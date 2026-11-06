@@ -124,7 +124,6 @@ import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './r
 import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
-import { GuidePane } from './components/GuidePane';
 import { ReviewPane } from './components/ReviewPane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
@@ -6281,34 +6280,31 @@ function Inbox() {
       <div className="ib-sr" aria-live="polite" data-inbox-live="">
         {said}
       </div>
-      {guideMessage &&
-        thread &&
-        // A review, while Code review is on: the full-window review (its own header's verdict). Otherwise the guide pane, as always.
-        (settings?.code_review?.on === true && guideMessage.guide?.review ? (
-          <ReviewPane
-            key={guideMessage.id}
-            thread={thread}
-            message={guideMessage}
-            guest={tailnetGuest(settings)}
-            // From the route as it is now (a verdict lands after the person moved on): only while it still shows this review.
-            onBack={() => {
-              const now = routeRef.current;
-              if (now.guide === guideMessage.id) close({ ...now, guide: null });
-            }}
-            onClose={() => close({ ...route, thread: null, guide: null })}
-            onSent={afterWrite}
-            onAsk={ask.askWith}
-          />
-        ) : (
-          <GuidePane
-            thread={thread}
-            message={guideMessage}
-            guest={tailnetGuest(settings)}
-            codeReview={settings?.code_review?.on === true}
-            onBack={() => close({ ...route, guide: null })}
-            onClose={() => close({ ...route, thread: null, guide: null })}
-          />
-        ))}
+      {guideMessage && thread && (
+        // Every guide or review an agent sends opens the full-window review (approval "inbox-one-review-screen");
+        // what Code review brings shows only while it is on.
+        <ReviewPane
+          key={guideMessage.id}
+          thread={thread}
+          message={guideMessage}
+          guest={tailnetGuest(settings)}
+          codeReview={settings?.code_review?.on === true}
+          // From the route as it is now (a verdict lands after the person moved on): only while it still shows this review.
+          onBack={() => {
+            const now = routeRef.current;
+            if (now.guide === guideMessage.id) close({ ...now, guide: null });
+          }}
+          onClose={() => close({ ...route, thread: null, guide: null })}
+          onSent={afterWrite}
+          onAsk={ask.askWith}
+          // No verdict: back to the thread, its reply box open (the comments ride its Send).
+          onWriteReply={() => {
+            const now = routeRef.current;
+            if (now.guide === guideMessage.id) close({ ...now, guide: null });
+            setReplyFor(thread.thread_id);
+          }}
+        />
+      )}
     </div>
     </InitiativeTagsContext.Provider>
   );

@@ -141,7 +141,7 @@ async function render(id: string) {
     root = createRoot(host!);
     root.render(
       <div className="pn-inbox">
-        <ReviewPane thread={threadOf(message)} message={message} onBack={() => {}} onClose={() => {}} onSent={() => {}} />
+        <ReviewPane thread={threadOf(message)} message={message} codeReview onBack={() => {}} onClose={() => {}} onSent={() => {}} />
       </div>,
     );
   });

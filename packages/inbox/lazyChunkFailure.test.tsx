@@ -22,7 +22,7 @@ if (hasDom) {
     throw new TypeError('Failed to fetch dynamically imported module: http://localhost/assets/GuideReader-gone.js');
   });
 }
-const { GuidePane } = (hasDom ? await import('./components/GuidePane') : {}) as typeof import('./components/GuidePane');
+const { ReviewPane } = (hasDom ? await import('./components/ReviewPane') : {}) as typeof import('./components/ReviewPane');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'ledger-abcdef', name: 'ledger', root: '/work/ledger', created_at: '2026-10-11T10:00:00.000Z' };
 const GUIDE = 'msg_01M4H6G73M9H3Z32T859E72DPY';
@@ -82,7 +82,7 @@ test.skipIf(!hasDom)("a reader chunk that cannot load says so in the pane, with 
       root.render(
         <div className="pn-inbox">
           <p data-window-sentinel="">the rest of the window</p>
-          <GuidePane thread={thread} message={message} onBack={() => {}} onClose={() => {}} />
+          <ReviewPane thread={thread} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} />
         </div>,
       );
     });
@@ -91,7 +91,7 @@ test.skipIf(!hasDom)("a reader chunk that cannot load says so in the pane, with 
     console.error = silence;
   }
   expect(document.querySelector('[data-window-sentinel]')).not.toBeNull();
-  const pane = document.querySelector('section[aria-label="Guided review"]');
+  const pane = document.querySelector('section[aria-label="Review"]');
   expect(pane).not.toBeNull();
   // ui's LazyLoadNotice: why the reader is missing, and Reload.
   const notice = pane!.querySelector('[data-lazy-load-failed]');

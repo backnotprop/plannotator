@@ -8,7 +8,7 @@
  * comments (`commentOnly`: nothing else of the review app, which needs its
  * server); without, they are read-only, as on guides.show and the phone.
  *
- * Mounted only through GuidePane's dynamic import (`#guide-reader`,
+ * Mounted only through lazyParts.tsx's dynamic import (`#guide-reader`,
  * tests/entry-assets.test.ts). It is its own chunk, packed in inbox.html and
  * served by the Inbox (build/pack-inbox.ts, #2593): its modules (the guide
  * chain, the diff renderer) load and run on the first Open, never at page load.

@@ -1,8 +1,18 @@
 /**
  * The full-window review (code review in the Inbox, approval
- * "inbox-code-review-direction", concept A take B): what Start review on a
- * review card opens, while the person has Settings → Capabilities → Code
- * review on.
+ * "inbox-code-review-direction", concept A take B): what opens every guide or
+ * review an agent sends (approval "inbox-one-review-screen": the guide pane
+ * it replaced is gone), from the review card's Start review or the guide
+ * tile's Open.
+ *
+ * - What Code review brings shows only while it is on (Settings →
+ *   Capabilities → Code review) and the agent sent a review (`review: true`):
+ *   the verdict, Viewed ticks, Show me and Ask on selected lines, the
+ *   Overview's picture and Post to GitHub/GitLab. Open in follows the switch
+ *   alone. Otherwise (a guide, or a review with Code review off) there is no
+ *   verdict to give: the comments ride the person's next Send from the
+ *   thread, and the header's Write the reply goes back to it with the reply
+ *   box open.
  *
  * - The agent's walkthrough is the spine. There is no left rail (approval
  *   "review-deslop", r7): the top bar holds the "Walkthrough | All files"
@@ -29,7 +39,7 @@
  *   heading, for the whole review.
  *   Plain Ask opens the Inbox's Ask window with the lines named.
  *
- * No new keyboard shortcuts: Escape and "Thread" go back as the guide pane's do.
+ * No new keyboard shortcuts: Escape and "Thread" go back to the thread.
  */
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -59,7 +69,7 @@ import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
 import { clearReviewNotes, readReviewNotes, saveReviewNotes, VerdictKeys, verdictOf, verdictReply } from '../reviewVerdict';
-import { useGuideState } from './GuidePane';
+import { useGuideState } from './useGuideState';
 import { PostEnding, reviewEnding, useReviewDestination } from '../pulls/PostEnding';
 import { postedWords } from '../pulls/postRules';
 import { useLiveSessions } from './NewMessage';
@@ -98,6 +108,10 @@ export interface ReviewPaneProps {
   onSent: () => void | Promise<void>;
   /** Plain Ask on selected lines: the Inbox's Ask window opens with these words in its box. Absent: no Ask. */
   onAsk?: (words: string) => void;
+  /** Settings → Capabilities → Code review is on. */
+  codeReview: boolean;
+  /** No verdict here (a guide, or Code review off): back to the thread with its reply box open. */
+  onWriteReply?: () => void;
 }
 
 /** Below this width the comments panel folds into the header's Comments button: the rail and the diff keep the room. */
@@ -108,16 +122,19 @@ const NO_ANNOTATIONS: never[] = [];
 
 type RailMode = 'walkthrough' | 'files';
 
-export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onAsk }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onAsk, codeReview, onWriteReply }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = state;
+  // Code review's own review: the agent sent it as one (`review: true`) while Code review is on. A guide, or a review
+  // while Code review is off, reads with none of it (no verdict, Viewed ticks, Show me or Post): the server refuses each.
+  const isReview = codeReview && message.guide?.review === true;
   // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
   // conversation in the thread, and no Approve or Request changes is offered.
-  const verdict = !thread.pull_theirs;
+  const verdict = isReview && !thread.pull_theirs;
   // Post to GitHub/GitLab (the owner's answer C on #2590): a review of the one PR this thread was handed can go on
   // that PR instead. A teammate's posts with its full verdict; its agent path stays verdict-free (no control here).
   // A stack's review spans several PRs and posts from each layer's own review (Pull requests) instead.
-  const postKey = !state.readOnly && thread.pull_keys?.length === 1 ? thread.pull_keys[0]! : null;
+  const postKey = isReview && !state.readOnly && thread.pull_keys?.length === 1 ? thread.pull_keys[0]! : null;
   const [postPull, setPostPull] = useState<InboxPull | null>(null);
   // A post refused at its commit (`pull_commit_gone` on GitHub after a force-push, `pull_moved` on GitLab after any push;
   // GitHub takes a commit still on the PR). Read again from the forge, then offered at its new
@@ -150,7 +167,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
   useEffect(() => setPosted(null), [message.id]);
   const phone = usePhone();
-  // This pane is Code review's own, so its diff headers offer Open in (the thread's project; nothing when the file is not there).
+  // With Code review on, its diff headers offer Open in (the thread's project; nothing when the file is not there).
   const fileOpenIn = useCallback((path: string) => <OpenInFile scope={{ thread: thread.thread_id, message: message.id, from: 'root' }} path={path} />, [thread.thread_id, message.id]);
   const [mode, setMode] = useState<RailMode>('walkthrough');
   const [reveal, setReveal] = useState<{ path: string; token: number } | null>(null);
@@ -271,7 +288,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     const at = thread.messages.findIndex((m) => m.id === message.id);
     return thread.messages.slice(0, Math.max(0, at)).filter((m) => m.guide?.review).map((m) => m.id);
   }, [thread.messages, message.id]);
-  const showMe = useShowMe({ threadId: thread.thread_id, reviewId: message.id, earlier: earlierReviews, title: message.guide?.title ?? snapshot?.guide.title ?? '', round, agent: author, files, enabled: !readOnly });
+  const showMe = useShowMe({ threadId: thread.thread_id, reviewId: message.id, earlier: earlierReviews, title: message.guide?.title ?? snapshot?.guide.title ?? '', round, agent: author, files, enabled: !readOnly && isReview });
   // Round 2 for Show me: an earlier round's picture stays as asked, its parts anchored again on this round's diff.
   const askedReview = showMe.state.shown && showMe.state.shown.review !== message.id ? showMe.state.shown.review : null;
   const [askedPatch, setAskedPatch] = useState<{ review: string; patch: string } | null>(null);
@@ -385,12 +402,13 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     : `drawn by ${author} with the guide`;
   const renderOverviewDiagram = useCallback(
     (diagram: GuideOverviewDiagram): ReactNode | null =>
-      diagram.kind === 'html' && diagram === overviewHtml ? (
+      // Code review's picture: a guide, or a review with Code review off, keeps the guide viewer's own note.
+      isReview && diagram.kind === 'html' && diagram === overviewHtml ? (
         <OverviewFigure drawn={inboxDrawnViewOf(diagram)} meta={overviewMeta} {...(overviewChanged ? { changed: overviewChanged } : {})} onCode={(target) => void openCode(target)} />
       ) : null,
     // openCode reads the latest render's state through its closure; the figure is redrawn when these change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [overviewHtml, overviewMeta, overviewChanged, files, chapters, mode],
+    [isReview, overviewHtml, overviewMeta, overviewChanged, files, chapters, mode],
   );
   // Before there is a picture, Show me is one of the review's own actions, in its heading beside Global comment.
   const renderHeadActions = useCallback(
@@ -411,7 +429,8 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     },
     [viewed, message.id, setSaveError],
   );
-  const viewedProp = useMemo(() => (readOnly ? undefined : { files: viewedSet, onToggle: toggleViewed }), [readOnly, viewedSet, toggleViewed]);
+  // Viewed ticks are Code review's (the server keeps them only for a review while it is on).
+  const viewedProp = useMemo(() => (readOnly || !isReview ? undefined : { files: viewedSet, onToggle: toggleViewed }), [readOnly, isReview, viewedSet, toggleViewed]);
   // The top bar's menu lists what the review draws, in the order it draws it (code, then tests, then generated).
   const jumpChapters = chapters.map((chapter, index) => ({ title: chapter.title, reviewed: reviewed[index] ?? snapshot?.guide.reviewed[index] ?? false }));
   const jumpFiles = groupByFileKind(files, (file) => file.path)
@@ -450,7 +469,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
         : null,
     [message],
   );
-  const { model: live } = useLiveSessions(thread.thread_id, asking && askerCanEnd(asking) ? asking.session : null, !readOnly && asking !== null && askerCanEnd(asking));
+  const { model: live } = useLiveSessions(thread.thread_id, asking && askerCanEnd(asking) ? asking.session : null, verdict && !readOnly && asking !== null && askerCanEnd(asking));
   const askerEnded = askerHasEnded(asking, live);
   const anyOtherLive = asking !== null && othersLive(asking, live).length > 0;
   const [route, setRoute] = useState<RouteState>(CLOSED_ROUTE);
@@ -536,6 +555,8 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   };
 
   const title = message.guide?.title ?? snapshot?.guide.title ?? 'Review';
+  // With no verdict and no post here, what the comments do: ride the person's next Send from the thread.
+  const rides = !readOnly && !verdict && !postPull && comments.length > 0 ? `${plural(comments.length, 'comment')} ${comments.length === 1 ? 'rides' : 'ride'} your next Send to ${author}.` : null;
   const source = snapshot ? reviewSourceLine(snapshot) : '';
   const railModes = (
     <div className="ib-seg ib-rv-modes" role="radiogroup" aria-label="Review by">
@@ -673,13 +694,21 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
               setReread((n) => n + 1);
             }}
           />
+        ) : !readOnly && snapshot && verdict ? (
+          <span className="ib-rv-decide" data-review-decision="">
+            <DecisionControl spec={spec} handlers={handlers} busy={sending || route.open} isLoading={sending} labelBreakpoint="md" drafts={notes} onDraftsChange={changeNotes} />
+          </span>
         ) : (
+          // No verdict to give: the comments ride the next Send, from the thread's reply box.
           !readOnly &&
-          verdict &&
-          snapshot && (
-            <span className="ib-rv-decide" data-review-decision="">
-              <DecisionControl spec={spec} handlers={handlers} busy={sending || route.open} isLoading={sending} labelBreakpoint="md" drafts={notes} onDraftsChange={changeNotes} />
-            </span>
+          snapshot &&
+          onWriteReply && (
+            <Tip content={rides}>
+              <button type="button" className="ib-btn ib-sm ib-pri" onClick={onWriteReply} aria-label="Write the reply" data-review-write-reply="">
+                <Icon name="reply" size={14} />
+                {phone ? 'Reply' : 'Write the reply'}
+              </button>
+            </Tip>
           )
         )}
         <Tip content="Close">
@@ -742,10 +771,10 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
               {error}
             </div>
           ) : snapshot ? (
-            // The reader is a chunk loaded on first use: one that cannot arrive says so here (GuidePane).
+            // The reader is a chunk loaded on first use: one that cannot arrive says so here (ReaderPart).
             <div ref={contentRef}>
             <ReaderPart diff={snapshot.review.rawPatch}>
-              <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on>
+              <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on={codeReview}>
               <GuideReader
                 snapshot={snapshot}
                 reviewed={reviewed}
@@ -755,7 +784,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
                 reveal={reveal}
                 viewed={viewedProp}
                 {...(guest ? {} : { fileContents })}
-                fileOpenIn={fileOpenIn}
+                {...(codeReview ? { fileOpenIn } : {})}
                 {...(selectionActions ? { selectionActions } : {})}
                 renderOverviewDiagram={renderOverviewDiagram}
                 renderHeadActions={renderHeadActions}
@@ -807,6 +836,16 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
             width="100%"
             readOnly={readOnly}
           />
+          {rides && (
+            <div className="ib-gstrip" data-review-rides="">
+              <span className="ib-rchip" data-strip-chip="">
+                {plural(comments.length, 'comment')}
+              </span>{' '}
+              <span className="ib-l">
+                {comments.length === 1 ? 'rides' : 'ride'} your next Send to {author}.
+              </span>
+            </div>
+          )}
         </div>
       </div>
       <ShowMeBox

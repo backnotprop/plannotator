@@ -2315,15 +2315,13 @@ pre code.pn-code[data-keep-layout] {
 .ib-gbody diffs-container { --diffs-dark-bg: var(--background); --diffs-light-bg: var(--background); --diffs-dark: var(--foreground); --diffs-light: var(--foreground); }
 /* FileHeader's height is this variable, which only the review stylesheet defined: here the row shrank onto its file name. */
 .ib-gbody { --panel-header-h: 33px; }
-/* The guide beside its comments: the attachment pane's panel column, with what rides the next Send at its foot. */
-.ib-gsplit { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; }
+/* The foot of a review's comments panel when no verdict is given there: what rides the next Send. */
 .ib-gstrip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
 .ib-gstrip .ib-l { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-gstrip .ib-rchip { border: 1px solid var(--border); background: var(--card); }
 .ib-gstrip .ib-sp { flex: 1; }
-/* A guide narrower than GUIDE_FOLD_PANEL_BELOW (GuidePane.tsx): the panel folds into the header's Comments button and
-   opens over the guide's right edge, as the file pane's does (it was hidden at 900 px and below, with no way to it). */
-.ib-viewer.ib-fold .ib-gsplit { grid-template-columns: minmax(0, 1fr); position: relative; }
+/* A review narrower than its fold width (REVIEW_FOLD_PANEL_BELOW, PullReview's): the panel folds into the header's
+   Comments button and opens over the review's right edge, as the file pane's does. */
 .ib-viewer.ib-fold .ib-gpanel { display: none; }
 .ib-viewer.ib-fold .ib-gbody { isolation: isolate; z-index: 0; }
 .ib-viewer.ib-fold.ib-panel-open .ib-gpanel { display: flex; position: absolute; top: 0; right: 0; bottom: 0; width: min(300px, 100%); z-index: 6; box-shadow: -16px 0 48px rgba(0, 0, 0, 0.18); }
@@ -7638,7 +7636,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 
 /* The full-window review (ReviewPane.tsx): the guide viewer's frame with a rail on the left (Walkthrough | All files,
    then the chapters or the files) and the verdict in the header (ui's DecisionControl). The comments panel folds into
-   the header's Comments button below REVIEW_FOLD_PANEL_BELOW, as the guide pane's does below its own width. */
+   the header's Comments button below REVIEW_FOLD_PANEL_BELOW. */
 .ib-review .ib-rsplit { display: grid; grid-template-columns: 264px minmax(0, 1fr) 300px; min-height: 0; }
 .ib-review.ib-fold .ib-rsplit { grid-template-columns: 264px minmax(0, 1fr); position: relative; }
 .ib-review.ib-fold .ib-gpanel { display: none; }
