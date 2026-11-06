@@ -126,6 +126,7 @@ import { isLoopbackHostHeader, isLoopbackForwardedFor } from "@plannotator/share
 import { prepareAppHtml, prewarmAppHtml } from "@plannotator/shared/app-html";
 import { openPackedApp, packedAppResponse, PACKED_ASSET_ROUTE_PREFIX } from "@plannotator/shared/packed-app";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
+import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines } from "@plannotator/shared/inbox/decision-data";
 import { createInboxSearchRoutes } from "./inbox-search";
 import { inboxSkillsRoute } from "./inbox-skills";
 import { assertTestHome } from "./test-home-guard";
@@ -4251,6 +4252,30 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json(await agentsModel());
         }
         return json({ error: "Not found", code: "not_found" }, 404);
+      }
+      // Settings -> Decision data's numbers, asked for only while that section is shown. Read only, nothing kept: the
+      // calculation hands the server back every few ms and stops when the reader leaves (decision-data.ts).
+      // Never on the device door (not on its allowlist).
+      if (path === "/api/inbox/decision-data") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        const days = Number(url.searchParams.get("days") ?? "0");
+        const tz = Number(url.searchParams.get("tz") ?? "0");
+        const now = Date.now();
+        const since = Number.isFinite(days) && days > 0 ? now - days * 86_400_000 : null;
+        const input = { ...store.decisionDataInput(), deleted: await readDecisionLines(store.dir) };
+        try {
+          if (url.searchParams.get("format") === "csv") {
+            const csv = await decisionDataCsv(input, since, req.signal);
+            return new Response(csv, { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="plannotator-decisions.csv"' } });
+          }
+          return json(await decisionDataSummary(input, { since, until: now, tz_offset_min: Number.isFinite(tz) ? Math.max(-840, Math.min(840, tz)) : 0, now }, req.signal));
+        } catch (error) {
+          if (error instanceof DecisionDataAborted) return new Response(null, { status: 499 });
+          throw error;
+        }
       }
       // Settings → Storage's sizes walk every file in the store, so only that panel asks for them, when it is shown.
       if (path === "/api/inbox/settings/storage") {
