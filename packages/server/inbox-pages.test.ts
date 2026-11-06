@@ -2,8 +2,8 @@
  * An attached HTML page's own document ("Pages only", inbox-pages.ts), tested
  * on the route alone (no Inbox is started). What regresses if these fail:
  * - the page is served without its own sandbox (it would run on the Inbox's
- *   origin when its URL is opened), or without web pictures, or with plain
- *   `http:` ones;
+ *   origin when its URL is opened), or without web pictures (`https:` and
+ *   plain `http:`, local servers included);
  * - the window's own policy lets a picture in from the web again (a message's
  *   text, a diagram in it, would make the browser call the agent's site);
  * - a page the Inbox no longer keeps (a restart) leaves the frame blank
@@ -54,7 +54,7 @@ describe("an attached page's document", () => {
     const policy = directives(csp);
     // An opaque origin even opened as a tab: never allow-same-origin.
     expect(policy.get("sandbox")).toEqual(["allow-scripts", "allow-modals"]);
-    expect(policy.get("img-src")).toEqual(["'self'", "data:", "blob:", "https:"]);
+    expect(policy.get("img-src")).toEqual(["'self'", "data:", "blob:", "https:", "http:"]);
     // Pictures only: nothing else reaches the web.
     for (const [name, values] of policy) {
       if (name === "img-src") continue;

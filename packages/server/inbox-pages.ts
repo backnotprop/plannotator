@@ -39,9 +39,10 @@ export const INBOX_PAGE_MAX_BYTES = 8 * 1024 * 1024;
 
 /**
  * The page document's policy: what its srcdoc frame inherited from the window
- * (`WINDOW_CSP` in inbox.ts), plus `https:` pictures, and sandboxed by the
- * header too, so the page is an opaque origin even opened as a tab of its own.
- * Plain `http:` pictures stay off, as for embeds (`EMBED_REMOTE_SOURCES`).
+ * (`WINDOW_CSP` in inbox.ts), plus web pictures (`https:` and plain `http:`,
+ * local servers included: every picture a page names should show), and
+ * sandboxed by the header too, so the page is an opaque origin even opened as
+ * a tab of its own.
  * `'self'` keeps the page's folder (its `<base href>`), its nested pages and
  * its own pictures from anywhere on this computer (their tokens, html-assets).
  */
@@ -50,7 +51,7 @@ export const INBOX_PAGE_CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https:",
+  "img-src 'self' data: blob: https: http:",
   "font-src 'self' data:",
   "connect-src 'self'",
   "worker-src 'self' blob:",

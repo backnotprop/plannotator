@@ -8,7 +8,7 @@
  * certificate, one http) log every request they get.
  *
  * - The attached page is its own document (packages/server/inbox-pages.ts):
- *   its `https:` picture is fetched and drawn, its plain `http:` one is not,
+ *   its `https:` and plain `http:` pictures are fetched and drawn,
  *   and its picture from another folder on this computer still loads.
  * - A message whose text names web pictures (three Mermaid ways: an image
  *   node, an `<img>` in a label, a background in a label's style; a markdown
@@ -178,7 +178,7 @@ test('an attached page shows its web pictures; the window asks the web for none,
       expect(plain.hits).toEqual([]);
       await shot(tab, 'pages-only-2-message-web-picture-blocked');
 
-      // (a) The attached page: its https picture is fetched and drawn, its http one is not, and its far one loads.
+      // (a) The attached page: its https and http pictures are fetched and drawn, and its far one loads.
       await tab.goto(`${url}#thread=${page.thread_id}`);
       await tab.locator(`button[data-attachment-id="${pageId}"]`).first().click();
       const frameEl = tab.locator('.ib-htmlframe iframe');
@@ -189,9 +189,9 @@ test('an attached page shows its web pictures; the window asks the web for none,
       const width = (id: string) => frame.locator(`#${id}`).evaluate((img: HTMLImageElement) => (img.complete ? img.naturalWidth : -1));
       await expect.poll(() => width('web')).toBe(2);
       await expect.poll(() => width('far')).toBe(2);
-      expect(await width('plain')).toBe(0);
+      await expect.poll(() => width('plain')).toBe(2);
       expect(secure.hits).toEqual(['/page-web.png']);
-      expect(plain.hits).toEqual([]);
+      expect(plain.hits).toEqual(['/page-http.png']);
       await shot(tab, 'pages-only-1-attached-page-web-picture');
 
       // (c) Annotation in the served page: a click pins the paragraph, the comment saves, the page marks it.
@@ -215,7 +215,7 @@ test('an attached page shows its web pictures; the window asks the web for none,
 
       // Still nothing from the window itself.
       expect(secure.hits).toEqual(['/page-web.png']);
-      expect(plain.hits).toEqual([]);
+      expect(plain.hits).toEqual(['/page-http.png']);
     } finally {
       await context.close();
     }
