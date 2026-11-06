@@ -4,13 +4,15 @@
  */
 import { afterEach, expect, test } from 'bun:test';
 import { InboxApiError, InboxHeldError, inboxApi } from './api';
-import { setSelfMachine } from './inboxUrl';
+import { selfMachineId, setSelfMachine } from './inboxUrl';
 
 const SELF = 'ibx_01ARZ3NDEKTSV4RRFFQ69G5FAV';
 const MINI = 'ibx_01ARZ3NDEKTSV4RRFFQ69G5FAW';
 const saved = globalThis.fetch;
+const savedSelf = selfMachineId();
 afterEach(() => {
   globalThis.fetch = saved;
+  setSelfMachine(savedSelf);
 });
 
 function answer(state: string) {
