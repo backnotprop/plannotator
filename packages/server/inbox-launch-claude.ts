@@ -58,6 +58,30 @@ const CLAUDE_FILES_ENV = ["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_CUSTOM_OAUTH_URL"] a
 
 const START_TIMEOUT_MS = 30_000;
 const COMMAND_TIMEOUT_MS = 15_000;
+/** How long a signed-in (or unreadable) `claude auth status` answer is kept. A signed-out one is asked again each time. */
+export const CLAUDE_AUTH_TTL_MS = 30_000;
+
+/**
+ * What `claude auth status` says: `signed_out` only when it says so plainly (JSON `loggedIn: false`, or the words "not
+ * logged in" or "not signed in"). Anything else, a timeout, a CLI that has no such command, or output it can't read,
+ * is `unknown`, which never stops a start: a check that can't read the answer must not take launch away.
+ */
+export function claudeAuthState(result: AgentRunResult): "signed_in" | "signed_out" | "unknown" {
+  if (result.timedOut || result.exitCode === 127) return "unknown";
+  const out = result.stdout.trim();
+  try {
+    const parsed = JSON.parse(out) as unknown;
+    if (parsed && typeof parsed === "object" && typeof (parsed as { loggedIn?: unknown }).loggedIn === "boolean") {
+      return (parsed as { loggedIn: boolean }).loggedIn ? "signed_in" : "signed_out";
+    }
+  } catch {
+    // Text, as an older or newer CLI may print.
+  }
+  const text = `${out}\n${result.stderr}`;
+  if (/\bnot (logged|signed) in\b/i.test(text)) return "signed_out";
+  if (result.exitCode === 0 && /\b(logged|signed) in\b/i.test(text)) return "signed_in";
+  return "unknown";
+}
 
 /** The short id and name `claude --bg` printed, or null. */
 export function parseBackgrounded(stdout: string): { short: string; name: string } | null {
@@ -446,6 +470,16 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     return path;
   };
 
+  // `claude auth status`, kept CLAUDE_AUTH_TTL_MS while it is not signed out (a Send asks availability fresh each time).
+  let auth: { key: string; at: number; state: "signed_in" | "unknown" } | null = null;
+  const authState = async (files: AgentEnvironment, path: string, configDir: string | null) => {
+    const key = JSON.stringify([path, configDir]);
+    if (auth && auth.key === key && Date.now() - auth.at < CLAUDE_AUTH_TTL_MS) return auth.state;
+    const state = claudeAuthState(await files.run([path, "auth", "status"], { timeoutMs: 10_000 }));
+    auth = state === "signed_out" ? null : { key, at: Date.now(), state };
+    return state;
+  };
+
   return {
     agent: CLAUDE,
     name: CLAUDE_NAME,
@@ -456,13 +490,17 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     async available(): Promise<LaunchAvailability> {
       const e = await ctx.environment();
       const path = e.which("claude");
-      if (!path) return { ok: false, missing: true, reason: "claude is not on the Inbox's PATH or in ~/.local/bin or ~/.claude/local" };
+      if (!path) return { ok: false, missing: true, reason: "claude is not on the Inbox's PATH or in ~/.local/bin or ~/.claude/local", code: "missing" };
       const version = parseClaudeVersion((await agentVersionRun(e, path, { timeoutMs: 10_000 })).stdout);
-      if (!version || !versionAtLeast(version, CLAUDE_LAUNCH_MIN_VERSION)) return { ok: false, missing: false, reason: `Claude Code ${version ?? "?"} is older than ${CLAUDE_LAUNCH_MIN_VERSION}` };
+      if (!version || !versionAtLeast(version, CLAUDE_LAUNCH_MIN_VERSION)) return { ok: false, missing: false, reason: `Claude Code ${version ?? "?"} is older than ${CLAUDE_LAUNCH_MIN_VERSION}`, code: "too_old" };
       // In the Claude folder a launched session will use: CLAUDE_CONFIG_DIR may be set only in the person's shell.
       const configDir = ctx.shell()?.CLAUDE_CONFIG_DIR;
       const files = configDir ? createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: { ...e.env, CLAUDE_CONFIG_DIR: configDir } }) : e;
-      if (!claudeCodePluginEnabled(files) || !claudeCodeInboxToolOn(files)) return { ok: false, missing: false, reason: "Plannotator's Claude Code plugin or its Inbox tool is off" };
+      if (!claudeCodePluginEnabled(files)) return { ok: false, missing: false, reason: "Plannotator's Claude Code plugin or its Inbox tool is off", code: "plugin_off" };
+      if (!claudeCodeInboxToolOn(files)) return { ok: false, missing: false, reason: "Plannotator's Claude Code plugin or its Inbox tool is off", code: "tool_off" };
+      // Signed in, as a launched session will be (its Claude folder). Over SSH macOS keeps the login locked, so this
+      // reads as signed out; the launch block says the Inbox was started over SSH.
+      if ((await authState(files, path, configDir ?? null)) === "signed_out") return { ok: false, missing: false, reason: "Claude Code isn't signed in", code: "signed_out" };
       return { ok: true, version };
     },
 

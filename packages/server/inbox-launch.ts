@@ -60,6 +60,7 @@
  *   POST /api/inbox/launch/:id/permission  the hook's long poll; the answer is the person's, from the thread
  */
 
+import { inboxLaunchNotReadyWords } from "@plannotator/core/inbox-launch-ready";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
@@ -168,6 +169,10 @@ export function createInboxLaunch(options: {
   hosts?: (context: LaunchHostContext) => LaunchHost[];
   /** A tailnet request from someone other than this computer's owner: never starts, stops or deletes an agent (Try again, Stop, Delete). Absent: nobody is. */
   isGuest?: (req: Request, via: string) => boolean;
+  /** This Inbox was started over SSH (`SSH_CONNECTION` at start): macOS keeps Claude Code's login locked there, so the launch block names that cause. */
+  startedOverSsh?: boolean;
+  /** This computer's name as linked machines know it: a launch another machine sends is refused in words that name it. */
+  machineName?: () => string | null;
   now?: () => number;
   log?: (line: string) => void;
 }) {
@@ -1024,7 +1029,16 @@ export function createInboxLaunch(options: {
       }
       const ok = await available(host, true);
       stateOf(host).lastAvailable = ok;
-      if (!ok.ok) throw new InboxError("agent_unavailable", `${host.name} can't be started here: ${ok.reason}. Nothing was sent.`);
+      if (!ok.ok) {
+        // Sent from another machine: say it with this machine's name, as that machine's start row does.
+        const machine = input.from ? (options.machineName?.() ?? null) : null;
+        if (machine && ok.code) {
+          const overSsh = ok.code === "signed_out" && options.startedOverSsh === true;
+          const words = inboxLaunchNotReadyWords({ agent: host.name, code: ok.code, machine, overSsh });
+          throw new InboxError("agent_unavailable", `${words.line}.${words.fix ? ` ${words.fix}` : ""} Nothing was sent.`, { not_ready: ok.code, ...(overSsh ? { over_ssh: true } : {}) });
+        }
+        throw new InboxError("agent_unavailable", `${host.name} can't be started here: ${ok.reason}. Nothing was sent.`);
+      }
       const id = inboxId("lch");
       // How it starts, fixed for this launch (the host's `startOf`: for Claude Code the switch, the person's own
       // setup with this folder's settings, and the last finished shell read, however old; the start reads the
@@ -1126,7 +1140,14 @@ export function createInboxLaunch(options: {
           return ok.ok ? [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root), ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}) }] : [];
         }),
       );
-      return { agents: offered.flat(), projects, scratch: { root } };
+      // Why the others can't start now, for a linked machine's window to say with this machine's name (remote launch).
+      const notReady = hostList.flatMap((host) => {
+        const last = stateOf(host).lastAvailable;
+        if (!last || last.ok) return [];
+        const code = last.code ?? "unknown";
+        return [{ agent: host.agent, name: host.name, code, ...(code === "signed_out" && options.startedOverSsh ? { over_ssh: true as const } : {}) }];
+      });
+      return { agents: offered.flat(), projects, scratch: { root }, ...(notReady.length > 0 ? { not_ready: notReady } : {}) };
     },
 
     /**

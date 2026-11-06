@@ -18,6 +18,9 @@
  *     trusts it on B (B's Claude config) and starts there.
  *  5. B asleep: a launch from A waits (202 queued). Cancel takes one back before it ever left; the other starts on
  *     B exactly once when B is back, and the cancelled one never does.
+ *  6. Readiness: A's machine list says B takes launches; B's Claude Code signed out shows in B's launch block, read
+ *     through the forward, with the SSH cause when B's Inbox was started over SSH; a launch is refused in words that
+ *     name B, nothing starts, and once signed in it starts at once. Launch off on B: its health says 0.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -46,6 +49,8 @@ const env = (m: Machine) => ({
   PLANNOTATOR_TEST_SANDBOX: m.w.root,
   PLANNOTATOR_TEST_LAUNCH_PATH: `${join(m.w.root, "fakes")}:/usr/bin:/bin`,
   PLANNOTATOR_MACHINE_NAME: m.name,
+  // Mini's Inbox was started over SSH (macOS then keeps Claude Code's login locked); the MacBook's was not.
+  SSH_CONNECTION: m.name === "Mini" ? "10.0.0.2 50022 10.0.0.3 22" : "",
   PLANNOTATOR_UPDATE_CHECK: "0",
   PLANNOTATOR_INBOX_NOTES: "0",
   NO_ANON_PING: "1",
@@ -282,4 +287,51 @@ describe("remote launch, on two real Inboxes linked both ways", () => {
       expect((await windowPost(here, `/api/inbox/outbox/k-held-${here.name}/cancel`, {})).status).toBe(409);
     }
   }, 180_000);
+
+  test("6. readiness: signed out, with the SSH cause, and launch off, said with the other machine's name", async () => {
+    for (const [here, there] of both()) {
+      await waitFor(`${here.name} sees ${there.name} online`, async () => (await stateOf(here, there)) === "online", 30_000);
+      const view = ((await getJson(here, "/api/inbox/machines")).machines as Json[]).find((x) => x.id === there.id)!;
+      expect(view.launch).toBe(true);
+
+      // Its Inbox started again (over SSH, for Mini) with Claude Code signed out: a fresh start has nothing kept.
+      await stopInbox(there.w);
+      there.fake.configure({ signedOut: true });
+      start(there);
+      await waitFor(`${here.name} sees ${there.name} back`, async () => (await stateOf(here, there)) === "online", 30_000);
+      try {
+        const block = (await getJson(here, `/api/inbox/m/${there.id}/sessions`)).launch as Json;
+        expect(block.agents).toEqual([]);
+        const notReady = (block.not_ready as Json[]).find((n) => n.agent === "claude-code")!;
+        expect(notReady.code).toBe("signed_out");
+        expect(notReady.over_ssh ?? false).toBe(there.name === "Mini");
+
+        const starts = there.fake.starts().length;
+        const refused = await windowPost(here, `/api/inbox/m/${there.id}/messages`, launchBody(`k-signed-out-${here.name}`, there.project.id));
+        expect(refused.status).toBe(409);
+        const answer = (await refused.json()) as Json;
+        expect(answer.code).toBe("agent_unavailable");
+        expect(answer.not_ready).toBe("signed_out");
+        expect(answer.error).toContain(`isn't signed in on ${there.name}`);
+        expect(answer.error).toContain(there.name === "Mini" ? "SSH" : "`claude`");
+        expect(there.fake.starts().length).toBe(starts);
+      } finally {
+        there.fake.configure({ signedOut: false });
+      }
+      // Signed in now: the very next Send starts (a signed-out answer is never kept).
+      const sent = await windowPost(here, `/api/inbox/m/${there.id}/messages`, launchBody(`k-signed-in-${here.name}`, there.project.id));
+      expect(sent.status).toBe(200);
+
+      // Launch off there: its health says so, which an older Inbox can't (no field).
+      const config = join(there.w.dataDir, "config.json");
+      const on = readFileSync(config, "utf8");
+      writeFileSync(config, JSON.stringify({ inboxLaunch: { enabled: false } }));
+      try {
+        await waitFor(`${there.name} says launch is off`, async () => (await getJson(there, "/api/inbox/health")).launch_from_machines === 0);
+      } finally {
+        writeFileSync(config, on);
+      }
+      expect((await getJson(there, "/api/inbox/health")).launch_from_machines).toBe(1);
+    }
+  }, 90_000);
 });
