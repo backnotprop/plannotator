@@ -244,13 +244,22 @@ jobs:
       - name: Install the browsers' system libraries
         if: steps.browser-cache.outputs.cache-hit == 'true'
         # A slow apt mirror can use up the job's whole limit here; a good run takes
-        # under a minute. Each try keeps the packages the last one finished.
-        timeout-minutes: 16
+        # under a minute. Each try keeps the packages the last one finished. A mirror
+        # caught mid-sync answers "Hash Sum mismatch" (exit 100) to every try that
+        # reuses its package lists, so they are dropped before the next try. The
+        # runner image already has most of these libraries: when every try fails but
+        # both browsers start, the job goes on; only a browser that can't start fails it.
+        timeout-minutes: 18
         run: |
           for try in 1 2 3; do
             timeout -k 15 300 bunx playwright install-deps chromium webkit && exit 0
             echo "::warning::playwright install-deps failed or timed out (exit $?, try $try of 3)"
+            sudo rm -rf /var/lib/apt/lists/*
           done
+          timeout -k 5 90 bun -e 'const { chromium, webkit } = await import("@playwright/test"); for (const type of [chromium, webkit]) await (await type.launch()).close();' \
+            && echo "::warning::install-deps failed, but Chromium and WebKit start with the runner's libraries; going on" \
+            && exit 0
+          echo "::error::install-deps failed and a browser can't start without its system libraries"
           exit 1
 
       # Code review's Go to Definition (review-explorer.spec.ts) searches with ripgrep.

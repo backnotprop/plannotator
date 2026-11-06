@@ -431,6 +431,17 @@ describe("a reply to a T3 Code thread, over T3's MCP on loopback", () => {
   });
 });
 
+test("a wake T3 Code holds in its queue never says nothing open, since the agent may ask first; the person's words stay", async () => {
+  const w = await world();
+  const sent = await w.send("A plain update.");
+  await w.reply(sent.message_id, "Keep going, nothing open on my side.");
+  await w.server.t3Wake.sweep();
+  const text = String(w.t3.sends[0]!.message);
+  expect(text.split("\n")[2]).toBe(`[Thread ${sent.thread_id}: 2 messages. Your last message was just now]`);
+  expect(text.split("nothing open")).toHaveLength(2);
+  expect(text).toContain("Keep going, nothing open on my side.");
+});
+
 test("a reply moved back to the T3 thread that took its stop notice goes in as its own request, and only that delivers it", async () => {
   const WORDS = "Yours again: use the ARM runner.";
   const clock = { now: Date.now() };
