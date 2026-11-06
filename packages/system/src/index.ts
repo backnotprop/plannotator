@@ -8,3 +8,4 @@ export type {
 export { bySheetOrder, loadFiles, parseRevision, sheetParts } from './format/load.ts';
 export { drawingProgress, drawingStatus, type DrawingStatus } from './format/status.ts';
 export { citations, type Citation } from './format/cited.ts';
+export { gate, globMatch, isIgnoredPath, type ChangedFile, type GateInput, type GateReason, type GateResult } from './gate/gate.ts';
