@@ -6277,6 +6277,7 @@ function Inbox() {
             key={guideMessage.id}
             thread={thread}
             message={guideMessage}
+            guest={tailnetGuest(settings)}
             // From the route as it is now (a verdict lands after the person moved on): only while it still shows this review.
             onBack={() => {
               const now = routeRef.current;
@@ -6290,6 +6291,7 @@ function Inbox() {
           <GuidePane
             thread={thread}
             message={guideMessage}
+            guest={tailnetGuest(settings)}
             codeReview={settings?.code_review?.on === true}
             onBack={() => close({ ...route, guide: null })}
             onClose={() => close({ ...route, thread: null, guide: null })}

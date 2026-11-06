@@ -143,9 +143,6 @@ function payoutsProject(parent: string): { project: string; patch: string } {
   return { project, patch: git('diff', '--cached') };
 }
 
-/** The off test's far-hunk file, as main draws it (measured on main's metrics). */
-const FAR_HEIGHT_ON_MAIN = 159;
-
 const REVIEW_GUIDE = {
   title: 'Retry failed payouts',
   intent: 'Retry only the payouts Stripe calls retryable, with backoff, and record each attempt once.',
@@ -339,10 +336,11 @@ test('the review card, the full-window review with a comment and a Viewed tick, 
   const added = (line: number) => retry.locator(`[data-line-type="change-addition"][data-column-number="${line}"]`);
   await expect(added(12)).toBeVisible({ timeout: 30_000 });
   await shot(page, '4-review-mode');
-  // The PR page's quiet scrollbar is its own: this window keeps its bar.
+  // The PR page's quiet scrollbar is its own: this window keeps its bar. Its file head is 33 px, as in every reader.
   const scrollbar = retry.locator('[data-diff-hscrollbar]');
   await expect(scrollbar).toBeAttached();
   await expect(scrollbar.locator('> div')).toHaveCSS('opacity', '1');
+  expect(await scrollbar.evaluate((bar) => bar.parentElement!.getBoundingClientRect().height)).toBe(33);
 
   await retry.hover();
   await added(12).click();
@@ -1111,12 +1109,8 @@ test('the chapter menu after a key press: a quiet ring on its button, none round
 
 test('Code review off: the same review opens in the guide pane, with no top bar of chapters and the Split | Unified tab on its card', async () => {
   const { page, claude } = world;
-  // A file whose hunk starts past its first line, so a separator draws above it: the spacing the PR page drops.
-  const far = 'src/payouts/schedule.ts';
-  const farPatch = `diff --git a/${far} b/${far}\nindex 1111111..2222222 100644\n--- a/${far}\n+++ b/${far}\n@@ -30,3 +30,3 @@ export const SCHEDULE = {\n   daily: true,\n-  hour: 2,\n+  hour: 3,\n   zone: 'UTC',\n`;
-  const guide = { ...REVIEW_GUIDE, unplacedFiles: [...REVIEW_GUIDE.unplacedFiles, far] };
   await setCodeReview(true);
-  const review = await claude.submitGuide({ project_path: world.project, guide, patch: `${world.patch}${farPatch}`, thread: 'off-after', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
+  const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'off-after', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
   await setCodeReview(false);
   try {
     await page.goto(`${world.url}#thread=${review.thread_id}&guide=${review.message_id}`);
@@ -1126,16 +1120,10 @@ test('Code review off: the same review opens in the guide pane, with no top bar 
     await expect(page.locator('[data-guide-heading]')).toHaveCount(0);
     await expect(page.locator('[data-guide-section-tab] [data-diff-style-switch]')).toBeVisible();
     await expect(page.locator('h1').filter({ hasText: 'Retry failed payouts' })).toBeVisible();
-    // The PR page's flush files and quiet bars are its own: this reader keeps its spacing around a hunk's separator.
+    // The 33 px file head is every reader's, this one's too.
     const shell = page.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
     await expect(shell.locator('[data-line-type="change-addition"]').first()).toBeVisible({ timeout: 30_000 });
-    // The fixture's lines at main's metrics.
-    expect(Math.round((await shell.boundingBox())!.height)).toBe(446);
-    // A hunk past line 1 draws its separator with main's spacing; flush, the box would be smaller.
-    const farShell = page.locator(`[data-guide-file-shell="${far}"]`);
-    await farShell.scrollIntoViewIfNeeded();
-    await expect(farShell.locator('[data-line-type="change-addition"]').first()).toBeVisible({ timeout: 30_000 });
-    expect(Math.round((await farShell.boundingBox())!.height)).toBe(FAR_HEIGHT_ON_MAIN);
+    expect((await shell.locator('[data-file-header]').first().boundingBox())!.height).toBe(33);
 
     // A comment here reads as on main: no name line, on the card or in the comments.
     const added = shell.locator('[data-line-type="change-addition"][data-column-number="12"]');
