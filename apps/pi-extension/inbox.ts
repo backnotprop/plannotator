@@ -151,8 +151,9 @@ export function setupPiInbox(pi: InboxPi, options: PiInboxOptions): Promise<void
  */
 function claimPiSessions(pi: InboxPi, dataDir: string): void {
 	const owner = randomUUID();
+	// `pi --mode rpc`, or Pi's `pi-rpc` entry (its title; it passes the mode to main, not on argv).
 	const at = process.argv.indexOf("--mode");
-	const rpc = at >= 0 && process.argv[at + 1] === "rpc";
+	const rpc = (at >= 0 && process.argv[at + 1] === "rpc") || /-rpc$/.test(process.title);
 	let claimed: string | null = null;
 	const release = () => {
 		if (claimed) releasePiSessionClaim(dataDir, claimed, process.pid, owner);

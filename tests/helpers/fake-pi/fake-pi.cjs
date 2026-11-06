@@ -26,7 +26,8 @@
  *  - Its title is `pi`, as Pi sets it, so `ps` lists neither `--mode rpc` nor
  *    `--session-id`. As the extension does, it claims its session in
  *    `<data dir>/inbox/pi-sessions/<uuid>.<pid>.json` as it starts (the Inbox
- *    tool on or off) and removes the claim as it ends.
+ *    tool on or off, only where `inbox/inbox.json` exists) and removes the
+ *    claim as it ends.
  *
  * State in $FAKE_PI_STATE: config.json (read on each use), calls.jsonl (argv,
  * cwd, env names, the data dir and Inbox-tool values it got), pids.log,
@@ -62,6 +63,8 @@ append("calls.jsonl", {
   dataDir: process.env.PLANNOTATOR_DATA_DIR ?? null,
   inboxTool: process.env.PLANNOTATOR_INBOX_TOOL ?? null,
   pid: process.pid,
+  // When this process started (for the helper's `alive`: a pid another program reused started later).
+  startedAt: Date.now() - Math.round(process.uptime() * 1000),
   at: Date.now(),
 });
 
@@ -118,7 +121,8 @@ const scratchHome = (() => {
   }
 })();
 const claimDataDir = process.env.PLANNOTATOR_DATA_DIR || (scratchHome ? path.join(home, ".plannotator") : null);
-const claimFile = claimDataDir ? path.join(claimDataDir, "inbox", "pi-sessions", `${sessionId}.${process.pid}.json`) : null;
+// As the extension: only on a computer that has run the Inbox (`inbox/inbox.json`).
+const claimFile = claimDataDir && fs.existsSync(path.join(claimDataDir, "inbox", "inbox.json")) ? path.join(claimDataDir, "inbox", "pi-sessions", `${sessionId}.${process.pid}.json`) : null;
 if (claimFile) {
   try {
     fs.mkdirSync(path.dirname(claimFile), { recursive: true });
@@ -146,6 +150,8 @@ if (terminal) {
       process.exit(0);
     });
   }
+  // Up until the person quits, connected or not (the Inbox tool off: no bridge poll keeps it running).
+  setInterval(() => {}, 1 << 30);
 } else process.stdin.setEncoding("utf8");
 if (!terminal) process.stdin.on("data", (chunk) => {
   input += chunk;

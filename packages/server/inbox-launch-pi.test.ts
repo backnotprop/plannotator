@@ -21,6 +21,9 @@ import { piSessionClaimFileOf, readPiSessionClaims, releasePiSessionClaim, write
 import { createPiLaunchHost, piDialogNote, piDialogTitle, piExtensionListed, piHandoffCommand, piSessionProcesses, piSpawnEnv, PI_HANDED_BACK_NOTE, PI_HANDOFF_NOTE, PI_STOPPED_NOTE } from "./inbox-launch-pi";
 
 const cleanup: (() => void | Promise<void>)[] = [];
+/** Node on PATH: the fake pi runs on it and titles itself `pi`, as Pi does (tests/helpers/fake-pi). */
+const NODE = Bun.which("node") !== null;
+if (!NODE) console.warn("inbox-launch-pi.test.ts: no node on PATH, so the fake pi runs on Bun, which ignores process.title; the Copy attach test that needs ps to list it as `pi` is skipped");
 afterEach(async () => {
   for (const undo of cleanup.splice(0).reverse()) await undo();
 });
@@ -530,15 +533,16 @@ describe("Pi's launch host, against the fake pi", () => {
 
   // A real Pi 1.5.0 run: Pi sets process.title = "pi", so ps lists a terminal's Pi as `pi` alone, with no
   // --session-id, and an Inbox started again started a second writer beside the one from Copy attach command.
-  test("after an Inbox restart, a Pi from Copy attach command that ps lists as `pi` alone keeps every restart off, until it quit", async () => {
+  // The fake hides its argv only on Node (Bun ignores process.title): without Node this proves nothing.
+  test.skipIf(!NODE)("after an Inbox restart, a Pi from Copy attach command that ps lists as `pi` alone keeps every restart off, until it quit", async () => {
     const { fake, host, makeHost, bin, dataDir, folder, env, started } = setup();
     const { launch, session } = await started();
     await host.stop(session);
     expect(host.attach(launch)).not.toBeNull();
-    // Its extension cannot reach the new Inbox yet (it retries on its own backoff).
-    rmSync(join(dataDir, "inbox", "inbox.json"));
-    // The attach command's Pi once its shell exec'd it: nothing in the process list names the session.
-    Bun.spawn([join(bin, "pi"), "--session-id", session], { cwd: folder, env: { ...env, PLANNOTATOR_INBOX_TOOL: "1", PLANNOTATOR_DATA_DIR: dataDir }, stdout: "ignore", stderr: "ignore" });
+    // The attach command's Pi once its shell exec'd it: nothing in the process list names the session. Its
+    // Inbox tool off keeps it off the bridge, as one still reconnecting to the new Inbox; it claims the session all the same.
+    const attached = Bun.spawn([join(bin, "pi"), "--session-id", session], { cwd: folder, env: { ...env, PLANNOTATOR_INBOX_TOOL: "0", PLANNOTATOR_DATA_DIR: dataDir }, stdout: "ignore", stderr: "ignore" });
+    cleanup.push(() => void attached.kill("SIGTERM"));
     const terminal = await until("the attach command's Pi", () => fake.terminals()[0]);
     await until("ps to list it as pi", () => Bun.spawnSync(["/bin/ps", "-o", "command=", "-p", String(terminal.pid)]).stdout.toString().trim() === "pi");
     const restarted = makeHost().host;
@@ -546,8 +550,8 @@ describe("Pi's launch host, against the fake pi", () => {
     expect((await restarted.resume(launch)).failure).toBeNull();
     expect(fake.starts()).toHaveLength(1);
     expect(restarted.attach(launch)).toBeNull();
-    process.kill(terminal.pid, "SIGTERM"); // inbox-guard: own child (the fake pi this test started)
-    await until("it to quit", () => !fake.alive(terminal.pid));
+    attached.kill("SIGTERM");
+    await attached.exited;
     await Bun.sleep(1_700);
     expect(restarted.live(session)).toBeNull();
     expect((await restarted.resume(launch)).failure).toBeNull();
@@ -662,7 +666,7 @@ describe("Pi's pure pieces", () => {
     expect(piSessionProcesses(listing, session, [250], [claim(400)])).toEqual([]);
   });
 
-  test("a claim whose pid is gone is stale and removed; a /reload's old instance never removes the new one's", () => {
+  test("a claim whose pid is gone, or whose pid another Pi claimed since, is stale and removed; a /reload's old instance never removes the new one's", () => {
     const dataDir = mkdtempSync(join(tmpdir(), "plannotator-pi-claims-"));
     cleanup.push(() => rmSync(dataDir, { recursive: true, force: true }));
     const session = randomUUID();
@@ -675,6 +679,11 @@ describe("Pi's pure pieces", () => {
     expect(readPiSessionClaims(dataDir)).toHaveLength(1);
     releasePiSessionClaim(dataDir, session, process.pid, "new");
     expect(readPiSessionClaims(dataDir)).toHaveLength(0);
+    // A killed Pi's claim, its pid reused by a Pi on another session: that Pi's claim replaces it.
+    writePiSessionClaim(dataDir, { session, pid: process.pid, rpc: true, title: "pi", owner: "killed" });
+    const other = randomUUID();
+    writePiSessionClaim(dataDir, { session: other, pid: process.pid, rpc: false, title: "pi", owner: "reuser" });
+    expect(readPiSessionClaims(dataDir).map((c) => c.session)).toEqual([other]);
   });
 
   test("a dialog's title keeps an emoji whole and drops bidi controls; one with no title still says what happened", () => {

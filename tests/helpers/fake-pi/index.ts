@@ -7,8 +7,8 @@
  *
  * Node-safe (the Playwright specs import it under node): the fake runs on Node
  * when there is one, as Pi does, else on this process's own executable.
- * `stopAll` signals only pids it recorded that still run as this fake (titled
- * `pi`, as Pi is).
+ * `stopAll` signals only pids it recorded that still run as this fake: titled
+ * `pi`, as Pi is, and started when that fake started.
  */
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -67,6 +67,8 @@ export interface FakePiCall {
   dataDir: string | null;
   inboxTool: string | null;
   pid: number;
+  /** When the process started (ms). */
+  startedAt?: number;
   at: number;
 }
 
@@ -126,13 +128,22 @@ export function installFakePi(input: { bin: string; state: string; home: string;
       : [];
   const readConfig = (): FakePiConfig => JSON.parse(readFileSync(join(state, "config.json"), "utf8")) as FakePiConfig;
   /**
-   * The fake titles itself `pi` as Pi does, so ps lists it as `pi` alone: a pid this fake recorded that runs
-   * as `pi` (or, in the instant before the title is set, runs this script).
+   * Whether `pid` is still a fake this helper recorded. The fake titles itself `pi` as Pi does, so ps lists
+   * it as `pi` alone (this script's path only in the instant before): the pid must also have started when
+   * that fake did (ps's elapsed time against its `startedAt`), so a real Pi that reused the pid never counts.
    */
   const alive = (pid: number) => {
-    const command = spawnSync("/bin/ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
-    if (command.includes(SCRIPT)) return true;
-    return command === "pi" && lines<FakePiCall>("calls.jsonl").some((call) => call.pid === pid);
+    const call = lines<FakePiCall>("calls.jsonl").filter((c) => c.pid === pid).at(-1);
+    if (!call) return false;
+    const row = spawnSync("/bin/ps", ["-o", "etime=,command=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
+    const match = /^(?:(?:(\d+)-)?(\d+):)?(\d+):(\d+)\s+(.*)$/.exec(row);
+    if (!match) return false;
+    const command = match[5]!.trim();
+    if (command !== "pi" && !command.includes(SCRIPT)) return false;
+    const elapsed = ((Number(match[1] ?? 0) * 24 + Number(match[2] ?? 0)) * 60 + Number(match[3])) * 60 + Number(match[4]);
+    // ps rounds the elapsed time down to the second.
+    const started = Date.now() - elapsed * 1000;
+    return Math.abs(started - (call.startedAt ?? call.at)) <= 2_000;
   };
 
   return {

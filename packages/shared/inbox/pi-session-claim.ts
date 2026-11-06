@@ -6,7 +6,8 @@
  * removes it as the session ends. The Inbox's Pi launch host reads them so that it never starts a second writer
  * on a session (packages/server/inbox-launch-pi.ts).
  *
- * A file whose pid no longer runs is stale (a Pi that was killed): the reader removes it. `title` is the
+ * A file whose pid no longer runs is stale (a Pi that was killed): the reader removes it, and a Pi that reuses
+ * the pid removes it as it claims its own session. `title` is the
  * process's title when it wrote the file, so a pid reused by another program is not read as that Pi. `owner`
  * names the extension instance, so a `/reload`'s old instance never removes the new one's file.
  *
@@ -46,11 +47,18 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
-/** Best effort: a claim that cannot be written leaves only `ps` to tell. */
+/**
+ * Best effort: a claim that cannot be written leaves only `ps` to tell. A pid runs one Pi session at a time, so
+ * any other claim under this pid is stale (a killed Pi whose pid this process reused) and is removed.
+ */
 export function writePiSessionClaim(dataDir: string, claim: PiSessionClaim): void {
   try {
-    mkdirSync(piSessionClaimDirOf(dataDir), { recursive: true, mode: 0o700 });
+    const dir = piSessionClaimDirOf(dataDir);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
     const file = piSessionClaimFileOf(dataDir, claim.session, claim.pid);
+    for (const name of readdirSync(dir)) {
+      if (name.endsWith(`.${claim.pid}.json`) && join(dir, name) !== file) rmSync(join(dir, name), { force: true });
+    }
     const tmp = `${file}.${claim.owner}.tmp`;
     writeFileSync(tmp, JSON.stringify(claim), { mode: 0o600 });
     renameSync(tmp, file);
