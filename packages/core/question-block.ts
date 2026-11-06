@@ -264,6 +264,11 @@ const CHOICE_IMAGE_RE = /!\[([^\]\n]*)\]\(([^)\n]+)\)/;
 // What may follow a recommendation that names the start of a choice label
 // (`Recommended: Unpin it` for `Unpin it: the toast says…`).
 const LABEL_HEAD_SEP_RE = /^(?:\s*[:—–(]|\s+-\s)/;
+// A recommendation that is only a label's leading token, a letter or a
+// number (`Recommended: A` for `A · Yes`), names the label when the token is
+// followed by a middle dot.
+const LABEL_TOKEN_RE = /^(?:[a-z]|\d+)$/;
+const LABEL_TOKEN_SEP_RE = /^ · /;
 // At the start of the line (no indentation), so an indented line under a
 // choice stays that choice's continuation.
 const DECISION_RE = /^decision\s*:\s*(.*?)\s*$/i;
@@ -484,7 +489,9 @@ const QUESTION_KEY_RE = /^q-[0-9a-f]{8}(?:-\d{1,3})?$/;
  * The one choice a recommendation names by the start of its label: the
  * choice whose label (or any of its other names, such as a task list's full
  * text) begins with the text and then a separator (`:` `—` `–` ` - ` `(`),
- * compared case-insensitively with emphasis and spacing folded
+ * or whose leading letter or number the text is, followed by ` · `
+ * (`Recommended: A` names `A · Yes`), compared case-insensitively with
+ * emphasis and spacing folded
  * (`Recommended: Unpin it` names `Unpin it: the toast says…`). -1 when no
  * choice or several do. `names` holds each choice's names, label first.
  */
@@ -497,7 +504,9 @@ export const recommendationHeadChoice = (
   const begins = (value: string | undefined): boolean => {
     if (!value) return false;
     const folded = value.replace(/[*_`]+/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-    return folded.startsWith(target) && LABEL_HEAD_SEP_RE.test(folded.slice(target.length));
+    if (!folded.startsWith(target)) return false;
+    const rest = folded.slice(target.length);
+    return LABEL_HEAD_SEP_RE.test(rest) || (LABEL_TOKEN_RE.test(target) && LABEL_TOKEN_SEP_RE.test(rest));
   };
   const hits = names.flatMap((entry, i) => ((typeof entry === 'string' ? [entry] : entry).some(begins) ? [i] : []));
   return hits.length === 1 ? hits[0] : -1;

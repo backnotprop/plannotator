@@ -758,7 +758,7 @@ export interface TourDegraded {
  * joined them (approval "inbox-snooze-announce", 2026-11-02): new users never get its one-time dialog, so the tour names it.
  */
 export const TOUR_ALSO_ITEMS: { mark: string; title: string; text: string }[] = [
-  { mark: '📌', title: 'Pin a thread', text: 'to keep it at the top of the sidebar.' },
+  { mark: '⭐', title: 'Star a thread', text: 'to keep it at the top of the sidebar.' },
   { mark: '⏰', title: 'Snooze', text: 'puts a thread away until later, and brings it back on time.' },
   { mark: '👍', title: 'Looks good', text: 'tells an agent in one click when there’s nothing to add.' },
   { mark: '↻', title: 'Re-ask', text: 'gathers an agent’s open questions into one fresh message.' },

@@ -436,7 +436,7 @@ export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
  * field and `plannotator inbox --help` carry it whole.
  */
 export const INBOX_PICTURES_RULE =
-  'Pictures go in the body where you write about them, `![alt](/abs/path.png)`, never only in `attachments`; do not also attach one the body shows. Visual options are picture choices, one picture each: `- [ ] A · Label — ![alt](path) what it means`; the label comes back.'
+  'Pictures go in the body where you write about them, `![alt](/abs/path.png)`, never only in `attachments`; do not also attach one the body shows. Visual options are picture choices, one picture each, inside the choice (not in the text above the question): `- [ ] A · Label — ![alt](path) what it means`; the label comes back.'
 
 /** The `attachments` field's line on pictures (fixed text, on every copy of the field). */
 export const INBOX_ATTACHMENTS_PICTURES_LINE =
@@ -1049,6 +1049,13 @@ function wakeName(value: unknown): string {
  * never offered there.
  */
 export const INBOX_SEND_NOW_POLL_FIELD = 'send_now'
+
+/**
+ * On a poll, the connection's tick goes on polling while a steer waits for the running turn. A connection without it
+ * (from before that) stops polling until the steer goes in, so the Inbox counts a session it handed one as there.
+ * An older Inbox ignores it.
+ */
+export const INBOX_STEER_POLLS_POLL_FIELD = 'steer_polls'
 
 /**
  * The poll field (`true`) by which a connection says it can answer Ask AI

@@ -113,6 +113,8 @@ let replyAnswer: () => Response = () => new Response('{}');
 let annotations: InboxAnnotationRecord[] = [];
 /** Which sessions are still there, by id (answers `?asker=` for any session); null: `sessions.asker` as set. */
 let liveness: Record<string, boolean> | null = null;
+/** What `/to` refuses with, when it does. */
+let moveRefusal: string | null = null;
 /**
  * A session whose `?asker=` reads wait (a slow /sessions round trip): each read waits on its own, in order, until
  * `held[i]` is called; null: none waits.
@@ -125,6 +127,7 @@ beforeEach(() => {
   posted = [];
   sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
   liveness = null;
+  moveRefusal = null;
   holdAsker = null;
   annotations = [];
   replyAnswer = () => Response.json({ reply: {}, questions: [], replayed: false });
@@ -132,6 +135,7 @@ beforeEach(() => {
     const path = String(input);
     if (init?.method === 'POST') {
       posted.push({ path, body: JSON.parse(String(init.body)) });
+      if (moveRefusal && path.endsWith('/to')) return Response.json({ code: moveRefusal, error: 'Refused.' }, { status: 422 });
       if (path.endsWith('/reply')) return replyAnswer();
       return Response.json({ questions: [] });
     }
@@ -223,7 +227,7 @@ test.skipIf(!hasDom)('ended, live sessions exist: "session ended" on the asking 
   expect(el.querySelector(`[data-message-article="${M1}"] .ib-to`)?.textContent).toBe('to you · session ended');
   const note = el.querySelector('[data-asker-ended]') as HTMLElement;
   expect(note.getAttribute('data-asker-ended')).toBe('live');
-  expect(note.textContent).toContain('The Claude Code session that asked has ended.');
+  expect(note.querySelector('b')?.textContent).toBe('This Claude Code session has ended.');
   // The note lives in one always-mounted status region.
   const region = el.querySelector('[data-asker-note]') as HTMLElement;
   expect(region.getAttribute('role')).toBe('status');
@@ -377,7 +381,7 @@ test.skipIf(!hasDom)('none live: the note says the reply will wait, Send sends a
   await writeReply(el);
   const note = el.querySelector('[data-asker-ended]') as HTMLElement;
   expect(note.getAttribute('data-asker-ended')).toBe('none-live');
-  expect(note.textContent).toContain('and no agent is running in ledger now. Your reply will wait here until an agent reads this thread.');
+  expect(note.textContent).toContain('A reply waits here until that session is resumed.');
   act(() => button(el, 'Send').click());
   await settle();
   expect(el.querySelector('[data-route-choice]')).toBeNull();
@@ -388,7 +392,7 @@ test.skipIf(!hasDom)('none live: the note says the reply will wait, Send sends a
   host?.remove();
   const after = await render(threadOf(asking(), personReply()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
   expect(after.querySelector('[data-delivery]')?.textContent).toBe(
-    'Saved for Claude Code. The session that asked has ended, so it waits here until an agent reads this thread.',
+    "Saved for Claude Code. That session has ended; it gets this only if it's resumed.",
   );
   // The note is for before replying: once the reply is the last message, its own line says where it went.
   expect(after.querySelector('[data-asker-ended]')).toBeNull();
@@ -705,6 +709,135 @@ test.skipIf(!hasDom)('a comment only, Send from the foot with the list of commen
   expect(list()).toBeNull();
 });
 
+const inFoot = (el: HTMLElement, text: string) => [...el.querySelectorAll('[data-foot-buttons] button')].some((b) => b.textContent?.trim() === text);
+
+test.skipIf(!hasDom)('ended, another live: Send to another session and Archive sit with Reply; the first opens the box with the list, the second archives', async () => {
+  sessions = { sessions: [live('ses_other', 'claude-code')], asker: { session: 'ses_asker', live: false } };
+  const el = await render(threadOf(asking()));
+  expect(inFoot(el, 'Reply')).toBe(true);
+  expect(inFoot(el, 'Send to another session')).toBe(true);
+  expect(inFoot(el, 'Archive')).toBe(true);
+
+  act(() => button(el, 'Send to another session').click());
+  await settle();
+  expect(el.querySelector('textarea')).not.toBeNull();
+  expect(pillList(el)).not.toBeNull();
+  expect(pillRows(el).map((r) => r[0])).toContain('ses_other');
+
+  act(() => root?.unmount());
+  host?.remove();
+  const again = await render(threadOf(asking()));
+  act(() => button(again, 'Archive').click());
+  await settle();
+  expect(posted.some((p) => p.path.endsWith(`/messages/${M1}/resolve`) && p.body.resolved === true)).toBe(true);
+});
+
+test.skipIf(!hasDom)('ended, nothing live: only Archive, since nothing could take the reply', async () => {
+  sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
+  const el = await render(threadOf(asking()));
+  expect(inFoot(el, 'Send to another session')).toBe(false);
+  expect(inFoot(el, 'Archive')).toBe(true);
+});
+
+test.skipIf(!hasDom)('the session is live, or the host cannot tell: no note and neither button', async () => {
+  sessions = { sessions: [live('ses_other', 'claude-code')], asker: { session: 'ses_asker', live: true } };
+  const alive = await render(threadOf(asking()));
+  expect(alive.querySelector('[data-foot-ended]')).toBeNull();
+  act(() => root?.unmount());
+  host?.remove();
+  sessions = { sessions: [live('ses_other', 'claude-code')], asker: { session: 'ses_asker', live: false } };
+  const noSignal = await render(threadOf(asking(false, false)));
+  expect(noSignal.querySelector('[data-foot-ended]')).toBeNull();
+  expect(noSignal.querySelector('[data-asker-ended]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a reply saved for a session that ended can move: the plain reply posts to its own `/to`', async () => {
+  sessions = { sessions: [live('ses_other', 'pi')], asker: { session: 'ses_asker', live: false } };
+  const el = await render(threadOf(asking(), personReply()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  act(() => (el.querySelector('[data-readdress-open]') as HTMLButtonElement).click());
+  await settle();
+  act(() => (el.querySelector('[data-readdress-send]') as HTMLButtonElement).click());
+  await settle();
+  expect(posted.find((p) => p.path.endsWith(`/messages/${R1}/to`))?.body.to).toEqual({ host: 'pi', session: 'ses_other' });
+});
+
+test.skipIf(!hasDom)('a session the reply already tags is not offered; with no other, neither is the move', async () => {
+  sessions = { sessions: [live('ses_b', 'pi'), live('ses_c', 'pi')], asker: { session: 'ses_asker', live: false } };
+  const tagged = () => personReply({ tags: [{ host: 'pi', session: 'ses_b', wakes: true, delivery: { host: 'pi', session: 'ses_b', state: 'delivered', at: '2026-10-11T10:51:00.000Z' } }] });
+  const both = await render(threadOf(asking(), tagged()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  act(() => (both.querySelector('[data-readdress-open]') as HTMLButtonElement).click());
+  await settle();
+  expect([...both.querySelectorAll('[data-readdress-session]')].map((row) => row.getAttribute('data-readdress-session'))).toEqual(['ses_c']);
+  act(() => root?.unmount());
+  host?.remove();
+  sessions = { sessions: [live('ses_b', 'pi')], asker: { session: 'ses_asker', live: false } };
+  const only = await render(threadOf(asking(), tagged()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  expect(!!only.querySelector('[data-readdress-open]')).toBe(false);
+});
+
+test.skipIf(!hasDom)('a tag not delivered yet, or a session the reply was handed away from, is still offered', async () => {
+  sessions = { sessions: [live('ses_b', 'pi'), live('ses_c', 'pi')], asker: { session: 'ses_asker', live: false } };
+  const at = '2026-10-11T10:51:00.000Z';
+  const reply = personReply({
+    tags: [
+      { host: 'pi', session: 'ses_b', wakes: true },
+      { host: 'pi', session: 'ses_c', wakes: true, handed_away: true, delivery: { host: 'pi', session: 'ses_c', state: 'delivered', at } },
+    ],
+  });
+  const el = await render(threadOf(asking(), reply), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  act(() => (el.querySelector('[data-readdress-open]') as HTMLButtonElement).click());
+  await settle();
+  expect([...el.querySelectorAll('[data-readdress-session]')].map((row) => row.getAttribute('data-readdress-session'))).toEqual(['ses_b', 'ses_c']);
+});
+
+test.skipIf(!hasDom)('a reply the session itself already read is not offered', async () => {
+  sessions = { sessions: [live('ses_other', 'pi')], asker: { session: 'ses_asker', live: false } };
+  const opened = asking();
+  const el = await render(threadOf({ ...opened, agent_checked_seq: 9 }, personReply({ seq: 2 })), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  expect(!!el.querySelector('[data-delivery]')).toBe(true);
+  expect(!!el.querySelector('[data-readdress-open]')).toBe(false);
+});
+
+test.skipIf(!hasDom)('the session came back as the person moved the reply: the form closes, with no refusal to read', async () => {
+  sessions = { sessions: [live('ses_other', 'pi')], asker: { session: 'ses_asker', live: false } };
+  moveRefusal = 'session_still_live';
+  const el = await render(threadOf(asking(), personReply()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  act(() => (el.querySelector('[data-readdress-open]') as HTMLButtonElement).click());
+  await settle();
+  act(() => (el.querySelector('[data-readdress-send]') as HTMLButtonElement).click());
+  await settle();
+  expect(!!el.querySelector('[data-readdress-choice]')).toBe(false);
+  expect(!!el.querySelector('.ib-route-error')).toBe(false);
+});
+
+test.skipIf(!hasDom)('an older linked machine refuses a plain move: the form stays open and says so', async () => {
+  sessions = { sessions: [live('ses_other', 'pi')], asker: { session: 'ses_asker', live: false } };
+  moveRefusal = 'not_addressed';
+  const el = await render(threadOf(asking(), personReply()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  act(() => (el.querySelector('[data-readdress-open]') as HTMLButtonElement).click());
+  await settle();
+  act(() => (el.querySelector('[data-readdress-send]') as HTMLButtonElement).click());
+  await settle();
+  expect(!!el.querySelector('[data-readdress-choice]')).toBe(true);
+  expect(el.querySelector('.ib-route-error')?.textContent).toBe('Refused.');
+});
+
+test.skipIf(!hasDom)('after a move: the next reply answers the moved one, and it is to the new session', async () => {
+  // The session that asked reads as ended, as it does in the window.
+  sessions = { sessions: [live('ses_other', 'pi')] };
+  liveness = { ses_asker: false, ses_other: true };
+  const moved = personReply({ to: { host: 'pi', session: 'ses_other' }, took_over: true, delivery: { host: 'pi', session: 'ses_other', state: 'delivered', at: '2026-10-11T10:53:00.000Z' } });
+  const el = await render(threadOf(asking(), moved), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  await writeReply(el);
+  expect(pill(el)?.getAttribute('aria-label')).toContain('To Pi');
+  expect(pill(el)?.getAttribute('aria-label')).not.toContain('ended');
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(pillList(el)).toBeNull();
+  expect(replies()).toHaveLength(1);
+  expect(replies()[0]!.path).toEndWith(`/messages/${R1}/reply`);
+});
+
 // A launched agent that stopped is not "ended": a reply starts it again. Only that session: another agent in the same
 // thread that ended is gone as it is anywhere, and a stopped launched session never reads as ended because of whom the
 // words go to.
@@ -754,6 +887,106 @@ test.skipIf(!hasDom)('a launched thread, its stopped agent the only one: never "
   await settle();
   await settle();
   expect(replies().map((r) => [r.path, r.body.to ?? null])).toEqual([[`/api/inbox/messages/${M1}/reply`, null]]);
+});
+
+const SAVED_REPLY = 'msg_01M4H6G73M9H3Z32T859E72L09';
+const savedIn = (asked: InboxMessageWire, replyTo: string, to?: { host: string; session: string }) =>
+  ({ ...asked, id: SAVED_REPLY, reply_to: replyTo, author: { kind: 'person' }, questions: undefined, wakes: undefined, ...(to ? { to } : {}), body: 'Carry on.', created_at: '2026-10-11T10:50:00.000Z', idempotency_key: 'k-saved' }) as InboxMessageWire;
+const SAVED_AT = { at: '2026-10-11T10:52:00.000Z', checked_at: null };
+
+test.skipIf(!hasDom)('a launched thread, a plain reply for its own agent: stopped, the reply starts it, so no move; gone, the line offers the move', async () => {
+  liveness = { ses_launched: false };
+  sessions = { sessions: [live('ses_other', 'pi')] };
+  const thread = launchedThread(false);
+  const [rootMessage, asked] = thread.messages as [InboxMessageWire, InboxMessageWire];
+  const withSaved = { ...thread, messages: [rootMessage, asked, savedIn(asked, M1)] };
+  const stopped = await render(withSaved, SAVED_AT, stoppedRun);
+  expect(stopped.querySelector('[data-run]')?.getAttribute('data-run')).toBe('stopped');
+  expect(!!stopped.querySelector('[data-readdress-open]')).toBe(false);
+  act(() => root?.unmount());
+  host?.remove();
+  const gone = await render(withSaved, SAVED_AT, { ...stoppedRun, state: 'missing' });
+  expect(gone.querySelector('[data-run]')?.textContent).toContain('or send the reply to another session');
+  act(() => (gone.querySelector('[data-readdress-open]') as HTMLButtonElement).click());
+  await settle();
+  act(() => (gone.querySelector('[data-readdress-send]') as HTMLButtonElement).click());
+  await settle();
+  expect(posted.find((p) => p.path.endsWith(`/messages/${SAVED_REPLY}/to`))?.body.to).toEqual({ host: 'pi', session: 'ses_other' });
+});
+
+test.skipIf(!hasDom)('a launched thread, its agent gone: the words and the form only while the reply can move', async () => {
+  liveness = { ses_launched: false };
+  sessions = { sessions: [live('ses_other', 'pi')] };
+  const thread = launchedThread(false);
+  const [rootMessage, asked] = thread.messages as [InboxMessageWire, InboxMessageWire];
+  const gone = { ...stoppedRun, state: 'missing' } as typeof stoppedRun;
+  const OFFER = 'or send the reply to another session';
+  const read = async (t: InboxThread) => {
+    const el = await render(t, SAVED_AT, gone);
+    const seen = { words: !!el.querySelector('[data-run]')?.textContent?.includes(OFFER), form: !!el.querySelector('[data-readdress-open]') };
+    act(() => root?.unmount());
+    host?.remove();
+    return seen;
+  };
+  const saved = savedIn(asked, M1);
+  const withSaved = { ...thread, messages: [rootMessage, asked, saved] };
+  expect(await read(withSaved)).toEqual({ words: true, form: true });
+  // Taken already, by delivery or by a read that settled it: refused as already delivered.
+  const taken = { ...saved, delivery: { host: 'claude-code', session: 'ses_launched', state: 'delivered', at: '2026-10-11T10:51:00.000Z' } } as InboxMessageWire;
+  expect(await read({ ...thread, messages: [rootMessage, asked, taken] })).toEqual({ words: false, form: false });
+  const read9 = { ...rootMessage, agent_checked_seq: 9 } as InboxMessageWire;
+  expect(await read({ ...thread, messages: [read9, asked, { ...saved, seq: 2 } as InboxMessageWire] })).toEqual({ words: false, form: false });
+  // Archived: refused as resolved.
+  const at = '2026-10-11T11:00:00.000Z';
+  expect(await read({ ...thread, resolved_at: at, messages: [{ ...rootMessage, resolved_at: at }, asked, saved] })).toEqual({ words: false, form: false });
+  // Every other live session took it through a tag: nowhere to send it, and no form.
+  const tagged = { ...saved, tags: [{ host: 'pi', session: 'ses_other', wakes: true, delivery: { host: 'pi', session: 'ses_other', state: 'delivered', at: '2026-10-11T10:51:00.000Z' } }] } as InboxMessageWire;
+  expect(await read({ ...thread, messages: [rootMessage, asked, tagged] })).toEqual({ words: false, form: false });
+  // No other session running: the words say nothing of it; the form stays, since opening it reads the sessions again.
+  sessions = { sessions: [] };
+  expect((await read(withSaved)).words).toBe(false);
+});
+
+test.skipIf(!hasDom)('a launched thread, a plain reply for a tagged agent that ended: a move, and no line saying the reply starts the launched agent', async () => {
+  liveness = { ses_launched: false, ses_tagged: false };
+  sessions = { sessions: [live('ses_other', 'pi')] };
+  const thread = launchedThread(false);
+  const [rootMessage, asked, tagged] = thread.messages as [InboxMessageWire, InboxMessageWire, InboxMessageWire];
+  const el = await render({ ...thread, messages: [rootMessage, asked, tagged, savedIn(asked, R1)] }, SAVED_AT, stoppedRun);
+  expect(!!el.querySelector('[data-readdress-open]')).toBe(true);
+  expect(!!el.querySelector('[data-run]')).toBe(false);
+});
+
+test.skipIf(!hasDom)('a launched thread, its agent stopped, a reply aimed at a session that ended: a move, and no line saying the reply starts the launched agent', async () => {
+  liveness = { ses_launched: false, ses_c: false };
+  sessions = { sessions: [live('ses_other', 'pi')] };
+  const thread = launchedThread(false);
+  const [rootMessage, asked] = thread.messages as [InboxMessageWire, InboxMessageWire];
+  const el = await render({ ...thread, messages: [rootMessage, asked, savedIn(asked, M1, { host: 'pi', session: 'ses_c' })] }, SAVED_AT, stoppedRun);
+  expect(!!el.querySelector('[data-run]')).toBe(false);
+  expect(!!el.querySelector('[data-readdress-open]')).toBe(true);
+});
+
+test.skipIf(!hasDom)('a launched root moved before it started, a reply on the session it moved to: no "isn\'t on this computer" line and no move', async () => {
+  liveness = { ses_c: true };
+  sessions = { sessions: [live('ses_c', 'pi'), live('ses_other', 'pi')] };
+  const thread = launchedThread(false);
+  const [rootMessage, asked] = thread.messages as [InboxMessageWire, InboxMessageWire];
+  const moved = { ...rootMessage, to: { host: 'pi', session: 'ses_c' }, launch: { ...rootMessage.launch!, session_ref: null } } as InboxMessageWire;
+  const el = await render({ ...thread, messages: [moved, savedIn(asked, LAUNCHED_ROOT, { host: 'pi', session: 'ses_c' })] }, SAVED_AT, { ...stoppedRun, state: 'missing' });
+  expect(!!el.querySelector('[data-run]')).toBe(false);
+  expect(!!el.querySelector('[data-readdress-open]')).toBe(false);
+});
+
+test.skipIf(!hasDom)('a launched root moved to another session that then ended: that session reads as ended, though the launched agent would start again', async () => {
+  liveness = { ses_launched: false, ses_c: false };
+  sessions = { sessions: [live('ses_other', 'pi')] };
+  const thread = launchedThread(false);
+  const [rootMessage, asked] = thread.messages as [InboxMessageWire, InboxMessageWire];
+  const moved = { ...rootMessage, to: { host: 'pi', session: 'ses_c' }, launch: { ...rootMessage.launch!, session: 'ses_launched' } } as InboxMessageWire;
+  const answered = { ...asked, reply_to: LAUNCHED_ROOT, author: { kind: 'agent', host: 'pi', session: 'ses_c', name: null }, questions: undefined, wakes: true } as InboxMessageWire;
+  const el = await render({ ...thread, messages: [moved, answered] }, null, stoppedRun);
+  expect(el.querySelector(`[data-message-article="${M1}"] [data-session-ended]`)).not.toBeNull();
 });
 
 test.skipIf(!hasDom)('a launched thread, the words going to a tagged agent that ended: the ended note shows, so the reply does not wait on it unsaid', async () => {

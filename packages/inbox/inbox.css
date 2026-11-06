@@ -580,8 +580,21 @@ button.ib-mut { border-radius: 6px; }
    On line 3 of three-line and phone rows its auto margin pushes it before the badge and the counts whether the
    preview before it is short or cut (a phone row with nothing else for line 3 keeps it on line 1, before the time).
    A wide row has it in its own column (`.ib-cpin`, below the wide row). */
-.ib-pinmark { display: inline-flex; flex: none; color: var(--muted-foreground); }
-.pn-inbox .ib-pinmark svg.ib-ic { width: 13px; height: 13px; stroke-width: 1.8; }
+.pn-inbox { --ib-star: oklch(0.74 0.17 72); }
+:root:not(.light) .pn-inbox { --ib-star: oklch(0.83 0.15 86); }
+.ib-pinmark { display: inline-flex; flex: none; color: var(--ib-star); }
+.pn-inbox .ib-pinmark svg.ib-ic { width: 13px; height: 13px; stroke-width: 1.8; fill: currentColor; }
+.pn-inbox :is(.ib-side-sec > svg, .ib-pmi svg).ib-star-on { color: var(--ib-star); fill: currentColor; }
+/* Starring: the star lands, one small pop and a settle, only just after the person starred (starPop.ts). */
+@keyframes ib-star-pop {
+  0% { transform: scale(0.3) rotate(-30deg); opacity: 0; }
+  55% { transform: scale(1.32) rotate(8deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+:is(.ib-pinmark[data-pop] svg.ib-ic, .ib-side-sec > svg.ib-star-pop) { animation: ib-star-pop 460ms cubic-bezier(0.2, 0.8, 0.2, 1) both; transform-origin: 50% 55%; }
+@media (prefers-reduced-motion: reduce) {
+  :is(.ib-pinmark[data-pop] svg.ib-ic, .ib-side-sec > svg.ib-star-pop) { animation: none; }
+}
 :is(.ib-nrow .ib-l3, .ib-m3) > .ib-pinmark { margin-left: auto; }
 /* A phone row with nothing else for line 3 keeps its pin on line 1, before the time (PhoneRow's `pinOnLine1`). */
 .ib-m1 > .ib-pinmark { margin-left: auto; }
@@ -2295,9 +2308,13 @@ pre code.pn-code[data-keep-layout] {
    `text-xs` at 13px is what the review stylesheet sets for Plannotator's code
    review and guides.show (packages/review-editor/index.css), scoped to the guide. */
 .ib-gerror { padding: 12px 30px 0; }
+/* GuideFileCard holds the reader's place here, for every browser. */
+.ib-gbody { overflow-anchor: none; }
 .ib-gbody { min-height: 0; overflow-y: auto; --text-xs: 0.8125rem; --text-xs--line-height: calc(1 / 0.75); }
 /* Pierre's diff colours from the theme, as the review stylesheet passes them into its shadow DOM. */
 .ib-gbody diffs-container { --diffs-dark-bg: var(--background); --diffs-light-bg: var(--background); --diffs-dark: var(--foreground); --diffs-light: var(--foreground); }
+/* FileHeader's height is this variable, which only the review stylesheet defined: here the row shrank onto its file name. */
+.ib-gbody { --panel-header-h: 33px; }
 /* The guide beside its comments: the attachment pane's panel column, with what rides the next Send at its foot. */
 .ib-gsplit { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; }
 .ib-gstrip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
@@ -2379,6 +2396,8 @@ pre code.pn-code[data-keep-layout] {
 .ib-esc { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-esc kbd { font-family: var(--font-sans); font-size: var(--ib-fs-11, 11px); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
 @media (max-width: 560px), (pointer: coarse) { .ib-esc { display: none; } }
+.ib-route-acts { flex-wrap: wrap; }
+.ib-route-acts .ib-btn { max-width: 100%; }
 @media (max-width: 560px) { .pn-inbox .ib-route-acts .ib-btn.ib-pri { flex: 1; justify-content: center; } }
 @media (prefers-reduced-motion: no-preference) {
   .ib-route { animation: ib-route-in 140ms ease-out; }
@@ -2901,6 +2920,9 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
    file (.ib-view.ib-full is z-index 40). Its words always show whole: a long detail wraps to a second line. */
 .ib-toast { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 41; box-sizing: border-box; display: flex; align-items: center; gap: 10px; width: max-content; max-width: min(520px, calc(100vw - 32px)); min-height: 40px; padding: 6px 6px 6px 12px; border-radius: 8px; background: var(--card); color: var(--card-foreground); border: 1px solid var(--border); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.04); font-size: var(--ib-fs-13, 13px); line-height: 20px; animation: ib-toast-in 180ms cubic-bezier(0.23, 1, 0.32, 1); }
 :root:not(.light) .ib-toast { box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.6); }
+/* An open Shape's bar (and the pill over it) hold the window's foot: the toast sits above them, never over their buttons. */
+body:has([data-shape-layer] .shp-dock) .ib-toast:not(.ib-toast-phone) { bottom: 72px; }
+body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 124px; }
 @keyframes ib-toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 .ib-toast > .ib-ic { color: var(--muted-foreground); flex: none; }
 .ib-toast.ib-toast-warn > .ib-ic { color: var(--warning, oklch(0.75 0.15 85)); }
@@ -8164,6 +8186,18 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-shape-layer { inset: 0; border-radius: 0; }
 }
 
+/* "Session ended" on a row: quiet, beside the row's own words. */
+.ib-rended { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); white-space: nowrap; flex: none; }
+.ib-row .ib-cw:has(.ib-rended) { gap: 10px; }
+.ib-noproj .ib-row:has(.ib-rended) { --ib-words-track: max-content; }
+.ib-rended + .ib-c { margin-left: 8px; }
+
+/* Send to another session and Archive beside Reply when the session ended; a phone gives them their own line. */
+.ib-footended { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-footended { flex: 1 0 100%; order: 1; }
+}
+
 /* Show me in the code review (approval "shape-in-code-review", mock ac2; packages/inbox/review-drawing). The box, the
    picture's sheet over the diff, its corner card, and the Overview's picture. Shape's paper behind every drawing. */
 .ib-review { --shp-paper: color-mix(in oklab, var(--background) 92%, var(--muted)); }
@@ -8297,3 +8331,18 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* The Inbox's own neutral badge (.ib-badge.ib-b-mut), a size down in the preview; a column's count after its name. */
 .pn-inbox .ib-tagpeek .ib-badge.ib-tagpeek-badge { height: 20px; padding: 0 6px; gap: 0; font-size: var(--ib-fs-12, 12px); font-weight: 500; border-color: color-mix(in oklch, var(--foreground) 18%, transparent); }
 .ib-tagpeek .ib-tagpeek-n { color: var(--foreground); font-variant-numeric: tabular-nums; margin-left: 2px; }
+
+/* Settings -> Decision data (approval decision-data, 2026-11-05). */
+.ib-dd-box { display: flex; gap: 8px; margin-top: 10px; }
+.ib-dd-box input { flex: 1; min-width: 0; height: 36px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); }
+.ib-dd-box input:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+.pn-inbox .ib-dd-box .ib-btn { height: 36px; flex: none; max-width: 50%; }
+.ib-dd-box .ib-btn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-dd-who { margin-top: 8px; }
+.ib-dd-who select { max-width: 100%; height: 30px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); }
+.ib-sgroup > p.ib-dd-note { margin: 10px 0 0; }
+@media (max-width: 480px) {
+  .ib-dd-box { flex-wrap: wrap; }
+  .ib-dd-box input { flex-basis: 100%; }
+  .pn-inbox .ib-dd-box .ib-btn { max-width: 100%; }
+}

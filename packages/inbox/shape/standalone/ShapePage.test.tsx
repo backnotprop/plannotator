@@ -8,7 +8,8 @@
  *    return), or Esc leaves the board open, or the grid stays reachable under
  *    the open board (it must be inert);
  *  - with Shape off the page shows a grid (or Find) at all;
- *  - with no boards the page is blank instead of saying what a board is.
+ *  - with no boards the page is blank instead of saying what a board is;
+ *  - the page's board takes the Inbox's crosshair (and its Show me stub) in place of Annotate.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -26,8 +27,8 @@ const hasDom = typeof document !== 'undefined';
 // The board itself (ShapeSurface and its Code view's guide chain) has its own tests; here it is a stand-in that
 // shows which board is open and calls onClose when clicked.
 if (hasDom) mock.module('#shape-board', () => ({
-  default: ({ id, onClose }: { id: string; onClose: () => void }) => (
-    <button type="button" data-stub-board={id} onClick={onClose}>
+  default: ({ id, onClose, crosshair, onAddToReply }: { id: string; onClose: () => void; crosshair?: boolean; onAddToReply?: unknown }) => (
+    <button type="button" data-stub-board={id} data-crosshair={String(!!crosshair || !!onAddToReply)} onClick={onClose}>
       board {id}
     </button>
   ),
@@ -142,6 +143,8 @@ describe.skipIf(!hasDom)('the standalone Shape page', () => {
     const el = await mount(api);
     await settle(() => !!el.querySelector('[data-shape-layer]'));
     expect(el.querySelector('[data-shape-layer]')?.getAttribute('data-shape-layer')).toBe(ids[0]);
+    // The page keeps Annotate: the crosshair and Add to reply are the Inbox's.
+    expect(el.querySelector('[data-stub-board]')?.getAttribute('data-crosshair')).toBe('false');
     act(() => {
       window.history.pushState(null, '', '#');
       window.dispatchEvent(new PopStateEvent('popstate'));

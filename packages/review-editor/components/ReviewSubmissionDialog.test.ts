@@ -181,6 +181,15 @@ describe('Call Flow platform comments', () => {
     expect(submission.targets[0].fileComments[0].body).toContain('src/events.ts:L22');
   });
 
+  test('an old-side line outside the diff says its side and has no link: the link opens the head, where that number is another line', () => {
+    const opened = (side: 'old' | 'new'): CodeAnnotation => ({ id: side, type: 'comment', scope: 'line', filePath: 'src/order.ts', lineStart: 20, lineEnd: 20, side, text: 'Why?', outsideDiff: true, anchorText: 'const x = 1;', createdAt: 1 });
+    const body = (side: 'old' | 'new') =>
+      buildReviewSubmission([opened(side)], [], 'https://github.com/acme/widgets/pull/42', new Set(['src/order.ts']), { number: 42, title: 'T', repo: 'acme/widgets' }, undefined, 'github', () => 'https://head.example/#L20').targets[0].fileScopedBody;
+    expect(body('old')).toContain('L20, old side');
+    expect(body('old')).not.toContain('https://head.example');
+    expect(body('new')).toContain('https://head.example/#L20');
+  });
+
   test('posts out-of-hunk Call Flow feedback in the review body, not as a fake inline comment', () => {
     const annotation: CodeAnnotation = {
       id: 'flow-outside',
