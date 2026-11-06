@@ -8722,3 +8722,19 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 /* The first file's Split | Unified tab has no business peeking out from behind the panel. */
 .ib-prreview:has([data-pull-details]) [data-guide-section-tab] { visibility: hidden; }
 .ib-prreview .ib-prr-fn .ib-prr-num { flex: none; }
+/* The bar's title opens the PR's details (the PR page, a thread's review of one PR): a quiet fill on hover and while
+   they are open, as the Details button has. */
+.pn-inbox .ib-vhead button.ib-dtitle { height: var(--ib-prp-h, 28px); padding: 0 6px; border-radius: 7px; cursor: pointer; text-align: left; }
+.pn-inbox .ib-vhead button.ib-dtitle:hover, .pn-inbox .ib-vhead button.ib-dtitle.ib-on { background: var(--ib-prp-fill); }
+.pn-inbox .ib-vhead button.ib-dtitle:focus-visible { outline: 1.5px solid color-mix(in oklch, var(--ring) 55%, transparent); outline-offset: -1.5px; }
+.ib-review.ib-rv-walk .ib-vhead button.ib-dtitle:hover, .ib-review.ib-rv-walk .ib-vhead button.ib-dtitle.ib-on { color: var(--foreground); }
+.ib-dtitle .ib-prp-dot, .ib-dtitle .ib-prp-count { margin-left: 6px; font-weight: 400; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+/* A thread's review of one PR (ReviewPane): the PR page's Details button and panel, the panel over the review's body. */
+.ib-review:not(.ib-prreview) { --ib-prp-fill: color-mix(in oklab, var(--foreground) 7%, transparent); --ib-prp-h: 28px; }
+.ib-review:not(.ib-prreview) .ib-rsplit:has(> .ib-prd) { position: relative; }
+.ib-review:not(.ib-prreview) .ib-rsplit > .ib-prd { z-index: 30; }
+/* A phone: the PR's title in a row under the bar opens the details full screen, as on the PR page. */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-review:not(.ib-prreview) .ib-rsplit:has(> .ib-prp-row2) { grid-template-rows: auto minmax(0, 1fr); position: relative; }
+  .ib-review:not(.ib-prreview) .ib-rsplit > .ib-prp-row2 { grid-column: 1 / -1; padding: 0 8px 6px; border-bottom: 1px solid color-mix(in oklab, var(--border) 50%, transparent); }
+}

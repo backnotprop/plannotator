@@ -142,6 +142,49 @@ export function DetailsStatus({ data }: { data: InboxPullDetailsAnswer | null })
   );
 }
 
+/**
+ * Whether the bar keeps its Details button beside the PR's title. The title opens the details either way (the owner's
+ * suggestion); with no button, the title carries the button's status (the checks' dot and the people's comments).
+ */
+export const DETAILS_BUTTON: boolean = true;
+
+/** The bar's Details button, while `DETAILS_BUTTON` keeps it. */
+export function DetailsButton({ open, data, onToggle }: { open: boolean; data: InboxPullDetailsAnswer | null; onToggle: (event: React.MouseEvent<HTMLElement>) => void }) {
+  if (!DETAILS_BUTTON) return null;
+  return (
+    <Tip content="Description, comments, checks and reviewers">
+      <button type="button" className={`ib-prp-dbtn${open ? ' ib-on' : ''}`} aria-expanded={open} onClick={onToggle} data-pull-details-button="">
+        Details
+        <DetailsStatus data={data} />
+      </button>
+    </Tip>
+  );
+}
+
+/**
+ * The bar's title as the way to the details: `name` is its visible words, the button's name starts with them and says
+ * what a click does. With no Details button, the status rides at its end.
+ */
+export function DetailsTitle({ name, tip, open, data, onToggle, className, children, ...rest }: {
+  name: string;
+  tip: ReactNode;
+  open: boolean;
+  data: InboxPullDetailsAnswer | null;
+  onToggle: (event: React.MouseEvent<HTMLElement>) => void;
+  className: string;
+  children: ReactNode;
+  [data: `data-${string}`]: string;
+}) {
+  return (
+    <Tip content={tip}>
+      <button type="button" className={`${className} ib-dtitle${open ? ' ib-on' : ''}`} aria-expanded={open} aria-label={`${name}, opens details`} onClick={onToggle} data-pull-details-title="" {...rest}>
+        {children}
+        {!DETAILS_BUTTON && <DetailsStatus data={data} />}
+      </button>
+    </Tip>
+  );
+}
+
 function ReviewerRows({ reviewers, host, words }: { reviewers: readonly InboxPullReviewer[]; host: string; words: boolean }) {
   return (
     <ul className="ib-prd-rows" data-pull-details-reviewers="">

@@ -253,6 +253,28 @@ test.skipIf(!hasDom)('a layer opens its own diff; Whole stack asks for the stack
   expect(el('[data-pull-layer-row][aria-current="step"]').getAttribute('data-pull-layer-row')).toBe(stack[1]!.key);
 });
 
+test.skipIf(!hasDom)("the bar's PR title opens the details, as the Details button beside it does", async () => {
+  mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={model} />);
+  await settle();
+  const title = el('.ib-vhead [data-pull-details-title]');
+  expect(title.tagName).toBe('BUTTON');
+  // Its name starts with the words on screen, and says what a click does.
+  expect(title.getAttribute('aria-label')).toBe('#412 Layer 412, opens details');
+  expect(title.textContent).toContain('Layer 412');
+  expect(document.querySelector('[data-pull-details]')).toBeNull();
+  await act(async () => title.click());
+  await settle();
+  expect(document.querySelector('[data-pull-details]')).not.toBeNull();
+  expect(el('.ib-vhead [data-pull-details-title]').getAttribute('aria-expanded')).toBe('true');
+  // A second click closes them; the Details button is still beside the title and opens them too.
+  await act(async () => el('.ib-vhead [data-pull-details-title]').click());
+  await settle();
+  expect(document.querySelector('[data-pull-details]')).toBeNull();
+  await act(async () => el('.ib-vhead [data-pull-details-button]').click());
+  await settle();
+  expect(document.querySelector('[data-pull-details]')).not.toBeNull();
+});
+
 test.skipIf(!hasDom)("Approve goes into the agent's thread as a reply to its last message, naming the layer", async () => {
   mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={model} />);
   await settle();

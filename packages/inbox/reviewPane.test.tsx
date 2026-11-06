@@ -78,6 +78,8 @@ let listHead = 'a'.repeat(40);
 let listReads: string[] = [];
 /** The thread's annotation records (`/attachments`): a guided-review comment when a test writes one. */
 let annotations: Record<string, unknown>[] = [];
+/** What asked `GET /api/inbox/pulls/details`. */
+let detailsReads: string[] = [];
 const PR_KEY = 'github.com/acme/ledger#880';
 const PR = {
   key: PR_KEY, platform: 'github', host: 'github.com', repo: 'acme/ledger', number: 880, url: 'https://github.com/acme/ledger/pull/880', title: 'RTL layout',
@@ -94,6 +96,7 @@ beforeEach(() => {
   listHead = 'a'.repeat(40);
   listReads = [];
   annotations = [];
+  detailsReads = [];
   window.localStorage.clear();
   others = [OTHER];
   backs = 0;
@@ -111,6 +114,10 @@ beforeEach(() => {
         return replyAnswer();
       }
       return Response.json({});
+    }
+    if (path.includes('/pulls/details')) {
+      detailsReads.push(path);
+      return Response.json({ key: PR_KEY, description: 'Flips the layout for right-to-left scripts.', labels: ['i18n'], reviewers: [], checks: [{ name: 'unit', state: 'fail' }], comments: [{ id: 'c1', author: 'mira', at: '2026-10-11T10:20:00.000Z', body: 'Does this handle Hebrew?', url: `${PR.url}#c1`, file: 'src/auth.ts', line: 1 }] });
     }
     if (/\/api\/inbox\/pulls(\?|$)/.test(path)) {
       listReads.push(path);
@@ -412,4 +419,81 @@ test.skipIf(!hasDom)('a global comment flips the decision to Send feedback and r
   expect(posted).toHaveLength(1);
   expect(posted[0]!.annotation_ids).toEqual(['ann-guide-global']);
   expect(String(posted[0]!.feedback)).toContain(`## Global comments\n\n${text}`);
+});
+
+// The PR page's Details in the full review (approval "inbox-review-details-panel"), and the PR title as its way in.
+const titleButton = () => document.querySelector<HTMLElement>('[data-review-message] .ib-vhead [data-pull-details-title]');
+const detailsButton = () => document.querySelector<HTMLElement>('[data-review-message] .ib-vhead [data-pull-details-button]');
+
+test.skipIf(!hasDom)('a thread handed one PR: its title and the Details button open the PR page\'s details; Escape and × close them', async () => {
+  await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY] });
+  const title = titleButton()!;
+  expect(title.tagName).toBe('BUTTON');
+  // Its name starts with the words on screen, and says what a click does.
+  expect(title.getAttribute('aria-label')).toBe('Token refresh, opens details');
+  expect(title.getAttribute('aria-expanded')).toBe('false');
+  expect(detailsButton()?.textContent).toContain('Details');
+  expect(document.querySelector('[data-pull-details]')).toBeNull();
+
+  await act(async () => title.click());
+  await settle();
+  const panel = document.querySelector<HTMLElement>('[data-pull-details]')!;
+  expect(panel).not.toBeNull();
+  expect(titleButton()!.getAttribute('aria-expanded')).toBe('true');
+  expect(detailsReads.at(-1)).toContain(encodeURIComponent(PR_KEY));
+  expect(panel.textContent).toContain('Flips the layout for right-to-left scripts.');
+  expect(panel.textContent).toContain('Does this handle Hebrew?');
+  expect(panel.querySelector('[data-pull-details-labels]')?.textContent).toBe('i18n');
+  // The Details button carries the same status as on the PR page: failing checks, one person's comment.
+  expect(detailsButton()!.querySelector('[data-pull-details-checks]')?.getAttribute('data-pull-details-checks')).toBe('fail');
+  expect(detailsButton()!.querySelector('[data-pull-details-comments]')?.textContent).toBe('1');
+
+  // Escape closes the details, not the review.
+  await act(async () => {
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  });
+  await settle();
+  expect(document.querySelector('[data-pull-details]')).toBeNull();
+  expect(document.querySelector('[data-review-message]')).not.toBeNull();
+
+  await act(async () => detailsButton()!.click());
+  await settle();
+  await click('[data-pull-details-close]');
+  expect(document.querySelector('[data-pull-details]')).toBeNull();
+});
+
+test.skipIf(!hasDom)("a comment's file:line opens that file in All files, and the details close", async () => {
+  await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY] });
+  expect(document.querySelector('[data-review-message]')?.getAttribute('data-review-mode')).toBe('walkthrough');
+  await act(async () => titleButton()!.click());
+  await settle();
+  const file = document.querySelector<HTMLElement>('[data-pull-details] button.ib-prd-cfile')!;
+  expect(file.textContent).toBe('auth.ts:1');
+  await act(async () => file.click());
+  await settle();
+  expect(document.querySelector('[data-review-message]')?.getAttribute('data-review-mode')).toBe('files');
+  expect(document.querySelector('[data-pull-details]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('no details where there is no one PR: a local review, and a thread handed several', async () => {
+  await render();
+  expect(titleButton()).toBeNull();
+  expect(detailsButton()).toBeNull();
+  // The title stays words, not a button.
+  expect(document.querySelector('[data-review-title]')?.tagName).toBe('SPAN');
+  act(() => root?.unmount());
+  host?.remove();
+  await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY, 'github.com/acme/ledger#881'] });
+  expect(titleButton()).toBeNull();
+  expect(detailsButton()).toBeNull();
+  expect(detailsReads).toEqual([]);
+});
+
+test.skipIf(!hasDom)("a resolved thread's review reads only, and still has its PR's details (read from the PR list itself)", async () => {
+  await render({ ...thread, resolved_at: '2026-10-11T11:00:00.000Z', pull_keys: [PR_KEY] });
+  expect(document.querySelector('[data-review-decision]')).toBeNull();
+  expect(listReads.length).toBe(1);
+  await act(async () => titleButton()!.click());
+  await settle();
+  expect(document.querySelector('[data-pull-details]')?.textContent).toContain('Does this handle Hebrew?');
 });
