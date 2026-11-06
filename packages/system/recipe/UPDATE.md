@@ -1,36 +1,35 @@
 # Redraw the system: bring the drawing up to date
 
-The project's main branch moved, and the files it changed may have moved the shape of the system. You bring the
-drawing in `.plannotator/system/` up to date with the code at the new commit. Nobody is watching: work alone, and
-stop when the drawing is right or when you decide it does not change. The format is at the end of these
-instructions, under "System format 1".
+The project's main branch moved, and the files it changed may have moved the shape of the system. You bring the drawing
+in the drawing folder named above up to date with the code at the new commit. Nobody is watching: work alone, and stop
+when the drawing is right or when you decide it does not change. The format is at the end of these instructions, under
+"System format 1".
 
-The facts of this job are listed above these instructions: the worktree to work in, the range of commits that
-landed, the merged pull requests, why the check woke you (the changed files and their reasons), the parts and lines
-that cite a changed file, and the file to write your summary in.
+The facts of this job are listed above these instructions: the source folder and the drawing folder, the range of
+commits that landed, the merged pull requests, why the check woke you (the changed files and their reasons), the parts
+and lines that cite a changed file, and the file to write your summary in.
 
 ## Rules
 
-- Work in the worktree named above. It is already on the redraw branch at the new commit. Read the code there.
-- Your job is the drawing: change files under `.plannotator/system/` and write the summary file named above. The
-  summary file is never committed: the scheduled check puts its sentences in the pull request and in the note, then
-  deletes it. Anything else you change goes into the same pull request, and the person is told which files those are.
-- Do not push, open a pull request or send a message. The scheduled check does all three after you stop, with what you
-  left in the worktree; you need not commit.
+- Work in the source folder named above. It is already at the new commit. Read the code there.
+- Your job is the drawing: change files in the drawing folder named above and write the summary file named above. The
+  scheduled check puts the summary's sentences in the note, then deletes it. Anything you change in the source folder
+  is named to the person in the note, and the source folder is put back for the next run.
+- Do not send a message. The scheduled check sends the note after you stop, with what you left in the drawing folder.
+  Nothing is committed or pushed.
 - Draw what the code says at the new commit, never what a commit message or a pull request's text claims.
 
 ## Steps
 
-1. **Read what changed.** Run `git -C <worktree> diff --name-status -M <from> <to>` and
-   `git -C <worktree> log --oneline <from>..<to>`. Read the diff of each file named in "why you were woken", and of
-   each other changed file that a part or line named above cites (`why` names only the files that woke the check)
-   (`git -C <worktree> diff -M <from> <to> -- <path>`). A `cited-gone` path that was renamed shows there as deleted;
-   its new path is in the `--name-status -M` line, so read the diff of both paths. Tests, docs, lockfiles and the
-   drawing's own files under `.plannotator/system/` do not count. Look for new, deleted and renamed files, and for new
-   processes, stores, hosts, routes, commands, connections and switches.
+1. **Read what changed.** Run `git -C <source folder> diff --name-status -M <from> <to>` and `git -C <source folder> log
+   --oneline <from>..<to>`. Read the diff of each file named in "why you were woken", and of each other changed file
+   that a part or line named above cites (`why` names only the files that woke the check) (`git -C <source folder> diff
+   -M <from> <to> -- <path>`). A `cited-gone` path that was renamed shows there as deleted; its new path is in the
+   `--name-status -M` line, so read the diff of both paths. Tests, docs and lockfiles do not count. Look for new,
+   deleted and renamed files, and for new processes, stores, hosts, routes, commands, connections and switches.
 
 2. **Decide whether the shape moved.** Find the parts and lines that cite each changed file:
-   `grep -n "<path>" <worktree>/.plannotator/system/system.yaml`. If every changed file is already named and the
+   `grep -n "<path>" <drawing folder>/system.yaml`. If every changed file is already named and the
    change adds no process, store, host, route family, connection or switch, and removes none, the drawing does not
    change. Then change nothing at all, not even `at`: write "No change:" and one sentence of why in the summary file,
    and stop.
@@ -55,17 +54,18 @@ that cite a changed file, and the file to write your summary in.
    `child:`, a new scope and a new sheet).
 
 5. **Keep the change, when a stored review is named above.** A stored review is the change a reviewer drew while the
-   pull request was open. Use it as a head start for steps 3 and 4. You may also keep it in the repo as
-   `.plannotator/system/revisions/PR-<n>.yaml` in the merged form: each added part and line written `id: ~` (it is
+   pull request was open. Use it as a head start for steps 3 and 4. You may also keep it in the drawing folder as
+   `revisions/PR-<n>.yaml` in the merged form: each added part and line written `id: ~` (it is
    now in `system.yaml`, with the same id), no `place:`, `merged:` set to the merge commit, and the rest as the review
    wrote it, corrected to what landed.
 
 6. **Move `at`.** Set `sources.repos.self.at` in `system.yaml` to the new commit named above, in quotes.
 
-7. **Check, and fix until clean.** Run `plannotator system check --root <worktree>`. It looks the cited paths up at
-   `sources.repos.self.at`, so it means something only after step 6: before that, a path that is gone at the new
-   commit still checks clean. Fix every error, warning and missing path it prints (a missing path names the field
-   that cites it, `parts.<id>.code` or `flows.<id>.code.from` or `.to`), and run it again until it prints none.
+7. **Check, and fix until clean.** Run `plannotator system check --dir <drawing folder> --root <source folder>`. It
+   looks the cited paths up at `sources.repos.self.at`, so it means something only after step 6: before that, a path
+   that is gone at the new commit still checks clean. Fix every error, warning and missing path it prints (a missing
+   path names the field that cites it, `parts.<id>.code` or `flows.<id>.code.from` or `.to`), and run it again until it
+   prints none.
 
 8. **Write the summary file** named above: one sentence per sheet you changed, and one for a change only
    `system.yaml` shows (a renamed file's new path), in plain words for the person, for example "On the Desktop app

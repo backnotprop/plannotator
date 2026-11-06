@@ -17,7 +17,7 @@ export { LOCKFILE_NAMES, TEST_FOLDERS } from '../gate/gate.ts';
  */
 export const SYSTEM_COMMANDS = {
   check: 'plannotator system check [--root <repo folder>] [--dir <drawing folder>] [--repo <alias>=<folder>]... [--at <commit>] [--json]',
-  gate: 'plannotator system gate [--project <repo folder>] --from <commit> --to <commit>',
+  gate: 'plannotator system gate [--project <repo folder>] [--dir <drawing folder>] --from <commit> --to <commit>',
   tick: 'plannotator system tick --project <repo folder> --key <project key>',
   revision: 'plannotator system revision --project <repo folder> --pr <host/owner/repo#n> --head <commit> -',
   schedule: 'plannotator system schedule install --project <repo folder> --key <project key> | remove --key <project key> | list',

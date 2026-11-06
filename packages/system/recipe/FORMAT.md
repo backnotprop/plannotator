@@ -1,9 +1,9 @@
 # System format 1: what to write
 
-A drawing is one folder, `.plannotator/system/`, in the project's repo:
+A drawing is one folder, the drawing folder, in Plannotator's own folder on this Mac:
 
 ```
-.plannotator/system/
+<drawing folder>/
   system.yaml            required: every part and line, each fact once
   sheets/<CODE>.yaml     one file per sheet; the file is named after its code
   revisions/<id>.yaml    optional: the change of one merged pull request (PR-<n>.yaml)
@@ -157,8 +157,8 @@ An algorithm sheet (A) adds `endpoint`, `route`, `steps` (`id`, `do`, `code`, `i
 
 ## revisions/<id>.yaml: one change
 
-One schema serves a merged pull request kept in the repo and an open pull request's change kept outside it. The
-merged form:
+One schema serves a merged pull request kept in the drawing folder and an open pull request's change kept outside it.
+The merged form:
 
 ```yaml
 revision: PR-412                    # the file is revisions/PR-412.yaml

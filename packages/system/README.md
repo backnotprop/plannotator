@@ -1,11 +1,15 @@
 # @plannotator/system
 
 System is a drawing of a project's code that a person can zoom through: nested sheets, each part naming the files it
-rests on. An agent draws it once from the real code and commits it to the project's repo in `.plannotator/system/`. A
-gate compares what changed with the files the drawing cites and says when the drawing may be out of date.
+rests on. An agent draws it once from the real code into Plannotator's own folder on the Mac,
+`<data dir>/system/<project key>/drawing/`. A gate compares what changed with the files the drawing cites and says
+when the drawing may be out of date. System never commits, branches or pushes in the person's repo and writes nothing
+in their checkout or its `.git`; it only reads the repo's history to see what merged. (Replaced 2026-11-06 by the
+owner's ruling, row 7689, q-122e6577; the drawing was committed to the repo before.)
 
 This package holds the format, its loader, the check of cited paths, the gate, the recipes agents follow, and the scheduled check that wakes an agent to redraw. It has no UI yet and no Inbox wiring; the `plannotator system` command is its one door from a shell.
-Plannotator's own drawing is at [`.plannotator/system/`](../../.plannotator/system/).
+This repo also keeps a drawing of Plannotator itself at [`.plannotator/system/`](../../.plannotator/system/), for its
+own tests and CI; that copy is a developer file, not where System keeps a person's drawing.
 
 ## API
 
@@ -99,7 +103,7 @@ file over this package; `plannotator system --help` is its whole agent guide). I
 
 ```sh
 plannotator system check [--root <repo folder>] [--dir <drawing folder>] [--repo <alias>=<folder>]... [--at <commit>] [--json]
-plannotator system gate [--project <repo folder>] --from <commit> --to <commit>
+plannotator system gate [--project <repo folder>] [--dir <drawing folder>] --from <commit> --to <commit>
 plannotator system tick --project <repo folder> --key <project key>
 plannotator system revision --project <repo folder> --pr <host/owner/repo#n> --head <commit> -
 plannotator system schedule install --project <repo folder> --key <project key> | remove --key <project key> | list
@@ -111,20 +115,20 @@ plannotator system schedule install --project <repo folder> --key <project key> 
   `not_installed`, `unsupported`, `launchctl_failed`, `failed`. check's findings are its result: printed on stdout,
   with one `not_clean: <counts>` line on stderr and exit 1. Each `missing:` line names the field that cites the path:
   `parts.<id>.code`, or `flows.<id>.code.from` or `.to` for a line's end.
-- `check` and `gate` read the drawing on disk in `<repo>/.plannotator/system`, whichever branch is checked out there,
-  so an edit counts before a commit, and a gate of a teammate's branch reads the drawing of the branch checked out
-  (have the base checked out for a review). A fix lasts only once it is committed: `tick` and `revision` read the
-  drawing committed on the default branch. With no `--root` or `--project`, the repo is the nearest folder up from
-  here that holds a drawing.
+- `check`, `gate` and `revision` read the drawing folder as it is on disk, so an edit counts at once; nothing is
+  committed, branched or pushed. `--dir` names the drawing folder; without it, it is
+  `<dataDir>/system/<key>/drawing` of the repo folder's project (the key as below). With no `--root` or `--project`,
+  the repo is the one the current folder is in. The recipes run `check --dir <drawing folder> --root <source folder>`,
+  `--root` being Plannotator's clone of the project (`<dataDir>/system/<key>/source`).
 - `gate` diffs exactly the `--from` and `--to` it is given (a sha, a branch, a tag); it does not find a merge base.
   To gate a branch, pass `--from "$(git merge-base main <branch>)"`.
-- `revision` loads the revision against the drawing committed on the default branch (`origin/HEAD`, else
-  `origin/main` or `origin/master`, else `HEAD`), refuses it with one line per problem when it does not load or its
-  `pr:` and `repo:` differ from `--pr`, and stores it as written under
+- `revision` loads the revision against the project's drawing folder, refuses it with one line per problem when it
+  does not load or its `pr:` and `repo:` differ from `--pr`, and stores it as written under
   `<dataDir>/system/<key>/reviews/<host>/<owner>/<repo>/<n>@<sha7>.yaml`. The key is the Inbox's key for the folder
   (`inboxProjectKey` of its project root, as the Shape store files under it).
 - `tick` prints the `TickResult`; a failed tick exits 1. `schedule install` writes a plist that runs the installed
-  binary, so it refuses to run from a source checkout; `list` prints the keys as one JSON array.
+  binary, so it refuses to run from a source checkout; launchd runs a first check as soon as it loads the job, then
+  every 15 minutes. `list` prints the keys as one JSON array.
 - The command is unreleased (`HIDDEN_SUBCOMMANDS`): it runs and has its help, but `plannotator --help` and the
   plannotator skill leave it out until the Inbox's System surfaces ship.
 
@@ -147,13 +151,13 @@ Three jobs, each a recipe an agent reads: draw once, redraw when main moves, dra
 recipes are plain Markdown in [`recipe/`](recipe/), written so any agent (Claude Code, Pi, OpenCode) can follow them
 with only that text:
 
-- [`DRAW.md`](recipe/DRAW.md): the first drawing. Work in the drawing's own worktree on `plannotator/system`, read the
-  code and the doc sites, write `system.yaml` first with every planned sheet under `wanted:`, draw the landing and then
-  the deeper sheets, run `plannotator system check` until clean, push the branch and open one pull request, and send
-  two Inbox messages (starting, done).
+- [`DRAW.md`](recipe/DRAW.md): the first drawing. Read the code in the source folder (Plannotator's clone of the
+  project) and the doc sites, write `system.yaml` first in the drawing folder with every planned sheet under
+  `wanted:`, draw the landing and then the deeper sheets, run `plannotator system check` until clean, and send two
+  Inbox messages (starting, done). Nothing is committed, pushed or opened as a pull request.
 - [`UPDATE.md`](recipe/UPDATE.md): an unattended redraw. Read the commits that landed, decide whether the shape moved
-  (if not, change nothing), edit the drawing, move `at`, check until clean, and write one sentence per changed sheet in
-  the summary file. It never commits, pushes or sends: the tick does.
+  (if not, change nothing), edit the drawing folder's copy, move `at`, check until clean, and write one sentence per
+  changed sheet in the summary file. It never sends: the tick does.
 - [`REVIEW.md`](recipe/REVIEW.md): an open pull request's change. Ask the gate first and stop when it does not wake,
   write the revision in the open form, and hand it to `plannotator system revision`, which refuses one that does not
   load.
@@ -165,9 +169,11 @@ The browser entry carries them as strings (`src/recipe/text.ts`, generated; a te
 // @plannotator/system (and /node): pure
 export const recipes: { draw: string; update: string; review: string; format: string };
 export function firstDrawPrompt(setup: Pick<SystemSetup, 'repos' | 'docs'> & { thread_message?: string | null },
-  projectRoot: string, o?: { worktree?: string; name?: string; repo?: string }): string;   // facts, DRAW.md, FORMAT.md
+  projectRoot: string, o?: { drawing?: string; source?: string; name?: string; repo?: string }): string;
+                                                                       // facts, DRAW.md, FORMAT.md
 export function updatePrompt(o: UpdatePromptInput): string;            // the tick's redraw prompt
-export function reviewPrompt(o: { project: string; pr: string; head: string; base: string; name?: string }): string;
+export function reviewPrompt(o: { project: string; drawing: string; pr: string; head: string; base: string;
+  name?: string }): string;
                                                                        // an open PR's change: facts, REVIEW.md, FORMAT.md
 export type SystemSetup = { v: 1; repos: string[]; docs: string[]; agent: 'claude' | 'pi' | 'opencode';
   model: string | null; thread_message: string | null };
@@ -181,12 +187,14 @@ export const SYSTEM_COMMANDS: Record<'check' | 'gate' | 'tick' | 'revision' | 's
 // SYSTEM_COMMANDS and SYSTEM_TICK_INTERVAL_SECONDS are also @plannotator/system/commands, which loads no loader (the CLI's help)
 
 // @plannotator/system/node
-export function systemPaths(dataDir: string, key: string):
-  { dir; setup; state; lock; worktree; reviews; failed: string };     // <dataDir>/system/<key>/...
+export function systemPaths(dataDir: string, key: string): { dir; setup; state; lock; drawing; source; redraw;
+  previous; summary; reviews; changed; failed: string };              // <dataDir>/system/<key>/...
+export function prepareSource(root: string, source: string, o?: { need?: (string | null)[]; aside?: string; stamp?: string }):
+  Promise<{ main: string; tip: string; recloned?: string }>;
 export function readSetup(dataDir: string, key: string): Promise<SystemSetup | null>;
 export function readState(dataDir: string, key: string): Promise<TickState>;
 export function tick(o: { root: string; dataDir: string; key: string; now?: Date; deps?: TickDeps }): Promise<TickResult>;
-export const TICK_TIMEOUTS_MS: { agent: 2_700_000; git: 300_000; gh: 120_000; note: 120_000 };
+export const TICK_TIMEOUTS_MS: { agent: 2_700_000; git: 300_000; note: 120_000 };
 export function runCommand(argv: string[], o: { cwd: string; timeoutMs: number; stdin?: string | null;
   env?: Record<string, string> }): Promise<{ code: number; stdout: string; stderr: string; timedOut: boolean }>;
 export function plannotatorProgram(): Promise<string>;   // this binary when it is plannotator, else the first on PATH
@@ -211,9 +219,9 @@ export const schedule: {
 - **The agent.** A redraw runs the person's agent with its normal full tools, as they would run it themselves (the
   owner's ruling: no limits on agents). Claude Code runs `claude -p --permission-mode bypassPermissions
   --no-session-persistence`, Pi `pi --no-session -p`, OpenCode `opencode run`. Each loads the project's own settings
-  and MCP servers as usual. git runs the repo's hooks and signs as the person's config says.
+  and MCP servers as usual. It runs in the source clone, so what it changes there never reaches the person's repo.
 - **Time bounds.** Every child the tick starts runs in its own process group and has a time bound
-  (`TICK_TIMEOUTS_MS`, engineering defaults): the agent 45 minutes, git 5, `gh` 2, the note 2. Past it the group gets
+  (`TICK_TIMEOUTS_MS`, engineering defaults): the agent 45 minutes, git 5, the note 2. Past it the group gets
   SIGTERM, then SIGKILL 5 seconds later, and the tick records why in `state.json`. So a hung agent, a credential
   prompt or a stalled network never holds the lock for good. A child that ended returns at the latest 5 seconds
   later even when something that left its group still holds its output open. While a child runs, a SIGINT, SIGTERM
@@ -221,42 +229,61 @@ export const schedule: {
   SIGKILLed when the tick exits, so a stopped tick leaves no agent running. On Windows the tree is stopped with
   `taskkill /T /F`.
 
+### Where System keeps a project
+
+Replaced 2026-11-06 by the owner's ruling (row 7689, q-122e6577). Everything is under `<dataDir>/system/<key>/` (`systemPaths`):
+
+- `drawing/`: the drawing (`system.yaml`, `sheets/`, `revisions/`). `check` reads it here, and checks cited paths in
+  the source clone at `sources.repos.self.at`, which still records the code commit the drawing was drawn at.
+- `source/`: Plannotator's clone of the project for the agent to read main's code (`prepareSource`). Made with
+  `git clone --reference <the repo's git folder> <its origin URL>`: the objects the person already has are borrowed,
+  not copied, and each tick fetches the default branch from origin into it, so the tick sees what merged even when
+  the person has not fetched. Toward the person's repo it only reads: the origin URL, the git folder and its objects.
+  A plain `git clone --shared` from the person's repo would see only what they last fetched. Borrowed objects can go
+  away (a `git gc`, a moved or deleted repo, a lost object file): a clone whose alternates folder is gone, or that
+  cannot read the tip or the drawing's `at` whole, is moved to `failed/source-<time>/` and cloned again, once per tick,
+  and with its own copy of every object when the person's repo lacks them too. The move is named in `set_aside`.
+- `redraw/`: a redraw in progress, a copy of `drawing/` the agent edits. `previous/`: the drawing before the last
+  redraw. `redraw-summary.txt`: the agent's sentences, read and deleted by the tick.
+- `reviews/`: revisions of open pull requests (written by `plannotator system revision`). `changed/<commit>/`: files a
+  redraw agent changed in the source clone. `failed/`: what a refused or cut-off redraw left.
+- `setup.json`, `state.json`, `tick.lock`, `tick.err.log`.
+
 ### What a tick does
 
 `tick({ root, dataDir, key })` is one run of `plannotator system tick --project <root> --key <key>`. It never throws.
+Replaced 2026-11-06 by the owner's ruling (row 7689, q-122e6577): no branch, commit, push or pull request.
 
 1. No setup.json: `nothing`. A live tick holds `tick.lock`: `nothing` (a dead pid's lock is taken over).
-2. `git fetch origin <default>` with the person's own credentials; the default branch is `origin/HEAD`, else `main`
-   or `master`.
-3. No drawing at `origin/<default>`: `nothing` (the first drawing's pull request is not merged yet).
+2. No drawing in `drawing/` yet: `nothing` (the first drawing is not done).
+3. `prepareSource`: make the source clone when missing, then `git fetch origin <default>` into it with the person's
+   own credentials; the default branch is the clone's `origin/HEAD`, else `main` or `master`.
 4. From: the newer of `sources.repos.self.at` and `state.json`'s `gated`. If main has not moved past it: `nothing`.
    If the last redraw for this very commit failed: `nothing` until main moves (one model run per move, at most).
-5. `gateRepo` from there to the tip. No wake: `state.json` gets the tip as `gated`, and the tick ends: `gated`.
-6. Wake. Ask the forge for an open redraw pull request first (no model runs when it cannot be asked). Put the
-   worktree (`<dataDir>/system/<key>/worktree`, made when missing) on `plannotator/system-redraw`. The worktree is the
-   tick's own: one left with changes or a half merge (a redraw cut off by a reboot, a logout or a kill) is set aside
-   under `failed/interrupted-<time>/`, put back, and named in `state.json`'s `set_aside`; the redraw goes on. The
-   branch starts from origin's redraw branch with main merged in when it exists, else from the tip.
-   Never force-pushed, so a person who closes a redraw pull request and wants a fresh start deletes that branch.
-7. Run the agent with `updatePrompt`: the range, the merged pull requests that changed a woken file, the gate's
-   reasons and touched parts, any stored reviews of those pull requests, the summary file and the allowed doc sites.
-8. Refuse the redraw (`failed`, its files kept under `failed/<commit>/`, the worktree put back) when the agent failed,
-   threw or hit its time bound, or the drawing does not check clean, or a later step (the push, the pull request)
-   failed. If it changed nothing: `gated`. A failure before the agent ran (no network, `gh` not signed in)
-   marks nothing, so the next tick tries again.
-9. Set `sources.repos.self.at` to the tip (only that value's text), commit what the agent left (the summary file
-   aside), push the redraw branch (never the default branch), open one pull request when none is open, and send one
-   note through `<plannotator> inbox call send_message` (`plannotatorProgram()` unless `deps.plannotator` names the
-   program), as a reply to setup.json's `thread_message` ("Main moved to 9c41e07. PR 1335 landed: <the agent's
-   sentences> 1 part changed. Redraw: <link>"). `redrew`. Files the agent changed outside `.plannotator/system/`, its
-   own commits included, stay in the pull request and are listed in its body and in the note ("This redraw also
-   changed: src/main.ts.").
+5. `gateRepo` in the source clone from there to the tip. No wake: `state.json` gets the tip as `gated`, and the tick
+   ends: `gated`.
+6. Wake. A redraw cut off before it ended (a reboot, a logout, a kill) left `redraw/` behind, or changes in the source
+   clone: both are set aside under `failed/interrupted-<time>/` and named in `state.json`'s `set_aside`; the last good
+   drawing stays, and the redraw goes on. The source clone is put at the tip, detached and clean, and `drawing/` is
+   copied to `redraw/`.
+7. Run the agent in the source clone with `updatePrompt`: the source folder, the drawing copy, the range, the merged
+   pull requests that changed a woken file, the gate's reasons and touched parts, any stored reviews of those pull
+   requests, the summary file and the allowed doc sites.
+8. Files the agent changed in the source clone, its own commits included, are kept under `changed/<commit>/` and the
+   clone is put back at the tip. Refuse the redraw (`failed`, the copy kept under `failed/<commit>/drawing/`, the
+   drawing as it was) when the agent failed, threw or hit its time bound, or the copy does not check clean. If the
+   copy is the drawing unchanged: `gated`. A failure before the agent ran (no network, no origin) marks nothing, so
+   the next tick tries again.
+9. Set `sources.repos.self.at` to the tip (only that value's text), move `drawing/` to `previous/` and the checked copy
+   to `drawing/`, and send one note through `<plannotator> inbox call send_message` (`plannotatorProgram()` unless
+   `deps.plannotator` names the program), as a reply to setup.json's `thread_message` ("Main moved to 9c41e07. PR 1335
+   landed: <the agent's sentences> 1 part changed. This redraw also changed: src/main.ts."). `redrew`.
 
-`state.json` is `{ v: 1, gated, gated_at, redrew_at, redraw_pr, last_error, failed, set_aside }`; `failed` is the
-commit a refused redraw was for, `set_aside` the last time a cut-off redraw's leftovers were moved aside and where to.
-Showing `last_error` and `set_aside` in the Inbox is a later step. The agent, the forge (`gh`) and the note are
-`deps`, so the tests run the whole path on temp repos with a scripted stand-in agent, no model, no network and no real
-`gh`.
+`state.json` is `{ v: 1, gated, gated_at, redrew_at, last_error, failed, set_aside }`; `failed` is the commit a
+refused redraw was for, `set_aside` the last time a cut-off redraw's leftovers were moved aside and where to. Showing
+`last_error` and `set_aside` in the Inbox is a later step. The agent and the note are `deps`, so the tests run the
+whole path on temp repos with a scripted stand-in agent, no model and no network, and one test checks that a full
+tick leaves the person's repo byte for byte as it was.
 
 ### The launchd job
 
@@ -276,7 +303,7 @@ A drawing is one folder. Nothing in it is a coordinate: a sheet says where a par
 where it sits.
 
 ```
-<repo>/.plannotator/system/
+<data dir>/system/<project key>/drawing/
   system.yaml            required: the model, each fact once
   sheets/<CODE>.yaml     one file per sheet; at least the root sheet once drawing is done
   revisions/<id>.yaml    optional: reviews of merged PRs (PR-<n>.yaml)

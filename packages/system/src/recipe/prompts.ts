@@ -8,11 +8,6 @@ import { DRAW, FORMAT, REVIEW, UPDATE } from './text.ts';
 /** The recipes as Markdown: draw once, redraw when main moves, draw an open pull request's change; and the format they share. */
 export const recipes = { draw: DRAW, update: UPDATE, review: REVIEW, format: FORMAT } as const;
 
-/** The branch a first drawing is written on, in its own worktree. */
-export const DRAW_BRANCH = 'plannotator/system';
-/** The branch every redraw is written on; one open pull request at a time. */
-export const REDRAW_BRANCH = 'plannotator/system-redraw';
-
 /** Text from a repo or a person (a path, a name) on one line, so it cannot start a line of its own in a prompt. */
 const oneLine = (s: string) => s.replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, ' ');
 const list = (items: readonly string[], none: string) => (items.length ? items.map((i) => `  - ${oneLine(i)}`).join('\n') : `  - ${none}`);
@@ -20,10 +15,12 @@ const list = (items: readonly string[], none: string) => (items.length ? items.m
 /**
  * The prompt that starts a project's first drawing, for the agent the person
  * picked. `projectRoot` is the person's own checkout, read and never edited.
- * `worktree` is the folder to write in, a git worktree of the project on
- * `plannotator/system` (the Inbox makes it at
- * `<PLANNOTATOR_DATA_DIR>/system/<project key>/worktree`); with none the agent
- * makes one of its own. `repo` is the project's own repo, `host/owner/name`;
+ * `drawing` is the folder to write the drawing in
+ * (`<PLANNOTATOR_DATA_DIR>/system/<project key>/drawing`) and `source` a
+ * clone of the project to read the code in (`.../source`, made by
+ * `prepareSource`); with none named the agent makes its own (owner ruling
+ * 2026-11-06, q-122e6577: nothing is written in the person's repo). `repo` is
+ * the project's own repo, `host/owner/name`;
  * `name` the project's name. `setup.thread_message`, when the Inbox started
  * the drawing's thread, is the message both of the agent's messages reply to,
  * the one every later redraw note replies to too; with none, the agent's
@@ -32,7 +29,7 @@ const list = (items: readonly string[], none: string) => (items.length ? items.m
 export function firstDrawPrompt(
   setup: Pick<SystemSetup, 'repos' | 'docs'> & Partial<Pick<SystemSetup, 'thread_message'>>,
   projectRoot: string,
-  o: { worktree?: string; name?: string; repo?: string } = {},
+  o: { drawing?: string; source?: string; name?: string; repo?: string } = {},
 ): string {
   const name = oneLine(o.name ?? (projectRoot.replace(/\/+$/, '').split('/').pop() || 'the project'));
   const facts = [
@@ -40,9 +37,12 @@ export function firstDrawPrompt(
     '',
     `- The project: ${name}.`,
     `- The project folder, the person's own checkout (read it, never edit it): ${oneLine(projectRoot)}`,
-    o.worktree
-      ? `- The worktree to write in, on branch ${DRAW_BRANCH}: ${oneLine(o.worktree)}`
-      : `- The worktree to write in: none yet. Make one in a new empty folder outside the project, on branch ${DRAW_BRANCH} (step 1).`,
+    o.drawing
+      ? `- The drawing folder, to write the drawing in: ${oneLine(o.drawing)}`
+      : '- The drawing folder: none named. Use a new empty folder of your own outside the project, and name it in your last message.',
+    o.source
+      ? `- The source folder, a clone of the project to read the code in: ${oneLine(o.source)}`
+      : '- The source folder: none yet. Make one in a new empty folder outside the project (step 1).',
     `- This repo: ${o.repo ? oneLine(o.repo) : 'read it from `git remote get-url origin` in the project folder'}. In system.yaml it is \`self\`.`,
     '- Other repos to read:',
     list(setup.repos, 'none'),
@@ -56,8 +56,10 @@ export function firstDrawPrompt(
 }
 
 export type UpdatePromptInput = {
-  /** The redraw worktree, on REDRAW_BRANCH at `to`. */
-  worktree: string;
+  /** The source clone, at `to`, where the agent reads the code. */
+  source: string;
+  /** The copy of the drawing the agent edits. */
+  drawing: string;
   /** The last commit the drawing was right for. */
   from: string;
   /** The new commit on the default branch. */
@@ -78,8 +80,9 @@ export function updatePrompt(o: UpdatePromptInput): string {
   const facts = [
     '# The job: redraw after main moved',
     '',
-    `- The worktree, already on branch ${REDRAW_BRANCH} at the new commit: ${oneLine(o.worktree)}`,
-    `- From (the last commit the drawing was checked against: its sources.repos.self.at, or a later commit the check found nothing to redraw for; the range may hold the drawing's own commits): ${oneLine(o.from)}`,
+    `- The source folder, a clone of the project already at the new commit: ${oneLine(o.source)}`,
+    `- The drawing folder, to edit the drawing in: ${oneLine(o.drawing)}`,
+    `- From (the last commit the drawing was checked against: its sources.repos.self.at, or a later commit the check found nothing to redraw for): ${oneLine(o.from)}`,
     `- To (the new commit; set sources.repos.self.at to it): ${oneLine(o.to)}`,
     '- Merged pull requests in that range:',
     list(o.prs.map((n) => `PR ${n}`), 'none named in the merge commits'),
@@ -99,8 +102,10 @@ export function updatePrompt(o: UpdatePromptInput): string {
 }
 
 export type ReviewPromptInput = {
-  /** The person's own checkout of the project, where the base branch is checked out. */
+  /** The person's own checkout of the project. */
   project: string;
+  /** The project's drawing folder (`<PLANNOTATOR_DATA_DIR>/system/<project key>/drawing`). */
+  drawing: string;
   /** The pull request, `host/owner/repo#n`. */
   pr: string;
   /** Its head commit. */
@@ -111,13 +116,14 @@ export type ReviewPromptInput = {
   name?: string;
 };
 
-/** The prompt that has an agent draw an open pull request's change: the four facts, then REVIEW.md, then the format. */
+/** The prompt that has an agent draw an open pull request's change: the five facts, then REVIEW.md, then the format. */
 export function reviewPrompt(o: ReviewPromptInput): string {
   const name = oneLine(o.name ?? (o.project.replace(/\/+$/, '').split('/').pop() || 'the project'));
   const facts = [
     `# The job: draw pull request ${oneLine(o.pr)} on the system of ${name}`,
     '',
     `- The project folder: ${oneLine(o.project)}`,
+    `- The drawing folder: ${oneLine(o.drawing)}`,
     `- The pull request: ${oneLine(o.pr)}`,
     `- Its head commit: ${oneLine(o.head)}`,
     `- Its base branch: ${oneLine(o.base)}`,
