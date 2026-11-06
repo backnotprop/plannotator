@@ -5194,7 +5194,9 @@ export class InboxStore {
    * of one still waiting; approval "inbox-message-comments", 2026-10-19):
    * Plannotator's text-selection annotation, `originalText` the exact words
    * the person selected, or a comment on a rendered diagram part, with
-   * `diagramAnchor` and the part's label as `originalText`. Only an agent's
+   * `diagramAnchor` and the part's label as `originalText`, or a Delete on
+   * selected words (`type` "DELETION", no words of its own needed; approval
+   * "inbox-toolbar-delete"). Only an agent's
    * message takes one, and only while it can be answered (an archive closes
    * the messages before its line). The
    * record's key is the message: `path` is its id, `version` "current", and
@@ -5212,15 +5214,19 @@ export class InboxStore {
     const fields = annotation as Record<string, unknown>;
     const id = fields.id;
     if (!isInboxAnnotationId(id)) throw new InboxError("validation_error", "annotation.id: a short id.", { field: "annotation.id" });
-    // A comment on selected words (a quick label such as 👍 is a comment too); never a deletion or a general comment.
-    if (fields.type !== "COMMENT") throw new InboxError("validation_error", 'annotation.type: "COMMENT" (a comment on the words selected).', { field: "annotation.type" });
+    // A comment on selected words (a quick label such as 👍 is a comment too), or a Delete on them (approval
+    // "inbox-toolbar-delete": the toolbar's Delete, as in plan review); never a general comment.
+    const deletion = fields.type === "DELETION";
+    if (fields.type !== "COMMENT" && !deletion) throw new InboxError("validation_error", 'annotation.type: "COMMENT" (a comment on the words selected) or "DELETION" (remove them).', { field: "annotation.type" });
     const quote = fields.originalText;
     if (typeof quote !== "string" || quote.trim() === "" || quote.length > INBOX_MESSAGE_COMMENT_QUOTE_MAX) {
       throw new InboxError("validation_error", `annotation.originalText: the words selected (1 to ${INBOX_MESSAGE_COMMENT_QUOTE_MAX} characters).`, { field: "annotation.originalText" });
     }
     // The comment itself: a quick label (👍) carries its label as its text, so every comment has words to send.
+    // A deletion's words are the ones selected; it may carry none of its own.
     const text = fields.text;
-    if (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX) {
+    const noText = text === undefined || text === null || text === "";
+    if (!(deletion && noText) && (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX)) {
       throw new InboxError("validation_error", `annotation.text: the comment (1 to ${INBOX_MESSAGE_COMMENT_TEXT_MAX} characters).`, { field: "annotation.text" });
     }
     // A comment on a message's words is words: no images, no element or page it points at, no reply thread.
