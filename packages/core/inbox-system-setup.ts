@@ -5,7 +5,8 @@
  *
  * `repos` are the extra repos only (the project's own repo comes from its folder's git remote), each written
  * `host/owner/name`. `docs` are doc site URLs. `agent` and `model` draw the drawing phase and every redraw after it
- * (one choice: redraws never ask again); `model` null is the agent's own default. `thread_message` is the first
+ * (one choice: redraws never ask again); `model` is in the agent's own form (`claude-opus-5-5` for Claude Code,
+ * `anthropic/claude-opus-5-5` for Pi and OpenCode), null for the agent's own default. `thread_message` is the first
  * message of the drawing's Inbox thread, set once Draw it starts one (null until then).
  *
  * Browser-safe: the window checks what the person types with the same functions the server checks the save with.
@@ -26,9 +27,25 @@ export function systemAgentOfLaunch(id: string): SystemSetupAgent | null {
 /** The model System recommends for the drawing phase and redraws, through whichever agent the person has. */
 export const SYSTEM_RECOMMENDED_MODEL = { id: 'claude-opus-5-5', name: 'Claude Opus 5.5' } as const;
 
+/**
+ * The recommended model's id as the agent takes it: Claude Code a bare model id, Pi and OpenCode `provider/model`
+ * (their `--model`), so setup.json's `model` is passed to the agent as it is.
+ */
+export function systemRecommendedModel(agent: SystemSetupAgent): string {
+  return agent === 'claude' ? SYSTEM_RECOMMENDED_MODEL.id : `anthropic/${SYSTEM_RECOMMENDED_MODEL.id}`;
+}
+
 /** The models offered for an agent: the recommended one first, then the agent's own default (`id` null). */
-export function systemAgentModels(agent: SystemSetupAgent): { id: string | null; name: string }[] {
-  return [{ ...SYSTEM_RECOMMENDED_MODEL }, { id: null, name: `${SYSTEM_AGENT_NAMES[agent]}'s default` }];
+export function systemAgentModels(agent: SystemSetupAgent): { id: string | null; name: string; recommended: boolean }[] {
+  return [
+    { id: systemRecommendedModel(agent), name: SYSTEM_RECOMMENDED_MODEL.name, recommended: true },
+    { id: null, name: `${SYSTEM_AGENT_NAMES[agent]}'s default`, recommended: false },
+  ];
+}
+
+/** The model to keep when the person picks another agent: the recommended one stays recommended, a default stays default. */
+export function systemModelForAgent(model: string | null, from: SystemSetupAgent, to: SystemSetupAgent): string | null {
+  return model === null ? null : model === systemRecommendedModel(from) ? systemRecommendedModel(to) : model;
 }
 
 export interface SystemSetup {
@@ -76,14 +93,19 @@ export type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
 const SEGMENT = /^[A-Za-z0-9_.-]+$/;
 const HOST = /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
 
+/** Where a link into a repo turns into a page in it: GitHub's /tree/main, /blob/…, /commit/…, /pull/…, Bitbucket's /src/…, GitLab's /-/…. */
+const REPO_PAGE = new Set(['tree', 'blob', 'src', 'commit', 'pull', '-']);
+/** Forges a person may type the host of without a repo after it (`github.com/owner` is not `owner/name`). */
+const FORGE_HOSTS = new Set(['github.com', 'gitlab.com', 'bitbucket.org', 'codeberg.org']);
+
 function repoFrom(host: string, path: string): string | null {
-  const parts = path
-    .replace(/\.git$/i, '')
-    .split('/')
-    .filter((part) => part.length > 0);
-  // A link into a repo (GitHub's /tree/main, GitLab's /-/...) names the repo before it.
-  const dash = parts.indexOf('-');
-  const named = dash >= 0 ? parts.slice(0, dash) : host.toLowerCase() === 'github.com' ? parts.slice(0, 2) : parts;
+  const parts = path.split('/').filter((part) => part.length > 0);
+  // A link into a repo names the repo before the page (on any host); the owner and name come first.
+  const page = parts.findIndex((part, index) => index >= 2 && REPO_PAGE.has(part.toLowerCase()));
+  const kept = page >= 0 ? parts.slice(0, page) : parts;
+  const named = host.toLowerCase() === 'github.com' ? kept.slice(0, 2) : kept;
+  // `.git` after the name (`owner/name.git`, `owner/name.git/`): the trailing slash is already gone.
+  if (named.length > 0) named[named.length - 1] = named[named.length - 1]!.replace(/\.git$/i, '');
   if (named.length < 2) return null;
   if (!named.every((part) => SEGMENT.test(part) && part !== '.' && part !== '..')) return null;
   if (!HOST.test(host)) return null;
@@ -112,7 +134,10 @@ export function parseSystemRepo(input: string, defaultHost = 'github.com'): Pars
     }
   } else {
     const first = text.split('/', 1)[0]!;
-    repo = first.includes('.') && text.split('/').length >= 3 ? repoFrom(first, text.slice(first.length)) : repoFrom(defaultHost, text);
+    const host = first.toLowerCase();
+    // A forge's host and one part (`github.com/owner`) names no repo.
+    if (host === defaultHost.toLowerCase() || FORGE_HOSTS.has(host)) repo = repoFrom(first, text.slice(first.length));
+    else repo = first.includes('.') && text.split('/').length >= 3 ? repoFrom(first, text.slice(first.length)) : repoFrom(defaultHost, text);
   }
   return repo ? { ok: true, value: repo } : { ok: false, error: REPO_ERROR };
 }
@@ -184,7 +209,7 @@ export function systemSetupFromInput(
   }
   const agent = body.agent ?? 'claude';
   if (!SYSTEM_SETUP_AGENTS.includes(agent as SystemSetupAgent)) return { ok: false, field: 'agent', error: `agent: ${SYSTEM_SETUP_AGENTS.join(', ')}.` };
-  const model = body.model === undefined ? SYSTEM_RECOMMENDED_MODEL.id : body.model;
+  const model = body.model === undefined ? systemRecommendedModel(agent as SystemSetupAgent) : body.model;
   if (model !== null && (typeof model !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,199}$/.test(model))) {
     return { ok: false, field: 'model', error: 'model: a model id, or null for the agent\u2019s own default.' };
   }

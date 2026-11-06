@@ -9,6 +9,8 @@ import type { InboxProject, InboxProjectRepo } from "@plannotator/core/inbox-typ
 import { systemSetupFromInput, type SystemSetup, type SystemSetupProject } from "@plannotator/core/inbox-system-setup";
 import { readSystemSetup, writeSystemSetup } from "@plannotator/shared/inbox/system-setup";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 
 export interface SystemSetupDeps {
   dataDir: string;
@@ -53,4 +55,39 @@ export async function saveSystemSetup(project: InboxProject, body: Record<string
   if (!checked.ok) throw new InboxError("validation_error", checked.error, { field: checked.field });
   const before = readSystemSetup(deps.dataDir, project.key);
   return writeSystemSetup(deps.dataDir, project.key, { v: 1, ...checked.value, thread_message: before?.thread_message ?? null });
+}
+
+/** What `/api/inbox/system/setup` needs from the running Inbox (inbox.ts passes its own). */
+export interface SystemSetupRouteDeps extends SystemSetupDeps {
+  store: { listProjects(): InboxProject[]; project(id: string): InboxProject | null; canonicalProjectId(id: string): string };
+  serverSession: string;
+  /** The request comes from the person on this computer, or the machine's owner over the tailnet. */
+  ownerOrLocal: (req: Request) => boolean;
+  /** System and Code review both on. */
+  systemOn: () => boolean;
+  readBody: (req: Request) => Promise<Record<string, unknown>>;
+  json: (body: unknown, status?: number) => Response;
+}
+
+/**
+ * `GET /api/inbox/system/setup` (the projects the dialog offers) and `POST` (one project's save). Guards in order:
+ * method, owner, same origin, System on, then the window's `serverSession`. An `InboxError` is thrown for the
+ * caller's error answer.
+ */
+export async function systemSetupRoute(req: Request, deps: SystemSetupRouteDeps): Promise<Response> {
+  const { json } = deps;
+  if (req.method !== "GET" && req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
+  if (!deps.ownerOrLocal(req)) return json({ error: "This answers only on this computer, not over the tailnet.", code: "local_only" }, 403);
+  if (!isSameOriginOrNoOrigin(req.headers.get("origin"), req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+    return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+  }
+  if (!deps.systemOn()) return json({ error: "System is off.", code: "system_off" }, 409);
+  const { store, serverSession } = deps;
+  if (req.method === "GET") return json({ serverSession, projects: await systemSetupProjects(store.listProjects(), deps) });
+  const body = await deps.readBody(req);
+  if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+  const projectId = typeof body.project_id === "string" && store.project(body.project_id) ? store.canonicalProjectId(body.project_id) : null;
+  const project = projectId ? store.project(projectId) : null;
+  if (!project) throw new InboxError("validation_error", "project_id: a project in the Inbox.", { field: "project_id" });
+  return json({ serverSession, setup: await saveSystemSetup(project, body, deps) });
 }

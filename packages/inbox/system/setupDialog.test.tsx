@@ -3,7 +3,10 @@
  * What regresses: anything of System shown while System or Code review is off; a setup that needs typing beyond
  * extra repos and doc sites; a step that loses what was chosen or typed; a repo or doc site that does not parse
  * saved, or one typed and not yet added dropped; Draw it offered with no agent to start, or Copy prompt offered
- * beside it; a Copy prompt whose copy does not start in the click; a Cancel that saves.
+ * beside it; a Copy prompt whose copy does not start in the click; a Cancel that saves; a removed chip dropping
+ * focus to the page instead of the next chip (or its field when none is left); an agent the Inbox launches itself
+ * (Claude Code, Pi, OpenCode) not offered; Draw it for an agent the Inbox cannot start here; a Pi or OpenCode save
+ * whose recommended model is not in the `provider/model` form those agents take.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -206,6 +209,44 @@ describe.skipIf(!hasDom)('System setup', () => {
     expect(ui.q<HTMLInputElement>('[data-system-model=""] input')!.checked).toBe(true);
     await press(ui.btn('draw'));
     expect(ui.saves).toEqual([{ project_id: 'prj_docs', repos: ['github.com/acme/brand'], docs: [], agent: 'claude', model: null }]);
+  });
+
+  test('removing a chip moves focus to the chip after it, or to its field when none is left', async () => {
+    const ui = await open(mount(), 'prj_docs');
+    await press(ui.btn('next'));
+    // Repos: brand, then tools; remove brand (focus to tools' remove), then tools (focus to the add button).
+    await press(ui.btn('add-repo'));
+    type(ui.q<HTMLInputElement>('[data-system-repo-input]'), 'acme/tools');
+    submit(ui.q<HTMLInputElement>('[data-system-repo-input]'));
+    await settle();
+    await press(ui.q('[data-system-repo="github.com/acme/brand"] button'));
+    expect(document.activeElement).toBe(ui.q('[data-system-repo="github.com/acme/tools"] button'));
+    await press(ui.q('[data-system-repo="github.com/acme/tools"] button'));
+    expect(document.activeElement).toBe(ui.q('[data-system-repo-input]'));
+    // Doc sites: the last one removed, focus to the doc field.
+    await press(ui.q('[data-system-doc="https://help.example.com/"] button'));
+    expect(document.activeElement).toBe(ui.q('[data-system-doc-input]'));
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  test('step 3 offers Claude Code, Pi and OpenCode; Draw it only for one the Inbox can start, Copy prompt otherwise', async () => {
+    const ui = await open(mount({ agents: ['claude'] }));
+    await press(ui.btn('next'));
+    await press(ui.btn('next'));
+    expect([...document.querySelectorAll('[data-system-agent]')].map((row) => row.getAttribute('data-system-agent'))).toEqual(['claude', 'pi', 'opencode']);
+    expect(ui.btn('draw')).not.toBeNull();
+    // Pi: not startable here, so Copy prompt; the recommended model follows the pick, in Pi's provider/model form.
+    await press(ui.q('[data-system-agent="pi"] input'));
+    expect(ui.btn('draw')).toBeNull();
+    expect(ui.btn('copy')).not.toBeNull();
+    expect(ui.q<HTMLInputElement>('[data-system-model="anthropic/claude-opus-5-5"] input')!.checked).toBe(true);
+    // The agent's own default stays the default across a pick.
+    await press(ui.q('[data-system-model=""] input'));
+    await press(ui.q('[data-system-agent="opencode"] input'));
+    expect(ui.q<HTMLInputElement>('[data-system-model=""] input')!.checked).toBe(true);
+    await press(ui.q('[data-system-model="anthropic/claude-opus-5-5"] input'));
+    await press(ui.btn('copy'));
+    expect(ui.saves).toEqual([{ project_id: 'prj_app', repos: [], docs: [], agent: 'opencode', model: 'anthropic/claude-opus-5-5' }]);
   });
 
   test('no agent the Inbox can start: Copy prompt only, copied in the click before the save', async () => {

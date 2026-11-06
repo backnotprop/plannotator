@@ -174,7 +174,7 @@ import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannota
 import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT } from "./inbox-mcp";
 import { guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
-import { saveSystemSetup, systemSetupProjects } from "./inbox-system-setup";
+import { systemSetupRoute } from "./inbox-system-setup";
 import { createRefCards, type RefRunner } from "./ref-cards";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
@@ -3884,20 +3884,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // System's project setup (inbox-system-setup.ts): the projects found on this Mac with a git remote, and the
       // save of one project's setup.json. Owner only, same origin, and only while System is on.
       if (path === "/api/inbox/system/setup") {
-        if (req.method !== "GET" && req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
-        if (!ownerOrLocal(req, via)) return localOnly();
-        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
-          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
-        }
-        if (!systemOn()) return json({ error: "System is off.", code: "system_off" }, 409);
-        const systemDeps = { dataDir, repoOf: async (root: string) => repos.get(root) ?? (await repos.refresh(root)) };
-        if (req.method === "GET") return json({ serverSession, projects: await systemSetupProjects(store.listProjects(), systemDeps) });
-        const body = await readBody(req);
-        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        const projectId = typeof body.project_id === "string" && store.project(body.project_id) ? store.canonicalProjectId(body.project_id) : null;
-        const project = projectId ? store.project(projectId) : null;
-        if (!project) throw new InboxError("validation_error", "project_id: a project in the Inbox.", { field: "project_id" });
-        return json({ serverSession, setup: await saveSystemSetup(project, body, systemDeps) });
+        // Awaited: a thrown InboxError reaches this handler's error answer.
+        return await systemSetupRoute(req, {
+          dataDir,
+          repoOf: async (root: string) => repos.get(root) ?? (await repos.refresh(root)),
+          store,
+          serverSession,
+          ownerOrLocal: (request) => ownerOrLocal(request, via),
+          systemOn,
+          readBody,
+          json,
+        });
       }
       // Pull requests: the person hands a PR (or a stack's PRs) to an agent's thread, the one compose's Send (to a
       // live session, or to an agent it launches) just started for it. The Inbox keeps that choice

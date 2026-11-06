@@ -8398,11 +8398,10 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-sys-agentrow[data-on] > .ib-sys-pick, .ib-sys-agentrow[data-on] > .ib-sys-pick:hover { background: transparent; }
 .ib-sys-agentrow .ib-sys-nm { min-width: 0; }
 .ib-sys-rb { display: flex; flex-direction: column; align-items: flex-start; padding: 0 14px 12px 41px; }
-.ib-sys-dflt { font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--primary); }
+.ib-sys-rec { margin-left: 6px; font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--primary); }
 .ib-sys-rb small { display: block; margin-top: 8px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); }
 .ib-sys-model { flex-wrap: wrap; }
 .ib-sys-cost { display: block; margin-top: 4px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
-.ib-sys-note { margin: 10px 2px 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-callout.ib-sys-msg { margin: 12px 0 0; }
 .ib-sys-acts { margin-top: 22px; }
 @media (forced-colors: active) {
@@ -8420,5 +8419,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-sys-phone .ib-sys-lc { order: 3; flex-basis: 100%; padding-left: 27px; }
   .ib-sys-phone .ib-sys-rb { padding-left: 14px; }
   .ib-sys-phone .ib-sys-inp { height: 44px; font-size: var(--ib-fs-16-in, 16px); }
+  .ib-sys-phone .ib-sys-x, .pn-inbox .ib-sys-phone .ib-sys-x { width: 32px; height: 32px; }
   .ib-sys-phone .ib-sys-acts .ib-btn { height: 44px; }
 }

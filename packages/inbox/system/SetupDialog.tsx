@@ -1,9 +1,10 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import {
   SYSTEM_AGENT_NAMES,
-  SYSTEM_RECOMMENDED_MODEL,
   SYSTEM_SETUP_AGENTS,
   systemAgentModels,
+  systemModelForAgent,
+  systemRecommendedModel,
   parseSystemDocSite,
   parseSystemRepo,
   systemDocLabel,
@@ -28,8 +29,8 @@ export interface SystemSetupDialogProps {
   /** The home folder, so folders read `~/…`. */
   home: string | null;
   /**
-   * The agents the Inbox can start here (`GET /api/inbox/sessions` `launch.agents`; none while launch is off). With
-   * one or more the last step ends at Draw it; with none, at Copy prompt (the fallback).
+   * The agents the Inbox can start here (`GET /api/inbox/sessions` `launch.agents`; none while launch is off). Every
+   * agent System knows is offered; the last step ends at Draw it for one of these, else at Copy prompt (the fallback).
    */
   loadAgents: () => Promise<SystemSetupAgent[]>;
   /** The project to start on; null: the first one found. */
@@ -61,7 +62,7 @@ export function SystemSetupDialog(props: SystemSetupDialogProps) {
   const [repos, setRepos] = useState<string[]>([]);
   const [docs, setDocs] = useState<string[]>([]);
   const [agent, setAgent] = useState<SystemSetupAgent>('claude');
-  const [model, setModel] = useState<string | null>(SYSTEM_RECOMMENDED_MODEL.id);
+  const [model, setModel] = useState<string | null>(systemRecommendedModel('claude'));
   const [launchable, setLaunchable] = useState<SystemSetupAgent[] | null>(null);
   const [repoDraft, setRepoDraft] = useState<string | null>(null);
   const [docDraft, setDocDraft] = useState('');
@@ -73,6 +74,10 @@ export function SystemSetupDialog(props: SystemSetupDialogProps) {
   const repoInputRef = useRef<HTMLInputElement>(null);
   const addRepoRef = useRef<HTMLButtonElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
+  const reposRef = useRef<HTMLUListElement>(null);
+  const docsRef = useRef<HTMLUListElement>(null);
+  /** A chip just removed: focus goes to the chip now in its place, or to its field when none is left after it. */
+  const removed = useRef<{ list: 'repos' | 'docs'; index: number } | null>(null);
   const firstStep = useRef(true);
 
   const read = () => {
@@ -97,13 +102,14 @@ export function SystemSetupDialog(props: SystemSetupDialogProps) {
       live = false;
     };
   }, []);
-  const canLaunch = !!launchable && launchable.length > 0;
-  /** The agents offered: the ones the Inbox can start; with none (the Copy prompt fallback), every agent System knows. */
-  const agents = launchable === null ? null : canLaunch ? launchable : [...SYSTEM_SETUP_AGENTS];
-  useEffect(() => {
-    // A saved agent the Inbox can no longer start gives way to the first one it can.
-    if (agents && !agents.includes(agent)) setAgent(agents[0]!);
-  }, [agents?.join(), agent]);
+  /** Draw it when the Inbox can start the picked agent here; Copy prompt (the fallback) otherwise. */
+  const canLaunch = !!launchable && launchable.includes(agent);
+  /** Every agent the Inbox launches itself is offered (none needs connecting first), once the read of which can start is in. */
+  const agents = launchable === null ? null : SYSTEM_SETUP_AGENTS;
+  const pickAgent = (next: SystemSetupAgent) => {
+    setModel((current) => systemModelForAgent(current, agent, next));
+    setAgent(next);
+  };
   useEffect(() => {
     // A new step's heading takes focus, so a screen reader hears where it is.
     if (firstStep.current) {
@@ -115,6 +121,24 @@ export function SystemSetupDialog(props: SystemSetupDialogProps) {
   useEffect(() => {
     if (repoDraft !== null) repoInputRef.current?.focus();
   }, [repoDraft !== null]);
+  useEffect(() => {
+    const gone = removed.current;
+    if (!gone) return;
+    removed.current = null;
+    const list = gone.list === 'repos' ? reposRef.current : docsRef.current;
+    const nextChip = list?.querySelectorAll<HTMLButtonElement>('.ib-sys-x')[gone.index];
+    if (nextChip) nextChip.focus();
+    else if (gone.list === 'repos') (repoInputRef.current ?? addRepoRef.current)?.focus();
+    else docInputRef.current?.focus();
+  }, [repos, docs]);
+  const removeRepo = (index: number) => {
+    removed.current = { list: 'repos', index };
+    setRepos((list) => list.filter((_, i) => i !== index));
+  };
+  const removeDoc = (index: number) => {
+    removed.current = { list: 'docs', index };
+    setDocs((list) => list.filter((_, i) => i !== index));
+  };
 
   const project = projects?.find((p) => p.id === chosen) ?? null;
   const ownHost = project ? systemRepoHost(project.repo) : null;
@@ -125,7 +149,7 @@ export function SystemSetupDialog(props: SystemSetupDialogProps) {
     setRepos(next.setup?.repos ?? []);
     setDocs(next.setup?.docs ?? []);
     setAgent(next.setup?.agent ?? 'claude');
-    setModel(next.setup ? next.setup.model : SYSTEM_RECOMMENDED_MODEL.id);
+    setModel(next.setup ? next.setup.model : systemRecommendedModel(next.setup?.agent ?? 'claude'));
     setRepoDraft(null);
     setDocDraft('');
     setRepoError(null);
@@ -275,15 +299,15 @@ export function SystemSetupDialog(props: SystemSetupDialogProps) {
           <p className="ib-sys-fl" id={`ib-sys-r-${uid}`}>
             Repos
           </p>
-          <ul className="ib-sys-chips" aria-labelledby={`ib-sys-r-${uid}`} data-system-repos="">
+          <ul ref={reposRef} className="ib-sys-chips" aria-labelledby={`ib-sys-r-${uid}`} data-system-repos="">
             <li className="ib-sys-chip" data-system-own="">
               <span className="ib-sys-mono">{systemRepoLabel(project.repo, ownHost)}</span>
               <span className="ib-sys-from">this project's repo</span>
             </li>
-            {repos.map((repo) => (
+            {repos.map((repo, index) => (
               <li key={repo} className="ib-sys-chip" data-system-repo={repo}>
                 <span className="ib-sys-mono">{systemRepoLabel(repo, ownHost)}</span>
-                <button type="button" className="ib-sys-x" aria-label={`Remove ${systemRepoLabel(repo, ownHost)}`} onClick={() => setRepos((list) => list.filter((r) => r !== repo))}>
+                <button type="button" className="ib-sys-x" aria-label={`Remove ${systemRepoLabel(repo, ownHost)}`} onClick={() => removeRepo(index)}>
                   <Icon name="x" size={12} />
                 </button>
               </li>
@@ -332,11 +356,11 @@ export function SystemSetupDialog(props: SystemSetupDialogProps) {
             Doc sites
           </p>
           {docs.length > 0 && (
-            <ul className="ib-sys-chips" aria-labelledby={`ib-sys-d-${uid}`} data-system-docs="">
-              {docs.map((doc) => (
+            <ul ref={docsRef} className="ib-sys-chips" aria-labelledby={`ib-sys-d-${uid}`} data-system-docs="">
+              {docs.map((doc, index) => (
                 <li key={doc} className="ib-sys-chip" data-system-doc={doc}>
                   <span className="ib-sys-mono">{systemDocLabel(doc)}</span>
-                  <button type="button" className="ib-sys-x" aria-label={`Remove ${systemDocLabel(doc)}`} onClick={() => setDocs((list) => list.filter((d) => d !== doc))}>
+                  <button type="button" className="ib-sys-x" aria-label={`Remove ${systemDocLabel(doc)}`} onClick={() => removeDoc(index)}>
                     <Icon name="x" size={12} />
                   </button>
                 </li>
@@ -391,9 +415,8 @@ export function SystemSetupDialog(props: SystemSetupDialogProps) {
               {agents.map((id) => (
                 <div key={id} className="ib-sys-agentrow" data-on={agent === id ? '' : undefined} data-system-agent={id}>
                   <label className="ib-sys-pick">
-                    <input type="radio" name={`ib-sys-a-${uid}`} checked={agent === id} onChange={() => setAgent(id)} />
+                    <input type="radio" name={`ib-sys-a-${uid}`} checked={agent === id} onChange={() => pickAgent(id)} />
                     <span className="ib-sys-nm">{SYSTEM_AGENT_NAMES[id]}</span>
-                    {id === agents[0] && <span className="ib-sys-dflt">Default</span>}
                   </label>
                   {agent === id && (
                     <div className="ib-sys-rb">
@@ -402,11 +425,12 @@ export function SystemSetupDialog(props: SystemSetupDialogProps) {
                           <label key={option.id ?? 'default'} className="ib-seg-o" data-on={model === option.id ? '' : undefined} data-system-model={option.id ?? ''}>
                             <input type="radio" name={`ib-sys-m-${uid}`} checked={model === option.id} onChange={() => setModel(option.id)} />
                             {option.name}
+                            {option.recommended && <span className="ib-sys-rec">Recommended</span>}
                           </label>
                         ))}
                       </span>
                       <small>
-                        {model === SYSTEM_RECOMMENDED_MODEL.id ? 'Recommended for the drawing phase and redraws. ' : ''}A free check looks at main every 15 minutes and wakes the agent only when something changed.
+                        A free check looks at main every 15 minutes and wakes the agent only when something changed.
                       </small>
                       <span className="ib-sys-cost">Cost: your own agent's usage, only when main changed.</span>
                     </div>
@@ -415,7 +439,6 @@ export function SystemSetupDialog(props: SystemSetupDialogProps) {
               ))}
             </div>
           )}
-          <p className="ib-sys-note">A cloud agent is not set up.</p>
           {saveError && (
             <p className="ib-callout ib-err ib-sys-msg" role="alert" data-system-save-error="">
               <Icon name="warn" />

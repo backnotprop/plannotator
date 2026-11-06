@@ -34,10 +34,25 @@ describe('parseSystemRepo', () => {
     expect(repo('https://gitlab.com/group/sub/project/-/tree/main')).toBe('gitlab.com/group/sub/project');
     expect(repo('git@github.com:acme/docs.git')).toBe('github.com/acme/docs');
     expect(repo('ssh://git@github.com:22/acme/docs.git')).toBe('github.com/acme/docs');
+    expect(repo('github.com/acme/docs')).toBe('github.com/acme/docs');
+  });
+
+  test('a link to a page in a repo names the repo, on any host', () => {
+    expect(repo('https://ghe.example.com/acme/docs/tree/main')).toBe('ghe.example.com/acme/docs');
+    expect(repo('https://ghe.example.com/acme/docs/blob/main/README.md')).toBe('ghe.example.com/acme/docs');
+    expect(repo('https://ghe.example.com/acme/docs/commit/abc123')).toBe('ghe.example.com/acme/docs');
+    expect(repo('https://ghe.example.com/acme/docs/pull/7')).toBe('ghe.example.com/acme/docs');
+    expect(repo('https://bitbucket.org/acme/docs/src/main/')).toBe('bitbucket.org/acme/docs');
+    expect(repo('https://gitlab.example.com/group/sub/project/-/merge_requests/3')).toBe('gitlab.example.com/group/sub/project');
+    expect(repo('ghe.example.com/acme/docs/tree/main')).toBe('ghe.example.com/acme/docs');
+    // A trailing slash after `.git`.
+    expect(repo('https://github.com/acme/docs.git/')).toBe('github.com/acme/docs');
+    expect(repo('https://ghe.example.com/acme/docs.git/')).toBe('ghe.example.com/acme/docs');
+    expect(repo('git@ghe.example.com:acme/docs.git/')).toBe('ghe.example.com/acme/docs');
   });
 
   test('anything that is not a repo is refused with a reason', () => {
-    for (const input of ['', '   ', 'docs', 'acme', 'acme/ docs', 'https://github.com/acme', 'acme/../etc', 'file:///etc/passwd', 'javascript:alert(1)', 'acme/do$cs']) {
+    for (const input of ['', '   ', 'docs', 'acme', 'acme/ docs', 'https://github.com/acme', 'github.com/acme', 'GitHub.com/acme', 'gitlab.com/acme', 'github.com/acme/', 'acme/../etc', 'file:///etc/passwd', 'javascript:alert(1)', 'acme/do$cs']) {
       const parsed = parseSystemRepo(input);
       expect(parsed.ok).toBe(false);
       if (!parsed.ok) expect(parsed.error.length).toBeGreaterThan(0);
@@ -84,10 +99,20 @@ describe('systemSetupFromInput', () => {
     const model = systemSetupFromInput({ model: 'rm -rf' }, own);
     expect(model.ok === false && model.field).toBe('model');
   });
+
+  test('no model named: the recommended one, in the form the agent takes (provider/model for Pi and OpenCode)', () => {
+    const modelOf = (agent: string) => {
+      const checked = systemSetupFromInput({ agent }, own);
+      return checked.ok ? checked.value.model : null;
+    };
+    expect(modelOf('claude')).toBe('claude-opus-5-5');
+    expect(modelOf('pi')).toBe('anthropic/claude-opus-5-5');
+    expect(modelOf('opencode')).toBe('anthropic/claude-opus-5-5');
+  });
 });
 
 test('parseSystemSetup reads format 1 only', () => {
-  const good = { v: 1, repos: ['github.com/a/b'], docs: [], agent: 'pi', model: 'claude-opus-5-5', thread_message: null };
+  const good = { v: 1, repos: ['github.com/a/b'], docs: [], agent: 'pi', model: 'anthropic/claude-opus-5-5', thread_message: null };
   expect(parseSystemSetup(good)).toEqual(good);
   expect(parseSystemSetup({ ...good, model: undefined })).toEqual({ ...good, model: null });
   expect(parseSystemSetup({ ...good, model: 3 })).toBeNull();
