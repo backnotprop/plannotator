@@ -16,7 +16,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { jjRuntime } from "./vcs.ts";
-import { useScratchJjConfig } from "../../../tests/helpers/jj-scratch-config";
+import { useScratchJjConfig } from "../../../tests/helpers/jj-scratch-config.ts";
 
 const jjConfig = useScratchJjConfig();
 

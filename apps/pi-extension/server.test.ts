@@ -32,7 +32,7 @@ import {
 import { WorkspaceReviewSession } from "./generated/review-workspace.ts";
 import { parseReviewArgs } from "./generated/review-args.ts";
 import { warmFileListCache } from "./generated/resolve-file.ts";
-import { useScratchJjConfig } from "../../tests/helpers/jj-scratch-config";
+import { useScratchJjConfig } from "../../tests/helpers/jj-scratch-config.ts";
 
 const jjConfig = useScratchJjConfig();
 
