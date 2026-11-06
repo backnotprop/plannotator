@@ -232,7 +232,7 @@ export function GuidePane({ thread, message, onBack, onClose, guest = false, cod
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
+      className={`ib-viewer ib-wlayer${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
       aria-label="Guided review"
       data-guide-message={message.id}
     >
