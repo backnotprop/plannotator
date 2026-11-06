@@ -5489,6 +5489,9 @@ function Inbox() {
           rememberSent(session);
           pulls.reload();
         }}
+        onOpenGuide={(threadId, messageId) => go({ page: 'inbox', project: null, thread: threadId, guide: messageId })}
+        shapes={shapeOn ? shapes.byThread : null}
+        onOpenShape={(s) => go(s.thread ? { page: 'inbox', project: null, thread: s.thread, shape: s.id } : { page: 'shapes', project: null, thread: null, shape: s.id })}
       />
     );
   } else if (route.page === 'reviews' && settings !== null && !guestPage) {

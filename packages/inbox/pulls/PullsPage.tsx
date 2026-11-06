@@ -25,13 +25,16 @@
  *   from the base branch up, the lowest open one marked "Lands next"; a Board
  *   chip only when the Board is on and a card links it; Reply at the foot goes
  *   into the review thread. No merge button.
+ * - A single open PR opens its launchpad instead (PullLaunchpad.tsx): the
+ *   ways into it (guided review, the diff, the review thread, its Shape
+ *   board), then its details. The hand-off (the picker) is this view's.
  *
  * Read only while the page is open (usePulls). No new keyboard shortcuts.
  */
 import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { inboxPullRepoKey, type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
-import { InboxApiError, inboxApi, type ProjectFolder } from '../api';
+import { InboxApiError, inboxApi, type InboxShapeSummary, type ProjectFolder } from '../api';
 import { HostMark, Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
 import { RowAgentTiles } from '../components/RowAgents';
@@ -68,6 +71,7 @@ import { PullFilterControl, PullScopeLine, useFilterTrigger } from './PullFilter
 import { forgeName, initials, repoLabels, repoName } from './labels';
 import { answeredClis, pullsEmptyWords, pullsNotices } from './notices';
 import { ReviewPicker } from './ReviewPicker';
+import { PullLaunchpad } from './PullLaunchpad';
 import { chainMarks, landsNextLayer, layerBaseWords, stackLink, startLayer } from './topology';
 import type { PullsState } from './usePulls';
 
@@ -96,6 +100,11 @@ export interface PullsPageProps {
   onLaunch: (keys: readonly string[], projects: readonly string[], body: string, askLine: string, opener: HTMLElement, threadName: string) => void;
   /** A review thread started with `session`, the picked agent: the list reads it. */
   onStarted: (session: string) => void;
+  /** The launchpad's Guided review: that message's guide in its thread. Absent: the thread. */
+  onOpenGuide?: (threadId: string, messageId: string) => void;
+  /** Shape boards by thread (`useInboxShapes` `byThread`); absent or null while Shape is off: the launchpad has no Shape door. */
+  shapes?: ReadonlyMap<string, InboxShapeSummary> | null;
+  onOpenShape?: (shape: InboxShapeSummary) => void;
 }
 
 /** A layer's state as the Board's mark draws it. */
@@ -620,6 +629,53 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   ) : null;
   const projects = stackProjects(model, stack);
   const threadName = pullHandoffThreadName(handed, model.links, stack);
+  const pickerNode = picking && canStart && (
+    <ReviewPicker
+      id={pickerId}
+      labelId={primaryId}
+      stack={handed}
+      projects={projects}
+      threadName={threadName}
+      exclude={link ? [link.agent?.session, link.handed_to].filter((s): s is string => !!s) : []}
+      onLaunch={(body, opener) => {
+        // Compose takes it from here: the picker closes, so it never comes back by itself (an agent ending later).
+        setPicking(false);
+        props.onLaunch(handoffKeys(handed), projects, body, pullHandoffAskLine(handed, { kind: 'guide' }), opener, threadName);
+      }}
+      onSending={setPickerSending}
+      onStarted={(session) => {
+        focusSaid.current = true;
+        setAwaiting({ from: linkThread });
+        setPicking(false);
+        props.onStarted(session);
+      }}
+      onCancel={closePicker}
+      onReload={props.state.reload}
+    />
+  );
+  // One open PR opens its launchpad; a stack of several keeps this page.
+  if (stack.layers.length === 1 && start) {
+    return (
+      <PullLaunchpad
+        stack={stack}
+        pr={start}
+        link={link}
+        phone={phone}
+        now={now}
+        heading={heading}
+        said={said}
+        start={canStart ? { id: primaryId, pickerId, ref: primaryButton, waits: primaryWaits, picking, kind: link ? 'again' : 'review', onToggle: () => setPicking((v) => !v) } : null}
+        picker={pickerNode}
+        shapes={props.shapes ?? null}
+        onClose={props.onClose}
+        onDiff={() => props.onReview(stack.id, start.key, 'layer')}
+        onThread={props.onOpenThread}
+        onGuide={(thread, message) => (props.onOpenGuide ? props.onOpenGuide(thread, message) : props.onOpenThread(thread))}
+        onShape={(shape) => props.onOpenShape?.(shape)}
+        foot={link?.last && !ended ? <StackReply key={link.thread_id} link={link} agent={agent ?? 'the agent'} onOpenThread={() => props.onOpenThread(link.thread_id)} /> : null}
+      />
+    );
+  }
   return (
     <section className="ib-pane ib-prpane" aria-labelledby={titleId} data-pulls-stack={stack.id}>
       <div className="ib-pr-bar">
@@ -670,30 +726,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             {openDiff}
           </div>
         )}
-        {picking && canStart && (
-          <ReviewPicker
-            id={pickerId}
-            labelId={primaryId}
-            stack={handed}
-            projects={projects}
-            threadName={threadName}
-            exclude={link ? [link.agent?.session, link.handed_to].filter((s): s is string => !!s) : []}
-            onLaunch={(body, opener) => {
-              // Compose takes it from here: the picker closes, so it never comes back by itself (an agent ending later).
-              setPicking(false);
-              props.onLaunch(handoffKeys(handed), projects, body, pullHandoffAskLine(handed, { kind: 'guide' }), opener, threadName);
-            }}
-            onSending={setPickerSending}
-            onStarted={(session) => {
-              focusSaid.current = true;
-              setAwaiting({ from: linkThread });
-              setPicking(false);
-              props.onStarted(session);
-            }}
-            onCancel={closePicker}
-            onReload={props.state.reload}
-          />
-        )}
+        {pickerNode}
         <div className="ib-pr-order">
           <div className="ib-pr-order-h">
             <b>{ladderHeading(stack)}</b>

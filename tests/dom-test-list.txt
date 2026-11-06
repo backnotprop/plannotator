@@ -525,6 +525,7 @@ packages/inbox/reviewVerdict.test.ts
 packages/inbox/reviewPane.test.tsx
 packages/inbox/reviewJump.test.tsx
 packages/inbox/pulls/pullFilter.test.tsx
+packages/inbox/pulls/pullLaunchpad.test.tsx
 packages/inbox/pulls/pullDetails.test.tsx
 packages/inbox/guideGlobalComment.test.tsx
 packages/inbox/guideExpandContext.test.tsx
