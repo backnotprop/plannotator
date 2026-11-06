@@ -969,11 +969,11 @@ export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
     else asOf = new Date(input.asOf).toISOString();
   }
   const views: ShapeBoard['views'] = {};
-  if (!isRecord(input.views)) c.fail('views', 'is required: { picture, how, know, code }, at least one');
+  if (!isRecord(input.views)) c.fail('views', 'is required: { picture, how, code }, at least one');
   else {
     for (const key of Object.keys(input.views)) {
-      if (key === 'reqs') c.fail('views.reqs', 'Requirements are gone. Put what the person needs to know in views.know, as at most two short paragraphs');
-      else if (!SHAPE_VIEWS.some((v) => v.id === key)) c.fail(`views.${key}`, 'is not a view (picture, how, know, code)');
+      if (key === 'reqs') c.fail('views.reqs', 'Requirements are gone. Put a caveat behind a numbered mark (a ref\'s sub), or say it in your message to the person');
+      else if (!SHAPE_VIEWS.some((v) => v.id === key)) c.fail(`views.${key}`, 'is not a view (picture, how, code)');
     }
     const picture = checkDrawn(c, input.views.picture, 'views.picture');
     const how = checkDrawn(c, input.views.how, 'views.how');
@@ -1319,7 +1319,7 @@ export function shapeBoardNotes(board: Pick<ShapeBoard, 'views' | 'refs'>): stri
   const picture = board.views.picture;
   if (!picture) return notes;
   const words = shapeDrawnWords(picture.html);
-  if (words > 240) notes.push(`The Picture has ${words} words. Read at a glance, about 200 is the most. Move the rest behind numbers (a ref's sub and images) or to views.know.`);
+  if (words > 240) notes.push(`The Picture has ${words} words. Read at a glance, about 200 is the most. Move the rest behind numbers (a ref's sub and images) or to your message to the person.`);
   if (picture.width === undefined) notes.push('The Picture has no width and height, so it scrolls like a page. Give it a fixed canvas: it then always fits one screen.');
   else if (!picture.tall) notes.push('The Picture has no tall drawing, so a phone pans it sideways. That works. For a board you expect on a phone, add views.picture.tall.');
   const cited = [...picture.html.matchAll(/\sdata-ref\s*=\s*["']?(\d{1,3})/g)].map((m) => Number(m[1]));

@@ -10,7 +10,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { shapeParts, type ShapeBoard, type ShapeNote, type ShapeNoteInput, type ShapeRef, type ShapeVersion, type ShapeViewId } from '@plannotator/core/shape';
+import { checkShapeBoard, shapeParts, type ShapeBoard, type ShapeNote, type ShapeNoteInput, type ShapeRef, type ShapeVersion, type ShapeViewId } from '@plannotator/core/shape';
 import { bridgeSanitizerDom } from '../../../../tests/helpers/chat-sanitizer-dom';
 import type { ShapeHost, ShapeLoaded } from './types';
 
@@ -277,6 +277,18 @@ describe.if(hasDom)('the words under the drawing (views.know)', () => {
     expect(know.querySelector('b code')?.textContent).toBe('code');
     expect(dock('Shape')?.getAttribute('aria-pressed')).toBe('true');
     expect(document.querySelector('.shp-dock')?.textContent).not.toContain('Requirements');
+  });
+
+  // Agents are no longer asked for views.know, but one that sends it anyway is not refused, and its words still show.
+  test('a board an agent sends with views.know passes the check and draws its words under the drawing', async () => {
+    const sent = checkShapeBoard({ title: 'Kettle', claim: 'Built.', views: { picture: PICTURE, know: 'Sent anyway [^1].' }, refs: REFS });
+    expect('errors' in sent ? sent.errors : []).toEqual([]);
+    if (!('value' in sent)) return;
+    await mount(sent.value.views);
+    const know = document.querySelector('.shp-know')!;
+    expect(know.previousElementSibling?.classList.contains('shp-drawn')).toBe(true);
+    expect(know.textContent).toBe('Sent anyway 1.');
+    expect(bar()).not.toContain('What to know');
   });
 
   test('a number keeps the word before it and the punctuation after it, and no word is lost or doubled', async () => {

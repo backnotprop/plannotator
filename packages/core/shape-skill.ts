@@ -40,7 +40,7 @@ export const SHAPE_GUIDE = `## The stance
 - A few colours, each with one meaning: a soft zone per group, a small chip for a status (new, open, unproven), a red box for what must never happen. About 200 words at most; no paragraphs.
 - The Picture says what it is; How it works says how it goes. Steps in order go in How it works, not on the Picture. A flow of pictures and logos is fine when the flow is the idea.
 - Paste real images, not boxes that name them. If a screenshot in the folder shows the thing, open it, cut the file down to the part that matters (\`sips -c <h> <w> --cropOffset <y> <x> in.png --out crop.png\`, or any tool), and put it on the Picture beside what it shows, never over it: \`<image href="crop.png" x="…" y="…" width="…" height="…"/>\` (relative to the board file, or absolute; it is copied in). Icons, real logos and drawn things come by name (below). Never make up a logo.
-- What you would say aloud goes behind a number: a reference's \`sub\` (one line), and \`images\` only if the picture shows what the line says. \`crop\` picks the part to show: a whole screen is unreadable in a bubble.
+- What you would say aloud goes behind a number: a reference's \`sub\` (one line), and \`images\` only if the picture shows what the line says. \`crop\` picks the part to show: a whole screen is unreadable in a bubble. A caveat or a "why" that does not draw goes there too, on the part it is about. What does not fit behind a number goes in your message to the person, not on the board.
 - Use the source's own words, names and numbers (the thread, the conversation, the code). Never invent data. If the source contradicts itself and nothing settles it, draw the latest statement and say it is open.
 - Commit to a clear reading. A clear picture can be corrected; a vague one cannot.
 - Handing the board to a helper or subagent? Give it the strongest model you can choose: the board is only as good as the model that draws it.
@@ -64,11 +64,10 @@ export const SHAPE_GUIDE = `## The stance
   "note": "v2: the dialog now says 2 days.",
   "views": {
     "picture": { "html": "<figure data-step=\\"1\\" data-mark=\\"dialog\\">…</figure>", "css": ".x { … }", "width": 1200, "height": 620, "tall": { "html": "…" } },
-    "how": { "html": "<svg viewBox=\\"0 0 1200 420\\">…</svg>", "width": 1200, "height": 420 },
-    "know": "It shows **once, after 2 days** of use, and never again [^1]. Nobody who already snoozed sees it."
+    "how": { "html": "<svg viewBox=\\"0 0 1200 420\\">…</svg>", "width": 1200, "height": 420 }
   },
   "refs": [
-    { "n": 1, "kind": "message", "title": "You set it to 2 days", "target": "msg_…" },
+    { "n": 1, "kind": "message", "title": "You set it to 2 days", "sub": "It shows once, after 2 days of use. Nobody who already snoozed sees it.", "target": "msg_…" },
     { "n": 2, "kind": "file", "title": "The dialog", "target": "src/SnoozeDialog.tsx", "line": 10 },
     { "n": 3, "kind": "image", "title": "Today's dialog", "target": "shot.png" },
     { "n": 4, "kind": "pr", "title": "#2547", "sub": "Adds the dialog", "target": "https://github.com/owner/repo/pull/2547", "images": [{ "src": "pr.png", "alt": "The PR's page" }] }
@@ -79,7 +78,6 @@ export const SHAPE_GUIDE = `## The stance
 - **title:** the subject in plain words. **claim:** one line: where it stands, and whether anything waits on the person now. **note** (optional): one line about this version.
 - **views.picture** (the main view): one screen. HTML and inline SVG. \`width\` and \`height\` make a fixed canvas the board scales to fit. A phone pans it, unless you add \`tall\`: the same parts stacked about 400 px wide.
 - **views.how** (How it works, optional): one precise diagram that answers three questions: when it starts, how it is processed, and what it produces. A flow is often not a straight line: where there are optional branches or different paths, draw them, have them meet in the one drawing, and let the person follow or focus on one (the kit's \`pick\` and \`on\`). A straight line is right when the thing really is one. Give every arrow a verb. Use \`width\` and \`height\` for a fixed canvas the board scales to fit.
-- **views.know** (What to know, optional): what the person needs to know that the drawings can't say, in at most two short paragraphs of prose (1,200 characters). Inline Markdown: \`**bold**\`, \`code\`, links, and \`[^n]\` for reference n.
 - **views.code** (Code, optional): a Guided Review of the change. Leave it out unless the person asks.
 - **refs:** numbered sources; on the Picture, a handful. Any kind can have \`sub\` and \`images\` (\`{ src, alt, crop: [x, y, width, height] }\`, 0 to 1); the bubble shows the first. \`message\` targets a thread message id; \`file\` a path in the project (with \`line\`); \`image\` an image file next to the board's JSON (the store keeps a copy); \`pr\` and \`link\` an https URL.
 
@@ -136,8 +134,8 @@ export const SHAPE_HELP_INTRO = [
   "  plannotator shape open [<shp_id>]",
   "  plannotator shape on | off",
   "",
-  "A shape is a board you draw for the person: a Picture, How it works, What to know",
-  "and Code, with numbered references. Each update stores a new version of the whole board.",
+  "A shape is a board you draw for the person: a Picture, How it works and Code,",
+  "with numbered references. Each update stores a new version of the whole board.",
   "",
   "(none)   Opens Shape's page in the person's browser, or the one already open, and prints its address.",
   "update   Stores the board in <board.json>. Without --id it makes a new shape and",
@@ -180,7 +178,7 @@ DRAFT. The person wants to see the work in this thread the way you see it, so th
 
 ## Steps
 
-1. Read the whole thread (\`read_thread\`, every message). Note: what the work makes, what is settled, what is open and whose call it is, and what happens next. Then pick the one idea to draw; the rest goes behind numbers or in What to know.
+1. Read the whole thread (\`read_thread\`, every message). Note: what the work makes, what is settled, what is open and whose call it is, and what happens next. Then pick the one idea to draw; the rest goes behind numbers or in your message to the person.
 2. Write the board as JSON (the format is below) in a scratch file, such as \`/tmp/shape-<topic>.json\`.
 3. Store it: \`plannotator shape update --file /tmp/shape-<topic>.json --thread <the thread's id: thread_id from read_thread> --through <the latest message id you read>\`. It prints \`{ id, v }\`. Keep the id.
 4. If it is refused, fix what it lists and run it again. Each problem names its field.
