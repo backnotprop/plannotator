@@ -108,11 +108,12 @@ const claims = () => posts.filter((p) => p.path.endsWith('/api/inbox/reveal'));
 const switchSaves = () => posts.filter((p) => p.path.endsWith('/api/inbox/settings'));
 const dialog = () => document.querySelector<HTMLDialogElement>('dialog[data-dialog="board-intro"]');
 
-function row(id: string): InboxListRow {
+/** A row; `project` 2 puts it in a second project (the Board's need: two projects or more). */
+function row(id: string, project: 1 | 2 = 1): InboxListRow {
   const at = new Date(Date.now() - 60_000).toISOString();
   return {
     thread_id: id,
-    project_id: 'prj_1',
+    project_id: `prj_${project}`,
     subject: `Subject ${id}`,
     author: { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null },
     created_at: at,
@@ -123,7 +124,7 @@ function row(id: string): InboxListRow {
     resolved_at: null,
     questions: { open: 0, picked: 0, stopped: false, holds_up: [], prompt: null },
     waiting_on_person: false,
-    project: { id: 'prj_1', name: 'billing' },
+    project: project === 1 ? { id: 'prj_1', name: 'billing' } : { id: 'prj_2', name: 'docs' },
     thread_name: `name-${id}`,
     section: 'sent',
     unread: false,
@@ -136,7 +137,7 @@ function row(id: string): InboxListRow {
   };
 }
 
-const ROWS = ['msg_a', 'msg_b', 'msg_c', 'msg_d', 'msg_e'].map(row);
+const ROWS = ['msg_a', 'msg_b', 'msg_c', 'msg_d', 'msg_e'].map((id, i) => row(id, i === 4 ? 2 : 1));
 
 interface State {
   due: boolean;
@@ -343,6 +344,8 @@ describe.skipIf(!hasDom)('the calm moment', () => {
     ['the thread was open under the read time', {}, { early: true }],
     ['the page is younger than its age', {}, { young: true }],
     ['under five rows', { rows: ROWS.slice(0, 4) }],
+    // Approval "inbox-one-time-dialogs": five threads in flight in two projects or more.
+    ['five rows in one project', { rows: ['msg_a', 'msg_b', 'msg_c', 'msg_d', 'msg_e'].map((id) => row(id)) }],
     ['the first-run screen', { firstRun: true }],
     ['the tour, an update or another one-time dialog this load', { blocked: true }],
     ['a toast is up', { toast: true }],

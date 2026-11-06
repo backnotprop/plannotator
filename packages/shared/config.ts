@@ -504,11 +504,20 @@ export interface PlannotatorConfig {
    * the 3-day patience. `board.shownAt`: the Board reveal was claimed.
    * `steps.shownAt`: the Checklist reveal was claimed. `key` beside either:
    * the claiming page's own key, so that page's retry after a lost answer is
-   * shown it again (any other key is not).
+   * shown it again (any other key is not). The schedule (approval
+   * "inbox-one-time-dialogs"): `dayShownAt`, the last dialog of the line on
+   * any day (the agent note included: one a day); `notNowAt`, the last offer
+   * closed with Not now (four days before the next); `shownLoad`, the page
+   * load that showed the last dialog (never on two loads in a row; the loads
+   * seen since are kept in memory). `waitingSince` also counts the 14 days
+   * after which an entry retires.
    */
   inboxReveals?: {
     lastShownAt?: string;
-    waitingSince?: { snooze?: string; board?: string; steps?: string };
+    dayShownAt?: string;
+    notNowAt?: string;
+    shownLoad?: string;
+    waitingSince?: { sound?: string; list_intro?: string; voice?: string; snooze?: string; board?: string; steps?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
   };

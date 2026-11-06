@@ -100,6 +100,11 @@ async function world(options: Options = {}) {
   const config: Record<string, unknown> = {
     updateCheck: false,
     inboxSnoozeIntro: { firstUseAt: new Date(Date.now() - days * DAY).toISOString(), shownAt: new Date(Date.now() - 3 * DAY).toISOString() },
+    // The update-day dialogs (sound, list options, voice) are first in the line (approval "inbox-one-time-dialogs"):
+    // already settled here (a fresh install's marks), so the offers are what these cases see.
+    inboxSound: { dialogShownFor: options.version ?? RELEASE },
+    inboxListIntro: { shownAt: new Date(Date.now() - days * DAY).toISOString() },
+    inboxVoiceIntro: { shownAt: new Date(Date.now() - days * DAY).toISOString() },
     ...options.config,
   };
   if (options.tailnet === "owner") Object.assign(config, { inboxTailscale: true, inboxTailscaleAllow: [GUEST] });
@@ -589,7 +594,8 @@ describe("the queue with Snooze", () => {
 
   test("the list options dialog's claim counts toward the spacing", async () => {
     const w = await world({ config: { inboxListIntro: { dueAt: new Date(Date.now() - DAY).toISOString() } } });
-    expect(await w.next()).toBe("board");
+    // An update-day dialog: before the offers in the line.
+    expect(await w.next()).toBe("list_intro");
     expect(((await (await w.post("/api/inbox/list-intro")).json()) as Json).show).toBe(true);
     expect(w.saved().inboxReveals.lastShownAt).toBe(w.saved().inboxListIntro.shownAt);
     expect(await w.next()).toBeNull();

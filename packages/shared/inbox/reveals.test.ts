@@ -21,7 +21,8 @@ function state(over: Partial<RevealState> = {}): RevealState {
 
 describe("the order", () => {
   test("Snooze first, then the Board once Snooze is no longer open; nothing once both are spent", () => {
-    expect(INBOX_REVEALS.map((entry) => entry.id)).toEqual(["snooze", "board", "steps"]);
+    // The update-day dialogs first (approval "inbox-one-time-dialogs"), then the offers.
+    expect(INBOX_REVEALS.map((entry) => entry.id)).toEqual(["sound", "list_intro", "voice", "snooze", "board", "steps"]);
     expect(revealNext(state(), NOW)).toBe("snooze");
     expect(revealNext(state({ open: { snooze: false, board: true } }), NOW)).toBe("board");
     expect(revealNext(state({ open: { snooze: false, board: false } }), NOW)).toBeNull();

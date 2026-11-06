@@ -37,6 +37,7 @@ import {
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { revealLoadId } from "@plannotator/shared/inbox/reveals";
 import { codexHome, type AgentEnvironment } from "./inbox-agents";
 import { codexCliCandidates } from "./inbox-codex-wake";
 
@@ -107,8 +108,13 @@ export interface InboxVoiceOptions {
   decidesIntro: boolean;
   /** The name a page over the tailnet shows for this computer. */
   computerName: () => string;
-  /** Another one-time dialog waits to be claimed: the announcement never goes before it. */
-  otherDialogDue: () => boolean;
+  /**
+   * Another one-time dialog waits to be claimed, or the line of one-time dialogs is not free for this page load
+   * (packages/shared/inbox/reveals.ts): the announcement never goes before it. `load`: the page's load id, or null.
+   */
+  otherDialogDue: (load: string | null) => boolean;
+  /** The config to save with the claim at `at`: the line's stamps (`inboxReveals`), or nothing (a dev build). */
+  lineStamp?: (at: string, load: string | null) => Record<string, unknown>;
   json: (body: unknown, status?: number) => Response;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   /** Tests: fake endpoints and where to look for Codex besides PATH. */
@@ -123,6 +129,8 @@ export interface InboxVoice {
   /** `validateOnly`: check `input` and write nothing. */
   save(input: unknown, validateOnly?: boolean): void;
   route(req: Request, url: URL, via: "local" | "tailnet"): Promise<Response | null>;
+  /** The announcement waits for a page (who only: the line's rules apart), as settings' `intro_due` for the owner. */
+  introOpen(): boolean;
   stop(): void;
 }
 
@@ -274,16 +282,16 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
     return typeof intro?.dueAt === "string" && intro.dueAt !== "" && !intro.shownAt && !intro.skippedAt && !isOn();
   };
   /** Only the first claim ever gets true. No await between the last read and the write, so two tabs cannot both win. */
-  const claimIntro = async (via: "local" | "tailnet"): Promise<boolean> => {
-    if (via !== "local" || !introDue() || options.otherDialogDue()) return false;
+  const claimIntro = async (via: "local" | "tailnet", load: string | null = null): Promise<boolean> => {
+    if (via !== "local" || !introDue() || options.otherDialogDue(load)) return false;
     if (!(await checkIntroAudience())) return false;
-    if (!introDue() || options.otherDialogDue()) return false;
+    if (!introDue() || options.otherDialogDue(load)) return false;
     const at = new Date().toISOString();
-    // A one-time announcement: it counts toward the reveals' 48 h spacing (packages/shared/inbox/reveals.ts). A dev build
+    // A one-time announcement: it keeps the line's day and spacing (packages/shared/inbox/reveals.ts). A dev build
     // never stamps that clock.
     saveConfig({
       inboxVoiceIntro: { ...loadConfig().inboxVoiceIntro, shownAt: at },
-      ...(options.decidesIntro ? { inboxReveals: { ...loadConfig().inboxReveals, lastShownAt: at } } : {}),
+      ...(options.decidesIntro ? (options.lineStamp?.(at, load) ?? { inboxReveals: { ...loadConfig().inboxReveals, lastShownAt: at } }) : {}),
     });
     // Not written (a read-only data dir): showing it anyway would show it on every load.
     return loadConfig().inboxVoiceIntro?.shownAt === at;
@@ -365,6 +373,7 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
     json({ error: "Voice did not transcribe this clip.", code, engine: engine(), ...(reason ? { reason } : {}) }, FAILURE_STATUS[code]);
 
   return {
+    introOpen: () => introDue() && introAudience !== false,
     settings: (via, guest = false) => {
       const value = saved();
       return {
@@ -421,7 +430,7 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await options.readBody(req);
         if (checkServerSession(body, options.serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        return json({ show: await claimIntro(via) });
+        return json({ show: await claimIntro(via, revealLoadId(req.headers.get("x-plannotator-load"))) });
       }
       if (path === "/api/inbox/voice/key") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
