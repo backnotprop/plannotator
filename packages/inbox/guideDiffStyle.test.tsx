@@ -1,16 +1,22 @@
 /**
- * Split | Unified in a guided review (approval "inbox-guide-diff-style",
- * #2107): the control sits in a tab rising out of the FIRST section card
- * only, switches every diff in the guide, and is kept where code review keeps
- * its layout (the `plannotator-diff-style` cookie and config.json
- * `diffOptions.diffStyle`). On a phone there is no control and every diff is
- * drawn Unified, the saved layout left as it is.
+ * Split | Unified in a guided review. A guide opens in the full-window review
+ * (approval "inbox-one-review-screen"), whose rule is the owner's note on r7
+ * (docs/agent-guides/inbox-files-and-guides.md, "The review"): the control
+ * sits in a tab rising out of every OPEN chapter card with diffs, each tab one
+ * view of the same setting; a folded chapter, or one without diffs, drops its
+ * tab (the first chapter keeps it). It switches every diff in the guide, and
+ * is kept where code review keeps its layout (the `plannotator-diff-style`
+ * cookie and config.json `diffOptions.diffStyle`). On a phone there is no
+ * control and every diff is drawn Unified, the saved layout left as it is.
+ * (The older first-card-only rule, approval "inbox-guide-diff-style", was the
+ * separate Guided review pane's, removed by "inbox-one-review-screen".)
  *
  * The whole window (InboxApp) over a REAL Inbox server in a temp data dir
  * (tests/helpers/inbox-dom-server.ts, `guide` mode: an agent sent a guided
  * review of two sections through the Inbox's own MCP).
  *
- * The failures this catches: a tab on every card (or none), a click that does
+ * The failures this catches: an open chapter without its tab, a folded one
+ * keeping it, tabs that disagree (a per-chapter setting), a click that does
  * not reach the diffs or the server, a choice config.json does not keep (code
  * review would undo it), config.json's layout not adopted on load, and a
  * phone drawing two narrow columns or rewriting the person's setting.
@@ -211,26 +217,37 @@ const allDrawnIn = (el: ParentNode, style: 'split' | 'unified') => {
 const sectionTabs = (el: ParentNode) => [...el.querySelectorAll('[data-guide-section-tab]')];
 const radio = (el: ParentNode, style: 'split' | 'unified') => el.querySelector<HTMLInputElement>(`[data-diff-style-switch] input[value="${style}"]`)!;
 
-test.skipIf(!hasDom)('the Split | Unified tab rises out of the first section card only', async () => {
+test.skipIf(!hasDom)('the Split | Unified tab rises out of every open chapter with diffs, one setting; a folded chapter drops it', async () => {
   startPage('split');
   writeStyleOnDisk(undefined);
   const el = await openGuide();
+  const cards = () => [...el.querySelectorAll<HTMLElement>('[data-guide-section]')];
+  // Both chapters are open and each has a diff: a tab sits right above each card, which squares its top-right corner under it.
   const tabs = sectionTabs(el);
-  expect(tabs).toHaveLength(1);
-  // The tab sits right above the first card, which squares its top-right corner under it; the second card is untouched.
-  const wrap = tabs[0]!.parentElement!;
-  expect(wrap.hasAttribute('data-guide-section-tabbed')).toBe(true);
-  const [first, second] = [...el.querySelectorAll<HTMLElement>('[data-guide-section]')];
-  expect(first!.parentElement).toBe(wrap);
+  expect(tabs).toHaveLength(2);
+  cards().forEach((card, i) => {
+    const wrap = tabs[i]!.parentElement!;
+    expect(wrap.hasAttribute('data-guide-section-tabbed')).toBe(true);
+    expect(card.parentElement).toBe(wrap);
+    expect(card.style.borderTopRightRadius).toBe('0px');
+  });
+  // Each a radio group named for what it sets (the later ones say which chapter), every one on the saved layout: one setting, not one per chapter.
+  const groups = tabs.map((tab) => tab.querySelector('[role="radiogroup"]')!);
+  expect(groups.map((g) => g.getAttribute('aria-label'))).toEqual(['Diff layout', 'Diff layout, The session']);
+  for (const group of groups) {
+    expect(group.querySelector<HTMLInputElement>('input[value="split"]')!.checked).toBe(true);
+    expect(group.querySelector<HTMLInputElement>('input[value="unified"]')!.checked).toBe(false);
+  }
+  await until(() => allDrawnIn(el, 'split'), 'both diffs drawn split');
+
+  // Folding the second chapter takes its tab away and gives its card its corner back; the first keeps its tab.
+  act(() => cards()[1]!.querySelector<HTMLButtonElement>('button[aria-label="Collapse section"]')!.click());
+  await until(() => sectionTabs(el).length === 1, 'the folded chapter to drop its tab');
+  const [first, second] = cards();
+  expect(first!.parentElement!.hasAttribute('data-guide-section-tabbed')).toBe(true);
   expect(first!.style.borderTopRightRadius).toBe('0px');
   expect(second!.parentElement!.hasAttribute('data-guide-section-tabbed')).toBe(false);
   expect(second!.style.borderTopRightRadius).toBe('');
-  // A radio group named for what it sets, the saved layout checked.
-  const group = tabs[0]!.querySelector('[role="radiogroup"]')!;
-  expect(group.getAttribute('aria-label')).toBe('Diff layout');
-  expect(radio(el, 'split').checked).toBe(true);
-  expect(radio(el, 'unified').checked).toBe(false);
-  await until(() => allDrawnIn(el, 'split'), 'both diffs drawn split');
 }, 30_000);
 
 test.skipIf(!hasDom)('choosing Unified switches the setting every diff reads and saves it where code review reads it', async () => {
@@ -248,7 +265,10 @@ test.skipIf(!hasDom)('choosing Unified switches the setting every diff reads and
   expect(configStore.get('diffStyle')).toBe('unified');
   expect(cookieStyle()).toBe('unified');
   expect(radio(el, 'unified').checked).toBe(true);
-  expect(el.querySelector('[data-diff-style-switch]')!.getAttribute('data-diff-style-switch')).toBe('unified');
+  // Every switch on the page (each chapter's tab, and the top bar's while docked) follows the one choice.
+  const switches = [...el.querySelectorAll('[data-diff-style-switch]')];
+  expect(switches.length >= 2).toBe(true);
+  expect(switches.map((s) => s.getAttribute('data-diff-style-switch'))).toEqual(switches.map(() => 'unified'));
   // And config.json, through the Inbox's settings route, keeping code review's other diff options.
   await until(() => styleOnDisk() === 'unified', 'config.json to say unified');
   expect(settingsPosts.some((body) => body.diff_style === 'unified')).toBe(true);
