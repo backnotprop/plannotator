@@ -107,3 +107,21 @@ describe('restartNote', () => {
     expect(restartNote(null)).toBeNull();
   });
 });
+
+describe('a reply another agent read', () => {
+  test('names the reader, with the time, in place of Delivered', () => {
+    expect(deliveryLine({ ...base, deliveredAt: '2026-10-16T17:12:00.000Z', wakes: false, readBy: 'Claude Code' })).toMatchObject({
+      state: 'delivered',
+      text: 'Read by Claude Code, 5:12 PM',
+    });
+  });
+
+  test('no record: today\'s wording, for a thread from before it was recorded', () => {
+    expect(deliveryLine({ ...base, deliveredAt: '2026-10-16T17:12:00.000Z', wakes: false }).text).toBe('Delivered to Claude Code, 5:12 PM');
+    expect(deliveryLine({ ...base, deliveredAt: '2026-10-16T17:12:00.000Z', wakes: false, readBy: null }).text).toBe('Delivered to Claude Code, 5:12 PM');
+  });
+
+  test('not delivered yet: the name changes nothing', () => {
+    expect(deliveryLine({ ...base, wakes: false, name: 'Cursor', readBy: 'Claude Code' }).text).toStartWith('Saved for Cursor.');
+  });
+});

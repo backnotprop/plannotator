@@ -41,6 +41,13 @@ export interface GuideDiffRendererProps {
   /** The focused card is the keyboard/annotation target. */
   isActive: boolean;
   allowScrollChaining: true;
+  /**
+   * Passed only when the guide fits each file's box to its content (GuideView `fitFileHeights`): the renderer reports the
+   * height its content needs (AllFilesCodeView does). A renderer that ignores it keeps the estimated box.
+   */
+  onContentHeightChange?: (height: number) => void;
+  /** No scroller of its own: as tall as its content, against the page's scroller (a `fitFileHeights` host). */
+  scrollsWithPage?: boolean;
 }
 
 export interface GuideDiffRendererContext {
@@ -105,15 +112,26 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    */
   renderOverviewDiagram?: (diagram: GuideOverviewDiagram) => React.ReactNode | null;
   /**
+   * A picture slot under the title when the guide's overview has no diagram
+   * (the Inbox's code review: "Show me" asks the agent for one). Answering
+   * null (or absent) leaves the guide exactly as it is.
+   */
+  renderOverviewFigure?: () => React.ReactNode | null;
+  /**
+   * The review's own actions on the title's line, ahead of Global comment (GuideView `threadHeading`: the Inbox's
+   * Show me). No other heading draws them. Answering null (or absent) adds nothing.
+   */
+  renderHeadActions?: () => React.ReactNode | null;
+  /**
    * A control the host raises in a small tab out of a section card's top-right
-   * edge (the Inbox: its Split | Unified switch on the first card). Called with
+   * edge (the Inbox: its Split | Unified switch). Called with
    * each card's index (the "Everything else" card's is the number of
    * sections); answering null (or absent) leaves that card exactly as it is.
    * The card draws the tab in its own background and border, only as wide as
    * the control; the host draws only the control. The tab assumes the guide
    * sits on `--background`, as it does in every host.
    */
-  renderSectionTab?: (index: number) => React.ReactNode | null;
+  renderSectionTab?: (index: number, card: { folded: boolean; diffs: number; title: string }) => React.ReactNode | null;
   /**
    * Controls a host draws on a file card's summary row, at its right (the VS
    * Code extension: Open in editor, Diff). Answering null (or absent) leaves
@@ -146,6 +164,14 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    * Absent (guides.show, the VS Code reader): no button and no list.
    */
   globalComments?: GuideGlobalComments;
+  /**
+   * The layout the host's renderer draws, for a content-fit box's first estimate (GuideView `fitFileHeights`):
+   * Split pairs a removed line with an added one on one row. Absent: counted as Unified (an over-estimate in Split,
+   * which the renderer's measured height then corrects).
+   */
+  diffStyle?: 'split' | 'unified';
+  /** The renderer can read a changed file's whole text: it draws an arrow row after the last hunk. For the same estimate. */
+  opensWholeFiles?: boolean;
 }
 
 // The context erases the renderer's extra-prop generic; hosts recover typing at the provider site.

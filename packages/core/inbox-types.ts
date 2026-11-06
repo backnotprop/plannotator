@@ -326,6 +326,27 @@ export function isInboxActionReport(message: { author: { kind: string }; action_
   return message.author.kind === "person" && (message.action_report?.length ?? 0) > 0;
 }
 
+/** The markers around what an agent receives with a question asked from Decision data, each on its own line. */
+export const INBOX_DECISION_ASK_OPEN = "<plannotator-decision-ask>";
+export const INBOX_DECISION_ASK_CLOSE = "</plannotator-decision-ask>";
+
+/**
+ * What the agent receives after the person's words when they ask from Settings -> Decision data. The owner approved
+ * these exact words (2026-11-05, `.product/approved/decision-data/ask-block.txt`), so they change only with the owner.
+ * It goes out only with an Ask: no tool text, skill or `--help` carries it.
+ */
+export const INBOX_DECISION_ASK_BLOCK = [
+  INBOX_DECISION_ASK_OPEN,
+  "The person asked this from Decision data in the Inbox. Answer from what the Inbox has stored, in a reply to this thread:",
+  "- Search with all_projects, more than once, with other words if the first find nothing. Then read each thread that matches: the answer alone does not say why.",
+  "- Say what was asked, the choices, what they chose and when, their own words, and the reasoning in the thread. Give the thread's link.",
+  "- A decision can be made in a plain reply, or changed later in the same thread or in another one. Give the newest and say what it changed from.",
+  "- Say who decided: a recommendation they took, a choice they made, or something the agent did after they said nothing.",
+  "- If it was asked but never decided, say that. If it is not stored, write \"I can't tell from what's stored\" and what you did find. A deleted thread cannot be read. Do not guess a reason.",
+  "- If you can't tell which decision they mean, ask them. Do not pick one for them.",
+  INBOX_DECISION_ASK_CLOSE,
+].join("\n");
+
 export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   "claude-code": "Claude Code",
   claude: "Claude Code",
@@ -368,6 +389,23 @@ export function inboxAgentName(author: { kind: string; host?: string | null; nam
   if (author.name) return author.name;
   if (author.host) return INBOX_HOST_NAMES[author.host] ?? author.host;
   return "An agent";
+}
+
+/**
+ * What was on screen when the person sent a reply from full screen's floating box. Context for the agent, not a
+ * choice: it never touches the words, and only the agent's read gets it (`inboxViewingLine`), never the thread.
+ */
+export interface InboxReplyViewing {
+  /** The open file's name. */
+  name: string;
+  /** The message that carries the file. */
+  message_id: string;
+  /** That message's time, in the person's own time zone. */
+  time?: string;
+  /** A page the attached HTML page links to, when that page is the one on screen. */
+  page?: string;
+  /** They had the version sent open, and the file has changed since. */
+  as_sent?: true;
 }
 
 /** A message or reply. A thread is its root message's id. */
@@ -455,6 +493,12 @@ export interface InboxMessage {
    */
   agent_checked_seq?: number | null;
   agent_checked_at?: string | null;
+  /**
+   * The host of the agent whose read moved `agent_checked_seq`, when it is known not to be the agent the reply was
+   * for (another host's session, new to the thread, settled a reply no connection wakes). Absent otherwise, and on a
+   * thread from before this was recorded: those keep "Delivered".
+   */
+  agent_checked_by?: string | null;
   /**
    * The files an agent attached (send_message's `attachments`), recorded at
    * send time and read only by their ids (see inbox-attachments.ts). Added in
@@ -621,6 +665,14 @@ export interface InboxMessage {
    */
   board_request?: true;
   /**
+   * On the root of a thread the person started from Settings -> Decision data's Ask. The body stays as typed; what
+   * the agent receives for this message (the delivered turn, read_thread) carries `INBOX_DECISION_ASK_BLOCK` after it.
+   * Absent on every other message.
+   */
+  decision_ask?: true;
+  /** On a person's reply sent from full screen's floating box: the file on screen. Rendered for the agent at read time; the body never holds it. */
+  viewing?: InboxReplyViewing;
+  /**
    * On the root of a thread the person started by launching an agent (To:
    * "New Claude Code session"). Absent on every other message.
    */
@@ -678,6 +730,12 @@ export interface InboxMessage {
    * tag) and no longer moves the thread. Absent on every other message.
    */
   handoff?: InboxHandoff | null;
+  /**
+   * A person's reply whose `to` took the place of a session that had ended (the recipient pill, or Send to another
+   * session). Until an agent writes again the person's next reply follows its `to`. Set only by the server, which
+   * checks the session really ended; a reply aimed elsewhere while the asker is live does not carry it.
+   */
+  took_over?: boolean;
 }
 
 /** A hand-off a person's reply carries (`InboxMessage.handoff`). */
@@ -689,7 +747,7 @@ export interface InboxHandoff {
   at: string;
   /** The Undo window passed: the new owner and the former one are handed it. */
   settled_at?: string | null;
-  /** Taken back inside the Undo window: the reply went as an Ask instead. */
+  /** Taken back inside the Undo window (the reply went as an Ask instead), or moved back to the former owner later. */
   undone_at?: string | null;
 }
 
@@ -915,6 +973,8 @@ export interface InboxLaunchRecord {
   agent: InboxLaunchAgent;
   /** The host's own short id (`claude attach <ref>`); null until it started. */
   session_ref: string | null;
+  /** The session it started as, which the root's `to` stops naming once the root moves. Absent until it started, and on an older launch (`inboxLaunchedSession`). */
+  session?: string;
   /** The folder it runs in: the project root, or the scratch folder the Inbox made (its real path). */
   folder: string;
   /** A new scratch folder (`<scratch root>/<slug>`): Delete purges and removes it. Never a project folder. */
@@ -963,6 +1023,8 @@ export interface InboxRun {
   untrusted: boolean;
   /** With `untrusted`: the folder is the home folder, which is never trusted (the how-to says to start inside it). */
   home_folder?: true;
+  /** With `untrusted`: trust here would cover home (a repo rooted there) or the folder is `/`; the how-to says to start in a project with its own repo. Wins over `home_folder`, which home in such a repo carries too, for a window that predates this. */
+  trust_covers_home?: true;
   /** With `untrusted`, for the machine's owner when the host can do it: Trust folder, and what would run once trusted. */
   trust?: { warning: string | null };
   /** `claude attach <ref>` from the folder, for Copy; null before the session exists. */
@@ -972,6 +1034,8 @@ export interface InboxRun {
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */
 export interface InboxDelivery {
   state: "delivered";
+  /** Settled by a read of another agent (its host), not by the session named here (`InboxMessage.agent_checked_by`). */
+  read_by?: string | null;
   /** The connection's host, e.g. `claude-code`. */
   host: string;
   /** The session it was delivered to (the asking message's `author.session`, or the message's `to.session`). */
@@ -1430,6 +1494,11 @@ export interface InboxListRow extends InboxThreadSummary {
   thread_name: string | null;
   section: InboxSectionId;
   /**
+   * The session this thread would reach has ended, as the thread's own note and the delivery line know it (only a
+   * host that can tell: a waking connection, not heard from past the grace). Never in Quiet. Absent otherwise.
+   */
+  session_ended?: boolean;
+  /**
    * Waiting on the person or new to them: drawn bold. Not for a row in New only
    * for the person's own unsent words or comments (`unsent`).
    */
@@ -1486,6 +1555,11 @@ export interface InboxListRow extends InboxThreadSummary {
      * Absent from an older Inbox.
      */
     wakes?: boolean;
+    /**
+     * Settled by a read of another agent than the one it was for: that agent's host ("Read by Claude Code, 6:25 PM").
+     * Absent otherwise, and on a thread from before this was recorded.
+     */
+    read_by?: string;
     /**
      * When the reply tags agents (`InboxMessage.tags`): every session it goes
      * to, the owner first, each with its own delivery ("1 of 3 delivered").
@@ -2362,10 +2436,26 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh";
  * the pictures rule, measured again the same way: 11,468 → 11,410 bytes
  * (-58, -14 tokens), so 11,456 with Pi's wrapper (checked within 5% by
  * inbox-board-switch.test.ts).
+ * Agents and initiatives (the card action's `initiative` field, carrying
+ * INBOX_CARD_INITIATIVE_RULE; approval "board-initiatives"): measured on Pi
+ * with the cost test, main 11,581 → 12,005 bytes (+424); the description
+ * stays 1,940 characters; Board off unchanged. Tokens scaled at about 4
+ * bytes a token for the added prose (+137 from the stated 11,456), so 3,273.
+ * With the op `initiative_delete` (its name in the enum, +20 bytes): 12,025
+ * bytes, tokens scaled the same way (+5), so 3,278. The sentence on clearing
+ * out is not in the tool: `plannotator card --help` and a per-call nudge.
+ * The `snooze_thread` action (its name in `action`, its tag on `thread_id` and
+ * its `until` field; no line in the description): 10,095 → 10,248 bytes with
+ * Pi's wrapper, measured from the entry, not on real Pi (+153; tokens estimated
+ * at +40, so 2,790). Board on, measured the same way from a real tools/list:
+ * 11,779 bytes (tokens estimated at the old ratio, 3,224). Most of that gap from
+ * 11,456 is older than this action.
+ * Both landed together (snooze_thread above, 11,779 bytes, plus the +444 of initiatives above): 12,223 bytes,
+ * tokens +142, so 3,366; the board-switch test checks the bytes within 5%.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 10096, tokens: 2750 };
+const INBOX_TOOL_COST_NOW = { bytes: 10248, tokens: 2790 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11456, tokens: 3136 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 12223, tokens: 3366 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval

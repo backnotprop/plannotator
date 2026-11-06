@@ -4,7 +4,7 @@
  * and the feedback text a Send carries after the picks.
  */
 
-import { INBOX_GUIDE_FEEDBACK_TITLE, inboxReviewTitleLine } from '@plannotator/core/inbox-review';
+import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE, inboxReviewTitleLine } from '@plannotator/core/inbox-review';
 import { inboxUrl, machineOf } from './inboxUrl';
 import { shouldStripFrontmatter } from '@plannotator/core/annotatable';
 import { diagramAnchorLocationLine, parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
@@ -380,7 +380,7 @@ export function recordTag(record: InboxAnnotationRecord): string | null {
 export function recordQuote(record: InboxAnnotationRecord): string {
   const comment = guideCommentOf(record);
   if (!comment) return annotationQuote(annotationOf(record));
-  const lines = (comment.selectedText ?? comment.originalCode ?? '').split('\n');
+  const lines = (comment.selectedText ?? comment.anchorText ?? comment.originalCode ?? '').split('\n');
   const first = lines.find((line) => line.trim() !== '')?.trim() ?? '';
   return `${cutText(first, 120)}${lines.length > 1 && first ? ' …' : ''}`;
 }
@@ -405,6 +405,15 @@ function conventionalPrefix(comment: CodeAnnotation): string {
   return `**${label}${decorations.length ? ` (${decorations.join(', ')})` : ''}:** `;
 }
 
+/** Heading suffix of a comment on lines outside the diff, as the review app's export writes it. */
+/** The lines an expand arrow opened, as a comment on them quotes: its own side's text, since the two sides number apart. */
+export function openedLinesQuote(contents: { oldContent: string | null; newContent: string | null }, side: 'old' | 'new', lineStart: number, lineEnd: number): string {
+  const text = side === 'new' ? contents.newContent : contents.oldContent;
+  return text ? text.split('\n').slice(lineStart - 1, lineEnd).join('\n') : '';
+}
+
+const OUTSIDE_DIFF_LABEL = '(not in the diff)';
+
 /**
  * One comment as the review app's export writes it (exportReviewFeedback in
  * packages/review-editor/utils/exportFeedback.ts, line scope): the line range
@@ -417,10 +426,15 @@ function guideCommentEntry(comment: CodeAnnotation, heading: string): string {
     ? ` — \`\`${comment.tokenText.replace(/`/g, '\\`')}\`\`${comment.charStart != null ? ` (chars ${comment.charStart}-${comment.charEnd})` : ''}`
     : '';
   const prefix = conventionalPrefix(comment);
-  let output = `${heading} ${range} (${comment.side})${token}\n`;
+  let output = `${heading} ${range} (${comment.side})${token}${comment.outsideDiff ? ` ${OUTSIDE_DIFF_LABEL}` : ''}\n`;
+  if (comment.outdated) output += '[Outdated — the code changed after this comment]\n';
   if (comment.text) output += `${prefix}${comment.text}\n`;
   else if (prefix) output += `${prefix.trimEnd()}\n`;
   if (comment.selectedText) output += `\n**Highlighted text:**\n${fenced(comment.selectedText)}`;
+  const opened = comment.outsideDiff ? (comment.anchorText ?? comment.originalCode) : '';
+  if (opened) output += `\n**Code:**\n${fenced(opened)}`;
+  // The code block already quotes the lines; a suggestion still shows what it replaces.
+  if (comment.outsideDiff && !comment.suggestedCode) return `${output}\n`;
   if ((comment.suggestedCode || comment.text) && comment.originalCode) output += `\n**Replaces:**\n${fenced(comment.originalCode)}`;
   if (comment.suggestedCode) output += `\n**Suggested code:**\n${fenced(comment.suggestedCode)}`;
   return `${output}\n`;
@@ -547,7 +561,7 @@ export function isFileComment(record: InboxAnnotationRecord): boolean {
 }
 
 export const MESSAGE_FEEDBACK_HEADING = {
-  title: 'Feedback on your messages',
+  title: INBOX_MESSAGE_FEEDBACK_TITLE,
   intro: 'The following feedback is on the text of your messages in this thread, one section per message. Each quote is the words I selected (as shown on screen) in your message.',
   /** Added to the intro only when a comment is on a diagram part. */
   diagrams: 'A quote with a "Diagram" line under it is a part of a diagram in the message; its lines count from the top of the message.',
@@ -627,7 +641,7 @@ export function messageFeedback(records: readonly InboxAnnotationRecord[], time:
 }
 
 export const ATTACHMENT_FEEDBACK_HEADING = {
-  title: 'Feedback on the attached files',
+  title: INBOX_ATTACHMENT_FEEDBACK_TITLE,
   intro: 'The following feedback is on the files you attached, one section per file and version.',
 };
 

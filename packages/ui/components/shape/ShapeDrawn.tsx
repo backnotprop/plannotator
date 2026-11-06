@@ -25,12 +25,25 @@ import {
   type ShapeRef,
 } from '@plannotator/core/shape';
 import { useReducedMotion } from './Pebble';
+import { syncKeptBoxes, type KeptBox } from './boxSelect';
+
+/** A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first. */
+function resolveFiles(html: string, resolve: ((src: string) => string) | undefined): string {
+  if (!resolve) return html;
+  const attr = (url: string) => url.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  return html.replace(/(<(?:img|image)\b[^>]*?\s(?:src|href)=")(files\/[^"]+)"/gi, (_, head: string, src: string) => `${head}${attr(resolve(src))}"`);
+}
 
 export interface MarkState {
   fresh: ReadonlySet<string>;
   erasing: ReadonlySet<string>;
   noted: ReadonlySet<string>;
 }
+
+/** A tagged part's top padding at least: the tag (2 px down, about 19 px tall) and a gap above the part's words. */
+const TAG_ROOM = 28;
+/** A tagged part's own inline padding-top, to put back when its tag goes. */
+const tagPads = new WeakMap<HTMLElement, string>();
 
 export const NO_MARKS: MarkState = { fresh: new Set(), erasing: new Set(), noted: new Set() };
 
@@ -53,6 +66,17 @@ export const SHAPE_FRAME_CSS = `
   --surface: var(--card);
   --raise: var(--popover);
   --sunk: var(--muted);
+  --alert: var(--destructive);
+  /* A few zone colours, each a hue mixed toward the ink (lines, words) or the paper (fills), so light and dark both hold. */
+  --blue: color-mix(in oklab, #2f6fb0 74%, var(--ink));
+  --blue-soft: color-mix(in oklab, #2f6fb0 13%, var(--paper));
+  --amber: color-mix(in oklab, #b87a12 76%, var(--ink));
+  --amber-soft: color-mix(in oklab, #d9971f 16%, var(--paper));
+  --green: color-mix(in oklab, #2b8a57 74%, var(--ink));
+  --green-soft: color-mix(in oklab, #2b8a57 13%, var(--paper));
+  --plum: color-mix(in oklab, #9b3f78 74%, var(--ink));
+  --plum-soft: color-mix(in oklab, #9b3f78 12%, var(--paper));
+  --alert-soft: color-mix(in oklab, var(--destructive) 11%, var(--paper));
   position: relative;
   container-type: inline-size;
   container-name: board;
@@ -63,14 +87,16 @@ export const SHAPE_FRAME_CSS = `
 }
 .board.canvas { container-type: normal; transform-origin: 0 0; }
 *, *::before, *::after { box-sizing: border-box; }
-svg { overflow: visible; }
+svg { overflow: visible; } svg svg { overflow: hidden; }
 svg text { fill: var(--ink); font-family: inherit; }
 svg .ink { stroke: var(--ink); fill: var(--paper); } svg .line { stroke: var(--ink); fill: none; }
 svg .grey { stroke: var(--grey); fill: none; } svg .acc { stroke: var(--mark); fill: none; }
-svg .acc-fill { fill: var(--mark-soft); stroke: var(--mark); } svg .dash { stroke-dasharray: 6 6; }
-svg .t-acc { fill: var(--mark); } svg .t-grey { fill: var(--grey); } svg .t-ink2 { fill: var(--ink2); }
+svg .acc-fill { fill: var(--mark-soft); stroke: var(--mark); } svg .dash { stroke-dasharray: 6 6; } svg .dash:not([fill]) { fill: none; } svg .dash:not([stroke]) { stroke: var(--grey); } svg .line.dash { stroke: var(--ink); } svg .acc.dash { stroke: var(--mark); } svg .alert.dash { stroke: var(--alert); } svg .grey.dash { stroke: var(--grey); } svg .acc-fill.dash { fill: var(--mark-soft); stroke: var(--mark); }
+svg .t-acc { fill: var(--mark); } svg .t-grey { fill: var(--grey); } svg .t-ink2 { fill: var(--ink2); } svg .alert { stroke: var(--alert); fill: none; } svg .t-alert { fill: var(--alert); } svg .t-mono { font-family: var(--font-mono, ui-monospace, monospace); }
 a { color: var(--mark); text-decoration: none; }
 img { max-width: 100%; }
+svg .obj { filter: drop-shadow(0 3px 10px rgb(0 0 0 / .18)); }
+.if-dark { opacity: var(--shp-is-dark, 0); } .if-light { opacity: calc(1 - var(--shp-is-dark, 0)); }
 
 /* Draw: parts arrive in step order; lines draw on. */
 .board.entering [data-step] { animation: shp-draw-in .5s cubic-bezier(.2,.7,.2,1) both; animation-delay: calc(.32s + var(--i, 0) * 110ms); }
@@ -81,7 +107,19 @@ img { max-width: 100%; }
 @keyframes shp-stroke-on { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes shp-fade-out { to { opacity: 0; } }
 .board.skip [data-step], .board.skip .draw, .board.skip .mk { animation: none !important; }
+
+/* A thing that travels (data-to): from its place to its point, again and again. Reduced motion: it holds still halfway. */
+.shp-go { animation: shp-go 3.4s cubic-bezier(.45,0,.4,1) infinite; }
+@keyframes shp-go { 0%, 8% { transform: translate(0, 0); opacity: 0; } 16% { opacity: 1; } 62% { transform: translate(var(--dx), var(--dy)); opacity: 1; } 72%, 100% { transform: translate(var(--dx), var(--dy)); opacity: 0; } }
+.board.reduce .shp-go { animation: none; transform: translate(calc(var(--dx) / 2), calc(var(--dy) / 2)); }
+@media (prefers-reduced-motion: reduce) { .shp-go { animation: none; transform: translate(calc(var(--dx) / 2), calc(var(--dy) / 2)); } }
 .board.reduce.entering [data-step], .board.reduce.entering .draw { animation: shp-fade-only .16s linear both; animation-delay: 0s; stroke-dasharray: none; }
+
+/* A board that takes a dragged box: the cross everywhere but a number, and no words selected on the way. */
+@media (pointer: fine) {
+  .board.boxable, .board.boxable * { cursor: crosshair !important; -webkit-user-select: none; user-select: none; }
+  .board.boxable .shp-rb, .board.boxable .shp-rb * { cursor: pointer !important; }
+}
 
 /* A marked part: the ring while the agent reads it; erased and redrawn when it changes. */
 .mk { border-radius: 6px; transition: box-shadow .25s, background-color .25s; }
@@ -94,6 +132,13 @@ img { max-width: 100%; }
 @keyframes shp-swash { 0% { --s: 0%; } 22% { --s: 100%; } 70% { --s: 100%; opacity: 1; } 100% { --s: 100%; background-color: transparent; } }
 .board.reduce .mk.erasing { animation: shp-fade-out .12s linear forwards; mask-image: none; -webkit-mask-image: none; }
 .board.reduce .mk.fresh { animation: none; background-size: 100% 100%; }
+
+/* A part a host tags: "changed" (a redrawn part, with .fresh) or "changed since asked" (.shp-stale: its code moved on).
+   The ring and the tag stay inside the part's own box, so they never cover a connector's label or a neighbour; the
+   tag gets room at the top of the part (the host's effect pads it), and an untagged part keeps its layout. */
+.mk.shp-stale { outline: 1.5px dashed color-mix(in oklab, var(--warning, var(--mark)) 80%, transparent) !important; outline-offset: -5px; }
+.mk[data-shp-tag]::after { content: attr(data-shp-tag); position: absolute; top: 2px; right: 8px; z-index: 1; font: 600 10.5px/1 var(--font-mono, ui-monospace, monospace); letter-spacing: .04em; text-transform: uppercase; padding: 4px 6px; border-radius: 6px; background: var(--mark); color: var(--primary-foreground); white-space: nowrap; pointer-events: none; }
+.mk.shp-stale[data-shp-tag]::after { background: color-mix(in oklab, var(--warning, var(--mark)) 22%, var(--paper)); color: color-mix(in oklab, var(--warning, var(--mark)) 60%, var(--ink)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning, var(--mark)) 50%, transparent); }
 
 /* A part that opens code. */
 .shp-cl { cursor: pointer; outline: 1.5px dashed transparent; outline-offset: 3px; transition: outline-color .15s; }
@@ -109,6 +154,14 @@ img { max-width: 100%; }
 .shp-rb.flash { animation: shp-rb-flash 1.6s ease-out; }
 @keyframes shp-rb-flash { 0%, 40% { background: var(--mark); color: var(--primary-foreground); box-shadow: 0 0 0 0 color-mix(in oklab, var(--mark) 55%, transparent); transform: scale(1.35); } 100% { box-shadow: 0 0 0 12px transparent; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .shp-rb.flash { animation: none; background: var(--mark); color: var(--primary-foreground); } }
+/* A number the agent drew: its own look; it grows a little under the pointer. */
+.shp-rb.own { display: revert; min-width: 0; height: auto; padding: 0; margin: 0; border-radius: 0; background: none; box-shadow: none; color: inherit; font: inherit; vertical-align: baseline; transform-box: fill-box; transform-origin: center; transition: transform .14s cubic-bezier(.2,.8,.2,1); }
+.shp-rb.own:hover, .shp-rb.own.lit { background: none; color: inherit; transform: scale(1.14); }
+.shp-rb.own.flash { animation: shp-rb-own-flash 1.2s ease-out; }
+@keyframes shp-rb-own-flash { 0%, 40% { transform: scale(1.3); } 100% { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .shp-rb.own, .shp-rb.own:hover, .shp-rb.own.lit { transform: none; transition: none; } .shp-rb.own.flash { animation: none; } }
+/* A finger needs more than 16 px. */
+@media (pointer: coarse) { .shp-rb.own:focus-visible { outline: none; } .board.peek .shp-rb:not(.own) { position: relative; min-width: 22px; height: 22px; font-size: 12px; } .board.peek .shp-rb:not(.own)::after { content: ""; position: absolute; inset: -11px; } }
 `;
 
 // One sanitizer of our own, so its hook reaches no other DOMPurify user.
@@ -181,8 +234,15 @@ export interface ShapeDrawnProps {
   refHover?: number | null;
   refFlash?: number | null;
   onRefHover?: (n: number | null) => void;
-  /** A bubble was opened (PR and link bubbles open their URL themselves). */
+  /** A bubble was opened (PR and link bubbles open their URL themselves, unless they carry a picture). */
   onRefOpen?: (n: number) => void;
+  /** A fixed canvas in a narrow space keeps a readable size and scrolls sideways. Absent: it shrinks to fit. */
+  pan?: boolean;
+  /**
+   * The bubble's preview: hover or keyboard focus shows it (null hides it), a tap on a touch
+   * screen pins it. Absent: a bubble only lights and opens, as before.
+   */
+  onRefPeek?: (n: number | null, el: HTMLElement, how: 'hover' | 'focus' | 'tap') => void;
   /**
    * A part with `data-code="path#L42"` was clicked (or Enter on it): the host
    * opens that file at that line. Absent: `data-code` does nothing. While
@@ -196,6 +256,14 @@ export interface ShapeDrawnProps {
   /** Select mode: a text selection inside a mark picks it. Board only. */
   select?: boolean;
   marks?: MarkState;
+  /** Marked parts whose code changed since the drawing was made: a dashed outline, and the `tags.stale` words on them. */
+  stale?: ReadonlySet<string>;
+  /** Words a host puts on parts: `fresh` on `marks.fresh` parts ("changed"), `stale` on `stale` ones. Absent: no tag. */
+  tags?: { fresh?: string; stale?: string };
+  /** A dragged box can start here: the cross cursor, and no text selection. Board only. */
+  boxable?: boolean;
+  /** Kept boxes with their comments, on this view. Board only. */
+  boxes?: readonly KeptBox[];
   onHoverMark?: (el: HTMLElement | null) => void;
   /** A marked part was chosen; `text` is the selected words in Select mode. */
   onPickMark?: (el: HTMLElement, text?: string) => void;
@@ -243,7 +311,8 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
   const css = useTall ? drawn.tall!.css ?? drawn.css ?? '' : drawn.css ?? '';
   const scaled = canvas && !useTall;
   // No height to fill (a diagram in a flowing page): fit the width alone.
-  const k = scaled && fit ? Math.max(0.2, Math.min(fit.w / drawn.width!, fit.h > 40 ? fit.h / drawn.height! : Infinity, 1.08)) : 1;
+  const pan = !!props.pan && scaled && narrow;
+  const k = scaled && fit ? Math.max(pan ? 0.55 : 0.2, Math.min(fit.w / drawn.width!, fit.h > 40 ? fit.h / drawn.height! : Infinity, 1.08)) : 1;
   const [contentKey, setContentKey] = useState(0);
 
   // The content: sanitized once per change, then marked up for the board.
@@ -253,7 +322,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     const root = rootRef.current ?? host.attachShadow({ mode: 'open' });
     rootRef.current = root;
     const safeCss = shapeCssProblems(css).length ? '' : css;
-    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}">${sanitizeShapeHtml(html)}</div>`;
+    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}${handlers.current.onRefPeek ? ' peek' : ''}">${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc)}</div>`;
     const board = root.querySelector<HTMLElement>('.board')!;
     // Steps: the agent's numbers, in order, become 0, 1, 2… however sparse.
     const steps = [...board.querySelectorAll<HTMLElement | SVGElement>('[data-step]')];
@@ -267,12 +336,14 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
         el.remove();
         continue;
       }
-      el.textContent = String(n);
+      // Empty: the board draws the number. Not empty: what the agent drew is the number.
+      if (!el.children.length && !el.textContent?.trim()) el.textContent = String(n);
+      else el.classList.add('own');
       el.classList.add('shp-rb');
       el.setAttribute('role', ref.kind === 'pr' || ref.kind === 'link' ? 'link' : 'button');
       el.setAttribute('tabindex', '0');
       el.setAttribute('aria-label', `Reference ${n}: ${ref.title}`);
-      el.setAttribute('title', ref.title);
+      if (!handlers.current.onRefPeek) el.setAttribute('title', ref.title);
     }
     if (handlers.current.onCode) {
       for (const el of board.querySelectorAll<HTMLElement>('[data-code]')) {
@@ -283,8 +354,6 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
         if (!el.hasAttribute('title')) el.setAttribute('title', `Open ${at.path} at line ${at.line}`);
       }
     }
-    const resolve = handlers.current.resolveSrc;
-    if (resolve) for (const img of board.querySelectorAll<HTMLImageElement>('img[src^="files/"]')) img.src = resolve(img.getAttribute('src')!);
     setContentKey((x) => x + 1);
   }, [html, css, scaled]);
 
@@ -309,9 +378,20 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     board.classList.toggle('skip', skip);
     board.classList.toggle('reduce', reduce);
     board.classList.toggle('pinpointing', pinpoint);
-  }, [phase, skip, reduce, pinpoint, contentKey]);
+    board.classList.toggle('boxable', !!props.boxable);
+  }, [phase, skip, reduce, pinpoint, props.boxable, contentKey]);
 
-  // Marks.
+  // Kept boxes: inside the drawing, so they scroll and scale with it. A box belongs to the layout it was drawn on.
+  const boxes = props.boxes;
+  useLayoutEffect(() => {
+    const board = rootRef.current?.querySelector<HTMLElement>('.board');
+    if (board && boxes) syncKeptBoxes(board, boxes.filter((b) => !!b.box.tall === useTall), scaled ? k : 1);
+  }, [boxes, useTall, scaled, k, contentKey]);
+
+  // Marks, and a host's tags on them.
+  const stale = props.stale;
+  const freshTag = props.tags?.fresh;
+  const staleTag = props.tags?.stale;
   useLayoutEffect(() => {
     const board = rootRef.current?.querySelector<HTMLElement>('.board');
     if (!board) return;
@@ -320,8 +400,30 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       el.classList.toggle('noted', marks.noted.has(id));
       el.classList.toggle('erasing', marks.erasing.has(id));
       el.classList.toggle('fresh', marks.fresh.has(id));
+      const isStale = !!stale?.has(id);
+      el.classList.toggle('shp-stale', isStale);
+      const tag = isStale ? staleTag : marks.fresh.has(id) ? freshTag : undefined;
+      if (tag) {
+        el.setAttribute('data-shp-tag', tag);
+        // The tag sits in the part's corner: a part the drawing left in the flow becomes its containing block.
+        if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
+        // Room for it above the part's own words; the part's own padding kept here (never in the DOM, where
+        // the drawing could have written it) to put back when the tag goes.
+        if (!tagPads.has(el)) {
+          tagPads.set(el, el.style.paddingTop);
+          const top = parseFloat(getComputedStyle(el).paddingTop) || 0;
+          if (top < TAG_ROOM) el.style.paddingTop = `${TAG_ROOM}px`;
+        }
+      } else {
+        el.removeAttribute('data-shp-tag');
+        const pad = tagPads.get(el);
+        if (pad !== undefined) {
+          el.style.paddingTop = pad;
+          tagPads.delete(el);
+        }
+      }
     }
-  }, [marks, contentKey]);
+  }, [marks, stale, freshTag, staleTag, contentKey]);
 
   // Bubbles: lit with their list row, flashed from it.
   useEffect(() => {
@@ -345,18 +447,36 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       if (!h.pinpoint || bubbleOf(e.composedPath())) return hover(null);
       hover(markOf(e.composedPath()) ?? null);
     };
+    let lastPointer = 'mouse';
+    const onDown = (e: Event) => {
+      lastPointer = (e as PointerEvent).pointerType || 'mouse';
+    };
     const onOver = (e: Event) => {
       const b = bubbleOf(e.composedPath());
-      if (b) handlers.current.onRefHover?.(Number(b.getAttribute('data-ref')));
+      if (!b) return;
+      const n = Number(b.getAttribute('data-ref'));
+      handlers.current.onRefHover?.(n);
+      if ((e as PointerEvent).pointerType !== 'touch') handlers.current.onRefPeek?.(n, b, 'hover');
     };
     const onOut = (e: Event) => {
-      if (bubbleOf(e.composedPath())) handlers.current.onRefHover?.(null);
+      const b = bubbleOf(e.composedPath());
+      if (!b) return;
+      handlers.current.onRefHover?.(null);
+      if ((e as PointerEvent).pointerType !== 'touch') handlers.current.onRefPeek?.(null, b, 'hover');
+    };
+    const onFocusIn = (e: Event) => {
+      const b = bubbleOf(e.composedPath());
+      if (b?.matches(':focus-visible')) handlers.current.onRefPeek?.(Number(b.getAttribute('data-ref')), b, 'focus');
+    };
+    const onFocusOut = (e: Event) => {
+      const b = bubbleOf(e.composedPath());
+      if (b) handlers.current.onRefPeek?.(null, b, 'focus');
     };
     const openBubble = (b: HTMLElement) => {
       const n = Number(b.getAttribute('data-ref'));
       const ref = (handlers.current.refs ?? []).find((r) => r.n === n);
       if (!ref) return;
-      if (ref.kind !== 'pr' && ref.kind !== 'link') handlers.current.onRefOpen?.(n);
+      if ((ref.kind !== 'pr' && ref.kind !== 'link') || (handlers.current.onRefPeek && ref.images?.length)) handlers.current.onRefOpen?.(n);
       else {
         const url = shapeLinkUrl(ref.target);
         if (url) window.open(url, '_blank', 'noreferrer');
@@ -371,7 +491,12 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       const b = bubbleOf(path);
       if (b) {
         e.stopPropagation();
-        openBubble(b);
+        // A tap has no hover: the first shows the bubble; the host opens it from there.
+        if (lastPointer === 'touch' && handlers.current.onRefPeek) {
+          (b as HTMLElement).blur?.();
+          handlers.current.onRefPeek(Number(b.getAttribute('data-ref')), b, 'tap');
+        }
+        else openBubble(b);
         return;
       }
       // A drawing's link never moves the page it sits on: `#…` scrolls inside the drawing (never the host's
@@ -425,6 +550,9 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
         if (mark && root.contains(mark)) h.onPickMark!(mark, text);
       });
     };
+    root.addEventListener('pointerdown', onDown);
+    root.addEventListener('focusin', onFocusIn);
+    root.addEventListener('focusout', onFocusOut);
     root.addEventListener('pointermove', onMove);
     root.addEventListener('pointerover', onOver);
     root.addEventListener('pointerout', onOut);
@@ -432,6 +560,9 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     root.addEventListener('keydown', onKey);
     root.addEventListener('mouseup', onUp);
     return () => {
+      root.removeEventListener('pointerdown', onDown);
+      root.removeEventListener('focusin', onFocusIn);
+      root.removeEventListener('focusout', onFocusOut);
       root.removeEventListener('pointermove', onMove);
       root.removeEventListener('pointerover', onOver);
       root.removeEventListener('pointerout', onOut);
@@ -451,7 +582,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
   return (
     <div
       ref={frameRef}
-      className={`shp-drawn${canvas ? ' canvas' : ''}${useTall ? ' tall' : ''}`}
+      className={`shp-drawn${canvas ? ' canvas' : ''}${useTall ? ' tall' : ''}${pan ? ' pan' : ''}`}
       style={FRAME_CONTAIN}
       onPointerLeave={() => props.onHoverMark?.(null)}
     >
@@ -476,6 +607,9 @@ export function ShapeDiagram({
   resolveSrc,
   animate = true,
   className,
+  marks,
+  stale,
+  tags,
 }: {
   drawn: ShapeDrawnView;
   refs?: readonly ShapeRef[];
@@ -485,6 +619,12 @@ export function ShapeDiagram({
   /** Draw in on mount. Default true (reduced motion: a short fade). */
   animate?: boolean;
   className?: string;
+  /** Marks on parts by `data-mark` id (ShapeDrawn's): `noted` rings a part (you are here), `fresh` redraws one. Default none. */
+  marks?: MarkState;
+  /** Parts whose code changed since the drawing was made. Default none. */
+  stale?: ReadonlySet<string>;
+  /** Words on tagged parts (ShapeDrawn's `tags`). Default none. */
+  tags?: ShapeDrawnProps['tags'];
 }) {
   const [phase, setPhase] = useState<'entering' | 'drawn'>(animate ? 'entering' : 'drawn');
   const [hover, setHover] = useState<number | null>(null);
@@ -508,6 +648,9 @@ export function ShapeDiagram({
         }}
         onCode={onCode}
         resolveSrc={resolveSrc}
+        {...(marks ? { marks } : {})}
+        {...(stale ? { stale } : {})}
+        {...(tags ? { tags } : {})}
       />
     </div>
   );

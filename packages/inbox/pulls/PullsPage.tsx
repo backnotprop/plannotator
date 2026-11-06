@@ -4,6 +4,10 @@
  * the Inline take): a sidebar row, shown only while Settings → Capabilities →
  * Code review is on. It needs no Board.
  *
+ * - The head: "Reviews", and on its right the filter mark (approval
+ *   "pr-list-filters", round 7 take B; PullFilter.tsx): the view (All, Mine,
+ *   To review, Others) and the project, kept in the address (`&view=`,
+ *   `&project=`) and named once in a quiet line over the list.
  * - The list, in the Inbox list's own rows and bands, grouped by whose move
  *   it is: On you (a teammate asked for the person's review, or the
  *   person's agent opened a PR that waits on them), Ready to land, and a
@@ -30,7 +34,6 @@ import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { InboxApiError, inboxApi, type ProjectFolder } from '../api';
 import { HostMark, Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
-import { ProjectFilter } from '../board/ProjectFilter';
 import { RowAgentTiles } from '../components/RowAgents';
 import { Tip } from '../components/Tip';
 import { relativeTime, relativeWords, useRelativeClock } from '../relativeTime';
@@ -48,6 +51,7 @@ import {
   ladderHeading,
   layerPill,
   linkAgentName,
+  pullFilterEmptyWords,
   pullGroups,
   pullHandoffAskLine,
   pullHandoffThreadName,
@@ -58,7 +62,9 @@ import {
   rowMeta,
   stackProjects,
   stackTitle,
+  type PullFilter,
 } from './model';
+import { PullFilterControl, PullScopeLine, useFilterTrigger } from './PullFilter';
 import { forgeName, initials, repoLabels, repoName } from './labels';
 import { answeredClis, pullsEmptyWords, pullsNotices } from './notices';
 import { ReviewPicker } from './ReviewPicker';
@@ -70,11 +76,14 @@ export interface PullsPageProps {
   /** The stack open beside the list (its id, or any layer's key), or null. */
   stackId: string | null;
   project: string | null;
+  /** The list's view (`&view=`): All, Mine, To review or Others. */
+  filter: PullFilter;
   projects: readonly ProjectFolder[];
   projectNames: ReadonlyMap<string, string>;
   phone: boolean;
   onOpenStack: (id: string | null) => void;
-  onProject: (id: string | null) => void;
+  /** A new view and project from the filter, in one step. */
+  onScope: (next: { filter: PullFilter; project: string | null }) => void;
   /** Phase 1's review mode on one layer (`scope` layer), or on the stack up to it (`stack`). */
   onReview: (stackId: string, layerKey: string, scope: 'layer' | 'stack') => void;
   onOpenThread: (threadId: string) => void;
@@ -94,32 +103,51 @@ function markState(pull: InboxPull): 'open' | 'draft' | 'merged' | 'closed' {
   return pull.state;
 }
 
-export function PullsPage(props: PullsPageProps) {
-  const { state, phone } = props;
-  const model = state.model;
-  const groups = useMemo(() => (model ? pullGroups(model, props.project) : null), [model, props.project]);
-  const open = groups && props.stackId ? findStack(groups, props.stackId) : null;
+export function PullsPage(given: PullsPageProps) {
+  const model = given.state.model;
   // The filter offers the projects that have a GitHub or GitLab remote here.
   const offered = useMemo(() => {
     const ids = new Set(Object.values(model?.projects ?? {}).flat());
-    return props.projects.filter((p) => ids.has(p.id));
-  }, [model, props.projects]);
+    return given.projects.filter((p) => ids.has(p.id));
+  }, [model, given.projects]);
+  // A project gone from the list (removed, its remote changed, a stale link) is no filter, as an unknown view is All:
+  // never a line naming no project over an empty list. Before the projects and the first answer, it stands.
+  const gone = !!given.project && !!model && given.projects.length > 0 && !offered.some((p) => p.id === given.project);
+  const props = gone ? { ...given, project: null } : given;
+  const { state, phone } = props;
+  const groups = useMemo(() => (model ? pullGroups(model, props.project, props.filter) : null), [model, props.project, props.filter]);
+  // A stack the address names opens even when the view leaves it out (a link like `view=mine&stack=…`): never a blank pane.
+  const open = useMemo(() => {
+    if (!groups || !model || !props.stackId) return null;
+    return findStack(groups, props.stackId) ?? (props.filter === 'all' ? null : findStack(pullGroups(model, props.project), props.stackId));
+  }, [groups, model, props.stackId, props.filter, props.project]);
+  const trigger = useFilterTrigger();
+  const projectName = props.project ? (props.projectNames.get(props.project) ?? offered.find((p) => p.id === props.project)?.name ?? null) : null;
 
   const list = (
-    <section className={`ib-listcol${phone ? '' : ' ib-narrow ib-resizable'} ib-prlist`} aria-label="Pull requests" data-pulls-list="">
+    <section className={`ib-listcol${phone ? '' : ' ib-narrow ib-resizable'} ib-prlist`} aria-label="Reviews" data-pulls-list="">
       <div className="ib-lhead">
         <SidebarTrigger />
         <h1 dir="auto" tabIndex={-1} data-pulls-heading="">
-          Pull requests
+          Reviews
         </h1>
-        {groups && groups.on_you.length > 0 && (
-          <span className="ib-pr-onyou" data-pulls-on-you={groups.on_you.length}>
-            {formatCount(groups.on_you.length)} on you
+        {/* Shown once a first answer came: before it, there is nothing to filter. */}
+        {model && (
+          <span className="ib-pf-slot">
+            <PullFilterControl
+              model={model}
+              filter={props.filter}
+              project={props.project}
+              projects={offered}
+              names={props.projectNames}
+              phone={phone}
+              triggerRef={trigger}
+              onChange={props.onScope}
+            />
           </span>
         )}
-        <span className="ib-sp" />
-        {offered.length > 1 && <ProjectFilter projects={offered} names={props.projectNames} value={props.project} phone={phone} onChange={props.onProject} />}
       </div>
+      {model && <PullScopeLine filter={props.filter} projectName={projectName} triggerRef={trigger} onClear={() => props.onScope({ filter: 'all', project: null })} />}
       <div className="ib-lbody" aria-busy={state.loading && !model ? true : undefined}>
         {!model && state.error && (
           <div className="ib-error" role="alert" style={{ margin: '8px 2px' }}>
@@ -127,7 +155,7 @@ export function PullsPage(props: PullsPageProps) {
           </div>
         )}
         {!model && !state.error && <p className="ib-pr-empty">Reading your pull requests…</p>}
-        {model && groups && <PullList model={model} groups={groups} selected={open?.stack.id ?? null} phone={phone} onOpen={(id) => props.onOpenStack(id)} />}
+        {model && groups && <PullList model={model} groups={groups} filter={props.filter} selected={open?.stack.id ?? null} phone={phone} onOpen={(id) => props.onOpenStack(id)} />}
       </div>
       <PullsFoot model={model} loading={state.loading} error={model ? state.error : null} onRefresh={state.refresh} />
       {!phone && <ListColumnEdge />}
@@ -152,7 +180,48 @@ export function PullsPage(props: PullsPageProps) {
   );
 }
 
-function PullList({ model, groups, selected, phone, onOpen }: { model: InboxPullsAnswer; groups: ReturnType<typeof pullGroups>; selected: string | null; phone: boolean; onOpen: (id: string) => void }) {
+/** A `#reviews` or `#pulls` link while Settings → Capabilities → Code review is off: what is here, and the way to turn it on. Nothing is read. */
+export function ReviewsOff({ phone, onSettings }: { phone: boolean; onSettings: () => void }) {
+  return (
+    <>
+      <section className={`ib-listcol${phone ? '' : ' ib-narrow ib-resizable'} ib-prlist`} aria-label="Reviews" data-reviews-off="">
+        <div className="ib-lhead">
+          <SidebarTrigger />
+          <h1 dir="auto" tabIndex={-1}>
+            Reviews
+          </h1>
+        </div>
+        <div className="ib-lbody ib-pr-off">
+          <div className="ib-pr-empty">
+            <p className="ib-pr-empty-h">Code review is off</p>
+            <p>Reviews of your local changes and pull requests show here when it’s on.</p>
+            <button type="button" className="ib-btn" onClick={onSettings} data-reviews-off-settings="">
+              Open Settings
+            </button>
+          </div>
+        </div>
+        {!phone && <ListColumnEdge />}
+      </section>
+      {!phone && <div className="ib-pane ib-pempty" />}
+    </>
+  );
+}
+
+function PullList({
+  model,
+  groups,
+  filter,
+  selected,
+  phone,
+  onOpen,
+}: {
+  model: InboxPullsAnswer;
+  groups: ReturnType<typeof pullGroups>;
+  filter: PullFilter;
+  selected: string | null;
+  phone: boolean;
+  onOpen: (id: string) => void;
+}) {
   const [waitingOpen, setWaitingOpen] = useState(false);
   const now = useRelativeClock(true);
   const total = groups.on_you.length + groups.ready.length + groups.waiting.length;
@@ -160,7 +229,29 @@ function PullList({ model, groups, selected, phone, onOpen }: { model: InboxPull
   useEffect(() => {
     if (selected && groups.waiting.some((i) => i.stack.id === selected)) setWaitingOpen(true);
   }, [selected, groups.waiting]);
-  const notices = pullsNotices(model);
+  // The notices this view needs: Mine and To review are the person's own lists, whole whatever Others did.
+  const notices = pullsNotices(model, filter);
+  // Others is on its way (read in the background) and nothing shows yet: never "Nothing open" before it answers.
+  // A host whose own read failed says so at once instead: the wait never hides a failure.
+  if (total === 0 && (filter === 'all' || filter === 'others') && model.hosts.some((h) => h.others_pending) && !model.hosts.some((h) => h.error)) {
+    return (
+      <p className="ib-pr-empty" data-pulls-empty="reading">
+        Reading your pull requests…
+      </p>
+    );
+  }
+  // A view with nothing in it, while the read was whole: what the view holds. Never while a host failed or was cut.
+  if (total === 0 && filter !== 'all' && notices.every((n) => n.key.startsWith('unsigned:'))) {
+    const empty = pullFilterEmptyWords(filter);
+    return (
+      <div className="ib-pr-empty" data-pulls-empty={`view-${filter}`}>
+        <p className="ib-pr-empty-h">{empty.head}</p>
+        {[empty.line, ...notices.map((n) => n.line)].map((line) => (
+          <p key={line}>{line}</p>
+        ))}
+      </div>
+    );
+  }
   if (total === 0) {
     const empty = pullsEmptyWords(model, notices);
     return (
@@ -533,7 +624,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
     <section className="ib-pane ib-prpane" aria-labelledby={titleId} data-pulls-stack={stack.id}>
       <div className="ib-pr-bar">
         {phone && (
-          <button type="button" className="ib-iconbtn" onClick={props.onClose} aria-label="Back to pull requests">
+          <button type="button" className="ib-iconbtn" onClick={props.onClose} aria-label="Back to reviews">
             <Icon name="back" />
           </button>
         )}

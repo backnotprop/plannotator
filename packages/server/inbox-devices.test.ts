@@ -35,6 +35,7 @@ import {
   type InboxWorld,
 } from "../../tests/helpers/inbox-world";
 import { resetServedHostnamesForTests } from "./request-host-guard";
+import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { startInboxServer } from "./inbox";
 import { createInboxDevices, takeDownInboxTailnet } from "./inbox-devices";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
@@ -301,6 +302,8 @@ describe("the device door, on the binary", () => {
       // "Open in" launches an app on the computer: never from a phone (and no new-tab page there either).
       ["POST", "open-in"],
       ["GET", "open-in/apps"],
+      ["GET", "open-in/file"],
+      ["POST", "open-in/file"],
       ["GET", "attachments/att_x/page"],
       ["POST", "restart"],
       ["POST", "mcp"],
@@ -443,7 +446,7 @@ describe("the device door, on the binary", () => {
 
   test("7.14 to 7.18: attachments, a view, an HTML asset, an annotation saved and removed", async () => {
     const listed = (await (await door(`threads/${threadId}/attachments`)).json()) as Json;
-    expect(Object.keys(listed).sort()).toEqual(["annotations", "attachments", "inline_images", "serverSession"]);
+    expect(Object.keys(listed).sort()).toEqual(["annotations", "attachments", "earlier_annotations", "inline_images", "serverSession"]);
     expect(listed.attachments.map((a: Json) => a.name).sort()).toEqual(["retry-plan.md", "ticket.html"]);
     const md = listed.attachments.find((a: Json) => a.name === "retry-plan.md");
     const html = listed.attachments.find((a: Json) => a.name === "ticket.html");
@@ -1219,6 +1222,17 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
     return { root, ledger, inbox, base, token, door, poll };
   };
 
+  test("a phone's snooze with a time gone by is refused and changes nothing: only a linked machine's write may have waited", async () => {
+    const { ledger, inbox, door } = await world();
+    const project = inbox.store.ensureProject({ name: "ledger", root: ledger });
+    const asked = inbox.store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: "ses-z", name: null }, body: "The build is green." }).message;
+    const running = inbox.store.setSnooze(asked.id, new Date(Date.now() + 86_400_000).toISOString());
+    const refused = await door(`threads/${asked.id}/snooze`, { body: { idempotency_key: "phone-past", until: new Date(Date.now() - 60_000).toISOString() } });
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as Json).code).toBe("snooze_past");
+    expect(inbox.store.snoozes()).toEqual([running]);
+  });
+
   test("7.62: a thread's reply draft, read only; the row's unsent rides the list", async () => {
     const { ledger, inbox, base, door } = await world();
     const project = inbox.store.ensureProject({ name: "ledger", root: ledger });
@@ -1241,7 +1255,8 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
   });
 
   test("7.39 to 7.41: the live sessions, a thread the phone starts (replayed by its key, refusals unchanged), and Send to another session", async () => {
-    const { ledger, inbox, door, poll } = await world();
+    let now = 1_000_000;
+    const { ledger, inbox, door, poll } = await world({ sessionsNow: () => now });
     await poll("ses-a", "claude-code");
     await poll("ses-b", "pi");
 
@@ -1268,6 +1283,9 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
     const gone = await door("messages", { body: { idempotency_key: "compose-2", to: { session: "ses-gone" }, body: "Hello" } });
     expect([gone.status, ((await gone.json()) as Json).code]).toEqual([409, "session_not_live"]);
 
+    // A move needs the session it waits on to have ended.
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
+    await poll("ses-b", "pi");
     const moved = await door(`messages/${first.message.id}/to`, { body: { idempotency_key: "to-1", to: { host: "pi", session: "ses-b" } } });
     expect(moved.status).toBe(200);
     const m = (await moved.json()) as Json;

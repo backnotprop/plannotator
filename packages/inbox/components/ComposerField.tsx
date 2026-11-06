@@ -46,6 +46,7 @@ import type { VoiceHandle } from '../voice';
 import { textareaField } from '../voiceField';
 import { isPhone, isTouchScreen } from '../phone';
 import { inboxSkillFilter } from '../skills';
+import { hashtagMenuLeft, useHashtagPicker, useInitiativeTags } from '../hashtags';
 
 /** The chip class a tag gets in the composer's highlight layer (inbox.css: colour, background and box-shadow only). */
 export const TAG_TOKEN_CLASS = 'ib-tg-tok';
@@ -124,7 +125,8 @@ export function InboxComposerField({
     },
     [textareaRef],
   );
-  // The field going away (the box closed, Reply to Comment in full screen) ends the session's run and drops its clip.
+  // The field going away (the box closed, Reply to Comment in full screen) ends the session's run and drops its clip;
+  // a host with a `late` keeps a take being transcribed (voiceSession.ts `attach`).
   const voiceSession = voice?.session;
   useEffect(() => {
     if (!voiceSession || !innerRef.current) return;
@@ -161,6 +163,13 @@ export function InboxComposerField({
     [options, people, onTagsChange],
   );
   const mention = useMentionAutocomplete({ text: value, setText: onChange, textareaRef: innerRef, source });
+  // `#` names an initiative (approval "board-hashtags"): the skill list's menu, the skill list's keys.
+  const initiativeTags = useInitiativeTags();
+  const hash = useHashtagPicker({ text: value, setText: onChange, fieldRef: innerRef, tags: initiativeTags, bareEscapeDismisses: escapeClosesMenu });
+  const hashListboxId = `ib-hash-${useId().replace(/:/g, '')}`;
+  const hashMenu = hash.menu && !mention.menu && !skills.menu ? hash.menu : null;
+  const [hashShown, setHashShown] = useState(false);
+  const hashMenuShown = hashMenu !== null && hashShown;
   // The agents can arrive after the person typed `@` (the list is read when the box opens): read the caret then.
   const tagsReady = source !== undefined;
   const readMentionCaret = mention.onSelect;
@@ -175,13 +184,17 @@ export function InboxComposerField({
   const showNotes = tagged.some((t) => !t.owner);
   const skillActive = skills.menu?.activeIndex;
   const tagMenu = mention.menu;
-  const listboxId = tagMenu ? tagListboxId : skillListboxId;
+  const listboxId = tagMenu ? tagListboxId : hashMenu ? hashListboxId : skillListboxId;
   const activeOption =
     tagMenu && tagMenu.activeIndex !== null
       ? `${tagListboxId}-option-${tagMenu.activeIndex}`
-      : !tagMenu && skillActive !== null && skillActive !== undefined
-        ? `${skillListboxId}-option-${skillActive}`
-        : undefined;
+      : hashMenu
+        ? hashMenu.activeIndex !== null
+          ? `${hashListboxId}-option-${hashMenu.activeIndex}`
+          : undefined
+        : !tagMenu && skillActive !== null && skillActive !== undefined
+          ? `${skillListboxId}-option-${skillActive}`
+          : undefined;
   const select = (index: number) => {
     const person = tagMenu?.items[index];
     const option = person ? options?.find((o) => o.id === person.id) : undefined;
@@ -214,6 +227,29 @@ export function InboxComposerField({
           )}
         </FloatingSkillMenu>
       ) : null}
+      {hashMenu && textarea && wrap && host ? (
+        <FloatingSkillMenu
+          textarea={textarea}
+          wrap={wrap}
+          host={host}
+          caret={caretMenu ?? null}
+          onShown={setHashShown}
+          kind="hashtag"
+          left={(box) => hashtagMenuLeft(textarea, hashMenu.start, box.left, box.width)}
+        >
+          {(boundary, maxListHeight) => (
+            <SkillReferenceMenu
+              id={hashListboxId}
+              items={hashMenu.items}
+              activeIndex={hashMenu.activeIndex}
+              onSelect={hash.select}
+              boundary={boundary}
+              prefer={caretMenu?.prefer ?? 'above'}
+              maxListHeight={maxListHeight}
+            />
+          )}
+        </FloatingSkillMenu>
+      ) : null}
       {tagMenu && options && <TagPicker id={tagListboxId} menu={tagMenu} options={options} onSelect={select} />}
       <ComposerTokenTextarea
         textareaRef={attach}
@@ -222,6 +258,7 @@ export function InboxComposerField({
           onChange(event.target.value);
           skills.onSelect();
           mention.onSelect();
+          hash.onSelect();
         }}
         onKeyDown={(event) => {
           if (tagMenu && (event.key === 'Enter' || event.key === 'Tab') && !event.metaKey && !event.ctrlKey && !event.altKey && tagMenu.activeIndex !== null) {
@@ -230,12 +267,14 @@ export function InboxComposerField({
             return;
           }
           if (mention.onKeyDown(event)) return;
+          if (hashMenuShown && hash.onKeyDown(event)) return;
           if (skillMenuShown && skills.onKeyDown(event)) return;
           onKeyDown?.(event);
         }}
         onSelectCaret={() => {
           skills.onSelect();
           mention.onSelect();
+          hash.onSelect();
         }}
         placeholder={voiceLive ? '' : placeholder}
         mirrorPaint={voice ? voicePaint(voice.view, voice.session, value) : undefined}
@@ -244,10 +283,10 @@ export function InboxComposerField({
         inputClassName="ib-rtext"
         mirrorClassName="ib-rmirror"
         skillReferences
-        tokens={skills.referenceTokens}
+        tokens={hash.tokens.length > 0 ? [...skills.referenceTokens, ...hash.tokens].sort((a, b) => a.start - b.start) : skills.referenceTokens}
         mentionChips={source ? { people: mention.mentions, tokenClassName: TAG_TOKEN_CLASS } : null}
         listboxId={listboxId}
-        listboxOpen={skillMenuShown || tagMenu !== null}
+        listboxOpen={skillMenuShown || hashMenuShown || tagMenu !== null}
         activeOptionId={activeOption}
         inputProps={{ 'aria-label': ariaLabel, 'aria-describedby': describedBy, rows: 2 }}
       />
@@ -335,11 +374,17 @@ function FloatingSkillMenu({
   caret,
   onShown,
   children,
+  kind = 'skill',
+  left,
 }: {
   textarea: HTMLTextAreaElement;
   wrap: HTMLElement;
   host: HTMLElement;
   caret: CaretMenuOptions | null;
+  /** `hashtag`: the initiatives (inbox.css draws `#` in place of the skill icon, without the source column). */
+  kind?: 'skill' | 'hashtag';
+  /** The list's left edge inside the anchor, from the anchor's box in viewport x (the `#` list: under the `#`). */
+  left?: (box: { left: number; width: number }) => number;
   onShown: (shown: boolean) => void;
   children: (boundary: () => VerticalBox | null, maxListHeight: number | undefined) => React.ReactNode;
 }) {
@@ -476,7 +521,17 @@ function FloatingSkillMenu({
       onMouseDown={(event) => event.preventDefault()}
       className="ib-skanchor"
       data-skill-menu-anchor={caret ? 'caret' : 'field'}
-      style={{ top: box.top, left: box.left, width: box.width, height: Math.max(0, box.bottom - box.top), '--ib-skill-list-least': `${frame.least}px` } as React.CSSProperties}
+      data-hashtag-menu={kind === 'hashtag' ? '' : undefined}
+      style={
+        {
+          top: box.top,
+          left: box.left,
+          width: box.width,
+          height: Math.max(0, box.bottom - box.top),
+          '--ib-skill-list-least': `${frame.least}px`,
+          ...(left ? { '--ib-hash-x': `${left({ left: box.left + host.getBoundingClientRect().left + host.clientLeft - host.scrollLeft, width: box.width })}px` } : {}),
+        } as React.CSSProperties
+      }
     >
       {children(room, frame.cap)}
     </div>,

@@ -25,6 +25,7 @@ import {
   INBOX_HANDOFF_INSTRUCTION,
   INBOX_TAGGED_INSTRUCTION,
   inboxHandedAwayLine,
+  inboxStopNoticeId,
   inboxWakeText,
 } from '../../packages/shared/inbox/connection';
 import { seedTagWorld, TAG_SESSIONS, type TagWorld } from '../helpers/inbox-tag-world';
@@ -251,6 +252,7 @@ test('Hand off, then Undo inside the window: nobody is handed it while held, and
   await page.waitForTimeout(2_000);
   expect(handed(S.pi, sent.id)).toBeUndefined();
   expect(handed(S.owner, sent.id)).toBeUndefined();
+  expect(handed(S.owner, inboxStopNoticeId(sent.id))).toBeUndefined();
   await move.locator('[data-handoff-undo]').click();
   await expect.poll(async () => !!(await lastPersonMessage(world.tags.ids.t1)).handoff?.undone_at).toBe(true);
   const undone = await lastPersonMessage(world.tags.ids.t1);
@@ -285,8 +287,8 @@ test('Hand off settles: the new owner gets the hand-off wake, the former owner o
   expect(handed(S.pi, sent.id)!.handoff).toEqual({ from: 'Claude Code' });
   expect(piWake[1]).toBe(INBOX_HANDOFF_INSTRUCTION);
   expect(piWake.join('\n')).toContain('the queue work is yours now.');
-  await expect.poll(() => !!handed(S.owner, sent.id), { timeout: 15_000 }).toBe(true);
-  const told = handed(S.owner, sent.id)!;
+  await expect.poll(() => !!handed(S.owner, inboxStopNoticeId(sent.id)), { timeout: 15_000 }).toBe(true);
+  const told = handed(S.owner, inboxStopNoticeId(sent.id))!;
   expect(told.handed_away).toEqual({ to: 'Pi' });
   expect(told.body).toBe(inboxHandedAwayLine('Pi'));
   expect(inboxWakeText(told)).not.toContain('the queue work is yours now.');

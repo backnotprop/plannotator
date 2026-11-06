@@ -41,6 +41,12 @@ interface UseAnnotationToolbarArgs {
    * its outside-click and Escape dismissal.
    */
   askOnly?: boolean;
+  /**
+   * A host's choices come first (`DiffSelectionActions`): a new selection
+   * opens on a small chooser (Comment · Ask · Show me), and the comment box
+   * (or a touch screen's expanded composer) opens only after Comment.
+   */
+  chooser?: boolean;
 }
 
 // Per-range draft storage (survives component remounts, e.g. file switches)
@@ -64,7 +70,7 @@ function draftKey(filePath: string, range: SelectedLineRange): string {
   return `${filePath}:${range.side}:${start}-${end}`;
 }
 
-export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelection, onAddAnnotation, onEditAnnotation, askOnly = false }: UseAnnotationToolbarArgs) {
+export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelection, onAddAnnotation, onEditAnnotation, askOnly = false, chooser = false }: UseAnnotationToolbarArgs) {
   const visibleBounds = useVisibleViewportBounds(16);
   const expandedComposerRequired = !askOnly && shouldUseExpandedComposer({
     bounds: visibleBounds,
@@ -86,6 +92,8 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
   const [conventionalLabel, setConventionalLabel] = useState<ConventionalLabel | null>(null);
   const [decorations, setDecorations] = useState<ConventionalDecoration[]>([]);
+  /** The chooser is showing (only with `chooser`): nothing of the comment box yet. */
+  const [choosing, setChoosing] = useState(false);
 
   // Refs to avoid stale closures in saveDraft
   const formRef = useRef({ commentText, suggestedCode, showSuggestedCode, conventionalLabel, decorations });
@@ -151,6 +159,7 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     setEditingAnnotationId(null);
     setConventionalLabel(null);
     setDecorations([]);
+    setChoosing(false);
   }, []);
 
   // Track mouse position continuously for toolbar placement.
@@ -170,7 +179,8 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     setEditingAnnotationId(null);
     setAskAIMode(false);
     setShowCodeModal(false);
-    setShowCommentModal(expandedComposerRequired);
+    setChoosing(chooser);
+    setShowCommentModal(expandedComposerRequired && !chooser);
 
     const draft = draftStore.get(draftKey(filePath, range));
     if (draft) {
@@ -197,7 +207,7 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     setSelectedOriginalCode(extractLinesFromPatch(patch, start, end, side as 'old' | 'new'));
 
     onLineSelection(range);
-  }, [expandedComposerRequired, patch, filePath, onLineSelection, saveDraft]);
+  }, [expandedComposerRequired, chooser, patch, filePath, onLineSelection, saveDraft]);
 
   // Handle line selection end (gutter clicks)
   const handleLineSelectionEnd = useCallback((range: SelectedLineRange | null) => {
@@ -271,6 +281,7 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     setSuggestedCode(annotation.suggestedCode || '');
     setSelectedOriginalCode(annotation.originalCode || '');
     setShowSuggestedCode(!!annotation.suggestedCode);
+    setChoosing(false);
     setAskAIMode(false);
     setShowCodeModal(false);
     setShowCommentModal(expandedComposerRequired);
@@ -302,6 +313,16 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     onLineSelection(null);
   }, [onLineSelection, saveDraft]);
 
+  // Hide: the toolbar goes and the selection stays painted (a host took the lines elsewhere: Ask, Show me).
+  const handleHide = useCallback(() => {
+    saveDraft();
+    setChoosing(false);
+    setToolbarState(null);
+  }, [saveDraft]);
+
+  // Comment, picked on the chooser: the comment box (or the expanded composer) opens.
+  const chooseComment = useCallback(() => setChoosing(false), []);
+
   // Cancel: explicit discard via X button -- clears draft and form
   const handleCancel = useCallback(() => {
     clearDraft();
@@ -316,10 +337,10 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
   });
 
   useEffect(() => {
-    if (toolbarState && expandedComposerRequired && !showCodeModal) {
+    if (toolbarState && expandedComposerRequired && !showCodeModal && !choosing) {
       setShowCommentModal(true);
     }
-  }, [expandedComposerRequired, showCodeModal, toolbarState]);
+  }, [expandedComposerRequired, showCodeModal, toolbarState, choosing]);
 
   useEffect(() => {
     const wasFocused = wasFocusedRef.current;
@@ -426,6 +447,9 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     handleSubmitAnnotation,
     handleDismiss,
     handleCancel,
+    handleHide,
+    choosing,
+    chooseComment,
     startEdit,
   };
 }

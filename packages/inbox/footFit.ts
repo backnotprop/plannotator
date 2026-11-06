@@ -57,6 +57,27 @@ export function footFitCandidates(max: OpenQuestionsLabelForm): FootFit[] {
   ]);
 }
 
+/**
+ * A way to draw the foot of full screen's card on a phone. `fit` is the foot's `data-fit` (inbox.css), its tokens:
+ * `chips`: "2 comments" becomes its icon and the number; `link`: "Open in thread" becomes "Thread"; `stack`: the chips
+ * take a row of their own over the paperclip, the mic and the link; `wrap`: the chips may wrap in that row.
+ */
+export interface CardFootFit extends FootFit {
+  fit: string;
+}
+
+/**
+ * What yields on the card's foot, in order, until the row holds: the open questions' words (as in the thread's foot),
+ * then the comments' word, then the link's first words; the icons, numbers and targets never shrink. Only then, with
+ * text sizes a phone's row cannot hold, do the chips take their own row, with their words back as far as they fit.
+ */
+export function cardFootFitCandidates(): CardFootFit[] {
+  const count: FootFit = { form: 'count', tight: false };
+  const rows = (forms: readonly FootFit[], fit: string) => forms.map((form) => ({ ...form, fit }));
+  const words = footFitCandidates('full').filter((c) => !c.tight);
+  return [...rows(words, ''), ...rows([count], 'chips'), ...rows([count], 'chips link'), ...rows(words, 'stack'), ...rows([count], 'stack chips'), ...rows([count], 'stack chips link wrap')];
+}
+
 /** A way to draw the row's buttons with the checklist button beside them: `steps`, its chevron gone. */
 export type FootFitWithSteps = FootFit & { steps: boolean };
 
@@ -116,6 +137,14 @@ export function laidOutChildren(row: Element): HTMLElement[] {
 }
 
 /**
+ * The children that must share a line: not one that always takes its own (`flex-basis: 100%`, a phone's Send to
+ * another session and Archive), so those two never cost the open questions their words.
+ */
+function sameLineChildren(row: Element): HTMLElement[] {
+  return laidOutChildren(row).filter((el) => getComputedStyle(el).flexBasis !== '100%');
+}
+
+/**
  * Tries each way in turn on the page itself (before paint: the caller runs in
  * a layout effect) and leaves the button drawn the first way that keeps the
  * row on one line; none does: the last. `apply` draws one way on the button.
@@ -127,7 +156,7 @@ export function fitFootRow<T>(buttons: HTMLElement, candidates: readonly T[], ap
   if (buttons.getBoundingClientRect().width <= 0 || candidates.length === 0) return null;
   for (const fit of candidates) {
     apply(fit);
-    if (onOneLine(laidOutChildren(buttons).map((el) => el.getBoundingClientRect().top)) && fits()) return fit;
+    if (onOneLine(sameLineChildren(buttons).map((el) => el.getBoundingClientRect().top)) && fits()) return fit;
   }
   return candidates[candidates.length - 1]!;
 }
@@ -183,7 +212,7 @@ export function onOneRow(mids: readonly number[]): boolean {
 }
 
 function rowMids(row: Element): number[] {
-  const parts = [...row.querySelectorAll<HTMLElement>('[data-foot-buttons], [data-foot-status]')].flatMap((group) => laidOutChildren(group));
+  const parts = [...row.querySelectorAll<HTMLElement>('[data-foot-buttons], [data-foot-status]')].flatMap((group) => sameLineChildren(group));
   return parts
     .map((el) => el.getBoundingClientRect())
     .filter((r) => r.width > 0)

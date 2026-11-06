@@ -58,6 +58,7 @@ import { handleInboxServerReady, startInboxServer } from "@plannotator/server/in
 import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
 import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { isRemoteSession } from "@plannotator/server/remote";
+import { assertTestHome } from "@plannotator/server/test-home-guard";
 import { agentSpec, createAgentEnvironment, formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
 import { addInboxNote, INBOX_NOTE_BODY, inboxNotesDisabled, markNotesAsked } from "@plannotator/server/inbox-agent-notes";
 import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
@@ -68,6 +69,7 @@ import { inboxHostSessionFromEnv, inboxQwenShimContext, inboxSessionProjectFromE
 import { runPermissionHook } from "./inbox-permission-hook";
 import { runInboxLinkCommand } from "./inbox-link-command";
 import { runInboxProjectsCommand } from "./inbox-projects-command";
+import { writeWholeToStdout } from "./write-whole-stdout";
 
 export const INBOX_LOG_FILE = "inbox.log";
 /** Set by a starter that holds the start lock for the detached Inbox it spawns. */
@@ -448,10 +450,11 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
       record: inboxRegistryPath(dataDir),
       cli_version: cliVersion,
     };
-    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    await writeWholeToStdout(`${JSON.stringify(report, null, 2)}\n`);
     return code;
   }
-  const out = (line: string) => process.stdout.write(`${line}\n`);
+  let lines = "";
+  const out = (line: string) => void (lines += `${line}\n`);
   if (status.state === "missing") {
     out("Plannotator Inbox: not running (it has never run with this data dir)");
   } else if (status.state === "stopped") {
@@ -476,6 +479,7 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
         : `This plannotator is ${cliVersion}; the Inbox runs ${status.health.version}.`,
     );
   }
+  await writeWholeToStdout(lines);
   return code;
 }
 
@@ -638,6 +642,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     // `--t3`: the entry the T3 Code setup adds (`plannotator t3 --help`). It lists its tools only inside a T3 thread.
     const unknown = args.slice(1).find((arg) => arg !== "--t3");
     if (unknown !== undefined) usageError(`Unknown inbox mcp option: ${unknown}`);
+    assertTestHome();
     await runInboxMcpShim({
       dataDir,
       cwd: process.env.PLANNOTATOR_CWD || process.cwd(),

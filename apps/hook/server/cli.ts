@@ -1,6 +1,6 @@
 import { GUIDE_CLI_USAGE } from "@plannotator/server/guide-cli";
 import { T3_CLI_USAGE } from "@plannotator/t3-code/usage";
-import { INBOX_CARD_COLUMNS } from "@plannotator/core/inbox-types";
+import { INBOX_CARD_COLUMNS, INBOX_CARD_INITIATIVE_CLEAR_OUT, INBOX_CARD_INITIATIVE_FIELD, INBOX_CARD_INITIATIVE_RULE } from "@plannotator/core/inbox-types";
 import { INBOX_REF_LINK_RULE, INBOX_TOOL_ACTIONS } from "@plannotator/shared/inbox/connection";
 import { FEEDBACK_HEREDOC_END } from "@plannotator/core/product-feedback";
 import { SHAPE_GUIDE, SHAPE_HELP_INTRO } from "@plannotator/core/shape-skill";
@@ -219,7 +219,7 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator inbox projects [combine <project id> --into <project id> | undo <project id>] [--json]",
     "  plannotator inbox call [--session <id>] <action> [<json> | -]",
     "  plannotator t3 login | logout --url <T3 MCP URL>",
-    ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list> ..."] : []),
+    ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list|initiative_delete> ..."] : []),
     `  plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'${FEEDBACK_HEREDOC_END}'`,
     "  plannotator update [--check]",
     "  plannotator uninstall [--purge] [--yes] [--dry-run]",
@@ -258,13 +258,14 @@ export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook
  */
 export const CARD_COMMAND_USAGE = [
   "Usage:",
-  "  plannotator card create <title> [--column <column>] [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--key <key>]",
+  "  plannotator card create <title> [--column <column>] [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--key <key>] [--initiative <name>]",
   "  plannotator card create --thread <id> [...]      (the thread's subject is the title; pass a short <title> too, as subjects run long)",
   "  plannotator card move <crd_id> <column> [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--reason <text>]",
-  "  plannotator card say <crd_id> [<text>] [--you <text>] [--title <text>]",
+  "  plannotator card say <crd_id> [<text>] [--you <text>] [--title <text>] [--initiative <name>]",
   "  plannotator card link <crd_id> [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--say <text>]",
   "  plannotator card ship <crd_id> [--say <text>] [--pr <ref>] [--thread <id>]      (moves it to done)",
   "  plannotator card drop <crd_id> <reason> [--say <text>]",
+  "  plannotator card initiative_delete <name or ini_id>      (its cards stay, in no initiative)",
   "  plannotator card list [--anyone | --mine] [--all]",
   "",
   "Every command takes [--project <folder>] (default: your Claude Code or Pi session's project, else this folder) and [--json].",
@@ -274,6 +275,7 @@ export const CARD_COMMAND_USAGE = [
   "",
   "Keeps a card on the person's Board in the Plannotator Inbox for work that outlasts a reply.",
   "A title is 2–5 words naming the work (\"Pi update fix\"), never a sentence; status goes in --say.",
+  `--initiative: ${INBOX_CARD_INITIATIVE_FIELD} ${INBOX_CARD_INITIATIVE_RULE} ${INBOX_CARD_INITIATIVE_CLEAR_OUT}`,
   "When you move a card to in_review, link the Inbox thread where the person makes the call (--thread), so \"You: …\" opens it.",
   "--ref: an issue or PR as owner/repo#123, or any http(s) link with its scheme (https://…). GitHub and GitLab issues and PRs show their live state; a Jira or YouTrack issue link shows its key; any other link shows as a plain link.",
   `In --say and --you: ${INBOX_REF_LINK_RULE.replace(/^A/, "a")}`,

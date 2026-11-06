@@ -4,9 +4,12 @@
  * review card opens, while the person has Settings → Capabilities → Code
  * review on.
  *
- * - The agent's walkthrough is the spine: the overview and its chapters down
- *   the left rail, with a "Walkthrough | All files" switch that turns the same
- *   rail into the list of changed files.
+ * - The agent's walkthrough is the spine. There is no left rail (approval
+ *   "review-deslop", r7): the top bar holds the "Walkthrough | All files"
+ *   switch, the menu of chapters or changed files (ReviewJump) and the review's
+ *   title in quiet grey. Split | Unified is a tab on each chapter, and sits in
+ *   the bar while no tab is in view. A phone's bar is one row: the same menu
+ *   holds its title and switch.
  * - The diff is Plannotator's own (`GuideReader` over review-editor's
  *   `AllFilesCodeView`): line comments as in code review, and a Viewed tick on
  *   each file's header, kept on the message.
@@ -18,16 +21,38 @@
  *   app's export format. It wakes the agent like any reply, and the card in
  *   the thread then shows the outcome.
  *
+ * - Show me (approval "shape-in-code-review", mock ac2): selecting lines offers
+ *   Comment · Ask · Show me. Show me asks the agent for a picture of the
+ *   lines, which opens over the diff; a click on a part opens its code and the
+ *   picture shrinks to a corner card. The Overview draws the agent's own
+ *   picture sent with the guide; a review with none has one Show me in its
+ *   heading, for the whole review.
+ *   Plain Ask opens the Inbox's Ask window with the lines named.
+ *
  * No new keyboard shortcuts: Escape and "Thread" go back as the guide pane's do.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import type { InboxMessageWire, InboxPull, InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
-import { formatCount, plural } from '@plannotator/core/inbox-format';
+import { groupByFileKind } from '@plannotator/core/file-kind';
+import { plural } from '@plannotator/core/inbox-format';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
 import { buildDecisionSpec, type DecisionActionId } from '@plannotator/ui/utils/decisionSpec';
+import type { GuideOverviewDiagram } from '@plannotator/core/guide';
+import { parseGuideSnapshot } from '@plannotator/core/guide-format';
+import { inboxDrawnViewOf, inboxReviewLines, inboxReviewRound } from '@plannotator/core/inbox-review';
+import type { ShapeCodeTarget } from '@plannotator/core/shape';
+import { Pebble } from '@plannotator/ui/components/shape/Pebble';
+import { OverviewFigure, ShowMeButton } from '../review-drawing/OverviewFigure';
+import { ShowMeBox, ShowMeCorner, ShowMeSheet } from '../review-drawing/ShowMeLayer';
+import { anchorDrawing, anchorLines, overviewPicture, baseName, changedMarks, chapterOf, codeKey, markOf, newSideLines, partName, targetLines } from '../review-drawing/showMeModel';
+import { useShowMe, type ShowMePlace } from '../review-drawing/useShowMe';
+import { SHEET_HOME, type SheetOffset } from '../review-drawing/useSheetDrag';
+import type { GuideSelectionActions } from '../guide/types';
+import { reviewSourceLine } from '../guide/sourceLine';
 import { InboxApiError, inboxApi } from '../api';
 import { agentName } from '../format';
 import { Icon } from '../icons';
@@ -51,13 +76,19 @@ import {
   type AskingSession,
   type RouteState,
 } from './ReplyRoute';
+import { DiffStyleSwitch } from './DiffStyleSwitch';
+import { DropdownMenuRadioGroup, DropdownMenuRadioItem } from '@plannotator/ui/components/ui/dropdown-menu';
+import { chapterInView, fileInView, ReviewJump } from './ReviewJump';
+import { OpenInCodeSpans, OpenInFile } from './OpenIn';
 import { Tip } from './Tip';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
-const GuideReader = lazy(() => import('#guide-reader'));
+const GuideReader = GuideReaderPart.Part;
 
 export interface ReviewPaneProps {
   thread: InboxThread;
+  /** A tailnet guest's page: the routes behind the arrows refuse it, so no reader. */
+  guest?: boolean;
   message: InboxMessageWire;
   /** Back to the thread. */
   onBack: () => void;
@@ -65,6 +96,8 @@ export interface ReviewPaneProps {
   onClose: () => void;
   /** The verdict went: the thread reads again (the card shows the outcome). */
   onSent: () => void | Promise<void>;
+  /** Plain Ask on selected lines: the Inbox's Ask window opens with these words in its box. Absent: no Ask. */
+  onAsk?: (words: string) => void;
 }
 
 /** Below this width the comments panel folds into the header's Comments button: the rail and the diff keep the room. */
@@ -75,9 +108,9 @@ const NO_ANNOTATIONS: never[] = [];
 
 type RailMode = 'walkthrough' | 'files';
 
-export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onAsk }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
-  const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments } = state;
+  const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = state;
   // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
   // conversation in the thread, and no Approve or Request changes is offered.
   const verdict = !thread.pull_theirs;
@@ -86,7 +119,8 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
   // A stack's review spans several PRs and posts from each layer's own review (Pull requests) instead.
   const postKey = !state.readOnly && thread.pull_keys?.length === 1 ? thread.pull_keys[0]! : null;
   const [postPull, setPostPull] = useState<InboxPull | null>(null);
-  // `pull_moved` on a post: the PR was pushed since it was read here. Read again from the forge, then offered at its new
+  // A post refused at its commit (`pull_commit_gone` on GitHub after a force-push, `pull_moved` on GitLab after any push;
+  // GitHub takes a commit still on the PR). Read again from the forge, then offered at its new
   // head (the review's comments ride the body, so they do not depend on the commit).
   const [moved, setMoved] = useState<'reading' | 'read' | 'failed' | null>(null);
   const [reread, setReread] = useState(0);
@@ -116,6 +150,8 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
   const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
   useEffect(() => setPosted(null), [message.id]);
   const phone = usePhone();
+  // This pane is Code review's own, so its diff headers offer Open in (the thread's project; nothing when the file is not there).
+  const fileOpenIn = useCallback((path: string) => <OpenInFile scope={{ thread: thread.thread_id, message: message.id, from: 'root' }} path={path} />, [thread.thread_id, message.id]);
   const [mode, setMode] = useState<RailMode>('walkthrough');
   const [reveal, setReveal] = useState<{ path: string; token: number } | null>(null);
   const [current, setCurrent] = useState<number | null>(null);
@@ -123,6 +159,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const [paneRef, folded] = useNarrowerThan<HTMLElement>(REVIEW_FOLD_PANEL_BELOW, true);
   const [sheet, setSheet] = useState(false);
   const sheetButtonRef = useRef<HTMLButtonElement>(null);
@@ -146,10 +183,57 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
 
   const files = useMemo(() => (snapshot ? parseDiffToFiles(snapshot.review.rawPatch) : []), [snapshot]);
   const chapters = snapshot?.guide.sections ?? [];
-  const reviewedCount = chapters.filter((_, i) => reviewed[i] ?? snapshot?.guide.reviewed[i] ?? false).length;
 
   const move = (path: string) => setReveal((was) => ({ path, token: (was?.token ?? 0) + 1 }));
+  // Where the person is: the top bar's chapter (or file) follows the scroll. A jump holds the one picked until the
+  // person moves the page themselves, so the name does not run through the chapters a smooth scroll passes, and a
+  // last chapter too short to reach the top of the scroll keeps its name.
+  const [fileSpot, setFileSpot] = useState<string | null>(null);
+  const jumped = useRef(false);
+  // No chapter's tab is in view: Split | Unified docks in the top bar, where it covers nothing (a phone has neither).
+  const [docked, setDocked] = useState(false);
+  const dockRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    let frame = 0;
+    const read = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const box = body.getBoundingClientRect();
+        const tabs = [...body.querySelectorAll('[data-guide-section-tab] [data-diff-style-switch]')];
+        const inView = tabs.find((tab) => {
+          const at = tab.getBoundingClientRect();
+          return at.bottom > box.top && at.top < box.bottom;
+        });
+        // One at a time. Focus in the docked one goes with it, to the tab that takes over.
+        if (inView && dockRef.current?.contains(document.activeElement)) inView.querySelector<HTMLElement>('input:checked')?.focus({ preventScroll: true });
+        setDocked(tabs.length > 0 && !inView);
+        if (jumped.current) return;
+        if (mode === 'walkthrough') setCurrent(chapterInView(body, chapters.length));
+        else setFileSpot(fileInView(body));
+      });
+    };
+    const release = () => {
+      jumped.current = false;
+    };
+    const HAND = ['wheel', 'touchmove', 'pointerdown', 'keydown'] as const;
+    read();
+    body.addEventListener('scroll', read, { passive: true });
+    for (const kind of HAND) body.addEventListener(kind, release, { passive: true });
+    // Which tabs are in view changes with no scroll too: a taller or shorter window, and a file or chapter that folds.
+    const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(read);
+    resized?.observe(body);
+    if (contentRef.current) resized?.observe(contentRef.current);
+    return () => {
+      resized?.disconnect();
+      cancelAnimationFrame(frame);
+      body.removeEventListener('scroll', read);
+      for (const kind of HAND) body.removeEventListener(kind, release);
+    };
+  }, [mode, snapshot, chapters.length]);
   const toChapter = (index: number | null) => {
+    jumped.current = true;
     setCurrent(index);
     if (mode !== 'walkthrough') setMode('walkthrough');
     if (index === null) {
@@ -161,9 +245,159 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
     else bodyRef.current?.querySelector(`[data-guide-section="${index}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   };
   const toFile = (path: string) => {
+    jumped.current = true;
+    setFileSpot(path);
     if (mode !== 'files') setMode('files');
     move(path);
   };
+  /** The switch keeps the person's place: the file at the top of the view stays there in the other mode. */
+  const flip = (next: RailMode) => {
+    const body = bodyRef.current;
+    const path = body ? fileInView(body) : null;
+    jumped.current = true;
+    setMode(next);
+    if (next === 'files') setFileSpot(path);
+    // A file no chapter placed sits after the last chapter: the name a scroll by hand gives it there.
+    else setCurrent(path ? (chapterOf(chapters, path) ?? Math.max(chapters.length - 1, 0)) : null);
+    if (path) move(path);
+    else body?.scrollTo({ top: 0 });
+  };
+
+  // Show me: a picture of selected lines (or the whole review), over the diff.
+  const author = agentName(message.author);
+  const host = message.author.kind === 'agent' ? (message.author.host ?? null) : null;
+  const round = inboxReviewRound(thread.messages, message.id);
+  const earlierReviews = useMemo(() => {
+    const at = thread.messages.findIndex((m) => m.id === message.id);
+    return thread.messages.slice(0, Math.max(0, at)).filter((m) => m.guide?.review).map((m) => m.id);
+  }, [thread.messages, message.id]);
+  const showMe = useShowMe({ threadId: thread.thread_id, reviewId: message.id, earlier: earlierReviews, title: message.guide?.title ?? snapshot?.guide.title ?? '', round, agent: author, files, enabled: !readOnly });
+  // Round 2 for Show me: an earlier round's picture stays as asked, its parts anchored again on this round's diff.
+  const askedReview = showMe.state.shown && showMe.state.shown.review !== message.id ? showMe.state.shown.review : null;
+  const [askedPatch, setAskedPatch] = useState<{ review: string; patch: string } | null>(null);
+  useEffect(() => {
+    if (!askedReview || askedPatch?.review === askedReview) return;
+    let live = true;
+    inboxApi.guide(askedReview).then(
+      (answer) => {
+        const parsed = parseGuideSnapshot(answer.snapshot);
+        if (live && parsed.ok) setAskedPatch({ review: askedReview, patch: parsed.value.review.rawPatch });
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [askedReview]); // eslint-disable-line react-hooks/exhaustive-deps
+  const anchors = useMemo(() => {
+    const shown = showMe.state.shown;
+    if (!shown || !askedReview || askedPatch?.review !== askedReview) return null;
+    const lines = (patch: string) => new Map(parseDiffToFiles(patch).map((file) => [file.path, newSideLines(file.patch)] as const));
+    return anchorDrawing([shown.drawing.view.html, shown.drawing.view.tall?.html ?? ''], lines(askedPatch.patch), new Map(files.map((file) => [file.path, newSideLines(file.patch)] as const)));
+  }, [showMe.state.shown?.drawing.id, askedReview, askedPatch, files]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Where the person dragged the picture: kept while the review is open, through the corner card and back.
+  const [sheetOffset, setSheetOffset] = useState<SheetOffset>(SHEET_HOME);
+  const [highlight, setHighlight] = useState<{ path: string; start: number; end: number; token: number } | null>(null);
+  /** A part of a picture opens its code: the chapter that holds the file (else All files), the lines painted. */
+  const openCode = (target: ShapeCodeTarget): boolean => {
+    if (!files.some((file) => file.path === target.path)) return false;
+    const index = chapterOf(chapters, target.path);
+    jumped.current = true;
+    if (index === null) {
+      setFileSpot(target.path);
+      if (mode !== 'files') setMode('files');
+    } else {
+      setCurrent(index);
+      if (mode !== 'walkthrough') setMode('walkthrough');
+    }
+    move(target.path);
+    const [start, end] = targetLines(target);
+    setHighlight((was) => ({ path: target.path, start, end, token: (was?.token ?? 0) + 1 }));
+    return true;
+  };
+  // The actions are made once per switch (a new object each render would re-render every diff); Show me reads
+  // the latest render's open through this ref, so it sees the drawings and turns read since.
+  const showMeOpen = useRef(showMe.open);
+  showMeOpen.current = showMe.open;
+  const selectionActions = useMemo<GuideSelectionActions | undefined>(
+    () =>
+      showMe.state.canAsk
+        ? {
+            onShowMe: (selection) => showMeOpen.current({ file: selection.filePath, lines: [selection.lineStart, selection.lineEnd] }),
+            ...(onAsk
+              ? {
+                  onAsk: (selection) =>
+                    onAsk(`${baseName(selection.filePath)} ${selection.lineStart === selection.lineEnd ? 'line' : 'lines'} ${inboxReviewLines([selection.lineStart, selection.lineEnd])}: `),
+                }
+              : {}),
+            showMeIcon: <Pebble alive={false} size={15} />,
+          }
+        : undefined,
+    [showMe.state.canAsk, onAsk],
+  );
+  /**
+   * Show me again on an earlier round's picture: its lines where they are in this round (the same text, moved
+   * or not), else the lines the person pressed Show me on, else the lines it was asked on.
+   */
+  const againPlace = (): ShowMePlace | undefined => {
+    const shown = showMe.state.shown;
+    if (!shown) return undefined;
+    const { file, lines } = shown.drawing;
+    if (file && lines && askedPatch?.review === askedReview) {
+      const before = parseDiffToFiles(askedPatch.patch).find((f) => f.path === file);
+      const after = files.find((f) => f.path === file);
+      const now = before && after ? anchorLines(lines, newSideLines(before.patch), newSideLines(after.patch)) : null;
+      if (now) return { file, lines: now };
+    }
+    return shown.from ?? undefined;
+  };
+
+  // The Overview's picture, and in a later round which of its parts the agent redrew.
+  // The Overview's picture, drawn as a Shape picture (overviewPicture: version 3 only); any other diagram keeps the guide viewer's own.
+  const overviewHtml = useMemo(() => overviewPicture(snapshot?.guide.overview?.diagram), [snapshot]);
+  const earlierReview = earlierReviews.at(-1) ?? null;
+  const [earlierOverview, setEarlierOverview] = useState<GuideOverviewDiagram | null>(null);
+  useEffect(() => {
+    setEarlierOverview(null);
+    if (!earlierReview || !overviewHtml) return;
+    let live = true;
+    inboxApi.guide(earlierReview).then(
+      (answer) => {
+        const parsed = parseGuideSnapshot(answer.snapshot);
+        const diagram = parsed.ok ? parsed.value.guide.overview?.diagram : undefined;
+        if (live && diagram?.kind === 'html') setEarlierOverview(diagram);
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [earlierReview, !!overviewHtml]); // eslint-disable-line react-hooks/exhaustive-deps
+  const overviewChanged = useMemo(
+    () =>
+      overviewHtml && earlierOverview
+        ? changedMarks([earlierOverview.source, earlierOverview.tall?.source ?? ''], [overviewHtml.source, overviewHtml.tall?.source ?? ''])
+        : null,
+    [overviewHtml, earlierOverview],
+  );
+  const overviewMeta = overviewChanged
+    ? `redrawn by ${author} for round ${round} · ${plural(overviewChanged.size, 'part')} changed`
+    : `drawn by ${author} with the guide`;
+  const renderOverviewDiagram = useCallback(
+    (diagram: GuideOverviewDiagram): ReactNode | null =>
+      diagram.kind === 'html' && diagram === overviewHtml ? (
+        <OverviewFigure drawn={inboxDrawnViewOf(diagram)} meta={overviewMeta} {...(overviewChanged ? { changed: overviewChanged } : {})} onCode={(target) => void openCode(target)} />
+      ) : null,
+    // openCode reads the latest render's state through its closure; the figure is redrawn when these change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [overviewHtml, overviewMeta, overviewChanged, files, chapters, mode],
+  );
+  // Before there is a picture, Show me is one of the review's own actions, in its heading beside Global comment.
+  const renderHeadActions = useCallback(
+    (): ReactNode | null => (!overviewHtml && showMe.state.canAsk ? <ShowMeButton onShowMe={() => showMe.open({ file: null, lines: null })} /> : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [overviewHtml, showMe.state.canAsk],
+  );
 
   const viewedSet = useMemo(() => new Set(viewed), [viewed]);
   const toggleViewed = useCallback(
@@ -178,6 +412,12 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
     [viewed, message.id, setSaveError],
   );
   const viewedProp = useMemo(() => (readOnly ? undefined : { files: viewedSet, onToggle: toggleViewed }), [readOnly, viewedSet, toggleViewed]);
+  // The top bar's menu lists what the review draws, in the order it draws it (code, then tests, then generated).
+  const jumpChapters = chapters.map((chapter, index) => ({ title: chapter.title, reviewed: reviewed[index] ?? snapshot?.guide.reviewed[index] ?? false }));
+  const jumpFiles = groupByFileKind(files, (file) => file.path)
+    .flatMap((group) => group.items)
+    .map((file) => ({ path: file.path, additions: file.additions, deletions: file.deletions, viewed: viewedSet.has(file.path) }));
+  const jumpAt = mode === 'walkthrough' ? current : Math.max(0, jumpFiles.findIndex((file) => file.path === fileSpot));
 
   // The notes the person writes on a decision: kept per review until its verdict went (a failed send, a close
   // and a reload keep them), the way the reply box keeps its draft.
@@ -295,12 +535,13 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
     }
   };
 
-  const author = agentName(message.author);
+  const title = message.guide?.title ?? snapshot?.guide.title ?? 'Review';
+  const source = snapshot ? reviewSourceLine(snapshot) : '';
   const railModes = (
     <div className="ib-seg ib-rv-modes" role="radiogroup" aria-label="Review by">
       {(['walkthrough', 'files'] as const).map((value) => (
         <label key={value} className="ib-seg-o" data-on={mode === value ? '' : undefined} data-review-mode-choice={value}>
-          <input type="radio" name={`ib-rv-mode-${sheetId}`} checked={mode === value} onChange={() => setMode(value)} />
+          <input type="radio" name={`ib-rv-mode-${sheetId}`} checked={mode === value} onChange={() => flip(value)} />
           {value === 'walkthrough' ? 'Walkthrough' : 'All files'}
         </label>
       ))}
@@ -310,22 +551,82 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer ib-review${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
+      className={`ib-viewer ib-review ib-rv-walk${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
       aria-label="Review"
       data-review-message={message.id}
       data-review-mode={mode}
     >
       <div className="ib-vhead">
-        <button type="button" className="ib-back" onClick={onBack}>
-          <Icon name="back" size={15} />
-          Thread
-        </button>
-        <span className="ib-vsep" />
-        <span className="ib-fn">Review</span>
-        <span className="ib-from">
-          <bdi>{message.guide?.title ?? ''}</bdi> · from {author}
-        </span>
+        <Tip content="Thread">
+          <button type="button" className="ib-back" aria-label="Thread" onClick={onBack}>
+            <Icon name="back" size={15} />
+          </button>
+        </Tip>
+        {!phone && <span className="ib-vsep" />}
+        {!phone && (
+          <span className="ib-rv-nav" data-review-nav="">
+            {railModes}
+            {snapshot && <ReviewJump mode={mode} chapters={jumpChapters} files={jumpFiles} current={jumpAt} onChapter={toChapter} onFile={toFile} />}
+          </span>
+        )}
+        {/* A phone's bar is one row: the place, and in its menu the title and the switch that had rows of their own. */}
+        {phone && snapshot && (
+          <ReviewJump
+            mode={mode}
+            chapters={jumpChapters}
+            files={jumpFiles}
+            current={jumpAt}
+            onChapter={toChapter}
+            onFile={toFile}
+            head={
+              <>
+                <div className="ib-rj-head">
+                  <bdi className="ib-rj-title" data-review-title="">
+                    {title}
+                  </bdi>
+                  {source && (
+                    <span className="ib-rj-source" dir="ltr" data-review-source="">
+                      {source}
+                    </span>
+                  )}
+                </div>
+                <DropdownMenuRadioGroup className="ib-rj-modes" aria-label="Review by" value={mode} onValueChange={(value) => flip(value as typeof mode)}>
+                  {(['walkthrough', 'files'] as const).map((value) => (
+                    <DropdownMenuRadioItem key={value} value={value} className="ib-rj-mode" data-review-mode-choice={value}>
+                      {value === 'walkthrough' ? 'Walkthrough' : 'All files'}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </>
+            }
+          />
+        )}
+        {!phone && <span className="ib-vsep ib-rv-titlesep" aria-hidden="true" />}
+        {/* The review's title, quiet; where it gives way (a short bar) the heading holds the same facts. */}
+        {!phone && (
+          <Tip
+            content={
+              <span className="ib-tip-proj">
+                <bdi className="ib-tip-name">{title}</bdi>
+                {source && (
+                  <span className="ib-tip-path" dir="ltr" data-review-source="">
+                    {source}
+                  </span>
+                )}
+              </span>
+            }
+          >
+            <span className="ib-fn ib-rv-title" data-review-title="">
+              <bdi>{title}</bdi>
+            </span>
+          </Tip>
+        )}
         <span className="ib-sp" />
+        {docked && !phone && (
+          <span ref={dockRef} className="ib-rv-docked" data-review-diff-style-docked="">
+            <DiffStyleSwitch icons name="ib-diff-style-docked" label="Diff layout, top bar" />
+          </span>
+        )}
         {folded && (
           <button
             type="button"
@@ -388,114 +689,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
         </Tip>
       </div>
       <div className="ib-rsplit">
-        <nav className="ib-rrail" aria-label="Review">
-          {railModes}
-          {mode === 'walkthrough' ? (
-            <ol className="ib-rv-list" data-review-chapters="">
-              <li>
-                <button type="button" className="ib-rv-row" data-on={current === null ? '' : undefined} onClick={() => toChapter(null)}>
-                  <span className="ib-rv-mark ib-rv-overview" aria-hidden="true">
-                    <Icon name="book" size={13} />
-                  </span>
-                  <span className="ib-rv-t">Overview</span>
-                </button>
-              </li>
-              {chapters.map((chapter, index) => {
-                const done = reviewed[index] ?? snapshot?.guide.reviewed[index] ?? false;
-                const count = chapter.diffs.length;
-                return (
-                  <li key={`${chapter.title}:${index}`}>
-                    <button
-                      type="button"
-                      className="ib-rv-row"
-                      data-on={current === index ? '' : undefined}
-                      onClick={() => toChapter(index)}
-                      aria-label={`Chapter ${index + 1}: ${chapter.title}${done ? ', reviewed' : ''}`}
-                    >
-                      <span className="ib-rv-mark" data-done={done ? '' : undefined} aria-hidden="true">
-                        {done ? <Icon name="check" size={12} /> : index + 1}
-                      </span>
-                      <span className="ib-rv-t">{chapter.title}</span>
-                      <span className="ib-rv-n">{count}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-          ) : (
-            <ul className="ib-rv-list" data-review-files="">
-              {files.map((file) => {
-                const seen = viewedSet.has(file.path);
-                const slash = file.path.lastIndexOf('/');
-                return (
-                  <li key={file.path}>
-                    <button type="button" className="ib-rv-row ib-rv-file" onClick={() => toFile(file.path)} aria-label={`${file.path}${seen ? ', viewed' : ''}`}>
-                      <span className="ib-rv-mark" data-done={seen ? '' : undefined} aria-hidden="true">
-                        {seen ? <Icon name="check" size={12} /> : null}
-                      </span>
-                      <span className="ib-rv-t">
-                        <Tip content={file.path} cut>
-                          <span className="ib-rv-path">
-                            {/* Cut at the start (the box is right to left); the path itself reads left to right, a leading dot included. */}
-                            <bdi dir="ltr">
-                              {slash >= 0 && <span className="ib-rv-dir">{file.path.slice(0, slash + 1)}</span>}
-                              {file.path.slice(slash + 1)}
-                            </bdi>
-                          </span>
-                        </Tip>
-                      </span>
-                      <span className="ib-rv-n">
-                        <span className="ib-add">+{formatCount(file.additions)}</span> <span className="ib-del">-{formatCount(file.deletions)}</span>
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          <div className="ib-rv-progress" aria-live="polite">
-            {mode === 'walkthrough'
-              ? `${reviewedCount} of ${plural(chapters.length, 'chapter')} reviewed`
-              : `${viewed.filter((path) => files.some((file) => file.path === path)).length} of ${plural(files.length, 'file')} viewed`}
-          </div>
-        </nav>
         <div className="ib-gbody" ref={bodyRef}>
-          {phone && (
-            // A phone has no rail: its switch, and the chapters or files as a native list to jump to.
-            <div className="ib-rv-phonebar" data-review-phonebar="">
-              {railModes}
-              <select
-                className="ib-rv-jump"
-                aria-label={mode === 'walkthrough' ? 'Go to a chapter' : 'Go to a file'}
-                value=""
-                onChange={(event) => {
-                  const value = event.target.value;
-                  if (mode === 'walkthrough') toChapter(value === 'overview' ? null : Number(value));
-                  else if (value) toFile(value);
-                }}
-              >
-                <option value="" disabled>
-                  {mode === 'walkthrough' ? `Chapters · ${reviewedCount} of ${chapters.length} reviewed` : `Files · ${plural(files.length, 'file')}`}
-                </option>
-                {mode === 'walkthrough' ? (
-                  <>
-                    <option value="overview">Overview</option>
-                    {chapters.map((chapter, index) => (
-                      <option key={`${chapter.title}:${index}`} value={String(index)}>
-                        {`${index + 1}. ${chapter.title}${(reviewed[index] ?? snapshot?.guide.reviewed[index]) ? ' ✓' : ''}`}
-                      </option>
-                    ))}
-                  </>
-                ) : (
-                  files.map((file) => (
-                    <option key={file.path} value={file.path}>
-                      {`${file.path}${viewedSet.has(file.path) ? ' ✓' : ''}`}
-                    </option>
-                  ))
-                )}
-              </select>
-            </div>
-          )}
           {moved && (
             <p className="ib-prr-note" role="status" data-review-pull-moved={moved}>
               {moved === 'reading'
@@ -548,7 +742,10 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
               {error}
             </div>
           ) : snapshot ? (
-            <Suspense fallback={null}>
+            // The reader is a chunk loaded on first use: one that cannot arrive says so here (GuidePane).
+            <div ref={contentRef}>
+            <ReaderPart diff={snapshot.review.rawPatch}>
+              <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on>
               <GuideReader
                 snapshot={snapshot}
                 reviewed={reviewed}
@@ -557,8 +754,17 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
                 mode={mode}
                 reveal={reveal}
                 viewed={viewedProp}
+                {...(guest ? {} : { fileContents })}
+                fileOpenIn={fileOpenIn}
+                {...(selectionActions ? { selectionActions } : {})}
+                renderOverviewDiagram={renderOverviewDiagram}
+                renderHeadActions={renderHeadActions}
+                highlight={highlight}
+                threadHeading
               />
-            </Suspense>
+              </OpenInCodeSpans>
+            </ReaderPart>
+            </div>
           ) : null}
         </div>
         <div
@@ -603,6 +809,36 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
           />
         </div>
       </div>
+      <ShowMeBox
+        state={showMe.state}
+        agent={author}
+        onWords={showMe.setWords}
+        onSend={() => void showMe.send()}
+        onBusy={(policy) => void showMe.busyChoice(policy)}
+        onStop={() => void showMe.stop()}
+        onClose={showMe.closeBox}
+      />
+      {showMe.state.shown?.as === 'sheet' && (
+        <ShowMeSheet
+          drawing={showMe.state.shown.drawing}
+          answer={showMe.state.shown.answer}
+          agent={author}
+          host={host}
+          offset={sheetOffset}
+          {...(phone ? {} : { onOffset: setSheetOffset })}
+          asked={askedReview ? { stale: anchors?.stale ?? new Set<string>(), onAgain: () => showMe.again(showMe.state.shown!.drawing, againPlace()) } : null}
+          onAgain={() => showMe.again(showMe.state.shown!.drawing)}
+          onCode={(drawn, el) => {
+            const target = anchors?.moved.get(codeKey(drawn)) ?? drawn;
+            if (openCode(target)) showMe.toCorner({ name: partName(el), mark: markOf(el), file: target.path, lines: targetLines(target) });
+          }}
+          onShrink={() => showMe.toCorner(null)}
+          onClose={showMe.closePicture}
+        />
+      )}
+      {showMe.state.shown?.as === 'corner' && (
+        <ShowMeCorner drawing={showMe.state.shown.drawing} part={showMe.state.shown.part} onGrow={showMe.grow} onClose={showMe.closePicture} />
+      )}
     </section>
   );
 }

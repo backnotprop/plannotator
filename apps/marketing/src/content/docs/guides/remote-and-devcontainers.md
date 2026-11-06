@@ -24,7 +24,7 @@ Remote mode changes these behaviors:
 3. **Wider bind** — The server listens on every interface (`0.0.0.0`), not only loopback, so a forwarder or another device can reach it
 4. **These features are turned off** — Ask AI's "Ask this session" (Ask AI uses a separate AI agent instead), the annotate agent terminal (unless `PLANNOTATOR_AGENT_TERMINAL_REMOTE=1`), Open in, Update now from a review window, live app annotation, the agent closing a review it opened, and auto-dismiss of an abandoned `--gate --json` session
 
-Every other route stays reachable by anyone who can reach the URL: approving or denying the plan, sending feedback, starting agent review jobs, staging files, posting to the pull request, saving Edit Mode changes, and Ask AI with a separate agent. Bind or forward the port only on networks you trust. Use remote mode only when the browser cannot reach the machine's loopback address; `PLANNOTATOR_PORT` works in local mode too.
+Every other route stays reachable by anyone who can reach the URL: approving or denying the plan, sending feedback, starting agent review jobs, staging files, posting to the pull request, saving Edit Mode changes, and Ask AI with a separate agent. In remote mode the server listens on every interface (`0.0.0.0`) with no login, so anyone who can reach the port can use it, even when you use an SSH tunnel. Keep the port closed to networks you don't trust. Use remote mode only when the browser cannot reach the machine's loopback address; `PLANNOTATOR_PORT` works in local mode too.
 
 ### Legacy detection
 
@@ -112,20 +112,20 @@ If the automatic `BROWSER` detection doesn't work for your setup, you can fall b
 
 ## SSH port forwarding
 
-For direct SSH connections, forward the port in your `~/.ssh/config`:
+For direct SSH connections, forward the port in your `~/.ssh/config` (`PLANNOTATOR_PORT` if set, otherwise `19432`):
 
 ```
 Host your-server
-    LocalForward 9999 localhost:9999
+    LocalForward 19432 localhost:19432
 ```
 
 Or forward ad-hoc when connecting:
 
 ```bash
-ssh -L 9999:localhost:9999 your-server
+ssh -L 19432:localhost:19432 your-server
 ```
 
-Then open `http://localhost:9999` locally if Plannotator does not open a browser for you.
+Then open `http://localhost:19432` locally (your `PLANNOTATOR_PORT` if set) if Plannotator does not open a browser for you.
 
 ## Docker (without VS Code)
 

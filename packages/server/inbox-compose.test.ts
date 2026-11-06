@@ -24,6 +24,7 @@ import {
 import { inboxId } from "@plannotator/core/inbox-types";
 import { INBOX_WAKE_INSTRUCTION, inboxContinuesLine } from "@plannotator/shared/inbox/connection";
 import { InboxAgentConnection, InboxWake } from "@plannotator/shared/inbox/agent-link";
+import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { startInboxServer, type InboxServer } from "./inbox";
 import type { InboxGitRunner } from "./inbox-project-root";
 
@@ -61,7 +62,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-async function setup(projectRootGit?: InboxGitRunner) {
+async function setup(projectRootGit?: InboxGitRunner, sessionsNow?: () => number) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-compose-")));
   roots.push(root);
   const ledger = join(root, "ledger");
@@ -69,7 +70,7 @@ async function setup(projectRootGit?: InboxGitRunner) {
   mkdirSync(ledger, { recursive: true });
   mkdirSync(billing, { recursive: true });
   const dataDir = join(root, "data");
-  const server = await startInboxServer({ dataDir, ...(projectRootGit ? { projectRootGit } : {}) });
+  const server = await startInboxServer({ dataDir, ...(projectRootGit ? { projectRootGit } : {}), ...(sessionsNow ? { sessionsNow } : {}) });
   servers.push(server);
   const client = new Client({ name: "inbox-compose-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -210,9 +211,11 @@ describe("a thread the person starts", () => {
   });
 
   test("Send to another session moves a message no session took yet; once delivered it stays", async () => {
-    const { server, billing } = await setup();
+    let now = 1_000_000;
+    const { server, billing } = await setup(undefined, () => now);
     await poll(server, "ses-a", "claude-code", billing);
     const sent = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-a" }, body: "Rename Quiet?", idempotency_key: "c1" })).json()) as { message: InboxMessage };
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
     await poll(server, "ses-b", "pi", billing);
     const moved = await post(server, `/api/inbox/messages/${sent.message.id}/to`, { to: { host: "pi", session: "ses-b" } });
     expect(moved.status).toBe(200);
@@ -244,7 +247,8 @@ describe("a thread the person starts", () => {
   });
 
   test("more words moved to a session that has seen nothing of the thread wake it with the line to read the thread first", async () => {
-    const { server, billing } = await setup();
+    let now = 1_000_000;
+    const { server, billing } = await setup(undefined, () => now);
     await poll(server, "ses-a", "claude-code", billing);
     const sent = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-a" }, body: "Add a retry budget.", idempotency_key: "c1" })).json()) as { message: InboxMessage };
     await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-a", host: "claude-code", type: "delivered", id: sent.message.id });
@@ -254,6 +258,7 @@ describe("a thread the person starts", () => {
     expect(own).toMatchObject({ type: "reply", id: follow.id });
     expect(own!.continues_thread).toBeUndefined();
 
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
     await poll(server, "ses-b", "pi", billing);
     expect((await post(server, `/api/inbox/messages/${follow.id}/to`, { to: { host: "pi", session: "ses-b" } })).status).toBe(200);
     const [moved] = await poll(server, "ses-b", "pi", billing);
@@ -269,7 +274,8 @@ describe("a thread the person starts", () => {
   });
 
   test("the root and a follow-up for the same session in one poll: no 'another session' line, also after both are moved there", async () => {
-    const { server, billing } = await setup();
+    let now = 1_000_000;
+    const { server, billing } = await setup(undefined, () => now);
     await poll(server, "ses-a", "claude-code", billing);
     const sent = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-a" }, body: "Add a retry budget.", idempotency_key: "c1" })).json()) as { message: InboxMessage };
     const follow = ((await (await post(server, `/api/inbox/messages/${sent.message.id}/reply`, { words: "And log each retry.", idempotency_key: "r1" })).json()) as { reply: InboxMessage }).reply;
@@ -278,6 +284,7 @@ describe("a thread the person starts", () => {
     expect(both[1]!.continues_thread).toBeUndefined();
 
     // Both moved to B before anyone took them: B gets the root first, so the follow-up needs no line either.
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
     await poll(server, "ses-b", "pi", billing);
     for (const id of [sent.message.id, follow.id]) {
       expect((await post(server, `/api/inbox/messages/${id}/to`, { to: { host: "pi", session: "ses-b" } })).status).toBe(200);
@@ -468,6 +475,63 @@ describe("drafts", () => {
     expect(after.map((d) => d.id)).toEqual([ended]);
     expect(((await (await post(server, `/api/inbox/drafts/${ended}/delete`, {})).json()) as { deleted: boolean }).deleted).toBe(true);
     expect(((await (await fetch(`${base(server)}/api/inbox/drafts`)).json()) as { drafts: InboxDraft[] }).drafts).toEqual([]);
+  });
+
+  test("a draft saved, deleted or sent tells every window's stream (event: drafts, compose); a refused save, a delete of nothing and the phone's stream hear nothing", async () => {
+    const { server, billing } = await setup();
+    /** The `event: drafts` frames a stream has carried so far. */
+    const listen = async (query: string) => {
+      const response = await fetch(`${base(server)}/api/inbox/events${query}`);
+      const reader = response.body!.getReader();
+      let text = "";
+      let open = true;
+      void (async () => {
+        while (open) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          text += new TextDecoder().decode(value);
+        }
+      })().catch(() => {});
+      return {
+        frames: () => text.split("\n\n").filter((frame) => frame.includes("event: drafts")).map((frame) => JSON.parse(frame.split("data: ")[1]!) as unknown),
+        close: () => {
+          open = false;
+          void reader.cancel().catch(() => {});
+        },
+      };
+    };
+    const windowA = await listen("?window=window-aaaa");
+    const phone = await listen("");
+    const settle = () => new Promise((done) => setTimeout(done, 100));
+    await settle();
+    const compose = { compose: true };
+
+    const id = inboxId("drf");
+    const created = (await (await post(server, `/api/inbox/drafts/${id}`, { body: "First words", to: null, base: null })).json()) as { draft: InboxDraft };
+    await settle();
+    expect(windowA.frames()).toEqual([compose]);
+    // A stale save is refused and changes nothing; neither does deleting a draft that is not there.
+    expect((await post(server, `/api/inbox/drafts/${id}`, { body: "other tab", base: null })).status).toBe(409);
+    expect(((await (await post(server, `/api/inbox/drafts/${inboxId("drf")}/delete`, {})).json()) as { deleted: boolean }).deleted).toBe(false);
+    await settle();
+    expect(windowA.frames()).toEqual([compose]);
+
+    expect(((await (await post(server, `/api/inbox/drafts/${id}/delete`, {})).json()) as { deleted: boolean }).deleted).toBe(true);
+    await settle();
+    expect(windowA.frames()).toEqual([compose, compose]);
+
+    // Sent from a draft: the draft is gone, and the windows hear it (the new thread's record says nothing of the draft).
+    await poll(server, "ses-pi", "pi", billing);
+    const again = inboxId("drf");
+    await post(server, `/api/inbox/drafts/${again}`, { body: "Send me", to: { host: "pi", session: "ses-pi" }, base: null });
+    expect((await post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "Send me", idempotency_key: "c-drafts", draft_id: again })).status).toBe(200);
+    await settle();
+    expect(windowA.frames()).toEqual([compose, compose, compose, compose]);
+    expect(created.draft.id).toBe(id);
+    // The phone's door (no window id) never carries drafts.
+    expect(phone.frames()).toEqual([]);
+    windowA.close();
+    phone.close();
   });
 
   test("a draft naming an upload that is gone is refused", async () => {

@@ -46,6 +46,7 @@ import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
 import { questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { hasHelpFlag, INBOX_CALL_ACTIONS, INBOX_CALL_USAGE } from "./cli";
+import { writeWholeToStdout } from "./write-whole-stdout";
 import { fillInboxToolArguments, type InboxHostSession, INBOX_DSH_ROOT_FOR_ENV, INBOX_DSH_ROOT_SESSION_ENV, INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
 
 /** One request never waits longer: a wedged Inbox must not hang a script. */
@@ -190,7 +191,7 @@ export interface CallCommandDeps {
 
 /** Run `plannotator inbox call …`; resolves to the exit code. */
 export async function runInboxCallCommand(argv: readonly string[], deps: CallCommandDeps): Promise<number> {
-  const out = deps.out ?? ((text: string) => new Promise<void>((done) => void process.stdout.write(text, () => done())));
+  const out = deps.out ?? writeWholeToStdout;
   const err = deps.err ?? ((text: string) => void process.stderr.write(text));
   const refused = (code: string, message: string, exit = 1) => {
     err(`${code}: ${message}\n`);

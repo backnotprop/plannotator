@@ -24,9 +24,11 @@
  *    (`link-back`, `unlink`).
  */
 
-import type { InboxListRow, InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
+import { inboxRowArchived, isInboxId, type InboxListRow, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { inboxSnoozeRefusal, inboxSnoozeRunning } from "@plannotator/core/inbox-snooze";
+import { refuseInboxSnoozeUntil } from "@plannotator/shared/inbox/snoozes";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
@@ -117,7 +119,7 @@ export interface InboxMachinesContext {
 export type MachineLinkTimings = Partial<PeerLinkTimings> & { accountsMs?: number };
 
 /** A frame for the window's event stream: other machines' records and states never share the local seq (design review, change 2). */
-export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: "snoozes"; data: Record<string, never> };
+export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: "snoozes"; data: Record<string, never> } | { event: "deliveries"; data: { sessions?: boolean } };
 
 export interface MachineView {
   id: string;
@@ -143,6 +145,21 @@ export interface MachineView {
   list_cursor: number | null;
   /** Its Inbox keeps snoozes (approval "inbox-snooze"): a write there would land. False until its list is read, and for an older Inbox. */
   snoozes: boolean;
+}
+
+/** An agent's snooze of a linked machine's thread: its answer there, or `held`, the words for a write that waits. */
+export interface MachineSnoozeAnswer {
+  machine: string;
+  name: string;
+  snoozed: { until: string; at: string } | null;
+  held: string | null;
+  /** `until: null` took off a snooze this machine's list showed running. */
+  ended: boolean;
+}
+
+/** What a held write says, by its machine's state: the same words as the window's `heldWords` (packages/inbox/api.ts). A revoked machine is forgotten as it is revoked, so it never holds one here. */
+export function machineHeldWords(name: string, state: string | null): string {
+  return state !== null && state !== "online" && state !== "connecting" ? `Waiting for ${name}: this applies when ${name} is back.` : `Sending to ${name}: this applies once ${name} confirms.`;
 }
 
 export interface OutboxView {
@@ -191,6 +208,7 @@ export const outboxView = (entry: OutboxEntry): OutboxView => ({
 });
 
 const FORWARD = /^\/api\/inbox\/m\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/(.+)$/;
+const SNOOZE_ROUTE = /^threads\/[^/]+\/snooze$/;
 const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
 /** A thread id the window names in `X-Plannotator-Thread`: kept on the outbox entry only, never sent on. */
 const THREAD_HINT = /^[A-Za-z0-9_-]{8,80}$/;
@@ -323,6 +341,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       onChange: machinesChanged,
       // A snooze moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
       onSnoozes: () => emit({ event: "snoozes", data: {} }),
+      onDeliveries: ({ sessions }) => emit({ event: "deliveries", data: sessions ? { sessions: true } : {} }),
       onRevoked: () => forget(link.id),
     });
     peers.set(link.id, peer);
@@ -642,6 +661,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (REPLY_ROUTE.test(route) && (typeof body.seen_through_seq !== "number" || !Number.isSafeInteger(body.seen_through_seq))) {
       throw new InboxError("validation_error", "seen_through_seq: a reply to another machine carries the newest seq of the thread the person saw.", { field: "seen_through_seq" });
     }
+    // A time already gone when it is asked for is the asker's to hear now. One that goes by in the queue is for that machine to settle.
+    if (SNOOZE_ROUTE.test(route) && !outbox.get(String(body.idempotency_key)) && inboxSnoozeRefusal(body.until) === "past") throw new InboxError("snooze_past", "That time has passed.", { field: "until" });
     // The window names the thread a write is about, so a held answer shows even where that thread cannot open.
     const named = req.headers.get("X-Plannotator-Thread")?.trim() ?? "";
     const { entry, fresh } = outbox.submit(machine, route, body, THREAD_HINT.test(named) ? named : null);
@@ -660,6 +681,53 @@ export function createInboxMachines(context: InboxMachinesContext) {
     }
     const machine = machinesView().find((m) => m.id === entry.machine) ?? null;
     return new Response(JSON.stringify({ outbox: outboxView(entry), machine }), { status: 202, headers });
+  };
+
+  // ── An agent's snooze of a linked machine's thread ──
+
+  /**
+   * The window's own write: the forward and the outbox, so a machine that is away gets it when it is back. Null: no
+   * linked machine lists the thread. A machine too old to keep snoozes is refused here, with nothing held or noticed.
+   */
+  const snoozeThread = async (threadId: string, until: string | null): Promise<MachineSnoozeAnswer | null> => {
+    const owners = [...peers.values()].flatMap((peer) => {
+      const row = peer.list?.rows.find((candidate) => candidate.thread_id === threadId);
+      return row ? [{ peer, row }] : [];
+    });
+    if (owners.length === 0) {
+      if (peers.size === 0 || !isInboxId("msg", threadId)) return null;
+      // Right after this Inbox starts, a machine that is away has sent no list, so the thread may be there.
+      const unknown = [...peers.values()].filter((peer) => peer.list === null && peer.state !== "needs_update" && peer.state !== "revoked").map((peer) => links.get(peer.id)?.name ?? "A linked machine");
+      if (unknown.length > 0) throw new InboxError("machine_offline", `This thread may be on ${unknown.join(" or ")}, whose threads are not known yet (away or still connecting). Nothing changed.`);
+      throw new InboxError("thread_not_found", `No thread ${threadId}. On a linked machine, use the thread's id, not a message's.`);
+    }
+    if (owners.length > 1) throw new InboxError("machine_conflict", "Two linked machines both claim this thread, so it opens on neither.");
+    const { peer, row } = owners[0]!;
+    const machine = peer.id;
+    const name = links.get(machine)?.name ?? "that machine";
+    if (!peer.list!.snoozes) throw new InboxError("machine_needs_update", `Update Plannotator on ${name}: it cannot snooze threads yet. Nothing changed.`);
+    // Refused here, as that machine's store would: sent, an agent's mistake would wait as if it will apply, then leave the person a notice.
+    if (until !== null) {
+      refuseInboxSnoozeUntil(until, new Date());
+      if (inboxRowArchived(row)) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
+    }
+    const route = `threads/${encodeURIComponent(threadId)}/snooze`;
+    const url = new URL(`http://inbox.local/api/inbox/m/${machine}/${route}`);
+    const asked = new Request(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Plannotator-Thread": threadId },
+      body: JSON.stringify({ idempotency_key: `agent-${crypto.randomUUID()}`, until }),
+    });
+    const response = await forward(asked, url, machine, route, "local");
+    const body = (await response.json().catch(() => ({}))) as { snoozed?: MachineSnoozeAnswer["snoozed"]; code?: unknown; error?: unknown; machine?: { state?: string } | null; outbox?: OutboxView };
+    if (response.status === 202) {
+      const state = body.outbox?.state;
+      if (state === "queued" || state === "sending") return { machine, name, snoozed: null, held: machineHeldWords(name, body.machine?.state ?? null), ended: false };
+      const why = (body.outbox?.answer as { error?: unknown } | null | undefined)?.error;
+      throw new InboxError("not_delivered", typeof why === "string" && why ? why : `Not delivered to ${name}.`);
+    }
+    if (!response.ok) throw new InboxError(typeof body.code === "string" ? body.code : "machine_refused", typeof body.error === "string" ? body.error : `${name} refused it.`);
+    return { machine, name, snoozed: body.snoozed ?? null, held: null, ended: until === null && !!row.snoozed && inboxSnoozeRunning(row.snoozed.until) };
   };
 
   // ── A linked machine's accounts (Settings → Accounts, the Usage peek) ──
@@ -802,6 +870,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     rows,
     projects,
     projectOwner,
+    snoozeThread,
     subscribe: (listener: (frame: MachineFrame) => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);

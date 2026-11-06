@@ -12,7 +12,7 @@
  *   GET  /api/inbox/sessions                 every live session, grouped by project;
  *                                            `?session=<id>` adds `session: { session, live }`
  *                                            (with the asker grace) for a thread's delivery line
- *   POST /api/inbox/messages                 `{ to, body, idempotency_key, uploads?, draft_id?, thread_name?, thread_name_auto?, board_request? }`:
+ *   POST /api/inbox/messages                 `{ to, body, idempotency_key, uploads?, draft_id?, thread_name?, thread_name_auto?, board_request?, decision_ask? }`:
  *                                            a new thread (409 `session_not_live`, nothing written). With
  *                                            `to.launch.trust` (Trust and start) only the owner's window: the
  *                                            Send saves the folder's trust, so this form alone is never a plain write
@@ -53,7 +53,7 @@ import {
   sweepInboxUploads,
 } from "@plannotator/shared/inbox/uploads";
 import type { InboxLaunch } from "./inbox-launch";
-import type { createInboxLiveSessions } from "./inbox-sessions";
+import { replacesEndedAsker, takesOver, thereInThread, type createInboxLiveSessions } from "./inbox-sessions";
 
 /** How many characters of a reply draft the Drafts page shows. */
 const INBOX_REPLY_PREVIEW_MAX = 160;
@@ -78,7 +78,7 @@ export function createInboxCompose(options: {
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
   /** Launch (inbox-launch.ts): `to: { launch: { agent, project_id } }` starts the agent. Absent: that form is refused. */
-  launch?: Pick<InboxLaunch, "enabled" | "target" | "prepare" | "acceptTrust" | "abandon" | "begin" | "composeBlock">;
+  launch?: Pick<InboxLaunch, "enabled" | "resumes" | "gone" | "target" | "prepare" | "acceptTrust" | "abandon" | "begin" | "composeBlock">;
   /** A tailnet request from someone other than this computer's owner: never starts an agent (`to.launch`). Absent: nobody is. */
   isGuest?: (req: Request, via: "local" | "tailnet") => boolean;
   now?: () => Date;
@@ -86,6 +86,8 @@ export function createInboxCompose(options: {
   boardOn?: () => boolean;
   /** This Inbox's stable id (linked machines): the sessions answer says whose sessions they are. */
   machine?: () => string;
+  /** A compose draft was saved, deleted or sent: every window's stream says `event: drafts`, so its Drafts count follows (#2593). */
+  onDraftsChange?: () => void;
 }) {
   const { store, serverSession, live, json } = options;
   const boardOn = options.boardOn ?? (() => false);
@@ -208,6 +210,8 @@ export function createInboxCompose(options: {
         // The Board chip (approval "inbox-compose-board-chip"): kept only while the Board is on, so an agent is
         // never asked for cards the Board would refuse (`board_off`).
         board_request: body.board_request === true && boardOn(),
+        // Settings -> Decision data's Ask: the agent also receives how to answer it (INBOX_DECISION_ASK_BLOCK).
+        decision_ask: body.decision_ask === true,
         ...(guest ? { by_guest: true } : {}),
         ...(prepared ? { launch: prepared.launch } : {}),
       });
@@ -226,7 +230,7 @@ export function createInboxCompose(options: {
     else if (prepared) options.launch!.begin(result.message);
     // Sent: the uploads are attachments now, and the draft it came from is done.
     removeInboxUploads(store.dir, uploads.filter((id): id is string => typeof id === "string"));
-    if (body.draft_id !== undefined) deleteInboxDraft(store.dir, body.draft_id);
+    if (body.draft_id !== undefined && deleteInboxDraft(store.dir, body.draft_id)) options.onDraftsChange?.();
     return json({
       thread_id: result.message.thread_id,
       message: result.message,
@@ -245,7 +249,16 @@ export function createInboxCompose(options: {
     const message = store.message(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
     const target = live.replyTarget(message.thread_id, body.to);
-    const next = store.readdressMessage(messageId, target);
+    // A move needs the session it waits on to have ended; `takesOver` says if it takes the thread too.
+    const asked = message.reply_to ? store.message(message.reply_to) : null;
+    const askedWakes = asked?.author.kind === "agent" && asked.wakes === true ? asked.author.session : null;
+    const waitsOn = message.to?.session ?? askedWakes;
+    const there = thereInThread(live, options.launch, message.thread_id);
+    const next = store.readdressMessage(messageId, target, {
+      targetLive: !!waitsOn && there.askerLive(waitsOn),
+      askerEnded: replacesEndedAsker(asked, there),
+      tookOver: takesOver(store, message.thread_id, asked, waitsOn, there),
+    });
     return json({ message: next, row: store.listRow(next.thread_id) });
   };
 
@@ -310,8 +323,13 @@ export function createInboxCompose(options: {
       const body = await options.readBody(req);
       const stale = staleTab(body);
       if (stale) return stale;
-      if (draftMatch[2]) return json({ ok: true, deleted: deleteInboxDraft(store.dir, draftMatch[1]) });
+      if (draftMatch[2]) {
+        const deleted = deleteInboxDraft(store.dir, draftMatch[1]);
+        if (deleted) options.onDraftsChange?.();
+        return json({ ok: true, deleted });
+      }
       const draft = saveInboxDraft(store.dir, draftMatch[1], body, now().toISOString());
+      options.onDraftsChange?.();
       return json({ draft: withStatus(draft) });
     }
     if (path === "/api/inbox/uploads") {

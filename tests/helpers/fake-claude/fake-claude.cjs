@@ -431,6 +431,7 @@ async function session(sessionId) {
       tool_input: spec.tool_input || {},
       ...(spec.permission_suggestions ? { permission_suggestions: spec.permission_suggestions } : {}),
     };
+    while (config().holdPrompts && !stopped) await sleep(100);
     updateAgent(sessionId, { status: "waiting", waitingFor: "permission prompt" });
     const started = Date.now();
     let stdout = "";

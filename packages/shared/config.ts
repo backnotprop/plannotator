@@ -762,9 +762,11 @@ function getConfigPath(): string {
 
 /**
  * Load config from ~/.plannotator/config.json.
- * Returns {} on missing file or malformed JSON.
+ * Returns {} on missing file or malformed JSON. `quiet`: no warning for a
+ * malformed file (a read that must not add a line to what a command printed
+ * before it existed: a later read in the same command still warns).
  */
-export function loadConfig(): PlannotatorConfig {
+export function loadConfig(options: { quiet?: boolean } = {}): PlannotatorConfig {
   try {
     const configPath = getConfigPath();
     if (!existsSync(configPath)) return {};
@@ -773,7 +775,7 @@ export function loadConfig(): PlannotatorConfig {
     const parsed = JSON.parse(raw);
     return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
   } catch (e) {
-    process.stderr.write(`[plannotator] Warning: failed to read config.json: ${e}\n`);
+    if (!options.quiet) process.stderr.write(`[plannotator] Warning: failed to read config.json: ${e}\n`);
     return {};
   }
 }

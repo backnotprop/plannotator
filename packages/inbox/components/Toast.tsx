@@ -28,6 +28,8 @@ export interface InboxToastModel {
   /** An error: its message may wrap (three lines, four on a phone); past that, its last sentence (what to do) stays whole. */
   wrap?: boolean;
   onUndo?: () => void;
+  /** Undo by its button only, no `Z` (a toast inside a dialog, whose fields take the key). */
+  noKey?: boolean;
   /** Not on a touch phone (its thread foot has Reply). */
   onReply?: () => void;
   /** One more action (compose: Open the thread just sent, or Drafts). */
@@ -40,7 +42,7 @@ export interface InboxToastModel {
   speech?: string;
 }
 
-const ICONS: Record<Exclude<InboxToastIcon, 'thumb'>, IconName> = { check: 'checkCircle', warn: 'warn', archive: 'archive', mute: 'mute', unpin: 'pinOff', clock: 'clock', unread: 'envelope' };
+const ICONS: Record<Exclude<InboxToastIcon, 'thumb'>, IconName> = { check: 'checkCircle', warn: 'warn', archive: 'archive', mute: 'mute', unpin: 'star', clock: 'clock', unread: 'envelope' };
 
 /**
  * What the window's live region says for a toast, as sentences, and how to
@@ -157,10 +159,10 @@ function ToastBody({ toast, phone, onDismiss }: { toast: InboxToastModel; phone:
             </button>
           )}
           {toast.onUndo && (
-            <button type="button" className="ib-tundo" onClick={toast.onUndo} data-toast-undo="" aria-keyshortcuts={phone && touchPhone ? undefined : undoKeys}>
+            <button type="button" className="ib-tundo" onClick={toast.onUndo} data-toast-undo="" aria-keyshortcuts={toast.noKey || (phone && touchPhone) ? undefined : undoKeys}>
               Undo
               {/* A narrow desktop window (the phone layout, a mouse and keys) keeps Z, as it keeps Reply. */}
-              {!(phone && touchPhone) && <ShortcutHint scope={inboxThreadShortcuts} action="undo" className="" touchOnly />}
+              {!toast.noKey && !(phone && touchPhone) && <ShortcutHint scope={inboxThreadShortcuts} action="undo" className="" touchOnly />}
             </button>
           )}
           {onDismiss && (

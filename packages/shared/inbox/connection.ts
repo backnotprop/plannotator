@@ -30,6 +30,25 @@
  * paste). The server imports the path constants from here.
  */
 
+/** The folder name of one session's claim on one delivery (`inbox/claims/`): a moved reply is a new delivery for the next session. */
+export function inboxClaimName(replyId: string, session: string): string {
+  return `${replyId}.${session.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120)}`;
+}
+
+/**
+ * The stop notice of a thread handed to another session goes by its own id, not the reply's. A connection only keeps the
+ * id and reports it, so what any connection or wake keeps per id (settled, claims, a T3 request), and its report, can
+ * never stand for the person's words when the reply moves back to that session. Older connections included.
+ */
+export function inboxStopNoticeId(replyId: string): string {
+  return `${replyId}-stop`;
+}
+
+/** The reply a stop notice's id belongs to; null for any other id. */
+export function inboxStopNoticeReply(id: string): string | null {
+  return id.length > '-stop'.length && id.endsWith('-stop') ? id.slice(0, -'-stop'.length) : null;
+}
+
 // --- CONTRACT (copied byte for byte into apps/hook/hooks/mod/inbox-contract.ts; edit packages/shared/inbox/connection.ts, then paste) ---
 
 /** The agent tool every connection registers. */
@@ -45,6 +64,7 @@ export const INBOX_TOOL_ACTIONS = [
   'read_thread',
   'search',
   'resolve_message',
+  'snooze_thread',
   'submit_guide',
   'get_guide_brief',
   'card',
@@ -430,6 +450,13 @@ function wakeSteps(value: unknown): { done: number; total: number; doing: string
 }
 
 /**
+ * Actions with no line in the agent tool's description: the name in `action`
+ * and its field's description say what they do, and a field description does
+ * not count toward the 2,048 (the owner: do not grow the main description).
+ */
+export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread']
+
+/**
  * The agent tool's own line for an action whose Inbox lead is long (the
  * description must stay under Claude Code's 2,048 characters, and every Pi and
  * OpenCode request carries it).
@@ -638,7 +665,7 @@ export function inboxAgentTool(
   const description = [
     INBOX_TOOL_LEAD,
     '',
-    ...tools.map((tool) => `- ${tool.name}: ${INBOX_AGENT_ACTION_LEADS[tool.name] ?? leadOf(tool.description)}`),
+    ...tools.filter((tool) => !INBOX_AGENT_ACTIONS_NO_LINE.includes(tool.name)).map((tool) => `- ${tool.name}: ${INBOX_AGENT_ACTION_LEADS[tool.name] ?? leadOf(tool.description)}`),
     ...(options.wakes === false ? [] : ['', INBOX_TOOL_WAKE_NOTE]),
     '',
     // The Board off: no card action, one line that it exists (nothing changes while it is on).
@@ -1066,6 +1093,13 @@ function wakeName(value: unknown): string {
  * never offered there.
  */
 export const INBOX_SEND_NOW_POLL_FIELD = 'send_now'
+
+/**
+ * On a poll, the connection's tick goes on polling while a steer waits for the running turn. A connection without it
+ * (from before that) stops polling until the steer goes in, so the Inbox counts a session it handed one as there.
+ * An older Inbox ignores it.
+ */
+export const INBOX_STEER_POLLS_POLL_FIELD = 'steer_polls'
 
 /**
  * The poll field (`true`) by which a connection says it can answer Ask AI

@@ -57,8 +57,10 @@
     "./inbox-open-questions": "./inbox-open-questions.ts",
     "./inbox-format": "./inbox-format.ts",
     "./inbox-snooze": "./inbox-snooze.ts",
+    "./inbox-list-delta": "./inbox-list-delta.ts",
     "./shape": "./shape.ts",
     "./shape-skill": "./shape-skill.ts",
+    "./shape-kit.mjs": "./shape-kit.mjs",
     "./inbox-reply-draft": "./inbox-reply-draft.ts",
     "./inbox-review": "./inbox-review.ts",
     "./diagram-anchor": "./diagram-anchor.ts",
@@ -79,7 +81,8 @@
   },
   "files": [
     "**/*.ts",
-    "!**/*.test.ts"
+    "!**/*.test.ts",
+    "shape-kit.mjs"
   ],
   "scripts": {
     "prepack": "bun run --cwd ../.. build:viewer-pin"

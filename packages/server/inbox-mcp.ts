@@ -20,7 +20,7 @@ import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import { inboxQuestionKeysWithRecommendedMarker } from "@plannotator/core/inbox-questions";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from "@plannotator/core/inbox-actions";
 import { checkInboxSubject, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, inboxTidyMcpLine, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
-import { INBOX_AGENT_RULES, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
+import { inboxStopNoticeReply, INBOX_AGENT_RULES, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
@@ -29,6 +29,7 @@ import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly 
 import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
+import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
 import type { InboxAttachment, InboxListRow } from "@plannotator/core/inbox-types";
 import { registerInboxGuideTools } from "./inbox-guides";
 import { lastContactOf, noteSessionRead, staleThreadOf, staleThreadText } from "./inbox-session-reads";
@@ -44,8 +45,9 @@ import { fail, guarded, ok, okComplete, PROJECT_PATH_DESCRIPTION, type ToolResul
 export { fail, guarded, ok, okComplete, PROJECT_PATH_DESCRIPTION, type ToolResult };
 import type { InboxSearchIndex } from "@plannotator/shared/inbox/search";
 import { isInsideFolder, type InboxProjectRoot } from "./inbox-project-root";
+import { registerInboxSnoozeTool, type InboxSnoozeMcpContext } from "./inbox-mcp-snooze";
 
-export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "get_guide_brief", "submit_guide", "card", "steps"] as const;
+export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "get_guide_brief", "submit_guide", "card", "steps"] as const;
 
 /**
  * The tools this Inbox serves with the Board on (and steps off): every one,
@@ -217,7 +219,7 @@ export const SEND_ROUTING_FIELDS = {
   agent_host: z.string().optional().describe("Your agent host, e.g. claude-code, codex, cursor."),
 };
 
-export interface InboxMcpContext {
+export interface InboxMcpContext extends InboxSnoozeMcpContext {
   store: InboxStore;
   /** The Inbox's base URL, `http://localhost:<port>/`. */
   baseUrl: () => string;
@@ -395,6 +397,13 @@ function threadUrl(base: string, threadId: string): string {
   return `${base}#thread=${threadId}`;
 }
 
+/** An id a stop notice's wake showed reads as its reply; any other id as it is, for an error to name it. */
+function ownMessageId<T extends string | number | undefined>(store: InboxStore, id: T): T {
+  if (typeof id !== "string") return id;
+  const reply = inboxStopNoticeReply(id);
+  return (reply && store.message(reply) ? reply : id) as T;
+}
+
 function threadOf(store: InboxStore, input: { thread_id?: string; message_id?: string }): string | null {
   if (input.thread_id) {
     const root = store.message(input.thread_id);
@@ -459,7 +468,7 @@ export async function sendProject(
   refuseIdShapedThread(input.thread, input.reply_to);
   refuseBadSubject(input.subject);
   if (input.reply_to) {
-    const parent = context.store.message(input.reply_to);
+    const parent = context.store.message(ownMessageId(context.store, input.reply_to));
     if (!parent) throw new InboxError("message_not_found", `No message ${input.reply_to}.`);
     return context.store.project(parent.project_id)!;
   }
@@ -529,7 +538,7 @@ function listScopedRows(store: InboxStore, projectIds: ReadonlySet<string> | nul
  * or when it is the folder the connection says the agent works in (`working`,
  * `callerWorkingFolder`).
  */
-async function sendBasePath(context: InboxMcpContext, projectPath: string | undefined, project: InboxProject, working = false): Promise<string | null> {
+async function sendBasePath(context: InboxMcpContext, projectPath: string | undefined, project: InboxProject, working = false, senderRoot?: string): Promise<string | null> {
   if (!projectPath || !isAbsolute(projectPath)) return null;
   let real: string;
   try {
@@ -542,7 +551,8 @@ async function sendBasePath(context: InboxMcpContext, projectPath: string | unde
   // stopped following a shell `cd`, that folder was the project_path, so its paths resolved there.
   if (working || isInsideFolder(real, project.root)) return real;
   const resolved = await context.projectRootOf?.(projectPath).catch(() => null);
-  if (resolved && resolved.worktree !== null && resolved.root === project.root) return real;
+  // A linked worktree, of this project or of the sender's own when it replies from another: that copy is the agent's.
+  if (resolved && resolved.worktree !== null && (resolved.root === project.root || resolved.root === senderRoot)) return real;
   const found = await context.findProjects?.(projectPath).catch(() => null);
   return found?.projects.some((other) => context.store.sameProject(other.id, project.id)) ? real : null;
 }
@@ -709,8 +719,8 @@ export async function sendAgentMessage(
     const base = here && isAbsolute(here) ? here : project.root;
     attachments = await context.recordAttachments(input.attachments, project, base);
   }
-  const basePath = await sendBasePath(context, here, project, working);
   const fromProject = await senderProject(context, input.project_path, project);
+  const basePath = await sendBasePath(context, here, project, working, fromProject?.root);
   // The images the body shows, copied now under the message-image route's rules (inline-images.ts):
   // files of the thread, with a sent version. One that cannot be read is captured on a later read.
   // Asynchronous and yielding; the blobs stay staged until the store accepts the message.
@@ -736,7 +746,7 @@ export async function sendAgentMessage(
       },
       body: input.body,
       subject: input.subject ?? null,
-      reply_to: input.reply_to ?? null,
+      reply_to: ownMessageId(context.store, input.reply_to) ?? null,
       idempotency_key: input.idempotency_key ?? null,
       thread: input.thread ?? null,
       attachments,
@@ -1087,8 +1097,15 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         .strict(),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async (input, ctx) =>
+    async (asked, ctx) =>
       guarded(async () => {
+        const input = {
+          ...asked,
+          message_id: ownMessageId(store, asked.message_id),
+          before: ownMessageId(store, asked.before),
+          after: ownMessageId(store, asked.after),
+          ...(asked.expand ? { expand: asked.expand.map((id) => ownMessageId(store, id)) } : {}),
+        };
         const threadId = threadOf(store, input);
         if (threadId) {
           const naming = namingHint(store, threadId, input.agent_session?.trim() || null);
@@ -1110,7 +1127,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             // This session has read the thread now (send_message's "not read since" line).
             noteSessionRead(store, reader, threadId, clock());
             // The full records, as before the window (tests, scripts, a jq over the result).
-            const thread = store.agentThread(threadId, reader)!;
+            const records = store.agentThread(threadId, reader)!;
+            // What was on screen reads the same here as in the transcript: the line, not its parts.
+            const thread = { ...records, messages: records.messages.map((m) => (m.viewing ? { ...m, viewing: inboxViewingLine(m) } : m)) };
             const replies = thread.messages.filter((m) => m.author.kind === "person").length;
             return ok(
               `Thread ${threadId}${thread.subject ? ` (${thread.subject})` : ""}: ${thread.messages.length} message${thread.messages.length === 1 ? "" : "s"}, ${replies} from the person${thread.resolved_at ? ", resolved" : ""}.${naming?.line ?? ""}`,
@@ -1207,10 +1226,13 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
     },
     async (input) =>
       guarded(() => {
-        const summary = store.resolveThread(input.message_id, input.resolved ?? true);
+        const summary = store.resolveThread(ownMessageId(store, input.message_id), input.resolved ?? true);
         return ok(`Thread ${summary.thread_id} is ${summary.resolved_at ? "resolved" : "open"}.`, { thread: summary });
       }),
   );
+
+  // Snooze, when the person asks an agent to: packages/server/inbox-mcp-snooze.ts.
+  registerInboxSnoozeTool(server, context);
 
   // Guided reviews (step 5): packages/server/inbox-guides.ts.
   registerInboxGuideTools(server, context);

@@ -357,6 +357,13 @@ the composer (0.44.0)" covers the chips, the metric rule, the merged-range
 refactor behind them, and the three inherited limits (duplicate labels,
 restored drafts, and a label that is a prefix of another label).
 
+### Timeline foot seams (`AnnotationPanel`)
+
+Both opt-in and defaulting to today's behavior.
+
+- **`timelineFooter?: ReactNode`**: the host's own section after the timeline, inside its scroll area, so the cards and the section scroll as one. Absent: no wrapper element.
+- **`hideEmptyMessage?: boolean`**: an empty timeline without "No annotations yet" and its hint, for a host that shows something else there. The way to other files' comments stays.
+
 ### Annotation card seams (`AnnotationPanel`; 0.45.0)
 
 Two more opt-in props, both on the panel and both defaulting to today's

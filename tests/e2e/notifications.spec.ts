@@ -21,6 +21,7 @@
  * PNGs of the proved states land in .local/proof/notifications/.
  */
 
+import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
@@ -44,6 +45,7 @@ declare global {
   interface Window {
     __notifications: { calls: Recorded[]; instances: Notification[]; prompts: string[] };
     __front: { visible: boolean; focused: boolean };
+    __reader?: Element | null;
   }
 }
 
@@ -218,7 +220,18 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   world = {
     root,
     dataDir,
-    env: { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir },
+    env: {
+      PATH: process.env.PATH ?? '',
+      HOME: home,
+      PLANNOTATOR_DATA_DIR: dataDir,
+      PLANNOTATOR_BROWSER: NO_BROWSER,
+      NO_BROWSER,
+      PLANNOTATOR_INBOX_CONNECT: '0',
+      PLANNOTATOR_UPDATE_CHECK: '0',
+      PLANNOTATOR_INBOX_NOTES: '0',
+      PLANNOTATOR_TEST_SANDBOX: '1',
+      NO_ANON_PING: '1',
+    },
     url: '',
     billing: scratchProject(join(root, 'src'), 'billing-svc'),
     docs: scratchProject(join(root, 'src'), 'docs-site'),
@@ -499,6 +512,150 @@ test('a click on the notification focuses the tab and opens the thread', async (
   await shot('6.2-click-opened-thread');
 });
 
+/** Every address the page's main frame goes through while `act` runs: what a desktop app wrapping the page is told (Electron's did-navigate-in-page). */
+async function addressesDuring(act: () => Promise<void>): Promise<string[]> {
+  const { page } = world;
+  const seen: string[] = [];
+  const onNavigated = (frame: { url(): string }) => {
+    if (frame === page.mainFrame()) seen.push(new URL(frame.url()).hash);
+  };
+  page.on('framenavigated', onNavigated);
+  await act();
+  // Past the last address and anything a late read might do with it.
+  await page.waitForTimeout(800);
+  page.off('framenavigated', onNavigated);
+  return seen;
+}
+
+const clickLast = () => world.page.evaluate(() => window.__notifications.instances.at(-1)!.dispatchEvent(new Event('click')));
+const hashNow = () => world.page.evaluate(() => location.hash);
+/** The thread's own scroller: the first element in the pane with more to scroll. */
+const scrollPane = (top?: number) =>
+  world.page.evaluate((to) => {
+    const scroller = [...document.querySelectorAll('section.ib-pane *')].find((el) => el.scrollHeight > el.clientHeight + 40 && /auto|scroll/.test(getComputedStyle(el).overflowY));
+    if (scroller && to !== undefined) scroller.scrollTop = to;
+    return scroller?.scrollTop ?? -1;
+  }, top);
+
+test('a click on a notice about the thread already showing changes the address and nothing else, each time', async () => {
+  const { page } = world;
+  const threadId = new URLSearchParams((await hashNow()).slice(1)).get('thread')!;
+  const pane = page.locator('section.ib-pane');
+  const codex = world.agents.at(-1)!;
+  await codex.send({ project_path: world.docs, body: `${Array.from({ length: 80 }, (_, i) => `Line ${i}.`).join('\n\n')}\n\nThe end of the long note.` });
+  await expect(pane).toContainText('The end of the long note.');
+  const before = (await calls()).length;
+  await codex.send({ project_path: world.docs, body: question('Keep the changelog headings as they are?') });
+  await expect.poll(async () => (await calls()).length).toBe(before + 1);
+  await expect(pane).toContainText('Keep the changelog headings as they are?');
+  await page.waitForTimeout(800);
+
+  // Half-typed words, a scroll position, this very reader on screen, and the entry as it stands.
+  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply' }).click();
+  await pane.locator('.ib-rbox textarea').fill('half a thou');
+  // Past the draft's own save and what follows it (replyDraft.ts): only what the clicks do is counted below.
+  await page.waitForTimeout(1500);
+  expect(await scrollPane(300)).toBe(300);
+  const entry = await page.evaluate(() => {
+    window.__reader = document.querySelector('section.ib-pane');
+    return { length: history.length, state: history.state };
+  });
+  const threadReads: string[] = [];
+  const onRequest = (request: { method(): string; url(): string }) => {
+    if (request.method() === 'GET' && new URL(request.url()).pathname.includes(`/threads/${threadId}`)) threadReads.push(request.url());
+  };
+  page.on('request', onRequest);
+
+  const first = await addressesDuring(async () => void (await clickLast()));
+  const second = await addressesDuring(async () => void (await clickLast()));
+  page.off('request', onRequest);
+
+  // The sequence a desktop app relies on: the value, then the address as it was.
+  const exact = new RegExp(`^#thread=${threadId}&click=\\d+$`);
+  expect(first).toHaveLength(2);
+  expect(first[0]).toMatch(exact);
+  expect(first[1]).toBe(`#thread=${threadId}`);
+  expect(second[0]).toMatch(exact);
+  expect(second[1]).toBe(`#thread=${threadId}`);
+  expect(second[0]).not.toBe(first[0]);
+
+  expect(await hashNow()).toBe(`#thread=${threadId}`);
+  expect(await page.evaluate(() => ({ length: history.length, state: history.state }))).toEqual(entry);
+  expect(threadReads).toEqual([]);
+  expect(await page.evaluate(() => document.querySelector('section.ib-pane') === window.__reader)).toBe(true);
+  await expect(pane.locator('.ib-rbox textarea')).toHaveValue('half a thou');
+  expect(await scrollPane()).toBe(300);
+  await pane.locator('.ib-rbox textarea').fill('');
+});
+
+test('a click on the test notice, which routes nowhere, gives the same sign and stays on its page', async () => {
+  const { page } = world;
+  const back = await hashNow();
+  await setFront(true, true);
+  await page.evaluate(() => {
+    location.hash = '#settings/general';
+  });
+  const before = (await calls()).length;
+  await page.getByRole('button', { name: 'Send a test notification' }).click();
+  await expect.poll(async () => (await calls()).length).toBe(before + 1);
+  const steps = await addressesDuring(async () => void (await clickLast()));
+  expect(steps).toHaveLength(2);
+  expect(steps[0]).toMatch(/^#settings\/general&click=\d+$/);
+  expect(steps[1]).toBe('#settings/general');
+  await expect(page.getByRole('button', { name: 'Send a test notification' })).toBeVisible();
+  await page.evaluate((hash) => {
+    location.hash = hash;
+  }, back);
+  await setFront(false, false);
+});
+
+test('an address that kept its click= (the browser history suggests one) opens the same screen and drops it', async () => {
+  const { page } = world;
+  const thread = await hashNow();
+  await page.evaluate((hash) => {
+    location.hash = `${hash}&click=7`;
+  }, thread);
+  await expect.poll(hashNow).toBe(thread);
+  await expect(page.locator('section.ib-pane')).toBeVisible();
+  await page.evaluate(() => {
+    location.hash = '#settings/general&click=7';
+  });
+  await expect.poll(hashNow).toBe('#settings/general');
+  await expect(page.getByRole('button', { name: 'Send a test notification' })).toBeVisible();
+  await page.evaluate((hash) => {
+    location.hash = hash;
+  }, thread);
+  await expect(page.locator('section.ib-pane')).toBeVisible();
+});
+
+test("on a phone's width the click adds no entry: Back goes where it went before", async () => {
+  const { page } = world;
+  const open = await hashNow();
+  const threadId = new URLSearchParams(open.slice(1)).get('thread')!;
+  await setFront(true, true);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => {
+    location.hash = '';
+  });
+  await page.locator(`[data-thread-id="${threadId}"]`).first().click();
+  await expect.poll(hashNow).toBe(open);
+  await setFront(false, false);
+  const before = (await calls()).length;
+  await world.agents.at(-1)!.send({ project_path: world.docs, body: question('Sort the changelog by date?') });
+  await expect.poll(async () => (await calls()).length).toBe(before + 1);
+  const entry = await page.evaluate(() => ({ length: history.length, state: history.state }));
+  expect((entry.state as { ibFrom?: unknown } | null)?.ibFrom).toBe('');
+  const steps = await addressesDuring(async () => void (await clickLast()));
+  expect(steps).toHaveLength(2);
+  expect(steps[1]).toBe(open);
+  expect(await page.evaluate(() => ({ length: history.length, state: history.state }))).toEqual(entry);
+  await page.goBack();
+  await expect.poll(hashNow).toBe('');
+  await expect(page.locator('section.ib-pane')).toHaveCount(0);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setFront(false, false);
+});
+
 test('a tab the browser froze in the background raises what arrived meanwhile as it wakes, once', async () => {
   const { page, context } = world;
   await setFront(true, true);
@@ -581,6 +738,23 @@ test('the Settings switch off raises nothing', async () => {
   await codex.send({ project_path: world.billing, body: question('And keep the weekly one?') });
   await expect.poll(async () => (await calls()).length).toBe(before + 1);
   expect((await calls()).at(-1)).toMatchObject({ title: 'billing-svc: Codex stopped on you', tag: TAG });
+});
+
+test('a fresh load of an address that kept its click= opens that screen and drops it', async () => {
+  // Its own tab, so this is a real load: a goto that only changes the hash of the page on screen stays in that document.
+  const fresh = await world.context.newPage();
+  fresh.on('pageerror', (error) => world.errors.push(error.message));
+  const loaded = async (hash: string, section: string) => {
+    await fresh.goto('about:blank');
+    await fresh.goto(`${world.url}${hash}&click=7`);
+    await expect(fresh.locator(`[data-settings-link="${section}"]`)).toHaveAttribute('aria-current', 'page');
+    await expect.poll(() => fresh.evaluate(() => location.hash)).toBe(hash);
+  };
+  await loaded('#settings/general', 'general');
+  await expect(fresh.getByRole('heading', { name: 'General', level: 1 })).toBeVisible();
+  // `#settings` alone is General on a desktop, so only another section shows the value was read past.
+  await loaded('#settings/about', 'about');
+  await fresh.close();
 });
 
 test('no page errors along the way', () => {

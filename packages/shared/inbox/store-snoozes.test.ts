@@ -9,6 +9,7 @@
  * checks every row an agent or the list reads never differs.
  */
 import { afterEach, describe, expect, test } from "bun:test";
+import { inboxRowAsOf } from "@plannotator/core/inbox-snooze";
 import fc from "fast-check";
 import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -49,6 +50,37 @@ function code(fn: () => unknown): string {
 }
 
 describe("snoozes in the store", () => {
+  test("a held write whose time passed brings back a running snooze; a return not read yet keeps its mark; no thread is still refused", () => {
+    const t = clock();
+    const { store, project } = open(t.now);
+    const thread = (session: string) => store.sendMessage({ project_id: project.id, author: agent(session), body: "News" }).message.thread_id;
+    const at = (ms: number) => new Date(t.now().getTime() + ms).toISOString();
+    const untilOf = (id: string) => store.snoozes().find((s) => s.thread_id === id)?.until ?? null;
+
+    const running = thread("ses_running");
+    store.setSnooze(running, at(30 * 24 * HOUR));
+    const wanted = at(-HOUR);
+    expect(store.setHeldSnooze(running, wanted)).toBeNull();
+    expect(untilOf(running)).toBe(wanted);
+    expect(store.snoozedThreads().has(running)).toBe(false);
+
+    const returned = thread("ses_returned");
+    const back = at(HOUR);
+    store.setSnooze(returned, back);
+    t.go(2 * HOUR);
+    expect(store.setHeldSnooze(returned, at(-30 * 60_000))).toBeNull();
+    expect(untilOf(returned)).toBe(back);
+
+    const none = thread("ses_none");
+    expect(store.setHeldSnooze(none, at(-HOUR))).toBeNull();
+    expect(untilOf(none)).toBeNull();
+
+    expect(code(() => store.setHeldSnooze("msg_nope", at(-HOUR)))).toBe("thread_not_found");
+    // Only a time gone by is forgiven.
+    expect(code(() => store.setHeldSnooze(none, at(400 * 24 * HOUR)))).toBe("validation_error");
+    expect(store.setHeldSnooze(none, at(HOUR))!.until).toBe(at(HOUR));
+  });
+
   test("a snooze writes no store line, keeps the file owner-only, and survives a restart", () => {
     const t = clock();
     const { dir, store, project } = open(t.now);
@@ -99,6 +131,70 @@ describe("snoozes in the store", () => {
     store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "Back again", reply_to: root.id });
     expect(store.listRow(root.thread_id)!.back_from_archive || store.listRow(root.thread_id)!.agent_after_archive).toBe(true);
     expect(store.snoozedThreads().has(root.thread_id)).toBe(true);
+  });
+
+  test("an agent's archive and then its time: reopened, the thread comes back with no return; while it runs, the snooze stays", () => {
+    const t = clock();
+    const { store, project } = open(t.now);
+    const make = (name: string) => {
+      const root = store.sendMessage({ project_id: project.id, author: agent(`ses_${name}`), body: "News", thread: name }).message;
+      store.setSnooze(root.thread_id, new Date(t.now().getTime() + HOUR).toISOString());
+      store.resolveThread(root.id, true);
+      return root;
+    };
+    const reopened = make("reopened");
+    const running = make("running");
+    store.resolveThread(running.id, false, "person");
+    expect(store.snoozedThreads().has(running.thread_id)).toBe(true);
+    store.resolveThread(running.id, true);
+    t.go(2 * HOUR);
+    const entries = () => store.snoozes().map((s) => s.thread_id);
+    expect(entries()).toContain(reopened.thread_id);
+    store.resolveThread(reopened.id, false, "person");
+    expect(entries()).not.toContain(reopened.thread_id);
+  });
+
+  test("a return survives an agent's write, on a thread that was archived and came back too", () => {
+    const t = clock();
+    const { store, project } = open(t.now);
+    const write = (name: string, reply_to?: string) => store.sendMessage({ project_id: project.id, author: agent(`ses_${name}`), body: "News", ...(reply_to ? { reply_to } : { thread: name }) }).message;
+    const inAnHour = () => new Date(t.now().getTime() + HOUR).toISOString();
+    /** The row by the list's rule: what the window reads. */
+    const back = (threadId: string) => {
+      const entry = store.snoozes().find((s) => s.thread_id === threadId);
+      return inboxRowAsOf({ ...store.listRow(threadId)!, snoozed: entry ? { until: entry.until, at: entry.at } : null }, t.now()).snooze_back ?? null;
+    };
+
+    // Never archived.
+    const plain = write("plain");
+    const plainUntil = inAnHour();
+    store.setSnooze(plain.thread_id, plainUntil);
+
+    // The person archives; an agent writes, so the thread is back; the person snoozes it.
+    const personArchived = write("person");
+    store.resolveThread(personArchived.id, true, "person");
+    write("person", personArchived.id);
+    const personUntil = inAnHour();
+    store.setSnooze(personArchived.thread_id, personUntil);
+
+    // An agent archives a snoozed thread and writes in it while the snooze runs.
+    const agentArchived = write("agent");
+    const agentUntil = inAnHour();
+    store.setSnooze(agentArchived.thread_id, agentUntil);
+    store.resolveThread(agentArchived.id, true);
+    write("agent", agentArchived.id);
+
+    t.go(2 * HOUR);
+    const cases = [
+      ["plain", plain, plainUntil],
+      ["person", personArchived, personUntil],
+      ["agent", agentArchived, agentUntil],
+    ] as const;
+    for (const [name, root, until] of cases) {
+      expect(back(root.thread_id)).toBe(until);
+      write(name, root.id);
+      expect(back(root.thread_id)).toBe(until);
+    }
   });
 
   test("`at` (Undo's earlier snooze) is a real time, not after now, and stored normalized", () => {
