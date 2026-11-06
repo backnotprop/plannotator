@@ -85,5 +85,5 @@ The facts of this job (the project, the folder to work in, what to read) are lis
    and a body that lists the sheets, one line each. If the push or `gh` fails (no rights, no `gh`), say so in your
    last message; the drawing stays in the worktree and the Inbox still shows it.
 
-8. **Send the last message**: the sheets you drew, one line each; the pull request's link; and the sentence "I will
-   redraw it when main moves." Then stop.
+8. **Send the last message**: the sheets you drew, one line each; the pull request's link, or why step 7 could not
+   open one; and the sentence "I will redraw it when main moves." Then stop.

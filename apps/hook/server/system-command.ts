@@ -34,7 +34,6 @@ import {
   launchAgentsDir,
   load,
   loadCommitted,
-  overfullPlacements,
   schedule,
   SYSTEM_TICK_INTERVAL_SECONDS,
   systemPaths,
@@ -329,9 +328,6 @@ async function runRevision(argv: readonly string[], deps: SystemCommandDeps, out
     for (const p of problems) err(`revision_refused: ${formatIssue(p)}`);
     return 1;
   }
-
-  // stored anyway: the renderer narrows the parts to fit
-  for (const w of overfullPlacements(committed.model, revision)) err(`warning: ${formatIssue(w)}`);
 
   const project = await resolveInboxProjectRoot(root);
   // the Inbox's own key for this folder, as the Shape store files under it

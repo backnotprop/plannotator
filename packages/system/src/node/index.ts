@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { citations } from '../format/cited.ts';
 import { MAX_FILE_BYTES, MAX_TOTAL_BYTES } from '../format/keys.ts';
 import { loadFiles } from '../format/load.ts';
-import type { Band, LoadIssue, LoadResult, Revision, SystemFiles, SystemModel } from '../format/types.ts';
+import type { LoadIssue, LoadResult, SystemFiles } from '../format/types.ts';
 import { decodeUtf8, git, gitBytes, isGitRepo, lsTree, resolveCommit } from './git.ts';
 
 /** Where a drawing lives inside a repo. */
@@ -181,48 +181,6 @@ async function lookupIn(root: string, at: string | undefined, name: string, erro
   };
 }
 
-/** A band holds 12 columns. Written spans past that are not wrapped: the renderer narrows every part to fit. */
-const BAND_COLUMNS = 12;
-/** The columns a band's written spans take: an unwritten span counts 0. */
-const writtenColumns = (band: Band): number => band.row.reduce((n, c) => n + (c.type === 'gap' ? (c.fixed ? c.span : 0) : (c.span ?? 0)), 0);
-function overfullBands(model: SystemModel): LoadIssue[] {
-  const out: LoadIssue[] = [];
-  for (const [code, sheet] of Object.entries(model.sheets)) {
-    sheet.bands.forEach((band, i) => {
-      const written = writtenColumns(band);
-      if (written > BAND_COLUMNS) {
-        out.push({ file: `sheets/${code}.yaml`, field: `bands[${i}].row`, message: `the spans add up to ${written} columns; a band holds at most ${BAND_COLUMNS}` });
-      }
-    });
-  }
-  return out;
-}
-
-/**
- * A revision's placements that take a band past 12 columns: the band's written
- * spans plus every written span the revision places in it. A warning, not a
- * refusal: the renderer narrows the parts to fit.
- */
-export function overfullPlacements(model: SystemModel, revision: Revision): LoadIssue[] {
-  const out: LoadIssue[] = [];
-  for (const [code, parts] of Object.entries(revision.place)) {
-    const bands = model.sheets[code]?.bands ?? [];
-    const placed = new Map<string, { columns: number; field: string }>();
-    for (const [id, p] of Object.entries(parts)) {
-      const band = bands.find((b) => b.id === p.band);
-      if (!band || p.span === null) continue;
-      const seen = placed.get(band.id);
-      placed.set(band.id, { columns: (seen?.columns ?? writtenColumns(band)) + p.span, field: seen?.field ?? `add.place.${code}.${id}` });
-    }
-    for (const [band, { columns, field }] of placed) {
-      if (columns > BAND_COLUMNS) {
-        out.push({ file: 'revision', field, message: `takes band ${band} of sheets/${code}.yaml to ${columns} columns; a band holds at most ${BAND_COLUMNS}` });
-      }
-    }
-  }
-  return out;
-}
-
 export type CheckResult = { errors: LoadIssue[]; warnings: LoadIssue[]; missing: string[] };
 
 /**
@@ -273,7 +231,6 @@ export async function check(o: { dir: string; root: string; roots?: Record<strin
   for (const alias of unchecked) {
     warnings.push({ file: 'system.yaml', field: `sources.repos.${alias}`, message: `paths in repo "${alias}" were not checked: no checkout of it was given` });
   }
-  warnings.push(...overfullBands(model));
   return { errors, warnings, missing };
 }
 

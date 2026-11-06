@@ -62,8 +62,8 @@ the model, or send the files and let the window call `loadFiles()`.
   one commit), so an untracked, ignored or symlinked file does not count. Outside git it reads the disk, and a symlink
   anywhere on the path does not count. Paths are matched with their exact case, so a check on macOS agrees with one
   on Linux. Paths in another repo alias are checked only when `roots` gives a checkout of it, else a warning names the
-  alias. A band whose written spans (`id N`, `~ N`, a stack's `N`) add up to more than 12 columns is a warning: the
-  renderer does not wrap a band with written spans, it narrows every part in it to fit.
+  alias. Spans are a preference: a band whose written spans add up to more than 12 columns is clean, and the
+  renderer narrows every part in it to fit.
 - Limits: a drawing file is at most 1 MiB and a drawing at most 8 MiB; a file over either is an error, not read. A
   drawing file must be a plain file (not a symlink), UTF-8, and end in `.yaml` (a `.yml` file is an error that names
   the new name). The ids `__proto__`, `constructor` and `prototype` are refused. A ref that starts with `-` is refused
