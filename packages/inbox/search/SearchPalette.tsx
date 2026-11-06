@@ -889,7 +889,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
     if (!menu) return null;
     const items = menuOptions(menu.kind);
     const chipEl = filtersRef.current?.querySelector<HTMLElement>(`[data-chip="${menu.kind}"]`);
-    // Under the chip's own cell: on a desktop the row may wrap, so the row's bottom is not always the chip's.
+    // Under the chip's own cell (a phone's menu is a sheet at the bottom instead).
     const cell = chipEl?.closest<HTMLElement>('.ib-sp-fcell');
     const left = cell?.offsetLeft ?? 10;
     const top = cell ? cell.offsetTop + cell.offsetHeight + 6 : undefined;
@@ -1150,30 +1150,31 @@ export default function SearchPalette(props: SearchPaletteProps) {
             }, 0);
           }}
         />
+        {/* The order (approval "inbox-search-calm", filter row "Up"): on a desktop at the search box's end, once there
+            are words, so the filter row below is the filters alone and fits one line. Tab: the box, the order, the filters. */}
+        {!phone && sortSwitch}
         <button type="button" className="ib-sp-cancel" data-search-cancel="" onClick={() => close('dismissed')}>
           Cancel
         </button>
       </div>
-      <div className="ib-sp-filters" ref={filtersRef}>
-        {chip('type')}
-        {chip('project')}
-        {chip('status')}
-        {chip('from')}
-        {/* Clear filters and, on a desktop, the switch: together at the row's end, and together on a second line when
-            the row wraps. A phone's chips scroll sideways, so there the switch has a row of its own, under them. */}
-        {(anyFilter || (!phone && sortSwitch)) && (
-          <span className="ib-sp-end">
-            {anyFilter && (
+      {/* The filters and Clear filters on one line. A phone's filters scroll sideways, the order pinned at the line's end. */}
+      <div className="ib-sp-fbar" data-search-filter-bar="">
+        <div className="ib-sp-filters" ref={filtersRef}>
+          {chip('type')}
+          {chip('project')}
+          {chip('status')}
+          {chip('from')}
+          {anyFilter && (
+            <span className="ib-sp-end">
               <button type="button" className="ib-sp-clear" data-clear-filters="" onClick={clearFilters}>
                 Clear filters
               </button>
-            )}
-            {!phone && sortSwitch}
-          </span>
-        )}
-        {menuEl}
+            </span>
+          )}
+          {menuEl}
+        </div>
+        {phone && sortSwitch && <span className="ib-sp-pin">{sortSwitch}</span>}
       </div>
-      {phone && sortSwitch && <div className="ib-sp-sortrow">{sortSwitch}</div>}
       <div className="ib-sp-frame">
         <div className="ib-sp-fade ib-sp-top" data-on={fades.top ? '' : undefined} />
         <div

@@ -1036,6 +1036,9 @@ test.skipIf(!hasDom)('Best match | Newest: shown for words, asks again in the or
     await type('rate');
     await waitFor(() => options().length > 0 && searches().some((c) => c.url.searchParams.get('q') === 'rate'));
     expect(sortSwitch()!.getAttribute('role')).toBe('radiogroup');
+    // Filter row "Up": on a desktop the order is at the search box's end, not in the filter row.
+    expect(sortSwitch()!.closest('.ib-sp-inrow')).not.toBeNull();
+    expect(host!.querySelector('[data-search-filter-bar] [data-search-sort]')).toBeNull();
     expect([...sortSwitch()!.querySelectorAll('label')].map((l) => l.textContent)).toEqual(['Best match', 'Newest']);
     expect(radio('best').checked).toBe(true);
     // Best match is today's request: no sort sent.
@@ -1088,10 +1091,32 @@ test.skipIf(!hasDom)('Tab reaches the order once (the chosen half), as a radio g
   await waitFor(() => host!.querySelector('[data-search-sort]') !== null);
   const stops: string[] = [];
   input().focus();
-  for (let i = 0; i < 8; i++) {
+  // One full turn: Tab until the search box again.
+  for (let i = 0; i < 20; i++) {
     await key(document.activeElement!, { key: 'Tab' });
     const el = document.activeElement as HTMLElement;
+    if (el === input()) break;
     stops.push(el instanceof HTMLInputElement && el.type === 'radio' ? `radio:${el.value}` : (el.getAttribute('data-chip') ?? el.className));
   }
   expect(stops.filter((s) => s.startsWith('radio:'))).toEqual(['radio:best']);
+  // In reading order: the search box, the order beside it, then the filters (Cancel shows on a phone only).
+  expect(stops.filter((s) => s !== 'ib-sp-cancel').slice(0, 5)).toEqual(['radio:best', 'type', 'project', 'status', 'from']);
+});
+
+test.skipIf(!hasDom)('a phone: the order is pinned at the end of the filter line, after the filters, once there are words', async () => {
+  respond = async (call) => (call.url.searchParams.get('q') ? results(call.url.searchParams.get('q')!) : answer({}));
+  await render({ phone: true });
+  await waitFor(() => searches().length === 1);
+  const bar = () => host!.querySelector<HTMLElement>('[data-search-filter-bar]')!;
+  // No words: no order, the filters have the line to themselves.
+  expect(host!.querySelector('[data-search-sort]')).toBeNull();
+  expect(bar().querySelector('.ib-sp-pin')).toBeNull();
+  await type('rate');
+  await waitFor(() => host!.querySelector('[data-search-sort]') !== null);
+  expect(host!.querySelectorAll('[data-search-sort]')).toHaveLength(1);
+  expect(host!.querySelector('.ib-sp-inrow [data-search-sort]')).toBeNull();
+  // One line: the filters (which scroll) and, after them, the pinned order; no row of its own.
+  expect([...bar().children].map((el) => el.className)).toEqual(['ib-sp-filters', 'ib-sp-pin']);
+  expect(bar().querySelector('.ib-sp-pin [data-search-sort]')).not.toBeNull();
+  expect(host!.querySelector('.ib-sp-sortrow')).toBeNull();
 });
