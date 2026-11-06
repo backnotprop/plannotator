@@ -109,7 +109,7 @@ import { inboxAgentTool, inboxReminderFor, type InboxToolInfo } from './inbox-co
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
 import { COMMANDS, debugAppendArgv, INBOX_COMMAND, isModCommand, resolveDataDir, waitArgv } from './launch'
 import { PLAN_TOOL } from './plan'
-import { answerRemovalPrompt, isEnvOn, removalAskKey, RemovalAsks, SKIP_RM_PROMPTS_VARIABLE } from './skip-rm-prompts'
+import { answerRemovalPrompt, isEnvOn, removalAskKey, RemovalAsks } from './skip-rm-prompts'
 import { answerShellCall, SHELL_TOOL, shellTakeOver } from './take-over'
 import { PLANNOTATOR_TOOL_NAME, PLANNOTATOR_TOOL_TAILSCALE_DESCRIPTION, PLANNOTATOR_TOOL_TAILSCALE_INPUT_SCHEMA } from './tool'
 
@@ -848,7 +848,7 @@ export function register(on: On) {
     const verdict = await next(e)
     if (!allowed || typeof e.tool_use_id !== 'string') return verdict
     removalAsks.note(removalAskKey(e.agentId, e.input), verdict)
-    if (allowed.debugPath && verdict?.decision === 'ask' && isEnvOn(await $.env.get(SKIP_RM_PROMPTS_VARIABLE))) {
+    if (allowed.debugPath && verdict?.decision === 'ask' && isEnvOn(await $.env.get('CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS'))) {
       const by = ['rule', 'hook', 'setting', 'plugin'].filter((key) => verdict[key]).map((key) => `${key} ${verdict[key]}`)
       hostOf($, allowed.debugPath).debug(`Bash ask (${e.agentId ? 'subagent' : 'main'}): ${String(verdict.reason ?? '').slice(0, 80)}${by.length ? ` [${by.join(', ')}]` : ''}`)
     }
@@ -858,7 +858,7 @@ export function register(on: On) {
   on('classic.PermissionRequest', { tool_name: SHELL_TOOL }, async ($: Engine, e: any, next: Next) => {
     if (!allowed || e.tool_name !== SHELL_TOOL) return next(e)
     const decision = await answerRemovalPrompt(e, removalAsks, {
-      variable: () => $.env.get(SKIP_RM_PROMPTS_VARIABLE),
+      variable: () => $.env.get('CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS'),
       childSession: () => $.env.get('CLAUDE_CODE_CHILD_SESSION'),
       settings: () => $.settings.read(),
       configDir: async () => {
@@ -872,7 +872,7 @@ export function register(on: On) {
         return text
       },
     })
-    if (allowed.debugPath && (decision || isEnvOn(await $.env.get(SKIP_RM_PROMPTS_VARIABLE)))) {
+    if (allowed.debugPath && (decision || isEnvOn(await $.env.get('CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS')))) {
       hostOf($, allowed.debugPath).debug(`removal prompt (${e.agent_id ? 'subagent' : 'main'}, ${String(e.permission_mode)}): ${decision ? 'allowed, as the variable asks' : 'left to the dialog'}`)
     }
     return decision ? { decision } : next(e)
