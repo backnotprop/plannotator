@@ -923,7 +923,16 @@ export function inboxUsedBefore(dataDir: string): boolean {
  * In that release, write `[key]: { on }` at each caller again and drop the `changed` argument of `capabilityListeners`.
  */
 function heldSwitch<K extends "code_review" | "shape">(key: K, on: boolean, told = false): { [P in K]?: { on: boolean } } {
-  return on || told || process.env.PLANNOTATOR_INBOX_PREVIEW === "1" ? ({ [key]: { on } } as { [P in K]: { on: boolean } }) : {};
+  return on || told || !switchesHeld() ? ({ [key]: { on } } as { [P in K]: { on: boolean } }) : {};
+}
+
+/**
+ * HELD UNTIL THE NEXT BIG RELEASE (0.29), with `heldSwitch`: the switches are held back from people who have them off
+ * (no PLANNOTATOR_INBOX_PREVIEW=1), so nothing offers them either: Code review's one-time offer (approval
+ * "code-review-offer-card") is never in the line while this says true. Delete it with `heldSwitch`.
+ */
+function switchesHeld(): boolean {
+  return process.env.PLANNOTATOR_INBOX_PREVIEW !== "1";
 }
 
 /** Start the Inbox server and write the registry. */
@@ -2352,11 +2361,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** The Checklist can be revealed only while config.json `inboxSteps` is unset, as the Board. */
   const stepsUndecided = () => options.steps === undefined && loadConfig().inboxSteps === undefined;
   /**
+   * Code review's day-0 offer (approval "code-review-offer-card", 2026-11-06; its slot: `CODE_REVIEW_OFFER` in
+   * shared/inbox/reveals.ts): only while config.json `inboxCodeReview` is unset (nobody decided; `false` is the
+   * person's own off), and never while the switch is held back from this person (`switchesHeld`).
+   */
+  const codeReviewUndecided = () => options.codeReview === undefined && loadConfig().inboxCodeReview === undefined && !switchesHeld();
+  /**
    * The offers the line claims for itself (approval "inbox-one-time-dialogs"): each one's "undecided" (the person never
    * set its switch). The claim stamps `inboxReveals[id]` with the page's key and turns nothing on; its dialog's "Turn it
    * on" writes the switch. A registered offer (Bro mode, List view) adds its own here, and its id to `INBOX_REVEALS`.
    */
-  const lineOffers: Partial<Record<RevealId, () => boolean>> = { board: boardUndecided, steps: stepsUndecided };
+  const lineOffers: Partial<Record<RevealId, () => boolean>> = { code_review: codeReviewUndecided, board: boardUndecided, steps: stepsUndecided };
   type LineOfferSaved = { shownAt?: string; key?: string };
   const lineOfferSaved = (id: RevealId): LineOfferSaved | undefined => (loadConfig().inboxReveals as Record<string, LineOfferSaved | undefined> | undefined)?.[id];
   /** The agent messages the person has looked at (up to each thread's `person_seen_seq`): heavy use reads their dates. */
