@@ -239,11 +239,14 @@ describe.skipIf(!hasDom)('System setup', () => {
     await press(ui.q('[data-system-agent="pi"] input'));
     expect(ui.btn('draw')).toBeNull();
     expect(ui.btn('copy')).not.toBeNull();
+    // The line above the agents names the one picked, and where to paste the prompt.
+    expect(ui.q('[data-system-how]')?.textContent).toBe("The Inbox can't start Pi yet. Copy the prompt and paste it into Pi in app. Redraws use Pi too.");
     expect(ui.q<HTMLInputElement>('[data-system-model="anthropic/claude-opus-5-5"] input')!.checked).toBe(true);
     // The agent's own default stays the default across a pick.
     await press(ui.q('[data-system-model=""] input'));
     await press(ui.q('[data-system-agent="opencode"] input'));
     expect(ui.q<HTMLInputElement>('[data-system-model=""] input')!.checked).toBe(true);
+    expect(ui.q('[data-system-how]')?.textContent).toContain("The Inbox can't start OpenCode yet.");
     await press(ui.q('[data-system-model="anthropic/claude-opus-5-5"] input'));
     await press(ui.btn('copy'));
     expect(ui.saves).toEqual([{ project_id: 'prj_app', repos: [], docs: [], agent: 'opencode', model: 'anthropic/claude-opus-5-5' }]);

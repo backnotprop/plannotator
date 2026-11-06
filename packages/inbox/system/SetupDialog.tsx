@@ -404,7 +404,7 @@ export function SystemSetupDialog(props: SystemSetupDialogProps) {
           <p className="ib-sub" data-system-how={canLaunch ? 'launch' : 'prompt'}>
             {canLaunch
               ? 'The agent you pick runs the drawing phase now, on this Mac, and every redraw after it.'
-              : `The Inbox can't start an agent here, so copy the prompt for the drawing phase and paste it into your agent in ${project.name}. Redraws use the same agent.`}
+              : `The Inbox can't start ${SYSTEM_AGENT_NAMES[agent]} yet. Copy the prompt and paste it into ${SYSTEM_AGENT_NAMES[agent]} in ${project.name}. Redraws use ${SYSTEM_AGENT_NAMES[agent]} too.`}
           </p>
           {agents === null ? (
             <p className="ib-quietline" aria-busy="true">
