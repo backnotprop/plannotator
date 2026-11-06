@@ -24,6 +24,7 @@ import { fileViewOfRendered, renderedViewOf, type MarkdownPreviewView } from '..
 import { MarkdownViewMenu } from './MarkdownViewMenu';
 import { BinaryFileNotice } from './BinaryFileNotice';
 import { FileCommentBanner } from './FileCommentBanner';
+import { DiffBottomBar } from './DiffBottomBar';
 import { OversizedFileNotice } from './OversizedFileNotice';
 import { isContentlessBinaryPatch, isImagePreviewCandidate, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
 import { ImageDiffPreview } from './ImageDiffPreview';
@@ -1256,6 +1257,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           )}
         </OverlayScrollArea>
       )}
+      {!collapsed && !bodyOverride && !markdownPreviewEnabled && diffOverflow !== 'wrap' && <DiffBottomBar root={viewport} />}
 
       {/* The header's Comment button works in every view (diff, preview,
           collapsed), so its composer is mounted outside them. */}

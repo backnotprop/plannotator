@@ -59,6 +59,7 @@ import { OversizedFileNotice } from './OversizedFileNotice';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import type { DiffSelectionActions } from './SelectionChooser';
 import { FileHeader } from './FileHeader';
+import { DiffBottomBar } from './DiffBottomBar';
 import { BinaryFileNotice } from './BinaryFileNotice';
 import { GeneratedFileNotice } from './GeneratedFileNotice';
 import { EditSessionHud } from './EditSessionHud';
@@ -3503,6 +3504,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       ) : (
         codeView
       )}
+      {diffOverflow !== 'wrap' && <DiffBottomBar root={scrollEl} />}
 
       {/* Leading content (commit description card) lives INSIDE the scroll
           container at content-top: absolutely positioned children of a scroller

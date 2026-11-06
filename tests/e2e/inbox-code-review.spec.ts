@@ -1198,6 +1198,38 @@ test('the library\'s own scrollbar sits whole at the bottom of the file\'s code,
   }
 });
 
+test('while a wide file\'s own bar is below the screen, a bar pinned to the pane\'s bottom scrolls it; at the file\'s end it goes', async () => {
+  const review = await world.claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'pinned-bar', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
+  const drawn = await chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'], args: ['--disable-features=OverlayScrollbar'] });
+  try {
+    const page = await drawn.newPage({ viewport: { width: 900, height: 320 } });
+    await page.goto(`${world.url}#thread=${review.thread_id}&guide=${review.message_id}`);
+    const body = page.locator('[data-review-message] .ib-gbody');
+    const shell = page.locator('[data-review-message] [data-guide-file-shell="src/payouts/retry.ts"]');
+    const code = shell.locator('[data-code]').first();
+    await expect.poll(() => code.evaluate((el) => el.scrollWidth > el.clientWidth), { timeout: 30_000 }).toBe(true);
+    const pinned = page.locator('[data-diff-bottom-bar]');
+    // The file's top in view, its end below the pane.
+    await shell.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+    await settled(body);
+    await expect(pinned.first()).toBeVisible();
+    const pane = (await body.boundingBox())!;
+    const bar = (await pinned.first().boundingBox())!;
+    expect(Math.abs(bar.y + bar.height - Math.min(pane.y + pane.height, 320))).toBeLessThanOrEqual(1);
+    await page.mouse.move(bar.x + 10, bar.y + bar.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(bar.x + 90, bar.y + bar.height / 2, { steps: 5 });
+    await page.mouse.up();
+    await expect.poll(() => code.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+    // The file's own bar on screen: no pinned one.
+    await shell.evaluate((el) => el.scrollIntoView({ block: 'end' }));
+    await settled(body);
+    await expect(pinned).toHaveCount(0);
+  } finally {
+    await drawn.close();
+  }
+});
+
 test('a phone: a sideways drag on the code scrolls it, and the page does not move', async ({ browser }) => {
   const { claude } = world;
   const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'native-bar-phone', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
