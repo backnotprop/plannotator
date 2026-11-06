@@ -21,12 +21,22 @@ export function drawingStatus(result: LoadResult | null):
 export function drawingProgress(model: SystemModel):
   { sheets: { code: string; title: string; kind: string; drawn: boolean }[] };
 export function citations(model: SystemModel): Citation[]; // every cited path, with the part or line citing it
+export type ChangedFile = { path: string; status: 'A' | 'M' | 'D' | 'R'; from?: string };
+export type GateResult = {
+  touched: { parts: string[]; flows: string[] }; // cite a changed path: amber in a PR, "may be stale" on main
+  wake: boolean;                                 // the shape may have moved: run the agent
+  why: { path: string; reason: 'added' | 'deleted' | 'renamed' | 'watched' | 'cited-gone' }[];
+  ignored: string[];                             // tests, docs, lockfiles, the drawing itself
+};
+export function gate(input: { files: ChangedFile[]; model: SystemModel; repo?: string /* alias, default 'self' */ }): GateResult;
 
 // @plannotator/system/node: Bun or Node; reads disk and git, never the network
 export function load(dir: string): Promise<LoadResult>;
 export function readCommitted(o: { root: string; ref: string }): Promise<SystemFiles>; // git show <ref>:.plannotator/system/...
 export function check(o: { dir: string; root: string; roots?: Record<string, string> }):
   Promise<{ errors: string[]; warnings: string[]; missing: string[] }>;
+export function gateRepo(o: { root: string; from: string; to: string; model: SystemModel }): Promise<GateResult>;
+  // git diff --name-status -M <from> <to>, read only, then gate()
 ```
 
 `SystemModel` and `Revision` are plain JSON-safe data (`src/format/types.ts`), so a server may load a drawing and send
@@ -38,6 +48,20 @@ the model, or send the files and let the window call `loadFiles()`.
 - `check` is clean when all three lists are empty. `root` is this repo's checkout at the commit the drawing was drawn
   from. Paths are matched with their exact case, so a check on macOS agrees with one on Linux. Paths in another repo
   alias are checked only when `roots` gives a checkout of it, else a warning names the alias.
+
+## The gate
+
+If every changed file is already named by the drawing and the change adds no process, store, host, route, connection
+or switch, the drawing does not change. A script cannot read "adds a process", so the gate wakes on what stands for it:
+
+- an added, deleted or renamed file (`added`, `deleted`, `renamed`);
+- a modified file that matches a `watch:` glob (`watched`);
+- a cited path that is gone, deleted or renamed away (`cited-gone`).
+
+A modified file that no part cites does not wake it. Every part and line that cites a changed path (a cited folder
+covers its files) is in `touched`, whether or not the gate wakes. Tests, docs, lockfiles and `.plannotator/system/`
+itself are ignored and never wake it, even inside a cited folder; only a file the drawing cites by its own path counts.
+The patterns are fixed in the package (`isIgnoredPath`), not settings.
 
 ## Commands
 
