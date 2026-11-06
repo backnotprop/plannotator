@@ -82,7 +82,7 @@ export function updatePrompt(o: UpdatePromptInput): string {
     '',
     `- The source folder, a clone of the project already at the new commit: ${oneLine(o.source)}`,
     `- The drawing folder, to edit the drawing in: ${oneLine(o.drawing)}`,
-    `- From (the last commit the drawing was checked against: its sources.repos.self.at, or a later commit the check found nothing to redraw for; the range may hold the drawing's own commits): ${oneLine(o.from)}`,
+    `- From (the last commit the drawing was checked against: its sources.repos.self.at, or a later commit the check found nothing to redraw for): ${oneLine(o.from)}`,
     `- To (the new commit; set sources.repos.self.at to it): ${oneLine(o.to)}`,
     '- Merged pull requests in that range:',
     list(o.prs.map((n) => `PR ${n}`), 'none named in the merge commits'),

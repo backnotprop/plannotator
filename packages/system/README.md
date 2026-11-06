@@ -142,7 +142,8 @@ export const SYSTEM_COMMANDS: Record<'check' | 'gate' | 'tick' | 'revision' | 's
 // @plannotator/system/node
 export function systemPaths(dataDir: string, key: string): { dir; setup; state; lock; drawing; source; redraw;
   previous; summary; reviews; changed; failed: string };              // <dataDir>/system/<key>/...
-export function prepareSource(root: string, source: string): Promise<{ main: string; tip: string }>;
+export function prepareSource(root: string, source: string, o?: { need?: (string | null)[]; aside?: string; stamp?: string }):
+  Promise<{ main: string; tip: string; recloned?: string }>;
 export function readSetup(dataDir: string, key: string): Promise<SystemSetup | null>;
 export function readState(dataDir: string, key: string): Promise<TickState>;
 export function tick(o: { root: string; dataDir: string; key: string; now?: Date; deps?: TickDeps }): Promise<TickResult>;
@@ -191,7 +192,10 @@ Replaced 2026-11-06 by the owner's ruling (row 7689, q-122e6577). Everything is 
   `git clone --reference <the repo's git folder> <its origin URL>`: the objects the person already has are borrowed,
   not copied, and each tick fetches the default branch from origin into it, so the tick sees what merged even when
   the person has not fetched. Toward the person's repo it only reads: the origin URL, the git folder and its objects.
-  A plain `git clone --shared` from the person's repo would see only what they last fetched.
+  A plain `git clone --shared` from the person's repo would see only what they last fetched. Borrowed objects can go
+  away (a `git gc`, a moved or deleted repo, a lost object file): a clone whose alternates folder is gone, or that
+  cannot read the tip or the drawing's `at` whole, is moved to `failed/source-<time>/` and cloned again, once per tick,
+  and with its own copy of every object when the person's repo lacks them too. The move is named in `set_aside`.
 - `redraw/`: a redraw in progress, a copy of `drawing/` the agent edits. `previous/`: the drawing before the last
   redraw. `redraw-summary.txt`: the agent's sentences, read and deleted by the tick.
 - `reviews/`: revisions of open pull requests (written by `plannotator system revision`). `changed/<commit>/`: files a

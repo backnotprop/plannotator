@@ -444,9 +444,79 @@ echo changed > src/main.ts`);
     expect(r).toMatchObject({ ran: 'failed', error: expect.stringContaining('git fetch') });
     // nothing was spent, so the next tick tries again
     expect(await readState(p.dataDir, KEY)).toMatchObject({ failed: null, last_error: expect.stringContaining('git fetch') });
+    // a fetch that fails on a clone that reads whole is the network: the clone is not moved or made again
+    expect(existsSync(p.paths.failed)).toBe(false);
     renameSync(`${p.origin}.away`, p.origin);
     expect((await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, ...fakes() } })).ran).toBe('redrew');
-    expect(await readState(p.dataDir, KEY)).toMatchObject({ failed: null, last_error: null });
+    expect(await readState(p.dataDir, KEY)).toMatchObject({ failed: null, last_error: null, set_aside: null });
+  });
+
+  /** The folders a re-clone moved the old source clone to. */
+  const oldClones = (failed: string) => (existsSync(failed) ? readdirSync(failed).filter((n) => n.startsWith('source-')) : []);
+
+  test('when an object the source clone borrows is gone from the person\'s repo, the next tick clones again and redraws', async () => {
+    const p = project();
+    // the person fetched a commit the tick then borrows; the tick gates it
+    const a = p.land({ 'src/main.ts': 'main, now with a banner\n' }, 'A banner');
+    git(p.root, 'fetch', '-q', 'origin');
+    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).toMatchObject({ ran: 'gated', gated: a });
+    expect(readFileSync(join(p.paths.source, '.git', 'objects', 'info', 'alternates'), 'utf8')).toContain(join(p.root, '.git', 'objects'));
+    expect(readdirSync(join(p.paths.source, '.git', 'objects')).filter((n) => /^[0-9a-f]{2}$/.test(n))).toEqual([]); // borrowed, not copied
+
+    // the blob that commit added is lost from the person's object store (moved into the test's temp folder)
+    const blob = git(p.root, 'rev-parse', `${a}:src/main.ts`).trim();
+    renameSync(join(p.root, '.git', 'objects', blob.slice(0, 2), blob.slice(2)), join(p.dir, 'lost-blob'));
+    expect(() => git(p.paths.source, 'cat-file', '-e', blob)).toThrow();
+
+    const tip = p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
+    const f = fakes();
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, notify: f.notify } });
+    expect(r).toMatchObject({ ran: 'redrew', gated: tip });
+    expect(drawingFiles(p.paths.drawing)['system.yaml']).toContain(`at: "${tip}"`);
+    expect(f.notes).toHaveLength(1);
+    // the old clone is kept aside; the person's repo lacks the blob too, so the new clone has its own objects and reads
+    // the tip whole; state.json says what happened
+    const old = oldClones(p.paths.failed);
+    expect(old).toHaveLength(1);
+    expect(existsSync(join(p.paths.failed, old[0]!, '.git'))).toBe(true);
+    expect(existsSync(join(p.paths.source, '.git', 'objects', 'info', 'alternates'))).toBe(false);
+    git(p.paths.source, 'rev-list', '--objects', '--no-walk', tip);
+    git(p.paths.source, 'cat-file', '-e', blob);
+    expect(git(p.paths.source, 'rev-parse', 'HEAD').trim()).toBe(tip);
+    expect(await readState(p.dataDir, KEY)).toMatchObject({ last_error: null, failed: null, set_aside: expect.stringContaining(join(p.paths.failed, old[0]!)) });
+
+    // a later tick on the healthy clone moves nothing
+    p.land({ 'src/main.ts': 'main, banner and footer\n' }, 'A footer');
+    expect((await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).ran).toBe('gated');
+    expect(oldClones(p.paths.failed)).toHaveLength(1);
+  });
+
+  test('after git gc drops what the source clone borrowed, its fetch takes the objects again and the redraw goes on', async () => {
+    const p = project();
+    const a = p.land({ 'src/main.ts': 'main, now with a banner\n' }, 'A banner');
+    git(p.root, 'fetch', '-q', 'origin');
+    expect((await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).ran).toBe('gated');
+    git(p.root, 'remote', 'set-head', 'origin', '-d');
+    git(p.root, 'update-ref', '-d', 'refs/remotes/origin/main');
+    git(p.root, 'reflog', 'expire', '--expire=now', '--all');
+    git(p.root, 'gc', '-q', '--prune=now');
+    expect(() => git(p.paths.source, 'cat-file', '-e', `${a}^{commit}`)).toThrow();
+    const tip = p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, ...fakes() } });
+    expect(r).toMatchObject({ ran: 'redrew', gated: tip });
+    git(p.paths.source, 'rev-list', '--objects', '--no-walk', tip, a);
+  });
+
+  test('when the person moves the repo, the folder the source clone borrows from is gone: the next tick clones again and redraws', async () => {
+    const p = project();
+    expect((await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).ran).toBe('nothing'); // the source clone is made
+    const moved = `${p.root}-moved`;
+    renameSync(p.root, moved);
+    const tip = p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
+    const r = await tick({ root: moved, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, ...fakes() } });
+    expect(r).toMatchObject({ ran: 'redrew', gated: tip });
+    expect(oldClones(p.paths.failed)).toHaveLength(1);
+    expect(readFileSync(join(p.paths.source, '.git', 'objects', 'info', 'alternates'), 'utf8')).toContain(join(moved, '.git', 'objects'));
   });
 
   test('a live tick holds the lock; a dead one is taken over', async () => {

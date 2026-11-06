@@ -385,25 +385,84 @@ const remoteFrom = (root: string, url: string) => (/^\.\.?(\/|$)/.test(url) ? re
  * origin each tick, so the tick sees what merged even when the person has not
  * fetched. Toward the person's repo it only reads: its origin URL, its git
  * folder and its objects. Returns the default branch and its tip.
+ *
+ * Borrowed objects can go away: the person runs `git gc` or prune, or moves
+ * or deletes the repo, or a file in its object store is lost. A clone whose
+ * alternates folder is gone, whose fetch fails while its last tip no longer
+ * reads whole, or whose fetched tip or `need` commits (the drawing's `at`) do
+ * not read whole, is moved to `<aside>/source-<stamp>` and cloned again, once
+ * per call. When the new borrowing clone is not whole either, the person's
+ * repo itself lacks the objects, so it is made again with its own copy of
+ * every object. A fetch that fails on a clone that reads whole is the
+ * network: it throws, and nothing moves.
  */
-export async function prepareSource(root: string, source: string): Promise<{ main: string; tip: string }> {
+export async function prepareSource(root: string, source: string,
+  o: { need?: (string | null | undefined)[]; aside?: string; stamp?: string } = {}): Promise<{ main: string; tip: string; recloned?: string }> {
   const url = remoteFrom(root, (await git(root, ['remote', 'get-url', 'origin'])).trim());
-  const fresh = !(await stat(join(source, '.git')).then(() => true, () => false));
-  if (fresh) {
-    const objects = (await git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim();
-    await mkdir(dirname(source), { recursive: true, mode: 0o700 });
-    await git(dirname(source), ['clone', '--quiet', '--no-checkout', '--reference', objects, '--', url, source]);
-  } else if ((await git(source, ['remote', 'get-url', 'origin']).catch(() => '')).trim() !== url) {
-    await git(source, ['remote', 'set-url', 'origin', url]);
+  let recloned: string | undefined;
+  let borrow = true;
+  /** Damage found: move the clone aside (once) or, for a clone made in this call, make it again with its own objects. */
+  const damaged = async (fresh: boolean, why: string) => {
+    if (fresh && borrow) {
+      borrow = false;
+      await rm(source, { recursive: true, force: true }); // made seconds ago by this call; nothing in it is anyone's
+    } else if (!fresh && recloned === undefined && o.aside) {
+      recloned = await moveAside(source, join(o.aside, `source-${o.stamp ?? new Date().toISOString().replace(/[:.]/g, '-')}`));
+    } else {
+      throw new Error(why);
+    }
+  };
+  for (;;) {
+    const fresh = !(await stat(join(source, '.git')).then(() => true, () => false));
+    if (fresh) {
+      await mkdir(dirname(source), { recursive: true, mode: 0o700 });
+      // --no-local: a local-path origin is fetched like a remote one, so the borrowing is the same as for a URL
+      const reference = borrow ? ['--reference', (await git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim()] : [];
+      const cloned = await git(dirname(source), ['clone', '--quiet', '--no-local', '--no-checkout', ...reference, '--', url, source]).then(() => null, (e: Error) => e);
+      // a borrowing clone also fails when the person's repo claims an object it lost: try once with its own objects
+      if (cloned && borrow) { await damaged(true, cloned.message); continue; }
+      if (cloned) throw cloned;
+    } else {
+      if (!(await alternatesPresent(source))) { await damaged(false, 'the source clone lost the folder it borrows objects from'); continue; }
+      if ((await git(source, ['remote', 'get-url', 'origin']).catch(() => '')).trim() !== url) await git(source, ['remote', 'set-url', 'origin', url]);
+    }
+    const main = await defaultBranch(source);
+    const fetched = await git(source, ['fetch', '--quiet', 'origin', `+refs/heads/${main}:refs/remotes/origin/${main}`]).then(() => null, (e: Error) => e);
+    if (fetched) {
+      const last = fresh ? null : await commitOf(source, `refs/remotes/origin/${main}`);
+      if (last && !(await whole(source, last))) { await damaged(false, `the source clone is missing objects: ${fetched.message}`); continue; }
+      throw fetched;
+    }
+    const tip = await commitOf(source, `refs/remotes/origin/${main}`);
+    if (!tip) throw new Error(`origin has no ${main}`);
+    const broken = (await whole(source, tip)) ? [] : [tip];
+    for (const c of o.need ?? []) {
+      if (!c || !isRef(c) || (await whole(source, c))) continue;
+      // a commit that is there but does not read whole lost objects. One that is not there at all lost them only when
+      // main's history has a hole; otherwise it is gone from origin itself (history rewritten), no fault of the clone,
+      // and the caller reports it
+      if (await gitOk(source, ['cat-file', '-e', `${c}^{commit}`]) || !(await gitOk(source, ['rev-list', '--quiet', tip]))) broken.push(c);
+    }
+    if (broken.length) { await damaged(fresh, `the source clone cannot read ${broken.map((c) => c.slice(0, 7)).join(', ')} whole`); continue; }
+    // a fresh clone has no checkout yet; a later one keeps what it has until a redraw resets it
+    if (fresh) await git(source, ['checkout', '--quiet', '--force', '--detach', tip]);
+    return recloned ? { main, tip, recloned } : { main, tip };
   }
-  const main = await defaultBranch(source);
-  await git(source, ['fetch', '--quiet', 'origin', `+refs/heads/${main}:refs/remotes/origin/${main}`]);
-  const tip = await commitOf(source, `refs/remotes/origin/${main}`);
-  if (!tip) throw new Error(`origin has no ${main}`);
-  // a fresh clone has no checkout yet; a later one keeps what it has until a redraw resets it
-  if (fresh) await git(source, ['checkout', '--quiet', '--force', '--detach', tip]);
-  return { main, tip };
 }
+
+/** Every folder in the clone's `objects/info/alternates` still exists (no file: nothing borrowed). */
+async function alternatesPresent(source: string): Promise<boolean> {
+  const list = await readFile(join(source, '.git', 'objects', 'info', 'alternates'), 'utf8').catch(() => '');
+  for (const line of list.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))) {
+    if (!(await stat(isAbsolute(line) ? line : resolve(source, '.git', 'objects', line)).then((s) => s.isDirectory(), () => false))) return false;
+  }
+  return true;
+}
+
+const isRef = (c: string) => { try { checkRef(c); return true; } catch { return false; } };
+
+/** A commit, its tree and every blob in it read (not its history): what a gate, a diff and a checkout need. */
+const whole = (cwd: string, commit: string) => gitOk(cwd, ['rev-list', '--objects', '--no-walk', '--end-of-options', checkRef(commit)]);
 
 /** True when a git checkout has changes (tracked or untracked) or a half-done merge. */
 async function dirty(wt: string): Promise<boolean> {
@@ -490,7 +549,10 @@ export async function tick(o: { root: string; dataDir: string; key: string; now?
   try {
     const model = (await load(paths.drawing)).model;
     if (!model) return { ran: 'nothing', gated: '', why: 'no drawing yet' };
-    const { tip: target } = await prepareSource(o.root, paths.source);
+    const stamp = now().replace(/[:.]/g, '-');
+    const { tip: target, recloned } = await prepareSource(o.root, paths.source,
+      { need: [model.sources?.repos.self?.at, state.gated], aside: paths.failed, stamp });
+    if (recloned) await save({ set_aside: `${now()}: the source clone could not read the objects it borrows from the project's repo; it was cloned again and the old one kept in ${recloned}` });
     const source = paths.source;
 
     const drawnAt = model.sources?.repos.self?.at ? await commitOf(source, model.sources.repos.self.at) : null;

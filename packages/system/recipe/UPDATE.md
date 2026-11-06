@@ -25,9 +25,8 @@ and lines that cite a changed file, and the file to write your summary in.
    --oneline <from>..<to>`. Read the diff of each file named in "why you were woken", and of each other changed file
    that a part or line named above cites (`why` names only the files that woke the check) (`git -C <source folder> diff
    -M <from> <to> -- <path>`). A `cited-gone` path that was renamed shows there as deleted; its new path is in the
-   `--name-status -M` line, so read the diff of both paths. Tests, docs, lockfiles and the drawing's own files under
-   `.plannotator/system/` do not count. Look for new, deleted and renamed files, and for new processes, stores, hosts,
-   routes, commands, connections and switches.
+   `--name-status -M` line, so read the diff of both paths. Tests, docs and lockfiles do not count. Look for new,
+   deleted and renamed files, and for new processes, stores, hosts, routes, commands, connections and switches.
 
 2. **Decide whether the shape moved.** Find the parts and lines that cite each changed file:
    `grep -n "<path>" <drawing folder>/system.yaml`. If every changed file is already named and the
