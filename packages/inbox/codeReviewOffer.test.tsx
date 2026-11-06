@@ -288,8 +288,13 @@ describe.skipIf(!hasDom)("Code review's offer on day 0", () => {
     set({ tourScreen: false });
     await until(() => dialog() !== null);
     const d = dialog()!;
-    expect(document.getElementById(d.getAttribute('aria-labelledby')!)!.textContent).toBe('Code review, in your Inbox');
-    expect(document.getElementById(d.getAttribute('aria-describedby')!)!.querySelectorAll('li')).toHaveLength(3);
+    // Named by its heading and described by its lines (the words are the owner's; this guards the wiring, not the copy).
+    const title = document.getElementById(d.getAttribute('aria-labelledby')!)!;
+    expect(title).toBe(d.querySelector('h2')!);
+    expect(title.textContent!.trim()).not.toBe('');
+    const lines = [...document.getElementById(d.getAttribute('aria-describedby')!)!.querySelectorAll('li')];
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.every((li) => d.contains(li) && li.textContent!.trim() !== '')).toBe(true);
     expect(d.getAttribute('aria-modal')).toBe('true');
     const on = d.querySelector<HTMLButtonElement>('[data-code-review-offer-on]')!;
     const notNow = d.querySelector<HTMLButtonElement>('[data-code-review-offer-close]')!;

@@ -5,7 +5,8 @@ import { Modal } from './Updates';
 
 /**
  * Code review's one-time offer (approval "code-review-offer-card", 2026-11-06; the owner picked "Card"): a dialog over
- * the list with the brand kit's static storm on top, the title, the three things code review brings, and two buttons.
+ * the list with the brand kit's static storm on top, the title, what code review brings, and two buttons. Its words are
+ * the owner's (the approval's 15:25Z addendum, take 1, as true on main today).
  * "Turn on code review" turns Code review on, as Settings → Capabilities does; "Not now", Escape and a click outside
  * leave it off. Every way out is final (the claim already spent it); Settings is the way on later. No keyboard
  * shortcut. Its slot in the line: `CODE_REVIEW_OFFER` (packages/shared/inbox/reveals.ts); its moment:
@@ -17,19 +18,19 @@ export function CodeReviewOffer({ phone, onClose, onTurnOn }: { phone: boolean; 
     <Modal labelledBy="ib-cro-title" describedBy="ib-cro-feats" testId="code-review-offer" onClose={onClose} ownKeys fallbackFocus={pageHeading} className={`ib-cro${phone ? ' ib-cro-phone' : ''}`}>
       <CodeReviewOfferArt phone={phone} />
       <div className="ib-cro-body">
-        <h2 id="ib-cro-title">Code review, in your Inbox</h2>
+        <h2 id="ib-cro-title">A new way to review</h2>
         <ul className="ib-cro-feats" id="ib-cro-feats">
-          <li>
-            <PullIcon />
-            <span>Pull requests and local changes, in one list</span>
-          </li>
+          {/* The risk line goes first, when #2664 (risk filters) merges: "Filter PRs by your own risk rules". */}
           <li>
             <MapIcon />
-            <span>Your agent walks you through each change</span>
+            <span>A review curator walks you through each change</span>
           </li>
           <li>
             <BoardIcon />
-            <span>Ask about any line, or see it drawn as a board</span>
+            {/* The System clause joins this line when System is in the Inbox: ", and where it lands in your **System**". */}
+            <span>
+              See each change as a <b className="ib-cro-name">Shape</b>
+            </span>
           </li>
         </ul>
         <div className="ib-cro-acts">
@@ -91,18 +92,6 @@ function CodeReviewOfferArt({ phone }: { phone: boolean }) {
     <div className="ib-cro-art" aria-hidden="true">
       <canvas ref={canvas} />
     </div>
-  );
-}
-
-/** A pull request: two branches joining. */
-function PullIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="6" cy="5.5" r="2.25" />
-      <circle cx="6" cy="18.5" r="2.25" />
-      <circle cx="18" cy="18.5" r="2.25" />
-      <path d="M6 7.75v8.5M18 16.25V10a3 3 0 0 0-3-3h-3.5m0 0 2.25-2.25M11.5 7l2.25 2.25" />
-    </svg>
   );
 }
 
