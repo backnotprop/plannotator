@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { mergedPrs, readState, redrawNote, runCommand, systemPaths, tick, type Notify, type RunAgent, type TickDeps } from '../src/node/index.ts';
 import { git, isolateGitConfig, smallDrawing, tempDir, writeTree } from './helpers.ts';
 import { gitBytes } from '../src/node/git.ts';
+import { drawingStatus } from '../src/index.ts';
+import { load } from '../src/node/index.ts';
 
 // A real project: a bare origin in a temp folder (a local path, no network),
 // a teammate's clone that lands commits on main, and the person's clone that
@@ -572,6 +574,15 @@ echo changed > src/main.ts`);
     // the drawer finished: nothing is wanted
     writeTree(p.paths.drawing, drawing(p.drawnAt));
     expect((await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, ...fakes() } })).ran).toBe('redrew');
+  });
+
+  test('a wanted entry whose sheet is drawn is not "still drawing": the tick reads it as the Inbox\'s status does', async () => {
+    const p = project();
+    const files = drawing(p.drawnAt);
+    files['system.yaml'] += 'wanted:\n  - { code: L-101, kind: logical, question: "The app." }\n';
+    writeTree(p.paths.drawing, files);
+    expect(drawingStatus(await load(p.paths.drawing)).state).toBe('drawn');
+    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).toMatchObject({ ran: 'nothing', why: 'main has not moved' });
   });
 
   test('a redraw that leaves a sheet under wanted: is refused, so a finished drawing never stops later redraws', async () => {

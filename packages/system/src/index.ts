@@ -7,7 +7,7 @@ export type {
   SideSection, Sources, StepHop, SystemFiles, SystemModel, Wanted,
 } from './format/types.ts';
 export { bySheetOrder, formatIssue, loadFiles, parseRevision, sheetParts } from './format/load.ts';
-export { drawingProgress, drawingStatus, type DrawingStatus } from './format/status.ts';
+export { drawingProgress, drawingStatus, stillWanted, type DrawingStatus } from './format/status.ts';
 export { citations, type Citation } from './format/cited.ts';
 export { gate, globMatch, isIgnoredPath, LOCKFILE_NAMES, TEST_FOLDERS, type ChangedFile, type GateInput, type GateReason, type GateResult } from './gate/gate.ts';
 // The recipes and the first-draw prompt are pure text, so the window can build
