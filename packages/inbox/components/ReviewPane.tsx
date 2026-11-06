@@ -43,6 +43,7 @@
  */
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import type { InboxMessageWire, InboxPull, InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
@@ -68,6 +69,7 @@ import { agentName, whenTime } from '../format';
 import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
+import { holdBarAfterClose, usePhoneCommentsSheet } from './phoneCommentsSheet';
 import { clearReviewNotes, readReviewNotes, saveReviewNotes, VerdictKeys, verdictOf, verdictReply } from '../reviewVerdict';
 import { useGuideState } from './useGuideState';
 import { PostEnding, reviewEnding, useReviewDestination } from '../pulls/PostEnding';
@@ -200,6 +202,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   const panelOpen = folded ? sheet : panelDocked === true;
   const setPanelOpen = (open: boolean) => (folded ? setSheet(open) : setPanelDocked(open));
   const sheetButtonRef = useRef<HTMLButtonElement>(null);
+  const sheetCloseRef = useRef<HTMLButtonElement>(null);
   const sheetId = useId();
   useEffect(() => {
     if (!folded) setSheet(false);
@@ -566,9 +569,12 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
 
   /** Close the panel from inside it (its close, Escape): focus goes back to the button that opens it. */
   const closeSheet = () => {
-    setPanelOpen(false);
+    // At once: on a phone the button can take focus only once the page shows again.
+    flushSync(() => setPanelOpen(false));
     sheetButtonRef.current?.focus({ preventScroll: true });
+    if (phone) holdBarAfterClose(sheetButtonRef.current);
   };
+  usePhoneCommentsSheet(phone && sheet, sheetCloseRef, closeSheet);
   // Escape closes the open panel before it closes the review (App's handler skips a used Escape).
   const onSheetKey = (event: React.KeyboardEvent) => {
     if (event.key === 'Escape' && panelOpen && !event.defaultPrevented) {
@@ -844,7 +850,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
               <b>Comments</b>
               <span className="ib-mut">{comments.length}</span>
               <span className="ib-sp" />
-              <button type="button" className="ib-iconbtn" onClick={closeSheet} aria-label="Close the comments">
+              <button ref={sheetCloseRef} type="button" className="ib-iconbtn" onClick={closeSheet} aria-label="Close the comments">
                 <Icon name="x" />
               </button>
             </div>
