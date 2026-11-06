@@ -4647,6 +4647,99 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .pn-inbox .question-block [data-question-tile] { border-radius: var(--ib-qc-tile-r-s, 9px); }
 /* A picture tile draws its own state (border and tint); its label stays clear. */
 .pn-inbox .question-block [data-question-tile] > label[data-question-option], .pn-inbox .question-block [data-question-tile] > label[data-question-option]:hover, .pn-inbox .question-block [data-question-tile] > label[data-question-option]:has(input:checked) { background: transparent; border-radius: 0; }
+/* Picture choices (approval "picture-choices-layout", Adaptive). ui's QuestionPictureTiles writes the facts: how many
+   choices, each picture's shape and size in pixels (recorded when the message was sent, so known before it loads), how
+   long the words run, and a choice without a picture. The layout is drawn here from the room the card has (a container
+   query), so nothing measures and nothing moves when a picture loads. Columns by default: the choices share the width,
+   each picture on top at its own shape, the pictures of a row one height (subgrid). Phone screenshots get narrow columns;
+   two choices where one has no picture, and three short choices in a middling room, get Rows; under 560 px one column. */
+.pn-inbox .question-block :is([role="radiogroup"], [role="group"]):has(> [data-question-tiles]) { container: ib-pics / inline-size; }
+.pn-inbox .question-block [data-question-tiles] { grid-template-columns: minmax(0, 1fr); gap: 12px; margin-bottom: 6px; --ib-qpic-max: 440px; }
+.pn-inbox .question-block [data-question-tiles] > [data-question-tile] { display: grid; grid-row: span 2; grid-template-rows: subgrid; row-gap: 0; }
+.pn-inbox .question-block [data-question-tiles] > [data-question-tile] > label { grid-row: 1 / span 2; display: grid; grid-template-rows: subgrid; row-gap: 0; }
+.pn-inbox .question-block [data-question-tile-caption] { grid-row: 2; align-self: start; padding: 10px 12px 12px; gap: 10px; }
+.pn-inbox .question-block [data-question-tile] [data-question-part="choice"] { max-width: 68ch; }
+/* The picture's box is its own shape from the recorded size (16:10 when none was recorded), never past its natural width
+   (a small icon is not blown up; an SVG has no recorded size and fills the box), at most 440 px tall, on a quiet ground.
+   At least 40 px tall: a long strip stays in sight, and the zoom button stays on the picture, off the words. */
+.pn-inbox .question-block [data-question-tile-picture] { aspect-ratio: auto; min-height: 40px; display: flex; align-items: center; justify-content: center; background: color-mix(in oklab, var(--muted) 40%, transparent); }
+.pn-inbox .question-block [data-question-tile-picture] > img { width: min(100%, var(--question-picture-width, 100%)); height: auto; aspect-ratio: var(--question-picture-ratio, 16 / 10); max-height: var(--ib-qpic-max); object-fit: contain; }
+/* A full-page capture shows its top at a phone's shape; the zoom shows all of it. */
+.pn-inbox .question-block [data-question-tile-shape="scroll"] [data-question-tile-picture] > img { aspect-ratio: 9 / 19.5; object-fit: cover; object-position: top; }
+/* A picture that did not load says so, in a box tall enough to read as a picture's place. The words stay out of the
+   choice's accessible name, which is unchanged. */
+.pn-inbox .question-block [data-question-tile-picture] > [data-image-unavailable] { flex: 1 1 auto; align-self: stretch; min-height: 120px; padding: 12px; align-content: center; gap: 4px; }
+.pn-inbox .question-block [data-question-tile-picture] > [data-question-picture-failed]::before { content: "Picture didn\2019t load"; content: "Picture didn\2019t load" / ""; font-weight: 550; color: var(--foreground); }
+@media (min-width: 721px) {
+  .pn-inbox .question-block [data-question-tile] [data-question-part="choice"] { font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; }
+  .pn-inbox .question-block [data-question-tile-label] { font-size: var(--ib-fs-14, 14px); }
+  .pn-inbox .question-block [data-question-tile-description] { margin-top: 2px; }
+}
+/* In columns, a choice without a picture holds its place with a short quiet panel, never a picture-tall empty box. Drawn
+   only where a rule below gives it its words (columns, not Rows or one column). */
+.pn-inbox .question-block [data-question-tiles] > [data-question-tile-no-picture] > label::before { grid-row: 1; align-self: start; display: grid; place-items: center; height: 120px; border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent); background: color-mix(in oklab, var(--muted) 25%, transparent); color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+/* Phone screenshots (and full-page captures): narrow columns, pictures up to 560 px tall; two across from a 360 px window
+   (the card's room is the window less 62 px). */
+.pn-inbox .question-block [data-question-tiles][data-question-tiles-shape="tall"] { --ib-qpic-max: 560px; }
+.pn-inbox .question-block [data-question-tiles][data-question-tiles-shape="tall"] [data-question-tile-picture] { padding: 10px 10px 0; }
+@container ib-pics (min-width: 298px) {
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-shape="tall"]:not([data-question-tiles-count="1"]) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container ib-pics (min-width: 298px) and (max-width: 559.98px) {
+  /* Two across with a choice that has no picture. */
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-shape="tall"]:not([data-question-tiles-count="1"]) > [data-question-tile-no-picture] > label::before { content: "No picture"; content: "No picture" / ""; }
+}
+@container ib-pics (min-width: 560px) {
+  /* Columns: two by default (2 halves, 4 two by two); one choice, or a set of panoramas, takes the full width. */
+  .pn-inbox .question-block [data-question-tiles] { grid-template-columns: repeat(var(--ib-qpic-cols, 2), minmax(0, 1fr)); }
+  .pn-inbox .question-block [data-question-tiles]:is([data-question-tiles-count="1"], [data-question-tiles-shape="pano"]) { --ib-qpic-cols: 1; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-shape="tall"]:not([data-question-tiles-count="1"]) { grid-template-columns: repeat(var(--ib-qpic-cols, 2), minmax(0, 320px)); }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-shape="tall"][data-question-tiles-count="1"] { grid-template-columns: minmax(0, 320px); }
+  /* A choice without a picture among three or more, of any shape (two such choices go Rows, below; panoramas one column). */
+  .pn-inbox .question-block [data-question-tiles]:not([data-question-tiles-count="2"]):not([data-question-tiles-shape="pano"]) > [data-question-tile-no-picture] > label::before { content: "No picture"; content: "No picture" / ""; }
+}
+@container ib-pics (min-width: 624px) {
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-shape="tall"]:not(:is([data-question-tiles-count="1"], [data-question-tiles-count="2"])) { --ib-qpic-cols: 3; }
+}
+@container ib-pics (min-width: 836px) {
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-shape="tall"]:not(:is([data-question-tiles-count="1"], [data-question-tiles-count="2"], [data-question-tiles-count="3"])) { --ib-qpic-cols: 4; }
+}
+@container ib-pics (min-width: 900px) {
+  /* Three in a row from 900 px (five or more: three, then the rest); two and four stay halves. */
+  .pn-inbox .question-block [data-question-tiles]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not(:is([data-question-tiles-count="1"], [data-question-tiles-count="2"], [data-question-tiles-count="4"])) { --ib-qpic-cols: 3; }
+}
+/* Rows: one choice a row, the picture at the start and the words beside it: for two choices where one has no picture
+   (three or more stay columns, the bare one with its panel), and for three choices of short words in 560 to 900 px
+   (three with long words, or pictures of mixed shapes, stay columns). */
+@container ib-pics (min-width: 560px) {
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] { grid-template-columns: minmax(0, 1fr); gap: 10px; --ib-qpic-w: min(62%, 760px); --ib-qpic-max: 460px; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"][data-question-tiles-words="short"] { --ib-qpic-w: min(74%, 860px); }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > :is([data-question-tile-shape="tall"], [data-question-tile-shape="scroll"]) { --ib-qpic-w: min(34%, 260px); --ib-qpic-max: 520px; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile] { display: flex; flex-direction: column; grid-row: auto; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile] > label { grid-row: auto; display: flex; flex-direction: row; align-items: stretch; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] [data-question-tile-picture] { flex: 0 0 var(--ib-qpic-w); width: var(--ib-qpic-w); border-bottom-width: 0; border-inline-end: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] [data-question-tile-caption] { flex: 1 1 auto; align-self: flex-start; padding: 14px 16px; }
+  /* The zoom stays on the picture, at its top corner on the words' side (left in a right-to-left page). */
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile]:not([data-question-tile-no-picture]) > [data-question-zoom] { inset-inline-start: calc(var(--ib-qpic-w) - 34px); inset-inline-end: auto; }
+  /* A panorama sits over its words at the full width, where it can be read. */
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile-shape="pano"] { --ib-qpic-w: 100%; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile-shape="pano"] > label { flex-direction: column; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-bare][data-question-tiles-count="2"] > [data-question-tile-shape="pano"] [data-question-tile-picture] { flex-basis: auto; border-inline-end: 0; border-bottom-width: 1px; }
+}
+@container ib-pics (min-width: 560px) and (max-width: 899.98px) {
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) { grid-template-columns: minmax(0, 1fr); gap: 10px; --ib-qpic-w: min(62%, 760px); --ib-qpic-max: 460px; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"])[data-question-tiles-words="short"] { --ib-qpic-w: min(74%, 860px); }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > :is([data-question-tile-shape="tall"], [data-question-tile-shape="scroll"]) { --ib-qpic-w: min(34%, 260px); --ib-qpic-max: 520px; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile] { display: flex; flex-direction: column; grid-row: auto; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile] > label { grid-row: auto; display: flex; flex-direction: row; align-items: stretch; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) [data-question-tile-picture] { flex: 0 0 var(--ib-qpic-w); width: var(--ib-qpic-w); border-bottom-width: 0; border-inline-end: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) [data-question-tile-caption] { flex: 1 1 auto; align-self: flex-start; padding: 14px 16px; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile]:not([data-question-tile-no-picture]) > [data-question-zoom] { inset-inline-start: calc(var(--ib-qpic-w) - 34px); inset-inline-end: auto; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile-shape="pano"] { --ib-qpic-w: 100%; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile-shape="pano"] > label { flex-direction: column; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile-shape="pano"] [data-question-tile-picture] { flex-basis: auto; border-inline-end: 0; border-bottom-width: 1px; }
+  .pn-inbox .question-block [data-question-tiles][data-question-tiles-count="3"]:not([data-question-tiles-shape="tall"]):not([data-question-tiles-shape="pano"]):not([data-question-tiles-shape="mixed"]):is([data-question-tiles-words="short"], [data-question-tiles-words="medium"]) > [data-question-tile-no-picture] > label::before { content: none; }
+}
 .pn-inbox .question-block label[data-question-option]:has(input:checked) { background: var(--ib-qc-opt-on-s, color-mix(in oklab, var(--primary) 12%, transparent)); }
 .pn-inbox .question-block [data-question-part="choice"] > span:first-child { font-weight: var(--ib-qc-choice-w-s, 550); }
 /* The Recommended tag only (ui's Tag carries data-question-tag): an image or inline code in a choice keeps its
