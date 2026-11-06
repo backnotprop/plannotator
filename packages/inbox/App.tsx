@@ -4562,6 +4562,7 @@ function Inbox() {
   }, []);
   const ask = useInboxAsk({
     on: (settings?.ask_ai === true || settings?.code_review?.on === true) && !tourOn,
+    codeReview: settings?.code_review?.on === true,
     threadId: route.thread && !machineOf(route.thread) ? route.thread : null,
     phone,
     openThread: (threadId) => writeRoute({ page: 'inbox', project: null, thread: threadId }),
