@@ -53,7 +53,7 @@ import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, r
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
-import { hasMovingDelivery } from './rowDelivery';
+import { deliveriesReadList } from './rowDelivery';
 import {
   captureSettle,
   COVERED_LIST_SETTLES,
@@ -2008,8 +2008,8 @@ function Inbox() {
           // So does each steps list's presence (the in-progress mark turns only while its session works): read
           // again only where a list shows.
           stepsBus.emit('presence');
-          // A session's label changed (issue #2450): the list carries the labels, so it is read again.
-          if (!change?.labels && !hasMovingDelivery(latestSectionsRef.current)) return;
+          // A session's label changed (issue #2450), or one ended or came back: the list carries both, so it is read again.
+          if (!deliveriesReadList(change, latestSectionsRef.current)) return;
           listAfterEvents(80);
         },
         // Every (re)connect: the permission now, since a reconnect's URL may be stale.
