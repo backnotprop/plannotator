@@ -23,6 +23,7 @@ import { createHash } from "node:crypto";
 import { isInboxId } from "@plannotator/core/inbox-types";
 import { INBOX_MESSAGE_IMAGE_CSP, inboxMessageImageRefsInOrder, readInboxMessageImageAsync, type InboxMessageImageResult } from "@plannotator/shared/inbox/message-images";
 import { captureInboxInlineImages, yieldToLoop } from "@plannotator/shared/inbox/inline-images";
+import { syncSection } from "./inbox-perf";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
 export const INBOX_MESSAGE_IMAGE_ROUTE = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/image$/;
@@ -167,7 +168,7 @@ export function createInboxImageCapture(
 
   const captureThread = async (threadId: string, budget: { bytes: number }) => {
     const version = store.threadVersion(threadId);
-    const gaps = store.imageCaptureGaps(threadId, inboxMessageImageRefsInOrder);
+    const gaps = syncSection("image-capture:gaps", () => store.imageCaptureGaps(threadId, inboxMessageImageRefsInOrder));
     if (gaps.length === 0) {
       settled.delete(threadId);
       settled.set(threadId, version);
@@ -205,7 +206,7 @@ export function createInboxImageCapture(
           await captured.discard();
           continue;
         }
-        store.addCapturedImages(message.id, captured.images, inboxMessageImageRefsInOrder(latest.body));
+        syncSection("image-capture:write", () => store.addCapturedImages(message.id, captured.images, inboxMessageImageRefsInOrder(latest.body)));
         await captured.commit();
         budget.bytes += captured.bytes;
         if (budget.bytes >= passBytes) {

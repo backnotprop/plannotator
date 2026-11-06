@@ -427,34 +427,26 @@ function checkedStat(attachment: InboxAttachment, stat: Stats): CurrentCheck {
 }
 
 /**
- * `checkCurrent`, the same steps in the same order with the same answers, its realpath and lstat calls off the
- * event loop: a thread with hundreds of files lists them without stopping the Inbox for each (the reads and the
- * opens use it; `checkCurrent` stays for the callers that need the answer at once).
+ * `checkCurrent` off the event loop: the same three reads (the path's realpath, the named path's, the path's
+ * lstat), made at once, judged in the same order with the same answers. A thread with hundreds of files lists them
+ * without stopping the Inbox for each (the listing, the reads and the opens use it; `checkCurrent` stays for a
+ * caller that needs the answer at once).
  */
 export async function checkCurrentAsync(attachment: InboxAttachment): Promise<CurrentCheck> {
-  let real: string;
-  try {
-    real = await realpath(attachment.path);
-  } catch {
-    return missing(`${attachment.name} is no longer on disk.`);
+  const settle = <T>(read: Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> => read.then((value) => ({ ok: true as const, value }), () => ({ ok: false as const }));
+  const [real, target, stat] = await Promise.all([
+    settle(realpath(attachment.path)),
+    attachment.named_path ? settle(realpath(attachment.named_path)) : null,
+    settle(lstat(attachment.path)),
+  ]);
+  if (!real.ok) return missing(`${attachment.name} is no longer on disk.`);
+  if (real.value !== attachment.path) return changedType(`${attachment.path} now leads somewhere else (${real.value}).`);
+  if (attachment.named_path && target) {
+    if (!target.ok) return missing(`${attachment.named_path} is no longer on disk.`);
+    if (target.value !== attachment.path) return changedType(`${attachment.named_path} now points somewhere else (${target.value}).`);
   }
-  if (real !== attachment.path) return changedType(`${attachment.path} now leads somewhere else (${real}).`);
-  if (attachment.named_path) {
-    let target: string;
-    try {
-      target = await realpath(attachment.named_path);
-    } catch {
-      return missing(`${attachment.named_path} is no longer on disk.`);
-    }
-    if (target !== attachment.path) return changedType(`${attachment.named_path} now points somewhere else (${target}).`);
-  }
-  let stat: Stats;
-  try {
-    stat = await lstat(attachment.path);
-  } catch {
-    return missing(`${attachment.name} is no longer on disk.`);
-  }
-  return checkedStat(attachment, stat);
+  if (!stat.ok) return missing(`${attachment.name} is no longer on disk.`);
+  return checkedStat(attachment, stat.value);
 }
 
 /**

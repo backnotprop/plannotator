@@ -3791,7 +3791,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // `plannotator inbox --tailscale` while this Inbox runs: publish for this run.
       if (path === "/api/inbox/control/tailscale") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-        return json({ tailscale: tailscale.enableForRun() });
+        return json({ tailscale: await tailscale.enableForRun() });
       }
       // `plannotator inbox` while this Inbox runs (an agent started it with
       // --background): connect the agents on this computer, as a start does.
@@ -4341,7 +4341,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.shape !== undefined) saveShape(body.shape, true);
         if (body.cookie_host !== undefined) saveCookieHostSwitch(body.cookie_host, true);
         if (body.voice !== undefined) voice.save(body.voice, true);
-        const tailnet = tailscaleChange === undefined ? tailscale.state() : tailscale.set(tailscaleChange.on, { via, replaceExposed: tailscaleChange.replaceExposed });
+        const tailnet = tailscaleChange === undefined ? tailscale.state() : await tailscale.set(tailscaleChange.on, { via, replaceExposed: tailscaleChange.replaceExposed });
         // After the tailnet change, so a tailnet refusal saves nothing; the cookie switch can be
         // refused too (the env var, another urlHost), so it comes before the other saves.
         const cookieHost = body.cookie_host === undefined ? undefined : saveCookieHostSwitch(body.cookie_host);
