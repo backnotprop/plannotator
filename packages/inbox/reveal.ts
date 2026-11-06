@@ -79,6 +79,19 @@ function listKey(rows: readonly InboxListRow[]): string {
 /**
  * The leave tracker, the settling wait, the claim and the opening, for one reveal. `target`: the thread just left.
  */
+/**
+ * Another one-time dialog showed on this load (the Board's first visit, the star ask's card): App's `revealBlocked`
+ * reads it, so Snooze, the Board and the Checklist reveals hold back for the rest of the load. Nothing is stamped: the
+ * line and every day stay as they are.
+ */
+let otherOneTimeDialog = false;
+export function noteOneTimeDialogShown(): void {
+  otherOneTimeDialog = true;
+}
+export function oneTimeDialogShownThisLoad(): boolean {
+  return otherOneTimeDialog;
+}
+
 export function useRevealMoment(input: RevealMomentInput) {
   const [stage, setStage] = useState<RevealStage>('none');
   const [moment, setMoment] = useState<RevealVisit | null>(null);
@@ -467,5 +480,9 @@ export function useStarReveal(input: StarRevealInput) {
       return answer.show;
     },
   });
+  // The card is up: the other reveals hold back for the rest of this load (App's `revealBlocked`), without a stamp.
+  useEffect(() => {
+    if (moment.stage === 'open') noteOneTimeDialogShown();
+  }, [moment.stage]);
   return { ...moment, canStar };
 }

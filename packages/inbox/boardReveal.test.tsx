@@ -476,3 +476,54 @@ describe.skipIf(!hasDom)('the Checklist dialog (ChecklistIntro): an offer', () =
     expect(calls).toEqual(['close', 'close', 'close', 'on']);
   });
 });
+
+/**
+ * The star ask's card (approval "star-ask") in the same load as the line's reveals, as App wires them: App's
+ * `revealBlocked` reads `oneTimeDialogShownThisLoad()`, so once the star card is up, Snooze, the Board and the
+ * Checklist hold back for the rest of the load (the star ask stamps nothing of the line, so this is the only thing that
+ * keeps two one-time dialogs off one load).
+ */
+function StarThenBoard({ state }: { state: State }) {
+  const common = { listLoaded: true, firstRun: false, rows: state.rows, toast: false, thread: state.thread, clear: true, place: state.thread ?? '', heldBack: () => false };
+  const star = reveal.useStarReveal({ ...common, due: true, blocked: false });
+  const board = reveal.useBoardReveal({ ...common, due: true, blocked: reveal.oneTimeDialogShownThisLoad(), on: false, onBoardOn: () => {} });
+  return (
+    <>
+      {star.stage === 'open' && <div data-star-card="" />}
+      {board.stage === 'open' && <div data-board-offer="" />}
+    </>
+  );
+}
+
+describe.skipIf(!hasDom)('the star card holds the line’s reveals back for the load', () => {
+  test('once the star card opens, the Board reveal never claims on this load, even at its own moment', async () => {
+    expect(reveal.oneTimeDialogShownThisLoad()).toBe(false);
+    // Too few rows for the Board's moment: the first calm moment is the star ask's alone.
+    let state: State = { ...BASE, rows: ROWS.slice(0, 2) };
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    act(() => {
+      root = createRoot(host!);
+      root.render(<StarThenBoard state={state} />);
+    });
+    const set = (next: Partial<State>) => {
+      state = { ...state, ...next };
+      act(() => root!.render(<StarThenBoard state={state} />));
+    };
+    await wait(TIMES.pageAgeMs + 20);
+    set({ thread: 'msg_a' });
+    await wait(TIMES.readMs + 20);
+    set({ thread: null });
+    await until(() => document.querySelector('[data-star-card]') !== null);
+    expect(claims().map((c) => (c.body as { id: string }).id)).toEqual(['star']);
+    expect(reveal.oneTimeDialogShownThisLoad()).toBe(true);
+    // Later in the load the Board's moment comes (five rows in two projects, a thread read and left): no claim.
+    set({ rows: ROWS });
+    set({ thread: 'msg_b' });
+    await wait(TIMES.readMs + 20);
+    set({ thread: null });
+    await wait(TIMES.settledMs + 200);
+    expect(claims().map((c) => (c.body as { id: string }).id)).toEqual(['star']);
+    expect(document.querySelector('[data-board-offer]')).toBeNull();
+  });
+});
