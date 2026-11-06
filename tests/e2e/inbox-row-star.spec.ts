@@ -293,7 +293,8 @@ test.describe('the pop', () => {
 test.describe('a phone', () => {
   let phone: Browser | null = null;
   test.beforeAll(async () => {
-    phone = await webkit.launch();
+    // No args: the config's Chromium flags (--use-mock-keychain, --password-store=basic) reach every launch, and Linux WebKit exits on them.
+    phone = await webkit.launch({ args: [] });
   });
   test.afterAll(async () => {
     await phone?.close();
