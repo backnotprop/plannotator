@@ -509,14 +509,17 @@ export interface PlannotatorConfig {
    * any day (the agent note included: one a day); `notNowAt`, the last offer
    * closed with Not now (four days before the next); `shownLoad`, the page
    * load that showed the last dialog (never on two loads in a row; the loads
-   * seen since are kept in memory). `waitingSince` also counts the 14 days
-   * after which an entry retires.
+   * seen since are kept in memory). `agentNote.shownFor`: the agents the
+   * agent note was shown for (once each, so an unanswered note never takes
+   * another day). `waitingSince` also counts the 14 days after which an offer
+   * retires (an update-day dialog never does).
    */
   inboxReveals?: {
     lastShownAt?: string;
     dayShownAt?: string;
     notNowAt?: string;
     shownLoad?: string;
+    agentNote?: { shownFor?: string[] };
     waitingSince?: { sound?: string; list_intro?: string; voice?: string; snooze?: string; board?: string; steps?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };

@@ -277,6 +277,17 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
     });
     return introCheck;
   };
+  /**
+   * Who may get it, as far as this start knows without asking Codex: not a computer the check settled as no, and not
+   * one with no `codex` CLI at all (looked up once per start). So voice never holds the line of one-time dialogs
+   * (packages/shared/inbox/reveals.ts) for someone who can never see it (approval "inbox-one-time-dialogs").
+   */
+  let introCliFound: boolean | null = null;
+  const introAudienceOpen = (): boolean => {
+    if (introAudience === false) return false;
+    introCliFound ??= codexCliCandidates(environment, options.extraClis).length > 0;
+    return introCliFound;
+  };
   const introDue = () => {
     const intro = loadConfig().inboxVoiceIntro;
     return typeof intro?.dueAt === "string" && intro.dueAt !== "" && !intro.shownAt && !intro.skippedAt && !isOn();
@@ -373,7 +384,7 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
     json({ error: "Voice did not transcribe this clip.", code, engine: engine(), ...(reason ? { reason } : {}) }, FAILURE_STATUS[code]);
 
   return {
-    introOpen: () => introDue() && introAudience !== false,
+    introOpen: () => introDue() && introAudienceOpen(),
     settings: (via, guest = false) => {
       const value = saved();
       return {
@@ -382,7 +393,7 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
         engine: engine(),
         key: guest ? { source: null, last4: null } : keyState(),
         computer: via === "tailnet" ? options.computerName() : null,
-        intro_due: !guest && introDue() && introAudience !== false,
+        intro_due: !guest && introDue() && introAudienceOpen(),
         guest,
       };
     },

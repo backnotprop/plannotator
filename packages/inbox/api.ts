@@ -84,8 +84,10 @@ import { newUuid } from './uuid';
  * side): the update-day dialogs, then the offers. A registered dialog (Bro mode, List view) adds its id here.
  */
 export type InboxRevealId = 'sound' | 'list_intro' | 'voice' | 'snooze' | 'board' | 'steps';
+/** An offer of the line (not an update-day dialog): only an offer's Not now stamps the four-day gap. */
+export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
 /** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, or the agent note. */
-export type InboxRevealClaimId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'> | 'agent_note';
+export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note';
 
 /**
  * This page load's id, sent with every read and write (`X-Plannotator-Load`): the line of one-time dialogs never shows
@@ -428,11 +430,12 @@ export interface SettingsModel {
   /** The one-time Snooze announcement waits to be claimed by this page (POST /api/inbox/snooze-intro). Absent from an older Inbox. */
   snooze_intro?: { due: boolean };
   /**
-   * The line of one-time dialogs: the one this page may arm, or null; `setup`: the agent note may show on this load
-   * (absent from an older Inbox: it may); `line`: this Inbox keeps the line (a release build), so the update-day
-   * dialogs (sound, list options, voice) show only when `next` names them. The whole field is absent from an older Inbox.
+   * The line of one-time dialogs: the one this page may arm, or null; `ahead`: the offers it may also arm, each going
+   * as soon as its own moment comes (List view); `setup`: the agent note may show on this load (absent from an older
+   * Inbox: it may); `line`: this Inbox keeps the line (a release build), so the update-day dialogs (sound, list
+   * options, voice) show only when `next` names them. The whole field is absent from an older Inbox.
    */
-  reveal?: { next: InboxRevealId | null; setup?: boolean; line?: boolean };
+  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
@@ -1584,13 +1587,18 @@ export const inboxApi = {
    * A reveal for returning users: `show: true` only while it is still next (a compare-and-set over the queue). It turns
    * nothing on. `key`: the page's own for this claim, so a retry after a lost answer is shown it again (Board, Checklist).
    */
-  claimReveal: (id: InboxRevealClaimId, key?: string) =>
-    post<{ show: boolean; reveal: { next: InboxRevealId | null }; board: { on: boolean }; steps?: { on: boolean } }>(inboxUrl('/reveal'), { id, ...(key ? { key } : {}) }),
+  claimReveal: (id: InboxRevealClaimId, key?: string, agents?: readonly string[]) =>
+    post<{ show: boolean; reveal: { next: InboxRevealId | null }; board: { on: boolean }; steps?: { on: boolean } }>(inboxUrl('/reveal'), {
+      id,
+      ...(key ? { key } : {}),
+      // The agent note: the agents it would ask about (it shows once for each).
+      ...(agents && agents.length > 0 ? { agents } : {}),
+    }),
   /**
-   * A dialog of the line closed with Not now (or Escape, or a click outside) without taking it: the next one waits four
-   * days. Best effort: a lost answer only shortens that wait.
+   * An offer of the line closed with Not now (or Escape, or a click outside) without taking it: the next one waits four
+   * days. Offers only (an update-day dialog's Not now keeps the usual two). Best effort: a lost answer only shortens that wait.
    */
-  revealNotNow: (id: InboxRevealId) => post<{ show: boolean }>(inboxUrl('/reveal'), { id, answer: 'not_now' }).then(
+  revealNotNow: (id: InboxRevealOfferId) => post<{ show: boolean }>(inboxUrl('/reveal'), { id, answer: 'not_now' }).then(
     () => undefined,
     () => undefined,
   ),

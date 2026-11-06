@@ -13,23 +13,29 @@
  *  - Day 0 is setup only: every offer needs tenure (two days or more since first use).
  *  - One due at a time: the first entry, in table order, whose "who" holds (a release build, tenure since first use,
  *    enough threads, heavy use where it asks for it, its own conditions).
+ *  - Ahead at its moment: an offer marked `ahead` (List view: approval "inbox-one-time-dialogs", "the change") may also
+ *    be armed while another offer is next, and goes as soon as its own moment comes, still inside the day, load and
+ *    spacing rules (`revealAhead`). It never goes before an update-day dialog.
  *  - At most one new dialog a calendar day (local time), the agent note included (`inboxReveals.dayShownAt`).
  *  - Never on two page loads in a row: the load right after the one that showed the last dialog shows none
- *    (`revealAfterShowLoad`; each page sends its load id).
+ *    (`revealAfterShowLoad`; each page sends its load id, and a load counts once, when it is first seen, so an old tab
+ *    reading settings again never becomes the newest load).
  *  - Spacing: `REVEAL_SPACING_MS` (2 days) after the last dialog that stamps the clock (every one but the agent note),
- *    `REVEAL_NOT_NOW_SPACING_MS` (4 days) after an offer closed with Not now (`inboxReveals.notNowAt`). The clock also
+ *    `REVEAL_NOT_NOW_SPACING_MS` (4 days) after an offer closed with Not now (`inboxReveals.notNowAt`; offers only, an
+ *    update-day dialog's Not now keeps the 2 days). The clock also
  *    reads the announcements' own `shownAt` stamps from before that key existed (`revealLastShown`).
  *  - Patience: an entry that has been next for `REVEAL_PATIENCE_MS` (3 days) without its moment lets the next entry
  *    that qualifies go first. It stays in line: when every qualifying entry has waited that long, the one that has
  *    waited longest is next.
- *  - Retirement: an entry next for `REVEAL_RETIRE_MS` (14 days) without its moment retires without a word.
+ *  - Retirement: an offer next for `REVEAL_RETIRE_MS` (14 days) without its moment retires without a word. An
+ *    update-day dialog never retires (patience still lets the others pass it).
  *  - No active-days counter (the owner, 2026-11-02): "different days" for heavy use come from the dates of the agent
  *    messages the person has read.
  *
  * Registering a dialog (a branch's Bro mode or List view): add its entry to `INBOX_REVEALS` at its place, with its own
- * need (`tenureMs`, `minThreads`, `heavyUse`); in packages/server/inbox.ts, add its "undecided" to `lineOffers` (the
+ * need (`tenureMs`, `minThreads`, `heavyUse`, `ahead`); in packages/server/inbox.ts, add its "undecided" to `lineOffers` (the
  * claim, the stamp, Not now and retirement then come from the line); on the page, arm it from `reveal.next` with
- * `useLineReveal` (packages/inbox/reveal.ts) and its own moment. docs/agent-guides/inbox-window.md has the steps.
+ * `useLineReveal` (packages/inbox/reveal.ts) and its own moment (also from `reveal.ahead` when it is `ahead`). docs/agent-guides/inbox-window.md has the steps.
  */
 
 /** Every dialog the queue orders. A registered dialog adds its id here. */
@@ -54,6 +60,11 @@ export interface RevealEntry {
   minThreads: number;
   /** Heavy use must hold (`revealHeavyUse`): for offers that only a heavy user needs (Bro mode). */
   heavyUse?: boolean;
+  /**
+   * An offer that goes ahead of the offers before it once its moment comes (`revealAhead`): List view, whose moment
+   * (the list taller than the screen) is itself the heavy use. Only for `offer`.
+   */
+  ahead?: boolean;
   /** Off: never next and never claimed. */
   enabled: boolean;
 }
@@ -75,7 +86,9 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // Board's 5 threads; the Board need not be on. Opt-in, as the Board: the claim only stamps it, `ChecklistIntro` opens,
   // and only its "Turn it on" writes inboxSteps (unset -> true). Until then no word of it reaches an agent.
   { id: "steps", kind: "offer", tenureMs: 5 * DAY_MS, minThreads: 5, enabled: true },
-  // List view (#2716) goes here: { id: "list_view", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 0, enabled: true }.
+  // List view (#2716) goes here, last in order but ahead at its moment (`ahead`; approval "inbox-one-time-dialogs": once
+  // the list is taller than the screen, at the next calm moment). `minThreads: 15` is the server's stand-in for "taller
+  // than the screen": { id: "list_view", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 15, ahead: true, enabled: true }.
 ];
 
 /** Never two dialogs within this long on one machine (the agent note apart). */
@@ -151,9 +164,10 @@ export function revealLineFree(kind: "setup" | "spaced", state: RevealState, now
   return kind === "setup" || revealSpaced(state.lastShownAt, now, state.notNowAt);
 }
 
-/** The entry has been next so long without its moment that it retires. */
-export function revealRetired(id: RevealId, state: Pick<RevealState, "waitingSince">, now: Date): boolean {
-  const since = time(state.waitingSince?.[id]);
+/** The offer has been next so long without its moment that it retires. An update-day dialog never retires. */
+export function revealRetired(entry: Pick<RevealEntry, "id" | "kind">, state: Pick<RevealState, "waitingSince">, now: Date): boolean {
+  if (entry.kind !== "offer") return false;
+  const since = time(state.waitingSince?.[entry.id]);
   return since !== null && now.getTime() - since >= REVEAL_RETIRE_MS;
 }
 
@@ -161,7 +175,7 @@ export function revealRetired(id: RevealId, state: Pick<RevealState, "waitingSin
 export function revealQualifies(entry: RevealEntry, state: RevealState, now: Date): boolean {
   if (!entry.enabled || !state.release || state.open[entry.id] !== true) return false;
   if (entry.heavyUse && state.heavy !== true) return false;
-  if (revealRetired(entry.id, state, now)) return false;
+  if (revealRetired(entry, state, now)) return false;
   const first = time(state.firstUseAt);
   if (first === null) {
     if (entry.kind !== "update") return false;
@@ -199,9 +213,25 @@ export function revealLastShown(stamps: readonly (string | null | undefined)[]):
   return latest === null ? null : new Date(latest).toISOString();
 }
 
-/** A claim for `id` may be spent now: it is still next. A page that armed something else gets no. */
+/**
+ * The `ahead` offers a page may arm besides `next` (approval "inbox-one-time-dialogs": List view goes at its moment,
+ * ahead of the other offers): each one that qualifies, while the line is free and `next` is not an update-day dialog.
+ */
+export function revealAhead(state: RevealState, now: Date, table: readonly RevealEntry[] = INBOX_REVEALS): RevealId[] {
+  const next = revealNext(state, now, table);
+  if (next === null && !revealLineFree("spaced", state, now)) return [];
+  if (next !== null && table.find((entry) => entry.id === next)?.kind !== "offer") return [];
+  return table.filter((entry) => entry.ahead === true && entry.kind === "offer" && entry.id !== next && revealQualifies(entry, state, now)).map((entry) => entry.id);
+}
+
+/** A claim for `id` may be spent now: it is still next, or an `ahead` offer at its moment. Anything else gets no. */
 export function revealMayClaim(id: RevealId, state: RevealState, now: Date, table: readonly RevealEntry[] = INBOX_REVEALS): boolean {
-  return revealNext(state, now, table) === id;
+  return revealNext(state, now, table) === id || revealAhead(state, now, table).includes(id);
+}
+
+/** A Not now may be stamped for `id`: an offer of the queue. An update-day dialog's Not now keeps the usual 2 days. */
+export function revealNotNowAllowed(id: unknown, table: readonly RevealEntry[] = INBOX_REVEALS): id is RevealId {
+  return table.some((entry) => entry.id === id && entry.kind === "offer");
 }
 
 /**
@@ -229,6 +259,8 @@ export interface RevealsSaved {
   /** The load id of the page that showed the last dialog. */
   shownLoad?: string;
   waitingSince?: Partial<Record<RevealId, string>>;
+  /** The agent note: the agents it was shown for (`revealAgentNoteNew`). */
+  agentNote?: { shownFor?: string[] };
 }
 
 /** A page's load id, as a page sends it (`X-Plannotator-Load`): 8 to 64 letters, digits, - or _. */
@@ -236,28 +268,38 @@ export function revealLoadId(value: string | null | undefined): string | null {
   return typeof value === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(value) ? value : null;
 }
 
+/** How many page loads the Inbox remembers (each with the load before it). */
+export const REVEAL_LOADS_KEPT = 256;
+
 /**
- * The last two page loads the Inbox saw (ids). Kept in memory, not in config.json: it changes on every load, and the
- * one-a-day rule already covers the load after a restart.
+ * The page loads the Inbox saw, in the order each was first seen: `newest`, and for each load the one first seen just
+ * before it. Kept in memory, not in config.json: it changes on every load, and the one-a-day rule already covers the
+ * load after a restart. A load counts once: an old tab reading settings again is not a new load.
  */
 export interface RevealLoads {
-  current?: string;
-  previous?: string;
+  newest?: string;
+  before?: ReadonlyMap<string, string | null>;
 }
 
-/** The loads once this page load is seen: null when nothing changes (the same load again, or no id). */
+/** The loads once this page load is seen: null when nothing changes (a load already seen, or no id). */
 export function revealSeeLoad(loads: RevealLoads, load: string | null): RevealLoads | null {
-  if (!load || loads.current === load) return null;
-  return { previous: loads.current, current: load };
+  if (!load || loads.before?.has(load)) return null;
+  const before = new Map(loads.before ?? []);
+  before.set(load, loads.newest ?? null);
+  for (const oldest of before.keys()) {
+    if (before.size <= REVEAL_LOADS_KEPT) break;
+    before.delete(oldest);
+  }
+  return { newest: load, before };
 }
 
 /**
- * This load comes right after the load that showed the last dialog (`shownLoad`, saved with the stamp). A page that
- * sends no id is never held back.
+ * This load was first seen right after the load that showed the last dialog (`shownLoad`, saved with the stamp), so it
+ * shows none for its whole life. A page that sends no id, or a load this Inbox never saw, is never held back.
  */
 export function revealAfterShowLoad(shownLoad: string | undefined, loads: RevealLoads, load: string | null): boolean {
-  if (!load || !shownLoad || loads.current !== load) return false;
-  return loads.previous === shownLoad;
+  if (!load || !shownLoad) return false;
+  return loads.before?.get(load) === shownLoad;
 }
 
 /**
@@ -276,4 +318,29 @@ export function revealStamp<T extends RevealsSaved>(saved: T | undefined, at: st
 /** The saved line once an offer is closed with Not now: the next waits four days. */
 export function revealStampNotNow<T extends RevealsSaved>(saved: T | undefined, at: string): T {
   return { ...(saved ?? ({} as T)), notNowAt: at };
+}
+
+/** An agent id as the agent-note claim sends it (`agents`): lower-case letters, digits and -. At most this many. */
+export const REVEAL_AGENT_NOTE_MAX_AGENTS = 32;
+
+/**
+ * The `agents` of an agent-note claim: the agents the note would ask about. Null when the claim sent none (an older
+ * page: the note shows as before); undefined when the value is not a list of agent ids (a validation error).
+ */
+export function revealAgentNoteAgents(value: unknown): string[] | null | undefined {
+  if (value === undefined) return null;
+  if (!Array.isArray(value) || value.length === 0 || value.length > REVEAL_AGENT_NOTE_MAX_AGENTS) return undefined;
+  if (!value.every((id) => typeof id === "string" && /^[a-z0-9-]{1,40}$/.test(id))) return undefined;
+  return [...new Set(value as string[])];
+}
+
+/**
+ * The agent note is shown once for each agent (approval "inbox-one-time-dialogs": setup, one a day): a claim names an
+ * agent it was never shown for, so it may show (and keep the day). A note left unanswered (the tab closed) is not shown
+ * again for the same agents, so it never takes another day's place. `agents` null (an older page): it may show.
+ */
+export function revealAgentNoteNew(shownFor: readonly string[] | undefined, agents: readonly string[] | null): boolean {
+  if (agents === null) return true;
+  const shown = new Set(shownFor ?? []);
+  return agents.some((agent) => !shown.has(agent));
 }

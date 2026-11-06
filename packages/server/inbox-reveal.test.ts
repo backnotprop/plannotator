@@ -504,11 +504,11 @@ describe("the Checklist reveal at day 6", () => {
   test("over the tailnet: a guest is never armed and never claims; the owner's phone claims", async () => {
     const w = await day6({}, { tailnet: "owner" });
     const guestSettings = (await (await w.viaTailnet(GUEST, "/api/inbox/settings?store=0")).json()) as Json;
-    expect(guestSettings.reveal).toEqual({ next: null });
+    expect(guestSettings.reveal.next).toBeNull();
     expect(((await (await w.viaTailnet(GUEST, "/api/inbox/reveal", { id: "steps" })).json()) as Json).show).toBe(false);
     expect(w.saved().inboxSteps).toBeUndefined();
     const ownerSettings = (await (await w.viaTailnet(OWNER, "/api/inbox/settings?store=0")).json()) as Json;
-    expect(ownerSettings.reveal).toEqual({ next: "steps" });
+    expect(ownerSettings.reveal.next).toBe("steps");
     expect(((await (await w.viaTailnet(OWNER, "/api/inbox/reveal", { id: "steps" })).json()) as Json).show).toBe(true);
     expect(w.saved().inboxReveals.steps.shownAt).toMatch(/^\d{4}-/);
     expect(w.saved().inboxSteps).toBeUndefined();
@@ -519,11 +519,14 @@ describe("over the tailnet", () => {
   test("a guest is never armed and never claims; the owner's phone claims", async () => {
     const w = await world({ tailnet: "owner" });
     const guestSettings = (await (await w.viaTailnet(GUEST, "/api/inbox/settings?store=0")).json()) as Json;
-    expect(guestSettings.reveal).toEqual({ next: null });
+    expect(guestSettings.reveal.next).toBeNull();
+    // A guest is never offered anything ahead, nor the agent note.
+    expect(guestSettings.reveal.ahead).toEqual([]);
+    expect(guestSettings.reveal.setup).toBe(false);
     expect(((await (await w.viaTailnet(GUEST, "/api/inbox/reveal", { id: "board" })).json()) as Json).show).toBe(false);
     expect(w.saved().inboxBoard).toBeUndefined();
     const ownerSettings = (await (await w.viaTailnet(OWNER, "/api/inbox/settings?store=0")).json()) as Json;
-    expect(ownerSettings.reveal).toEqual({ next: "board" });
+    expect(ownerSettings.reveal.next).toBe("board");
     expect(((await (await w.viaTailnet(OWNER, "/api/inbox/reveal", { id: "board" })).json()) as Json).show).toBe(true);
     expect(w.saved().inboxReveals.board.shownAt).toMatch(/^\d{4}-/);
     expect(w.saved().inboxBoard).toBeUndefined();
@@ -549,7 +552,7 @@ describe("over the tailnet", () => {
   test("a tagged machine: the login the owner allowed counts as the owner for the reveal", async () => {
     const w = await world({ tailnet: "tagged" });
     const settings = (await (await w.viaTailnet(OWNER, "/api/inbox/settings?store=0")).json()) as Json;
-    expect(settings.reveal).toEqual({ next: "board" });
+    expect(settings.reveal.next).toBe("board");
     expect(((await (await w.viaTailnet(OWNER, "/api/inbox/reveal", { id: "board" })).json()) as Json).show).toBe(true);
     expect(w.saved().inboxReveals.board.shownAt).toMatch(/^\d{4}-/);
     expect(w.saved().inboxBoard).toBeUndefined();
@@ -599,5 +602,70 @@ describe("the queue with Snooze", () => {
     expect(((await (await w.post("/api/inbox/list-intro")).json()) as Json).show).toBe(true);
     expect(w.saved().inboxReveals.lastShownAt).toBe(w.saved().inboxListIntro.shownAt);
     expect(await w.next()).toBeNull();
+  });
+});
+
+describe("the schedule's wiring (approval inbox-one-time-dialogs)", () => {
+  const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+  const asLoad = (load: string) => ({ "X-Plannotator-Load": load });
+  const settingsAs = async (w: Awaited<ReturnType<typeof world>>, load: string) =>
+    (await (await fetch(`${w.base}/api/inbox/settings?store=0`, { headers: asLoad(load) })).json()) as Json;
+  const claimAs = async (w: Awaited<ReturnType<typeof world>>, load: string, body: Record<string, unknown>) =>
+    (await (
+      await fetch(`${w.base}/api/inbox/reveal`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: w.base, ...asLoad(load) },
+        body: JSON.stringify({ serverSession: w.server.serverSession, ...body }),
+      })
+    ).json()) as Json;
+
+  test("the load first seen right after the one that showed a dialog arms and claims none; an old tab reading again holds no new load", async () => {
+    // Load A showed the last dialog three days ago (its stamp); the Board is next.
+    const w = await world({ config: { inboxReveals: { lastShownAt: ago(3 * DAY), dayShownAt: ago(3 * DAY), shownLoad: "load-aaaaaaaa" } } });
+    expect((await settingsAs(w, "load-aaaaaaaa")).reveal.next).toBe("board");
+    // B opens right after A: nothing armed, and its claim is refused.
+    expect((await settingsAs(w, "load-bbbbbbbb")).reveal.next).toBeNull();
+    expect((await claimAs(w, "load-bbbbbbbb", { id: "board" })).show).toBe(false);
+    // Tab A comes back and reads settings again, then C opens: C is not the load after A, and gets the Board.
+    await settingsAs(w, "load-aaaaaaaa");
+    expect((await settingsAs(w, "load-cccccccc")).reveal.next).toBe("board");
+    expect((await claimAs(w, "load-cccccccc", { id: "board" })).show).toBe(true);
+    expect(w.saved().inboxReveals.shownLoad).toBe("load-cccccccc");
+  });
+
+  test("Not now stamps the four days only for an offer: an update-day dialog's Not now is refused and writes nothing", async () => {
+    const w = await world();
+    const voice = await w.post("/api/inbox/reveal", { id: "voice", answer: "not_now" });
+    expect(((await voice.json()) as Json).code).toBe("validation_error");
+    expect(w.saved().inboxReveals?.notNowAt).toBeUndefined();
+    expect(await w.next()).toBe("board");
+    expect((await w.post("/api/inbox/reveal", { id: "board", answer: "not_now" })).status).toBe(200);
+    expect(w.saved().inboxReveals.notNowAt).toMatch(/^\d{4}-/);
+    // The next offer waits four days from that Not now.
+    expect(await w.next()).toBeNull();
+  });
+
+  test("the agent note shows once for each agent: left unanswered it never takes another day; a new agent is asked; bad agents refused", async () => {
+    const w = await world({ config: { inboxReveals: { agentNote: { shownFor: ["codex"] } } } });
+    // Shown for Codex before and left unanswered: refused, nothing stamped, so the Board keeps its day.
+    expect(((await (await w.post("/api/inbox/reveal", { id: "agent_note", agents: ["codex"] })).json()) as Json).show).toBe(false);
+    expect(w.saved().inboxReveals.dayShownAt).toBeUndefined();
+    expect(await w.next()).toBe("board");
+    // A newly connected agent: shown, the day stamped (nothing else today) and both agents kept.
+    expect(((await (await w.post("/api/inbox/reveal", { id: "agent_note", agents: ["codex", "claude-code"] })).json()) as Json).show).toBe(true);
+    expect(w.saved().inboxReveals.agentNote.shownFor.sort()).toEqual(["claude-code", "codex"]);
+    expect(w.saved().inboxReveals.dayShownAt).toMatch(/^\d{4}-/);
+    expect(await w.next()).toBeNull();
+    const bad = await w.post("/api/inbox/reveal", { id: "agent_note", agents: "codex" });
+    expect(((await bad.json()) as Json).code).toBe("validation_error");
+  });
+
+  test("the agent note: a dev build keeps no line and always shows it; over the tailnet it never does", async () => {
+    const dev = await world({ version: "0.0.0-dev", config: { inboxReveals: { agentNote: { shownFor: ["codex"] } } } });
+    expect(((await (await dev.post("/api/inbox/reveal", { id: "agent_note", agents: ["codex"] })).json()) as Json).show).toBe(true);
+    const phone = await world({ tailnet: "owner" });
+    const answer = await phone.viaTailnet(OWNER, "/api/inbox/reveal", { id: "agent_note", agents: ["pi"] });
+    expect(((await answer.json()) as Json).show).toBe(false);
+    expect(phone.saved().inboxReveals?.dayShownAt).toBeUndefined();
   });
 });

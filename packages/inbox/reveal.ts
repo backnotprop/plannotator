@@ -215,16 +215,18 @@ export interface RevealArmed {
   next: InboxRevealId | null;
   /** Snooze's own `due`, armed only while it is next. */
   snoozeDue: boolean;
+  /** The offers this load may also arm, each at its own moment (settings `reveal.ahead`: List view). */
+  ahead: readonly InboxRevealId[];
 }
 
 /**
  * The load's latch (App): only `reveal.next` is armed. An older Inbox reports no queue (no `reveal`): its Snooze rule
  * alone, and never the Board.
  */
-export function revealArmed(settings: { reveal?: { next: RevealArmed['next'] }; snooze_intro?: { due: boolean } }): RevealArmed {
+export function revealArmed(settings: { reveal?: { next: RevealArmed['next']; ahead?: readonly InboxRevealId[] }; snooze_intro?: { due: boolean } }): RevealArmed {
   const snoozeDue = settings.snooze_intro?.due === true;
   const next = settings.reveal ? settings.reveal.next : snoozeDue ? 'snooze' : null;
-  return { next, snoozeDue: snoozeDue && next === 'snooze' };
+  return { next, snoozeDue: snoozeDue && next === 'snooze', ahead: settings.reveal?.ahead ?? [] };
 }
 
 /** The Board reveal's need: the list holds this many rows or more (the approval: "the list has 5 rows or more"). */
@@ -370,7 +372,10 @@ export function useStepsReveal(input: StepsRevealInput) {
 export interface LineRevealInput {
   /** Its id in the line (`INBOX_REVEALS`, and `lineOffers` on the server). */
   id: Exclude<InboxRevealClaimId, 'snooze' | 'agent_note'>;
-  /** The Inbox has it next for this page (settings `reveal.next === id`), read once per load. */
+  /**
+   * The Inbox has it for this page, read once per load: `reveal.next === id`, or (an `ahead` offer such as List view)
+   * `reveal.ahead` names it, so it goes at its own moment even while another offer is next.
+   */
   due: boolean;
   /** The tour, an update or another one-time dialog was on screen (or due) on this load. */
   blocked: boolean;

@@ -9,20 +9,28 @@
  * here: they are registered in a test table the way their branches register (`heavyUse`, `minThreads`), so the line's
  * seam is what is tested.
  *
- * What regresses: a heavy user's dialogs leaving their approved days (setup on day 0, then days 2, 4, 6, 8, 10); a
- * light user getting a heavy-use dialog; two dialogs on one day, or on two page loads in a row; the gap after Not
- * now; an offer whose moment never comes not retiring after 14 days; update-day dialogs coming back to back.
+ * What regresses: a heavy user's dialogs leaving their approved days (setup on day 0, then one every two days); List
+ * view not going ahead of the other offers once its moment comes (the approval's change: not day 10, but the first free
+ * day after the list grows taller than the screen); a light user getting a heavy-use dialog; two dialogs on one day,
+ * or on two page loads in a row (an old tab reading again included); the gap after an offer's Not now; an offer whose
+ * moment never comes not retiring after 14 days (an update-day dialog never retires); update-day dialogs coming back to
+ * back; an unanswered agent note taking another day.
  */
 import { describe, expect, test } from "bun:test";
 import {
   INBOX_REVEALS,
   REVEAL_RETIRE_MS,
+  REVEAL_LOADS_KEPT,
   revealAfterShowLoad,
+  revealAgentNoteAgents,
+  revealAgentNoteNew,
+  revealAhead,
   revealDay,
   revealHeavyUse,
   revealLineFree,
   revealMayClaim,
   revealNext,
+  revealNotNowAllowed,
   revealSeeLoad,
   revealStamp,
   revealStampNotNow,
@@ -45,7 +53,7 @@ const TABLE: readonly RevealEntry[] = [
   ...INBOX_REVEALS.slice(0, 4),
   { id: BRO, kind: "offer", tenureMs: 2 * DAY, minThreads: 0, heavyUse: true, enabled: true },
   ...INBOX_REVEALS.slice(4),
-  { id: LIST_VIEW, kind: "offer", tenureMs: 2 * DAY, minThreads: 15, enabled: true },
+  { id: LIST_VIEW, kind: "offer", tenureMs: 2 * DAY, minThreads: 15, ahead: true, enabled: true },
 ];
 
 type Dialog = RevealId | "agent_note";
@@ -110,8 +118,10 @@ function simulate(user: User, days = 30): Shown[] {
         shown.push({ id, day, at: now });
       };
       // The page: the sound first (it opens at load), then the agent note (an agent with no note: on day 0 for
-      // everyone, after the tour screen), then whatever the line has next, at its moment.
+      // everyone, after the tour screen), then an `ahead` offer whose moment has come (List view), then whatever the
+      // line has next, at its moment.
       const next = revealNext(state(), now, TABLE);
+      const ahead = revealAhead(state(), now, TABLE);
       if (next && !saved.waitingSince?.[next]) saved = { ...saved, waitingSince: { ...saved.waitingSince, [next]: now.toISOString() } };
       if (next === "sound") {
         show("sound", true);
@@ -119,6 +129,11 @@ function simulate(user: User, days = 30): Shown[] {
       }
       if (!done.has("agent_note") && revealLineFree("setup", state(), now)) {
         show("agent_note", false);
+        continue;
+      }
+      const early = ahead.find((id) => user.moment(id, day) && revealMayClaim(id, state(), now, TABLE));
+      if (early) {
+        show(early, true);
         continue;
       }
       if (next && user.moment(next, day) && revealMayClaim(next, state(), now, TABLE)) show(next, true);
@@ -136,8 +151,9 @@ const HEAVY: User = {
   loads: () => [9, 11, 13, 15, 17],
   threads: (day) => 20 * (day + 1),
   readsPerLoad: 4,
-  // Snooze needs two threads read and left for a day: from day 1.
-  moment: (id, day) => id !== "snooze" || day >= 1,
+  // Snooze needs two threads read and left for a day: from day 1. The grouped list grows taller than the screen on
+  // day 5 (List view's moment).
+  moment: (id, day) => (id === "snooze" ? day >= 1 : id === LIST_VIEW ? day >= 5 : true),
 };
 
 /** A few threads a week, a visit every two or three days, one project. */
@@ -166,22 +182,34 @@ function expectOnePerDay(shown: Shown[]) {
 }
 
 describe("30 days of a heavy user", () => {
-  test("setup on day 0, then Snooze, Bro mode, the Board, the Checklist and List view on days 2, 4, 6, 8 and 10; nothing new after", () => {
+  test("setup on day 0, Snooze on 2, Bro mode on 4; the list outgrows the screen on day 5, so List view goes on 6, ahead of the Board (8) and the Checklist (10)", () => {
     const shown = simulate(HEAVY);
     expect(shown.map((s) => [s.id, s.day])).toEqual([
       ["agent_note", 0],
       ["snooze", 2],
       [BRO, 4],
-      ["board", 6],
-      ["steps", 8],
-      [LIST_VIEW, 10],
+      [LIST_VIEW, 6],
+      ["board", 8],
+      ["steps", 10],
     ]);
     expectOnePerDay(shown);
   });
 
+  test("a list taller than the screen from the start: List view on the first free day (2), ahead of Snooze", () => {
+    const shown = simulate({ ...HEAVY, moment: (id, day) => id !== "snooze" || day >= 1 });
+    expect(shown.map((s) => [s.id, s.day])).toEqual([
+      ["agent_note", 0],
+      [LIST_VIEW, 2],
+      ["snooze", 4],
+      [BRO, 6],
+      ["board", 8],
+      ["steps", 10],
+    ]);
+  });
+
   test("a Not now on Bro mode: the next offer waits four days, not two", () => {
     const shown = simulate({ ...HEAVY, notNow: [BRO] });
-    expect(days(shown)).toEqual({ agent_note: 0, snooze: 2, [BRO]: 4, board: 8, steps: 10, [LIST_VIEW]: 12 });
+    expect(days(shown)).toEqual({ agent_note: 0, snooze: 2, [BRO]: 4, [LIST_VIEW]: 8, board: 10, steps: 12 });
   });
 });
 
@@ -203,15 +231,15 @@ describe("30 days of a light user", () => {
 });
 
 describe("an update day", () => {
-  test("the sound on the update day, the agent note the day after, list options on day 2, voice on day 4: never back to back", () => {
+  test("the sound on the update day, the agent note the day after, list options on day 2, voice on day 4: never back to back, and List view never ahead of them", () => {
     const shown = simulate(UPGRADER);
     expect(shown.map((s) => [s.id, s.day])).toEqual([
       ["sound", 0],
       ["agent_note", 1],
       ["list_intro", 2],
       ["voice", 4],
-      [BRO, 6],
-      [LIST_VIEW, 8],
+      [LIST_VIEW, 6],
+      [BRO, 8],
     ]);
     expectOnePerDay(shown);
   });
@@ -295,6 +323,80 @@ describe("the line's rules", () => {
     expect(revealHeavyUse([...read(9, 9), ...read(1, 2)], NOW)).toBe(false);
     // The same thread read twice is one thread.
     expect(revealHeavyUse([...read(9, 9), { threadId: "d9-0", at: at(8, 10).toISOString() }], NOW)).toBe(false);
+  });
+
+  test("a load counts once: an old tab reading settings again never becomes the newest load, so new loads are not held", () => {
+    let loads: RevealLoads = revealSeeLoad({}, "tab-a-load")!;
+    const shownLoad = "tab-a-load";
+    // Tab A showed a dialog. Days later it comes back and reads settings again, before each new page opens.
+    for (const fresh of ["tab-b-load", "phone-load", "tab-d-load"]) {
+      expect(revealSeeLoad(loads, "tab-a-load")).toBeNull();
+      loads = revealSeeLoad(loads, fresh) ?? loads;
+    }
+    // Only the load first seen right after A is held; the phone and tab D are not.
+    expect(revealAfterShowLoad(shownLoad, loads, "tab-b-load")).toBe(true);
+    expect(revealAfterShowLoad(shownLoad, loads, "phone-load")).toBe(false);
+    expect(revealAfterShowLoad(shownLoad, loads, "tab-d-load")).toBe(false);
+  });
+
+  test("the load right after a show stays held for its whole life, also once newer loads came; a load never seen is not held", () => {
+    let loads: RevealLoads = revealSeeLoad({}, "load-a")!;
+    // B opened before A's dialog showed (A's moment came later): still the load right after it.
+    loads = revealSeeLoad(loads, "load-b")!;
+    loads = revealSeeLoad(loads, "load-c")!;
+    expect(revealAfterShowLoad("load-a", loads, "load-b")).toBe(true);
+    expect(revealAfterShowLoad("load-a", loads, "load-c")).toBe(false);
+    // After a restart (nothing in memory) or a load forgotten long ago: never held.
+    expect(revealAfterShowLoad("load-a", {}, "load-b")).toBe(false);
+    for (let i = 0; i < REVEAL_LOADS_KEPT; i++) loads = revealSeeLoad(loads, `later-${i}`)!;
+    expect(loads.before!.size).toBe(REVEAL_LOADS_KEPT);
+    expect(revealAfterShowLoad("load-a", loads, "load-b")).toBe(false);
+  });
+
+  test("List view goes ahead at its moment: armed beside another offer, claimable, but never ahead of an update-day dialog nor outside the line", () => {
+    const state = (over: Partial<RevealState> = {}) => base({ open: { snooze: true, board: true, [LIST_VIEW]: true }, ...over });
+    expect(revealNext(state(), NOW, TABLE)).toBe("snooze");
+    expect(revealAhead(state(), NOW, TABLE)).toEqual([LIST_VIEW]);
+    expect(revealMayClaim(LIST_VIEW, state(), NOW, TABLE)).toBe(true);
+    // The Board is behind Snooze and not ahead: still no.
+    expect(revealMayClaim("board", state(), NOW, TABLE)).toBe(false);
+    // An update-day dialog is next: List view waits for it.
+    expect(revealAhead(state({ open: { voice: true, snooze: true, [LIST_VIEW]: true } }), NOW, TABLE)).toEqual([]);
+    expect(revealMayClaim(LIST_VIEW, state({ open: { voice: true, [LIST_VIEW]: true } }), NOW, TABLE)).toBe(false);
+    // The line's rules hold for it too: a dialog today, the gap, or too few threads.
+    expect(revealAhead(state({ dayShownAt: at(10, 8).toISOString() }), NOW, TABLE)).toEqual([]);
+    expect(revealAhead(state({ lastShownAt: at(9, 13).toISOString() }), NOW, TABLE)).toEqual([]);
+    expect(revealAhead(state({ threads: 14 }), NOW, TABLE)).toEqual([]);
+    // Alone in line it is simply next.
+    expect(revealNext(state({ open: { [LIST_VIEW]: true } }), NOW, TABLE)).toBe(LIST_VIEW);
+    expect(revealAhead(state({ open: { [LIST_VIEW]: true } }), NOW, TABLE)).toEqual([]);
+  });
+
+  test("Not now waits four days only after an offer: an update-day dialog's Not now is refused", () => {
+    for (const offer of ["snooze", "board", "steps"]) expect(revealNotNowAllowed(offer)).toBe(true);
+    for (const update of ["sound", "list_intro", "voice", "agent_note", "bogus", 7]) expect(revealNotNowAllowed(update)).toBe(false);
+  });
+
+  test("an update-day dialog never retires: voice waiting 30 days for a long reply is still in line (patience lets others pass)", () => {
+    const since = { voice: new Date(NOW.getTime() - 30 * DAY).toISOString() };
+    expect(revealNext(base({ open: { voice: true }, waitingSince: since }), NOW)).toBe("voice");
+    expect(revealNext(base({ open: { voice: true, board: true }, waitingSince: since }), NOW)).toBe("board");
+  });
+
+  test("an unanswered agent note shows once for its agents: the next day it asks again, is refused, and the offer gets the day", () => {
+    const agents = revealAgentNoteAgents(["codex"])!;
+    expect(revealAgentNoteNew(undefined, agents)).toBe(true);
+    // Day 0: shown for Codex, left unanswered (the tab closed). Day 2: the same agents, so no show and no stamp.
+    let saved: RevealsSaved = revealStamp({}, at(0, 10).toISOString(), { spaced: false, load: "load-a" });
+    saved = { ...saved, agentNote: { shownFor: agents } };
+    expect(revealAgentNoteNew(saved.agentNote?.shownFor, revealAgentNoteAgents(["codex"])!)).toBe(false);
+    expect(revealNext(base({ firstUseAt: at(0, 9).toISOString(), dayShownAt: saved.dayShownAt, open: { snooze: true } }), at(2, 10))).toBe("snooze");
+    // A newly connected agent is asked about.
+    expect(revealAgentNoteNew(saved.agentNote?.shownFor, revealAgentNoteAgents(["codex", "claude-code"])!)).toBe(true);
+    // An older page sends no list: it shows as before. Anything but a list of agent ids is refused.
+    expect(revealAgentNoteAgents(undefined)).toBeNull();
+    expect(revealAgentNoteNew(["codex"], null)).toBe(true);
+    for (const bad of [[], "codex", ["Codex!"], [1], Array.from({ length: 33 }, (_, i) => `a${i}`)]) expect(revealAgentNoteAgents(bad)).toBeUndefined();
   });
 
   test("a dev build keeps no line: the agent note is always free", () => {

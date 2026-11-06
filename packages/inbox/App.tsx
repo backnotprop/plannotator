@@ -973,9 +973,11 @@ function Inbox() {
   const voiceIntroDueAtLoad = useRef(false);
   /**
    * The reveals for returning users (reveal.ts; approval "inbox-feature-reveal"): the one this page may arm, read once
-   * per load (settings `reveal.next`), and the Snooze announcement's own `due`. Only `next` is armed: one per load.
+   * per load (settings `reveal.next`), and the Snooze announcement's own `due`. Only `next` is armed, and beside it the
+   * `ahead` offers (settings `reveal.ahead`, List view once registered), which go at their own moment; the Inbox's
+   * claim lets only one of them show (one a day).
    */
-  const snoozeIntroLatch = useRef<{ due: boolean; next: InboxRevealId | null } | null>(null);
+  const snoozeIntroLatch = useRef<{ due: boolean; next: InboxRevealId | null; ahead: readonly InboxRevealId[] } | null>(null);
   /** The list's rows, for "a question waits in the open thread" (`openThreadAsks`) in checks that run on a timer. */
   const oneTimeRows = useRef<readonly InboxListRow[]>([]);
   /** An update dialog or a restart was on screen in this load: no Snooze announcement on it. */
@@ -4351,7 +4353,7 @@ function Inbox() {
   if (snoozeIntroLatch.current === null && settings && latest !== null) {
     // Only `reveal.next` is armed; an older Inbox reports no queue: its Snooze rule alone (reveal.ts `revealArmed`).
     const armed = revealArmed(settings);
-    snoozeIntroLatch.current = { due: armed.snoozeDue, next: armed.next };
+    snoozeIntroLatch.current = { due: armed.snoozeDue, next: armed.next, ahead: armed.ahead };
   }
   const snoozeIntroRows = useMemo(() => latestSections.flatMap((section) => section.threads), [latestSections]);
   oneTimeRows.current = snoozeIntroRows;
@@ -4928,7 +4930,11 @@ function Inbox() {
         return true;
       }
       void inboxApi
-        .claimReveal('agent_note')
+        .claimReveal(
+          'agent_note',
+          undefined,
+          rows.map((row) => row.id),
+        )
         .then(
           (answer) => answer.show,
           (cause) => !(cause instanceof InboxApiError) || cause.status === 404 || cause.status === 422,
@@ -6121,10 +6127,7 @@ function Inbox() {
                 ),
               );
           }}
-          onKeep={() => {
-            void inboxApi.revealNotNow('voice');
-            voiceIntro.close();
-          }}
+          onKeep={voiceIntro.close}
         />
       )}
       {soundDialog === 'open' && settings && (
