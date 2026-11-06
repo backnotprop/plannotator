@@ -3,9 +3,8 @@
  *
  * A release's "What's New" markdown shows images from GitHub
  * (`https://github.com/user-attachments/assets/<uuid>`, which redirects to
- * `private-user-images.githubusercontent.com`). The window never loads a
- * remote image: its CSP is `img-src 'self' data: blob:`, and stays so.
- * Instead the Inbox copies those images once, beside the notes, and the page
+ * `private-user-images.githubusercontent.com`). The window does not load
+ * these from GitHub itself: the Inbox copies those images once, beside the notes, and the page
  * loads them from `GET /api/inbox/whats-new/image?version=X&src=<as written>`.
  *
  * The rules:

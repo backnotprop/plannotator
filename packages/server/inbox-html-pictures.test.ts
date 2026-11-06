@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHtmlAssetRegistry } from "./html-assets";
 import { createInboxHtmlAssets, INBOX_HTML_DOCUMENT_CSP } from "./inbox-attachments";
+import { WINDOW_CSP } from "./inbox";
 
 // A 1×1 PNG.
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
@@ -194,6 +195,17 @@ describe("annotate keeps serving only the page's folder", () => {
 
 describe("the attached page's policies", () => {
   const directives = (csp: string) => new Map(csp.split(";").map((part) => part.trim().split(/\s+/)).map(([name, ...values]) => [name!, values]));
+
+  test("the window (whose policy the page's srcdoc frame inherits) allows web pictures and nothing else from the web", () => {
+    const window = directives(WINDOW_CSP);
+    expect(window.get("img-src")).toEqual(expect.arrayContaining(["https:", "http:", "'self'"]));
+    for (const name of ["default-src", "script-src", "connect-src", "font-src", "style-src", "worker-src", "frame-ancestors"]) {
+      for (const value of window.get(name) ?? []) expect(value).not.toMatch(/^(https?:|\*)/);
+    }
+    expect(window.get("connect-src")).toEqual(["'self'"]);
+    expect(window.has("frame-src")).toBe(false);
+    expect(window.has("child-src")).toBe(false);
+  });
 
   test("a nested or new-tab page reaches no network but names no image source, so its web pictures load", () => {
     const document = directives(INBOX_HTML_DOCUMENT_CSP);

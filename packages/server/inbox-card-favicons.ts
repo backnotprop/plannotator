@@ -1,10 +1,9 @@
 /**
  * A web link's favicon on the opened card (user feedback #10; the owner's
  * answer, 2026-11-02: favicons only for links the person added, fetched by
- * the Inbox, served from its own origin). The window's CSP stays
- * `img-src 'self' data: blob:`, so it never loads a remote image itself: a
- * remote image in an agent's text stays blocked, and a link an agent added
- * never makes this computer ask its host for anything (the route refuses it
+ * the Inbox, served from its own origin). The window never loads a link's
+ * icon itself, and a link an agent added never makes this computer ask its
+ * host for anything (the route refuses it
  * before this module is reached).
  *
  * What is fetched: `https://<host>/favicon.ico` and nothing else (no page,

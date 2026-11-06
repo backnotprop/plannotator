@@ -65,7 +65,7 @@ test.skipIf(!hasDom)('a message image loads from /api/inbox/messages/<id>/image 
   const src = (alt: string) => host!.querySelector<HTMLImageElement>(`img[alt="${alt}"]`)?.getAttribute('src');
   expect(src('after')).toBe(`/api/inbox/messages/${ID}/image?path=${encodeURIComponent('.walkthrough/shots/after.png')}`);
   expect(src('before')).toBe(`/api/inbox/messages/${ID}/image?path=${encodeURIComponent('/abs/shots/before.png')}`);
-  // Remote images keep their URL (the window's CSP does not load them).
+  // Remote images keep their URL (the browser fetches them from their site).
   expect(src('remote')).toBe('https://example.com/x.png');
 });
 

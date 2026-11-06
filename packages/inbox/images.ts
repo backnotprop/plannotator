@@ -14,7 +14,8 @@
  * `&document=<its path in that folder>` (#2230). There is no route that takes a bare path.
  *
  * Remote images (`http(s)`, protocol-relative `//host/…`) are left as
- * written: the window's CSP (`img-src 'self' data: blob:`) does not load them.
+ * written, and load from their site: the window's CSP allows `https:` and
+ * `http:` images, for an attached HTML page's web pictures (inbox.ts).
  */
 import { inboxUrl, machineOf } from './inboxUrl';
 import type { ImageSrcResolver } from '@plannotator/ui/configure';
