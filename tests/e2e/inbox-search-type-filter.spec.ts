@@ -272,6 +272,9 @@ test('by keyboard only: Tab to the chip, Enter, the arrows, Enter; Escape closes
   await expect(input(page)).toBeFocused();
   await page.keyboard.type('relay');
   await answered(page);
+  // With words, the order beside the search box comes first, then the Type chip.
+  await page.keyboard.press('Tab');
+  await expect(palette(page).locator('[data-search-sort] input[type="radio"]:checked')).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(typeChip(page)).toBeFocused();
   await page.keyboard.press('Enter');

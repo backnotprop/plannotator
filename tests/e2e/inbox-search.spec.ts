@@ -320,7 +320,9 @@ test('filters: a chip menu by keyboard, Escape closes the menu before the palett
   // The open thread of the same quality ranks above the archived one.
   const order = await palette(page).locator('[data-search-group="threads"] [data-result]').evaluateAll((r) => r.map((x) => x.getAttribute('data-result-id')));
   expect(order.indexOf(world.threads.cliPagination)).toBeLessThan(order.indexOf(world.threads.pagination));
-  // Tab reaches the chips (Type, Project, then Status); the Status menu opens; arrows and Enter pick Archived.
+  // Tab reaches the order beside the search box (there are words), then the chips (Type, Project, then Status); the Status menu opens; arrows and Enter pick Archived.
+  await page.keyboard.press('Tab');
+  await expect(palette(page).locator('[data-search-sort] input[type="radio"]:checked')).toBeFocused();
   await page.keyboard.press('Tab');
   await page.keyboard.press('Tab');
   await page.keyboard.press('Tab');
@@ -443,26 +445,20 @@ test('⌘/Ctrl+Enter opens the result in a new tab and keeps the palette open', 
   expect(errors).toEqual([]);
 });
 
-/** The box of the palette's first named thread chip, and of a plain `.ib-key` mounted in the Inbox outside the palette, as the rest of the Inbox draws it (border, corners, fill, padding, face). */
-async function chipBoxes(p: Page): Promise<{ search: string | null; list: string | null; boxed: boolean }> {
+/** The look of the palette's first named thread chip (border, corners, fill, padding, face), and whether it is drawn as a box. */
+async function chipBoxes(p: Page): Promise<{ search: string | null; boxed: boolean }> {
   return p.evaluate(() => {
     const box = (el: Element | null | undefined) => {
       if (!el) return null;
       const s = getComputedStyle(el);
       return [s.borderTopWidth, s.borderTopStyle, s.borderTopColor, s.borderTopLeftRadius, s.backgroundColor, s.paddingLeft, s.fontFamily].join(' | ');
     };
-    const ref = document.createElement('span');
-    ref.className = 'ib-key';
-    ref.textContent = 'ref';
-    document.querySelector('.pn-inbox')!.append(ref);
-    const list = box(ref);
-    ref.remove();
     const chip = document.querySelector('dialog.ib-sp .ib-sp-tl .ib-key[data-result-thread="name"]');
     // Drawn as a box: padded, and filled or outlined (the default style fills it; others outline it).
     const clear = (c: string) => c === 'transparent' || /\/ 0\)$|, 0\)$/.test(c);
     const s = chip ? getComputedStyle(chip) : null;
     const boxed = Boolean(s && parseFloat(s.paddingLeft) > 0 && (!clear(s.backgroundColor) || (parseFloat(s.borderTopWidth) > 0 && s.borderTopStyle !== 'none' && !clear(s.borderTopColor))));
-    return { search: box(chip), list, boxed };
+    return { search: box(chip), boxed };
   });
 }
 
@@ -520,7 +516,14 @@ test('every result starts with its mark; the selected row stands apart from the 
   // A message shows its writer's mark: Claude Code's for Claude Code, the person's outline for a reply.
   const byWriter = await palette(page)
     .locator('[data-result="message"]')
-    .evaluateAll((all) => all.map((r) => [r.querySelector('.ib-sp-tl .ib-sp-lead')!.textContent, r.querySelector('.ib-sp-mark')!.getAttribute('data-row-mark')]));
+    .evaluateAll((all) =>
+      all.map((r) => {
+        // The writer's words, without the "·" and the screen reader's ", " the part holds after them.
+        const lead = r.querySelector('.ib-sp-tl .ib-sp-lead')!.cloneNode(true) as HTMLElement;
+        lead.querySelectorAll('.ib-sp-sep, .ib-sr').forEach((el) => el.remove());
+        return [lead.textContent, r.querySelector('.ib-sp-mark')!.getAttribute('data-row-mark')];
+      }),
+    );
   const hostOf: Record<string, string> = { 'Claude Code': 'agent:claude-code', Pi: 'agent:pi', OpenCode: 'agent:opencode', You: 'user' };
   expect(byWriter.map(([who]) => who)).toEqual(expect.arrayContaining(['Claude Code', 'You']));
   for (const [who, mark] of byWriter) expect(mark, who!).toBe(hostOf[who!]);
@@ -567,10 +570,10 @@ test('every result starts with its mark; the selected row stands apart from the 
     ] as const) {
       expect((await contrastOf(page, fg, look.selectedBg, look.panel)).ratio, `${scheme} ${name}`).toBeGreaterThanOrEqual(4.5);
     }
-    // The thread's name keeps the chip form, the box the rest of the Inbox draws (owner request 2026-10-16), in each theme.
+    // The thread's name is plain words in the row's face, no box (approval "inbox-search-calm"), in each theme.
     const chip = await chipBoxes(page);
-    expect(chip.boxed, `${scheme}: the thread chip is drawn as a box`).toBe(true);
-    expect(chip.search, `${scheme}: the thread chip is the Inbox's chip`).toBe(chip.list);
+    expect(chip.search, `${scheme}: the thread chip is in the row`).not.toBeNull();
+    expect(chip.boxed, `${scheme}: the thread chip is plain words, no box`).toBe(false);
     await page.screenshot({ path: join(proofDir, `10-marks-${scheme}.png`) });
   }
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
@@ -641,12 +644,12 @@ test('a phone: the list header opens a full-screen sheet; a result opens the thr
     await expect(relayRow.locator('[data-result-time]')).toHaveCount(0);
     await expect(relayRow.locator('.ib-sp-tl .ib-sp-at')).toBeVisible();
     await expect(palette(p).locator('[data-search-keys]')).toHaveCount(0);
-    // A phone draws the thread chip with the Inbox's box too.
+    // A phone draws the thread chip as plain words too.
     await input(p).fill('retry');
     await answered(p, 'retry');
     const chip = await chipBoxes(p);
-    expect(chip.boxed, 'phone: the thread chip is drawn as a box').toBe(true);
-    expect(chip.search, "phone: the thread chip is the Inbox's chip").toBe(chip.list);
+    expect(chip.search, 'phone: the thread chip is in the row').not.toBeNull();
+    expect(chip.boxed, 'phone: the thread chip is plain words, no box').toBe(false);
     await input(p).fill('rate lim');
     await settled(p);
     await shot(p, '22-phone-typing');
