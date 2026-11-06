@@ -850,9 +850,46 @@ checksum_url="${binary_url}.sha256"
 
 mkdir -p "$INSTALL_DIR"
 
+# Release downloads retry a dropped connection (#2788): the binary is about
+# 200 MB, and one HTTP/2 reset or timeout used to fail the whole install or
+# update. --retry-all-errors (curl 7.71+) also retries the errors plain
+# --retry treats as final, such as an HTTP/2 stream error (curl 92); an older
+# curl rejects the option, so it gets --retry alone. The probe puts the
+# option before --version, which ends curl's option parsing.
+curl_retry_args=(--retry 3 --retry-delay 2)
+if curl --retry-all-errors --version >/dev/null 2>&1; then
+    curl_retry_args+=(--retry-all-errors)
+fi
+
+# download_release_file <url> <file> <max seconds>: each attempt must connect
+# within 30 s, gives up after a minute below 1 byte/s (an update holds its
+# lock while it runs) and after <max seconds> in all, and no retry starts
+# after <max seconds>. When curl still ends in an HTTP/2 error (92), one more
+# run goes over HTTP/1.1. Returns curl's exit status.
+download_release_file() {
+    _dl_status=0
+    curl -fsSL "${curl_retry_args[@]}" --connect-timeout 30 --max-time "$3" --retry-max-time "$3" \
+        --speed-limit 1 --speed-time 60 -o "$2" "$1" || _dl_status=$?
+    if [ "$_dl_status" -eq 92 ]; then
+        echo "The download hit an HTTP/2 error; trying again over HTTP/1.1..." >&2
+        _dl_status=0
+        curl -fsSL --http1.1 "${curl_retry_args[@]}" --connect-timeout 30 --max-time "$3" --retry-max-time "$3" \
+            --speed-limit 1 --speed-time 60 -o "$2" "$1" || _dl_status=$?
+    fi
+    return "$_dl_status"
+}
+
 tmp_file=$(mktemp)
-# A stalled download gives up after a minute (an update holds its lock while it runs).
-curl -fsSL -o "$tmp_file" --speed-limit 1 --speed-time 60 "$binary_url"
+# 30 minutes per attempt: a 1 Mbit/s link still finishes the ~200 MB binary,
+# and a connection that only trickles stops instead of holding the update
+# for hours. Exit 1, not curl's code: the updater gives some codes a meaning.
+binary_status=0
+download_release_file "$binary_url" "$tmp_file" 1800 || binary_status=$?
+if [ "$binary_status" -ne 0 ]; then
+    rm -f "$tmp_file"
+    echo "Could not download ${binary_name} ${latest_tag} (curl exit ${binary_status}). Nothing was changed; try again later." >&2
+    exit 1
+fi
 
 # Safe updates (step 1): `plannotator update`, Update now and auto-update run
 # this script after the running Plannotator downloaded it, and the .sha256 of
@@ -884,7 +921,16 @@ else
         # Plannotator, never the network): check as before rather than block.
         echo "Note: the update carried no checksum for ${binary_name}; checking the release's .sha256 instead."
     fi
-    expected_checksum=$(curl -fsSL "$checksum_url" | cut -d' ' -f1)
+    checksum_file=$(mktemp)
+    checksum_status=0
+    download_release_file "$checksum_url" "$checksum_file" 120 || checksum_status=$?
+    if [ "$checksum_status" -ne 0 ]; then
+        rm -f "$checksum_file" "$tmp_file"
+        echo "Could not download the checksum for ${binary_name} ${latest_tag} (curl exit ${checksum_status}). Nothing was changed; try again later." >&2
+        exit 1
+    fi
+    expected_checksum=$(cut -d' ' -f1 < "$checksum_file")
+    rm -f "$checksum_file"
 fi
 
 if [ "$(uname -s)" = "Darwin" ]; then

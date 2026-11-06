@@ -787,9 +787,28 @@ REM don't collide and a same-user pre-placed symlink at a predictable
 REM path can't redirect where curl writes the downloaded executable.
 REM The SHA256 check would pass regardless (content is authentic), but
 REM the install destination would be corrupted.
+REM
+REM The download retries a dropped connection (#2788). --retry-all-errors
+REM (curl 7.71+) also retries what plain --retry treats as final, such as an
+REM HTTP/2 stream error (curl 92); the curl.exe of an older Windows rejects
+REM it, so it gets --retry alone. The probe puts the option before --version,
+REM which ends curl's option parsing. Each attempt must connect within 30 s,
+REM gives up after a minute below 1 byte/s and after 30 minutes in all (the
+REM binary is about 200 MB), and when curl still ends in an HTTP/2 error, one
+REM more run goes over HTTP/1.1.
+set "CURL_RETRY=--retry 3 --retry-delay 2"
+curl --retry-all-errors --version >nul 2>&1
+if !ERRORLEVEL! equ 0 set "CURL_RETRY=!CURL_RETRY! --retry-all-errors"
+set "CURL_LIMITS=--connect-timeout 30 --max-time 1800 --retry-max-time 1800 --speed-limit 1 --speed-time 60"
 set "TEMP_FILE=%TEMP%\plannotator-%RANDOM%.exe"
-curl -fsSL "!BINARY_URL!" -o "!TEMP_FILE!"
-if !ERRORLEVEL! neq 0 (
+curl -fsSL !CURL_RETRY! !CURL_LIMITS! "!BINARY_URL!" -o "!TEMP_FILE!"
+set "DL_STATUS=!ERRORLEVEL!"
+if "!DL_STATUS!"=="92" (
+    echo The download hit an HTTP/2 error; trying again over HTTP/1.1... >&2
+    curl -fsSL --http1.1 !CURL_RETRY! !CURL_LIMITS! "!BINARY_URL!" -o "!TEMP_FILE!"
+    set "DL_STATUS=!ERRORLEVEL!"
+)
+if !DL_STATUS! neq 0 (
     echo Failed to download binary >&2
     if exist "!TEMP_FILE!" del "!TEMP_FILE!"
     exit /b 1
@@ -798,7 +817,7 @@ if !ERRORLEVEL! neq 0 (
 REM Download checksum to a randomized temp path for the same reason as
 REM the binary download above (concurrent collision + symlink pre-placement).
 set "CHECKSUM_FILE=%TEMP%\plannotator-checksum-%RANDOM%.txt"
-curl -fsSL "!CHECKSUM_URL!" -o "!CHECKSUM_FILE!"
+curl -fsSL !CURL_RETRY! --connect-timeout 30 --max-time 120 "!CHECKSUM_URL!" -o "!CHECKSUM_FILE!"
 if !ERRORLEVEL! neq 0 (
     echo Failed to download checksum >&2
     REM curl -o creates the output file before receiving data, so a

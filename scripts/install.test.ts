@@ -1571,21 +1571,21 @@ describe("install shared behavior", () => {
 
     // install.sh: resolution before curl -o
     const shResolve = sh.indexOf("verify_attestation=0");
-    const shDownload = sh.indexOf('curl -fsSL -o "$tmp_file"');
+    const shDownload = sh.indexOf('download_release_file "$binary_url" "$tmp_file"');
     expect(shResolve).toBeGreaterThan(-1);
     expect(shDownload).toBeGreaterThan(-1);
     expect(shResolve).toBeLessThan(shDownload);
 
     // install.ps1: resolution before Invoke-WebRequest -OutFile $tmpFile
     const psResolve = ps.indexOf("$verifyAttestationResolved = $false");
-    const psDownload = ps.indexOf("Invoke-WebRequest -Uri $binaryUrl -OutFile $tmpFile");
+    const psDownload = ps.indexOf("Invoke-ReleaseDownload -Uri $binaryUrl -OutFile $tmpFile");
     expect(psResolve).toBeGreaterThan(-1);
     expect(psDownload).toBeGreaterThan(-1);
     expect(psResolve).toBeLessThan(psDownload);
 
     // install.cmd: resolution before curl -o "!TEMP_FILE!"
     const cmdResolve = cmdScript.indexOf('set "VERIFY_ATTESTATION=0"');
-    const cmdDownload = cmdScript.indexOf('curl -fsSL "!BINARY_URL!" -o "!TEMP_FILE!"');
+    const cmdDownload = cmdScript.indexOf('curl -fsSL !CURL_RETRY! !CURL_LIMITS! "!BINARY_URL!" -o "!TEMP_FILE!"');
     expect(cmdResolve).toBeGreaterThan(-1);
     expect(cmdDownload).toBeGreaterThan(-1);
     expect(cmdResolve).toBeLessThan(cmdDownload);
@@ -1964,12 +1964,19 @@ describe("install shared behavior", () => {
     // install.sh: binary download and checksum download must NOT carry the
     // auth header array. Token vars cleared right after the api call so
     // they don't linger for the download phase.
-    expect(sh).not.toContain('curl -fsSL "${GH_AUTH_HEADER[@]}" -o "$tmp_file"');
-    expect(sh).not.toContain('curl -fsSL "${GH_AUTH_HEADER[@]}" "$checksum_url"');
+    // Both go through download_release_file, so its body must not carry it.
+    const shDownloader = sh.match(/^download_release_file\(\) \{\n[\s\S]*?\n\}\n/m);
+    expect(shDownloader).not.toBeNull();
+    expect(shDownloader![0]).not.toContain("GH_AUTH_HEADER");
+    expect(sh).toContain('download_release_file "$binary_url" "$tmp_file"');
+    expect(sh).toContain('download_release_file "$checksum_url" "$checksum_file"');
     expect(sh).toContain("unset _gh_token GH_AUTH_HEADER _api_url");
 
     // install.ps1: binary download must NOT carry $ghHeaders, which is nulled.
     expect(ps).not.toContain('Invoke-WebRequest -Uri $binaryUrl -OutFile $tmpFile -Headers $ghHeaders');
+    const psDownloader = ps.match(/^function Invoke-ReleaseDownload \{\n[\s\S]*?\n\}\n/m);
+    expect(psDownloader).not.toBeNull();
+    expect(psDownloader![0]).not.toContain("ghHeaders");
     expect(ps).toContain('$ghToken = $null; $ghHeaders = $null; $apiUrl = $null');
 
     // install.cmd: binary download must NOT carry !GH_AUTH_HEADER!. Token
@@ -2316,7 +2323,11 @@ function setupInstallSandbox(opts: {
 
   // Stub curl: serves the fake binary, its checksum, and the captured real
   // attestations response. Anything else fails, so a test can never reach
-  // the network.
+  // the network. Options are read in order like real curl: --version ends
+  // parsing, and with STUB_CURL_OLD (a curl older than 7.71) the option
+  // --retry-all-errors is unknown (exit 2). STUB_DOWNLOAD_FAIL=<code> fails
+  // the binary download with that code, except over --http1.1, which fails
+  // only with STUB_DOWNLOAD_FAIL_HTTP11=<code>.
   writeFileSync(
     join(stub, "curl"),
     `#!/bin/bash
@@ -2324,7 +2335,13 @@ if [ -n "$STUB_CURL_LOG" ]; then printf '%s\\n' "$*" >> "$STUB_CURL_LOG"; fi
 out=""
 url=""
 prev=""
+http11=""
 for a in "$@"; do
+  if [ "$a" = "--retry-all-errors" ] && [ -n "$STUB_CURL_OLD" ]; then
+    echo "curl: option --retry-all-errors: is unknown" >&2; exit 2
+  fi
+  if [ "$a" = "--version" ]; then echo "curl 8.7.1 (stub)"; exit 0; fi
+  if [ "$a" = "--http1.1" ]; then http11=1; fi
   if [ "$prev" = "-o" ]; then out="$a"; fi
   case "$a" in
     http*) url="$a" ;;
@@ -2332,11 +2349,18 @@ for a in "$@"; do
   prev="$a"
 done
 case "$url" in
+  *".sha256") ;;
+  */releases/download/*)
+    fail="$STUB_DOWNLOAD_FAIL"
+    if [ -n "$http11" ]; then fail="$STUB_DOWNLOAD_FAIL_HTTP11"; fi
+    if [ -n "$fail" ]; then printf 'partial' > "$out"; echo "curl: ($fail) stub failure" >&2; exit "$fail"; fi ;;
+esac
+case "$url" in
   https://github.com/*/releases/latest) printf '%s' "\${STUB_LATEST_URL:-https://github.com/backnotprop/plannotator/releases/tag/v99.9.9}" ;;
   */releases/latest)
     if [ -n "$STUB_API_DOWN" ]; then printf '{"message":"API rate limit exceeded"}\\n403'
     else printf '{"tag_name":"v99.9.9"}\\n200'; fi ;;
-  *".sha256") printf '%s  plannotator\\n' "$STUB_CHECKSUM" ;;
+  *".sha256") printf '%s  plannotator\\n' "$STUB_CHECKSUM" > "\${out:-/dev/stdout}" ;;
   */releases/download/*)
     if [ -n "$STUB_BINARY_SOURCE" ]; then cat "$STUB_BINARY_SOURCE" > "$out"
     else printf 'fake plannotator binary\\n' > "$out"; fi ;;
@@ -2486,6 +2510,74 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
         expect(existsSync(join(result.home, "pwned"))).toBe(false);
       });
     }
+  },
+);
+
+// A dropped connection during the ~200 MB binary download (#2788: curl 92,
+// "HTTP/2 stream 1 was not closed cleanly") used to fail the whole install or
+// update, and nothing bounded a connection that only trickled.
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh binary download retries a dropped connection (#2788)",
+  () => {
+    const args = ["--version", "v99.9.9", "--non-interactive", "--skip-skills"];
+    const binary = "#!/bin/sh\necho plannotator-fixture-new\n";
+    const OLD = "#!/bin/sh\necho plannotator-old\n";
+
+    function run(env: Record<string, string>) {
+      const sandbox = setupInstallSandbox({ gh: "pass-all", binary });
+      const installed = join(sandbox.home, ".local", "bin", "plannotator");
+      mkdirSync(join(sandbox.home, ".local", "bin"), { recursive: true });
+      writeFileSync(installed, OLD, { mode: 0o755 });
+      const log = join(sandbox.home, "curl.log");
+      const result = runInstallSh(sandbox, args, { STUB_CURL_LOG: log, ...env });
+      const calls = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
+      const downloads = calls.filter((c) => c.includes("/releases/download/") && !c.endsWith(".sha256"));
+      return { ...result, downloads, installed: readFileSync(installed, "utf8"), tmp: join(sandbox.home, "tmp") };
+    }
+
+    test("an HTTP/2 error (curl 92) is retried over HTTP/1.1 and the install completes", () => {
+      const r = run({ STUB_DOWNLOAD_FAIL: "92" });
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("trying again over HTTP/1.1");
+      expect(r.installed).toBe(binary);
+      expect(r.downloads).toHaveLength(2);
+      expect(r.downloads[0]).not.toContain("--http1.1");
+      expect(r.downloads[1]).toContain("--http1.1");
+      // Both runs hand curl its own retries and a time bound, so a reset is
+      // retried and a trickling connection cannot hold the update for hours.
+      for (const call of r.downloads) {
+        expect(call).toContain("--retry 3");
+        expect(call).toContain("--retry-all-errors");
+        expect(call).toMatch(/--max-time \d+/);
+        expect(call).toContain("--speed-limit 1 --speed-time 60");
+      }
+    });
+
+    test("a download that keeps failing stops cleanly: old binary kept, no temp file left, no HTTP/1.1 run for other errors", () => {
+      const r = run({ STUB_DOWNLOAD_FAIL: "56" });
+      expect(r.code).toBe(1);
+      expect(r.out).toContain("Could not download");
+      expect(r.out).toContain("curl exit 56");
+      expect(r.installed).toBe(OLD);
+      expect(r.downloads).toHaveLength(1);
+      expect(readdirSync(r.tmp)).toEqual([]);
+    });
+
+    test("HTTP/1.1 failing too stops with curl's error, old binary kept", () => {
+      const r = run({ STUB_DOWNLOAD_FAIL: "92", STUB_DOWNLOAD_FAIL_HTTP11: "56" });
+      expect(r.code).toBe(1);
+      expect(r.out).toContain("curl exit 56");
+      expect(r.installed).toBe(OLD);
+      expect(r.downloads).toHaveLength(2);
+    });
+
+    test("a curl older than 7.71 (no --retry-all-errors) still installs, with plain --retry", () => {
+      const r = run({ STUB_CURL_OLD: "1" });
+      expect(r.code).toBe(0);
+      expect(r.installed).toBe(binary);
+      expect(r.downloads).toHaveLength(1);
+      expect(r.downloads[0]).toContain("--retry 3");
+    });
   },
 );
 

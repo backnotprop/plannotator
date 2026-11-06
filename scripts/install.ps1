@@ -581,13 +581,34 @@ New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
 $tmpFile = [System.IO.Path]::GetTempFileName()
 
-# Use -UseBasicParsing to avoid security prompts and ensure consistent behavior
-Invoke-WebRequest -Uri $binaryUrl -OutFile $tmpFile -UseBasicParsing
+# Release downloads retry a dropped connection (#2788): one reset used to fail
+# the whole install or update of a ~200 MB binary. Up to 4 attempts, 2 s
+# apart; the last failure stops the script as before. -UseBasicParsing avoids
+# security prompts and keeps behavior consistent.
+function Invoke-ReleaseDownload {
+    param([string]$Uri, [string]$OutFile)
+    $attempts = 4
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        try {
+            if ($OutFile) {
+                Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing
+                return
+            }
+            return Invoke-WebRequest -Uri $Uri -UseBasicParsing
+        } catch {
+            if ($attempt -eq $attempts) { throw }
+            Write-Host "Download failed ($($_.Exception.Message)); trying again..."
+            Start-Sleep -Seconds 2
+        }
+    }
+}
+
+Invoke-ReleaseDownload -Uri $binaryUrl -OutFile $tmpFile
 
 # Verify checksum
 # Note: In Windows PowerShell 5.1, Invoke-WebRequest returns .Content as byte[] for non-HTML responses.
 # We must handle both byte[] (PS 5.1) and string (PS 7+) for cross-version compatibility.
-$checksumResponse = Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing
+$checksumResponse = Invoke-ReleaseDownload -Uri $checksumUrl
 if ($checksumResponse.Content -is [byte[]]) {
     $checksumContent = [System.Text.Encoding]::UTF8.GetString($checksumResponse.Content)
 } else {
