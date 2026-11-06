@@ -594,16 +594,23 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
 
     // The host-served frame (`frameUrl`): the URL of the document last built.
     // The previous one stays in the frame until the next is known, as a
-    // srcdoc change reloads in place. A gone page asks again, at most twice in
-    // a row (a host that keeps nothing cannot loop).
+    // srcdoc change reloads in place. A gone page asks again, at most twice
+    // per document: the count resets only when the document changes, never on
+    // the bridge's `ready`, because the page runs in the same frame and could
+    // otherwise post "gone" after every load and re-post forever.
     const servesFrame = !liveMode && !!frameUrl;
     const frameUrlRef = useRef(frameUrl);
     frameUrlRef.current = frameUrl;
     const [servedUrl, setServedUrl] = useState<string | undefined>(undefined);
     const [frameAsk, setFrameAsk] = useState(0);
     const goneAsksRef = useRef(0);
+    const goneAsksDocRef = useRef<string | undefined>(undefined);
     useEffect(() => {
       if (!servesFrame || srcdoc === undefined) return;
+      if (goneAsksDocRef.current !== srcdoc) {
+        goneAsksDocRef.current = srcdoc;
+        goneAsksRef.current = 0;
+      }
       let cancelled = false;
       void (async () => {
         let next: string | null = null;
@@ -870,7 +877,6 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
           return;
         }
         if (isBridgeReadyMessage(e.data)) {
-          goneAsksRef.current = 0;
           // Protocol stamp: one console warning on drift, naming both
           // versions. The ready is still honored (an older bridge answers
           // every message shape it knows); on the bridgeScriptUrl path the

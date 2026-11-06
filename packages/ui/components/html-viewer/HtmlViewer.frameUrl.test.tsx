@@ -5,7 +5,8 @@
  * page and the inline annotation bridge), and the frame loads the URL it
  * answers with the srcdoc frame's sandbox and no `srcdoc`, never falling back
  * to one (it would load under the host page's policy); a page the host says
- * is gone is asked for again, at most twice in a row; with no prop the frame
+ * is gone is asked for again, at most twice per document (a page posting
+ * "gone" after every `ready` cannot loop it); with no prop the frame
  * is a srcdoc, unchanged.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
@@ -108,6 +109,30 @@ describe.if(hasDom)('HtmlViewer frameUrl', () => {
     expect(frame.getAttribute('src')).toBe('about:blank#served-2');
     await gone();
     await gone();
+    expect(asked).toBe(3);
+  });
+
+  test("the page's own script cannot loop it: gone after every ready still asks at most twice", async () => {
+    let asked = 0;
+    const frame = await frameFor(async () => {
+      asked += 1;
+      return `about:blank#served-${asked}`;
+    });
+    await settle();
+    expect(asked).toBe(1);
+    const post = async (data: unknown) => {
+      await act(async () => {
+        window.dispatchEvent(new MessageEvent('message', { data, source: frame.contentWindow }));
+      });
+      await settle();
+    };
+    const ready = { type: 'plannotator-bridge-ready', protocolVersion: bridgeModule!.BRIDGE_PROTOCOL_VERSION };
+    await post({ type: SERVED_FRAME_GONE });
+    await post(ready);
+    await post({ type: SERVED_FRAME_GONE });
+    await post(ready);
+    await post({ type: SERVED_FRAME_GONE });
+    // The first load plus two asks for "gone", never a third.
     expect(asked).toBe(3);
   });
 

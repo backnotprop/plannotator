@@ -17,6 +17,8 @@
  *   Mermaid diagram reaching the web while that policy was widened).
  * - Annotation still works in the served page: a click pins its paragraph, the
  *   comment saves, and the page draws its highlight.
+ * - Only the window can keep a page: a POST to /api/inbox/pages from another
+ *   origin (`https://evil.example`, or `null`) is refused 403.
  *
  * Screenshots go to PLANNOTATOR_PAGES_ONLY_SHOTS when it is set.
  *
@@ -155,6 +157,14 @@ test('an attached page shows its web pictures; the window asks the web for none,
       // The window's own policy, as served.
       const window = await context.request.get(url);
       expect(window.headers()['content-security-policy']).toContain("img-src 'self' data: blob:;");
+
+      // Only the window may keep a page: the listener's cross-origin guard runs before the route.
+      // Another site (or an opaque-origin page, `Origin: null`) cannot get HTML served from the Inbox.
+      const pagesUrl = new URL('/api/inbox/pages', url).href;
+      for (const origin of ['https://evil.example', 'null']) {
+        const refused = await context.request.post(pagesUrl, { headers: { Origin: origin }, data: { html: '<p>from elsewhere</p>' } });
+        expect(refused.status(), `Origin: ${origin}`).toBe(403);
+      }
 
       // (b) The message: every diagram draws, and the web hears nothing.
       await tab.goto(`${url}#thread=${text.thread_id}`);
