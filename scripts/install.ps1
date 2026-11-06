@@ -615,6 +615,13 @@ if ($checksumResponse.Content -is [byte[]]) {
     $checksumContent = $checksumResponse.Content
 }
 $expectedChecksum = $checksumContent.Split(" ")[0].Trim().ToLower()
+# The value must be 64 hex characters, as install.sh checks: an empty or
+# garbled .sha256 (a proxy's page, a cut-off file) never gets as far as the compare.
+if ($expectedChecksum -notmatch '^[0-9a-f]{64}$') {
+    Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
+    [Console]::Error.WriteLine("The checksum file for $binaryName $latestTag is not a SHA-256 checksum. Nothing was changed; try again later.")
+    exit 1
+}
 $actualChecksum = (Get-FileHash -Path $tmpFile -Algorithm SHA256).Hash.ToLower()
 
 if ($actualChecksum -ne $expectedChecksum) {

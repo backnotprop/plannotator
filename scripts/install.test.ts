@@ -2523,8 +2523,9 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
     const binary = "#!/bin/sh\necho plannotator-fixture-new\n";
     const OLD = "#!/bin/sh\necho plannotator-old\n";
 
-    function run(env: Record<string, string>) {
+    function run(env: Record<string, string>, setupStub?: (stub: string) => void) {
       const sandbox = setupInstallSandbox({ gh: "pass-all", binary });
+      setupStub?.(sandbox.stub);
       const installed = join(sandbox.home, ".local", "bin", "plannotator");
       mkdirSync(join(sandbox.home, ".local", "bin"), { recursive: true });
       writeFileSync(installed, OLD, { mode: 0o755 });
@@ -2569,6 +2570,32 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       expect(r.out).toContain("curl exit 56");
       expect(r.installed).toBe(OLD);
       expect(r.downloads).toHaveLength(2);
+    });
+
+    test("a .sha256 that is not 64 hex characters stops before the compare: old binary kept, no temp file left", () => {
+      for (const served of ["", "<html>login</html>", "a".repeat(63), `${"a".repeat(63)}g`, "a".repeat(65)]) {
+        const r = run({ STUB_CHECKSUM: served });
+        expect(r.code).toBe(1);
+        expect(r.out).toContain("is not a SHA-256 checksum");
+        expect(r.installed).toBe(OLD);
+        expect(readdirSync(r.tmp)).toEqual([]);
+      }
+    });
+
+    test("an empty .sha256 never matches a hash tool that printed nothing", () => {
+      // The gap the shape check closes: with no hash tool output, an empty
+      // expected value used to equal the empty actual one and install.
+      const r = run({ STUB_CHECKSUM: "" }, (stub) => {
+        for (const tool of ["shasum", "sha256sum"]) writeFileSync(join(stub, tool), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+      });
+      expect(r.code).toBe(1);
+      expect(r.installed).toBe(OLD);
+    });
+
+    test("an upper-case .sha256 is still accepted", () => {
+      const r = run({ STUB_CHECKSUM: createHash("sha256").update(binary).digest("hex").toUpperCase() });
+      expect(r.code).toBe(0);
+      expect(r.installed).toBe(binary);
     });
 
     test("a curl older than 7.71 (no --retry-all-errors) still installs, with plain --retry", () => {

@@ -880,11 +880,12 @@ download_release_file() {
 }
 
 tmp_file=$(mktemp)
-# 30 minutes per attempt: a 1 Mbit/s link still finishes the ~200 MB binary,
-# and a connection that only trickles stops instead of holding the update
-# for hours. Exit 1, not curl's code: the updater gives some codes a meaning.
+# An hour per attempt: a link at about 0.5 Mbit/s still finishes the ~200 MB
+# binary (a slow update must still succeed), and a connection that only
+# trickles stops instead of holding the update without end. Exit 1, not
+# curl's code: the updater gives some codes a meaning.
 binary_status=0
-download_release_file "$binary_url" "$tmp_file" 1800 || binary_status=$?
+download_release_file "$binary_url" "$tmp_file" 3600 || binary_status=$?
 if [ "$binary_status" -ne 0 ]; then
     rm -f "$tmp_file"
     echo "Could not download ${binary_name} ${latest_tag} (curl exit ${binary_status}). Nothing was changed; try again later." >&2
@@ -929,8 +930,18 @@ else
         echo "Could not download the checksum for ${binary_name} ${latest_tag} (curl exit ${checksum_status}). Nothing was changed; try again later." >&2
         exit 1
     fi
-    expected_checksum=$(cut -d' ' -f1 < "$checksum_file")
+    expected_checksum=$(cut -d' ' -f1 < "$checksum_file" | tr -d '\r' | tr 'ABCDEF' 'abcdef')
     rm -f "$checksum_file"
+    # The same shape check as the pinned value: an empty or garbled .sha256
+    # (a proxy's page, a cut-off file) never gets as far as the compare.
+    case "$expected_checksum" in
+        *[!0123456789abcdef]*) expected_checksum="" ;;
+    esac
+    if [ "${#expected_checksum}" -ne 64 ]; then
+        rm -f "$tmp_file"
+        echo "The checksum file for ${binary_name} ${latest_tag} is not a SHA-256 checksum. Nothing was changed; try again later." >&2
+        exit 1
+    fi
 fi
 
 if [ "$(uname -s)" = "Darwin" ]; then
