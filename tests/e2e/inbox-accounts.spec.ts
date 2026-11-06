@@ -4,10 +4,11 @@
  * Inbox's whole PATH is a fake `cswap`'s folder (tests/helpers/fake-cswap.ts),
  * so no real claude-swap can be reached: that one goes to the Keychain.
  *
- * What only a browser can show: week holds the right-hand column, three
- * windows sit on one line (under the name on a phone), long names shorten
- * instead of pushing the bars, and nothing scrolls sideways, at 1440, 780, a
- * phone and 320, with 12 accounts of long addresses, aliases and organizations.
+ * What only a browser can show: the usage cluster holds one column down the
+ * list, a row's confirm opens under it and fits, long names shorten instead of
+ * pushing the bars, phone rows are tap targets, and nothing scrolls sideways,
+ * at 1440, 780, a phone and 320, with 12 accounts of long addresses, aliases
+ * and organizations.
  * The states themselves are packages/inbox/accountsSection.test.tsx.
  *
  * PNGs, light, dark and phone, land in .local/proof/inbox-accounts-step1/.
@@ -17,6 +18,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from '@pla
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { INBOX_ACCOUNT_SWITCHING } from '../../packages/core/inbox-types';
 import { fakeCswapCalls, removeFakeCswap, writeFakeCswap } from '../helpers/fake-cswap';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
@@ -135,7 +137,6 @@ test.afterAll(async () => {
 });
 
 const section = (page: Page) => page.locator('[data-settings-accounts]');
-const usageBoxes = (page: Page) => page.locator('[data-account-use]');
 
 async function shot(page: Page, name: string) {
   // Off the left edge's 20 px strip, which slides the sidebar in over the page.
@@ -164,10 +165,10 @@ async function show(page: Page, state: (typeof STATES)[number]) {
 async function expectNoOverflow(page: Page) {
   const report = await page.evaluate(() => {
     const scroller = document.querySelector('.ib-spage') as HTMLElement;
-    const card = document.querySelector('.ib-acct-list')?.getBoundingClientRect();
+    const card = document.querySelector('.ib-accts')?.getBoundingClientRect();
     const past: string[] = [];
     if (card) {
-      for (const el of document.querySelectorAll('.ib-acct, .ib-acct-row, .ib-acct-use, .ib-acct-who, .ib-acct-bar, .ib-acct-more, .ib-acct-ro')) {
+      for (const el of document.querySelectorAll('.ib-acct-r, .ib-acct-n, .ib-acct-use, .ib-acct-confirm, .ib-acct-fail, .ib-acct-miss')) {
         const box = el.getBoundingClientRect();
         if (box.right > card.right + 0.5 || box.left < card.left - 0.5) past.push(el.className);
       }
@@ -177,42 +178,42 @@ async function expectNoOverflow(page: Page) {
   expect(report).toEqual({ sideways: 0, doc: 0, past: [] });
 }
 
-/** The bars line up down the list: every week in one column at the right, and the window before it in the next. */
+/** The usage cluster lines up down the list: every label, bar and figure in one column, whatever the name beside it. */
 async function expectColumns(page: Page) {
   const columns = await page.evaluate(() => {
-    const left = (el: Element) => Math.round(el.getBoundingClientRect().left);
-    const weeks = [...document.querySelectorAll('[data-usage="week"]')];
-    const beside = weeks.flatMap((week) => (week.previousElementSibling ? [left(week.previousElementSibling)] : []));
-    return { weeks: [...new Set(weeks.map(left))], beside: [...new Set(beside)] };
+    const left = (el: Element | null) => (el ? Math.round(el.getBoundingClientRect().left) : -1);
+    const clusters = [...document.querySelectorAll('[data-machine-key="self"] [data-account-use="bars"]')];
+    return {
+      clusters: [...new Set(clusters.map(left))],
+      figures: [...new Set(clusters.map((cluster) => left(cluster.querySelector('b[data-usage]'))))],
+    };
   });
-  expect(columns.weeks).toHaveLength(1);
-  expect(columns.beside).toHaveLength(1);
-  expect(columns.weeks[0]!).toBeGreaterThan(columns.beside[0]!);
+  expect(columns.clusters).toHaveLength(1);
+  expect(columns.figures).toHaveLength(1);
 }
 
-/** Three windows read 5h, the scoped one, week on one line: beside the name at the width of a desktop, under it on a phone. */
-async function expectThreeOnOneLine(page: Page, account: number, under: boolean) {
-  const row = page.locator(`[data-account="${account}"]`);
-  const box = async (label: string) => (await row.locator(`[data-usage="${label}"]`).boundingBox())!;
-  const [five, fable, week] = [await box('5h'), await box('Fable'), await box('week')];
-  expect(fable.y).toBe(five.y);
-  expect(week.y).toBe(five.y);
-  expect(five.x).toBeLessThan(fable.x);
-  expect(fable.x).toBeLessThan(week.x);
-  const name = (await row.locator('.ib-acct-name').boundingBox())!;
-  if (under) expect(five.y).toBeGreaterThanOrEqual(name.y + name.height);
-  else expect(five.x).toBeGreaterThan(name.x + name.width);
-}
-
-/** Opens a row, proves it fits, takes its picture, and closes it. */
-async function shotOpen(page: Page, account: number, name: string) {
-  const button = page.locator(`[data-account="${account}"] button.ib-acct-row`);
-  await button.click();
-  await expect(page.locator(`[data-account="${account}"] .ib-acct-more`)).toBeVisible();
+/**
+ * Presses a row, proves its confirm opens under it and fits, takes its picture, and cancels.
+ * While switching is off (INBOX_ACCOUNT_SWITCHING), proves the row is plain and pressing it opens nothing.
+ */
+async function shotConfirm(page: Page, account: number, name: string) {
+  if (!INBOX_ACCOUNT_SWITCHING) {
+    const plain = page.locator(`[data-machine-key="self"] [data-account="${account}"]`);
+    await expect(plain).toHaveJSProperty('tagName', 'DIV');
+    await plain.click();
+    await expect(page.locator('[data-accounts-confirm]')).toHaveCount(0);
+    await expect(page.locator('.ib-accts button')).toHaveCount(0);
+    return;
+  }
+  const row = page.locator(`[data-machine-key="self"] button[data-account="${account}"]`);
+  await row.click();
+  const confirm = page.locator('[data-accounts-confirm]');
+  await expect(confirm).toBeVisible();
+  expect(await row.evaluate((el) => el.nextElementSibling?.hasAttribute('data-accounts-confirm'))).toBe(true);
   await expectNoOverflow(page);
   await shot(page, name);
-  await button.click();
-  await expect(page.locator(`[data-account="${account}"] .ib-acct-more`)).toHaveCount(0);
+  await page.locator('[data-accounts-cancel]').click();
+  await expect(confirm).toHaveCount(0);
 }
 
 async function walk(page: Page, prefix: string, errors: string[]) {
@@ -221,16 +222,19 @@ async function walk(page: Page, prefix: string, errors: string[]) {
     await expectNoOverflow(page);
     if (state.name === 'normal' || state.name === 'three-windows' || state.name === 'worst-case') await expectColumns(page);
     if (state.name === 'normal') {
-      await expect(page.locator('[data-account="3"] [data-account-use]')).toHaveText('API key');
-      await expect(page.locator('[data-accounts-machine] .ib-acct-ro')).toHaveText('work');
-      const machineBox = (await page.locator('[data-accounts-machine]').boundingBox())!;
-      expect(machineBox.y + machineBox.height).toBeLessThanOrEqual((await section(page).boundingBox())!.y);
-      // The address waits in the open row.
+      // The account in use comes first.
+      const first = page.locator('[data-machine-key="self"] .ib-acct-r').first();
+      await expect(first).toHaveAttribute('data-in-use', '');
+      await expect(first.locator('.ib-acct-name')).toHaveText('work');
+      // An API key is its name alone: no bar, and "API key" only on hover.
+      await expect(page.locator('[data-account="3"] [data-account-use]')).toHaveText('');
+      await expect(page.locator('[data-account="3"]')).toHaveAttribute('title', /API key/);
+      // No address on the page.
       await expect(page.locator('.ib-spg')).not.toContainText('@');
-      // The amber is the mock's: it differs from a bar under 90%.
-      const color = (usage: string) => page.locator(`[data-account="2"] [data-usage="${usage}"] b`).evaluate((b) => getComputedStyle(b).color);
-      expect(await color('5h')).not.toBe(await color('week'));
-      await shotOpen(page, 2, `${prefix}-row-open`);
+      // The amber is the mock's: 92% in use differs from a row under 90%.
+      const color = (account: number) => page.locator(`[data-account="${account}"] b[data-usage]`).evaluate((b) => getComputedStyle(b).color);
+      expect(await color(2)).not.toBe(await color(1));
+      await shotConfirm(page, 1, `${prefix}-confirm`);
       // This picture goes before the failed Refresh below, which would leave its line in it.
       await expect(page.locator('[data-accounts-failed]')).toHaveCount(0);
       await shot(page, `${prefix}-normal`);
@@ -244,44 +248,46 @@ async function walk(page: Page, prefix: string, errors: string[]) {
     }
     if (state.name === 'same-name') {
       await expect(page.locator('.ib-spg')).not.toContainText('@');
-      await expect(page.locator('[data-account="1"] .ib-acct-l')).toHaveText('mira #1');
-      await expect(page.locator('[data-accounts-machine] .ib-acct-ro')).toHaveText('mira #2');
+      await expect(page.locator('[data-account="1"] .ib-acct-name')).toHaveText('mira #1');
+      await expect(page.locator('[data-account="2"] .ib-acct-name')).toHaveText('mira #2');
     }
     if (state.name === 'stale') {
       await expect(page.locator('[data-account="1"] [data-stale]')).toBeVisible();
-      await expect(page.locator('[data-account="1"] [data-high]')).toHaveCount(0);
-      await shotOpen(page, 1, `${prefix}-stale-open`);
+      await expect(page.locator('[data-account="1"] [data-l="hot"]')).toHaveCount(0);
+      await shotConfirm(page, 2, `${prefix}-stale-confirm`);
     }
-    if (state.name === 'three-windows') await expectThreeOnOneLine(page, 1, prefix === 'phone');
     if (state.name === 'no-reading') {
-      await expect(usageBoxes(page).filter({ hasText: 'No reading yet' })).toHaveCount(3);
-      // The words stop before the chevron.
-      const note = (await page.locator('[data-account="1"] .ib-acct-note').boundingBox())!;
-      expect(note.x + note.width).toBeLessThanOrEqual((await page.locator('[data-account="1"] .ib-acct-car').boundingBox())!.x);
+      // No reading: no bar, and the reason beside the name.
+      await expect(page.locator('[data-account-use="none"]')).toHaveCount(3);
+      await expect(page.locator('[data-account-use="none"] i')).toHaveCount(0);
+      // The name and its notes stop before the usage.
+      const words = (await page.locator('[data-account="1"] .ib-acct-n').boundingBox())!;
+      // The empty cluster has no height, so its left edge comes from the page, not a bounding box.
+      const useLeft = await page.locator('[data-account="1"] .ib-acct-use').evaluate((el) => el.getBoundingClientRect().left);
+      if (prefix === 'desktop') expect(words.x + words.width).toBeLessThanOrEqual(useLeft);
     }
-    if (state.name === 'not-installed') await expect(page.locator('.ib-cbox pre')).toHaveText('uv tool install claude-swap');
+    if (state.name === 'not-installed') await expect(page.locator('[data-accounts-missing] .ib-cbox pre')).toHaveText('uv tool install claude-swap');
     if (state.name === 'failed') {
       await expect(page.locator('[data-accounts-failed]')).toBeVisible();
       await expect(section(page)).not.toContainText('words-of-cswap');
     }
     if (state.name === 'worst-case') {
       await expect(page.locator('[data-account]')).toHaveCount(12);
-      // Two rows share an alias and two share an address: those four, and only those, name their organization.
-      await expect(page.locator('[data-account] .ib-acct-org')).toHaveCount(4);
-      // A long name shortens on one line, on its row and on the machine.
-      const name = page.locator('[data-account="3"] .ib-acct-name');
-      expect(await name.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-      expect(await page.locator('[data-accounts-machine] .ib-acct-ro span').last().evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-      // The longest address and organization wrap inside an open row.
-      await shotOpen(page, 3, `${prefix}-worst-case-open`);
+      // A long name shortens on one line on a desktop, instead of pushing the usage.
+      if (prefix === 'desktop') {
+        const name = page.locator('[data-account="3"] .ib-acct-name');
+        expect(await name.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+      }
+      await shotConfirm(page, 1, `${prefix}-worst-case-confirm`);
     }
     await shot(page, `${prefix}-${state.name}`);
   }
   expect(errors).toEqual([]);
+  // Nothing on the page switched: a confirm was only ever cancelled.
   expect([...new Set(fakeCswapCalls(world.bin))]).toEqual(['list --json']);
 }
 
-test('desktop: every state, light and dark, with the columns, an open row and the worst case', async ({ browser }: { browser: Browser }) => {
+test('desktop: every state, light and dark, with the columns, a confirm and the worst case', async ({ browser }: { browser: Browser }) => {
   test.setTimeout(120_000);
   const context: BrowserContext = await browser.newContext({ viewport: { width: 1440, height: 1040 } });
   const page = await context.newPage();
@@ -290,7 +296,7 @@ test('desktop: every state, light and dark, with the columns, an open row and th
   await page.goto(`${world.url}#settings/accounts`);
   await expect(section(page)).toHaveAttribute('data-settings-accounts', 'accounts');
   await walk(page, 'desktop', errors);
-  // The narrowest window that keeps the side nav, with the three fixed columns: the tightest a row gets.
+  // The narrowest window that keeps the side nav: the tightest a row gets.
   await page.setViewportSize({ width: 780, height: 1040 });
   await expect(page.locator('.ib-snav')).toBeVisible();
   await expectNoOverflow(page);
@@ -309,11 +315,14 @@ test('phone: through the list of sections, every state, light and dark', async (
   await page.goto(`${world.url}#settings`);
   await page.locator('[data-settings-list] [data-settings-link="accounts"]').tap();
   await expect(section(page)).toHaveAttribute('data-settings-accounts', 'accounts');
+  // A phone row is a tap target of 44 px or more, with no hover word.
+  for (const box of await page.locator('[data-machine-key="self"] .ib-acct-r').evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height))) expect(box).toBeGreaterThanOrEqual(44);
+  await expect(page.locator('.ib-acct-sw', { hasText: 'Switch' })).toHaveCount(0);
   await walk(page, 'phone', errors);
   await context.close();
 });
 
-test('320 px: a three-window row stays inside its card and lines up', async ({ browser }: { browser: Browser }) => {
+test('320 px: a three-limit row stays inside its window and lines up', async ({ browser }: { browser: Browser }) => {
   writeFakeCswap(world.bin, { stdout: THREE_WINDOWS });
   const context: BrowserContext = await browser.newContext({ viewport: { width: 320, height: 640 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const page = await context.newPage();
@@ -322,7 +331,6 @@ test('320 px: a three-window row stays inside its card and lines up', async ({ b
   await expect(page.locator('[data-account]')).toHaveCount(3);
   await expectNoOverflow(page);
   await expectColumns(page);
-  await expectThreeOnOneLine(page, 1, true);
   await shot(page, 'phone-320-three-windows');
   await context.close();
 });
