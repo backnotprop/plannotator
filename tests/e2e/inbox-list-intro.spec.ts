@@ -5,8 +5,9 @@
  * Each case is its own Inbox (the dialog is once per machine); agents write through `plannotator inbox mcp`.
  *
  *  - A new user (a fresh install) never gets it, even with a long list.
- *  - Someone who used an Inbox before: it shows once, in one of two tabs, plays its preview (each option on in turn,
- *    then all off), and Done puts the switches on the real list at once, which a reload keeps; it never shows again.
+ *  - Someone who used an Inbox before: it shows once, in one of two tabs, plays its preview (each option that is off
+ *    on in turn, then back to the defaults: smaller names on), and Done puts the switches on the real list at once,
+ *    which a reload keeps; it never shows again.
  *  - Escape and Keep as it is change nothing and retire it (with reduced motion: no preview at all).
  *  - A key or a click during the preview ends it at once, back to the defaults.
  *  - Never on the same load as the tour (the next load shows it); after the sound dialog, never that load nor the next
@@ -20,7 +21,8 @@
  *    phone); only its picture is light, in both (and under Synthwave '84), and nothing else on the page is a light
  *    scope or a second window root.
  *  - The picture's thread names stay on one line, a long one cut with "…" (the owner: no long names in the examples).
- *  - Smaller thread names is the fourth switch, in the preview and saved by Done.
+ *  - Smaller thread names is the fourth switch, on from the start (a default since 2026-11-05): the preview never
+ *    shows it turning on, and turning it off is saved by Done.
  *  - Dark, and a 390 px phone: a bottom sheet with the phone's rows.
  *
  * Build the apps first (bun run --cwd apps/review build && bun run build:hook), then
@@ -143,15 +145,16 @@ async function context(browser: Browser, options: { phone?: boolean; dark?: bool
 const lookClasses = (page: Page) => page.locator('.pn-inbox .ib-listcol:not(.ib-lo-list)').first().evaluate((el) => [...el.classList].filter((c) => c.startsWith('ib-lk-')).sort());
 const option = (page: Page, key: string) => page.locator(`${DIALOG} [data-list-intro-option="${key}"]`);
 
-async function allOff(page: Page) {
-  for (const key of KEYS) await expect(option(page, key)).toHaveAttribute('aria-checked', 'false');
+/** The switches at the defaults: Smaller thread names on (since 2026-11-05), the other three off. */
+async function atDefaults(page: Page) {
+  for (const key of KEYS) await expect(option(page, key)).toHaveAttribute('aria-checked', key === 'smallNames' ? 'true' : 'false');
 }
 
-/** The dialog is up and its preview has played out (or never played): every switch off and usable. */
+/** The dialog is up and its preview has played out (or never played): the switches at the defaults and usable. */
 async function settledDialog(page: Page) {
   await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('[data-list-intro-playing]')).toHaveCount(0, { timeout: 5_000 });
-  await allOff(page);
+  await atDefaults(page);
 }
 
 async function shot(page: Page, name: string) {
@@ -280,15 +283,15 @@ test('once, in one of two tabs: the preview plays, Done puts the switches on the
   await expect(page.locator(`${DIALOG} .ib-lo-list.ib-lk-pill.ib-lk-compact`)).toHaveCount(1);
   await namesOneLine(page);
   await shot(page, 'desktop-light-options-on');
-  // The real list is today's until Done.
-  expect(await lookClasses(page)).toEqual([]);
+  // The real list keeps the defaults until Done.
+  expect(await lookClasses(page)).toEqual(['ib-lk-small']);
   await page.locator('[data-list-intro-done]').click();
   await expect(page.locator(DIALOG)).toHaveCount(0);
-  expect(await lookClasses(page)).toEqual(['ib-lk-compact', 'ib-lk-pill']);
+  expect(await lookClasses(page)).toEqual(['ib-lk-compact', 'ib-lk-pill', 'ib-lk-small']);
   await shot(page, 'after-done');
   await page.reload();
   await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
-  expect(await lookClasses(page)).toEqual(['ib-lk-compact', 'ib-lk-pill']);
+  expect(await lookClasses(page)).toEqual(['ib-lk-compact', 'ib-lk-pill', 'ib-lk-small']);
   await other.reload();
   await page.waitForTimeout(3000);
   await expect(page.locator(DIALOG)).toHaveCount(0);
@@ -305,7 +308,7 @@ for (const how of ['Escape', 'Keep as it is'] as const) {
     // Reduced motion: never a preview; the switches are usable from the start.
     await expect(page.locator('[data-list-intro-playing]')).toHaveCount(0);
     await page.waitForTimeout(700);
-    await allOff(page);
+    await atDefaults(page);
     // Tab stays inside the dialog and never lands on the picture's (inert) rows.
     await expect(page.locator('[data-list-intro-done]')).toBeFocused();
     await page.keyboard.press('Tab');
@@ -317,14 +320,14 @@ for (const how of ['Escape', 'Keep as it is'] as const) {
     if (how === 'Escape') await page.keyboard.press('Escape');
     else await page.locator('[data-list-intro-keep]').click();
     await expect(page.locator(DIALOG)).toHaveCount(0);
-    expect(await lookClasses(page)).toEqual([]);
+    expect(await lookClasses(page)).toEqual(['ib-lk-small']);
     // The list is still there: Escape closed only the dialog.
     await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
     await page.reload();
     await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
     await page.waitForTimeout(3000);
     await expect(page.locator(DIALOG)).toHaveCount(0);
-    expect(await lookClasses(page)).toEqual([]);
+    expect(await lookClasses(page)).toEqual(['ib-lk-small']);
   });
 }
 
@@ -340,11 +343,12 @@ for (const how of ['a key', 'a click'] as const) {
     else await page.locator(`${DIALOG} #ib-lo-title`).click();
     await expect(page.locator('[data-list-intro-playing]')).toHaveCount(0);
     if (how === 'a key') await expect(option(page, 'highlight')).toBeFocused();
-    await allOff(page);
-    await expect(page.locator(`${DIALOG} .ib-lo-list`)).not.toHaveClass(/ib-lk-/);
+    await atDefaults(page);
+    await expect(page.locator(`${DIALOG} .ib-lo-list`)).not.toHaveClass(/ib-lk-(pill|compact|noagents)/);
+    await expect(page.locator(`${DIALOG} .ib-lo-list`)).toHaveClass(/ib-lk-small/);
     // Nothing plays on after it, and the switches answer.
     await page.waitForTimeout(1800);
-    await allOff(page);
+    await atDefaults(page);
     await option(page, 'hideAgents').click();
     await expect(option(page, 'hideAgents')).toHaveAttribute('aria-checked', 'true');
   });
@@ -583,25 +587,26 @@ test('the dialog follows the window\'s mode and passes WCAG AA in both; only its
   }
 });
 
-test('Smaller thread names: the fourth switch, in the preview, saved by Done', async ({ browser }) => {
+test('Smaller thread names: the fourth switch, on from the start, turned off by Done', async ({ browser }) => {
   const w = await world({ earlier: true });
   const page = await (await context(browser)).newPage();
   await page.goto(w.url);
   await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(`${DIALOG} [role="switch"]`)).toHaveCount(4);
   await expect(page.locator(`${DIALOG} .ib-lo-opt > span`)).toHaveText(['Highlight thread subject', 'Compact rows', 'Hide agent icons', 'Smaller thread names']);
-  // The preview reaches it last, all four on together, then all off.
-  await expect(option(page, 'smallNames')).toHaveAttribute('aria-checked', 'true', { timeout: 4_000 });
+  // A default (2026-11-05): on from the open, and the preview never shows it turning on; the other three reach on.
+  await expect(option(page, 'smallNames')).toHaveAttribute('aria-checked', 'true');
   await expect(page.locator(`${DIALOG} .ib-lo-list.ib-lk-small`)).toHaveCount(1);
+  await expect(option(page, 'hideAgents')).toHaveAttribute('aria-checked', 'true', { timeout: 4_000 });
   for (const key of KEYS) await expect(option(page, key)).toHaveAttribute('aria-checked', 'true');
   await settledDialog(page);
   await option(page, 'smallNames').click();
   await page.locator('[data-list-intro-done]').click();
   await expect(page.locator(DIALOG)).toHaveCount(0);
-  expect(await lookClasses(page)).toEqual(['ib-lk-small']);
+  expect(await lookClasses(page)).toEqual([]);
   await page.reload();
   await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
-  expect(await lookClasses(page)).toEqual(['ib-lk-small']);
+  expect(await lookClasses(page)).toEqual([]);
 });
 
 test('dark, with options on', async ({ browser }) => {
