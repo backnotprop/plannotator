@@ -81,6 +81,8 @@ import {
   type InboxTextSize,
   inboxRowsList,
   inboxRowsRead,
+  inboxRowsSaved,
+  INBOX_ROWS_DEFAULTS_VERSION,
   type InboxRowsOption,
   type InboxHealth,
   type InboxLine,
@@ -182,7 +184,7 @@ import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture
 import { createInboxAccountsFor } from "./inbox-accounts";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
-import { inboxBodyForAgent, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
+import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createInboxVoice } from "./inbox-voice";
@@ -214,7 +216,26 @@ import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
 import { snoozeIntroDue, snoozeIntroFirstUse, type SnoozeIntroSaved } from "./inbox-snooze-intro";
-import { revealLastShown, revealMayClaim, revealNext, type RevealId, type RevealState } from "@plannotator/shared/inbox/reveals";
+import {
+  INBOX_REVEALS,
+  revealAfterShowLoad,
+  revealAgentNoteAgents,
+  revealAgentNoteNew,
+  revealAhead,
+  revealHeavyUse,
+  revealLastShown,
+  revealLineFree,
+  revealLoadId,
+  revealMayClaim,
+  revealNext,
+  revealNotNowAllowed,
+  revealSeeLoad,
+  revealStamp,
+  revealStampNotNow,
+  type RevealId,
+  type RevealLoads,
+  type RevealState,
+} from "@plannotator/shared/inbox/reveals";
 import { createInboxEmbeds } from "./inbox-embeds";
 import { createInboxPages } from "./inbox-pages";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
@@ -716,6 +737,7 @@ const ERROR_STATUS: Record<string, number> = {
   upload_too_large: 413,
   markup_too_large: 413,
   upload_not_found: 404,
+  upload_no_space: 507,
   // The Board's cards (approval "inbox-board"): who may move a card.
   card_not_found: 404,
   card_no_project: 404,
@@ -826,6 +848,8 @@ function errorResponse(error: unknown): Response {
   if (error instanceof InboxError) {
     return json({ error: error.message, code: error.code, ...error.details }, ERROR_STATUS[error.code] ?? 400);
   }
+  const full = inboxDiskFullError(error);
+  if (full) return errorResponse(full);
   return json({ error: "Internal error.", code: "internal_error" }, 500);
 }
 
@@ -1934,12 +1958,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * Null until a window first saves it, so the first window adopts its browser's old cookies. Lenient on read (a name
    * this build does not know is dropped, so a downgrade or a typo never reads as "never saved"), strict on write (a
    * `422`). `inboxRowsRev` counts the saves: every answer and `event: rows` carries it, so a window takes a look only
-   * when it is newer than the last it took, whatever order the answers and events arrive in.
+   * when it is newer than the last it took, whatever order the answers and events arrive in. `inboxRowsDefaults`
+   * says which defaults it was saved under: an old look that is the old defaults (every option off) is read as
+   * today's (core `inboxRowsSaved`).
    */
   const rowsState = (): { rows: InboxRowsOption[] | null; rev: number } => {
     const config = loadConfig();
     const rev = config.inboxRowsRev;
-    return { rows: inboxRowsRead(config.inboxRows), rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0 };
+    return { rows: inboxRowsSaved(inboxRowsRead(config.inboxRows), config.inboxRowsDefaults), rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0 };
   };
 
   const saveRows = (input: unknown, validateOnly = false): { rows: InboxRowsOption[]; rev: number } => {
@@ -1947,7 +1973,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (!rows) throw new InboxError("validation_error", `rows: a list of row options (${INBOX_ROWS_OPTIONS.join(", ")}).`, { field: "rows" });
     const rev = rowsState().rev + 1;
     if (validateOnly) return { rows, rev };
-    saveConfig({ inboxRows: rows, inboxRowsRev: rev });
+    saveConfig({ inboxRows: rows, inboxRowsRev: rev, inboxRowsDefaults: INBOX_ROWS_DEFAULTS_VERSION });
     const saved = rowsState();
     if (saved.rev !== rev || saved.rows?.join() !== rows.join()) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     for (const listener of rowsListeners) listener(rows, rev);
@@ -2030,10 +2056,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * never shows it and leaves it for the next page opened here. The server is
    * one process and this runs with no await, so two claims cannot interleave.
    */
-  const claimSoundDialog = (via: RequestVia): boolean => {
+  const claimSoundDialog = (via: RequestVia, load: string | null = null): boolean => {
     if (via !== "local" || !soundState().dialog_due) return false;
+    // The line of one-time dialogs (shared/inbox/reveals.ts): one a day, never on the load after one, a day apart.
+    if (!lineFree("spaced", load)) return false;
     const { dialogDueFor, ...rest } = savedSound();
-    saveConfig({ inboxSound: { ...rest, dialogShownFor: dialogDueFor } });
+    saveConfig({ inboxSound: { ...rest, dialogShownFor: dialogDueFor }, ...lineStamp(new Date().toISOString(), true, load) });
     // Not written (a read-only data dir): showing it anyway would show it on every load.
     return loadConfig().inboxSound?.dialogShownFor === dialogDueFor;
   };
@@ -2071,15 +2099,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * never both show it. Only on this computer (a page through the tailnet leaves it for the next page opened here).
    * No await between the read and the write, so two claims cannot interleave.
    */
-  const claimListIntro = (via: RequestVia): boolean => {
-    if (via !== "local" || !listIntroState().due) return false;
+  const claimListIntro = (via: RequestVia, load: string | null = null): boolean => {
+    if (via !== "local" || !listIntroState().due || !lineFree("spaced", load)) return false;
     const at = new Date().toISOString();
-    // A one-time announcement: it counts toward the reveals' 48 h spacing (shared/inbox/reveals.ts). A dev build never stamps
+    // A one-time announcement: it keeps the line's day and spacing (shared/inbox/reveals.ts). A dev build never stamps
     // that clock.
-    saveConfig({
-      inboxListIntro: { ...loadConfig().inboxListIntro, shownAt: at },
-      ...(normalizeStableVersion(version) !== null ? { inboxReveals: { ...loadConfig().inboxReveals, lastShownAt: at } } : {}),
-    });
+    saveConfig({ inboxListIntro: { ...loadConfig().inboxListIntro, shownAt: at }, ...lineStamp(at, true, load) });
     // Not written (a read-only data dir): showing it anyway would show it on every load.
     return loadConfig().inboxListIntro?.shownAt === at;
   };
@@ -2107,11 +2132,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   }
   /**
    * Whether it is due, and for this page: the owner's (this computer or their phone), never a tailnet guest's. Its own
-   * rules, and the reveals' queue (shared/inbox/reveals.ts): the 48 h spacing, and the Board going first once Snooze waited
+   * rules, and the reveals' queue (shared/inbox/reveals.ts): the one-day spacing, and the Board going first once Snooze waited
    * three days for its moment.
    */
-  const snoozeIntroState = (owner: boolean) => ({
-    due: owner && revealNow(owner) === "snooze",
+  const snoozeIntroState = (owner: boolean, load: string | null = null) => ({
+    due: owner && revealNow(owner, load) === "snooze",
   });
   /** The person snoozed something: the dialog never shows. Once; a dev build marks too (only showing is release-only). */
   const markSnoozeUsed = () => {
@@ -2123,11 +2148,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * The page about to show it claims it: only the first claim ever gets `show: true` (no await between the read and
    * the write, so two claims cannot interleave). A claim that could not be saved shows nothing.
    */
-  const claimSnoozeIntro = (owner: boolean): boolean => {
-    if (!snoozeIntroState(owner).due) return false;
+  const claimSnoozeIntro = (owner: boolean, load: string | null = null): boolean => {
+    if (!snoozeIntroState(owner, load).due) return false;
     const at = new Date().toISOString();
-    // One save: the stamp and the reveals' spacing clock.
-    return saveConfig({ inboxSnoozeIntro: { ...loadConfig().inboxSnoozeIntro, shownAt: at }, inboxReveals: { ...loadConfig().inboxReveals, lastShownAt: at } });
+    // One save: the stamp and the line's.
+    return saveConfig({ inboxSnoozeIntro: { ...loadConfig().inboxSnoozeIntro, shownAt: at }, inboxReveals: revealStamp(loadConfig().inboxReveals, at, { spaced: true, load }) });
   };
 
   /** The two update switches (PLANNOTATOR_UPDATE_CHECK, PLANNOTATOR_AUTO_UPDATE): the effective value and whether the env decides. */
@@ -2300,8 +2325,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
-   * The reveals for returning users (approval "inbox-feature-reveal"; the queue is packages/shared/inbox/reveals.ts):
-   * Snooze, then the Board. Read live, like Snooze: the days pass while the Inbox runs. A dev build decides nothing.
+   * The line of one-time dialogs (approval "inbox-feature-reveal", and its schedule, "inbox-one-time-dialogs"; the queue
+   * is packages/shared/inbox/reveals.ts): the update-day dialogs (sound, list options, voice), then Snooze, the Board
+   * and the Checklist, with the agent note keeping the day. Read live: the days pass while the Inbox runs. A dev build
+   * decides nothing.
    * The Board can be revealed only while config.json `inboxBoard` is unset (nobody decided): `true` and `false` are
    * the person's (a `true` from 0.28.49's reveal, which turned it on at the claim, is theirs now and never touched), and
    * a test's `board` option decides it too.
@@ -2309,39 +2336,82 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const boardUndecided = () => INBOX_CARD_ACTION_ON && options.board === undefined && loadConfig().inboxBoard === undefined;
   /** The Checklist can be revealed only while config.json `inboxSteps` is unset, as the Board. */
   const stepsUndecided = () => options.steps === undefined && loadConfig().inboxSteps === undefined;
-  const revealState = (now: Date): RevealState => {
+  /**
+   * The offers the line claims for itself (approval "inbox-one-time-dialogs"): each one's "undecided" (the person never
+   * set its switch). The claim stamps `inboxReveals[id]` with the page's key and turns nothing on; its dialog's "Turn it
+   * on" writes the switch. A registered offer (Bro mode, List view) adds its own here, and its id to `INBOX_REVEALS`.
+   */
+  const lineOffers: Partial<Record<RevealId, () => boolean>> = { board: boardUndecided, steps: stepsUndecided };
+  type LineOfferSaved = { shownAt?: string; key?: string };
+  const lineOfferSaved = (id: RevealId): LineOfferSaved | undefined => (loadConfig().inboxReveals as Record<string, LineOfferSaved | undefined> | undefined)?.[id];
+  /** The agent messages the person has looked at (up to each thread's `person_seen_seq`): heavy use reads their dates. */
+  const seenAgentMessages = function* (): Generator<{ threadId: string; at: string }> {
+    for (const threadId of store.threadIds()) {
+      const seen = store.message(threadId)?.person_seen_seq;
+      if (typeof seen !== "number") continue;
+      for (const id of store.threadMessageIds(threadId)) {
+        const message = store.message(id);
+        const seq = store.messageCursor(id);
+        if (message?.author.kind === "agent" && seq !== null && seq <= seen) yield { threadId, at: message.created_at };
+      }
+    }
+  };
+  /** Voice's who (inbox-voice.ts), read once the voice module exists. */
+  let voiceIntroOpen: () => boolean = () => false;
+  /** The page loads seen, each with the one first seen before it (never a dialog on the load right after one). */
+  let pageLoads: RevealLoads = {};
+  const revealState = (now: Date, load: string | null = null): RevealState => {
     const snooze = snoozeIntroSaved();
     const config = loadConfig();
     const reveals = config.inboxReveals;
     // A list options or voice `shownAt` without `dueAt` is a fresh install's mark (never shown), not a show.
     const shown = (intro: { dueAt?: string; shownAt?: string } | undefined) => (intro?.dueAt ? intro.shownAt : undefined);
+    const offers = Object.fromEntries(Object.entries(lineOffers).map(([id, undecided]) => [id, undecided!() && !lineOfferSaved(id as RevealId)?.shownAt]));
+    const open: RevealState["open"] = {
+      // The update-day dialogs: who they are for was decided at a release start (and is kept until claimed).
+      sound: soundState().dialog_due,
+      list_intro: listIntroState().due,
+      voice: voiceIntroOpen(),
+      snooze: snoozeIntroDue(snooze, now, snoozeIntroRelease),
+      // Every undecided owner (the owner: "the board we just show every user"), also someone who saw the first-visit
+      // dialog before the Board was a switch: the reveal offers it to them too (`claimReveal`). The Checklist
+      // (approval "inbox-checklist-reveal"): never decided by the person and never revealed. The Board need not be on.
+      ...offers,
+    };
     return {
       release: snoozeIntroRelease,
       firstUseAt: snooze?.firstUseAt ?? null,
       // The spacing clock: the reveals' own stamp, and every announcement shown before this key existed (an upgrade).
       lastShownAt: revealLastShown([reveals?.lastShownAt, snooze?.shownAt, shown(config.inboxListIntro), shown(config.inboxVoiceIntro), config.inboxBoardIntro?.shownAt]),
+      dayShownAt: reveals?.dayShownAt ?? null,
+      notNowAt: reveals?.notNowAt ?? null,
+      afterShowLoad: revealAfterShowLoad(reveals?.shownLoad, pageLoads, load),
+      // Read only while an entry that asks for heavy use is still open (a walk of every thread; a release build).
+      heavy: snoozeIntroRelease && INBOX_REVEALS.some((entry) => entry.heavyUse && entry.enabled && open[entry.id] === true) && revealHeavyUse(seenAgentMessages(), now),
       // Roots in the store. The onboarding tour's threads live in the window only (tour/content), never here.
       threads: store.threadIds().length,
-      open: {
-        snooze: snoozeIntroDue(snooze, now, snoozeIntroRelease),
-        // Every undecided owner (the owner: "the board we just show every user"), also someone who saw the first-visit
-        // dialog before the Board was a switch: the reveal offers it to them too (`claimReveal`).
-        board: boardUndecided() && !reveals?.board?.shownAt,
-        // The Checklist (approval "inbox-checklist-reveal"): never decided by the person and never revealed. The Board
-        // need not be on.
-        steps: stepsUndecided() && !reveals?.steps?.shownAt,
-      },
+      open,
       waitingSince: reveals?.waitingSince,
     };
   };
+  /** The line's stamps to save with a claim at `at` (a release build only): the day, the load and, unless `spaced` is false, the spacing clock. */
+  const lineStamp = (at: string, spaced: boolean, load: string | null): Partial<PlannotatorConfig> =>
+    snoozeIntroRelease ? { inboxReveals: revealStamp(loadConfig().inboxReveals, at, { spaced, load }) } : {};
+  /** The line's own rules hold for this page load (`setup`: the agent note, which keeps no spacing). A dev build: free. */
+  const lineFree = (kind: "setup" | "spaced", load: string | null): boolean => revealLineFree(kind, revealState(new Date(), load), new Date());
+  /** A page load is seen (its first settings read): the line learns which load came after which. */
+  const seeLoad = (load: string | null) => {
+    pageLoads = revealSeeLoad(pageLoads, load) ?? pageLoads;
+  };
   /**
-   * The reveal this page may arm, or null. The owner's pages only (this computer, their phone over the tailnet, an
-   * allowed login on a tagged machine), never a guest's. The first time an entry is next is kept, for the patience.
+   * The dialog this page may arm, or null. The owner's pages only (this computer, their phone over the tailnet, an
+   * allowed login on a tagged machine), never a guest's. The first time an entry is next is kept, for the patience
+   * and the retirement.
    */
-  const revealNow = (owner: boolean): RevealId | null => {
+  const revealNow = (owner: boolean, load: string | null = null, read?: { now: Date; state: RevealState }): RevealId | null => {
     if (!owner || !snoozeIntroRelease) return null;
-    const now = new Date();
-    const state = revealState(now);
+    const now = read?.now ?? new Date();
+    const state = read?.state ?? revealState(now, load);
     const next = revealNext(state, now);
     if (next && !state.waitingSince?.[next]) {
       const reveals = loadConfig().inboxReveals;
@@ -2351,39 +2421,70 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   /**
    * The page about to show a reveal claims it: a compare-and-set over the whole queue (no await between the read and
-   * the write, so two claims cannot interleave). Only `next` can be claimed, and only while the spacing holds. A claim
+   * the write, so two claims cannot interleave). Only `next` can be claimed, and only while the line is free. A claim
    * turns nothing on (the owner, 2026-11-04: reveals are opt-in): the dialog offers the feature, and only its "Turn it
-   * on" writes the switch (`POST /api/inbox/settings`). The Board's claim stamps its reveal and the spacing clock in one
+   * on" writes the switch (`POST /api/inbox/settings`). The Board's claim stamps its reveal and the line in one
    * save, never the first-visit dialog (the owner, 2026-11-04, review of #2598 finding 5): the offer has no Copy prompt,
    * so the first visit to a Board turned on (from the offer, or later in Settings after "Not now") shows the welcome
    * with Copy prompt; someone who saw it before (its `inboxBoardIntro.shownAt`) does not see it again. `show`: the page
    * draws the dialog. `key` (the page's own, kept with the stamp): the same page's retry after a lost answer gets
    * `show: true` again, without a write, while the feature is still undecided; any other key, window or device does not.
+   * `agent_note`: the agent note (a setup dialog), on this computer only: the line's day and load rules, no spacing.
    */
-  const claimReveal = (id: RevealId, owner: boolean, key: string | null = null): boolean => {
-    if (id === "snooze") return claimSnoozeIntro(owner);
-    if (id === "steps") return claimStepsReveal(owner, key);
-    if (id !== "board" || !owner || !snoozeIntroRelease) return false;
-    if (key && loadConfig().inboxReveals?.board?.key === key) return boardUndecided();
+  const claimReveal = (
+    id: RevealId | "agent_note",
+    owner: boolean,
+    key: string | null = null,
+    load: string | null = null,
+    via: RequestVia = "local",
+    agents: string[] | null = null,
+  ): boolean => {
+    if (id === "agent_note") return claimAgentNote(via, load, agents);
+    if (id === "snooze") return claimSnoozeIntro(owner, load);
+    const undecided = lineOffers[id];
+    if (!undecided || !owner || !snoozeIntroRelease) return false;
+    if (key && lineOfferSaved(id)?.key === key) return undecided();
     const now = new Date();
-    if (!revealMayClaim("board", revealState(now), now) || !boardUndecided()) return false;
+    if (!revealMayClaim(id, revealState(now, load), now) || !undecided()) return false;
     const at = now.toISOString();
-    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, lastShownAt: at, board: { shownAt: at, ...(key ? { key } : {}) } } });
+    saveConfig({ inboxReveals: { ...revealStamp(loadConfig().inboxReveals, at, { spaced: true, load }), [id]: { shownAt: at, ...(key ? { key } : {}) } } });
     // Not written (a read-only data dir): showing it anyway would show it on every load.
-    return loadConfig().inboxReveals?.board?.shownAt === at;
+    return lineOfferSaved(id)?.shownAt === at;
   };
   /**
-   * The Checklist's reveal (approval "inbox-checklist-reveal", 2026-11-04): the claim stamps the reveal and the spacing
-   * clock in one save and turns nothing on, as the Board's. "Turn it on" in `ChecklistIntro` writes `inboxSteps`.
+   * The agent note (approval "inbox-one-time-dialogs": setup): never on the load after a dialog, never on a day that had
+   * one; it stamps the day, not the spacing. Once for each agent (`agents`, the ones it would ask about): a note left
+   * unanswered is not shown again for the same agents, so it never takes another day (`revealAgentNoteNew`). A dev
+   * build keeps no line: always yes.
    */
-  const claimStepsReveal = (owner: boolean, key: string | null): boolean => {
-    if (!owner || !snoozeIntroRelease) return false;
-    if (key && loadConfig().inboxReveals?.steps?.key === key) return stepsUndecided();
+  const claimAgentNote = (via: RequestVia, load: string | null, agents: string[] | null): boolean => {
+    if (via !== "local") return false;
+    if (!snoozeIntroRelease) return true;
+    const saved = loadConfig().inboxReveals;
+    if (!revealAgentNoteNew(saved?.agentNote?.shownFor, agents) || !lineFree("setup", load)) return false;
+    const at = new Date().toISOString();
+    const shownFor = agents ? [...new Set([...(saved?.agentNote?.shownFor ?? []), ...agents])] : saved?.agentNote?.shownFor;
+    return saveConfig({ inboxReveals: { ...revealStamp(saved, at, { spaced: false, load }), ...(shownFor ? { agentNote: { shownFor } } : {}) } });
+  };
+  /**
+   * What a settings read reports of the line (`reveal`), from one read of its state (one walk of the threads for heavy
+   * use): the dialog this page may arm, the `ahead` offers it may also arm at their moment, and the agent note's `setup`.
+   */
+  const lineReport = (owner: boolean, via: RequestVia, load: string | null) => {
     const now = new Date();
-    if (!revealMayClaim("steps", revealState(now), now) || !stepsUndecided()) return false;
-    const at = now.toISOString();
-    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, lastShownAt: at, steps: { shownAt: at, ...(key ? { key } : {}) } } });
-    return loadConfig().inboxReveals?.steps?.shownAt === at;
+    const state = revealState(now, load);
+    const next = revealNow(owner, load, { now, state });
+    return {
+      next,
+      ahead: owner && snoozeIntroRelease ? revealAhead(state, now) : [],
+      setup: via === "local" && revealLineFree("setup", state, now),
+      line: snoozeIntroRelease,
+    };
+  };
+  /** An offer closed with Not now (Escape, a click outside): the next dialog waits three days. A release build, the owner. */
+  const revealNotNow = (owner: boolean) => {
+    if (!owner || !snoozeIntroRelease) return;
+    saveConfig({ inboxReveals: revealStampNotNow(loadConfig().inboxReveals, new Date().toISOString()) });
   };
   const experimentalState = () => ({
     decision_mode: { on: decisionModeOn(), env: parseExperimentalEnv("decision-mode") ?? null },
@@ -2443,7 +2544,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * Storage sizes too, a walk of every file, for a page older than GET /api/inbox/settings/storage (it reads
    * `settings.store` and breaks without it); a current page asks with `?store=0` and reads the sizes on their own.
    */
-  const settingsModel = (via: RequestVia, guest: boolean, withStore: boolean) => ({
+  const settingsModel = (via: RequestVia, guest: boolean, withStore: boolean, load: string | null = null, line = lineReport(!guest, via, load)) => ({
     serverSession,
     /** Over your tailnet: the switch, the address or why not, and who may open it. */
     tailscale: tailscale.state(),
@@ -2468,9 +2569,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     /** The one-time list options dialog: whether it waits to be claimed (POST /api/inbox/list-intro). */
     list_intro: listIntroState(),
     /** The one-time Snooze announcement: whether it waits to be claimed by this page (POST /api/inbox/snooze-intro). */
-    snooze_intro: snoozeIntroState(!guest),
-    /** The reveals for returning users (shared/inbox/reveals.ts): the one this page may arm, or null. Never for a guest. */
-    reveal: { next: revealNow(!guest) },
+    snooze_intro: { due: !guest && line.next === "snooze" },
+    /**
+     * The line of one-time dialogs (shared/inbox/reveals.ts): the one this page may arm, or null (never for a guest);
+     * `setup`: the agent note may show on this load (the line's day and load rules; a dev build: always). `line`: this
+     * Inbox keeps the line (a release build): the update-day dialogs show only when they are `next`.
+     */
+    reveal: line,
     /** Settings → Voice: off unless turned on. Never a key: its source and, for a saved one, its last 4. */
     voice: voice.settings(via, guest),
     /** Settings → About: update notices and automatic updates. */
@@ -3424,12 +3529,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     usedBefore,
     decidesIntro: normalizeStableVersion(version) !== null,
     computerName: () => phones?.machineDoor.computerName() ?? "this computer",
-    // It goes last: the sound and list options dialogs first, whatever keeps them waiting.
-    otherDialogDue: () => soundState().dialog_due || listIntroState().due,
+    // It goes last: the sound and list options dialogs first, whatever keeps them waiting; and the line's day, load and
+    // spacing (shared/inbox/reveals.ts).
+    otherDialogDue: (load) => soundState().dialog_due || listIntroState().due || !lineFree("spaced", load),
+    lineStamp: (at, load) => lineStamp(at, true, load),
     json,
     readBody,
     ...options.voice,
   });
+
+  voiceIntroOpen = () => voice.introOpen();
 
   /** Settings → Accounts (inbox-accounts.ts): this computer's Claude accounts, read through `cswap`. */
   const accounts = createInboxAccountsFor(agentEnvironment, options.accounts);
@@ -4145,7 +4254,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json(perfPhase("disk", () => store.diskUsage()));
       }
       if (path === "/api/inbox/settings") {
-        if (req.method === "GET") return json(settingsModel(via, !ownerOrLocal(req, via), url.searchParams.get("store") !== "0"));
+        if (req.method === "GET") {
+          const guest = !ownerOrLocal(req, via);
+          // The page's load id (api.ts): the line never shows a dialog on the load right after one that did.
+          const load = guest ? null : revealLoadId(req.headers.get("x-plannotator-load"));
+          seeLoad(load);
+          return json(settingsModel(via, guest, url.searchParams.get("store") !== "0", load));
+        }
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
@@ -4276,7 +4391,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        const show = claimSoundDialog(via);
+        const show = claimSoundDialog(via, revealLoadId(req.headers.get("x-plannotator-load")));
         return json({ show, sound: soundState() });
       }
 
@@ -4286,7 +4401,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        return json({ show: claimListIntro(via), list_intro: listIntroState() });
+        return json({ show: claimListIntro(via, revealLoadId(req.headers.get("x-plannotator-load"))), list_intro: listIntroState() });
       }
 
       // The one-time Snooze announcement (approval "inbox-snooze-announce"): the first page to ask gets `show: true`,
@@ -4296,7 +4411,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const owner = ownerOrLocal(req, via);
-        return json({ show: claimSnoozeIntro(owner), snooze_intro: snoozeIntroState(owner) });
+        const load = revealLoadId(req.headers.get("x-plannotator-load"));
+        return json({ show: claimSnoozeIntro(owner, load), snooze_intro: snoozeIntroState(owner, load) });
       }
 
       // The reveals for returning users (approval "inbox-feature-reveal"): one compare-and-set over the queue. Only the
@@ -4306,13 +4422,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const id = body.id;
-        if (id !== "snooze" && id !== "board" && id !== "steps") throw new InboxError("validation_error", "id: snooze, board or steps.", { field: "id" });
+        if (body.answer !== undefined && body.answer !== "not_now") throw new InboxError("validation_error", "answer: not_now.", { field: "answer" });
+        // A claim: Snooze, the agent note or an offer of the line. Not now: an offer of the queue (an update-day dialog's
+        // Not now keeps the usual day, approval "inbox-one-time-dialogs").
+        if (body.answer === "not_now") {
+          if (!revealNotNowAllowed(id)) throw new InboxError("validation_error", `id: ${INBOX_REVEALS.filter((entry) => entry.kind === "offer").map((entry) => entry.id).join(", ")}.`, { field: "id" });
+        } else if (!(id === "snooze" || id === "agent_note" || (typeof id === "string" && id in lineOffers))) {
+          throw new InboxError("validation_error", `id: snooze, agent_note or ${Object.keys(lineOffers).join(", ")}.`, { field: "id" });
+        }
+        // The agent note's agents (the ones it would ask about): it shows once for each. Optional (an older page).
+        const agents = id === "agent_note" ? revealAgentNoteAgents(body.agents) : null;
+        if (agents === undefined) throw new InboxError("validation_error", "agents: a list of agent ids.", { field: "agents" });
         // The page's own key for this claim (a retry after a lost answer sends it again): optional, as an older page sends none.
         const key = body.key;
         if (key !== undefined && (typeof key !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(key))) throw new InboxError("validation_error", "key: 8 to 64 letters, digits, - or _.", { field: "key" });
         const owner = ownerOrLocal(req, via);
-        const show = claimReveal(id, owner, key ?? null);
-        return json({ show, reveal: { next: revealNow(owner) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+        const load = revealLoadId(req.headers.get("x-plannotator-load"));
+        // Not now on an offer already shown: the line waits three days. Nothing is claimed.
+        if (body.answer === "not_now") {
+          revealNotNow(owner);
+          return json({ show: false, reveal: { next: revealNow(owner, load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+        }
+        const show = claimReveal(id as RevealId | "agent_note", owner, key ?? null, load, via, agents);
+        return json({ show, reveal: { next: revealNow(owner, load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
       }
 
       // The Board's first-visit dialog (approval "inbox-board", intro amendment): the first page on this
@@ -4899,7 +5031,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             const replayKey = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
             const fresh = uploads.length > 0 && !store.replyByKey(messageId, replayKey);
             if (fresh && !store.message(messageId)) throw new InboxError("message_not_found", `No message ${messageId}.`);
-            const attachments = fresh ? inboxUploadAttachments(store.dir, uploads, new Date().toISOString()) : [];
+            const attachments = fresh ? await inboxUploadAttachments(store.dir, uploads, new Date().toISOString()) : [];
+            // The same Send while this one copied is a replay, below; another Send of these files already has them.
+            if (fresh && !store.replyByKey(messageId, replayKey)) assertInboxUploadsPending(store.dir, uploads, attachments);
             let result: ReturnType<typeof store.sendReply>;
             try {
               result = store.sendReply(messageId, {
