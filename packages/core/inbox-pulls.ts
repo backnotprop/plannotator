@@ -159,13 +159,24 @@ export interface InboxPullDiffAnswer {
   head: string;
   patch: string;
   /**
-   * The head commit this layer's patch is of, read from the forge just before and just after the patch (null when
-   * they differ, when the forge did not say, and for the whole stack). A review posted from it is pinned to it.
+   * The head commit this patch is of, read from the forge just before and just after the patch (null when they differ
+   * or the forge did not say). The window keeps comments per this head; a review posted from the patch is pinned to it.
    */
   head_sha?: string | null;
 }
 
 export type InboxPullDiffScope = "layer" | "stack";
+
+/**
+ * One changed file's whole text at both ends of its diff, so the viewer's gaps can open. Both null when there is
+ * nothing to open into (see `GET /api/inbox/pulls/file`): the diff then shows as it came, with no arrows.
+ */
+export interface InboxFileContents {
+  /** The forge did not answer (rate limited, offline): both texts are null for now, and asking again may work. */
+  failed?: true;
+  oldContent: string | null;
+  newContent: string | null;
+}
 
 /** The CLI's answers are this many PRs per search at most. */
 export const INBOX_PULLS_SEARCH_MAX = 50;
