@@ -10,7 +10,7 @@
 //
 // The tick never pushes to the default branch and never force-pushes. The
 // agent runs as it normally does, with its full tools (owner ruling
-// 2026-11-07: no limits on agents); whatever it changes is offered in the
+// 2026-11-06: no limits on agents); whatever it changes is offered in the
 // redraw pull request for the person to review, and files outside the drawing
 // are named there and in the note. Every child process has a time bound, so a
 // hung agent, git, hook or gh cannot hold the schedule. The agent, the forge

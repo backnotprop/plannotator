@@ -25,7 +25,7 @@ export type SystemSubcommand = keyof typeof SYSTEM_COMMANDS;
  * The command that runs one unattended redraw with the agent and model the
  * person chose in setup. The agent runs as it normally does, with its full
  * tools and the project's own settings and MCP servers (owner ruling
- * 2026-11-07: no limits on agents). Claude Code runs with
+ * 2026-11-06: no limits on agents). Claude Code runs with
  * `--permission-mode bypassPermissions`, so a run with nobody there never
  * stops on a permission prompt. The prompt goes on stdin where the agent
  * reads it there (Claude Code and Pi), else as the last argument (OpenCode's
