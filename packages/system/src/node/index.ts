@@ -106,3 +106,5 @@ export async function check(o: { dir: string; root: string; roots?: Record<strin
   for (const alias of unchecked) warnings.push(`paths in repo "${alias}" were not checked: no checkout of it was given`);
   return { errors, warnings, missing };
 }
+
+export { gateRepo, parseNameStatus } from './gate-repo.ts';
