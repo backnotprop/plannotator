@@ -3016,6 +3016,8 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
 .pn-inbox[data-stack~="thread"] .ib-prlist:has(~ .ib-prpane) { position: absolute; inset: 0; visibility: hidden; }
 /* It then leads with `‹ Reviews` (PullLaunchpad.tsx `PullPaneBack`), set in from the edge as a covering thread's `‹ Inbox`. */
 .ib-pr-bar:has([data-stack-back]) { padding-left: 10px; }
+/* The way back keeps its word whole; the repository's name is what gets cut in a narrow bar. */
+.pn-inbox .ib-pr-bar .ib-pback { flex: none; max-width: none; }
 .pn-inbox[data-stack~="file"][data-view="file"] .ib-pane.ib-withfile { display: none; }
 /* The thread in full screen (App.tsx `data-thread-full`): the list stays drawn under it, hidden as a stacked
    window hides it, so J/K and G I still read its order and its scroll stays. */
