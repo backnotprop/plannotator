@@ -1247,11 +1247,17 @@ html:has([data-pn-compact-touch-layout='true'])
 diffs-container {
   scrollbar-color: auto;
 }
-/* A wide file's bar pinned to the bottom of its pane while its own is below the screen (DiffBottomBar): Pierre's look. */
+/* A wide file's bar pinned to the bottom of its pane while its own is below the screen (DiffBottomBar): Pierre's look.
+ * The dock is the pane's last child, stuck to its bottom edge and taking no room. */
+.pn-diff-bottom-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  height: 0;
+}
 .pn-diff-bottom-bar {
-  position: fixed;
-  z-index: 30; /* over the Inbox's review (20), under menus and dialogs */
-  transform: translateY(-100%);
+  position: absolute;
+  bottom: 0;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: auto;

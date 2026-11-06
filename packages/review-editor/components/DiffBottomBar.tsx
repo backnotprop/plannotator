@@ -2,19 +2,21 @@
  * GitHub's wide-diff bar: while a file's code runs past the bottom of its scroll pane, a native scrollbar pinned to
  * the pane's bottom edge mirrors that file's sideways scroll (one per column in split view). Pierre's own bar at the
  * bottom of the code stays; this one shows only while that bar is below the screen, and only for the file in view.
+ * It lives inside the pane (a sticky dock at the end of its content), so whatever covers the pane covers it too.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 interface Lane {
   left: number;
-  top: number;
   width: number;
   scrollWidth: number;
 }
 
-/** Pierre's bar is 6px; a file must show at least this much code above the pane's bottom to get one. */
+/** A file must show at least this much code above the pane's bottom to get one. */
 const MIN_CODE_IN_VIEW = 40;
+/** Pierre's room under the last row (its bar and padding): once the last row is on screen, the bar goes, so it never covers it. */
+const CODE_END_ROOM = 8;
 
 /** The element that scrolls `el` up and down: itself, or the nearest ancestor that does. */
 function scrollportOf(el: HTMLElement): HTMLElement | null {
@@ -26,6 +28,8 @@ function scrollportOf(el: HTMLElement): HTMLElement | null {
 
 export function DiffBottomBar({ root }: { root: HTMLElement | null }) {
   const [lanes, setLanes] = useState<Lane[]>([]);
+  const [port, setPort] = useState<HTMLElement | null>(null);
+  const dock = useRef<HTMLDivElement>(null);
   const codes = useRef<HTMLElement[]>([]);
   const bars = useRef<(HTMLDivElement | null)[]>([]);
   const follow = useRef(() => {
@@ -40,13 +44,15 @@ export function DiffBottomBar({ root }: { root: HTMLElement | null }) {
     let frame = 0;
     const measure = () => {
       frame = 0;
-      const port = scrollportOf(root);
-      const bottom = Math.min(port?.getBoundingClientRect().bottom ?? window.innerHeight, window.innerHeight);
+      const scroller = scrollportOf(root);
+      setPort(scroller);
+      if (!scroller) return;
+      const bottom = Math.min(scroller.getBoundingClientRect().bottom, window.innerHeight);
       let found: HTMLElement[] = [];
       for (const host of root.querySelectorAll('diffs-container')) {
         const columns = [...(host.shadowRoot?.querySelectorAll<HTMLElement>('[data-code]') ?? [])].filter((code) => code.scrollWidth > code.clientWidth);
         const box = columns[0]?.getBoundingClientRect();
-        if (box && box.top < bottom - MIN_CODE_IN_VIEW && box.bottom > bottom) {
+        if (box && box.top < bottom - MIN_CODE_IN_VIEW && box.bottom - CODE_END_ROOM > bottom) {
           found = columns;
           break;
         }
@@ -54,9 +60,10 @@ export function DiffBottomBar({ root }: { root: HTMLElement | null }) {
       for (const code of codes.current) if (!found.includes(code)) code.removeEventListener('scroll', follow);
       for (const code of found) code.addEventListener('scroll', follow, { passive: true });
       codes.current = found;
+      const origin = dock.current?.getBoundingClientRect().left ?? scroller.getBoundingClientRect().left;
       const next = found.map((code) => {
         const box = code.getBoundingClientRect();
-        return { left: box.left, top: bottom, width: box.width, scrollWidth: code.scrollWidth };
+        return { left: box.left - origin, width: box.width, scrollWidth: code.scrollWidth };
       });
       setLanes((last) => (JSON.stringify(last) === JSON.stringify(next) ? last : next));
     };
@@ -85,26 +92,28 @@ export function DiffBottomBar({ root }: { root: HTMLElement | null }) {
 
   useLayoutEffect(follow, [lanes, follow]);
 
-  if (lanes.length === 0) return null;
+  if (!port) return null;
   return createPortal(
-    lanes.map((lane, i) => (
-      <div
-        key={i}
-        ref={(el) => {
-          bars.current[i] = el;
-        }}
-        aria-hidden
-        data-diff-bottom-bar
-        className="pn-diff-bottom-bar"
-        style={{ left: lane.left, top: lane.top, width: lane.width }}
-        onScroll={(event) => {
-          const code = codes.current[i];
-          if (code && code.scrollLeft !== event.currentTarget.scrollLeft) code.scrollLeft = event.currentTarget.scrollLeft;
-        }}
-      >
-        <div style={{ width: lane.scrollWidth, height: 1 }} />
-      </div>
-    )),
-    document.body,
+    <div ref={dock} className="pn-diff-bottom-dock">
+      {lanes.map((lane, i) => (
+        <div
+          key={i}
+          ref={(el) => {
+            bars.current[i] = el;
+          }}
+          aria-hidden
+          data-diff-bottom-bar
+          className="pn-diff-bottom-bar"
+          style={{ left: lane.left, width: lane.width }}
+          onScroll={(event) => {
+            const code = codes.current[i];
+            if (code && code.scrollLeft !== event.currentTarget.scrollLeft) code.scrollLeft = event.currentTarget.scrollLeft;
+          }}
+        >
+          <div style={{ width: lane.scrollWidth, height: 1 }} />
+        </div>
+      ))}
+    </div>,
+    port,
   );
 }
