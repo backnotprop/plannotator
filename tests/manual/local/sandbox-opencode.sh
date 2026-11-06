@@ -1,4 +1,5 @@
 #!/bin/bash
+# Manual QA: starts from your real HOME on purpose (with --isolated, the session gets a scratch HOME). For an isolated test run, use `bun run test:sandbox`.
 # Sandbox script for testing Plannotator OpenCode plugin locally
 #
 # Usage:
