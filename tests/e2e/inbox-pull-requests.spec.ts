@@ -1637,11 +1637,16 @@ test('the sheets cover the diff and nothing else at 800 and 1100, a phone\'s Com
     const sheet = (await rail.boundingBox())!;
     const body = (await review.locator('.ib-gbody').boundingBox())!;
     expect(Math.abs(sheet.y - body.y)).toBeLessThanOrEqual(1);
-    // One sheet at a time, from either side.
+    // One sheet at a time: Comments closes Files. A phone's Comments takes the whole window, so Files is not reached
+    // from it; closed, the page is back with no Files sheet.
     await review.locator('.ib-vcomments').click();
     await expect(rail).toBeHidden();
-    await button.click();
+    await expect(button).toHaveAttribute('aria-expanded', 'false');
+    await review.locator('.ib-gpanel').getByRole('button', { name: 'Close the comments' }).click();
     await expect(review.locator('.ib-gpanel')).toBeHidden();
+    await expect(rail).toBeHidden();
+    await button.click();
+    await expect(rail).toBeVisible();
     // The circle leaves the sheet open; picking a file closes it, shows the file and gives focus back to the button.
     await review.locator('[data-review-file="src/app.ts"]').hover();
     await review.locator('[data-review-file="src/app.ts"] [role="checkbox"]').click();
