@@ -21,6 +21,7 @@
 //   SYSTEM_URL=http://127.0.0.1:<port>/ node scripts/measure.mjs
 //   MOVES=dive-inbox,... (default all)  TRIES=3  MODE=light  OUT=<dir>  NAME=a4
 //   PASS=rt|film|both  SHOTS=0 to skip the strips  CHROMIUM=<executable>
+//   WHO=<px> names the box behind every step over px.
 //   STRICT=1 exits 1 when a check fails (a step that grows, a long task, a flash).
 // The script can also measure another build of the same drawing: import
 // { run } and pass an adapter like PAGE below.
@@ -54,7 +55,9 @@ export const PAGE = {
   sw: '.sys-seg-o:not([data-on])',
   state: () => {
     const r = document.querySelector('.sys-view');
-    return { code: r?.dataset.sheet, depth: document.querySelectorAll('.sys-crumbs .sys-crumb-w').length };
+    // the crumbs name the window's inside once a door is past half open; the world is still rooted one level up
+    const shown = document.querySelector('.sys-crumbs .sys-code')?.textContent;
+    return { code: r?.dataset.sheet, depth: document.querySelectorAll('.sys-crumbs .sys-crumb-w').length - (shown && shown !== r?.dataset.sheet ? 1 : 0) };
   },
   windowName: (win) => document.querySelector(`.sys-cur [data-part="${win}"]`)?.getAttribute('aria-label')?.split(',')[0] ?? null,
   /** The keys act with the drawing in focus: a click on the stage's corner. */
@@ -74,6 +77,8 @@ export const MOVES = {
   'key-minus': { act: key('-'), ms: 900, title: 'Key -: zoom out one step on the landing' },
   'key-fit': { pre: async (p) => { await p.keyboard.press('+'); await p.keyboard.press('+'); }, act: key('f'), ms: 1100, title: 'Key F: fit after two + steps' },
   'turn-esc': { act: cue('inbox'), turn: { at: 250, k: 'Escape' }, ms: 1700, win: 'inbox', title: 'A dive turned round: Escape 250 ms into the dive into the Inbox' },
+  'reduced-dive': { act: cue('inbox'), reduce: true, ms: 700, win: 'inbox', title: 'Reduced motion: the dive into the Inbox is a cut, the drawing fades up' },
+  'reduced-simple': { act: sw, reduce: true, ms: 700, title: 'Reduced motion: Full to Simple is a cut, the drawing fades up' },
   'turn-wheel': { act: cue('inbox'), turn: { at: 250, dy: 100, n: 3 }, ms: 1700, win: 'inbox', title: 'A dive turned round: the wheel out 250 ms into the dive into the Inbox' },
 };
 
@@ -120,9 +125,12 @@ export async function run({ A = PAGE, base, out, name = A.name, mode = 'light', 
     p.on('pageerror', (e) => errs.push((M.sheet || '') + ': ' + e.message));
     if (clock) await p.clock.install();
     await p.goto(A.url(base, mode, M.sheet));
-    if (clock) { await p.clock.runFor(2500); } else await p.waitForTimeout(2500);
+    await p.waitForTimeout(2500);
     if (A.focus) await A.focus(p, A);
     await p.mouse.move(4, 300);
+    // the film's clock stands still between steps: a screenshot takes real time, and a clock that runs on would
+    // put 32 or 48 ms between frames, not 16
+    if (clock) { await p.clock.pauseAt(await p.evaluate(() => Date.now() + 100)); await p.clock.runFor(400); }
     const glass = await p.locator(A.stage).first().boundingBox();
     return { ctx, p, glass };
   };
@@ -261,21 +269,25 @@ export async function run({ A = PAGE, base, out, name = A.name, mode = 'light', 
     return out;
   };
   const boxStep = (a, c) => {
-    let m = 0;
-    for (const [x, y] of pairsOf(a, c)) { const ink = Math.min(x[4], y[4]); for (let i = 0; i < 4; i++) m = Math.max(m, Math.abs(y[i] - x[i]) * ink); }
+    let m = 0, who = '';
+    for (const [x, y, id] of pairsOf(a, c)) { const ink = Math.min(x[4], y[4]); for (let i = 0; i < 4; i++) { const v = Math.abs(y[i] - x[i]) * ink; if (v > m) { m = v; who = `${id} edge ${i} ${x[i].toFixed(0)}>${y[i].toFixed(0)} ink ${ink.toFixed(2)}`; } } }
+    if (process.env.WHO && m > +process.env.WHO) console.log(`    step ${m.toFixed(1)} ${who} (depth ${a.depth}>${c.depth}, ${a.code}>${c.code})`);
     return m;
   };
 
   async function film(nm) {
     const M = MOVES[nm];
     const { ctx, p, glass } = await open(M, true);
-    if (M.pre) { await M.pre(p, A); await p.clock.runFor(2000); await p.mouse.move(4, 300); }
+    // in 16 ms steps: one runFor(2000) fires every timer and frame in a burst, before React (on a real message
+    // channel) has rendered what a timer asked for, and a move started then would never get its frames
+    if (M.pre) { await M.pre(p, A); for (let i = 0; i < 125; i++) await p.clock.runFor(16); await p.mouse.move(4, 300); }
     const sync = () => p.evaluate(() => { for (const a of document.getAnimations()) if (a.__born != null) { a.pause(); a.currentTime = Math.max(0, performance.now() - a.__born); } });
+    const now = () => p.evaluate(() => performance.now());
     if (M.wheel) await p.mouse.move(...(await wheelPt(p, M, glass)));
     const N = Math.round(M.ms / FILM);
     const frames = [];
     const shot = async () => (await p.screenshot({ type: 'png', scale: 'css' })).toString('base64');
-    frames.push({ i: -1, ...(await look(p, M.win, glass)), png: await shot() });
+    frames.push({ i: -1, at: await now(), ...(await look(p, M.win, glass)), png: await shot() });
     const code0 = frames[0].code;
     let notches = 0, turned = 0;
     if (!M.wheel) await M.act(p, A);
@@ -285,8 +297,10 @@ export async function run({ A = PAGE, base, out, name = A.name, mode = 'light', 
       if (M.turn && i * FILM >= M.turn.at && turned < (M.turn.n || 1) && i % 2 === 0) { if (M.turn.k) await p.keyboard.press(M.turn.k); else await p.mouse.wheel(0, M.turn.dy); turned++; }
       await p.clock.runFor(FILM);
       await sync();
-      frames.push({ i, ...(await look(p, M.win, glass)), png: await shot() });
+      frames.push({ i, at: await now(), ...(await look(p, M.win, glass)), png: await shot() });
     }
+    const gaps = frames.slice(1).map((f, i) => f.at - frames[i].at).filter((d) => Math.abs(d - FILM) > 1);
+    if (gaps.length) console.log(`    clock: ${gaps.length} frames not ${FILM} ms apart (${gaps.slice(0, 5).map((d) => d.toFixed(0)).join(', ')})`);
     await ctx.close();
     const dd = await diffs(frames.map((f) => f.png));
     frames.forEach((f, i) => { f.diff = dd[i]; f.step = i ? boxStep(frames[i - 1], f) : 0; });
