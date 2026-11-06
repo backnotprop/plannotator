@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { ChatWindowStore, useChatFrameFocusReturn } from '@plannotator/ui/components/chat';
 import { inboxApi, type InboxAskChat, type InboxAskConversationWire, type InboxAskModel } from '../api';
+import { useOpenInCodeRegion } from '../components/OpenIn';
 import { Tip } from '../components/Tip';
 import { AskChat } from './AskChat';
 import { onAskChange } from './askEvents';
@@ -8,6 +9,8 @@ import { onAskChange } from './askEvents';
 export interface InboxAskOptions {
   /** `ask_ai` in the settings, and not the tour: while false nothing is read and nothing shows. */
   on: boolean;
+  /** Settings → Capabilities → Code review: a code span in an answer shows its code, as in a message. */
+  codeReview: boolean;
   /** The open thread, when this Inbox holds it. */
   threadId: string | null;
   phone: boolean;
@@ -48,7 +51,7 @@ function SparklesIcon() {
 /** Each seed's token, unique in this window. */
 let seedCount = 0;
 
-export function useInboxAsk({ on, threadId, phone, openThread, replyInThread }: InboxAskOptions): InboxAskParts {
+export function useInboxAsk({ on, codeReview, threadId, phone, openThread, replyInThread }: InboxAskOptions): InboxAskParts {
   const store = useMemo(() => new ChatWindowStore(), []);
   const minimized = useSyncExternalStore(store.subscribe, () => store.minimized);
   useChatFrameFocusReturn(store);
@@ -165,12 +168,15 @@ export function useInboxAsk({ on, threadId, phone, openThread, replyInThread }: 
     [store],
   );
 
+  const region = useOpenInCodeRegion({ thread: askFor ?? '' }, codeReview && !!askFor);
+
   return {
     askWith,
     button: icon('ib-iconbtn ib-artbtn'),
     fileButton: icon(pressed ? 'ib-fvb ib-on' : 'ib-fvb'),
     layer: askFor ? (
-      <div className="ib-ask-layer" data-ask-layer="" onPointerDownCapture={keepFocusIn}>
+      // The code window's handlers sit on the layer itself: ChatFrame sizes itself from this element.
+      <div className="ib-ask-layer" data-ask-layer="" onPointerDownCapture={keepFocusIn} {...region.handlers}>
         <AskChat
           key={askFor}
           threadId={askFor}
@@ -193,6 +199,7 @@ export function useInboxAsk({ on, threadId, phone, openThread, replyInThread }: 
           onReload={reload}
           onReply={(words) => replyInThread(askFor, words)}
         />
+        {region.window}
       </div>
     ) : null,
   };

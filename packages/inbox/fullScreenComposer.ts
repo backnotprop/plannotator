@@ -99,6 +99,12 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
+/** Whether the thread's card is folded to its pill (`composerMinimized`), redrawn when it changes. No thread: false. */
+export function useComposerFolded(threadId: string | null, foldedByDefault = false): boolean {
+  useSyncExternalStore(subscribe, () => version, () => version);
+  return threadId !== null && composerMinimized(threadId, foldedByDefault);
+}
+
 /** The thread's tab and minimized state, redrawn when either changes. */
 export function useComposerState(threadId: string, hasDraft: boolean, takesComments: boolean, foldedByDefault = false) {
   useSyncExternalStore(subscribe, () => version, () => version);
