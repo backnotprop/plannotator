@@ -7,6 +7,8 @@
  * the hand-off (the picker, one thread at a time) and passes it in. No keyboard shortcuts of its own.
  */
 import { useId, useRef, type ReactNode, type Ref, type RefObject } from 'react';
+import { usePhoneHeadFit } from '../headFit';
+import { useInboxTextSize } from '../textSize';
 import type { InboxPull, InboxPullLink, InboxPullStack } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import type { InboxShapeSummary } from '../api';
@@ -53,13 +55,19 @@ function Door({ kind, icon, title, sub, soon, wide, box, thread, children }: { k
  * and the pane side by side (stack.ts, `stacked`). The same control a covering thread leads with (`‹ Inbox`,
  * components/Thread.tsx), so a PR and a thread close the same way. Null beside the list, where Close (×) is the way.
  */
+/** The least room the bar's number and repository keep on a phone before `‹ Reviews` shows its chevron alone. */
+const SUBJECT_FLOOR_PX = 170;
+
 export function PullPaneBack({ phone, stacked, onClose }: { phone: boolean; stacked: boolean; onClose: () => void }) {
   if (phone) {
+    // Short of room the bar shows the chevron alone (`usePhoneHeadFit`, as a thread's `‹ Inbox`): the name stays.
     return (
-      <button type="button" className="ib-pback" onClick={onClose} aria-label="Back to Reviews" data-phone-back="">
-        <Icon name="chevL" size={18} />
-        <span className="ib-pback-l">Reviews</span>
-      </button>
+      <Tip content="Back to Reviews">
+        <button type="button" className="ib-pback" onClick={onClose} aria-label="Back to Reviews" data-phone-back="">
+          <Icon name="chevL" size={18} />
+          <span className="ib-pback-l">Reviews</span>
+        </button>
+      </Tip>
     );
   }
   if (!stacked) return null;
@@ -131,20 +139,25 @@ export function PullLaunchpad({
   const repo = stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`;
   const checks = checksWords(pr);
   const agentMark = <HostMark host={link?.agent?.host ?? null} />;
+  // A phone's bar gives way as a thread's header does (headFit.ts): `‹ Reviews` shows its chevron alone before the
+  // PR's number and repository (its subject) lose their room.
+  const bar = useRef<HTMLDivElement>(null);
+  usePhoneHeadFit(bar, phone, [stacked, inboxPullLabel(pr), repo, useInboxTextSize()].join('|'));
   return (
     <section className="ib-pane ib-prpane ib-lp" aria-labelledby={titleId} data-pulls-stack={stack.id} data-launchpad="">
-      <div className="ib-pr-bar ib-lp-bar">
+      <div ref={bar} className="ib-pr-bar ib-lp-bar">
         <PullPaneBack phone={phone} stacked={stacked} onClose={onClose} />
-        <span className="ib-lp-mark ib-bc-mark" data-card-mark={pr.state} data-card-mark-kind="pr" aria-hidden="true">
-          <RefMarkIcon kind="pr" state={pr.state} size={15} />
-        </span>
-        <span className="ib-lp-num">{inboxPullLabel(pr)}</span>
-        <Tip cut content={repo}>
-          <span className="ib-lp-repo" dir="auto">
-            {repo}
+        <span className="ib-lp-id" data-fit-subject={SUBJECT_FLOOR_PX}>
+          <span className="ib-lp-mark ib-bc-mark" data-card-mark={pr.state} data-card-mark-kind="pr" aria-hidden="true">
+            <RefMarkIcon kind="pr" state={pr.state} size={15} />
           </span>
-        </Tip>
-        <span className="ib-sp" />
+          <span className="ib-lp-num">{inboxPullLabel(pr)}</span>
+          <Tip cut content={repo}>
+            <span className="ib-lp-repo" dir="auto">
+              {repo}
+            </span>
+          </Tip>
+        </span>
         <a className="ib-pr-ext" href={pr.url} target="_blank" rel="noreferrer noopener" data-pulls-open-forge="">
           <Icon name="external" size={15} />
           {phone ? <span className="ib-sr">Open on {forge}</span> : `Open on ${forge}`}

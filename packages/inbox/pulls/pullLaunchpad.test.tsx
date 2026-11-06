@@ -11,6 +11,8 @@
  *  - the Shape board door offering a board that is not there, or showing while Shape is off;
  *  - the details panel drawing its own head (author, branches, Close) under the page's;
  *  - a PR pane covering the list (stack.ts) with no way back to it but Close, unlike a covering thread's ‹ Inbox;
+ *  - a phone's bar keeping `‹ Reviews` whole when the PR's number and repository have no room (a thread's
+ *    header gives way the same, headFit.ts);
  *  - the stack page's Your review pill leaving its PR's number for the row's end (owner, q-f4030127).
  *
  * Element checks are booleans: a failing match on a happy-dom node prints the whole window.
@@ -197,6 +199,33 @@ test.skipIf(!hasDom)('one open PR opens its launchpad; a stack of several keeps 
   await settle();
   expect(!!$('[data-launchpad]')).toBe(false);
   expect(document.querySelectorAll('[data-pulls-layer]')).toHaveLength(2);
+});
+
+test.skipIf(!hasDom)("a phone's bar short of room shows ‹ Reviews as its chevron alone, as a thread's ‹ Inbox; with room, the word", async () => {
+  // happy-dom draws no boxes: the bar is `width` wide, its number and repository take what the way back leaves.
+  const real = Element.prototype.getBoundingClientRect;
+  let width = 320;
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    const bar = this.closest('.ib-pr-bar');
+    const chevronAlone = bar?.getAttribute('data-fit')?.split(' ').includes('back') ?? false;
+    const w = this.classList.contains('ib-pr-bar') ? width : this.hasAttribute('data-fit-subject') ? width - (chevronAlone ? 150 : 230) : this.classList.contains('ib-pback-l') && !chevronAlone ? 70 : 0;
+    return { left: 0, right: w, width: w, top: 0, bottom: 20, height: 20, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+  };
+  try {
+    mount(single.key, answer(), { phone: true });
+    await settle();
+    const bar = $('.ib-pr-bar')!;
+    expect(!!bar.querySelector('[data-phone-back][aria-label="Back to Reviews"]')).toBe(true);
+    expect((bar.getAttribute('data-fit') ?? '').split(' ').includes('back')).toBe(true);
+    act(() => root!.unmount());
+    host!.remove();
+    width = 420;
+    mount(single.key, answer(), { phone: true });
+    await settle();
+    expect($('.ib-pr-bar')!.hasAttribute('data-fit')).toBe(false);
+  } finally {
+    Element.prototype.getBoundingClientRect = real;
+  }
 });
 
 test.skipIf(!hasDom)("the stack page's Your review pill sits beside its PR's number, not alone at the row's end", async () => {

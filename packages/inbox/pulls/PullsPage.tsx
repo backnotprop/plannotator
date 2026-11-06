@@ -72,6 +72,8 @@ import { forgeName, initials, repoLabels, repoName } from './labels';
 import { answeredClis, pullsEmptyWords, pullsNotices } from './notices';
 import { ReviewPicker } from './ReviewPicker';
 import { PullLaunchpad, PullPaneBack } from './PullLaunchpad';
+import { usePhoneHeadFit } from '../headFit';
+import { useInboxTextSize } from '../textSize';
 import { chainMarks, landsNextLayer, layerBaseWords, stackLink, startLayer } from './topology';
 import type { PullsState } from './usePulls';
 
@@ -572,6 +574,9 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   }, [stack.id, phone]);
   const forge = forgeName(stack);
   const many = open.length > 1;
+  // A phone's bar gives way as a thread's header does (headFit.ts; the launchpad's bar too).
+  const bar = useRef<HTMLDivElement>(null);
+  usePhoneHeadFit(bar, phone, [!!props.stacked, stack.id, useInboxTextSize()].join('|'));
   // One review thread at a time: the picker opens only while there is none, or its agent has ended.
   const canStart = open.length > 0 && (!link || ended);
   const [picking, setPicking] = useState(false);
@@ -684,7 +689,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   }
   return (
     <section className="ib-pane ib-prpane" aria-labelledby={titleId} data-pulls-stack={stack.id}>
-      <div className="ib-pr-bar">
+      <div ref={bar} className="ib-pr-bar">
         <PullPaneBack phone={phone} stacked={!phone && !!props.stacked} onClose={props.onClose} />
         <a className="ib-pr-ext" href={(many ? top : (start ?? top)).url} target="_blank" rel="noreferrer noopener" data-pulls-open-forge="">
           <Icon name="external" size={15} />

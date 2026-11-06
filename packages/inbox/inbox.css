@@ -8216,6 +8216,12 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-pm-pos[data-phone] .ib-pc-menu .ib-pmi .ib-pmi-n { font-size: var(--ib-fs-14, 14px); }
   .ib-pr-bar { height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 8px 0 4px; }
   .pn-inbox .ib-pr-bar .ib-iconbtn, .pn-inbox .ib-pr-ext { min-width: 44px; min-height: 44px; justify-content: center; }
+  /* Short of room the bar gives way as a thread's header does (headFit.ts, `data-fit`): `‹ Reviews` tightens, then
+     shows its chevron alone (its name says where); a subject with no room even then is not drawn. */
+  .pn-inbox .ib-pr-bar[data-fit~="tight"] .ib-pback { padding-right: 6px; }
+  .ib-pr-bar[data-fit~="back"] .ib-pback-l { display: none; }
+  .pn-inbox .ib-pr-bar[data-fit~="back"] .ib-pback { width: 44px; padding: 0; justify-content: center; }
+  .ib-pr-bar[data-subject-off] [data-fit-subject] { visibility: hidden; }
   .ib-pr-body { padding: 18px 16px 24px; }
   .ib-pr-h { font-size: var(--ib-fs-22, 22px); }
   .ib-pr-actions .ib-pr-note { flex-basis: 100%; }
@@ -8775,7 +8781,8 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 }
 
 /* One PR's launchpad (approval "pr-launchpad", pulls/PullLaunchpad.tsx). Its width decides the grid, not the window's. */
-.ib-lp-bar > .ib-sp { flex: 1 1 auto; }
+/* The PR's mark, number and repository: the bar's subject (headFit.ts `[data-fit-subject]`), which takes the room. */
+.ib-lp-id { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; }
 .ib-lp-mark { display: inline-flex; flex: none; }
 .ib-lp-num { flex: none; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-lp-repo { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); }

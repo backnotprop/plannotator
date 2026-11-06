@@ -146,6 +146,7 @@ import { isPhone, isTouchPhone, trackKeyboard, usePhone } from './phone';
 import { installPasteFollowsField } from './pasteTarget';
 import { installPlainTextPaste } from '@plannotator/ui/utils/pasteInsert';
 import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, paneGutters, useStack } from './stack';
+import { usePrPaneFocus } from './pulls/prPaneFocus';
 import { threadPanelShows, useThreadPanel } from './threadPanel';
 import { ListColumnEdge } from './shell/ListColumnEdge';
 import { backBy, backTo, pushScreen, settleLanding, whileWritingRoute, withoutClickSignal } from './history';
@@ -5077,6 +5078,10 @@ function Inbox() {
       focusFirst([`.ib-listcol .ib-lbody [data-thread-id="${CSS.escape(row)}"]`, `.ib-listcol .ib-lbody [data-thread-id="${CSS.escape(before.thread)}"]`]);
     }
   }, [view, route.thread, stack.thread, phone]);
+  // A PR's pane on the Reviews page (its launchpad, or a stack's page) covers the list the same way, and focus follows
+  // it as it follows a thread (pulls/prPaneFocus.ts): opened or shrunk over the list, to its `‹ Reviews`; back, to its row.
+  const prPane = route.page === 'reviews' && !route.layer ? (route.stack ?? null) : null;
+  usePrPaneFocus(prPane, stack.thread, phone, focusFirst);
 
   // The window resized across the stacking width with a thread open. Into it: a list row that
   // had focus is now hidden under the pane (and redrawn), so focus would drop to the page; it goes to the
