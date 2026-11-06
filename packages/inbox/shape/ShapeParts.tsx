@@ -114,7 +114,7 @@ export function ShapeLayer({
     setFailedOn(id);
   }, [id]);
   return (
-    <section className="ib-shape-layer pn-shape" data-shape-layer={id} aria-label="Shape" inert={covered || undefined}>
+    <section className="ib-shape-layer ib-wlayer pn-shape" data-shape-layer={id} aria-label="Shape" inert={covered || undefined}>
       <PanePart key={attempt} loading={<div className="ib-shape-loading" aria-busy="true" />} onFailed={failed}>
         <ShapeBoard
           host={host}

@@ -83,6 +83,7 @@ export const TableToolbar: React.FC<TableToolbarProps> = ({
   return createPortal(
     <div
       ref={toolbarRef}
+      data-table-toolbar=""
       className="fixed z-[100] bg-popover border border-border rounded-md shadow-md"
       style={style}
       onMouseDown={(e) => e.stopPropagation()}
