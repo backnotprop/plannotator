@@ -142,6 +142,57 @@ export function DetailsStatus({ data }: { data: InboxPullDetailsAnswer | null })
   );
 }
 
+/**
+ * Whether the bar keeps its Details button beside the PR's title. The title opens the details either way (the owner's
+ * suggestion); with no button, the title carries the button's status (the checks' dot and the people's comments). The
+ * owner chose the title only (approval "inbox-review-details-panel", addendum "title only").
+ */
+export const DETAILS_BUTTON: boolean = false;
+
+/** The bar's Details button, while `DETAILS_BUTTON` keeps it. */
+export function DetailsButton({ open, data, onToggle }: { open: boolean; data: InboxPullDetailsAnswer | null; onToggle: (event: React.MouseEvent<HTMLElement>) => void }) {
+  if (!DETAILS_BUTTON) return null;
+  return (
+    <Tip content="Description, comments, checks and reviewers">
+      <button type="button" className={`ib-prp-dbtn${open ? ' ib-on' : ''}`} aria-expanded={open} onClick={onToggle} data-pull-details-button="">
+        Details
+        <DetailsStatus data={data} />
+      </button>
+    </Tip>
+  );
+}
+
+/**
+ * The bar's title as the way to the details: `name` is its visible words, the button's name starts with them and says
+ * what a click does, and so does the last line of its tip. With no Details button, the status rides at its end.
+ */
+export function DetailsTitle({ name, tip, open, data, onToggle, className, children, ...rest }: {
+  name: string;
+  tip: ReactNode;
+  open: boolean;
+  data: InboxPullDetailsAnswer | null;
+  onToggle: (event: React.MouseEvent<HTMLElement>) => void;
+  className: string;
+  children: ReactNode;
+  [data: `data-${string}`]: string;
+}) {
+  return (
+    <Tip
+      content={
+        <span className="ib-tip-proj">
+          {tip}
+          <span className="ib-tip-sub" data-pull-details-hint="">{open ? 'Click to close Details' : 'Click for Details: description, comments, checks and reviewers'}</span>
+        </span>
+      }
+    >
+      <button type="button" className={`${className} ib-dtitle${open ? ' ib-on' : ''}`} aria-expanded={open} aria-label={`${name}, opens details`} onClick={onToggle} data-pull-details-title="" {...rest}>
+        {children}
+        {!DETAILS_BUTTON && <DetailsStatus data={data} />}
+      </button>
+    </Tip>
+  );
+}
+
 function ReviewerRows({ reviewers, host, words }: { reviewers: readonly InboxPullReviewer[]; host: string; words: boolean }) {
   return (
     <ul className="ib-prd-rows" data-pull-details-reviewers="">
@@ -330,7 +381,7 @@ function CommentCard({ comment, layer, onFile }: { comment: InboxPullDetailComme
   );
 }
 
-export function PullDetails({ layer, description, headSha, data, failed, heldUntil = null, onRetry, forge, panel, phone, inDiff, onClose, onFile, top, keys }: {
+export function PullDetails({ layer, description, headSha, data, failed, heldUntil = null, onRetry, forge, panel, phone, inDiff, onClose, onFile, top, keys, descriptionUnread = false }: {
   layer: InboxPull;
   description: string | null | undefined;
   headSha?: string | null;
@@ -349,6 +400,8 @@ export function PullDetails({ layer, description, headSha, data, failed, heldUnt
   /** The phone's sheet: the stack above the details. */
   top?: ReactNode;
   keys?: Record<string, unknown>;
+  /** The description has no other source than the details' read (the full review), and it failed: whether there is one is not known. */
+  descriptionUnread?: boolean;
 }) {
   const labelsId = useId();
   const [opened, setOpened] = useState<'people' | 'checks' | null>(null);
@@ -387,14 +440,14 @@ export function PullDetails({ layer, description, headSha, data, failed, heldUnt
       <button type="button" className="ib-prd-more" onClick={onRetry}>Try again</button>
     </p>
   );
-  const reading = words ? <PullDescription markdown={words} layer={layer} headSha={headSha} /> : data || failed ? <p className="ib-prd-none">No description.</p> : null;
+  const reading = words ? <PullDescription markdown={words} layer={layer} headSha={headSha} /> : data || (failed && !descriptionUnread) ? <p className="ib-prd-none">No description.</p> : null;
   // Held, Try again waits for the time it names: before it, a click could only be refused again.
   const canRetry = useReached(heldUntil);
   const failedNote = failed && (
     <p className="ib-prd-none" role="status" data-pull-details-failed={heldUntil ? 'held' : ''}>
       {heldUntil
         ? `${layer.host} asked to slow down.${canRetry ? '' : ` Try again after ${new Date(heldUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`}`
-        : `${forge} did not answer about the reviewers and checks.`}{' '}
+        : `${forge} did not answer about the ${descriptionUnread ? 'description, ' : ''}reviewers and checks.`}{' '}
       {canRetry && <button type="button" className="ib-prd-more" onClick={onRetry}>Try again</button>}
     </p>
   );
