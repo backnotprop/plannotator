@@ -73,6 +73,10 @@ test('a tap on a highlight opens the sheet at that comment, with its header stil
   await expect(rowOf(page, t.onMessage)).toHaveClass(/ib-at/);
   await expect(rowOf(page, t.onMessage)).toBeInViewport();
   await expect(theList(page, t.count).getByRole('button', { name: 'Close the list' })).toBeInViewport();
+  // A phone's foot has no count to go back to (approval "reply-bar-pairs"): closing puts focus back on the highlight.
+  await page.keyboard.press('Escape');
+  await expect(theList(page, t.count)).toHaveCount(0);
+  await expect(highlight(page, t)).toBeFocused();
   await page.context().close();
 });
 

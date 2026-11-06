@@ -223,7 +223,7 @@ test.skipIf(!hasDom)('one count per thing: the draft status after the buttons co
   expect(labels(buttons!)).toEqual(['Send', 'Edit draft', '1 open question']);
   expect(status!.querySelector('[data-draft-foot]')!.textContent).toContain('1 pick');
   // No skip chip in the foot: it is the open questions list's first row now.
-  expect(row.querySelector('[data-skip-chip], [data-skip-toggle]')).toBeNull();
+  expect(row.querySelector('[data-skip-chip], [data-skip-toggle]') === null).toBe(true);
 
   // Send and Edit draft name the status as their description: the draft note and the skip sentence.
   for (const name of ['Send', 'Edit draft']) {
@@ -253,15 +253,19 @@ test.skipIf(!hasDom)('the skip for this Send is the list\'s first row: Skip it r
   await press(toggle()!);
   await until(() => skipRow()?.getAttribute('data-open-questions-skip-row') === 'skip', 'skipped for this Send');
   // The list stays open so the change shows; the button and Send say it.
-  expect(list()).not.toBeNull();
+  expect(list() !== null).toBe(true);
   expect(skipRow()!.textContent).toBe('1 skipped when you sendKeep open');
   expect(questions().textContent?.trim()).toBe('1 to skip');
-  expect(questions().getAttribute('aria-label')).toBe('1 open question, skipped when you send');
+  expect(questions().getAttribute('aria-label')).toBe('1 question skipped when you send');
+  // Said in the list's live region, as the toggle stays put.
+  const live = () => document.querySelector('[data-open-questions-select-live]')?.textContent ?? '';
+  expect(live()).toBe('1 skipped when you send');
   expect(described(button(foot(el), 'Send'))).toContain('1 question will be skipped');
   // Keep open undoes it.
   await press(toggle()!);
   await until(() => skipRow()?.getAttribute('data-open-questions-skip-row') === 'keep', 'kept open again');
   expect(questions().textContent?.trim()).toBe('1 open question');
+  expect(live()).toBe('1 stays open when you send');
   expect(described(button(foot(el), 'Send'))).toContain('1 question stays open');
   // A skip for one Send is not saved: no pick was written by the toggle.
   expect(posted.filter((p) => p.path.includes('/picks')).length).toBe(picksBefore);

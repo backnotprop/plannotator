@@ -4788,10 +4788,10 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
       pick(q.messageId, q.key, skipToggledAnswer(base));
     }
   };
-  // Shown whenever a question is unanswered or an action item waits, or Re-ask or "Decide these" is offered (they live
-  // in the list, so never out of reach). Every question answered in the draft: no button (approval "reply-bar-pairs":
-  // the draft counts those, on Edit draft or in the Draft status, and the reply box lists them).
-  const openQShown = openQuestionsShown(openQ.questions.filter((q) => !q.picked), reaskShown, openActions.length) || decide !== null;
+  // Shown whenever a question is listed (open, or answered in the draft) or an action item waits, or Re-ask or "Decide
+  // these" is offered (they live in the list, so never out of reach). Every question answered in the draft: the icon
+  // alone, "? ⌄" (approval "reply-bar-pairs": the draft counts those), so the list and its Unskip stay in reach.
+  const openQShown = openQuestionsShown(openQ.questions, reaskShown, openActions.length) || decide !== null;
   /** Where each listed card sits now: in a folded message, or above or below the middle of the thread's view. */
   const measureOpenQuestions = (): ReadonlyMap<string, OpenQuestionPlace> => {
     const places = new Map<string, OpenQuestionPlace>();
@@ -5021,14 +5021,21 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   const listHome = !resolved && !(guard && staleQuestions.length > 0) && newMessage?.kind !== 'compose' && (box.open || !(route.open && asking));
   // The list lives where it opened: another thread, another view, the box opening or closing, or anything taking the foot's place, takes it away.
   useEffect(() => setCommentsList(null), [thread.thread_id, shownFull, box.open, route.open, artifactsOn, listHome]);
-  /** Closes the foot's list. `back`: to the count that shows at this width (the foot's first button once no comment is left). */
+  /**
+   * Closes the foot's list. `back`: to the count that shows at this width; where the foot has none (a phone, approval
+   * "reply-bar-pairs") to the highlight it was opened at; else the foot's first button (no comment left).
+   */
   const closeFootList = (back: boolean) => {
+    const at = commentsList?.at ?? null;
     setCommentsList(null);
     if (!back) return;
     const row = footRowRef.current;
     const links = [...(row?.querySelectorAll<HTMLElement>('[data-comments-link]') ?? [])];
     const link = links.find((el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility === 'visible');
-    (link ?? row?.querySelector<HTMLElement>('button'))?.focus({ preventScroll: true });
+    const mark = !link && at ? bodyRef.current?.querySelector<HTMLElement>(`[data-bind-id="${CSS.escape(at)}"], [data-highlight-id="${CSS.escape(at)}"]`) : null;
+    // A highlight takes no Tab stop of its own: focusable by script only, so the Tab order is unchanged.
+    if (mark && !mark.hasAttribute('tabindex')) mark.setAttribute('tabindex', '-1');
+    (link ?? mark ?? row?.querySelector<HTMLElement>('button'))?.focus({ preventScroll: true });
   };
   const footRowShown = !resolved && !(guard && staleQuestions.length > 0) && newMessage?.kind !== 'compose' && !box.open && !(route.open && asking);
   // What the row shows; a change re-fits it (with its width).
@@ -5046,8 +5053,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     const key = `${row.getBoundingClientRect().width}|${footSig}`;
     if (!force && key === rowFittedFor.current) return;
     rowFittedFor.current = key;
-    // The long form first, on a phone too; there, "N open" before the count (fitWholeFootRowForms).
-    const fit = footStatusShown ? fitWholeFootRowForms(row, phone) : null;
+    // Only with the draft status at the row's end (a computer's foot); a phone's buttons fit themselves.
+    const fit = footStatusShown ? fitWholeFootRowForms(row) : null;
     setRowFit((current) => (current?.level === fit?.level && current?.max === fit?.max ? current : fit));
   };
   // Every render (after the open questions button drew itself), and whenever the row's width changes.
@@ -6529,13 +6536,14 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                 onClick={() => openBox()}
                 data-edit-draft={waiting || draftKept ? '' : undefined}
                 data-reply-button=""
-                aria-label={phone && (waiting || draftKept) ? `Edit draft: ${draftWords}` : undefined}
+                // Its name starts with what it shows (WCAG 2.5.3): "Draft 2: 1 pick, 1 comment. Edit draft".
+                aria-label={phone && (waiting || draftKept) ? `Draft${draftCount > 0 ? ` ${formatCount(draftCount)}` : ''}: ${draftWords}. Edit draft` : undefined}
                 aria-describedby={waiting || draftKept ? footStatusIds : undefined}
                 aria-keyshortcuts={replyKeys}
               >
                 <Icon name={waiting || draftKept ? 'pen' : 'reply'} size={15} />
                 {/* On a phone "Draft 2": the pencil and the draft's count are one button (approval "reply-bar-pairs");
-                    its name says what the count holds ("Edit draft: 1 pick, 1 comment"). On a computer "Edit draft",
+                    its name says what the count holds ("Draft 2: 1 pick, 1 comment. Edit draft"). On a computer "Edit draft",
                     short of room "Edit" (footFit.ts): the words stay as hidden text, so the name is "Edit draft". */}
                 {waiting || draftKept ? (
                   phone ? (
@@ -6639,7 +6647,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                   Its route, door row and code stay; turn SHOW_NEW_MESSAGE_BUTTON on to bring it back. */}
               {SHOW_NEW_MESSAGE_BUTTON && !archived && <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />}
             </div>
-            {(waiting || draftKept) && !phone && (
+            {footStatusShown && (
               <div className="ib-footstatus" data-foot-status="">
                 <DraftFootNote
                   id={draftNoteId}

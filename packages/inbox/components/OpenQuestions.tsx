@@ -160,9 +160,15 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
   const a = actions.length;
   // Only a launched agent's permission prompts wait (no other question, no action item): "1 permission waiting" (screen 09).
   const permission = a === 0 && n > 0 && questions.every((q) => isInboxPermissionSession(q.question.asked_by_agent_id));
-  // This Send skips the unanswered questions: "6 to skip", with the skip glyph.
+  // This Send skips the questions the skip row counted: "6 to skip", with the skip glyph (its count, not the unanswered
+  // ones now: a question that lands after Skip them stays open).
   const skipRow = skip && skip.count > 0 ? skip : null;
   const skipping = skipRow !== null && !skipRow.keepOpen;
+  const skipCount = skipping ? skipRow.count : null;
+  // Every listed question answered in the draft (and no action item): the icon alone, "? ⌄" (approval "reply-bar-pairs").
+  const answered = n + a === 0 && questions.length > 0;
+  /** Said once the skip row's toggle is pressed, in the list's live region: the row's words now. */
+  const [said, setSaid] = useState('');
   const reaskTipId = useId();
   const skipTipId = useId();
   // The long form first on a phone too (owner, 2026-10-30: "it should say both"); "5 open" and "5" when it does not fit.
@@ -183,7 +189,7 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
       if (!button || !words.current || !buttons || !row) return;
       if (rowForm) {
         // The row chose: draw it (the row's own fit already left the page this way).
-        fittedFor.current = `row:${rowForm}|${n}|${a}|${permission}|${skipping}`;
+        fittedFor.current = `row:${rowForm}|${n}|${a}|${permission}|${skipCount}|${answered}`;
         const next = { form: rowForm, tight: false };
         drawOpenQuestionsForm(button, next);
         // The row's `steps` step narrows the checklist there (data-fit), not this fit.
@@ -195,7 +201,7 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
         .filter((el) => el !== button)
         .map((el) => el.textContent ?? '')
         .join('|');
-      const key = `${row.getBoundingClientRect().width}|${n}|${a}|${permission}|${skipping}|${max}|${others}`;
+      const key = `${row.getBoundingClientRect().width}|${n}|${a}|${permission}|${skipCount}|${answered}|${max}|${others}`;
       if (!force && key === fittedFor.current) return;
       fittedFor.current = key;
       // The checklist button beside it gives way first (its chevron), so these words stay whole longest.
@@ -210,7 +216,7 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
       apply(next);
       setFitted((current) => (current.form === next.form && current.tight === next.tight ? current : next));
     },
-    [n, a, permission, skipping, max, rowForm],
+    [n, a, permission, skipCount, answered, max, rowForm],
   );
   // Every render: a button beside it may have come or gone (Send, 👍) with no resize.
   useLayoutEffect(() => fit());
@@ -241,12 +247,18 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
       }, 0);
     };
   }, []);
+  // Skipping: what this Send skips, then the action items, which it never skips ("3 questions skipped when you send,
+  // 1 open action item").
   const label =
-    n + a === 0
-      ? 'Questions'
-      : permission
-        ? openQuestionsLabel(n, 'permission')
-        : `${openItemsLabel(n, a)}${skipping ? ', skipped when you send' : ''}`;
+    skipCount !== null
+      ? `${formatCount(skipCount)} question${skipCount === 1 ? '' : 's'} skipped when you send${a > 0 ? `, ${openQuestionsLabel(a, 'action item')}` : ''}`
+      : n + a === 0
+        ? answered
+          ? 'Questions, all answered in your draft'
+          : 'Questions'
+        : permission
+          ? openQuestionsLabel(n, 'permission')
+          : openItemsLabel(n, a);
   // The list's name counts its rows: a question in the draft is listed too ("Draft · Yes").
   const heading = permission ? openQuestionsHeading(questions.length, 'permission') : openItemsHeading(questions.length, a);
 
@@ -280,6 +292,7 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
   };
   /** The list closes and starts at rest next time: no select mode, no ticks, no focus to move. */
   const resetSelect = () => {
+    setSaid('');
     setSelecting(false);
     setTickedIds(new Set());
     setSkipAllIds(new Set());
@@ -391,7 +404,7 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
         className="ib-btn ib-oq-btn"
         data-open-questions=""
         // A shorter form ("5 open", "5"): the name keeps the whole count.
-        aria-label={form === 'full' && !skipping ? undefined : label}
+        aria-label={form === 'full' && !skipping && !answered ? undefined : label}
         aria-keyshortcuts={keyShortcuts}
         data-label-form={form}
         data-fit-tight={tight ? '' : undefined}
@@ -399,12 +412,13 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
         data-oq-n={n}
         data-oq-actions={a}
         data-oq-permission={permission ? '' : undefined}
-        data-oq-skipping={skipping ? '' : undefined}
+        data-oq-skipping={skipCount !== null ? String(skipCount) : undefined}
+        data-oq-answered={answered ? '' : undefined}
         data-oq-label={label}
       >
         <Icon name={skipping ? 'forward' : 'question'} size={15} />
         <span ref={words} data-oq-words="">
-          {openQuestionsFormText(n, form, a, permission, skipping)}
+          {openQuestionsFormText(n, form, a, permission, skipCount, answered)}
         </span>
         {keyHint}
         <span className="ib-oq-chev" aria-hidden="true">
@@ -415,7 +429,7 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
         {phone && <Menu.Backdrop className="ib-oq-scrim" data-open-questions-scrim="" />}
         {/* The count of ticks, said politely as it changes (outside the menu, whose children are its items). */}
         <span className="ib-sr" role="status" aria-live="polite" data-open-questions-select-live="">
-          {selecting && ticks.size > 0 ? `${formatCount(ticks.size)} selected` : ''}
+          {selecting ? (ticks.size > 0 ? `${formatCount(ticks.size)} selected` : '') : said}
         </span>
         <Menu.Positioner
           className="ib-oq-pos"
@@ -463,7 +477,10 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
                     label={skipRow.keepOpen ? `Skip ${skipRow.count === 1 ? 'it' : 'them'}` : 'Keep open'}
                     aria-label={`${skipRow.keepOpen ? `Skip ${skipRow.count === 1 ? 'it' : 'them'}` : 'Keep open'}: ${skipRowWords(skipRow)}`}
                     closeOnClick={false}
-                    onClick={() => skipRow.onToggle()}
+                    onClick={() => {
+                      skipRow.onToggle();
+                      setSaid(skipRowWords({ ...skipRow, keepOpen: !skipRow.keepOpen }));
+                    }}
                   >
                     {skipRow.keepOpen ? `Skip ${skipRow.count === 1 ? 'it' : 'them'}` : 'Keep open'}
                   </Menu.Item>

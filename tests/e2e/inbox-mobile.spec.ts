@@ -687,7 +687,7 @@ for (const phone of [
       await expect(readLine).toHaveCount(0);
 
       // With the reply box open the foot is much taller: the toast still sits above it.
-      await pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)/ }).click();
+      await pane.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).click();
       await expect(pane.locator('.ib-pfoot textarea')).toBeVisible();
       await markRead();
       await expect(toast).toBeVisible();

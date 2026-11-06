@@ -218,7 +218,7 @@ for (const width of [390, 320]) {
     expect(m.status).toBe(false);
     expect(m.oneLine, JSON.stringify(m.boxes)).toBe(true);
     expect(m.overflow).toBe(false);
-    expect(m.boxes.map((b) => b.name)).toEqual(['Send', 'Edit draft: 1 pick, 1 comment', '1 open question']);
+    expect(m.boxes.map((b) => b.name)).toEqual(['Send', 'Draft 2: 1 pick, 1 comment. Edit draft', '1 open question']);
     // "✎ Draft 2": the pick and the comment, once each, on one button.
     expect(m.boxes[1]!.text).toBe('Draft 2');
     for (const b of m.boxes) {
@@ -247,7 +247,7 @@ for (const width of [390, 320]) {
     await page.screenshot({ path: join(shotsDir, `sheet-checkout-${width}-skipped.png`) });
     await page.locator('[data-open-questions-close]').click();
     await expect(page.locator('[data-open-questions-list]')).toHaveCount(0);
-    await expect(buttons.locator('[data-open-questions]')).toHaveAccessibleName('1 open question, skipped when you send');
+    await expect(buttons.locator('[data-open-questions]')).toHaveAccessibleName('1 question skipped when you send');
     await expect(buttons.locator('[data-open-questions] [data-oq-words]')).toHaveText(/^1( to skip)?$/);
     const after = await phoneRow(page);
     expect(after.oneLine, JSON.stringify(after.boxes)).toBe(true);

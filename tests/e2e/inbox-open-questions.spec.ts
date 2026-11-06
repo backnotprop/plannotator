@@ -508,6 +508,22 @@ test('Skip from the list: "Skip…", tick two, "Skip 2" saves what the card\'s S
     await expect(sheet).toBeVisible();
     await expect(queue).not.toHaveAttribute('data-skipped', '');
     await expect.poll(async () => (await serverQuestion(ids[0]!)).state).toBe('open');
+    // Skip all: every listed question is then answered in the draft. The sheet stays under the person and the button is
+    // its icon alone ("? ⌄", approval "reply-bar-pairs"), so Unskip stays in reach.
+    await phoneSkip.click();
+    await sheet.locator('[data-open-questions-skip-all]').click();
+    await expect(sheet).toBeVisible();
+    const trigger = phone.locator('.ib-pfoot [data-open-questions]');
+    await expect(trigger).toHaveAccessibleName('Questions, all answered in your draft');
+    await expect(trigger.locator('[data-oq-words]')).toHaveText('');
+    await phone.screenshot({ path: join(proofDir, 'skip-phone-all-skipped.png') });
+    await phoneSkip.click();
+    await queue.click();
+    await expect(apply).toHaveText('Unskip 1');
+    await apply.click();
+    await expect(sheet).toBeVisible();
+    await expect.poll(async () => (await serverQuestion(ids[0]!)).answer?.skipped === true).toBe(false);
+    await expect(trigger.locator('[data-oq-words]')).toHaveText(/^1\b/);
     await context.close();
   } finally {
     await own?.close();

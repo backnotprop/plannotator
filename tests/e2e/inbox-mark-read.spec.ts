@@ -312,7 +312,7 @@ test('the foot after a pick: the buttons on the left, the draft status at the ro
       return { status: !!document.querySelector('.ib-pfoot [data-foot-status]'), order: send!.right <= draft!.left && draft!.right <= reask!.left, oneLine: Math.abs(reask!.top - send!.top) < 2 && Math.abs(draft!.top - send!.top) < 2 };
     });
   await expect.poll(narrow).toEqual({ status: false, order: true, oneLine: true });
-  await expect(page.locator('.ib-pfoot [data-foot-buttons]').getByRole('button', { name: 'Edit draft: 1 pick' })).toBeVisible();
+  await expect(page.locator('.ib-pfoot [data-foot-buttons]').getByRole('button', { name: 'Draft 1: 1 pick. Edit draft' })).toBeVisible();
   await expect(page.locator('.ib-pfoot [data-edit-draft] [data-draft-count]')).toHaveText('1');
   await shot('04e-foot-status-phone');
   await page.setViewportSize({ width: 1440, height: 900 });

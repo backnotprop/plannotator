@@ -127,7 +127,7 @@ async function nothingOpened(page: Page): Promise<void> {
   await expect(composer(page)).toHaveCount(0);
 }
 
-const openReply = (page: Page) => page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)/ }).first().click();
+const openReply = (page: Page) => page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
 
 test.describe.configure({ mode: 'serial' });
 

@@ -5248,6 +5248,8 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 /* Open questions in one thread (approval "inbox-thread-open-questions", option A): the "N open questions"
    button in the foot's button row and the short list it opens; on a phone the list is a bottom sheet. */
 .pn-inbox .ib-oq-btn { gap: 6px; }
+/* Every listed question answered in the draft: the icon and the chevron alone, "? ⌄" (approval "reply-bar-pairs"). */
+.pn-inbox .ib-oq-btn [data-oq-words]:empty { display: none; }
 /* The foot's buttons on one line (footFit.ts): before the label gives way to a shorter one, the row tries it tightened. */
 .pn-inbox .ib-footbtns:has(> [data-fit-tight]) { gap: 6px; }
 .pn-inbox .ib-footbtns:has(> [data-fit-tight]) .ib-btn { padding-left: 10px; padding-right: 10px; gap: 5px; }

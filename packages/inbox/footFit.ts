@@ -28,16 +28,19 @@ export const OPEN_QUESTIONS_LABEL_FORMS: readonly OpenQuestionsLabelForm[] = ['f
  * action items: "2 open action items" alone, "6 questions, 2 action items"
  * with questions (`openItemsLabel`); the short forms count both ("8 open", "8").
  * `permission` (only a launched agent's permission prompts wait): "1 permission
- * waiting" / "1 waiting" / "1". `skipping` (this Send skips the unanswered
- * questions): "6 to skip" / "6 to skip" / "6". Nothing to count: "Questions".
+ * waiting" / "1 waiting" / "1". `skip` (this Send skips that many questions,
+ * the ones the list's "Skip them" counted): "6 to skip" / "6 to skip" / "6".
+ * Nothing to count: "Questions", or with `answered` (every listed question is
+ * answered in the draft) no words at all: the button is its icon.
  */
-export function openQuestionsFormText(questions: number, form: OpenQuestionsLabelForm, actions = 0, permission = false, skipping = false): string {
+export function openQuestionsFormText(questions: number, form: OpenQuestionsLabelForm, actions = 0, permission = false, skip: number | null = null, answered = false): string {
+  // This Send skips the questions the list's "Skip them" counted (approval "reply-bar-pairs"): "6 to skip", or "6" at
+  // the count, with the skip glyph. Action items are never skipped, so they are not in it.
+  if (skip !== null && skip > 0) return form === 'count' ? String(skip) : `${skip} to skip`;
   const n = questions + actions;
-  // Nothing left to count (only Re-ask or "Decide these" keep the list): its name, never a bare "0".
-  if (n === 0) return 'Questions';
-  // This Send skips the unanswered questions (the list's "Skip them", approval "reply-bar-pairs"): "6 to skip", or
-  // "6" at the count, with the skip glyph. Action items are never skipped, so they are not in it.
-  if (skipping) return form === 'count' ? String(questions) : `${questions} to skip`;
+  // Nothing left to count: every listed question answered in the draft draws the icon alone ("? ⌄", never a bare "0");
+  // only Re-ask or "Decide these" keep the list: its name.
+  if (n === 0) return answered ? '' : 'Questions';
   if (form === 'count') return String(n);
   if (permission) return form === 'short' ? `${n} waiting` : `${n} permission${n === 1 ? '' : 's'} waiting`;
   if (form === 'short') return `${n} open`;
@@ -225,27 +228,26 @@ export function drawOpenQuestionsForm(button: HTMLElement, fit: FootFit): void {
   const n = Number(button.getAttribute('data-oq-n') ?? '0');
   const actions = Number(button.getAttribute('data-oq-actions') ?? '0');
   const permission = button.hasAttribute('data-oq-permission');
-  const skipping = button.hasAttribute('data-oq-skipping');
-  if (words) words.textContent = openQuestionsFormText(n, fit.form, actions, permission, skipping);
+  const skip = button.hasAttribute('data-oq-skipping') ? Number(button.getAttribute('data-oq-skipping') || '0') : null;
+  const skipping = skip !== null && skip > 0;
+  const answered = button.hasAttribute('data-oq-answered');
+  if (words) words.textContent = openQuestionsFormText(n, fit.form, actions, permission, skip, answered);
   button.setAttribute('data-label-form', fit.form);
   button.toggleAttribute('data-fit-tight', fit.tight);
   const label = button.getAttribute('data-oq-label');
-  if ((fit.form === 'full' && !skipping) || !label) button.removeAttribute('aria-label');
+  if ((fit.form === 'full' && !skipping && !answered) || !label) button.removeAttribute('aria-label');
   else button.setAttribute('aria-label', label);
 }
 
 /**
- * The whole row's fit with the forms a window may take: the long form first;
- * on a phone, where the long form only fits at the count (or not at all), the
- * ladder again with "6 open" (`fitWholeFootRow` keeps the long form until its
- * `oq` step, then shows the count, so "6 open" needs its own pass). The page
- * is left drawn as the result says. Null as `fitWholeFootRow`.
+ * The whole row's fit, from the long form (only a computer's foot has the
+ * draft status the row is fitted for: a phone draws none, approval
+ * "reply-bar-pairs"). The page is left drawn as the result says. Null as
+ * `fitWholeFootRow`.
  */
-export function fitWholeFootRowForms(row: HTMLElement, phone = false): { level: number; max: OpenQuestionsLabelForm } | null {
+export function fitWholeFootRowForms(row: HTMLElement): { level: number; max: OpenQuestionsLabelForm } | null {
   const level = fitWholeFootRow(row, 'full');
-  if (!phone || (level !== null && footRowOpenQuestionsForm(level, 'full') !== 'count')) return level === null ? null : { level, max: 'full' };
-  const short = fitWholeFootRow(row, 'short');
-  return short === null ? null : { level: short, max: 'short' };
+  return level === null ? null : { level, max: 'full' };
 }
 
 /**

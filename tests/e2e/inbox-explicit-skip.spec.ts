@@ -180,7 +180,7 @@ test('a phone: the foot by default and after Skip them; that Send is one reply s
     await expect(row).toContainText('10 skipped when you send');
     await page.locator('[data-open-questions-close]').click();
     await expect(page.locator('[data-open-questions-list]')).toHaveCount(0);
-    await expect(oq).toHaveAccessibleName('10 open questions, skipped when you send');
+    await expect(oq).toHaveAccessibleName('10 questions skipped when you send');
     await footShots(page, 'phone-2-skip-them');
     await page.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
     await expect.poll(async () => (await readThread(threadId)).thread.messages.filter((m) => m.author.kind === 'person').length).toBe(1);

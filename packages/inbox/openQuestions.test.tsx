@@ -245,13 +245,18 @@ describe('fitting the foot on one line (footFit.ts)', () => {
     expect(openQuestionsFormText(12, 'count')).toBe('12');
   });
 
-  test('after Skip them every form with words reads "N to skip" (questions only: action items are never skipped); nothing to count reads "Questions", never "0"', () => {
-    expect(openQuestionsFormText(6, 'full', 0, false, true)).toBe('6 to skip');
-    expect(openQuestionsFormText(6, 'short', 0, false, true)).toBe('6 to skip');
-    expect(openQuestionsFormText(6, 'count', 0, false, true)).toBe('6');
-    expect(openQuestionsFormText(6, 'short', 2, false, true)).toBe('6 to skip');
+  test('after Skip them every form with words reads "N to skip", N being what Skip them counted (a question that came after stays open; action items are never skipped); nothing to count reads "Questions", or nothing at all when every question is answered in the draft, never "0"', () => {
+    expect(openQuestionsFormText(6, 'full', 0, false, 6)).toBe('6 to skip');
+    expect(openQuestionsFormText(6, 'short', 0, false, 6)).toBe('6 to skip');
+    expect(openQuestionsFormText(6, 'count', 0, false, 6)).toBe('6');
+    expect(openQuestionsFormText(6, 'short', 2, false, 6)).toBe('6 to skip');
+    // A seventh question landed after Skip them: this Send still skips the six.
+    expect(openQuestionsFormText(7, 'full', 0, false, 6)).toBe('6 to skip');
+    expect(openQuestionsFormText(7, 'count', 0, false, 6)).toBe('6');
     expect(openQuestionsFormText(0, 'full')).toBe('Questions');
     expect(openQuestionsFormText(0, 'count')).toBe('Questions');
+    expect(openQuestionsFormText(0, 'full', 0, false, null, true)).toBe('');
+    expect(openQuestionsFormText(0, 'count', 0, false, null, true)).toBe('');
   });
 
   test('with action items: the long form names each kind; the short forms count both (the fallback the row already had)', () => {
@@ -684,7 +689,7 @@ const allSent = (keepAction: boolean) =>
 
 test.skipIf(!hasDom)('no button when nothing is open', async () => {
   await render(thread(allSent(false)));
-  expect(button()).toBeNull();
+  expect(button() === null).toBe(true);
 });
 
 /** Every question answered in the draft (picked, not sent), the action item done: nothing is left unanswered. */
@@ -695,13 +700,22 @@ const allPicked = () =>
     ...(m.actions ? { actions: m.actions.map((a) => ({ ...a, state: 'sent' as const })) } : {}),
   }));
 
-test.skipIf(!hasDom)('every question answered in the draft: no open questions button (never a bare "?" or "0"); the draft counts them', async () => {
+test.skipIf(!hasDom)('every question answered in the draft: the button is its icon alone ("? ⌄", no count, never "0"), named "Questions, all answered in your draft"; its list stays; the draft counts them', async () => {
   const el = await render(thread(allPicked()));
-  expect(button()).toBeNull();
+  const b = button();
+  expect(b === null).toBe(false);
+  expect(b!.querySelector('[data-oq-words]')!.textContent).toBe('');
+  expect(/\d/.test(b!.textContent ?? '')).toBe(false);
+  expect(b!.getAttribute('aria-label')).toBe('Questions, all answered in your draft');
+  expect(b!.getAttribute('aria-keyshortcuts')).toBe('Q');
   // The draft holds them: Send and Edit draft, and on a computer the status says how many.
   const foot = [...el.querySelectorAll('[data-foot-buttons] button')].map((n) => n.textContent?.replace(/\s+/g, ' ').trim());
   expect(foot[0]).toBe('Send');
   expect(el.querySelector('[data-foot-status] [data-draft-foot]')!.textContent).toContain('4 picks');
+  // The list still opens on its rows, each a draft answer (so Unskip stays in reach).
+  await openList();
+  expect(rows().length).toBe(4);
+  expect(rows().every((r) => (r.textContent ?? '').includes('Draft'))).toBe(true);
 });
 
 test.skipIf(!hasDom)('on a phone: Send first, then one Draft button carrying the count (picks and comments), then the unanswered questions; no status; the keys stay', async () => {
@@ -712,16 +726,42 @@ test.skipIf(!hasDom)('on a phone: Send first, then one Draft button carrying the
   expect(draft.hasAttribute('data-edit-draft')).toBe(true);
   // "✎ Draft 1": the one pick, once. Its name says what the count holds.
   expect(draft.querySelector('[data-draft-count]')!.textContent).toBe('1');
-  expect(draft.getAttribute('aria-label')).toBe('Edit draft: 1 pick');
+  // Its name starts with what it shows ("Draft 1"), then what the count holds, then what it does.
+  expect(draft.getAttribute('aria-label')).toBe('Draft 1: 1 pick. Edit draft');
   expect(draft.getAttribute('aria-keyshortcuts')).toBe('R');
   expect(buttons[2]!.matches('[data-open-questions]')).toBe(true);
   expect(buttons[2]!.getAttribute('aria-keyshortcuts')).toBe('Q');
   // No pill or chip beside them: the counts live on the buttons.
-  expect(el.querySelector('[data-foot-status], [data-skip-chip], [data-draft-foot]')).toBeNull();
+  expect(el.querySelector('[data-foot-status], [data-skip-chip], [data-draft-foot]') === null).toBe(true);
   // Send is still described by the draft and the skip, as hidden text.
   const text = buttons[0]!.getAttribute('aria-describedby')!.split(' ').map((i) => document.getElementById(i)?.textContent ?? '').join(' ');
   expect(text).toContain('Draft, 1 pick');
   expect(text).toContain('3 questions stay open');
+});
+
+test.skipIf(!hasDom)('after Skip them the button counts what Skip them counted, not the unanswered questions now (one that came after stays open); its name keeps the action items apart', async () => {
+  const { OpenQuestionsButton } = await import('./components/OpenQuestions');
+  const { questions } = threadOpenQuestions(sample());
+  const actions = threadOpenActions(sample());
+  const unanswered = questions.filter((q) => !q.picked).length;
+  expect(unanswered).toBe(3);
+  host = document.createElement('div');
+  host.className = 'pn-inbox';
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(
+      <div data-foot-row="">
+        <div data-foot-buttons="">
+          <OpenQuestionsButton questions={questions} actions={actions} phone={false} measure={() => new Map()} onPick={() => {}} skip={{ count: 2, keepOpen: false, onToggle: () => {} }} />
+        </div>
+      </div>,
+    );
+  });
+  await settle();
+  const b = host.querySelector<HTMLElement>('[data-open-questions]')!;
+  expect(b.querySelector('[data-oq-words]')!.textContent).toBe('2 to skip');
+  expect(b.getAttribute('aria-label')).toBe('2 questions skipped when you send, 1 open action item');
 });
 
 test.skipIf(!hasDom)('only an action item open: the button counts it, and its list holds that item, then Re-ask', async () => {

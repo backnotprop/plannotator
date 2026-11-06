@@ -181,7 +181,7 @@ const sendButton = (page: Page) => pane(page).locator('.ib-acts .ib-btn.ib-pri')
 async function openReply(page: Page, w: World, thread: string): Promise<Locator> {
   await page.goto(`${w.url}#thread=${thread}`);
   const box = pane(page).locator('.ib-rbox textarea');
-  const button = page.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)/ });
+  const button = page.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ });
   for (let attempt = 0; attempt < 20 && !(await box.isVisible()); attempt += 1) await button.click({ timeout: 1_000 }).catch(() => {});
   await expect(box).toBeVisible();
   await box.focus();

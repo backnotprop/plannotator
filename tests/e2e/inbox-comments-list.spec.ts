@@ -567,7 +567,7 @@ for (const [width, height] of [[390, 844], [320, 640]] as const) {
     await expect(pane(page).locator('.ib-pfoot [data-comments-link]')).toHaveCount(0);
     const draft = pane(page).locator('.ib-pfoot [data-edit-draft]');
     await expect(draft.locator('[data-draft-count]')).toHaveText(String(t.count));
-    await expect(draft).toHaveAccessibleName(`Edit draft: ${t.count} comments`);
+    await expect(draft).toHaveAccessibleName(`Draft ${t.count}: ${t.count} comments. Edit draft`);
     await layout(page);
     const box = (await draft.boundingBox())!;
     expect(box.width).toBeGreaterThanOrEqual(44);

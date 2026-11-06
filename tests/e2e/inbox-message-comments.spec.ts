@@ -192,7 +192,7 @@ test("a comment on words in an agent's message: toolbar, composer, highlight, ch
   await page.mouse.click(5, 5);
 
   // The reply box's chip lists them under the message.
-  await page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)/ }).first().click();
+  await page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
   const chip = page.locator('[data-annotations-chip]');
   await expect(chip).toHaveText('2 comments');
   await chip.click();
@@ -286,7 +286,7 @@ test('on a phone-wide window: the same toolbar, composer, highlight and chip, in
     await shot(page, '07-phone-composer');
     await composer.press('ControlOrMeta+Enter');
     await expect(page.locator(`[data-message-id="${id}"] mark.annotation-highlight`)).toHaveText('dead-letter queue');
-    await page.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)/ }).first().click();
+    await page.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
     await shot(page, '08-phone-highlighted');
     // A phone's reply box names its comments in one line, which opens their list (approval "inbox-reply-foot-phone").
     await page.locator('section.ib-pane .ib-rfoot [data-foot-summary]').click();

@@ -145,7 +145,7 @@ for (const engine of ENGINES) {
       await page.goto(`${world.url}#thread=${world.threadId}`);
       const pane = page.locator('section.ib-pane');
       const box = pane.locator('.ib-pfoot textarea');
-      const open = pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)/ });
+      const open = pane.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ });
       // The other engine's words come back as a draft, and the box may open by itself: a click only while it is shut.
       await expect(box.or(open).first()).toBeVisible();
       if (!(await box.isVisible())) await open.click({ timeout: 5_000 }).catch(() => {});
