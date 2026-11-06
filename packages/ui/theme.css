@@ -1241,6 +1241,35 @@ html:has([data-pn-compact-touch-layout='true'])
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
+/* Except a diff: Pierre (@pierre/diffs) draws its own bar at the bottom of each file's code with ::-webkit-scrollbar,
+ * sized to the room its layout keeps. scrollbar-color is inherited into its shadow root, and Chrome drops
+ * ::-webkit-scrollbar styles under it (a 15px classic bar the layout does not count, cut off at the file's edge). */
+diffs-container {
+  scrollbar-color: auto;
+}
+/* A wide file's bar pinned to the bottom of its pane while its own is below the screen (DiffBottomBar): Pierre's look.
+ * The dock is the pane's last child, stuck to its bottom edge and taking no room. */
+.pn-diff-bottom-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  height: 0;
+}
+.pn-diff-bottom-bar {
+  position: absolute;
+  bottom: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+  background: var(--background);
+  --pn-diff-bar-thumb: color-mix(in srgb, var(--foreground) 28%, var(--background));
+}
+.pn-diff-bottom-bar::-webkit-scrollbar { height: 6px; }
+.pn-diff-bottom-bar::-webkit-scrollbar-thumb { background-color: var(--pn-diff-bar-thumb); border-radius: 3px; }
+@supports (-moz-appearance: none) {
+  .pn-diff-bottom-bar { scrollbar-width: thin; scrollbar-color: var(--pn-diff-bar-thumb) transparent; }
+}
 
 /* Selection */
 ::selection {

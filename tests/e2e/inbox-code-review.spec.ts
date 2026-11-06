@@ -27,7 +27,7 @@
  * PLANNOTATOR_E2E_VIDEO=1.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { chromium, expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -337,11 +337,8 @@ test('the review card, the full-window review with a comment and a Viewed tick, 
   const added = (line: number) => retry.locator(`[data-line-type="change-addition"][data-column-number="${line}"]`);
   await expect(added(12)).toBeVisible({ timeout: 30_000 });
   await shot(page, '4-review-mode');
-  // The PR page's quiet scrollbar is its own: this window keeps its bar. Its file head is 33 px, as in every reader.
-  const scrollbar = retry.locator('[data-diff-hscrollbar]');
-  await expect(scrollbar).toBeAttached();
-  await expect(scrollbar.locator('> div')).toHaveCSS('opacity', '1');
-  expect(await scrollbar.evaluate((bar) => bar.parentElement!.getBoundingClientRect().height)).toBe(33);
+  // Its file head is 33 px, as in every reader.
+  expect((await retry.locator('[data-file-header]').first().boundingBox())!.height).toBe(33);
 
   await retry.hover();
   await added(12).click();
@@ -1150,59 +1147,94 @@ async function fingerDrag(page: Page, from: { x: number; y: number }, by: { x: n
   await touch.detach();
 }
 
-const thumbOpacity = (thumb: Locator) => thumb.evaluate((el) => getComputedStyle(el).opacity);
-
-test('the bar under a file\'s name shows with the pointer on the file, moves nothing, and the file still scrolls sideways', async () => {
-  const { page, pane, body } = await shortReview('grey-bar', 800);
+test('a long line scrolls sideways in the code by wheel or trackpad, and the page stays put', async () => {
+  const { page, pane, body } = await shortReview('native-bar', 800);
   await page.setViewportSize({ width: 900, height: 800 });
   const shell = pane.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
-  const thumb = shell.locator('[data-diff-hscrollbar] > div');
   const code = shell.locator('[data-code]').first();
   const scrolled = () => code.evaluate((el) => el.scrollLeft);
-  await expect(thumb).toHaveCount(1);
+  await expect.poll(() => code.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
   await shell.evaluate((el) => el.scrollIntoView({ block: 'start' }));
   await settled(body);
 
-  // Away from the file: not drawn.
-  await page.mouse.move(2, 500);
-  await expect.poll(() => thumbOpacity(thumb)).toBe('0');
-  const lineBox = async () => shell.locator('[data-line-type]').first().boundingBox();
-  const headerBefore = await shell.getByRole('button', { name: /viewed/i }).first().boundingBox();
-  const lineBefore = await lineBox();
+  const line = (await shell.locator('[data-line-type]').first().boundingBox())!;
   const shellBox = (await shell.boundingBox())!;
-
-  // On the file: drawn, and nothing moved to make room.
-  const at = { x: shellBox.x + shellBox.width * 0.7, y: lineBefore!.y + 30 };
-  await page.mouse.move(at.x, at.y);
-  await expect.poll(() => thumbOpacity(thumb)).toBe('1');
-  expect(await shell.getByRole('button', { name: /viewed/i }).first().boundingBox()).toEqual(headerBefore);
-  expect(await lineBox()).toEqual(lineBefore);
-
-  // A sideways wheel or trackpad scrolls the code, and the bar follows.
+  const top = await body.evaluate((el) => el.scrollTop);
+  await page.mouse.move(shellBox.x + shellBox.width * 0.7, line.y + 30);
   await page.mouse.wheel(120, 0);
   await expect.poll(scrolled).toBeGreaterThan(0);
-  await expect.poll(() => thumb.evaluate((el) => (el as HTMLElement).offsetLeft)).toBeGreaterThan(0);
-  await code.evaluate((el) => {
-    el.scrollLeft = 0;
-  });
-
-  // Its thumb drags, and stays drawn when the pointer leaves the file mid-drag.
-  const thumbBox = (await thumb.boundingBox())!;
-  await page.mouse.move(thumbBox.x + 10, thumbBox.y + thumbBox.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(thumbBox.x + 60, thumbBox.y + thumbBox.height / 2);
-  await expect.poll(scrolled).toBeGreaterThan(0);
-  await page.mouse.move(2, 500);
-  expect(await thumbOpacity(thumb)).toBe('1');
-  await page.mouse.up();
-  await expect.poll(() => thumbOpacity(thumb)).toBe('0');
+  expect(await body.evaluate((el) => el.scrollTop)).toBe(top);
   await page.setViewportSize({ width: 1440, height: 900 });
   expect(world.errors).toEqual([]);
 });
 
-test('a phone: the bar shows on the file under the finger while it moves, then goes; hidden it takes no tap', async ({ browser }) => {
+test('the library\'s own scrollbar sits whole at the bottom of the file\'s code, and dragging it scrolls the code', async () => {
+  // Scrollbars drawn as on Windows or with "always show" (Playwright's headless hides them): Pierre's bar must take
+  // its room under the last row, inside the file's box. A 15px classic bar that the layout did not count was cut off.
+  const review = await world.claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'native-bar-drawn', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
+  const drawn = await chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'], args: ['--disable-features=OverlayScrollbar'] });
+  try {
+    const page = await drawn.newPage({ viewport: { width: 900, height: 800 } });
+    await page.goto(`${world.url}#thread=${review.thread_id}&guide=${review.message_id}`);
+    const shell = page.locator('[data-review-message] [data-guide-file-shell="src/payouts/retry.ts"]');
+    const code = shell.locator('[data-code]').first();
+    await expect.poll(() => code.evaluate((el) => el.scrollWidth > el.clientWidth), { timeout: 30_000 }).toBe(true);
+    await shell.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await settled(page.locator('[data-review-message] .ib-gbody'));
+    const fit = await shell.evaluate((el) => {
+      const code = el.querySelector('diffs-container')!.shadowRoot!.querySelector('[data-code]') as HTMLElement;
+      const box = el.querySelector('[data-guide-code-view-mounted]')!.getBoundingClientRect();
+      const rect = code.getBoundingClientRect();
+      return { bar: code.offsetHeight - code.clientHeight, below: box.bottom - rect.bottom, left: rect.left, bottom: rect.bottom };
+    });
+    expect(fit.bar).toBeGreaterThan(0);
+    expect(fit.below).toBeGreaterThanOrEqual(0);
+    // The thumb starts at the bar's left end: a drag along the bar scrolls the code.
+    await page.mouse.move(fit.left + 12, fit.bottom - fit.bar / 2);
+    await page.mouse.down();
+    await page.mouse.move(fit.left + 80, fit.bottom - fit.bar / 2, { steps: 5 });
+    await page.mouse.up();
+    await expect.poll(() => code.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+  } finally {
+    await drawn.close();
+  }
+});
+
+test('while a wide file\'s own bar is below the screen, a bar pinned to the pane\'s bottom scrolls it; at the file\'s end it goes', async () => {
+  const review = await world.claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'pinned-bar', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
+  const drawn = await chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'], args: ['--disable-features=OverlayScrollbar'] });
+  try {
+    const page = await drawn.newPage({ viewport: { width: 900, height: 320 } });
+    await page.goto(`${world.url}#thread=${review.thread_id}&guide=${review.message_id}`);
+    const body = page.locator('[data-review-message] .ib-gbody');
+    const shell = page.locator('[data-review-message] [data-guide-file-shell="src/payouts/retry.ts"]');
+    const code = shell.locator('[data-code]').first();
+    await expect.poll(() => code.evaluate((el) => el.scrollWidth > el.clientWidth), { timeout: 30_000 }).toBe(true);
+    const pinned = page.locator('[data-diff-bottom-bar]');
+    // The file's top in view, its end below the pane.
+    await shell.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+    await settled(body);
+    await expect(pinned.first()).toBeVisible();
+    const pane = (await body.boundingBox())!;
+    const bar = (await pinned.first().boundingBox())!;
+    expect(Math.abs(bar.y + bar.height - Math.min(pane.y + pane.height, 320))).toBeLessThanOrEqual(1);
+    await page.mouse.move(bar.x + 10, bar.y + bar.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(bar.x + 90, bar.y + bar.height / 2, { steps: 5 });
+    await page.mouse.up();
+    await expect.poll(() => code.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+    // The file's own bar on screen: no pinned one.
+    await shell.evaluate((el) => el.scrollIntoView({ block: 'end' }));
+    await settled(body);
+    await expect(pinned).toHaveCount(0);
+  } finally {
+    await drawn.close();
+  }
+});
+
+test('a phone: a sideways drag on the code scrolls it, and the page does not move', async ({ browser }) => {
   const { claude } = world;
-  const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'grey-bar-phone', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
+  const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'native-bar-phone', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, colorScheme: 'light', hasTouch: true, isMobile: true });
   const page = await context.newPage();
   const errors: string[] = [];
@@ -1212,69 +1244,19 @@ test('a phone: the bar shows on the file under the finger while it moves, then g
     const pane = page.locator('[data-review-message]');
     const body = pane.locator('.ib-gbody');
     const shell = pane.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
-    const thumb = shell.locator('[data-diff-hscrollbar] > div');
     const code = shell.locator('[data-code]').first();
     const scrolled = () => code.evaluate((el) => el.scrollLeft);
-    await expect(thumb).toHaveCount(1, { timeout: 30_000 });
+    await expect(shell.locator('[data-line-type]').first()).toBeVisible({ timeout: 30_000 });
     await shell.evaluate((el) => el.scrollIntoView({ block: 'start' }));
     await settled(body);
-    expect(await thumbOpacity(thumb)).toBe('0');
 
-    // A tap on the code is no movement: a phone's sticky hover must not bring the bar up, with the composer it opens or after it.
-    const tapped = (await shell.locator('[data-line-type]').nth(2).boundingBox())!;
-    await page.touchscreen.tap(tapped.x + tapped.width * 0.6, tapped.y + tapped.height / 2);
-    await expect(page.getByPlaceholder('Leave feedback...')).toBeVisible();
-    await page.waitForTimeout(300);
-    expect(await thumbOpacity(thumb)).toBe('0');
-    await page.getByRole('button', { name: 'Close expanded comment' }).tap();
-    await expect(page.getByPlaceholder('Leave feedback...')).toHaveCount(0);
-    await page.waitForTimeout(300);
-    expect(await thumbOpacity(thumb)).toBe('0');
-
-    // Hidden, it takes no finger: what is under that strip is the header. Showing, it is the bar.
-    const bar = (await shell.locator('[data-diff-hscrollbar]').boundingBox())!;
-    const barUnder = () =>
-      page.evaluate(([x, y]) => Boolean(document.elementFromPoint(x!, y!)?.closest('[data-diff-hscrollbar]')), [bar.x + bar.width * 0.05, bar.y + bar.height / 2]);
-    expect(await barUnder()).toBe(false);
-
-    // A sideways drag scrolls the code with the bar showing, and nothing else moves.
     const shellBox = (await shell.boundingBox())!;
     const line = (await shell.locator('[data-line-type]').nth(4).boundingBox())!;
     const top = await body.evaluate((el) => el.scrollTop);
     await fingerDrag(page, { x: shellBox.x + shellBox.width * 0.8, y: line.y + line.height / 2 }, { x: -170, y: 0 }, async () => {
-      await expect.poll(() => thumbOpacity(thumb)).toBe('1');
       await expect.poll(scrolled).toBeGreaterThan(0);
-      expect(await barUnder()).toBe(true);
       expect(await body.evaluate((el) => el.scrollTop)).toBe(top);
-      expect(await shell.locator('[data-line-type]').nth(4).boundingBox()).toEqual(line);
-      // Momentum: no finger movement, the code still gliding, for longer than the bar lingers.
-      for (let step = 0; step < 10; step += 1) {
-        await code.evaluate((el) => {
-          el.scrollLeft -= 4;
-        });
-        await page.waitForTimeout(120);
-        expect(await thumbOpacity(thumb)).toBe('1');
-      }
     });
-    await expect.poll(() => thumbOpacity(thumb)).toBe('0');
-
-    // Scrolling the page with a finger on the file: this file's bar, and no other's.
-    await fingerDrag(page, { x: shellBox.x + shellBox.width * 0.5, y: line.y + line.height / 2 }, { x: 0, y: -120 }, async () => {
-      await expect.poll(() => thumbOpacity(thumb)).toBe('1');
-      expect(await body.evaluate((el) => el.scrollTop)).toBeGreaterThan(top);
-      const others = pane.locator('[data-guide-file-shell]:not([data-guide-file-shell="src/payouts/retry.ts"]) [data-diff-hscrollbar] > div');
-      const drawn = await others.evaluateAll((all) => all.filter((el) => getComputedStyle(el).opacity !== '0').length);
-      expect(drawn).toBe(0);
-      // Momentum again, this time the page gliding.
-      for (let step = 0; step < 10; step += 1) {
-        await body.evaluate((el) => {
-          el.scrollTop += 3;
-        });
-        await page.waitForTimeout(120);
-        expect(await thumbOpacity(thumb)).toBe('1');
-      }
-    });
-    await expect.poll(() => thumbOpacity(thumb)).toBe('0');
     expect(errors).toEqual([]);
   } finally {
     await context.close();
@@ -1311,14 +1293,7 @@ test('Code review off: the same review opens in the guide pane, with no top bar 
     await expect(page.getByText('Unsigned while Code review is off.').first()).toBeVisible();
     await expect(page.getByText(/\(me\)/)).toHaveCount(0);
 
-    // The bar under a file's name stays on show here, with the pointer away from the file.
-    await page.setViewportSize({ width: 900, height: 800 });
-    await page.mouse.move(2, 500);
-    const thumb = page.locator('[data-guide-file-shell="src/payouts/retry.ts"] [data-diff-hscrollbar] > div');
-    await expect(thumb).toHaveCount(1, { timeout: 30_000 });
-    expect(await thumbOpacity(thumb)).toBe('1');
   } finally {
-    await page.setViewportSize({ width: 1440, height: 900 });
     await setCodeReview(true);
   }
 });

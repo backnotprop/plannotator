@@ -4,9 +4,9 @@ name: Windows
 # code review diagram engine build, the Pi extension's Node runtime, and
 # install.cmd / install.ps1 end to end. They are part of the full tier: on a PR
 # they run only once it has the `ci:full` label (adding the label starts them
-# on the current head; every later push runs them again). Pushes to main and
-# manual runs always run them. The `Full CI (all green)` job at the end is what
-# the merge script requires.
+# on the current head; every later push runs them again). The nightly run on
+# main and manual runs always run them. The `Full CI (all green)` job at the
+# end is what the merge script requires.
 
 on:
   workflow_dispatch:
@@ -14,16 +14,18 @@ on:
     branches:
       - main
     types: [opened, synchronize, reopened, labeled]
-  push:
-    branches:
-      - main
+  # Main is not run after every merge: the merge train already ran this
+  # workflow on the tree it merges. A nightly run on main catches a hand
+  # merge, and a release dispatches it on main before the tag.
+  schedule:
+    - cron: "22 7 * * *"
 
 permissions:
   contents: read
 
-# One run per PR, and one per main: a newer push cancels the older run. Adding
-# any other label starts a run that skips every job; it gets a group of its own
-# so it cannot cancel the real one. Manual runs are never cancelled.
+# One run per PR: a newer push cancels the older run. Adding any other label
+# starts a run that skips every job; it gets a group of its own so it cannot
+# cancel the real one. Nightly and manual runs are never cancelled.
 concurrency:
   group: windows-${{ github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name != 'ci:full' && format('run-{0}', github.run_id) || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref || format('run-{0}', github.run_id) }}
   cancel-in-progress: true
@@ -55,7 +57,7 @@ jobs:
   # minutes per run). Only these files can change what those tests run: the
   # installers, their tests, the Qwen Code extension they install, the test
   # setup, and this workflow. The same Qwen Code tests also run under pwsh in
-  # the unit lanes on every PR. Anything this cannot resolve (a push to main, a
+  # the unit lanes on every PR. Anything this cannot resolve (the nightly run, a
   # manual run, a checkout that is not the PR merge commit) runs the jobs:
   # skipping is the risky direction. A skipped job reports as skipped, not
   # missing.

@@ -8,7 +8,7 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_BRIDGE_POLL_PATH, inboxClaimName, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
@@ -116,6 +116,8 @@ const PI_B = { host: "pi", session: "ses-b" };
 const CC = { host: "claude-code", session: "ses-cc" };
 /** A pid no process has: one that ran and exited. */
 const deadPid = () => spawnSync("/usr/bin/true").pid!;
+/** Set when a claim folder reads as made (its mtime), so a test never leans on the filesystem's clock. */
+const madeAt = (dir: string, ms: number) => utimesSync(dir, ms / 1000, ms / 1000);
 
 describe("a reply its session's wake took and never delivered", () => {
   test("Pi, an older wake with no pid: killed mid-delivery, it is stuck once the session's next wake polls; the reply moves by hand and that session is never handed it again", async () => {
@@ -123,13 +125,14 @@ describe("a reply its session's wake took and never delivered", () => {
     await w.poll("ses-a", "pi", Date.now() - 60_000);
     await w.poll("ses-b", "pi", Date.now() - 60_000);
     const sent = w.sendTo(PI_A, "k1");
-    w.piClaim(sent.id, "ses-a");
+    const claim = w.piClaim(sent.id, "ses-a");
     // The wake polling now made the claim: it may still be delivering.
     expect(await w.reading(sent, "ses-a")).toEqual({ row: false, thread: false });
-    // Pi comes back as the same session: a new wake, started after the claim, polls. It settles the claim it
-    // finds and never delivers it, while the Inbox keeps handing it out.
-    await Bun.sleep(5);
-    await w.poll("ses-a", "pi", Date.now());
+    // Pi comes back as the same session: a new wake, started a second after the claim, polls. It settles the
+    // claim it finds and never delivers it, while the Inbox keeps handing it out.
+    const restarted = Date.now();
+    madeAt(claim, restarted - 1_000);
+    await w.poll("ses-a", "pi", restarted);
     expect(w.store.pendingReplies("ses-a").map((m) => m.id)).toEqual([sent.id]);
     expect(w.store.listRow(sent.thread_id)!.delivery).toMatchObject({ state: "undelivered", reason: "stuck" });
     expect(await w.asker(sent.thread_id, "ses-a")).toMatchObject({ live: true, stuck: [sent.id] });
@@ -200,13 +203,14 @@ describe("a reply its session's wake took and never delivered", () => {
     expect(await w.reading(reported, "ses-a")).toEqual({ row: true, thread: true });
     // An older version's claim (`claims/<reply id>`), made before the wake polling now started.
     const legacy = w.sendTo(PI_A, "legacy");
-    w.piClaim(legacy.id, "ses-a", {}, legacy.id);
-    await Bun.sleep(5);
-    await w.poll("ses-a", "pi", Date.now());
+    const restarted = Date.now();
+    madeAt(w.piClaim(legacy.id, "ses-a", {}, legacy.id), restarted - 1_000);
+    await w.poll("ses-a", "pi", restarted);
     expect(await w.reading(legacy, "ses-a")).toEqual({ row: true, thread: true });
-    // The wake that claimed it is the last one the session had, and the session stops polling.
+    // The wake that claimed it is the last one the session had, and the session stops polling. It claimed it just
+    // after it started, and the folder's time reads a few ms earlier (Linux's coarse file clock): still its own claim.
     const last = w.sendTo(PI_A, "last");
-    w.piClaim(last.id, "ses-a");
+    madeAt(w.piClaim(last.id, "ses-a"), restarted - 8);
     expect(await w.reading(last, "ses-a")).toEqual({ row: false, thread: false });
     w.later(120_000);
     await w.poll("ses-b", "pi", Date.now());

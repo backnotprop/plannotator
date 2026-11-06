@@ -1843,15 +1843,8 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
     expect(sheet.inner).toBe(sheet.card);
     await review.getByRole('button', { name: 'Close the comments' }).click();
 
-    // The file's scrollbar stays off its header until the pointer is on the file, and the header keeps its 33 px.
-    const thumb = shell.locator('[data-diff-hscrollbar] > div');
-    await expect(thumb).toHaveCount(1);
-    await page.mouse.move(2, 2);
-    await expect(thumb).toHaveCSS('opacity', '0');
-    await shell.hover();
-    await expect(thumb).toHaveCSS('opacity', '1');
-    const header = await shell.locator('[data-diff-hscrollbar]').evaluate((bar) => bar.parentElement!.getBoundingClientRect().height);
-    expect(header).toBe(33);
+    // The file's header keeps its 33 px.
+    expect((await shell.locator('[data-file-header]').first().boundingBox())!.height).toBe(33);
   } finally {
     await context.close();
   }
