@@ -13,9 +13,11 @@ Plannotator's own drawing is at [`.plannotator/system/`](../../.plannotator/syst
 // @plannotator/system: pure, browser-safe
 export const FORMAT = 1;
 export type SystemFiles = Record<string, string>; // 'system.yaml', 'sheets/C-001.yaml', 'revisions/PR-2543.yaml'
-export type LoadResult = { model: SystemModel | null; errors: string[]; warnings: string[] };
+export type LoadIssue = { file: string; field: string; message: string }; // field: a dotted path, 'parts.api.in', 'bands[0].x'
+export type LoadResult = { model: SystemModel | null; errors: LoadIssue[]; warnings: LoadIssue[] };
 export function loadFiles(files: SystemFiles): LoadResult;
-export function parseRevision(model: SystemModel, yaml: string): { revision: Revision | null; errors: string[] };
+export function parseRevision(model: SystemModel, yaml: string): { revision: Revision | null; errors: LoadIssue[] };
+export function formatIssue(issue: LoadIssue): string; // 'sheets/L-101.yaml bands[0].x: coordinates are not allowed; ...'
 export function drawingStatus(result: LoadResult | null):
   { state: 'none' | 'drawing' | 'drawn' | 'broken'; sheets: number; wanted: number; drawnAt: string | null };
 export function drawingProgress(model: SystemModel):
@@ -32,9 +34,10 @@ export function gate(input: { files: ChangedFile[]; model: SystemModel; repo?: s
 
 // @plannotator/system/node: Bun or Node; reads disk and git, never the network
 export function load(dir: string): Promise<LoadResult>;
-export function readCommitted(o: { root: string; ref: string }): Promise<SystemFiles>; // git show <ref>:.plannotator/system/...
-export function check(o: { dir: string; root: string; roots?: Record<string, string> }):
-  Promise<{ errors: string[]; warnings: string[]; missing: string[] }>;
+export function readCommitted(o: { root: string; ref: string }): Promise<SystemFiles>; // the drawing's files at a commit
+export function loadCommitted(o: { root: string; ref: string }): Promise<LoadResult>;  // the same, loaded
+export function check(o: { dir: string; root: string; roots?: Record<string, string>; at?: string }):
+  Promise<{ errors: LoadIssue[]; warnings: LoadIssue[]; missing: string[] }>;
 export function gateRepo(o: { root: string; from: string; to: string; model: SystemModel }): Promise<GateResult>;
   // git diff --name-status -M <from> <to>, read only, then gate()
 ```
@@ -42,12 +45,23 @@ export function gateRepo(o: { root: string; from: string; to: string; model: Sys
 `SystemModel` and `Revision` are plain JSON-safe data (`src/format/types.ts`), so a server may load a drawing and send
 the model, or send the files and let the window call `loadFiles()`.
 
-- `model` is non-null exactly when `errors` is empty. No files at all gives `model: null` and no errors: no drawing.
-- `drawingStatus`: `none` (no drawing), `drawing` (sheets still under `wanted:`), `drawn`, `broken` (does not load).
-  `drawnAt` is `sources.repos.self.at`.
-- `check` is clean when all three lists are empty. `root` is this repo's checkout at the commit the drawing was drawn
-  from. Paths are matched with their exact case, so a check on macOS agrees with one on Linux. Paths in another repo
-  alias are checked only when `roots` gives a checkout of it, else a warning names the alias.
+- Every error and warning names its file and field. No files at all gives `model: null` and no errors: no drawing.
+- `system.yaml` must load clean for there to be a model. A sheet or a revision with errors is left out of the model on
+  its own, with its errors, so a half-written sheet in the middle of a draw leaves the rest usable. A line whose
+  `lands` part only that sheet drew, or a `root` that names it, gets an error of its own.
+- `drawingStatus`: `none` (no drawing), `drawing` (sheets still under `wanted:` and not loaded, even with errors in
+  them), `drawn` (nothing wanted, no errors), `broken` (`system.yaml` does not load, or errors with nothing wanted).
+  `sheets` counts the sheets that load clean. `drawnAt` is `sources.repos.self.at`.
+- `check` is clean when all three lists are empty. In a git repo a cited path counts only if it is in the tree of the
+  commit the drawing was drawn from (`sources.repos.<alias>.at`; `at` overrides it for this repo, for a CI checkout of
+  one commit), so an untracked, ignored or symlinked file does not count. Outside git it reads the disk, and a symlink
+  anywhere on the path does not count. Paths are matched with their exact case, so a check on macOS agrees with one
+  on Linux. Paths in another repo alias are checked only when `roots` gives a checkout of it, else a warning names the
+  alias.
+- Limits: a drawing file is at most 1 MiB and a drawing at most 8 MiB; a file over either is an error, not read. A
+  drawing file must be a plain file (not a symlink), UTF-8, and end in `.yaml` (a `.yml` file is an error that names
+  the new name). The ids `__proto__`, `constructor` and `prototype` are refused. A ref that starts with `-` is refused
+  before git runs.
 
 ## The gate
 
@@ -68,6 +82,7 @@ The patterns are fixed in the package (`isIgnoredPath`), not settings.
 ```sh
 bun run --cwd packages/system check              # the drawing of this repo: loader, then every cited path
 bun run --cwd packages/system check -- --json    # one JSON value: { ok, errors, warnings, missing }
+bun run --cwd packages/system check -- --at HEAD # cited paths at HEAD, not at sources.repos.self.at
 bun src/node/check-cli.ts --dir <drawing> --root <repo>
 bun test packages/system                         # the package's tests (sandboxed: temp folders, no network, no gh)
 ```
@@ -142,8 +157,8 @@ A path with no prefix is in this repo; `<alias>:<path>` is in a repo `sources.re
 repo's root: absolute paths and `..` are refused. A cited folder covers every file in it. A part with no code (a
 person, an outside product) has no `code:`.
 
-Scopes: `scopes:` names every scope and must have `root`. A part opens a scope with `child:`; one part opens a scope,
-and a scope is opened by one part only. A scope's parent is the scope of the part that opens it, at any depth; a scope
+Scopes: `scopes:` names every scope and must have `root`. A part opens a scope with `child:`, and every scope but
+`root` is opened by exactly one part. A scope's parent is the scope of the part that opens it, at any depth; a scope
 may not contain itself.
 
 ### `sheets/<CODE>.yaml`
