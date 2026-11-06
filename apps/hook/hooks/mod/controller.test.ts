@@ -1671,16 +1671,14 @@ describe('/plannotator-inbox', () => {
 // The owner's report, for review decisions: Claude Code drops a plugin prompt after the person stopped the session
 // until someone types (`PromptDropped`). The decision was marked delivered, its files cleaned up, and it never went in.
 describe('a decision Claude Code dropped', () => {
-  const STOPPED = 'the session was stopped and nobody has sent input since'
-
-  /** An engine that drops every plugin prompt while `held.value` (the person stopped the session). */
+  /** An engine that drops every plugin prompt while `held.value` (any reason: a Stop, an idle compaction). */
   function stoppedHost() {
     const host = fakeHost()
     const held = { value: true }
     const attempts: string[] = []
     host.submit = async (text) => {
       attempts.push(text)
-      if (held.value) throw new PromptDropped(STOPPED)
+      if (held.value) throw new PromptDropped('plugin input is held')
       host.submits.push(text)
     }
     serveOnLaunch(host)

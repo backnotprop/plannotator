@@ -161,8 +161,8 @@ export class ClaudeSession {
   turns: { id: string; text: string }[] = []
   /** Keep the plugin's turns running until `endTurn` (default: they answer at once). */
   holdPluginTurns = false
-  /** The person stopped the session and nobody has typed since: plugin prompts are dropped (`stop`). */
-  inputHeld = false
+  /** Why plugin prompts are dropped now (`stop`), until the person types; null: they go in. */
+  inputHeld: string | null = null
   private idleWaiters: ((discarded: boolean) => void)[] = []
   private discarding = false
   private sequence = 0
@@ -251,19 +251,20 @@ export class ClaudeSession {
   }
 
   /**
-   * The person stops the session (Esc, a remote interrupt): the running turn
-   * ends aborted, and until someone types Claude Code drops every plugin
-   * prompt (`$.prompt.submit` resolves `{ drop }`, which the mod reads as
+   * Claude Code holds plugins' input (the person stopped the session, Esc or a
+   * remote interrupt; seen too after an idle compaction): a running turn ends
+   * aborted, and until someone types every plugin prompt is dropped
+   * (`$.prompt.submit` resolves `{ drop: reason }`, which the mod reads as
    * `PromptDropped`) without starting a turn.
    */
-  stop(): void {
+  stop(reason: string = STOPPED_DROP_REASON): void {
     this.endTurn('', true)
-    this.inputHeld = true
+    this.inputHeld = reason
   }
 
   /** The person presses Enter: at idle it starts a turn; mid-turn it joins the running one (take-over). */
   async type(text: string): Promise<void> {
-    this.inputHeld = false
+    this.inputHeld = null
     const ref = { fromUs: false, originKind: 'composer', ...(this.running ? { turnId: this.running.id } : {}) }
     this.mod.onPromptSubmitting(ref)
     this.mod.onPromptEntered({ ...ref, text })
@@ -284,12 +285,12 @@ export class ClaudeSession {
 
   /** `$.prompt.submit`: waits for idle, then its turn starts under the plugin's frame. */
   private async pluginTurn(text: string): Promise<void> {
-    if (this.inputHeld) throw new PromptDropped(STOPPED_DROP_REASON)
+    if (this.inputHeld !== null) throw new PromptDropped(this.inputHeld)
     while (this.running) {
       const discarded = await new Promise<boolean>((resolve) => this.idleWaiters.push(resolve))
       if (discarded) throw new Error('The engine discarded the prompt.')
       // Waiting when the person stopped the session: dropped with the others.
-      if (this.inputHeld) throw new PromptDropped(STOPPED_DROP_REASON)
+      if (this.inputHeld !== null) throw new PromptDropped(this.inputHeld)
     }
     await this.startTurn(`${PLUGIN_FRAME}${text}`)
     if (!this.holdPluginTurns) setTimeout(() => this.endTurn('Thanks, on it.'), 20)

@@ -73,11 +73,13 @@ describe('classic.PermissionRequest registration', () => {
 describe("the submit adapter reads $.prompt.submit's answer", () => {
   const STOPPED = 'the session was stopped and nobody has sent input since'
 
-  test('a drop rejects with PromptDropped, carrying the reason', async () => {
-    const error = await submitOrThrow(async () => ({ drop: STOPPED })).catch((caught: unknown) => caught)
+  test('a drop rejects with PromptDropped, carrying the reason, whatever the reason', async () => {
+    for (const reason of [STOPPED, 'plugin input is held', '']) {
+      const error = await submitOrThrow(async () => ({ drop: reason })).catch((caught: unknown) => caught)
 
-    expect(error).toBeInstanceOf(PromptDropped)
-    expect((error as PromptDropped).reason).toBe(STOPPED)
+      expect(error).toBeInstanceOf(PromptDropped)
+      expect((error as PromptDropped).reason).toBe(reason)
+    }
   })
 
   test('a prompt that went in resolves, whatever the engine answered with', async () => {

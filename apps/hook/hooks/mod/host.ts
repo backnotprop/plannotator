@@ -39,10 +39,11 @@ export interface TimerHandle {
 
 /**
  * `$.prompt.submit` did not take the prompt: the engine RESOLVES `{ drop:
- * <reason> }` instead of rejecting. One reason holds from the moment the
- * person stops the session (Esc, a remote interrupt) until someone types:
- * "the session was stopped and nobody has sent input since". No turn starts
- * and nothing entered the conversation, so the caller may try again later.
+ * <reason> }` instead of rejecting, whatever the reason, while it holds
+ * plugins' input until someone types: after the person stops the session
+ * (Esc, a remote interrupt: "the session was stopped and nobody has sent
+ * input since"), and seen after an idle compaction. No turn starts and
+ * nothing entered the conversation, so the caller may try again later.
  */
 export class PromptDropped extends Error {
   constructor(readonly reason: string) {

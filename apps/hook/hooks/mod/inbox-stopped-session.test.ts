@@ -1,8 +1,9 @@
 /**
- * The owner's report: in a Claude Code session the person had stopped (Esc), three Inbox replies each said
- * "Delivered to Claude Code" and no turn started; once they typed, later replies woke it. Claude Code's
- * `$.prompt.submit` does not reject a prompt it refuses: it resolves `{ drop }` ("the session was stopped and
- * nobody has sent input since"), and the mod read that as a turn that started. A real Inbox in process, a
+ * The owner's report: after Claude Code compacted an idle session, three Inbox replies each said "Delivered to
+ * Claude Code" and no turn started; once the person typed, later replies woke it. Claude Code's
+ * `$.prompt.submit` does not reject a prompt it refuses: it resolves `{ drop: <reason> }` (after a Stop: "the
+ * session was stopped and nobody has sent input since"), and the mod read that as a turn that started. Any
+ * reason is a drop. A real Inbox in process, a
  * running `ClaudeSession` whose engine drops plugin prompts once stopped, the person's reply through the
  * window's own route.
  */
@@ -15,7 +16,7 @@ import { startInboxServer, type InboxServer } from '../../../../packages/server/
 import { INBOX_WAKES_META_KEY } from '../../../../packages/shared/inbox/connection'
 import { inboxSessionDirOf } from './inbox'
 import { INBOX_BRIDGE_POLL_PATH } from './inbox-contract'
-import { ClaudeSession } from './testing/claude-session'
+import { ClaudeSession, STOPPED_DROP_REASON } from './testing/claude-session'
 
 const SESSION = 'session-stopped'
 const FIRST = 'Use the ARM runner.'
@@ -93,11 +94,14 @@ async function world() {
 const wakes = (session: ClaudeSession, words: string) => session.turns.filter((turn) => turn.text.includes(words))
 const attempts = (session: ClaudeSession, words: string) => session.host.submits.filter((text) => text.includes(words))
 
-describe('a session the person stopped', () => {
-  test('a reply waits, undelivered, until the person types; then it wakes the session once, and the next reply wakes it as usual', async () => {
+describe('a session whose plugin prompts Claude Code refuses until the person types', () => {
+  test.each([
+    ['after a Stop', STOPPED_DROP_REASON],
+    ['for any other reason', 'plugin input is held'],
+  ])('%s: a reply waits, undelivered, until the person types; then it wakes the session once, and the next reply wakes it as usual', async (_when, reason) => {
     const { session, reply, delivery, claims } = await world()
     await session.startTurn('Refactor the handler.')
-    session.stop()
+    session.stop(reason)
 
     const first = await reply('k1', FIRST)
     await until('the wake to be tried', () => attempts(session, FIRST).length > 0)
