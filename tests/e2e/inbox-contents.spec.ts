@@ -165,11 +165,11 @@ for (const layout of ['side', 'full'] as const) {
       await expect(rail).not.toHaveAttribute('data-revealed', '');
       if (layout === 'full') {
         await expect(pane).toHaveClass(/\bib-fullview\b/);
-        // The comments drawer: the rail moves with the page's edge, or yields, never under the drawer.
+        // The comments panel floats over the page's right side: the rail yields while it is open, never under it.
         await page.locator('[data-full-view-comments]').click();
         const drawer = (await pane.locator('[data-comments-drawer="open"]').boundingBox())!;
         await expect.poll(async () => {
-          if ((await rail.count()) === 0) return 'yielded';
+          if ((await rail.count()) === 0 || !(await rail.isVisible())) return 'yielded';
           const tick = await rail.locator('[data-contents-index]').first().boundingBox();
           return tick && tick.x + tick.width <= drawer.x ? 'clear' : 'under';
         }).not.toBe('under');

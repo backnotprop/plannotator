@@ -11,6 +11,7 @@ export {
   checkBridgeProtocolVersion,
   formatBridgeProtocolWarning,
   type BridgeProtocolVerdict,
+  type HtmlScrollClear,
 } from "./useHtmlAnnotation";
 export {
   buildPersistedHtmlAnchor,
