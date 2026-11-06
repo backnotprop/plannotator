@@ -67,8 +67,10 @@ import {
   inboxToolCallParams,
   inboxToolResultText,
   INBOX_SEND_NOW_POLL_FIELD,
+  INBOX_STEER_POLLS_POLL_FIELD,
   INBOX_TAGS_POLL_FIELD,
   INBOX_SESSION_LABEL_INPUT_MAX,
+  INBOX_UNDELIVERED_AFTER_MS,
   inboxSentNowFollowUpText,
   inboxHealthPeeks,
   inboxSessionThreadsParams,
@@ -310,8 +312,8 @@ export const INBOX_TICK_MS = 1_000
 const LEASE_EVERY_MS = 5_000
 /** A lease not renewed for this long belongs to a process that exited, slept or hung. */
 export const INBOX_LEASE_STALE_MS = 20_000
-/** A claimed reply whose claimant stopped saying it is alive for this long is reported as undelivered. */
-export const INBOX_UNDELIVERED_AFTER_MS = 60_000
+/** A claimed reply whose claimant stopped saying it is alive for this long is reported as undelivered (shared with the Inbox). */
+export { INBOX_UNDELIVERED_AFTER_MS }
 /**
  * The longest session start waits for a running Inbox's `tools/list`. The
  * person's first prompt waits for session.start, and `$.http.fetch` gives up
@@ -724,11 +726,6 @@ export interface InboxLinkOptions {
   dataDir: string
   sessionId: string
   tools: readonly InboxToolInfo[]
-  /**
-   * The name the engine registered the tool under (`mcp__<server>__plannotator_inbox`),
-   * named in the wake's closing line so the model can find the tool. Absent: `plannotator_inbox`.
-   */
-  toolName?: string
   /** A turn is running (or a question of Ask this session is in flight). */
   isBusy: () => boolean
   /**
@@ -1176,6 +1173,7 @@ export class InboxLink {
       ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
       // Send now: this engine can put a reply into a running turn (`$.session.append`).
       ...((await this.sendNowNow()) ? { [INBOX_SEND_NOW_POLL_FIELD]: true } : {}),
+      [INBOX_STEER_POLLS_POLL_FIELD]: true,
       // Tags (approval "inbox-tag-agents"): this connection words a reply it was tagged in truthfully.
       [INBOX_TAGS_POLL_FIELD]: true,
       // What this process loaded (additive): the Inbox says when a restart would load a newer plugin.
@@ -1239,6 +1237,9 @@ export class InboxLink {
       }
       this.backoffMs = 0
       this.retryAt = 0
+      // What the Inbox stopped handing out is done with here: handed out again (the reply moved back), it is new.
+      const handedOut = new Set(commands.map((command) => command.id))
+      for (const id of this.settled) if (!handedOut.has(id)) this.settled.delete(id)
       for (const command of commands) {
         if (this.settled.has(command.id) || this.elsewhere.has(command.id)) continue
         const known = this.pending.get(command.id)
@@ -1283,14 +1284,19 @@ export class InboxLink {
    * the running turn while one runs (`appendUserRow`), else as a turn.
    */
   private async deliverNext(urgent = false): Promise<void> {
-    const command = this.pending.values().next().value as InboxReplyCommand | undefined
-    if (!command) return
+    const waiting = this.pending.values().next().value as InboxReplyCommand | undefined
+    if (!waiting) return
     // Still waiting? An agent may have read it through the tool meanwhile, or
     // another process delivered it.
     const fresh = await this.pendingNow(0)
     if (fresh === null) return
-    if (!fresh.some((candidate) => candidate.id === command.id)) {
-      this.settle(command.id)
+    // The same reply as this poll words it: a reply that waited through a turn says what the thread holds now.
+    // What the Inbox says now is what goes in: a reply can have moved here since it was first handed out.
+    const command = fresh.find((candidate) => candidate.id === waiting.id)
+    if (!command) {
+      // Not settled: nothing went in here, so if the reply moves back before the next poll, it goes in.
+      this.pending.delete(waiting.id)
+      this.held.delete(waiting.id)
       return
     }
     if (this.disposed || !(await this.holdLease(await this.host.now()))) return
@@ -1321,7 +1327,7 @@ export class InboxLink {
       if (turn) {
         // Send now while Claude works: a user row in the running turn, read at its next model request.
         try {
-          await this.host.appendUserRow!(inboxWakeText(command, this.options.toolName))
+          await this.host.appendUserRow!(inboxWakeText(command))
         } catch (error) {
           // Refused: nothing entered, so the claim is given back and it is delivered when the session is idle
           // (here or in the process the person moves to), the window reads it as queued again, and Send now
@@ -1343,7 +1349,7 @@ export class InboxLink {
           .catch(() => undefined)
       } else {
         // Resolves once Claude is idle and took the turn.
-        await this.host.submit(inboxWakeText(command, this.options.toolName))
+        await this.host.submit(inboxWakeText(command))
       }
     } catch (error) {
       this.submitting = null

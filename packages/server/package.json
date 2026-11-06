@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/server",
-  "version": "0.28.50",
+  "version": "0.28.51",
   "private": true,
   "description": "Shared server implementation for Plannotator plugins",
   "main": "index.ts",
@@ -42,6 +42,7 @@
     "./inbox-mcp-read": "./inbox-mcp-read.ts",
     "./inbox-mcp-search": "./inbox-mcp-search.ts",
     "./inbox-agents": "./inbox-agents.ts",
+    "./test-home-guard": "./test-home-guard.ts",
     "./inbox-codex-wake": "./inbox-codex-wake.ts",
     "./inbox-agent-notes": "./inbox-agent-notes.ts"
   },

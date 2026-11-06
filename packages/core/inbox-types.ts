@@ -326,6 +326,27 @@ export function isInboxActionReport(message: { author: { kind: string }; action_
   return message.author.kind === "person" && (message.action_report?.length ?? 0) > 0;
 }
 
+/** The markers around what an agent receives with a question asked from Decision data, each on its own line. */
+export const INBOX_DECISION_ASK_OPEN = "<plannotator-decision-ask>";
+export const INBOX_DECISION_ASK_CLOSE = "</plannotator-decision-ask>";
+
+/**
+ * What the agent receives after the person's words when they ask from Settings -> Decision data. The owner approved
+ * these exact words (2026-11-05, `.product/approved/decision-data/ask-block.txt`), so they change only with the owner.
+ * It goes out only with an Ask: no tool text, skill or `--help` carries it.
+ */
+export const INBOX_DECISION_ASK_BLOCK = [
+  INBOX_DECISION_ASK_OPEN,
+  "The person asked this from Decision data in the Inbox. Answer from what the Inbox has stored, in a reply to this thread:",
+  "- Search with all_projects, more than once, with other words if the first find nothing. Then read each thread that matches: the answer alone does not say why.",
+  "- Say what was asked, the choices, what they chose and when, their own words, and the reasoning in the thread. Give the thread's link.",
+  "- A decision can be made in a plain reply, or changed later in the same thread or in another one. Give the newest and say what it changed from.",
+  "- Say who decided: a recommendation they took, a choice they made, or something the agent did after they said nothing.",
+  "- If it was asked but never decided, say that. If it is not stored, write \"I can't tell from what's stored\" and what you did find. A deleted thread cannot be read. Do not guess a reason.",
+  "- If you can't tell which decision they mean, ask them. Do not pick one for them.",
+  INBOX_DECISION_ASK_CLOSE,
+].join("\n");
+
 export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   "claude-code": "Claude Code",
   claude: "Claude Code",
@@ -643,6 +664,12 @@ export interface InboxMessage {
    * other message.
    */
   board_request?: true;
+  /**
+   * On the root of a thread the person started from Settings -> Decision data's Ask. The body stays as typed; what
+   * the agent receives for this message (the delivered turn, read_thread) carries `INBOX_DECISION_ASK_BLOCK` after it.
+   * Absent on every other message.
+   */
+  decision_ask?: true;
   /** On a person's reply sent from full screen's floating box: the file on screen. Rendered for the agent at read time; the body never holds it. */
   viewing?: InboxReplyViewing;
   /**
@@ -703,6 +730,12 @@ export interface InboxMessage {
    * tag) and no longer moves the thread. Absent on every other message.
    */
   handoff?: InboxHandoff | null;
+  /**
+   * A person's reply whose `to` took the place of a session that had ended (the recipient pill, or Send to another
+   * session). Until an agent writes again the person's next reply follows its `to`. Set only by the server, which
+   * checks the session really ended; a reply aimed elsewhere while the asker is live does not carry it.
+   */
+  took_over?: boolean;
 }
 
 /** A hand-off a person's reply carries (`InboxMessage.handoff`). */
@@ -714,7 +747,7 @@ export interface InboxHandoff {
   at: string;
   /** The Undo window passed: the new owner and the former one are handed it. */
   settled_at?: string | null;
-  /** Taken back inside the Undo window: the reply went as an Ask instead. */
+  /** Taken back inside the Undo window (the reply went as an Ask instead), or moved back to the former owner later. */
   undone_at?: string | null;
 }
 
@@ -939,6 +972,8 @@ export interface InboxLaunchRecord {
   agent: InboxLaunchAgent;
   /** The host's own short id (`claude attach <ref>`); null until it started. */
   session_ref: string | null;
+  /** The session it started as, which the root's `to` stops naming once the root moves. Absent until it started, and on an older launch (`inboxLaunchedSession`). */
+  session?: string;
   /** The folder it runs in: the project root, or the scratch folder the Inbox made (its real path). */
   folder: string;
   /** A new scratch folder (`<scratch root>/<slug>`): Delete purges and removes it. Never a project folder. */
@@ -987,6 +1022,8 @@ export interface InboxRun {
   untrusted: boolean;
   /** With `untrusted`: the folder is the home folder, which is never trusted (the how-to says to start inside it). */
   home_folder?: true;
+  /** With `untrusted`: trust here would cover home (a repo rooted there) or the folder is `/`; the how-to says to start in a project with its own repo. Wins over `home_folder`, which home in such a repo carries too, for a window that predates this. */
+  trust_covers_home?: true;
   /** With `untrusted`, for the machine's owner when the host can do it: Trust folder, and what would run once trusted. */
   trust?: { warning: string | null };
   /** `claude attach <ref>` from the folder, for Copy; null before the session exists. */
@@ -1456,6 +1493,11 @@ export interface InboxListRow extends InboxThreadSummary {
   thread_name: string | null;
   section: InboxSectionId;
   /**
+   * The session this thread would reach has ended, as the thread's own note and the delivery line know it (only a
+   * host that can tell: a waking connection, not heard from past the grace). Never in Quiet. Absent otherwise.
+   */
+  session_ended?: boolean;
+  /**
    * Waiting on the person or new to them: drawn bold. Not for a row in New only
    * for the person's own unsent words or comments (`unsent`).
    */
@@ -1753,6 +1795,13 @@ export interface InboxHealth {
   inbox_id?: string;
   /** The machine-link protocol this Inbox speaks (additive; absent: it cannot link). */
   machine_links?: number;
+  /**
+   * The page honours `--pn-window-controls-width` and `-height` on `:root`, for
+   * a desktop host that draws the window's buttons over it, and from 2 names
+   * the line they go on in `--pn-window-controls-center-y` (additive; absent
+   * from an older Inbox).
+   */
+  window_controls?: number;
 }
 
 /** What an Inbox window reports about its browser's notification permission for its own origin. */
@@ -1908,6 +1957,31 @@ export function inboxRowsList(value: unknown): InboxRowsOption[] | null {
 export function inboxRowsRead(value: unknown): InboxRowsOption[] | null {
   if (!Array.isArray(value)) return null;
   return inboxRowsCanonical(INBOX_ROWS_OPTIONS.filter((name) => value.includes(name)));
+}
+
+/**
+ * The look for someone who chose none: smaller thread names on, every other option off (the owner, 2026-11-05: "I
+ * feel like we should make it the default"). Before that, every option was off.
+ */
+export const INBOX_ROWS_DEFAULT: readonly InboxRowsOption[] = ["smallNames"];
+
+/**
+ * The defaults a look is saved under (config.json `inboxRowsDefaults`): 2 since smaller thread names are on by
+ * default. Every save writes it beside `inboxRows`.
+ */
+export const INBOX_ROWS_DEFAULTS_VERSION = 2;
+
+/**
+ * A kept look as the windows read it. One saved before the defaults changed (`savedUnder` unset) that is the old
+ * defaults, every option off, was never a choice (a window saves the look whenever it is touched, Balanced
+ * included): it is today's defaults, so the person gets the smaller names like someone who never saved one. Any
+ * other old look is the person's own and stays as it is. A look saved since then (`savedUnder` 2) is read as is, so
+ * "every option off" chosen today stays off.
+ */
+export function inboxRowsSaved(rows: InboxRowsOption[] | null, savedUnder: unknown): InboxRowsOption[] | null {
+  const current = typeof savedUnder === "number" && savedUnder >= INBOX_ROWS_DEFAULTS_VERSION;
+  if (rows && rows.length === 0 && !current) return [...INBOX_ROWS_DEFAULT];
+  return rows;
 }
 
 /**
@@ -2463,6 +2537,10 @@ export interface InboxUpload {
   media_type?: string;
   width?: number;
   height?: number;
+  /** A film's length, when the file came from a message that knew it (a reuse, inboxUploadFromAttachment). */
+  duration_ms?: number;
+  /** The listing's stat name for a big changed file this was added from, so the button knows its tile after a reload. */
+  shown_sha256?: string;
 }
 
 /** The session a draft was written for, with enough to name it after it has ended. */

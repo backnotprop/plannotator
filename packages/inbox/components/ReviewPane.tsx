@@ -33,6 +33,7 @@
  */
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import type { InboxMessageWire, InboxPull, InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
@@ -58,6 +59,7 @@ import { agentName } from '../format';
 import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
+import { holdBarAfterClose, usePhoneCommentsSheet } from './phoneCommentsSheet';
 import { clearReviewNotes, readReviewNotes, saveReviewNotes, VerdictKeys, verdictOf, verdictReply } from '../reviewVerdict';
 import { useGuideState } from './GuidePane';
 import { PostEnding, reviewEnding, useReviewDestination } from '../pulls/PostEnding';
@@ -87,6 +89,8 @@ const GuideReader = GuideReaderPart.Part;
 
 export interface ReviewPaneProps {
   thread: InboxThread;
+  /** A tailnet guest's page: the routes behind the arrows refuse it, so no reader. */
+  guest?: boolean;
   message: InboxMessageWire;
   /** Back to the thread. */
   onBack: () => void;
@@ -106,9 +110,9 @@ const NO_ANNOTATIONS: never[] = [];
 
 type RailMode = 'walkthrough' | 'files';
 
-export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onAsk }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
-  const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments } = state;
+  const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = state;
   // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
   // conversation in the thread, and no Approve or Request changes is offered.
   const verdict = !thread.pull_theirs;
@@ -161,6 +165,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
   const [paneRef, folded] = useNarrowerThan<HTMLElement>(REVIEW_FOLD_PANEL_BELOW, true);
   const [sheet, setSheet] = useState(false);
   const sheetButtonRef = useRef<HTMLButtonElement>(null);
+  const sheetCloseRef = useRef<HTMLButtonElement>(null);
   const sheetId = useId();
   useEffect(() => {
     if (!folded) setSheet(false);
@@ -523,9 +528,12 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
   );
 
   const closeSheet = () => {
-    setSheet(false);
+    // At once: on a phone the button can take focus only once the page shows again.
+    flushSync(() => setSheet(false));
     sheetButtonRef.current?.focus({ preventScroll: true });
+    if (phone) holdBarAfterClose(sheetButtonRef.current);
   };
+  usePhoneCommentsSheet(phone && sheet, sheetCloseRef, closeSheet);
   const onSheetKey = (event: React.KeyboardEvent) => {
     if (event.key === 'Escape' && folded && sheet && !event.defaultPrevented) {
       event.preventDefault();
@@ -549,7 +557,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer ib-review ib-rv-walk${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
+      className={`ib-viewer ib-wlayer ib-review ib-rv-walk${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
       aria-label="Review"
       data-review-message={message.id}
       data-review-mode={mode}
@@ -752,6 +760,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
                 mode={mode}
                 reveal={reveal}
                 viewed={viewedProp}
+                {...(guest ? {} : { fileContents })}
                 fileOpenIn={fileOpenIn}
                 {...(selectionActions ? { selectionActions } : {})}
                 renderOverviewDiagram={renderOverviewDiagram}
@@ -777,7 +786,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
               <b>Comments</b>
               <span className="ib-mut">{comments.length}</span>
               <span className="ib-sp" />
-              <button type="button" className="ib-iconbtn" onClick={closeSheet} aria-label="Close the comments">
+              <button ref={sheetCloseRef} type="button" className="ib-iconbtn" onClick={closeSheet} aria-label="Close the comments">
                 <Icon name="x" />
               </button>
             </div>

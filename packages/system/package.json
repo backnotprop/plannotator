@@ -1,0 +1,24 @@
+{
+  "name": "@plannotator/system",
+  "version": "0.1.0",
+  "private": true,
+  "description": "System: a living drawing of a codebase. Format 1, its loader, the check of cited paths, and the gate that says when a drawing may be out of date.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./node": "./src/node/index.ts"
+  },
+  "scripts": {
+    "check": "bun src/node/check-cli.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "yaml": "2.9.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.2"
+  }
+}

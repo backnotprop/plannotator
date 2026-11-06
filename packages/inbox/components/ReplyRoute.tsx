@@ -211,11 +211,11 @@ export function AskerEndedNote({ asking, project, anyLive }: { asking: AskingSes
       <Icon name="info" size={15} />
       {anyLive ? (
         <span>
-          <b>The {asking.name} session that asked has ended.</b> When you send, you can pick a live session in {project} to take your reply.
+          <b>This {asking.name} session has ended.</b> Send your reply to another session, or archive it if it's done.
         </span>
       ) : (
         <span>
-          <b>The {asking.name} session that asked has ended</b>, and no agent is running in {project} now. Your reply will wait here until an agent reads this thread.
+          <b>This {asking.name} session has ended</b>, and no agent is running in {project} now. A reply waits here until that session is resumed.
         </span>
       )}
     </p>
