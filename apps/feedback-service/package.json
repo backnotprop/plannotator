@@ -8,7 +8,9 @@
     "db:create": "wrangler d1 create plannotator-feedback",
     "db:migrate": "wrangler d1 execute plannotator-feedback --remote --file=./schema.sql",
     "db:migrate:local": "wrangler d1 execute plannotator-feedback --local --file=./schema.sql",
-    "db:read": "wrangler d1 execute plannotator-feedback --remote --json --command=\"SELECT id, created_at, category, surface, version, os, contact, message FROM feedback ORDER BY id DESC LIMIT 100\""
+    "db:migrate:agents": "wrangler d1 execute plannotator-feedback --remote --file=./migrations/0001_agents.sql",
+    "db:migrate:agents:local": "wrangler d1 execute plannotator-feedback --local --file=./migrations/0001_agents.sql",
+    "db:read": "wrangler d1 execute plannotator-feedback --remote --json --command=\"SELECT id, created_at, category, surface, agents, version, os, contact, message FROM feedback ORDER BY id DESC LIMIT 100\""
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241218.0",
