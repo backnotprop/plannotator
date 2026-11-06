@@ -33,6 +33,9 @@ function setup() {
   const home = join(root, "home");
   for (const dir of [".ssh", ".claude", "x", "code/billing-api"]) mkdirSync(join(home, dir), { recursive: true });
   symlinkSync(join(home, ".ssh"), join(home, "code", "sshlink"));
+  mkdirSync(join(root, "elsewhere"), { recursive: true });
+  symlinkSync(join(root, "elsewhere"), join(home, "outlink"));
+  symlinkSync(home, join(home, "code", "homelink"));
   mkdirSync(dataDir, { recursive: true });
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   setEnv("PLANNOTATOR_TEST_SANDBOX", "1");
@@ -93,9 +96,18 @@ describe("to.launch.folder: never somewhere the listing doesn't offer", () => {
     expect(resolvedCount()).toBe(0);
   });
 
-  test("home itself is refused, however it is typed", async () => {
+  test("a folder that isn't there under a hidden folder or outside home answers as that folder, not as missing", async () => {
     const { send, resolvedCount } = setup();
-    for (const folder of ["~", "~/", "", "~//"]) {
+    expect(await send("~/code/sshlink/nope")).toEqual({ code: "validation_error", message: "Hidden folders can't be picked. Nothing was sent." });
+    expect(await send("~/outlink/nope")).toEqual({ code: "validation_error", message: "Pick a folder inside the home folder. Nothing was sent." });
+    // Under a plain folder: just missing.
+    expect((await send("~/code/nope")).code).toBe("folder_missing");
+    expect(resolvedCount()).toBe(0);
+  });
+
+  test("home itself is refused, however it is typed (a link back to it too)", async () => {
+    const { send, resolvedCount } = setup();
+    for (const folder of ["~", "~/", "", "~//", "~/code/homelink"]) {
       expect([folder, await send(folder)]).toEqual([folder, { code: "validation_error", message: "Pick a folder inside the home folder. Nothing was sent." }]);
     }
     expect(resolvedCount()).toBe(0);
