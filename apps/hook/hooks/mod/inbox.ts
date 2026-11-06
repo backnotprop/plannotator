@@ -70,6 +70,7 @@ import {
   INBOX_STEER_POLLS_POLL_FIELD,
   INBOX_TAGS_POLL_FIELD,
   INBOX_SESSION_LABEL_INPUT_MAX,
+  INBOX_UNDELIVERED_AFTER_MS,
   inboxSentNowFollowUpText,
   inboxHealthPeeks,
   inboxSessionThreadsParams,
@@ -311,8 +312,8 @@ export const INBOX_TICK_MS = 1_000
 const LEASE_EVERY_MS = 5_000
 /** A lease not renewed for this long belongs to a process that exited, slept or hung. */
 export const INBOX_LEASE_STALE_MS = 20_000
-/** A claimed reply whose claimant stopped saying it is alive for this long is reported as undelivered. */
-export const INBOX_UNDELIVERED_AFTER_MS = 60_000
+/** A claimed reply whose claimant stopped saying it is alive for this long is reported as undelivered (shared with the Inbox). */
+export { INBOX_UNDELIVERED_AFTER_MS }
 /**
  * The longest session start waits for a running Inbox's `tools/list`. The
  * person's first prompt waits for session.start, and `$.http.fetch` gives up
