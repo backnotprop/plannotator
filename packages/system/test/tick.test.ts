@@ -255,6 +255,25 @@ echo 'On the app sheet, the app sends mail' > .plannotator/redraw-summary.txt
       forge: { findOpenPr: async () => { throw new Error('gh pr list: not signed in'); }, openPr: async () => '' },
     };
     expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps })).toMatchObject({ ran: 'failed', error: 'gh pr list: not signed in' });
+    // nothing was spent, so the next tick tries again
+    expect(await readState(p.dataDir, KEY)).toMatchObject({ failed: null, last_error: 'gh pr list: not signed in' });
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, ...fakes() } });
+    expect(r.ran).toBe('redrew');
+    expect(await readState(p.dataDir, KEY)).toMatchObject({ failed: null, last_error: null });
+  });
+
+  test('a push origin refuses after the agent ran is a failed redraw: no PR, no note, the worktree clean', async () => {
+    const p = project();
+    const tip = p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs');
+    writeFileSync(join(p.origin, 'hooks', 'pre-receive'), '#!/bin/sh\necho "refused by the test" >&2\nexit 1\n', { mode: 0o755 });
+    const f = fakes();
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, forge: f.forge, notify: f.notify } });
+    expect(r.ran).toBe('failed');
+    expect(r.error).toContain('refused by the test');
+    expect(f.opened).toEqual([]);
+    expect(f.notes).toEqual([]);
+    expect(await readState(p.dataDir, KEY)).toMatchObject({ failed: tip });
+    expect(git(p.paths.worktree, 'status', '--porcelain')).toBe('');
   });
 
   test('a live tick holds the lock; a dead one is taken over', async () => {

@@ -315,8 +315,9 @@ export async function tick(o: { root: string; dataDir: string; key: string; now?
     }
     return await redraw({ ...o, setup, paths, main, from, target, model, result, state, save, now });
   } catch (e) {
+    // before any agent ran: nothing was spent, so the next tick tries again
     const error = (e as Error).message;
-    await save({ last_error: error, ...(target ? { failed: target } : {}) }).catch(() => {});
+    await save({ last_error: error }).catch(() => {});
     return { ran: 'failed', gated: state.gated ?? '', error };
   } finally {
     await release();
@@ -371,6 +372,22 @@ async function redraw(r: RedrawInput): Promise<TickResult> {
   // what this redraw starts from: main's drawing, or the open redraw's
   const before = (await load(dir)).model ?? r.model;
   const agent = await runAgent({ setup: r.setup, cwd: wt, prompt, docs });
+  // from here a model ran: any failure sets the work aside and waits for main to move
+  try {
+    return await afterAgent(r, { agent, wt, dir, before, prs, summaryPath, openPr, forge, notify, fail });
+  } catch (e) {
+    return fail((e as Error).message);
+  }
+}
+
+async function afterAgent(
+  r: RedrawInput,
+  c: {
+    agent: { ok: boolean; output: string }; wt: string; dir: string; before: SystemModel; prs: number[]; summaryPath: string;
+    openPr: string | null; forge: Forge; notify: Notify; fail: (error: string) => Promise<TickResult>;
+  },
+): Promise<TickResult> {
+  const { agent, wt, dir, before, prs, summaryPath, openPr, forge, notify, fail } = c;
   if (!agent.ok) return fail(`the agent did not finish: ${agent.output.trim().slice(-400) || 'no output'}`);
   const outside = (await changedPaths(wt)).filter((p) => p !== SUMMARY_FILE && !p.startsWith(`${DRAWING_DIR}/`));
   if (outside.length) return fail(`the agent changed files outside ${DRAWING_DIR}: ${outside.slice(0, 5).join(', ')}`);

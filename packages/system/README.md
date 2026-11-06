@@ -174,7 +174,9 @@ export const schedule: {
 7. Run the agent with `updatePrompt`: the range, the merged pull requests that changed a woken file, the gate's
    reasons and touched parts, any stored reviews of those pull requests, the summary file and the allowed doc sites.
 8. Refuse the redraw (`failed`, its files kept under `failed/<commit>/`, the worktree put back) when the agent failed,
-   changed a file outside the drawing, or the drawing does not check clean. If it changed nothing: `gated`.
+   changed a file outside the drawing, or the drawing does not check clean, or a later step (the push, the pull
+   request) failed. If it changed nothing: `gated`. A failure before the agent ran (no network, `gh` not signed in)
+   marks nothing, so the next tick tries again.
 9. Set `sources.repos.self.at` to the tip (only that value's text), commit `.plannotator/system/` only, push the redraw
    branch (never the default branch), open one pull request when none is open, and send one note through
    `plannotator inbox call send_message`, as a reply to setup.json's `thread_message` ("Main moved to 9c41e07. PR 1335
