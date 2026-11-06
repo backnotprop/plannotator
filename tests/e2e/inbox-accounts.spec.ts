@@ -170,7 +170,11 @@ async function expectNoOverflow(page: Page) {
     if (card) {
       for (const el of document.querySelectorAll('.ib-acct-r, .ib-acct-n, .ib-acct-use, .ib-acct-confirm, .ib-acct-fail, .ib-acct-miss')) {
         const box = el.getBoundingClientRect();
-        if (box.right > card.right + 0.5 || box.left < card.left - 0.5) past.push(el.className);
+        // A row's box runs 8 px past the list on each side for its hover tint, as in the mock; its padding brings what it holds back in line.
+        const inset = el.matches('.ib-acct-r') ? getComputedStyle(el) : null;
+        const left = box.left + (inset ? parseFloat(inset.paddingLeft) : 0);
+        const right = box.right - (inset ? parseFloat(inset.paddingRight) : 0);
+        if (right > card.right + 0.5 || left < card.left - 0.5) past.push(el.className);
       }
     }
     return { sideways: scroller.scrollWidth - scroller.clientWidth, doc: document.documentElement.scrollWidth - document.documentElement.clientWidth, past };

@@ -215,7 +215,8 @@ test('Settings: one block per machine, this one first, each with its own list, a
   // A login another machine is using says which; Mini at 92% points at the most room on Mini.
   await expect(notesOf(page, 'Studio', 'personal')).toContainText('on Mini');
   await expect(notesOf(page, 'Studio', 'work')).toHaveText('on Laptop');
-  await expect(notesOf(page, 'Mini', 'team')).not.toContainText('most room');
+  // "Most room" is in the hover only: the row's face (name and notes, which a row without notes leaves out) never says it.
+  await expect(rowOf(page, 'Mini').locator('.ib-acct-r').filter({ has: page.locator('.ib-acct-name', { hasText: /^team$/ }) }).locator('.ib-acct-n')).not.toContainText(/most room/i);
   await expect(rowOf(page, 'Mini').locator('.ib-acct-r').filter({ has: page.locator('.ib-acct-name', { hasText: /^team$/ }) })).toHaveAttribute('title', /Most room/);
   await expect(rowOf(page, 'Mini').locator('[data-in-use] [data-l="hot"]')).toHaveCount(1);
   // This machine's other rows are the switch while switching is on; a linked machine's rows are not, in this build.
