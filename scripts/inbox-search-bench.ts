@@ -71,6 +71,10 @@ async function main() {
   refuseRealDataDir(dataDir, "scripts/inbox-search-bench.ts");
   // The Inbox reads config.json through the environment as well: never the person's.
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
+  // Never the person's skills or agents. `homedir()` itself keeps what it read at startup.
+  process.env.HOME = join(root, "home");
+  mkdirSync(process.env.HOME, { recursive: true });
+  process.env.PLANNOTATOR_TEST_SANDBOX = dataDir;
   const log = (line: string) => (asJson ? process.stderr : process.stdout).write(`${line}\n`);
   const seedStart = performance.now();
   const seeded = seedInboxSearchWorld(dataDir, WORST_CASE, 1, unique);

@@ -30,6 +30,7 @@ import { join, resolve } from 'node:path';
 import { LiveSessions, seedWorstCase, type WorstCaseWorld } from '../../scripts/inbox-worst-case';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { INBOX_ASKER_RESTART_GRACE_MS } from '../../packages/server/inbox-sessions';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -240,8 +241,8 @@ test('the names: real folder names, a parent folder for two "api", days and year
 });
 
 test('things that grow: the reply chooser with 50 sessions, the compose To picker, a long draft', async ({ browser }) => {
-  // The session that asked counts as live for a minute after the Inbox starts.
-  await new Promise((r) => setTimeout(r, Math.max(0, world.startedAt + 70_000 - Date.now())));
+  // The session that asked counts as live for a while after the Inbox starts.
+  await new Promise((r) => setTimeout(r, Math.max(0, world.startedAt + INBOX_ASKER_RESTART_GRACE_MS + 10_000 - Date.now())));
   for (const [w, thread] of [
     [WIDTHS[2]!, world.seed.threads.ended],
     [WIDTHS[6]!, world.seed.threads.ended2],

@@ -223,6 +223,7 @@ describe("through the entrypoint", () => {
     const entry = join(import.meta.dir, "index.ts");
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? "",
+      HOME: process.env.HOME!,
       PLANNOTATOR_DATA_DIR: w.dataDir,
       PLANNOTATOR_BROWSER: NO_BROWSER,
       NO_BROWSER: "1",

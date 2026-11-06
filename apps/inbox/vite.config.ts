@@ -30,6 +30,7 @@ export const sharedConfig = defineConfig({
       '@plannotator/shared': path.resolve(__dirname, '../../packages/shared'),
       '@plannotator/ui': path.resolve(__dirname, '../../packages/ui'),
       '@plannotator/inbox': path.resolve(__dirname, '../../packages/inbox/index.ts'),
+      '@plannotator/review-editor/worker-pool': path.resolve(__dirname, '../../packages/review-editor/workerPool.tsx'),
     },
   },
   // The guided review's diff renderer (review-editor's AllFilesCodeView)

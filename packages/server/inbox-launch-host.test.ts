@@ -17,11 +17,12 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
+import type { InboxLaunchRecord, InboxQuestion } from "@plannotator/core/inbox-types";
 import { INBOX_RUN_START_GRACE_MS } from "@plannotator/core/inbox-run-line";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { FAKE, fakeLaunchHost } from "../../tests/helpers/fake-launch-host";
 import { createInboxLaunch } from "./inbox-launch";
+import { ANSWER_SETTLE_MS, createLaunchPermissions } from "./inbox-launch-claude-permission";
 import { launchNoteText, writeLaunchNote, type LaunchHost, type LaunchHostContext, type LaunchLive, type LaunchTrustOffer } from "./inbox-launch-host";
 import { createLaunchQuestions } from "./inbox-launch-permission";
 
@@ -40,7 +41,7 @@ function setEnv(name: string, value: string) {
 }
 
 /** `homeDir`: the home folder the engine is given, spelled from the real one (a link to it, a trailing slash). */
-function setup(options: { homeDir?: (home: string, root: string) => string } = {}) {
+function setup(options: { homeDir?: (home: string, root: string) => string; adapt?: (host: LaunchHost) => void } = {}) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-launch-host-"));
   restore.push(() => rmSync(root, { recursive: true, force: true }));
   const dataDir = join(root, "data");
@@ -56,6 +57,7 @@ function setup(options: { homeDir?: (home: string, root: string) => string } = {
   const store = InboxStore.open(dataDir, { now: () => new Date(clock.now) });
   const project = store.ensureProject({ name: "project", root: folder });
   const fake = fakeLaunchHost();
+  options.adapt?.(fake.host);
   /** The login-shell reads the engine made, and the context it gave the hosts. */
   const logins = { count: 0 };
   let context: LaunchHostContext | null = null;
@@ -329,6 +331,103 @@ describe("a second agent behind LaunchHost", () => {
     expect(await launch.runOf(one.id)).toMatchObject({ state: "stopped", stopped_by_person: true, cause: null });
   });
 
+  describe("a row's Session ended is about the session it names", () => {
+    const pickOf = (key: string, kind: InboxQuestion["kind"], prompt: string, label: string) => ({ v: 1 as const, key, kind, prompt, selected: [label] });
+    const question = (prompt: string, labels: string[]) => `:::question\n${prompt}\n${labels.map((label) => `- ${label}`).join("\n")}\n:::`;
+    /** A launch that started as L and stopped; `ended` are the sessions read as not there. */
+    async function stopped() {
+      const world = setup();
+      const { store, clock, project, fake, launch } = world;
+      const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+      const prepared = await launch.prepare(target, { name: "One", body: "One.", resolveProject: async () => project });
+      const root = store.startPersonThread({ project_id: project.id, body: "One.", to: prepared.to, idempotency_key: "send-1", launch: prepared.launch }).message;
+      launch.begin(root);
+      await until(() => !!store.message(root.id)!.launch!.session_ref);
+      const L = store.message(root.id)!.to!.session;
+      fake.poll(L, false, clock.now);
+      store.recordDelivery(root.id, { host: FAKE, session: L });
+      await fake.host.stop("f1");
+      clock.now += INBOX_RUN_START_GRACE_MS * 2;
+      const ended = new Set<string>([L]);
+      store.setDeliveryPresence({ connection: () => null, askerLive: (session) => !ended.has(session), launchResumes: (threadId, session) => launch.resumes(threadId, session) });
+      const agent = (session: string) => ({ kind: "agent" as const, host: FAKE, session, name: "Fake Agent" });
+      const says = (body: string, session: string, replyTo: string, key: string) => store.sendMessage({ project_id: project.id, author: agent(session), body, reply_to: replyTo, wakes: true, idempotency_key: key }).message;
+      const pick = (messageId: string, label: string) => {
+        const q = store.questionsOf(messageId)[0]!;
+        store.savePicks(messageId, [{ key: q.key, revision: q.revision, answer: pickOf(q.key, q.kind, q.prompt, label) }]);
+      };
+      return { ...world, root, L, ended, says, pick, mark: () => store.listRow(root.id)!.session_ended };
+    }
+
+    test("the stopped launched session asked and is answered, though a live agent wrote last: not ended", async () => {
+      const w = await stopped();
+      const asked = w.says(question("Which?", ["One", "Two"]), w.L, w.root.id, "a1");
+      const later = w.says("Tagged in.", "ses_t", asked.id, "a2");
+      w.pick(asked.id, "One");
+      w.store.sendReply(later.id, { words: "Go on.", idempotency_key: "k1" });
+      expect(w.mark()).toBeUndefined();
+    });
+
+    test("another agent asked and ended, though the stopped launched session wrote last: ended", async () => {
+      const w = await stopped();
+      w.ended.add("ses_t");
+      const asked = w.says(question("Which?", ["One", "Two"]), "ses_t", w.root.id, "a1");
+      const later = w.says("Noted.", w.L, asked.id, "a2");
+      w.pick(asked.id, "One");
+      w.store.sendReply(later.id, { words: "Go on.", idempotency_key: "k1" });
+      expect(w.mark()).toBe(true);
+    });
+
+    test("a reply aimed at another session that ended: ended, while the launched session stays stopped", async () => {
+      const w = await stopped();
+      const said = w.says("Done.", w.L, w.root.id, "a1");
+      w.ended.add("ses_c");
+      w.store.sendReply(said.id, { words: "For you.", idempotency_key: "k1", to: { host: FAKE, session: "ses_c" } });
+      expect(w.mark()).toBe(true);
+    });
+
+    test("a reply waiting on the stopped launched session: not ended; its launch deleted: ended", async () => {
+      const w = await stopped();
+      const said = w.says("Done.", w.L, w.root.id, "a1");
+      expect(w.mark()).toBeUndefined();
+      w.store.sendReply(said.id, { words: "Go on.", idempotency_key: "k1" });
+      expect(w.mark()).toBeUndefined();
+      await w.post(w.root.launch!.id, "delete");
+      expect(w.launch.resumes(w.root.id, w.L)).toBe(false);
+      expect(w.mark()).toBe(true);
+    });
+  });
+
+  test("only the session the launch started reads by its launch: a root moved to another session reads as that session", async () => {
+    const { store, project, fake, launch } = setup();
+    const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+    const prepared = await launch.prepare(target, { name: "One", body: "One.", resolveProject: async () => project });
+    fake.host.start = async () => ({ ok: false, code: "missing", text: "Not installed." });
+    const failed = store.startPersonThread({ project_id: project.id, body: "One.", to: prepared.to, idempotency_key: "send-1", launch: prepared.launch }).message;
+    launch.begin(failed);
+    await until(() => !!store.message(failed.id)!.launch!.error);
+    const placeholder = store.message(failed.id)!.to!.session;
+    expect(launch.gone(failed.id, placeholder)).toBe(true);
+    store.readdressMessage(failed.id, { host: FAKE, session: "ses_c" });
+    expect(launch.gone(failed.id, "ses_c")).toBe(false);
+    expect(launch.resumes(failed.id, "ses_c")).toBe(false);
+  });
+
+  test("a started root moved away: the session it started still reads by its launch, the one it moved to does not", async () => {
+    const { store, project, fake, launch } = setup();
+    const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+    const prepared = await launch.prepare(target, { name: "One", body: "One.", resolveProject: async () => project });
+    const root = store.startPersonThread({ project_id: project.id, body: "One.", to: prepared.to, idempotency_key: "send-1", launch: prepared.launch }).message;
+    launch.begin(root);
+    await until(() => !!store.message(root.id)!.launch!.session_ref);
+    const L = store.message(root.id)!.to!.session;
+    expect(store.message(root.id)!.launch!.session).toBe(L);
+    fake.poll(L, false, Date.now());
+    store.readdressMessage(root.id, { host: FAKE, session: "ses_c" });
+    expect(launch.resumes(root.id, L)).toBe(true);
+    expect(launch.resumes(root.id, "ses_c")).toBe(false);
+  });
+
   test("a scratch launch's Delete purges its folder through its host", async () => {
     const { store, fake, launch, post } = setup();
     const target = launch.target({ launch: { agent: FAKE, scratch: true } })!;
@@ -348,6 +447,8 @@ describe("a second agent behind LaunchHost", () => {
     const root = store.startPersonThread({ project_id: project.id, body: "Hello.", to: { host: "gone-agent", session: "session-g1" }, idempotency_key: "send-gone", launch: record }).message;
 
     expect(await launch.runOf(root.id)).toBeNull();
+    // Nothing here can start it again, so a reply to it does not read as doing so.
+    expect(launch.resumes(root.id, "session-g1")).toBe(false);
     expect(launch.attachOf(root.id)).toBeNull();
     expect(launch.signature()).toBe(`${record.id}:-`);
     expect(() => launch.sweep(true)).not.toThrow();
@@ -356,6 +457,78 @@ describe("a second agent behind LaunchHost", () => {
     await expect(launch.permissionRoute(hook, `/api/inbox/launch/${record.id}/permission`)).rejects.toMatchObject({ code: "launch_not_found" });
     // A Send naming it is refused before anything is written.
     expect(() => launch.target({ launch: { agent: "gone-agent", project_id: project.id } })).toThrow(/to\.launch/);
+  });
+});
+
+describe("an answered permission question, with a host that lists its own prompt", () => {
+  const KEY = "k".repeat(64);
+  const WAITING = { status: "waiting", state: "running", waitingFor: "permission prompt" };
+
+  /** Claude Code's permission transport on the engine, its hook played by hand; the host says the session waits on a prompt throughout. */
+  async function waitingOnTheCard() {
+    const view = { reads: 0 };
+    const t = setup({
+      adapt: (host) => {
+        host.permissions = (context) => createLaunchPermissions({ ...context, holdMs: 0 });
+        host.sessions = async () => (view.reads++, () => WAITING);
+      },
+    });
+    const { store, clock, project, fake, launch } = t;
+    const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+    const prepared = await launch.prepare(target, { name: "Tidy", body: "Tidy.", resolveProject: async () => project });
+    const root = store.startPersonThread({ project_id: project.id, body: "Tidy.", to: prepared.to, idempotency_key: "send-1", thread_name: "Tidy", launch: prepared.launch }).message;
+    launch.begin(root);
+    await until(() => store.message(root.id)!.launch!.session_ref === "f1");
+    fake.poll("session-f1", true, clock.now);
+    store.recordDelivery(root.id, { host: FAKE, session: "session-f1" });
+    const launchId = prepared.launch.id;
+    mkdirSync(join(store.dir, "launch", launchId), { recursive: true });
+    writeFileSync(join(store.dir, "launch", launchId, "settings.json"), JSON.stringify({ env: { PLANNOTATOR_LAUNCH_KEY: KEY } }));
+    const event = { session_id: "session-f1", cwd: "/work", hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "rm -rf dist" }, permission_suggestions: [] };
+    /** One call of the hook's long poll. */
+    const hook = async (extra: Record<string, unknown>) => {
+      const path = `/api/inbox/launch/${launchId}/permission`;
+      const response = await launch.permissionRoute(new Request(`http://127.0.0.1${path}`, { method: "POST", body: JSON.stringify({ key: KEY, event, ...extra }) }), path);
+      return (await response!.json()) as { status: string; message_id: string };
+    };
+    const { message_id: asked } = await hook({ request_id: "req-00000001" });
+    // The host's read: the session waits on the prompt the card asks.
+    expect((await launch.runOf(root.id))!.state).toBe("waiting_answer");
+    expect(view.reads).toBe(1);
+    clock.now += 1_000;
+    /** The person's answer, the window's way: the pick, then the Send. */
+    const deny = () => {
+      const question = store.questionsOf(asked)[0]!;
+      const picked = { v: 1 as const, key: question.key, kind: "single" as const, prompt: question.prompt, selected: ["Deny"] };
+      const saved = store.savePicks(asked, [{ key: question.key, revision: question.revision, answer: picked }], { unsentOnly: true });
+      store.sendReply(asked, { idempotency_key: "answer-1", questions: [{ key: question.key, revision: saved[0]!.revision }] });
+    };
+    const line = async () => (await launch.runOf(root.id))!.state;
+    return { ...t, view, asked, hook, deny, line };
+  }
+
+  test("from the answer on, the host's read of that prompt never says the session waits on one, even before the hook has taken the answer", async () => {
+    const { clock, asked, hook, deny, line } = await waitingOnTheCard();
+    deny();
+    // The hook's next look is up to 200 ms away (longer when it is between calls).
+    expect(await line()).toBe("working");
+    clock.now += 200;
+    expect(await hook({ message_id: asked })).toMatchObject({ status: "decided" });
+    expect(await line()).toBe("working");
+    clock.now += ANSWER_SETTLE_MS - 1;
+    expect(await line()).toBe("working");
+    // Settled: a new read, and it still lists a prompt, so the session really waits on its own dialog.
+    clock.now += 1;
+    expect(await line()).toBe("waiting_terminal");
+  });
+
+  test("a hook that never takes the answer: once settled, one read says where the session is, with no wait for the host's usual 10 s", async () => {
+    const { clock, view, deny, line } = await waitingOnTheCard();
+    deny();
+    expect(await line()).toBe("working");
+    clock.now += ANSWER_SETTLE_MS;
+    expect(await line()).toBe("waiting_terminal");
+    expect(view.reads).toBe(2);
   });
 });
 
