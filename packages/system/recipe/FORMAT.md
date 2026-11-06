@@ -25,7 +25,7 @@ sources:                            # what you read
     self: { repo: github.com/acme/acme, at: "<full commit sha>" }   # this repo; at: the commit you drew from, quoted
     api: { repo: github.com/acme/api, at: "<full commit sha>" }     # another repo, under an alias you choose
   docs: [https://docs.example.com]
-watch: [deploy/*.toml]              # optional: globs of files whose edit changes the shape (configs, channel lists)
+watch: [deploy/*.toml]              # optional: globs (** crosses folders, * and ? stay in one) of files whose edit changes the shape
 scopes: { root: Acme, app: The app } # a scope is what a window opens into; root is the landing
 wanted:                             # sheets planned and not drawn yet; take each out once its file is written
   - { code: A-201, kind: algorithm, question: "How an order is priced, step by step." }
@@ -67,7 +67,9 @@ stack:                              # optional: technology tiles for a landscape
   t-node: { name: Node, mark: node, for: the server, used_by: [app] }
 ```
 
-- `code:` is what keeps a drawing true. Every part and line that rests on code names its files. A path with no
+- `code:` is what keeps a drawing true. Every part and line that rests on code names its files, in two shapes: a
+  part's `code:` maps each path to what that file does for it (`code: { src/worker.ts: the loop }`); a line's
+  `code:` names the file at each end (`code: { from: src/worker.ts, to: src/db/pool.ts }`), either end optional. A path with no
   prefix is in this repo; `<alias>:<path>` is in another repo named in `sources.repos`. A path is relative to its
   repo's root: no leading `/`, no `..`. A cited folder covers every file in it. A part with no code (a person, an
   outside vendor, a product built elsewhere) has no `code:`.
