@@ -156,9 +156,9 @@ function Secondary({ parts }: { parts: readonly (ReactNode | null | false)[] }) 
 }
 
 /**
- * The thread chip, the list's own (`.ib-key` / `.ib-keyt`): the thread's name
- * in the list's monospace face, or, for a thread with no name, its subject in
- * the row's face. Its tooltip and accessible words carry the whole thread:
+ * The thread chip (`.ib-key` / `.ib-keyt`, drawn as plain words in the row's
+ * face and a "·", approval "inbox-search-calm"): the thread's name, or, for a
+ * thread with no name, its subject. Its tooltip and accessible words carry the whole thread:
  * "Thread nightly-deploy: Investigate why…" (always for a named thread, whose
  * subject is not on screen; a subject chip only while it is cut). Its words are
  * shown whole (they wrap inside the chip) with the query's words marked, so a
@@ -868,7 +868,8 @@ export default function SearchPalette(props: SearchPaletteProps) {
           <span className="ib-sp-fl" dir="auto">
             {label}
           </span>
-          <Icon name="chevD" />
+          {/* A set filter shows its × instead (approval "inbox-search-calm"); a click still opens its menu. */}
+          {!set && <Icon name="chevD" />}
         </button>
       </Tip>
     );
