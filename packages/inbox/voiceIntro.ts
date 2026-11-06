@@ -1,12 +1,19 @@
 /**
  * When the one-time voice announcement may show (DESIGN-NOTES section 1). The Inbox decides who, and spends the claim
- * (POST /api/inbox/voice/intro: once per machine, only where Codex has a ChatGPT login). The page decides when: it goes
- * last, so it never shares a load with the sound dialog, the agent note, the list options dialog or the tour, and it
- * waits as the list options dialog does (listIntro.ts) for a settled Inbox page with nothing over it.
+ * (POST /api/inbox/voice/intro: once per machine, only where Codex has a ChatGPT login), and its line says when it is
+ * next (packages/shared/inbox/reveals.ts). The page decides when: it goes last, so it never shares a load with the
+ * sound dialog, the agent note, the list options dialog or the tour; its moment is a long reply just sent (approval
+ * "inbox-one-time-dialogs"), and it waits as the list options dialog does (listIntro.ts) for a settled Inbox page with
+ * nothing over it.
  */
 import { useEffect, useRef, useState } from 'react';
 import { inboxApi } from './api';
 import { LIST_INTRO_SETTLED_MS } from './listIntro';
+
+/** Voice's moment (approval "inbox-one-time-dialogs": "just sent a reply of 40+ words"): a reply this long or longer. */
+export const VOICE_INTRO_MIN_WORDS = 40;
+/** How long after such a reply the moment lasts, ms. */
+export const VOICE_INTRO_MOMENT_MS = 60_000;
 
 export interface VoiceIntroLoad {
   /** The Inbox has it due (settings `voice.intro_due`), read once per load. */
@@ -24,6 +31,8 @@ export interface VoiceIntroLoad {
   othersSettled: boolean;
   /** An update dialog or a restart is on screen. */
   updating: boolean;
+  /** Its moment: this page sent a reply of `VOICE_INTRO_MIN_WORDS` or more a moment ago. Absent: no moment needed. */
+  moment?: boolean;
 }
 
 export function voiceIntroWanted(load: VoiceIntroLoad): boolean {
@@ -31,7 +40,7 @@ export function voiceIntroWanted(load: VoiceIntroLoad): boolean {
 }
 
 export function voiceIntroMayAsk(load: VoiceIntroLoad, settled: boolean): boolean {
-  return voiceIntroWanted(load) && settled && load.othersSettled && !load.updating;
+  return voiceIntroWanted(load) && settled && load.othersSettled && !load.updating && load.moment !== false;
 }
 
 const RECHECK_MS = 700;

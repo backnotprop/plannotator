@@ -73,6 +73,9 @@ import { UndeliveredBand, UndeliveredText, useMinuteClock } from './Undelivered'
 import { SendToAnotherSession } from '../compose/SendToAnotherSession';
 import { authorWithLabel, labelOf, shortLabel, useSessionLabels } from '../sessionLabels';
 import { ROW_LABEL_MAX } from './RowAgents';
+import { attachmentImageUrl, readableVersion } from '../attachments';
+import { pickComposerMode } from '../fullScreenComposer';
+import { InlineReuseLayer, ReuseContext, sourceOf, type ReuseApi } from '../reuse';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, pastedSignature, useComposeFiles, useFileDrop } from '../compose/ComposeFiles';
 import {
   AskerEndedNote,
@@ -992,6 +995,7 @@ export function MessageBody({
           ))}
         </div>
       )}
+      <InlineReuseLayer bodyRef={bodyRef} />
       {fallback && createPortal(<ImageLightbox src={fallback.src} alt={fallback.alt} onClose={() => setFallback(null)} />, document.body)}
     </div>
     </OpenInCodeSpans>
@@ -1619,6 +1623,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // words; Put back, Undo and the browser's undo return it there. Full screen's card writes the same words.
   const replyFiles = useComposeFiles(NO_UPLOADS, {
     onPasted: (names) => announce(attachedAnnouncement(names)),
+    onAlready: (name) => announce(`${name} is already in your reply`),
     onPutBack: () => announce('The pasted text is back in your reply.'),
     machine: machine?.id ?? null,
     text: {
@@ -5376,7 +5381,43 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     linkOf: linkOf ?? ((messageId) => threadLink(thread.thread_id, null, window.location.origin, messageId)),
   };
 
+  // The one thing every reuse button in this pane calls. Stable between changes of what it shows, so the buttons and the
+  // pictures' layer (which measures) draw only when a file comes or goes.
+  const reuseToggle = useRef<ReuseApi['toggle']>(() => {});
+  reuseToggle.current = (f, version) => {
+    const source = sourceOf(f, version ?? readableVersion(f), attachmentImageUrl);
+    if (boxRef.current.open && replyFiles.holding(source.sha256)) {
+      replyFiles.removeHolding(source.sha256);
+      announce(`${source.name} taken out of your reply`);
+      return;
+    }
+    openBehind();
+    replyFiles.addExisting(source);
+    setError(null);
+    // Full screen's card shows the file under its Reply tab: a comment's words wait on theirs, and the person sees it went in.
+    pickComposerMode(thread.thread_id, 'reply');
+  };
+  // A refused tile holds nothing: it says why, and the button can try again. A tile answers to both hashes: the one the
+  // page knew and the bytes the Inbox gave, which is a stat for a big changed file until it is read.
+  const reuseHeld = replyFiles.files
+    .filter((f) => f.state !== 'refused')
+    .flatMap((f) => [f.reuse?.sha256, f.upload?.sha256, f.upload?.shown_sha256])
+    .filter(Boolean)
+    .join();
+  const reuseOffered = !resolved && newMessage?.kind !== 'compose' && replyFiles.canReuse;
+  const reuseApi = useMemo<ReuseApi | null>(
+    () =>
+      reuseOffered
+        ? {
+            fileOf: (id) => allFiles.find((f) => f.id === id),
+            isAdded: (f, version) => box.open && reuseHeld.split(',').includes(sourceOf(f, version ?? readableVersion(f), attachmentImageUrl).sha256),
+            toggle: (f, version) => reuseToggle.current(f, version),
+          }
+        : null,
+    [reuseOffered, allFiles, box.open, reuseHeld],
+  );
   return (
+    <ReuseContext.Provider value={reuseApi}>
     <>
     <section
       ref={sectionRef}
@@ -6740,6 +6781,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
       />
     )}
     </>
+    </ReuseContext.Provider>
   );
 }
 

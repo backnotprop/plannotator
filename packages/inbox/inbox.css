@@ -1257,7 +1257,7 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 /* Files pasted into the reply box: compose's tiles, inside the box above its chips. A tile never runs past
    the box: at least 200 px wide in a row, the whole box when that is narrower (a 320 px phone). */
 .ib-rfiles { padding: 0 8px 4px; }
-.ib-rfiles .ib-cp-files { margin-top: 2px; grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr)); }
+.ib-rfiles .ib-cp-files { margin-top: 2px; grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); }
 /* The answers this reply carries (picks on the cards), listed live inside the box under the words: one
    row per answer, the prompt cut with an ellipsis so the answer stays on the line; a row takes the person
    to its card. Never written into the words (ReplyAnswers). */
@@ -4073,13 +4073,18 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
 .pn-inbox .ib-cp-field .ib-rtext, .pn-inbox .ib-cp-field .ib-rmirror { min-height: 150px; max-height: 320px; font-size: var(--ib-fs-15, 15px); line-height: 1.6; padding: 0; }
 .ib-cp-field .ib-rtext::placeholder { color: color-mix(in oklch, var(--muted-foreground) 80%, transparent); }
 .ib-cp-field [data-skill-human-only-notice] { padding: 6px 0 0; }
-.ib-cp-files { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin-top: 10px; }
+.ib-cp-files { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; margin-top: 10px; }
 .ib-cp-file { position: relative; display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); min-width: 0; }
 .ib-cp-file .ib-fi { width: 30px; height: 30px; border-radius: 7px; background: var(--muted); display: flex; align-items: center; justify-content: center; color: var(--muted-foreground); flex: none; overflow: hidden; }
 .ib-cp-file .ib-fi.ib-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .ib-cp-file .ib-att-text { flex: 1; min-width: 0; }
 .ib-cp-file .ib-nm { font-size: var(--ib-fs-13-5, 13.5px); font-weight: 550; }
 .ib-cp-file .ib-kd { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The size never gets cut (the owner: "the numbers still seem cut off"), on a compose tile or a thread's: the words give way, then the count, and the separator stays with the size. */
+.ib-kd-split { display: flex; min-width: 0; }
+.ib-kd-w { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.ib-kd-n { flex: none; white-space: pre; }
+.ib-kd-c { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
 .ib-cp-file.ib-refused { border-color: color-mix(in oklch, var(--destructive) 55%, var(--border)); background: color-mix(in oklch, var(--destructive) 5%, var(--card)); }
 .ib-cp-ferr { font-size: var(--ib-fs-12, 12px); color: var(--destructive); line-height: 1.4; }
 .ib-cp-prog { display: block; height: 3px; margin-top: 5px; border-radius: 2px; background: color-mix(in oklch, var(--muted) 90%, var(--foreground) 6%); overflow: hidden; }
@@ -7704,6 +7709,16 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .pn-inbox .ib-rv-jump { height: 44px; width: 100%; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-16-in, 16px); }
   .ib-review .ib-vhead .ib-from { display: none; }
   .ib-review .ib-vhead .ib-fn { flex: 1; }
+  /* Comments: the whole screen, one row at its top. The review stays mounted, hidden under it, so Close finds the page
+     where it was (the list under an open thread's way). */
+  .pn-inbox .ib-viewer.ib-review.ib-fold.ib-panel-open .ib-gpanel { position: fixed; top: 0; left: 0; right: 0; bottom: calc(100% - var(--ib-vvh, 100%)); width: auto; z-index: 8; border-left: 0; box-shadow: none; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  .ib-review.ib-fold.ib-panel-open > :not(.ib-rsplit), .ib-review.ib-fold.ib-panel-open > .ib-rsplit > :not(.ib-gpanel) { visibility: hidden; }
+  .ib-review.ib-fold .ib-sheet-h { height: 52px; padding: 0 4px 0 20px; font-size: var(--ib-fs-15, 15px); }
+  /* Each card's Edit and Delete: 44 px targets in a row no taller, the outer icon under the sheet's close. */
+  .ib-review .ib-gpanel [data-annotation-panel] .ml-auto { margin-right: -16px; }
+  .pn-inbox .ib-review .ib-gpanel [data-annotation-panel] .ml-auto button { display: grid; place-items: center; width: 44px; height: 44px; margin-block: -10px; }
+  .pn-inbox .ib-review .ib-gpanel [data-annotation-panel] .ml-auto button::before { content: none; }
+  .pn-inbox .ib-review .ib-gpanel [data-annotation-panel] textarea + div button { height: 44px; min-width: 44px; padding-inline: 12px; }
   .ib-rvcard { padding: 12px 14px 14px; }
   .pn-inbox .ib-rvc-foot .ib-btn { min-height: 44px; }
 }
@@ -8197,6 +8212,64 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   /* A phone has no gutter around the pane: the board covers it edge to edge. */
   .ib-shape-layer { inset: 0; border-radius: 0; }
 }
+
+/* Reuse: add a file already in the Inbox to the message being written (reuse.tsx).
+   Same quiet family as the tile's ⋯: no colour at rest, muted on hover; a check once it is in, in the calm accent. */
+.pn-inbox .ib-reuse { display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--muted-foreground); transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease; }
+.pn-inbox .ib-reuse:hover { background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-reuse.ib-reuse-on { color: var(--ib-calm-s, var(--primary)); }
+.pn-inbox .ib-reuse:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; opacity: 1; }
+/* A tile: beside the ⋯, on the same patch as Open. */
+.pn-inbox .ib-reuse-tile { position: absolute; right: 8px; top: 50%; translate: 0 -50%; width: 26px; height: 26px; opacity: 0; }
+.ib-att-w-more .ib-reuse-tile { right: 36px; }
+.ib-att-w:hover .ib-reuse-tile, .ib-att-w:focus-within .ib-reuse-tile, .pn-inbox .ib-reuse-tile.ib-reuse-on { opacity: 1; }
+@media (hover: hover) {
+  .ib-att-w-reuse > .ib-att-t:not(.ib-open-beside) .ib-open { padding-right: 30px; margin-right: 0; }
+  .ib-att-w-reuse.ib-att-w-more > .ib-att-t:not(.ib-open-beside) .ib-open { padding-right: 58px; }
+}
+/* No hover: Open stays where it was, unless the check rests on the tile and needs the room (approval: nothing new rests on a phone's thread). */
+@media (hover: none) {
+  .ib-att-w-reuse:not(.ib-att-w-more) > .ib-att-t .ib-open { margin-right: 0; }
+  .ib-att-w-reuse:has(.ib-reuse-on) > .ib-att-t .ib-open { margin-right: 30px; }
+  .ib-att-w-reuse.ib-att-w-more:has(.ib-reuse-on) > .ib-att-t .ib-open { margin-right: 58px; }
+}
+/* A big preview: top right of the frame, on the card's colour, like an Artifacts card's ⋯. */
+.ib-gal-w { position: relative; display: flex; min-width: 0; }
+.ib-gal-w > .ib-gal-item { flex: 1 1 auto; width: 100%; }
+.pn-inbox .ib-reuse-gallery, .pn-inbox .ib-reuse-inline, .pn-inbox .ib-reuse-card { width: 28px; height: 28px; background: color-mix(in oklch, var(--card) 92%, transparent); box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 80%, transparent); }
+.pn-inbox .ib-reuse-gallery:hover, .pn-inbox .ib-reuse-inline:hover, .pn-inbox .ib-reuse-card:hover { background: var(--card); }
+.pn-inbox .ib-reuse-gallery { position: absolute; top: 8px; right: 8px; opacity: 0; }
+.ib-gal-w-count .ib-reuse-gallery { right: 38px; }
+.ib-gal-w:hover .ib-reuse-gallery, .ib-gal-w:focus-within .ib-reuse-gallery, .pn-inbox .ib-reuse-gallery.ib-reuse-on { opacity: 1; }
+/* A picture in the text: a layer over the body, each button placed from its picture's box. */
+.ib-body { position: relative; }
+.ib-reuse-layer { position: absolute; inset: 0; pointer-events: none; z-index: 51; }
+.ib-reuse-spot { position: absolute; pointer-events: auto; opacity: 0; transition: opacity 120ms ease; }
+.ib-reuse-spot.ib-show, .ib-reuse-spot:focus-within, .ib-reuse-spot:has(.ib-reuse-on) { opacity: 1; }
+/* An Artifacts card: beside its ⋯. */
+.pn-inbox .ib-reuse-card { position: absolute; top: 12px; right: 12px; opacity: 0; }
+.ib-art-w-more .ib-reuse-card { right: 44px; }
+.ib-art-w:hover .ib-reuse-card, .ib-art-w:focus-within .ib-reuse-card, .pn-inbox .ib-reuse-card.ib-reuse-on { opacity: 1; }
+/* The viewer: the pane header's icon button, and a button of full screen's toolbar. */
+.pn-inbox .ib-reuse-pane { width: 30px; height: 30px; border-radius: 7px; }
+.pn-inbox .ib-reuse-bar { width: 30px; height: 30px; border-radius: 7px; }
+.ib-fvbar-phone .ib-reuse-bar { width: 44px !important; height: 44px !important; }
+/* A phone's HTML page opens clear, the pill and the toolbar in one row (approval "inbox-html-attachments-phone"): no room
+   until the pill opens the card, so AttachmentPane draws no bar button while the pill shows (`phonePillShown`). */
+/* A screen with no hover: nothing new rests on the thread's tiles and pictures; the viewer holds the button.
+   A download tile opens no viewer, so its button rests on it (q-0136fc02, A). */
+@media (hover: none) {
+  .pn-inbox .ib-reuse-gallery:not(.ib-reuse-on), .ib-reuse-spot:not(:has(.ib-reuse-on)), .pn-inbox .ib-att-w:not(:has(> a.ib-dl)) > .ib-reuse-tile:not(.ib-reuse-on), .pn-inbox .ib-reuse-card:not(.ib-reuse-on) { display: none; }
+  .pn-inbox .ib-att-w:has(> a.ib-dl) > .ib-reuse-tile { opacity: 1; width: 44px; height: 44px; right: 2px; }
+  .pn-inbox .ib-att-w-more:has(> a.ib-dl) > .ib-reuse-tile { right: 36px; }
+  .ib-att-w-reuse:has(> a.ib-dl) > .ib-att-t .ib-open { margin-right: 34px; padding-left: 0; }
+  .ib-att-w-reuse.ib-att-w-more:has(> a.ib-dl) > .ib-att-t .ib-open { margin-right: 68px; }
+}
+/* A tile pointed at again. */
+.ib-cp-file.ib-cp-flash { animation: ib-cp-flash 900ms ease-out; }
+@keyframes ib-cp-flash { 0%, 40% { border-color: var(--ib-calm-s, var(--primary)); box-shadow: 0 0 0 2px color-mix(in oklch, var(--ib-calm-s, var(--primary)) 30%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .ib-cp-file.ib-cp-flash { animation-duration: 1ms; border-color: var(--ib-calm-s, var(--primary)); } }
+@media print { .pn-inbox .ib-reuse, .ib-reuse-layer { display: none; } }
 
 /* "Session ended" on a row: quiet, beside the row's own words. */
 .ib-rended { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); white-space: nowrap; flex: none; }
