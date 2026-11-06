@@ -218,7 +218,11 @@ jobs:
   # (`playwright install-deps`, 181 packages) hung on a slow Ubuntu mirror often
   # enough to fail shards before a spec ran. The image runs as the runner's own
   # user (uid 1001, its pwuser), not root, so the workspace stays the runner's
-  # and the specs that rely on file permissions still see them.
+  # and the specs that rely on file permissions still see them. `--init` puts an
+  # init first in the container: an Inbox started with `--background` is
+  # reparented to PID 1 when its launcher exits, and the runner's own PID 1
+  # (`tail -f /dev/null`) never reaps it, so a stopped Inbox stays a zombie and
+  # the specs that stop one (stopScratchInbox) see it still there.
   inbox-window-e2e:
     name: Inbox window (Playwright against the compiled binary, ${{ matrix.shard }}/16)
     needs: build
@@ -226,7 +230,7 @@ jobs:
     timeout-minutes: 30
     container:
       image: mcr.microsoft.com/playwright:v${{ needs.build.outputs.playwright }}-noble
-      options: --user 1001
+      options: --user 1001 --init
     strategy:
       fail-fast: false
       matrix:
