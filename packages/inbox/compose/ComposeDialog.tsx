@@ -68,6 +68,8 @@ import {
   startStatusLine,
   scratchFolderOf,
   scratchProject,
+  folderProject,
+  untildePath,
   SCRATCH_PICK,
   sendThreadName,
   suggestThreadName,
@@ -247,11 +249,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
   });
   // A drop anywhere on the dialog attaches the files ("Drop files to attach").
   const drop = useFileDrop(files.add, takesFiles);
-  // `machine`: the linked machine the project is on (remote launch); null for this computer.
-  const [startPick, setStartPick] = useState<{ agent: string; projectId: string; machine: string | null } | null>(null);
-  const { model, load: loadHere } = useComposeSessions(true, transport?.sessions, startPick && !startPick.machine ? { agent: startPick.agent, project: startPick.projectId } : null);
+  // `machine`: the linked machine the project is on (remote launch); null for this computer. `folder`: a folder under
+  // that machine's home picked in "Another folder…" (`~/…`, with its `name`), in place of a project.
+  const [startPick, setStartPick] = useState<{ agent: string; projectId: string; machine: string | null; folder?: { path: string; name: string } } | null>(null);
+  // A typed folder has no project id, so no sessions read can look at its files (Trust and start is not offered for it).
+  const trustPick = startPick && !startPick.folder ? startPick : null;
+  const { model, load: loadHere } = useComposeSessions(true, transport?.sessions, trustPick && !trustPick.machine ? { agent: trustPick.agent, project: trustPick.projectId } : null);
   // Linked machines (remote launch): each one's launch block, read through the forward while launch is on here.
-  const there = useMachineLaunches(!transport && !!model?.launch, startPick?.machine ? { agent: startPick.agent, project: startPick.projectId, machine: startPick.machine } : null);
+  const there = useMachineLaunches(!transport && !!model?.launch, trustPick?.machine ? { agent: trustPick.agent, project: trustPick.projectId, machine: trustPick.machine } : null);
   const load = async () => {
     await Promise.all([loadHere(), startPick?.machine ? there.readOne(startPick.machine) : null]);
   };
@@ -297,6 +302,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
     if (!startPick) return null;
     const block = startPick.machine ? there.reads.get(startPick.machine)?.launch : model?.launch;
     const agent = block?.agents.find((a) => a.agent === startPick.agent);
+    // "Another folder…": a folder under that machine's home; the Send names it, and the far side makes it a project.
+    if (agent && startPick.folder && !pulls) {
+      return { agent: agent.agent, name: agent.name, project: folderProject(startPick.folder.path, startPick.folder.name), folder: startPick.folder.path, machine: startPick.machine };
+    }
     // "New scratch folder": its root stands in for the project; the folder is made when the person sends.
     if (agent && startPick.projectId === SCRATCH_PICK && block?.scratch && !pulls) return { agent: agent.agent, name: agent.name, project: scratchProject(block.scratch.root), scratch: true, machine: startPick.machine };
     const project = block?.projects.find((p) => p.id === startPick.projectId && (!pulls || pulls.projects.includes(p.id)));
@@ -496,7 +505,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         to: start
           ? {
               launch: {
-                ...(start.scratch ? { agent: start.agent, scratch: true as const } : { agent: start.agent, project_id: start.project.id }),
+                ...(start.scratch ? { agent: start.agent, scratch: true as const } : start.folder ? { agent: start.agent, folder: start.folder } : { agent: start.agent, project_id: start.project.id }),
                 // The press is the consent, to what it was offered: the server refuses a folder that changed since.
                 ...(trust ? { trust: { folder: trust.folder, facts: trustFacts } } : {}),
               },
@@ -582,6 +591,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
       // A draft keeps the project a new session would start in, not the start itself: reopened, To is chosen again.
       const project = target
         ? { id: target.project.id, root: target.project.root, name: target.project.name }
+        : start?.folder
+          ? // A folder picked in "Another folder…" is no project yet: its path (absolute when that machine's home is known) and name.
+            { id: null, root: untildePath(start.folder, startHome), name: start.project.name }
         : start && !start.scratch
           ? { id: start.project.id, root: start.project.root, name: start.project.name }
         : (draft?.project ?? (current?.root ? { id: current.id, root: current.root, name: current.name ?? current.root } : null));
@@ -705,6 +717,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       projects: g.projects,
       last: g.last,
       notice: g.notice,
+      asleep: g.asleep,
       scratch:
         g.scratch && folder && start
           ? { folder: tildePath(folder, g.home), root: tildePath(g.scratch.root, g.home), trusted: agentThere?.scratch_trusted !== false || !!agentThere.untrusted?.[SCRATCH_PICK], agentName: start.name }
@@ -923,6 +936,20 @@ export function ComposeDialog(props: ComposeDialogProps) {
                 }
               : null
           }
+          onFolder={
+            pulls
+              ? undefined
+              : (folder, name, machine) => {
+                  // A folder that is one of that machine's projects already is that project (its trust facts and all).
+                  const machineHome = machine ? (there.reads.get(machine)?.home ?? null) : home;
+                  const known = blockOf(machine)?.projects.find((p) => p.exists && tildePath(p.root, machineHome) === folder);
+                  setStartPick(known ? { agent: start.agent, projectId: known.id, machine } : { agent: start.agent, projectId: `folder:${folder}`, machine, folder: { path: folder, name } });
+                  setFolderMenu(false);
+                  setError(null);
+                  textRef.current?.focus();
+                }
+          }
+          folderPicked={start.folder ? { folder: start.folder, machine: start.machine } : null}
           onScratch={(machine) => {
             setStartPick({ agent: start.agent, projectId: SCRATCH_PICK, machine });
             setFolderMenu(false);

@@ -9,11 +9,22 @@
  *  1. New message → New Claude Code session → the folder menu groups the projects by machine, billing-svc under both;
  *     picking Mac mini's infra makes To read "in infra · Mac mini"; Send starts the agent on Mac mini (its fake gets
  *     `--bg` in its own folder) and MacBook's fake starts nothing.
- *  2. Mac mini stopped: its last read still lists its projects ("Mac mini · asleep"); Send reads "Start when Mac mini
+ *  2. "Another folder on MacBook…" (approval addendum "existing folders"): this computer's own folder route, and the
+ *     agent starts here.
+ *  3. "Another folder on Mac mini…": a folder in Mac mini's home that is no project yet, typed and picked through
+ *     Mac mini's own folder route; Start puts "billing-api · Mac mini" in To and Send starts Claude Code there on Mac
+ *     mini (MacBook's fake starts nothing); a missing path says so.
+ *  4. An untrusted folder picked that way (Mac mini's fake checks Claude's folder trust): the Send still goes, the
+ *     start stops on trust, and the thread's run line Trust folder (through the forward) starts it there.
+ *  5. Mac mini stopped: its last read still lists its projects ("Mac mini · asleep"); Send reads "Start when Mac mini
  *     is back" with the note; the Send is held, the toast says Claude Code starts on Mac mini when it's back, and
- *     Cancel takes it back (the outbox entry `cancelled`, nothing started).
+ *     Cancel takes it back (the outbox entry `cancelled`, nothing started). Its folder browser reads nothing and says
+ *     "Mac mini is asleep".
  *
- * `RL_PICKER_SHOTS` saves the pictures (default /tmp/remote-launch-picker/build), 1440×900 and a 390 phone, light.
+ * `RL_PICKER_SHOTS` saves the picker's pictures (default /tmp/remote-launch-picker/build), 1440×900 and a 390 phone,
+ * light; `RL_PICKER_DARK_SHOTS` their dark ones at 1440 (default /tmp/remote-launch-picker/build-dark);
+ * `RL_FOLDER_SHOTS` the folder browser's, `folder-<state>-<1440|390>-<light|dark>.png` (default
+ * /tmp/remote-launch-picker/other-folder).
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
@@ -27,6 +38,8 @@ import { inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } f
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const shots = resolve(process.env.RL_PICKER_SHOTS ?? '/tmp/remote-launch-picker/build');
+const darkShots = resolve(process.env.RL_PICKER_DARK_SHOTS ?? '/tmp/remote-launch-picker/build-dark');
+const folderShots = resolve(process.env.RL_FOLDER_SHOTS ?? '/tmp/remote-launch-picker/other-folder');
 const CLOSED = 'http://127.0.0.1:9';
 
 interface Machine {
@@ -117,15 +130,44 @@ async function projectOn(m: Machine, name: string, body: string): Promise<string
   expect(response.status).toBe(200);
   await response.text();
   m.projects[name] = root;
-  const trusted = Object.fromEntries(Object.values(m.projects).map((p) => [p, { hasTrustDialogAccepted: true }]));
-  writeFileSync(join(m.dataDir, 'agents-home', '.claude.json'), JSON.stringify({ projects: trusted }));
+  trustProjects(m);
   return root;
 }
 
-async function shot(page: Page, name: string): Promise<void> {
-  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+/** Claude trusts every folder in `m.projects` (the sandbox's agents' home `.claude.json`). */
+function trustProjects(m: Machine): void {
+  const trusted = Object.fromEntries(Object.values(m.projects).map((p) => [p, { hasTrustDialogAccepted: true }]));
+  writeFileSync(join(m.dataDir, 'agents-home', '.claude.json'), JSON.stringify({ projects: trusted }));
+}
+
+async function shot(page: Page, name: string, options: { scheme?: 'light' | 'dark'; dir?: string } = {}): Promise<void> {
+  const dark = options.scheme === 'dark';
+  await page.emulateMedia({ colorScheme: dark ? 'dark' : 'light', reducedMotion: 'reduce' });
+  await page.waitForFunction((d) => document.documentElement.classList.contains('light') !== d, dark, { timeout: 3000 }).catch(() => undefined);
   await page.waitForTimeout(300);
-  await page.screenshot({ path: join(shots, `${name}.png`) });
+  await page.screenshot({ path: join(options.dir ?? shots, `${name}.png`) });
+  if (dark) await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+}
+
+/** The picker's picture again in dark (1440), beside the light ones. */
+const darkShot = (page: Page, name: string) => shot(page, `${name}-dark`, { scheme: 'dark', dir: darkShots });
+
+/** A folder browser picture, light and dark: `folder-<state>-<1440|390>-<light|dark>.png`. */
+async function folderShot(page: Page, state: string): Promise<void> {
+  const width = page.viewportSize()?.width === 390 ? '390' : '1440';
+  await shot(page, `folder-${state}-${width}-light`, { dir: folderShots });
+  await shot(page, `folder-${state}-${width}-dark`, { scheme: 'dark', dir: folderShots });
+}
+
+/** The folder reads a window makes (`…/launch/folders?path=`), by route: `self` or the machine id. */
+function watchFolderReads(page: Page): { machine: string; path: string }[] {
+  const seen: { machine: string; path: string }[] = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    const m = /^\/api\/inbox\/(?:m\/(ibx_[0-9A-Z]{26})\/)?launch\/folders$/.exec(url.pathname);
+    if (m) seen.push({ machine: m[1] ?? 'self', path: url.searchParams.get('path') ?? '' });
+  });
+  return seen;
 }
 
 let macbook: Machine;
@@ -139,7 +181,7 @@ test.use({ actionTimeout: 20_000 });
 
 test.beforeAll(async () => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
-  mkdirSync(shots, { recursive: true });
+  for (const dir of [shots, darkShots, folderShots]) mkdirSync(dir, { recursive: true });
   macbook = machine('MacBook');
   mini = machine('Mac mini');
   for (const m of [macbook, mini]) {
@@ -215,6 +257,11 @@ test('1. the folder menu groups projects by machine; a Mac mini project starts C
   // The phone first, so both windows have read Mac mini while it is awake.
   await openFolderMenu(phone, 'The staging certs expire in a week. Rotate them and update the three cron jobs that read them.', 'Mac mini');
   await shot(phone, 'menu-390');
+  // "Another folder on Mac mini…" ends Mac mini's group.
+  const otherRow = phone.locator(`[data-compose-folder-other="${mini.id}"]`);
+  await expect(otherRow).toHaveText('Another folder on Mac mini…');
+  await otherRow.scrollIntoViewIfNeeded();
+  await folderShot(phone, 'row');
   await phone.locator(`[data-compose-folder-option][data-compose-folder-machine="${mini.id}"]`).filter({ hasText: 'infra' }).click();
   await shot(phone, 'to-line-390');
   await phone.locator('[data-compose-cancel]').click();
@@ -226,11 +273,15 @@ test('1. the folder menu groups projects by machine; a Mac mini project starts C
   // billing-svc is on both machines: it shows under each.
   await expect(page.locator('[data-compose-folder-option]').filter({ hasText: 'billing-svc' })).toHaveCount(2);
   await shot(page, 'menu-1440');
+  await darkShot(page, 'menu-1440');
+  await expect(page.locator('[data-compose-folder-other]')).toHaveText(['Another folder on MacBook…', 'Another folder on Mac mini…']);
+  await folderShot(page, 'row');
   await page.locator(`[data-compose-folder-option][data-compose-folder-machine="${mini.id}"]`).filter({ hasText: 'infra' }).click();
   const folder = dialog(page).locator('[data-compose-folder]');
   await expect(folder.locator('bdi').first()).toHaveText('infra');
   await expect(folder.locator(`[data-compose-machine="${mini.id}"]`)).toHaveText('· Mac mini');
   await shot(page, 'to-line-1440');
+  await darkShot(page, 'to-line-1440');
 
   const here = macbook.fake.starts().length;
   const answer = page.waitForResponse((r) => r.url().endsWith(`/api/inbox/m/${mini.id}/messages`) && r.request().method() === 'POST');
@@ -243,7 +294,152 @@ test('1. the folder menu groups projects by machine; a Mac mini project starts C
   await shot(page, 'sent-1440');
 });
 
-test("2. Mac mini asleep: Send waits for it, the toast says so, and Cancel takes it back", async () => {
+/** The home folder a sandboxed Inbox lists and starts in (`PLANNOTATOR_TEST_SANDBOX`: its agents' home). */
+const homeOf = (m: Machine) => join(m.dataDir, 'agents-home');
+
+/** In the open folder menu: "Another folder on <machine>…", then a path typed in its field. */
+async function browse(page: Page, machine: string, path: string): Promise<void> {
+  await page.locator(`[data-compose-folder-other="${machine}"]`).click();
+  await expect(page.locator('[data-home-folders-path]')).toBeFocused();
+  await page.locator('[data-home-folders-path]').fill(path);
+}
+
+test("2. Another folder on MacBook…: this computer's own folder route, and the agent starts here", async () => {
+  const page = contexts[0]!.pages()[0]!;
+  mkdirSync(join(homeOf(macbook), 'code', 'notes-local'), { recursive: true });
+  const target = realpathSync(join(homeOf(macbook), 'code', 'notes-local'));
+  const reads = watchFolderReads(page);
+  await page.locator('.ib-toast [data-toast-dismiss]').click({ timeout: 2000 }).catch(() => {});
+  await openFolderMenu(page, 'Sort the notes by date and drop the empty ones.', 'Mac mini');
+  await browse(page, 'self', '~/code/no');
+  await expect(page.locator('[data-home-folder-option] .ib-cp-op')).toHaveText(['notes-local']);
+  await expect(page.locator('[data-home-folders] .ib-hfb-head')).toHaveText('A folder on MacBook');
+  await page.locator('[data-home-folder-option="notes-local"]').click();
+  await page.locator('[data-home-folder-start="~/code/notes-local"]').click();
+  await expect(dialog(page).locator('[data-compose-folder] [data-compose-machine]')).toHaveCount(0);
+  expect(reads.length).toBeGreaterThan(0);
+  expect(reads.every((r) => r.machine === 'self')).toBe(true);
+  const there = mini.fake.starts().length;
+  const answer = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/inbox/messages' && r.request().method() === 'POST');
+  await dialog(page).locator('[data-compose-send]').click();
+  const sent = await answer;
+  expect(sent.status()).toBe(200);
+  expect(sent.request().postDataJSON().to).toEqual({ launch: { agent: 'claude-code', folder: '~/code/notes-local' } });
+  await waitFor('--bg on MacBook in ~/code/notes-local', () => macbook.fake.starts().some((s) => s.cwd === target && s.argv.includes('--bg')));
+  expect(mini.fake.starts().length).toBe(there);
+  // A project of MacBook's now; trusted like the others, so later pictures don't show its Trust and start.
+  macbook.projects['notes-local'] = target;
+  trustProjects(macbook);
+});
+
+test('3. Another folder on Mac mini…: a folder that is no project yet, read and started on Mac mini; a missing path says so', async () => {
+  const [page, phone] = contexts.map((c) => c.pages()[0]!) as [Page, Page];
+  // Folders in Mac mini's home that are no project of its Inbox (the sandboxed Inbox's home is its agents' home).
+  for (const name of ['billing-api', 'billing-reports', 'billing-svc']) mkdirSync(join(homeOf(mini), 'code', name), { recursive: true });
+  const target = realpathSync(join(homeOf(mini), 'code', 'billing-api'));
+  const words = 'The refund webhook retries forever on a 409. Make it retry with the same key three times, then alert.';
+  const reads = watchFolderReads(page);
+  const phoneReads = watchFolderReads(phone);
+
+  // The phone: typing, chosen, To, missing.
+  await page.locator('.ib-toast [data-toast-dismiss]').click({ timeout: 2000 }).catch(() => {});
+  await openFolderMenu(phone, words, 'Mac mini');
+  await browse(phone, mini.id, '~/code/bil');
+  await expect(phone.locator('[data-home-folder-option] .ib-cp-op')).toHaveText(['billing-api', 'billing-reports', 'billing-svc']);
+  await folderShot(phone, 'typing');
+  await phone.locator('[data-home-folder-option="billing-api"]').click();
+  await expect(phone.locator('[data-home-folders-path]')).toHaveValue('~/code/billing-api/');
+  await expect(phone.locator('[data-home-folder-start="~/code/billing-api"]')).toBeVisible();
+  await folderShot(phone, 'chosen');
+  await phone.locator('[data-home-folder-start]').click();
+  await expect(dialog(phone).locator('[data-compose-folder] bdi').first()).toHaveText('billing-api');
+  await folderShot(phone, 'to-line');
+  await dialog(phone).locator('[data-compose-folder]').click();
+  await browse(phone, mini.id, '~/code/biling-svc');
+  await expect(phone.locator('[data-home-folders-note="missing"]')).toHaveText('Mac mini has no folder ~/code/biling-svc. Check the path, or pick a folder below.');
+  await folderShot(phone, 'missing');
+  await phone.locator('[data-home-folders-back]').click();
+  await phone.locator('[data-compose-folders] .ib-cp-back').first().click();
+  await phone.locator('[data-compose-cancel]').click();
+  await dialog(phone).locator('[data-compose-discard]').click();
+  expect(phoneReads.length).toBeGreaterThan(0);
+  expect(phoneReads.every((r) => r.machine === mini.id)).toBe(true);
+
+  // The desktop: the same, then Send.
+  await openFolderMenu(page, words, 'Mac mini');
+  await browse(page, mini.id, '~/code/biling-svc');
+  await expect(page.locator('[data-home-folders-note="missing"]')).toHaveText('Mac mini has no folder ~/code/biling-svc. Check the path, or pick a folder below.');
+  await folderShot(page, 'missing');
+  await page.locator('[data-home-folders-path]').fill('~/code/bil');
+  await expect(page.locator('[data-home-folder-option] .ib-cp-op')).toHaveText(['billing-api', 'billing-reports', 'billing-svc']);
+  await expect(page.locator('[data-home-folders] .ib-hfb-head')).toHaveText('A folder on Mac mini');
+  await folderShot(page, 'typing');
+  await page.locator('[data-home-folder-option="billing-api"]').click();
+  await expect(page.locator('[data-home-folder-start="~/code/billing-api"]')).toBeVisible();
+  await folderShot(page, 'chosen');
+  await page.keyboard.press('Enter');
+  const folder = dialog(page).locator('[data-compose-folder]');
+  await expect(folder.locator('bdi').first()).toHaveText('billing-api');
+  await expect(folder.locator(`[data-compose-machine="${mini.id}"]`)).toHaveText('· Mac mini');
+  await folderShot(page, 'to-line');
+  expect(reads.length).toBeGreaterThan(0);
+  expect(reads.every((r) => r.machine === mini.id)).toBe(true);
+
+  const here = macbook.fake.starts().length;
+  const answer = page.waitForResponse((r) => r.url().endsWith(`/api/inbox/m/${mini.id}/messages`) && r.request().method() === 'POST');
+  await dialog(page).locator('[data-compose-send]').click();
+  const sent = await answer;
+  expect(sent.status()).toBe(200);
+  expect(sent.request().postDataJSON().to).toEqual({ launch: { agent: 'claude-code', folder: '~/code/billing-api' } });
+  await expect(dialog(page)).toHaveCount(0);
+  await expect(page.locator('.ib-toast')).toContainText('in billing-api · Mac mini');
+  await waitFor('--bg on Mac mini in ~/code/billing-api', () => mini.fake.starts().some((s) => s.cwd === target && s.argv.includes('--bg')));
+  expect(macbook.fake.starts().length).toBe(here);
+  // The folder is Mac mini's project now.
+  await waitFor("Mac mini's project for billing-api", async () => JSON.stringify(await getJson(mini, '/api/inbox/projects')).includes(target));
+});
+
+test('4. an untrusted folder picked there: the start stops on trust, and the run line Trust folder starts it on Mac mini', async () => {
+  const page = contexts[0]!.pages()[0]!;
+  const target = realpathSync(join(homeOf(mini), 'code', 'billing-reports'));
+  mini.fake.configure({ trustCheck: true });
+  try {
+    await page.locator('.ib-toast [data-toast-dismiss]').click({ timeout: 2000 }).catch(() => {});
+    await openFolderMenu(page, 'Add the monthly refunds report to the billing reports.', 'Mac mini');
+    await browse(page, mini.id, '~/code/billing-reports/');
+    await page.locator('[data-home-folder-start="~/code/billing-reports"]').click();
+    // No Trust and start: a typed folder has no reading before the Send.
+    await expect(dialog(page).locator('[data-compose-send]')).toContainText('Send');
+    await expect(dialog(page).locator('[data-compose-send]')).not.toContainText('Trust');
+    const answer = page.waitForResponse((r) => r.url().endsWith(`/api/inbox/m/${mini.id}/messages`) && r.request().method() === 'POST');
+    await dialog(page).locator('[data-compose-send]').click();
+    expect((await answer).status()).toBe(200);
+    await page.locator('.ib-toast [data-toast-action]').click();
+    await waitFor('the refused start on Mac mini', () => mini.fake.starts().some((s) => s.cwd === target));
+    const tries = mini.fake.starts().filter((s) => s.cwd === target).length;
+    const line = page.locator('section.ib-pane [data-run="failed"]');
+    await expect(line).toContainText("isn't a trusted folder yet.", { timeout: 30_000 });
+    await shot(page, 'folder-untrusted-1440-light', { dir: folderShots });
+    const trusted = page.waitForResponse((r) => /\/api\/inbox\/m\/ibx_[0-9A-Z]{26}\/launch\/[^/]+\/trust$/.test(new URL(r.url()).pathname));
+    await line.locator('[data-run-trust]').click();
+    expect((await trusted).status()).toBe(200);
+    await waitFor('the start again on Mac mini, trusted', () => mini.fake.starts().filter((s) => s.cwd === target).length > tries && mini.fake.agents().some((a) => a.cwd === target));
+  } finally {
+    mini.fake.configure({ trustCheck: false });
+  }
+  // Both windows read Mac mini once more while it is awake, so billing-reports is in the read they keep for its sleep.
+  for (const window of contexts.map((c) => c.pages()[0]!)) {
+    await openFolderMenu(window, 'Nothing to send.', 'Mac mini');
+    await expect(window.locator(`[data-compose-folder-option][data-compose-folder-machine="${mini.id}"]`).filter({ hasText: 'billing-reports' })).toHaveCount(1, { timeout: 20_000 });
+    await window.keyboard.press('Escape');
+    await window.keyboard.press('Escape');
+    const discard = dialog(window).locator('[data-compose-discard]');
+    if (await discard.isVisible().catch(() => false)) await discard.click();
+    await expect(dialog(window)).toHaveCount(0);
+  }
+});
+
+test("5. Mac mini asleep: Send waits for it, the toast says so, and Cancel takes it back", async () => {
   const [desktop, phone] = contexts.map((c) => c.pages()[0]!);
   const startsBefore = mini.fake.starts().length;
   await stopScratchInbox(mini.dataDir);
@@ -254,20 +450,41 @@ test("2. Mac mini asleep: Send waits for it, the toast says so, and Cancel takes
   await phone!.locator(`[data-compose-folder-option][data-compose-folder-machine="${mini.id}"]`).filter({ hasText: 'infra' }).click();
   await expect(dialog(phone!).locator('[data-compose-send]')).toContainText('Start when Mac mini is back');
   await shot(phone!, 'asleep-390');
+  // Its folder browser reads nothing: "Mac mini is asleep", nothing to start.
+  const phoneReads = watchFolderReads(phone!);
+  await dialog(phone!).locator('[data-compose-folder]').click();
+  await browse(phone!, mini.id, '~/code/');
+  await expect(phone!.locator('[data-home-folders-note="asleep"]')).toHaveText('Mac mini is asleep');
+  await folderShot(phone!, 'asleep');
+  await phone!.locator('[data-home-folders-back]').click();
+  await phone!.locator('[data-compose-folders] .ib-cp-back').first().click();
+  expect(phoneReads).toEqual([]);
 
   const page = desktop!;
   // The earlier "Starting Claude Code" toast is not this picture's.
   await page.locator('.ib-toast [data-toast-dismiss]').click({ timeout: 2000 }).catch(() => {});
   await openFolderMenu(page, 'Rotate the staging database password and update the three cron jobs that read it.', 'asleep');
-  // The person started an agent on Mac mini last: its group leads, its last project first.
+  // The person started an agent on Mac mini last (billing-reports, case 4): its group leads, its last project first.
   await expect(page.locator('[data-compose-folder-group]')).toHaveText(['Mac mini · asleep', 'MacBook · this computer']);
-  await expect(page.locator('[data-compose-folder-option]').first()).toContainText('infra · you started it here last');
+  await expect(page.locator('[data-compose-folder-option]').first()).toContainText('billing-reports · you started it here last');
   await shot(page, 'menu-asleep-1440');
+  await darkShot(page, 'menu-asleep-1440');
+  const reads = watchFolderReads(page);
+  await page.locator(`[data-compose-folder-other="${mini.id}"]`).click();
+  await expect(page.locator('[data-home-folders-note="asleep"]')).toHaveText('Mac mini is asleep');
+  await page.locator('[data-home-folders-path]').fill('~/code/');
+  await page.waitForTimeout(400);
+  await expect(page.locator('[data-home-folder-start], [data-home-folder-option]')).toHaveCount(0);
+  await folderShot(page, 'asleep');
+  expect(reads).toEqual([]);
+  await page.keyboard.press('Escape');
+  await expect(page.locator(`[data-compose-folder-other="${mini.id}"]`)).toBeVisible();
   await page.locator(`[data-compose-folder-option][data-compose-folder-machine="${mini.id}"]`).filter({ hasText: 'infra' }).click();
   const d = dialog(page);
   await expect(d.locator('[data-compose-send]')).toContainText('Start when Mac mini is back');
   await expect(d.locator('[data-compose-note="asleep"]')).toContainText("Your message waits here, and Claude Code starts on Mac mini when it's back. You can cancel it until then.");
   await shot(page, 'asleep-1440');
+  await darkShot(page, 'asleep-1440');
 
   const held = page.waitForResponse((r) => r.url().endsWith(`/api/inbox/m/${mini.id}/messages`) && r.request().method() === 'POST');
   await d.locator('[data-compose-send]').click();

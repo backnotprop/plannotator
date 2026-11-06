@@ -8365,3 +8365,23 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-cp-picker[data-phone] .ib-cp-fopt .ib-cp-op { grid-area: agent; color: var(--foreground); font-size: var(--ib-fs-15, 15px); }
   .ib-cp-picker[data-phone] .ib-cp-fnotice .ib-cp-op { color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
 }
+
+/* "Another folder on <machine>…" (approval addendum "existing folders"): the quiet last row of each machine's group,
+   and the folder browser it opens in the menu's place (HomeFolderBrowser.tsx): "‹ A folder on Mac mini", the path
+   field, the folders under it, "✓ Start in <name>", and the missing or asleep line where the folders would be. */
+.ib-cp-other .ib-cp-op { color: color-mix(in oklch, var(--foreground) 55%, var(--muted-foreground)); }
+.ib-hfb { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.ib-hfb .ib-cp-list { grid-template-columns: auto minmax(0, max-content) minmax(min(12ch, 30%), 1fr) 16px; }
+.ib-hfb-head { display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px 0 6px; border-bottom: 1px solid var(--ib-line); color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); flex: none; }
+.ib-hfb-head b { color: var(--foreground); font-weight: 600; }
+.pn-inbox .ib-hfb-back { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted-foreground); }
+.pn-inbox .ib-hfb-back:hover { background: var(--muted); color: var(--foreground); }
+.ib-hfb-field > svg.ib-ic { flex: none; }
+.ib-hfb-start .ib-cp-op b { font-weight: 600; }
+.ib-hfb-start > svg.ib-ic { color: var(--foreground); }
+.ib-hfb .ib-cp-none.ib-hfb-note { line-height: 1.45; overflow-wrap: anywhere; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-cp-picker[data-phone] .ib-hfb-head { min-height: 44px; padding: 0 14px; font-size: var(--ib-fs-15, 15px); }
+  .ib-cp-picker[data-phone] .ib-hfb .ib-cp-none { font-size: var(--ib-fs-14, 14px); padding: 14px 8px; }
+  .ib-cp-picker[data-phone] .ib-cp-other .ib-cp-op { color: color-mix(in oklch, var(--foreground) 55%, var(--muted-foreground)); }
+}

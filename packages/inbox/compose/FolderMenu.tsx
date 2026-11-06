@@ -3,7 +3,8 @@ import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { Icon } from '../icons';
 import { tildePath } from '../format';
 import { FolderPath } from './ToPicker';
-import { filterLaunchProjects, scratchMatches, SCRATCH_PICK, type LaunchProject } from './model';
+import { filterLaunchProjects, otherFolderMatches, scratchMatches, SCRATCH_PICK, type LaunchProject } from './model';
+import { HomeFolderBrowser } from './HomeFolderBrowser';
 
 /**
  * The folder menu (launch, UX screen 03): where a new session starts, picked
@@ -28,6 +29,10 @@ import { filterLaunchProjects, scratchMatches, SCRATCH_PICK, type LaunchProject 
  * A machine where the agent can't start shows one disabled line, with its
  * command to copy when there is one. The filter matches a project's name or
  * path, or the machine's name; the keys walk every row of every group.
+ *
+ * "Another folder on <machine>…" (approval addendum "existing folders", `onFolder`): the quiet last row of each
+ * group ("Another folder…" with no machine words when there is only this computer). Picked, the menu turns into
+ * that machine's folder browser (HomeFolderBrowser.tsx) until a folder is picked or the person goes back.
  */
 /** "New scratch folder" in one place: the folder a Send would make, its root, and whether the agent trusts the root. */
 export interface ScratchRow {
@@ -51,11 +56,17 @@ export interface FolderGroup {
   scratch: ScratchRow | null;
   /** The agent can't start there: one disabled line instead of its projects. */
   notice: { line: string; command: string | null } | null;
+  /** That machine is asleep: its folder browser reads nothing. */
+  asleep?: boolean;
 }
+
+/** The folder browser's pick key in the keys' walk: never a project id (`prj_…`) or the scratch pick. */
+const OTHER_PICK = '~other';
 
 type Row =
   | { key: string; kind: 'project'; project: LaunchProject; group: FolderGroup }
-  | { key: string; kind: 'scratch'; scratch: ScratchRow; group: FolderGroup };
+  | { key: string; kind: 'scratch'; scratch: ScratchRow; group: FolderGroup }
+  | { key: string; kind: 'other'; group: FolderGroup };
 
 const rowKey = (machine: string | null, id: string) => `${machine ?? ''}:${id}`;
 
@@ -70,6 +81,8 @@ export function FolderMenu({
   onScratch,
   onClose,
   groups,
+  onFolder,
+  folderPicked = null,
 }: {
   projects: readonly LaunchProject[];
   selected: string | null;
@@ -87,8 +100,14 @@ export function FolderMenu({
   onClose: () => void;
   /** Linked machines: the projects grouped by machine, each with its caption. Absent or null: one list, as always. */
   groups?: readonly FolderGroup[] | null;
+  /** "Another folder on <machine>…": a folder under that machine's home (`~/…`) was picked. Absent: no such row. */
+  onFolder?: (folder: string, name: string, machine: string | null) => void;
+  /** The folder To names now, when it is one of these: the browser opens there on its machine. */
+  folderPicked?: { folder: string; machine: string | null } | null;
 }) {
   const [query, setQuery] = useState('');
+  // The folder browser open in place of the list, for one machine's group.
+  const [other, setOther] = useState<FolderGroup | null>(null);
   const grouped = !!groups;
   // Without linked machines: one group with no caption, so the menu is exactly what it was.
   const all = useMemo<readonly FolderGroup[]>(
@@ -106,19 +125,22 @@ export function FolderMenu({
           projects: named ? [...group.projects] : filterLaunchProjects(group.projects, query),
           scratch: group.scratch && (named || scratchMatches(query)) ? group.scratch : null,
           notice: group.notice && (named || words.length === 0) ? group.notice : null,
+          // A group that offers anything to start in (not a machine's notice) ends with "Another folder on <machine>…".
+          other: !!onFolder && !group.notice && (named || otherFolderMatches(query)),
         };
       })
-      .filter((g) => g.projects.length > 0 || g.scratch || g.notice);
-  }, [all, grouped, query]);
+      .filter((g) => g.projects.length > 0 || g.scratch || g.notice || g.other);
+  }, [all, grouped, query, onFolder]);
   const rows = useMemo<Row[]>(
     () =>
       shown.flatMap((g) => [
         ...g.projects.map((project) => ({ key: rowKey(g.group.machine, project.id), kind: 'project' as const, project, group: g.group })),
         ...(g.scratch ? [{ key: rowKey(g.group.machine, SCRATCH_PICK), kind: 'scratch' as const, scratch: g.scratch, group: g.group }] : []),
+        ...(g.other ? [{ key: rowKey(g.group.machine, OTHER_PICK), kind: 'other' as const, group: g.group }] : []),
       ]),
     [shown],
   );
-  // The keys walk the projects, then the scratch row, group after group.
+  // The keys walk the projects, then the scratch row, then "Another folder…", group after group.
   const ids = useMemo(() => rows.map((row) => row.key), [rows]);
   const [hlId, setHlId] = useState<string | null>(selected ? rowKey(selectedMachine, selected) : null);
   const found = ids.indexOf(hlId ?? '');
@@ -133,7 +155,10 @@ export function FolderMenu({
     if (query !== '') setHlId(ids[0] ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
-  useEffect(() => inputRef.current?.focus(), []);
+  // Back from the folder browser too: the filter, with "Another folder…" still the highlighted row.
+  useEffect(() => {
+    if (!other) inputRef.current?.focus();
+  }, [other]);
   useLayoutEffect(() => {
     document.getElementById(optionId(hl))?.scrollIntoView?.({ block: 'nearest' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -147,10 +172,11 @@ export function FolderMenu({
     return () => document.removeEventListener('pointerdown', onDown, true);
   }, [onClose]);
 
-  const choose = (row: Row) => (row.kind === 'scratch' ? onScratch?.(row.group.machine) : onPick(row.project, row.group.machine));
+  const choose = (row: Row) => (row.kind === 'scratch' ? onScratch?.(row.group.machine) : row.kind === 'other' ? setOther(row.group) : onPick(row.project, row.group.machine));
 
   const onKey = (event: ReactKeyboardEvent) => {
-    if (event.nativeEvent.isComposing) return;
+    // The folder browser takes its own keys.
+    if (event.nativeEvent.isComposing || other) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
@@ -179,6 +205,23 @@ export function FolderMenu({
   };
 
   let at = 0;
+  if (other) {
+    const named = grouped ? other.name : null;
+    return (
+      <div className="ib-cp-picker ib-cp-folders" ref={ref} data-compose-folders="" data-other-folder={other.machine ?? 'self'} data-phone={phone ? '' : undefined}>
+        <HomeFolderBrowser
+          machine={{ id: other.machine, name: named, asleep: other.asleep === true }}
+          phone={phone}
+          initialPath={folderPicked && folderPicked.machine === other.machine ? `${folderPicked.folder.replace(/\/+$/, '')}/` : undefined}
+          onBack={() => {
+            setHlId(rowKey(other.machine, OTHER_PICK));
+            setOther(null);
+          }}
+          onPick={(folder, name) => onFolder?.(folder, name, other.machine)}
+        />
+      </div>
+    );
+  }
   return (
     <div className="ib-cp-picker ib-cp-folders" ref={ref} data-compose-folders="" data-grouped={grouped ? '' : undefined} data-phone={phone ? '' : undefined} onKeyDown={onKey}>
       {phone && (
@@ -312,6 +355,34 @@ export function FolderMenu({
                           {untrustedHint(s)}
                         </div>
                       )}
+                    </>
+                  );
+                })()}
+              {g.other &&
+                (() => {
+                  const i = at++;
+                  const words = grouped ? `Another folder on ${group.name}…` : 'Another folder…';
+                  return (
+                    <>
+                      {!grouped && !g.scratch && g.projects.length > 0 && <div className="ib-cp-cap-line" role="presentation" />}
+                      <div
+                        id={optionId(i)}
+                        role="option"
+                        aria-selected={hl === i}
+                        aria-label={words}
+                        className={`ib-cp-opt ib-cp-fopt ib-cp-other${hl === i ? ' ib-hl' : ''}`}
+                        data-compose-folder-other={group.machine ?? 'self'}
+                        onPointerMove={() => hl !== i && setHlId(rowKey(group.machine, OTHER_PICK))}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => setOther(group)}
+                      >
+                        <Icon name="folder" size={15} />
+                        <span className="ib-cp-op" dir="auto">
+                          {words}
+                        </span>
+                        <span />
+                        <span className="ib-cp-check" aria-hidden="true" />
+                      </div>
                     </>
                   );
                 })()}
