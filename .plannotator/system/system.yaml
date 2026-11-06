@@ -68,7 +68,6 @@ parts:
     kind: app
     role: A Mac window over this computer's Inbox page.
     sub: built in another repo
-    marks: [ electron ]
   share:
     name: Share links
     kind: web service
@@ -114,7 +113,6 @@ parts:
     kind: hosted product
     role: Shared workspaces of documents, live editing, git history, and MCP for agents.
     sub: hosted, built in another repo
-    marks: [ cloudflare ]
 
   # Built and off: drawn on the Inbox sheet (L-201) as the far end of its phone
   # lines, never on the landing while they are off.
@@ -123,7 +121,6 @@ parts:
     kind: iOS and Android
     role: Pair with your Inbox and answer with one tap. Built in CI, not shipped yet.
     sub: built in another repo · off until they ship
-    marks: [ swift ]
     facts:
       Inbox side: phones off until the iPhone app ships (inboxPhones, default false)
     code:
