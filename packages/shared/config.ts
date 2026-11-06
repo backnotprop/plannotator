@@ -508,6 +508,12 @@ export interface PlannotatorConfig {
    */
   inboxShape?: boolean;
   /**
+   * System in the Inbox (approval "system-inbox"): a drawing of each project's code, kept current by an agent.
+   * Shown only while Code review is on. Off unless turned on; config only until Settings → Capabilities' switch
+   * lands. Read on every request.
+   */
+  inboxSystem?: boolean;
+  /**
    * The queue of one-time reveals for returning users (approval
    * "inbox-feature-reveal"; rules in packages/shared/inbox/reveals.ts). Written
    * only by the server. `lastShownAt`: the last one-time announcement claimed
