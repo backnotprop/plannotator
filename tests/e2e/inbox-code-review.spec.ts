@@ -4,9 +4,8 @@
  * the binary runs `plannotator inbox --background` under a temp
  * PLANNOTATOR_DATA_DIR, a simulated agent writes through
  * `plannotator inbox mcp` (scripts/inbox-sim.ts), and Chromium drives the
- * window. HOME is never changed: the sandbox env (PLANNOTATOR_TEST_SANDBOX
- * and the rest below) keeps the binary off the person's agents, and the skill
- * roots point at scratch folders.
+ * window. HOME is the scratch folder, and the sandbox env (PLANNOTATOR_TEST_SANDBOX
+ * and the rest below) keeps the binary off the person's agents.
  *
  * What is proved, in order:
  *  1. Off (the default): Settings → Capabilities shows Code review off; a
@@ -214,11 +213,11 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const root = inboxScratch('plannotator-inbox-code-review-e2e-');
   const dataDir = join(root, 'data');
   markTourDecided(dataDir);
-  // The skill roots (review-skill-loader.ts) in scratch folders; HOME stays the runner's.
+  // The skill roots (review-skill-loader.ts) in scratch folders, like HOME.
   for (const dir of ['claude', 'codex', 'xdg']) mkdirSync(join(root, dir), { recursive: true });
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? '',
-    ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
@@ -272,7 +271,7 @@ test('off by default: no review sent, today\'s guided-review tile, no Plannotato
   await box.click();
   await box.pressSequentially('/review-', { delay: 30 });
   await page.waitForTimeout(500);
-  // The person's own skills may match (the runner's ~/.agents/skills); none of Plannotator's does.
+  // None of Plannotator's skills matches.
   await expect(plannotatorOptions(page)).toHaveCount(0);
   await box.fill('');
 });

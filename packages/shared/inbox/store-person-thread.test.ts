@@ -5,7 +5,7 @@
  * it, the list placing it wrong, a replay writing twice, and re-addressing.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxError } from "./schema";
@@ -101,6 +101,15 @@ describe("a thread the person starts", () => {
     expect(code(() => store.startPersonThread({ project_id: project.id, body: "Three", to: null, idempotency_key: "k2" }))).toBe("session_not_live");
     expect(code(() => store.startPersonThread({ project_id: project.id, body: "  ", to: claude, idempotency_key: "k3" }))).toBe("validation_error");
     expect(store.cursor()).toBe(cursor);
+  });
+
+  test("a session id is not a path: a move never removes a folder outside the session's own", () => {
+    const { dir, store, project } = world();
+    const { message } = store.startPersonThread({ project_id: project.id, body: "Rename Quiet?", to: claude, idempotency_key: "k" });
+    const outside = join(dir, "keep", "inbox", "claims", message.id);
+    mkdirSync(outside, { recursive: true });
+    store.readdressMessage(message.id, { host: "pi", session: "../keep" });
+    expect(existsSync(outside)).toBe(true);
   });
 
   test("Send to another session re-addresses the same message until it is delivered, and replays from disk", () => {

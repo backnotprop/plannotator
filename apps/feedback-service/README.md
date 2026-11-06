@@ -17,11 +17,12 @@ core/
   throttle.ts     # Per-caller throttle in isolate memory (never stored)
   storage.ts      # FeedbackStore: one method, insert
 stores/
-  d1.ts           # The one statement: a parameterised INSERT
+  d1.ts           # Parameterised INSERTs only: every column, or the same without agents on an unmigrated table
 targets/
   cloudflare.ts   # Worker entry point
 schema.sql        # The append-only `feedback` table (+ triggers)
-test/             # Handler, source guard and limits tests (in-memory store)
+migrations/       # Additive changes for a database made before them (one ADD COLUMN each)
+test/             # Handler, source guard and limits tests (in-memory store); the D1 store on real SQLite
 wrangler.toml
 ```
 
@@ -44,6 +45,7 @@ Body fields (any other field is refused with `400`):
 | `version` | no | the Plannotator version, a short label, at most 40 characters |
 | `os` | no | the OS name (`macOS`, `Linux`, `Windows`), at most 40 characters |
 | `surface` | no | `inbox`, `plan-review`, `code-review`, `annotate` or `cli` |
+| `agents` | no | a list of agent names (`["Claude Code", "Codex"]`). Each kept name is a short label: words of letters, digits and `+ _ ( ) -`, one space or ` / ` between them, at most 40 characters (so no dot, comma or bare slash: no path passes); any other entry is dropped, repeats too, and only the first 8 are kept. Stored as one text, `Claude Code, Codex`. Refused (`400`) only when it is not a list, or a list of more than 64. |
 
 Errors: `400` bad JSON or a bad field, `403` an Origin that is not allowed,
 `413` a body over 16 KB, `415` not `application/json`, `429` over a limit,
@@ -71,9 +73,19 @@ exactly the end word. Never put the words in a double-quoted shell string.
 ## What is stored
 
 Only: the message, the category, the contact the person chose to type, the
-Plannotator version, the OS name, the surface and the time it arrived. No IP,
-user agent, country, machine ID or anything else that identifies a person.
-The per-IP limits read the caller's IP in memory only.
+Plannotator version, the OS name, the surface, the names of the agents the
+person has used (`agents`, e.g. `Claude Code, Codex`: names only, no session,
+path, thread or count) and the time it arrived. No IP, user agent, country,
+machine ID or anything else that identifies a person. The per-IP limits read
+the caller's IP in memory only.
+
+The Inbox fills `agents` from the hosts of the agent messages it holds, by
+Plannotator's own names, the most recently used first
+(`packages/server/inbox-feedback.ts`); a host it does not know, and an
+agent's own display name, are never sent. `plannotator feedback` sends none.
+A client sends the field only when it has a name; a Worker from before the
+field refuses it by name, and the client then sends the feedback again
+without it.
 
 ## Abuse limits (the owner's call)
 
@@ -111,6 +123,27 @@ Deployed 2026-10-27 at `https://plannotator-feedback.plannotator.workers.dev/fee
 (the default `PRODUCT_FEEDBACK_URL`), with its D1 database `plannotator-feedback`
 (id in `wrangler.toml`). A change to the Worker ships with `bun run deploy`; a
 change to `schema.sql` with `bun run db:migrate` first.
+
+### The `agents` column (once, on the existing database)
+
+The `agents` column came after the database was made. Add it before deploying
+the Worker that writes it. If the Worker goes out first, nothing is lost: on a
+table without the column SQLite refuses the INSERT before writing anything, and
+the store writes the feedback again without the names
+(`stores/d1.ts`, `test/d1-store.test.ts`). The names are stored only once the
+migration has run:
+
+```bash
+cd apps/feedback-service
+bun run db:migrate:agents   # ALTER TABLE feedback ADD COLUMN agents TEXT (migrations/0001_agents.sql)
+bun run deploy
+```
+
+The migration only adds a column: existing rows keep `agents` NULL, and the
+append-only triggers are untouched. A second run fails with "duplicate column
+name: agents" and changes nothing. A database made from this `schema.sql`
+already has the column and needs no migration. Locally:
+`bun run db:migrate:agents:local` on a local database made before it.
 
 ## First-time setup (owner only)
 
@@ -176,5 +209,6 @@ bun test apps/feedback-service
 
 The handler runs against an in-memory store; no wrangler, no Cloudflare
 account and no network. `test/source-guard.test.ts` fails if the Worker's
-source gains any SQL but the one INSERT, any D1 read method, a second route
+source gains any SQL but its two INSERTs (every column, and the same without
+`agents`), any D1 read method, a second route
 or a cookie.

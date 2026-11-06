@@ -233,8 +233,8 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }
           <p className="ib-fbk-what" id={`ib-fbk-what-${uid}`} data-feedback-what="">
             <Icon name="info" />
             <span>
-              Sends your message (and the category and email, if you add them), Plannotator {version} and the name of your OS. Nothing from your
-              threads or files.
+              Sends your message (and the category and email, if you add them), Plannotator {version}, the name of your OS and the names of the
+              agents you use. Nothing from your threads or files.
             </span>
           </p>
           {error && (

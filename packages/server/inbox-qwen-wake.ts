@@ -687,7 +687,8 @@ export function createInboxQwenWake(options: {
     });
 
   const sendOne = async (item: InboxMessage, session: string, record: InboxQwenSessionRecord, controller: string): Promise<void> => {
-    const key = keyOf(item.id, session);
+    const id = store.deliveryIdOf(item, session);
+    const key = keyOf(id, session);
     const retry = retryAt.get(key);
     if (retry && retry.at > now()) return;
     const from = await bindReceipts();
@@ -700,7 +701,7 @@ export function createInboxQwenWake(options: {
       return;
     }
     const msgId = randomUUID();
-    const claim: Claim = { itemId: item.id, session, msgId, at: now(), state: "sent", pid: record.pid };
+    const claim: Claim = { itemId: id, session, msgId, at: now(), state: "sent", pid: record.pid };
     claims.set(key, claim);
     byMsgId.set(msgId, key);
     persist(claim);
@@ -765,7 +766,7 @@ export function createInboxQwenWake(options: {
     for (const [session, items] of pending) {
       for (const item of items) {
         if (!wakesItem(item, session) || options.skip?.(item, session)) continue;
-        const key = keyOf(item.id, session);
+        const key = keyOf(store.deliveryIdOf(item, session), session);
         pendingKeys.add(key);
         if (claims.has(key) || refused.has(session)) continue;
         const record = ended.has(session) ? null : recordOf(session);
