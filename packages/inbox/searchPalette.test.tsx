@@ -717,6 +717,29 @@ test.skipIf(!hasDom)('the Type chip: All types sends the request as before; a pi
   expect(options()).toHaveLength(0);
 });
 
+test.skipIf(!hasDom)('Show 50 more drops a row already shown (a message that came in moved the next page down by one)', async () => {
+  respond = async (call) => {
+    const p = call.url.searchParams;
+    if (p.get('group') === 'files' && p.get('offset') === '50') {
+      // One new file came first since the last page: the page starts one row early.
+      return answer({ q: p.get('q') ?? '', terms: [p.get('q') ?? ''], totals: typeTotals, groups: { files: Array.from({ length: 11 }, (_, i) => fileRow(49 + i)) }, recent: null });
+    }
+    return typeAnswers(call);
+  };
+  await renderTyped(true);
+  await type('relay');
+  await waitFor(() => groupHeadings().includes('Threads'));
+  await pickType('Files');
+  await waitFor(() => groupHeadings()[0] === 'Files60' && options().length === 51);
+  await act(async () => {
+    options().at(-1)!.click();
+  });
+  await waitFor(() => options().length === 60);
+  const ids = options().map((o) => o.getAttribute('data-result-id'));
+  expect(new Set(ids).size).toBe(ids.length);
+  expect(ids.at(-1)).toBe('att_f59');
+});
+
 test.skipIf(!hasDom)('the Type chip goes back to All types on ×, on Clear filters, on Search everywhere and at every open', async () => {
   respond = typeAnswers;
   const plainAgain = async () => {

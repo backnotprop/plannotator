@@ -588,7 +588,9 @@ export default function SearchPalette(props: SearchPaletteProps) {
     const offset = already ? already.length : 0;
     try {
       const model = await searchInbox({ q: answered.q, ...filters, current: currentProject, sort: answered.sort, group: option.group, offset, limit: SEARCH_PAGE });
-      const more = model.groups?.[option.group] ?? [];
+      // A message that came in since the last page moves the next one down: a row already shown is not shown twice.
+      const shown = new Set((already ?? []).map((row) => `${row.type}-${row.id}`));
+      const more = (model.groups?.[option.group] ?? []).filter((row) => !shown.has(`${row.type}-${row.id}`));
       setExpanded((current) => ({ ...current, [option.group]: [...(already ?? []), ...more] }));
       setHl(index);
     } catch {
@@ -807,10 +809,13 @@ export default function SearchPalette(props: SearchPaletteProps) {
     if (!menu) return null;
     const items = menuOptions(menu.kind);
     const chipEl = filtersRef.current?.querySelector<HTMLElement>(`[data-chip="${menu.kind}"]`);
-    const left = chipEl?.closest<HTMLElement>('.ib-sp-fcell')?.offsetLeft ?? 10;
+    // Under the chip's own cell: on a desktop the row may wrap, so the row's bottom is not always the chip's.
+    const cell = chipEl?.closest<HTMLElement>('.ib-sp-fcell');
+    const left = cell?.offsetLeft ?? 10;
+    const top = cell ? cell.offsetTop + cell.offsetHeight + 6 : undefined;
     const label = menu.kind === 'type' ? 'Type' : menu.kind === 'project' ? 'Project' : menu.kind === 'status' ? 'Status' : 'From';
     return (
-      <div ref={menuRef} className="ib-sp-menu" role="menu" aria-label={label} style={phone ? undefined : { left }} onKeyDown={onMenuKey}>
+      <div ref={menuRef} className="ib-sp-menu" role="menu" aria-label={label} style={phone ? undefined : { left, top }} onKeyDown={onMenuKey}>
         {items.map((item, i) => {
           const checked = chipValue(menu.kind) === item.value;
           return (
@@ -1080,13 +1085,18 @@ export default function SearchPalette(props: SearchPaletteProps) {
         {chip('project')}
         {chip('status')}
         {chip('from')}
-        {anyFilter && (
-          <button type="button" className="ib-sp-clear" data-clear-filters="" onClick={clearFilters}>
-            Clear filters
-          </button>
+        {/* Clear filters and, on a desktop, the switch: together at the row's end, and together on a second line when
+            the row wraps. A phone's chips scroll sideways, so there the switch has a row of its own, under them. */}
+        {(anyFilter || (!phone && sortSwitch)) && (
+          <span className="ib-sp-end">
+            {anyFilter && (
+              <button type="button" className="ib-sp-clear" data-clear-filters="" onClick={clearFilters}>
+                Clear filters
+              </button>
+            )}
+            {!phone && sortSwitch}
+          </span>
         )}
-        {/* Desktop: at the row's end. A phone's chips scroll sideways, so there it has a row of its own, under them. */}
-        {!phone && sortSwitch}
         {menuEl}
       </div>
       {phone && sortSwitch && <div className="ib-sp-sortrow">{sortSwitch}</div>}

@@ -330,6 +330,19 @@ describe("ranking", () => {
     expect(messageIds(page)).toEqual([whole.id, prefix.id]);
   });
 
+  test("Newest: a project by its threads' latest message, not by when it was added", async () => {
+    const store = open();
+    const older = store.ensureProject({ name: "billing", root: "/w/billing" });
+    store.sendMessage({ project_id: older.id, author: CLAUDE, subject: "Notes", thread: "a", body: "First." });
+    const newer = store.ensureProject({ name: "billing-web", root: "/w/billing-web" });
+    store.sendMessage({ project_id: newer.id, author: CLAUDE, subject: "Notes", thread: "b", body: "Once." });
+    store.sendMessage({ project_id: older.id, author: CLAUDE, subject: "Notes", thread: "c", body: "Busy again." });
+    const index = await built(store);
+    const projectIds = (answer: InboxSearchAnswer) => (answer.groups?.projects ?? []).map((r) => r.id);
+    expect(projectIds(search(index, "billing"))).toEqual([newer.id, older.id]);
+    expect(projectIds(search(index, "billing", { sort: "newest" }))).toEqual([older.id, newer.id]);
+  });
+
 });
 
 describe("identifiers", () => {
@@ -511,6 +524,15 @@ describe("filters", () => {
     expect(messageIds(agents)).not.toContain(w.sentReply.id);
     // A thread counts for Me when the person wrote in it.
     expect(threadIds(search(w.index, "deploy", { from: "me" }))).toEqual([w.sent.id]);
+  });
+
+  test("a filter with Newest: the filtered set, by its latest message", async () => {
+    const w = await world();
+    const filtered = { project: w.api.id, from: "agent" } as const;
+    // Best match puts the archived thread's message last; Newest puts it first, as the latest.
+    expect(messageIds(search(w.index, "deploy", filtered))).toEqual([w.quiet.id, w.waiting.id, w.archived.id]);
+    expect(messageIds(search(w.index, "deploy", { ...filtered, sort: "newest" }))).toEqual([w.archived.id, w.quiet.id, w.waiting.id]);
+    expect(messageIds(search(w.index, "deploy", { status: "new", sort: "newest" }))).toEqual([w.fresh.id]);
   });
 });
 
