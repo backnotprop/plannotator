@@ -59,7 +59,7 @@ import { OversizedFileNotice } from './OversizedFileNotice';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import type { DiffSelectionActions } from './SelectionChooser';
 import { FileHeader } from './FileHeader';
-import { DiffHScrollbar } from './DiffHScrollbar';
+import { DiffBottomBar } from './DiffBottomBar';
 import { BinaryFileNotice } from './BinaryFileNotice';
 import { GeneratedFileNotice } from './GeneratedFileNotice';
 import { EditSessionHud } from './EditSessionHud';
@@ -679,9 +679,9 @@ const COMPACT_PANEL_HEADER_HEIGHT = 44;
 // OUR unsafeCSS rule rather than silently tracking a library default.
 const HUNK_SEPARATOR_HEIGHT = 32;
 // A file in a box as tall as its layout (`scrollsWithPage`). The box holds the padding, so the code draws what the
-// layout counts. The line under a header shows only while the header is stuck (browsers without scroll-state queries draw none).
+// layout counts; under the last row only Pierre's own room for its sideways scrollbar (itemMetrics' paddingBottom).
+// The line under a header shows only while the header is stuck (browsers without scroll-state queries draw none).
 const SCROLLS_WITH_PAGE_CSS = `
-  [data-code] { padding-bottom: 0 !important; }
   [data-diffs-header] { container-type: scroll-state; container-name: sticky-header; }
   [data-expand-index] [data-separator-content] { justify-self: start; }
   :host([data-reading-whole-file]) [data-expand-button] { cursor: progress; animation: reading-whole-file 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
@@ -3166,7 +3166,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
     return (
       <div
-        className="relative flex flex-col"
+        className="flex flex-col"
         // Image-preview items report their real header height to the
         // virtualizer (see syncHeaderMetrics); other headers are fixed height.
         ref={imagePreviewItemIdsRef.current.has(item.id) ? getHeaderMeasureRef(item.id) : undefined}
@@ -3296,15 +3296,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         )}
         {/* The rendered Markdown, in place of the (hunkless) diff rows. */}
         {!collapsed && previewed && previewControl!.render({ file, onHeightChange: remeasure })}
-        {/* This file's own horizontal scrollbar (#1048), riding the sticky
-            header so it stays reachable anywhere in a long diff. Absolutely
-            positioned on the header's bottom edge so it costs no layout
-            height — itemMetrics.diffHeaderHeight must keep matching the
-            header, and a bar that appears only on overflow would otherwise
-            drift the virtualization estimate. */}
-        {!collapsed && !previewed && diffOverflow !== 'wrap' && (
-          <DiffHScrollbar className="absolute inset-x-2 bottom-0 z-30" />
-        )}
       </div>
     );
   });
@@ -3333,6 +3324,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // HUNK_SEPARATOR_HEIGHT already holds the drawn margins. In a box that is as tall as this layout, Pierre's gaps
       // around each separator would be empty space the rows float in.
       ...(scrollsWithPage && { spacing: 0 }),
+      // Spacing 0 would count no room under the last row, but the code keeps Pierre's 8px there (its padding plus its
+      // sideways scrollbar's gutter): counted, the bar is not cut off by the box or drawn over the next file.
+      ...(scrollsWithPage && { paddingBottom: 8 }),
       ...(customLineHeight != null && { lineHeight: customLineHeight }),
     }),
     [compactTouchLayout, customLineHeight, scrollsWithPage],
@@ -3510,6 +3504,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       ) : (
         codeView
       )}
+      {diffOverflow !== 'wrap' && <DiffBottomBar root={scrollEl} />}
 
       {/* Leading content (commit description card) lives INSIDE the scroll
           container at content-top: absolutely positioned children of a scroller

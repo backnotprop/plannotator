@@ -1,0 +1,5 @@
+revision: W-19
+scope: core
+title: Small plan 19
+change:
+  kiosk: "Small change number 19."
