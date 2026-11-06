@@ -299,7 +299,7 @@ describe("plannotator inbox --help as a process", () => {
 });
 
 // Each host with Plannotator's own inbox tool must be in the guide an agent reads from every wake
-// ("how it works: plannotator inbox --help"): how to turn the tool on, and that replies arrive by themselves.
+// ("help: plannotator inbox --help"): how to turn the tool on, and that replies arrive by themselves.
 describe("the guide covers every host with Plannotator's inbox tool", () => {
   const section = (title: string) => help.split(`## ${title}`)[1]!.split("\n## ")[0]!;
 

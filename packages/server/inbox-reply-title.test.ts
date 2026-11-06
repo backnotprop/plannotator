@@ -19,7 +19,7 @@ import {
   INBOX_WAKE_INSTRUCTION,
   INBOX_WAKES_META_KEY,
   inboxSentNowFollowUpText,
-  inboxWakeClosingLine,
+  INBOX_WAKE_CLOSING_LINE,
   inboxWakeText,
   parseInboxBridgeCommands,
   type InboxReplyCommand,
@@ -135,7 +135,7 @@ describe("a plain reply", () => {
     expect(wake[0]).toBe(`Plannotator Inbox: ${NAME} (${id})`);
     // Body, ids and routing, as the wake carried them with the subject.
     expect(wake.slice(1)).toEqual(inboxWakeText({ ...command!, subject: SUBJECT }).split("\n").slice(1));
-    expect(wake.slice(1)).toEqual([INBOX_WAKE_INSTRUCTION, "", command!.body, "", inboxWakeClosingLine(sent.thread_id)]);
+    expect(wake.slice(1)).toEqual([INBOX_WAKE_INSTRUCTION, expect.stringContaining(`[Thread ${sent.thread_id}: `), "", command!.body, "", INBOX_WAKE_CLOSING_LINE]);
   });
 
   test("in a thread with no name says `a reply`, and the subject enters nowhere", async () => {
@@ -146,7 +146,7 @@ describe("a plain reply", () => {
     expect(command!.subject).toBeNull();
     expect(firstLine(command!)).toBe(`Plannotator Inbox: a reply (${id})`);
     expect(inboxWakeText(command!)).not.toContain(SUBJECT);
-    expect(inboxWakeText(command!).endsWith(inboxWakeClosingLine(sent.thread_id))).toBe(true);
+    expect(inboxWakeText(command!).endsWith(INBOX_WAKE_CLOSING_LINE)).toBe(true);
     // The window still shows the thread's subject.
     expect((await thread(server, sent.thread_id)).subject).toBe(SUBJECT);
   });
