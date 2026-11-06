@@ -13,7 +13,7 @@
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
-import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, expect, setSystemTime, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -137,6 +137,7 @@ beforeEach(() => {
 
 afterEach(() => {
   if (!hasDom) return;
+  setSystemTime();
   act(() => root?.unmount());
   host?.remove();
   root = null;
@@ -398,6 +399,8 @@ test.skipIf(!hasDom)('Escape closes the menu and puts focus back on the row; the
 });
 
 test.skipIf(!hasDom)('Snooze by keyboard: focus lands on the first time, and Back puts it on Snooze again, never on the page', async () => {
+  // A Wednesday morning, so the times are all four: after 6 PM there is no Later today, and on a Friday Next week is In 3 days.
+  setSystemTime(new Date('2026-11-04T10:00:00Z'));
   await renderApp();
   const row = rowButton(ids.waiting)!;
   act(() => row.focus());
