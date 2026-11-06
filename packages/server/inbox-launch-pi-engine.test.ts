@@ -15,6 +15,7 @@ import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { installFakePi } from "../../tests/helpers/fake-pi";
 import { createInboxLaunch } from "./inbox-launch";
+import { PI_STOPPED_NOTE } from "./inbox-launch-pi";
 
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
@@ -31,7 +32,7 @@ async function until<T>(what: string, check: () => T | null | undefined | false 
   }
 }
 
-/** The bridge the fake's extension calls: each session's polls, the root handed once to the session it is addressed to, its delivery. */
+/** The bridge the fake's extension calls: each session's polls, the root and the waiting replies handed once to the session they are for, their delivery. */
 function stubBridge(dataDir: string, store: InboxStore) {
   const polls = new Map<string, { count: number; last: number }>();
   const busy = new Map<string, boolean>();
@@ -58,8 +59,10 @@ function stubBridge(dataDir: string, store: InboxStore) {
       const commands = store
         .threadIds()
         .map((id) => store.message(id))
-        .filter((root): root is InboxMessage => !!root && root.to?.host === host && root.to.session === session && !handed.has(root.id))
-        .map((root) => (handed.add(root.id), { id: root.id, body: root.body }));
+        .filter((root): root is InboxMessage => !!root && root.to?.host === host && root.to.session === session)
+        .concat(store.pendingReplies(session, { tags: true }))
+        .filter((message) => !handed.has(message.id))
+        .map((message) => (handed.add(message.id), { id: message.id, body: message.body }));
       return Response.json({ commands });
     },
   });
@@ -98,7 +101,11 @@ function setup(options: { folderName?: string } = {}) {
   const bridge = stubBridge(dataDir, store);
   cleanup.push(() => bridge.stop());
   const path = `${bin}:/usr/bin:/bin`;
-  const launch = createInboxLaunch({
+  /** How far the engine's clock is ahead of the wall clock (past the start's grace). */
+  const clock = { ahead: 0 };
+  /** A launch engine over this data dir: the Inbox, or the Inbox after a restart. */
+  const makeLaunch = () => {
+  const made = createInboxLaunch({
     store,
     live: { runStateOf: (session) => bridge.runStateOf(session) },
     dataDir,
@@ -115,9 +122,13 @@ function setup(options: { folderName?: string } = {}) {
     onChange: () => {},
     log: () => {},
     selfCommand: ["plannotator"],
+    now: () => Date.now() + clock.ahead,
   });
-  cleanup.push(() => launch.stop());
-  return { store, project, folder, dataDir, fake, bridge, launch };
+  cleanup.push(() => made.stop());
+  return made;
+  };
+  const launch = makeLaunch();
+  return { store, project, folder, dataDir, fake, bridge, launch, clock, makeLaunch };
 }
 
 describe("Pi through the launch engine, against the fake pi", () => {
@@ -165,4 +176,61 @@ describe("Pi through the launch engine, against the fake pi", () => {
     expect(store.message(root.id)!.delivery).toMatchObject({ host: "pi", session });
     await until("the line follows that session: working", async () => (await launch.runOf(root.id))?.state === "working");
   });
+
+  /** Send to a new Pi session whose extension does not connect: started, with its session id. */
+  async function sendUnconnected(t: ReturnType<typeof setup>) {
+    t.fake.configure({ noConnect: true });
+    const target = t.launch.target({ launch: { agent: "pi", project_id: t.project.id } })!;
+    const prepared = await t.launch.prepare(target, { name: "Tidy", body: "Tidy the readme.", resolveProject: async () => t.project });
+    const root = t.store.startPersonThread({ project_id: t.project.id, body: "Tidy the readme.", to: prepared.to, idempotency_key: "send-1", thread_name: "Tidy", launch: prepared.launch }).message;
+    t.launch.begin(root);
+    const session = await until("the session", () => t.store.message(root.id)!.launch!.session_ref);
+    return { root, session };
+  }
+
+  /** The reply starts Pi again on the same session, and the new one takes the root and the reply. */
+  async function replyContinues(t: ReturnType<typeof setup>, launch: ReturnType<typeof setup>["launch"], root: InboxMessage, session: string) {
+    t.fake.configure({ noConnect: false });
+    const { reply } = t.store.sendReply(root.id, { words: "Please go on.", idempotency_key: "reply-1" });
+    const again = await until("a second start", () => t.fake.starts()[1]);
+    expect(again.argv.slice(0, 4)).toEqual(["--mode", "rpc", "--session-id", session]);
+    await until("the root and the reply delivered", () => t.fake.delivered().includes(root.id) && t.fake.delivered().includes(reply.id));
+    launch.sweep(true);
+    expect(t.fake.starts()).toHaveLength(2);
+  }
+
+  test("a Pi that ends before it ever connected: the line says a reply continues it, and a reply does", async () => {
+    const t = setup();
+    const { root, session } = await sendUnconnected(t);
+    const pid = t.fake.starts()[0]!.pid;
+    process.kill(pid, "SIGKILL");
+    await until("it ended", () => !t.fake.alive(pid));
+    await until("the host saw it end", async () => (t.clock.ahead = 120_000, (await t.launch.runOf(root.id))?.state === "stopped"));
+    expect((await t.launch.runOf(root.id))?.cause).toMatch(/^Pi ended on its own \(exit \d+\)\. Your reply continues it\.$/);
+    await replyContinues(t, t.launch, root, session);
+  }, 30_000);
+
+  test("the Inbox restarted before Pi connected: the line says a reply continues it, and a reply does", async () => {
+    const t = setup();
+    const { root, session } = await sendUnconnected(t);
+    // The Inbox stops (its Pi with it) and starts again.
+    await t.launch.stop();
+    await until("the first Pi ended", () => !t.fake.alive(t.fake.starts()[0]!.pid));
+    const after = t.makeLaunch();
+    t.clock.ahead = 120_000;
+    expect(await after.runOf(root.id)).toMatchObject({ state: "stopped", cause: PI_STOPPED_NOTE });
+    await replyContinues(t, after, root, session);
+  }, 30_000);
+
+  test("a Pi that runs but never connected: the line offers Try again, and a reply starts nothing beside it", async () => {
+    const t = setup();
+    const { root } = await sendUnconnected(t);
+    t.clock.ahead = 120_000;
+    expect(await t.launch.runOf(root.id)).toMatchObject({ state: "failed", cause: "Started, but not connected to the Inbox. Is Plannotator's extension on in that folder?" });
+    t.store.sendReply(root.id, { words: "Hello?", idempotency_key: "reply-1" });
+    await Bun.sleep(500);
+    t.launch.sweep(true);
+    await Bun.sleep(200);
+    expect(t.fake.starts()).toHaveLength(1);
+  }, 30_000);
 });

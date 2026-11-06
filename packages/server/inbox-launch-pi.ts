@@ -92,6 +92,12 @@ const DIALOGS = new Set(["select", "confirm", "input", "editor"]);
 
 // ── Pure helpers (unit-tested) ──
 
+/** A cause as the line shows it after "Pi didn't start.": one line, ending in a period. */
+export function piCause(text: string): string {
+  const line = text.replace(/\s+/g, " ").trim();
+  return !line ? "" : /[.!?]$/.test(line) ? line : `${line}.`;
+}
+
 /** `pi --version` prints the version alone (`0.85.1`). */
 export function parsePiVersion(stdout: string): string | null {
   return /(\d+\.\d+\.\d+)/.exec(stdout)?.[1] ?? null;
@@ -299,8 +305,9 @@ function processListing(ps: string): string | null {
 const LISTING_MS = 1_500;
 
 /** Pi as a `LaunchHost`; `close` ends every process it owns. The options are for tests. */
-export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?: number; terminalOpenMs?: number; ps?: string } = {}) {
+export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?: number; terminalOpenMs?: number; ps?: string; readyMs?: number } = {}) {
   const handoffMs = options.handoffMs ?? HANDOFF_MS;
+  const readyMs = options.readyMs ?? READY_MS;
   const terminalOpenMs = options.terminalOpenMs ?? TERMINAL_OPEN_MS;
   const ps = options.ps ?? (existsSync("/bin/ps") ? "/bin/ps" : "ps");
   /** Pi's own folder (`PI_CODING_AGENT_DIR` from the login shell or the Inbox, else `~/.pi/agent`). */
@@ -321,6 +328,8 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
   const spawning = new Map<string, PiSpawning>();
   /** Open in Terminal's hand-offs that still hold, by session id. */
   const handoffs = new Map<string, PiHandoff>();
+  /** The last Open in Terminal per session: its command and what it changed, so a Terminal that never opened undoes it. */
+  const opening = new Map<string, { command: string; handoff: PiHandoff; cancels: PiSpawning | null; wasHandedBack: boolean }>();
   /** Sessions whose hand-off is over, with no process here since (the stopped line's cause). */
   const handedBack = new Set<string>();
   /** The engine's permission context, for the thread notes (set once by `permissions`). */
@@ -534,7 +543,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       proc = Bun.spawn(argv, { cwd: launch.folder, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
-      return { ok: false, cancelled: false, missing: false, text: `Pi did not start: ${text}`, output: text };
+      return { ok: false, cancelled: false, missing: false, text: piCause(text), output: text };
     }
     const p: PiProcess = { launchId: launch.id, session, proc, exited: false, exitCode: null, busy: false, ending: null, waiters: new Map(), stderr: "", ended: null as never, pollsAtExit: null, turnError: null };
     p.ended = proc.exited.then((code) => {
@@ -579,13 +588,16 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
         // Closed.
       }
     })();
-    const state = await request(p, { type: "get_state" }, READY_MS);
+    const state = await request(p, { type: "get_state" }, readyMs);
     const data = state?.data as { sessionId?: unknown; sessionFile?: unknown } | undefined;
     if (state?.success === true && data?.sessionId === session) {
       if (typeof data.sessionFile === "string") writeRecord(launch.id, { file: data.sessionFile, written: existsSync(data.sessionFile) });
       ctx.startLog(launch.id, `pi ${argv.slice(1).join(" ")}\nready: session ${session}${typeof data.sessionFile === "string" ? `, ${data.sessionFile}` : ""}`);
       return { ok: true };
     }
+    // Whether it ended by itself: then its stderr says why. Still running, it did not answer in time, and its
+    // stderr is only what Pi prints on the way up (a new session's "No project session found…").
+    const endedItself = p.exited;
     // Never leave a process running that did not come up as the session asked for.
     if (!p.exited) {
       try {
@@ -594,8 +606,9 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       p.proc.kill("SIGTERM");
     }
     await Promise.race([p.ended, Bun.sleep(2_000)]);
-    const why = p.stderr.trim().split("\n").filter(Boolean).at(-1)?.slice(0, 200) ?? (state ? String(state.error ?? "it answered something else") : "it did not answer");
-    return { ok: false, cancelled: false, missing: false, text: `Pi did not start: ${why}`, output: `pi ${argv.slice(1).join(" ")}\n${p.stderr.trim().slice(-2000)}` };
+    const said = endedItself ? p.stderr.trim().split("\n").filter(Boolean).at(-1)?.slice(0, 200) : undefined;
+    const why = said ?? (state ? String(state.error ?? "It answered something else") : endedItself ? "It exited before it answered" : `It did not answer within ${Math.round(readyMs / 1000)} s`);
+    return { ok: false, cancelled: false, missing: false, text: piCause(why), output: `pi ${argv.slice(1).join(" ")}\n${p.stderr.trim().slice(-2000)}` };
   };
 
   /** End a process: abort its turn, close its stdin (Pi then shuts down), and signal it only if it lingers. */
@@ -652,6 +665,8 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
   const handOver = async (p: PiProcess, session: string) => {
     const until = Date.now() + terminalOpenMs;
     while (!p.exited && Date.now() < until) {
+      // Withdrawn (Terminal did not open): the Inbox's Pi keeps the session.
+      if (handoffs.get(session)?.pid !== p.proc.pid) return;
       if ((othersOn(session, true) ?? [p]).length > 0) {
         await end(p, "handoff");
         return;
@@ -671,6 +686,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
   return {
     agent: PI,
     name: PI_NAME,
+    connector: "extension",
     // Of a login-shell read: where Pi keeps its settings and sessions.
     shellNames: ["PI_CODING_AGENT_DIR"],
 
@@ -819,12 +835,24 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
           continue;
         }
         dirs += 1;
-        for (const name of readdirSync(dir)) {
+        let entries: string[];
+        try {
+          entries = readdirSync(dir);
+        } catch (error) {
+          // Unreadable (permissions): Delete goes on, and keeps that folder's files.
+          ctx.log(`Inbox launch: Pi sessions folder ${dir} could not be read (${error instanceof Error ? error.message : String(error)}); kept`);
+          continue;
+        }
+        for (const name of entries) {
           const file = join(dir, name);
-          const header = name.endsWith(".jsonl") && lstatSync(file).isFile() ? piSessionCwd(file) : null;
-          if (!header || !names.has(header)) continue;
-          rmSync(file, { force: true });
-          removed.push(name);
+          try {
+            const header = name.endsWith(".jsonl") && lstatSync(file).isFile() ? piSessionCwd(file) : null;
+            if (!header || !names.has(header)) continue;
+            rmSync(file, { force: true });
+            removed.push(name);
+          } catch {
+            // One file that can't be read or removed stays; the rest go.
+          }
         }
         try {
           if (readdirSync(dir).length === 0) rmdirSync(dir);
@@ -851,7 +879,8 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
      * aborted), and the command waits for it; a restart under way is cancelled; nothing starts here until the
      * hand-off is over. While a hand-off holds, or another process runs the session, only words.
      */
-    terminal(launch: InboxLaunchRecord): string {
+    // `untrusted` never holds: Pi trusts every folder.
+    terminal(launch: InboxLaunchRecord, _untrusted?: boolean): string {
       if (!launch.session_ref) return shNeutral(`cd ${shellQuote(launch.folder)} && pi`);
       const session = launch.session_ref;
       // Never a second Pi on the session: the first terminal's may still be starting.
@@ -860,16 +889,36 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       }
       if ((othersOn(session, true)?.length ?? 0) > 0) return say("This Pi session is open in another process. Quit Pi there first.");
       const mark = spawning.get(session);
-      if (mark) mark.cancel ??= "handoff";
+      const cancels = mark && mark.cancel === null ? mark : null;
+      if (cancels) cancels.cancel = "handoff";
       const p = running(session);
-      handedBack.delete(session);
-      handoffs.set(session, { pid: p?.proc.pid ?? null, since: Date.now(), baseline: null, sawLive: false });
-      if (!p) {
-        handingOff(session);
-        return piAttachCommand(launch.folder, session, dataDirArg());
-      }
-      void handOver(p, session);
-      return piHandoffCommand(launch.folder, session, p.proc.pid, dataDirArg());
+      const wasHandedBack = handedBack.delete(session);
+      const handoff: PiHandoff = { pid: p?.proc.pid ?? null, since: Date.now(), baseline: null, sawLive: false };
+      handoffs.set(session, handoff);
+      const command = p ? piHandoffCommand(launch.folder, session, p.proc.pid, dataDirArg()) : piAttachCommand(launch.folder, session, dataDirArg());
+      opening.set(session, { command, handoff, cancels, wasHandedBack });
+      if (!p) handingOff(session);
+      else void handOver(p, session);
+      return command;
+    },
+
+    /** Terminal never opened: the hand-off this command made is withdrawn, and a restart it called off goes on. */
+    terminalFailed(launch: InboxLaunchRecord, command: string) {
+      const session = launch.session_ref;
+      const opened = session ? opening.get(session) : undefined;
+      if (!session || !opened || opened.command !== command) return;
+      opening.delete(session);
+      if (handoffs.get(session) !== opened.handoff) return;
+      handoffs.delete(session);
+      if (opened.wasHandedBack) handedBack.add(session);
+      if (opened.cancels && opened.cancels.cancel === "handoff" && spawning.get(session) === opened.cancels) opened.cancels.cancel = null;
+      ctx.log(`Inbox launch: Terminal did not open for Pi session ${session}; the hand-off is withdrawn`);
+      threads?.onChange();
+    },
+
+    /** No process of this Inbox's runs the session (it ended, or never ran here), and no restart is under way. */
+    processEnded(ref: string): boolean {
+      return !running(ref) && !spawning.has(ref);
     },
 
     /** No prompts to carry: the context is kept for the thread notes; each sweep moves the hand-offs on. */

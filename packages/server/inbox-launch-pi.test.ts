@@ -7,7 +7,7 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxLaunchRecord, InboxMessage } from "@plannotator/core/inbox-types";
@@ -66,7 +66,7 @@ function testBridge(dataDir: string) {
 
 function setup(
   config: Parameters<typeof installFakePi>[0]["config"] = { noConnect: true },
-  options: { handoffMs?: number; terminalOpenMs?: number; dataDirName?: string; folderName?: string; ps?: string } = {},
+  options: { handoffMs?: number; terminalOpenMs?: number; dataDirName?: string; folderName?: string; ps?: string; readyMs?: number } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-launch-pi-")));
   const home = join(root, "home");
@@ -263,6 +263,23 @@ describe("Pi's launch host, against the fake pi", () => {
     const { launch, pid } = await started();
     host.terminal(launch, false);
     await Bun.sleep(900);
+    expect(fake.alive(pid)).toBe(true);
+    expect(fake.exits()).toHaveLength(0);
+    expect(host.terminal(launch, false)).toContain("kill -0"); // inbox-guard: own child (text of the Terminal command, no signal)
+  });
+
+  test("Open in Terminal whose Terminal never opened (osascript failed): the hand-off is withdrawn at once, and the Inbox's Pi keeps the session", async () => {
+    const { fake, host, started } = setup({ noConnect: true }, { terminalOpenMs: 5_000 });
+    const { launch, pid } = await started();
+    const command = host.terminal(launch, false);
+    expect(host.stoppedNote(launch)).toBe(PI_HANDOFF_NOTE);
+    // Another Open's words (a second press while it opens) never withdraw the first one's hand-off.
+    host.terminalFailed(launch, host.terminal(launch, false));
+    expect(host.stoppedNote(launch)).toBe(PI_HANDOFF_NOTE);
+    host.terminalFailed(launch, command);
+    expect(host.stoppedNote(launch)).not.toBe(PI_HANDOFF_NOTE);
+    // Not ended once ps would show a terminal: nothing waits for one any more.
+    await Bun.sleep(700);
     expect(fake.alive(pid)).toBe(true);
     expect(fake.exits()).toHaveLength(0);
     expect(host.terminal(launch, false)).toContain("kill -0"); // inbox-guard: own child (text of the Terminal command, no signal)
@@ -532,7 +549,16 @@ describe("Pi's launch host, against the fake pi", () => {
     const launch: InboxLaunchRecord = { id: "lch_01J00000000000000000000009", agent: "pi", session_ref: null, folder, scratch: false, started_at: new Date().toISOString() };
     store.startPersonThread({ project_id: project.id, body: "Hi.", to: { host: "pi", session: `launch:${launch.id}` }, idempotency_key: "send-fail", launch });
     const result = await host.start(launch, { name: "Hi", login: { HOME: "", PATH: fake.shell.replace(/\/login-shell$/, "") + ":/usr/bin:/bin" } });
-    expect(result).toMatchObject({ ok: false, code: "failed", text: "Pi did not start: Error: No API key found for anthropic" });
+    expect(result).toMatchObject({ ok: false, code: "failed", text: "Error: No API key found for anthropic." });
+    expect(fake.starts().every((call) => !fake.alive(call.pid))).toBe(true);
+  });
+
+  test("a start that never answers: the cause is the wait, never what Pi prints on the way up", async () => {
+    const { fake, host, folder } = setup({ readyDelayMs: 5_000 }, { readyMs: 1_000 });
+    const launch: InboxLaunchRecord = { id: "lch_01J0000000000000000000000A", agent: "pi", session_ref: null, folder, scratch: false, started_at: new Date().toISOString() };
+    const result = await host.start(launch, { name: "Hi", login: { HOME: "", PATH: fake.shell.replace(/\/login-shell$/, "") + ":/usr/bin:/bin" } });
+    // The fake, as Pi, says "No project session found…" on stderr for a new session id.
+    expect(result).toMatchObject({ ok: false, code: "failed", text: "It did not answer within 1 s." });
     expect(fake.starts().every((call) => !fake.alive(call.pid))).toBe(true);
   });
 
@@ -546,6 +572,12 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(await host.available()).toMatchObject({ ok: false, missing: false, reason: "Pi 0.70.0 is older than 0.79.1" });
     fake.setInstalled(false);
     expect(await host.available()).toMatchObject({ ok: false, missing: true });
+
+    // The settings are read first: with the extension missing, no Pi runs at all, not even `--version`.
+    const bare = setup();
+    bare.fake.setExtension(false);
+    expect(await bare.host.available()).toMatchObject({ ok: false, missing: false });
+    expect(bare.fake.calls().filter((call) => call.argv.includes("--version"))).toEqual([]);
   });
 
   test("purge of a scratch folder: only the session files whose header names that folder", async () => {
@@ -559,6 +591,19 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(fake.sessionFiles()).toEqual([join(dir, "other.jsonl")]);
     expect(existsSync(dir)).toBe(true);
     expect(readFileSync(join(dir, "other.jsonl"), "utf8")).toContain("elsewhere");
+  });
+
+  test("purge of a scratch folder whose Pi sessions folder can't be read: Delete goes on, and the files stay", async () => {
+    const { home, host, folder, started, fake } = setup();
+    const { session } = await started();
+    await host.stop(session);
+    const dir = join(home, ".pi", "agent", "sessions", `--${folder.slice(1).replace(/\//g, "-")}--`);
+    const files = fake.sessionFiles();
+    chmodSync(dir, 0o000);
+    cleanup.push(() => chmodSync(dir, 0o755));
+    expect(await host.purge(folder)).toMatchObject({ exitCode: 0 });
+    chmodSync(dir, 0o755);
+    expect(fake.sessionFiles()).toEqual(files);
   });
 });
 

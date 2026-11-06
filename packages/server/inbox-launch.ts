@@ -530,6 +530,7 @@ export function createInboxLaunch(options: {
       respawnUntrusted: respawnUntrustedOf(memo),
       stoppedByPersonAt: memo.stoppedAt,
       stoppedNote: host.stoppedNote?.(launch) ?? null,
+      connector: host.connector,
       attachCommand: host.attach(launch),
       permissionSince: openPermissionSince(store, root.thread_id),
     });
@@ -684,8 +685,10 @@ export function createInboxLaunch(options: {
   const maybeRespawn = (root: InboxMessage) => {
     const launch = root.launch!;
     const host = hostOf(launch);
+    if (!host || launch.deleted_at || launch.error || !launch.session_ref || !root.to || respawning.has(launch.id) || starting.has(launch.id)) return;
     // Only a session that connected once: one that never did is "not connected", and respawning it would not help.
-    if (!host || launch.deleted_at || launch.error || !launch.session_ref || !root.to || !root.delivery || respawning.has(launch.id) || starting.has(launch.id)) return;
+    // A host that owns the process is the exception once that process ended (its line says a reply continues it).
+    if (!root.delivery && host.processEnded?.(launch.session_ref) !== true) return;
     // A Stop or a Delete under way: the session is going, never started again meanwhile (a host's `live` may
     // read null as soon as its stop begins).
     if (stopping.has(launch.id) || deleting.has(launch.id)) return;
@@ -808,6 +811,7 @@ export function createInboxLaunch(options: {
         // `on run argv`: the command is an argument, never part of the script's text.
         const script = ["on run argv", 'tell application "Terminal"', "activate", "do script (item 1 of argv)", "end tell", "end run"];
         const result = await e.run([osascript, ...script.flatMap((line) => ["-e", line]), command], { timeoutMs: 15_000 });
+        if (result.exitCode !== 0) host.terminalFailed?.(launch, command);
         if (result.exitCode !== 0) throw new InboxError("open_unavailable", `Terminal did not open: ${(result.stderr || result.stdout).trim().slice(0, 200)}`);
         return json({ ok: true, command });
       }

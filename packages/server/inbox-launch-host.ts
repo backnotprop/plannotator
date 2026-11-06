@@ -185,6 +185,8 @@ export interface LaunchHost {
   readonly agent: InboxLaunchAgent;
   /** "Claude Code": To's row, a refusal, the questions' author. */
   readonly name: string;
+  /** What of Plannotator's connects a session, in the line's words: "plugin" (the default), Pi's "extension". */
+  readonly connector?: string;
   /** The login-shell names it keeps from each read (the rest of the env is never held). */
   readonly shellNames: readonly string[];
   /** Whether To may offer it. The engine caches it 30 s. */
@@ -217,6 +219,14 @@ export interface LaunchHost {
   attach(launch: InboxLaunchRecord): string | null;
   /** What Open in Terminal runs: the attach command, else (no session, or `untrusted`) what lets the person trust the folder. */
   terminal(launch: InboxLaunchRecord, untrusted: boolean): string;
+  /** That command never reached Terminal (osascript failed): undo what `terminal` did for it. */
+  terminalFailed?(launch: InboxLaunchRecord, command: string): void;
+  /**
+   * A host that owns its session's process: true when no process of its own runs this session now (it ended,
+   * or this Inbox never ran one). A reply then starts it again even if it never connected. No member: a
+   * session that never connected is never started again by a reply.
+   */
+  processEnded?(ref: string): boolean;
   /** Its permission transport, made once. */
   permissions(context: LaunchPermissionContext): LaunchHostPermissions;
   /**

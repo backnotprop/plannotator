@@ -208,6 +208,25 @@ const on = (value) => ["1", "true", "on"].includes(String(value || "").toLowerCa
 async function extension() {
   // `noConnect` is the RPC process's; a terminal's Pi connects whenever the Inbox tool is on.
   if (!on(process.env.PLANNOTATOR_INBOX_TOOL) || (!terminal && config().noConnect)) return;
+  // The default data dir only inside a scratch HOME: never the account's real ~/.plannotator.
+  const scratchHome = (() => {
+    try {
+      const real = fs.realpathSync(home);
+      return [require("node:os").tmpdir(), "/tmp", "/private/tmp"].some((root) => {
+        try {
+          return real.startsWith(`${fs.realpathSync(root)}/`);
+        } catch {
+          return false;
+        }
+      });
+    } catch {
+      return false;
+    }
+  })();
+  if (!process.env.PLANNOTATOR_DATA_DIR && !scratchHome) {
+    process.stderr.write(`fake pi: no PLANNOTATOR_DATA_DIR and HOME (${home || "unset"}) is not a scratch folder; not connecting\n`);
+    return;
+  }
   const dataDir = process.env.PLANNOTATOR_DATA_DIR || path.join(home, ".plannotator");
   const registryFile = path.join(dataDir, "inbox", "inbox.json");
   const read = () => {

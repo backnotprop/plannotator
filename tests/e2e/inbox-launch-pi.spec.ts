@@ -342,7 +342,7 @@ test('Stop, then Copy attach command: the Terminal\'s Pi takes the replies throu
     const command = await page.evaluate(() => navigator.clipboard.readText());
     expect(command.startsWith('/bin/sh -c ')).toBe(true);
     // What the person runs in Terminal, run here in their shell: the fake on PATH and none of the Inbox's env.
-    shell = spawn('/bin/zsh', ['-f', '-c', command], { env: { PATH: `${world.bin}:/usr/bin:/bin`, HOME: world.home }, stdio: 'ignore' });
+    shell = spawn('/bin/sh', ['-c', command], { env: { PATH: `${world.bin}:/usr/bin:/bin`, HOME: world.home }, stdio: 'ignore' });
     const terminal = await waitFor('the Terminal\'s Pi', () => fake.terminals().find((call) => call.argv[1] === session));
     expect(terminal).toMatchObject({ argv: ['--session-id', session], cwd: world.project, dataDir: world.dataDir, inboxTool: '1' });
     // A reply goes to the Terminal's Pi: it answers, nothing starts here (no restart line meanwhile), and ⋯
@@ -392,7 +392,7 @@ test('a Pi that runs but never connected: Open in Terminal ends it only once the
     // Terminal has not run it yet: the Inbox's Pi still has the session.
     await page.waitForTimeout(1_000);
     expect(fake.alive(start.pid)).toBe(true);
-    shell = spawn('/bin/zsh', ['-f', '-c', command], { env: { PATH: `${world.bin}:/usr/bin:/bin`, HOME: world.home }, stdio: 'ignore' });
+    shell = spawn('/bin/sh', ['-c', command], { env: { PATH: `${world.bin}:/usr/bin:/bin`, HOME: world.home }, stdio: 'ignore' });
     const ended = await waitFor('the Inbox\'s process ended', () => fake.exits().find((exit) => exit.pid === start.pid));
     expect(ended).toMatchObject({ why: 'stdin' });
     const terminal = await waitFor('the Terminal\'s Pi', () => fake.terminals().find((call) => call.argv[1] === session));
