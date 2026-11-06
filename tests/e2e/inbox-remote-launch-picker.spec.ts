@@ -221,6 +221,10 @@ async function window(browser: Browser, phone: boolean): Promise<Page> {
   contexts.push(context);
   const page = await context.newPage();
   page.on('pageerror', (e) => errors.push(e.message));
+  // The one-time "Add the note to Claude Code?" dialog can open at any moment once a launch went: not this test's.
+  await page.addLocatorHandler(page.locator('[data-dialog="agent-note"]'), async (note) => {
+    await note.getByRole('button', { name: 'Not now' }).click();
+  });
   await page.goto(macbook.url);
   await expect(page.locator('[data-open-compose]:visible').first()).toBeVisible();
   return page;
@@ -230,9 +234,6 @@ const dialog = (page: Page) => page.locator('dialog[data-compose]');
 
 /** New message → To → New Claude Code session → words → the folder menu, open once Mac mini's group is in. */
 async function openFolderMenu(page: Page, words: string, wantGroup: string): Promise<void> {
-  // The one-time "Add the note to Claude Code?" dialog may open once compose has closed: not what this is about.
-  const note = page.locator('[data-dialog="agent-note"]');
-  if (await note.isVisible().catch(() => false)) await note.getByRole('button', { name: 'Not now' }).click();
   await page.locator('[data-open-compose]:visible').first().click();
   const d = dialog(page);
   await expect(d).toBeVisible();
