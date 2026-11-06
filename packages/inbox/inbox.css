@@ -7825,6 +7825,14 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 }
 @media (min-width: 1024px) { .ib-rv-walk [data-guide-section-grid] { grid-template-columns: 272px minmax(0, 1fr); } }
 @media (min-width: 1360px) { .ib-rv-walk [data-guide-section-grid] { grid-template-columns: 296px minmax(0, 1fr); } }
+/* A narrow desktop window (768-1279 px; not a phone on its side): half the side room, so the diffs keep it. The bar
+   takes the phone bar's edges (4 and 6 px), the page 12, the notes 14, the diffs' column 8. */
+@media (min-width: 768px) and (max-width: 1279px) and (min-height: 501px), (min-width: 768px) and (max-width: 1279px) and (pointer: fine) {
+  .pn-inbox .ib-viewer.ib-rv-walk .ib-vhead { padding-inline: 4px 6px; }
+  .ib-rv-walk .gv-guide { padding-inline: 12px; }
+  .ib-rv-walk [data-guide-section-narrative] > div { padding: 16px 14px; }
+  .ib-rv-walk [data-guide-section-grid] > :last-child { padding: 10px 8px 12px; }
+}
 /* A long unbroken chapter name wraps in the notes column instead of running under the diffs. */
 .ib-rv-walk [data-guide-section-narrative] h3 { min-width: 0; overflow-wrap: anywhere; }
 /* A jump lands with air under the top bar: the card's edge clear of it (the file sits inside the card's padding). */
