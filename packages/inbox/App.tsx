@@ -580,7 +580,7 @@ function closeTo(route: Route): void {
 
 /**
  * Which panes cover their list now (a window too narrow for both, stack.ts),
- * kept in step by the window. Closing a covering thread back to the list is
+ * kept in step by the window. Closing a covering thread (or PR pane) back to the list is
  * then the browser's Back, as on a phone, so an iPad's swipe back and
  * `‹ Inbox` agree.
  * Every other close, and every close beside the list, stays a new entry, as on
@@ -592,6 +592,10 @@ function leavesCoveringPane(route: Route): boolean {
   const from = readRoute();
   if (covering.thread && route.page === 'inbox' && !route.thread) {
     return from.page === 'inbox' && !!from.thread && !from.file && !from.guide;
+  }
+  // A PR's pane (a stack, or one PR's launchpad) covers the Reviews list the same way.
+  if (covering.thread && route.page === 'reviews' && !route.stack) {
+    return from.page === 'reviews' && !!from.stack && !from.layer;
   }
   return false;
 }

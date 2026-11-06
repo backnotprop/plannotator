@@ -40,7 +40,7 @@ function Door({ kind, icon, title, sub, soon, wide, box, thread, children }: { k
         <span className="ib-lp-ic" aria-hidden="true">
           {icon}
         </span>
-        <b>{title}</b>
+        <h3 className="ib-lp-door-t">{title}</h3>
         {soon && <span className="ib-lp-soon">Coming</span>}
       </div>
       <div className="ib-lp-sub">{sub}</div>
@@ -93,7 +93,8 @@ export function PullLaunchpad({
   const details = usePullDetails(pr.key, `${pr.head_sha ?? ''}\u0000${pr.updated_at}`);
   const agent = linkAgentName(link) ?? 'the agent';
   const ended = link?.agent?.ended === true;
-  const guide = link?.guide ?? null;
+  // A guided review is there once the agent's arrives (the stack page's rule, `ThreadLine`).
+  const guide = link?.guide?.review ? link.guide : null;
   // The person asked for it (the hand-off) and it has not arrived yet.
   const onItsWay = !!link && !ended && !guide && link.via === 'owner' && !!link.ask;
   const shape = shapes && link ? (shapes.get(link.thread_id) ?? null) : null;
@@ -138,6 +139,7 @@ export function PullLaunchpad({
             {pr.title}
           </h2>
           <div className="ib-pr-meta ib-lp-meta" data-launch-facts="">
+            {pr.state === 'draft' && <span data-launch-draft="">Draft</span>}
             {pr.author && <span dir="auto">by {pr.mine ? 'you' : pr.author}</span>}
             <span className="ib-lp-ref">
               <Tip cut content={pr.head}>
@@ -173,8 +175,9 @@ export function PullLaunchpad({
                       <span className="ib-lp-strong ib-lp-name" dir="auto">
                         {guide.title}
                       </span>
-                    </Tip>{' '}
-                    · {plural(guide.steps, 'chapter')} by {agentMark} {agent}
+                    </Tip>
+                    {'\u00a0· '}
+                    {plural(guide.steps, 'chapter')} by {agentMark} {agent}
                   </>
                 ) : onItsWay ? (
                   <>
@@ -187,35 +190,43 @@ export function PullLaunchpad({
                 )
               }
             >
-              {guide && link ? (
+              {(guide && link) || start || (link && !ended) ? (
                 <div className="ib-lp-go">
-                  <button type="button" className="ib-btn ib-pri" onClick={() => onGuide(link.thread_id, guide.message_id)} data-launch-go="guide">
-                    <Icon name="map" size={15} />
-                    Open the guided review
-                  </button>
-                </div>
-              ) : start ? (
-                <div className="ib-lp-go">
-                  <button
-                    ref={start.ref}
-                    id={start.id}
-                    type="button"
-                    className="ib-btn ib-pri"
-                    disabled={start.waits}
-                    onClick={start.onToggle}
-                    aria-expanded={start.picking}
-                    aria-controls={start.picking ? start.pickerId : undefined}
-                    data-pulls-primary={start.kind}
-                    data-launch-go="start"
-                  >
-                    <Icon name="plus" size={15} />
-                    Start a guided review
-                  </button>
+                  {guide && link && (
+                    <button type="button" className="ib-btn ib-pri" onClick={() => onGuide(link.thread_id, guide.message_id)} data-launch-go="guide">
+                      <Icon name="map" size={15} />
+                      Open the guided review
+                    </button>
+                  )}
+                  {start && (
+                    <button
+                      ref={start.ref}
+                      id={start.id}
+                      type="button"
+                      className={guide ? 'ib-btn' : 'ib-btn ib-pri'}
+                      disabled={start.waits}
+                      onClick={start.onToggle}
+                      aria-expanded={start.picking}
+                      aria-controls={start.picking ? start.pickerId : undefined}
+                      data-pulls-primary={start.kind}
+                      data-launch-go="start"
+                    >
+                      <Icon name="plus" size={15} />
+                      {guide ? 'Start a new guided review' : 'Start a guided review'}
+                    </button>
+                  )}
+                  {!guide && !start && link && (
+                    // A live thread with no guide yet (asked for, or not): its thread is where one comes. Starts nothing.
+                    <button type="button" className="ib-btn ib-pri" onClick={() => onThread(link.thread_id)} data-launch-go="guide-thread" data-pulls-primary="open">
+                      <Icon name="questionBubble" size={15} />
+                      Open review thread
+                    </button>
+                  )}
                 </div>
               ) : null}
               {picker}
             </Door>
-            <Door kind="diff" icon={<Icon name="code" size={18} />} title="The diff" sub={<>All {plural(pr.files, 'file')} with your comments, Viewed and Approve.</>}>
+            <Door kind="diff" icon={<Icon name="code" size={18} />} title="The diff" sub={<>Every file, with your comments, Viewed and Approve.</>}>
               <div className="ib-lp-go">
                 <button type="button" className="ib-btn" onClick={onDiff} data-launch-go="diff" data-pulls-open-diff="">
                   Open the diff
@@ -239,12 +250,11 @@ export function PullLaunchpad({
                       <>With {agentMark} {agent}</>
                     )}
                     {link.last ? (
-                      <>
-                        {' '}
-                        · <span dir="auto">“{link.last.preview}”</span>
-                      </>
+                      <span className="ib-lp-said" dir="auto">
+                        “{link.last.preview}”
+                      </span>
                     ) : (
-                      !ended && <> · No answer yet</>
+                      !ended && <>{'\u00a0· '}No answer yet</>
                     )}
                   </>
                 ) : (
@@ -272,8 +282,10 @@ export function PullLaunchpad({
                         <span className="ib-lp-strong ib-lp-name" dir="auto">
                           {shape.title}
                         </span>
-                      </Tip>{' '}
-                      · v{shape.latest} · {relativeWords(shape.updated, now)}
+                      </Tip>
+                      {'\u00a0· '}v{shape.latest}
+                      {'\u00a0· '}
+                      {relativeWords(shape.updated, now)}
                     </>
                   ) : (
                     <>None yet. An agent draws one in the review thread.</>

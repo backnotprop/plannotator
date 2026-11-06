@@ -4,7 +4,10 @@
  *  - a door going anywhere but its own place: the guided review (its thread and message), the PR's diff (this layer),
  *    the review thread, the Shape board;
  *  - Start a guided review missing when there is none and a thread can start, not opening the picker, or offered beside
- *    a live thread (one review thread at a time);
+ *    a live thread (one review thread at a time); an ended agent's guide leaving no way to start a new one;
+ *  - focus not landing on the Review thread card once a thread starts;
+ *  - a guide the agent has not sent as a review (`review: false`) counted as one (the stack page's rule);
+ *  - the facts losing "by you" on the person's own PR, or "Draft" on a draft;
  *  - the Shape board door offering a board that is not there, or showing while Shape is off;
  *  - the details panel drawing its own head (author, branches, Close) under the page's.
  *
@@ -96,6 +99,8 @@ const board: InboxShapeSummary = {
   session: null,
 };
 
+const liveSession = (session: string) => ({ session, host: 'claude-code', started_at: '2026-11-03T08:00:00.000Z', last_seen_at: '2026-11-03T09:29:00.000Z', busy: false, idle_since: null, last_thread: null });
+
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
@@ -105,9 +110,15 @@ beforeEach(() => {
   if (!hasDom) return;
   went.length = 0;
   savedFetch = globalThis.fetch;
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
-    if (url.pathname.endsWith('/api/inbox/sessions')) return Response.json({ serverSession: 's', home: '/home/dana', projects: [] });
+    if (init?.method === 'POST') {
+      if (url.pathname.endsWith('/api/inbox/messages')) return Response.json({ thread_id: 'thr_new', message: {}, replayed: false });
+      return Response.json({ ok: true });
+    }
+    if (url.pathname.endsWith('/api/inbox/sessions')) {
+      return Response.json({ serverSession: 's', home: '/home/dana', projects: [{ project: { id: 'prj_web', name: 'web-app', root: '/home/dana/web-app' }, sessions: [liveSession('ses_web')] }] });
+    }
     if (url.pathname.endsWith('/pulls/details')) return Response.json({ serverSession: 's', key: url.searchParams.get('key'), description: null, labels: [], reviewers: [], checks: [], comments: [] });
     return Response.json({});
   }) as typeof fetch;
@@ -130,9 +141,7 @@ async function settle() {
   }
 }
 
-function mount(stackId: string, model: InboxPullsAnswer, extra: Partial<PullsPageProps> = {}) {
-  host = document.createElement('div');
-  document.body.appendChild(host);
+function page(stackId: string, model: InboxPullsAnswer, extra: Partial<PullsPageProps> = {}) {
   const props: PullsPageProps = {
     state: { model, error: null, loading: false, refresh: () => {}, reload: () => {} },
     stackId,
@@ -151,15 +160,21 @@ function mount(stackId: string, model: InboxPullsAnswer, extra: Partial<PullsPag
     onOpenShape: (shape) => went.push(`shape ${shape.id}`),
     ...extra,
   };
+  return (
+    <SidebarProvider>
+      <div className="pn-inbox">
+        <PullsPage {...props} />
+      </div>
+    </SidebarProvider>
+  );
+}
+
+function mount(stackId: string, model: InboxPullsAnswer, extra: Partial<PullsPageProps> = {}) {
+  host = document.createElement('div');
+  document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(
-      <SidebarProvider>
-        <div className="pn-inbox">
-          <PullsPage {...props} />
-        </div>
-      </SidebarProvider>,
-    );
+    root.render(page(stackId, model, extra));
   });
 }
 
@@ -208,13 +223,61 @@ test.skipIf(!hasDom)('no guided review and no thread: Start a guided review open
   expect(went).toEqual([]);
 });
 
-test.skipIf(!hasDom)("a live thread with no guide yet: no second thread to start; its agent's thread opens from its door", async () => {
+test.skipIf(!hasDom)("a live thread with no guide yet: no second thread to start; its thread opens from the wide card and its own", async () => {
   mount(single.key, answer({ [single.key]: { ...live, guide: null } }));
   await settle();
   expect(!!$('[data-launch-go="start"]')).toBe(false);
   expect(!!$('[data-launch-go="guide"]')).toBe(false);
+  expect($('[data-launch-door="guide"] [data-launch-go="guide-thread"]')!.getAttribute('data-pulls-primary')).toBe('open');
+  await click('[data-launch-go="guide-thread"]');
   await click('[data-launch-go="thread"]');
-  expect(went).toEqual(['thread thr_review']);
+  expect(went).toEqual(['thread thr_review', 'thread thr_review']);
+});
+
+test.skipIf(!hasDom)('a guide the agent did not send as a review is none yet (the stack page rule)', async () => {
+  mount(single.key, answer({ [single.key]: { ...live, guide: { ...live.guide!, review: false } } }));
+  await settle();
+  expect(!!$('[data-launch-go="guide"]')).toBe(false);
+  expect(!!$('[data-launch-go="guide-thread"]')).toBe(true);
+});
+
+test.skipIf(!hasDom)("an agent that ended after its guide: the guide opens, and a new guided review can start from the picker", async () => {
+  mount(single.key, answer({ [single.key]: { ...live, agent: { ...live.agent!, ended: true } } }));
+  await settle();
+  const open = $('[data-launch-door="guide"] [data-launch-go="guide"]')!;
+  const again = $<HTMLButtonElement>('[data-launch-door="guide"] [data-launch-go="start"]')!;
+  expect(open.classList.contains('ib-pri')).toBe(true);
+  expect(again.classList.contains('ib-pri')).toBe(false);
+  expect(again.getAttribute('data-pulls-primary')).toBe('again');
+  await click('[data-launch-go="start"]');
+  expect(!!$('[data-launch-door="guide"] [data-pulls-picker]')).toBe(true);
+  await click('[data-launch-go="guide"]');
+  expect(went).toEqual(['guide thr_review msg_guide']);
+});
+
+test.skipIf(!hasDom)('once a thread starts from the picker, focus lands on the Review thread card that names its agent', async () => {
+  mount(single.key, answer());
+  await settle();
+  await click('[data-launch-go="start"]');
+  await click('[data-pulls-start]');
+  const owned: InboxPullLink = { ...live, thread_id: 'thr_new', last: null, guide: null };
+  act(() => root!.render(page(single.key, answer({ [single.key]: owned }))));
+  await settle();
+  expect(document.activeElement?.getAttribute('data-launch-door')).toBe('thread');
+  expect(document.activeElement?.getAttribute('data-pulls-thread')).toBe('thr_new');
+});
+
+test.skipIf(!hasDom)('the facts say "by you" on your own PR and "Draft" on a draft; a teammate\'s ready PR says neither', async () => {
+  mount(single.key, { ...answer(), pulls: [{ ...single, mine: true, author: 'dana', state: 'draft' }] });
+  await settle();
+  const facts = () => $('[data-launch-facts]')!.textContent!;
+  expect(facts()).toContain('by you');
+  expect(facts()).toContain('Draft');
+  act(() => root!.render(page(single.key, answer())));
+  await settle();
+  expect(facts()).toContain('by tomas');
+  expect(facts()).not.toContain('by you');
+  expect(facts()).not.toContain('Draft');
 });
 
 test.skipIf(!hasDom)('an agent that ended with no guide: Start a guided review is offered again', async () => {

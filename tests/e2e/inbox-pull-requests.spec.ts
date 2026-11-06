@@ -20,13 +20,14 @@
  *     the lowest open one, its review thread's agent (tied by the PR's link in
  *     the agent's own message) and Open review thread, no Board UI, no merge
  *     button.
- *  4. A PR with no review thread (approval "pr-page-review-with-agent"): one
- *     button, Review with an agent, opens the picker inline: Ask for, the
+ *  4. A PR with no review thread, one PR on its own: its launchpad (approval
+ *     "pr-launchpad"). Start a guided review in the Guided review card opens
+ *     the picker inline (approval "pr-page-review-with-agent"): Ask for, the
  *     project's running agents as one radio list, Start a new agent; Start
  *     review thread sends the first message to the picked one, and the PR is
- *     that thread's from then on ("Review thread with Claude Code", Open
- *     review thread, also once the guided review arrived). "Open the diff"
- *     sits beside the button in every state, and each row opens its diff.
+ *     that thread's from then on (the guided review on its way, Open review
+ *     thread; once it arrives, Open the guided review). The diff card's Open
+ *     the diff is there in every state.
  *     (Start a new agent shows only while the Inbox can launch; the shots add
  *     compose's launch block to the sessions answer, since launching is not
  *     on main yet.)
@@ -893,31 +894,37 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
   }
 }
 
-/** The stack view's controls a phone must make full touch targets: the one button, Open the diff, the picker's Ask for options, its rows and Start. */
-const PHONE_TARGETS = '[data-pulls-primary], [data-pulls-open-diff], [data-pulls-picker-session], [data-pulls-picker-new], [data-pulls-start], [data-pulls-picker-cancel], [data-pulls-ask-option]';
+/** The stack view's and the launchpad's controls a phone must make full touch targets: the one button, Open the diff, the launchpad's card buttons, the picker's Ask for options, its rows and Start. */
+const PHONE_TARGETS = '[data-pulls-primary], [data-pulls-open-diff], [data-launch-go], [data-pulls-picker-session], [data-pulls-picker-new], [data-pulls-start], [data-pulls-picker-cancel], [data-pulls-ask-option]';
 
-test('a PR with no review thread: Review with an agent, the picker (Ask for, the running agents, Start a new agent), "on the way", the guided review arriving, Open review thread, and Open the diff in each', async ({ browser }) => {
+test('one PR with no review thread, on its launchpad: Start a guided review, the picker (Ask for, the running agents, Start a new agent), "on its way", the guided review arriving, and Open the diff in each', async ({ browser }) => {
   const { page } = world;
   await offerLaunch(page);
   await page.goto(`${world.url}#pulls`);
   const list = page.locator('[data-pulls-list]');
   await list.locator('[data-pulls-waiting-toggle]').click();
   await list.locator(`[data-pulls-row="${LOCALE}"]`).click();
-  const pane = page.locator('[data-pulls-stack]');
-  // One button under the title, Open the diff beside it; no picker until it is asked for, no thread, no Reply.
-  const primary = pane.locator('[data-pulls-primary]');
-  await expect(primary).toHaveText('Review with an agent');
+  // One PR on its own opens its launchpad, not the stack page.
+  const pane = page.locator('[data-pulls-stack][data-launchpad]');
+  await expect(pane).toBeVisible();
+  await expect(pane.locator('.ib-pr-ladder')).toHaveCount(0);
+  await expect(pane.locator('h2')).toHaveText('Fall back to English for missing strings');
+  // Start a guided review in the wide Guided review card, Open the diff in its own; no picker until it is asked for, no thread, no Reply.
+  const primary = pane.locator('[data-launch-door="guide"] [data-pulls-primary]');
+  await expect(primary).toHaveText('Start a guided review');
+  await expect(primary).toHaveAttribute('data-pulls-primary', 'review');
   await expect(primary).toHaveClass(/ib-pri/);
   await expect(primary).toHaveAttribute('aria-expanded', 'false');
-  expect((await pane.locator('[data-pulls-open-diff]').boundingBox())!.y).toBe((await primary.boundingBox())!.y);
+  await expect(pane.locator('[data-launch-door="diff"] [data-pulls-open-diff]')).toHaveText('Open the diff');
+  await expect(pane.locator('[data-launch-door="thread"]')).toContainText('None yet');
   await expect(pane.locator('[data-pulls-picker]')).toHaveCount(0);
   await expect(pane.locator('[data-pulls-thread]')).toHaveCount(0);
   await expect(pane.locator('[data-pulls-reply]')).toHaveCount(0);
   await expect(pane).not.toContainText(/\bhand/i);
   await shot(page, '4-no-thread');
   await primary.click();
-  // Inline under the button, no menu: Ask for, then one radio list of web-app's running agents and Start a new agent.
-  const picker = pane.locator('[data-pulls-picker]');
+  // Inline under the button, in its card, no menu: Ask for, then one radio list of web-app's running agents and Start a new agent.
+  const picker = pane.locator('[data-launch-door="guide"] [data-pulls-picker]');
   await expect(primary).toHaveAttribute('aria-expanded', 'true');
   await expect(picker).toContainText('Ask for');
   await expect(picker).toContainText('Running in web-app');
@@ -937,22 +944,17 @@ test('a PR with no review thread: Review with an agent, the picker (Ask for, the
   await expect(picker.locator('[data-pulls-start]')).toHaveAttribute('data-pulls-start', 'ses-web-claude');
   await expect(pane.locator('[data-pulls-thread]')).toHaveCount(0);
   await shot(page, '4a-picker');
-  // The row opens the diff too: "Open diff ›" at its end, under the pointer.
-  const row = pane.locator(`[data-pulls-layer="${LOCALE}"] button`);
-  await row.hover();
-  await expect(row.locator('.ib-pr-lgo')).toHaveText('Open diff');
-  await shot(page, '4b-row-hover', ['light']);
-  await page.mouse.move(0, 0);
   await picker.locator('[data-pulls-ask-option="custom"]').click();
   await picker.locator('[data-pulls-ask-words]').fill('Check the fallback chain, and a test for a missing locale');
   await shot(page, '5-ask-custom');
   await picker.locator('[data-pulls-ask-option="guide"]').click();
   await picker.locator('[data-pulls-start]').click();
   await expect(picker).toHaveCount(0);
-  // Focus lands on the line that names the review thread's agent.
-  const line = pane.locator('[data-pulls-thread-line]');
+  // Focus lands on the Review thread card, which names the thread's agent; the guided review is on its way.
+  const line = pane.locator('[data-launch-door="thread"]');
   await expect(line).toBeFocused();
-  await expect(line).toHaveText(/^Review thread with Claude Code\s*Guided review on the way$/);
+  await expect(line).toContainText('With Claude Code');
+  await expect(pane.locator('[data-launch-door="guide"]')).toContainText('A guided review is on its way from Claude Code.');
   const threadId = String(await line.getAttribute('data-pulls-thread'));
   const opening = await world.claude.nextReply(threadId);
   const words = String(opening.body);
@@ -961,25 +963,27 @@ test('a PR with no review thread: Review with an agent, the picker (Ask for, the
   expect(words).toContain('\n- Link: https://github.com/northwind/web-app/pull/869\n');
   expect(words).toContain('\n1. Send me a guided review of its diff against main, using /review-curate (its instructions are at the end of this message).\n');
   expect(words).toContain('BEGIN SKILL INSTRUCTIONS: review-curate');
-  // Kept: a fresh read still ties it to that thread, and says what was asked; the one button opens the thread.
+  // Kept: a fresh read still ties it to that thread, and says what was asked; the wide card opens the thread (no second Start).
   await page.reload();
   await expect(page.locator('[data-pulls-stack] [data-pulls-thread]')).toHaveAttribute('data-pulls-thread', threadId);
   await expect(page.locator(`[data-pulls-row="${LOCALE}"]`)).toContainText('#869 · Review thread with Claude Code · your review');
-  await expect(page.locator('[data-pulls-stack] [data-pulls-thread-line="asked"]')).toContainText('Guided review on the way');
+  await expect(page.locator('[data-launch-door="guide"]')).toContainText('is on its way from Claude Code');
   await expect(page.locator('[data-pulls-stack] [data-pulls-primary]')).toHaveText('Open review thread');
-  await expect(page.locator('[data-pulls-stack] [data-pulls-picker]')).toHaveCount(0);
+  await expect(page.locator('[data-pulls-stack] [data-launch-go="start"], [data-pulls-stack] [data-pulls-picker]')).toHaveCount(0);
   await expect(page.locator('[data-pulls-stack] [data-pulls-open-diff]')).toBeVisible();
   await expect(page.locator('[data-pulls-stack]')).not.toContainText(/\bhand/i);
   await shot(page, '6-on-the-way');
   await phoneShot(browser, LOCALE, 'phone-6-on-the-way');
 
-  // The agent's guided review arrives through phase 1's path: the thread is still the way in.
+  // The agent's guided review arrives through phase 1's path: the wide card opens it; the thread and the diff stay a card away.
   await sendReview(world.claude, world.projects.web, String(opening.id), world.patches.locale, 'src/i18n/fallback.ts', 'Fall back to English for missing strings');
   await page.reload();
   const stackPane = page.locator('[data-pulls-stack]');
-  await expect(stackPane.locator('[data-pulls-thread-line="live"]')).toBeVisible();
-  await expect(stackPane.locator('[data-pulls-ask]')).toHaveCount(0);
-  expect(await stackPane.locator('.ib-pr-actions button').allTextContents()).toEqual(['Open review thread', 'Open the diff']);
+  await expect(stackPane.locator('[data-launch-go="guide"]')).toHaveText('Open the guided review');
+  await expect(stackPane.locator('[data-launch-door="guide"]')).not.toContainText('on its way');
+  await expect(stackPane.locator('[data-launch-go="start"]')).toHaveCount(0);
+  await expect(stackPane.locator('[data-launch-go="thread"]')).toHaveText('Open review thread');
+  await expect(stackPane.locator('[data-launch-go="diff"]')).toHaveText('Open the diff');
   await shot(page, '6a-review-arrived');
   await phoneShot(browser, LOCALE, 'phone-6a-review-arrived');
   // The thread is named for the PR (owner, q-49bd0699 A), as the person's own name: the Inbox list shows it.
@@ -988,13 +992,18 @@ test('a PR with no review thread: Review with an agent, the picker (Ask for, the
   await shot(page, '6t-thread-name', ['light']);
   await page.goto(`${world.url}#pulls`);
   await page.locator(`[data-pulls-row="${LOCALE}"]`).click();
-  await expect(stackPane.locator('[data-pulls-thread-line="live"]')).toBeVisible();
+  await expect(stackPane.locator('[data-launch-go="guide"]')).toBeVisible();
   await stackPane.locator('[data-pulls-open-diff]').click();
   await expect(page.locator('[data-pull-review]')).toHaveAttribute('data-pull-review', LOCALE);
   await page.goto(`${world.url}#pulls`);
   await page.locator(`[data-pulls-row="${LOCALE}"]`).click();
-  await page.locator('[data-pulls-stack] [data-pulls-primary="open"]').click();
+  await page.locator('[data-pulls-stack] [data-launch-go="thread"]').click();
   await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toContain(threadId);
+  // The guided review opens over its thread.
+  await page.goto(`${world.url}#pulls`);
+  await page.locator(`[data-pulls-row="${LOCALE}"]`).click();
+  await page.locator('[data-pulls-stack] [data-launch-go="guide"]').click();
+  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toMatch(new RegExp(`thread=${threadId}.*&guide=msg_`));
   await page.unroute('**/api/inbox/sessions*');
 });
 
@@ -2790,7 +2799,7 @@ test('the posting video (25 s or less): a teammate\'s PR reviewed with a comment
   renameSync(join(dir, recorded!), join(proofDir, 'posting.webm'));
 });
 
-test('the walkthrough video (20 s or less): Review with an agent starts a review thread with the picked agent, Open the diff in every state, its guided review arriving', async ({ browser }) => {
+test('the walkthrough video (20 s or less): Start a guided review starts a review thread with the picked agent, Open the diff in every state, its guided review arriving', async ({ browser }) => {
   test.skip(!video, 'PLANNOTATOR_E2E_VIDEO=1 records it');
   const dir = join(proofDir, 'video');
   await setBoard(false);
@@ -2800,13 +2809,12 @@ test('the walkthrough video (20 s or less): Review with an agent starts a review
   const pause = (ms: number) => page.waitForTimeout(ms);
   try {
     await page.goto(`${world.url}#pulls`);
-    // A teammate's PR with no review thread: Review with an agent, and Open the diff beside it.
+    // A teammate's PR with no review thread, on its launchpad: Start a guided review, and Open the diff in its own card.
     await page.locator('[data-pulls-row="github.com/northwind/web-app#880"]').click();
-    const pane = page.locator('[data-pulls-stack]');
+    const pane = page.locator('[data-pulls-stack][data-launchpad]');
     await expect(pane.locator('[data-pulls-primary="review"]')).toBeVisible();
     await pause(2200);
-    // The row opens the diff too.
-    await pane.locator('[data-pulls-layer="github.com/northwind/web-app#880"] button').hover();
+    await pane.locator('[data-launch-door="diff"] [data-pulls-open-diff]').hover();
     await pause(1300);
     await pane.locator('[data-pulls-primary]').click();
     await pause(900);
@@ -2819,14 +2827,14 @@ test('the walkthrough video (20 s or less): Review with an agent starts a review
     await pane.locator('[data-pulls-start]').click();
     const chip = pane.locator('[data-pulls-thread]');
     await expect(chip).toBeVisible();
-    await expect(pane.locator('[data-pulls-thread-line]')).toContainText('Guided review on the way');
+    await expect(pane.locator('[data-launch-door="guide"]')).toContainText('is on its way');
     await pane.locator('[data-pulls-open-diff]').hover();
     await pause(2500);
     const threadId = String(await chip.getAttribute('data-pulls-thread'));
     const opening = await world.claude.nextReply(threadId);
     await sendReview(world.claude, world.projects.web, String(opening.id), world.patches.rtl, 'src/settings/Layout.tsx', 'RTL layout for the settings pages');
     await page.reload();
-    await expect(page.locator('[data-pulls-stack] [data-pulls-thread-line="live"]')).toBeVisible();
+    await expect(page.locator('[data-pulls-stack] [data-launch-go="guide"]')).toBeVisible();
     await pause(2500);
     // Open the diff: straight into the review mode, no stop on the way.
     await page.locator('[data-pulls-stack] [data-pulls-open-diff]').click();
