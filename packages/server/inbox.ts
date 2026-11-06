@@ -183,7 +183,7 @@ import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture
 import { createInboxAccountsFor } from "./inbox-accounts";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
-import { inboxBodyForAgent, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
+import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createInboxVoice } from "./inbox-voice";
@@ -736,6 +736,7 @@ const ERROR_STATUS: Record<string, number> = {
   upload_too_large: 413,
   markup_too_large: 413,
   upload_not_found: 404,
+  upload_no_space: 507,
   // The Board's cards (approval "inbox-board"): who may move a card.
   card_not_found: 404,
   card_no_project: 404,
@@ -846,6 +847,8 @@ function errorResponse(error: unknown): Response {
   if (error instanceof InboxError) {
     return json({ error: error.message, code: error.code, ...error.details }, ERROR_STATUS[error.code] ?? 400);
   }
+  const full = inboxDiskFullError(error);
+  if (full) return errorResponse(full);
   return json({ error: "Internal error.", code: "internal_error" }, 500);
 }
 
@@ -5031,7 +5034,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             const replayKey = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
             const fresh = uploads.length > 0 && !store.replyByKey(messageId, replayKey);
             if (fresh && !store.message(messageId)) throw new InboxError("message_not_found", `No message ${messageId}.`);
-            const attachments = fresh ? inboxUploadAttachments(store.dir, uploads, new Date().toISOString()) : [];
+            const attachments = fresh ? await inboxUploadAttachments(store.dir, uploads, new Date().toISOString()) : [];
+            // The same Send while this one copied is a replay, below; another Send of these files already has them.
+            if (fresh && !store.replyByKey(messageId, replayKey)) assertInboxUploadsPending(store.dir, uploads, attachments);
             let result: ReturnType<typeof store.sendReply>;
             try {
               result = store.sendReply(messageId, {

@@ -1104,6 +1104,19 @@ export interface StartThreadInput {
   decision_ask?: true;
 }
 
+/** A file this Inbox already holds, as a pending upload (never another machine's: a thread there offers no reuse). No bytes travel. */
+export async function reuseAttachment(attachmentId: string, version: 'current' | 'sent', options: { signal?: AbortSignal; sha256?: string } = {}): Promise<InboxUpload> {
+  const response = await fetch(inboxUrl('/uploads/reuse'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ attachment_id: attachmentId, version, ...(options.sha256 ? { sha256: options.sha256 } : {}), serverSession: pageServerSession() }),
+    signal: options.signal,
+  });
+  const body = (await response.json().catch(() => ({}))) as { upload?: InboxUpload; error?: string; code?: string };
+  if (!response.ok || !body.upload) throw new InboxApiError(response.status, body.code ?? 'error', body.error ?? 'Not attached: that file could not be added.');
+  return body.upload;
+}
+
 /**
  * Upload one file (compose): the raw bytes, streamed by the browser, with
  * progress. XHR because fetch reports no upload progress. `serverSession`

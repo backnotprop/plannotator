@@ -118,7 +118,6 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
 }) => {
   const { DiffRenderer, getDiffRendererProps, renderFileActions, diffStyle, opensWholeFiles, collapseAll } = useGuideHost();
   const actions = renderFileActions?.(file) ?? null;
-  const shellRef = useRef<HTMLDivElement | null>(null);
   const scrollPositionRef = useRef(0);
   const [collapsed, setCollapsed] = useState(collapseAll && collapseAll.token > 0 ? collapseAll.collapsed : kind === 'generated');
   // The host's Collapse all: a new token folds or opens this card too. The renderer reads `mountCollapsed` once, so it
@@ -137,7 +136,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   // A file whose gap was opened stays mounted: the viewer holds the opened lines, and leaving the outer window would
   // close them, shrink the box under the reader and read the file again. A mounted viewer draws only rows near the viewport.
   const [opened, setOpened] = useState(false);
-  const { mounted, register, requestMount } = useGuideFileWindow(file.path, focused || opened);
+  const { mounted, register, requestMount, jumpTo } = useGuideFileWindow(file.path, focused || opened);
   const diffHeight = useMemo(
     () => (fitContent ? estimateFitDiffHeight(file.patch, diffStyle, !!opensWholeFiles && (file.status === 'modified' || file.status === 'renamed')) : estimateDiffHeight(file.patch)),
     [fitContent, file.patch, file.status, diffStyle, opensWholeFiles],
@@ -198,17 +197,16 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   const followsContent = fitContent && mounted && !collapsed;
 
   // A navigation target can live far outside the current outer window or in a
-  // chapter that was just reopened. Force its CodeView first, then move the
-  // lightweight shell into view; the tokenized inner target completes the jump.
+  // chapter that was just reopened. Force its CodeView first, then take the
+  // lightweight shell there; the tokenized inner target completes the jump.
   useEffect(() => {
     if (!target) return;
     setCollapsed(false);
     requestMount();
     onActivate(file.path);
-    const raf = requestAnimationFrame(() => {
-      // Fitting, at once: a page-long ride would mount boxes on the way, and holding the reader's place stops a smooth scroll.
-      shellRef.current?.scrollIntoView(fitContent ? { block: 'start' } : { behavior: 'smooth', block: 'start' });
-    });
+    // Fitting, at once: a page-long ride would mount boxes on the way, and holding the reader's place stops a smooth
+    // scroll. Either way the manager then holds the file at its place while the boxes above it settle.
+    const raf = requestAnimationFrame(() => jumpTo(fitContent ? { instant: true } : undefined));
     return () => cancelAnimationFrame(raf);
     // Token identifies the navigation event; callback identity must not replay it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -219,11 +217,6 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   useEffect(() => {
     if (focused) requestMount();
   }, [focused, requestMount]);
-
-  const attachShell = useCallback((element: HTMLDivElement | null) => {
-    shellRef.current = element;
-    register(element);
-  }, [register]);
 
   // The page holds the reader's place: a box wholly above the viewport that changes height moves the page by as much.
   // Browsers do not do this for us here (and Safari never does): `.ib-gbody` opts out so that nothing corrects twice.
@@ -261,7 +254,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
 
   return (
     <div
-      ref={attachShell}
+      ref={register}
       data-guide-file-shell={file.path}
       className="scroll-mt-4"
       onPointerEnter={() => {
