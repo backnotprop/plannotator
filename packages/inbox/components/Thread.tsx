@@ -60,7 +60,7 @@ import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../
 import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
 import { clearLateVoiceMiss, LATE_VOICE_MISSED, noteLateVoiceMiss, useLateVoiceMiss } from '../lateVoice';
-import { landInReplyDraft, landWordsInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook } from '../replyDraft';
+import { landInReplyDraft, landWordsInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
 import { useReplyHasWords, useReplyText, useReplyTextStore, useReplyTextWhile, type ReplyText } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
 import { conflictText, DraftHead, DraftFootNote, DraftStamp } from './DraftLabel';
@@ -153,6 +153,7 @@ import { StepsButton } from '../steps/StepsButton';
 import { stepsCount, stepsWaitTarget } from '../steps/model';
 import { useThreadSteps, type StepsSubscribe } from '../steps/useThreadSteps';
 import { linkHashtags, useInitiativeTags } from '../hashtags';
+import { replyWordsCount, withFreeName, withoutReplyWords, type ShapeReplyPart } from '../shape/addToReply';
 import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
 
 export { routeSendAnnotations, sendTargetsOf, type SendTarget };
@@ -1130,6 +1131,12 @@ export interface ThreadPaneProps {
   /** Words from Ask AI's Reply in the thread: they join the reply draft, and the pane calls `onReplyWordsTaken` once. */
   replyWords?: string | null;
   onReplyWordsTaken?: () => void;
+  /**
+   * A board's Add to reply (packages/inbox/shape/addToReply.ts): its words join the reply after any it holds, its
+   * picture joins the reply's files, with the window's "Added to your reply · Undo". The pane calls `onReplyPartTaken` once.
+   */
+  replyPart?: ShapeReplyPart | null;
+  onReplyPartTaken?: () => void;
   /** On a phone the header leads with a Back button named for the screen under the thread ("Inbox", a project). */
   backLabel?: string;
   /** A thread opened from a Board card: the chip naming the card, under the subject (board/CardChip.tsx). */
@@ -1176,6 +1183,8 @@ export interface ThreadPaneProps {
   onBackToList?: (fileName: string | null) => void;
   /** The window's one toast: "Files open side by side now" with Undo, when a picked view becomes the remembered one. */
   onToast?: (toast: Omit<InboxToastModel, 'id'>) => void;
+  /** Take down the toast this pane put up, named by its Undo, when it is still the one showing (another replaced it: no change). */
+  onToastGone?: (onUndo: () => void) => void;
   /**
    * The thread's address, or one message's (`&msg=<id>`), for the copy menus' Copy link (CopyMenus.tsx). Absent:
    * the window's own origin (rowMenu.ts `threadLink` before the settings load).
@@ -1436,7 +1445,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   // Thread steps (approval "inbox-thread-steps"): the lists with steps, newest first; none while the switch is off.
@@ -1700,8 +1709,13 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     setTaggedIds(ids);
     if (ids.length === 0) setTagMode('ask');
   }, []);
+  /** A board's Add to reply whose Undo is live (one at a time): `closing` as the box closes into a draft, `end` when it can no longer. */
+  const partUndo = useRef<{ end: () => void; closing: () => void } | null>(null);
   /** `discarded`: Discard closed it, so a file still uploading stops instead of joining the draft. */
   const closeBox = (discarded = false) => {
+    // A board's Add to reply still undoable: it reads the box as it goes into the draft (its Undo works on that).
+    if (!discarded) partUndo.current?.closing();
+    else partUndo.current?.end();
     // A Send waiting to be confirmed: read back now, so a reply that went leaves no stale "Draft" foot.
     const earlier = unconfirmed.get(thread.thread_id);
     if (earlier) forgetUnconfirmed(earlier, 'closed');
@@ -5100,6 +5114,74 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     // changeReply reads this render's Send state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replyWords, sending]);
+
+  // A board's Add to reply: its words after the draft's, its picture beside them. Its toast's Undo works once and takes
+  // out exactly that press's words and file, in the box or, once Cancel or Esc closed it, in the saved draft; a Send,
+  // Discard or another thread ends it.
+  const changeReplyLive = useRef(changeReply);
+  changeReplyLive.current = changeReply;
+  useEffect(() => {
+    if (!replyPart || sending) return;
+    onReplyPartTaken?.();
+    const kept = boxRef.current.open ? boxRef.current.text : replyDraft.conflict ?? replyDraft.draft?.body ?? '';
+    // A closed box opens with its draft's files, as a drop on the thread opens it.
+    if (!boxRef.current.open) openBox();
+    const words = replyPart.words;
+    // Which of the words' places is this press's: the same box added twice reads the same.
+    const nth = words ? replyWordsCount(kept, words) : 0;
+    if (words) changeReply(kept.trim() ? `${kept.trimEnd()}\n\n${words}` : words);
+    // Its name beside every file the reply holds: a closed box's draft files come back through state, after this.
+    const taken = [...replyFiles.files.map((f) => f.name), ...draftFilesWithMine(replyDraft.draft?.files ?? []).map((f) => f.name)];
+    const file = replyPart.file ? withFreeName(replyPart.file, taken) : null;
+    const keys = file ? replyFiles.add([file]) : [];
+    setError(null);
+    partUndo.current?.end();
+    let live = true;
+    const end = () => {
+      if (!live) return;
+      live = false;
+      if (partUndo.current?.end === end) partUndo.current = null;
+      onToastGone?.(undo);
+    };
+    // Its file's upload, once in (a box opened again shows the draft's files under their upload ids), and the box as it
+    // last closed into the draft.
+    const uploads = new Set<string>();
+    let closed: { text: string; files: ReplyDraftFiles } | null = null;
+    const closing = () => {
+      for (const f of replyFiles.current()) if (keys.includes(f.key) && f.upload) uploads.add(f.upload.upload_id);
+      const text = boxRef.current.text;
+      closed = { text, files: replyFiles.draftFiles(text) };
+    };
+    partUndo.current = { end, closing };
+    const undo = () => {
+      if (!live) return;
+      end();
+      // Words the person changed since are theirs now: the file goes, the words stay.
+      if (boxRef.current.open) {
+        for (const key of [...keys, ...uploads]) replyFiles.remove(key);
+        if (!words) return;
+        const now = boxRef.current.text;
+        const next = withoutReplyWords(now, words, nth);
+        if (next !== now) changeReplyLive.current(next);
+        return;
+      }
+      // Closed (Cancel, Esc): the draft it was saved as, without them.
+      if (!closed) return;
+      const text = words ? withoutReplyWords(closed.text, words, nth) : closed.text;
+      const files = closed.files.filter((f) => !uploads.has(f.upload_id));
+      if (text === closed.text && files.length === closed.files.length) return;
+      replyDraft.save(text, files);
+      replyDraft.flush();
+    };
+    onToast?.({ icon: 'check', lead: 'Added to your reply', phoneLead: 'Added to your reply', speech: 'Added to your reply.', onUndo: undo });
+    // openBox and changeReply read this render's draft and Send state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replyPart, sending]);
+  // A Send, or another thread, ends the Undo (Discard ends it in closeBox).
+  useEffect(() => {
+    if (sending) partUndo.current?.end();
+  }, [sending]);
+  useEffect(() => () => partUndo.current?.end(), [thread.thread_id]);
 
   // Mark read: pressed while the thread is marked read, offered while something here waits on the person.
   const readAt = row?.read_at ?? null;

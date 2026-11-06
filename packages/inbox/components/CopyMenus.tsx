@@ -226,9 +226,9 @@ export function ThreadMore(
     </Menu.Item>
   );
   const pinItem = pin && (
-    <Menu.Item className="ib-pmi" label={pin.pinned ? 'Unpin thread' : 'Pin thread'} onClick={pin.onToggle} data-thread-pin-item="">
-      <Icon name={pin.pinned ? 'pinOff' : 'pin'} size={15} />
-      {pin.pinned ? 'Unpin thread' : 'Pin thread'}
+    <Menu.Item className="ib-pmi" label={pin.pinned ? 'Unstar thread' : 'Star thread'} onClick={pin.onToggle} data-thread-pin-item="">
+      <Icon name="star" size={15} className={pin.pinned ? 'ib-star-on' : undefined} />
+      {pin.pinned ? 'Unstar thread' : 'Star thread'}
     </Menu.Item>
   );
   const phoneLeads = !!(markRead || moveBack || markUnread || snooze);

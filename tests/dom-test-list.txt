@@ -185,6 +185,7 @@ packages/inbox/rowMenu.test.tsx
 packages/inbox/copyMessage.test.tsx
 packages/inbox/guideRequest.test.tsx
 packages/inbox/pinnedThreads.test.tsx
+packages/inbox/rowStar.test.tsx
 packages/inbox/pinnedRowLabel.test.tsx
 packages/inbox/fileBack.test.tsx
 packages/inbox/archived.test.tsx
@@ -525,6 +526,8 @@ packages/inbox/reviewPane.test.tsx
 packages/inbox/reviewJump.test.tsx
 packages/inbox/pulls/pullFilter.test.tsx
 packages/inbox/guideGlobalComment.test.tsx
+packages/inbox/guideExpandContext.test.tsx
+packages/inbox/guideScrollsWithPage.test.tsx
 packages/inbox/pulls/pullReview.test.tsx
 packages/inbox/pulls/usePulls.test.tsx
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
@@ -540,6 +543,7 @@ packages/inbox/shapeBoardHead.test.tsx
 packages/inbox/shapeChangeFailed.test.tsx
 packages/inbox/shapeSidebarToggle.test.tsx
 packages/inbox/shape/standalone/ShapePage.test.tsx
+packages/inbox/shape/ShapeBoard.test.tsx
 packages/ui/components/shape/ShapeSurface.commentDraft.test.tsx
 packages/ui/components/shape/ShapeSurface.popoverQuote.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.globalCommentDraft.test.tsx
@@ -549,5 +553,6 @@ packages/review-editor/components/MarkdownBody.prImages.test.tsx
 packages/inbox/attachmentDrawReady.test.tsx
 packages/inbox/lazyRecovery.test.tsx
 packages/review-editor/components/guide/GuideGlobalCommentPopover.test.tsx
+packages/review-editor/utils/scrollWithPage.test.ts
 packages/ui/components/shape/ShapeSurface.board.test.tsx
 packages/ui/components/AnnotationToolstrip.hideActionModes.test.tsx
