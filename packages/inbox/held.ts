@@ -258,6 +258,27 @@ export function settleThread(shown: readonly InboxListSection[], latest: readonl
 }
 
 /**
+ * The rows on screen a snooze change moves by itself (`event: snoozes` with no thread open, approval
+ * "inbox-list-view", R7): each row drawn in the Snoozed band that the read shows not snoozed, or drawn in its
+ * group and now snoozed (another tab or machine snoozed or unsnoozed it). Nothing else moves, and the list is not
+ * sorted whole: the person's pending reads and archives keep their places. A snooze run out by the clock is not one:
+ * its return is news, which waits behind "N new" (`hasNewAgentActivity`). The person's own snooze and unsnooze have
+ * moved their row already, so it is not here either.
+ */
+export function snoozeChangedRows(shown: readonly InboxListSection[], latest: readonly InboxListSection[]): string[] {
+  const fresh = rowsById(latest);
+  const out: string[] = [];
+  for (const section of shown) {
+    for (const row of section.threads) {
+      const next = fresh.get(row.thread_id);
+      if (!next || (section.id === INBOX_SNOOZED_BAND.id) === !!next.snoozed) continue;
+      if (!hasNewAgentActivity(row, next)) out.push(row.thread_id);
+    }
+  }
+  return out;
+}
+
+/**
  * Where the thread covers the list, does Back move the thread just closed
  * (`settleThread`) instead of showing it as left? Yes when an agent message
  * there is still unseen (it comes back unread), and when the thread now waits
@@ -285,7 +306,9 @@ export function settlesOnBack(shown: readonly InboxListSection[], row: InboxList
  * behind "N new". Each row `latest` has for `threadIds` and the list on
  * screen lacks goes into its section at its place there (newest first: the
  * top of Sent); every other row keeps its section and its order. A thread
- * already on screen, or not in `latest`, changes nothing.
+ * already on screen, or not in `latest`, changes nothing. Also a write's own
+ * rows that the list on screen lost (App.tsx `afterWrite`: an Undo of Archive
+ * after the list settled without the row); a snoozed one goes into the band.
  */
 export function addOwnThreads(shown: readonly InboxListSection[], latest: readonly InboxListSection[], threadIds: readonly string[]): InboxListSection[] {
   const fresh = rowsById(latest);
@@ -295,8 +318,8 @@ export function addOwnThreads(shown: readonly InboxListSection[], latest: readon
   return shown.map((section) => {
     const threads = [...section.threads];
     for (const row of adding) {
-      if (row.section !== section.id) continue;
-      const at = threads.findIndex((other) => newestFirst(row, other) < 0);
+      if (groupOf(row) !== section.id) continue;
+      const at = threads.findIndex((other) => (section.id === INBOX_SNOOZED_BAND.id ? soonestBack : newestFirst)(row, other) < 0);
       threads.splice(at < 0 ? threads.length : at, 0, row);
     }
     return { ...section, threads };
