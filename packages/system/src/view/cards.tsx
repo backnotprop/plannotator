@@ -6,7 +6,7 @@ import type { SheetLayout } from '../layout/types.ts';
 
 const Kbd = ({ k }: { k: string }) => <kbd className="sys-kbd">{k}</kbd>;
 
-export function KeyCard({ notes, sheets, keys }: { notes: boolean; sheets: boolean; keys: boolean }) {
+export function KeyCard({ notes, sheets, keys, pane }: { notes: boolean; sheets: boolean; keys: boolean; pane: boolean }) {
   return (
     <div className="sys-card-pop sys-keycard" role="dialog" aria-label="Symbols and keys">
       <div className="sys-kc-h">Symbols</div>
@@ -37,7 +37,7 @@ export function KeyCard({ notes, sheets, keys }: { notes: boolean; sheets: boole
           {notes && <div className="sys-kc-k"><Kbd k="N" /><span>every note of this sheet</span></div>}
         </>
       )}
-      <div className="sys-kc-k"><span>Drag to move; the wheel or a pinch zooms</span></div>
+      <div className="sys-kc-k"><span>{pane ? 'Drag to move; a pinch, or the wheel with Ctrl or ⌘, zooms' : 'Drag to move; the wheel or a pinch zooms'}</span></div>
     </div>
   );
 }

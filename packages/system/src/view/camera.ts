@@ -147,3 +147,27 @@ export const paneH = (w: number, h: number, stageW: number) => {
 
 /** Reduced motion, read when a move starts (so a change of the setting applies to the next move). */
 export const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// ---------------------------------------------------------------- a window's door and a dive's picture (G step 8i)
+
+/** Where the camera is against a window: the inside's ratio to its own rest scale, and the door's three marks. */
+export type DoorWindow = { ratio: number; lo: number; hi: number; at: number };
+
+/** The ratio a window's inside is at when the sheet around it rests, and its door: where the sheet around lowers (lo to hi) and where the camera crosses (at). From G (doorOf). */
+export const doorOf = (r0: number) => {
+  const lo = Math.max(0.5, r0 * 1.04), hi = Math.max(0.8, lo + 0.12);
+  return { lo, hi, at: Math.max(1, hi + 0.08) };
+};
+/** How far into a window the wheel has the camera, on the dive's own scale (0 to 1): the sheet around lowers over 0.1 to 0.6 of it exactly as it lowers from the door's lo to hi. */
+export const doorT = (d: DoorWindow, r0: number) => {
+  const t = 0.1 + (0.5 * (d.ratio - d.lo)) / (d.hi - d.lo);
+  return clamp(d.ratio < d.lo ? Math.min(t, 0.1 * clamp((d.ratio - r0) / (d.lo - r0), 0, 1)) : t, 0, 1);
+};
+/** What a dive at t draws: the sheet around, the entered box's own words, the inside's ink and paper, and how far it has unrolled. */
+export const diveInk = (t: number) => ({
+  around: 1 - smooth(0.1, 0.6, t),
+  box: 1 - smooth(0, 0.24, t),
+  ink: smooth(0.02, 0.22, t) * lerp(0.5, 1, smooth(0.05, 0.6, t)),
+  paper: smooth(0.2, 0.6, t),
+  unroll: smooth(0.1, 0.6, t),
+});

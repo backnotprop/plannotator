@@ -3,11 +3,16 @@
  * own committed drawing and the worst-case fixtures, in a real React tree
  * (happy-dom). What is proved: every sheet draws in each reading it has, with
  * a box for every part the layout placed; Simple draws no lines and no
- * letters; Full draws the lines; a window's "N sheets inside" cue asks for the
- * first sheet inside; the Simple / Full switch asks for the other reading and
- * shows only when a sheet has both and the host listens; the crumbs name the
- * drawing and the parts that open each scope; a sheet the drawing lacks falls
- * back to the landing sheet; the thumb is a picture with no controls.
+ * letters; Full draws the lines; a window's "N sheets inside" cue dives into
+ * the first sheet inside and names it; the Simple / Full switch asks for the
+ * other reading and shows only when a sheet has both and the host listens; the
+ * crumbs name the drawing and the parts that open each scope, and a crumb above
+ * travels up; the chips and keys 1 to 9 turn to a sheet of the scope; Esc
+ * climbs, then closes; the zoom group and + - F zoom and fit; Key and N open
+ * their cards and Esc closes them first; keys={false} lets those keys pass; a
+ * part with sheets inside is a Tab stop and Enter dives. The moves run under
+ * reduced motion (a cut), so where each ends is read at once; the motion itself
+ * is measured in a real browser by scripts/measure.mjs.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -50,7 +55,19 @@ afterAll(() => {
   if (savedRect) Object.defineProperty(Element.prototype, 'getBoundingClientRect', savedRect);
 });
 
+/** Reduced motion until the test ends: every move cuts, so where a move ends can be read at once. */
+let undoReduce: (() => void) | null = null;
+function reduce() {
+  const saved = globalThis.matchMedia;
+  const mm = ((q: string) => ({ matches: q.includes('reduce'), media: q, onchange: null, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent: () => false })) as unknown as typeof matchMedia;
+  globalThis.matchMedia = mm;
+  undoReduce = () => { globalThis.matchMedia = saved; };
+}
+const press = (el: Element, key: string) => act(() => { el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); });
+
 afterEach(() => {
+  undoReduce?.();
+  undoReduce = null;
   act(() => root?.unmount());
   host?.remove();
   root = null;
@@ -101,20 +118,28 @@ test.skipIf(!hasDom)('Simple draws no lines and no letters; Full draws the lines
   expect(full.querySelectorAll('.sys-letter.sys-mk').length).toBe(L.letters.length);
 });
 
-test.skipIf(!hasDom)('a window at rest says how many sheets are inside, and its cue asks for the first of them', async () => {
+test.skipIf(!hasDom)('a window at rest says how many sheets are inside, and its cue dives into the first of them and names it', async () => {
   const model = models.plannotator!;
-  const asked: string[] = [];
-  const el = await render(<R.SystemView model={model} sheet="C-001" layout="window" onNavigate={(s) => asked.push(s)} />);
-  const cues = [...el.querySelectorAll<HTMLButtonElement>('button.sys-win-cue')];
   const L = R.restLayout(model, 'C-001', {});
   const windows = Object.entries(L.parts).filter(([, p]) => p.opens);
   expect(windows.length).toBeGreaterThan(0);
-  expect(cues.length).toBe(windows.length);
+  reduce();
   for (const [id, p] of windows) {
+    const asked: string[] = [];
+    const el = await render(<R.SystemView model={model} sheet="C-001" layout="window" onNavigate={(s) => asked.push(s)} />);
+    expect(el.querySelectorAll('button.sys-win-cue').length).toBe(windows.length);
     const cue = el.querySelector<HTMLButtonElement>(`[data-part="${id}"] button.sys-win-cue`)!;
-    expect(cue.textContent).toBe(`${model.byScope[p.opens!]!.length} sheet${model.byScope[p.opens!]!.length === 1 ? '' : 's'} inside`);
+    const inside = model.byScope[p.opens!]!;
+    expect(cue.textContent).toBe(`${inside.length} sheet${inside.length === 1 ? '' : 's'} inside`);
+    // the cue is reached through its part, not by Tab
+    expect(cue.tabIndex).toBe(-1);
     act(() => cue.click());
-    expect(asked.at(-1)).toBe(model.byScope[p.opens!]![0]!);
+    expect(asked).toEqual([inside[0]!]);
+    expect(el.querySelector('.sys-view')!.getAttribute('data-sheet')).toBe(inside[0]!);
+    expect(el.querySelector('.sys-crumb.sys-here')!.textContent).toBe(model.parts[id]!.name);
+    act(() => root!.unmount());
+    host!.remove();
+    root = null;
   }
 });
 
@@ -179,4 +204,133 @@ test.skipIf(!hasDom)('the thumb is a picture of the landing sheet at the asked w
   expect(thumb.style.height).toBe(`${Math.ceil((L.h * 640) / L.w)}px`);
   expect(thumb.querySelectorAll('button').length).toBe(0);
   expect(thumb.querySelector('.sys-sheet.sys-live')).toBeNull();
+});
+
+test.skipIf(!hasDom)('Esc climbs one level and names the sheet; on the landing sheet it closes', async () => {
+  const model = models.plannotator!;
+  reduce();
+  const asked: string[] = [];
+  let closed = 0;
+  const el = await render(<R.SystemView model={model} sheet="L-201" layout="window" onNavigate={(s) => asked.push(s)} onClose={() => closed++} />);
+  const stage = el.querySelector('.sys-stage')!;
+  press(stage, 'Escape');
+  const up = el.querySelector('.sys-view')!.getAttribute('data-sheet')!;
+  expect(model.sheets[up]!.scope).toBe('root');
+  // the sheet it climbs to is the one that draws the window it climbed out of
+  expect(R.restLayout(model, up, {}).parts[model.owner[model.sheets['L-201']!.scope]!]).toBeDefined();
+  expect(asked).toEqual([up]);
+  expect(closed).toBe(0);
+  press(stage, 'Escape');
+  expect(closed).toBe(1);
+  expect(asked).toEqual([up]);
+});
+
+test.skipIf(!hasDom)("a crumb above the sheet travels up to it; the crumb of the sheet on screen is not a control", async () => {
+  const model = models.plannotator!;
+  reduce();
+  const asked: string[] = [];
+  const el = await render(<R.SystemView model={model} sheet="L-201" project="plannotator" layout="window" onNavigate={(s) => asked.push(s)} />);
+  const up = [...el.querySelectorAll<HTMLButtonElement>('button.sys-crumb-b')];
+  expect(up.map((b) => b.textContent)).toEqual([model.name]);
+  expect(el.querySelector('.sys-crumb.sys-here')!.tagName).toBe('SPAN');
+  act(() => up[0]!.click());
+  const at = el.querySelector('.sys-view')!.getAttribute('data-sheet')!;
+  expect(model.sheets[at]!.scope).toBe('root');
+  expect(asked).toEqual([at]);
+});
+
+test.skipIf(!hasDom)('the chips name the sheets of this scope and turn to one; keys 1 to 9 do the same', async () => {
+  const model = models.plannotator!;
+  reduce();
+  const codes = model.byScope.root!;
+  expect(codes.length).toBeGreaterThan(1);
+  const asked: string[] = [];
+  const el = await render(<R.SystemView model={model} sheet="C-001" layout="window" onNavigate={(s) => asked.push(s)} />);
+  const chips = () => [...el.querySelectorAll<HTMLButtonElement>('.sys-chips button.sys-chip-b')];
+  expect(chips().length).toBe(codes.length);
+  expect(chips().filter((c) => c.getAttribute('aria-current') === 'page').length).toBe(1);
+  const other = codes.find((c) => c !== 'C-001')!;
+  act(() => chips()[codes.indexOf(other)]!.click());
+  expect(el.querySelector('.sys-view')!.getAttribute('data-sheet')).toBe(other);
+  expect(chips()[codes.indexOf(other)]!.getAttribute('aria-current')).toBe('page');
+  press(el.querySelector('.sys-stage')!, String(codes.indexOf('C-001') + 1));
+  expect(el.querySelector('.sys-view')!.getAttribute('data-sheet')).toBe('C-001');
+  expect(asked).toEqual([other, 'C-001']);
+});
+
+test.skipIf(!hasDom)('the zoom group zooms in and out and its percent fits; + - F do the same', async () => {
+  const model = models.plannotator!;
+  reduce();
+  const el = await render(<R.SystemView model={model} sheet="C-001" layout="window" onNavigate={noop} />);
+  const pct = () => +el.querySelector('.sys-zoom .sys-pct')!.textContent!.replace('%', '');
+  const rest = pct();
+  act(() => el.querySelector<HTMLButtonElement>('.sys-zoom [aria-label="Zoom in"]')!.click());
+  expect(pct()).toBe(Math.round(rest * 1.25));
+  act(() => el.querySelector<HTMLButtonElement>('.sys-zoom .sys-pct')!.click());
+  expect(pct()).toBe(rest);
+  act(() => el.querySelector<HTMLButtonElement>('.sys-zoom [aria-label="Zoom out"]')!.click());
+  expect(pct()).toBe(Math.round(rest / 1.25));
+  const stage = el.querySelector('.sys-stage')!;
+  press(stage, 'f');
+  expect(pct()).toBe(rest);
+  press(stage, '+');
+  expect(pct()).toBe(Math.round(rest * 1.25));
+  press(stage, '-');
+  expect(pct()).toBe(rest);
+});
+
+test.skipIf(!hasDom)('Key opens the symbols and keys, N opens the notes, and Esc closes them before it climbs', async () => {
+  const model = models.plannotator!;
+  reduce();
+  const code = Object.keys(model.sheets).find((c) => model.sheets[c]!.scope !== 'root' && R.restLayout(model, c, {}).notes.length > 0)!;
+  expect(code).toBeDefined();
+  const notes = R.restLayout(model, code, {}).notes;
+  const asked: string[] = [];
+  const el = await render(<R.SystemView model={model} sheet={code} layout="window" onNavigate={(s) => asked.push(s)} />);
+  const key = el.querySelector<HTMLButtonElement>('.sys-zoom button[aria-expanded]')!;
+  act(() => key.click());
+  expect(key.getAttribute('aria-expanded')).toBe('true');
+  expect(el.querySelector('[role="dialog"][aria-label="Symbols and keys"]')).not.toBeNull();
+  const stage = el.querySelector('.sys-stage')!;
+  press(stage, 'n');
+  expect(el.querySelector('[aria-label="Symbols and keys"]')).toBeNull();
+  const rows = [...el.querySelectorAll('[aria-label="Notes on this sheet"] .sys-note-row')];
+  expect(rows.map((r) => r.querySelector('.sys-letter')!.textContent)).toEqual(notes.map((n) => n.l));
+  press(stage, 'Escape');
+  expect(el.querySelector('[aria-label="Notes on this sheet"]')).toBeNull();
+  expect(el.querySelector('.sys-view')!.getAttribute('data-sheet')).toBe(code);
+  expect(asked).toEqual([]);
+});
+
+test.skipIf(!hasDom)('with keys off, only Tab, the arrows, Enter and Esc act; the zoom, sheet and notes keys pass through', async () => {
+  const model = models.plannotator!;
+  reduce();
+  const el = await render(<R.SystemView model={model} sheet="C-001" layout="window" keys={false} onNavigate={noop} />);
+  const stage = el.querySelector('.sys-stage')!;
+  const pct = el.querySelector('.sys-zoom .sys-pct')!.textContent;
+  for (const k of ['+', '-', 'f', '1', '2', 'n']) {
+    const ev = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true });
+    act(() => { stage.dispatchEvent(ev); });
+    expect([k, ev.defaultPrevented]).toEqual([k, false]);
+  }
+  expect(el.querySelector('.sys-zoom .sys-pct')!.textContent).toBe(pct);
+  expect(el.querySelector('.sys-view')!.getAttribute('data-sheet')).toBe('C-001');
+  expect(el.querySelector('.sys-notescard')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a part with sheets inside is a stop for Tab, says so, and Enter on it dives in', async () => {
+  const model = models.plannotator!;
+  reduce();
+  const asked: string[] = [];
+  const el = await render(<R.SystemView model={model} sheet="C-001" layout="window" onNavigate={(s) => asked.push(s)} />);
+  const L = R.restLayout(model, 'C-001', {});
+  const [id, p] = Object.entries(L.parts).find(([, q]) => q.opens)!;
+  const part = el.querySelector<HTMLElement>(`.sys-cur [data-part="${id}"]`)!;
+  expect(part.tabIndex).toBe(0);
+  expect(part.getAttribute('aria-label')).toContain('Enter opens it');
+  act(() => part.focus());
+  press(part, 'Enter');
+  expect(asked).toEqual([model.byScope[p.opens!]![0]!]);
+  // the focus stays in the drawing, so Esc still reaches it
+  expect(el.contains(document.activeElement)).toBe(true);
 });

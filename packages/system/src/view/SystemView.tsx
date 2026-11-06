@@ -24,7 +24,7 @@ import type { SheetLayout } from '../layout/types.ts';
 import { layoutAtRest, lodAt, scopeLabel, scopePath, sheetOr } from './rest.ts';
 import { useSize, useText } from './text.ts';
 import {
-  CAM_MS, camAt, clamp, DIVE_MS, GLIDE_DECAY, LAND, lerp, paneH, reduced, restCam, smooth, spring, springStep, STEP_MS, SW_CALM, SW_EXIT, SW_LEAD,
+  CAM_MS, camAt, clamp, DIVE_MS, diveInk, doorOf, doorT, type DoorWindow, GLIDE_DECAY, LAND, lerp, paneH, reduced, restCam, spring, springStep, STEP_MS, SW_CALM, SW_EXIT, SW_LEAD,
   toSheet, WHEEL_TAU, WHEEL_TAU_PINCH, wOf, xf, ZOOM_STEP, zoomAbout, fitRect, type Cam, type Rect, type SpringState, type Stage,
 } from './camera.ts';
 import { all, born, clearFlip, easeOut, FULL_LINES, FULL_WORDS, placesOf, startFlip, type Flip } from './flip.ts';
@@ -67,26 +67,8 @@ export type SystemViewProps = {
 /** A window being entered or left: the part, the sheet inside, the box its inside opens from, and how far (0 outside, 1 inside). */
 type Dive = { part: string; code: string; r: Rect; s: number; t: number };
 type DiveRun = Dive & { t0: number; S: SpringState; A: Cam; B: Cam; done: boolean; then?: () => void; onIn: () => void; onOut: () => void; restIn: () => Cam };
-type Door = { id: string; code: string; r: Rect; s: number; ratio: number; lo: number; hi: number; at: number };
+type Door = DoorWindow & { id: string; code: string; r: Rect; s: number };
 
-/** The ratio a window's inside is at when the sheet around it rests, and its door: where the sheet around lowers (lo to hi) and where the camera crosses (at). From G (doorOf). */
-const doorOf = (r0: number) => {
-  const lo = Math.max(0.5, r0 * 1.04), hi = Math.max(0.8, lo + 0.12);
-  return { lo, hi, at: Math.max(1, hi + 0.08) };
-};
-/** How far into a window the wheel has the camera, on the dive's own scale (0 to 1): the sheet around lowers over 0.1 to 0.6 of it exactly as it lowers from the door's lo to hi. */
-const doorT = (d: Door, r0: number) => {
-  const t = 0.1 + (0.5 * (d.ratio - d.lo)) / (d.hi - d.lo);
-  return clamp(d.ratio < d.lo ? Math.min(t, 0.1 * clamp((d.ratio - r0) / (d.lo - r0), 0, 1)) : t, 0, 1);
-};
-/** What a dive at t draws: the sheet around, the entered box's own words, the inside's ink and paper, and how far it has unrolled. */
-const diveInk = (t: number) => ({
-  around: 1 - smooth(0.1, 0.6, t),
-  box: 1 - smooth(0, 0.24, t),
-  ink: smooth(0.02, 0.22, t) * lerp(0.5, 1, smooth(0.05, 0.6, t)),
-  paper: smooth(0.2, 0.6, t),
-  unroll: smooth(0.1, 0.6, t),
-});
 
 export function SystemView({ model, sheet, project, reading = 'full', layout, keys = true, onNavigate, onReading, onOpenFull, onClose }: SystemViewProps) {
   const root = useRef<HTMLDivElement>(null);
@@ -127,7 +109,9 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
   const camRef = useRef<Cam | null>(null);
   const dvRef = useRef<Dive | null>(null);
   /** Runs what is current in the frame it is called from (a spring's frame, a wheel event), so the camera, a dive's ink and a move land in one paint. */
+  const moved = useRef(0); // when the camera last moved: idle layout waits until it has been still a while
   const draw = (sync = true) => {
+    moved.current = performance.now();
     if (worldRef.current && camRef.current) worldRef.current.style.transform = xf(camRef.current);
     if (sync) flushSync(() => setTick((n) => n + 1));
     else setTick((n) => n + 1);
@@ -197,10 +181,12 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
     if (!Lc || Lc.simple) return null;
     const [wx, wy] = toSheet(c, px, py);
     for (const id of Object.keys(Lc.parts)) {
+      const b = Lc.parts[id]!;
+      // the box first: the inside's layout is read only for the window under the point (or the one being opened)
+      if (!b.cw || wx < b.x || wx > b.x + b.w || wy < b.y || (wy > b.y + b.h && id !== near.current)) continue;
       const w = windowOf(Lc, id);
       if (!w) continue;
-      const b = Lc.parts[id]!;
-      if (wx < b.x || wx > b.x + b.w || wy < b.y || wy > Math.max(w.r.y + w.C.h * w.s, b.y + b.h)) continue;
+      if (wy > Math.max(w.r.y + w.C.h * w.s, b.y + b.h)) continue;
       return doorFor(c, w);
     }
     return null;
@@ -217,6 +203,8 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
   const doorNow = (c: Cam): Door | null => {
     const Lc = LRef.current;
     if (!Lc || Lc.simple || dvRef.current || A.current.flip) return null;
+    // at the sheet's rest scale or below, every window is at rest (doorT is 0): nothing to read
+    if (c.k <= restNow().k * (1 + 1e-6)) { near.current = null; return null; }
     const [px, py] = focusPt.current ?? [stRef.current.w / 2, stRef.current.h / 2];
     let d = windowAt(c, px, py);
     if (!d && near.current) {
@@ -616,14 +604,17 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
   }, [ghost?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => { clearTimeout(pendingSimple.current ?? undefined); endFlip(); dropFades(); A.current.cam?.(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // the other reading of the sheet on screen, and its scope's other sheets, are laid out in idle time so a press never waits
+  // what the next press may need is laid out in idle time, so a press never waits on a layout (routing a big sheet's
+  // lines takes hundreds of ms): the sheet above (Esc), the sheet inside each window (a dive), the other reading
+  // (the switch), then the scope's other sheets (a chip)
   useEffect(() => {
     if (!s) return;
     const idle = (globalThis as { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => number }).requestIdleCallback;
     const stop = (globalThis as { cancelIdleCallback?: (h: number) => void }).cancelIdleCallback;
-    const jobs = [() => layoutAtRest(model, code, !simple), ...(model.byScope[scope] ?? []).map((c) => () => layoutAtRest(model, c, simple))];
+    const inside = L ? Object.values(L.parts).flatMap((p) => { const c = p.opens ? childFor(p.opens) : undefined; return c ? [() => layoutAtRest(model, c, simple)] : []; }) : [];
+    const jobs = [() => parentOf(code), ...inside, () => layoutAtRest(model, code, !simple), ...(model.byScope[scope] ?? []).map((c) => () => layoutAtRest(model, c, simple))];
     let h = 0, dead = false;
-    const run = () => { if (dead) return; const j = jobs.shift(); if (!j) return; if (!A.current.dive && !A.current.flip) j(); else jobs.unshift(j); h = idle ? idle(run, { timeout: 2000 }) : (setTimeout(run, 200) as unknown as number); };
+    const run = () => { if (dead) return; const j = jobs.shift(); if (!j) return; if (!A.current.dive && !A.current.flip && performance.now() - moved.current > 300) j(); else jobs.unshift(j); h = idle ? idle(run, { timeout: 2000 }) : (setTimeout(run, 200) as unknown as number); };
     h = idle ? idle(run, { timeout: 2000 }) : (setTimeout(run, 200) as unknown as number);
     return () => { dead = true; if (idle && stop) stop(h); else clearTimeout(h); };
   }, [model, code, simple, scope, epoch]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -875,7 +866,7 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
             <button type="button" aria-expanded={keyOpen} onClick={() => { setKeyOpen((v) => !v); setNotesOpen(false); }} title="Symbols and keys">Key</button>
           </div>
         )}
-        {keyOpen && <KeyCard notes={!!L?.notes.length} sheets={codes.length > 1} keys={keys} />}
+        {keyOpen && <KeyCard notes={!!L?.notes.length} sheets={codes.length > 1} keys={keys} pane={layout === 'pane'} />}
         {notesOpen && L && <NotesCard notes={L.notes} />}
         <div className="sys-sr" aria-live="polite">{said}</div>
       </div>
