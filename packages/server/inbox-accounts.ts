@@ -35,10 +35,29 @@
  *
  * A linked machine's read is this same read on that machine, asked for through
  * its door (`accountsOf` in inbox-machines.ts) and picked by name again here.
+ *
+ * Switch (step 3, this computer only) is `cswap switch <number> --json`, which
+ * writes the login Claude Code uses. Never killed, at any limit; one at a
+ * time; a fixed answer with no address and no `cswap` words. Before it runs, a
+ * new list (never the kept answer) must still have the login the window showed
+ * under that number, and after it the address `cswap` switched to must be that
+ * row's, so a list renumbered since switches nothing, or says so. Its end drops
+ * the kept answer and any run begun before it, and a read asked for during it
+ * waits for it, so the next read is a new run that shows the account in use. `switchTo` takes no request: a linked machine's
+ * switch (step 4) is this same call on that machine.
  */
 
-import type { InboxAccount, InboxAccountsFailure, InboxAccountsRead, InboxAccountUsage, InboxMachineAccountsRead, InboxUsageWindow } from "@plannotator/core/inbox-types";
-import { createAgentEnvironmentFor, runUntilExit, type AgentEnvironment } from "./inbox-agents";
+import type {
+  InboxAccount,
+  InboxAccountsFailure,
+  InboxAccountsRead,
+  InboxAccountSwitch,
+  InboxAccountSwitchTarget,
+  InboxAccountUsage,
+  InboxMachineAccountsRead,
+  InboxUsageWindow,
+} from "@plannotator/core/inbox-types";
+import { createAgentEnvironmentFor, runToExit, runUntilExit, type AgentEnvironment } from "./inbox-agents";
 
 /** The `schemaVersion` of `cswap list --json` this build reads. Extra fields are fine; another version is not. */
 const CSWAP_SCHEMA_VERSION = 1;
@@ -145,6 +164,58 @@ export function parseCswapList(stdout: string): InboxAccountsRead {
   return accounts ? { state: "accounts", accounts } : failed("bad_output");
 }
 
+/**
+ * What the window may know of `cswap switch <number> --json` (exit 0): the
+ * account in use after it, when that is the one asked for, whether it switched
+ * or was already in use. Its `from`, `to` addresses, `message` and `warnings`
+ * never pass.
+ */
+export function parseCswapSwitch(stdout: string, number: number, email: string | null): InboxAccountSwitch {
+  let output: unknown;
+  try {
+    output = JSON.parse(stdout);
+  } catch {
+    return { state: "failed", reason: "bad_output" };
+  }
+  if (!isRecord(output) || typeof output.schemaVersion !== "number") return { state: "failed", reason: "bad_output" };
+  if (output.schemaVersion !== CSWAP_SCHEMA_VERSION) return { state: "failed", reason: "unknown_schema" };
+  const to = isRecord(output.to) && Number.isInteger(output.to.number) ? (output.to.number as number) : null;
+  if (typeof output.switched !== "boolean" || to === null) return { state: "failed", reason: "bad_output" };
+  // A switch that ended anywhere else did not do what was asked: the next read says where it is.
+  if (to !== number || (!output.switched && output.reason !== "already-active")) return { state: "failed", reason: "run_failed" };
+  // The number asked for, and another login under it: the list moved between the read before and the switch. Compared here, never passed on.
+  if (text((output.to as Record<string, unknown>).email) !== email) return { state: "failed", reason: "renumbered" };
+  return { state: "switched", number };
+}
+
+/** The address `cswap list --json` gives account `number`, the placeholder of an API key too. Server-side only: it is matched, never passed on. */
+function listedEmail(stdout: string, number: number): string | null {
+  try {
+    const output: unknown = JSON.parse(stdout);
+    const rows = isRecord(output) && Array.isArray(output.accounts) ? output.accounts : [];
+    const row = rows.find((item) => isRecord(item) && item.number === number);
+    return isRecord(row) ? text(row.email) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The switch's body, picked by name: `cswap`'s number, and the login the window showed under it. Null: not one. */
+export function switchTarget(body: Record<string, unknown>): InboxAccountSwitchTarget | null {
+  const { number, email, organizationName, alias } = body;
+  const textOrNull = (value: unknown) => value === null || (typeof value === "string" && value.length <= TEXT_MAX);
+  if (typeof number !== "number" || !Number.isSafeInteger(number) || number < 0 || !textOrNull(email) || !textOrNull(organizationName) || !(alias === undefined || textOrNull(alias))) return null;
+  const orNull = (value: unknown) => (value as string | null) || null;
+  return { number, email: orNull(email), organizationName: orNull(organizationName), alias: orNull(alias) };
+}
+
+/** The read's row for this target, if it is still the login the window showed: an API key has no address, so its alias counts too. */
+function sameLogin(accounts: InboxAccount[], target: InboxAccountSwitchTarget): InboxAccount | null {
+  const row = accounts.find((account) => account.number === target.number);
+  const same = row && (row.email ?? null) === target.email && (row.organizationName ?? null) === target.organizationName && (row.alias ?? null) === target.alias;
+  return same ? row : null;
+}
+
 export interface InboxAccountsOptions {
   environment: AgentEnvironment;
   /** Default `INBOX_ACCOUNTS_TIMEOUT_MS`; tests give a short one. */
@@ -178,18 +249,74 @@ export function createInboxAccountsFor(environment: AgentEnvironment, options: P
 }
 
 export function createInboxAccounts({ environment, timeoutMs = INBOX_ACCOUNTS_TIMEOUT_MS, hardLimitMs = INBOX_ACCOUNTS_HARD_LIMIT_MS, cacheMs = INBOX_ACCOUNTS_CACHE_MS }: InboxAccountsOptions) {
-  const runOnce = async (cswap: string): Promise<InboxAccountsRead> => {
+  /** One `cswap list --json`: its answer, and its output for the switch's own match (never passed on). */
+  const listRun = async (cswap: string): Promise<{ answer: InboxAccountsRead; stdout: string }> => {
     const run = await runUntilExit([cswap, "list", "--json"], environment.env, hardLimitMs);
-    if (run.timedOut) return failed("timed_out");
+    if (run.timedOut) return { answer: failed("timed_out"), stdout: "" };
     // The shell's "command not found": a shim whose tool is gone, which is not installed. The e2e stubs exit this way too.
-    if (run.exitCode === 127) return { state: "not_installed" };
-    if (run.exitCode !== 0) return failed("run_failed");
-    return parseCswapList(run.stdout);
+    if (run.exitCode === 127) return { answer: { state: "not_installed" }, stdout: "" };
+    if (run.exitCode !== 0) return { answer: failed("run_failed"), stdout: "" };
+    return { answer: parseCswapList(run.stdout), stdout: run.stdout };
   };
   /** The run going now, until it has really ended. */
   let running: Promise<InboxAccountsRead> | null = null;
   let startedAt = Number.NEGATIVE_INFINITY;
   let last: { at: number; answer: InboxAccountsRead } | null = null;
+  /** The switch going now, until its `cswap` has really exited. It never rejects. */
+  let switching: Promise<InboxAccountSwitch> | null = null;
+  /** Moves on at each switch's end: a run that began before it never becomes the kept answer. */
+  let generation = 0;
+
+  /** The kept answer, or the run going, or a new run. A switch is not waited for here. */
+  const list = (cswap: string, fresh: boolean): Promise<InboxAccountsRead> => {
+    const now = Date.now();
+    // A time ahead of now is a clock set back: not a reason to wait for it to catch up.
+    const recent = (at: number) => now >= at && now - at < cacheMs;
+    if (last && recent(last.at) && (!fresh || recent(startedAt))) return Promise.resolve(last.answer);
+    if (!running) {
+      startedAt = now;
+      const born = generation;
+      const run: Promise<InboxAccountsRead> = listRun(cswap)
+        .then(({ answer }) => {
+          if (born === generation) last = { at: Date.now(), answer };
+          return answer;
+        })
+        .finally(() => {
+          if (running === run) running = null;
+        });
+      running = run;
+    }
+    return running;
+  };
+  /** A read asked for during a switch waits for it, so it never serves the account in use before. */
+  const settled = (cswap: string, fresh: boolean): Promise<InboxAccountsRead> => (switching ? switching.then(() => settled(cswap, fresh)) : list(cswap, fresh));
+  /** Each caller waits its own limit, so a Refresh during a slow run can still get that run's answer. */
+  const waitAtMost = <T,>(work: Promise<T>, late: T): Promise<T> => {
+    let limit: ReturnType<typeof setTimeout>;
+    const tooLong = new Promise<T>((done) => {
+      limit = setTimeout(() => done(late), timeoutMs);
+    });
+    return Promise.race([work, tooLong]).finally(() => clearTimeout(limit));
+  };
+
+  const switchOnce = async (cswap: string, target: InboxAccountSwitchTarget): Promise<InboxAccountSwitch> => {
+    // A list run going ends first, so `cswap list` and `cswap switch` never overlap here.
+    if (running) await running;
+    // A new run, never the kept answer: a login renumbered since the window's read switches nothing. The 30 s floor saves
+    // processes, not logins (`cswap` refreshes at most once per its own 3 minutes), so this one extra run is safe.
+    const listed = await listRun(cswap);
+    const before = listed.answer;
+    if (before.state !== "accounts") return before;
+    const row = sameLogin(before.accounts, target);
+    if (!row) return { state: "failed", reason: "changed" };
+    if (row.active) return { state: "switched", number: row.number };
+    // Never killed, at any limit: a kill could land in the middle of writing the login. The person's wait is `waitAtMost`.
+    const run = await runToExit([cswap, "switch", String(target.number), "--json"], environment.env);
+    if (run.exitCode === 127) return { state: "not_installed" };
+    if (run.exitCode !== 0) return { state: "failed", reason: "run_failed" };
+    return parseCswapSwitch(run.stdout, target.number, listedEmail(listed.stdout, target.number));
+  };
+
   return {
     /** Whether `cswap` is on this PATH. Looks only: runs nothing. */
     installed: (): boolean => environment.which("cswap") !== null,
@@ -199,27 +326,31 @@ export function createInboxAccounts({ environment, timeoutMs = INBOX_ACCOUNTS_TI
         last = null;
         return Promise.resolve({ state: "not_installed" });
       }
-      const now = Date.now();
-      // A time ahead of now is a clock set back: not a reason to wait for it to catch up.
-      const recent = (at: number) => now >= at && now - at < cacheMs;
-      if (last && recent(last.at) && (!fresh || recent(startedAt))) return Promise.resolve(last.answer);
-      if (!running) {
-        startedAt = now;
-        running = runOnce(cswap)
-          .then((answer) => {
-            last = { at: Date.now(), answer };
-            return answer;
-          })
-          .finally(() => {
-            running = null;
-          });
+      return waitAtMost(settled(cswap, fresh), failed("timed_out"));
+    },
+    /**
+     * Switch this computer's Claude Code to `target`. One at a time: a second
+     * while one runs is `busy`, never a second run. Whatever the end, the kept
+     * answer goes, so the next read runs and shows the account now in use.
+     */
+    switchTo(target: InboxAccountSwitchTarget): Promise<InboxAccountSwitch> {
+      const cswap = environment.which("cswap");
+      if (!cswap) {
+        last = null;
+        return Promise.resolve({ state: "not_installed" });
       }
-      // Each caller waits its own limit, so a Refresh during a slow run can still get that run's answer.
-      let limit: ReturnType<typeof setTimeout>;
-      const tooLong = new Promise<InboxAccountsRead>((done) => {
-        limit = setTimeout(() => done(failed("timed_out")), timeoutMs);
-      });
-      return Promise.race([running, tooLong]).finally(() => clearTimeout(limit));
+      if (switching) return Promise.resolve({ state: "failed", reason: "busy" });
+      // Whatever the end: no answer or run from before it serves a read after it.
+      const forget = () => {
+        generation += 1;
+        last = null;
+        running = null;
+        startedAt = Number.NEGATIVE_INFINITY;
+        switching = null;
+      };
+      const run = switchOnce(cswap, target).catch((): InboxAccountSwitch => ({ state: "failed", reason: "run_failed" }));
+      switching = run.finally(forget);
+      return waitAtMost(switching, { state: "failed", reason: "timed_out" });
     },
   };
 }
