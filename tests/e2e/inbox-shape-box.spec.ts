@@ -356,9 +356,10 @@ test('a phone keeps its tap: the crosshair, a tap on a part, no box', async ({ b
   await context.close();
 });
 
+// `args: []`: the config's launch flags are Chromium's, and WebKit (Firefox too) refuses them on Linux.
 for (const [name, launch] of [
-  ['webkit', () => webkit.launch()],
-  ['firefox', () => firefox.launch({ executablePath: process.env.PLANNOTATOR_SHAPE_BOX_FIREFOX || undefined })],
+  ['webkit', () => webkit.launch({ args: [] })],
+  ['firefox', () => firefox.launch({ args: [], executablePath: process.env.PLANNOTATOR_SHAPE_BOX_FIREFOX || undefined })],
 ] as const) {
   test(`the real build in ${name}: a lazy drag, the note and its picture`, async () => {
     // Firefox is not among the browsers the e2e job installs: it runs where one is named.
