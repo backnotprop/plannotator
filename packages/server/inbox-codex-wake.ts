@@ -482,12 +482,13 @@ export function createInboxCodexWake(options: {
   };
 
   const queueOne = async (path: string, item: InboxMessage, session: string): Promise<void> => {
-    const key = `${item.id}.${session}`;
+    const id = store.deliveryIdOf(item, session);
+    const key = `${id}.${session}`;
     const retry = retryAt.get(key);
     if (retry && retry.at > now()) return;
     try {
       mkdirSync(dir, { recursive: true });
-      mkdirSync(claimDir(item.id, session));
+      mkdirSync(claimDir(id, session));
     } catch {
       // Claimed already (another sweep, or before a restart).
       claimed.add(key);
@@ -497,7 +498,7 @@ export function createInboxCodexWake(options: {
     const text = codexQueueMessage(options.commandOf(item, session));
     const at = now();
     // An idle thread starts its turn while `codex queue` still runs; that turn's tool call is kept until the call exits 0.
-    const flight = { at, session, itemId: item.id, taken: false };
+    const flight = { at, session, itemId: id, taken: false };
     inFlight.set(key, flight);
     // `--name=value`: a value that starts with "-" would be read as a flag.
     const run = await environment.run([path, "queue", `--thread=${session}`, `--message=${text}`], { timeoutMs: options.queueTimeoutMs ?? INBOX_CODEX_QUEUE_TIMEOUT_MS, signal: stopping.signal });
@@ -513,7 +514,7 @@ export function createInboxCodexWake(options: {
       log(`codex queue ran out of time for ${item.id} (thread ${session}); it may not have gone, and is not sent again: the agent sees it when it reads the thread.`);
       if (!claimed.has(key)) return;
       uncertain.add(key);
-      writeFileSync(join(claimDir(item.id, session), "queued.json"), `${JSON.stringify({ at, timed_out: true })}\n`);
+      writeFileSync(join(claimDir(id, session), "queued.json"), `${JSON.stringify({ at, timed_out: true })}\n`);
       return;
     }
     if (run.exitCode === 0) {
@@ -521,14 +522,14 @@ export function createInboxCodexWake(options: {
       unproven.delete(session);
       if (!claimed.has(key)) return;
       if (flight.taken) {
-        delivered(item.id, session);
+        delivered(id, session);
         return;
       }
-      writeFileSync(join(claimDir(item.id, session), "queued.json"), `${JSON.stringify({ at })}\n`);
-      (queued.get(session) ?? queued.set(session, new Map()).get(session)!).set(item.id, at);
+      writeFileSync(join(claimDir(id, session), "queued.json"), `${JSON.stringify({ at })}\n`);
+      (queued.get(session) ?? queued.set(session, new Map()).get(session)!).set(id, at);
       return;
     }
-    dropClaim(item.id, session);
+    dropClaim(id, session);
     const said = `${run.stderr}${run.stdout}`.trim().split("\n")[0]?.slice(0, 300) ?? "";
     if (run.exitCode === 1 && UNKNOWN_THREAD.test(`${run.stderr}\n${run.stdout}`)) {
       dead.add(session);
@@ -562,7 +563,7 @@ export function createInboxCodexWake(options: {
     for (const [session, items] of pending) {
       for (const item of items) {
         if (!wakesItem(item, session) || options.skip?.(item, session)) continue;
-        const key = `${item.id}.${session}`;
+        const key = `${store.deliveryIdOf(item, session)}.${session}`;
         pendingKeys.add(key);
         if (dead.has(session) || claimed.has(key)) continue;
         work.push({ item, session });

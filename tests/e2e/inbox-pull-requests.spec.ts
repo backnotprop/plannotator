@@ -4,7 +4,7 @@
  * the compiled binary. The binary runs `plannotator inbox --background` under
  * a temp PLANNOTATOR_DATA_DIR; simulated agents write through `plannotator
  * inbox mcp` (scripts/inbox-sim.ts); Chromium drives the window. HOME is
- * never changed. `gh` and `glab` are sh fakes first on PATH: nothing reaches
+ * the scratch folder. `gh` and `glab` are sh fakes first on PATH: nothing reaches
  * GitHub or GitLab, and the real CLIs never run. The diffs they answer are
  * real `git diff`s of scratch repositories with invented names.
  *
@@ -535,7 +535,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 
   const env: Record<string, string> = {
     PATH: `${forgeDir}:${process.env.PATH ?? ''}`,
-    ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',

@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { INBOX_AUTO_SEND_AFTER_MS, type InboxListRow, type InboxThread } from "@plannotator/core/inbox-types";
 import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, INBOX_SEND_NOW_POLL_FIELD, INBOX_WAKES_META_KEY, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
+import { INBOX_ASKER_STEER_GRACE_MS } from "./inbox-sessions";
 import { INBOX_AUTO_SEND_SWEEP_MS, startInboxServer, type InboxServer } from "./inbox";
 
 const roots: string[] = [];
@@ -40,7 +41,7 @@ async function start(dataDir: string, options: { autoSendAfterMs?: number } = { 
   return { server, client };
 }
 
-async function setup(options?: { autoSendAfterMs?: number }) {
+async function setup(options?: { autoSendAfterMs?: number; sessionsNow?: () => number }) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-auto-send-")));
   roots.push(root);
   const project = join(root, "ledger");
@@ -238,7 +239,9 @@ describe("the Inbox puts a waiting reply into a busy session's turn by itself", 
   });
 
   test("a message moved to a busy session starts its wait there: no `now` on that session's first poll, and an old mark does not carry over", async () => {
-    const { server, project } = await setup();
+    // The sessions' clock starts behind, then catches up, so A has stopped by the time of the move, with the store's clock untouched.
+    let behind = INBOX_ASKER_STEER_GRACE_MS + 1;
+    const { server, project } = await setup({ autoSendAfterMs: WAIT, sessionsNow: () => Date.now() - behind });
     await poll(server, "ses-a", project, { busy: true, sendNow: true });
     await poll(server, "ses-b", project, { busy: true, sendNow: true });
     const thread = await startThread(server, "ses-a", "Try the new parser.");
@@ -249,6 +252,9 @@ describe("the Inbox puts a waiting reply into a busy session's turn by itself", 
       await poll(server, "ses-b", project, { busy: true, sendNow: true });
     }
     expect((await messageOf(server, thread.thread_id, thread.message.id)).deliver_now_by).toBe("auto");
+    // A stopped: a move needs the session it waits on to have ended, also past the grace of a steer it was handed.
+    behind = 0;
+    await poll(server, "ses-b", project, { busy: true, sendNow: true });
     await moveTo(server, thread.message.id, "ses-b");
     const moved = await messageOf(server, thread.thread_id, thread.message.id);
     expect(moved.deliver_now_at ?? null).toBeNull();
