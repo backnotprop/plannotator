@@ -9,12 +9,17 @@
  * count without opening it, and opening then closing again clears that;
  * closed Stopped and Holding up work keep the warning triangle; focus in a row
  * of the group that closes goes to its header; with cookies that are not kept,
- * a header still toggles its group.
+ * a header still toggles its group. A closed header looks exactly as an open
+ * one (owner's correction): same fill, words and weight, no outline; only a
+ * count with something new goes bold. The list's keys: ↓ ↑ stop on the headers,
+ * while Home End and J K (no thread open) go to threads only.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListGroupId, InboxListRow, InboxListSection, InboxSectionId } from '@plannotator/core/inbox-types';
 
@@ -22,6 +27,9 @@ const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { LIST_GROUPS_COOKIE } = await import('./listGroups');
+const { listKeyTarget } = await import('./listKeys');
+const { loadCascade } = await import('./cssCascade.testing');
+const CSS = readFileSync(join(import.meta.dir, 'inbox.css'), 'utf8');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 let root: Root | null = null;
@@ -266,4 +274,88 @@ test('with storage that keeps nothing (cookies blocked), a header still closes a
   expect(rowsIn('waiting')).toBe(0);
   click(header('waiting'));
   expect(isOpen('waiting')).toBe(true);
+});
+
+/** What a list key reaches from `from`, in words. */
+function described(el: Element | null): string {
+  if (!el) return 'nothing';
+  const row = el.getAttribute('data-thread-id');
+  if (row) return `row ${row}`;
+  return `header ${el.closest('[data-section-id]')?.getAttribute('data-section-id')}`;
+}
+const rowEl = (id: string) => host!.querySelector<HTMLElement>(`.ib-lbody [data-thread-id="${id}"]`)!;
+const press = (key: string) =>
+  act(() => {
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+  });
+// happy-dom has no layout: every element counts as drawn (`listStops` keeps what has a box).
+const drawnRects = () => {
+  const real = Element.prototype.getClientRects;
+  Element.prototype.getClientRects = function () {
+    return [{ width: 1, height: 1 }] as unknown as DOMRectList;
+  };
+  return () => void (Element.prototype.getClientRects = real);
+};
+
+test('↓ ↑ stop on the headers; Home and End go to the first and last thread, past the closed groups’ headers', () => {
+  if (!hasDom) return;
+  const restore = drawnRects();
+  try {
+    draw(sections());
+    act(() => rowEl('t_waiting').focus());
+    press('End');
+    // Quiet and the Snoozed band are closed below Sent: their headers are not threads.
+    expect(focused()).toBe('row t_sent');
+    press('Home');
+    expect(focused()).toBe('row t_stopped');
+    press('ArrowDown');
+    expect(focused()).toBe('header holding');
+    press('ArrowUp');
+    expect(focused()).toBe('row t_stopped');
+    press('ArrowUp');
+    expect(focused()).toBe('header stopped');
+  } finally {
+    restore();
+  }
+});
+
+test('J K with no thread open go along the threads only: over a header, and from a header to its first thread', () => {
+  if (!hasDom) return;
+  const restore = drawnRects();
+  try {
+    draw(sections());
+    const body = host!.querySelector<HTMLElement>('.ib-lbody')!;
+    expect(described(listKeyTarget(body, rowEl('t_stopped'), 'j'))).toBe('row t_holding');
+    expect(described(listKeyTarget(body, rowEl('t_holding'), 'k'))).toBe('row t_stopped');
+    expect(described(listKeyTarget(body, header('waiting'), 'j'))).toBe('row t_waiting');
+    expect(described(listKeyTarget(body, header('waiting'), 'k'))).toBe('row t_holding');
+    // No wrap, and nothing past the last thread (closed Quiet and Snoozed below it).
+    expect(described(listKeyTarget(body, rowEl('t_stopped'), 'k'))).toBe('nothing');
+    expect(described(listKeyTarget(body, rowEl('t_sent'), 'j'))).toBe('nothing');
+    // ↓ from the last thread still reaches the closed Quiet's header.
+    expect(described(listKeyTarget(body, rowEl('t_sent'), 'down'))).toBe('header quiet');
+  } finally {
+    restore();
+  }
+});
+
+test('a closed header looks as an open one: same fill, words, weight and no outline; only a new count is bold', () => {
+  if (!hasDom) return;
+  draw(sections());
+  click(header('waiting'));
+  click(header('new'));
+  const now = new Date(Date.now() + 1000).toISOString();
+  draw(sections({ new: [row('t_news', 'new', { last_at: now, last_agent_at: now })] }));
+  expect(isOpen('stopped')).toBe(true);
+  const cascade = loadCascade(CSS);
+  const look = (el: Element) =>
+    ['background', 'background-color', 'color', 'font-weight', 'box-shadow', 'border', 'outline', 'opacity'].map((prop) => `${prop}: ${cascade.resolved(el, prop) ?? '-'}`);
+  // Closed by the person (Waiting), closed by default (Quiet), and with something new inside (New), against open Stopped.
+  for (const id of ['waiting', 'quiet', 'new'] as const) {
+    expect(isOpen(id)).toBe(false);
+    expect(look(header(id))).toEqual(look(header('stopped')));
+  }
+  expect(look(count('waiting'))).toEqual(look(count('stopped')));
+  expect(cascade.resolved(count('new'), 'font-weight')).toBe('700');
+  expect(cascade.resolved(count('stopped'), 'font-weight')).not.toBe('700');
 });

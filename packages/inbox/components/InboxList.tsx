@@ -37,7 +37,7 @@ import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { relativeTime, relativeWords, useRelativeClock } from '../relativeTime';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { isComposingKey, keyTarget, modalOpen } from '../shortcuts/guards';
-import { listMoveIndex, listStops, LIST_STOPS, type ListMove } from '../listKeys';
+import { listKeyTarget, LIST_STOPS, type ListMove } from '../listKeys';
 
 export interface InboxListProps {
   title: string;
@@ -1074,9 +1074,9 @@ export function InboxList(props: InboxListProps) {
     handle: (event: KeyboardEvent) => {
       const body = bodyRef.current;
       if (!body) return;
-      const stops = listStops(body);
-      const at = listMoveIndex(stops.length, stops.indexOf(keyTarget(event) as HTMLElement), move);
-      const next = at === null ? null : stops[at];
+      // ↓ ↑ stop on the groups' headers too; Home End go to the first or last thread (listKeys.ts).
+      const key = move === 'next' ? 'down' : move === 'previous' ? 'up' : move;
+      const next = listKeyTarget(body, keyTarget(event), key);
       if (!next) return;
       next.focus({ preventScroll: true });
       next.scrollIntoView?.({ block: 'nearest' });

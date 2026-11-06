@@ -109,3 +109,10 @@ export function useListGroups(remember = true): {
     },
   };
 }
+
+/** Tests only: forget every choice (the cookie and the page's own copy), so each test starts at the defaults. */
+export function resetListGroupsForTests(): void {
+  storage.removeItem(LIST_GROUPS_COOKIE);
+  written = null;
+  for (const listener of [...listeners]) listener();
+}

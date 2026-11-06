@@ -1059,10 +1059,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-band .ib-n { font-weight: var(--ib-band-nw-s, 500); }
 button.ib-band { transition: var(--ib-fade-s, var(--ib-ui-fade)); }
 button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
-/* A closed group (approval "inbox-list-groups-close"): no fill, a thin outline drawn inside the box (nothing moves),
-   muted words, the count kept. Something new inside since it closed: the count bold, in the text colour. */
-button.ib-band[aria-expanded="false"] { background: transparent; box-shadow: inset 0 0 0 1px var(--border); color: var(--muted-foreground); }
-button.ib-band[aria-expanded="false"]:hover { background: var(--ib-hover); }
+/* A closed group's header looks as an open one does (approval "inbox-list-groups-close", correction 2026-11-06):
+   only its rows go. Something new inside since it closed: the count bold, in the text colour. */
 .ib-band .ib-n[data-new] { font-weight: 700; color: var(--foreground); }
 /* Rows part by space, not rules. */
 .ib-row, .ib-nrow { border-bottom-color: var(--ib-row-line); }
