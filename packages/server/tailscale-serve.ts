@@ -186,11 +186,6 @@ export function enableTailscaleServe(
   return { url };
 }
 
-/** `enableTailscaleServe` with `persist` (the Inbox owns the mapping), without blocking the event loop. */
-export function enableTailscaleServeAsync(port: number, run: TailscaleRunnerAsync, options: TailscaleServeOptions & { persist: true }): Promise<{ url: string }> {
-  return runTailscaleStepsAsync(enableServeSteps(port, options), run);
-}
-
 /** `enableTailscaleServe`'s calls, up to the URL (the mapping is made, or the reason it was not, thrown). */
 export function* enableServeSteps(port: number, options: TailscaleServeOptions = {}): TailscaleSteps<{ url: string }> {
   const httpsPort = options.httpsPort ?? port;
@@ -290,10 +285,6 @@ export function removeTailscaleServe(httpsPort: number, run: TailscaleRunner = r
   return runServeOff(httpsPort, run);
 }
 
-/** `removeTailscaleServe` without blocking the event loop. */
-export function removeTailscaleServeAsync(httpsPort: number, run: TailscaleRunnerAsync): Promise<boolean> {
-  return runTailscaleStepsAsync(serveOffSteps(httpsPort), run);
-}
 
 /**
  * Take down the mapping on `httpsPort` only when it points at one of

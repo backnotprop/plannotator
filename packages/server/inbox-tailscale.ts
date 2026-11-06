@@ -308,14 +308,20 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
    * points at it. Find which (serve status) and say so once. The refusal
    * answers at once; the scan runs after it, one at a time.
    */
+  let scanning = false;
   const noteServedRequest = () => {
-    if (state.exposed.length > 0) return;
+    if (state.exposed.length > 0 || scanning) return;
+    scanning = true;
     void serial(async () => {
       if (state.exposed.length > 0) return;
       const found = await runTailscaleStepsAsync(scanExposure(), runAsync);
       state.exposed = found && found.length > 0 ? found : [{ https_port: null, target: null }];
       warnExposure();
-    }).catch(() => {});
+    })
+      .catch(() => {})
+      .finally(() => {
+        scanning = false;
+      });
   };
 
   const failureWords = (error: unknown, port: number): string => {
