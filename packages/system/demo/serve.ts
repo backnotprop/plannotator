@@ -14,7 +14,7 @@
 // are, not bundled: the Inbox's sheet uses CSS that Bun's CSS parser rejects.
 import { dirname, join, normalize } from 'node:path';
 import { readFiles } from '../src/node/index.ts';
-import { before2563, OPEN_2563, PLAN, prFiles } from '../test/fixtures/change.ts';
+import { before2563, OPEN_2563, PLAN, prFiles, REMOVES } from '../test/fixtures/change.ts';
 import page from './index.html';
 
 const pkg = join(import.meta.dir, '..');
@@ -42,7 +42,7 @@ const server = Bun.serve({
     // the change fixtures: each PR's real files and counts, PR 2563 as it was while open, a plan
     '/change.json': async () => {
       const files = (await readFiles(dir)).files;
-      return Response.json({ prs: { 2543: prFiles(2543), 2563: prFiles(2563) }, before2563: before2563(files), open2563: OPEN_2563, plan: PLAN });
+      return Response.json({ prs: { 2543: prFiles(2543), 2563: prFiles(2563) }, before2563: before2563(files), open2563: OPEN_2563, plan: PLAN, removes: REMOVES });
     },
   },
   fetch(req) {

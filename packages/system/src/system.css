@@ -54,7 +54,7 @@
 .light .sys {
   --sys-box: var(--card);
   --sys-add-ink: var(--success);
-  --sys-chg-ink: var(--warning);
+  --sys-chg-ink: color-mix(in oklab, var(--warning) 88%, var(--foreground));
 }
 /* resets at zero specificity, so every sys- class wins over them */
 :where(.sys) *, :where(.sys) *::before, :where(.sys) *::after { box-sizing: border-box; }

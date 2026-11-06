@@ -52,13 +52,18 @@ function View({ model }: { model: SystemModel }) {
   );
 }
 
-type Fixtures = { prs: Record<string, ChangeFile[]>; before2563: SystemFiles; open2563: string; plan: string };
+type Fixtures = { prs: Record<string, ChangeFile[]>; before2563: SystemFiles; open2563: string; plan: string; removes: string };
 type Change = { model: SystemModel; change: Revision | GateResult; files: ChangeFile[]; pr: number; title: string; state: 'open' | 'merged' };
 
 /** The change a shot asks for: a merged PR's committed review, PR 2563 as it was while open, or the gate alone. */
 function pickChange(model: SystemModel, fx: Fixtures): Change {
   const n = q.get('pr') === '2563' || q.get('open') ? 2563 : 2543;
   const files = fx.prs[n]!;
+  if (q.get('removes')) {
+    // invented (no real PR removed a part): the grey ink; no files, so no diff links
+    const { revision } = parseRevision(model, fx.removes);
+    return { model, change: revision!, files: [], pr: 9001, title: revision!.title, state: 'open' };
+  }
   if (q.get('open')) {
     const base = loadFiles(fx.before2563).model!;
     const { revision } = parseRevision(base, fx.open2563);
