@@ -381,6 +381,21 @@ export function putRowBack(shown: readonly InboxListSection[], before: readonly 
 }
 
 /**
+ * Undo of Mark read (App.tsx `markRead`): the row comes back into the group it
+ * was drawn in when Mark read was pressed (`before`), between the same
+ * neighbours, in its state as it is now (`next`). Only when a settle moved it
+ * since (another thread closed and the list tidied: the read row went into
+ * folded Quiet), so it is never left hidden there while it waits on the person
+ * again. Null when it has not moved, or either list has no row for it.
+ */
+export function putReadRowBack(shown: readonly InboxListSection[], before: readonly InboxListSection[], next: InboxListRow): InboxListSection[] | null {
+  const was = drawnSection(before, next.thread_id);
+  const is = drawnSection(shown, next.thread_id);
+  if (was === null || is === null || was === is) return null;
+  return putRowBack(replaceHeldRow(shown, next), before, next.thread_id);
+}
+
+/**
  * The look the window sends when a thread opens has gone out: the open row
  * reads as looked at until the server has taken the look and the list has
  * been read again (App.tsx `looking`), which then gives the server's row. Its

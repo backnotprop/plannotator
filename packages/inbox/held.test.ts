@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, heldNotice, listGroups, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, settleOwn, settlesOnBack, settleThread, snoozeChangedRows } from './held';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, heldNotice, listGroups, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, snoozeChangedRows } from './held';
 
 function row(id: string, project: string, last_at: string, last_author: 'agent' | 'person'): InboxListRow {
   return { thread_id: id, project: { id: `prj_${project}`, name: project }, last_at, last_author } as InboxListRow;
@@ -485,6 +485,43 @@ describe('putRowBack (Undo of Mark read on a seen update held in New)', () => {
     expect(putRowBack(gone, before, 'a')).toEqual(gone);
     expect(drawnSection(gone, 'a')).toBeNull();
     expect(drawnSection(null, 'a')).toBeNull();
+  });
+});
+
+// e2e S1 (tests/e2e/inbox-keyboard-journeys.spec.ts): Mark read on a row, another thread closes and the list
+// tidies (the read row goes into folded Quiet), then Undo. The Undo's write only swaps the row in place
+// (App.tsx afterWrite), so without putReadRowBack the row, waiting on the person again, stayed hidden in Quiet.
+describe('putReadRowBack (Undo of Mark read after the list settled)', () => {
+  const bySection = (...rows: InboxListRow[]): InboxListSection[] =>
+    (['stopped', 'holding', 'waiting', 'new', 'sent', 'quiet'] as const).map((id) => ({ id, label: id, threads: rows.filter((t) => t.section === id) }));
+  const at = (id: string, time: string, section: InboxListRow['section'], unread: boolean) => ({ ...row(id, 'shop', time, 'agent'), section, unread }) as InboxListRow;
+  const ids = (list: InboxListSection[]) => list.filter((s) => s.threads.length > 0).map((s) => `${s.id}:${s.threads.map((t) => t.thread_id).join(',')}`);
+
+  test('a settle put the read row into Quiet; Undo brings it back between the same neighbours, in its state now', () => {
+    const x = at('x', '2026-10-20T12:00:00Z', 'waiting', true);
+    const y = at('y', '2026-10-20T08:00:00Z', 'waiting', true);
+    const q = at('q', '2026-10-20T07:00:00Z', 'quiet', false);
+    const pressed = bySection(x, at('c', '2026-10-20T10:00:00Z', 'waiting', true), y, q);
+    // Mark read: the server's row is Quiet. The list holds still, then the tidy after a close settles it.
+    const read = at('c', '2026-10-20T10:00:00Z', 'quiet', false);
+    const settled = settleOwn(replaceHeldRow(pressed, read), bySection(x, y, read, q));
+    expect(ids(settled)).toEqual(['waiting:x,y', 'quiet:c,q']);
+    // Undo: the row waits on the person again. The write alone swaps it in place, still in Quiet.
+    const unread = at('c', '2026-10-20T10:00:00Z', 'waiting', true);
+    const latest = bySection(x, unread, y, q);
+    const written = addOwnThreads(replaceHeldRow(settled, unread), latest, ['c']);
+    expect(drawnSection(written, 'c')).toBe('quiet');
+    const back = putReadRowBack(written, pressed, unread)!;
+    expect(ids(back)).toEqual(['waiting:x,c,y', 'quiet:q']);
+    expect(back.find((s) => s.id === 'waiting')!.threads[1]).toBe(unread);
+  });
+
+  test('a row that never moved, or is not on screen, is left alone', () => {
+    const c = at('c', '2026-10-20T10:00:00Z', 'waiting', true);
+    const pressed = bySection(c);
+    expect(putReadRowBack(pressed, pressed, c)).toBeNull();
+    expect(putReadRowBack(bySection(), pressed, c)).toBeNull();
+    expect(putReadRowBack(pressed, bySection(), c)).toBeNull();
   });
 });
 

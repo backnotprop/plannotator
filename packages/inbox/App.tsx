@@ -53,7 +53,7 @@ import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads'
 import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, threadAwayLine, threadOutbox } from './machines';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { flatRows, useListView, type ListSort } from './listView';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { deliveriesReadList } from './rowDelivery';
 import {
@@ -3001,9 +3001,13 @@ function Inbox() {
    * Mark read, or move it back (the pressed button, `E` again, Undo). The
    * thread leaves the top for Quiet with its waiting questions closed; Undo
    * reopens them as they were. An agent stopped or held up on it makes the
-   * toast a warning with Reply.
+   * toast a warning with Reply. `drawnBefore` (the Undo): the list as drawn
+   * when Mark read was pressed; a settle that moved the row since (into folded
+   * Quiet) is undone for it, so it comes back where it was (held.ts
+   * `putReadRowBack`).
    */
-  const markRead = async (threadId: string, read: boolean) => {
+  const markRead = async (threadId: string, read: boolean, drawnBefore: InboxListSection[] | null = null) => {
+    const listAtPress = read ? shownRef.current : null;
     // A look this tab sent and the server has not taken yet: decide on what it gives (a seen update held in New
     // moves locally), whether Mark read came before the look landed or after. Never longer than
     // MARK_READ_LOOK_WAIT_MS: a look that stalls leaves the thread New on the server, so Mark read writes.
@@ -3027,6 +3031,11 @@ function Inbox() {
     }
     await afterWrite([threadId]);
     if (!read) {
+      const now = rowOf(threadId);
+      if (drawnBefore && now && shownRef.current && putReadRowBack(shownRef.current, drawnBefore, now)) {
+        armSlide();
+        setShown((current) => (current ? (putReadRowBack(current, drawnBefore, now) ?? current) : current));
+      }
       dismissToast();
       // The row has not left its place, so it has nowhere to come back from.
       say('Moved back.');
@@ -3042,7 +3051,7 @@ function Inbox() {
       onUndo: () => {
         // Mark read ended the snooze: its Undo puts that back too.
         const restoring = restoreSnooze(threadId, before.snoozed);
-        if (!stood) return void restoring.then(() => markRead(threadId, false));
+        if (!stood) return void restoring.then(() => markRead(threadId, false, listAtPress));
         dismissToast();
         void restoring.then(() => markUnread(threadId));
       },
@@ -3050,7 +3059,7 @@ function Inbox() {
         ? {
             onReply: () => {
               void (async () => {
-                await markRead(threadId, false);
+                await markRead(threadId, false, listAtPress);
                 if (routeRef.current.thread !== threadId) go({ page: 'inbox', project: routeRef.current.project, machine: routeRef.current.machine, thread: threadId });
                 setReplyFor(threadId);
               })();
