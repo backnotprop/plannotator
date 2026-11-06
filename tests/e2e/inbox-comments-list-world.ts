@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { clearSidebarPeek } from './sidebar-peek';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
@@ -134,6 +135,7 @@ export const fileHighlight = (page: Page) => page.locator('[data-attachment-pane
 /** Goes to a thread and waits for its comment's highlight, drawn after the message. */
 export async function openThread(page: Page, world: ListWorld, t: ListThread): Promise<void> {
   await page.goto(threadUrl(world, t));
+  await clearSidebarPeek(page);
   await expect(highlight(page, t)).toBeVisible();
 }
 
