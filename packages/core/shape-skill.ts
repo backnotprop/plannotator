@@ -79,7 +79,7 @@ export const SHAPE_GUIDE = `## The stance
 - **title:** the subject in plain words. **claim:** one line: where it stands, and whether anything waits on the person now. **note** (optional): one line about this version.
 - **views.picture** (the main view): one screen. HTML and inline SVG. \`width\` and \`height\` make a fixed canvas the board scales to fit. A phone pans it, unless you add \`tall\`: the same parts stacked about 400 px wide.
 - **views.how** (How it works, optional): one precise diagram that answers three questions: when it starts, how it is processed, and what it produces. A flow is often not a straight line: where there are optional branches or different paths, draw them, have them meet in the one drawing, and let the person follow or focus on one (the kit's \`pick\` and \`on\`). A straight line is right when the thing really is one. Give every arrow a verb. Use \`width\` and \`height\` for a fixed canvas the board scales to fit.
-- **views.changed** (What's changed, optional): when the work changes code, what it now does differently, so the person can check it without reading the diff. Write only what you saw in the code; leave it out when nothing changed. \`items\` (one per change, at most 40), each with an \`id\`, a \`title\` in the person's words, and a \`kind\`: \`behaviour\` (what someone sees or gets) or \`contract\` (a name, type, setting or API) with \`was\` and \`now\` (a line or a list of lines); \`moved\` with \`from\` and \`to\`; \`removed\` with \`was\`; \`check\`, a thing to look at, with a \`note\` that says why. Add \`code: ["src/kettle.ts:42"]\` for where it is, and \`step\` for its step in your Guided Review, if there is one. \`flows\` (optional) follow one call path: \`{ "id": "boil", "title": "Water boils", "start": "The sensor reads 100 °C", "steps": [{ "call": "whistleOnce()", "is": "new", "at": "src/kettle.ts:42" }], "forks": [{ "when": "Lid open", "end": { "now": "No whistle" } }], "end": { "was": "Whistles until lifted", "now": "One whistle" } }\`, where \`is\` is \`new\`, \`gone\`, \`changed\` or \`same\`. \`summary\` (one line) and \`also\` (one line, such as tests) are optional. If you can start subagents, have one write What's changed from the code while you draw, then check that the Picture, How it works and What's changed agree before you update.
+- **views.changed** (What's changed, optional): when the work changes code, what it now does differently, so the person can check it without reading the diff. Write only what you saw in the code; leave it out when nothing changed. \`items\` (one per change, at most 40), each with an \`id\`, a \`title\` in the person's words, and a \`kind\`: \`behaviour\` (what someone sees or gets) or \`contract\` (a name, type, setting or API), each with \`was\`, \`now\` or both (a line or a list of lines); \`moved\` with \`from\` and \`to\`; \`removed\` with \`was\`; \`check\`, a thing to look at, with a \`note\` that says why. Add \`code: ["src/kettle.ts:42"]\` for where it is, and \`step\` for its step in your Guided Review, if there is one. \`flows\` (optional) follow one call path: \`{ "id": "boil", "title": "Water boils", "start": "The sensor reads 100 °C", "steps": [{ "call": "whistleOnce()", "is": "new", "at": "src/kettle.ts:42" }], "forks": [{ "when": "Lid open", "end": { "now": "No whistle" } }], "end": { "was": "Whistles until lifted", "now": "One whistle" } }\`, where \`is\` is \`new\`, \`gone\`, \`changed\` or \`same\`. \`summary\` (one line) and \`also\` (one line, such as tests) are optional.
 - **views.know** (What to know, optional): what the person needs to know that the drawings can't say, in at most two short paragraphs of prose (1,200 characters). Inline Markdown: \`**bold**\`, \`code\`, links, and \`[^n]\` for reference n.
 - **views.code** (Code, optional): a Guided Review of the change. Leave it out unless the person asks. The Plannotator Inbox does not show it: there, What's changed opens the thread's own review.
 - **refs:** numbered sources; on the Picture, a handful. Any kind can have \`sub\` and \`images\` (\`{ src, alt, crop: [x, y, width, height] }\`, 0 to 1); the bubble shows the first. \`message\` targets a thread message id; \`file\` a path in the project (with \`line\`); \`image\` an image file next to the board's JSON (the store keeps a copy); \`pr\` and \`link\` an https URL.
@@ -116,11 +116,13 @@ export const SHAPE_HELP_INTRO = [
   "",
   "Start:",
   "1. Write the board as JSON (the format is below) in a scratch file, such as /tmp/shape-<topic>.json.",
-  "2. Store it: `plannotator shape update --file /tmp/shape-<topic>.json`. It prints { id, v }. Keep the id.",
+  "2. If you can start subagents, have one write What's changed from the code while you draw, then check",
+  "   that the Picture, How it works and What's changed agree before you update.",
+  "3. Store it: `plannotator shape update --file /tmp/shape-<topic>.json`. It prints { id, v }. Keep the id.",
   "   If it is refused, fix what it lists and run it again. Each problem names its field.",
-  "3. Open it: `plannotator shape open <id>`. The Shape page opens in the person's browser, and the",
+  "4. Open it: `plannotator shape open <id>`. The Shape page opens in the person's browser, and the",
   "   command prints its address. Tell the person in one line that the board is up (v1), with the address.",
-  "4. A page that is already open shows each new version by itself: do not open it again. Run",
+  "5. A page that is already open shows each new version by itself: do not open it again. Run",
   "   `plannotator shape open` again only when the person closed it or asks for it.",
   "",
   "In a Plannotator Inbox thread, add --thread <the thread's id> to the first update and",
@@ -184,9 +186,10 @@ DRAFT. The person wants to see the work in this thread the way you see it, so th
 
 1. Read the whole thread (\`read_thread\`, every message). Note: what the work makes, what is settled, what is open and whose call it is, and what happens next. Then pick the one idea to draw; the rest goes behind numbers or in What to know.
 2. Write the board as JSON (the format is below) in a scratch file, such as \`/tmp/shape-<topic>.json\`.
-3. Store it: \`plannotator shape update --file /tmp/shape-<topic>.json --thread <the thread's id: thread_id from read_thread> --through <the latest message id you read>\`. It prints \`{ id, v }\`. Keep the id.
-4. If it is refused, fix what it lists and run it again. Each problem names its field.
-5. Tell the person in one line that the board is up (v1), in this thread.
+3. If you can start subagents, have one write What's changed from the code while you draw, then check that the Picture, How it works and What's changed agree before you update.
+4. Store it: \`plannotator shape update --file /tmp/shape-<topic>.json --thread <the thread's id: thread_id from read_thread> --through <the latest message id you read>\`. It prints \`{ id, v }\`. Keep the id.
+5. If it is refused, fix what it lists and run it again. Each problem names its field.
+6. Tell the person in one line that the board is up (v1), in this thread.
 
 Every later update in this thread also takes \`--through <the latest message id you read>\`.
 `;
