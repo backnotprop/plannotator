@@ -85,6 +85,8 @@ export function fontsReady(): Promise<void>; // forgets widths measured before t
 - A part that opens a scope with sheets is drawn as a plate with a "N sheets inside" cue. Diving into it, the camera,
   the crumbs and sheet chips as controls, the zoom group, Key and the keyboard are step A4; a change drawn on the
   sheet is step A5.
+- CI fetches the drawing's pinned commit (`sources.repos.self.at`) one commit deep before the tests, so the cited paths
+  are checked offline. That fetch costs more as the pinned commit ages; a redraw that refreshes `at` keeps it cheap.
 - `bun run --cwd packages/system demo` serves a page that draws this repo's drawing, for screenshots only:
   `?shot=thumb`, or `?shot=view&sheet=C-001&reading=simple&layout=window|pane`, with `&mode=light`.
 
