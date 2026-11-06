@@ -189,6 +189,8 @@ export interface LaunchHost {
   readonly name: string;
   /** The login-shell names it keeps from each read (the rest of the env is never held). */
   readonly shellNames: readonly string[];
+  /** Login-shell names it learns only whether they are set: kept as "1", never their values (a sign-in token). */
+  readonly shellFlags?: readonly string[];
   /** Whether To may offer it. The engine caches it 30 s. */
   available(): Promise<LaunchAvailability>;
   /** How a launch made now in `folder` starts; fixed on the record at Send. */

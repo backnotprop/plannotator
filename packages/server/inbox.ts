@@ -3270,8 +3270,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }),
     ownEnv: () => (process.env.PLANNOTATOR_TEST_SANDBOX ? { HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" } : process.env),
     installDirs: process.env.PLANNOTATOR_TEST_SANDBOX ? [] : [join(homedir(), ".local", "bin"), join(homedir(), ".claude", "local")],
-    // Read once: the env this Inbox started with. Over SSH, macOS keeps Claude Code's login locked (remote launch).
-    startedOverSsh: !!process.env.SSH_CONNECTION,
+    // Read once: the env this Inbox started with. Over SSH, macOS keeps Claude Code's login locked (remote launch);
+    // that is the Keychain's rule, so only on a Mac.
+    startedOverSsh: process.platform === "darwin" && !!process.env.SSH_CONNECTION,
     machineName: () => phones?.machineDoor.computerName() ?? null,
     displayFolder: (path) => displayPath(path, agentEnvironment) ?? path,
     readBody: (req) => readBody(req),

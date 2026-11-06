@@ -58,8 +58,15 @@ const CLAUDE_FILES_ENV = ["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_CUSTOM_OAUTH_URL"] a
 
 const START_TIMEOUT_MS = 30_000;
 const COMMAND_TIMEOUT_MS = 15_000;
-/** How long a signed-in (or unreadable) `claude auth status` answer is kept. A signed-out one is asked again each time. */
+/** How long a signed-in (or unreadable) `claude auth status` answer is kept. */
 export const CLAUDE_AUTH_TTL_MS = 30_000;
+/** A signed-out one, briefly: compose's reads don't run the CLI each time, and signing in shows within seconds. */
+export const CLAUDE_AUTH_SIGNED_OUT_TTL_MS = 5_000;
+/**
+ * Ways a launched session signs in that `claude auth status`, run with the Inbox's env, may not see: a token or an
+ * API key exported in the login shell, or a cloud provider. With one set, a signed-out answer is not believed.
+ */
+export const CLAUDE_OTHER_SIGN_IN_ENV = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"] as const;
 
 /**
  * What `claude auth status` says: `signed_out` only when it says so plainly (JSON `loggedIn: false`, or the words "not
@@ -69,17 +76,17 @@ export const CLAUDE_AUTH_TTL_MS = 30_000;
 export function claudeAuthState(result: AgentRunResult): "signed_in" | "signed_out" | "unknown" {
   if (result.timedOut || result.exitCode === 127) return "unknown";
   const out = result.stdout.trim();
+  // Words, as an older or newer CLI may print: signed out only with a failing exit, signed in only with exit 0.
   try {
     const parsed = JSON.parse(out) as unknown;
     if (parsed && typeof parsed === "object" && typeof (parsed as { loggedIn?: unknown }).loggedIn === "boolean") {
       return (parsed as { loggedIn: boolean }).loggedIn ? "signed_in" : "signed_out";
     }
   } catch {
-    // Text, as an older or newer CLI may print.
+    // Not JSON.
   }
-  const text = `${out}\n${result.stderr}`;
-  if (/\bnot (logged|signed) in\b/i.test(text)) return "signed_out";
-  if (result.exitCode === 0 && /\b(logged|signed) in\b/i.test(text)) return "signed_in";
+  if (result.exitCode !== 0 && /\bnot (logged|signed) in\b/i.test(out)) return "signed_out";
+  if (result.exitCode === 0 && !/\bnot (logged|signed) in\b/i.test(out) && /\b(logged|signed) in\b/i.test(out)) return "signed_in";
   return "unknown";
 }
 
@@ -470,14 +477,32 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     return path;
   };
 
-  // `claude auth status`, kept CLAUDE_AUTH_TTL_MS while it is not signed out (a Send asks availability fresh each time).
-  let auth: { key: string; at: number; state: "signed_in" | "unknown" } | null = null;
-  const authState = async (files: AgentEnvironment, path: string, configDir: string | null) => {
+  // `claude auth status`: kept CLAUDE_AUTH_TTL_MS (signed out, CLAUDE_AUTH_SIGNED_OUT_TTL_MS), and one check at a time,
+  // shared, since a Send and every compose read ask availability.
+  let auth: { key: string; at: number; state: ReturnType<typeof claudeAuthState> } | null = null;
+  let checking: { key: string; answer: Promise<ReturnType<typeof claudeAuthState>> } | null = null;
+  const authState = (files: AgentEnvironment, path: string, configDir: string | null): Promise<ReturnType<typeof claudeAuthState>> => {
     const key = JSON.stringify([path, configDir]);
-    if (auth && auth.key === key && Date.now() - auth.at < CLAUDE_AUTH_TTL_MS) return auth.state;
-    const state = claudeAuthState(await files.run([path, "auth", "status"], { timeoutMs: 10_000 }));
-    auth = state === "signed_out" ? null : { key, at: Date.now(), state };
-    return state;
+    const kept = auth && auth.key === key ? auth : null;
+    if (kept && Date.now() - kept.at < (kept.state === "signed_out" ? CLAUDE_AUTH_SIGNED_OUT_TTL_MS : CLAUDE_AUTH_TTL_MS)) return Promise.resolve(kept.state);
+    if (checking?.key === key) return checking.answer;
+    const answer = files
+      .run([path, "auth", "status"], { timeoutMs: 10_000 })
+      .then(claudeAuthState, () => "unknown" as const)
+      .then((state) => {
+        auth = { key, at: Date.now(), state };
+        return state;
+      })
+      .finally(() => {
+        if (checking?.answer === answer) checking = null;
+      });
+    checking = { key, answer };
+    return answer;
+  };
+  /** The launched session may sign in another way the check can't see (the login shell's token or key, a cloud provider). */
+  const signsInOtherwise = (e: AgentEnvironment) => {
+    const shell = ctx.shell();
+    return CLAUDE_OTHER_SIGN_IN_ENV.some((name) => !!shell?.[name] || !!e.env[name]);
   };
 
   return {
@@ -485,6 +510,8 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     name: CLAUDE_NAME,
     // Of a login-shell read: where the person's Claude files are, and the skip-permissions export.
     shellNames: [...CLAUDE_FILES_ENV, CLAUDE_SKIP_PERMISSIONS_ENV],
+    // Whether the login shell signs Claude Code in some other way: set or not, never the value.
+    shellFlags: CLAUDE_OTHER_SIGN_IN_ENV,
 
     /** `claude` on the plain env's PATH (the Inbox's, the last login PATH, Claude's install folders), new enough, the plugin's mod and its Inbox tool on. */
     async available(): Promise<LaunchAvailability> {
@@ -500,7 +527,7 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
       if (!claudeCodeInboxToolOn(files)) return { ok: false, missing: false, reason: "Plannotator's Claude Code plugin or its Inbox tool is off", code: "tool_off" };
       // Signed in, as a launched session will be (its Claude folder). Over SSH macOS keeps the login locked, so this
       // reads as signed out; the launch block says the Inbox was started over SSH.
-      if ((await authState(files, path, configDir ?? null)) === "signed_out") return { ok: false, missing: false, reason: "Claude Code isn't signed in", code: "signed_out" };
+      if ((await authState(files, path, configDir ?? null)) === "signed_out" && !signsInOtherwise(files)) return { ok: false, missing: false, reason: "Claude Code isn't signed in", code: "signed_out" };
       return { ok: true, version };
     },
 

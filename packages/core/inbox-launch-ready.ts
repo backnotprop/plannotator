@@ -26,9 +26,10 @@ export function inboxLaunchNotReadyWords(input: { agent: string; code: InboxLaun
     case "too_old":
       return { line: `${agent} ${on} is too old to start from the Inbox`, fix: `Update ${agent} ${on}, then try again.`, command: null };
     case "plugin_off":
+      // The fix stands alone (a refusal shows no copy button): the command is in it, and in `command` to copy.
       return {
-        line: `${agent} isn't ready ${on}: Plannotator's ${agent} plugin isn't installed there`,
-        fix: `Run this ${on}, then try again.`,
+        line: `${agent} isn't ready ${on}: Plannotator's ${agent} plugin isn't installed or is turned off there`,
+        fix: `Run \`${INBOX_CLAUDE_PLUGIN_INSTALL.split("\n").join(" && ")}\` ${on}, then try again.`,
         command: INBOX_CLAUDE_PLUGIN_INSTALL,
       };
     case "tool_off":

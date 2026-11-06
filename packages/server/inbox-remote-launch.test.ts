@@ -309,7 +309,9 @@ describe("remote launch, on two real Inboxes linked both ways", () => {
         expect(block.agents).toEqual([]);
         const notReady = (block.not_ready as Json[]).find((n) => n.agent === "claude-code")!;
         expect(notReady.code).toBe("signed_out");
-        expect(notReady.over_ssh ?? false).toBe(there.name === "Mini");
+        // The SSH cause is macOS's Keychain: only said on a Mac.
+        const overSsh = there.name === "Mini" && process.platform === "darwin";
+        expect(notReady.over_ssh ?? false).toBe(overSsh);
 
         const starts = there.fake.starts().length;
         const refused = await windowPost(here, `/api/inbox/m/${there.id}/messages`, launchBody(`k-signed-out-${here.name}`, there.project.id));
@@ -318,21 +320,26 @@ describe("remote launch, on two real Inboxes linked both ways", () => {
         expect(answer.code).toBe("agent_unavailable");
         expect(answer.not_ready).toBe("signed_out");
         expect(answer.error).toContain(`isn't signed in on ${there.name}`);
-        expect(answer.error).toContain(there.name === "Mini" ? "SSH" : "`claude`");
+        expect(answer.error).toContain(overSsh ? "SSH" : "`claude`");
         expect(there.fake.starts().length).toBe(starts);
       } finally {
         there.fake.configure({ signedOut: false });
       }
-      // Signed in now: the very next Send starts (a signed-out answer is never kept).
+      // Signed in now: within a few seconds (a signed-out answer is kept briefly) it is offered again, and starts.
+      await waitFor(`${there.name} offers Claude Code again`, async () => (((await getJson(here, `/api/inbox/m/${there.id}/sessions`)).launch as Json).agents as Json[]).length > 0, 15_000);
       const sent = await windowPost(here, `/api/inbox/m/${there.id}/messages`, launchBody(`k-signed-in-${here.name}`, there.project.id));
       expect(sent.status).toBe(200);
 
-      // Launch off there: its health says so, which an older Inbox can't (no field).
+      // Launch off there: its health says so, which an older Inbox can't (no field), and this machine's list says
+      // launch is off there (false, not null) once its line connects again.
       const config = join(there.w.dataDir, "config.json");
       const on = readFileSync(config, "utf8");
       writeFileSync(config, JSON.stringify({ inboxLaunch: { enabled: false } }));
       try {
         await waitFor(`${there.name} says launch is off`, async () => (await getJson(there, "/api/inbox/health")).launch_from_machines === 0);
+        await stopInbox(there.w);
+        start(there);
+        await waitFor(`${here.name} sees launch off on ${there.name}`, async () => ((await getJson(here, "/api/inbox/machines")).machines as Json[]).find((x) => x.id === there.id)?.launch === false, 30_000);
       } finally {
         writeFileSync(config, on);
       }
@@ -341,6 +348,7 @@ describe("remote launch, on two real Inboxes linked both ways", () => {
   }, 90_000);
   test("7. a permission prompt of an agent started there: A's window answers it, an agent's bare call through the forward does not", async () => {
     for (const [here, there] of both()) {
+      await waitFor(`${here.name} sees ${there.name} online`, async () => (await stateOf(here, there)) === "online", 30_000);
       there.fake.configure({ prompts: [{ tool_name: "Bash", tool_input: { command: "bun run build" } }] });
       try {
         const sent = (await (await windowPost(here, `/api/inbox/m/${there.id}/messages`, launchBody(`k-perm-${here.name}`, there.project.id))).json()) as Json;
