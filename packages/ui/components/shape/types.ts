@@ -109,6 +109,31 @@ export interface ShapeCodeHoverCardProps {
 
 export type ShapePanelTab = 'ask' | 'thread' | 'refs';
 
+/** A place in a review's guided review: a file and line, a guide step (from 1), every file, or (empty) its start. */
+export interface ShapeReviewAt {
+  path?: string;
+  line?: number;
+  step?: number;
+  files?: boolean;
+}
+
+/**
+ * The review a board is part of (the host found it: the Inbox, a review's thread). What's changed shows its facts,
+ * Guided review, Full review and its guide-step links, and with no Code view the board's `file:line` links open it.
+ */
+export interface ShapeSurfaceReview {
+  /** What names it on the facts line (a pull request's "#2661"). */
+  label?: string;
+  files?: number;
+  additions?: number;
+  deletions?: number;
+  /**
+   * Open the review's guided review there. False (or a promise of false) when it cannot show that place, such as a
+   * file the review does not change: the board opens the file in its own viewer instead.
+   */
+  open(at: ShapeReviewAt): boolean | Promise<boolean>;
+}
+
 export interface ShapeSurfaceProps {
   host: ShapeHost;
   id: string;
@@ -134,4 +159,11 @@ export interface ShapeSurfaceProps {
   onNavigate?: (state: { view: ShapeViewId; panel: ShapePanelTab | null }) => void;
   /** Before the title, on its line (the Inbox: its sidebar toggle). Absent: the title comes first. */
   headStart?: ReactNode;
+  /**
+   * False: no Code view in the dock, even on a board that has one (Plannotator's board: a review's guided review is
+   * its own place). A part's `file:line` then opens the review there (`review`), else the file viewer. Absent: true.
+   */
+  codeView?: boolean;
+  /** The review this board is part of. Absent: What's changed shows no review facts, buttons or guide-step links. */
+  review?: ShapeSurfaceReview | null;
 }

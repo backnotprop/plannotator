@@ -2762,6 +2762,16 @@ Optional seams, so a host can put its own control beside a file a board or a mes
 
 Two small changes come with them. Shape's diff popout gains a row above the patch when a host passes `fileAction`, which also clears the × from the patch's header. Esc on the board does nothing while a menu is open anywhere on the page, so the menu closes alone. Core's `ShapeRecord.project` is now `ShapeProject`, with an optional `worktree`; the JSON only gains that field, on boards written from a linked worktree.
 
+## Shape: What's changed, and a board without its Code view (unreleased; needs the core with `views.changed`; additive)
+
+A new view and two optional `ShapeSurface` props. A host that passes neither prop, showing boards with no `views.changed`, sees no change.
+
+- Core: `ShapeViewId` gains `'changed'`, and `SHAPE_VIEWS` lists it after `how` ("What's changed"). New types `ShapeChanged`, `ShapeChangeItem`, `ShapeChangeKind`, `ShapeChangeFlow`, `ShapeFlowStep`, `ShapeFlowEnd`, `SHAPE_CHANGE_KINDS`; `ShapeBoard.views.changed?`. `checkShapeBoard`'s "not a view" message now lists `changed`. A host that switches over `ShapeViewId` exhaustively needs a case for it.
+- `ShapeChanged` (exported from `components/shape`): the view on its own (`changed`, `marks`, `review?`, `onCode?`).
+- `ShapeSurfaceProps.codeView?: boolean` (default `true`): `false` drops the Code tab.
+- `ShapeSurfaceProps.review?: ShapeSurfaceReview | null`: `{ label?, files?, additions?, deletions?, open(at: ShapeReviewAt): boolean | Promise<boolean> }`, with `ShapeReviewAt` `{ path?, line?, step?, files? }`. It adds Guided review, Full review and "Guide step N" to What's changed, and a board's `file:line` asks it first after the Code view; `false` falls back to the file viewer (`host.readFile`).
+- `shape.css` gains the `.shp-chg*` classes only.
+
 ## Shape: What to know (ui 0.62.0; not additive)
 
 Plannotator's board reads first now, and What to know replaces Requirements. A host that changes no code keeps the board's behaviour; what could not be kept is listed below.

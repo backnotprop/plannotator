@@ -184,6 +184,8 @@ import { setSessionLabels } from './sessionLabels';
 import { createInboxShapeHost } from './shape/inboxShapeHost';
 import { ShapeGridPage, ShapeLayer, ShapePebbleButton } from './shape/ShapeParts';
 import { useInboxShapes } from './shape/useInboxShapes';
+import { shapeReviewAtOf, writeShapeReviewAt } from './shape/review';
+import type { ShapeReviewAt } from '@plannotator/ui/components/shape/types';
 import { filterShapeItems, shapeAgo } from '@plannotator/ui/components/shape/ShapeGrid';
 import type { SearchShape } from './search/model';
 import { connectCommand } from './connectPrompt';
@@ -352,6 +354,11 @@ interface Route {
   /** The message whose guided review is open over the window (`#thread=…&guide=msg_…`). */
   guide?: string | null;
   /**
+   * Where that review opens (a Shape board's link, approval "shape-whats-changed"): `&code=path:line`, `&step=N`
+   * or `&files`. Dropped from the address once the review is there.
+   */
+  guideAt?: ShapeReviewAt | null;
+  /**
    * The thread's Artifacts view (`#thread=…&artifacts`, approval "inbox-thread-artifacts"): the grid of every
    * artifact in place of the messages. A file or a guided review opened from it keeps it, so their Back returns to it.
    */
@@ -408,6 +415,7 @@ function routeOf(fullHash: string): Route {
     thread,
     file: fileId ? { id: fileId, version: params.get('v') === 'sent' ? 'sent' : 'current', focus: params.get('at'), linked: params.get('linked'), view: parseFileView(params.get('view')), set: params.get('set') } : null,
     guide: thread ? params.get('guide') : null,
+    guideAt: thread && params.get('guide') ? shapeReviewAtOf(params) : null,
     shape: thread ? params.get('shape') : null,
     msg: thread ? params.get('msg') : null,
     artifacts: thread ? params.has('artifacts') : false,
@@ -458,14 +466,15 @@ function hashOf(route: Route): string {
       if (route.file.set) params.set('set', route.file.set);
     }
     if (route.thread && route.guide) params.set('guide', route.guide);
+    if (route.thread && route.guide) writeShapeReviewAt(params, route.guideAt);
     if (route.thread && route.shape) params.set('shape', route.shape);
     // A thread opened from a Board card: its way back is the card (`&card=crd_…`).
     if (route.thread && route.card) params.set('card', route.card);
     if (route.thread && route.card && route.board && route.board !== 'lanes') params.set('from', route.board);
     if (route.thread && route.card && route.boardProject) params.set('board-project', route.boardProject);
     if (route.thread && route.card && route.boardInitiative) params.set('board-initiative', route.boardInitiative);
-    // `&artifacts`, a flag: written without its empty `=`.
-    hash = params.toString().replace(/(^|&)artifacts=(?=&|$)/, '$1artifacts');
+    // `&artifacts` and `&files`, flags: written without their empty `=`.
+    hash = params.toString().replace(/(^|&)(artifacts|files)=(?=&|$)/g, '$1$2');
   }
   return hash ? `#${hash}` : '';
 }
@@ -2400,7 +2409,11 @@ function Inbox() {
       // (approval "inbox-thread-artifacts": one more rung before Escape closes the thread).
       // A thread in full screen leaves it before it closes (the sidebar and the list come back, the thread stays).
       const now = routeRef.current;
-      // A board open over the thread closes first, back to the thread.
+      // A review a board opened over itself closes first, back to the board; then the board, back to the thread.
+      if (now.shape && now.guide) {
+        closeTo({ ...now, guide: null, guideAt: null });
+        return;
+      }
       if (now.shape) {
         closeTo({ ...now, shape: null });
         return;
@@ -4987,6 +5000,11 @@ function Inbox() {
   const shapeLayerId = shapeOn && route.shape && (route.page === 'shapes' || (route.page === 'inbox' && !!route.thread)) ? route.shape : null;
   const guideMessage =
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
+  // The review is at the place a board's link named: the address lets it go, so a reload opens it at the top.
+  const landGuide = () => {
+    const now = routeRef.current;
+    if (now.guideAt) writeRoute({ ...now, guideAt: null }, { replace: true });
+  };
   // Linked machines: the open thread's machine is away, so its read failed: "MacBook asleep since …", and the answers
   // held for it. A phone and a stacked window show this in the thread's place too, so a held answer is never out of sight.
   const openOwner = route.thread ? machines.linked.find((m) => m.id === machineOf(route.thread!)) : undefined;
@@ -5957,6 +5975,8 @@ function Inbox() {
               id={shapeLayerId}
               thread={route.page === 'inbox' && thread && thread.thread_id === route.thread ? thread : null}
               onClose={() => close({ ...routeRef.current, shape: null })}
+              // Its review opens over the board, at the place a link names; Back or Esc comes back to the board.
+              onOpenReview={(messageId, at) => go({ ...routeRef.current, guide: messageId, guideAt: at })}
             />
           )}
         </main>
@@ -6298,6 +6318,8 @@ function Inbox() {
             onClose={() => close({ ...route, thread: null, guide: null })}
             onSent={afterWrite}
             onAsk={ask.askWith}
+            at={route.guideAt ?? null}
+            onLanded={landGuide}
           />
         ) : (
           <GuidePane
@@ -6305,6 +6327,8 @@ function Inbox() {
             message={guideMessage}
             guest={tailnetGuest(settings)}
             codeReview={settings?.code_review?.on === true}
+            at={route.guideAt ?? null}
+            onLanded={landGuide}
             onBack={() => close({ ...route, guide: null })}
             onClose={() => close({ ...route, thread: null, guide: null })}
           />

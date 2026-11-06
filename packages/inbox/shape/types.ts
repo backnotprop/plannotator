@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { ShapeViewId } from '@plannotator/core/shape';
-import type { ShapeHost, ShapePanelTab } from '@plannotator/ui/components/shape';
+import type { ShapeHost, ShapePanelTab, ShapeSurfaceReview } from '@plannotator/ui/components/shape';
 
 export interface ShapeBoardProps {
   host: ShapeHost;
@@ -15,4 +15,6 @@ export interface ShapeBoardProps {
   onNavigate?: (state: { view: ShapeViewId; panel: ShapePanelTab | null }) => void;
   /** Before the board's title (the Inbox's sidebar toggle). */
   headStart?: ReactNode;
+  /** The review the board is part of (its thread's): What's changed's buttons and links, and where `file:line` opens. */
+  review?: ShapeSurfaceReview | null;
 }

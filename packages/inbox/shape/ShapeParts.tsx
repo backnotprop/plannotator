@@ -11,13 +11,14 @@ import type { QuestionAnswer } from '@plannotator/core/question-block';
 // The parts by file, never the index: the index holds ShapeSurface, which only the lazy #shape-board may load.
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import { ShapeGrid, shapeAgo, type ShapeGridItem } from '@plannotator/ui/components/shape/ShapeGrid';
-import type { ShapeHost } from '@plannotator/ui/components/shape';
+import type { ShapeHost, ShapeReviewAt } from '@plannotator/ui/components/shape';
 import { inboxApi, type InboxShapeSummary } from '../api';
 import { agentName, whenTime } from '../format';
 import { Icon } from '../icons';
 import { MessageBody } from '../components/Thread';
 import { Tip } from '../components/Tip';
 import { SidebarTrigger, useSidebar } from '../shell/sidebar';
+import { shapeReview, shapeReviewMessage } from './review';
 
 const ShapeBoard = ShapeBoardPart.Part;
 const NO_ANSWERS: ReadonlyMap<string, QuestionAnswer> = new Map();
@@ -66,10 +67,33 @@ export function ShapePebbleButton({ shape, open, onToggle }: { shape: InboxShape
  * The board, over the thread (or over the grid): its ×, Esc or Back closes it.
  * It covers the page's head, so the sidebar toggle every full page's head has
  * sits at its title's left: the board can take the window's width.
+ *
+ * `onOpenReview`: the thread's review opens over the board (What's changed, and the board's `file:line` links).
  */
-export function ShapeLayer({ host, id, onClose, thread }: { host: ShapeHost; id: string; onClose: () => void; thread: InboxThread | null }) {
+export function ShapeLayer({
+  host,
+  id,
+  onClose,
+  thread,
+  onOpenReview,
+}: {
+  host: ShapeHost;
+  id: string;
+  onClose: () => void;
+  thread: InboxThread | null;
+  onOpenReview?: (messageId: string, at: ShapeReviewAt | null) => void;
+}) {
   // A phone has none: there the sidebar is a sheet and the board covers the window, as before.
   const { isMobile } = useSidebar();
+  const reviewMessage = shapeReviewMessage(thread);
+  const openReview = useRef(onOpenReview);
+  openReview.current = onOpenReview;
+  const review = useMemo(
+    () => (reviewMessage && onOpenReview ? shapeReview(reviewMessage, (message, at) => openReview.current?.(message, at), inboxApi.guide) : null),
+    // A new review in the thread, or new facts on it; not every render's new callback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [reviewMessage?.id, reviewMessage?.guide?.sha256, !!onOpenReview],
+  );
   // The board is a chunk the Inbox serves: one that cannot arrive says so here, with Reload, and the next open
   // (this layer mounted again, or another board in it) asks for the chunk again.
   const [failedOn, setFailedOn] = useState<string | null>(null);
@@ -89,6 +113,7 @@ export function ShapeLayer({ host, id, onClose, thread }: { host: ShapeHost; id:
           host={host}
           id={id}
           onClose={onClose}
+          review={review}
           renderThread={thread ? ({ flash }) => <ShapeThreadTab thread={thread} flash={flash} /> : undefined}
           headStart={isMobile ? undefined : <SidebarTrigger />}
         />

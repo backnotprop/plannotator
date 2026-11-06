@@ -1,40 +1,19 @@
 /**
- * The board, as the Inbox opens it (lazy: `#shape-board`, like the guide
- * reader). ShapeSurface with the Code view's Guided Review and code review's
- * hover card. Checked under tsconfig.guide.json (it imports review-editor);
+ * The board, as the Inbox opens it (lazy: `#shape-board`). ShapeSurface
+ * without its Code view (approval "shape-whats-changed": the guided review is
+ * another part of the review, so the board does not embed it). With a review,
+ * What's changed and the board's `file:line` links open the review's own
+ * guided review (`review`); without one, a `file:line` opens the file viewer.
+ * The shared Code view (`ShapeCode`, `@plannotator/guide-viewer/ShapeCodeGuide`)
+ * stays in its packages for other hosts. Checked under tsconfig.guide.json;
  * the window sees its shape in board-module.d.ts.
  */
-import { useContext } from 'react';
-import { ShapeSurface, type ShapeCodeGuideProps, type ShapeCodeHoverCardProps } from '@plannotator/ui/components/shape';
-import { CodeSpanContext } from '@plannotator/ui/components/LocalLinkContext';
-import { GuideCodeSpanContext } from '@plannotator/guide-viewer/renderInlineMarkdown';
-import { ShapeCodeGuide } from '@plannotator/guide-viewer/ShapeCodeGuide';
+import { ShapeSurface } from '@plannotator/ui/components/shape';
 import { OpenInCodeSpans } from '../components/OpenIn';
-import { TokenHoverCard } from '@plannotator/review-editor/components/TokenHoverCard';
 import type { ShapeBoardProps } from './types';
 import type BoardShape from './board-module';
 
-function HoverCard(props: ShapeCodeHoverCardProps) {
-  return (
-    <TokenHoverCard
-      hover={props.hover as never}
-      onPointerEnter={props.onPointerEnter ?? (() => {})}
-      onPointerLeave={props.onPointerLeave ?? (() => {})}
-      onSelectLocation={(loc) => props.onSelectLocation?.({ filePath: loc.filePath, line: loc.line })}
-    />
-  );
-}
-
-/** The Code view's source line: inside the surface, so its spans follow the board's (only words while annotating). */
-function CodeGuide(props: ShapeCodeGuideProps) {
-  return (
-    <GuideCodeSpanContext.Provider value={useContext(CodeSpanContext)}>
-      <ShapeCodeGuide {...props} />
-    </GuideCodeSpanContext.Provider>
-  );
-}
-
-export default function ShapeBoard({ host, id, onClose, renderThread, initialView, initialPanel, onNavigate, headStart }: ShapeBoardProps) {
+export default function ShapeBoard({ host, id, onClose, renderThread, initialView, initialPanel, onNavigate, headStart, review }: ShapeBoardProps) {
   return (
     <OpenInCodeSpans scope={{ shape: id }} on={!!host.fileAction}>
     <ShapeSurface
@@ -42,8 +21,8 @@ export default function ShapeBoard({ host, id, onClose, renderThread, initialVie
       host={host}
       id={id}
       onClose={onClose}
-      CodeGuide={CodeGuide}
-      CodeHoverCard={HoverCard}
+      codeView={false}
+      review={review}
       renderThread={renderThread}
       readFirst
       initialView={initialView}
