@@ -612,7 +612,7 @@ test('with image paste (#1953): an image pasted after a pick attaches once to th
 test('WebKit: after a pick, the paste goes back to the reply box', async () => {
   let browser: Browser | null = null;
   try {
-    browser = await webkit.launch();
+    browser = await webkit.launch({ args: [] });
   } catch (error) {
     test.skip(true, `WebKit is not installed here: ${(error as Error).message.split('\n')[0]}`);
     return;

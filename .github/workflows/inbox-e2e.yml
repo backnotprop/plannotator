@@ -175,10 +175,17 @@ jobs:
     if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full'))
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    outputs:
+      playwright: ${{ steps.playwright.outputs.version }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+
+      # The shards run in the Playwright image of exactly this version.
+      - name: Read the pinned Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('./package.json').devDependencies['@playwright/test']")" >> "$GITHUB_OUTPUT"
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -204,11 +211,22 @@ jobs:
   # The specs, split into whole spec files by measured time
   # (scripts/ci-e2e-shard.ts). Each shard is its own runner with one worker,
   # as the single job was.
+  #
+  # Each shard runs in the official Playwright image of the pinned version
+  # (the build job reads it from package.json), which already holds Chromium,
+  # WebKit and their system libraries. Installing those with apt on the runner
+  # (`playwright install-deps`, 181 packages) hung on a slow Ubuntu mirror often
+  # enough to fail shards before a spec ran. The image runs as the runner's own
+  # user (uid 1001, its pwuser), not root, so the workspace stays the runner's
+  # and the specs that rely on file permissions still see them.
   inbox-window-e2e:
     name: Inbox window (Playwright against the compiled binary, ${{ matrix.shard }}/16)
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.build.outputs.playwright }}-noble
+      options: --user 1001
     strategy:
       fail-fast: false
       matrix:
@@ -219,43 +237,40 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.4.4
+      # setup-bun unpacks with `unzip`, which the image lacks; the same release
+      # zip setup-bun fetches, checked against its published SHA-256.
+      - name: Install Bun 1.4.4
+        env:
+          BUN_ZIP_SHA256: bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c
+        run: |
+          set -eu
+          dir="$RUNNER_TEMP/bun"
+          mkdir -p "$dir"
+          curl -fsSL --retry 5 -o "$dir/bun.zip" https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip
+          echo "$BUN_ZIP_SHA256  $dir/bun.zip" | sha256sum -c -
+          python3 -I -m zipfile -e "$dir/bun.zip" "$dir"
+          chmod +x "$dir/bun-linux-x64/bun"
+          ln -s bun "$dir/bun-linux-x64/bunx"
+          echo "$dir/bun-linux-x64" >> "$GITHUB_PATH"
+          "$dir/bun-linux-x64/bun" --version
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Read the pinned Playwright version
-        id: playwright
-        run: echo "version=$(node -p "require('./package.json').devDependencies['@playwright/test']")" >> "$GITHUB_OUTPUT"
-
-      - name: Cache the Playwright browser
-        id: browser-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-webkit-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-
-      - name: Install Chromium and WebKit
-        if: steps.browser-cache.outputs.cache-hit != 'true'
-        run: bunx playwright install --with-deps chromium webkit
-
-      - name: Install the browsers' system libraries
-        if: steps.browser-cache.outputs.cache-hit == 'true'
-        # A slow apt mirror can use up the job's whole limit here; a good run takes
-        # under a minute. Each try keeps the packages the last one finished.
-        timeout-minutes: 16
-        run: |
-          for try in 1 2 3; do
-            timeout -k 15 300 bunx playwright install-deps chromium webkit && exit 0
-            echo "::warning::playwright install-deps failed or timed out (exit $?, try $try of 3)"
-          done
-          exit 1
-
-      # Code review's Go to Definition (review-explorer.spec.ts) searches with ripgrep.
+      # Code review's Go to Definition (review-explorer.spec.ts) searches with
+      # ripgrep, which the image lacks: the release's static build, checked.
       - name: Install ripgrep
-        run: command -v rg || (sudo apt-get update -q && sudo apt-get install -y -q ripgrep)
+        env:
+          RG_SHA256: 4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e
+        run: |
+          set -eu
+          dir="$RUNNER_TEMP/rg"
+          mkdir -p "$dir"
+          curl -fsSL --retry 5 -o "$dir/rg.tar.gz" https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz
+          echo "$RG_SHA256  $dir/rg.tar.gz" | sha256sum -c -
+          tar -xzf "$dir/rg.tar.gz" -C "$dir" --strip-components=1
+          echo "$dir" >> "$GITHUB_PATH"
+          "$dir/rg" --version
 
       - name: Get the built apps
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
