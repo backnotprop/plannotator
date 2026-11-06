@@ -4825,6 +4825,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // this run's serverSession, never a bare local call (an agent's curl). A tightening, not a secret:
         // see "Permission prompts" in docs/agent-guides/inbox-launch.md.
         if ((messageMatch[2] === "picks" || messageMatch[2] === "reply") && !answeredFromWindow(req, body, store.message(messageId))) {
+          // A linked machine without the window's mark: an agent's call there, or a Plannotator there from before the mark.
+          const door = fromDeviceDoor.get(req);
+          const from = door?.platform === MACHINE_PLATFORM ? machines.machineOfDevice(door.device_id) : null;
+          if (from) return json({ error: `Update Plannotator on ${from.name} to answer from there.`, code: "window_only" }, 403);
           return json({ error: "A permission prompt is answered in the Inbox window.", code: "window_only" }, 403);
         }
         switch (messageMatch[2]) {

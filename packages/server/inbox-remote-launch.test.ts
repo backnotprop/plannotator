@@ -264,6 +264,9 @@ describe("remote launch, on two real Inboxes linked both ways", () => {
       expect(((await kept.json()) as Json).outbox.state).toBe("queued");
       const dropped = await windowPost(here, `/api/inbox/m/${there.id}/messages`, launchBody(`k-cancel-${here.name}`, there.project.id));
       expect(dropped.status).toBe(202);
+      // A held launch is taken back only from the window, as the forward took it: an agent's bare call can't.
+      const bareCancel = await barePost(here, `/api/inbox/outbox/k-cancel-${here.name}/cancel`, {});
+      expect([bareCancel.status, ((await bareCancel.json()) as Json).code]).toEqual([403, "window_only"]);
       const cancelled = await windowPost(here, `/api/inbox/outbox/k-cancel-${here.name}/cancel`, {});
       expect(cancelled.status).toBe(200);
       expect(((await cancelled.json()) as Json).entry.state).toBe("cancelled");
@@ -282,4 +285,31 @@ describe("remote launch, on two real Inboxes linked both ways", () => {
       expect((await windowPost(here, `/api/inbox/outbox/k-held-${here.name}/cancel`, {})).status).toBe(409);
     }
   }, 180_000);
+
+  test("7. a permission prompt of an agent started there: A's window answers it, an agent's bare call through the forward does not", async () => {
+    for (const [here, there] of both()) {
+      there.fake.configure({ prompts: [{ tool_name: "Bash", tool_input: { command: "bun run build" } }] });
+      try {
+        const sent = (await (await windowPost(here, `/api/inbox/m/${there.id}/messages`, launchBody(`k-perm-${here.name}`, there.project.id))).json()) as Json;
+        const card = async () => ((await getJson(there, `/api/inbox/threads/${sent.thread_id}`)).thread.messages as Json[]).find((m) => String(m.author?.session ?? "").startsWith("perm:") && m.questions?.length);
+        await waitFor(`the prompt on ${there.name}`, async () => (await card()) !== undefined, 30_000);
+        const message = (await card())!;
+        const question = (message.questions as Json[])[0]!;
+        const pick = (key: string) => ({ idempotency_key: key, questions: [{ key: question.key, revision: question.revision, answer: { v: 1, key: question.key, kind: "single", prompt: question.prompt, selected: ["Deny"] } }] });
+
+        const bare = await barePost(here, `/api/inbox/m/${there.id}/messages/${message.id}/picks`, pick(`k-perm-bare-${here.name}`));
+        expect(bare.status).toBe(403);
+        const refused = (await bare.json()) as Json;
+        expect(refused.code).toBe("window_only");
+        expect(refused.error).toBe(`Update Plannotator on ${here.name} to answer from there.`);
+        expect(((await card())!.questions as Json[])[0]!.state).toBe("open");
+
+        const pressed = await windowPost(here, `/api/inbox/m/${there.id}/messages/${message.id}/picks`, pick(`k-perm-press-${here.name}`));
+        expect(pressed.status).toBe(200);
+        expect(((await card())!.questions as Json[])[0]!.state).not.toBe("open");
+      } finally {
+        there.fake.configure({ prompts: [] });
+      }
+    }
+  }, 120_000);
 });
