@@ -16,8 +16,6 @@ import { EarlierCommentsList } from './components/EarlierCommentsList';
 
 const hasDom = typeof document !== 'undefined';
 const { AttachmentPane } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');
-const { storage } = (hasDom ? await import('@plannotator/ui/utils/storage') : {}) as typeof import('@plannotator/ui/utils/storage');
-const { COMMENTS_DRAWER_COOKIE } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -29,7 +27,6 @@ afterEach(() => {
   root = null;
   host = null;
   globalThis.fetch = realFetch;
-  if (hasDom) storage.removeItem(COMMENTS_DRAWER_COOKIE);
 });
 
 const M1 = 'msg_01K7M1MMMMMMMMMMMMMMMMMMMM';
