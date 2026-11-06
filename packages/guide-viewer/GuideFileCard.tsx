@@ -122,11 +122,16 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   const scrollPositionRef = useRef(0);
   const [collapsed, setCollapsed] = useState(collapseAll && collapseAll.token > 0 ? collapseAll.collapsed : kind === 'generated');
   // The host's Collapse all: a new token folds or opens this card too. The renderer reads `mountCollapsed` once, so it
-  // mounts again under the new token (`key` below).
+  // mounts again (`key` below), but only when this card's state changes: a file already that way keeps its opened
+  // context gaps and an open comment.
   const [collapseToken, setCollapseToken] = useState(collapseAll?.token ?? 0);
+  const [mountKey, setMountKey] = useState(0);
   if (collapseAll && collapseAll.token !== collapseToken) {
     setCollapseToken(collapseAll.token);
-    setCollapsed(collapseAll.collapsed);
+    if (collapseAll.collapsed !== collapsed) {
+      setCollapsed(collapseAll.collapsed);
+      setMountKey((key) => key + 1);
+    }
   }
   const fileList = useMemo(() => [file], [file]);
   // A file whose gap was opened stays mounted: the viewer holds the opened lines, and leaving the outer window would
@@ -296,7 +301,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
       >
         {mounted ? (
           <DiffRenderer
-            key={collapseToken}
+            key={mountKey}
             {...getDiffRendererProps({ file, focused })}
             files={fileList}
             fileScrollTarget={target}

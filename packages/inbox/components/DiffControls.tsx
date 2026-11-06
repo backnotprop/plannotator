@@ -64,7 +64,7 @@ export function DiffControls({
           </button>
         </Tip>
       )}
-      <DiffDisplayOptionsPopover repositoryOptions={false} onChange={(key, value) => chooseDiffOption(key as never, value as never)} triggerClassName="ib-iconbtn ib-dctl-b" />
+      <DiffDisplayOptionsPopover repositoryOptions={false} onChange={(key, value) => chooseDiffOption(key as never, value as never)} triggerClassName="ib-iconbtn ib-dctl-b" triggerTitleSide="bottom" />
     </span>
   );
 }

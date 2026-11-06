@@ -18,6 +18,7 @@ import { Popover } from '@base-ui/react/popover';
 import { configStore, useConfigValue } from '../config';
 import type { SettingName } from '../config/settings';
 import type { SettingValue } from '../config/configStore';
+import { HostTitle } from './HostTitle';
 
 /** The settings this popover writes. */
 export type DiffDisplaySetting =
@@ -138,6 +139,8 @@ export interface DiffDisplayOptionsPopoverProps {
   triggerContent?: React.ReactNode;
   /** A phone-sized review: bigger targets in the popup (theme.css `[data-pn-compact-diff-options]`). */
   compactTouchLayout?: boolean;
+  /** Where the gear's hover text opens when the host draws ui's tooltips (`componentTooltips`). Default: top. */
+  triggerTitleSide?: 'top' | 'right' | 'bottom' | 'left';
 }
 
 const GEAR = (
@@ -153,6 +156,7 @@ export const DiffDisplayOptionsPopover: React.FC<DiffDisplayOptionsPopoverProps>
   triggerClassName = 'px-2 py-1 rounded-md text-muted-foreground hover:text-foreground transition-colors flex items-center data-popup-open:bg-background data-popup-open:text-foreground data-popup-open:shadow-sm',
   triggerContent = GEAR,
   compactTouchLayout = false,
+  triggerTitleSide = 'top',
 }) => {
   const set: DiffDisplayChange = onChange ?? ((key, value) => configStore.set(key, value));
   const overflow = useConfigValue('diffOverflow');
@@ -168,21 +172,23 @@ export const DiffDisplayOptionsPopover: React.FC<DiffDisplayOptionsPopoverProps>
 
   return (
     <Popover.Root>
-      <Popover.Trigger
-        render={
-          <button
-            type="button"
-            data-pn-touch-target
-            data-pn-touch-target-icon
-            data-diff-display-options=""
-            className={triggerClassName}
-            title="Diff display options"
-            aria-label="Diff display options"
-          />
-        }
-      >
-        {triggerContent}
-      </Popover.Trigger>
+      {/* A native title by default (code review); ui's tooltip where the host opts in (the Inbox), like its neighbours. */}
+      <HostTitle title="Diff display options" side={triggerTitleSide}>
+        <Popover.Trigger
+          render={
+            <button
+              type="button"
+              data-pn-touch-target
+              data-pn-touch-target-icon
+              data-diff-display-options=""
+              className={triggerClassName}
+              aria-label="Diff display options"
+            />
+          }
+        >
+          {triggerContent}
+        </Popover.Trigger>
+      </HostTitle>
       <Popover.Portal>
         <Popover.Positioner align="end" sideOffset={6} className="z-50">
           <Popover.Popup

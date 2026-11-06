@@ -994,6 +994,9 @@ describe("the window's routes: settings, restart, favicon", () => {
         [{}, "diff_options"],
         [{ font_size: "14" }, "diff_options.font_size"],
         [{ expand_unchanged: true }, "diff_options.expand_unchanged"],
+        // Names Object.prototype has are not diff options either (a computed key, so `__proto__` is an own key on the wire).
+        [{ toString: "x" }, "diff_options.toString"],
+        [{ ["__proto__"]: "x" }, "diff_options.__proto__"],
         [{ diff_style: "both" }, "diff_options.diff_style"],
         [{ overflow: "clip" }, "diff_options.overflow"],
         [{ indicators: "dots" }, "diff_options.indicators"],
