@@ -687,15 +687,16 @@ test('the row in a full-screen thread and beside a file', async ({ browser }: { 
 
 test.describe('phone', () => {
   let own: Browser | undefined;
-  let context: BrowserContext;
+  let context: BrowserContext | undefined;
   let page: Page;
   test.beforeAll(async () => {
-    own = await webkit.launch();
+    // No args: the chromium project's Chromium flags reach this launch too, and WebKit refuses them.
+    own = await webkit.launch({ args: [] });
     context = await own.newContext({ ...devices['iPhone 15'], viewport: { width: 390, height: 844 } });
     page = await context.newPage();
   });
   test.afterAll(async () => {
-    await context.close();
+    await context?.close();
     await own?.close();
   });
 
