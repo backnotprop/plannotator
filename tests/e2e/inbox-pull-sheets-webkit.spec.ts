@@ -1,6 +1,6 @@
 /**
- * The flat PR view's folded sheets in WebKit, against the compiled binary: a click does not focus a button there, so a
- * sheet opened by mouse leaves focus on the page, and Escape has to close it from there. `gh` and `glab` are sh fakes
+ * The flat PR view's folded sheets in WebKit, against the compiled binary: in Safari a click does not focus a button, so
+ * a sheet opened by mouse leaves focus on the page, and Escape has to close it from there. `gh` and `glab` are sh fakes
  * first on PATH. The rest of the view, in Chromium: inbox-pull-requests.spec.ts.
  *
  * Runs in the playwright config's `webkit` project. Build the binary first (see inbox.spec.ts).
@@ -119,7 +119,9 @@ test('a sheet opened by mouse, focus still on the page: Escape closes it, back o
   const panel = review.locator('.ib-gpanel');
   await comments.click();
   await expect(panel).toBeVisible();
-  // The case this file is for: WebKit leaves focus where it was.
+  // The case this file is for: Safari leaves focus where it was. Only Apple's WebKit does; Linux's (GTK and WPE, what
+  // CI runs) focuses a clicked button like Chromium, so the page takes focus back here, as Safari leaves it.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('BODY');
   await page.keyboard.press('Escape');
   await expect(panel).toBeHidden();

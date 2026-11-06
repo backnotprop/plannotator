@@ -57,7 +57,7 @@ import { TooltipEscapePassesThrough } from '@plannotator/ui/components/Tooltip';
 import { RailStack } from './RailStack';
 import { RailTree } from './RailTree';
 import { RailScopeSwitch } from './RailScope';
-import { useTreeScope } from '@plannotator/review-editor/hooks/useTreeScope';
+import { useTreeScope } from '@plannotator/ui/hooks/useTreeScope';
 import { useSheetEscape } from '../shortcuts/useSheetEscape';
 import { inOverlay } from '../shortcuts/guards';
 import { reviewFiles } from './reviewFiles';

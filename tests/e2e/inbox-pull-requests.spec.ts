@@ -1881,10 +1881,14 @@ test('a phone at 390 px: the list, a stack, a layer review; and off, no row', as
 
 const TEAMMATE = 'github.com/northwind/web-app#880';
 
-/** From each file's code to the next file's header. */
-function seams(review: Locator): Promise<number[]> {
+/** From each file's code to the next file's header; null while either is not drawn yet (each file mounts on its own), so a poll waits. */
+function seams(review: Locator): Promise<(number | null)[]> {
   return review.locator('[data-guide-file-shell]').evaluateAll((shells) =>
-    shells.slice(1).map((shell, index) => shell.querySelector('[slot="header-custom"]')!.getBoundingClientRect().top - shells[index]!.querySelector('diffs-container')!.getBoundingClientRect().bottom),
+    shells.slice(1).map((shell, index) => {
+      const head = shell.querySelector('[slot="header-custom"]');
+      const code = shells[index]!.querySelector('diffs-container');
+      return head && code ? head.getBoundingClientRect().top - code.getBoundingClientRect().bottom : null;
+    }),
   );
 }
 
