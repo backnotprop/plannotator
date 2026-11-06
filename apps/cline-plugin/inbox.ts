@@ -25,9 +25,13 @@
  * A reply waits until the session is idle for two ticks, then goes in as
  * `ctx.emitEvent("queue_message", { prompt })`, which starts a turn in an idle
  * session (tested against the Cline CLI: a turn starts within ~50 ms). It is
- * delivered once the next run starts, or after CLINE_DELIVERY_WAIT_MS: it is
- * then in Cline's own queue. No Send now: nothing here goes into a running
- * turn, and nothing cancels one.
+ * delivered once the next run starts. No run within CLINE_DELIVERY_WAIT_MS
+ * (Cline drops a prompt it cannot queue without a word), or the session
+ * closing first, gives it back to the Inbox (`InboxDeliverLater`), and the
+ * next idle wake puts it in again. A run that began before this worker (its
+ * `afterRun` only) starts the wait again: ours is queued behind it. No Send
+ * now yet: Cline takes a plugin's `steer_message` event into a running turn,
+ * but this plugin does not use it, so nothing goes into a running turn.
  *
  * Cline stops a plugin's worker after 30 minutes with no call from Cline
  * (`CLINE_PLUGIN_IDLE_TIMEOUT_MS`), running `onDispose` first: the wake stops,
@@ -45,14 +49,22 @@
 import { existsSync } from "node:fs";
 import { loadConfig, resolveInboxTool } from "../../packages/shared/config";
 import { getPlannotatorDataDir } from "../../packages/shared/data-dir";
-import { discoverInboxTools, InboxAgentConnection, inboxRegistryFileOf, InboxWake, type InboxWakeTarget } from "../../packages/shared/inbox/agent-link";
+import { discoverInboxTools, InboxAgentConnection, InboxDeliverLater, inboxRegistryFileOf, InboxWake, type InboxWakeTarget } from "../../packages/shared/inbox/agent-link";
 import { inboxAgentTool, type InboxReplyCommand, type InboxToolInfo } from "../../packages/shared/inbox/connection";
 
 export const CLINE_INBOX_HOST = "cline";
 export const CLINE_INBOX_AGENT_NAME = "Cline";
 
-/** How long a reply put into the session waits for its turn to start before it counts as taken (it is in Cline's queue). */
+/** How long a reply put into an idle session waits for its run to start before it goes back to the Inbox (a run starts within ~50 ms). */
 export const CLINE_DELIVERY_WAIT_MS = 15_000;
+
+/**
+ * The longest setup waits for the Inbox's tool list. Cline gives every
+ * plugin's import and setup 4 s together, and stops the session's whole
+ * plugin sandbox past it; a running Inbox answers in milliseconds, so past
+ * this the tools remembered from the last answer are used.
+ */
+export const CLINE_DISCOVER_TIMEOUT_MS = 750;
 
 /** A tool call can start a stopped Inbox (up to 30 s) and then wait for its answer. */
 export const CLINE_TOOL_TIMEOUT_MS = 120_000;
@@ -89,11 +101,18 @@ export interface ClineRunContext {
   snapshot?: { agentId?: string };
 }
 
+/** A prompt of ours waiting for its run: delivered, given back to the Inbox, or its wait started again. */
+interface WaitingPrompt {
+  done: () => void;
+  later: (why: string) => void;
+  rearm: () => void;
+}
+
 export interface ClineInboxDeps {
   env?: NodeJS.ProcessEnv;
   /** Plannotator's data dir (default: PLANNOTATOR_DATA_DIR, else ~/.plannotator). */
   dataDir?: string;
-  /** The Inbox tools to carry (default: the running Inbox's `tools/list`, bounded at 2 s). */
+  /** The Inbox tools to carry (default: the running Inbox's `tools/list`, bounded at CLINE_DISCOVER_TIMEOUT_MS, else the remembered list). */
   discover?: (dataDir: string) => Promise<InboxToolInfo[] | null>;
   /** The wake's tick (tests). */
   tickMs?: number;
@@ -121,7 +140,7 @@ export class ClineInboxSession {
   /** The runs going now, by agent id. */
   private readonly runs = new Set<string>();
   /** Prompts of ours put into the session whose run has not started, oldest first. */
-  private readonly waiting: Array<{ done: () => void }> = [];
+  private readonly waiting: WaitingPrompt[] = [];
   private disposed = false;
 
   constructor(
@@ -143,29 +162,42 @@ export class ClineInboxSession {
     };
   }
 
-  /** Put the wake text into the session as a prompt; settled when its run starts, or after the wait (it is queued in Cline). */
+  /**
+   * Put the wake text into the session as a prompt. Delivered when its run
+   * starts. Given back to the Inbox (`InboxDeliverLater`: the reply waits, and
+   * the next idle wake puts it in again) when no run starts within the wait,
+   * since Cline drops a prompt it cannot queue without a word, or when the
+   * session closes with it waiting.
+   */
   private put(text: string): Promise<void> {
     const emit = this.ctx.emitEvent;
     if (this.disposed || typeof emit !== "function") return Promise.reject(new Error("this Cline session cannot take a prompt from a plugin"));
+    const waitMs = this.deps.deliveryWaitMs ?? CLINE_DELIVERY_WAIT_MS;
     return new Promise<void>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const entry = {
-        done: () => {
+      const settle = (error?: Error) => {
+        clearTimeout(timer);
+        const at = this.waiting.indexOf(entry);
+        if (at < 0) return;
+        this.waiting.splice(at, 1);
+        if (error) reject(error);
+        else resolve();
+      };
+      const entry: WaitingPrompt = {
+        done: () => settle(),
+        later: (why) => settle(new InboxDeliverLater(why)),
+        rearm: () => {
           clearTimeout(timer);
-          const at = this.waiting.indexOf(entry);
-          if (at >= 0) this.waiting.splice(at, 1);
-          resolve();
+          timer = setTimeout(() => entry.later("no Cline run took it"), waitMs);
+          (timer as { unref?: () => void }).unref?.();
         },
       };
       this.waiting.push(entry);
-      timer = setTimeout(entry.done, this.deps.deliveryWaitMs ?? CLINE_DELIVERY_WAIT_MS);
-      (timer as { unref?: () => void }).unref?.();
+      entry.rearm();
       try {
         emit("queue_message", { prompt: text });
       } catch (error) {
-        clearTimeout(timer);
-        this.waiting.splice(this.waiting.indexOf(entry), 1);
-        reject(error instanceof Error ? error : new Error(String(error)));
+        settle(error instanceof Error ? error : new Error(String(error)));
       }
     });
   }
@@ -190,7 +222,9 @@ export class ClineInboxSession {
 
   afterRun(context: ClineRunContext | undefined): void {
     const key = context?.snapshot?.agentId ?? "run";
-    if (!this.runs.delete(key) && key !== "run") this.runs.delete("run");
+    if (this.runs.delete(key) || (key !== "run" && this.runs.delete("run"))) return;
+    // A run this worker never saw start (it began before the worker did): ours waits in Cline's queue behind it.
+    for (const entry of this.waiting) entry.rearm();
   }
 
   /** The model called the tool in this session: replies land in this process from now on. */
@@ -202,8 +236,8 @@ export class ClineInboxSession {
     if (this.disposed) return;
     this.disposed = true;
     this.wake.dispose();
-    // Whatever waits for its run is in Cline's queue already.
-    for (const entry of [...this.waiting]) entry.done();
+    // A prompt still waiting dies with the session's queue: the reply goes back to the Inbox.
+    for (const entry of [...this.waiting]) entry.later("the Cline session closed before a run took it");
   }
 }
 
@@ -211,7 +245,8 @@ export class ClineInboxSession {
  * Start the Inbox connection for the session Cline set the plugin up for, or
  * return null: no session (Cline reading what the plugin registers), the
  * switch is off, or no Inbox ever ran here. The tool is registered once the
- * Inbox's tools are known (bounded at 2 s, inside Cline's 4 s setup limit).
+ * Inbox's tools are known (bounded at CLINE_DISCOVER_TIMEOUT_MS: Cline gives
+ * every plugin's import and setup 4 s together).
  */
 export async function setupClineInbox(api: ClinePluginApi, ctx: ClineSetupContext, deps: ClineInboxDeps = {}): Promise<ClineInboxSession | null> {
   const sessionId = ctx.session?.sessionId;
@@ -220,7 +255,7 @@ export async function setupClineInbox(api: ClinePluginApi, ctx: ClineSetupContex
   if (!resolveInboxTool(loadConfig(), env, CLINE_INBOX_HOST)) return null;
   const dataDir = deps.dataDir ?? getPlannotatorDataDir();
   if (!existsSync(inboxRegistryFileOf(dataDir))) return null;
-  const tools = await (deps.discover ?? ((dir) => discoverInboxTools(dir)))(dataDir).catch(() => null);
+  const tools = await (deps.discover ?? ((dir) => discoverInboxTools(dir, { timeoutMs: CLINE_DISCOVER_TIMEOUT_MS })))(dataDir).catch(() => null);
   if (!tools) return null;
   const connection = new InboxAgentConnection({ dataDir, host: CLINE_INBOX_HOST, agentName: CLINE_INBOX_AGENT_NAME, tools });
   const session = new ClineInboxSession(connection, sessionId, ctx, deps);

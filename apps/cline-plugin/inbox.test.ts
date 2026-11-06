@@ -12,12 +12,14 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxThread } from "../../packages/core/inbox-types";
 import { startInboxServer, type InboxServer } from "../../packages/server/inbox";
-import { CLINE_INBOX_HOST, setupClineInbox, type ClineInboxSession, type ClineSetupContext, type ClineToolDefinition } from "./inbox";
+import { discoverInboxTools, inboxRegistryFileOf } from "../../packages/shared/inbox/agent-link";
+import { CLINE_DISCOVER_TIMEOUT_MS, CLINE_INBOX_HOST, setupClineInbox, type ClineInboxSession, type ClineSetupContext, type ClineToolDefinition } from "./inbox";
 import { plugin } from "./index";
 
 const roots: string[] = [];
@@ -138,6 +140,11 @@ async function deliveryOf(server: InboxServer, threadId: string, id: string) {
   return found as { host: string; session: string } | null;
 }
 
+/** The message's delivery as the thread says it now (null: not delivered). */
+async function deliveredNow(server: InboxServer, threadId: string, id: string) {
+  return (await thread(server, threadId)).messages.find((m) => m.id === id)?.delivery ?? null;
+}
+
 describe("Cline: the Inbox connection (fake Cline plugin host)", () => {
   test("an idle session is listed in the To picker under its folder, and a New message to it starts one turn there", async () => {
     const w = await world();
@@ -204,15 +211,54 @@ describe("Cline: the Inbox connection (fake Cline plugin host)", () => {
     expect(await until(() => cline.prompts().length === 1)).toBe(true);
   });
 
-  test("a prompt whose run never starts counts as taken after the wait (it is in Cline's queue), and is not sent again", async () => {
+  test("a prompt whose run never starts (Cline dropped it) is not marked delivered: it stays waiting and goes in again", async () => {
     const w = await world();
     const cline = new FakeCline("ses-q", w.project);
-    await start(w, cline, { deliveryWaitMs: 300 });
+    const session = (await start(w, cline, { deliveryWaitMs: 300 }))!;
     const sent = idsOf(await cline.call({ action: "send_message", body: "Done with the parser." }));
     const answer = await reply(w.server, sent.message_id, "Thanks.");
     expect(await until(() => cline.prompts().length === 1)).toBe(true);
+    await Bun.sleep(500);
+    expect(await deliveredNow(w.server, sent.thread_id, answer.id)).toBeNull();
+    // The reply was given back: the next idle wake puts it in again, and that run takes it.
+    expect(await until(() => cline.prompts().length === 2)).toBe(true);
+    expect(cline.prompts()[1]).toContain("Thanks.");
+    session.beforeRun({ snapshot: { agentId: "agent-1" } });
     expect(await deliveryOf(w.server, sent.thread_id, answer.id)).toMatchObject({ session: "ses-q" });
-    await Bun.sleep(TICK * 10);
+  });
+
+  test("the session closes with our prompt waiting: the reply is not marked delivered, and the next worker for the session delivers it", async () => {
+    const w = await world();
+    const first = new FakeCline("ses-closed", w.project);
+    await start(w, first);
+    const sent = idsOf(await first.call({ action: "send_message", body: "Renaming the config keys." }));
+    const answer = await reply(w.server, sent.message_id, "Keep the old ones as aliases.");
+    expect(await until(() => first.prompts().length === 1)).toBe(true);
+    await first.stopWorker();
+    await Bun.sleep(TICK * 6);
+    expect(await deliveredNow(w.server, sent.thread_id, answer.id)).toBeNull();
+    const again = new FakeCline("ses-closed", w.project);
+    const session = (await start(w, again))!;
+    expect(await until(() => again.prompts().length === 1)).toBe(true);
+    expect(again.prompts()[0]).toContain("Keep the old ones as aliases.");
+    session.beforeRun({ snapshot: { agentId: "agent-1" } });
+    expect(await deliveryOf(w.server, sent.thread_id, answer.id)).toMatchObject({ session: "ses-closed" });
+  });
+
+  test("a run that was already going when the worker started (its afterRun only) keeps our prompt waiting behind it, so it is not sent twice", async () => {
+    const w = await world();
+    const cline = new FakeCline("ses-mid", w.project);
+    const session = (await start(w, cline, { deliveryWaitMs: 600 }))!;
+    const sent = idsOf(await cline.call({ action: "send_message", body: "Profiling the import." }));
+    const answer = await reply(w.server, sent.message_id, "Look at the lockfile parse.");
+    expect(await until(() => cline.prompts().length === 1)).toBe(true);
+    // Cline queued ours behind a run this worker never saw start; that run ends now.
+    await Bun.sleep(400);
+    session.afterRun({ snapshot: { agentId: "agent-1" } });
+    await Bun.sleep(400);
+    expect(await deliveredNow(w.server, sent.thread_id, answer.id)).toBeNull();
+    session.beforeRun({ snapshot: { agentId: "agent-1" } });
+    expect(await deliveryOf(w.server, sent.thread_id, answer.id)).toMatchObject({ session: "ses-mid" });
     expect(cline.prompts()).toHaveLength(1);
   });
 
@@ -234,6 +280,29 @@ describe("Cline: the Inbox connection (fake Cline plugin host)", () => {
     session.afterRun({ snapshot: { agentId: "agent-1" } });
     expect(await until(() => again.prompts().length === 1)).toBe(true);
     expect(again.prompts()[0]).toContain("Added it to .env.");
+  });
+
+  test("a hung Inbox costs setup at most CLINE_DISCOVER_TIMEOUT_MS (Cline gives import and setup 4 s together), with the remembered tools", async () => {
+    const w = await world();
+    // Seen once while the Inbox answered: its tools are remembered.
+    expect(await discoverInboxTools(w.dataDir)).not.toBeNull();
+    const registryFile = inboxRegistryFileOf(w.dataDir);
+    const registry = JSON.parse(readFileSync(registryFile, "utf8")) as { port: number };
+    // Now an Inbox that takes the connection and never answers.
+    const hung = createServer(() => {});
+    await new Promise<void>((resolve) => hung.listen(0, "127.0.0.1", resolve));
+    try {
+      writeFileSync(registryFile, JSON.stringify({ ...registry, port: (hung.address() as { port: number }).port }));
+      const cline = new FakeCline("ses-hung", w.project);
+      const began = Date.now();
+      const session = await setupClineInbox(cline.api, cline.ctx(), { env: ON, dataDir: w.dataDir, tickMs: TICK });
+      if (session) sessions.push(session);
+      expect(Date.now() - began).toBeLessThan(CLINE_DISCOVER_TIMEOUT_MS + 400);
+      expect(CLINE_DISCOVER_TIMEOUT_MS).toBeLessThanOrEqual(1_000);
+      expect(cline.tools.map((t) => t.name)).toEqual(["plannotator_inbox"]);
+    } finally {
+      hung.close();
+    }
   });
 
   test("starts nothing without a session (Cline reading what the plugin registers), with the switch off, or before the Inbox ever ran", async () => {

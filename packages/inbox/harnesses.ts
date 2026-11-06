@@ -88,6 +88,9 @@ const DSH_PLUGIN = '@plannotator/dsh';
 /** When a DSH tool switch takes effect: the plugin decides once, when DSH starts, never per session. */
 export const DSH_APPLIES = 'It applies when DeepSeek Harness next starts.';
 
+/** When Cline's tool switch takes effect: the plugin decides at each session's setup, never in a running one. */
+export const CLINE_APPLIES = 'It applies to Cline sessions started from now on.';
+
 /** POSIX single-quoting where a word needs it; plain words stay bare. */
 export function shellWord(word: string): string {
   return /^[A-Za-z0-9_\-./:=@%+,~]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`;

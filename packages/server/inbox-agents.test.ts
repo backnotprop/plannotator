@@ -11,6 +11,7 @@ import { loadConfig } from "@plannotator/shared/config";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
 import {
   agentHomeAllowed,
+  clinePluginInstalled,
   codexHome,
   geminiDir,
   connectInboxAgents,
@@ -424,6 +425,25 @@ describe("Pi and OpenCode with Plannotator's extension or plugin: the tool switc
     writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@plannotator/cline", version: "0.28.51" }));
     expect((await connect()).added).toEqual([]);
     expect((await connect({ CLINE_DIR: clineDir })).added).toEqual(["cline"]);
+  });
+
+  test("Cline: the plugin as a plain file in ~/.cline/plugins (a built index.js copied there) is found", async () => {
+    mkdirSync(join(fake.home, ".cline", "plugins"), { recursive: true });
+    writeFileSync(join(fake.home, ".cline", "plugins", "weather.js"), "export default { name: 'weather' };\n");
+    expect((await connect()).added).toEqual([]);
+    writeFileSync(join(fake.home, ".cline", "plugins", "plannotator.js"), 'const pkg = { name: "@plannotator/cline" };\nexport default { name: "plannotator" };\n');
+    expect((await connect()).added).toEqual(["cline"]);
+  });
+
+  test("Cline: a workspace-scope install (<folder>/.cline/plugins) is found for the folder the Inbox runs in, read only", () => {
+    const e = createAgentEnvironmentFor({ platform: process.platform, homeDir: fake.home, env: {} });
+    const workspace = join(fake.root, "ledger");
+    const pkg = join(workspace, ".cline", "plugins", "_installed", "npm", "plannotator-cline-4d5e6f", "package", "node_modules", "@plannotator", "cline");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@plannotator/cline", version: "0.28.51" }));
+    expect(clinePluginInstalled(e, join(fake.root, "other"))).toBe(false);
+    expect(clinePluginInstalled(e, workspace)).toBe(true);
+    expect(fake.calls()).toEqual([]);
   });
 
   test("Cline with someone else's plugin only is still left to the person", async () => {
