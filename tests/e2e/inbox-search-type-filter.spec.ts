@@ -331,7 +331,7 @@ test('a phone: the Type chip leads the sideways chip row and picks in the bottom
 });
 
 // Last: it adds a project, which would change the counts above.
-test('every filter set with a long project name: the one desktop row keeps every chip and Clear filters inside the panel', async () => {
+test('every filter set with a long project name: the chips keep one desktop line, Clear filters and the order switch end the row, all inside the panel', async () => {
   const longName = await world.longProject();
   await page.reload();
   await openFromSidebar(page);
@@ -349,14 +349,28 @@ test('every filter set with a long project name: the one desktop row keeps every
   const row = palette(page).locator('.ib-sp-filters');
   const clear = row.locator('[data-clear-filters]');
   await expect(clear).toBeVisible();
-  // One row (every part on the same middle line), no sideways scrolling, nothing past the panel's edge.
+  await expect(row.locator('[data-search-sort]')).toBeVisible();
+  // The chips stay on one line (the project chip gives way, never a chip pushed to a line of its own); Clear filters and
+  // the Best match | Newest switch end the row together, on a second line when they do not fit after the chips
+  // (approval "inbox-search-sort": the filter row may wrap to fit the switch). No sideways scrolling, nothing past the panel's edge.
   const fit = await row.evaluate((el) => {
     const box = el.getBoundingClientRect();
     const right = box.right - parseFloat(getComputedStyle(el).paddingRight);
-    const parts = [...el.querySelectorAll<HTMLElement>('.ib-sp-fcell, [data-clear-filters]')].map((p) => p.getBoundingClientRect());
-    return { scrolls: el.scrollWidth > el.clientWidth, past: parts.filter((r) => r.right > right + 0.5).length, rows: new Set(parts.map((r) => Math.round(r.top + r.height / 2))).size };
+    const mid = (r: DOMRect) => Math.round(r.top + r.height / 2);
+    const chips = [...el.querySelectorAll<HTMLElement>('.ib-sp-fcell')].map((p) => p.getBoundingClientRect());
+    const end = [...el.querySelectorAll<HTMLElement>('[data-clear-filters], [data-search-sort]')].map((p) => p.getBoundingClientRect());
+    const all = [...chips, ...end];
+    return {
+      chips: chips.length,
+      scrolls: el.scrollWidth > el.clientWidth,
+      past: all.filter((r) => r.right > right + 0.5).length,
+      chipLines: new Set(chips.map(mid)).size,
+      endLines: new Set(end.map(mid)).size,
+      endAfterChips: end.every((r) => mid(r) >= Math.max(...chips.map(mid))),
+      switchEndsRow: Math.abs(end[end.length - 1].right - right) <= 1,
+    };
   });
-  expect(fit).toEqual({ scrolls: false, past: 0, rows: 1 });
+  expect(fit).toEqual({ chips: 4, scrolls: false, past: 0, chipLines: 1, endLines: 1, endAfterChips: true, switchEndsRow: true });
   // The project chip gave way: its name is cut, whole in its tooltip.
   expect(await palette(page).locator('[data-chip="project"] .ib-sp-fl').evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
   await shot(page, '06-every-filter-set');
