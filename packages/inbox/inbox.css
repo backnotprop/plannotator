@@ -5342,7 +5342,7 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-oq-pos[data-phone] .ib-oq-bbtn { height: 44px; padding: 0 16px; border-radius: 12px; font-size: var(--ib-fs-15, 15px); }
 .ib-oq-pos[data-phone] .ib-oq-bbtn.ib-oq-pri { flex: 1 1 auto; }
 /* The list's skip row (approval "reply-bar-pairs"): what this Send does with the unanswered questions, and the toggle. */
-.ib-oq-skiprow { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 0 8px; align-items: center; flex: none; min-height: 40px; padding: 2px 2px 2px 8px; }
+.ib-oq-skiprow { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 0 8px; align-items: center; flex: none; min-height: 40px; padding: 2px 8px; }
 .ib-oq-skipico { display: grid; place-items: center; color: var(--muted-foreground); }
 .ib-oq-skipwords { min-width: 0; font-size: var(--ib-fs-13-5, 13.5px); color: var(--foreground); line-height: 1.35; }
 .ib-oq-skipbtn { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 0 12px; border-radius: var(--ib-lr-sm, 8px); box-shadow: inset 0 0 0 1px var(--border); font-size: var(--ib-fs-13, 13px); font-weight: 500; color: var(--foreground); white-space: nowrap; cursor: default; outline: none; user-select: none; }
