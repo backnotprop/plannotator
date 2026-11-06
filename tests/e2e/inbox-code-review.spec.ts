@@ -608,12 +608,15 @@ test('the top bar holds what the rail held: chapters, the count, files, Overview
   // The one button switches every diff, and switches back; the controls stay where they are, off the page.
   const approve = pane.locator('[data-review-decision] [data-decision-primary]');
   const approveAt = (await approve.boundingBox())!.x;
-  const drawnTypes = () => pane.locator('pre[data-diff]').evaluateAll((pres) => [...new Set(pres.map((p) => p.getAttribute('data-diff-type')))]);
+  // Each file's layout as drawn. A new file has no old side, so Split draws it in one column too (the diff library's way).
+  const drawnTypes = () => pane.locator('pre[data-diff]').evaluateAll((pres) => pres.map((p) => p.getAttribute('data-diff-type')));
+  const asSplit = await drawnTypes();
+  expect(asSplit).toContain('split');
   await toggle.click();
   await expect(toggle).toHaveAttribute('data-diff-layout-toggle', 'unified');
-  await expect.poll(drawnTypes).toEqual(['single']);
+  await expect.poll(async () => [...new Set(await drawnTypes())]).toEqual(['single']);
   await toggle.click();
-  await expect.poll(drawnTypes).toEqual(['split']);
+  await expect.poll(drawnTypes).toEqual(asSplit);
   expect((await approve.boundingBox())!.x).toBe(approveAt);
   const controlsBox = (await controls.boundingBox())!;
   expect(controlsBox.x + controlsBox.width).toBeLessThanOrEqual(approveAt);
