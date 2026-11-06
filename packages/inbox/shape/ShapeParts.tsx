@@ -12,6 +12,7 @@ import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import { ShapeGrid, shapeAgo, type ShapeGridItem } from '@plannotator/ui/components/shape/ShapeGrid';
 import type { ShapeHost, ShapeReviewAt } from '@plannotator/ui/components/shape';
+import type { ShapeBoardProps } from './types';
 import { inboxApi, type InboxShapeSummary } from '../api';
 import { agentName, whenTime } from '../format';
 import { Icon } from '../icons';
@@ -79,6 +80,7 @@ export function ShapeLayer({
   thread,
   onOpenReview,
   covered = false,
+  onAddToReply,
 }: {
   host: ShapeHost;
   id: string;
@@ -86,6 +88,7 @@ export function ShapeLayer({
   thread: InboxThread | null;
   onOpenReview?: (messageId: string, at: ShapeReviewAt | null) => void;
   covered?: boolean;
+  onAddToReply?: ShapeBoardProps['onAddToReply'];
 }) {
   // A phone has none: there the sidebar is a sheet and the board covers the window, as before.
   const { isMobile } = useSidebar();
@@ -120,6 +123,8 @@ export function ShapeLayer({
           review={review}
           renderThread={thread ? ({ flash }) => <ShapeThreadTab thread={thread} flash={flash} /> : undefined}
           headStart={isMobile ? undefined : <SidebarTrigger />}
+          crosshair
+          onAddToReply={thread ? onAddToReply : undefined}
         />
       </PanePart>
     </section>

@@ -6,6 +6,7 @@
  * standalone Shapes page each pass an adapter over the same routes
  * (SPEC.md §3, "Host seam"); the dev harness passes an in-memory one.
  */
+import type { ShapeBoxSelection, ShapeReadAsset } from './boxSelect';
 import type { ComponentType, ReactNode } from 'react';
 import type { ShapeNote, ShapeNoteInput, ShapeRecord, ShapeVersion, ShapeViewId } from '@plannotator/core/shape';
 
@@ -78,6 +79,19 @@ export interface ShapeHost {
    * session ended. Absent: the line shows the session's state, as always.
    */
   sessionless?: boolean;
+}
+
+/** A board that takes a dragged box (`boxSelect` on ShapeSurface). */
+export interface ShapeBoxOptions {
+  /** A same-site image or font as a data: URL, for the box's picture. Absent: the picture has no images and the system's font. */
+  readAsset?: ShapeReadAsset;
+  /** The box's Show me: the same object a comment is made from, and whatever was typed. Absent: no Show me. */
+  onShowMe?: (selection: ShapeBoxSelection, text: string) => void;
+  /**
+   * The box's Add to reply: the same object and whatever was typed, for the host's reply to the board's thread (the
+   * Inbox: the picture as a file, the label and words as text). Absent: no Add to reply.
+   */
+  onAddToReply?: (selection: ShapeBoxSelection, text: string) => void;
 }
 
 export interface ShapeCodeHoverRequest {
@@ -171,4 +185,9 @@ export interface ShapeSurfaceProps {
   codeView?: boolean;
   /** The review this board is part of. Absent: What's changed shows no review facts, buttons or guide-step links. */
   review?: ShapeSurfaceReview | null;
+  /**
+   * While annotating with the pointer, a mouse drag draws a box and comments on what is inside it (the Inbox, by
+   * ShapeBoard). Absent: pointing and clicking only, as always.
+   */
+  boxSelect?: ShapeBoxOptions;
 }

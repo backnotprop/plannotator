@@ -8,12 +8,36 @@
  * stays in its packages for other hosts. Checked under tsconfig.guide.json;
  * the window sees its shape in board-module.d.ts.
  */
-import { ShapeSurface } from '@plannotator/ui/components/shape';
+import { useMemo } from 'react';
+import { ShapeSurface, type ShapeBoxOptions } from '@plannotator/ui/components/shape';
 import { OpenInCodeSpans } from '../components/OpenIn';
 import type { ShapeBoardProps } from './types';
 import type BoardShape from './board-module';
 
-export default function ShapeBoard({ host, id, onClose, renderThread, initialView, initialPanel, onNavigate, headStart, review }: ShapeBoardProps) {
+/** A same-site image or font for a box's picture: the board itself makes no request. */
+async function readAsset(url: string): Promise<string | null> {
+  const answer = await fetch(url);
+  if (!answer.ok) return null;
+  const blob = await answer.blob();
+  return new Promise((done) => {
+    const reader = new FileReader();
+    reader.onload = () => done(typeof reader.result === 'string' ? reader.result : null);
+    reader.onerror = () => done(null);
+    reader.readAsDataURL(blob);
+  });
+}
+
+const BOX_SELECT: ShapeBoxOptions = {
+  readAsset,
+  // STUB (proto/shape-box-comment): the word is drawn; Show me on boards is another branch's (#2669). It logs what it would receive.
+  onShowMe: (selection, text) => {
+    void selection.picture.then((picture) => console.info('[shape-box] Show me stub', JSON.stringify({ ...selection, picture: picture ? `${picture.slice(0, 40)}… (${picture.length} chars)` : null, text })));
+  },
+};
+
+export default function ShapeBoard({ host, id, onClose, renderThread, initialView, initialPanel, onNavigate, headStart, review, crosshair = false, onAddToReply }: ShapeBoardProps) {
+  // The crosshair is the Inbox's (its ShapeLayer asks for it): the standalone page keeps Annotate.
+  const boxSelect = useMemo<ShapeBoxOptions | undefined>(() => (!crosshair ? undefined : onAddToReply ? { ...BOX_SELECT, onAddToReply } : BOX_SELECT), [crosshair, onAddToReply]);
   return (
     <OpenInCodeSpans scope={{ shape: id }} on={!!host.fileAction}>
     <ShapeSurface
@@ -25,6 +49,7 @@ export default function ShapeBoard({ host, id, onClose, renderThread, initialVie
       review={review}
       renderThread={renderThread}
       readFirst
+      boxSelect={boxSelect}
       initialView={initialView}
       initialPanel={initialPanel}
       onNavigate={onNavigate}

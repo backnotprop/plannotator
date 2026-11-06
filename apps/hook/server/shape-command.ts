@@ -315,7 +315,9 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     // The notes count as received only once the agent has them: written first, marked after.
     const waiting = store.waiting(id);
     try {
-      await out(JSON.stringify({ shape: record, version, notes: waiting }, null, 2));
+      // A box's picture: its full path, so the agent can open it.
+      const notes = waiting.map((n) => (n.picture ? { ...n, picture: store.filePath(id, n.picture) ?? n.picture } : n));
+      await out(JSON.stringify({ shape: record, version, notes }, null, 2));
     } catch (error) {
       err(`output_failed: the notes were not handed over and still wait: ${(error as Error).message}`);
       return 1;

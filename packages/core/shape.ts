@@ -324,6 +324,22 @@ export interface ShapeNote {
   re: string | null;
   /** When an agent picked it up (`shape read`); null while it waits. */
   delivered: string | null;
+  /** A box dragged over the board: where it sits. `part` then names every part inside it, comma-separated. */
+  box?: ShapeNoteBox;
+  /** The `data-code` places inside the box ("src/a.ts#L42"). */
+  code?: string[];
+  /** A picture of the box, grown to the whole of the parts it picked, the box drawn on it: `files/…` in the store, its full path in `shape read --notes`. */
+  picture?: string;
+}
+
+/** Where a box sits, as fractions of its drawing (or of What to know). `tall` and `more`: on that layout of the view. */
+export interface ShapeNoteBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  tall?: true;
+  more?: true;
 }
 
 /** A Change it that no agent has picked up: "1 change waits for the agent". */
@@ -381,6 +397,8 @@ export const SHAPE_LIMITS = {
   flows: 6,
   flowSteps: 40,
   forks: 12,
+  /** A box's picture, as a data: URL. */
+  notePicture: 6_000_000,
 } as const;
 
 const PART_ID_RE = /^[A-Za-z][\w.-]{0,63}$/;
@@ -1496,6 +1514,24 @@ export interface ShapeNoteInput {
   part?: string | null;
   quote?: string | null;
   text: string;
+  box?: ShapeNoteBox;
+  code?: string[];
+  /** A PNG as a data: URL; the store keeps it as a file. */
+  picture?: string;
+}
+
+const NOTE_PICTURE_RE = /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/;
+
+function checkNoteBox(c: Checker, input: unknown): ShapeNoteBox | undefined {
+  if (input === undefined) return undefined;
+  const b = isRecord(input) ? input : {};
+  const at = [b.x, b.y, b.w, b.h];
+  if (!at.every((n) => typeof n === 'number' && n >= 0 && n <= 1)) {
+    c.fail('box', 'must be x, y, w and h, each from 0 to 1');
+    return undefined;
+  }
+  const [x, y, w, h] = at as number[];
+  return { x: x!, y: y!, w: w!, h: h!, ...(b.tall === true ? { tall: true as const } : {}), ...(b.more === true ? { more: true as const } : {}) };
 }
 
 /** Validate a person's Change it or Ask. No part: a general comment (on a view, or the whole board). */
@@ -1519,8 +1555,14 @@ export function checkShapeNoteInput(input: unknown): ShapeCheck<ShapeNoteInput> 
   if (part && !view) c.fail('view', 'is required with a part');
   const quote = c.text(input.quote, 'quote', SHAPE_LIMITS.quote, false) ?? null;
   const text = c.text(input.text, 'text', SHAPE_LIMITS.noteText);
+  const box = checkNoteBox(c, input.box);
+  if (box && !view) c.fail('view', 'is required with a box');
+  const code = input.code === undefined ? undefined : Array.isArray(input.code) && input.code.length <= 40 && input.code.every((t) => typeof t === 'string' && parseShapeCodeTarget(t)) ? (input.code as string[]) : undefined;
+  if (input.code !== undefined && !code) c.fail('code', 'must be up to 40 data-code places');
+  const picture = input.picture === undefined ? undefined : typeof input.picture === 'string' && input.picture.length <= SHAPE_LIMITS.notePicture && NOTE_PICTURE_RE.test(input.picture) ? input.picture : undefined;
+  if (input.picture !== undefined && !picture) c.fail('picture', 'must be a PNG data: URL within the limit');
   if (c.errors.length || !kind || !v || !text) return { ok: false, errors: c.errors };
-  return { ok: true, value: { kind, v, view, part, quote, text } };
+  return { ok: true, value: { kind, v, view, part, quote, text, ...(box ? { box } : {}), ...(code ? { code } : {}), ...(picture ? { picture } : {}) } };
 }
 
 /** The words a person reads on a drawing. */

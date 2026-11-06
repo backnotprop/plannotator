@@ -6,7 +6,9 @@ export { ShapeDiagram, ShapeDrawn, SHAPE_FRAME_CSS, NO_MARKS, type MarkState, ty
 export { ShapeInline, shapePlainText } from './inline';
 export { ShapeChanged, type ShapeChangedProps } from './ShapeChanged';
 export { ShapeGrid, ShapeThumb, shapeAgo, filterShapeItems, type ShapeGridItem } from './ShapeGrid';
+export type { ShapeBoxSelection, ShapeReadAsset } from './boxSelect';
 export type {
+  ShapeBoxOptions,
   ShapeCodeGuideProps,
   ShapeCodeHoverCardProps,
   ShapeCodeHoverRequest,
