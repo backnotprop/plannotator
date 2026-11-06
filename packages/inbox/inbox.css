@@ -260,6 +260,9 @@
   --ib-fs-30: max(11px, calc(30px * var(--ib-type) / 14));
   --ib-fs-32: max(11px, calc(32px * var(--ib-type) / 14));
   --ib-fs-34: max(11px, calc(34px * var(--ib-type) / 14));
+  --ib-fs-84: max(11px, calc(84px * var(--ib-type) / 14));
+  --ib-fs-104: max(11px, calc(104px * var(--ib-type) / 14));
+  --ib-fs-132: max(11px, calc(132px * var(--ib-type) / 14));
   --ib-fs-16-in: max(16px, calc(16px * var(--ib-type) / 14));
   /* Hovers and fades (--ib-soft-hover). Today's fade is ui's global one (packages/ui/theme.css `*`). */
   --ib-ui-fade: color 150ms cubic-bezier(0.4, 0, 0.2, 1), background-color 150ms cubic-bezier(0.4, 0, 0.2, 1), border-color 150ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -6478,7 +6481,7 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
    both themes; the sidebar's Tater sits on the e. */
 dialog.ib-dlg.ib-bi.ib-bro { --bro-w: 77px; --bro-h: 88px; width: min(480px, calc(100vw - 32px)); border: 0; border-radius: 16px; background: #27345a; color: #fbfaf5; box-shadow: 0 18px 50px oklch(0 0 0 / 0.4); }
 dialog.ib-dlg.ib-bi.ib-bro::before { content: ""; position: absolute; inset: 0 0 auto; height: 62%; border-radius: inherit; background: radial-gradient(circle at center, #fbfaf533 0 1.2px, transparent 1.5px) 0 0 / 8px 8px; -webkit-mask-image: linear-gradient(to bottom, #000 30%, transparent); mask-image: linear-gradient(to bottom, #000 30%, transparent); pointer-events: none; }
-dialog.ib-dlg.ib-bro h2 { position: relative; margin: 0; padding: 18px 24px 0; font-size: 132px; font-weight: 800; line-height: 0.84; letter-spacing: -0.055em; color: #fbfaf5; }
+dialog.ib-dlg.ib-bro h2 { position: relative; margin: 0; padding: 18px 24px 0; font-size: var(--ib-fs-132, 132px); font-weight: 800; line-height: 0.84; letter-spacing: -0.055em; color: #fbfaf5; }
 /* The sprite as the sidebar plays it (TaterMark): 24 frames, 3.5 s, mirrored; the first frame under reduced motion. */
 .ib-bro .ib-bro-tater { position: absolute; left: 292px; top: 80px; display: block; width: var(--bro-w); height: var(--bro-h); overflow: hidden; transform: scaleX(-1); }
 .ib-bro .ib-bro-strip { display: block; width: calc(var(--bro-w) * 24); height: var(--bro-h); background: left center / 100% 100% no-repeat; animation: ib-bro-strip 3.5s steps(24) infinite; }
@@ -6501,12 +6504,12 @@ dialog.ib-dlg.ib-bro h2 { position: relative; margin: 0; padding: 18px 24px 0; f
 .ib-bro .ib-bro-credit a:focus-visible { outline: 2px solid #fbfaf5; outline-offset: 2px; border-radius: 2px; }
 @media (max-width: 560px) {
   dialog.ib-dlg.ib-bi.ib-bro { --bro-w: 63px; --bro-h: 72px; }
-  dialog.ib-dlg.ib-bro h2 { font-size: 104px; }
+  dialog.ib-dlg.ib-bro h2 { font-size: var(--ib-fs-104, 104px); }
   .ib-bro .ib-bro-tater { left: 233px; top: 64px; }
 }
 @media (max-width: 350px) {
   dialog.ib-dlg.ib-bi.ib-bro { --bro-w: 52px; --bro-h: 60px; }
-  dialog.ib-dlg.ib-bro h2 { padding: 16px 18px 0; font-size: 84px; }
+  dialog.ib-dlg.ib-bro h2 { padding: 16px 18px 0; font-size: var(--ib-fs-84, 84px); }
   .ib-bro .ib-bro-tater { left: 187px; top: 52px; }
 }
 /* BRO-CARD-END */
