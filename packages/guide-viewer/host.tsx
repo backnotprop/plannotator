@@ -46,6 +46,8 @@ export interface GuideDiffRendererProps {
    * height its content needs (AllFilesCodeView does). A renderer that ignores it keeps the estimated box.
    */
   onContentHeightChange?: (height: number) => void;
+  /** No scroller of its own: as tall as its content, against the page's scroller (a `fitFileHeights` host). */
+  scrollsWithPage?: boolean;
 }
 
 export interface GuideDiffRendererContext {
@@ -168,6 +170,8 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    * which the renderer's measured height then corrects).
    */
   diffStyle?: 'split' | 'unified';
+  /** The renderer can read a changed file's whole text: it draws an arrow row after the last hunk. For the same estimate. */
+  opensWholeFiles?: boolean;
 }
 
 // The context erases the renderer's extra-prop generic; hosts recover typing at the provider site.
