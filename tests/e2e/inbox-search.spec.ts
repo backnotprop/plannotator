@@ -418,16 +418,14 @@ test('long, right-to-left and CJK text stays inside the palette', async () => {
     return { list: list.scrollWidth - list.clientWidth, rows: rows.filter((r) => r.scrollWidth > r.clientWidth + 1).length };
   });
   expect(overflow).toEqual({ list: 0, rows: 0 });
-  // The truncating line carries dir="auto"; its full text is a component tooltip while cut, never a native title.
+  // The first line carries dir="auto" and no native title.
   const arabic = palette(page).locator(`[data-result="thread"][data-result-id="${world.threads.arabic}"] .ib-sp-p`);
   await expect(arabic).toHaveAttribute('dir', 'auto');
   await expect(arabic).not.toHaveAttribute('title', /./);
-  // Cut it (a narrow box, as on a phone): hovered, the component tooltip holds the whole right-to-left text.
+  // In a narrow box (as on a phone) the words wrap whole, never cut (the owner, 2026-11-06: show why it matched).
   await arabic.evaluate((el) => ((el as HTMLElement).style.maxWidth = '140px'));
-  expect(await arabic.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-  await arabic.hover();
-  await expect(palette(page).locator('[data-side].bg-popover')).toHaveText('تقرير أخطاء الدفع بعد آخر deploy على الخادم الثاني');
-  await page.mouse.move(1, 1);
+  expect(await arabic.evaluate((el) => ({ cut: el.scrollWidth > el.clientWidth + 1, lines: Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)) > 1 }))).toEqual({ cut: false, lines: true });
+  await expect(arabic).toHaveText('تقرير أخطاء الدفع بعد آخر deploy على الخادم الثاني');
   await arabic.evaluate((el) => ((el as HTMLElement).style.maxWidth = ''));
   await shot(page, '09-stress-long-rtl');
 });
