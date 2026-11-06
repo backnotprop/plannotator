@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { check, load } from '../src/node/index.ts';
-import { commitAt, drawingDir, git, isolateGitConfig, repoRoot, smallDrawing, tempDir, writeTree } from './helpers.ts';
+import { commitAt, drawingDir, FETCH_STEP, git, isolateGitConfig, repoRoot, smallDrawing, tempDir, writeTree } from './helpers.ts';
 
 // This repo's own drawing, as a test of the repo. A later PR that renames a
 // file the drawing cites must not turn this red: the drawing says what it was
@@ -11,9 +12,10 @@ import { commitAt, drawingDir, git, isolateGitConfig, repoRoot, smallDrawing, te
 // - At HEAD, everything that does not ask whether a file exists is a hard
 //   test: system.yaml and every sheet load, the schema, the ids, the refs
 //   between sheets (load.test.ts, "the committed drawing", holds the rest).
-// - The cited paths are checked at the drawing's own commit. CI clones one
-//   commit, so that commit is fetched (depth 1) when it is missing; when it
-//   cannot be, the test is skipped and its name says why.
+// - The cited paths are checked at the drawing's own commit. The test stays
+//   offline: CI clones one commit and fetches the drawing's commit in a step
+//   before the tests. When the commit is not in the clone, the test is
+//   skipped and the reason is printed (and is in its name).
 // - Cited paths gone at HEAD are a printed warning, never a failure.
 
 const drawn = (await load(drawingDir)).model;
@@ -31,7 +33,7 @@ describe('the committed drawing', () => {
   });
 
   test.skipIf(!state.ok)(
-    `cites only paths that exist at its own commit${state.ok ? ` (${state.at.slice(0, 12)}, ${state.how})` : ` [SKIPPED: ${state.reason}]`}`,
+    `cites only paths that exist at its own commit${state.ok ? ` (${state.at.slice(0, 12)})` : ` [SKIPPED: ${state.reason}]`}`,
     async () => {
       expect(await check({ dir: drawingDir, root: repoRoot })).toEqual({ errors: [], warnings: [], missing: [] });
     },
@@ -47,7 +49,8 @@ describe('the committed drawing', () => {
 });
 
 // The same rule in temp repos, so both arms run on every machine: the
-// drawing's commit present after a fetch, and absent with a reason.
+// drawing's commit present (fetched the way the CI step does, from a local
+// origin), and absent, with a reason and no fetch.
 describe("the drawing's own commit in a one-commit clone", () => {
   isolateGitConfig();
   const cleanups: (() => void)[] = [];
@@ -82,46 +85,30 @@ describe("the drawing's own commit in a one-commit clone", () => {
     git(from, 'clone', '-q', '--depth=1', '--no-local', `file://${from}`, root);
     return root;
   }
+  const commits = (root: string) => git(root, 'rev-list', '--all').trim().split('\n');
 
-  test('present: the commit is fetched at depth 1, the cited paths are clean there, and the rename at HEAD is only stale', async () => {
+  test('absent: the one-commit clone lacks it, nothing is fetched, and the reason names the commit and the CI step', () => {
     const o = origin();
     const clone = ciClone(o.root);
-    expect(git(clone, 'rev-parse', '--is-shallow-repository').trim()).toBe('true');
-    expect(git(clone, 'rev-list', '--all').trim().split('\n')).toEqual([o.head]);
-    const dir = join(clone, '.plannotator', 'system');
-
     const s = commitAt(clone, o.drawnAt);
-    expect(s).toEqual({ ok: true, at: o.drawnAt, how: 'fetched' });
+    expect(s).toEqual({ ok: false, at: o.drawnAt, reason: `${o.drawnAt} is not in this clone (CI fetches it before the tests: ${FETCH_STEP})` });
+    // no fetch was tried: the clone still holds the one commit, and git wrote no FETCH_HEAD
+    expect(commits(clone)).toEqual([o.head]);
+    expect(existsSync(join(clone, '.git', 'FETCH_HEAD'))).toBe(false);
+  });
+
+  test("present: after the CI step's depth-1 fetch, the cited paths are clean at it and the rename at HEAD is only stale", async () => {
+    const o = origin();
+    const clone = ciClone(o.root);
+    git(clone, 'fetch', '--quiet', '--no-tags', '--depth=1', 'origin', o.drawnAt);
     expect(git(clone, 'rev-parse', '--is-shallow-repository').trim()).toBe('true');
+    expect(commitAt(clone, o.drawnAt)).toEqual({ ok: true, at: o.drawnAt });
+    const dir = join(clone, '.plannotator', 'system');
     expect(await check({ dir, root: clone })).toEqual({ errors: [], warnings: [], missing: [] });
     expect((await check({ dir, root: clone, at: 'HEAD' })).missing).toEqual(['src/main.ts']);
-    // a second look finds it without fetching
-    expect(commitAt(clone, o.drawnAt)).toEqual({ ok: true, at: o.drawnAt, how: 'present' });
   });
 
-  test('absent: origin does not have the commit, so the check is skipped with a reason that names it', () => {
-    const o = origin();
-    const clone = ciClone(o.root);
-    const elsewhere = temp();
-    git(elsewhere, 'init', '-q');
-    writeTree(elsewhere, { 'x.ts': '' });
-    const missing = commit(elsewhere, 'not in origin');
-    const s = commitAt(clone, missing);
-    expect(s.ok).toBe(false);
-    if (!s.ok) {
-      expect(s.reason).toContain(`${missing} is not in this clone`);
-      expect(s.reason).toContain('git fetch --depth=1 origin');
-    }
-  });
-
-  test('absent: no origin to fetch from, and an id that is not a commit id, each say so', () => {
-    const o = origin();
-    const lone = temp();
-    git(lone, 'init', '-q');
-    writeTree(lone, { 'x.ts': '' });
-    commit(lone, 'alone');
-    const s = commitAt(lone, o.drawnAt);
-    expect(s).toEqual({ ok: false, at: o.drawnAt, reason: `${o.drawnAt} is not in this clone, and it has no origin to fetch it from` });
-    expect(commitAt(lone, '--upload-pack=touch')).toEqual({ ok: false, at: '--upload-pack=touch', reason: '--upload-pack=touch is not a commit id' });
+  test('an id that is not a commit id is refused before git runs', () => {
+    expect(commitAt(temp(), '--upload-pack=touch')).toEqual({ ok: false, at: '--upload-pack=touch', reason: '--upload-pack=touch is not a commit id' });
   });
 });

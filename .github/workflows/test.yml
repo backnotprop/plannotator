@@ -147,6 +147,17 @@ jobs:
       - name: Generate Pi extension shared copies
         run: bash apps/pi-extension/vendor.sh
 
+      # packages/system/test/committed-drawing.test.ts checks the drawing's
+      # cited paths at the commit it was drawn from (sources.repos.self.at),
+      # which this one-commit checkout lacks; the test itself stays offline.
+      # Every unit-k lane, since Bun's --shard picks the lane for that file.
+      # Non-fatal: without the commit the test skips and prints why.
+      - name: Fetch the system drawing's commit
+        if: startsWith(matrix.lane, 'unit-')
+        run: |
+          AT=$(bun -e 'const { load } = await import("./packages/system/src/node/index.ts"); console.log((await load(".plannotator/system")).model?.sources?.repos.self?.at ?? "")') || AT=""
+          git fetch --quiet --no-tags --depth=1 origin "$AT" || echo "system drawing commit not fetched"
+
       - name: Run tests
         env:
           LANE: ${{ matrix.lane }}
