@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { PlannotatorMod, STORE_LAUNCHES } from './controller'
+import { PromptDropped } from './host'
 import { PLAN_APPROVAL_NEXT_STEP } from './delivery'
 import { inboxCommandBriefing } from './inbox-contract'
 import { CLASSIC_PLAN_REVIEW_TEXT } from './plan'
@@ -1664,5 +1665,79 @@ describe('/plannotator-inbox', () => {
     const failing = fakeHost()
     failing.onRun = () => ({ exitCode: 1, stdout: '', stderr: 'The Plannotator Inbox did not start; see /data/inbox/inbox.log.\n' })
     expect((await new PlannotatorMod(failing, SESSION).openInbox()).text).toContain('/data/inbox/inbox.log')
+  })
+})
+
+// The owner's report, for review decisions: Claude Code drops a plugin prompt after the person stopped the session
+// until someone types (`PromptDropped`). The decision was marked delivered, its files cleaned up, and it never went in.
+describe('a decision Claude Code dropped', () => {
+  const STOPPED = 'the session was stopped and nobody has sent input since'
+
+  /** An engine that drops every plugin prompt while `held.value` (the person stopped the session). */
+  function stoppedHost() {
+    const host = fakeHost()
+    const held = { value: true }
+    const attempts: string[] = []
+    host.submit = async (text) => {
+      attempts.push(text)
+      if (held.value) throw new PromptDropped(STOPPED)
+      host.submits.push(text)
+    }
+    serveOnLaunch(host)
+    return { host, held, attempts }
+  }
+
+  test('is not marked delivered; it goes in once after the person types, and the next decision goes in as usual', async () => {
+    const { host, held, attempts } = stoppedHost()
+    const mod = new PlannotatorMod(host, SESSION)
+    await mod.runCommand('annotate', 'a.md')
+    const [first] = launches(host)
+    const dir = launchDirOf(first!)
+
+    decide(host, first!, { surface: 'annotate', decision: 'annotated', message: '# Markdown Annotations\n\nfix it', noop: false, annotationCount: 1 })
+    await host.tick()
+    await host.tick()
+
+    expect(attempts).toHaveLength(1)
+    expect(host.submits).toEqual([])
+    expect(host.files.has(`${dir}/settled/delivered`)).toBe(false)
+    expect(host.files.has(`${dir}/stdin`)).toBe(true)
+    expect(host.logs.some((line) => line.startsWith('Could not send'))).toBe(false)
+
+    // The person types: input moves again, and the decision is tried once more.
+    held.value = false
+    mod.onPromptEntered({ text: 'carry on', fromUs: false, originKind: 'composer' })
+    await mod.onTurnStart('turn-1', 'carry on')
+    await host.tick()
+
+    expect(attempts).toHaveLength(2)
+    expect(host.submits).toHaveLength(1)
+    expect(host.submits[0]).toStartWith('Plannotator: a.md (pn-ababab) — Feedback · 1 comment.')
+    expect(host.files.has(`${dir}/settled/delivered`)).toBe(true)
+
+    mod.onTurnComplete('turn-1', 'Done.', false)
+    await mod.runCommand('annotate', 'b.md')
+    decide(host, launches(host)[1]!, { surface: 'annotate', decision: 'annotated', message: '# Markdown Annotations\n\nand this', noop: false, annotationCount: 1 })
+    await host.tick()
+
+    expect(host.submits).toHaveLength(2)
+    expect(host.submits[1]).toContain('and this')
+  })
+
+  test('the session ending while it waits leaves it undelivered, for a restore to report', async () => {
+    const { host, attempts } = stoppedHost()
+    const mod = new PlannotatorMod(host, SESSION)
+    await mod.runCommand('annotate', 'a.md')
+    const [first] = launches(host)
+    const dir = launchDirOf(first!)
+    decide(host, first!, { surface: 'annotate', decision: 'annotated', message: '# Markdown Annotations\n\nfix it', noop: false, annotationCount: 1 })
+    await host.tick()
+
+    mod.dispose()
+    for (let index = 0; index < 500; index += 1) await Promise.resolve()
+
+    expect(attempts).toHaveLength(1)
+    expect(host.files.has(`${dir}/settled/delivered`)).toBe(false)
+    expect(host.files.has(`${dir}/stdin`)).toBe(true)
   })
 })

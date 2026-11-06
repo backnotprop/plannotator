@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { PromptDropped, submitOrThrow } from './host'
 import { COMMANDS, INBOX_COMMAND } from './launch'
 import { PLAN_TOOL } from './plan'
 import { register } from './register'
@@ -63,5 +64,31 @@ describe('classic.PermissionRequest registration', () => {
     const events = registrations().map((hook) => hook.event)
 
     expect(events.filter((event) => event === '*' || event.endsWith('.*') || event.startsWith('!'))).toEqual([])
+  })
+})
+
+// The owner's report: Claude Code's `$.prompt.submit` RESOLVES `{ drop: <reason> }` for a prompt it refuses
+// (after the person stopped the session, until someone types). Read as a turn that started, an Inbox reply was
+// marked delivered and never went in. register.ts's `submit` is `submitOrThrow(() => $.prompt.submit({ text }))`.
+describe("the submit adapter reads $.prompt.submit's answer", () => {
+  const STOPPED = 'the session was stopped and nobody has sent input since'
+
+  test('a drop rejects with PromptDropped, carrying the reason', async () => {
+    const error = await submitOrThrow(async () => ({ drop: STOPPED })).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(PromptDropped)
+    expect((error as PromptDropped).reason).toBe(STOPPED)
+  })
+
+  test('a prompt that went in resolves, whatever the engine answered with', async () => {
+    for (const answer of [undefined, null, {}, { text: 'x' }]) await expect(submitOrThrow(async () => answer)).resolves.toBeUndefined()
+  })
+
+  test('a real failure keeps its own error', async () => {
+    const failure = new Error('$.prompt.submit takes text alone')
+    const error = await submitOrThrow(async () => Promise.reject(failure)).catch((caught: unknown) => caught)
+
+    expect(error).toBe(failure)
+    expect(error).not.toBeInstanceOf(PromptDropped)
   })
 })

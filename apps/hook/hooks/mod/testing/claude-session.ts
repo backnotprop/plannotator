@@ -14,9 +14,12 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { PlannotatorMod } from '../controller'
-import type { Host, HttpResult, ProcessResult } from '../host'
+import { PromptDropped, type Host, type HttpResult, type ProcessResult } from '../host'
 import { discoverInboxTools } from '../inbox'
 import type { InboxToolInfo } from '../inbox-contract'
+
+/** What Claude Code's `$.prompt.submit` resolves `{ drop }` with after the person stopped the session. */
+export const STOPPED_DROP_REASON = 'the session was stopped and nobody has sent input since'
 
 /** The engine's frame around a plugin's prompt at `turn.start`. */
 export const PLUGIN_FRAME = 'The plannotator plugin sent a message: '
@@ -158,6 +161,8 @@ export class ClaudeSession {
   turns: { id: string; text: string }[] = []
   /** Keep the plugin's turns running until `endTurn` (default: they answer at once). */
   holdPluginTurns = false
+  /** The person stopped the session and nobody has typed since: plugin prompts are dropped (`stop`). */
+  inputHeld = false
   private idleWaiters: ((discarded: boolean) => void)[] = []
   private discarding = false
   private sequence = 0
@@ -245,8 +250,20 @@ export class ClaudeSession {
     for (const wake of this.idleWaiters.splice(0)) wake(discarded)
   }
 
+  /**
+   * The person stops the session (Esc, a remote interrupt): the running turn
+   * ends aborted, and until someone types Claude Code drops every plugin
+   * prompt (`$.prompt.submit` resolves `{ drop }`, which the mod reads as
+   * `PromptDropped`) without starting a turn.
+   */
+  stop(): void {
+    this.endTurn('', true)
+    this.inputHeld = true
+  }
+
   /** The person presses Enter: at idle it starts a turn; mid-turn it joins the running one (take-over). */
   async type(text: string): Promise<void> {
+    this.inputHeld = false
     const ref = { fromUs: false, originKind: 'composer', ...(this.running ? { turnId: this.running.id } : {}) }
     this.mod.onPromptSubmitting(ref)
     this.mod.onPromptEntered({ ...ref, text })
@@ -267,9 +284,12 @@ export class ClaudeSession {
 
   /** `$.prompt.submit`: waits for idle, then its turn starts under the plugin's frame. */
   private async pluginTurn(text: string): Promise<void> {
+    if (this.inputHeld) throw new PromptDropped(STOPPED_DROP_REASON)
     while (this.running) {
       const discarded = await new Promise<boolean>((resolve) => this.idleWaiters.push(resolve))
       if (discarded) throw new Error('The engine discarded the prompt.')
+      // Waiting when the person stopped the session: dropped with the others.
+      if (this.inputHeld) throw new PromptDropped(STOPPED_DROP_REASON)
     }
     await this.startTurn(`${PLUGIN_FRAME}${text}`)
     if (!this.holdPluginTurns) setTimeout(() => this.endTurn('Thanks, on it.'), 20)

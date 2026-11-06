@@ -37,6 +37,26 @@ export interface TimerHandle {
   cancel: () => void
 }
 
+/**
+ * `$.prompt.submit` did not take the prompt: the engine RESOLVES `{ drop:
+ * <reason> }` instead of rejecting. One reason holds from the moment the
+ * person stops the session (Esc, a remote interrupt) until someone types:
+ * "the session was stopped and nobody has sent input since". No turn starts
+ * and nothing entered the conversation, so the caller may try again later.
+ */
+export class PromptDropped extends Error {
+  constructor(readonly reason: string) {
+    super(reason)
+    this.name = 'PromptDropped'
+  }
+}
+
+/** `$.prompt.submit`'s answer read: a drop rejects with `PromptDropped`; anything else is a prompt that went in. */
+export async function submitOrThrow(submit: () => Promise<unknown>): Promise<void> {
+  const result = (await submit()) as { drop?: unknown } | null | undefined
+  if (result && typeof result === 'object' && typeof result.drop === 'string') throw new PromptDropped(result.drop)
+}
+
 export interface Host {
   now(): Promise<number>
   /**
@@ -60,7 +80,12 @@ export interface Host {
   fileSize(path: string): Promise<number | null>
   storeGet(key: string): Promise<unknown>
   storeSet(key: string, value: unknown): Promise<void>
-  /** `$.prompt.submit`: runs once the session is idle, read under the plugin's name. */
+  /**
+   * `$.prompt.submit`: runs once the session is idle, read under the plugin's
+   * name. Resolves once the turn was taken. Rejects with `PromptDropped` when
+   * the engine refused the prompt (no turn started: try again after the
+   * person's next input), and with any other error when it failed.
+   */
   submit(text: string): Promise<void>
   /**
    * `$.session.append` of a user-role row (the model reads it; the person
