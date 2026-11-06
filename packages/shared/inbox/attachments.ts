@@ -27,7 +27,7 @@
 
 import { createHash } from "node:crypto";
 import { constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
-import { open, type FileHandle } from "node:fs/promises";
+import { lstat, open, realpath, type FileHandle } from "node:fs/promises";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { isShapeProjectPath } from "@plannotator/core/shape";
 import {
@@ -415,10 +415,46 @@ export function checkCurrent(attachment: InboxAttachment): CurrentCheck {
   } catch {
     return missing(`${attachment.name} is no longer on disk.`);
   }
+  return checkedStat(attachment, stat);
+}
+
+/** The check's last part, on the file's own stat: a regular file, its name not of the dotenv family. */
+function checkedStat(attachment: InboxAttachment, stat: Stats): CurrentCheck {
   if (!stat.isFile()) return changedType(`${attachment.path} is no longer a regular file.`);
   const refusal = inboxAttachmentNameRefusal(attachment.path);
   if (refusal) return changedType(refusal);
   return { ok: true, stat };
+}
+
+/**
+ * `checkCurrent`, the same steps in the same order with the same answers, its realpath and lstat calls off the
+ * event loop: a thread with hundreds of files lists them without stopping the Inbox for each (the reads and the
+ * opens use it; `checkCurrent` stays for the callers that need the answer at once).
+ */
+export async function checkCurrentAsync(attachment: InboxAttachment): Promise<CurrentCheck> {
+  let real: string;
+  try {
+    real = await realpath(attachment.path);
+  } catch {
+    return missing(`${attachment.name} is no longer on disk.`);
+  }
+  if (real !== attachment.path) return changedType(`${attachment.path} now leads somewhere else (${real}).`);
+  if (attachment.named_path) {
+    let target: string;
+    try {
+      target = await realpath(attachment.named_path);
+    } catch {
+      return missing(`${attachment.named_path} is no longer on disk.`);
+    }
+    if (target !== attachment.path) return changedType(`${attachment.named_path} now points somewhere else (${target}).`);
+  }
+  let stat: Stats;
+  try {
+    stat = await lstat(attachment.path);
+  } catch {
+    return missing(`${attachment.name} is no longer on disk.`);
+  }
+  return checkedStat(attachment, stat);
 }
 
 /**
@@ -436,7 +472,7 @@ export function checkCurrent(attachment: InboxAttachment): CurrentCheck {
  * or a plain text format, so a swapped-in file still opens by that extension.
  */
 export async function checkInboxAttachmentForLaunch(inboxDirPath: string, attachment: InboxAttachment): Promise<CurrentCheck> {
-  const check = checkCurrent(attachment);
+  const check = await checkCurrentAsync(attachment);
   if (!check.ok) return check;
   const kind = readInboxAttachmentKind(attachment.kind);
   if (kind !== "image" && kind !== "pdf" && kind !== "video") return check;
@@ -528,7 +564,7 @@ function headMatchesKind(attachment: InboxAttachment, head: Uint8Array): string 
  * swap in between, a FIFO or a device is refused without being read.
  */
 async function openCurrent(attachment: InboxAttachment): Promise<{ ok: true; handle: FileHandle; stat: Stats } | { ok: false; unavailable: InboxAttachmentUnavailable }> {
-  const check = checkCurrent(attachment);
+  const check = await checkCurrentAsync(attachment);
   if (!check.ok) return check;
   let handle: FileHandle;
   try {
@@ -583,7 +619,7 @@ function primeCurrentInfo(attachment: InboxAttachment, stat: Stats, result: Curr
  * so a growing log is not re-read on every listing.
  */
 export async function inboxAttachmentCurrentInfo(attachment: InboxAttachment, options: { hash?: "always" | "small" } = {}): Promise<CurrentResult> {
-  const check = checkCurrent(attachment);
+  const check = await checkCurrentAsync(attachment);
   if (!check.ok) return check;
   const key = cacheKey(attachment, check.stat);
   const cached = currentInfoCache.get(attachment.path);

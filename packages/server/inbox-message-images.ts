@@ -146,6 +146,11 @@ export function createInboxImageCapture(
   const pauseMs = options.pauseMs ?? INBOX_IMAGE_CAPTURE_PAUSE_MS;
   const retryMs = options.retryMs ?? INBOX_IMAGE_CAPTURE_RETRY_MS;
   const queue = new Set<string>();
+  /**
+   * Threads whose messages had nothing left to capture, at the thread's version then (`store.threadVersion`): a
+   * read of one that has not changed since starts no pass (its gaps are still none).
+   */
+  const settled = new Map<string, string>();
   /** Per message (least recently tried first), when each costly refusal was last tried. */
   const attempts = new Map<string, Map<string, number>>();
   let running: Promise<void> | null = null;
@@ -161,7 +166,15 @@ export function createInboxImageCapture(
   const lastTried = (messageId: string, ref: string) => attempts.get(messageId)?.get(ref) ?? -Infinity;
 
   const captureThread = async (threadId: string, budget: { bytes: number }) => {
-    for (const { message, refs } of store.imageCaptureGaps(threadId, inboxMessageImageRefsInOrder)) {
+    const version = store.threadVersion(threadId);
+    const gaps = store.imageCaptureGaps(threadId, inboxMessageImageRefsInOrder);
+    if (gaps.length === 0) {
+      settled.delete(threadId);
+      settled.set(threadId, version);
+      while (settled.size > ATTEMPTS_MAX_MESSAGES) settled.delete(settled.keys().next().value!);
+      return;
+    }
+    for (const { message, refs } of gaps) {
       if (stopped) return;
       const now = Date.now();
       const due = refs.filter((ref) => now - lastTried(message.id, ref) >= retryMs).slice(0, MESSAGE_BATCH);
@@ -217,6 +230,7 @@ export function createInboxImageCapture(
   return {
     schedule(threadId) {
       if (stopped) return;
+      if (settled.get(threadId) === store.threadVersion(threadId)) return;
       queue.add(threadId);
       if (running) return;
       running = (async () => {

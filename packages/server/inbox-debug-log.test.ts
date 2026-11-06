@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { INBOX_DEBUG_BATCH_RECORDS, INBOX_DEBUG_BODY_BYTES, INBOX_DEBUG_ID_HEADER, INBOX_DEBUG_ON_HEADER, INBOX_DEBUG_PATH } from "@plannotator/shared/inbox/debug-log";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { createInboxDebugLog } from "./inbox-debug-log";
+import { createInboxDebugLog, flushInboxDebugLogs } from "./inbox-debug-log";
 
 type Line = Record<string, unknown>;
 
@@ -67,6 +67,7 @@ describe("off, the default", () => {
     expect(read.status).toBe(200);
     expect(read.headers.has(INBOX_DEBUG_ON_HEADER)).toBe(false);
     expect((await post(server, { records: [{ t: 1, ev: "page_load" }] })).status).toBe(404);
+    await flushInboxDebugLogs();
     expect(existsSync(logPath(dataDir))).toBe(false);
   });
 });
@@ -79,6 +80,7 @@ describe("on", () => {
     const read = await fetch(url(server, "/api/inbox/threads?archived=exclude"), { headers: { [INBOX_DEBUG_ID_HEADER]: REQUEST } });
     expect(read.status).toBe(200);
     expect(read.headers.get(INBOX_DEBUG_ON_HEADER)).toBe("1");
+    await flushInboxDebugLogs();
     const mine = lines(logPath(dataDir)).filter((line) => line.id === REQUEST);
     expect(mine.map((line) => line.ev)).toEqual(["req_start", "req_end"]);
     expect(mine[0]).toMatchObject({ side: "server", method: "GET", route: "/api/inbox/threads", via: "local" });
@@ -91,6 +93,7 @@ describe("on", () => {
     const dataDir = world({ inboxDebug: true });
     const server = await start(dataDir);
     await fetch(url(server, "/api/inbox/threads"));
+    await flushInboxDebugLogs();
     expect(existsSync(logPath(dataDir))).toBe(true);
   });
 
@@ -99,6 +102,7 @@ describe("on", () => {
     const server = await start(dataDir, { debug: true });
     const answer = await post(server, { records: [{ t: 5, ev: "req_start", page: PAGE, id: REQUEST, method: "POST", route: `/api/inbox/messages/${MSG}/reply`, words: WORDS }, { t: 6, ev: WORDS }] });
     expect(await answer.json()).toEqual({ ok: true, written: 1 });
+    await flushInboxDebugLogs();
     const all = lines(logPath(dataDir));
     expect(all).toHaveLength(1);
     expect(all[0]).toMatchObject({ t: 5, side: "window", ev: "req_start", page: PAGE, id: REQUEST, route: `/api/inbox/messages/${MSG}/reply` });
@@ -111,8 +115,10 @@ describe("on", () => {
     const batch = (size: number) => ({ records: Array.from({ length: size }, (_, i) => ({ t: i + 1, ev: "visibility" })) });
     const refused = await post(server, batch(INBOX_DEBUG_BATCH_RECORDS + 1));
     expect(refused.status).toBe(413);
+    await flushInboxDebugLogs();
     expect(existsSync(logPath(dataDir))).toBe(false);
     expect(await (await post(server, batch(INBOX_DEBUG_BATCH_RECORDS))).json()).toEqual({ ok: true, written: INBOX_DEBUG_BATCH_RECORDS });
+    await flushInboxDebugLogs();
     expect(lines(logPath(dataDir))).toHaveLength(INBOX_DEBUG_BATCH_RECORDS);
   });
 
@@ -124,6 +130,7 @@ describe("on", () => {
     const large = await post(server, { records: [], pad: "x".repeat(INBOX_DEBUG_BODY_BYTES) });
     expect(large.status).toBe(413);
     expect((await post(server, "not json")).status).toBe(400);
+    await flushInboxDebugLogs();
     expect(existsSync(logPath(dataDir))).toBe(false);
   });
 
@@ -136,6 +143,7 @@ describe("on", () => {
     await fetch(url(server, `/api/inbox/messages/${MSG}/reply`), { method: "POST", headers: json, body: JSON.stringify({ idempotency_key: "k", words: WORDS }) });
     await fetch(url(server, `/api/inbox/embeds/${WORDS}.png`));
     await post(server, { records: [{ t: 1, ev: "req_fail", error: WORDS, route: `/api/inbox/embeds/${WORDS}` }] });
+    await flushInboxDebugLogs();
     const text = readFileSync(logPath(dataDir), "utf8");
     expect(text).not.toContain(WORDS);
     expect(text).toContain("/api/inbox/search");
@@ -148,10 +156,12 @@ describe("on", () => {
     const dressed = [`/api/inbox/outbox/msg_${WORDS}`, `/api/inbox/drafts/drf_${WORDS}`, `/api/inbox/attachments/att_${WORDS}/download`];
     for (const path of dressed) await fetch(url(server, path), { headers: { [INBOX_DEBUG_ID_HEADER]: WORDS } });
     await post(server, { records: [{ t: 1, ev: "req_fail", id: `p-${WORDS}`, page: `p-${WORDS}`, error: "Zebraquartz", protocol: "zebra/1", thread: `msg_${WORDS}`, route: dressed[0] }] });
+    await flushInboxDebugLogs();
     const text = readFileSync(logPath(dataDir), "utf8");
     expect(text).not.toContain(WORDS);
     expect(text).not.toContain("ebraquartz");
     expect(text).not.toContain("zebra/1");
+    await flushInboxDebugLogs();
     expect(lines(logPath(dataDir)).filter((line) => line.route === "/api/inbox/outbox/*").length).toBeGreaterThan(0);
   });
 });
@@ -185,7 +195,9 @@ describe("the window's route on its own", () => {
     const batch = (from: number) => new Request("http://127.0.0.1/api/inbox/debug/log", { method: "POST", body: JSON.stringify({ records: Array.from({ length: 8 }, (_, i) => ({ t: from + i, ev: "visibility" })) }) });
     await debug.accept(batch(100));
     await debug.accept(batch(200));
+    await flushInboxDebugLogs();
     expect(lines(`${debug.path}.1`).map((line) => line.t)).toEqual([100, 101, 102, 103, 104, 105, 106, 107]);
+    await flushInboxDebugLogs();
     expect(lines(debug.path).map((line) => line.t)).toEqual([200, 201, 202, 203, 204, 205, 206, 207]);
   });
 });
@@ -197,6 +209,7 @@ describe("the log itself", () => {
     const log = createInboxDebugLog(dir);
     const served = log.wrap(() => new Promise<Response>(() => {}), () => true);
     void served(new Request(`http://127.0.0.1/api/inbox/messages/${MSG}/reply`, { method: "POST", headers: { [INBOX_DEBUG_ID_HEADER]: REQUEST } }), "local");
+    await flushInboxDebugLogs();
     expect(lines(log.path).map((line) => [line.id, line.ev])).toEqual([[REQUEST, "req_start"]]);
   });
 
@@ -211,9 +224,11 @@ describe("the log itself", () => {
     await served(new Request(threads, { method: "PROPFIND" }), "local");
     await served(anyToken, "local");
     await served(new Request(threads, { method: "POST" }), "local");
+    await flushInboxDebugLogs();
     const text = readFileSync(log.path, "utf8");
     expect(text).not.toContain("PROPFIND");
     expect(text).not.toContain("ZEBRAQUARTZ");
+    await flushInboxDebugLogs();
     expect(lines(log.path).map((line) => line.method)).toEqual(["other", "other", "other", "other", "POST", "POST"]);
   });
 
@@ -224,7 +239,9 @@ describe("the log itself", () => {
     const failure = new Error(WORDS);
     const served = log.wrap(() => Promise.reject(failure), () => true);
     expect(await served(new Request("http://127.0.0.1/api/inbox/threads"), "local").catch((cause: unknown) => cause)).toBe(failure);
+    await flushInboxDebugLogs();
     expect(lines(log.path).map((line) => line.ev)).toEqual(["req_start", "req_error"]);
+    await flushInboxDebugLogs();
     expect(readFileSync(log.path, "utf8")).not.toContain(WORDS);
   });
 
@@ -258,6 +275,7 @@ describe("the log itself", () => {
     });
     expect(await refused(new Request("http://127.0.0.1/api/inbox/threads", { headers: { [INBOX_DEBUG_ID_HEADER]: REQUEST } }), "local")).toBe(plain);
     expect(plain.headers.has(INBOX_DEBUG_ON_HEADER)).toBe(false);
+    await flushInboxDebugLogs();
     expect(lines(log.path).at(-1)!.id).not.toBe(REQUEST);
   });
 
@@ -268,9 +286,37 @@ describe("the log itself", () => {
     const log = createInboxDebugLog(dir, cap);
     const served = log.wrap(async () => new Response("ok"), () => true);
     for (let i = 0; i < 200; i += 1) await served(new Request("http://127.0.0.1/api/inbox/threads"), "local");
+    await flushInboxDebugLogs();
     expect(readFileSync(log.path).length).toBeLessThanOrEqual(cap);
+    await flushInboxDebugLogs();
     expect(readFileSync(`${log.path}.1`).length).toBeLessThanOrEqual(cap);
+    await flushInboxDebugLogs();
     expect(existsSync(`${log.path}.2`)).toBe(false);
+  });
+});
+
+describe("written off the request path", () => {
+  test("every line lands, in order, across writes in flight and a rotation; the stop writes what is kept at once", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-debug-")));
+    roots.push(dir);
+    const log = createInboxDebugLog(dir, 40_000);
+    const served = log.wrap(async () => new Response("ok"), () => true);
+    for (let i = 0; i < 300; i += 1) {
+      await served(new Request("http://127.0.0.1/api/inbox/threads"), "local");
+      if (i % 50 === 0) void log.flush();
+      if (i % 7 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await log.flush();
+    const ids = [...lines(`${log.path}.1`), ...lines(log.path)].filter((line) => line.ev === "req_end").map((line) => Number(String(line.id).slice(1)));
+    // Rotated once: the oldest lines went with the first file; the rest are every request since, in order.
+    expect(ids.at(-1)).toBe(300);
+    expect(ids).toEqual(Array.from({ length: ids.length }, (_, i) => 301 - ids.length + i));
+    expect(existsSync(`${log.path}.2`)).toBe(false);
+
+    // Kept, not yet written: the stop writes it before it returns.
+    log.note("store_load", { ms: 1 });
+    log.close();
+    expect(lines(log.path).at(-1)).toMatchObject({ ev: "store_load" });
   });
 });
 
@@ -327,6 +373,7 @@ describe("over the tailnet", () => {
     const stranger = await through(INBOX_DEBUG_PATH, "someone@example.com", records);
     expect(stranger.status).toBe(403);
 
+    await flushInboxDebugLogs();
     const all = lines(logPath(dataDir));
     expect(all.filter((line) => line.side === "window")).toHaveLength(1);
     expect(all.filter((line) => line.id === REQUEST).map((line) => line.via)).toEqual(["tailnet", "tailnet"]);
