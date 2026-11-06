@@ -641,7 +641,7 @@ function guideCommentFields(fields: Record<string, unknown>, scope: "line" | "ge
   }
   const kept: Record<string, unknown> = { id: fields.id, type: fields.type, scope };
   if (fields.text !== undefined) kept.text = fields.text;
-  const strings = scope === "general" ? ["author", "conventionalLabel"] : ["author", "conventionalLabel", "suggestedCode", "originalCode", "selectedText", "tokenText"];
+  const strings = scope === "general" ? ["author", "conventionalLabel"] : ["author", "conventionalLabel", "suggestedCode", "originalCode", "selectedText", "tokenText", "anchorText"];
   for (const field of strings) {
     const value = fields[field];
     if (value === undefined || value === null) continue;
@@ -649,6 +649,8 @@ function guideCommentFields(fields: Record<string, unknown>, scope: "line" | "ge
     kept[field] = value;
   }
   if (scope === "line") {
+    // On a line an expand arrow opened: a PR's review posts it in its main comment, never inline.
+    if (fields.outsideDiff === true) kept.outsideDiff = true;
     for (const field of ["charStart", "charEnd"]) {
       const value = fields[field];
       if (value === undefined || value === null) continue;
@@ -5043,7 +5045,8 @@ export class InboxStore {
     if (!Number.isInteger(start) || !Number.isInteger(end) || (start as number) < 1 || (end as number) < (start as number)) {
       throw new InboxError("validation_error", "annotation.lineStart / lineEnd: line numbers, start first.", { field: "annotation.lineStart" });
     }
-    if (!isLineRangeInPatch(diff.patch, start as number, end as number, side)) {
+    // A line an expand arrow opened is outside every hunk by its nature; the file must still be one the patch changes.
+    if (fields.outsideDiff !== true && !isLineRangeInPatch(diff.patch, start as number, end as number, side)) {
       const range = start === end ? `line ${start}` : `lines ${start}-${end}`;
       throw new InboxError("validation_error", `annotation.lineStart / lineEnd: ${range} on the ${side} side of ${file} is not in one hunk of the guided review's patch.`, { field: "annotation.lineStart" });
     }

@@ -386,6 +386,18 @@ describe('diffShapeVersions', () => {
 });
 
 describe('checkShapeNoteInput', () => {
+  test('a box note keeps its box, code and picture; anything off is refused, not stored', () => {
+    const base = { kind: 'change', v: 1, view: 'picture', text: 'x' };
+    const box = { x: 0.1, y: 0.2, w: 0.3, h: 0.4 };
+    const ok = checkShapeNoteInput({ ...base, box, code: ['src/a.ts#L42'], picture: 'data:image/png;base64,iVBORw0KGgo=' });
+    expect(ok.ok && [ok.value.box, ok.value.code, ok.value.picture]).toEqual([box, ['src/a.ts#L42'], 'data:image/png;base64,iVBORw0KGgo=']);
+    expect(checkShapeNoteInput({ ...base, box: { ...box, x: 2 } }).ok).toBe(false);
+    expect(checkShapeNoteInput({ ...base, view: null, box }).ok).toBe(false);
+    expect(checkShapeNoteInput({ ...base, code: ['/etc/passwd#L1'] }).ok).toBe(false);
+    expect(checkShapeNoteInput({ ...base, picture: 'data:image/svg+xml;base64,PHN2Zz4=' }).ok).toBe(false);
+    expect(checkShapeNoteInput({ ...base, picture: `data:image/png;base64,${'A'.repeat(6_000_001)}` }).ok).toBe(false);
+  });
+
   test('a general comment needs no part; a part needs its view', () => {
     expect(checkShapeNoteInput({ kind: 'change', v: 1, text: 'Simpler, please' }).ok).toBe(true);
     expect(checkShapeNoteInput({ kind: 'ask', v: 1, view: 'code', text: 'Why two files?' }).ok).toBe(true);
