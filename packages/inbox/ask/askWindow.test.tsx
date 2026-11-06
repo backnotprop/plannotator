@@ -80,6 +80,7 @@ async function startWorld(setting: 'on' | 'off'): Promise<World> {
     env: {
       ...process.env,
       DOM_TESTS: '0',
+      HOME: dir,
       PLANNOTATOR_DATA_DIR: join(dir, 'data'),
       CLAUDE_CONFIG_DIR: join(dir, 'claude'),
       CODEX_HOME: join(dir, 'codex'),

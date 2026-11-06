@@ -14,6 +14,7 @@ import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import { SoftLineBreaksContext } from '@plannotator/ui/components/InlineMarkdown';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
+import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
 import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListGroupId, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxReplyDraft, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
@@ -61,7 +62,7 @@ import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../
 import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
 import { clearLateVoiceMiss, LATE_VOICE_MISSED, noteLateVoiceMiss, useLateVoiceMiss } from '../lateVoice';
-import { landInReplyDraft, landWordsInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook } from '../replyDraft';
+import { landInReplyDraft, landWordsInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
 import { useReplyHasWords, useReplyText, useReplyTextStore, useReplyTextWhile, type ReplyText } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
 import { conflictText, DraftHead, DraftFootNote, DraftStamp } from './DraftLabel';
@@ -154,7 +155,8 @@ import { StepsButton } from '../steps/StepsButton';
 import { stepsCount, stepsWaitTarget } from '../steps/model';
 import { useThreadSteps, type StepsSubscribe } from '../steps/useThreadSteps';
 import { linkHashtags, useInitiativeTags } from '../hashtags';
-import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
+import { replyWordsCount, withFreeName, withoutReplyWords, type ShapeReplyPart } from '../shape/addToReply';
+import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
 
 export { routeSendAnnotations, sendTargetsOf, type SendTarget };
 
@@ -1131,6 +1133,12 @@ export interface ThreadPaneProps {
   /** Words from Ask AI's Reply in the thread: they join the reply draft, and the pane calls `onReplyWordsTaken` once. */
   replyWords?: string | null;
   onReplyWordsTaken?: () => void;
+  /**
+   * A board's Add to reply (packages/inbox/shape/addToReply.ts): its words join the reply after any it holds, its
+   * picture joins the reply's files, with the window's "Added to your reply · Undo". The pane calls `onReplyPartTaken` once.
+   */
+  replyPart?: ShapeReplyPart | null;
+  onReplyPartTaken?: () => void;
   /** On a phone the header leads with a Back button named for the screen under the thread ("Inbox", a project). */
   backLabel?: string;
   /** A thread opened from a Board card: the chip naming the card, under the subject (board/CardChip.tsx). */
@@ -1177,6 +1185,8 @@ export interface ThreadPaneProps {
   onBackToList?: (fileName: string | null) => void;
   /** The window's one toast: "Files open side by side now" with Undo, when a picked view becomes the remembered one. */
   onToast?: (toast: Omit<InboxToastModel, 'id'>) => void;
+  /** Take down the toast this pane put up, named by its Undo, when it is still the one showing (another replaced it: no change). */
+  onToastGone?: (onUndo: () => void) => void;
   /**
    * The thread's address, or one message's (`&msg=<id>`), for the copy menus' Copy link (CopyMenus.tsx). Absent:
    * the window's own origin (rowMenu.ts `threadLink` before the settings load).
@@ -1441,7 +1451,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   // Thread steps (approval "inbox-thread-steps"): the lists with steps, newest first; none while the switch is off.
@@ -1705,8 +1715,13 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     setTaggedIds(ids);
     if (ids.length === 0) setTagMode('ask');
   }, []);
+  /** A board's Add to reply whose Undo is live (one at a time): `closing` as the box closes into a draft, `end` when it can no longer. */
+  const partUndo = useRef<{ end: () => void; closing: () => void } | null>(null);
   /** `discarded`: Discard closed it, so a file still uploading stops instead of joining the draft. */
   const closeBox = (discarded = false) => {
+    // A board's Add to reply still undoable: it reads the box as it goes into the draft (its Undo works on that).
+    if (!discarded) partUndo.current?.closing();
+    else partUndo.current?.end();
     // A Send waiting to be confirmed: read back now, so a reply that went leaves no stale "Draft" foot.
     const earlier = unconfirmed.get(thread.thread_id);
     if (earlier) forgetUnconfirmed(earlier, 'closed');
@@ -2141,7 +2156,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // A launched agent that stopped is not "ended": a reply starts it again (`claude respawn`), so no route choice.
   const launchResumes = !!launched && !launched.deleted_at && runLine !== undefined && runLine?.state !== 'missing' && runLine?.state !== 'failed';
   // Only the launched session (the root's `to`, the one the server's sweep starts again): another agent in the thread that ended is gone.
-  const resumingSession = launchResumes ? (root.to?.session ?? null) : null;
+  const resumingSession = launchResumes ? inboxLaunchedSession(root) : null;
   // Every other session this Send reaches is checked too (handoff "multi-agent-thread-model", failure 2): a pick
   // on an ended session's question, while the words go to a live one, opens the choice for that answer.
   const otherSessions = otherSendSessions(thread, { skip: skipIds, carries: sendCarries, records }, wordsAsking).filter((s) => s.session !== resumingSession);
@@ -2157,7 +2172,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // Tags (approval "inbox-tag-agents"): who the person can tag with `@`, read while the reply box is open. In a
   // thread with more than one agent, read with the box closed too: the recipient pill and the message heads name
   // agents by their folders (approval "inbox-reply-recipient"), and a head must not change when the box opens.
-  const multiAgent = participants.length > 1 || activeHandoff(thread) !== null;
+  const multiAgent = participants.length > 1 || activeHandoff(thread) !== null || tookOverReply(thread) !== null;
   const taggable = useTaggable(thread.thread_id, (box.open || !!file || multiAgent) && !resolved);
   // Each session's label (issue #2450): an agent message's author reads it, as the list read it.
   const sessionLabels = useSessionLabels();
@@ -2240,7 +2255,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     const add = (host: string | null, session: string) => {
       if (!people.some((p) => p.session === session)) people.push({ host, session });
     };
-    const handed = activeHandoff(thread);
+    const handed = activeHandoff(thread) ?? tookOverReply(thread);
     if (handed?.to) add(handed.to.host, handed.to.session);
     // The agent asked has ended: the live sessions take its place in the list (its project's, and writers from other folders).
     if (askerEnded) for (const s of live?.sessions ?? []) add(s.host, s.session);
@@ -4462,6 +4477,10 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // another way from such a session (the stdio shim run inside Claude Code), when that session polls now.
   const wakingSession = askedSession && repliedTo?.wakes === true ? askedSession : null;
   const replySession = lastTo?.session ?? askedSession;
+  // The run line speaks for the session the launch started. Words "your reply starts it again" and "your reply is
+  // waiting" are not about a reply waiting on another session, or a root that moved: that reply's own line says.
+  const runSpeaks = !runLine || (runLine.state !== 'stopped' && runLine.state !== 'missing') || (replySession ?? root.to?.session ?? null) === inboxLaunchedSession(root);
+  const shownRun = runSpeaks ? runLine : null;
   const replyWaiting = !!replySession && !last.delivery && !(lastTo === null && sent?.checked_at);
   // A 👍 the Inbox sent through to a waking session and that session has not taken yet (the person's reply
   // is not the last message then: the 👍 is offered only before it): its line reads the same connection.
@@ -4478,6 +4497,9 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // A reply that tags agents (approval "inbox-tag-agents", Lines): one line per tagged session, each with
   // its own state and Send now, under the owner's line. Their connections are read while one still waits.
   const lastTags = last.author.kind === 'person' && !isInboxNote(last) ? messageTags(last) : [];
+  // A reply waiting on a gone launched agent can still move: not taken, not archived. The line offers it while another session could take it.
+  const waitingCanMove = !!lastTo && !isDelivered(last, thread.messages[0]!) && !resolved;
+  const anotherCanTake = (pendingLive?.sessions ?? []).some((s) => s.session !== lastTo?.session && !lastTags.some((tag) => tag.session === s.session && tag.delivery && !tag.handed_away));
   const ownerHost = lastTo?.host ?? (repliedTo?.author.kind === 'agent' ? (repliedTo.author.host ?? null) : null);
   const waitingTags = lastTags.filter((t) => t.wakes && !t.delivery).map((t) => t.session);
   const { connections: tagConnections, load: loadTagConnections } = useTagConnections(thread.thread_id, waitingTags, waitingTags.length > 0);
@@ -5019,7 +5041,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // another session's list adds or drops its "+1".
   const replyKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'reply' });
   const openItemsKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'openItems' });
-  const footSig = [footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, openActions.length, phone, replyKeyShown, openItemsKeyShown, stepLists[0] ? stepsCount(stepLists[0]).text : '', stepLists.length].join('|');
+  const footSig = [showAskerNote, anyOtherLive, footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, openActions.length, phone, replyKeyShown, openItemsKeyShown, stepLists[0] ? stepsCount(stepLists[0]).text : '', stepLists.length].join('|');
   const rowFittedFor = useRef('');
   const fitRowRef = useRef<(force?: boolean) => void>(() => {});
   fitRowRef.current = (force = false) => {
@@ -5104,6 +5126,74 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     // changeReply reads this render's Send state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replyWords, sending]);
+
+  // A board's Add to reply: its words after the draft's, its picture beside them. Its toast's Undo works once and takes
+  // out exactly that press's words and file, in the box or, once Cancel or Esc closed it, in the saved draft; a Send,
+  // Discard or another thread ends it.
+  const changeReplyLive = useRef(changeReply);
+  changeReplyLive.current = changeReply;
+  useEffect(() => {
+    if (!replyPart || sending) return;
+    onReplyPartTaken?.();
+    const kept = boxRef.current.open ? boxRef.current.text : replyDraft.conflict ?? replyDraft.draft?.body ?? '';
+    // A closed box opens with its draft's files, as a drop on the thread opens it.
+    if (!boxRef.current.open) openBox();
+    const words = replyPart.words;
+    // Which of the words' places is this press's: the same box added twice reads the same.
+    const nth = words ? replyWordsCount(kept, words) : 0;
+    if (words) changeReply(kept.trim() ? `${kept.trimEnd()}\n\n${words}` : words);
+    // Its name beside every file the reply holds: a closed box's draft files come back through state, after this.
+    const taken = [...replyFiles.files.map((f) => f.name), ...draftFilesWithMine(replyDraft.draft?.files ?? []).map((f) => f.name)];
+    const file = replyPart.file ? withFreeName(replyPart.file, taken) : null;
+    const keys = file ? replyFiles.add([file]) : [];
+    setError(null);
+    partUndo.current?.end();
+    let live = true;
+    const end = () => {
+      if (!live) return;
+      live = false;
+      if (partUndo.current?.end === end) partUndo.current = null;
+      onToastGone?.(undo);
+    };
+    // Its file's upload, once in (a box opened again shows the draft's files under their upload ids), and the box as it
+    // last closed into the draft.
+    const uploads = new Set<string>();
+    let closed: { text: string; files: ReplyDraftFiles } | null = null;
+    const closing = () => {
+      for (const f of replyFiles.current()) if (keys.includes(f.key) && f.upload) uploads.add(f.upload.upload_id);
+      const text = boxRef.current.text;
+      closed = { text, files: replyFiles.draftFiles(text) };
+    };
+    partUndo.current = { end, closing };
+    const undo = () => {
+      if (!live) return;
+      end();
+      // Words the person changed since are theirs now: the file goes, the words stay.
+      if (boxRef.current.open) {
+        for (const key of [...keys, ...uploads]) replyFiles.remove(key);
+        if (!words) return;
+        const now = boxRef.current.text;
+        const next = withoutReplyWords(now, words, nth);
+        if (next !== now) changeReplyLive.current(next);
+        return;
+      }
+      // Closed (Cancel, Esc): the draft it was saved as, without them.
+      if (!closed) return;
+      const text = words ? withoutReplyWords(closed.text, words, nth) : closed.text;
+      const files = closed.files.filter((f) => !uploads.has(f.upload_id));
+      if (text === closed.text && files.length === closed.files.length) return;
+      replyDraft.save(text, files);
+      replyDraft.flush();
+    };
+    onToast?.({ icon: 'check', lead: 'Added to your reply', phoneLead: 'Added to your reply', speech: 'Added to your reply.', onUndo: undo });
+    // openBox and changeReply read this render's draft and Send state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replyPart, sending]);
+  // A Send, or another thread, ends the Undo (Discard ends it in closeBox).
+  useEffect(() => {
+    if (sending) partUndo.current?.end();
+  }, [sending]);
+  useEffect(() => () => partUndo.current?.end(), [thread.thread_id]);
 
   // Mark read: pressed while the thread is marked read, offered while something here waits on the person.
   const readAt = row?.read_at ?? null;
@@ -5713,10 +5803,10 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                 </article>,
               );
             }
-            if (message === last && runLine && !runInCard) {
+            if (message === last && shownRun && !runInCard) {
               before.push(
                 <div className="ib-msg" key="perm-run">
-                  <RunLine run={runLine} canOpen={!!openTerminal} canReaddress={!!last.to} guest={guest} onChanged={() => onRunChanged?.()} />
+                  <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} onChanged={() => onRunChanged?.()} />
                 </div>,
               );
             }
@@ -6038,8 +6128,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                     ))}
                   </ul>
                 )}
-                {message === last && runLine && !runInCard && <RunLine run={runLine} canOpen={!!openTerminal} canReaddress={!!last.to} guest={guest} onChanged={() => onRunChanged?.()} />}
-                {message === last && !runLine && delivered && tagLines.length > 0 && (
+                {message === last && shownRun && !runInCard && <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} onChanged={() => onRunChanged?.()} />}
+                {message === last && !shownRun && delivered && tagLines.length > 0 && (
                   // Lines (approval "inbox-tag-agents"): the owner first, then each tagged session, each with its own state.
                   <ul className="ib-tg-dl" data-tag-lines="" tabIndex={-1}>
                     <li data-tag-line={replySession ?? ''} data-delivery={delivered.state} data-owner="">
@@ -6076,7 +6166,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                     {tagSendNow.error}
                   </p>
                 )}
-                {message === last && !runLine && delivered?.wait && tagLines.length === 0 && (
+                {message === last && !shownRun && delivered?.wait && tagLines.length === 0 && (
                   // Waiting on a busy agent (approval "inbox-busy-agent-reply"): the band, with its own minute clock.
                   <UndeliveredBand
                     wait={delivered.wait}
@@ -6087,7 +6177,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                     restartName={restartName}
                   />
                 )}
-                {message === last && !runLine && delivered && !delivered.wait && tagLines.length === 0 && (
+                {message === last && !shownRun && delivered && !delivered.wait && tagLines.length === 0 && (
                   // tabIndex -1: Send to another session puts focus here once it moved the message.
                   <div className="ib-delivered" data-delivery={delivered.state} data-auto={delivered.autoAfterMin !== undefined ? '' : undefined} tabIndex={-1}>
                     <span className="ib-dl-main">
@@ -6118,11 +6208,24 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                     {sendNowError}
                   </p>
                 )}
-                {/* A launched agent that is gone: only a message addressed to it (its own `to`) can move; a reply to its answer cannot. */}
-                {message === last && (runLine ? runLine.state === 'missing' && !!last.to : delivered?.state === 'undelivered') && lastTo && (
+                {/* A plain reply saved for a session that ended moves the same way (the server checks that it ended). */}
+                {message === last && delivered?.ended && !lastTo && askedSession && !isDelivered(last, thread.messages[0]!) && (
+                  <SendToAnotherSession
+                    messageId={last.id}
+                    ended={{ host: repliedTo?.author.kind === 'agent' ? (repliedTo.author.host ?? '') : '', session: askedSession }}
+                    taken={lastTags.filter((tag) => tag.delivery && !tag.handed_away).map((tag) => tag.session)}
+                    project={thread.project.name}
+                    live={live}
+                    onReload={loadLive}
+                    onMoved={onChanged}
+                  />
+                )}
+                {/* A launched agent that is gone: the reply waiting on it can move, addressed to it or answering it. */}
+                {message === last && (shownRun ? shownRun.state === 'missing' && waitingCanMove : delivered?.state === 'undelivered') && lastTo && (
                   <SendToAnotherSession
                     messageId={last.id}
                     ended={lastTo}
+                    taken={lastTags.filter((tag) => tag.delivery && !tag.handed_away).map((tag) => tag.session)}
                     project={thread.project.name}
                     live={pendingLive}
                     onReload={loadPendingLive}
@@ -6488,6 +6591,28 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                     Looks good
                   </button>
                 </Tip>
+              )}
+              {/* The session ended (the note above says so): what the person can do about it, with Reply. */}
+              {showAskerNote && (
+                <div className="ib-footended" data-foot-ended="">
+                  {anyOtherLive && (
+                    <button
+                      type="button"
+                      className="ib-btn"
+                      data-ended-send=""
+                      onClick={() => {
+                        openBox();
+                        setRcptOpen(true);
+                      }}
+                    >
+                      <Icon name="forward" size={15} />
+                      Send to another session
+                    </button>
+                  )}
+                  <button type="button" className="ib-btn" data-ended-archive="" onClick={() => void resolve(true)}>
+                    Archive
+                  </button>
+                </div>
               )}
               {/* The agents' steps (approval "inbox-thread-steps", A1): beside the open questions, by their list's rules. */}
               {stepLists.length > 0 && (

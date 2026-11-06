@@ -215,7 +215,7 @@ describe('shapeBoardNotes: what shape update says about a board', () => {
   });
 
   test.each([
-    ['too many words', { html: `<svg viewBox="0 0 900 500" data-mark="a" data-ref="1"><text x="0" y="0">${'word '.repeat(81)}</text><rect x="0" y="0" width="900" height="500"/></svg>` }, 'has 81 words'],
+    ['too many words', { html: `<svg viewBox="0 0 900 500" data-mark="a" data-ref="1"><text x="0" y="0">${'word '.repeat(241)}</text><rect x="0" y="0" width="900" height="500"/></svg>` }, 'has 241 words'],
     ['no canvas', { width: undefined, height: undefined }, 'no width and height'],
     ['no tall', { tall: undefined }, 'no tall drawing'],
     ['no numbers', { html: GOOD.replace(' data-ref="1"', '') }, 'no numbers'],
@@ -225,6 +225,12 @@ describe('shapeBoardNotes: what shape update says about a board', () => {
   ])('%s', (_name, picture, words) => {
     const notes = notesFor(picture as Parameters<typeof notesFor>[0]);
     expect(notes.join('\n')).toContain(words as string);
+  });
+
+  test('a whiteboard with a short line under each piece is no word problem: 240 words pass, 241 are named', () => {
+    const words = (n: number) => ({ html: `<svg viewBox="0 0 900 500" data-mark="a" data-ref="1"><text x="0" y="0">${'word '.repeat(n)}</text><rect x="0" y="0" width="900" height="500"/></svg>` });
+    expect(notesFor(words(240))).toEqual([]);
+    expect(notesFor(words(241)).join('\n')).toContain('about 200 is the most');
   });
 
   test('a number with nothing behind it is named; one with a line or a picture is not', () => {
@@ -380,6 +386,18 @@ describe('diffShapeVersions', () => {
 });
 
 describe('checkShapeNoteInput', () => {
+  test('a box note keeps its box, code and picture; anything off is refused, not stored', () => {
+    const base = { kind: 'change', v: 1, view: 'picture', text: 'x' };
+    const box = { x: 0.1, y: 0.2, w: 0.3, h: 0.4 };
+    const ok = checkShapeNoteInput({ ...base, box, code: ['src/a.ts#L42'], picture: 'data:image/png;base64,iVBORw0KGgo=' });
+    expect(ok.ok && [ok.value.box, ok.value.code, ok.value.picture]).toEqual([box, ['src/a.ts#L42'], 'data:image/png;base64,iVBORw0KGgo=']);
+    expect(checkShapeNoteInput({ ...base, box: { ...box, x: 2 } }).ok).toBe(false);
+    expect(checkShapeNoteInput({ ...base, view: null, box }).ok).toBe(false);
+    expect(checkShapeNoteInput({ ...base, code: ['/etc/passwd#L1'] }).ok).toBe(false);
+    expect(checkShapeNoteInput({ ...base, picture: 'data:image/svg+xml;base64,PHN2Zz4=' }).ok).toBe(false);
+    expect(checkShapeNoteInput({ ...base, picture: `data:image/png;base64,${'A'.repeat(6_000_001)}` }).ok).toBe(false);
+  });
+
   test('a general comment needs no part; a part needs its view', () => {
     expect(checkShapeNoteInput({ kind: 'change', v: 1, text: 'Simpler, please' }).ok).toBe(true);
     expect(checkShapeNoteInput({ kind: 'ask', v: 1, view: 'code', text: 'Why two files?' }).ok).toBe(true);

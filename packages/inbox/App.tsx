@@ -53,7 +53,7 @@ import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, r
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
-import { hasMovingDelivery } from './rowDelivery';
+import { deliveriesReadList } from './rowDelivery';
 import {
   captureSettle,
   COVERED_LIST_SETTLES,
@@ -135,6 +135,7 @@ import { errorToast } from './toastError';
 import { canToggleRead, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, seenHeldInNew } from './markRead';
 import { threadLink, type RowMenuAction } from './rowMenu';
 import { movePin, unpinnedWhere } from './pins';
+import { noteStarred } from './starPop';
 import type { PinnedAction } from './components/PinnedRow';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { newBatchId, projectAllArchived, projectBatchToast, projectsWithReadable, shownProjects, type ProjectAction } from './projectMenu';
@@ -182,6 +183,8 @@ import { useInboxAsk } from './ask/useInboxAsk';
 import { setSessionLabels } from './sessionLabels';
 import { createInboxShapeHost } from './shape/inboxShapeHost';
 import { ShapeGridPage, ShapeLayer, ShapePebbleButton } from './shape/ShapeParts';
+import { shapeReplyPart, type ShapeReplyPart } from './shape/addToReply';
+import type { ShapeBoxSelection } from '@plannotator/ui/components/shape';
 import { useInboxShapes } from './shape/useInboxShapes';
 import { filterShapeItems, shapeAgo } from '@plannotator/ui/components/shape/ShapeGrid';
 import type { SearchShape } from './search/model';
@@ -1029,6 +1032,9 @@ function Inbox() {
   const [lastSent, setLastSent] = useState<string | null>(() => storage.getItem(COMPOSE_LAST_COOKIE));
   /** The one toast (Mark read, Archive) with its Undo, and what the live region last said. */
   const [toast, setToast] = useState<InboxToastModel | null>(null);
+  // The toast showing now, for a pane taking down only its own (`onToastGone`).
+  const toastNow = useRef(toast);
+  toastNow.current = toast;
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** When the toast's timer ends, and what was left of it while a swipe holds it. */
   const toastDeadline = useRef(0);
@@ -2008,8 +2014,8 @@ function Inbox() {
           // So does each steps list's presence (the in-progress mark turns only while its session works): read
           // again only where a list shows.
           stepsBus.emit('presence');
-          // A session's label changed (issue #2450): the list carries the labels, so it is read again.
-          if (!change?.labels && !hasMovingDelivery(latestSectionsRef.current)) return;
+          // A session's label changed (issue #2450), or one ended or came back: the list carries both, so it is read again.
+          if (!deliveriesReadList(change, latestSectionsRef.current)) return;
           listAfterEvents(80);
         },
         // Every (re)connect: the permission now, since a reconnect's URL may be stale.
@@ -3372,9 +3378,11 @@ function Inbox() {
     const pinnedAt = index >= 0 ? (pinsNow[index]!.pinned_at ?? null) : null;
     // Where it still is, from the pinned row (an archived thread has none in the list) or the list.
     const listed = (latestRef.current?.pins ?? []).find((pin) => pin.thread_id === row.thread_id) ?? rowOf(row.thread_id) ?? (threadRow?.thread_id === row.thread_id ? threadRow : null);
+    if (pinned) noteStarred(row.thread_id);
     try {
       await inboxApi.pin(row.thread_id, pinned);
     } catch (cause) {
+      if (pinned) noteStarred(null);
       showError(cause);
       return;
     }
@@ -3383,15 +3391,15 @@ function Inbox() {
     await refreshList(false);
     const subject = row.subject ?? '(no subject)';
     if (pinned) {
-      say(`Pinned “${subject}”`);
+      say(`Starred “${subject}”`);
       return;
     }
     const canUndo = index >= 0 && pinnedAt !== null;
     showToast({
       icon: 'unpin',
-      lead: 'Unpinned',
+      lead: 'Unstarred',
       detail: unpinnedWhere(listed),
-      speech: `Unpinned “${subject}”. ${unpinnedWhere(listed)}.`,
+      speech: `Unstarred “${subject}”. ${unpinnedWhere(listed)}.`,
       onUndo: canUndo ? () => void restorePin({ thread_id: row.thread_id, index, pinned_at: pinnedAt! }, subject) : undefined,
     });
   };
@@ -3401,16 +3409,28 @@ function Inbox() {
    * back a pin another tab removed meanwhile.
    */
   const restorePin = async (restore: { thread_id: string; index: number; pinned_at: string }, subject: string) => {
+    noteStarred(restore.thread_id);
     try {
       await inboxApi.pinRestore(restore);
     } catch (cause) {
+      noteStarred(null);
       showError(cause);
       return;
     }
     setSidebarSectionOpen('pinned', true);
     await refreshList(false);
     dismissToast();
-    say(`Pinned “${subject}” again.`);
+    say(`Starred “${subject}” again.`);
+  };
+  /**
+   * A press on the star a list row shows (the owner, 2026-11-05): Unstar, with what the menus' item does (the toast and
+   * `Z`). It opens nothing and marks nothing read. One press at a time per thread: a double click is one unstar.
+   */
+  const unstarring = useRef(new Set<string>());
+  const unstarRow = (row: InboxListRow) => {
+    if (unstarring.current.has(row.thread_id)) return;
+    unstarring.current.add(row.thread_id);
+    void setPin(row, false).finally(() => unstarring.current.delete(row.thread_id));
   };
   /** A pinned row's menu: Unpin, Move up, Move down, Copy link. */
   const pinAction = async (row: InboxListRow, action: PinnedAction) => {
@@ -4518,6 +4538,15 @@ function Inbox() {
   // Ask AI (PLANNOTATOR_INBOX_ASK_AI, and always while Code review is on: approval "shape-in-code-review"): off, this
   // reads nothing and draws nothing. A linked machine's thread has no chat here.
   const [askReply, setAskReply] = useState<{ threadId: string; words: string } | null>(null);
+  // A board's Add to reply: its words and picture, on their way to the reply of the thread the board hangs off.
+  const [shapeReply, setShapeReply] = useState<(ShapeReplyPart & { threadId: string }) | null>(null);
+  // The thread the open board hangs off (read when its Add to reply is pressed: one callback, so the board keeps its options).
+  const shapeReplyThread = useRef<string | null>(null);
+  shapeReplyThread.current = route.page === 'inbox' && thread && thread.thread_id === route.thread ? thread.thread_id : null;
+  const addShapeReply = useCallback((selection: ShapeBoxSelection, text: string) => {
+    const threadId = shapeReplyThread.current;
+    if (threadId) void shapeReplyPart(selection, text).then((part) => setShapeReply({ ...part, threadId }));
+  }, []);
   const ask = useInboxAsk({
     on: (settings?.ask_ai === true || settings?.code_review?.on === true) && !tourOn,
     threadId: route.thread && !machineOf(route.thread) ? route.thread : null,
@@ -5579,6 +5608,7 @@ function Inbox() {
           onSnooze={snoozeOn ? (row, until) => void snooze(row, until) : undefined}
           snoozesOf={(row) => rowSnoozes(row, machines)}
           pinned={pinsOn ? pinnedIds : undefined}
+          onUnstar={pinsOn ? unstarRow : undefined}
           tidy={{
             ...listTidy,
             combine: async (pairs) => {
@@ -5701,6 +5731,8 @@ function Inbox() {
             askFileButton={ask.fileButton}
             replyWords={askReply?.threadId === thread.thread_id ? askReply.words : null}
             onReplyWordsTaken={() => setAskReply(null)}
+            replyPart={shapeReply?.threadId === thread.thread_id ? shapeReply : null}
+            onReplyPartTaken={() => setShapeReply(null)}
             onQuestions={patchQuestions}
             onPickSaves={onPickSaves}
             onChanged={afterWrite}
@@ -5796,6 +5828,9 @@ function Inbox() {
             remote={settings ? (settings.via ?? 'local') === 'tailnet' : null}
             guest={guestPage}
             onToast={(t) => showToast(t)}
+            onToastGone={(onUndo) => {
+              if (toastNow.current?.onUndo === onUndo) dismissToast();
+            }}
             linkOf={(messageId) => threadLink(thread.thread_id, settings, window.location.origin, messageId)}
             onInboxLink={inboxLink}
             onBackToList={(fileName) => {
@@ -5944,6 +5979,7 @@ function Inbox() {
               id={shapeLayerId}
               thread={route.page === 'inbox' && thread && thread.thread_id === route.thread ? thread : null}
               onClose={() => close({ ...routeRef.current, shape: null })}
+              onAddToReply={addShapeReply}
             />
           )}
         </main>
@@ -6276,6 +6312,7 @@ function Inbox() {
             key={guideMessage.id}
             thread={thread}
             message={guideMessage}
+            guest={tailnetGuest(settings)}
             // From the route as it is now (a verdict lands after the person moved on): only while it still shows this review.
             onBack={() => {
               const now = routeRef.current;
@@ -6289,6 +6326,7 @@ function Inbox() {
           <GuidePane
             thread={thread}
             message={guideMessage}
+            guest={tailnetGuest(settings)}
             codeReview={settings?.code_review?.on === true}
             onBack={() => close({ ...route, guide: null })}
             onClose={() => close({ ...route, thread: null, guide: null })}
