@@ -7775,20 +7775,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 @media (prefers-reduced-motion: reduce) {
   .ib-rv-docked { animation: none; }
 }
-/* The bar under a file's name shows with the pointer on the file, or under a finger while the file or the page moves
-   (ReviewPane). It sits over the header's edge, so showing it moves nothing; hidden, it takes no tap. Sideways scrolling is
-   the code's own and does not need it. */
-.ib-rv-walk [data-diff-hscrollbar] { pointer-events: none; }
-.ib-rv-walk [data-diff-hscrollbar] > div { opacity: 0; transition: opacity 120ms ease-out, background-color 150ms ease; }
-.ib-rv-walk [data-guide-file-shell][data-review-file-moving] [data-diff-hscrollbar]:has(> div) { pointer-events: auto; }
-.ib-rv-walk [data-guide-file-shell][data-review-file-moving] [data-diff-hscrollbar] > div { opacity: 1; }
-@media (hover: hover) {
-  .ib-rv-walk [data-guide-file-shell]:hover [data-diff-hscrollbar]:has(> div) { pointer-events: auto; }
-  .ib-rv-walk [data-guide-file-shell]:hover [data-diff-hscrollbar] > div { opacity: 1; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .ib-rv-walk [data-diff-hscrollbar] > div { transition: background-color 150ms ease; }
-}
 /* The menu portals to the body, outside .pn-inbox. Long titles wrap and many chapters scroll; the count stays. */
 .ib-rj-menu[data-review-jump-menu] { display: flex; flex-direction: column; width: 380px; max-width: calc(100vw - 16px); padding: 6px; border-radius: 12px; border: 1px solid color-mix(in oklch, var(--border) 80%, transparent); box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.28); }
 .ib-rj-menu[data-review-jump-menu]:focus-visible { outline: none; }

@@ -1241,6 +1241,12 @@ html:has([data-pn-compact-touch-layout='true'])
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
+/* Except a diff: Pierre (@pierre/diffs) draws its own bar at the bottom of each file's code with ::-webkit-scrollbar,
+ * sized to the room its layout keeps. scrollbar-color is inherited into its shadow root, and Chrome drops
+ * ::-webkit-scrollbar styles under it (a 15px classic bar the layout does not count, cut off at the file's edge). */
+diffs-container {
+  scrollbar-color: auto;
+}
 
 /* Selection */
 ::selection {
