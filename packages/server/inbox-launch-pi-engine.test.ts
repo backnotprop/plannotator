@@ -203,7 +203,7 @@ describe("Pi through the launch engine, against the fake pi", () => {
     const t = setup();
     const { root, session } = await sendUnconnected(t);
     const pid = t.fake.starts()[0]!.pid;
-    process.kill(pid, "SIGKILL");
+    process.kill(pid, "SIGKILL"); // inbox-guard: own child (the test's fake Pi, not an Inbox)
     await until("it ended", () => !t.fake.alive(pid));
     await until("the host saw it end", async () => (t.clock.ahead = 120_000, (await t.launch.runOf(root.id))?.state === "stopped"));
     expect((await t.launch.runOf(root.id))?.cause).toMatch(/^Pi ended on its own \(exit \d+\)\. Your reply continues it\.$/);
