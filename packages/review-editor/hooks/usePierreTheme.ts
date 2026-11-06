@@ -199,6 +199,32 @@ const COMPACT_TOUCH_GUTTER_UTILITY_CSS = `
   }
 `;
 
+/**
+ * Opt-in hooks for a host page that sets a file's name on its own surface, above
+ * a framed code box (the Inbox's review, inbox.css). Custom properties inherit
+ * into Pierre's shadow root, so the host sets them on any ancestor of the
+ * `diffs-container`:
+ *
+ * - `--pn-diff-header-bg`: the file header's fill. The header sticks to the top
+ *   of the scroller, so it needs a solid colour (the host's surface), never
+ *   transparent, or the code shows through it while stuck.
+ * - `--pn-diff-code-border`, `--pn-diff-code-radius`, `--pn-diff-code-overflow`:
+ *   a border, corners and clipping (`clip`, so the rows' fills keep to the
+ *   corners) on the code under the header.
+ *
+ * Each fallback is what Pierre draws without them (its sticky and default
+ * headers fill with `--diffs-bg`; `pre` has no border, radius or overflow of
+ * its own), so the review app, which sets none, renders exactly as before.
+ */
+const HOST_SURFACE_HOOKS_CSS = `
+  [data-diffs-header][data-sticky], [data-diffs-header='default'] { background-color: var(--pn-diff-header-bg, var(--diffs-bg)); }
+  pre[data-diff], pre[data-file] {
+    border: var(--pn-diff-code-border, none);
+    border-radius: var(--pn-diff-code-radius, 0);
+    overflow: var(--pn-diff-code-overflow, visible);
+  }
+`;
+
 export function usePierreTheme(options?: {
   fontFamily?: string;
   fontSize?: string;
@@ -229,6 +255,7 @@ export function usePierreTheme(options?: {
       [data-separator='line-info'] { margin-block: 4px !important; }
       ${buildLineBgOverrides(lineBgIntensity, resolvedMode ?? 'dark')}
       ${compactTouchCSS}
+      ${HOST_SURFACE_HOOKS_CSS}
     `};
   });
 
@@ -343,6 +370,8 @@ export function usePierreTheme(options?: {
           ${buildLineBgOverrides(lineBgIntensity, resolvedMode)}
 
           ${compactTouchCSS}
+
+          ${HOST_SURFACE_HOOKS_CSS}
         `,
       });
     });
