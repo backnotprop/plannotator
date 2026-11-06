@@ -1,7 +1,7 @@
 /**
  * Pull request authors' profile pictures for the Pull requests list (the owner, on #2608: the row's top-left spot is
- * always the author's picture). The window never loads these from the forge itself:
- * the Inbox fetches the picture and serves it from its own origin.
+ * always the author's picture). The window's CSP stays `img-src 'self' data: blob:`: it never loads a remote image
+ * itself. The Inbox fetches the picture and serves it from its own origin.
  *
  * What is fetched: only the avatar URL the forge's own answer gave for an author of a PR in the current list
  * (`allow`), never a URL or login the page names. A login the last list did not return is refused before anything

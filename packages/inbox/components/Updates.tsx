@@ -603,7 +603,7 @@ export function WhatsNewPage({
 }) {
   const blocks = useMemo(() => parseMarkdownToBlocks(model?.notes ?? '', { frontmatter: false }), [model?.notes]);
   // The notes' images load from the copies the Inbox saved (never from GitHub:
-  // the window loads no picture from the web, images.ts). One not saved is drawn as
+  // the window's CSP allows only its own origin). One not saved is drawn as
   // its alt text in a quiet chip, never a broken image.
   const storedImages = useMemo(() => new Set(model?.images ?? []), [model?.images]);
   const modelVersion = model?.version;

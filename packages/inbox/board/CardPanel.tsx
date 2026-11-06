@@ -770,8 +770,8 @@ const failedFavicons = new Set<string>();
  * favicon (`src`) loads; the favicon takes its place only once it has loaded
  * with a real size (more than 1 px each way), so a failed, empty or 1×1
  * image never shows, and nothing moves: both sit in the same 15 px box.
- * `src` is the Inbox's own route (`cardLinkFaviconUrl`): the window never
- * loads a picture from the web itself (images.ts), a site's icon included.
+ * `src` is the Inbox's own route (`cardLinkFaviconUrl`): the window's CSP
+ * (`img-src 'self' data: blob:`) never loads a remote site's icon itself.
  * Null draws the link icon alone.
  */
 export function LinkFavicon({ src }: { src: string | null }) {

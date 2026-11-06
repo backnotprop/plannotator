@@ -179,7 +179,7 @@ export function inboxMessageImageRefsInOrder(body: string): string[] {
 /**
  * The remote images the body shows (`http:`, `https:`, protocol-relative
  * `//host/…`), each once, in text order, outside code. The window never loads
- * them (its renderers refuse a web picture, packages/inbox/images.ts), so
+ * them (its CSP allows only its own origin, `data:` and `blob:`), so
  * send_message warns about them.
  */
 export function inboxMessageRemoteImageRefsInOrder(body: string): string[] {

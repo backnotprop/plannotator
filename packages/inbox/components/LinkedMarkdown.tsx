@@ -3,9 +3,10 @@ import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { ScrollViewportProvider } from '@plannotator/ui/hooks/useScrollViewport';
+import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import type { LinkedPageView } from '../api';
 import { attachmentBlocks } from '../attachments';
-import { inboxBodyImageResolver, inboxMarkdownImageBase } from '../images';
+import { inboxMarkdownImageBase } from '../images';
 
 const noop = () => {};
 const NO_ANNOTATIONS: [] = [];
@@ -21,7 +22,10 @@ export function LinkedMarkdown({ page, attachmentId, onOpenLink }: {
   const blocks = useMemo(() => attachmentBlocks('markdown', page.text, page.name), [page.text, page.name]);
   // Its own images, relative to its folder and only those it references (the attachment's markdown-image route).
   const imageBaseDir = inboxMarkdownImageBase(attachmentId, 'current', page.relative);
-  const resolveImage = useMemo<ImageResolver>(() => inboxBodyImageResolver(imageBaseDir), [imageBaseDir]);
+  const resolveImage = useCallback<ImageResolver>(
+    (src) => ({ kind: 'src', src: /^(https?:|data:|blob:)/i.test(src) ? src : getImageSrc(src, imageBaseDir) }),
+    [imageBaseDir],
+  );
   // Stable across renders (through a ref): ui's HtmlBlock redraws a raw HTML block whenever its link resolver changes.
   const openLinkRef = useRef(onOpenLink);
   openLinkRef.current = onOpenLink;

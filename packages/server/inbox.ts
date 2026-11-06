@@ -742,18 +742,13 @@ const ERROR_STATUS: Record<string, number> = {
  * policy allows inline code and code from this origin only. Nothing may frame
  * it, and it may only talk to this server.
  */
-export const WINDOW_CSP = [
+const WINDOW_CSP = [
   "default-src 'self'",
   // 'wasm-unsafe-eval' lets the Graphviz engine (@viz-js/viz) compile its
   // WebAssembly; it does not allow eval() or new Function().
   "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
-  // https: and http: only so an attached HTML page's web pictures load (img,
-  // srcset, CSS backgrounds): the page is a srcdoc frame, which inherits this
-  // policy. The window's own text never loads one: its renderers refuse a web
-  // picture (packages/inbox/images.ts, InboxWebImagePolicy). Pictures only;
-  // script, connect, frame and font sources stay this origin's.
-  "img-src 'self' data: blob: https: http:",
+  "img-src 'self' data: blob:",
   "font-src 'self' data:",
   "connect-src 'self'",
   "worker-src 'self' blob:",
