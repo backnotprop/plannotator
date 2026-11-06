@@ -231,7 +231,7 @@ describe('register', () => {
   ] as const) {
     test(`the variable set, in bypass mode: a removal prompt is ${name}`, async ($: any, on: any) => {
       world(on, { env: { CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS: '1' } })
-      on('settings.read', () => settings)
+      on('settings.read', () => ({ value: settings }))
       const command = 'rm -rf t/logs/*/*'
       on('tool.check', () => ({ decision: 'ask', reason: "Dangerous rm operation detected: '/work/t/logs/*/*'" }))
       on('classic.PermissionRequest', () => ({ decision: { behavior: 'deny', message: 'beneath' } }))
@@ -653,7 +653,7 @@ describe('register', () => {
   // classic.* hook: the removal prompt stays exactly as it is today.
   test('under the guard, a removal prompt in bypass mode with the variable set is left to the dialog', { plugins: [GUARD] }, async ($: any, on: any) => {
     world(on, { env: { CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS: '1' } })
-    on('settings.read', () => ({}))
+    on('settings.read', () => ({ value: {} }))
     const command = 'rm -rf t/logs/*/*'
     on('tool.check', () => ({ decision: 'ask', reason: "Dangerous rm operation detected: '/work/t/logs/*/*'" }))
     on('classic.PermissionRequest', () => ({ decision: { behavior: 'deny', message: 'beneath' } }))
