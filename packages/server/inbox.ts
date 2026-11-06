@@ -81,6 +81,8 @@ import {
   type InboxTextSize,
   inboxRowsList,
   inboxRowsRead,
+  inboxRowsSaved,
+  INBOX_ROWS_DEFAULTS_VERSION,
   type InboxRowsOption,
   type InboxHealth,
   type InboxLine,
@@ -183,7 +185,7 @@ import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
 import { INBOX_ACCOUNT_SWITCHING } from "@plannotator/core/inbox-types";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
-import { inboxBodyForAgent, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
+import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createInboxVoice } from "./inbox-voice";
@@ -736,6 +738,7 @@ const ERROR_STATUS: Record<string, number> = {
   upload_too_large: 413,
   markup_too_large: 413,
   upload_not_found: 404,
+  upload_no_space: 507,
   // The Board's cards (approval "inbox-board"): who may move a card.
   card_not_found: 404,
   card_no_project: 404,
@@ -846,6 +849,8 @@ function errorResponse(error: unknown): Response {
   if (error instanceof InboxError) {
     return json({ error: error.message, code: error.code, ...error.details }, ERROR_STATUS[error.code] ?? 400);
   }
+  const full = inboxDiskFullError(error);
+  if (full) return errorResponse(full);
   return json({ error: "Internal error.", code: "internal_error" }, 500);
 }
 
@@ -1954,12 +1959,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * Null until a window first saves it, so the first window adopts its browser's old cookies. Lenient on read (a name
    * this build does not know is dropped, so a downgrade or a typo never reads as "never saved"), strict on write (a
    * `422`). `inboxRowsRev` counts the saves: every answer and `event: rows` carries it, so a window takes a look only
-   * when it is newer than the last it took, whatever order the answers and events arrive in.
+   * when it is newer than the last it took, whatever order the answers and events arrive in. `inboxRowsDefaults`
+   * says which defaults it was saved under: an old look that is the old defaults (every option off) is read as
+   * today's (core `inboxRowsSaved`).
    */
   const rowsState = (): { rows: InboxRowsOption[] | null; rev: number } => {
     const config = loadConfig();
     const rev = config.inboxRowsRev;
-    return { rows: inboxRowsRead(config.inboxRows), rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0 };
+    return { rows: inboxRowsSaved(inboxRowsRead(config.inboxRows), config.inboxRowsDefaults), rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0 };
   };
 
   const saveRows = (input: unknown, validateOnly = false): { rows: InboxRowsOption[]; rev: number } => {
@@ -1967,7 +1974,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (!rows) throw new InboxError("validation_error", `rows: a list of row options (${INBOX_ROWS_OPTIONS.join(", ")}).`, { field: "rows" });
     const rev = rowsState().rev + 1;
     if (validateOnly) return { rows, rev };
-    saveConfig({ inboxRows: rows, inboxRowsRev: rev });
+    saveConfig({ inboxRows: rows, inboxRowsRev: rev, inboxRowsDefaults: INBOX_ROWS_DEFAULTS_VERSION });
     const saved = rowsState();
     if (saved.rev !== rev || saved.rows?.join() !== rows.join()) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     for (const listener of rowsListeners) listener(rows, rev);
@@ -5042,7 +5049,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             const replayKey = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
             const fresh = uploads.length > 0 && !store.replyByKey(messageId, replayKey);
             if (fresh && !store.message(messageId)) throw new InboxError("message_not_found", `No message ${messageId}.`);
-            const attachments = fresh ? inboxUploadAttachments(store.dir, uploads, new Date().toISOString()) : [];
+            const attachments = fresh ? await inboxUploadAttachments(store.dir, uploads, new Date().toISOString()) : [];
+            // The same Send while this one copied is a replay, below; another Send of these files already has them.
+            if (fresh && !store.replyByKey(messageId, replayKey)) assertInboxUploadsPending(store.dir, uploads, attachments);
             let result: ReturnType<typeof store.sendReply>;
             try {
               result = store.sendReply(messageId, {
