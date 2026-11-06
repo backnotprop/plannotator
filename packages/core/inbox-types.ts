@@ -997,6 +997,14 @@ export interface InboxLaunchRecord {
   error?: InboxLaunchError | null;
   /** The ⋯ menu's Delete removed the session and its files; the thread stays, with no run line. */
   deleted_at?: string;
+  /** Started from a linked machine's window (remote launch): which one. Where the click came from, never a credential. Absent: this computer. */
+  from?: InboxLaunchFrom;
+}
+
+/** The linked machine a launch was started from: its Inbox id (`ibx_…`) and its name as this Inbox knows it. */
+export interface InboxLaunchFrom {
+  machine: string;
+  name: string;
 }
 
 /** The run line's state (`packages/core/inbox-run-line.ts`). Absent: no line (the agent is resting). */

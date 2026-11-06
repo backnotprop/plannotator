@@ -62,7 +62,7 @@
 
 import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
-import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
+import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxLaunchedSession, inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { derivePersonThreadSubject } from "@plannotator/core/inbox-questions";
@@ -76,7 +76,7 @@ import { createClaudeLaunchHost } from "./inbox-launch-claude";
 import { launchPlainEnv, type LaunchEnv } from "./inbox-launch-env";
 import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchTrustOffer } from "./inbox-launch-host";
 import { openPermissionSince } from "./inbox-launch-permission";
-import { INBOX_CROSS_SITE_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
+import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { samePlace } from "./agent-files";
 
 const AVAILABLE_TTL_MS = 30_000;
@@ -717,8 +717,18 @@ export function createInboxLaunch(options: {
     scratch_dir: scratchRoot(),
     scratch_dir_shown: options.displayFolder(scratchRoot()),
   });
-  /** `owner`: the machine's owner, here or over the tailnet (a guest the allow list let in is not). */
-  const route = async (req: Request, path: string, via: "local" | "tailnet" | string, owner: boolean = via === "local"): Promise<Response | null> => {
+  /**
+   * `owner`: the machine's owner, here or over the tailnet (a guest the allow list let in is not). `door`: the request
+   * came through the device door (a linked machine's Stop, Try again, Trust folder or Delete; remote launch). A
+   * machine is the owner's, and acts only for a press in a window there (`window`), never for an agent's bare call.
+   */
+  const route = async (
+    req: Request,
+    path: string,
+    via: "local" | "tailnet" | string,
+    owner: boolean = via === "local",
+    door: { platform: string; window: boolean } | null = null,
+  ): Promise<Response | null> => {
     const match = /^\/api\/inbox\/launch\/(settings|lch_[0-9A-HJKMNP-TV-Z]{26})(?:\/(stop|open|delete|retry|trust))?$/.exec(path);
     if (!match) return null;
     if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
@@ -767,6 +777,8 @@ export function createInboxLaunch(options: {
     const { root, host } = launchById(match[1]!);
     const launch = root.launch!;
     const state = stateOf(host);
+    // From another machine: only what a person pressed in a window there (its Inbox checked; this door trusts its token).
+    if (door && !door.window) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
     switch (match[2]) {
       case "stop": {
         // Stop ends the owner's agent: never a guest's to do, as starting one isn't.
@@ -853,7 +865,7 @@ export function createInboxLaunch(options: {
       }
       case "trust": {
         if (!owner) throw new InboxError("owner_only", "Only this computer's owner can trust a folder.");
-        if (!isWindowRequest(req, body, options.serverSession)) return json(INBOX_WINDOW_ONLY_BODY, 403);
+        if (!door?.window && !isWindowRequest(req, body, options.serverSession)) return json(INBOX_WINDOW_ONLY_BODY, 403);
         // A click under way (a double click): the same answer, once it is done.
         const under = trusting.get(launch.id);
         if (under) return json(await under);
@@ -1001,7 +1013,7 @@ export function createInboxLaunch(options: {
      */
     async prepare(
       target: InboxLaunchTarget,
-      input: { name: string | null; body: string; resolveProject: (path: string) => Promise<InboxProject> },
+      input: { name: string | null; body: string; resolveProject: (path: string) => Promise<InboxProject>; from?: InboxLaunchFrom | null },
     ): Promise<{ project: InboxProject; to: { host: string; session: string }; launch: InboxLaunchRecord; trust: LaunchTrustOffer | null }> {
       const host = Object.hasOwn(hosts, target.agent) ? hosts[target.agent]! : null;
       if (!host) throw new InboxError("agent_unavailable", `${target.agent} can't be started here. Nothing was sent.`);
@@ -1043,6 +1055,7 @@ export function createInboxLaunch(options: {
         ...(start.full ? { full_permissions: true } : {}),
         ...(start.ownMode ? { own_mode: true } : {}),
         ...(start.bypass ? { bypass_available: true } : {}),
+        ...(input.from ? { from: { machine: input.from.machine, name: input.from.name } } : {}),
       };
       return { project, to: { host: host.agent, session: `launch:${id}` }, launch, trust };
     },
