@@ -94,7 +94,15 @@ async function world(options: Options = {}) {
   for (const name of ["PLANNOTATOR_INBOX_TAILSCALE", "PLANNOTATOR_URL_HOST", "PLANNOTATOR_UPDATE_CHECK"]) setEnv(name, undefined);
   // Phones on would make a mailbox at the real relay: a dead loopback port instead.
   setEnv("PLANNOTATOR_RELAY_URL", "http://127.0.0.1:9");
-  const config: Record<string, unknown> = { updateCheck: false };
+  // The update-day dialogs (sound, list options, voice) are first in the line (approval "inbox-one-time-dialogs"):
+  // already settled here (a fresh install's marks), so Snooze is what these cases see.
+  const settledAt = new Date(Date.now() - 30 * DAY).toISOString();
+  const config: Record<string, unknown> = {
+    updateCheck: false,
+    inboxSound: { dialogShownFor: options.version ?? RELEASE },
+    inboxListIntro: { shownAt: settledAt },
+    inboxVoiceIntro: { shownAt: settledAt },
+  };
   if (options.saved) config.inboxSnoozeIntro = options.saved;
   if (options.tailnet) Object.assign(config, { inboxTailscale: true, inboxTailscaleAllow: [GUEST] });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify(config));

@@ -20,7 +20,8 @@
  *    not there. Words land where they
  *    did; Cancel and the draft question leave no microphone open; To ends a take and keeps its words; a save waits for
  *    a take on its way. On a desktop Save draft stays put when listening starts.
- *  - The announcement: once, on a computer with a ChatGPT login only, its Phones only option saved by Turn on voice.
+ *  - The announcement: once, on a computer with a ChatGPT login only, its Phones only option saved by Turn on voice. It
+ *    waits for its moment (approval "inbox-one-time-dialogs"): a reply of 40 or more words just sent.
  *  - A file or the artifacts opening over the box closes the microphone.
  *  - A take full screen's card is transcribing outlives the card: Write the reply (through the unsaved-comment question
  *    too), the Comment tab and browser Back; its words reach the thread it was said in, never the thread now open. A
@@ -1881,6 +1882,20 @@ test.describe('New message dictates as the reply box does', () => {
 test.describe('the announcement', () => {
   const dialog = (page: Page) => page.locator('[data-dialog="voice-intro"]');
   const SETTLE = 6_000;
+  /** Over 40 words: a reply long enough that talking would have been quicker, the announcement's moment. */
+  const LONG = Array.from({ length: 45 }, (_, i) => `word${i}`).join(' ');
+  /** Sends what the box holds, and waits for it to go. */
+  const send = async (page: Page) => {
+    const sent = page.waitForResponse((r) => r.request().method() === 'POST' && /\/api\/inbox\/.*\/reply$/.test(r.url()) && r.ok());
+    await sendButton(page).click();
+    await sent;
+  };
+  /** Sends a long reply into `thread`. */
+  const sendLong = async (page: Page, w: World, thread: string) => {
+    const box = await openReply(page, w, thread);
+    await box.fill(LONG);
+    await send(page);
+  };
 
   test('on a computer with a ChatGPT login: once; Phones only is saved by Turn on voice, which asks for no microphone', async () => {
     const w = await startWorld({ version: '0.30.0', used: true });
@@ -1894,6 +1909,9 @@ test.describe('the announcement', () => {
       };
     });
     await page.goto(w.url);
+    await page.waitForTimeout(SETTLE);
+    await expect(dialog(page), 'no long reply sent yet: not its moment').toHaveCount(0);
+    await sendLong(page, w, w.threads[0]!);
     await expect(dialog(page)).toBeVisible({ timeout: 15_000 });
     await expect(dialog(page).getByRole('switch', { name: 'Phones only' })).toHaveAttribute('aria-checked', 'false');
     await shot(page, 'dialog');
@@ -1913,7 +1931,7 @@ test.describe('the announcement', () => {
     const w = await startWorld({ version: '0.30.0', used: true });
     const { context, page } = await open(speech, w);
     await page.route('**/api/inbox/settings', (route) => (route.request().method() === 'POST' ? route.fulfill({ status: 500, json: { error: 'Not saved.', code: 'config_not_saved' } }) : route.continue()));
-    await page.goto(w.url);
+    await sendLong(page, w, w.threads[0]!);
     await expect(dialog(page)).toBeVisible({ timeout: 15_000 });
     await dialog(page).locator('[data-voice-intro-on]').click();
     const toast = page.locator('.ib-toast');
@@ -1923,16 +1941,20 @@ test.describe('the announcement', () => {
     await context.close();
   });
 
-  test('Not now changes nothing and retires it, and over a reply being written it waits', async () => {
+  test('Not now changes nothing and retires it; a short reply, or a long one still being written, is not its moment', async () => {
     const w = await startWorld({ version: '0.30.0', used: true });
     const { context, page } = await open(speech, w);
     const box = await openReply(page, w, w.threads[0]!);
-    await box.fill('Words in the box');
+    await box.fill('Short words.');
+    await send(page);
     await page.waitForTimeout(SETTLE);
-    await expect(dialog(page)).toHaveCount(0);
+    await expect(dialog(page), 'a short reply').toHaveCount(0);
+    const again = await openReply(page, w, w.threads[1]!);
+    await again.fill(LONG);
+    await page.waitForTimeout(SETTLE);
+    await expect(dialog(page), 'a long reply still in the box').toHaveCount(0);
     expect(saved(w).inboxVoiceIntro?.shownAt).toBeUndefined();
-    await box.fill('');
-    await pane(page).locator('.ib-acts .ib-btn.ib-ghost').click();
+    await send(page);
     await expect(dialog(page)).toBeVisible({ timeout: 15_000 });
     await dialog(page).locator('[data-voice-intro-keep]').click();
     await expect(dialog(page)).toHaveCount(0);
@@ -1944,14 +1966,14 @@ test.describe('the announcement', () => {
   test('no ChatGPT login: never shown, and not spent', async () => {
     const w = await startWorld({ version: '0.30.0', used: true, codex: { account: { type: 'apiKey' } } });
     const { context, page } = await open(speech, w);
-    await page.goto(w.url);
+    await sendLong(page, w, w.threads[0]!);
     await page.waitForTimeout(SETTLE);
     await expect(dialog(page)).toHaveCount(0);
     expect(saved(w).inboxVoiceIntro?.shownAt).toBeUndefined();
     await context.close();
   });
 
-  test('a fresh install, and a load with the list options dialog due: not shown', async () => {
+  test('a fresh install, and a day the list options dialog showed: not shown, and not spent', async () => {
     const fresh = await startWorld({ version: '0.30.0', fresh: true });
     const first = await open(speech, fresh);
     await first.page.goto(fresh.url);
@@ -1966,10 +1988,15 @@ test.describe('the announcement', () => {
     await second.page.goto(queued.url);
     await expect(second.page.locator('[data-dialog="list-look-intro"]')).toBeVisible({ timeout: 15_000 });
     await second.page.keyboard.press('Escape');
+    // One dialog a day: a long reply on this load, and on the next, finds the moment but not the day.
+    await sendLong(second.page, queued, queued.threads[0]!);
     await second.page.waitForTimeout(SETTLE);
     await expect(dialog(second.page)).toHaveCount(0);
     await second.page.reload();
-    await expect(dialog(second.page)).toBeVisible({ timeout: 15_000 });
+    await sendLong(second.page, queued, queued.threads[1]!);
+    await second.page.waitForTimeout(SETTLE);
+    await expect(dialog(second.page)).toHaveCount(0);
+    expect(saved(queued).inboxVoiceIntro?.shownAt).toBeUndefined();
     await second.context.close();
   });
 });
