@@ -242,7 +242,10 @@ test.skipIf(!hasDom)("asleep: Send says it starts when that machine is back, a l
   await until(() => held.length === 1, 'the held answer');
   expect(held[0]).toMatchObject({ key: 'k1', queued: true, machineName: 'Mac mini', asleep: true, agentName: 'Claude Code', words: { body: 'Rotate the staging password.' } });
   expect(sent).toEqual([]);
-  expect(inDialog('[data-compose-error]')).toBeNull();
+  // Compose is still there (this test's onHeld leaves it open), and it shows no error: held is not a failure.
+  expect(document.querySelector('dialog[data-compose]')).not.toBeNull();
+  expect(inDialog('[data-compose-send]')).not.toBeNull();
+  expect(inDialog('.ib-cp-error')).toBeNull();
 });
 
 test.skipIf(!hasDom)("the held toast: it starts on that machine when it's back, and Cancel takes it back and puts its words in Drafts", async () => {
