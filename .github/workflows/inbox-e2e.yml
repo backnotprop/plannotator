@@ -254,8 +254,14 @@ jobs:
           echo "$dir/bun-linux-x64" >> "$GITHUB_PATH"
           "$dir/bun-linux-x64/bun" --version
 
+      # Without the packages' install scripts: the image has no C++ toolchain,
+      # and node-pty (the agent terminal, which no spec drives) has no linux-x64
+      # prebuild, so it would compile from source. The repo's own postinstall
+      # (the fallback guide-viewer pin) still runs.
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          bun run postinstall
 
       # Code review's Go to Definition (review-explorer.spec.ts) searches with
       # ripgrep, which the image lacks: the release's static build, checked.
