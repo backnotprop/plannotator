@@ -174,6 +174,7 @@ import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannota
 import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT } from "./inbox-mcp";
 import { guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
+import { saveSystemSetup, systemSetupProjects } from "./inbox-system-setup";
 import { createRefCards, type RefRunner } from "./ref-cards";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
@@ -442,6 +443,8 @@ export interface InboxServerOptions {
   codeReview?: boolean;
   /** Shape, decided here instead of config.json `inboxShape` (tests). Absent: config.json decides on every request. */
   shape?: boolean;
+  /** System, decided here instead of config.json `inboxSystem` (tests). Absent: config.json decides on every request. Shown only while Code review is on. */
+  system?: boolean;
   /**
    * `plannotator inbox --tailscale`: publish over the tailnet for this run
    * whatever PLANNOTATOR_INBOX_TAILSCALE / config.json `inboxTailscale` say
@@ -680,6 +683,8 @@ const ERROR_STATUS: Record<string, number> = {
   guide_not_found: 404,
   // A verdict on a review while the person has Code review off (Settings → Capabilities).
   code_review_off: 409,
+  // System's routes while System (or Code review, which it needs) is off.
+  system_off: 409,
   // New message (step 8).
   session_not_live: 409,
   // Launch (inbox-launch.ts): the project's folder is gone, the agent can't be started, or the feature is off.
@@ -2256,6 +2261,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const codeReviewOn = () => options.codeReview ?? loadConfig().inboxCodeReview === true;
   /**
+   * System (approval "system-inbox"): a drawing of each project, shown only while Code review is on. The one
+   * reading every System route and the settings answer use. Settings → Capabilities' switch is step B1; until it
+   * lands, only config.json `inboxSystem` turns it on.
+   */
+  const systemOn = () => codeReviewOn() && (options.system ?? loadConfig().inboxSystem === true);
+  /**
    * Ask AI is on with PLANNOTATOR_INBOX_ASK_AI, or whenever Code review is on
    * (approval "shape-in-code-review", q-668227a8: Code review brings Ask, and
    * so Show me). Read on every request, as the switch is.
@@ -2491,6 +2502,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     /** Code review (config.json `inboxCodeReview`) and Shape (`inboxShape`): off unless the person turned them on. Held until the next big release: absent while off. */
     ...heldSwitch("code_review", codeReviewOn()),
     ...heldSwitch("shape", shapeOn()),
+    /** System (config.json `inboxSystem`, only while Code review is on): absent while off. */
+    ...(systemOn() ? { system: { on: true } } : {}),
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder (editable by the owner) and the plan, review and annotate prompts. */
@@ -3867,6 +3880,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         pullStates.look({ threads, pulls: listed.pulls, hosts: listed.hosts, owners: pullOwners.all(), landed: pullOwners.landings() });
         const rows = inboxReviewRows({ threads, stacks, links, pulls: listed.pulls, pullReasons, landed: pullOwners.landings(), owners: pullOwners.all() });
         return json({ serverSession, fetched_at: listed.fetched_at, hosts: listed.hosts, rows, projects: Object.fromEntries(projectsByRepo) });
+      }
+      // System's project setup (inbox-system-setup.ts): the projects found on this Mac with a git remote, and the
+      // save of one project's setup.json. Owner only, same origin, and only while System is on.
+      if (path === "/api/inbox/system/setup") {
+        if (req.method !== "GET" && req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!systemOn()) return json({ error: "System is off.", code: "system_off" }, 409);
+        const systemDeps = { dataDir, repoOf: async (root: string) => repos.get(root) ?? (await repos.refresh(root)) };
+        if (req.method === "GET") return json({ serverSession, projects: await systemSetupProjects(store.listProjects(), systemDeps) });
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const projectId = typeof body.project_id === "string" && store.project(body.project_id) ? store.canonicalProjectId(body.project_id) : null;
+        const project = projectId ? store.project(projectId) : null;
+        if (!project) throw new InboxError("validation_error", "project_id: a project in the Inbox.", { field: "project_id" });
+        return json({ serverSession, setup: await saveSystemSetup(project, body, systemDeps) });
       }
       // Pull requests: the person hands a PR (or a stack's PRs) to an agent's thread, the one compose's Send (to a
       // live session, or to an agent it launches) just started for it. The Inbox keeps that choice

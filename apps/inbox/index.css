@@ -16,6 +16,8 @@
 @source "../../packages/inbox/shape/**/*.tsx";
 /* Show me in the code review: the box, the picture over the diff and the Overview's picture (packages/inbox/review-drawing). */
 @source "../../packages/inbox/review-drawing/**/*.tsx";
+/* System: the project setup dialog (packages/inbox/system). */
+@source "../../packages/inbox/system/**/*.tsx";
 
 @import "../../packages/ui/theme.css";
 /* The board's own sheet (shp- classes). */
