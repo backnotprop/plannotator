@@ -1,5 +1,6 @@
 export {
   DEFAULT_BRIDGE_READY_TIMEOUT_MS,
+  HTML_VIEWER_FRAME_GONE,
   HtmlViewer,
   formatBridgeUnavailableMessage,
   type BridgeUnavailableInfo,

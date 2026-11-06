@@ -1,3 +1,4 @@
+import { SERVED_FRAME_GONE } from "@plannotator/core/html-embed";
 import {
   forwardRef,
   useCallback,
@@ -422,7 +423,25 @@ export interface HtmlViewerProps {
    * example, key it on the value).
    */
   sandbox?: string;
+  /**
+   * Opt-in: frame the document from a URL the host serves instead of as a
+   * srcdoc. The viewer builds the same document (the page, theme, print
+   * defaults, the inline annotation bridge) and hands it here; the host keeps
+   * it and answers the URL of a page it serves under its OWN CSP (the Inbox:
+   * web pictures in an attached page while its window loads none, because a
+   * srcdoc frame inherits the host page's CSP and can only narrow it). The
+   * frame keeps the same `sandbox`, so it is still an opaque origin and the
+   * bridge speaks as before. Called again whenever the document changes, and
+   * once more when the served page says it is gone
+   * (`{ type: "plannotator-frame-gone" }`, a host restart). Null or a failure:
+   * the frame stays empty; never a srcdoc fallback, which would load under
+   * the host's policy. Ignored in live (`src`) mode. Absent → srcdoc, unchanged.
+   */
+  frameUrl?: (document: string) => Promise<string | null>;
 }
+
+/** What a host's served frame document says when it is no longer kept (`frameUrl`). */
+export const HTML_VIEWER_FRAME_GONE = SERVED_FRAME_GONE;
 
 /**
  * Render arbitrary HTML in a sandbox and adapt its validated bridge messages
@@ -481,6 +500,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       touchSelection = false,
       hostNavigates = false,
       sandbox = HTML_VIEWER_SANDBOX,
+      frameUrl,
     },
     ref,
   ) => {
@@ -578,6 +598,42 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     useLayoutEffect(() => {
       setPrintReady(false);
     }, [srcdoc]);
+
+    // The host-served frame (`frameUrl`): the URL of the document last built.
+    // The previous one stays in the frame until the next is known, as a
+    // srcdoc change reloads in place. A gone page asks again, at most twice
+    // per document: the count resets only when the document changes, never on
+    // the bridge's `ready`, because the page runs in the same frame and could
+    // otherwise post "gone" after every load and re-post forever.
+    const servesFrame = !liveMode && !!frameUrl;
+    const frameUrlRef = useRef(frameUrl);
+    frameUrlRef.current = frameUrl;
+    const [servedUrl, setServedUrl] = useState<string | undefined>(undefined);
+    const [frameAsk, setFrameAsk] = useState(0);
+    const goneAsksRef = useRef(0);
+    const goneAsksDocRef = useRef<string | undefined>(undefined);
+    useEffect(() => {
+      if (!servesFrame || srcdoc === undefined) return;
+      if (goneAsksDocRef.current !== srcdoc) {
+        goneAsksDocRef.current = srcdoc;
+        goneAsksRef.current = 0;
+      }
+      let cancelled = false;
+      void (async () => {
+        let next: string | null = null;
+        try {
+          next = (await frameUrlRef.current?.(srcdoc)) ?? null;
+        } catch {
+          next = null;
+        }
+        if (!cancelled && next !== null) setServedUrl(next);
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [servesFrame, srcdoc, frameAsk]);
+    const servesFrameRef = useRef(servesFrame);
+    servesFrameRef.current = servesFrame;
 
     // Error state for the bridgeScriptUrl path only: the inline path never
     // sets it (no timer, and a version mismatch there can only be a forged
@@ -814,6 +870,20 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         // Live sessions verify origin + token before reading anything.
         const live = liveSessionRef.current;
         if (live && rejectsLiveMessage(live, e.origin, e.data)) return;
+        if (
+          servesFrameRef.current
+          && typeof e.data === "object"
+          && e.data !== null
+          && (e.data as { type?: unknown }).type === HTML_VIEWER_FRAME_GONE
+        ) {
+          if (goneAsksRef.current < 2) {
+            goneAsksRef.current += 1;
+            // Blank first, so the same URL kept again (the host had pushed it out) still navigates.
+            setServedUrl("about:blank");
+            setFrameAsk((n) => n + 1);
+          }
+          return;
+        }
         if (isBridgeReadyMessage(e.data)) {
           // Protocol stamp: one console warning on drift, naming both
           // versions. The ready is still honored (an older bridge answers
@@ -1371,10 +1441,16 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             )}
             {/* Live proxied-app mode navigates a real loopback origin: no
                 sandbox (the user's own app needs cookies, storage, and
-                same-origin XHR) and no srcdoc. Srcdoc mode is unchanged. */}
+                same-origin XHR) and no srcdoc. A host-served frame
+                (`frameUrl`) keeps the srcdoc frame's sandbox. Srcdoc mode is
+                unchanged. */}
             <iframe
               ref={iframeRef}
-              {...(src ? { src } : { srcDoc: srcdoc, sandbox: srcdocSandbox(sandbox, hostNavigates) })}
+              {...(src
+                ? { src }
+                : servesFrame
+                  ? { src: servedUrl, sandbox: srcdocSandbox(sandbox, hostNavigates) }
+                  : { srcDoc: srcdoc, sandbox: srcdocSandbox(sandbox, hostNavigates) })}
               style={{
                 width: "100%",
                 height: fullViewport ? "100%" : `${iframeHeight}px`,

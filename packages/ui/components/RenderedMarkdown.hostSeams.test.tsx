@@ -107,6 +107,28 @@ describe.if(hasDom)('RenderedMarkdown host seams (DOM)', () => {
     expect(inert?.getAttribute('title')).toBe('From the outer host');
   });
 
+  test('an unavailable link\'s `after` (deprecated) is still drawn right after the inert link, with its tooltip', async () => {
+    const el = await render(
+      <LocalLinkContext.Provider value={() => ({ kind: 'unavailable', title: 'Not here', after: <button data-after-control="">Open</button> })}>
+        <RenderedMarkdown markdown={DOC} />
+      </LocalLinkContext.Provider>,
+    );
+    const inert = Array.from(el.querySelectorAll('[data-local-link="unavailable"]')).find((n) => n.textContent === 'local doc')!;
+    expect(inert.getAttribute('title')).toBe('Not here');
+    expect(inert.nextElementSibling?.hasAttribute('data-after-control')).toBe(true);
+  });
+
+  test('`wrap` draws the inert link\'s text through the host, with no default tooltip', async () => {
+    const el = await render(
+      <LocalLinkContext.Provider value={() => ({ kind: 'unavailable', title: 'Not here', wrap: (text) => <span data-host-wrap="">{text}</span> })}>
+        <RenderedMarkdown markdown={DOC} />
+      </LocalLinkContext.Provider>,
+    );
+    const inert = Array.from(el.querySelectorAll('[data-local-link="unavailable"]')).find((n) => n.textContent === 'local doc')!;
+    expect(inert.parentElement?.hasAttribute('data-host-wrap')).toBe(true);
+    expect(inert.hasAttribute('title')).toBe(false);
+  });
+
   // A README-style themed image (#2328): with a resolver, `responsiveImages`
   // keeps the dark-mode `<source>`, its candidate resolved like the `<img>`.
   // Without it the resolver host gets today's behavior (sources dropped), and
