@@ -13,13 +13,13 @@
  *     agent starts here.
  *  3. "Another folder on Mac mini…": a folder in Mac mini's home that is no project yet, typed and picked through
  *     Mac mini's own folder route; Start puts "billing-api · Mac mini" in To and Send starts Claude Code there on Mac
- *     mini (MacBook's fake starts nothing); a missing path says so.
+ *     mini (MacBook's fake starts nothing); a missing path says so, with the folders that are there under the line.
  *  4. An untrusted folder picked that way (Mac mini's fake checks Claude's folder trust): the Send still goes, the
  *     start stops on trust, and the thread's run line Trust folder (through the forward) starts it there.
  *  5. Mac mini stopped: its last read still lists its projects ("Mac mini · asleep"); Send reads "Start when Mac mini
  *     is back" with the note; the Send is held, the toast says Claude Code starts on Mac mini when it's back, and
- *     Cancel takes it back (the outbox entry `cancelled`, nothing started). Its folder browser reads nothing and says
- *     "Mac mini is asleep".
+ *     Cancel takes it back (the outbox entry `cancelled`, nothing started). Its group offers no "Another folder on
+ *     Mac mini…" (nothing is read); MacBook's still does.
  *
  * `RL_PICKER_SHOTS` saves the picker's pictures (default /tmp/remote-launch-picker/build), 1440×900 and a 390 phone,
  * light; `RL_PICKER_DARK_SHOTS` their dark ones at 1440 (default /tmp/remote-launch-picker/build-dark);
@@ -357,6 +357,9 @@ test('3. Another folder on Mac mini…: a folder that is no project yet, read an
   await dialog(phone).locator('[data-compose-folder]').click();
   await browse(phone, mini.id, '~/code/biling-svc');
   await expect(phone.locator('[data-home-folders-note="missing"]')).toHaveText('Mac mini has no folder ~/code/biling-svc. Check the path, or pick a folder below.');
+  // "Below" is true: Mac mini's folders in ~/code are listed under the line, the closest to what was typed first.
+  await expect(phone.locator('[data-home-folder-option]').first()).toHaveAttribute('data-home-folder-option', 'billing-svc');
+  expect(await phone.locator('[data-home-folder-option]').count()).toBeGreaterThanOrEqual(3);
   await folderShot(phone, 'missing');
   await phone.locator('[data-home-folders-back]').click();
   await phone.locator('[data-compose-folders] .ib-cp-back').first().click();
@@ -369,6 +372,9 @@ test('3. Another folder on Mac mini…: a folder that is no project yet, read an
   await openFolderMenu(page, words, 'Mac mini');
   await browse(page, mini.id, '~/code/biling-svc');
   await expect(page.locator('[data-home-folders-note="missing"]')).toHaveText('Mac mini has no folder ~/code/biling-svc. Check the path, or pick a folder below.');
+  // "Below" is true: Mac mini's folders in ~/code are listed under the line, the closest to what was typed first.
+  await expect(page.locator('[data-home-folder-option]').first()).toHaveAttribute('data-home-folder-option', 'billing-svc');
+  expect(await page.locator('[data-home-folder-option]').count()).toBeGreaterThanOrEqual(3);
   await folderShot(page, 'missing');
   await page.locator('[data-home-folders-path]').fill('~/code/bil');
   await expect(page.locator('[data-home-folder-option] .ib-cp-op')).toHaveText(['billing-api', 'billing-reports', 'billing-svc']);
@@ -450,13 +456,12 @@ test("5. Mac mini asleep: Send waits for it, the toast says so, and Cancel takes
   await phone!.locator(`[data-compose-folder-option][data-compose-folder-machine="${mini.id}"]`).filter({ hasText: 'infra' }).click();
   await expect(dialog(phone!).locator('[data-compose-send]')).toContainText('Start when Mac mini is back');
   await shot(phone!, 'asleep-390');
-  // Its folder browser reads nothing: "Mac mini is asleep", nothing to start.
+  // Its group offers no folder browser (its folders can't be read); this computer's still does.
   const phoneReads = watchFolderReads(phone!);
   await dialog(phone!).locator('[data-compose-folder]').click();
-  await browse(phone!, mini.id, '~/code/');
-  await expect(phone!.locator('[data-home-folders-note="asleep"]')).toHaveText('Mac mini is asleep');
+  await expect(phone!.locator('[data-compose-folder-other]')).toHaveCount(1);
+  await expect(phone!.locator('[data-compose-folder-other="self"]')).toBeVisible();
   await folderShot(phone!, 'asleep');
-  await phone!.locator('[data-home-folders-back]').click();
   await phone!.locator('[data-compose-folders] .ib-cp-back').first().click();
   expect(phoneReads).toEqual([]);
 
@@ -470,15 +475,11 @@ test("5. Mac mini asleep: Send waits for it, the toast says so, and Cancel takes
   await shot(page, 'menu-asleep-1440');
   await darkShot(page, 'menu-asleep-1440');
   const reads = watchFolderReads(page);
-  await page.locator(`[data-compose-folder-other="${mini.id}"]`).click();
-  await expect(page.locator('[data-home-folders-note="asleep"]')).toHaveText('Mac mini is asleep');
-  await page.locator('[data-home-folders-path]').fill('~/code/');
-  await page.waitForTimeout(400);
-  await expect(page.locator('[data-home-folder-start], [data-home-folder-option]')).toHaveCount(0);
+  // No "Another folder on Mac mini…" while it sleeps; MacBook's row is still there.
+  await expect(page.locator(`[data-compose-folder-other="${mini.id}"]`)).toHaveCount(0);
+  await expect(page.locator('[data-compose-folder-other="self"]')).toBeVisible();
   await folderShot(page, 'asleep');
   expect(reads).toEqual([]);
-  await page.keyboard.press('Escape');
-  await expect(page.locator(`[data-compose-folder-other="${mini.id}"]`)).toBeVisible();
   await page.locator(`[data-compose-folder-option][data-compose-folder-machine="${mini.id}"]`).filter({ hasText: 'infra' }).click();
   const d = dialog(page);
   await expect(d.locator('[data-compose-send]')).toContainText('Start when Mac mini is back');
