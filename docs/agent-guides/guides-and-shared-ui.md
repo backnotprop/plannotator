@@ -303,7 +303,7 @@ interface SharePayload {
 
 type ShareableAnnotation =
   | ["D", string, string | null, ShareableImage[]?] // [type, original, author, images?]
-  | ["C", string, string, string | null, ShareableImage[]?] // [type, original, comment, author, images?]
+  | ["C", string, string, string | null, ShareableImage[]?, 1?, string?] // [type, original, comment, author, images?, isQuickLabel?, quickLabelTip?] (the tip slot is optional and newer, so older links still decode)
   | ["G", string, string | null, ShareableImage[]?]; // [type, comment, author, images?]
 ```
 
