@@ -1503,8 +1503,9 @@ export class PlannotatorMod {
       if (launch.kind === 'plan' && (await this.lacksModPlan(launch))) {
         await this.fallBackToClassicPlans(launch)
         this.delivering = this.delivering
-          .then(() => this.host.submit(`Plannotator: ${launch.subject} — not opened.\n\n${CLASSIC_PLAN_RETRY_TEXT}`))
-          .catch(() => undefined)
+          // Dropped (Claude Code holds plugins' input): tried again after the next input, as a decision is.
+          .then(() => this.submitDecision(launch.subject, `Plannotator: ${launch.subject} — not opened.\n\n${CLASSIC_PLAN_RETRY_TEXT}`, { quiet: true }))
+          .then(() => undefined, () => undefined)
         await this.delivering
         return
       }
@@ -1684,15 +1685,16 @@ export class PlannotatorMod {
    * stopped the session and nobody has typed since) is tried again after the
    * next prompt or turn start, so it goes in at the idle after the person's
    * input. False: the instance was disposed while it waited, nothing went in.
+   * `quiet`: a failure is not logged (the classic-plan retry never logged one).
    */
-  private async submitDecision(subject: string, text: string): Promise<boolean> {
+  private async submitDecision(subject: string, text: string, options: { quiet?: boolean } = {}): Promise<boolean> {
     for (;;) {
       try {
         await this.host.submit(text)
         return true
       } catch (error) {
         if (!(error instanceof PromptDropped)) {
-          this.host.log(`Could not send the ${subject} decision to Claude (${error instanceof Error ? error.message : String(error)}).`)
+          if (!options.quiet) this.host.log(`Could not send the ${subject} decision to Claude (${error instanceof Error ? error.message : String(error)}).`)
           return true
         }
         if (this.disposed) return false

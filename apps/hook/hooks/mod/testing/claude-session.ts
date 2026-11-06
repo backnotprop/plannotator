@@ -14,7 +14,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { PlannotatorMod } from '../controller'
-import { PromptDropped, type Host, type HttpResult, type ProcessResult } from '../host'
+import { submitOrThrow, type Host, type HttpResult, type ProcessResult } from '../host'
 import { discoverInboxTools } from '../inbox'
 import type { InboxToolInfo } from '../inbox-contract'
 
@@ -45,8 +45,8 @@ export interface RealHost extends Host {
   aborted: string[]
   fetches: string[]
   timers: Set<ReturnType<typeof setInterval>>
-  /** Set by the session: `$.prompt.submit`'s turn. */
-  onSubmit: (text: string) => Promise<void>
+  /** Set by the session: `$.prompt.submit`'s turn; what it resolves with (`{ drop }`: refused) goes through register.ts's reading. */
+  onSubmit: (text: string) => Promise<unknown>
   /** Called as `$.session.append` stores a user row (a test ends the turn here). */
   onAppend: (text: string) => Promise<void>
   /** Called before every `$.process.run` (a test acts at a given step, e.g. the delivery claim). */
@@ -118,10 +118,11 @@ export function realHost(options: RealHostOptions): RealHost {
     storeSet: async (key, value) => {
       options.store.set(key, JSON.parse(JSON.stringify(value)))
     },
-    submit: async (text) => {
-      host.submits.push(text)
-      await host.onSubmit(text)
-    },
+    submit: (text) =>
+      submitOrThrow(async () => {
+        host.submits.push(text)
+        return host.onSubmit(text)
+      }),
     appendUserRow: async (text) => {
       host.appended.push(text)
       await host.onAppend(text)
@@ -283,16 +284,17 @@ export class ClaudeSession {
     return this.startTurn(`The ${name} plugin sent a message: ${text}`)
   }
 
-  /** `$.prompt.submit`: waits for idle, then its turn starts under the plugin's frame. */
-  private async pluginTurn(text: string): Promise<void> {
-    if (this.inputHeld !== null) throw new PromptDropped(this.inputHeld)
+  /** `$.prompt.submit`: waits for idle, then its turn starts under the plugin's frame; resolves `{ drop }` while input is held. */
+  private async pluginTurn(text: string): Promise<{ drop: string } | undefined> {
+    if (this.inputHeld !== null) return { drop: this.inputHeld }
     while (this.running) {
       const discarded = await new Promise<boolean>((resolve) => this.idleWaiters.push(resolve))
       if (discarded) throw new Error('The engine discarded the prompt.')
       // Waiting when the person stopped the session: dropped with the others.
-      if (this.inputHeld !== null) throw new PromptDropped(this.inputHeld)
+      if (this.inputHeld !== null) return { drop: this.inputHeld }
     }
     await this.startTurn(`${PLUGIN_FRAME}${text}`)
     if (!this.holdPluginTurns) setTimeout(() => this.endTurn('Thanks, on it.'), 20)
+    return undefined
   }
 }

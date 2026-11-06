@@ -1672,7 +1672,7 @@ describe('/plannotator-inbox', () => {
 // until someone types (`PromptDropped`). The decision was marked delivered, its files cleaned up, and it never went in.
 describe('a decision Claude Code dropped', () => {
   /** An engine that drops every plugin prompt while `held.value` (any reason: a Stop, an idle compaction). */
-  function stoppedHost() {
+  function stoppedHost(serve = true) {
     const host = fakeHost()
     const held = { value: true }
     const attempts: string[] = []
@@ -1681,7 +1681,7 @@ describe('a decision Claude Code dropped', () => {
       if (held.value) throw new PromptDropped('plugin input is held')
       host.submits.push(text)
     }
-    serveOnLaunch(host)
+    if (serve) serveOnLaunch(host)
     return { host, held, attempts }
   }
 
@@ -1720,6 +1720,29 @@ describe('a decision Claude Code dropped', () => {
 
     expect(host.submits).toHaveLength(2)
     expect(host.submits[1]).toContain('and this')
+  })
+
+  test("an old CLI's late refusal: the ask to call ExitPlanMode again waits for the person's input, then goes in once", async () => {
+    const { host, held, attempts } = stoppedHost(false)
+    const mod = new PlannotatorMod(host, SESSION)
+    await mod.onPlanCall({ tool_use_id: 't1', plan: PLAN })
+    const dir = launchDirOf(launches(host)[0]!)
+    host.files.set(`${dir}/stderr`, 'Unknown command: claude-mod-plan\n')
+    host.files.set(`${dir}/exit`, '1')
+    await host.tick()
+    await host.tick()
+
+    expect(attempts).toHaveLength(1)
+    expect(host.submits).toEqual([])
+
+    held.value = false
+    mod.onPromptEntered({ text: 'carry on', fromUs: false, originKind: 'composer' })
+    await host.tick()
+
+    expect(attempts).toHaveLength(2)
+    expect(host.submits).toHaveLength(1)
+    expect(host.submits[0]).toContain('Call ExitPlanMode again')
+    expect(host.logs).toEqual([CLASSIC_PLAN_REVIEW_TEXT])
   })
 
   test('the session ending while it waits leaves it undelivered, for a restore to report', async () => {

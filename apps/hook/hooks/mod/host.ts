@@ -52,10 +52,13 @@ export class PromptDropped extends Error {
   }
 }
 
-/** `$.prompt.submit`'s answer read: a drop rejects with `PromptDropped`; anything else is a prompt that went in. */
+/** `$.prompt.submit`'s answer read: any `drop` rejects with `PromptDropped`; anything else is a prompt that went in. */
 export async function submitOrThrow(submit: () => Promise<unknown>): Promise<void> {
   const result = (await submit()) as { drop?: unknown } | null | undefined
-  if (result && typeof result === 'object' && typeof result.drop === 'string') throw new PromptDropped(result.drop)
+  // Any `drop` the engine set (not undefined, null or false) is a refusal; only a string reason is kept as words.
+  if (result && typeof result === 'object' && 'drop' in result && result.drop !== undefined && result.drop !== null && result.drop !== false) {
+    throw new PromptDropped(typeof result.drop === 'string' ? result.drop : '')
+  }
 }
 
 export interface Host {

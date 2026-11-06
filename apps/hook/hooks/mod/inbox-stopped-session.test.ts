@@ -129,4 +129,28 @@ describe('a session whose plugin prompts Claude Code refuses until the person ty
     expect(wakes(session, FIRST)).toHaveLength(1)
     expect(wakes(session, SECOND)).toHaveLength(1)
   }, 40_000)
+  // Review of #2780: the person typed while the dropped reply's claim was being given back. The hold set after that
+  // release overwrote their input, and the reply waited for the NEXT input. Held first, their input clears it.
+  test('the person types while the claim is given back: the reply still goes in at the idle after their turn, once', async () => {
+    const { session, reply, delivery } = await world()
+    await session.startTurn('Refactor the handler.')
+    session.stop()
+    let typed = false
+    session.host.onRun = (argv) => {
+      if (argv[3] !== 'plannotator-inbox-release' || typed) return
+      typed = true
+      void session.type('Carry on.')
+    }
+
+    const first = await reply('k1', FIRST)
+    await until('the person to type during the release', () => typed && session.running !== null)
+    await Bun.sleep(1_500)
+    expect(wakes(session, FIRST)).toEqual([])
+    session.endTurn()
+    await until('the wake', () => wakes(session, FIRST).length > 0)
+    await until('the delivery', async () => (await delivery(first)) !== null)
+    await Bun.sleep(1_500)
+    expect(wakes(session, FIRST)).toHaveLength(1)
+    expect(attempts(session, FIRST)).toHaveLength(2)
+  }, 40_000)
 })

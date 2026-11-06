@@ -82,8 +82,17 @@ describe("the submit adapter reads $.prompt.submit's answer", () => {
     }
   })
 
+  test('a drop that is not a string is a refusal too, with no words of its own', async () => {
+    for (const drop of [true, { reason: 'held' }, 1]) {
+      const error = await submitOrThrow(async () => ({ drop })).catch((caught: unknown) => caught)
+
+      expect(error).toBeInstanceOf(PromptDropped)
+      expect((error as PromptDropped).reason).toBe('')
+    }
+  })
+
   test('a prompt that went in resolves, whatever the engine answered with', async () => {
-    for (const answer of [undefined, null, {}, { text: 'x' }]) await expect(submitOrThrow(async () => answer)).resolves.toBeUndefined()
+    for (const answer of [undefined, null, {}, { text: 'x' }, { drop: undefined }, { drop: null }, { drop: false }]) await expect(submitOrThrow(async () => answer)).resolves.toBeUndefined()
   })
 
   test('a real failure keeps its own error', async () => {

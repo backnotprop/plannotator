@@ -1368,9 +1368,10 @@ export class InboxLink {
       if (error instanceof PromptDropped) {
         // Claude Code refused the turn (the person stopped the session and has not typed since): nothing went
         // in, so the claim is given back and the reply stays pending, to go in at the idle after their input.
-        await this.release(command.id)
+        // Held BEFORE the release: input that arrives while it runs must clear the hold, not be overwritten by it.
         this.heldForInput = true
         this.host.debug(`inbox: ${command.id} was not taken (${error.reason}); it waits for the person's next input`)
+        await this.release(command.id)
         return
       }
       this.settle(command.id)
