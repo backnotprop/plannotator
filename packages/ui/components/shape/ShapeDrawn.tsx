@@ -28,11 +28,32 @@ import {
 import { useReducedMotion } from './Pebble';
 import { syncKeptBoxes, type KeptBox } from './boxSelect';
 
-/** A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first. */
-function resolveFiles(html: string, resolve: ((src: string) => string) | undefined): string {
-  if (!resolve) return html;
+/**
+ * A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first.
+ * `tile`: each also carries `data-shp-pic`, for `tilePictures`.
+ */
+function resolveFiles(html: string, resolve: ((src: string) => string) | undefined, tile = false): string {
+  if (!resolve && !tile) return html;
   const attr = (url: string) => url.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-  return html.replace(/(<(?:img|image)\b[^>]*?\s(?:src|href)=")(files\/[^"]+)"/gi, (_, head: string, src: string) => `${head}${attr(resolve(src))}"`);
+  return html.replace(/(<(?:img|image)\b)([^>]*?\s(?:src|href)=")(files\/[^"]+)"/gi, (_, open: string, head: string, src: string) => `${open}${tile ? ' data-shp-pic' : ''}${head}${resolve ? attr(resolve(src)) : src}"`);
+}
+
+/**
+ * `pictureTiles`: a rounded tile behind each SVG picture the board keeps, its box plus a little room. An `<img>`
+ * gets the same from the frame's CSS. A picture the drawing clips itself (the kit's `pic()` frames its own) is left
+ * as drawn, and so is one with no plain size.
+ */
+function tilePictures(board: HTMLElement): void {
+  for (const image of board.querySelectorAll<SVGImageElement>('image[data-shp-pic]')) {
+    if (image.hasAttribute('clip-path') || image.closest('[clip-path]')) continue;
+    const [x, y, w, h] = ['x', 'y', 'width', 'height'].map((k) => Number(image.getAttribute(k) ?? (k === 'x' || k === 'y' ? 0 : NaN)));
+    if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) continue;
+    const pad = Math.max(3, Math.min(10, Math.min(w, h) * 0.12));
+    const tile = document.createElementNS(SVG_NS, 'rect');
+    tile.setAttribute('class', 'shp-pic-tile');
+    for (const [k, v] of [['x', x - pad], ['y', y - pad], ['width', w + pad * 2], ['height', h + pad * 2], ['rx', Math.min(12, pad + 5)]] as const) tile.setAttribute(k, String(Math.round(v * 10) / 10));
+    image.before(tile);
+  }
 }
 
 export interface MarkState {
@@ -97,6 +118,10 @@ svg .t-acc { fill: var(--mark); } svg .t-grey { fill: var(--grey); } svg .t-ink2
 a { color: var(--mark); text-decoration: none; }
 img { max-width: 100%; }
 svg .obj { filter: drop-shadow(0 3px 10px rgb(0 0 0 / .18)); }
+/* pictureTiles: a picture the board keeps sits on a light tile in both themes (white on a light board, a soft grey on a dark one). */
+.board { --shp-pic-tile: color-mix(in oklab, var(--surface) calc(100% - var(--shp-is-dark, 0) * 100%), #e4e6ea); }
+.shp-pic-tile { fill: var(--shp-pic-tile); stroke: color-mix(in oklab, var(--rule) calc(100% - var(--shp-is-dark, 0) * 100%), transparent); stroke-width: 1; }
+img[data-shp-pic] { background: var(--shp-pic-tile); padding: 6px; border-radius: 10px; box-sizing: border-box; box-shadow: 0 0 0 1px color-mix(in oklab, var(--rule) calc(100% - var(--shp-is-dark, 0) * 100%), transparent); }
 .if-dark { opacity: var(--shp-is-dark, 0); } .if-light { opacity: calc(1 - var(--shp-is-dark, 0)); }
 
 /* Draw: parts arrive in step order; lines draw on. */
@@ -298,6 +323,8 @@ export interface ShapeDrawnProps {
   onCode?: (target: ShapeCodeTarget, el: HTMLElement) => void;
   /** A `files/…` image's URL. */
   resolveSrc?: (src: string) => string;
+  /** Each `files/…` picture on a rounded tile, light in both themes (`ShapeSurfaceProps.pictureTiles`). Absent: as drawn. */
+  pictureTiles?: boolean;
   /** Pointing at marked parts (Change it / Ask). Board only. */
   pinpoint?: boolean;
   /** Select mode: a text selection inside a mark picks it. Board only. */
@@ -375,8 +402,9 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     const root = rootRef.current ?? host.attachShadow({ mode: 'open' });
     rootRef.current = root;
     const safeCss = shapeCssProblems(css).length ? '' : css;
-    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}${handlers.current.onRefPeek ? ' peek' : ''}">${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc)}</div>`;
+    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}${handlers.current.onRefPeek ? ' peek' : ''}">${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc, !!handlers.current.pictureTiles)}</div>`;
     const board = root.querySelector<HTMLElement>('.board')!;
+    if (handlers.current.pictureTiles) tilePictures(board);
     // Steps: the agent's numbers, in order, become 0, 1, 2… however sparse.
     const steps = [...board.querySelectorAll<HTMLElement | SVGElement>('[data-step]')];
     const order = [...new Set(steps.map((el) => Number(el.getAttribute('data-step')) || 0))].sort((a, b) => a - b);

@@ -388,6 +388,21 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
     expect(shadow.querySelector('image')?.getAttribute('href')).toBe('/assets/files/b.png');
   });
 
+  test('pictureTiles puts a tile behind each kept SVG picture, never behind a logo or a picture the drawing frames itself; off, nothing is added', async () => {
+    const logo = expandShapeStamps('<svg data-logo="codex" x="0" y="0" width="40" height="40"/>').html;
+    const html = `<svg>${logo}<image href="files/shot.png" x="10" y="20" width="100" height="50"/><image href="files/framed.png" x="0" y="0" width="80" height="80" clip-path="url(#c)"/><image href="files/nosize.png"/></svg><img src="files/a.png">`;
+    const on = await draw({ html, resolveSrc: (src) => `/assets/${src}`, pictureTiles: true });
+    const tiles = [...on.shadow.querySelectorAll('rect.shp-pic-tile')];
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0]!.nextElementSibling?.getAttribute('href')).toBe('/assets/files/shot.png');
+    expect(['x', 'y', 'width', 'height'].map((k) => Number(tiles[0]!.getAttribute(k)))).toEqual([4, 14, 112, 62]);
+    expect(on.shadow.querySelector('img')?.hasAttribute('data-shp-pic')).toBe(true);
+    // The logo's own picture (a data: image) is never tiled.
+    expect(on.shadow.querySelector('svg[data-brand] image')?.hasAttribute('data-shp-pic')).toBe(false);
+    const off = await draw({ html, resolveSrc: (src) => `/assets/${src}` });
+    expect(off.shadow.querySelectorAll('rect.shp-pic-tile, [data-shp-pic]')).toHaveLength(0);
+  });
+
   test('a mouse over a number peeks; leaving hides it; a click opens it', async () => {
     const peeks: [number | null, string][] = [];
     const opens: number[] = [];

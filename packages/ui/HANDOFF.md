@@ -2819,3 +2819,16 @@ New classes: `.shp-title-row`, `.shp-head-side`, `.shp-drawing`, `.shp-finished`
 - **`ShapeGrid` / `ShapeThumb`** (approval `shape-landing-grid`): every board as a card (a scaled Picture, the title, `project · when`, a dot while it changed), newest first; `filterShapeItems` is its title-or-project match and `shapeAgo` its time words. `ShapeThumb` fills the box you give it (give it a height). A drawing's `#…` link scrolls inside the drawing and never changes the page's hash; an https link opens a new tab; any other link does nothing.
 - **`@plannotator/ui/shape.css`**: the board's styles (`shp-` classes, theme variables only, light and dark, reduced motion). Plain CSS: import it next to your theme.
 - **Seams it needed, all opt-in (absent = unchanged):** `CommentPopover` `submitLabel`, `askAILabel`; `CodeFileView` `onAskAnnotation`, `commentSubmitLabel`, `commentAskLabel`.
+
+## Shape: picture tiles (unreleased; additive)
+
+Shape boards can now show any picture: a file on this computer or a web picture, which `plannotator shape update` copies into the board's `files/` (#2756). The board itself still names only `files/<name>`. Nothing changes in the allowlist or in how `resolveSrc` / `assetUrl` resolve a picture.
+
+**`pictureTiles` on `ShapeSurface` and `ShapeDrawn` (default off: pictures are drawn as written, as before).** Plannotator passes it from `ShapeBoard`. With it, each `files/…` picture sits on a rounded tile:
+- the tile is white with a hairline border on a light board, and a soft grey (`#e4e6ea`) on a dark one (`--shp-pic-tile`);
+- the effect: a white screenshot reads as a card, not a hole cut in a dark zone, and a dark logo stays visible on a dark board.
+
+What the tile covers:
+- An SVG `<image>` gets a `rect.shp-pic-tile` before it: its box plus 3 to 10 px of room.
+- An `<img>` gets the same from CSS (`img[data-shp-pic]`: 6 px padding, `box-sizing: border-box`, so a declared size holds).
+- A picture the drawing frames itself (a `clip-path` on it or around it, as the kit's `pic()` does) is left alone. So is an `<image>` with no plain size, and a `data:` image (a built-in logo's).

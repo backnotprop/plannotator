@@ -153,4 +153,10 @@ export interface ShapeSurfaceProps {
    * ShapeBoard). Absent: pointing and clicking only, as always.
    */
   boxSelect?: ShapeBoxOptions;
+  /**
+   * Each picture the board keeps (`files/…`, a screenshot or a logo from the web) sits on a rounded tile, light in
+   * both themes, so a white picture reads as a card and a dark logo holds on a dark board (Plannotator, by
+   * ShapeBoard). Absent: pictures are drawn as written, as before.
+   */
+  pictureTiles?: boolean;
 }

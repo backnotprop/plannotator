@@ -69,6 +69,7 @@ export default function ShapeBoard({ host, id, onClose, renderThread, initialVie
       CodeHoverCard={HoverCard}
       renderThread={renderThread}
       readFirst
+      pictureTiles
       boxSelect={boxSelect}
       initialView={initialView}
       initialPanel={initialPanel}
