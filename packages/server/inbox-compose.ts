@@ -254,9 +254,12 @@ export function createInboxCompose(options: {
     const askedWakes = asked?.author.kind === "agent" && asked.wakes === true ? asked.author.session : null;
     const waitsOn = message.to?.session ?? askedWakes;
     const there = thereInThread(live, options.launch, message.thread_id);
+    // Its session's connection claimed it and will never deliver it (its wake was killed mid-delivery): that session
+    // does not get it, running or not, so it moves as off an ended one. Nothing delivers it again by itself.
+    const stuck = !!waitsOn && live.stuck(waitsOn, messageId);
     const next = store.readdressMessage(messageId, target, {
-      targetLive: !!waitsOn && there.askerLive(waitsOn),
-      askerEnded: replacesEndedAsker(asked, there),
+      targetLive: !!waitsOn && !stuck && there.askerLive(waitsOn),
+      askerEnded: stuck || replacesEndedAsker(asked, there),
       tookOver: takesOver(store, message.thread_id, asked, waitsOn, there),
     });
     return json({ message: next, row: store.listRow(next.thread_id) });
