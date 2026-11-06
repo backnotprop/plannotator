@@ -8014,6 +8014,24 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rv-walk[data-review-mode='files'] [data-guide-section-grid] { display: block; }
 .ib-rv-walk[data-review-mode='files'] [data-guide-section-narrative] { display: none; }
 .ib-rv-walk[data-review-mode='files'] [data-guide-section-grid] > :last-child { padding: 0; background: transparent; }
+/* Each file's name sits on the page, like the summary line above it, and its code box starts under it (approval
+   "review-file-title", take B): nothing is painted behind the name, at rest or under the pointer, and the code keeps its
+   own fill inside a border with corners. The name's row sticks to the top while the page scrolls, so it is painted with
+   the surface it sits on (the chapter's code column: --card under 7% --muted; the page in All files), never transparent.
+   usePierreTheme's --pn-diff-* hooks carry this inside the diff. The row keeps its 33 px (PANEL_HEADER_HEIGHT). */
+.ib-rv-walk [data-guide-file-shell] {
+  --pn-diff-header-bg: color-mix(in srgb, var(--muted) 7%, var(--card));
+  --pn-diff-code-border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+  --pn-diff-code-radius: 10px;
+  --pn-diff-code-overflow: clip;
+}
+.ib-rv-walk[data-review-mode='files'] [data-guide-file-shell] { --pn-diff-header-bg: var(--background); }
+/* The box keeps its padding (its height counts it), and rises by it, so the name sits close under the summary line. */
+.ib-rv-walk [data-guide-code-view-mounted] { border-color: transparent; background: transparent; }
+.ib-rv-walk [data-guide-code-view-mounted]:not(:first-child) { margin-top: -8px; }
+.ib-rv-walk [data-guide-code-view-mounted] diffs-container { background-color: transparent; }
+.ib-rv-walk [data-file-header], .ib-rv-walk [data-file-header]:hover { background-color: transparent; border-bottom-color: transparent; padding-inline: 4px; }
+.ib-rv-walk [data-guide-code-placeholder] { border: var(--pn-diff-code-border); border-radius: var(--pn-diff-code-radius); }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .gv-guide { padding: 14px 12px 48px; }
   .gv-chapters { gap: 14px; margin-top: 22px; }
