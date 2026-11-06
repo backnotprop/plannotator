@@ -480,8 +480,11 @@ export interface PlannotatorConfig {
    * `answer`: `starred` (gh starred it on the click), `opened` (the GitHub
    * page opened), `not-now`, or `already` (starred before it showed: nothing
    * showed). `surface`: where. `canStar`: the button starred with gh.
+   * `checkedAt`: the already-starred check ran (a done-screen page at load)
+   * and the ask is still open; later loads reuse it without gh.
    */
   starAsk?: {
+    checkedAt?: string;
     shownAt?: string;
     answer?: "starred" | "opened" | "not-now" | "already";
     answeredAt?: string;
@@ -535,7 +538,7 @@ export interface PlannotatorConfig {
     notNowAt?: string;
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
-    waitingSince?: { sound?: string; list_intro?: string; voice?: string; snooze?: string; board?: string; steps?: string; star?: string };
+    waitingSince?: { sound?: string; list_intro?: string; voice?: string; snooze?: string; board?: string; steps?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
     /** The "Star the repo" ask's claim in the line (config.json `starAsk` is its record across surfaces). */

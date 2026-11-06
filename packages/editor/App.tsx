@@ -7232,7 +7232,7 @@ const App: React.FC = () => {
   const starAskFooter = useStarAskDoneScreen({
     ready: !isLoading,
     decided: (submitted === 'approved' || submitted === 'denied' || submitted === 'done') && !goalSetupMode,
-    eligible: isApiMode && !isSharedSession && !archive.archiveMode && !isVSCodeWebview(),
+    eligible: isApiMode && !goalSetupMode && !isSharedSession && !archive.archiveMode && !isVSCodeWebview(),
   });
   // Read from the host alone, not agentToolOfferApplies: once "Turn it on"
   // succeeds the setting is on, and the open offer must stay to say so.

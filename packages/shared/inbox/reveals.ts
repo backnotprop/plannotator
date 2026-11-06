@@ -68,6 +68,11 @@ export interface RevealEntry {
   ahead?: boolean;
   /** First use must be on an earlier local calendar day (`revealDay`): from the second day of use. */
   laterDay?: boolean;
+  /**
+   * Outside the line's order (the star ask): never `next`, never passing or passed by an entry, never stamping the
+   * line. It may be claimed at a calm moment while the line is free (`revealMayClaim`), so no other entry's day moves.
+   */
+  aside?: boolean;
   /** Off: never next and never claimed. */
   enabled: boolean;
 }
@@ -91,9 +96,11 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   { id: "steps", kind: "offer", tenureMs: 5 * DAY_MS, minThreads: 5, enabled: true },
   // The "Star the repo" ask (approval "star-ask", 2026-11-06; packages/shared/star-ask.ts): last in the line, shown
   // from the second day of Inbox use (the owner, 2026-11-06: "Would rather show it on 2nd day of inbox use"; no thread
-  // minimum), once across every surface (config.json `starAsk`). Last in order, so on a day another offer is due that
-  // one goes first. Its claim runs the already-starred check (gh) before it stamps anything; starred already, nothing shows.
-  { id: "star", kind: "offer", tenureMs: 0, minThreads: 0, laterDay: true, enabled: true },
+  // minimum), once across every surface (config.json `starAsk`). Aside from the line's order (the coordinator, for the
+  // owner: no offer may lose its showing to it): it takes a calm moment while the line is free, and its claim stamps
+  // only its own `inboxReveals.star`, so every other dialog keeps its day. Its claim runs the already-starred check
+  // (gh) before it stamps anything; starred already, nothing shows.
+  { id: "star", kind: "offer", tenureMs: 0, minThreads: 0, laterDay: true, aside: true, enabled: true },
   // List view (#2716) goes here, last in order but ahead at its moment (`ahead`; approval "inbox-one-time-dialogs": once
   // the list is taller than the screen, at the next calm moment). `minThreads: 15` is the server's stand-in for "taller
   // than the screen": { id: "list_view", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 15, ahead: true, enabled: true }.
@@ -204,7 +211,7 @@ export function revealNext(state: RevealState, now: Date, table: readonly Reveal
   if (!revealLineFree("spaced", state, now)) return null;
   let longest: { id: RevealId; since: number } | null = null;
   for (const entry of table) {
-    if (!revealQualifies(entry, state, now)) continue;
+    if (entry.aside || !revealQualifies(entry, state, now)) continue;
     const since = time(state.waitingSince?.[entry.id]);
     if (since === null || now.getTime() - since < REVEAL_PATIENCE_MS) return entry.id;
     if (!longest || since < longest.since) longest = { id: entry.id, since };
@@ -236,8 +243,15 @@ export function revealAhead(state: RevealState, now: Date, table: readonly Revea
   return table.filter((entry) => entry.ahead === true && entry.kind === "offer" && entry.id !== next && revealQualifies(entry, state, now)).map((entry) => entry.id);
 }
 
+/** The `aside` entries a page may arm on this load (the star ask): each one that may be claimed now. */
+export function revealAsideNow(state: RevealState, now: Date, table: readonly RevealEntry[] = INBOX_REVEALS): RevealId[] {
+  return table.filter((entry) => entry.aside === true && revealMayClaim(entry.id, state, now, table)).map((entry) => entry.id);
+}
+
 /** A claim for `id` may be spent now: it is still next, or an `ahead` offer at its moment. Anything else gets no. */
 export function revealMayClaim(id: RevealId, state: RevealState, now: Date, table: readonly RevealEntry[] = INBOX_REVEALS): boolean {
+  const entry = table.find((e) => e.id === id);
+  if (entry?.aside) return revealQualifies(entry, state, now) && revealLineFree("spaced", state, now);
   return revealNext(state, now, table) === id || revealAhead(state, now, table).includes(id);
 }
 

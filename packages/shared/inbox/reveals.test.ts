@@ -4,12 +4,12 @@
  * back for ever, or patience skipping an entry with nothing behind it; the Board's tenure (3 days, the owner's
  * change) or its 5 threads moving; a dev build or a feature the person decided being revealed; the Checklist (approval
  * "inbox-checklist-reveal", 2026-11-04) leaving its place after Snooze and the Board, its 5 days or 5 threads moving, or
- * it needing the Board on; the "Star the repo" ask (approval "star-ask", 2026-11-06) going before a feature reveal due the
- * same day, showing on the first day of Inbox use, or waiting for more days or a number of threads (the owner: "2nd day
- * of inbox use").
+ * it needing the Board on; the "Star the repo" ask (approval "star-ask", 2026-11-06) showing on the first day of Inbox
+ * use, waiting for more days or a number of threads (the owner: "2nd day of inbox use"), becoming `next` (so passing or
+ * being passed by an offer), or showing while the line is not free.
  */
 import { describe, expect, test } from "bun:test";
-import { INBOX_REVEALS, REVEAL_PATIENCE_MS, REVEAL_SPACING_MS, revealLastShown, revealMayClaim, revealNext, type RevealState } from "./reveals";
+import { INBOX_REVEALS, REVEAL_PATIENCE_MS, REVEAL_SPACING_MS, revealAsideNow, revealLastShown, revealMayClaim, revealNext, type RevealState } from "./reveals";
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -145,14 +145,23 @@ describe("the star ask's who (approval \"star-ask\")", () => {
   };
   const at = local(0, 0, 30);
   const star = (over: Partial<RevealState>, now: Date = at) =>
-    revealNext(state({ firstUseAt: local(-1, 23, 30).toISOString(), threads: 0, open: { star: true }, ...over }), now);
+    revealMayClaim("star", state({ firstUseAt: local(-1, 23, 30).toISOString(), threads: 0, open: { star: true }, ...over }), now) ? "star" : null;
 
-  test("last in line: after every feature reveal still open", () => {
+  test("outside the line's order: never next, never in the way of an offer, claimable beside whichever offer is next", () => {
     const week = { firstUseAt: ago(7 * DAY), threads: 10 };
+    expect(revealNext(state({ ...week, open: { star: true } }), NOW)).toBeNull();
     expect(revealNext(state({ ...week, open: { steps: true, star: true } }), NOW)).toBe("steps");
-    expect(revealNext(state({ ...week, open: { board: true, star: true } }), NOW)).toBe("board");
-    expect(revealMayClaim("star", state({ ...week, open: { steps: true, star: true } }), NOW)).toBe(false);
-    expect(revealMayClaim("star", state({ ...week, open: { star: true } }), NOW)).toBe(true);
+    // A stuck Snooze past its patience is still the one that goes (the star ask never takes its turn).
+    expect(revealNext(state({ ...week, open: { snooze: true, star: true }, waitingSince: { snooze: ago(5 * DAY) } }), NOW)).toBe("snooze");
+    expect(revealMayClaim("star", state({ ...week, open: { steps: true, star: true } }), NOW)).toBe(true);
+    expect(revealAsideNow(state({ ...week, open: { steps: true, star: true } }), NOW)).toEqual(["star"]);
+  });
+
+  test("only while the line is free: not on a day that had a dialog, not on the load after one, not inside the spacing", () => {
+    expect(star({ dayShownAt: local(0, 0, 5).toISOString() })).toBeNull();
+    expect(star({ afterShowLoad: true })).toBeNull();
+    expect(star({ lastShownAt: local(-1, 9, 0).toISOString() })).toBeNull();
+    expect(star({ notNowAt: local(-2, 9, 0).toISOString() })).toBeNull();
   });
 
   test("from the second day of Inbox use (a later calendar day, not 24 hours), with no thread minimum", () => {
@@ -167,7 +176,7 @@ describe("the star ask's who (approval \"star-ask\")", () => {
     expect(star({ firstUseAt: null })).toBeNull();
   });
 
-  test("on day 1 it goes before the offers that are not due yet (Snooze waits for day 2)", () => {
+  test("on day 1, beside offers not due yet (Snooze waits for day 2)", () => {
     expect(star({ open: { snooze: true, board: true, steps: true, star: true }, threads: 20 })).toBe("star");
   });
 

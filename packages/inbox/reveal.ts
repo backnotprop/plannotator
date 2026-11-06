@@ -217,16 +217,18 @@ export interface RevealArmed {
   snoozeDue: boolean;
   /** The offers this load may also arm, each at its own moment (settings `reveal.ahead`: List view). */
   ahead: readonly InboxRevealId[];
+  /** Armed beside `next`, outside the line's order (settings `reveal.aside`: the star ask). */
+  aside: readonly InboxRevealId[];
 }
 
 /**
  * The load's latch (App): only `reveal.next` is armed. An older Inbox reports no queue (no `reveal`): its Snooze rule
  * alone, and never the Board.
  */
-export function revealArmed(settings: { reveal?: { next: RevealArmed['next']; ahead?: readonly InboxRevealId[] }; snooze_intro?: { due: boolean } }): RevealArmed {
+export function revealArmed(settings: { reveal?: { next: RevealArmed['next']; ahead?: readonly InboxRevealId[]; aside?: readonly InboxRevealId[] }; snooze_intro?: { due: boolean } }): RevealArmed {
   const snoozeDue = settings.snooze_intro?.due === true;
   const next = settings.reveal ? settings.reveal.next : snoozeDue ? 'snooze' : null;
-  return { next, snoozeDue: snoozeDue && next === 'snooze', ahead: settings.reveal?.ahead ?? [] };
+  return { next, snoozeDue: snoozeDue && next === 'snooze', ahead: settings.reveal?.ahead ?? [], aside: settings.reveal?.aside ?? [] };
 }
 
 /** The Board reveal's need: the list holds this many rows or more (the approval: "the list has 5 rows or more"). */

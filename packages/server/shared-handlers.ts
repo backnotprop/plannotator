@@ -442,14 +442,14 @@ export async function handleSaveNotes(req: Request, options: HandleSaveNotesOpti
 }
 
 /**
- * The "Star the repo" ask on the done screen (packages/shared/star-ask.ts): `POST /api/star-ask/claim` and
- * `/answer`. Null for any other path. In remote mode the ask never shows: gh there is the server machine's login, not
- * the person's own (the claim answers `show: false`; nothing else can run without a shown record).
+ * The "Star the repo" ask on the done screen (packages/shared/star-ask.ts): `POST /api/star-ask/claim` (at load: may
+ * it show), `/shown` (at the decision: stamp it, draw it) and `/answer`. Null for any other path. In remote mode the ask
+ * never shows: gh there is the server machine's login, not the person's own (`claim` and `shown` answer
+ * `show: false`, with no gh and no stamp).
  */
 export async function handleStarAsk(req: Request, url: URL, surface: StarAskSurface, options: { remote: boolean }): Promise<Response | null> {
   if (!url.pathname.startsWith("/api/star-ask/")) return null;
-  if (options.remote && url.pathname === "/api/star-ask/claim" && req.method === "POST") return Response.json({ show: false, can_star: false });
   const body = req.method === "POST" ? await req.json().catch(() => ({})) : undefined;
-  const answered = await starAskRoute(starAskService(), surface, req.method, url.pathname, body);
+  const answered = await starAskRoute(starAskService(), surface, req.method, url.pathname, body, { remote: options.remote });
   return answered ? Response.json(answered.body, { status: answered.status }) : null;
 }

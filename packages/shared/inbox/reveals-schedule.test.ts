@@ -15,8 +15,8 @@
  * day after the list grows taller than the screen); a light user getting a heavy-use dialog; two dialogs on one day,
  * or on two page loads in a row (an old tab reading again included); the gap after an offer's Not now; an offer whose
  * moment never comes not retiring after 14 days (an update-day dialog never retires); update-day dialogs coming back to
- * back; an unanswered agent note taking another day; the "Star the repo" ask (approval "star-ask") not going on the
- * second day of use (the owner, 2026-11-06), or going ahead of an offer that is next.
+ * back; an unanswered agent note taking another day; the "Star the repo" ask (approval "star-ask") not going from the
+ * second day of use (the owner, 2026-11-06), or moving any other dialog's day (it stays outside the line's order).
  */
 import { describe, expect, test } from "bun:test";
 import {
@@ -27,6 +27,7 @@ import {
   revealAgentNoteAgents,
   revealAgentNoteNew,
   revealAhead,
+  revealAsideNow,
   revealDay,
   revealHeavyUse,
   revealLineFree,
@@ -138,7 +139,16 @@ function simulate(user: User, days = 30): Shown[] {
         show(early, true);
         continue;
       }
-      if (next && user.moment(next, day) && revealMayClaim(next, state(), now, TABLE)) show(next, true);
+      if (next && user.moment(next, day) && revealMayClaim(next, state(), now, TABLE)) {
+        show(next, true);
+        continue;
+      }
+      // An `aside` entry (the star ask) at a calm moment the line left free: it stamps nothing of the line.
+      const aside = revealAsideNow(state(), now, TABLE).find((id) => user.moment(id, day));
+      if (aside) {
+        done.add(aside);
+        shown.push({ id: aside, day, at: now });
+      }
     }
   }
   return shown;
@@ -184,7 +194,7 @@ function expectOnePerDay(shown: Shown[]) {
 }
 
 describe("30 days of a heavy user", () => {
-  test("setup on day 0, the star ask on day 1 (nothing else is due yet), then one a day: Snooze 2, Bro mode 3, the Board 4; the list outgrows the screen on day 5, so List view goes on 5, ahead of the Checklist (6)", () => {
+  test("setup on day 0, the star ask on day 1 (aside: it moves no one), then one a day: Snooze 2, Bro mode 3, the Board 4; the list outgrows the screen on day 5, so List view goes on 5, ahead of the Checklist (6)", () => {
     const shown = simulate(HEAVY);
     expect(shown.map((s) => [s.id, s.day])).toEqual([
       ["agent_note", 0],
@@ -218,12 +228,14 @@ describe("30 days of a heavy user", () => {
 });
 
 describe("30 days of a light user", () => {
-  test("setup on day 0; Snooze next from day 2 holds the star ask back until its patience runs out, so the star ask goes on day 7 and Snooze, passed, retires; the Checklist late; never Bro mode, the Board or List view", () => {
+  test("setup on day 0, Snooze about day 7, the Checklist late; never Bro mode, the Board or List view", () => {
     const shown = simulate(LIGHT);
     const got = days(shown);
     expect(got.agent_note).toBe(0);
-    expect(got.star).toBe(7);
-    expect(got.snooze).toBeUndefined();
+    expect(got.snooze).toBe(7);
+    // The star ask on day 4: their first load with the line free (day 2's load comes right after the agent note's),
+    // beside Snooze waiting for its moment, and Snooze's day unmoved.
+    expect(got.star).toBe(4);
     expect(got.steps).toBeGreaterThanOrEqual(20);
     for (const never of [BRO, "board", LIST_VIEW]) expect(got[never]).toBeUndefined();
     expectOnePerDay(shown);

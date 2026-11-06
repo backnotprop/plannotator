@@ -7,7 +7,9 @@
  * GitHub; Not now not recording or not leaving; the corner staying after a thank-you, or the card leaving without
  * Close; a key that closes it (no new shortcut); the done screen asking with auto-close on, outside a live session, or
  * twice, after the session's server stopped (it must claim while the page is open), showing the card before a decision
- * or when the server said no, or offering a gh star there (no server is left to run it).
+ * or when the server said no, or offering a gh star there (no server is left to run it); the done screen using the ask
+ * up before the card draws (a reload, a session left without a decision, auto-close turned on during the review: only
+ * `shown`, at the decision, stamps it), or drawing the card when `shown` said no.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -15,6 +17,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 const hasDom = typeof document !== 'undefined';
 const { StarAskCard, STAR_ASK_REPO_URL } = (hasDom ? await import('./StarAskCard') : {}) as typeof import('./StarAskCard');
+const { STAR_ASK_WORDS } = (hasDom ? await import('../utils/starAskWords') : {}) as typeof import('../utils/starAskWords');
 const { useStarAskDoneScreen } = (hasDom ? await import('./StarAskDoneScreen') : {}) as typeof import('./StarAskDoneScreen');
 type StarAskClient = import('./StarAskDoneScreen').StarAskClient;
 
@@ -51,16 +54,17 @@ function calls() {
 }
 
 describe.skipIf(!hasDom)('the card', () => {
-  test('both shapes: the short words, a named region (never a dialog), no "only once" line, the art asking', async () => {
+  test('both shapes: the short body, a named region (never a dialog), no "only once" line, the art asking', async () => {
     for (const shape of ['corner', 'card'] as const) {
       const c = calls();
       const el = await render(<StarAskCard shape={shape} canStar onStar={async () => true} {...c} />);
       const region = el.querySelector('section')!;
       const title = el.querySelector('h2')!;
+      expect(title.id).not.toBe('');
       expect(region.getAttribute('aria-labelledby')).toBe(title.id);
-      expect(title.textContent).toBe('Would you star Plannotator?');
       expect(el.querySelector('dialog, [role="dialog"]')).toBeNull();
-      expect(el.querySelector('.psa-p')?.textContent).toBe('It’s free and open source. A star helps more people find it, and helps us keep it going.');
+      // Every surface uses the one short body (the owner's answer, q-bc8be138), never a longer one.
+      expect(el.querySelector('.psa-p')?.textContent).toBe(STAR_ASK_WORDS.body);
       expect(el.textContent).not.toContain('only ask once');
       expect(art(el).getAttribute('data-star-ask-art')).toBe('ask');
       expect(art(el).getAttribute('aria-hidden')).toBe('true');
@@ -160,21 +164,23 @@ describe.skipIf(!hasDom)('the card', () => {
 });
 
 describe.skipIf(!hasDom)('the done screen (useStarAskDoneScreen)', () => {
-  function client(answer: { show: boolean; can_star: boolean }) {
+  function client(answer: { show: boolean; can_star: boolean }, shown = true) {
     const log: string[] = [];
     const api: StarAskClient = {
       claim: async () => (log.push('claim'), answer),
+      shown: async () => (log.push('shown'), { show: shown }),
       answer: async (a) => log.push(`answer:${a}`),
     };
     return { api, log };
   }
 
-  function Screen(props: { ready?: boolean; eligible: boolean; decided: boolean; api: StarAskClient; delay?: string; tick?: number }) {
-    const footer = useStarAskDoneScreen({ ready: props.ready ?? true, eligible: props.eligible, decided: props.decided, client: props.api, autoCloseDelay: () => props.delay ?? 'off' });
+  function Screen(props: { ready?: boolean; eligible: boolean; decided: boolean; api: StarAskClient; delay?: string | (() => string); tick?: number }) {
+    const delay = props.delay;
+    const footer = useStarAskDoneScreen({ ready: props.ready ?? true, eligible: props.eligible, decided: props.decided, client: props.api, autoCloseDelay: typeof delay === 'function' ? delay : () => delay ?? 'off' });
     return <div data-tick={props.tick}>{footer}</div>;
   }
 
-  test('claims once while the session is open (the server stops on the decision), shows the card only after a decision, with the link', async () => {
+  test('claims once at load (nothing used up), stamps it with shown only at the decision, then draws the card with the link', async () => {
     const { api, log } = client({ show: true, can_star: true });
     const el = await render(<Screen ready={false} eligible decided={false} api={api} />);
     expect(log).toEqual([]);
@@ -184,12 +190,44 @@ describe.skipIf(!hasDom)('the done screen (useStarAskDoneScreen)', () => {
     expect(el.querySelector('[data-star-ask]')).toBeNull();
     await act(async () => root!.render(<Screen eligible decided api={api} tick={2} />));
     await settle();
-    expect(log).toEqual(['claim']);
+    expect(log).toEqual(['claim', 'shown']);
     expect(el.querySelector('[data-star-ask="card"]')).not.toBeNull();
     // No gh star from the done screen: the server has stopped, so the button is the real link.
     expect(button(el, 'Star on GitHub')?.tagName).toBe('A');
     await act(async () => button(el, 'Not now')!.click());
-    expect(log).toEqual(['claim', 'answer:not-now']);
+    expect(log).toEqual(['claim', 'shown', 'answer:not-now']);
+    expect(el.querySelector('[data-star-ask]')).toBeNull();
+  });
+
+  test('never stamped without a decision (a reload, a session left open or closed): the claim alone uses nothing up', async () => {
+    const { api, log } = client({ show: true, can_star: true });
+    const el = await render(<Screen eligible decided={false} api={api} />);
+    await settle();
+    await act(async () => root!.unmount());
+    root = null;
+    host?.remove();
+    expect(log).toEqual(['claim']);
+    expect(el.querySelector('[data-star-ask]')).toBeNull();
+  });
+
+  test('auto-close turned on during the review: no shown at the decision, no card', async () => {
+    let delay = 'off';
+    const { api, log } = client({ show: true, can_star: true });
+    const el = await render(<Screen eligible decided={false} api={api} delay={() => delay} />);
+    await settle();
+    delay = '3';
+    await act(async () => root!.render(<Screen eligible decided api={api} delay={() => delay} tick={2} />));
+    await settle();
+    expect(log).toEqual(['claim']);
+    expect(el.querySelector('[data-star-ask]')).toBeNull();
+  });
+
+  test('shown says no (another surface or process drew it first, or the server is gone): no card', async () => {
+    const { api, log } = client({ show: true, can_star: true }, false);
+    const el = await render(<Screen eligible decided api={api} />);
+    await settle();
+    await settle();
+    expect(log).toEqual(['claim', 'shown']);
     expect(el.querySelector('[data-star-ask]')).toBeNull();
   });
 

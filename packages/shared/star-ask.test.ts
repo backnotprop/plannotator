@@ -7,7 +7,9 @@
  * (a second surface, a second tab, a surface after an answer, a hand-edited record); the already-starred check reading
  * a 204 as "show it" or anything but a 404 as "gh can star"; a missing gh, a signed-out gh or a gh that never answers
  * holding the ask back (or hanging past the timeout) instead of falling back to the link; starring without a click, or
- * with no shown record, or twice on a double click; a star written as starred when GitHub refused it.
+ * with no shown record, or twice on a double click; a star written as starred when GitHub refused it; a check alone
+ * (a done-screen page at load) using the ask up, or running gh again on a later load; two processes both showing it;
+ * starring an ask another surface showed; the preview flag beating CI.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -85,6 +87,8 @@ describe("who: release builds only", () => {
     expect(starAskEnabled({ PLANNOTATOR_TEST_SANDBOX: "1", PLANNOTATOR_STAR_ASK_PREVIEW: "1" }, false)).toBe(true);
     // The preview means nothing outside the sandbox: a dev build stays off.
     expect(starAskEnabled({ PLANNOTATOR_STAR_ASK_PREVIEW: "1" }, false)).toBe(false);
+    // CI wins over the preview: a CI runner's gh login can never star it.
+    expect(starAskEnabled({ CI: "true", PLANNOTATOR_TEST_SANDBOX: "1", PLANNOTATOR_STAR_ASK_PREVIEW: "1" }, true)).toBe(false);
   });
 
   test("this test process is never a release, and a host's word overrides the compiled-in mark", () => {
@@ -178,7 +182,7 @@ describe("the claim: once, everywhere", () => {
     const store = memoryStore();
     const gh = fakeGh(ok(404));
     expect(await service(store, gh).claim("plan")).toEqual({ show: true, canStar: true });
-    expect(store.raw).toEqual({ shownAt: NOW.toISOString(), surface: "plan", canStar: true });
+    expect(store.raw).toEqual({ checkedAt: NOW.toISOString(), shownAt: NOW.toISOString(), surface: "plan", canStar: true });
     expect(gh.calls).toEqual([[...STAR_ASK_CHECK_ARGS]]);
   });
 
@@ -211,7 +215,19 @@ describe("the claim: once, everywhere", () => {
     const ask = service(store, fakeGh(ok(404), ok(404)));
     const [a, b] = await Promise.all([ask.claim("plan"), ask.claim("plan")]);
     expect([a.show, b.show].filter(Boolean)).toHaveLength(1);
-    expect(store.writes).toBe(1);
+    expect(store.raw).toMatchObject({ shownAt: NOW.toISOString() });
+  });
+
+  test("two processes stamping at once: only the one whose stamp is read back shows it", async () => {
+    const store = memoryStore({ checkedAt: "2026-11-06T12:00:00.000Z", canStar: false });
+    const write = store.write.bind(store);
+    // The other process writes right after this one: its stamp is what this one reads back.
+    store.write = (record) => {
+      const ok = write(record);
+      if (record.shownAt) store.raw = { ...record, surface: "inbox" };
+      return ok;
+    };
+    expect(service(store, fakeGh()).show("plan")).toEqual({ show: false, canStar: false });
   });
 
   test("another surface shows it while gh answers: this one shows nothing", async () => {
@@ -259,22 +275,46 @@ describe("the claim: once, everywhere", () => {
     expect(await service(store, fakeGh(ok(404))).claim("plan")).toEqual({ show: false, canStar: false });
   });
 
-  test("a custom stamp writes the record (the Inbox's line and the record in one save)", async () => {
+  test("a custom stamp writes the record (the Inbox's own reveal and the record in one save)", async () => {
     const store = memoryStore();
     const stamped: StarAskRecord[] = [];
-    const claim = await service(store, fakeGh(ok(404))).claim("inbox", { stamp: (record) => (stamped.push(record), true) });
+    const claim = await service(store, fakeGh(ok(404))).claim("inbox", { stamp: (record) => (stamped.push(record), store.write(record)) });
     expect(claim.show).toBe(true);
-    expect(stamped).toEqual([{ shownAt: NOW.toISOString(), surface: "inbox", canStar: true }]);
+    expect(stamped).toEqual([{ checkedAt: NOW.toISOString(), shownAt: NOW.toISOString(), surface: "inbox", canStar: true }]);
+  });
+});
+
+describe("the done screens: a check at load, the stamp only when the card draws", () => {
+  test("the check uses nothing up: the record stays open, and a later load reuses it without gh", async () => {
+    const store = memoryStore();
+    const gh = fakeGh(ok(404));
+    expect(await service(store, gh).check("plan")).toEqual({ show: true, canStar: true });
+    expect(store.raw).toEqual({ checkedAt: NOW.toISOString(), canStar: true });
+    expect(starAskOpen(readStarAskRecord({ starAsk: store.raw as StarAskRecord }), store.raw)).toBe(true);
+    // A reload, an abandoned session, goal setup or auto-close: nothing calls show, so it stays open.
+    const again = fakeGh(ok(404));
+    expect(await service(store, again).check("review")).toEqual({ show: true, canStar: true });
+    expect(again.calls).toEqual([]);
+  });
+
+  test("show at the decision stamps it once; no show without a check, after another surface showed it, or for a closed record", async () => {
+    expect(service(memoryStore(), fakeGh()).show("plan")).toEqual({ show: false, canStar: false });
+    const store = memoryStore({ checkedAt: "2026-11-06T12:00:00.000Z", canStar: false });
+    expect(service(store, fakeGh()).show("review")).toEqual({ show: true, canStar: false });
+    expect(store.raw).toMatchObject({ shownAt: NOW.toISOString(), surface: "review" });
+    expect(service(store, fakeGh()).show("plan")).toEqual({ show: false, canStar: false });
+    expect(service(memoryStore({ checkedAt: "x", answer: "not-now" }), fakeGh()).show("plan").show).toBe(false);
+    expect(service(memoryStore({ checkedAt: "x" }), fakeGh(), { enabled: false }).show("plan").show).toBe(false);
   });
 });
 
 describe("the click", () => {
-  const shown = (canStar: boolean) => memoryStore({ shownAt: "2026-11-06T12:00:00.000Z", surface: "plan", canStar });
+  const shown = (canStar: boolean) => memoryStore({ shownAt: "2026-11-06T12:00:00.000Z", surface: "inbox", canStar });
 
   test("stars with gh only on the click, once shown with gh able to; 204 records starred", async () => {
     const store = shown(true);
     const gh = fakeGh(ok(204));
-    expect(await service(store, gh).star()).toEqual({ starred: true });
+    expect(await service(store, gh).star("inbox")).toEqual({ starred: true });
     expect(gh.calls).toEqual([[...STAR_ASK_STAR_ARGS]]);
     expect(store.raw).toMatchObject({ answer: "starred", answeredAt: NOW.toISOString() });
   });
@@ -283,25 +323,26 @@ describe("the click", () => {
     const store = shown(true);
     const gh = fakeGh(ok(204), ok(204));
     const ask = service(store, gh);
-    const [a, b] = await Promise.all([ask.star(), ask.star()]);
+    const [a, b] = await Promise.all([ask.star("inbox"), ask.star("inbox")]);
     expect(a.starred && b.starred).toBe(true);
     expect(gh.calls).toHaveLength(1);
-    expect(await ask.star()).toEqual({ starred: true });
+    expect(await ask.star("inbox")).toEqual({ starred: true });
     expect(gh.calls).toHaveLength(1);
   });
 
   test("GitHub refuses (or gh is silent): not starred, and nothing recorded as starred", async () => {
     for (const answer of [ok(403), "hang" as const]) {
       const store = shown(true);
-      expect(await service(store, fakeGh(answer)).star()).toEqual({ starred: false });
+      expect(await service(store, fakeGh(answer)).star("inbox")).toEqual({ starred: false });
       expect((store.raw as StarAskRecord).answer).toBeUndefined();
     }
   });
 
-  test("never without a shown record, after an answer, or when the button is a link", async () => {
-    for (const store of [memoryStore(), memoryStore({ shownAt: "x", canStar: true, answer: "not-now" }), shown(false)]) {
+  test("never without a shown record, after an answer, when the button is a link, or for an ask another surface showed", async () => {
+    const elsewhere = memoryStore({ shownAt: "x", surface: "plan", canStar: true });
+    for (const store of [memoryStore(), memoryStore({ shownAt: "x", surface: "inbox", canStar: true, answer: "not-now" }), shown(false), elsewhere]) {
       const gh = fakeGh(ok(204));
-      expect(await service(store, gh).star()).toEqual({ starred: false });
+      expect(await service(store, gh).star("inbox")).toEqual({ starred: false });
       expect(gh.calls).toEqual([]);
     }
   });
@@ -318,11 +359,13 @@ describe("the click", () => {
 });
 
 describe("the routes (plan review, code review, annotate)", () => {
-  test("claim and answer; no star route (the server stops before the click); POST only; a bad answer is refused", async () => {
+  test("claim (nothing used up), shown, answer; no star route (the server stops before the click); POST only; a bad answer is refused", async () => {
     const store = memoryStore();
     const gh = fakeGh(ok(404), ok(204));
     const ask = service(store, gh);
     expect(await starAskRoute(ask, "review", "POST", "/api/star-ask/claim", {})).toEqual({ status: 200, body: { show: true, can_star: true } });
+    expect((store.raw as StarAskRecord).shownAt).toBeUndefined();
+    expect(await starAskRoute(ask, "review", "POST", "/api/star-ask/shown", {})).toEqual({ status: 200, body: { show: true } });
     expect(store.raw).toMatchObject({ surface: "review" });
     expect(await starAskRoute(ask, "review", "POST", "/api/star-ask/star", {})).toBeNull();
     expect(gh.calls).toEqual([[...STAR_ASK_CHECK_ARGS]]);

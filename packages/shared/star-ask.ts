@@ -4,13 +4,15 @@
  * plan review, code review and annotate).
  *
  * Shown once, everywhere: one config.json record, `starAsk` (`StarAskRecord`), read and written only here. The first
- * surface that shows the ask stamps `shownAt`; no surface shows it again. Ignoring it or closing the tab counts as an
- * answer. `answer` says how it ended: `starred` (gh starred it on the click), `opened` (the GitHub page opened),
+ * surface that shows the ask stamps `shownAt`, right before it draws it; no surface shows it again. A check alone
+ * (`checkedAt`, a done-screen page that loaded but never reached its done screen) uses nothing up. Ignoring a shown
+ * ask or closing the tab counts as an answer. `answer` says how it ended: `starred` (gh starred it on the click), `opened` (the GitHub page opened),
  * `not-now`, or `already` (the check found a star before the ask showed, so nothing showed).
  *
  * Who sees it (every gate, in order):
- *  - a release build (`starAskEnabled`): never a dev build, a test or CI. Under the test sandbox only
- *    PLANNOTATOR_STAR_ASK_PREVIEW=1 turns it on, for a scratch build's pictures and e2e (gh is faked there);
+ *  - a release build (`starAskEnabled`): never a dev build, a test or CI (CI wins over everything, so a CI runner's gh
+ *    login can never star it). Under the test sandbox only PLANNOTATOR_STAR_ASK_PREVIEW=1 turns it on, for a scratch
+ *    build's pictures and e2e (gh is faked there);
  *  - the record is open (`starAskOpen`): never shown and never answered, on any surface;
  *  - a returning person: plan review, code review and annotate read the daily ping's first-use week
  *    (`starAskReturning`: week 2 or later). The Inbox's line has its own need (the second day of Inbox use, no thread
@@ -50,6 +52,8 @@ export interface StarAskRecord {
   surface?: StarAskSurface;
   /** The check said gh can star it (404 from GitHub): the button stars with gh. */
   canStar?: boolean;
+  /** When the already-starred check ran without the ask showing yet (a done-screen page at load): reused, never re-run. */
+  checkedAt?: string;
 }
 
 const ANSWERS: readonly StarAskAnswer[] = ["starred", "opened", "not-now", "already"];
@@ -66,6 +70,7 @@ export function readStarAskRecord(config: Pick<PlannotatorConfig, "starAsk"> | u
   if (typeof r.answeredAt === "string") out.answeredAt = r.answeredAt;
   if (typeof r.surface === "string" && (SURFACES as readonly string[]).includes(r.surface)) out.surface = r.surface as StarAskSurface;
   if (typeof r.canStar === "boolean") out.canStar = r.canStar;
+  if (typeof r.checkedAt === "string") out.checkedAt = r.checkedAt;
   return out;
 }
 
@@ -98,8 +103,9 @@ export function starAskRelease(): boolean {
  * faked there).
  */
 export function starAskEnabled(env: NodeJS.ProcessEnv = process.env, release: boolean = starAskRelease()): boolean {
-  if (env.PLANNOTATOR_TEST_SANDBOX || env.NODE_ENV === "test") return env.PLANNOTATOR_STAR_ASK_PREVIEW === "1";
+  // CI first: no preview flag can turn it on where a bot's gh login could star the repository.
   if (env.CI) return false;
+  if (env.PLANNOTATOR_TEST_SANDBOX || env.NODE_ENV === "test") return env.PLANNOTATOR_STAR_ASK_PREVIEW === "1";
   return release;
 }
 
@@ -238,7 +244,7 @@ export const configStarAskStore: StarAskStore = {
   write(record) {
     if (!saveConfig({ starAsk: record })) return false;
     const back = readStarAskRecord(loadConfig({ quiet: true }));
-    return back?.shownAt === record.shownAt && back?.answer === record.answer;
+    return back?.shownAt === record.shownAt && back?.answer === record.answer && back?.checkedAt === record.checkedAt;
   },
 };
 
@@ -262,15 +268,26 @@ export interface StarAskClaim {
 export interface StarAskClaimOptions {
   /** The surface's own rules (the Inbox's line), checked before the check and again after it. */
   gate?: () => boolean;
-  /** Write the shown record (the Inbox stamps its line in the same save). Default: the store. */
+  /** Write the shown record (the Inbox stamps its own reveal in the same save). Default: the store. */
   stamp?: (record: StarAskRecord) => boolean;
 }
 
 export interface StarAskService {
-  /** A surface is about to show the ask: every gate, then the check, then the stamp. */
+  /**
+   * May this surface show the ask later (a done-screen page at load)? Every gate and the already-starred check, but no
+   * `shownAt`: only the check's result is kept (`checkedAt`, `canStar`), so a later load reuses it and never asks gh
+   * again. Starred already: `answer: "already"`.
+   */
+  check(surface: StarAskSurface, options?: Pick<StarAskClaimOptions, "gate">): Promise<StarAskClaim>;
+  /**
+   * The surface draws the ask now: a compare-and-set on the record (still open, a check ran), stamping `shownAt` and
+   * `surface`. Only the writer whose stamp is read back shows it (two processes at once: one).
+   */
+  show(surface: StarAskSurface, options?: StarAskClaimOptions): StarAskClaim;
+  /** `check` then `show`, in one call (the Inbox: its card draws as soon as the claim answers). */
   claim(surface: StarAskSurface, options?: StarAskClaimOptions): Promise<StarAskClaim>;
-  /** The click on "Star on GitHub" while the button stars with gh. */
-  star(): Promise<{ starred: boolean }>;
+  /** The click on "Star on GitHub" while the button stars with gh: only for the ask `surface` showed. */
+  star(surface: StarAskSurface): Promise<{ starred: boolean }>;
   /** Not now, or the GitHub page opened from the link. */
   answer(answer: "not-now" | "opened"): { ok: boolean };
 }
@@ -282,16 +299,19 @@ export function createStarAsk(deps: StarAskDeps): StarAskService {
     const { record, raw } = deps.store.read();
     return starAskOpen(record, raw);
   };
-  // One check at a time in this process: a second tab's claim while the first waits on gh shows nothing.
-  let claiming = false;
+  const no: StarAskClaim = { show: false, canStar: false };
+  // One check at a time in this process: a second tab's check while the first waits on gh says no.
+  let checking = false;
   let starring: Promise<{ starred: boolean }> | null = null;
 
-  return {
-    async claim(surface, options = {}) {
-      const no: StarAskClaim = { show: false, canStar: false };
+  const service: StarAskService = {
+    async check(surface, options = {}) {
       const gate = options.gate ?? (() => true);
-      if (claiming || !deps.enabled() || !open() || !gate() || !deps.returning()) return no;
-      claiming = true;
+      if (checking || !deps.enabled() || !open() || !gate() || !deps.returning()) return no;
+      const before = deps.store.read().record;
+      // One check per machine: a later load (or another surface) reuses the result.
+      if (before?.checkedAt) return { show: true, canStar: before.canStar === true };
+      checking = true;
       try {
         const check = await checkStarred(deps.run, timeoutMs);
         // Another surface (or process) may have shown it while gh answered.
@@ -301,19 +321,38 @@ export function createStarAsk(deps: StarAskDeps): StarAskService {
           deps.store.write({ answer: "already", answeredAt: at, surface });
           return no;
         }
-        const record: StarAskRecord = { shownAt: at, surface, canStar: check === "not-starred" };
-        const written = (options.stamp ?? deps.store.write)(record);
-        // Not written (a read-only data dir): showing it anyway would show it on every load.
-        return written ? { show: true, canStar: record.canStar === true } : no;
+        const canStar = check === "not-starred";
+        deps.store.write({ ...deps.store.read().record, checkedAt: at, canStar });
+        return { show: true, canStar };
       } finally {
-        claiming = false;
+        checking = false;
       }
     },
 
-    star() {
+    show(surface, options = {}) {
+      const gate = options.gate ?? (() => true);
+      if (!deps.enabled() || !open() || !gate()) return no;
+      const before = deps.store.read().record;
+      if (!before?.checkedAt) return no;
+      const record: StarAskRecord = { ...before, shownAt: now().toISOString(), surface, canStar: before.canStar === true };
+      // Not written (a read-only data dir): showing it anyway would show it on every load.
+      if (!(options.stamp ?? deps.store.write)(record)) return no;
+      // Two processes stamping at once: only the one whose stamp is read back shows it.
+      const back = deps.store.read().record;
+      if (back?.shownAt !== record.shownAt || back?.surface !== surface) return no;
+      return { show: true, canStar: record.canStar === true };
+    },
+
+    async claim(surface, options = {}) {
+      const checked = await service.check(surface, options);
+      return checked.show ? service.show(surface, options) : no;
+    },
+
+    star(surface) {
       // A double click stars once.
       starring ??= (async () => {
         const { record } = deps.store.read();
+        if (record?.surface !== surface) return { starred: false };
         if (record?.answer === "starred") return { starred: true };
         if (!record?.shownAt || record.answer || record.canStar !== true) return { starred: false };
         const starred = await starRepo(deps.run, timeoutMs);
@@ -332,15 +371,18 @@ export function createStarAsk(deps: StarAskDeps): StarAskService {
       return { ok: deps.store.write({ ...record, answer, answeredAt: now().toISOString() }) };
     },
   };
+  return service;
 }
 
 // ── The routes (plan review, code review and annotate; both runtimes) ──
 
 /**
- * `POST /api/star-ask/claim` and `/api/star-ask/answer` (`{ answer: "not-now" | "opened" }`). Null for any other path.
- * The page claims once it has loaded, while the session is open: the server stops as soon as the decision is sent, so
- * the done screen's card holds the answer and its button is the link (no gh star from there; the Inbox has one).
- * Runtime-free: the Bun and Pi servers hand in the method and the parsed body.
+ * `POST /api/star-ask/claim`, `/api/star-ask/shown` and `/api/star-ask/answer` (`{ answer: "not-now" | "opened" }`).
+ * Null for any other path. At load the page claims: every gate and the check, nothing used up (`{ show, can_star }`:
+ * may it show later). When the person sends the decision the page posts `shown` (the server is still up: every
+ * runtime waits 800 to 1500 ms after the decision) and draws the card only on `{ show: true }`. Its button is the link
+ * (the server stops right after: no gh star from there; the Inbox has one). Runtime-free: the Bun and Pi servers hand
+ * in the method and the parsed body.
  */
 export async function starAskRoute(
   service: StarAskService,
@@ -348,12 +390,19 @@ export async function starAskRoute(
   method: string,
   path: string,
   body: unknown,
+  options: { remote?: boolean } = {},
 ): Promise<{ status: number; body: unknown } | null> {
-  if (path !== "/api/star-ask/claim" && path !== "/api/star-ask/answer") return null;
+  if (path !== "/api/star-ask/claim" && path !== "/api/star-ask/shown" && path !== "/api/star-ask/answer") return null;
   if (method !== "POST") return { status: 405, body: { error: "Use POST." } };
+  // Remote mode (another device's browser): never asks, never runs gh, never stamps.
+  if (options.remote && path !== "/api/star-ask/answer") return { status: 200, body: path === "/api/star-ask/claim" ? { show: false, can_star: false } : { show: false } };
   if (path === "/api/star-ask/claim") {
-    const claim = await service.claim(surface);
-    return { status: 200, body: { show: claim.show, can_star: claim.canStar } };
+    const check = await service.check(surface);
+    return { status: 200, body: { show: check.show, can_star: check.canStar } };
+  }
+  if (path === "/api/star-ask/shown") {
+    const shown = service.show(surface);
+    return { status: 200, body: { show: shown.show } };
   }
   const answer = body && typeof body === "object" ? (body as { answer?: unknown }).answer : undefined;
   if (answer !== "not-now" && answer !== "opened") return { status: 400, body: { error: "answer: not-now or opened." } };

@@ -1,7 +1,7 @@
 /**
  * The done screen's star ask route on the Pi plan, review and annotate servers (`handleStarAskRequest`, handlers.ts),
- * the Bun servers' mirror (packages/server/star-ask-route.test.ts). What regresses: Pi's route missing, recording the
- * wrong surface, or running the check in remote mode.
+ * the Bun servers' mirror (packages/server/star-ask-route.test.ts). What regresses: Pi's route missing (claim at load,
+ * shown at the decision), the claim using the ask up, recording the wrong surface, or checking or stamping in remote mode.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -40,20 +40,28 @@ function exchange(path: string, body: unknown = {}) {
 }
 
 describe("handleStarAskRequest (Pi)", () => {
-  test("the claim records the server's surface and answers how the button works", async () => {
+  const call = async (path: string, surface: "plan" | "review", remote = false) => {
+    const x = exchange(path);
+    expect(await handleStarAskRequest(x.req, x.res, x.url, surface, remote)).toBe(true);
+    return JSON.parse(x.sent.body!);
+  };
+
+  test("the claim at load uses nothing up; shown, at the decision, stamps the server's surface", async () => {
     const gh = fake();
-    const x = exchange("/api/star-ask/claim");
-    expect(await handleStarAskRequest(x.req, x.res, x.url, "review", false)).toBe(true);
-    expect(JSON.parse(x.sent.body!)).toEqual({ show: true, can_star: true });
+    expect(await call("/api/star-ask/claim", "review")).toEqual({ show: true, can_star: true });
+    expect(gh.record()?.shownAt).toBeUndefined();
+    expect(await call("/api/star-ask/shown", "review")).toEqual({ show: true });
     expect(gh.record()).toMatchObject({ surface: "review", canStar: true });
+    expect(await call("/api/star-ask/shown", "review")).toEqual({ show: false });
   });
 
-  test("remote mode: never shown, and gh never runs", async () => {
+  test("remote mode: never shown, gh never runs, nothing stamped", async () => {
     const gh = fake();
-    const x = exchange("/api/star-ask/claim");
-    expect(await handleStarAskRequest(x.req, x.res, x.url, "plan", true)).toBe(true);
-    expect(JSON.parse(x.sent.body!)).toEqual({ show: false, can_star: false });
+    expect(await call("/api/star-ask/claim", "plan", true)).toEqual({ show: false, can_star: false });
     expect(gh.calls).toEqual([]);
+    await call("/api/star-ask/claim", "plan");
+    expect(await call("/api/star-ask/shown", "plan", true)).toEqual({ show: false });
+    expect(gh.record()?.shownAt).toBeUndefined();
   });
 
   test("other paths are not its own", async () => {

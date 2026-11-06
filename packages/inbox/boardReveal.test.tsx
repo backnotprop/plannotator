@@ -386,9 +386,9 @@ describe.skipIf(!hasDom)('the calm moment', () => {
 describe('the load latch (App: revealArmed)', () => {
   test('only reveal.next is armed; Snooze only while it is next', async () => {
     const { revealArmed } = await import('./reveal');
-    expect(revealArmed({ reveal: { next: 'board' }, snooze_intro: { due: true } })).toEqual({ next: 'board', snoozeDue: false, ahead: [] });
-    expect(revealArmed({ reveal: { next: 'snooze' }, snooze_intro: { due: true } })).toEqual({ next: 'snooze', snoozeDue: true, ahead: [] });
-    expect(revealArmed({ reveal: { next: null }, snooze_intro: { due: true } })).toEqual({ next: null, snoozeDue: false, ahead: [] });
+    expect(revealArmed({ reveal: { next: 'board' }, snooze_intro: { due: true } })).toEqual({ next: 'board', snoozeDue: false, ahead: [], aside: [] });
+    expect(revealArmed({ reveal: { next: 'snooze' }, snooze_intro: { due: true } })).toEqual({ next: 'snooze', snoozeDue: true, ahead: [], aside: [] });
+    expect(revealArmed({ reveal: { next: null }, snooze_intro: { due: true } })).toEqual({ next: null, snoozeDue: false, ahead: [], aside: [] });
   });
 
   test('an ahead offer (List view) is latched beside next, so it can go at its own moment (approval "inbox-one-time-dialogs")', async () => {
@@ -400,9 +400,9 @@ describe('the load latch (App: revealArmed)', () => {
 
   test('an older Inbox (no reveal in settings): its Snooze rule alone, never the Board', async () => {
     const { revealArmed } = await import('./reveal');
-    expect(revealArmed({ snooze_intro: { due: true } })).toEqual({ next: 'snooze', snoozeDue: true, ahead: [] });
-    expect(revealArmed({ snooze_intro: { due: false } })).toEqual({ next: null, snoozeDue: false, ahead: [] });
-    expect(revealArmed({})).toEqual({ next: null, snoozeDue: false, ahead: [] });
+    expect(revealArmed({ snooze_intro: { due: true } })).toEqual({ next: 'snooze', snoozeDue: true, ahead: [], aside: [] });
+    expect(revealArmed({ snooze_intro: { due: false } })).toEqual({ next: null, snoozeDue: false, ahead: [], aside: [] });
+    expect(revealArmed({})).toEqual({ next: null, snoozeDue: false, ahead: [], aside: [] });
   });
 });
 
