@@ -1,4 +1,5 @@
 #!/bin/bash
+# Manual QA: runs with your real HOME and Plannotator config on purpose. For an isolated test run, use `bun run test:sandbox`.
 # Test script using the installed plannotator binary (not local codebase)
 #
 # Usage:

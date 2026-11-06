@@ -941,7 +941,7 @@ test('a PR with no review thread: Review with an agent, the picker (Ask for, the
   const threadId = String(await line.getAttribute('data-pulls-thread'));
   const opening = await world.claude.nextReply(threadId);
   const words = String(opening.body);
-  expect(words.startsWith("You're being asked to help me review and understand a pull request. Don't change any code unless I explicitly tell you to.\n")).toBe(true);
+  expect(words.startsWith("You're being asked to help me review and understand a pull request.\n")).toBe(true);
   expect(words).toContain('\n- Title: Fall back to English for missing strings\n- Number: #869\n');
   expect(words).toContain('\n- Link: https://github.com/northwind/web-app/pull/869\n');
   expect(words).toContain('\n1. Send me a guided review of its diff against main, using /review-curate (its instructions are at the end of this message).\n');

@@ -681,7 +681,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
 
   if (!model || !stack || !layer) {
     return (
-      <section className={`ib-viewer ib-review ib-prreview${phone ? '' : ' ib-prr-wide'}`} aria-label="Review" data-pull-review="">
+      <section className={`ib-viewer ib-wlayer ib-review ib-prreview${phone ? '' : ' ib-prr-wide'}`} aria-label="Review" data-pull-review="">
         <div className="ib-vhead">
           {!phone && <SidebarTrigger />}
           <Tip content="Reviews">
@@ -764,7 +764,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${phone ? '' : ' ib-prr-wide'}${phone ? ' ib-railfold' : ''}${filesSheet ? ' ib-files-open' : ''}`}
+      className={`ib-viewer ib-wlayer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${phone ? '' : ' ib-prr-wide'}${phone ? ' ib-railfold' : ''}${filesSheet ? ' ib-files-open' : ''}`}
       style={{ '--ib-rail-w': `${railWidth}px` } as React.CSSProperties}
       aria-label={`Review ${label}`}
       data-pull-review={layer.key}
