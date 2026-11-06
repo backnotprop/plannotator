@@ -4,7 +4,7 @@ System is a drawing of a project's code that a person can zoom through: nested s
 rests on. An agent draws it once from the real code and commits it to the project's repo in `.plannotator/system/`. A
 gate compares what changed with the files the drawing cites and says when the drawing may be out of date.
 
-This package holds the format, its loader, the check of cited paths, the gate, the recipes agents follow, and the scheduled check that wakes an agent to redraw. It has no UI yet and no Inbox wiring.
+This package holds the format, its loader, the check of cited paths, the gate, the recipes agents follow, and the scheduled check that wakes an agent to redraw. It has no UI yet and no Inbox wiring; the `plannotator system` command is its one door from a shell.
 Plannotator's own drawing is at [`.plannotator/system/`](../../.plannotator/system/).
 
 ## API
@@ -12,6 +12,7 @@ Plannotator's own drawing is at [`.plannotator/system/`](../../.plannotator/syst
 ```ts
 // @plannotator/system: pure, browser-safe
 export const FORMAT = 1;
+export const MAX_FILE_BYTES = 1048576; export const MAX_TOTAL_BYTES = 8388608; // the loader's caps
 export type SystemFiles = Record<string, string>; // 'system.yaml', 'sheets/C-001.yaml', 'revisions/PR-2543.yaml'
 export type LoadIssue = { file: string; field: string; message: string }; // field: a dotted path, 'parts.api.in', 'bands[0].x'
 export type LoadResult = { model: SystemModel | null; errors: LoadIssue[]; warnings: LoadIssue[] };
@@ -83,6 +84,35 @@ The patterns are fixed in the package (`isIgnoredPath`), not settings.
 
 ## Commands
 
+`plannotator system` is the command agents and the launchd job call (`apps/hook/server/system-command.ts`, a thin
+file over this package; `plannotator system --help` is its whole agent guide). Its subcommands and flags are exactly
+`SYSTEM_COMMANDS`, which the recipes name too:
+
+```sh
+plannotator system check [--root <repo folder>] [--dir <drawing folder>] [--repo <alias>=<folder>]... [--at <commit>] [--json]
+plannotator system gate [--project <repo folder>] --from <commit> --to <commit>
+plannotator system tick --project <repo folder> --key <project key>
+plannotator system revision --project <repo folder> --pr <host/owner/repo#n> --head <commit> -
+plannotator system schedule install --project <repo folder> --key <project key> | remove --key <project key> | list
+```
+
+- stdout is the result (check prints one line per finding, or one JSON value with `--json`; the others one JSON value)
+  and nothing on failure; stderr is `<code>: <message>`; exit 0 ok, 1 failed, 2 bad usage. check's findings are its
+  result: printed, with exit 1. Each `missing:` line names the field that cites the path.
+- `check` and `gate` read the drawing on disk in `<repo>/.plannotator/system`, so an edit counts before a commit.
+  With no `--root` or `--project`, the repo is the nearest folder up from here that holds a drawing.
+- `revision` loads the revision against the drawing committed on the default branch (`origin/HEAD`, else
+  `origin/main` or `origin/master`, else `HEAD`), refuses it with one line per problem when it does not load or its
+  `pr:` and `repo:` differ from `--pr`, and stores it as written under
+  `<dataDir>/system/<key>/reviews/<host>/<owner>/<repo>/<n>@<sha7>.yaml`. The key is the Inbox's key for the folder
+  (`inboxProjectKey` of its project root, as the Shape store files under it).
+- `tick` prints the `TickResult`; a failed tick exits 1. `schedule install` writes a plist that runs the installed
+  binary, so it refuses to run from a source checkout; `list` prints the keys as one JSON array.
+- The command is unreleased (`HIDDEN_SUBCOMMANDS`): it runs and has its help, but `plannotator --help` and the
+  plannotator skill leave it out until the Inbox's System surfaces ship.
+
+From a checkout, for this repo's own drawing:
+
 ```sh
 bun run --cwd packages/system check              # the drawing of this repo: loader, then every cited path
 bun run --cwd packages/system check -- --json    # one JSON value: { ok, errors, warnings, missing }
@@ -129,6 +159,7 @@ export function unattendedDocs(docs: string[]): { allowed: string[]; refused: { 
 export function redrawCommand(setup: Pick<SystemSetup, 'agent' | 'model'>, prompt: string, o?: { docs?: string[] }):
   { command: string[]; stdin: string | null };
 export const SYSTEM_COMMANDS: Record<'check' | 'gate' | 'tick' | 'revision' | 'schedule', string>; // usage lines
+// SYSTEM_COMMANDS and SYSTEM_TICK_INTERVAL_SECONDS are also @plannotator/system/commands, which loads no loader (the CLI's help)
 
 // @plannotator/system/node
 export function systemPaths(dataDir: string, key: string):

@@ -31,6 +31,7 @@ import {
   checkKey,
   DRAWING_DIR,
   gateRepo,
+  launchAgentsDir,
   load,
   loadCommitted,
   schedule,
@@ -143,6 +144,7 @@ function repoFolder(deps: SystemCommandDeps, flag: string | undefined, name: str
   return found;
 }
 
+const firstLine = (text: string) => text.split("\n")[0]!.trim();
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
 async function runCheck(argv: readonly string[], deps: SystemCommandDeps, out: (text: string) => Promise<void>, err: (text: string) => void): Promise<number> {
@@ -217,7 +219,7 @@ async function runGate(argv: readonly string[], deps: SystemCommandDeps, out: (t
   try {
     result = await gateRepo({ root, from, to, model: loaded.model });
   } catch (e) {
-    throw new Refusal("git_failed", (e as Error).message);
+    throw new Refusal("git_failed", firstLine((e as Error).message));
   }
   await out(JSON.stringify(result));
   return 0;
@@ -283,7 +285,7 @@ async function runRevision(argv: readonly string[], deps: SystemCommandDeps, out
   try {
     committed = await loadCommitted({ root, ref });
   } catch (e) {
-    throw new Refusal("git_failed", (e as Error).message);
+    throw new Refusal("git_failed", firstLine((e as Error).message));
   }
   if (!committed.model) {
     if (!committed.errors.length) throw new Refusal("no_drawing", `no drawing committed at ${ref.replace(/^refs\/remotes\//, "")} in ${root}`);
@@ -350,7 +352,7 @@ async function runSchedule(argv: readonly string[], deps: SystemCommandDeps, out
     // launchd starts a job with almost no environment; the tick runs git, gh and the person's agent
     const env: Record<string, string> = deps.env.PATH ? { PATH: deps.env.PATH } : {};
     await launchd(() => schedule.install({ key, root, program, dataDir, interval: SYSTEM_TICK_INTERVAL_SECONDS, env, ...o }));
-    await out(JSON.stringify({ installed: key, label: schedule.label(key), plist: join(o.agentsDir ?? join(deps.env.HOME || "", "Library", "LaunchAgents"), `${schedule.label(key)}.plist`), interval: SYSTEM_TICK_INTERVAL_SECONDS }));
+    await out(JSON.stringify({ installed: key, label: schedule.label(key), plist: join(o.agentsDir ?? launchAgentsDir(), `${schedule.label(key)}.plist`), interval: SYSTEM_TICK_INTERVAL_SECONDS }));
     return 0;
   }
   throw new UsageError(op ? `schedule takes install, remove or list, not "${op}"` : "schedule takes install, remove or list");
