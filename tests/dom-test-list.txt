@@ -545,6 +545,7 @@ packages/inbox/shapeSidebarToggle.test.tsx
 packages/inbox/shape/standalone/ShapePage.test.tsx
 packages/inbox/shape/ShapeBoard.test.tsx
 packages/ui/components/shape/ShapeSurface.commentDraft.test.tsx
+packages/ui/components/shape/ShapeFollow.test.tsx
 packages/ui/components/shape/ShapeSurface.popoverQuote.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.globalCommentDraft.test.tsx
 packages/ui/components/CodeFilePopout.commentDraft.test.tsx
@@ -557,3 +558,4 @@ packages/review-editor/utils/scrollWithPage.test.ts
 packages/ui/components/shape/ShapeSurface.board.test.tsx
 packages/ui/components/AnnotationToolstrip.hideActionModes.test.tsx
 packages/inbox/system/setupDialog.test.tsx
+packages/ui/components/html-viewer/HtmlViewer.frameUrl.test.tsx

@@ -217,6 +217,7 @@ import { parseDiffToFiles } from "@plannotator/core/diff-files";
 import { snoozeIntroDue, snoozeIntroFirstUse, type SnoozeIntroSaved } from "./inbox-snooze-intro";
 import { revealLastShown, revealMayClaim, revealNext, type RevealId, type RevealState } from "@plannotator/shared/inbox/reveals";
 import { createInboxEmbeds } from "./inbox-embeds";
+import { createInboxPages } from "./inbox-pages";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
 import { createCardFavicons, type CardFaviconOptions } from "./inbox-card-favicons";
@@ -748,21 +749,25 @@ const ERROR_STATUS: Record<string, number> = {
  * policy allows inline code and code from this origin only. Nothing may frame
  * it, and it may only talk to this server.
  */
-const WINDOW_CSP = [
+export const WINDOW_CSP = [
   "default-src 'self'",
   // 'wasm-unsafe-eval' lets the Graphviz engine (@viz-js/viz) compile its
   // WebAssembly; it does not allow eval() or new Function().
   "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
+  // Never a picture from the web: an agent's text (a markdown image, a
+  // diagram's) must not make the browser call a site when the person reads it.
+  // An attached HTML page shows its web pictures from a document of its own,
+  // under its own policy (inbox-pages.ts), never as a srcdoc under this one.
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
   "connect-src 'self'",
   "worker-src 'self' blob:",
   "frame-ancestors 'none'",
-  // 'self', not 'none': an attached HTML page is drawn in a srcdoc frame,
-  // which inherits this policy, with a <base href> at its own folder's
-  // asset route on this origin (annotate's #1554 serving path). Without it
-  // the base is blocked and the page's frames resolve onto the Inbox.
+  // 'self', not 'none': a page drawn in a srcdoc frame here (the tour's)
+  // inherits this policy, with a <base href> at its own folder's asset route
+  // on this origin (annotate's #1554 serving path). Without it the base is
+  // blocked and the page's frames resolve onto the Inbox.
   "base-uri 'self'",
   "form-action 'none'",
 ].join("; ");
@@ -2829,14 +2834,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const command = replyCommandOf(reply, sendNow, session);
     // A Tidy body is written when the run starts: with steps turned off since, it goes without its steps lines.
     if (command.tidy && !stepsOn()) return { ...command, body: inboxTidyBodyStepsOff(command.body) };
-    // Thread steps (approval "inbox-thread-steps"): the session's own list in this thread, one wake line, only while
-    // the person has steps on. Never on a Tidy, a 👍 or a hand-off notice: those are not about the thread's work.
-    if (!stepsOn() || command.tidy || command.ack_of || command.handed_away) return command;
+    // Never on a Tidy, a 👍 or a hand-off notice: those are not about the thread's work.
+    if (command.tidy || command.ack_of || command.handed_away) return command;
     const receiver = session ?? store.recipientOf(reply)?.session ?? null;
-    const list = receiver ? store.stepsOf(reply.thread_id, receiver) : null;
-    if (!list) return command;
+    // The details line (approval "inbox-wake-context"). A brand new thread has nothing to say yet: its only message is this one.
+    const context = command.new_thread ? {} : wakeContextOf(reply, receiver);
+    // Thread steps (approval "inbox-thread-steps"): the session's own list in this thread, one wake line, only while
+    // the person has steps on.
+    const list = stepsOn() && receiver ? store.stepsOf(reply.thread_id, receiver) : null;
+    if (!list) return { ...command, ...context };
     const { done, total, doing } = inboxStepsProgress(list.steps);
-    return total > 0 ? { ...command, steps: { done, total, doing } } : command;
+    return { ...command, ...context, ...(total > 0 ? { steps: { done, total, doing } } : {}) };
+  };
+  /** Words for the wake, never a condition of it: with no context, the reply goes as it would from an older Inbox. */
+  const wakeContextOf = (reply: InboxMessage, receiver: string | null): Pick<InboxReplyCommand, "context"> => {
+    try {
+      return { context: store.wakeContext(reply, receiver) };
+    } catch {
+      return {};
+    }
   };
   const replyCommandOf = (reply: InboxMessage, sendNow: boolean, session: string | null): InboxReplyCommand => {
     const tag = session && !store.isOwner(reply, session) ? (reply.tags?.find((t) => t.session === session) ?? null) : null;
@@ -3376,6 +3392,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   // Live HTML embeds (approval "inbox-inline-html"): the documents the window frames for a message's ```html fences (inbox-embeds.ts).
   const embeds = createInboxEmbeds({ readBody: (req) => readBody(req), json });
+  // Attached HTML pages ("Pages only"): the documents the window frames for an attached page, under their own policy (inbox-pages.ts).
+  const attachedPages = createInboxPages({ readBody: (req) => readBody(req), json });
   // The sidebar's Feedback dialog: forwards what the person typed to the feedback Worker (inbox-feedback.ts),
   // with the names of the agents that wrote here (names only, read at each Send).
   const feedback = createInboxFeedback({ version, json, store, ...(options.feedbackUrl ? { url: () => options.feedbackUrl! } : {}) });
@@ -3452,6 +3470,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return origin?.host && inboxPullRepoKey(origin.host, origin.display) === repo;
         })
         .map((project) => project.root),
+    threadPulls: (thread) => pullOwners.keys(thread).reverse(),
+    // An Inbox just started has no list yet: read it for a PR it does not know.
+    pullFile: async (pull, path) => {
+      const { wanted } = await pullProjects();
+      if (!pulls.find(pull)) await findPulls([pull], wanted);
+      return pulls.file(pull, path, wanted);
+    },
+    ownerOrLocal,
   });
 
   /**
@@ -4381,6 +4407,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Live HTML embeds: keep a fence's page, and serve it under its own sandboxing policy.
       const embedded = await embeds.route(req, url);
       if (embedded) return embedded;
+      // Attached HTML pages: keep a page's frame document, and serve it under its own policy (web pictures, never in the window).
+      const paged = await attachedPages.route(req, url);
+      if (paged) return paged;
       // Feedback (the sidebar's Feedback dialog): sent on, never stored here. The owner's only: a
       // tailnet guest's words would go out as this computer's (its version, OS, IP and rate limit).
       if (path === INBOX_FEEDBACK_PATH && !ownerOrLocal(req, via)) {
