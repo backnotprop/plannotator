@@ -9,3 +9,6 @@ export { bySheetOrder, formatIssue, loadFiles, parseRevision, sheetParts } from 
 export { drawingProgress, drawingStatus, type DrawingStatus } from './format/status.ts';
 export { citations, type Citation } from './format/cited.ts';
 export { gate, globMatch, isIgnoredPath, type ChangedFile, type GateInput, type GateReason, type GateResult } from './gate/gate.ts';
+export { applyChange, hasSteps, STEPS_CODE, type ChangeView } from './change/apply.ts';
+export { changeSummary, changeWords, isRevision, linesOf, type ChangeFile, type ChangePart, type ChangeSummary } from './change/summary.ts';
+export type { ChangeIs } from './change/marks.ts';

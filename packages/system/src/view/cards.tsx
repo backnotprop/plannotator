@@ -6,9 +6,28 @@ import type { SheetLayout } from '../layout/types.ts';
 
 const Kbd = ({ k }: { k: string }) => <kbd className="sys-kbd">{k}</kbd>;
 
-export function KeyCard({ notes, sheets, keys, pane }: { notes: boolean; sheets: boolean; keys: boolean; pane: boolean }) {
+const Swatch = ({ is, dashed }: { is?: 'added' | 'changed' | 'removed'; dashed?: boolean }) => (
+  <svg width="26" height="16" viewBox="0 0 26 16" aria-hidden="true">
+    <rect x="1" y="1" width="24" height="14" rx="2" fill={is === 'changed' ? 'color-mix(in oklab, var(--sys-chg-ink) 11%, var(--sys-box))' : 'var(--sys-box)'}
+      stroke={is ? `var(--sys-${is === 'added' ? 'add' : is === 'changed' ? 'chg' : 'gone'}-ink)` : 'var(--sys-line)'} strokeWidth="1.3" strokeDasharray={dashed || is === 'removed' ? '3 2' : undefined} />
+  </svg>
+);
+
+/** What the change on the sheet means: a PR's review, a plan, or only the parts its files touch (the gate). */
+export type KeyChange = 'review' | 'plan' | 'gate' | null;
+
+export function KeyCard({ notes, sheets, keys, pane, change = null }: { notes: boolean; sheets: boolean; keys: boolean; pane: boolean; change?: KeyChange }) {
   return (
     <div className="sys-card-pop sys-keycard" role="dialog" aria-label="Symbols and keys">
+      {change && (
+        <>
+          <div className="sys-kc-h">{change === 'plan' ? 'This plan' : 'This change'}</div>
+          {change !== 'gate' && <div className="sys-kc-r"><span className="sys-kc-i"><Swatch is="added" dashed={change === 'plan'} /></span><span>{change === 'plan' ? 'new, not built yet' : 'added'}</span></div>}
+          <div className="sys-kc-r"><span className="sys-kc-i"><Swatch is="changed" dashed={change === 'plan'} /></span><span>{change === 'plan' ? 'changes, not built yet' : change === 'gate' ? 'its files change' : 'changed'}</span></div>
+          {change === 'review' && <div className="sys-kc-r"><span className="sys-kc-i"><Swatch is="removed" /></span><span>removed, struck through</span></div>}
+          {change === 'review' && <div className="sys-kc-r"><span className="sys-kc-i"><span className="sys-kc-num">1</span></span><span>its number in the parts list</span></div>}
+        </>
+      )}
       <div className="sys-kc-h">Symbols</div>
       <div className="sys-kc-r">
         <span className="sys-kc-i"><svg width="40" height="10" aria-hidden="true"><path d="M2 5H31" stroke="var(--sys-line)" strokeWidth="1.3" /><path d="M38 5l-9 3.6v-7.2z" fill="var(--sys-line)" /></svg></span>

@@ -6,7 +6,13 @@
 // (the wheel and a pinch about the pointer, + and -, fit, a drag that glides),
 // the dive into a window and back out, the wheel through a window's door, the
 // crumbs and sheet chips as controls, the zoom group and Key, the keyboard, the
-// notes, and the Simple / Full move. Step A5 draws a change.
+// notes, and the Simple / Full move.
+//
+// A change (step A5): a PR's revision, a plan, or the gate's touched parts.
+// Before / After switch the drawing (the parts both draw travel, the rest
+// fades); Steps puts the change's one sequence in place of the sheet. In a
+// full window the parts list stands beside the sheet and a numbered legend
+// under it; a plan is drawn dashed.
 //
 // The sheet on screen is always at the world's origin. A dive flies the camera
 // into a window's box while the box's inside unrolls out of it and the sheet
@@ -29,6 +35,10 @@ import {
 } from './camera.ts';
 import { all, born, clearFlip, easeOut, FULL_LINES, FULL_WORDS, placesOf, startFlip, type Flip } from './flip.ts';
 import { KeyCard, NotesCard } from './cards.tsx';
+import { applyChange, hasSteps, type ChangeView } from '../change/apply.ts';
+import { changeSummary, isRevision, type ChangeFile } from '../change/summary.ts';
+import { PartsList } from './PartsList.tsx';
+import { StepsStage } from './StepsStage.tsx';
 
 export type Reading = 'simple' | 'full';
 
@@ -44,19 +54,25 @@ export type SystemViewProps = {
   layout: 'pane' | 'window';
   /** Single-key shortcuts (+, -, F, N, 1 to 9) while the focus is in the drawing (default on). The Inbox passes its Single-key shortcuts setting. */
   keys?: boolean;
-  /** A change to draw (step A5). */
+  /** A change to draw: a PR's revision, a plan, or the gate's touched parts (amber only). Opens on the sheet it touches most when `sheet` is left out. */
   revision?: Revision | GateResult;
-  /** Before, After or Steps of a change (step A5). */
+  /** Before, After (default) or Steps of a change. A gate result has After only; Steps needs a revision with steps. */
   view?: 'before' | 'after' | 'steps';
-  /** plan: a change drawn dashed, for Shape's System (plan) tab (step A5). */
+  /** plan: the change drawn dashed where not built, for Shape's System (plan) tab. Default review. */
   mode?: 'review' | 'plan';
+  /** The PR's changed files with their counts (`git diff --numstat`): they name each part's files and counts. */
+  files?: ChangeFile[];
+  /** The PR as the forge knows it: its number and title (else the revision's) and its state. */
+  pr?: { number?: number; title?: string; state?: 'open' | 'merged' | 'closed' };
+  /** The PR's number opens its Details (as the PR title does in the Inbox's review). */
+  onOpenDetails?(): void;
   /** The sheet on screen changed: a dive or a climb landed, a chip or a crumb was pressed, the wheel crossed a door. */
   onNavigate(sheet: string): void;
   /** Shown as the Simple / Full switch when given, on a sheet that has both readings. */
   onReading?(r: Reading): void;
-  /** Before / After / Steps (step A5). */
+  /** Shows Before / After / Steps when given (As built / As planned in a plan); Esc in Steps asks for After. */
   onView?(v: 'before' | 'after' | 'steps'): void;
-  /** A part's file (step A5). */
+  /** "diff ›" and a file in the parts list: open that file of the PR. In a full window, shows the parts list. */
   onOpenFile?(path: string, part: string): void;
   /** Shown as Open full window when given, in the pane. */
   onOpenFull?(): void;
@@ -70,7 +86,10 @@ type DiveRun = Dive & { t0: number; S: SpringState; A: Cam; B: Cam; done: boolea
 type Door = DoorWindow & { id: string; code: string; r: Rect; s: number };
 
 
-export function SystemView({ model, sheet, project, reading = 'full', layout, keys = true, onNavigate, onReading, onOpenFull, onClose }: SystemViewProps) {
+export function SystemView({
+  model: base, sheet, project, reading = 'full', layout, keys = true, revision, view = 'after', mode = 'review', files, pr,
+  onNavigate, onReading, onView, onOpenFile, onOpenFull, onClose, onOpenDetails,
+}: SystemViewProps) {
   const root = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
@@ -80,15 +99,36 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
   const size = useSize(stageRef);
   const simple = reading === 'simple';
 
+  // ---------------------------------------------------------------- the change on the drawing
+  const change = revision ?? null;
+  const rev = change && isRevision(change) ? change : null;
+  const plan = mode === 'plan' && !!change;
+  const summary = useMemo(() => (change ? changeSummary(base, change, files) : null), [base, change, files]);
+  const canSteps = hasSteps(change);
+  const vw: ChangeView = !change ? 'after' : view === 'steps' && canSteps ? 'steps' : view === 'before' && rev ? 'before' : 'after';
+  const asBefore = vw === 'before';
+  const model = useMemo(() => (change ? applyChange(base, change, asBefore ? 'before' : 'after', files) : base), [base, change, asBefore, files]);
+  const stepsModel = useMemo(() => (change && canSteps && vw === 'steps' ? applyChange(base, change, 'steps', files) : null), [base, change, canSteps, vw, files]);
+  const [picked, setPicked] = useState<string | null>(null);
+  const [rowHover, setRowHover] = useState<string | null>(null);
+
   // ---------------------------------------------------------------- the sheet on screen
-  const [cur, setCurS] = useState(() => sheetOr(model, sheet));
+  const [cur, setCurS] = useState(() => sheetOr(model, sheet ?? summary?.sheet));
   const curNow = useRef(cur);
   const setCur = (c: string) => { curNow.current = c; setCurS(c); };
   const code = model.sheets[cur] ? cur : sheetOr(model, cur);
   const s = model.sheets[code];
   const scope = s?.scope ?? 'root';
   const L = useMemo(() => (s ? layoutAtRest(model, code, simple) : null), [model, code, simple, s, epoch]); // eslint-disable-line react-hooks/exhaustive-deps
-  const LRef = useRef(L); LRef.current = L;
+  const LRef = useRef(L);
+  const turn = useRef<{ from: SheetLayout | null; cut: boolean; same?: boolean; fromModel?: SystemModel } | null>(null);
+  const modelNow = useRef(model);
+  if (modelNow.current !== model) {
+    // Before and After of the sheet on screen: the parts both draw travel, what one alone draws fades
+    if (LRef.current && LRef.current !== L && LRef.current.id === code) turn.current = { from: LRef.current, fromModel: modelNow.current, cut: reduced(), same: true };
+    modelNow.current = model;
+  }
+  LRef.current = L;
   const restOf = useCallback((c: string) => layoutAtRest(model, c, simple), [model, simple, epoch]); // eslint-disable-line react-hooks/exhaustive-deps
   const lastIn = useRef<Record<string, string>>({}); // scope -> the sheet last shown there
   /** The sheet a window opens onto: where its scope was left, else its first sheet. */
@@ -502,8 +542,7 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
   const exitFades = useRef<Animation[]>([]);
   const pendingSimple = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shown = useRef<{ code: string; simple: boolean; L: SheetLayout | null }>({ code, simple, L });
-  const turn = useRef<{ from: SheetLayout | null; cut: boolean } | null>(null);
-  const [ghost, setGhost] = useState<{ L: SheetLayout; keep: Set<string>; n: number } | null>(null);
+  const [ghost, setGhost] = useState<{ L: SheetLayout; model: SystemModel; keep: Set<string>; n: number } | null>(null);
   const dropFades = () => { for (const a of exitFades.current) a.cancel(); exitFades.current = []; };
   const endFlip = () => {
     const F = A.current.flip;
@@ -555,20 +594,21 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
     const T = turn.current;
     turn.current = null;
     const rest = restCam(L.w, L.h, stRef.current);
-    if (T && was.code !== code && (T.cut || !T.from)) {
+    if (T && (was.code !== code || T.same) && (T.cut || !T.from)) {
       // reduced motion, or nothing to move from: the camera cuts to the sheet and the world fades up
       take(); calm();
       camRef.current = rest;
       draw(false);
       return;
     }
-    if (T && T.from && was.code !== code) {
-      // another sheet of the scope
+    if (T && T.from && (was.code !== code || T.same)) {
+      // another sheet of the scope, or the same sheet Before and After a change
       const at = placesOf(A.current.flip);
       endFlip();
       near.current = null;
       const from = T.from;
-      setGhost((g) => ({ L: from, keep: new Set([...Object.keys(L.parts).map((id) => 'p:' + id), ...L.zones.map((z) => 'z:' + z.id)]), n: (g?.n ?? 0) + 1 }));
+      const fromModel = T.fromModel ?? model;
+      setGhost((g) => ({ L: from, model: fromModel, keep: new Set([...Object.keys(L.parts).map((id) => 'p:' + id), ...L.zones.map((z) => 'z:' + z.id)]), n: (g?.n ?? 0) + 1 }));
       flyTo(rest, CAM_MS);
       if (root0) A.current.flip = startFlip({ root: root0, from, to: L, at, enter: 'sheet', onDone: () => { A.current.flip = null; setGhost(null); } });
       return;
@@ -693,7 +733,10 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
     const partEl = t.closest<HTMLElement>('.sys-cur [data-part]');
     const k = e.key;
     let did = true;
-    if (k === 'Escape') {
+    if (k === 'Escape' && vw === 'steps') {
+      if (onView) onView('after');
+      else did = false;
+    } else if (k === 'Escape') {
       if (keyOpen || notesOpen) { setKeyOpen(false); setNotesOpen(false); }
       else if (A.current.dive || scopePath(model, curNow.current).length > 1) surface();
       else if (onClose) onClose();
@@ -750,8 +793,44 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
   const two = !!s && hasSimple(model, code);
   const pct = cam ? Math.round(cam.k * (mini && t >= 0.5 ? mini.s : 1) * 100) : 100;
 
+  // the PR's number, title and state; the legend under the sheet; the parts list beside it
+  const prNum = pr?.number ?? rev?.pr ?? null;
+  const prTitle = pr?.title ?? rev?.title ?? '';
+  const prState = pr?.state ? <span className={'sys-pr-state sys-pr-' + pr.state}><span className="sys-pr-dot" aria-hidden="true" />{STATE_WORD[pr.state]}</span> : null;
+  const pickRow = (id: string) => {
+    setPicked(id);
+    if (LRef.current?.parts[id]) { keepInView(id); return; }
+    // a part on another sheet: go to the sheet that draws it, here first, then the change's own sheet
+    const there = [...(model.byScope[scope] ?? []), summary?.sheet ?? '', ...Object.keys(model.sheets)].find((c) => c && model.sheets[c] && restOf(c).parts[id]);
+    if (there) travel(there, () => keepInView(id));
+  };
+  const aside = change && summary && layout === 'window' && onOpenFile && vw !== 'steps' ? (
+    <aside className="sys-aside">
+      <PartsList model={base} revision={change} files={files} summary={summary} onOpenFile={onOpenFile} selected={picked} onSelect={pickRow} onHover={setRowHover} />
+    </aside>
+  ) : null;
+  const legend = change && summary && layout === 'window' && vw === 'after' ? (
+    plan ? (
+      <div className="sys-legend sys-legend-key" aria-label="Key to the plan">
+        <span className="sys-lg-i"><span className="sys-sw sys-sw-added" aria-hidden="true" />new, proposed</span>
+        <span className="sys-lg-i"><span className="sys-sw sys-sw-changed" aria-hidden="true" />changes, proposed</span>
+        <span className="sys-lg-i"><span className="sys-sw" aria-hidden="true" />as built today</span>
+      </div>
+    ) : (
+      <ol className="sys-legend" aria-label="The change on this sheet">
+        {summary.parts.map((p, i) => (
+          <li key={p.id} className={'sys-lg-i sys-ink-' + p.is + (L?.parts[p.id] ? '' : ' sys-lg-off')} title={L?.parts[p.id] ? undefined : 'On another sheet'}>
+            <span className="sys-lg-n">{i + 1}</span>{p.name} {p.is}
+            {p.files[0] && <span className="sys-mono sys-lg-f">{p.files[0].split('/').slice(-2).join('/')}</span>}
+          </li>
+        ))}
+        {summary.flows.filter((f) => f.is === 'removed').map((f) => <li key={f.id} className="sys-lg-i sys-ink-removed sys-lg-gone">{f.says || f.id}</li>)}
+      </ol>
+    )
+  ) : null;
+
   return (
-    <div ref={root} className={'sys sys-view sys-' + layout} data-sheet={code} data-reading={two ? reading : 'full'} onKeyDown={onKeyDown}>
+    <div ref={root} className={'sys sys-view sys-' + layout + (plan ? ' sys-plan' : '') + (aside ? ' sys-has-aside' : '')} data-sheet={code} data-reading={two ? reading : 'full'} data-view={change ? vw : undefined} onKeyDown={onKeyDown}>
       <div className="sys-bar">
         <nav className="sys-crumbs" aria-label="Where this sheet is">
           {project && <span className="sys-crumb">{project}</span>}
@@ -770,7 +849,9 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
           })}
           {shownSheet && <span className="sys-code">{shownCode}</span>}
         </nav>
-        {shownSheet && shownCodes.length > 1 ? (
+        {vw === 'steps' && stepsModel ? (
+          <div className="sys-kind" aria-label="Steps">{rev?.steps?.title || 'Steps'}</div>
+        ) : shownSheet && shownCodes.length > 1 ? (
           <div className="sys-chips" role="group" aria-label="Sheets here">
             {shownCodes.map((c, i) => {
               const sh = model.sheets[c]!;
@@ -786,7 +867,7 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
           shownSheet && <div className="sys-kind" aria-label="Sheet kind">{kindLabel(shownSheet.kind)}</div>
         )}
         <div className="sys-tools">
-          {two && onReading && (
+          {two && onReading && vw !== 'steps' && (
             <div className="sys-seg" role="radiogroup" aria-label="Reading">
               {(['simple', 'full'] as const).map((r) => (
                 <button key={r} type="button" role="radio" aria-checked={reading === r} className="sys-seg-o" data-on={reading === r ? '' : undefined} onClick={() => pressReading(r)}>
@@ -795,6 +876,25 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
               ))}
             </div>
           )}
+          {prNum != null && !plan && (
+            onOpenDetails ? (
+              <button type="button" className="sys-pr sys-pr-b" title={prTitle || undefined} aria-label={`PR ${prNum}${prTitle ? `: ${prTitle}` : ''}, opens details`} onClick={() => onOpenDetails()}>
+                <span>PR {prNum}</span>{prState}
+              </button>
+            ) : (
+              <span className="sys-pr" title={prTitle || undefined}><span>PR {prNum}</span>{prState}</span>
+            )
+          )}
+          {rev && onView && (
+            <div className="sys-seg" role="radiogroup" aria-label={plan ? 'As built or as planned' : 'Before or after'}>
+              {(['before', 'after', ...(canSteps ? ['steps' as const] : [])] as const).map((v) => (
+                <button key={v} type="button" role="radio" aria-checked={vw === v} className="sys-seg-o" data-on={vw === v ? '' : undefined} onClick={() => vw !== v && onView(v)}>
+                  {v === 'steps' ? 'Steps' : v === 'before' ? (plan ? 'As built' : 'Before') : plan ? 'As planned' : 'After'}
+                </button>
+              ))}
+            </div>
+          )}
+          {summary && <Tally s={summary} />}
           {layout === 'pane' && onOpenFull && (
             <button type="button" className="sys-btn" onClick={() => onOpenFull()}>
               <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 2.5h4v4M13.5 2.5L8 8M6.5 3.5h-3v9h9v-3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -808,11 +908,14 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
           )}
         </div>
       </div>
+      <div className="sys-main">
+      <div className="sys-col">
+      {stepsModel && <StepsStage model={stepsModel} epoch={epoch} />}
       <div
         ref={stageRef}
         tabIndex={0}
         className={'sys-stage' + (dragging ? ' sys-drag' : '')}
-        style={layout === 'pane' ? { height: stageH } : undefined}
+        style={stepsModel ? { display: 'none' } : layout === 'pane' ? { height: stageH } : undefined}
         role="group"
         aria-label={s ? `${s.title}: ${s.question ?? ''}` : 'Drawing'}
         aria-roledescription="drawing"
@@ -821,7 +924,13 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
         onPointerUp={onUp}
         onPointerCancel={onUp}
         onClickCapture={(e) => { if (drag.current?.moved) { e.stopPropagation(); e.preventDefault(); } }}
-        onClick={(e) => { if (!(e.target as Element).closest('.sys-card-pop, .sys-zoom')) { setKeyOpen(false); setNotesOpen(false); } }}
+        onClick={(e) => {
+          if ((e.target as Element).closest('.sys-card-pop, .sys-zoom')) return;
+          setKeyOpen(false); setNotesOpen(false);
+          // a marked part picked on the sheet picks its row in the parts list
+          const el = (e.target as HTMLElement).closest<HTMLElement>('.sys-cur [data-part][data-status]');
+          setPicked(el ? el.dataset.part! : null);
+        }}
         onDoubleClick={onDouble}
         onFocus={onFocusIn}
       >
@@ -829,11 +938,11 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
           <div ref={worldRef} className="sys-world" style={{ transform: xf(cam) }}>
             {ghost && (
               <div ref={ghostRef} key={ghost.n} className="sys-layer sys-ghost" aria-hidden="true">
-                <Sheet layout={ghost.L} model={model} lod={lod} />
+                <Sheet layout={ghost.L} model={ghost.model} lod={lod} />
               </div>
             )}
             <div ref={curRef} className="sys-layer sys-cur" style={{ opacity: ink.around < 0.999 ? ink.around : undefined, visibility: ink.around < 0.001 ? 'hidden' : undefined }}>
-              <Sheet layout={L} model={model} lod={lod} live={!dv} onEnter={onEnter} />
+              <Sheet layout={L} model={model} lod={lod} live={!dv} onEnter={onEnter} picked={rowHover ?? picked} />
             </div>
             {mini && miniL && cam && (
               <div
@@ -866,10 +975,27 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
             <button type="button" aria-expanded={keyOpen} onClick={() => { setKeyOpen((v) => !v); setNotesOpen(false); }} title="Symbols and keys">Key</button>
           </div>
         )}
-        {keyOpen && <KeyCard notes={!!L?.notes.length} sheets={codes.length > 1} keys={keys} pane={layout === 'pane'} />}
+        {keyOpen && <KeyCard notes={!!L?.notes.length} sheets={codes.length > 1} keys={keys} pane={layout === 'pane'} change={change ? (plan ? 'plan' : rev ? 'review' : 'gate') : null} />}
         {notesOpen && L && <NotesCard notes={L.notes} />}
         <div className="sys-sr" aria-live="polite">{said}</div>
       </div>
+      {legend}
+      </div>
+      {aside}
+      </div>
     </div>
+  );
+}
+
+const STATE_WORD = { open: 'Open', merged: 'Merged', closed: 'Closed' } as const;
+
+/** "3 added · 5 changed · 1 removed", each in its ink. */
+function Tally({ s }: { s: NonNullable<ReturnType<typeof changeSummary>> }) {
+  const bits = [s.added && ['added', `${s.added} added`], s.changed && ['changed', `${s.changed} changed`], s.removed && ['removed', `${s.removed} removed`]].filter((b): b is [string, string] => !!b);
+  if (!bits.length) return <span className="sys-tally">No drawn part changed</span>;
+  return (
+    <span className="sys-tally">
+      {bits.map(([k, t], i) => <span key={k}>{i > 0 && <span className="sys-tally-sep"> · </span>}<span className={'sys-ink-' + k}>{t}</span></span>)}
+    </span>
   );
 }
