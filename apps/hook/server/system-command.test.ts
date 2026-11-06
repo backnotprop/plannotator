@@ -363,7 +363,7 @@ describe("plannotator system revision", () => {
     const project = await resolveInboxProjectRoot(box.repo);
     const key = inboxProjectKey(project.name, project.root);
     const path = join(box.dataDir, "system", key, "reviews", "example.com", "acme", "ledger", "12@a5cb1c9.yaml");
-    expect(JSON.parse(r.stdout)).toEqual({ stored: path, revision: "PR-12", pr: "example.com/acme/ledger#12", head, key });
+    expect(JSON.parse(r.stdout)).toEqual({ stored: path, revision: "PR-12", pr: "example.com/acme/ledger#12", head });
     expect(readFileSync(path, "utf8")).toBe(REVISION);
   }, 30_000);
 

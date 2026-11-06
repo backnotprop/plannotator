@@ -339,7 +339,8 @@ async function runRevision(argv: readonly string[], deps: SystemCommandDeps, out
   const tmp = `${path}.${process.pid}.tmp`;
   await writeFile(tmp, yaml, { mode: 0o600 });
   await rename(tmp, path);
-  await out(JSON.stringify({ stored: path, revision: revision.id, pr: `${pr.repo}#${pr.n}`, head: head.toLowerCase(), key }));
+  // exactly the fields the approved help lists
+  await out(JSON.stringify({ stored: path, revision: revision.id, pr: `${pr.repo}#${pr.n}`, head: head.toLowerCase() }));
   return 0;
 }
 
