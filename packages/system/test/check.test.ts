@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { MAX_FILE_BYTES } from '../src/format/keys.ts';
 import { loadFiles } from '../src/index.ts';
 import { check, load, loadCommitted, readCommitted } from '../src/node/index.ts';
-import { drawingDir, edited, git, isolateGitConfig, repoRoot, smallDrawing, tempDir, writeTree } from './helpers.ts';
+import { drawingDir, edited, git, isolateGitConfig, repoRoot, revisionOfSize, smallDrawing, tempDir, writeTree } from './helpers.ts';
 
 isolateGitConfig();
 const cleanups: (() => void)[] = [];
@@ -107,6 +108,18 @@ describe('check', () => {
     expect((await check({ dir, root, at: sha })).missing).toEqual(['src/main.ts']);
   });
 
+  test('a project in a folder of a bigger repo looks its paths up under that folder', async () => {
+    const top = temp();
+    git(top, 'init', '-q');
+    writeTree(top, { 'src/main.ts': '', 'app/src/api/index.ts': '' });
+    const sha = commit(top);
+    const root = join(top, 'app');
+    const dir = join(root, '.plannotator', 'system');
+    writeTree(dir, smallDrawing());
+    // src/main.ts is at the top of the repo, not in app/: it is missing
+    expect((await check({ dir, root, at: sha })).missing).toEqual(['src/main.ts']);
+  });
+
   test('outside git, the disk is read, with the same case and symlink rules', async () => {
     const root = temp();
     const dir = join(root, '.plannotator', 'system');
@@ -154,6 +167,56 @@ describe('load from disk', () => {
     const r = await load(root);
     expect(r.errors).toEqual([{ file: 'revisions/PR-1.yaml', field: '', message: `is ${big.length} bytes; this Plannotator reads at most 1048576 bytes in one file` }]);
     expect(r.model).not.toBeNull();
+  });
+});
+
+describe('the caps, read from disk and from git', () => {
+  const bigDrawing = () => {
+    const files: Record<string, string> = { ...smallDrawing() };
+    for (let i = 1; i <= 9; i++) files[`revisions/PR-${i}.yaml`] = revisionOfSize(`PR-${i}`, MAX_FILE_BYTES - 100);
+    return files;
+  };
+  const capError = { file: '', field: '', message: 'the drawing is over 8388608 bytes; this Plannotator reads at most that in one drawing' };
+
+  test('a file of exactly 1 MiB on disk is read', async () => {
+    const root = temp();
+    writeTree(root, { ...smallDrawing(), 'revisions/PR-1.yaml': revisionOfSize('PR-1', MAX_FILE_BYTES) });
+    const r = await load(root);
+    expect(r.errors).toEqual([]);
+    expect(Object.keys(r.model!.revisions)).toEqual(['PR-1']);
+  });
+
+  test('a drawing over 8 MiB on disk gives the cap error alone', async () => {
+    const root = temp();
+    writeTree(root, bigDrawing());
+    expect(await load(root)).toEqual({ model: null, errors: [capError], warnings: [] });
+  });
+
+  test('a committed file over 1 MiB is reported, not thrown by the git buffer', async () => {
+    const root = temp();
+    git(root, 'init', '-q');
+    writeTree(join(root, '.plannotator', 'system'), { ...smallDrawing(), 'revisions/PR-1.yaml': revisionOfSize('PR-1', MAX_FILE_BYTES + 1) });
+    commit(root);
+    const r = await loadCommitted({ root, ref: 'HEAD' });
+    expect(r.errors).toEqual([{ file: 'revisions/PR-1.yaml', field: '', message: `is ${MAX_FILE_BYTES + 1} bytes; this Plannotator reads at most ${MAX_FILE_BYTES} bytes in one file` }]);
+    expect(Object.keys(r.model!.sheets).sort()).toEqual(['C-001', 'L-101']);
+    await expect(readCommitted({ root, ref: 'HEAD' })).rejects.toThrow(`revisions/PR-1.yaml: is ${MAX_FILE_BYTES + 1} bytes`);
+  });
+
+  test('a committed file of exactly 1 MiB is read', async () => {
+    const root = temp();
+    git(root, 'init', '-q');
+    writeTree(join(root, '.plannotator', 'system'), { ...smallDrawing(), 'revisions/PR-1.yaml': revisionOfSize('PR-1', MAX_FILE_BYTES) });
+    commit(root);
+    expect((await loadCommitted({ root, ref: 'HEAD' })).errors).toEqual([]);
+  });
+
+  test('a committed drawing over 8 MiB gives the cap error alone, not "system.yaml is missing"', async () => {
+    const root = temp();
+    git(root, 'init', '-q');
+    writeTree(join(root, '.plannotator', 'system'), bigDrawing());
+    commit(root);
+    expect(await loadCommitted({ root, ref: 'HEAD' })).toEqual({ model: null, errors: [capError], warnings: [] });
   });
 });
 

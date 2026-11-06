@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { citations, drawingProgress, drawingStatus, FORMAT, formatIssue, loadFiles, parseRevision, type SystemFiles } from '../src/index.ts';
 import { load } from '../src/node/index.ts';
-import { drawingDir, edited, fixturesDir, smallDrawing } from './helpers.ts';
+import { drawingDir, edited, fixturesDir, revisionOfSize, smallDrawing } from './helpers.ts';
 
 /** Each error as one line: `<file> <field>: <message>`. */
 const errorsOf = (files: SystemFiles) => loadFiles(files).errors.map(formatIssue);
@@ -162,6 +162,13 @@ describe('format 1 refuses', () => {
     expect(errors).toContain('system.yaml scopes.b: is inside itself');
   });
 
+  test('a line that lands on, or leaves from, a part that does not exist', () => {
+    const r = loadFiles(sysEdit((t) => t.replace('lands: api', 'lands: nope')));
+    expect(r.model).toBeNull();
+    expect(r.errors.map(formatIssue)).toEqual(['system.yaml flows.use.lands: unknown part "nope"']);
+    expect(errorsOf(sysEdit((t) => t.replace('lands: api', 'lands: api, leaves: ghost')))).toEqual(['system.yaml flows.use.leaves: unknown part "ghost"']);
+  });
+
   test('a line with the id of a part', () => {
     expect(errorsOf(sysEdit((t) => t.replace('  use: {', '  api: { from: person, to: app }\n  use: {')))).toEqual([
       'system.yaml flows.api: has the id of a part; a line and a part need different ids',
@@ -246,6 +253,21 @@ describe('format 1 refuses', () => {
   });
 });
 
+describe('the caps are inclusive', () => {
+  test('a file of exactly 1 MiB and a drawing of exactly 8 MiB load', () => {
+    const files = smallDrawing();
+    files['revisions/PR-1.yaml'] = revisionOfSize('PR-1', 1024 * 1024);
+    expect(loadFiles(files)).toMatchObject({ errors: [], warnings: [] });
+    const used = Object.values(files).reduce((n, t) => n + t.length, 0);
+    for (let i = 2; i <= 7; i++) files[`revisions/PR-${i}.yaml`] = revisionOfSize(`PR-${i}`, 1024 * 1024);
+    files['revisions/PR-8.yaml'] = revisionOfSize('PR-8', 8 * 1024 * 1024 - used - 6 * 1024 * 1024);
+    expect(Object.values(files).reduce((n, t) => n + t.length, 0)).toBe(8 * 1024 * 1024);
+    const r = loadFiles(files);
+    expect(r).toMatchObject({ errors: [], warnings: [] });
+    expect(Object.keys(r.model!.revisions)).toHaveLength(8);
+  });
+});
+
 describe('names every JavaScript object carries', () => {
   test('a scope named constructor, toString or __proto__ is an error, not a crash', () => {
     for (const name of ['constructor', 'toString', '__proto__']) {
@@ -312,6 +334,18 @@ describe('a drawing part way through', () => {
     expect(drawingProgress(r.model!).sheets.map((s) => [s.code, s.drawn])).toEqual([
       ['L-101', true], ['C-001', true], ['F-101', false], ['F-102', false],
     ]);
+  });
+
+  test('a line landing on a part no sheet draws yet is a warning while sheets are wanted, an error once none are', () => {
+    const files = smallDrawing();
+    delete files['sheets/L-101.yaml'];
+    const notWanted = loadFiles(files);
+    expect(notWanted.errors.map(formatIssue)).toEqual(['system.yaml flows.use.lands: "api", which no sheet inside The app draws']);
+    files['system.yaml'] += 'wanted:\n  - { code: L-101, kind: logical, question: Inside the app. }\n';
+    const wanted = loadFiles(files);
+    expect(wanted.errors).toEqual([]);
+    expect(wanted.warnings.map(formatIssue)).toEqual(['system.yaml flows.use.lands: "api", which no sheet inside The app draws']);
+    expect(drawingStatus(wanted)).toMatchObject({ state: 'drawing', sheets: 1, wanted: 1 });
   });
 
   test('a broken sheet nothing wants still leaves the model, and the drawing is broken', () => {

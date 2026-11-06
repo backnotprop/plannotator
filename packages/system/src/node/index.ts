@@ -15,6 +15,8 @@ export const DRAWING_DIR = '.plannotator/system';
 /** A file the loader should see: the drawing's own files, and .yml or stray .yaml files it reports. */
 const isDrawingFile = (rel: string) => /^(?:(?:sheets|revisions)\/)?[^/]+\.ya?ml$/.test(rel);
 const issue = (file: string, message: string): LoadIssue => ({ file, field: '', message });
+/** The whole drawing is over the cap: filed under no file, and the only error then. */
+const totalCap = () => issue('', `the drawing is over ${MAX_TOTAL_BYTES} bytes; this Plannotator reads at most that in one drawing`);
 
 /** The drawing's files in a folder on disk, and what kept a file out (a symlink, a size over the cap, bytes that are not UTF-8). */
 export async function readFiles(dir: string): Promise<{ files: SystemFiles; issues: LoadIssue[] }> {
@@ -26,6 +28,9 @@ export async function readFiles(dir: string): Promise<{ files: SystemFiles; issu
     // no folder, no drawing
     return { files, issues };
   }
+  // stop reading as soon as the drawing passes the total cap
+  let total = 0;
+  let over = false;
   const walk = async (rel: string) => {
     let entries;
     try {
@@ -34,6 +39,7 @@ export async function readFiles(dir: string): Promise<{ files: SystemFiles; issu
       return;
     }
     for (const e of entries) {
+      if (over) return;
       const path = rel ? `${rel}/${e.name}` : e.name;
       if (e.isSymbolicLink()) {
         if (isDrawingFile(path) || (!rel && (e.name === 'sheets' || e.name === 'revisions'))) {
@@ -47,6 +53,11 @@ export async function readFiles(dir: string): Promise<{ files: SystemFiles; issu
           issues.push(issue(path, `is ${size} bytes; this Plannotator reads at most ${MAX_FILE_BYTES} bytes in one file`));
           continue;
         }
+        total += size;
+        if (total > MAX_TOTAL_BYTES) {
+          over = true;
+          return;
+        }
         const text = decodeUtf8(await readFile(join(dir, path)));
         if (text == null) issues.push(issue(path, 'is not UTF-8 text'));
         else files[path] = text;
@@ -54,11 +65,14 @@ export async function readFiles(dir: string): Promise<{ files: SystemFiles; issu
     }
   };
   await walk('');
+  if (over) return { files: Object.create(null), issues: [totalCap()] };
   return { files, issues };
 }
 
 /** Load with the issues that kept files out, so a symlinked system.yaml reads as that and not as "missing". */
 function withIssues(files: SystemFiles, issues: LoadIssue[]): LoadResult {
+  // over the total cap nothing was read, and that is the one error
+  if (issues.some((i) => i.file === '')) return { model: null, errors: issues.filter((i) => i.file === ''), warnings: [] };
   const result = loadFiles(files);
   const kept = new Set(issues.map((i) => i.file));
   const errors = result.errors.filter((e) => !(e.message === 'is missing' && kept.has(e.file)));
@@ -93,10 +107,7 @@ async function collectCommitted(o: { root: string; ref: string }): Promise<{ fil
       continue;
     }
     total += entry.size ?? 0;
-    if (total > MAX_TOTAL_BYTES) {
-      issues.push(issue('', `the drawing is over ${MAX_TOTAL_BYTES} bytes; this Plannotator reads at most that in one drawing`));
-      break;
-    }
+    if (total > MAX_TOTAL_BYTES) return { files: Object.create(null), issues: [totalCap()] };
     const text = decodeUtf8(await gitBytes(o.root, ['cat-file', 'blob', `${commit}:${full}`], MAX_FILE_BYTES + 1));
     if (text == null) issues.push(issue(rel, 'is not UTF-8 text'));
     else files[rel] = text;

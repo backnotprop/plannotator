@@ -49,6 +49,10 @@ the model, or send the files and let the window call `loadFiles()`.
 - `system.yaml` must load clean for there to be a model. A sheet or a revision with errors is left out of the model on
   its own, with its errors, so a half-written sheet in the middle of a draw leaves the rest usable. A line whose
   `lands` part only that sheet drew, or a `root` that names it, gets an error of its own.
+- The model's maps (`parts`, `flows`, `sheets`, `scopes`, `revisions` and the rest) are keyed by ids the drawing
+  chose, and ids like `toString` are allowed. The loader builds them with no prototype, but a model that went through
+  JSON comes back as plain objects: look an id up with `Object.hasOwn(model.parts, id)`, never `model.parts[id]` alone
+  or `id in model.parts`.
 - `drawingStatus`: `none` (no drawing), `drawing` (sheets still under `wanted:` and not loaded, even with errors in
   them), `drawn` (nothing wanted, no errors), `broken` (`system.yaml` does not load, or errors with nothing wanted).
   `sheets` counts the sheets that load clean. `drawnAt` is `sources.repos.self.at`.

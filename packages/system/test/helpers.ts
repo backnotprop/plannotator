@@ -78,3 +78,9 @@ export function edited(path: string, edit: (text: string) => string): SystemFile
   files[path] = edit(files[path] ?? '');
   return files;
 }
+
+/** A revision file that loads clean and is exactly `bytes` long (ASCII, padded with a comment). */
+export function revisionOfSize(id: string, bytes: number): string {
+  const head = `revision: ${id}\n# `;
+  return head + 'x'.repeat(bytes - head.length - 1) + '\n';
+}

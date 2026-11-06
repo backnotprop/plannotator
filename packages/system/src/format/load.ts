@@ -559,6 +559,10 @@ function buildSystem(sys: Obj, issues: Issues): SystemPart {
     if (has(parts, id)) err(issues, a, `has the id of a part; a line and a part need different ids`);
     const flow = normFlow(id, f, aliases, a, issues);
     for (const e of [...flow.from, flow.to]) if (e && !has(parts, e)) err(issues, a, `names unknown part "${e}"`);
+    for (const key of ['lands', 'leaves'] as const) {
+      const inner = flow[key];
+      if (inner && !has(parts, inner)) err(issues, sub(a, key), `unknown part "${inner}"`);
+    }
     flows[id] = flow;
   }
 
