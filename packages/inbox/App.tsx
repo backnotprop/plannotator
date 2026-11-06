@@ -5483,6 +5483,8 @@ function Inbox() {
         projects={projects}
         projectNames={projectNames}
         phone={phone}
+        // A window too narrow for the list and the PR's pane: the pane covers the list, as a thread does (stack.ts).
+        stacked={stack.thread}
         onOpenStack={(id) => (id ? writeRoute({ ...route, stack: id, layer: null }, { replace: !!route.stack && !phone }) : close({ ...route, stack: null, layer: null }))}
         onScope={({ filter, project }) => go({ page: 'reviews', project, view: filter, thread: null, stack: null })}
         onReview={(stack, layer, scope) => go({ ...route, stack, layer, scope })}

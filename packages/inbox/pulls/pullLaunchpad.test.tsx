@@ -9,7 +9,9 @@
  *  - a guide the agent has not sent as a review (`review: false`) counted as one (the stack page's rule);
  *  - the facts losing "by you" on the person's own PR, or "Draft" on a draft;
  *  - the Shape board door offering a board that is not there, or showing while Shape is off;
- *  - the details panel drawing its own head (author, branches, Close) under the page's.
+ *  - the details panel drawing its own head (author, branches, Close) under the page's;
+ *  - a PR pane covering the list (stack.ts) with no way back to it but Close, unlike a covering thread's ‹ Inbox;
+ *  - the stack page's Your review pill leaving its PR's number for the row's end (owner, q-f4030127).
  *
  * Element checks are booleans: a failing match on a happy-dom node prints the whole window.
  *
@@ -195,6 +197,41 @@ test.skipIf(!hasDom)('one open PR opens its launchpad; a stack of several keeps 
   await settle();
   expect(!!$('[data-launchpad]')).toBe(false);
   expect(document.querySelectorAll('[data-pulls-layer]')).toHaveLength(2);
+});
+
+test.skipIf(!hasDom)("the stack page's Your review pill sits beside its PR's number, not alone at the row's end", async () => {
+  mount(high.key, answer());
+  await settle();
+  const rows = [...document.querySelectorAll('[data-pulls-layer]')];
+  expect(rows).toHaveLength(2);
+  for (const row of rows) {
+    const pill = [...row.querySelectorAll('.ib-pr-pill')].find((p) => p.textContent === 'Your review');
+    expect(!!pill).toBe(true);
+    expect(pill!.previousElementSibling?.classList.contains('ib-pr-num') === true).toBe(true);
+  }
+});
+
+test.skipIf(!hasDom)('covering the list (a window too narrow for both), the PR pane leads with ‹ Reviews and has no Close, as a covering thread', async () => {
+  for (const id of [single.key, high.key]) {
+    const closed: (string | null)[] = [];
+    mount(id, answer(), { stacked: true, onOpenStack: (to) => closed.push(to) });
+    await settle();
+    expect(!!$('.ib-pr-bar [data-stack-back]')).toBe(true);
+    expect(!!$('.ib-pr-bar [aria-label="Close"], .ib-pr-bar [aria-label="Close the stack"]')).toBe(false);
+    await click('.ib-pr-bar [data-stack-back]');
+    expect(closed).toEqual([null]);
+    act(() => root!.unmount());
+    host!.remove();
+    // Beside the list: Close, and no way back (the list is in sight).
+    mount(id, answer());
+    await settle();
+    expect(!!$('.ib-pr-bar [data-stack-back]')).toBe(false);
+    expect(!!$('.ib-pr-bar [aria-label="Close"], .ib-pr-bar [aria-label="Close the stack"]')).toBe(true);
+    act(() => root!.unmount());
+    host!.remove();
+  }
+  root = null;
+  host = null;
 });
 
 test.skipIf(!hasDom)("each door goes to its own place: the guide's message, this PR's diff, the review thread, its Shape board", async () => {

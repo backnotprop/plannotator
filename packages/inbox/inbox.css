@@ -3012,8 +3012,10 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
    .pn-inbox; a wide window never gets it, so it is drawn as before. */
 .pn-inbox[data-stack~="thread"] .ib-main { position: relative; }
 .pn-inbox[data-stack~="thread"][data-view="thread"] .ib-listcol { position: absolute; inset: 0; visibility: hidden; }
-/* The same for an open PR on the Reviews page (its launchpad, or a stack's page): it covers the list; Close brings it back. */
+/* The same for an open PR on the Reviews page (its launchpad, or a stack's page), on the same rule: it covers the list; `‹ Reviews` brings it back. */
 .pn-inbox[data-stack~="thread"] .ib-prlist:has(~ .ib-prpane) { position: absolute; inset: 0; visibility: hidden; }
+/* It then leads with `‹ Reviews` (PullLaunchpad.tsx `PullPaneBack`), set in from the edge as a covering thread's `‹ Inbox`. */
+.ib-pr-bar:has([data-stack-back]) { padding-left: 10px; }
 .pn-inbox[data-stack~="file"][data-view="file"] .ib-pane.ib-withfile { display: none; }
 /* The thread in full screen (App.tsx `data-thread-full`): the list stays drawn under it, hidden as a stacked
    window hides it, so J/K and G I still read its order and its scroll stays. */
@@ -8018,7 +8020,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-pr-checks[data-checks="success"] { color: var(--success); }
 .ib-pr-checks[data-checks="failure"] { color: var(--destructive); }
 .ib-pr-pill { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: var(--ib-fs-12, 12px); font-weight: 600; white-space: nowrap; flex: none; background: var(--muted); color: var(--muted-foreground); }
-.ib-pr-lrow > .ib-pr-pill { margin-top: 1px; }
 .ib-pr-pill[data-tone="next"] { background: color-mix(in oklch, var(--success) 16%, var(--card)); color: color-mix(in oklch, var(--success) 80%, var(--foreground)); }
 .ib-pr-pill[data-tone="you"] { background: color-mix(in oklch, var(--warning) 20%, var(--card)); color: color-mix(in oklch, var(--warning) 45%, var(--foreground)); }
 .ib-pr-pill[data-tone="ok"] { background: color-mix(in oklch, var(--success) 14%, var(--card)); color: color-mix(in oklch, var(--success) 80%, var(--foreground)); }
@@ -8223,7 +8224,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .pn-inbox .ib-pr-opt { min-height: 52px; }
   .pn-inbox .ib-pr-pick-go .ib-btn { height: 44px; }
   .pn-inbox .ib-pr-lrow { flex-wrap: wrap; padding: 12px 6px 12px 8px; }
-  .ib-pr-lrow > .ib-pr-pill { margin-left: 32px; }
   .ib-pr-lgo { flex-basis: calc(100% - 32px); margin-left: 32px; min-height: 24px; }
   /* The foot's words read as two lines beside Next layer, not two narrow columns. */
   .ib-prr-foot:has(> .ib-prr-note) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; }
@@ -8773,7 +8773,6 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 }
 
 /* One PR's launchpad (approval "pr-launchpad", pulls/PullLaunchpad.tsx). Its width decides the grid, not the window's. */
-.ib-lp-bar { padding-left: 12px; }
 .ib-lp-bar > .ib-sp { flex: 1 1 auto; }
 .ib-lp-mark { display: inline-flex; flex: none; }
 .ib-lp-num { flex: none; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }

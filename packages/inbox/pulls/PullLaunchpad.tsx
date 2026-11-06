@@ -13,7 +13,6 @@ import type { InboxShapeSummary } from '../api';
 import { HostMark, Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
 import { Tip } from '../components/Tip';
-import { SidebarTrigger } from '../shell/sidebar';
 import { relativeWords } from '../relativeTime';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import { PullDetails, usePullDetails } from './PullDetails';
@@ -49,11 +48,40 @@ function Door({ kind, icon, title, sub, soon, wide, box, thread, children }: { k
   );
 }
 
+/**
+ * The way back to the Reviews list where the PR's pane covers it: on a phone, and in a window too narrow for the list
+ * and the pane side by side (stack.ts, `stacked`). The same control a covering thread leads with (`‹ Inbox`,
+ * components/Thread.tsx), so a PR and a thread close the same way. Null beside the list, where Close (×) is the way.
+ */
+export function PullPaneBack({ phone, stacked, onClose }: { phone: boolean; stacked: boolean; onClose: () => void }) {
+  if (phone) {
+    return (
+      <button type="button" className="ib-pback" onClick={onClose} aria-label="Back to Reviews" data-phone-back="">
+        <Icon name="chevL" size={18} />
+        <span className="ib-pback-l">Reviews</span>
+      </button>
+    );
+  }
+  if (!stacked) return null;
+  return (
+    <>
+      <Tip content="Back to Reviews">
+        <button type="button" className="ib-pback" onClick={onClose} aria-label="Back to Reviews" data-stack-back="">
+          <Icon name="chevL" size={16} />
+          <span className="ib-pback-l">Reviews</span>
+        </button>
+      </Tip>
+      <span className="ib-vsep" aria-hidden="true" />
+    </>
+  );
+}
+
 export function PullLaunchpad({
   stack,
   pr,
   link,
   phone,
+  stacked = false,
   now,
   heading,
   said,
@@ -71,6 +99,8 @@ export function PullLaunchpad({
   pr: InboxPull;
   link: InboxPullLink | null;
   phone: boolean;
+  /** The pane covers the list (stack.ts): it leads with `‹ Reviews` and has no Close, as a covering thread. */
+  stacked?: boolean;
   now: number;
   /** The title: it takes focus when the page opens on a phone. */
   heading: RefObject<HTMLHeadingElement | null>;
@@ -104,13 +134,7 @@ export function PullLaunchpad({
   return (
     <section className="ib-pane ib-prpane ib-lp" aria-labelledby={titleId} data-pulls-stack={stack.id} data-launchpad="">
       <div className="ib-pr-bar ib-lp-bar">
-        {phone ? (
-          <button type="button" className="ib-iconbtn" onClick={onClose} aria-label="Back to reviews">
-            <Icon name="back" />
-          </button>
-        ) : (
-          <SidebarTrigger />
-        )}
+        <PullPaneBack phone={phone} stacked={stacked} onClose={onClose} />
         <span className="ib-lp-mark ib-bc-mark" data-card-mark={pr.state} data-card-mark-kind="pr" aria-hidden="true">
           <RefMarkIcon kind="pr" state={pr.state} size={15} />
         </span>
@@ -125,7 +149,7 @@ export function PullLaunchpad({
           <Icon name="external" size={15} />
           {phone ? <span className="ib-sr">Open on {forge}</span> : `Open on ${forge}`}
         </a>
-        {!phone && (
+        {!phone && !stacked && (
           <Tip content="Close">
             <button type="button" className="ib-iconbtn" onClick={onClose} aria-label="Close">
               <Icon name="x" />

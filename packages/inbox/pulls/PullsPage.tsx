@@ -71,7 +71,7 @@ import { PullFilterControl, PullScopeLine, useFilterTrigger } from './PullFilter
 import { forgeName, initials, repoLabels, repoName } from './labels';
 import { answeredClis, pullsEmptyWords, pullsNotices } from './notices';
 import { ReviewPicker } from './ReviewPicker';
-import { PullLaunchpad } from './PullLaunchpad';
+import { PullLaunchpad, PullPaneBack } from './PullLaunchpad';
 import { chainMarks, landsNextLayer, layerBaseWords, stackLink, startLayer } from './topology';
 import type { PullsState } from './usePulls';
 
@@ -85,6 +85,11 @@ export interface PullsPageProps {
   projects: readonly ProjectFolder[];
   projectNames: ReadonlyMap<string, string>;
   phone: boolean;
+  /**
+   * The open PR's pane covers the list: a window too narrow for both side by side (App.tsx `useStack`, stack.ts), the
+   * rule a thread follows. It then leads with `‹ Reviews` and drops Close, as a covering thread leads with `‹ Inbox`.
+   */
+  stacked?: boolean;
   onOpenStack: (id: string | null) => void;
   /** A new view and project from the filter, in one step. */
   onScope: (next: { filter: PullFilter; project: string | null }) => void;
@@ -661,6 +666,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
         pr={start}
         link={link}
         phone={phone}
+        stacked={!phone && !!props.stacked}
         now={now}
         heading={heading}
         said={said}
@@ -679,17 +685,13 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   return (
     <section className="ib-pane ib-prpane" aria-labelledby={titleId} data-pulls-stack={stack.id}>
       <div className="ib-pr-bar">
-        {phone && (
-          <button type="button" className="ib-iconbtn" onClick={props.onClose} aria-label="Back to reviews">
-            <Icon name="back" />
-          </button>
-        )}
+        <PullPaneBack phone={phone} stacked={!phone && !!props.stacked} onClose={props.onClose} />
         <a className="ib-pr-ext" href={(many ? top : (start ?? top)).url} target="_blank" rel="noreferrer noopener" data-pulls-open-forge="">
           <Icon name="external" size={15} />
           {phone ? <span className="ib-sr">Open on {forge}</span> : `Open on ${forge}`}
         </a>
         <span className="ib-sp" />
-        {!phone && (
+        {!phone && !props.stacked && (
           <Tip content="Close">
             <button type="button" className="ib-iconbtn" onClick={props.onClose} aria-label="Close the stack">
               <Icon name="x" />
@@ -797,6 +799,12 @@ function Layer({ layer, stack, next, now, onReview }: { layer: InboxPull; stack:
       <span className="ib-pr-lmain">
         <span className="ib-pr-l1">
           <span className="ib-pr-num">{inboxPullLabel(layer)}</span>
+          {/* Whose move it is on this PR (Your review, Approved, ...): it sits with the PR's number, not alone at the row's end. */}
+          {pill && (
+            <span className="ib-pr-pill" data-tone={pill.tone}>
+              {pill.text}
+            </span>
+          )}
           <span className="ib-pr-lt" dir="auto">
             {layer.title}
           </span>
@@ -828,11 +836,6 @@ function Layer({ layer, stack, next, now, onReview }: { layer: InboxPull; stack:
           )}
         </span>
       </span>
-      {pill && (
-        <span className="ib-pr-pill" data-tone={pill.tone}>
-          {pill.text}
-        </span>
-      )}
     </>
   );
   return (
