@@ -4,7 +4,7 @@
  * the compiled binary. The binary runs `plannotator inbox --background` under
  * a temp PLANNOTATOR_DATA_DIR; simulated agents write through `plannotator
  * inbox mcp` (scripts/inbox-sim.ts); Chromium drives the window. HOME is
- * a scratch folder: the Inbox reads skills and agent config from it. `gh` and `glab` are sh fakes first on PATH: nothing reaches
+ * the scratch folder. `gh` and `glab` are sh fakes first on PATH: nothing reaches
  * GitHub or GitLab, and the real CLIs never run. The diffs they answer are
  * real `git diff`s of scratch repositories with invented names.
  *

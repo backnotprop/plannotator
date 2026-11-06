@@ -23,7 +23,7 @@ test('six blank lines in the person\'s message leave six lines of space; the age
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-inbox-person-breaks-e2e-');
   try {
-    const env = { PATH: process.env.PATH ?? '', PLANNOTATOR_DATA_DIR: join(root, 'data'), CLAUDE_CONFIG_DIR: join(root, 'claude'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_TEST_SANDBOX: '1' };
+    const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), CLAUDE_CONFIG_DIR: join(root, 'claude'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_TEST_SANDBOX: '1' };
     const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
     expect(started.status, started.stderr).toBe(0);
     const url = started.stdout.trim();

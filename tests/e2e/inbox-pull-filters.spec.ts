@@ -3,7 +3,7 @@
  * "highlights when open"), proved in a real browser against the compiled binary. The same sandbox as
  * inbox-pull-requests.spec.ts: `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR, `gh` and `glab` sh
  * fakes first on PATH (nothing reaches GitHub or GitLab; the real CLIs never run), simulated agents through
- * `plannotator inbox mcp`. HOME is never changed.
+ * `plannotator inbox mcp`. HOME is the scratch folder.
  *
  * What is proved, in order:
  *  1. The read: the person's own lists, then Others as a call of its own scoped to the projects (never unscoped).
@@ -238,7 +238,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 
   const env: Record<string, string> = {
     PATH: `${forge}:${process.env.PATH ?? ''}`,
-    ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
