@@ -1,4 +1,4 @@
-import { resolve as resolvePath } from "path";
+import { basename, posix as pathPosix, resolve as resolvePath } from "path";
 import {
   HTML_ASSET_ERROR_CSP,
   HTML_ASSET_DOCUMENT_CSP,
@@ -10,7 +10,9 @@ import {
   htmlAssetHeaders,
   isFramedEmbeddedDocumentRequest,
   resolveHtmlAssetRoute,
+  rewriteCssAssetReferences,
   rewriteHtmlAssetReferences,
+  type HtmlOutsideAssetUrlMapper,
 } from "@plannotator/shared/html-assets";
 import {
   inlineHtmlLocalAssets,
@@ -102,6 +104,19 @@ export interface HtmlAssetRegistryOptions {
    * answer only such a page: anyone else gets 404.
    */
   isThisMachine?: (req: Request) => boolean;
+  /**
+   * The Inbox: a picture the page names OUTSIDE its root (`../shots/a.png`,
+   * `/Users/me/a.png`, `file:///Users/me/a.png`) loads too, wherever it is on
+   * this computer. Each such path that `allows` (judged on the absolute path
+   * as named) gets an unguessable token of its own, for that one file, and
+   * `serve` answers it (the host checks what it is and where it really
+   * leads). Absent (annotate, the Pi server): nothing outside the root is
+   * rewritten or served, as before.
+   */
+  pictures?: {
+    allows: (absolutePath: string) => boolean;
+    serve: (absolutePath: string, req: Request) => Promise<Response>;
+  };
 }
 
 export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) {
@@ -116,13 +131,73 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
   /** Tokens of roots outside the session's roots (`isInsideRoots`). */
   const outsideTokens = new Set<string>();
   const isOutside = (htmlFilePath: string) => options.isInsideRoots ? !options.isInsideRoots(htmlFilePath) : false;
+  /** `pictures`: one token per picture file a page names outside its root, and back. */
+  const picturesByToken = new Map<string, string>();
+  const pictureTokens = new Map<string, string>();
+  const mintToken = () => crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+
+  /** The asset-route URL of a picture outside the root (`/api/html-assets/<token>/<name>`), or null. */
+  function outsideMapper(root: string): HtmlOutsideAssetUrlMapper | undefined {
+    const pictures = options.pictures;
+    if (!pictures) return undefined;
+    return (path) => {
+      const absolute = resolvePath(root, path);
+      if (!pictures.allows(absolute)) return null;
+      let token = pictureTokens.get(absolute);
+      if (!token) {
+        token = mintToken();
+        pictureTokens.set(absolute, token);
+        picturesByToken.set(token, absolute);
+      }
+      return `${HTML_ASSET_ROUTE_PREFIX}/${token}/${encodeURIComponent(basename(absolute))}`;
+    };
+  }
+
+  /** A picture token's file, when the request names one; "mismatch" when the name after the token is not its own. */
+  function pictureOf(pathname: string): string | "mismatch" | null {
+    if (picturesByToken.size === 0 || !pathname.startsWith(`${HTML_ASSET_ROUTE_PREFIX}/`)) return null;
+    const [token, ...rest] = pathname.slice(HTML_ASSET_ROUTE_PREFIX.length + 1).split("/");
+    const absolute = picturesByToken.get(token ?? "");
+    if (!absolute) return null;
+    let name: string;
+    try {
+      name = decodeURIComponent(rest.join("/"));
+    } catch {
+      return "mismatch";
+    }
+    return name === basename(absolute) ? absolute : "mismatch";
+  }
+
+  /**
+   * A document or stylesheet served from the root, with its pictures outside
+   * the root pointed at their tokens (`pictures` only). The bytes as they are
+   * when it names none, so everything else is served exactly as before.
+   */
+  async function withOutsidePictures(file: ReturnType<typeof Bun.file>, root: string, assetPath: string, document: boolean): Promise<string | null> {
+    const outside = outsideMapper(root);
+    if (!outside) return null;
+    let changed = false;
+    const mapper: HtmlOutsideAssetUrlMapper = (path) => {
+      const url = outside(path);
+      if (url) changed = true;
+      return url;
+    };
+    const text = await file.text();
+    const folder = pathPosix.dirname(assetPath);
+    const basePath = folder === "." ? "" : folder;
+    // Inside the root nothing is rewritten (the local mapper says no): those resolve natively, as before.
+    const rewritten = document
+      ? rewriteHtmlAssetReferences(text, () => null, { assetBasePath: basePath, outsideAssetUrlFor: mapper })
+      : rewriteCssAssetReferences(text, () => null, basePath, mapper);
+    return changed ? rewritten : null;
+  }
 
   function register(baseDir: string, docDir: string | null = null, outside = false): string {
     const root = resolvePath(baseDir);
     const scope = `${outside ? "outside\0" : ""}${docDir ? `${root}\0${docDir}` : root}`;
     const existing = tokensByScope.get(scope);
     if (existing) return existing;
-    const token = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+    const token = mintToken();
     tokensByScope.set(scope, token);
     rootsByToken.set(token, root);
     if (docDir) docDirByToken.set(token, docDir);
@@ -142,7 +217,11 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
         // own <base href> against the PARENT's URL, which is this server, so
         // `/api/html-assets/<token>/` lands on the right origin without the
         // rewrite needing to know the port.
-        { baseHref: htmlAssetBaseHref(token) + (basePath ? `${encodeHtmlAssetPath(basePath)}/` : ""), assetBasePath: basePath },
+        {
+          baseHref: htmlAssetBaseHref(token) + (basePath ? `${encodeHtmlAssetPath(basePath)}/` : ""),
+          assetBasePath: basePath,
+          outsideAssetUrlFor: outsideMapper(root),
+        },
       );
     } catch {
       return html;
@@ -167,6 +246,10 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
   }
 
   async function handle(req: Request, url: URL): Promise<Response | null> {
+    const picture = pictureOf(url.pathname);
+    if (picture === "mismatch") return assetError(404, "Not found", false);
+    if (picture) return options.pictures!.serve(picture, req);
+
     const decision = resolveHtmlAssetRoute(
       { pathname: url.pathname, secFetchDest: req.headers.get("sec-fetch-dest") },
       (token) => rootsByToken.get(token),
@@ -209,8 +292,9 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
       const file = Bun.file(resolved);
       // A root outside the session's roots: only fonts are readable by script.
       const cors: Record<string, string> = !outside || outsideRootAssetAllowsCors(assetPath) ? { "Access-Control-Allow-Origin": "*" } : {};
+      const pictured = document || contentType.startsWith("text/css") ? await withOutsidePictures(file, root, assetPath, document) : null;
       if (document) {
-        return new Response(file, {
+        return new Response(pictured ?? file, {
           headers: {
             // Outside the session's roots a page gets no network (connect-src 'none').
             ...htmlAssetDocumentHeaders(outside ? OUTSIDE_ROOT_HTML_DOCUMENT_CSP : (options.documentCsp ?? HTML_ASSET_DOCUMENT_CSP)),
@@ -221,7 +305,7 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
           },
         });
       }
-      return new Response(file, {
+      return new Response(pictured ?? file, {
         headers: {
           // Sandboxed: an SVG or XML asset opened as a document never runs script on this origin.
           ...htmlAssetHeaders(contentType),
