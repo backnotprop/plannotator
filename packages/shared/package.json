@@ -150,6 +150,7 @@
     "./shape/format": "./shape/format.ts",
     "./shape/store": "./shape/store.ts",
     "./shape/stamps": "./shape/stamps.ts",
+    "./shape/web-pictures": "./shape/web-pictures.ts",
     "./shape/switch": "./shape/switch.ts",
     "./shape/routes": "./shape/routes.ts",
     "./inbox/board-seen": "./inbox/board-seen.ts",
