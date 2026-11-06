@@ -251,10 +251,9 @@ export interface PRReviewFileComment {
 }
 
 /**
- * The review event a platform submission carries (#1611). GitHub maps these
- * to `APPROVE` / `COMMENT` / `REQUEST_CHANGES`. GitLab has no request-changes
- * review, so it posts `request_changes` exactly like `comment` (a note plus
- * discussions); only `approve` adds a mutation there.
+ * The review event a platform submission carries. GitHub maps these to
+ * `APPROVE` / `COMMENT` / `REQUEST_CHANGES`. GitLab posts a note plus
+ * discussions, then `approve` or `request_changes` sets the decision separately.
  */
 export type PRReviewAction = "approve" | "comment" | "request_changes";
 
@@ -303,7 +302,7 @@ export interface PRReviewCommentFailure {
 export interface PRReviewRetry {
   /**
    * `approve` / `request_changes` when the decision mutation itself failed
-   * (GitLab approve, Bitbucket approve or request-changes); `comment` when only
+   * (GitLab or Bitbucket approve or request-changes); `comment` when only
    * inline comments (and possibly the unposted general comment) remain.
    */
   action: PRReviewAction;
@@ -396,13 +395,15 @@ export interface PRPlatformCapabilities {
   /** Prefix of the change number in labels: "#" or "!". */
   numberPrefix: "#" | "!";
   /**
-   * The platform records a real request-changes decision (#1611). GitHub:
-   * REQUEST_CHANGES review; Bitbucket: `POST /request-changes`. GitLab has
-   * none, so `request_changes` posts exactly like `comment` there.
+   * The platform records a real request-changes decision. GitHub:
+   * REQUEST_CHANGES review; GitLab: `mergeRequestRequestChanges`; Bitbucket:
+   * `POST /request-changes`.
    */
   requestChanges: boolean;
-  /** The platform refuses approve / request-changes from the PR author. */
+  /** The platform refuses approve from the PR author. */
   selfReviewBlocked: boolean;
+  /** The platform refuses request-changes from the PR author (GitHub only). */
+  selfRequestChangesBlocked: boolean;
   /** File-scoped comments post as file-level threads (else folded into the body). */
   fileLevelComments: boolean;
   /** Per-file "viewed" state syncs to the platform. */
@@ -431,6 +432,7 @@ const PLATFORM_CAPABILITIES: Record<Platform, PRPlatformCapabilities> = {
     numberPrefix: "#",
     requestChanges: true,
     selfReviewBlocked: true,
+    selfRequestChangesBlocked: true,
     fileLevelComments: true,
     viewedSync: true,
     artifacts: true,
@@ -442,8 +444,10 @@ const PLATFORM_CAPABILITIES: Record<Platform, PRPlatformCapabilities> = {
     label: "GitLab",
     changeLabel: "MR",
     numberPrefix: "!",
-    requestChanges: false,
+    requestChanges: true,
     selfReviewBlocked: true,
+    // An MR author may mark their own MR as needing changes.
+    selfRequestChangesBlocked: false,
     fileLevelComments: false,
     viewedSync: false,
     artifacts: true,
@@ -459,6 +463,7 @@ const PLATFORM_CAPABILITIES: Record<Platform, PRPlatformCapabilities> = {
     // Bitbucket Cloud lets an author approve their own PR (the approval just
     // does not count toward merge checks), so nothing is muted.
     selfReviewBlocked: false,
+    selfRequestChangesBlocked: false,
     // Bitbucket supports file comments, but posting them one by one outside the
     // partial-retry contract is not worth the risk yet: they fold into the body.
     fileLevelComments: false,

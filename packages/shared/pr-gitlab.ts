@@ -642,6 +642,68 @@ export async function fetchGlFileBytes(
 
 // --- Submit MR Review ---
 
+type RunWithInput = NonNullable<PRRuntime["runCommandWithInput"]>;
+
+function commandFailure(result: CommandResult): string {
+  return result.stderr.trim() || result.stdout.trim() || `exit code ${result.exitCode}`;
+}
+
+/** Approve the MR. Returns the failure message, or null on success. */
+async function approveGlMR(run: RunWithInput, host: string, mrEndpoint: string): Promise<string | null> {
+  const result = await run(
+    "glab",
+    apiArgs(host, `${mrEndpoint}/approve`, ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
+    "{}",
+  );
+  return result.exitCode === 0 ? null : commandFailure(result);
+}
+
+// GitLab records requested changes only for a reviewer, and runs a document's
+// mutations in order, so the user is appended as a reviewer first.
+const REQUEST_CHANGES_MUTATION = `mutation($projectPath: ID!, $iid: String!, $username: String!) {
+  mergeRequestSetReviewers(input: { projectPath: $projectPath, iid: $iid, reviewerUsernames: [$username], operationMode: APPEND }) { errors }
+  mergeRequestRequestChanges(input: { projectPath: $projectPath, iid: $iid }) { errors }
+}`;
+
+/** GraphQL error messages from a top-level `errors` array and every mutation payload's `errors` strings. */
+function graphqlErrors(value: unknown): string[] {
+  if (!isRecord(value)) return [];
+  const top = Array.isArray(value.errors)
+    ? value.errors.map((e) => (isRecord(e) ? stringValue(e.message) : stringValue(e))).filter(Boolean)
+    : [];
+  const payloads = isRecord(value.data) ? Object.values(value.data) : [];
+  const nested = payloads.flatMap((payload) =>
+    isRecord(payload) && Array.isArray(payload.errors) ? payload.errors.map(stringValue).filter(Boolean) : [],
+  );
+  return [...top, ...nested];
+}
+
+/**
+ * Add the current user as a reviewer and set their state to "Requested
+ * changes". Returns the failure message, or null on success.
+ */
+async function requestGlMRChanges(runtime: PRRuntime, run: RunWithInput, ref: GlMRRef): Promise<string | null> {
+  const username = await getGlUser(runtime, ref.host);
+  if (!username) return "could not read the current GitLab user";
+  const result = await run(
+    "glab",
+    apiArgs(ref.host, "graphql", ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
+    JSON.stringify({
+      query: REQUEST_CHANGES_MUTATION,
+      variables: { projectPath: ref.projectPath, iid: String(ref.iid), username },
+    }),
+  );
+  if (result.exitCode !== 0) return commandFailure(result);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch {
+    return `unexpected GraphQL response: ${result.stdout.trim().slice(0, 200)}`;
+  }
+  const errors = graphqlErrors(parsed);
+  return errors.length > 0 ? errors.join("; ") : null;
+}
+
 /**
  * Submit a GitLab review across its separate note, discussion, and approval
  * APIs.
@@ -681,7 +743,7 @@ export async function submitGlMRReview(
       notePayload,
     );
     if (noteResult.exitCode !== 0) {
-      const msg = noteResult.stderr.trim() || noteResult.stdout.trim() || `exit code ${noteResult.exitCode}`;
+      const msg = commandFailure(noteResult);
       throw new Error(`Failed to post MR note: ${msg}`);
     }
     reviewBodyPosted = true;
@@ -760,7 +822,7 @@ export async function submitGlMRReview(
           );
 
           if (res.exitCode !== 0) {
-            const msg = res.stderr.trim() || res.stdout.trim() || `exit code ${res.exitCode}`;
+            const msg = commandFailure(res);
             throw new Error(`${comment.path}:${comment.line}: ${msg}`);
           }
         }),
@@ -815,28 +877,24 @@ export async function submitGlMRReview(
     }
   }
 
-  // 3. Approve if requested. GitLab has no request-changes review, so a
-  //    `request_changes` action posts exactly what `comment` posts (#1611).
   let approval: "not-requested" | "succeeded" | "failed" = "not-requested";
   let approvalError: string | undefined;
-  if (action === "approve") {
+  if (action === "approve" || action === "request_changes") {
+    const verb = action === "approve" ? "approve MR" : "request changes on MR";
     try {
-      const approveResult = await runCommandWithInput(
-        "glab",
-        apiArgs(ref.host, `${mrEndpoint}/approve`, ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
-        "{}",
-      );
-      if (approveResult.exitCode !== 0) {
-        const msg = approveResult.stderr.trim() || approveResult.stdout.trim() || `exit code ${approveResult.exitCode}`;
+      const failure = action === "approve"
+        ? await approveGlMR(runCommandWithInput, ref.host, mrEndpoint)
+        : await requestGlMRChanges(runtime, runCommandWithInput, ref);
+      if (failure) {
         approval = "failed";
-        approvalError = `Failed to approve MR: ${msg}`;
+        approvalError = `Failed to ${verb}: ${failure}`;
       } else {
         approval = "succeeded";
       }
     } catch (error) {
       approval = "failed";
       const message = error instanceof Error ? error.message : String(error);
-      approvalError = `Failed to approve MR: ${message}`;
+      approvalError = `Failed to ${verb}: ${message}`;
     }
   }
 
@@ -850,7 +908,7 @@ export async function submitGlMRReview(
       ...(approvalError ? { approvalError } : {}),
       ...(recoveryFile ? { recoveryFile } : {}),
       retry: {
-        action: approval === "failed" ? "approve" : "comment",
+        action: approval === "failed" ? action : "comment",
         fileComments: failedFileComments.map((failure) => failure.comment),
       },
     };
