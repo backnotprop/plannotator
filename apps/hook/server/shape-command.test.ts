@@ -175,6 +175,22 @@ describe("shape update", () => {
     expect(result.err).toContain("- title: is empty");
     expect(result.err).toContain("- views.how.html: <script> is not allowed");
   });
+
+  test("icons, logos and drawn things named in the drawing are stored as their drawing; a name it lacks is a note with close names", async () => {
+    const w = world();
+    const html = '<svg viewBox="0 0 900 500"><svg data-icon="database" x="10" y="10" width="28" height="28"/><svg data-logo="stripe" x="60" y="10"/><svg data-draw="queue" x="10" y="80" width="200" height="60" data-label="jobs"/><svg data-icon="serverr" x="300" y="10"/></svg>';
+    writeFileSync(join(w.project, "kit.json"), JSON.stringify({ title: "Kit", claim: "c", views: { picture: { html } } }));
+    const result = await w.run("update", "--file", "kit.json");
+    expect(result.code).toBe(0);
+    const { id, notes } = JSON.parse(result.out) as { id: string; notes: string[] };
+    expect(notes.some((n) => n.startsWith('data-icon="serverr": no icon by that name; close: server'))).toBe(true);
+    const stored = JSON.parse((await w.run("read", id)).out).version.views.picture.html as string;
+    // The stored board holds the drawings, so showing it looks nothing up.
+    expect(stored).toMatch(/<svg data-icon="database"[^>]*viewBox="0 0 24 24"><ellipse /);
+    expect(stored).toContain('<svg data-brand data-logo="stripe"');
+    expect(stored).toContain(">jobs</text>");
+    expect(stored).toContain('data-icon="serverr" x="300" y="10" data-missing=');
+  });
 });
 
 describe("shape read", () => {
@@ -323,6 +339,7 @@ describe("the Shape switch, through the entrypoint", () => {
     const entry = join(import.meta.dir, "index.ts");
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? "",
+      HOME: process.env.HOME!,
       PLANNOTATOR_DATA_DIR: dataDir,
       PLANNOTATOR_BROWSER: NO_BROWSER,
       NO_BROWSER: "1",
@@ -379,6 +396,7 @@ describe("the Shape switch, through the entrypoint", () => {
     const entry = join(import.meta.dir, "index.ts");
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? "",
+      HOME: process.env.HOME!,
       PLANNOTATOR_DATA_DIR: dataDir,
       PLANNOTATOR_BROWSER: NO_BROWSER,
       NO_BROWSER: "1",

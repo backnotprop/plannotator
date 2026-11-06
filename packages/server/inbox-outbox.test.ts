@@ -388,6 +388,9 @@ describe("rule 8: every door write is classified, and only small JSON is held", 
     expect(doorWriteKind("messages/msg_1/reply/extra")).toBeNull();
     expect(doorWriteKind("messages/msg_1/actions/not-an-action")).toBeNull();
     expect(doorWriteKind("settings")).toBeNull();
+    // On the door for a phone, in the table, and still never forwarded: a held one would answer no upload id.
+    expect(DOOR_WRITES["POST uploads/reuse"]).toBe("local");
+    expect(doorWriteKind("uploads/reuse")).toBeNull();
   });
 
   test("an Inbox that never holds a write keeps no outbox folder", () => {

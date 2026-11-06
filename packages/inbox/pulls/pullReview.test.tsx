@@ -26,14 +26,18 @@ import type { StartThreadInput } from '../api';
 import { handoffKeys, handoffStack, PULL_HANDOFF_TITLE_MAX, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk, pullTitleLine } from './model';
 import { layerVerdictLink } from './topology';
 
+import { pullsStateOf } from './reviewsTestState';
 const hasDom = typeof document !== 'undefined';
 const shown: { patch: string; title: string }[] = [];
 /** The reader's comment seam as the review last gave it (a test writes a comment through it). */
 let readerComments: { onSave: (annotation: unknown) => void } | undefined;
+/** The reader's whole-file seam as the review last gave it. */
+let readerFiles: ((path: string, signal: AbortSignal, patch: string) => Promise<unknown>) | undefined;
 if (hasDom) {
   mock.module('#guide-reader', () => ({
-    default: (props: { snapshot: { review: { rawPatch: string }; guide: { title: string } }; comments?: { onSave: (annotation: unknown) => void } }) => {
+    default: (props: { snapshot: { review: { rawPatch: string }; guide: { title: string } }; comments?: { onSave: (annotation: unknown) => void }; fileContents?: typeof readerFiles }) => {
       readerComments = props.comments;
+      readerFiles = props.fileContents;
       shown.push({ patch: props.snapshot.review.rawPatch, title: props.snapshot.guide.title });
       return null;
     },
@@ -121,8 +125,12 @@ const liveSession = (session: string, _project: string) => ({ session, host: 'cl
 let sessionsAnswer: Record<string, unknown> = {};
 /** What `POST /api/inbox/pulls/review` answers (Post to GitHub/GitLab), and its status. */
 let reviewAnswer: { status: number; body: Record<string, unknown> } = { status: 200, body: {} };
-/** The head commit the layer patch is read at (`InboxPullDiffAnswer.head_sha`). */
+/** The head commit the patch is read at (`InboxPullDiffAnswer.head_sha`). */
 let diffHead: string | null = 'a'.repeat(40);
+/** The diff door's patch instead of the one named after the layer. */
+let diffPatch: string | null = null;
+/** The whole files asked for behind the expand arrows. */
+let fileAsks: string[] = [];
 /** What starting a thread answers for one session (an ended agent: 409 session_not_live), and how often compose's sessions were read. */
 let refuse: Record<string, { status: number; body: Record<string, unknown> }> = {};
 /** Thread names another open thread already has: starting a thread with one answers 409 thread_name_taken. */
@@ -150,6 +158,8 @@ beforeEach(() => {
   shown.length = 0;
   reviewAnswer = { status: 200, body: { ok: true, prUrl: '', submission: { status: 'complete' } } };
   diffHead = 'a'.repeat(40);
+  diffPatch = null;
+  fileAsks = [];
   refuse = {};
   takenNames = [];
   sessionReads = 0;
@@ -175,13 +185,17 @@ beforeEach(() => {
       sessionReads += 1;
       return Response.json(sessionsAnswer);
     }
+    if (url.pathname.endsWith('/pulls/file')) {
+      fileAsks.push(url.searchParams.get('scope')!);
+      return Response.json({ serverSession: 's', oldContent: 'a\n', newContent: 'b\n' });
+    }
     if (url.pathname.endsWith('/pulls/diff')) {
       const key = url.searchParams.get('key')!;
       const scope = url.searchParams.get('scope')!;
       asked.push({ key, scope });
       if (diffOverride) return diffOverride(key, scope);
       const patch = `diff --git a/${scope}-${key.split('#')[1]}.ts b/${scope}-${key.split('#')[1]}.ts\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n`;
-      return Response.json({ serverSession: 's', key, scope, base: scope === 'stack' ? 'main' : 'x', head: 'y', patch, ...(scope === 'layer' ? { head_sha: diffHead } : {}) });
+      return Response.json({ serverSession: 's', key, scope, base: scope === 'stack' ? 'main' : 'x', head: 'y', patch: diffPatch ?? patch, head_sha: diffHead });
     }
     return Response.json({});
   }) as typeof fetch;
@@ -224,6 +238,30 @@ const el = <T extends Element = HTMLElement>(selector: string) => {
   if (!found) throw new Error(`${selector} did not render`);
   return found as unknown as T;
 };
+
+// Guards a whole file read at another commit than the patch on screen, in either scope.
+test.skipIf(!hasDom)('a diff whose head moved during its read asks for no whole files; one that held does', async () => {
+  diffPatch = 'diff --git a/a.ts b/a.ts\nindex 1111111..2222222 100644\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-a\n+b\n';
+  const theirs = { ...model.pulls.find((p) => p.number === 880)!, head_sha: SHA };
+  const answer = { ...model, pulls: model.pulls.map((p) => (p.number === 880 ? theirs : p)) };
+  const ask = async (scope: 'layer' | 'stack', head: string | null, pushed: string) => {
+    diffHead = head;
+    // Its own push time: the window keeps a patch read a moment ago per push.
+    const fresh = { ...answer, pulls: answer.pulls.map((p) => (p.number === 880 ? { ...theirs, updated_at: pushed } : p)) };
+    mount(<PullReview model={fresh} modelError={null} stackId={theirs.key} layerKey={theirs.key} scope={scope} onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+    await settle();
+    await readerFiles!('a.ts', new AbortController().signal, diffPatch!);
+    act(() => root!.unmount());
+    root = null;
+    host!.remove();
+  };
+  await ask('layer', null, '2026-11-03T13:00:00.000Z');
+  await ask('stack', null, '2026-11-03T13:01:00.000Z');
+  expect(fileAsks).toEqual([]);
+  await ask('layer', 'c'.repeat(40), '2026-11-03T13:02:00.000Z');
+  await ask('stack', 'c'.repeat(40), '2026-11-03T13:03:00.000Z');
+  expect(fileAsks).toEqual(['layer', 'stack']);
+});
 
 test.skipIf(!hasDom)('a layer opens its own diff; Whole stack asks for the stack up to it; Next layer moves up', async () => {
   mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={model} />);
@@ -485,17 +523,18 @@ test.skipIf(!hasDom)('a partial post keeps the dialog open on what did not go, w
   expect(document.querySelector('[data-pull-review-posted]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('the list: On you, Ready to land, then the waiting ones folded; a stack is one row with its chain', async () => {
+test.skipIf(!hasDom)('the list: On you, then the folded group; a stack is one row with its chain', async () => {
   const opened: string[] = [];
   mount(
     <SidebarProvider>
     <PullsPage
-      state={{ model, error: null, loading: false, refresh: () => {}, reload: () => {} }}
+      state={pullsStateOf(model)}
       stackId={null}
       project={null}
       projects={[]}
       projectNames={new Map()}
       phone={false}
+      onNew={() => {}}
       onOpenStack={(id) => id && opened.push(id)}
       filter="all"
       onScope={() => {}}
@@ -509,18 +548,16 @@ test.skipIf(!hasDom)('the list: On you, Ready to land, then the waiting ones fol
   await settle();
   const rows = () => [...document.querySelectorAll<HTMLElement>('[data-pulls-row]')].filter((r) => r.closest('[hidden]') === null);
   const moves = rows().map((r) => r.getAttribute('data-pulls-move'));
-  expect(moves).toEqual(['on_you', 'on_you', 'ready']);
-  expect(el('[data-pulls-group="on_you"] .ib-n').textContent).toBe('2');
-  const stackRow = rows().find((r) => r.getAttribute('data-pulls-layers') === '3')!;
-  expect(stackRow).toBeDefined();
-  expect(stackRow.querySelectorAll('.ib-pr-chain svg').length).toBe(3);
-  expect(stackRow.textContent).toContain('start at #412');
-  // The waiting one is folded under its count, and opens on a click.
-  const fold = el('.ib-pr-foldbtn');
-  expect(fold.textContent).toContain('1 waiting on others');
+  // A teammate's request stays On you; a PR only listed is folded under Open, not reviewed, and opens on a click.
+  expect(moves).toEqual(['on_you']);
+  expect(el('[data-pulls-group="on_you"] .ib-n').textContent).toBe('1');
+  const fold = el('[data-reviews-fold="not_reviewed"]');
+  expect(fold.textContent).toContain('Open, not reviewed');
   await act(async () => fold.click());
   await settle();
-  expect(rows().map((r) => r.getAttribute('data-pulls-move'))).toEqual(['on_you', 'on_you', 'ready', 'waiting']);
+  expect(new Set(rows().map((r) => r.getAttribute('data-pulls-move')))).toEqual(new Set(['on_you', 'not_reviewed']));
+  const stackRow = rows().find((r) => r.getAttribute('data-pulls-layers') === '3')!;
+  expect(stackRow.querySelectorAll('.ib-pr-chain svg').length).toBe(3);
   await act(async () => stackRow.click());
   expect(opened).toEqual([STACK_ID]);
 });
@@ -555,10 +592,11 @@ test.skipIf(!hasDom)("top left is always the author's picture, from the Inbox's 
   expect(asked.every((u) => u.origin === 'http://inbox.test' && /\/api\/inbox\/pulls\/avatar$/.test(u.pathname))).toBe(true);
   expect(asked.map((u) => `${u.searchParams.get('host')} ${u.searchParams.get('login')}`)).toContain('github.com mara-lee');
   expect(lead.querySelector('.ib-atiles')).toBeNull();
-  // The agent: its mark and name on the third line.
+  // The agent: its mark on the third line, named for a reader, and what it is doing.
   const agent = stackRow.querySelector('.ib-pv [data-pulls-row-agent]')!;
   expect(agent.getAttribute('data-pulls-row-agent')).toBe('claude-code');
-  expect(agent.textContent).toBe('Review thread with Claude Code');
+  expect(agent.getAttribute('aria-label')).toBe('Claude Code');
+  expect(stackRow.querySelector('[data-reviews-status]')!.textContent).toBe('Curating…');
   expect(agent.querySelector('svg, img')).not.toBeNull();
   // The picture failed: the initials stay, no broken image.
   expect(av.querySelector('img')).toBeNull();
@@ -677,12 +715,13 @@ function Page({
   return (
     <SidebarProvider>
       <PullsPage
-        state={{ model: answer, error: null, loading: false, refresh: () => {}, reload: () => {} }}
+        state={pullsStateOf(answer)}
         stackId={stackId}
         project={null}
         projects={[]}
         projectNames={new Map()}
         phone={false}
+        onNew={() => {}}
         onOpenStack={() => {}}
         filter="all"
         onScope={() => {}}

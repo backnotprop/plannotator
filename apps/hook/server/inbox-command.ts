@@ -58,6 +58,7 @@ import { handleInboxServerReady, startInboxServer } from "@plannotator/server/in
 import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
 import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { isRemoteSession } from "@plannotator/server/remote";
+import { assertTestHome } from "@plannotator/server/test-home-guard";
 import { agentSpec, createAgentEnvironment, formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
 import { addInboxNote, INBOX_NOTE_BODY, inboxNotesDisabled, markNotesAsked } from "@plannotator/server/inbox-agent-notes";
 import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
@@ -614,8 +615,11 @@ function usageError(message: string): never {
 }
 
 export interface InboxCommandAssets {
-  /** The built window (`apps/hook/dist/inbox.html`), embedded by the binary. */
-  htmlContent?: string;
+  /**
+   * Reads the built window (`apps/hook/dist/inbox.html`), embedded by the binary. A function because
+   * only serving needs the page, and every agent session keeps an `inbox mcp` process running.
+   */
+  htmlContent?: () => string;
   /** The global `--json` flag (index.ts takes it out of the arguments first); `status` reads it, `stop` and `restart` refuse it. */
   json?: boolean;
 }
@@ -641,6 +645,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     // `--t3`: the entry the T3 Code setup adds (`plannotator t3 --help`). It lists its tools only inside a T3 thread.
     const unknown = args.slice(1).find((arg) => arg !== "--t3");
     if (unknown !== undefined) usageError(`Unknown inbox mcp option: ${unknown}`);
+    assertTestHome();
     await runInboxMcpShim({
       dataDir,
       cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
@@ -744,7 +749,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     if (connect) await connectRunningInbox(entry);
     process.exit(0);
   }
-  return serveInbox(dataDir, !noOpen, assets.htmlContent, tailscale, connect);
+  return serveInbox(dataDir, !noOpen, assets.htmlContent?.(), tailscale, connect);
 }
 
 /**

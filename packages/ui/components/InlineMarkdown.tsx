@@ -1127,12 +1127,15 @@ export const InlineMarkdown: React.FC<{
           </HostTitle>,
         );
       } else if (localLink?.kind === 'unavailable') {
+        const inert = (
+          <span className="text-muted-foreground underline decoration-dotted underline-offset-2" data-local-link="unavailable">
+            {linkText}
+          </span>
+        );
         parts.push(
-          <HostTitle key={key++} title={localLink.title}>
-            <span className="text-muted-foreground underline decoration-dotted underline-offset-2" data-local-link="unavailable">
-              {linkText}
-            </span>
-          </HostTitle>,
+          localLink.wrap
+            ? <React.Fragment key={key++}>{localLink.wrap(inert)}</React.Fragment>
+            : <HostTitle key={key++} title={localLink.title}>{inert}</HostTitle>,
         );
         if (localLink.after) parts.push(<React.Fragment key={key++}>{localLink.after}</React.Fragment>);
       } else if (isInPageAnchor) {

@@ -1,10 +1,10 @@
 /**
  * PR risk ranking in the window (approval "code-review-launch-build", item 4): what a
- * row's mark says and what the filter keeps. A stack is one row, so it takes the
- * highest judgment of its open layers.
+ * row's mark says and what the filter keeps. A row takes the highest judgment of
+ * its PRs' open layers.
  */
-import type { InboxPullGroups, InboxPullItem, InboxPullRiskJudgment, InboxPullRiskLevel, InboxPullStack } from '@plannotator/core/inbox-types';
-import { openLayers, pullRows } from './model';
+import type { InboxPullRiskJudgment, InboxPullRiskLevel, InboxPullStack, InboxReviewGroups, InboxReviewRow } from '@plannotator/core/inbox-types';
+import { openLayers } from './model';
 
 export type RiskFilterValue = 'all' | 'high' | 'medium';
 
@@ -64,37 +64,47 @@ export function stackRiskFailure(stack: Pick<InboxPullStack, 'layers'>, judgment
 
 const passes = (level: InboxPullRiskLevel | undefined, filter: RiskFilterValue) => filter === 'all' || (level !== undefined && (filter === 'high' ? level === 'high' : RANK[level] >= RANK.medium));
 
+/** A Reviews row's PRs as one stack: a thread that owns PRs is judged by them, a local review has none. */
+export function rowStack(row: Pick<InboxReviewRow, 'stacks'>): Pick<InboxPullStack, 'layers'> {
+  return row.stacks.length === 1 ? row.stacks[0]! : { layers: row.stacks.flatMap((stack) => stack.layers) };
+}
+
+const rankOf = (row: InboxReviewRow, judgments: RiskJudgments) => {
+  const found = stackRisk(rowStack(row), judgments)?.level;
+  return found ? RANK[found] : -1;
+};
+
 /**
- * The rows the filter keeps, highest first within each group. With the filter off, the groups as they came, in their order.
- * A row it can't say is out for good (a layer not ranked yet, or a run that failed: it could be anything, a huge diff
- * most of all) is never silent. Medium and up keeps a failed row, after the ranked ones, and `notJudged` counts the
- * others it hid. High hides both kinds and hands them back as `notRanked`, for one quiet line that shows them.
+ * The rows the filter keeps. With the filter off, the rows as they came. A local review has no PR to rank: the
+ * filter hides it, and it is no row the filter could not place. A row it can't say is out for good (a layer not
+ * ranked yet, or a run that failed: it could be anything, a huge diff most of all) is never silent. Medium and up
+ * keeps a failed row (`riskOrder` puts it after the ranked ones), and `notJudged` counts the others it hid. High
+ * hides both kinds and hands them back as `notRanked`, for one quiet line that shows them.
  */
-export function filterPullGroups(
-  groups: InboxPullGroups,
+export function filterReviewRows(
+  rows: readonly InboxReviewRow[],
   filter: RiskFilterValue,
   judgments: RiskJudgments,
   failed: RiskFailures,
-): { groups: InboxPullGroups; notJudged: number; notRanked: InboxPullItem[] } {
-  if (filter === 'all') return { groups, notJudged: 0, notRanked: [] };
-  const level = (item: InboxPullItem) => stackRisk(item.stack, judgments)?.level;
-  const isFailed = (item: InboxPullItem) => stackRiskFailure(item.stack, judgments, failed) !== null;
-  const rank = (item: InboxPullItem) => {
-    const found = level(item);
-    return found ? RANK[found] : -1;
-  };
-  const kept = (item: InboxPullItem) => passes(level(item), filter) || (filter !== 'high' && isFailed(item));
-  const keep = (items: readonly InboxPullItem[]) =>
-    items
-      .filter(kept)
-      .map((item, at) => ({ item, at }))
-      .sort((a, b) => rank(b.item) - rank(a.item) || a.at - b.at)
-      .map(({ item }) => item);
+): { rows: readonly InboxReviewRow[]; notJudged: number; notRanked: InboxReviewRow[] } {
+  if (filter === 'all') return { rows, notJudged: 0, notRanked: [] };
+  const isFailed = (row: InboxReviewRow) => stackRiskFailure(rowStack(row), judgments, failed) !== null;
+  const kept = (row: InboxReviewRow) => passes(stackRisk(rowStack(row), judgments)?.level, filter) || (filter !== 'high' && isFailed(row));
   // A run still going counts too: the count only ever goes down as answers come in, and nothing hides without a word.
-  const hidden = pullRows(groups).filter((item) => !kept(item) && (isFailed(item) || openLayers(item.stack).some((layer) => !judgments[layer.key])));
+  const hidden = rows.filter((row) => !kept(row) && (isFailed(row) || openLayers(rowStack(row)).some((layer) => !judgments[layer.key])));
   return {
-    groups: { ...groups, on_you: keep(groups.on_you), ready: keep(groups.ready), waiting: keep(groups.waiting) },
+    rows: rows.filter(kept),
     notJudged: filter === 'high' ? 0 : hidden.length,
     notRanked: filter === 'high' ? hidden : [],
   };
+}
+
+/** With the filter on: highest first within each group, the groups' own order after that. */
+export function riskOrder(groups: InboxReviewGroups, judgments: RiskJudgments): InboxReviewGroups {
+  const sorted = (rows: readonly InboxReviewRow[]) =>
+    rows
+      .map((row, at) => ({ row, at, rank: rankOf(row, judgments) }))
+      .sort((a, b) => b.rank - a.rank || a.at - b.at)
+      .map(({ row }) => row);
+  return { on_you: sorted(groups.on_you), agents: sorted(groups.agents), ready: sorted(groups.ready), waiting: sorted(groups.waiting), not_reviewed: sorted(groups.not_reviewed) };
 }

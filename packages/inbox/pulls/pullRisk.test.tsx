@@ -6,6 +6,7 @@
  *  - a merged layer's old judgment deciding a stack;
  *  - the filter closing the stack open beside the list;
  *  - a tap on a mark opening the row instead of showing the sentence;
+ *  - a local review (no PR to rank) shown or counted under the filter, or a thread's row not judged by the PRs it owns;
  *  - the dialog losing the person's words when a save fails, or keeping the last agent's model after a switch;
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -13,7 +14,8 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxPull, InboxPullRiskAnswer, InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import type { InboxPull, InboxPullRiskAnswer, InboxPullsAnswer, InboxReviewRow, InboxReviewThread } from '@plannotator/core/inbox-types';
+import { pullsStateOf } from './reviewsTestState';
 
 const hasDom = typeof document !== 'undefined';
 const { inboxApi } = (hasDom ? await import('../api') : {}) as typeof import('../api');
@@ -112,10 +114,10 @@ afterEach(async () => {
   for (const restore of restores.splice(0)) restore();
 });
 
-const page = (stackId: string | null = null, opened: string[] = []) => (
+const page = (stackId: string | null = null, opened: string[] = [], state = pullsStateOf(LIST)) => (
   <SidebarProvider>
     <PullsPage
-      state={{ model: LIST, error: null, loading: false, refresh: () => {}, reload: () => {} }}
+      state={state}
       stackId={stackId}
       project={null}
       projects={[]}
@@ -125,6 +127,7 @@ const page = (stackId: string | null = null, opened: string[] = []) => (
       filter="all" onScope={() => {}}
       onReview={() => {}}
       onOpenThread={() => {}}
+      onNew={() => {}}
       onLaunch={() => {}}
       onStarted={() => {}}
     />
@@ -493,4 +496,55 @@ test.skipIf(!hasDom)('no agent installed: one line, and the rules can still be s
   await settle();
   expect(saves).toEqual([{ rules: '', provider: null, model: null }]);
   expect(done).toBe(1);
+});
+
+const review = (thread: string): InboxReviewThread =>
+  ({
+    thread_id: thread,
+    project_id: 'proj_a',
+    subject: null,
+    first_review_id: `msg_${thread}`,
+    latest_review_id: `msg_${thread}`,
+    round: 1,
+    title: `Review ${thread}`,
+    files: 1,
+    additions: 1,
+    deletions: 1,
+    agent: null,
+    source: null,
+    verdict: null,
+    answered: null,
+    reviewed_at: '2026-11-03T11:00:00.000Z',
+    updated_at: '2026-11-03T11:00:00.000Z',
+  }) as InboxReviewThread;
+
+/** The list with #2 owned by a review thread, and a local review that owns no PR. */
+function withThreads() {
+  const state = pullsStateOf(LIST);
+  const rows = state.reviews!.rows;
+  const pr2 = rows.find((row) => row.id === key(2))!;
+  const owned: InboxReviewRow = { ...pr2, id: 'thr_owns', reviewed: true, thread_id: 'thr_owns', move: 'on_you', reason: 'review_ready', review: review('thr_owns') };
+  const local: InboxReviewRow = { id: 'thr_local', reviewed: true, move: 'on_you', reason: 'review_ready', thread_id: 'thr_local', review: review('thr_local'), stacks: [], pull_keys: [], link: null, pull_reason: null, landed: [], updated_at: '2026-11-03T11:00:00.000Z' };
+  return { ...state, reviews: { ...state.reviews!, rows: [local, owned, ...rows.filter((row) => row !== pr2)] } };
+}
+const reviewRows = () => [...document.querySelectorAll('[data-reviews-row]')].map((r) => r.getAttribute('data-reviews-row'));
+
+test.skipIf(!hasDom)("a thread's row is judged by the PR it owns; a local review has no mark, and the filter hides it without counting it", async () => {
+  spy('pullRisk', async () => JUDGED);
+  await mount(page(null, [], withThreads()));
+  expect(document.querySelector('[data-reviews-row="thr_owns"] [data-pull-risk]')?.getAttribute('data-pull-risk')).toBe('high');
+  expect(document.querySelector('[data-reviews-row="thr_local"]')).not.toBeNull();
+  expect(document.querySelector('[data-reviews-row="thr_local"] [data-pull-risk]')).toBeNull();
+  if (root) await act(async () => root!.unmount());
+  document.body.innerHTML = '';
+
+  for (const filter of ['high', 'medium']) {
+    window.localStorage.setItem('plannotator-inbox-pr-risk-filter', filter);
+    await mount(page(null, [], withThreads()));
+    expect(reviewRows()).toContain('thr_owns');
+    expect(reviewRows()).not.toContain('thr_local');
+    expect(document.querySelectorAll('[data-pulls-risk-not-judged], [data-pulls-risk-not-ranked]').length).toBe(0);
+    if (root) await act(async () => root!.unmount());
+    document.body.innerHTML = '';
+  }
 });

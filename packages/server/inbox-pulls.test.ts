@@ -1780,6 +1780,10 @@ describe("who may read it", () => {
         const answer = await fetch(`http://127.0.0.1:${listener}${path}`, { ...init, headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST, "Content-Type": "application/json" } });
         expect(((await answer.json()) as { code: string }).code).toBe("local_only");
       }
+      // Nor read a project's files through a guide's expand arrows.
+      const guestFile = await fetch(`http://127.0.0.1:${listener}/api/inbox/messages/msg_any/guide/file?path=a.ts`, { headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST } });
+      expect(guestFile.status).toBe(403);
+      expect(((await guestFile.json()) as { code: string }).code).toBe("local_only");
       // Nor may a guest hand a PR to an agent.
       const handGuest = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/owner`, {
         method: "POST",
