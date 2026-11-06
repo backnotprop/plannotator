@@ -3099,7 +3099,7 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
      the right. */
   .ib-m1 .ib-from { flex: 1 1 auto; min-width: 0; }
   .ib-m1 .ib-p { font-size: var(--ib-fs-13, 13px); font-weight: 500; line-height: 17px; }
-  .ib-m1 .ib-t { flex: none; margin-left: auto; font-size: var(--ib-fs-13, 13px); line-height: 17px; font-variant-numeric: tabular-nums; }
+  .ib-m1 .ib-t { flex: none; margin-left: auto; font-size: var(--ib-fs-13, 13px); line-height: 17px; white-space: nowrap; font-variant-numeric: tabular-nums; }
   /* Line 2: the title, never cut, at the row's text size and weight. Line 3: the preview, cut first, then the guided
      review book, and the pin, the badge and the count at the right end, never cut; a row with none of these has no
      line 3. */
