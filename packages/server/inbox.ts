@@ -2816,14 +2816,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const command = replyCommandOf(reply, sendNow, session);
     // A Tidy body is written when the run starts: with steps turned off since, it goes without its steps lines.
     if (command.tidy && !stepsOn()) return { ...command, body: inboxTidyBodyStepsOff(command.body) };
-    // Thread steps (approval "inbox-thread-steps"): the session's own list in this thread, one wake line, only while
-    // the person has steps on. Never on a Tidy, a 👍 or a hand-off notice: those are not about the thread's work.
-    if (!stepsOn() || command.tidy || command.ack_of || command.handed_away) return command;
+    // Never on a Tidy, a 👍 or a hand-off notice: those are not about the thread's work.
+    if (command.tidy || command.ack_of || command.handed_away) return command;
     const receiver = session ?? store.recipientOf(reply)?.session ?? null;
-    const list = receiver ? store.stepsOf(reply.thread_id, receiver) : null;
-    if (!list) return command;
+    // The details line (approval "inbox-wake-context"). A brand new thread has nothing to say yet: its only message is this one.
+    const context = command.new_thread ? {} : wakeContextOf(reply, receiver);
+    // Thread steps (approval "inbox-thread-steps"): the session's own list in this thread, one wake line, only while
+    // the person has steps on.
+    const list = stepsOn() && receiver ? store.stepsOf(reply.thread_id, receiver) : null;
+    if (!list) return { ...command, ...context };
     const { done, total, doing } = inboxStepsProgress(list.steps);
-    return total > 0 ? { ...command, steps: { done, total, doing } } : command;
+    return { ...command, ...context, ...(total > 0 ? { steps: { done, total, doing } } : {}) };
+  };
+  /** Words for the wake, never a condition of it: with no context, the reply goes as it would from an older Inbox. */
+  const wakeContextOf = (reply: InboxMessage, receiver: string | null): Pick<InboxReplyCommand, "context"> => {
+    try {
+      return { context: store.wakeContext(reply, receiver) };
+    } catch {
+      return {};
+    }
   };
   const replyCommandOf = (reply: InboxMessage, sendNow: boolean, session: string | null): InboxReplyCommand => {
     const tag = session && !store.isOwner(reply, session) ? (reply.tags?.find((t) => t.session === session) ?? null) : null;
@@ -3210,6 +3221,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     hostOf: live.hostOf,
     // A Codex reply whose `codex queue` ran out of time may not have gone: its row says it is saved, not queued.
     uncertain: (session, itemId) => codexWake.uncertain(session, itemId) || qwenWake.uncertain(session, itemId) || t3Wake.uncertain(session, itemId),
+    // Claimed by its session's connection and never to be delivered there (a wake killed mid-delivery).
+    stuck: live.stuck,
     autoSendAfterMs: live.autoSendAfterMs,
     waitOf: live.waitOf,
   });
@@ -3437,6 +3450,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return origin?.host && inboxPullRepoKey(origin.host, origin.display) === repo;
         })
         .map((project) => project.root),
+    threadPulls: (thread) => pullOwners.keys(thread).reverse(),
+    // An Inbox just started has no list yet: read it for a PR it does not know.
+    pullFile: async (pull, path) => {
+      const { wanted } = await pullProjects();
+      if (!pulls.find(pull)) await findPulls([pull], wanted);
+      return pulls.file(pull, path, wanted);
+    },
+    ownerOrLocal,
   });
 
   /**
