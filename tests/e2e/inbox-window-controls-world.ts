@@ -12,6 +12,7 @@ import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { fakeForge } from './fake-forge';
 import { inboxScratch, rememberInboxOf } from './inbox-scratch';
+import { clearSidebarPeek } from './sidebar-peek';
 
 const repo = resolve(__dirname, '../..');
 
@@ -98,13 +99,16 @@ export async function openRoute(page: Page, world: ControlsWorld, hash: string, 
   const settled = () => page.waitForTimeout(500);
   await page.goto('about:blank');
   await page.goto(world.url);
+  await clearSidebarPeek(page);
   await page.locator('.pn-inbox .ib-main').waitFor();
   await settled();
   const docked = page.locator('.ib-sb');
   const isDocked = (await docked.count()) > 0;
   // The list's own toggle first: a layer on the route may cover the window's.
   if (isDocked && (await docked.getAttribute('data-state')) !== wanted) {
-    await page.locator('.ib-lhead .ib-sb-trigger').click();
+    // The peek, out over the toggle, would take the click.
+    await clearSidebarPeek(page);
+    await page.locator('.ib-lhead .ib-sb-trigger').click({ timeout: 10_000 });
     await settled();
   }
   if (hash) {
