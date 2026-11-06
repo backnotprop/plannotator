@@ -513,9 +513,9 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await expect(page.locator('[data-open-in-menu]')).toHaveCount(0);
       await page.keyboard.press('Escape');
       await expect(page.locator('[data-code-snippet-preview]')).toHaveCount(0);
-      // Annotating, the words are only words: nothing shows, and a click picks them.
+      // Commenting (the crosshair, in Annotate's place), the words are only words: nothing shows, and a click picks them.
       await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
-      await page.locator('.shp-tbtn', { hasText: 'Annotate' }).click();
+      await page.locator('.shp-dock').getByRole('button', { name: 'Comment', exact: true }).click();
       await expect(page.locator('.shp-know [data-code-hover]')).toHaveCount(0);
       await noCodeWindow(page, page.locator('.shp-know code', { hasText: 'src/ledger.ts:1' }));
 
