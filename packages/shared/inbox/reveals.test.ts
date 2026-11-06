@@ -4,7 +4,8 @@
  * back for ever, or patience skipping an entry with nothing behind it; the Board's tenure (3 days, the owner's
  * change) or its 5 threads moving; a dev build or a feature the person decided being revealed; the Checklist (approval
  * "inbox-checklist-reveal", 2026-11-04) leaving its place after Snooze and the Board, its 5 days or 5 threads moving, or
- * it needing the Board on.
+ * it needing the Board on; the "Star the repo" ask (approval "star-ask", 2026-11-06) going before a feature reveal, or its
+ * week of first use or 10 threads moving.
  */
 import { describe, expect, test } from "bun:test";
 import { INBOX_REVEALS, REVEAL_PATIENCE_MS, REVEAL_SPACING_MS, revealLastShown, revealMayClaim, revealNext, type RevealState } from "./reveals";
@@ -22,7 +23,7 @@ function state(over: Partial<RevealState> = {}): RevealState {
 describe("the order", () => {
   test("Snooze first, then the Board once Snooze is no longer open; nothing once both are spent", () => {
     // The update-day dialogs first (approval "inbox-one-time-dialogs"), then the offers.
-    expect(INBOX_REVEALS.map((entry) => entry.id)).toEqual(["sound", "list_intro", "voice", "snooze", "board", "steps"]);
+    expect(INBOX_REVEALS.map((entry) => entry.id)).toEqual(["sound", "list_intro", "voice", "snooze", "board", "steps", "star"]);
     expect(revealNext(state(), NOW)).toBe("snooze");
     expect(revealNext(state({ open: { snooze: false, board: true } }), NOW)).toBe("board");
     expect(revealNext(state({ open: { snooze: false, board: false } }), NOW)).toBeNull();
@@ -130,5 +131,29 @@ describe("the patience", () => {
 
   test("passed over only for an entry that qualifies: a stuck Snooze with under 5 threads stays next", () => {
     expect(revealNext(state({ threads: 4, waitingSince: { snooze: ago(10 * DAY) } }), NOW)).toBe("snooze");
+  });
+});
+
+describe("the star ask's who (approval \"star-ask\")", () => {
+  const star = (over: Partial<RevealState>) => revealNext(state({ firstUseAt: ago(7 * DAY), threads: 10, open: { star: true }, ...over }), NOW);
+
+  test("last in line: after every feature reveal still open", () => {
+    const week = { firstUseAt: ago(7 * DAY), threads: 10 };
+    expect(revealNext(state({ ...week, open: { steps: true, star: true } }), NOW)).toBe("steps");
+    expect(revealNext(state({ ...week, open: { board: true, star: true } }), NOW)).toBe("board");
+    expect(revealMayClaim("star", state({ ...week, open: { steps: true, star: true } }), NOW)).toBe(false);
+    expect(revealMayClaim("star", state({ ...week, open: { star: true } }), NOW)).toBe(true);
+  });
+
+  test("returning: exactly 7 days of first use and 10 threads", () => {
+    expect(INBOX_REVEALS.find((entry) => entry.id === "star")).toMatchObject({ kind: "offer", tenureMs: 7 * DAY, minThreads: 10, enabled: true });
+    expect(star({})).toBe("star");
+    expect(star({ firstUseAt: ago(7 * DAY - 1) })).toBeNull();
+    expect(star({ threads: 9 })).toBeNull();
+  });
+
+  test("closed once shown or answered on any surface (not open), or a dev build: never next", () => {
+    expect(star({ open: { star: false } })).toBeNull();
+    expect(star({ release: false })).toBeNull();
   });
 });

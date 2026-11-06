@@ -420,3 +420,50 @@ export function useLineReveal(input: LineRevealInput) {
     },
   });
 }
+
+/** What one load knows for the "Star the repo" ask (approval "star-ask"): the Board's inputs, without its switch. */
+export type StarRevealInput = Omit<BoardRevealInput, 'onBoardOn' | 'on'>;
+
+/**
+ * Leaving a thread counts for the star ask when it was open long enough to read (the proposal: "just after the person
+ * leaves a thread they read for 5 s or more"), back on the list or on to another thread.
+ */
+export function starRevealLeaveCounts(visit: RevealVisit, now: number): boolean {
+  return now - visit.at >= REVEAL_TIMES.readMs;
+}
+
+/** At a settled moment: the list is loaded and not the first-run screen, and the page has been open 60 s or more. */
+export function starRevealMayClaim(gate: Pick<StarRevealInput, 'due' | 'blocked' | 'listLoaded' | 'firstRun'>, pageAge: number): boolean {
+  return gate.due && !gate.blocked && gate.listLoaded && !gate.firstRun && pageAge >= REVEAL_TIMES.pageAgeMs;
+}
+
+/**
+ * The "Star the repo" ask (approval "star-ask", 2026-11-06; packages/shared/star-ask.ts): last in the line, at the
+ * shared calm moment. Its claim (`claimReveal('star')`) runs the already-starred check on the Inbox and answers
+ * whether the button stars with gh (`canStar`) or is a link; the page then shows the corner card (`StarAskCard`).
+ */
+export function useStarReveal(input: StarRevealInput) {
+  const latest = useRef(input);
+  latest.current = input;
+  const key = useRef<string | null>(null);
+  const [canStar, setCanStar] = useState(false);
+  const moment = useRevealMoment({
+    wanted: input.due && !input.blocked,
+    thread: input.thread,
+    rows: input.rows,
+    clear: input.clear,
+    place: input.place,
+    heldBack: input.heldBack,
+    toast: input.toast,
+    leaveCounts: (visit, now) => starRevealLeaveCounts(visit, now),
+    mayClaim: (pageAge) => starRevealMayClaim(latest.current, pageAge),
+    holds: () => true,
+    claim: async () => {
+      key.current ??= newUuid();
+      const answer = await claimRevealOnce('star', key.current);
+      setCanStar(answer.star?.can_star === true);
+      return answer.show;
+    },
+  });
+  return { ...moment, canStar };
+}

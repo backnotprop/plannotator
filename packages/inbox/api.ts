@@ -84,7 +84,7 @@ import { newUuid } from './uuid';
  * A dialog of the line of one-time dialogs, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server
  * side): the update-day dialogs, then the offers. A registered dialog (Bro mode, List view) adds its id here.
  */
-export type InboxRevealId = 'sound' | 'list_intro' | 'voice' | 'snooze' | 'board' | 'steps';
+export type InboxRevealId = 'sound' | 'list_intro' | 'voice' | 'snooze' | 'board' | 'steps' | 'star';
 /** An offer of the line (not an update-day dialog): only an offer's Not now stamps the four-day gap. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
 /** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, or the agent note. */
@@ -1619,7 +1619,7 @@ export const inboxApi = {
    * nothing on. `key`: the page's own for this claim, so a retry after a lost answer is shown it again (Board, Checklist).
    */
   claimReveal: (id: InboxRevealClaimId, key?: string, agents?: readonly string[]) =>
-    post<{ show: boolean; reveal: { next: InboxRevealId | null }; board: { on: boolean }; steps?: { on: boolean } }>(inboxUrl('/reveal'), {
+    post<{ show: boolean; reveal: { next: InboxRevealId | null }; board: { on: boolean }; steps?: { on: boolean }; star?: { can_star: boolean } }>(inboxUrl('/reveal'), {
       id,
       ...(key ? { key } : {}),
       // The agent note: the agents it would ask about (it shows once for each).
@@ -1633,6 +1633,17 @@ export const inboxApi = {
     () => undefined,
     () => undefined,
   ),
+  /**
+   * The "Star the repo" ask (packages/shared/star-ask.ts), once claimed through the line (`claimReveal('star')`):
+   * `star` stars it with the person's own gh (only on their click), `answer` records Not now (the line's three-day
+   * wait too) or the GitHub page opened from the link.
+   */
+  starAskStar: () => post<{ starred: boolean }>(inboxUrl('/star-ask'), { action: 'star' }),
+  starAskAnswer: (answer: 'not-now' | 'opened') =>
+    post<{ ok: boolean }>(inboxUrl('/star-ask'), { action: 'answer', answer }).then(
+      () => undefined,
+      () => undefined,
+    ),
   saveVoice: (change: { on?: boolean; phones_only?: boolean; engine?: InboxVoiceEngine }) => post<{ voice: InboxVoiceSettings }>(inboxUrl('/settings'), { voice: change }),
   /** Only on this computer; the answer never holds the key. Null removes it. */
   saveVoiceKey: (key: string | null) => post<{ key: InboxVoiceKeyState }>(inboxUrl('/voice/key'), { key }),

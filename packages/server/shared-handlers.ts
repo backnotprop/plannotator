@@ -23,6 +23,7 @@ import { crossOriginRefusalBody } from "@plannotator/shared/request-origin";
 import { isSameOriginRequest } from "./request-origin-guard";
 import { checkServerSession, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 import { localImageContentType, localImageResponseHeaders } from "@plannotator/shared/local-image";
+import { starAskRoute, starAskService, type StarAskSurface } from "@plannotator/shared/star-ask";
 
 function normalizeDraftGeneration(value: unknown): number | undefined {
   if (typeof value !== "number") return undefined;
@@ -438,4 +439,17 @@ export async function handleSaveNotes(req: Request, options: HandleSaveNotesOpti
   }
 
   return Response.json({ ok: true, results });
+}
+
+/**
+ * The "Star the repo" ask on the done screen (packages/shared/star-ask.ts): `POST /api/star-ask/claim` and
+ * `/answer`. Null for any other path. In remote mode the ask never shows: gh there is the server machine's login, not
+ * the person's own (the claim answers `show: false`; nothing else can run without a shown record).
+ */
+export async function handleStarAsk(req: Request, url: URL, surface: StarAskSurface, options: { remote: boolean }): Promise<Response | null> {
+  if (!url.pathname.startsWith("/api/star-ask/")) return null;
+  if (options.remote && url.pathname === "/api/star-ask/claim" && req.method === "POST") return Response.json({ show: false, can_star: false });
+  const body = req.method === "POST" ? await req.json().catch(() => ({})) : undefined;
+  const answered = await starAskRoute(starAskService(), surface, req.method, url.pathname, body);
+  return answered ? Response.json(answered.body, { status: answered.status }) : null;
 }

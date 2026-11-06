@@ -21,7 +21,7 @@ import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-gu
 import { getRepoInfo } from "./repo";
 import { createRefCards, refCardRouteResponse, refCardsTailnetAllowed, type RefRunner } from "./ref-cards";
 import type { Origin } from "@plannotator/shared/agents";
-import { handleImage, handleUpload, handleServerReady, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
+import { handleImage, handleStarAsk, handleUpload, handleServerReady, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, resolveAllowedDocPath, type FolderAnnotateHistory } from "./reference-handlers";
 import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
 import { getExtraMarkdownExtensions, isAnnotatableTextPath, MAX_ANNOTATABLE_FILE_BYTES, resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
@@ -1240,6 +1240,10 @@ export async function startAnnotateServer(
               return Response.json({ error: "Invalid request" }, { status: 400 });
             }
           }
+
+          // The "Star the repo" ask on the done screen (packages/shared/star-ask.ts).
+          const starAsk = await handleStarAsk(req, url, "annotate", { remote: isRemote });
+          if (starAsk) return starAsk;
 
           // API: Serve images (local paths or temp uploads)
           if (url.pathname === "/api/image") {
