@@ -98,8 +98,8 @@ export const inboxRefusesAssetPath = refusesHiddenHtmlAssetPath;
 /**
  * A nested document in an attached page runs scripts but reaches no network
  * (`connect-src 'none'`). It names no `img-src`, so its pictures load from
- * anywhere, the web included; in the window the page itself is a srcdoc frame
- * under the window's own policy (`WINDOW_CSP` in inbox.ts).
+ * anywhere, the web included; in the window the page itself is a document of
+ * its own under `INBOX_PAGE_CSP` (inbox-pages.ts: web pictures over https).
  */
 export const INBOX_HTML_DOCUMENT_CSP = `${HTML_ASSET_DOCUMENT_CSP}; connect-src 'none'`;
 
