@@ -427,6 +427,12 @@ export const INBOX_SEARCH_RECENT_THREADS = 6;
 export type InboxSearchStatus = 'waiting' | 'new' | 'sent' | 'quiet' | 'archived';
 export const INBOX_SEARCH_STATUSES: readonly InboxSearchStatus[] = ['waiting', 'new', 'sent', 'quiet', 'archived'];
 export type InboxSearchFrom = 'agent' | 'me';
+/**
+ * The results' order (approval "inbox-search-sort"): `best` (the default) ranks by match quality, then newest;
+ * `newest` lists each group by its latest message first (a thread's latest message, a message's own time).
+ */
+export type InboxSearchSort = 'best' | 'newest';
+export const INBOX_SEARCH_SORTS: readonly InboxSearchSort[] = ['best', 'newest'];
 
 export interface InboxSearchQuery {
   q: string;
@@ -440,6 +446,8 @@ export interface InboxSearchQuery {
   limit?: number | null;
   /** The project open in the list: a tie boost, never a filter. */
   current?: string | null;
+  /** The order: best match (default) or newest first. */
+  sort?: InboxSearchSort | null;
 }
 
 export interface InboxSearchProjectRef {
