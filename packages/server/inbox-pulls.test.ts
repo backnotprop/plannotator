@@ -30,7 +30,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { INBOX_PULL_DESCRIPTION_MAX, INBOX_REPO_TTL_MS, inboxId, type InboxPullsAnswer } from "@plannotator/core/inbox-types";
+import { INBOX_REPO_TTL_MS, inboxId, type InboxPullsAnswer } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
 import {
   compareBranch,
@@ -141,8 +141,6 @@ interface Forge {
   heads: string[] | null;
   /** The commits GitHub says the PR has; null, that read fails. */
   prCommits?: string[] | null;
-  /** What `gh api … pulls/N` (the PR itself, for its description) answers; a string: that read fails with it on stderr. */
-  pr?: unknown;
 }
 
 /** gh signed in to github.com only; glab signed in nowhere. */
@@ -158,9 +156,6 @@ function forge(answer: unknown = GH_ANSWER): Forge {
     run: async (cli, args) => {
       f.calls.push({ cli, args });
       if (cli === "gh" && args.some((a) => a.includes("/commits?"))) return f.prCommits ? { stdout: `${f.prCommits.join("\n")}\n`, stderr: "", exitCode: 0 } : { stdout: "", stderr: "HTTP 502", exitCode: 1 };
-      if (cli === "gh" && args[0] === "api" && args.length === 4 && /\/pulls\/\d+$/.test(args[3]!)) {
-        return typeof f.pr === "string" ? { stdout: "", stderr: f.pr, exitCode: 1 } : { stdout: JSON.stringify(f.pr ?? {}), stderr: "", exitCode: 0 };
-      }
       if (cli === "gh" && args.includes("--jq")) return { stdout: `${f.heads ? f.heads.shift() ?? "" : String(args[3]!.split("/").at(-1)).padStart(40, "a")}\n`, stderr: "", exitCode: 0 };
       if (cli === "gh" && args[0] === "auth") return { stdout: JSON.stringify({ hosts: { "github.com": [{ login: "dana", active: true, state: "success" }] } }), stderr: "", exitCode: 0 };
       if (cli === "glab" && args[0] === "auth") return { stdout: "", stderr: "No hosts logged in", exitCode: 1 };
@@ -1827,56 +1822,5 @@ describe("GET /api/inbox/pulls/avatar", () => {
     const before = s.fetched.length;
     expect((await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=dana`)).status).toBe(409);
     expect(s.fetched.length).toBe(before);
-  });
-});
-
-describe("the description (the pull request page's description line)", () => {
-  const repos = [{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }];
-  const key = "github.com/northwind/billing-svc#412";
-  const reads = (f: Forge) => f.calls.filter((c) => c.args[0] === "api" && c.args.length === 4);
-
-  test("the author's markdown, read once per change of the PR; nothing written is null; too long is cut and says so", async () => {
-    const f = forge();
-    const pulls = createInboxPulls({ run: f.run });
-    await pulls.list(repos);
-    f.pr = { body: "## Summary\r\n\r\nRetries now back off.\r\n" };
-    expect(await pulls.description(key)).toEqual({ key, body: "## Summary\n\nRetries now back off." });
-    expect(reads(f).map((c) => c.args)).toEqual([["api", "--hostname", "github.com", "repos/northwind/billing-svc/pulls/412"]]);
-    await pulls.description(key);
-    expect(reads(f)).toHaveLength(1);
-
-    const other = "github.com/northwind/billing-svc#413";
-    f.pr = { body: null };
-    expect(await pulls.description(other)).toEqual({ key: other, body: null });
-    const long = "x".repeat(INBOX_PULL_DESCRIPTION_MAX + 10);
-    f.pr = { body: long };
-    const fresh = createInboxPulls({ run: f.run });
-    await fresh.list(repos);
-    const cut = await fresh.description(other);
-    expect(cut.cut).toBe(true);
-    expect(cut.body).toHaveLength(INBOX_PULL_DESCRIPTION_MAX);
-  });
-
-  test("a PR the list did not name, and a forge that did not answer, are refused", async () => {
-    const f = forge();
-    const pulls = createInboxPulls({ run: f.run });
-    await pulls.list(repos);
-    await expect(pulls.description("github.com/elsewhere/thing#9")).rejects.toMatchObject({ code: "pull_unknown" });
-    f.pr = "HTTP 502";
-    await expect(pulls.description(key)).rejects.toMatchObject({ code: "pull_description_failed" });
-  });
-
-  test("the route: Code review on, a listed PR's description; an unknown key is 404 and a missing one 422", async () => {
-    const w = await world({ codeReview: true });
-    // A project of the repository, so the list reads its PRs.
-    await w.send("Working on retries.", "retries");
-    expect((await w.pulls()).status).toBe(200);
-    w.forge.pr = { body: "Retries now back off." };
-    const answer = await fetch(`${w.base}/api/inbox/pulls/description?key=${encodeURIComponent(key)}`);
-    expect(answer.status).toBe(200);
-    expect(await answer.json()).toMatchObject({ key, body: "Retries now back off." });
-    expect((await fetch(`${w.base}/api/inbox/pulls/description?key=${encodeURIComponent("github.com/elsewhere/thing#9")}`)).status).toBe(404);
-    expect((await fetch(`${w.base}/api/inbox/pulls/description`)).status).toBe(422);
-    expect((await fetch(`${w.base}/api/inbox/pulls/description?key=${encodeURIComponent(key)}`, { headers: { Origin: "https://evil.example" } })).status).toBe(403);
   });
 });

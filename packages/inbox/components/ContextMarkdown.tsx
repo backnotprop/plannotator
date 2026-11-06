@@ -21,8 +21,7 @@ export function ContextMarkdown({
   ...data
 }: {
   markdown: string;
-  /** The message whose images the markdown shows. Absent (a pull request's description): no local images. */
-  messageId?: string;
+  messageId: string;
   onImage?: (src: string, alt: string) => void;
   /** The thread's repo, so `#123` and `owner/repo#123` link as in the message (none: they stay plain). */
   refRepo?: { display: string; host?: string } | null;
@@ -46,7 +45,7 @@ export function ContextMarkdown({
         stickyActions={false}
         disableCodePathValidation
         refRepo={refRepo}
-        imageBaseDir={messageId ? inboxMessageImageBase(messageId) : undefined}
+        imageBaseDir={inboxMessageImageBase(messageId)}
         onImageClick={onImage}
         questionDecisionLines={false}
         answerOnly

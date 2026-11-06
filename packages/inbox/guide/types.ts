@@ -72,11 +72,6 @@ export interface GuideReaderProps {
   hostDiffControls?: boolean;
   /** Fold or open every file's diff (the bar's Collapse all); a new token applies it again. Not remembered. */
   collapseAll?: { collapsed: boolean; token: number };
-  /**
-   * The host draws the Global comment button itself (the pull request page's strip): the reader hands it the opener
-   * (null while the review takes no comments) and draws no button of its own. Absent: the reader's button, as before.
-   */
-  onGlobalCommentOpener?: (open: ((anchor: HTMLElement) => void) | null) => void;
   /** The review's own actions on that heading's title line (the guide host's `renderHeadActions`). */
   renderHeadActions?: () => ReactNode | null;
   /** "Open in" on each file's header (a review while Code review is on). Absent: none, as before. */

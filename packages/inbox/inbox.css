@@ -8021,24 +8021,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-prr-layer:disabled { cursor: default; }
 .pn-inbox .ib-prr-layer:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .ib-prr-scope { flex: none; }
-/* The top, take A ("diff-controls-headers"): the author after the title; in the strip the description's first line,
-   More, and Global comment at the right. The layers keep their own width there. */
-.ib-prr-by { display: inline-flex; align-items: center; gap: 6px; flex: none; margin-left: -2px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); white-space: nowrap; }
-.ib-prr-by .ib-pr-av.ib-prr-by-av { width: 18px; height: 18px; border-radius: 99px; font-size: 9.5px; }
-.ib-prreview .ib-dctl-sep { flex: none; margin: 0 2px; }
-.ib-prreview .ib-prr-strip:has(.ib-prr-desc) .ib-prr-layers { flex: 0 0 auto; max-width: 50%; }
-.ib-prr-desc { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
-.ib-prr-desc-lead { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ib-prr-desc-none { color: color-mix(in oklch, var(--muted-foreground) 75%, transparent); }
-.ib-prr-desc-name { color: var(--foreground); font-weight: 500; }
-.pn-inbox .ib-prr-desc-more { display: inline-flex; align-items: center; gap: 3px; flex: none; padding: 2px 5px; border-radius: 5px; color: var(--foreground); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; }
-.pn-inbox .ib-prr-desc-more:hover { background: var(--muted); }
-.ib-prr-global { flex: none; }
-.ib-prr-global .ib-ic { color: var(--muted-foreground); }
-.ib-prr-strip:has(> .ib-prr-desc-panel) { flex-wrap: wrap; row-gap: 0; }
-.ib-prr-desc-panel { order: 99; flex: 1 0 100%; margin: 8px -14px -8px; padding: 12px 24px 16px; max-height: min(340px, 45vh); overflow: auto; overscroll-behavior: contain; background: var(--card); border-top: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); }
-.ib-prr-desc-md { max-width: 72ch; }
-.ib-prr-desc-cut { margin: 8px 0 0; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-prr-note { margin: 14px 18px 0; padding: 10px 12px; border-radius: 8px; background: var(--muted); color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
 .ib-prr-foot { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 10px 16px; background: var(--card); border-top: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .ib-prr-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
