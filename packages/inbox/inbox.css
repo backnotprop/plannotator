@@ -8729,6 +8729,9 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 .pn-inbox .ib-vhead button.ib-dtitle:focus-visible { outline: 1.5px solid color-mix(in oklch, var(--ring) 55%, transparent); outline-offset: -1.5px; }
 .ib-review.ib-rv-walk .ib-vhead button.ib-dtitle:hover, .ib-review.ib-rv-walk .ib-vhead button.ib-dtitle.ib-on { color: var(--foreground); }
 .ib-dtitle .ib-prp-dot, .ib-dtitle .ib-prp-count { margin-left: 6px; font-weight: 400; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+/* In a title that is not a row (the full review's), the dot needs a box of its own. */
+.ib-dtitle .ib-prp-dot { display: inline-block; vertical-align: middle; }
+.ib-dtitle .ib-prp-count { vertical-align: middle; }
 /* A thread's review of one PR (ReviewPane): the PR page's Details button and panel, the panel over the review's body. */
 .ib-review:not(.ib-prreview) { --ib-prp-fill: color-mix(in oklab, var(--foreground) 7%, transparent); --ib-prp-h: 28px; }
 .ib-review:not(.ib-prreview) .ib-rsplit:has(> .ib-prd) { position: relative; }
