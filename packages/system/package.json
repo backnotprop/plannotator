@@ -16,7 +16,7 @@
     "check": "bun src/node/check-cli.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test",
-    "demo": "bun demo/index.html --port 5893"
+    "demo": "bun demo/serve.ts"
   },
   "dependencies": {
     "yaml": "2.9.0"

@@ -17,11 +17,15 @@ export const layoutAtRest = (model: SystemModel, code: string, simple: boolean):
  */
 export const lodAt = (k: number): Lod => (k >= 0.95 ? 3 : k >= 0.3 ? 2 : 1);
 
-/** The scope path of a sheet, from the landing scope down: [scope id, display name][]. */
+/** What a crumb says for a scope: the drawing's name for the landing scope, the part that opens it below. */
+export const scopeLabel = (model: SystemModel, sc: string) =>
+  sc === 'root' ? model.name : (model.owner[sc] && model.parts[model.owner[sc]!]?.name) || model.scopes[sc] || sc;
+
+/** The scope path of a sheet, from the landing scope down: [scope id, crumb label][]. */
 export function scopePath(model: SystemModel, code: string): [string, string][] {
   const out: [string, string][] = [];
   for (let sc: string | undefined = model.sheets[code]?.scope || 'root', n = 0; sc && n < 40; n++) {
-    out.unshift([sc, model.scopes[sc] ?? sc]);
+    out.unshift([sc, scopeLabel(model, sc)]);
     if (sc === 'root') break;
     sc = model.parentOf[sc] ?? 'root';
   }

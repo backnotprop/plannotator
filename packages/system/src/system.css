@@ -56,8 +56,9 @@
   --sys-add-ink: var(--success);
   --sys-chg-ink: var(--warning);
 }
-.sys *, .sys *::before, .sys *::after { box-sizing: border-box; }
-.sys button { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; }
+/* resets at zero specificity, so every sys- class wins over them */
+:where(.sys) *, :where(.sys) *::before, :where(.sys) *::after { box-sizing: border-box; }
+:where(.sys) :where(button) { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; }
 .sys-mono { font-family: var(--font-mono); }
 
 /* ---------------------------------------------------------------- the view */

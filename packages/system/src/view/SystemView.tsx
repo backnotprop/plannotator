@@ -23,6 +23,8 @@ export type SystemViewProps = {
   model: SystemModel;
   /** The sheet to draw; the landing sheet when left out. */
   sheet?: string;
+  /** The project the drawing belongs to, shown as the first crumb (the Inbox's project name). */
+  project?: string;
   /** Simple or Full (default Full). A sheet with one reading draws it whatever this says. */
   reading?: Reading;
   /** pane: the drawing fits the pane's width and grows down; window: it fits the window. */
@@ -49,7 +51,7 @@ export type SystemViewProps = {
 
 const PAD = 20;
 
-export function SystemView({ model, sheet, reading = 'full', layout, onNavigate, onReading, onOpenFull, onClose }: SystemViewProps) {
+export function SystemView({ model, sheet, project, reading = 'full', layout, onNavigate, onReading, onOpenFull, onClose }: SystemViewProps) {
   const root = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   useText(root);
@@ -66,10 +68,10 @@ export function SystemView({ model, sheet, reading = 'full', layout, onNavigate,
     <div ref={root} className={'sys sys-view sys-' + layout} data-sheet={code} data-reading={two ? reading : 'full'}>
       <div className="sys-bar">
         <div className="sys-crumbs" aria-label="Where this sheet is">
-          <span className="sys-crumb">{model.name}</span>
-          {path.map(([id, name]) => (
+          {project && <span className="sys-crumb">{project}</span>}
+          {path.map(([id, name], i) => (
             <span key={id} className="sys-crumb-w">
-              <span className="sys-crumb-sep" aria-hidden="true">/</span>
+              {(project || i > 0) && <span className="sys-crumb-sep" aria-hidden="true">/</span>}
               <span className={'sys-crumb' + (id === s?.scope ? ' sys-here' : '')}>{name}</span>
             </span>
           ))}
