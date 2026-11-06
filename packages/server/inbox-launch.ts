@@ -63,7 +63,7 @@
 import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
-import { inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
+import { inboxLaunchedSession, inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { derivePersonThreadSubject } from "@plannotator/core/inbox-questions";
 import { INBOX_SCRATCH_PICK, inboxScratchCandidate, inboxScratchSlug } from "@plannotator/core/inbox-scratch";
@@ -487,6 +487,14 @@ export function createInboxLaunch(options: {
     const last = lastId ? store.message(lastId) : null;
     // The person's latest, unless it went to another session (re-addressed).
     return last?.author.kind === "person" && (!last.to || last.to.session === root.to?.session);
+  };
+
+  /** The root of a launched thread whose launch started this session, with launch on and the launch not deleted. */
+  const launchedRootOf = (threadId: string, session: string | null | undefined): InboxMessage | null => {
+    if (!enabled() || !session) return null;
+    const root = store.message(threadId);
+    if (!root?.launch || root.launch.deleted_at || inboxLaunchedSession(root) !== session) return null;
+    return root;
   };
 
   /** The run line of a launched root; null for an agent with no host here. */
@@ -1122,8 +1130,17 @@ export function createInboxLaunch(options: {
       if (state.lastAvailable === null) state.lastAvailable = await available(host);
       if (hostStale(host) && needsHost(host, root)) await refreshHost(host);
       const runLine = runOfRoot(store.message(threadId)!);
-      // The home folder is never trusted: the how-to then says to start in a folder inside it.
-      const line = runLine?.untrusted && samePlace(root.launch.folder, options.homeDir) ? { ...runLine, home_folder: true as const } : runLine;
+      // Trust that would cover home, or `/`: the how-to says to start in a project with its own repository.
+      // The home folder is never trusted: the how-to says to start in a folder inside it. Home in a repository rooted
+      // there carries both: this window reads the first, and a window from before it, which knows only the second, keeps
+      // that sentence rather than "run it here".
+      const line = !runLine?.untrusted
+        ? runLine
+        : {
+            ...runLine,
+            ...(host.trustCoversHome?.(root.launch) ? { trust_covers_home: true as const } : {}),
+            ...(samePlace(root.launch.folder, options.homeDir) ? { home_folder: true as const } : {}),
+          };
       const offer = owner && line?.untrusted ? host.trustOffer?.(root.launch) : null;
       return offer ? { ...line!, trust: { warning: offer.read().warning } } : line;
     },
@@ -1138,6 +1155,23 @@ export function createInboxLaunch(options: {
     /** The list's row decorator, resolved once per list (one config read): the identity while launch is off. */
     rowDecorator(): <T extends InboxListRow>(row: T) => T {
       return enabled() ? (row) => this.decorateLaunched(row) : (row) => row;
+    },
+
+    /**
+     * Whether a reply to this session starts it again: the session this thread's launch started, and an agent that is
+     * neither gone nor without a host here. It has not ended, whatever its liveness says (the window's `launchResumes`).
+     */
+    resumes(threadId: string, session: string | null | undefined): boolean {
+      const root = launchedRootOf(threadId, session);
+      if (!root || !hostOf(root.launch!)) return false;
+      const state = runOfRoot(root)?.state;
+      return state !== "missing" && state !== "failed";
+    },
+
+    /** Whether the session this thread's launch started is gone (the line's "missing"), however recently it was heard from. */
+    gone(threadId: string, session: string | null | undefined): boolean {
+      const root = launchedRootOf(threadId, session);
+      return !!root && runOfRoot(root)?.state === "missing";
     },
 
     /** A launched row with its run word, and a session blocked on a prompt placed in Stopped on you (through `rowDecorator`). */

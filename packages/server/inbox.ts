@@ -126,6 +126,7 @@ import { openPackedApp, packedAppResponse, PACKED_ASSET_ROUTE_PREFIX } from "@pl
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
 import { createInboxSearchRoutes } from "./inbox-search";
 import { inboxSkillsRoute } from "./inbox-skills";
+import { assertTestHome } from "./test-home-guard";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { foldCheckoutFolderProjects } from "./inbox-checkout-folders";
@@ -152,7 +153,9 @@ import {
   INBOX_REMOVED_ACTION,
   INBOX_REMOVED_ACTION_TEXT,
   INBOX_SEND_NOW_POLL_FIELD,
+  INBOX_STEER_POLLS_POLL_FIELD,
   INBOX_TAGS_POLL_FIELD,
+  inboxStopNoticeId,
   type InboxReplyCommand,
 } from "@plannotator/shared/inbox/connection";
 import {
@@ -181,7 +184,7 @@ import { createInboxAccountsFor } from "./inbox-accounts";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { inboxBodyForAgent, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
-import { createInboxLiveSessions } from "./inbox-sessions";
+import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createInboxVoice } from "./inbox-voice";
 import { createInboxQwenWake, type InboxQwenWake } from "./inbox-qwen-wake";
@@ -392,6 +395,8 @@ export interface InboxServerOptions {
   mcpNow?: () => number;
   /** Tests: the store's clock (what it stamps on messages, cards and deliveries), so a test can write what reads as hours old. Default: the wall clock. */
   storeNow?: () => Date;
+  /** A clock for the live sessions (their grace), for tests. */
+  sessionsNow?: () => number;
   /**
    * The argv that runs this CLI (the compiled binary's absolute path, or bun
    * plus the entry script), so the window's connect snippets name a command
@@ -701,6 +706,7 @@ const ERROR_STATUS: Record<string, number> = {
   // Compose: a new thread the person starts (packages/server/inbox-compose.ts).
   already_delivered: 409,
   not_addressed: 422,
+  session_still_live: 422,
   // A thread name another open thread of the project already has.
   thread_name_taken: 409,
   draft_conflict: 409,
@@ -886,6 +892,7 @@ function heldSwitch<K extends "code_review" | "shape">(key: K, on: boolean, told
 
 /** Start the Inbox server and write the registry. */
 export async function startInboxServer(options: InboxServerOptions = {}): Promise<InboxServer> {
+  assertTestHome();
   const dataDir = options.dataDir ?? getPlannotatorDataDir();
   const version = options.version ?? "dev";
   // Read before the store, the update state and the registry are written below.
@@ -2635,15 +2642,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         };
         if (windowId) capabilityListeners.add(onCapabilities);
         if (windowId) sendReach();
-        // A row's delivery moved with the live sessions (no store line): windows only, like `reach`.
+        // A row's delivery moved with the live sessions (no store line): windows, and a linked machine that asks
+        // (`deliveries=1`), whose copy of this machine's rows would otherwise keep a "Session ended" that is over.
         // `labels` (additive): a session's label changed; only the owner's windows hear it (they alone read labels).
         // A change of labels alone says nothing to a guest's window, so it gets no frame at all.
         const labelsHere = ownerOrLocal(req, via);
-        const sendDeliveries = (labels: boolean, moved: boolean) => {
+        const sendDeliveries = (labels: boolean, moved: boolean, sessions: boolean) => {
           if (!moved && !labelsHere) return;
-          send(`event: deliveries\ndata: ${labels && labelsHere ? '{"labels":true}' : "{}"}\n\n`);
+          send(`event: deliveries\ndata: ${JSON.stringify({ ...(labels && labelsHere ? { labels: true } : {}), ...(sessions ? { sessions: true } : {}) })}\n\n`);
         };
-        if (windowId) deliveryListeners.add(sendDeliveries);
+        if (windowId || url.searchParams.get("deliveries") === "1") deliveryListeners.add(sendDeliveries);
         // Linked machines (`machines=1`, the window only; the door refuses it to a machine): their records, states and
         // the outbox, each in its own frame and never with an `id:`, so the local seq and Last-Event-ID stay this Inbox's.
         // A `machines` snapshot opens every stream: a resync, never a notification.
@@ -2804,7 +2812,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const to = hostAgentName(reply.to?.host);
       return {
         type: "reply",
-        id: reply.id,
+        id: inboxStopNoticeId(reply.id),
         thread_id: reply.thread_id,
         reply_to: reply.reply_to,
         subject,
@@ -2894,11 +2902,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A busy session that can take an item mid-turn: what has waited long enough goes in now.
     const steer = live.deliveryConnectionOf(session);
     if (sendNow && steer?.busy === true && steer.send_now) autoSendFor(session, tags);
-    const commands = () =>
-      store
+    const commands = () => {
+      const list = store
         .pendingReplies(session, { tags })
         .filter((reply) => !withdrawnTidy(reply))
         .map((reply) => replyCommand(reply, sendNow, session));
+      // Handed an item for the running turn: an older connection does not poll again until it goes in.
+      if (body[INBOX_STEER_POLLS_POLL_FIELD] !== true && list.some((command) => command.now === true)) live.steerHanded(session);
+      return list;
+    };
     // Ask AI: said on every answer until the client connects, so an answer that no one read loses nothing.
     const askWaits = () => (ask.waits(session) ? { [INBOX_ASK_WAITS_FIELD]: true } : {});
     const now = commands();
@@ -2946,12 +2958,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     // Send now could not go into the running turn: the reply reads as queued again and waits for idle.
     if (body.type === "send_now_failed" && typeof body.id === "string") {
+      live.steerDone(session);
       store.clearDeliverNow(body.id, session);
       return json({ ok: true });
     }
     if (body.type !== "delivered" || typeof body.id !== "string") {
       throw new InboxError("validation_error", 'type: "delivered" with the reply id, or "state" with busy.', { field: "type" });
     }
+    live.steerDone(session);
     // An item the Inbox marked to go in by itself: whether it went into the running turn, or waited for the
     // turn to end (the session was seen idle after the mark: its own Ask question held the turn).
     const marked = store.message(body.id);
@@ -3053,6 +3067,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // OpenCode 2's configured spec: `opencode2 plugin update` takes it as its target (only Plannotator), and a pinned one never moves.
   const openCodeSpec = createOpenCodeSpecReader(agentEnvironment);
   const live = createInboxLiveSessions({
+    ...(options.sessionsNow ? { now: options.sessionsNow } : {}),
     store,
     serverSession,
     resolveRoot: async (path) => (await projectRoots.resolve(path)).root,
@@ -3169,6 +3184,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   store.setDeliveryPresence({
     connection: live.deliveryConnectionOf,
     askerLive: live.askerLive,
+    launchResumes: (threadId, session) => launch.resumes(threadId, session),
     hostOf: live.hostOf,
     // A Codex reply whose `codex queue` ran out of time may not have gone: its row says it is saved, not queued.
     uncertain: (session, itemId) => codexWake.uncertain(session, itemId) || qwenWake.uncertain(session, itemId) || t3Wake.uncertain(session, itemId),
@@ -3180,21 +3196,26 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // timer, only while a window listens, and `event: deliveries` tells the windows to read the list again.
   // A poll that changed a session's label (issue #2450) says `labels` on the same frame: the rows' agents and the
   // open thread's authors read the list again.
-  // `moved`: a row's delivery moved (every window hears it); `labels`: a label changed (the owner's windows only).
-  const deliveryListeners = new Set<(labels: boolean, moved: boolean) => void>();
+  // `moved`: a row's delivery moved (every window hears it); `labels`: a label changed (the owner's windows only);
+  // `sessions`: a session ended or came back, which moves a row's "Session ended" whatever else it says.
+  const deliveryListeners = new Set<(labels: boolean, moved: boolean, sessions: boolean) => void>();
   let lastDeliverySignature = "";
+  let lastPresenceSignature = live.presenceSignature();
   let lastLabelVersion = live.labelVersion();
   const deliveryWatch = setInterval(() => {
     // Launched threads: respawn a stopped session someone wrote to; read the CLI only while a window watches.
     launch.sweep(deliveryListeners.size > 0);
     if (deliveryListeners.size === 0) return;
     const signature = live.deliverySignature() + launch.signature();
-    const moved = signature !== lastDeliverySignature;
+    const presence = live.presenceSignature();
+    const sessions = presence !== lastPresenceSignature;
+    const moved = sessions || signature !== lastDeliverySignature;
     const labels = live.labelVersion() !== lastLabelVersion;
     if (!moved && !labels) return;
     lastDeliverySignature = signature;
+    lastPresenceSignature = presence;
     lastLabelVersion = live.labelVersion();
-    for (const listener of deliveryListeners) listener(labels, moved);
+    for (const listener of deliveryListeners) listener(labels, moved, sessions);
   }, INBOX_DELIVERY_WATCH_MS);
   (deliveryWatch as { unref?: () => void }).unref?.();
 
@@ -3227,7 +3248,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     json,
     onChange: () => {
       // A run line moved: a delivery move to every window, no label change.
-      for (const listener of deliveryListeners) listener(false, true);
+      for (const listener of deliveryListeners) listener(false, true, false);
     },
     log: (line) => process.stderr.write(`${line}\n`),
     // The permission hook runs this Plannotator.
@@ -3878,18 +3899,28 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (text.length > PULL_REVIEW_BODY_MAX) throw new InboxError("validation_error", `body: at most ${PULL_REVIEW_BODY_MAX} characters.`, { field: "body" });
         const fileComments = pullReviewComments(body.fileComments);
         if (!fileComments) throw new InboxError("validation_error", `fileComments: at most ${PULL_REVIEW_COMMENTS_MAX} comments, each { path, line, side, body }.`, { field: "fileComments" });
-        const fileLevelComments = parseFileLevelComments(body.fileLevelComments).slice(0, PULL_REVIEW_COMMENTS_MAX);
+        // All of them go or none: the page forgets what it sent once the forge has it.
+        const fileLevelComments = parseFileLevelComments(body.fileLevelComments);
+        const fileLevelSent = Array.isArray(body.fileLevelComments) ? body.fileLevelComments.length : 0;
+        if (fileLevelSent !== fileLevelComments.length || fileLevelSent > PULL_REVIEW_COMMENTS_MAX) throw new InboxError("validation_error", `fileLevelComments: at most ${PULL_REVIEW_COMMENTS_MAX} comments, each { path, body }.`, { field: "fileLevelComments" });
         if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
         const pull = pulls.find(key);
         if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
-        // Pinned to the commit the person read: a push since then is read again first, never reviewed blind.
-        // Pinned to a commit the Inbox read for this PR: the list's head, or the head of the layer patch the person
-        // read (the list can be a minute behind the forge). Anything else is a commit they never saw.
+        // Pinned to the commit the person read: the list's head, or the head of the patch they read (the list can be a
+        // minute behind the forge). On GitHub also an older commit of this PR, as GitHub takes a review there and marks
+        // what moved outdated; one no longer on the PR (a force-push) is refused for the page to put its words in the
+        // review's body. GitLab's docs do not say it takes one, so there a commit the Inbox no longer names is refused.
         const heads = [pull.head_sha, pulls.readHead(key)].filter((sha): sha is string => !!sha);
-        if (heads.length === 0) return json({ error: "The forge did not say which commit this pull request is at. Refresh the list and try again.", code: "pull_head_unknown" }, 409);
-        const headSha = typeof body.head_sha === "string" && heads.includes(body.head_sha) ? body.head_sha : null;
-        if (!headSha) return json({ error: "This pull request has new commits since you read it.", code: "pull_moved" }, 409);
+        const named = typeof body.head_sha === "string" && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(body.head_sha) ? body.head_sha : null;
+        const known = !!named && heads.includes(named);
+        if (!known && (!named || pull.platform !== "github")) {
+          if (heads.length === 0) return json({ error: "The forge did not say which commit this pull request is at. Refresh the list and try again.", code: "pull_head_unknown" }, 409);
+          return json({ error: "This pull request has new commits since you read it.", code: "pull_moved" }, 409);
+        }
+        const commitGone = () => json({ error: "The commit you read is no longer on this pull request.", code: "pull_commit_gone" }, 409);
+        if (!known && (await pulls.hasCommit(key, named!)) === false) return commitGone();
+        const headSha = named!;
         const ref: PRRef | null =
           pull.platform === "github"
             ? (() => {
@@ -3912,6 +3943,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ serverSession, ok: true, prUrl: pull.url, submission });
         } catch (cause) {
           const message = cause instanceof Error ? cause.message : "The review was not posted.";
+          // A refusal of the commit or its lines, or GitHub's 422 giving no reason: nothing went, and the words have a way.
+          // Any other reason (your own PR, a pending review, too quickly) is the person's to read.
+          if (/no commit found|commit_id|not part of the pull request|part of the (?:diff|same hunk)|\bpath could not be resolved|\(HTTP 422\)\s*$|HTTP 422: (?:Unprocessable Entity|Validation Failed)\s*$/i.test(message)) {
+            // At a head the list still names, only if a force-push really took it.
+            if (!known || (await pulls.hasCommit(key, headSha)) === false) return commitGone();
+          }
           return json({ error: message, code: "pull_review_failed" }, 502);
         }
       }
@@ -4771,6 +4808,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 ...(isGuest(req, via) ? { by_guest: true } : {}),
                 ...(attachments.length > 0 ? { attachments } : {}),
                 ...(to === undefined ? {} : { to }),
+                ...(to && asked && takesOver(store, asked.thread_id, asked, asked.to?.session, thereInThread(live, launch, asked.thread_id)) ? { took_over: true } : {}),
                 ...(tags && tags.length > 0 ? { tags } : {}),
                 ...(handoff ? { handoff } : {}),
                 words: typeof body.words === "string" ? body.words : undefined,

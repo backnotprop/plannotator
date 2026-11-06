@@ -329,6 +329,17 @@ test.skipIf(!hasDom)("a phone's Snooze swaps the sheet for ‹ Snooze until and 
   expect(menuItems(threadMenu()!)[0]).toBe('Mark unread');
 });
 
+test.skipIf(!hasDom)('"Snoozed until" shows while the time is ahead, never for a time gone by (an archived thread keeps its snooze until a look)', async () => {
+  const at = '2026-10-20T18:00:00.000Z';
+  await render(row({ resolved_at: at, snoozed: { until: new Date(Date.now() + 3_600_000).toISOString(), at } }));
+  expect(host!.querySelector('[data-snooze-line]')).not.toBeNull();
+  act(() => root?.unmount());
+  host?.remove();
+  await render(row({ resolved_at: at, snoozed: { until: new Date(Date.now() - 60_000).toISOString(), at } }));
+  expect(host!.querySelector('[data-snooze-line]')).toBeNull();
+  expect(host!.querySelector('[data-unsnooze]')).toBeNull();
+});
+
 test.skipIf(!hasDom)("desktop: the clock opens the times, titled Snooze until; a time snoozes; Pick a time's lists snooze too", async () => {
   await render(OPENED);
   const clock = head().querySelector('[data-thread-snooze]')!;

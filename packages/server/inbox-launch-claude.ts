@@ -46,7 +46,7 @@ import {
   type AgentRunResult,
 } from "./inbox-agents";
 import { CLAUDE_NAME, createLaunchPermissions, launchPermissionHooks } from "./inbox-launch-claude-permission";
-import { acceptClaudeTrust, claudeTrustKey, claudeTrustReading } from "./inbox-launch-claude-trust";
+import { acceptClaudeTrust, claudeTrustKey, claudeTrustReading, hasGit } from "./inbox-launch-claude-trust";
 import { CLAUDE_SKIP_PERMISSIONS_ENV, launchSettingsEnv, launchSpawnEnv, launchStartOf, shellSkipsPermissions, type LaunchEnv } from "./inbox-launch-env";
 import { launchUploadsDir, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchTrustOffer, type LaunchTrustTarget } from "./inbox-launch-host";
 
@@ -499,6 +499,14 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
           }
         },
       };
+    },
+
+    /** The folders the how-to tells to start elsewhere. Home with no repository, and a folder above home, are not among them. */
+    trustCoversHome(target: LaunchTrustTarget): boolean {
+      const place = placeKey(target.folder);
+      if (dirname(place) === place) return true;
+      const home = placeKey(ctx.homeDir).normalize("NFC");
+      return hasGit(home) && claudeTrustKey(trustFolderOf(target)) === home;
     },
 
     /**
