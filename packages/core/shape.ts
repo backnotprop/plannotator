@@ -667,6 +667,148 @@ export function shapeHtmlDataCodes(html: string): string[] {
   return out;
 }
 
+// HTML start tags that end an <svg> where they stand (the spec's "breakout" tags in foreign content);
+// `font` only with color, face or size. Of them, the ones with no end tag and no picture.
+const SVG_BREAKOUT_TAGS = new Set(['b', 'big', 'blockquote', 'body', 'br', 'center', 'code', 'dd', 'div', 'dl', 'dt', 'em', 'embed', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'hr', 'i', 'img', 'li', 'listing', 'menu', 'meta', 'nobr', 'ol', 'p', 'pre', 'ruby', 's', 'small', 'span', 'strong', 'strike', 'sub', 'sup', 'table', 'tt', 'u', 'ul', 'var']);
+const SVG_BREAKOUT_VOID = new Set(['br', 'embed', 'hr', 'meta']);
+// Inside these SVG parts the page reads HTML again.
+const SVG_HTML_POINTS = new Set(['foreignobject', 'desc', 'title']);
+// Outside SVG, the page reads these elements' content as text: an `<svg` in it is no drawing.
+const HTML_RAW_TEXT = new Set(['script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes']);
+
+/**
+ * The drawing with the HTML tags the page would let end an `<svg>` renamed to
+ * SVG ones where they stand, so the page keeps the rest of the drawing in the
+ * SVG instead of dropping it. Inside a `<text>` such a tag becomes a `tspan`,
+ * which still shows its words. Elsewhere only a tag that holds nothing (an
+ * empty `<span data-ref="1"></span>` among the shapes, a `<br>`) becomes a
+ * `g`, keeping its attributes (a `data-ref` stays a number): SVG would not
+ * show the words of a `<div>Legend</div>` or the picture of an `<img>`, so
+ * those are left as written and the page shows them as HTML, as it always
+ * did. Everything else, HTML inside a foreignObject included, is left as
+ * written.
+ */
+export function shapeKeepSvgWhole(html: string): string {
+  if (!/<svg/i.test(html)) return html;
+  const n = html.length;
+  const lower = html.toLowerCase();
+  // What is open inside the outermost <svg>, as written (`name`) and as now written (`as`).
+  const open: { name: string; as: string }[] = [];
+  const inSvg = () => open.length > 0 && !SVG_HTML_POINTS.has(open[open.length - 1]!.name);
+  const inText = () => {
+    for (let k = open.length - 1; k >= 0 && open[k]!.name !== 'svg'; k--) if (open[k]!.as === 'text') return true;
+    return false;
+  };
+  let out = '';
+  let copied = 0;
+  for (let lt = html.indexOf('<'); lt >= 0 && lt < n; lt = html.indexOf('<', lt + 1)) {
+    // Deeper than any page nests a drawing: the rest stays as written.
+    if (open.length > 512) break;
+    if (html.startsWith('<!--', lt)) {
+      // A comment ends at `-->` or `--!>`; `<!-->` and `<!--->` end at once.
+      if (html.startsWith('>', lt + 4) || html.startsWith('->', lt + 4)) {
+        lt = html.indexOf('>', lt + 4);
+        continue;
+      }
+      let e = html.indexOf('--', lt + 4);
+      while (e >= 0 && html[e + 2] !== '>' && !html.startsWith('!>', e + 2)) e = html.indexOf('--', e + 1);
+      lt = e < 0 ? n : html.indexOf('>', e);
+      continue;
+    }
+    if (inSvg() && html.startsWith('<![CDATA[', lt)) {
+      const e = html.indexOf(']]>', lt + 9);
+      lt = e < 0 ? n : e + 2;
+      continue;
+    }
+    const at = lt;
+    const end = html[lt + 1] === '/';
+    const start = end ? lt + 2 : lt + 1;
+    // `<!…>`, `<?…>` and `</` with no name are comments to the next `>`.
+    if (html[lt + 1] === '!' || html[lt + 1] === '?' || (end && !isAsciiAlpha(html[start]))) {
+      const e = html.indexOf('>', lt + 1);
+      lt = e < 0 ? n : e;
+      continue;
+    }
+    if (!isAsciiAlpha(html[start])) continue;
+    let i = start;
+    while (i < n && !isHtmlSpace(html[i]) && html[i] !== '/' && html[i] !== '>') i++;
+    const nameEnd = i;
+    const name = html.slice(start, nameEnd).toLowerCase();
+    // The tag's attributes, read as the page reads them, up to its `>`.
+    for (;;) {
+      while (i < n && (isHtmlSpace(html[i]) || html[i] === '/')) i++;
+      if (i >= n || html[i] === '>') break;
+      i++;
+      while (i < n && !isHtmlSpace(html[i]) && html[i] !== '/' && html[i] !== '>' && html[i] !== '=') i++;
+      while (i < n && isHtmlSpace(html[i])) i++;
+      if (html[i] !== '=') continue;
+      i++;
+      while (i < n && isHtmlSpace(html[i])) i++;
+      if (html[i] === '"' || html[i] === "'") {
+        const q = html.indexOf(html[i]!, i + 1);
+        i = q < 0 ? n : q + 1;
+      } else while (i < n && !isHtmlSpace(html[i]) && html[i] !== '>') i++;
+    }
+    const gt = i;
+    const selfClosing = html[gt - 1] === '/' && gt - 1 >= nameEnd;
+    lt = gt;
+    if (!inSvg()) {
+      const point = open[open.length - 1];
+      if (!end && name === 'svg') {
+        if (!selfClosing) open.push({ name, as: name });
+      } else if (end && point && name === point.name) open.pop();
+      else if (!end && HTML_RAW_TEXT.has(name)) {
+        const close = lower.indexOf(`</${name}`, gt);
+        lt = close < 0 ? n : close;
+      } else if (!end && name === 'plaintext') break;
+      continue;
+    }
+    if (!end) {
+      const breakout =
+        SVG_BREAKOUT_TAGS.has(name) || (name === 'font' && /[\s/](?:color|face|size)(?=[\s/=>]|$)/i.test(html.slice(nameEnd, gt)));
+      if (!breakout) {
+        if (!selfClosing) open.push({ name, as: name });
+        continue;
+      }
+      const words = inText();
+      let empty = selfClosing || SVG_BREAKOUT_VOID.has(name);
+      if (!empty && !words && name !== 'img') {
+        let k = gt + 1;
+        while (k < n && isHtmlSpace(html[k])) k++;
+        empty = lower.startsWith(`</${name}`, k) && /^[\s/>]?$/.test(html[k + 2 + name.length] ?? '');
+      }
+      if (name === 'img' || (!words && !empty)) {
+        // Left as written, it ends the SVG here: what follows is HTML again.
+        while (inSvg()) open.pop();
+        continue;
+      }
+      const as = words ? 'tspan' : 'g';
+      const close = SVG_BREAKOUT_VOID.has(name) && !selfClosing;
+      out += html.slice(copied, start) + as + html.slice(nameEnd, gt) + (close ? ' /' : '');
+      copied = gt;
+      if (!selfClosing && !close) open.push({ name, as });
+      continue;
+    }
+    // An end tag closes the nearest part of its name, as written or as now written.
+    let k = open.length - 1;
+    while (k >= 0 && open[k]!.name !== name && open[k]!.as !== name) k--;
+    if (k < 0) {
+      // `</p>` or `</br>` with nothing to close would end the SVG too: an empty part instead.
+      if (name !== 'p' && name !== 'br') continue;
+      out += html.slice(copied, at) + `<${inText() ? 'tspan' : 'g'}/>`;
+      copied = Math.min(gt + 1, n);
+      continue;
+    }
+    const as = open[k]!.as;
+    if (as !== name) {
+      out += html.slice(copied, at) + `</${as}>`;
+      copied = Math.min(gt + 1, n);
+    }
+    open.length = open.map((o) => o.as).lastIndexOf(as);
+  }
+  return copied ? out + html.slice(copied) : html;
+}
+
 /**
  * A path in the project, relative to its root: `src/a.ts`. Not absolute
  * (`/x`, `C:/x`, `~/x`), no `.` or `..` part, no backslash (a UNC path or a
