@@ -20,7 +20,7 @@ import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import { inboxQuestionKeysWithRecommendedMarker } from "@plannotator/core/inbox-questions";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from "@plannotator/core/inbox-actions";
 import { checkInboxSubject, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, inboxTidyMcpLine, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
-import { INBOX_AGENT_RULES, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
+import { inboxStopNoticeReply, INBOX_AGENT_RULES, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
@@ -397,6 +397,13 @@ function threadUrl(base: string, threadId: string): string {
   return `${base}#thread=${threadId}`;
 }
 
+/** An id a stop notice's wake showed reads as its reply; any other id as it is, for an error to name it. */
+function ownMessageId<T extends string | number | undefined>(store: InboxStore, id: T): T {
+  if (typeof id !== "string") return id;
+  const reply = inboxStopNoticeReply(id);
+  return (reply && store.message(reply) ? reply : id) as T;
+}
+
 function threadOf(store: InboxStore, input: { thread_id?: string; message_id?: string }): string | null {
   if (input.thread_id) {
     const root = store.message(input.thread_id);
@@ -461,7 +468,7 @@ export async function sendProject(
   refuseIdShapedThread(input.thread, input.reply_to);
   refuseBadSubject(input.subject);
   if (input.reply_to) {
-    const parent = context.store.message(input.reply_to);
+    const parent = context.store.message(ownMessageId(context.store, input.reply_to));
     if (!parent) throw new InboxError("message_not_found", `No message ${input.reply_to}.`);
     return context.store.project(parent.project_id)!;
   }
@@ -739,7 +746,7 @@ export async function sendAgentMessage(
       },
       body: input.body,
       subject: input.subject ?? null,
-      reply_to: input.reply_to ?? null,
+      reply_to: ownMessageId(context.store, input.reply_to) ?? null,
       idempotency_key: input.idempotency_key ?? null,
       thread: input.thread ?? null,
       attachments,
@@ -1090,8 +1097,15 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         .strict(),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async (input, ctx) =>
+    async (asked, ctx) =>
       guarded(async () => {
+        const input = {
+          ...asked,
+          message_id: ownMessageId(store, asked.message_id),
+          before: ownMessageId(store, asked.before),
+          after: ownMessageId(store, asked.after),
+          ...(asked.expand ? { expand: asked.expand.map((id) => ownMessageId(store, id)) } : {}),
+        };
         const threadId = threadOf(store, input);
         if (threadId) {
           const naming = namingHint(store, threadId, input.agent_session?.trim() || null);
@@ -1212,7 +1226,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
     },
     async (input) =>
       guarded(() => {
-        const summary = store.resolveThread(input.message_id, input.resolved ?? true);
+        const summary = store.resolveThread(ownMessageId(store, input.message_id), input.resolved ?? true);
         return ok(`Thread ${summary.thread_id} is ${summary.resolved_at ? "resolved" : "open"}.`, { thread: summary });
       }),
   );

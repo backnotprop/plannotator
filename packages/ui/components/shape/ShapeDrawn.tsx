@@ -67,6 +67,16 @@ export const SHAPE_FRAME_CSS = `
   --raise: var(--popover);
   --sunk: var(--muted);
   --alert: var(--destructive);
+  /* A few zone colours, each a hue mixed toward the ink (lines, words) or the paper (fills), so light and dark both hold. */
+  --blue: color-mix(in oklab, #2f6fb0 74%, var(--ink));
+  --blue-soft: color-mix(in oklab, #2f6fb0 13%, var(--paper));
+  --amber: color-mix(in oklab, #b87a12 76%, var(--ink));
+  --amber-soft: color-mix(in oklab, #d9971f 16%, var(--paper));
+  --green: color-mix(in oklab, #2b8a57 74%, var(--ink));
+  --green-soft: color-mix(in oklab, #2b8a57 13%, var(--paper));
+  --plum: color-mix(in oklab, #9b3f78 74%, var(--ink));
+  --plum-soft: color-mix(in oklab, #9b3f78 12%, var(--paper));
+  --alert-soft: color-mix(in oklab, var(--destructive) 11%, var(--paper));
   position: relative;
   container-type: inline-size;
   container-name: board;
@@ -97,6 +107,12 @@ svg .obj { filter: drop-shadow(0 3px 10px rgb(0 0 0 / .18)); }
 @keyframes shp-stroke-on { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes shp-fade-out { to { opacity: 0; } }
 .board.skip [data-step], .board.skip .draw, .board.skip .mk { animation: none !important; }
+
+/* A thing that travels (data-to): from its place to its point, again and again. Reduced motion: it holds still halfway. */
+.shp-go { animation: shp-go 3.4s cubic-bezier(.45,0,.4,1) infinite; }
+@keyframes shp-go { 0%, 8% { transform: translate(0, 0); opacity: 0; } 16% { opacity: 1; } 62% { transform: translate(var(--dx), var(--dy)); opacity: 1; } 72%, 100% { transform: translate(var(--dx), var(--dy)); opacity: 0; } }
+.board.reduce .shp-go { animation: none; transform: translate(calc(var(--dx) / 2), calc(var(--dy) / 2)); }
+@media (prefers-reduced-motion: reduce) { .shp-go { animation: none; transform: translate(calc(var(--dx) / 2), calc(var(--dy) / 2)); } }
 .board.reduce.entering [data-step], .board.reduce.entering .draw { animation: shp-fade-only .16s linear both; animation-delay: 0s; stroke-dasharray: none; }
 
 /* A marked part: the ring while the agent reads it; erased and redrawn when it changes. */

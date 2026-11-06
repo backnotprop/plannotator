@@ -322,7 +322,7 @@ export function deliveryText(
     case 'undelivered':
       return `Not delivered. That ${words.undeliveredHost} session stopped before it took this. If it is resumed, it still gets it.`;
     case 'ended':
-      return `Saved for ${words.endedName}. The session that asked has ended, so it waits here until an agent reads this thread.`;
+      return `Saved for ${words.endedName}. That session has ended; it gets this only if it's resumed.`;
     case 'reads':
       return `Saved for ${name}. It sees it when it next reads this thread.`;
     case 'sending_now':

@@ -14,6 +14,8 @@
  *   board (code review's "show me how this works") cannot open the code;
  * - while pointing (Change it / Ask), a marked part opens the code instead of
  *   being picked, or a bad `data-code` reaches the host;
+ * - an icon, logo or drawn thing `shape update` stamped loses strokes, colour or
+ *   its motion to the sanitizer, or keeps moving when motion is reduced;
  * - a drawing's `#…` link changes the host page's hash (the Inbox's route), or
  *   its https link opens in the same tab (leaving the Inbox), or an image map's
  *   `<area href>` gets past either.
@@ -24,6 +26,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { ShapeCodeTarget, ShapeRef } from '@plannotator/core/shape';
 import { bridgeSanitizerDom } from '../../../../tests/helpers/chat-sanitizer-dom';
 import { OUTSIDE_HOST, SHAPE_OUTSIDE_HTML, SHAPE_SAFE_HTML } from '../../../../tests/fixtures/shape-outside-loads';
+import { expandShapeStamps } from '../../../shared/shape/stamps';
 
 const hasDom = typeof document !== 'undefined';
 const drawnModule = hasDom ? await import('./ShapeDrawn') : null;
@@ -223,6 +226,36 @@ describe.skipIf(!hasDom)('a drawn view', () => {
     } finally {
       window.location.hash = '';
     }
+  });
+});
+
+describe.skipIf(!hasDom)('icons, logos and drawn things by name (stamped by `shape update`)', () => {
+  // Inside a drawing's own <svg>, as a board has them.
+  const STAMPED = expandShapeStamps(
+    '<svg viewBox="0 0 900 400"><svg data-icon="database" x="10" y="10" width="28" height="28" style="color:var(--blue)"/><svg data-logo="stripe" x="60" y="10"/><svg data-logo="github" x="110" y="10"/>'
+      + '<svg data-draw="database" x="10" y="80" width="140" height="120" data-label="Postgres"/><svg data-draw="queue" x="200" y="80" width="200" height="60" data-label="jobs"/>'
+      + '<svg data-draw="envelope" x="10" y="260" width="56" height="40" data-to="400 260"/></svg>',
+  ).html;
+  const shapes = (html: string) => html.match(/<(path|rect|ellipse|circle|text)\b/g)!.length;
+
+  test('come through the same sanitizer whole: every stroke, the logo, the label and the motion', () => {
+    const out = drawnModule!.sanitizeShapeHtml(STAMPED);
+    expect(shapes(out)).toBe(shapes(STAMPED));
+    expect(out).toContain('fill="#635BFF"');
+    expect(out).toContain('fill:var(--ink)');
+    expect(out).toMatch(/<g class="shp-go" style="--dx:\s*390px;\s*--dy:\s*0px;?">/);
+    expect(out).toContain('>Postgres</text>');
+  });
+
+  test('a thing sent along moves, and holds still halfway when motion is reduced', async () => {
+    const html = STAMPED;
+    const moving = await draw({ html, reduce: false });
+    expect(getComputedStyle(moving.shadow.querySelector('.shp-go')!).animation).toMatch(/^shp-go /);
+    act(() => root?.unmount());
+    const still = await draw({ html, reduce: true });
+    const style = getComputedStyle(still.shadow.querySelector('.shp-go')!);
+    expect(style.animation).toBe('none');
+    expect(style.transform).toContain('/ 2');
   });
 });
 

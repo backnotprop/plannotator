@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxListModel, InboxListRow, InboxThread } from "@plannotator/core/inbox-types";
 import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, inboxWakeText, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
+import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { startInboxServer, type InboxServer } from "./inbox";
 
 const roots: string[] = [];
@@ -55,7 +56,9 @@ describe("a thread the removed Grok Build runner wrote", () => {
     writeFileSync(join(data, "inbox", "acp", "sessions.json"), table);
     writeFileSync(join(data, "config.json"), JSON.stringify({ inboxRun: { grok: false } }));
 
-    const server = await startInboxServer({ dataDir: data });
+    // The sessions' clock starts behind and catches up below: the runner's session has ended by the move.
+    let behind = INBOX_ASKER_RESTART_GRACE_MS + 1;
+    const server = await startInboxServer({ dataDir: data, sessionsNow: () => Date.now() - behind });
     servers.push(server);
     const base = `http://127.0.0.1:${server.port}`;
 
@@ -127,6 +130,8 @@ describe("a thread the removed Grok Build runner wrote", () => {
     expect(taken.status).toBe(200);
     // Send to another session: a message addressed to the runner's session that no turn took (its first turn never ran)
     // moves to the live session, and lands there.
+    behind = 0;
+    await poll();
     const unstarted = server.store.startPersonThread({ project_id: place.id, body: "Rename the refunds queue.", to: { host: "grok", session: RUN }, idempotency_key: "old-start-2" });
     const moved = await fetch(`${base}/api/inbox/messages/${unstarted.message.id}/to`, {
       method: "POST",
