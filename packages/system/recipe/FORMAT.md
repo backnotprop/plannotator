@@ -67,7 +67,9 @@ stack:                              # optional: technology tiles for a landscape
   t-node: { name: Node, mark: node, for: the server, used_by: [app] }
 ```
 
-- `code:` is what keeps a drawing true. Every part and line that rests on code names its files. A path with no
+- `code:` is what keeps a drawing true. Every part and line that rests on code names its files, in two shapes: a
+  part's `code:` maps each path to what that file does for it (`code: { src/worker.ts: the loop }`); a line's
+  `code:` names the file at each end (`code: { from: src/worker.ts, to: src/db/pool.ts }`), either end optional. A path with no
   prefix is in this repo; `<alias>:<path>` is in another repo named in `sources.repos`. A path is relative to its
   repo's root: no leading `/`, no `..`. A cited folder covers every file in it. A part with no code (a person, an
   outside vendor, a product built elsewhere) has no `code:`.

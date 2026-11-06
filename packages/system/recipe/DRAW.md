@@ -65,7 +65,8 @@ The facts of this job (the project, the folder to work in, what to read) are lis
 
 6. **Check, and fix until clean.** Run `plannotator system check --root <worktree>`. It loads the drawing and checks
    that every cited path is in the repo at the commit in `sources.repos.self.at`. For another repo add
-   `--repo <alias>=<its temporary folder>`. It prints each error with its file and field. Fix and run it again until
+   `--repo <alias>=<its temporary folder>`. It prints each error with its file and field, and each missing path with
+   the field that cites it (`parts.<id>.code`, or `flows.<id>.code.from` or `.to` for a line). Fix and run it again until
    it prints no errors, no warnings and no missing paths. Then read your sheets once more against the code: every
    claim must be true at the commit you drew from.
 

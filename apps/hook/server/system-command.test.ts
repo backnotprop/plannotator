@@ -167,6 +167,27 @@ describe("plannotator system check", () => {
     expect(fixed).toEqual({ code: 0, stdout: "clean: .plannotator/system\n", stderr: "" });
   }, 30_000);
 
+  test("a line's missing end is named by its end; a path cited twice names both fields", async () => {
+    const box = sandbox({ storePath: "src/store/gone.ts" });
+    const yaml = join(box.repo, ".plannotator/system/system.yaml");
+    writeFileSync(yaml, readFileSync(yaml, "utf8")
+      .replace("code: { to: src/server/routes.ts }", "code: { from: src/server/old.ts, to: src/server/routes.ts }")
+      .replace("says: reads it }", "says: reads it, code: { from: src/server/old.ts, to: src/store/gone.ts } }"));
+    const r = await cli(box, ["check"]);
+    expect(r.code).toBe(1);
+    const at = box.drawnAt.slice(0, 12);
+    expect(r.stdout).toBe([
+      `missing: src/store/gone.ts (cited by parts.store.code, flows.read.code.to; not in the repo at ${at})`,
+      `missing: src/server/old.ts (cited by flows.use.code.from, flows.read.code.from; not in the repo at ${at})`,
+      "",
+    ].join("\n"));
+    expect(r.stderr).toBe("not_clean: 0 errors, 0 warnings, 2 missing paths\n");
+    expect(JSON.parse((await cli(box, ["check", "--json"])).stdout).cited_by).toEqual({
+      "src/store/gone.ts": ["parts.store.code", "flows.read.code.to"],
+      "src/server/old.ts": ["flows.use.code.from", "flows.read.code.from"],
+    });
+  }, 30_000);
+
   test("a file only on disk does not count at the drawn commit; --at a commit that has it does", async () => {
     const box = sandbox();
     const yaml = join(box.repo, ".plannotator/system/system.yaml");
@@ -234,6 +255,33 @@ describe("plannotator system gate", () => {
     const edit = commit(box.repo, "an edit");
     const edited = await cli(box, ["gate", "--project", box.repo, "--from", box.drawn, "--to", edit], { cwd: box.home });
     expect(JSON.parse(edited.stdout)).toEqual({ touched: { parts: ["store"], flows: [] }, wake: false, why: [], ignored: [] });
+  }, 30_000);
+
+  test("diffs exactly the refs given, with no merge base; reads the drawing of whatever is checked out", async () => {
+    const box = sandbox();
+    git(box.repo, "checkout", "-q", "-b", "receipts");
+    write(box.repo, { "src/mail/receipt.ts": "export {};\n" });
+    const yaml = join(box.repo, ".plannotator/system/system.yaml");
+    writeFileSync(yaml, readFileSync(yaml, "utf8").replace("  mail:", "  receipt: { in: server, name: Receipt, code: { src/mail/receipt.ts: the receipt } }\n  mail:"));
+    const sheet = join(box.repo, ".plannotator/system/sheets/L-101.yaml");
+    writeFileSync(sheet, readFileSync(sheet, "utf8").replace("row: [store, mail]", "row: [store, mail, receipt]"));
+    commit(box.repo, "receipts, drawn");
+    git(box.repo, "checkout", "-q", "main");
+    write(box.repo, { "src/store/cache.ts": "export const cache = new Map<string, number>();\n" });
+    commit(box.repo, "main moves on");
+    const base = git(box.repo, "merge-base", "main", "receipts").trim();
+
+    // main checked out: main's drawing, which has no receipt part
+    const onMain = JSON.parse((await cli(box, ["gate", "--from", base, "--to", "receipts"])).stdout);
+    expect(onMain.touched.parts).toEqual(["mail"]);
+    expect(onMain.why).toEqual([{ path: "src/mail/receipt.ts", reason: "added" }]);
+    // --from main is main's tip, not the merge base: main's new file reads as deleted
+    const tip = JSON.parse((await cli(box, ["gate", "--from", "main", "--to", "receipts"])).stdout);
+    expect(tip.why).toContainEqual({ path: "src/store/cache.ts", reason: "deleted" });
+    // the branch checked out: its own drawing, which has the receipt part
+    git(box.repo, "checkout", "-q", "receipts");
+    const onBranch = JSON.parse((await cli(box, ["gate", "--from", base, "--to", "receipts"])).stdout);
+    expect(onBranch.touched.parts).toEqual(["mail", "receipt"]);
   }, 30_000);
 
   test("a ref git does not know fails with git's first line; a missing --to is bad usage", async () => {

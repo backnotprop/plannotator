@@ -55,7 +55,8 @@ that cite a changed file, and the file to write your summary in.
 6. **Move `at`.** Set `sources.repos.self.at` in `system.yaml` to the new commit named above, in quotes.
 
 7. **Check, and fix until clean.** Run `plannotator system check --root <worktree>`. Fix every error, warning and
-   missing path it prints, and run it again until it prints none.
+   missing path it prints (a missing path names the field that cites it, `parts.<id>.code` or
+   `flows.<id>.code.from` or `.to`), and run it again until it prints none.
 
 8. **Write the summary file** named above: one sentence per sheet you changed, in plain words for the person, for
    example "On the Desktop app sheet, stable now shows a corner, not a header." Then stop.

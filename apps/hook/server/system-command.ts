@@ -177,8 +177,16 @@ async function runCheck(argv: readonly string[], deps: SystemCommandDeps, out: (
     for (const c of citations(model)) {
       const key = c.repo === "self" ? c.path : `${c.repo}:${c.path}`;
       if (!result.missing.includes(key)) continue;
-      const field = `${c.by.kind === "part" ? "parts" : "flows"}.${c.by.id}.code`;
-      if (!(citedBy[key] ??= []).includes(field)) citedBy[key]!.push(field);
+      const fields: string[] = [];
+      if (c.by.kind === "part") fields.push(`parts.${c.by.id}.code`);
+      else if (Object.hasOwn(model.flows, c.by.id)) {
+        // a line cites a file at each end: name the end (or both), so the fix is one look away
+        const code = model.flows[c.by.id]!.code;
+        for (const end of ["from", "to"] as const) {
+          if (code[end]?.repo === c.repo && code[end]?.path === c.path) fields.push(`flows.${c.by.id}.code.${end}`);
+        }
+      }
+      for (const field of fields) if (!(citedBy[key] ??= []).includes(field)) citedBy[key]!.push(field);
     }
   }
   const clean = !result.errors.length && !result.warnings.length && !result.missing.length;

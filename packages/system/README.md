@@ -97,10 +97,17 @@ plannotator system schedule install --project <repo folder> --key <project key> 
 ```
 
 - stdout is the result (check prints one line per finding, or one JSON value with `--json`; the others one JSON value)
-  and nothing on failure; stderr is `<code>: <message>`; exit 0 ok, 1 failed, 2 bad usage. check's findings are its
-  result: printed, with exit 1. Each `missing:` line names the field that cites the path.
-- `check` and `gate` read the drawing on disk in `<repo>/.plannotator/system`, so an edit counts before a commit.
-  With no `--root` or `--project`, the repo is the nearest folder up from here that holds a drawing.
+  and nothing on failure; stderr is one `<code>: <message>` line per problem; exit 0 ok, 1 failed, 2 bad usage. The
+  codes: `usage`, `not_a_folder`, `no_drawing`, `drawing_broken`, `git_failed`, `tick_failed`, `revision_refused`,
+  `not_installed`, `unsupported`, `launchctl_failed`, `failed`. check's findings are its result: printed on stdout,
+  with one `not_clean: <counts>` line on stderr and exit 1. Each `missing:` line names the field that cites the path:
+  `parts.<id>.code`, or `flows.<id>.code.from` or `.to` for a line's end.
+- `check` and `gate` read the drawing on disk in `<repo>/.plannotator/system`, whichever branch is checked out there,
+  so an edit counts before a commit, and a gate of a teammate's branch reads the drawing of the branch checked out
+  (have the base checked out for a review). With no `--root` or `--project`, the repo is the nearest folder up from
+  here that holds a drawing.
+- `gate` diffs exactly the `--from` and `--to` it is given (a sha, a branch, a tag); it does not find a merge base.
+  To gate a branch, pass `--from "$(git merge-base main <branch>)"`.
 - `revision` loads the revision against the drawing committed on the default branch (`origin/HEAD`, else
   `origin/main` or `origin/master`, else `HEAD`), refuses it with one line per problem when it does not load or its
   `pr:` and `repo:` differ from `--pr`, and stores it as written under
@@ -291,7 +298,8 @@ flows:
     moves: data                     # data, people, money or energy
 ```
 
-A path with no prefix is in this repo; `<alias>:<path>` is in a repo `sources.repos` names. A path is relative to its
+A part's `code:` maps each path to what that file does for the part; a line's `code:` is `{ from, to }`, the file at
+each end, either optional. A path with no prefix is in this repo; `<alias>:<path>` is in a repo `sources.repos` names. A path is relative to its
 repo's root: absolute paths and `..` are refused. A cited folder covers every file in it. A part with no code (a
 person, an outside product) has no `code:`.
 
