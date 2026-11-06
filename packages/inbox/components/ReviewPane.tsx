@@ -87,6 +87,8 @@ const GuideReader = GuideReaderPart.Part;
 
 export interface ReviewPaneProps {
   thread: InboxThread;
+  /** A tailnet guest's page: the routes behind the arrows refuse it, so no reader. */
+  guest?: boolean;
   message: InboxMessageWire;
   /** Back to the thread. */
   onBack: () => void;
@@ -109,9 +111,9 @@ type RailMode = 'walkthrough' | 'files';
 /** How long a file's sideways bar stays after the last movement under a finger. */
 const FILE_MOVING_LINGER_MS = 700;
 
-export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onAsk }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
-  const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments } = state;
+  const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = state;
   // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
   // conversation in the thread, and no Approve or Request changes is offered.
   const verdict = !thread.pull_theirs;
@@ -790,6 +792,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
                 mode={mode}
                 reveal={reveal}
                 viewed={viewedProp}
+                {...(guest ? {} : { fileContents })}
                 fileOpenIn={fileOpenIn}
                 {...(selectionActions ? { selectionActions } : {})}
                 renderOverviewDiagram={renderOverviewDiagram}

@@ -215,7 +215,7 @@ describe('shapeBoardNotes: what shape update says about a board', () => {
   });
 
   test.each([
-    ['too many words', { html: `<svg viewBox="0 0 900 500" data-mark="a" data-ref="1"><text x="0" y="0">${'word '.repeat(81)}</text><rect x="0" y="0" width="900" height="500"/></svg>` }, 'has 81 words'],
+    ['too many words', { html: `<svg viewBox="0 0 900 500" data-mark="a" data-ref="1"><text x="0" y="0">${'word '.repeat(241)}</text><rect x="0" y="0" width="900" height="500"/></svg>` }, 'has 241 words'],
     ['no canvas', { width: undefined, height: undefined }, 'no width and height'],
     ['no tall', { tall: undefined }, 'no tall drawing'],
     ['no numbers', { html: GOOD.replace(' data-ref="1"', '') }, 'no numbers'],
@@ -225,6 +225,12 @@ describe('shapeBoardNotes: what shape update says about a board', () => {
   ])('%s', (_name, picture, words) => {
     const notes = notesFor(picture as Parameters<typeof notesFor>[0]);
     expect(notes.join('\n')).toContain(words as string);
+  });
+
+  test('a whiteboard with a short line under each piece is no word problem: 240 words pass, 241 are named', () => {
+    const words = (n: number) => ({ html: `<svg viewBox="0 0 900 500" data-mark="a" data-ref="1"><text x="0" y="0">${'word '.repeat(n)}</text><rect x="0" y="0" width="900" height="500"/></svg>` });
+    expect(notesFor(words(240))).toEqual([]);
+    expect(notesFor(words(241)).join('\n')).toContain('about 200 is the most');
   });
 
   test('a number with nothing behind it is named; one with a line or a picture is not', () => {

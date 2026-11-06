@@ -68,6 +68,17 @@ export interface InboxRunEvidence {
 
 const iso = (ms: number | null) => (ms === null ? null : new Date(ms).toISOString());
 
+/**
+ * The session a launched root started: its record's, else its `to` while that is still the placeholder or, on an older
+ * launch that started, the session. Null when the root was moved before any session started, and on a thread no launch made.
+ */
+export function inboxLaunchedSession(root: { to?: { session: string } | null; launch?: Pick<InboxLaunchRecord, "session" | "session_ref"> | null }): string | null {
+  if (!root.launch) return null;
+  if (root.launch.session) return root.launch.session;
+  const to = root.to?.session ?? null;
+  return to && (to.startsWith("launch:") || root.launch.session_ref) ? to : null;
+}
+
 export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
   const line = (state: InboxRun["state"], extra: Partial<InboxRun> = {}): InboxRun => ({
     state,
