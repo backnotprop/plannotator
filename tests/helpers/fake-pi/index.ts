@@ -5,15 +5,31 @@
  * (the launch row's check), a fake `osascript` (Open in Terminal, recorded,
  * nothing opens) and a stand-in login shell. Never the real Pi.
  *
- * Node-safe (the Playwright specs import it under node): the fake runs on this
- * process's own executable. `stopAll` signals only pids it recorded whose
- * command line is still this fake.
+ * Node-safe (the Playwright specs import it under node): the fake runs on Node
+ * when there is one, as Pi does, else on this process's own executable.
+ * `stopAll` signals only pids it recorded that still run as this fake (titled
+ * `pi`, as Pi is).
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const SCRIPT = resolve(__dirname, "fake-pi.cjs");
+
+/**
+ * The runtime the fake runs on: Node, as Pi does, wherever there is one (Bun ignores `process.title`, so under
+ * Bun ps would still list the fake's argv); else this process's own executable.
+ */
+function fakeRuntime(): string {
+  const bun = (globalThis as { Bun?: { which(name: string): string | null } }).Bun;
+  if (!bun) return process.execPath;
+  const node = bun.which("node");
+  try {
+    return node ? realpathSync(node) : process.execPath;
+  } catch {
+    return process.execPath;
+  }
+}
 
 export interface FakePiConfig {
   /** `pi --version` (default 0.85.1). */
@@ -88,8 +104,9 @@ export function installFakePi(input: { bin: string; state: string; home: string;
   const pi = join(bin, "pi");
   /** `exec` off: the wrapper runs Pi as its child, as Volta's shim or `node …/cli.js "$@"` does. */
   let exec = true;
+  const runtime = fakeRuntime();
   const install = () => {
-    writeFileSync(pi, `#!/bin/sh\nFAKE_PI_STATE=${q(state)} ${exec ? "exec " : ""}${q(process.execPath)} ${q(SCRIPT)} "$@"\n`);
+    writeFileSync(pi, `#!/bin/sh\nFAKE_PI_STATE=${q(state)} ${exec ? "exec " : ""}${q(runtime)} ${q(SCRIPT)} "$@"\n`);
     chmodSync(pi, 0o755);
   };
   install();
@@ -108,7 +125,15 @@ export function installFakePi(input: { bin: string; state: string; home: string;
           .map((line) => JSON.parse(line) as T)
       : [];
   const readConfig = (): FakePiConfig => JSON.parse(readFileSync(join(state, "config.json"), "utf8")) as FakePiConfig;
-  const alive = (pid: number) => spawnSync("/bin/ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }).stdout.includes(SCRIPT);
+  /**
+   * The fake titles itself `pi` as Pi does, so ps lists it as `pi` alone: a pid this fake recorded that runs
+   * as `pi` (or, in the instant before the title is set, runs this script).
+   */
+  const alive = (pid: number) => {
+    const command = spawnSync("/bin/ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
+    if (command.includes(SCRIPT)) return true;
+    return command === "pi" && lines<FakePiCall>("calls.jsonl").some((call) => call.pid === pid);
+  };
 
   return {
     state,

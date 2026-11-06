@@ -17,7 +17,8 @@ import { installFakePi, type FakePi } from "../../tests/helpers/fake-pi";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import type { LaunchHostContext, LaunchLive } from "./inbox-launch-host";
 import type { LaunchEnv } from "./inbox-launch-env";
-import { createPiLaunchHost, piDialogNote, piDialogTitle, piExtensionListed, piHandoffCommand, piSpawnEnv, PI_HANDED_BACK_NOTE, PI_HANDOFF_NOTE, PI_STOPPED_NOTE } from "./inbox-launch-pi";
+import { piSessionClaimFileOf, readPiSessionClaims, releasePiSessionClaim, writePiSessionClaim } from "@plannotator/shared/inbox/pi-session-claim";
+import { createPiLaunchHost, piDialogNote, piDialogTitle, piExtensionListed, piHandoffCommand, piSessionProcesses, piSpawnEnv, PI_HANDED_BACK_NOTE, PI_HANDOFF_NOTE, PI_STOPPED_NOTE } from "./inbox-launch-pi";
 
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
@@ -527,6 +528,32 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(fake.starts()).toHaveLength(2);
   });
 
+  // A real Pi 1.5.0 run: Pi sets process.title = "pi", so ps lists a terminal's Pi as `pi` alone, with no
+  // --session-id, and an Inbox started again started a second writer beside the one from Copy attach command.
+  test("after an Inbox restart, a Pi from Copy attach command that ps lists as `pi` alone keeps every restart off, until it quit", async () => {
+    const { fake, host, makeHost, bin, dataDir, folder, env, started } = setup();
+    const { launch, session } = await started();
+    await host.stop(session);
+    expect(host.attach(launch)).not.toBeNull();
+    // Its extension cannot reach the new Inbox yet (it retries on its own backoff).
+    rmSync(join(dataDir, "inbox", "inbox.json"));
+    // The attach command's Pi once its shell exec'd it: nothing in the process list names the session.
+    Bun.spawn([join(bin, "pi"), "--session-id", session], { cwd: folder, env: { ...env, PLANNOTATOR_INBOX_TOOL: "1", PLANNOTATOR_DATA_DIR: dataDir }, stdout: "ignore", stderr: "ignore" });
+    const terminal = await until("the attach command's Pi", () => fake.terminals()[0]);
+    await until("ps to list it as pi", () => Bun.spawnSync(["/bin/ps", "-o", "command=", "-p", String(terminal.pid)]).stdout.toString().trim() === "pi");
+    const restarted = makeHost().host;
+    expect(restarted.live(session)).toMatchObject({ busy: null });
+    expect((await restarted.resume(launch)).failure).toBeNull();
+    expect(fake.starts()).toHaveLength(1);
+    expect(restarted.attach(launch)).toBeNull();
+    process.kill(terminal.pid, "SIGTERM"); // inbox-guard: own child (the fake pi this test started)
+    await until("it to quit", () => !fake.alive(terminal.pid));
+    await Bun.sleep(1_700);
+    expect(restarted.live(session)).toBeNull();
+    expect((await restarted.resume(launch)).failure).toBeNull();
+    expect(fake.starts()).toHaveLength(2);
+  });
+
   test("a session file that is gone: Pi starts the session again, and the thread says it starts with no memory", async () => {
     const { fake, host, started, agentNotes } = setup();
     const { launch, session, root } = await started();
@@ -621,6 +648,33 @@ describe("Pi's pure pieces", () => {
     const pi = { PI_SESSION_ID: "s", PI_SESSION_FILE: "/f", PI_PROVIDER: "p", PI_MODEL: "m", PI_REASONING_LEVEL: "high" };
     expect(piSpawnEnv({ PATH: "/bin", PLANNOTATOR_SESSION_TAG: "t", PLANNOTATOR_DATA_DIR: "/x", ...pi, PI_CODING_AGENT_DIR: "/a" }, null)).toEqual({ PATH: "/bin", PI_CODING_AGENT_DIR: "/a", PLANNOTATOR_INBOX_TOOL: "1" });
     expect(piSpawnEnv({ PATH: "/bin" }, "/tmp/data")).toEqual({ PATH: "/bin", PLANNOTATOR_INBOX_TOOL: "1", PLANNOTATOR_DATA_DIR: "/tmp/data" });
+  });
+
+  test("a claimed session's process counts while its pid is listed under the title it claimed, never once that pid runs something else", () => {
+    const session = "0b6f3c1e-1d2a-4c3b-9e8f-7a6b5c4d3e2f";
+    const listing = ["  10     1 /sbin/launchd", " 200    10 pi  ", " 300    10 node /srv/app.js", " 400   250 pi", " 250    10 /Applications/Plannotator"].join("\n");
+    const claim = (pid: number, rpc = false) => ({ session, pid, rpc, title: "pi" });
+    expect(piSessionProcesses(listing, session, [], [claim(200, true)])).toEqual([{ pid: 200, rpc: true }]);
+    // The pid is another program now, or gone; or the claim is another session's.
+    expect(piSessionProcesses(listing, session, [], [claim(300), claim(999)])).toEqual([]);
+    expect(piSessionProcesses(listing, randomUUID(), [], [claim(200)])).toEqual([]);
+    // The Inbox's own Pi, or one under it (a wrapper that does not exec), is left out.
+    expect(piSessionProcesses(listing, session, [250], [claim(400)])).toEqual([]);
+  });
+
+  test("a claim whose pid is gone is stale and removed; a /reload's old instance never removes the new one's", () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "plannotator-pi-claims-"));
+    cleanup.push(() => rmSync(dataDir, { recursive: true, force: true }));
+    const session = randomUUID();
+    const dead = Bun.spawnSync(["/usr/bin/true"]).pid;
+    writePiSessionClaim(dataDir, { session, pid: dead, rpc: false, title: "pi", owner: "a" });
+    writePiSessionClaim(dataDir, { session, pid: process.pid, rpc: false, title: "pi", owner: "new" });
+    expect(readPiSessionClaims(dataDir).map((c) => c.pid)).toEqual([process.pid]);
+    expect(existsSync(piSessionClaimFileOf(dataDir, session, dead))).toBe(false);
+    releasePiSessionClaim(dataDir, session, process.pid, "old");
+    expect(readPiSessionClaims(dataDir)).toHaveLength(1);
+    releasePiSessionClaim(dataDir, session, process.pid, "new");
+    expect(readPiSessionClaims(dataDir)).toHaveLength(0);
   });
 
   test("a dialog's title keeps an emoji whole and drops bidi controls; one with no title still says what happened", () => {

@@ -42,8 +42,10 @@
  * the Terminal's Pi and then lost it (or, when it never came, a minute after)
  * and no process runs the session any more. A restart under way is marked:
  * Stop, Delete and Open in Terminal cancel it, before its spawn or right after
- * it came up. And nothing starts while any other process's command line runs
- * the session (`--session-id <uuid>`), which holds across an Inbox restart.
+ * it came up. And nothing starts while any other process runs the session:
+ * one whose command line names it (`--session-id <uuid>`), or a Pi whose
+ * extension claimed it (`inbox/pi-sessions/`; Pi sets `process.title = "pi"`,
+ * so `ps` never lists its argv). That holds across an Inbox restart.
  */
 
 import { randomUUID } from "node:crypto";
@@ -52,6 +54,7 @@ import { join, resolve } from "node:path";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { childEnv } from "@plannotator/shared/child-env";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { readPiSessionClaims, type PiSessionClaim } from "@plannotator/shared/inbox/pi-session-claim";
 import { agentVersionRun, createAgentEnvironmentFor } from "./inbox-agents";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
 import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
@@ -164,31 +167,41 @@ export function piHandoffCommand(folder: string, session: string, pid: number, d
 }
 
 /**
- * Every process whose command line runs the Pi session `session` (`--session-id <uuid>`), from one
- * `ps -A -o pid=,ppid=,command=` listing; never one of `exclude` or a process under one (a `pi` wrapper
- * that does not exec, as Volta's shim, runs Pi as its child).
+ * Every process that runs the Pi session `session`, from one `ps -A -o pid=,ppid=,command=` listing and the
+ * claims Pi processes wrote (`readPiSessionClaims`): one whose command line names the session
+ * (`--session-id <uuid>`: a terminal's shell about to start Pi, a Pi that keeps its argv), or one whose claim
+ * names it while that pid is listed with the title it claimed under (Pi sets `process.title = "pi"`, so its own
+ * argv is not listed). Never one of `exclude` or a process under one (a `pi` wrapper that does not exec, as
+ * Volta's shim, runs Pi as its child).
  */
-export function piSessionProcesses(listing: string, session: string, exclude: Iterable<number> = []): { pid: number; rpc: boolean }[] {
-  const rows: { pid: number; command: string }[] = [];
+export function piSessionProcesses(listing: string, session: string, exclude: Iterable<number> = [], claims: readonly Pick<PiSessionClaim, "session" | "pid" | "rpc" | "title">[] = []): { pid: number; rpc: boolean }[] {
+  const rows = new Map<number, string>();
   const parent = new Map<number, number>();
   for (const line of listing.split("\n")) {
     const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
     if (!match) continue;
     parent.set(Number(match[1]), Number(match[2]));
-    rows.push({ pid: Number(match[1]), command: match[3]! });
+    rows.set(Number(match[1]), match[3]!);
   }
   const skip = new Set(exclude);
   const under = (pid: number) => {
     for (let at: number | undefined = pid, hops = 0; at !== undefined && at > 1 && hops < 64; at = parent.get(at), hops++) if (skip.has(at)) return true;
     return false;
   };
-  const found: { pid: number; rpc: boolean }[] = [];
-  for (const { pid, command } of rows) {
-    // Quoted (a terminal's `sh -c`) or not (Pi's own argv), and never a longer id that starts the same.
-    if (under(pid) || !new RegExp(`--session-id\\s+'?${session}(?![0-9a-f-])`, "i").test(command)) continue;
-    found.push({ pid, rpc: /--mode\s+rpc\b/.test(command) });
+  // Quoted (a terminal's `sh -c`) or not (Pi's own argv), and never a longer id that starts the same.
+  const names = (command: string) => new RegExp(`--session-id\\s+'?${session}(?![0-9a-f-])`, "i").test(command);
+  const found = new Map<number, boolean>();
+  for (const [pid, command] of rows) {
+    if (!under(pid) && names(command)) found.set(pid, /--mode\s+rpc\b/.test(command));
   }
-  return found;
+  for (const claim of claims) {
+    if (claim.session.toLowerCase() !== session.toLowerCase() || found.has(claim.pid) || under(claim.pid)) continue;
+    const command = rows.get(claim.pid);
+    // Listed, and still that Pi: its title, or its argv (a pid another program reused is neither).
+    if (command === undefined || !((claim.title.trim() && command.trim() === claim.title.trim()) || names(command))) continue;
+    found.set(claim.pid, claim.rpc);
+  }
+  return [...found].map(([pid, rpc]) => ({ pid, rpc }));
 }
 
 /**
@@ -375,27 +388,28 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
   };
   /**
    * The processes that run `session` and are not this Inbox's own Pi or under it: a terminal's Pi (or the
-   * shell about to run it), or an RPC Pi an earlier Inbox could not end. `fresh`: list again now. null: ps
-   * could not run, so any process may hold the session.
+   * shell about to run it), or an RPC Pi an earlier Inbox could not end, by their command line or their
+   * extension's claim. `fresh`: list again now. null: ps could not run, so any process may hold the session.
    */
   const othersOn = (session: string, fresh = false): { pid: number; rpc: boolean }[] | null => {
     const text = fresh || !listing || Date.now() - listing.at > LISTING_MS ? list() : listing.text;
     if (text === null) return null;
     const own = [...procs.values()].filter((p) => !p.exited).map((p) => p.proc.pid);
-    return piSessionProcesses(text, session, own).filter((found) => found.pid !== process.pid);
+    return piSessionProcesses(text, session, own, readPiSessionClaims(ctx.dataDir)).filter((found) => found.pid !== process.pid);
   };
   /**
    * Sessions this Inbox found held by a process of no hand-off of its own (a Terminal's Pi the Inbox
    * knew before it was started again, a Pi started by hand): it starts nothing beside them while they run.
    */
   const elsewhere = new Set<string>();
-  /** The first time any session is in question, the Pis that already run (once per Inbox). */
+  /** The first time any session is in question, the Pis that already run, listed or claimed (once per Inbox). */
   let looked = false;
   const lookOnce = () => {
     if (looked) return;
     looked = true;
     const text = list() ?? "";
     for (const match of text.matchAll(/--session-id\s+'?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi)) elsewhere.add(match[1]!.toLowerCase());
+    for (const claim of readPiSessionClaims(ctx.dataDir)) elsewhere.add(claim.session.toLowerCase());
   };
   /** Whether a process of no hand-off of this Inbox's still runs `session` (checked again at most every `LISTING_MS`). */
   const heldElsewhere = (session: string): boolean => {

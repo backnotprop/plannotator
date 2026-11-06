@@ -23,6 +23,10 @@
  *    Inbox's MCP `send_message`, idle, `agent_settled`. With `turnError` the
  *    turn instead ends as a provider error does (no answer; `agent_end` whose
  *    last assistant message has `stopReason: "error"` and `errorMessage`).
+ *  - Its title is `pi`, as Pi sets it, so `ps` lists neither `--mode rpc` nor
+ *    `--session-id`. As the extension does, it claims its session in
+ *    `<data dir>/inbox/pi-sessions/<uuid>.<pid>.json` as it starts (the Inbox
+ *    tool on or off) and removes the claim as it ends.
  *
  * State in $FAKE_PI_STATE: config.json (read on each use), calls.jsonl (argv,
  * cwd, env names, the data dir and Inbox-tool values it got), pids.log,
@@ -31,6 +35,9 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+
+// As Pi does (cli/setup.js, bundle/cli-runtime.js): `ps` then shows this process as `pi` alone, never its argv.
+process.title = "pi";
 
 const STATE = process.env.FAKE_PI_STATE;
 const args = process.argv.slice(2);
@@ -93,6 +100,36 @@ else {
   fs.writeFileSync(sessionFile, `${JSON.stringify({ type: "session", version: 3, id: sessionId, timestamp: new Date().toISOString(), cwd })}\n`);
 }
 const messageCount = () => fs.readFileSync(sessionFile, "utf8").split("\n").filter(Boolean).length - 1;
+
+// ── The extension: the session claim (packages/shared/inbox/pi-session-claim.ts) ──
+// The default data dir only inside a scratch HOME: never the account's real ~/.plannotator.
+const scratchHome = (() => {
+  try {
+    const real = fs.realpathSync(home);
+    return [require("node:os").tmpdir(), "/tmp", "/private/tmp"].some((root) => {
+      try {
+        return real.startsWith(`${fs.realpathSync(root)}/`);
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    return false;
+  }
+})();
+const claimDataDir = process.env.PLANNOTATOR_DATA_DIR || (scratchHome ? path.join(home, ".plannotator") : null);
+const claimFile = claimDataDir ? path.join(claimDataDir, "inbox", "pi-sessions", `${sessionId}.${process.pid}.json`) : null;
+if (claimFile) {
+  try {
+    fs.mkdirSync(path.dirname(claimFile), { recursive: true });
+    fs.writeFileSync(claimFile, JSON.stringify({ session: sessionId, pid: process.pid, rpc: !terminal, title: process.title, owner: "fake-pi" }));
+  } catch {}
+  process.on("exit", () => {
+    try {
+      fs.rmSync(claimFile, { force: true });
+    } catch {}
+  });
+}
 
 // ── RPC ──
 const out = (event) => process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -208,21 +245,6 @@ const on = (value) => ["1", "true", "on"].includes(String(value || "").toLowerCa
 async function extension() {
   // `noConnect` is the RPC process's; a terminal's Pi connects whenever the Inbox tool is on.
   if (!on(process.env.PLANNOTATOR_INBOX_TOOL) || (!terminal && config().noConnect)) return;
-  // The default data dir only inside a scratch HOME: never the account's real ~/.plannotator.
-  const scratchHome = (() => {
-    try {
-      const real = fs.realpathSync(home);
-      return [require("node:os").tmpdir(), "/tmp", "/private/tmp"].some((root) => {
-        try {
-          return real.startsWith(`${fs.realpathSync(root)}/`);
-        } catch {
-          return false;
-        }
-      });
-    } catch {
-      return false;
-    }
-  })();
   if (!process.env.PLANNOTATOR_DATA_DIR && !scratchHome) {
     process.stderr.write(`fake pi: no PLANNOTATOR_DATA_DIR and HOME (${home || "unset"}) is not a scratch folder; not connecting\n`);
     return;
