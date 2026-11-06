@@ -408,6 +408,42 @@ test.skipIf(!hasDom)('Two paths: two equal cards; Connect my agents opens the re
   expect($(again, '[data-tour-entry]')).toBeNull();
 }, 90_000);
 
+test.skipIf(!hasDom)('the agent note never opens over the tour: it waits for the entry screen to go, then opens (approval "inbox-one-time-dialogs")', async () => {
+  // This computer has Codex connected with no note, never asked: the note dialog has someone to ask about.
+  const agents = {
+    agents: [
+      {
+        id: 'codex',
+        label: 'Codex',
+        detected: true,
+        reach: { kind: 'mcp', on: true, state: 'connected', path: null, locked: false, reason: null },
+        reminder: null,
+        note: { agent: 'codex', path: '~/.codex/AGENTS.md', target: null, state: 'absent', create: false, created: false, reason: null },
+      },
+    ],
+    last_report: null,
+    connecting: false,
+    connect_env_off: true,
+    tool_env: null,
+    notes_offered: false,
+    notes_asked: [],
+    note_text: '<!-- plannotator-inbox:start v1 -->\n## Plannotator Inbox\n<!-- plannotator-inbox:end -->',
+  };
+  intercept = (path, method) => (method === 'GET' && path.startsWith('/api/inbox/agents') ? Response.json(agents) : null);
+  const noteDialog = () => document.querySelector('dialog[data-dialog="agent-note"]');
+  const el = await openOnEntry();
+  // Past the agents' settling reads (about 2.5 s) and the note's 700 ms checks: the entry screen alone.
+  for (let i = 0; i < 10; i++) {
+    await wait(500);
+    expect(noteDialog()).toBeNull();
+    expect($(el, '[data-tour-entry]')).not.toBeNull();
+  }
+  await click($(el, '[data-tour-connect]'));
+  await until(() => $(el, '[data-tour-entry]') === null, 'the entry screen gone');
+  await until(() => noteDialog() !== null, 'the agent-note dialog after the tour screen');
+  expect($(el, '[data-tour-entry]')).toBeNull();
+}, 60_000);
+
 /**
  * What the tour may ask of the server: the tour's own read-only routes, the window's own reads, and the
  * `tour` setting. Never a route that writes anything else: no annotations, markups, picks, replies,

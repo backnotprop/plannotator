@@ -407,6 +407,11 @@ export interface PlannotatorConfig {
   /** How many times `inboxRows` was saved: windows take a look only when it is newer than the last they took. */
   inboxRowsRev?: number;
   /**
+   * The defaults `inboxRows` was saved under (core `INBOX_ROWS_DEFAULTS_VERSION`, 2: smaller thread names on).
+   * Unset: saved before that, so an empty `inboxRows` is read as today's defaults (core `inboxRowsSaved`).
+   */
+  inboxRowsDefaults?: number;
+  /**
    * The Inbox's onboarding tour, per machine (approval "inbox-onboarding-tour"):
    * when it was started, finished or skipped, and whether the first real thread
    * offers notifications once more. Written by the server only, through POST
@@ -499,16 +504,28 @@ export interface PlannotatorConfig {
    * The queue of one-time reveals for returning users (approval
    * "inbox-feature-reveal"; rules in packages/shared/inbox/reveals.ts). Written
    * only by the server. `lastShownAt`: the last one-time announcement claimed
-   * on this machine (list options, voice, Snooze, the Board), the 48 h
+   * on this machine (list options, voice, Snooze, the Board), the one-day
    * spacing's clock. `waitingSince`: when each reveal first became next, for
    * the 3-day patience. `board.shownAt`: the Board reveal was claimed.
    * `steps.shownAt`: the Checklist reveal was claimed. `key` beside either:
    * the claiming page's own key, so that page's retry after a lost answer is
-   * shown it again (any other key is not).
+   * shown it again (any other key is not). The schedule (approval
+   * "inbox-one-time-dialogs"): `dayShownAt`, the last dialog of the line on
+   * any day (the agent note included: one a day); `notNowAt`, the last offer
+   * closed with Not now (three days before the next); `shownLoad`, the page
+   * load that showed the last dialog (never on two loads in a row; the loads
+   * seen since are kept in memory). `agentNote.shownFor`: the agents the
+   * agent note was shown for (once each, so an unanswered note never takes
+   * another day). `waitingSince` also counts the 14 days after which an offer
+   * retires (an update-day dialog never does).
    */
   inboxReveals?: {
     lastShownAt?: string;
-    waitingSince?: { snooze?: string; board?: string; steps?: string };
+    dayShownAt?: string;
+    notNowAt?: string;
+    shownLoad?: string;
+    agentNote?: { shownFor?: string[] };
+    waitingSince?: { sound?: string; list_intro?: string; voice?: string; snooze?: string; board?: string; steps?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
   };

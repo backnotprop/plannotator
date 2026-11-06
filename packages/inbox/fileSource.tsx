@@ -15,6 +15,7 @@ import { createContext, useContext, type ReactNode } from 'react';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { inboxApi, type AttachmentView, type LinkedPageView } from './api';
 import { attachmentDownloadUrl, attachmentImageUrl, attachmentVideoUrl } from './attachments';
+import { inboxUrl } from './inboxUrl';
 
 type Version = 'current' | 'sent';
 
@@ -54,6 +55,12 @@ export interface InboxFileSource {
   posterUrl?(attachment: InboxAttachmentState): string | null;
   view(attachment: InboxAttachmentState, version: Version): Promise<AttachmentView>;
   linkedPage(attachment: InboxAttachmentState, path: string): Promise<LinkedPageView>;
+  /**
+   * Where an HTML page's frame document loads from ("Pages only", inbox-pages.ts): the Inbox keeps it and
+   * serves it under its own policy, so the page shows web pictures while the window loads none. Absent (the
+   * tour): the page is a srcdoc frame, under the window's policy.
+   */
+  pageFrameUrl?(html: string): Promise<string | null>;
   /** Keep a drawing (a marked-up image, a film's frame): its path rides the comment's `images`. */
   keepMarkup(blob: Blob): Promise<{ path: string; name: string }>;
   saveAnnotation(attachment: InboxAttachmentState, version: string, annotation: object): Promise<InboxAnnotationRecord>;
@@ -71,6 +78,10 @@ export const INBOX_FILE_SOURCE: InboxFileSource = {
   downloadUrl: (attachment, version) => attachmentDownloadUrl(attachment, version),
   view: (attachment, version) => inboxApi.view(attachment.id, version),
   linkedPage: (attachment, path) => inboxApi.linkedPage(attachment.id, path),
+  pageFrameUrl: async (html) => {
+    const answer = await inboxApi.page(html);
+    return typeof answer.url === 'string' && answer.url.startsWith(inboxUrl('/pages/')) ? answer.url : null;
+  },
   keepMarkup: async (blob) => {
     const kept = await inboxApi.uploadMarkup(blob);
     return { path: kept.path, name: kept.name };

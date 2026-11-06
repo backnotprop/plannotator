@@ -13,7 +13,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
-import { LIST_LOOK_OFF, type ListLook } from './listLook';
+import { LIST_LOOK_DEFAULT, LIST_LOOK_OFF, type ListLook } from './listLook';
 import type { ListIntroGroup } from './components/ListLookIntro';
 
 const hasDom = typeof document !== 'undefined';
@@ -163,6 +163,21 @@ describe.skipIf(!hasDom)('the list options dialog', () => {
     expect(group(dialog).hasAttribute('inert')).toBe(false);
     expect(document.activeElement).toBe(sw(dialog, 'highlight'));
     expect(checked(dialog)).toEqual({ highlight: false, compact: false, hideAgents: false, smallNames: false });
+  });
+
+  // Smaller thread names is on by default (2026-11-05): the preview never shows it turning on, and it stays on.
+  test('at the defaults: smaller names stay on through the preview, which turns on only the other three', async () => {
+    motion(false);
+    const { dialog } = render(LIST_LOOK_DEFAULT);
+    expect(checked(dialog)).toEqual({ highlight: false, compact: false, hideAgents: false, smallNames: true });
+    expect(preview(dialog).classList.contains('ib-lk-small')).toBe(true);
+    await wait(1450);
+    expect(checked(dialog)).toEqual({ highlight: true, compact: true, hideAgents: true, smallNames: true });
+    expect(group(dialog).hasAttribute('inert')).toBe(true);
+    // The hold after the third step, as after the fourth when all four play (no step where smaller names was).
+    await wait(700);
+    expect(checked(dialog)).toEqual({ highlight: false, compact: false, hideAgents: false, smallNames: true });
+    expect(group(dialog).hasAttribute('inert')).toBe(false);
   });
 
   test('options already set from the ⋮ menu: it opens at them, the preview returns to them, Done keeps them', async () => {

@@ -26,7 +26,6 @@ import { randomBytes } from "node:crypto";
 import {
   chmodSync,
   constants,
-  copyFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -38,7 +37,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { open, type FileHandle } from "node:fs/promises";
+import { copyFile, open, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import {
   inboxAttachmentId,
@@ -55,7 +54,7 @@ import {
   type InboxUpload,
 } from "@plannotator/core/inbox-types";
 import { cutText } from "@plannotator/core/inbox-questions";
-import { decideInboxAttachmentKind, inboxBlobPath, inboxBlobsDir, scanInboxFile } from "./attachments";
+import { decideInboxAttachmentKind, inboxAttachmentCurrentInfo, inboxBlobPath, inboxBlobsDir, openInboxAttachmentVersion, scanInboxFile } from "./attachments";
 import { InboxError } from "./schema";
 
 export const INBOX_UPLOADS_DIR = "uploads";
@@ -138,6 +137,8 @@ export const INBOX_UPLOAD_KEEP_MS = 24 * 60 * 60 * 1000;
 export const INBOX_UPLOAD_NAME_MAX_BYTES = 255;
 const ATTACHMENT_DIR_RE = /^att_[0-9A-HJKMNP-TV-Z]{26}$/;
 const UPLOAD_TEMP_RE = /^\.upload\..*\.tmp$/;
+/** How a thread's listing names a big changed file it did not read: `stat:<size>:<mtimeMs>` (`hash: "small"`). */
+const INBOX_STAT_HASH_RE = /^stat:\d+:\d+(\.\d+)?$/;
 
 function uploadsDir(inboxDirPath: string): string {
   return join(inboxDirPath, INBOX_UPLOADS_DIR);
@@ -224,6 +225,26 @@ export function pendingInboxUploadBlobs(inboxDirPath: string): Set<string> {
   return new Set(listInboxUploads(inboxDirPath).map((upload) => upload.sha256));
 }
 
+function recordPendingUpload(inboxDirPath: string, upload: InboxUpload): void {
+  try {
+    const dir = pendingDir(inboxDirPath);
+    ensureDir(dir);
+    const file = join(dir, `${upload.upload_id}.json`);
+    writeFileSync(`${file}.tmp`, `${JSON.stringify(upload)}\n`, { mode: 0o600 });
+    renameSync(`${file}.tmp`, file);
+  } catch (error) {
+    throw inboxDiskFullError(error, INBOX_FILE_NOT_ADDED) ?? error;
+  }
+}
+
+const INBOX_FILE_NOT_ADDED = "The disk is full, so the file could not be added. Free some space and try again.";
+
+/** The error for a write the disk had no room for, or null for any other failure. Every path that writes says the same. */
+export function inboxDiskFullError(error: unknown, words = "The disk is full, so that could not be saved. Free some space and try again."): InboxError | null {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return code === "ENOSPC" || code === "EDQUOT" ? new InboxError("upload_no_space", words) : null;
+}
+
 /**
  * Take one file the person uploaded: the body streamed to a temp file in the
  * blob store (never held whole), refused past INBOX_UPLOAD_MAX_BYTES, then
@@ -234,7 +255,7 @@ export async function receiveInboxUpload(
   inboxDirPath: string,
   name: unknown,
   body: ReadableStream<Uint8Array> | null,
-  options: { at: string; maxBytes?: number },
+  options: { at: string; maxBytes?: number; shownSha256?: string },
 ): Promise<InboxUpload> {
   const refusal = inboxUploadNameRefusal(name);
   if (refusal) throw new InboxError("upload_refused", refusal, { field: "name" });
@@ -276,12 +297,9 @@ export async function receiveInboxUpload(
       created_at: options.at,
       ...(decided.media_type ? { media_type: decided.media_type } : {}),
       ...(decided.width !== undefined && decided.height !== undefined ? { width: decided.width, height: decided.height } : {}),
+      ...(options.shownSha256 ? { shown_sha256: options.shownSha256 } : {}),
     };
-    const dir = pendingDir(inboxDirPath);
-    ensureDir(dir);
-    const file = join(dir, `${upload.upload_id}.json`);
-    writeFileSync(`${file}.tmp`, `${JSON.stringify(upload)}\n`, { mode: 0o600 });
-    renameSync(`${file}.tmp`, file);
+    recordPendingUpload(inboxDirPath, upload);
     return upload;
   } catch (error) {
     if (out) await out.close().catch(() => {});
@@ -291,8 +309,80 @@ export async function receiveInboxUpload(
       // Renamed, or never written.
     }
     if (error instanceof InboxError) throw error;
-    throw new InboxError("upload_refused", "The file could not be received; try again.", { field: "body" });
+    throw inboxDiskFullError(error, INBOX_FILE_NOT_ADDED) ?? new InboxError("upload_refused", "The file could not be received; try again.", { field: "body" });
   }
+}
+
+function streamOfFile(handle: FileHandle): ReadableStream<Uint8Array> {
+  let position = 0;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const buffer = Buffer.allocUnsafe(1024 * 1024);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+      if (bytesRead === 0) return controller.close();
+      position += bytesRead;
+      controller.enqueue(buffer.subarray(0, bytesRead));
+    },
+  });
+}
+
+/**
+ * A file already in the Inbox, for the message being written (the attachment's
+ * reuse button): a pending upload naming the blob the file already has, so no
+ * bytes are written. From here it lives as any upload does: a draft keeps it,
+ * the sweep ages it, and Send gives it its own record and read-only file. It
+ * keeps no thread, message or path of where it came from, so deleting the
+ * original touches nothing here.
+ *
+ * `current` of an agent's file that changed since it was sent has no blob yet:
+ * its bytes come in once, through the same door as an upload, and a second add
+ * finds the blob. The version is fixed now: the agent changing the file later
+ * moves nothing.
+ *
+ * `sha256` is the version the page showed. A tab that read the thread before the
+ * agent changed the file gets what it showed, or a refusal if those bytes have
+ * gone, never newer bytes under the same tile. A big changed file is listed by
+ * its stat rather than a hash, so only a real hash is held to this.
+ */
+export async function inboxUploadFromAttachment(
+  inboxDirPath: string,
+  attachment: InboxAttachment,
+  version: "current" | "sent",
+  options: { at: string; sha256?: string },
+): Promise<InboxUpload> {
+  const refusal = inboxUploadNameRefusal(attachment.name);
+  if (refusal) throw new InboxError("upload_refused", refusal, { field: "name" });
+  const shown = options.sha256 && /^[0-9a-f]{64}$/.test(options.sha256) ? options.sha256 : null;
+  if (version === "current" && shown !== attachment.sent_sha256) {
+    const info = await inboxAttachmentCurrentInfo(attachment);
+    if (!info.ok) throw new InboxError("upload_not_found", `${info.unavailable.message} Add the version it sent.`);
+    if (shown && info.sha256 !== shown) throw new InboxError("upload_not_found", `${attachment.name} changed since this page showed it. Look at it again, then add it.`);
+    if (info.sha256 !== attachment.sent_sha256) {
+      const opened = await openInboxAttachmentVersion(inboxDirPath, attachment, "current", { hash: "none" });
+      if (!opened.ok) throw new InboxError("upload_not_found", opened.message);
+      try {
+        return await receiveInboxUpload(inboxDirPath, attachment.name, streamOfFile(opened.handle), { at: options.at, maxBytes: Number.MAX_SAFE_INTEGER, ...(options.sha256 && INBOX_STAT_HASH_RE.test(options.sha256) ? { shownSha256: options.sha256 } : {}) });
+      } finally {
+        await opened.handle.close().catch(() => {});
+      }
+    }
+  }
+  if (!existsSync(inboxBlobPath(inboxDirPath, attachment.sent_sha256))) {
+    throw new InboxError("upload_not_found", `${attachment.name} is no longer here.`);
+  }
+  const upload: InboxUpload = {
+    upload_id: inboxId("upl"),
+    name: attachment.name,
+    size: attachment.size,
+    kind: attachment.kind,
+    sha256: attachment.sent_sha256,
+    created_at: options.at,
+    ...(attachment.media_type ? { media_type: attachment.media_type } : {}),
+    ...(attachment.width !== undefined && attachment.height !== undefined ? { width: attachment.width, height: attachment.height } : {}),
+    ...(attachment.duration_ms !== undefined ? { duration_ms: attachment.duration_ms } : {}),
+  };
+  recordPendingUpload(inboxDirPath, upload);
+  return upload;
 }
 
 /**
@@ -305,7 +395,7 @@ export async function receiveInboxUpload(
  * written. `removeInboxAttachmentFiles` takes them back when the message is
  * not written after all.
  */
-export function inboxUploadAttachments(inboxDirPath: string, ids: readonly unknown[], at: string): InboxAttachment[] {
+export async function inboxUploadAttachments(inboxDirPath: string, ids: readonly unknown[], at: string): Promise<InboxAttachment[]> {
   const uploads = ids.map((id, index) => {
     const upload = readInboxUpload(inboxDirPath, id);
     if (!upload || !existsSync(inboxBlobPath(inboxDirPath, upload.sha256))) {
@@ -314,26 +404,37 @@ export function inboxUploadAttachments(inboxDirPath: string, ids: readonly unkno
     return upload;
   });
   const made: string[] = [];
+  const attachments: InboxAttachment[] = [];
+  const blobsDir = inboxBlobsDir(inboxDirPath);
+  let temp: string | null = null;
   try {
-    return uploads.map((upload) => {
+    for (const upload of uploads) {
       const id = inboxAttachmentId();
       const dir = join(uploadsDir(inboxDirPath), id);
-      ensureDir(dir);
-      made.push(dir);
       const target = join(dir, upload.name);
       const blob = inboxBlobPath(inboxDirPath, upload.sha256);
-      copyFileSync(blob, target, constants.COPYFILE_FICLONE);
+      // A clone where the disk has them, else a full copy. Never a hard link: the read-only mode stops no agent that
+      // chmods the file and writes it in place, and with a link that write would change the blob and every other
+      // message's copy of these bytes, in any project (uploads-reuse.test.ts).
+      // Not the sync call: where a disk has no clones, a big file would stop the whole Inbox while it copies.
+      // Under a temp name the upload sweep knows, so a crash mid-copy leaves nothing in uploads/, which no sweep reads.
+      temp = join(blobsDir, `.upload.${process.pid}.${Date.now()}.${randomBytes(6).toString("hex")}.tmp`);
+      await copyFile(blob, temp, constants.COPYFILE_FICLONE);
       // Read-only, so the file reads as the version sent. Not on Windows,
       // where a read-only file cannot be deleted by the sweep.
       if (process.platform !== "win32") {
         try {
-          chmodSync(target, 0o400);
+          chmodSync(temp, 0o400);
         } catch {
           // Best effort (a filesystem without modes).
         }
       }
+      ensureDir(dir);
+      made.push(dir);
+      renameSync(temp, target);
+      temp = null;
       const real = realpathSync(target);
-      return {
+      attachments.push({
         id,
         path: real,
         named_path: null,
@@ -345,13 +446,27 @@ export function inboxUploadAttachments(inboxDirPath: string, ids: readonly unkno
         sent_mtime: statSync(real).mtime.toISOString(),
         ...(upload.media_type ? { media_type: upload.media_type } : {}),
         ...(upload.width !== undefined && upload.height !== undefined ? { width: upload.width, height: upload.height } : {}),
-      } satisfies InboxAttachment;
-    });
+        ...(upload.duration_ms !== undefined ? { duration_ms: upload.duration_ms } : {}),
+      });
+    }
+    return attachments;
   } catch (error) {
     for (const dir of made) rmSync(dir, { recursive: true, force: true });
+    if (temp) rmSync(temp, { force: true });
     if (error instanceof InboxError) throw error;
-    throw new InboxError("upload_not_found", "An uploaded file could not be attached; attach it again.");
+    throw inboxDiskFullError(error, "The disk is full, so the file could not be attached and nothing was sent. Free some space and send again.") ?? new InboxError("upload_not_found", "An uploaded file could not be attached; attach it again.");
   }
+}
+
+/**
+ * Whether these uploads are still pending after their files were copied. A Send that took them while this one
+ * copied has them, so this one refuses, as it would have had the copy not left the event loop.
+ */
+export function assertInboxUploadsPending(inboxDirPath: string, ids: readonly unknown[], attachments: readonly InboxAttachment[]): void {
+  const gone = ids.findIndex((id) => !readInboxUpload(inboxDirPath, id));
+  if (gone < 0) return;
+  removeInboxAttachmentFiles(inboxDirPath, attachments);
+  throw new InboxError("upload_not_found", `uploads[${gone}]: that file was just sent; attach it again.`, { field: `uploads[${gone}]` });
 }
 
 /** Remove the files `inboxUploadAttachments` wrote, for a message that was not written (a replay, a refusal). */
