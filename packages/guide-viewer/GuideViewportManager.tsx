@@ -209,7 +209,7 @@ class GuideViewportManager {
     this.pinned.add(id);
     const next = new Set(this.mounted);
     next.add(id);
-    if (next.size > MAX_MOUNTED_CODE_VIEWS) {
+    if (next.size > this.mountLimit()) {
       const eviction = this.farthestMountedFrom(id, next);
       if (eviction) next.delete(eviction);
     }
@@ -224,7 +224,7 @@ class GuideViewportManager {
     this.forcedId = id;
     const next = new Set(this.mounted);
     next.add(id);
-    if (next.size > MAX_MOUNTED_CODE_VIEWS) {
+    if (next.size > this.mountLimit()) {
       const eviction = this.farthestMountedFrom(id, next);
       if (eviction) next.delete(eviction);
     }
@@ -301,19 +301,27 @@ class GuideViewportManager {
     // than flashing every CodeView off and back on.
     if (candidates.length === 0 && this.mounted.size > 0) return;
 
+    const limit = this.mountLimit();
     const next = new Set<string>();
     for (const id of this.pinned) {
-      if (next.size >= MAX_MOUNTED_CODE_VIEWS) break;
       if (this.entries.has(id)) next.add(id);
     }
-    if (this.forcedId && this.entries.has(this.forcedId) && next.size < MAX_MOUNTED_CODE_VIEWS) {
+    if (this.forcedId && this.entries.has(this.forcedId) && next.size < limit) {
       next.add(this.forcedId);
     }
     for (const candidate of candidates) {
-      if (next.size >= MAX_MOUNTED_CODE_VIEWS) break;
+      if (next.size >= limit) break;
       next.add(candidate.id);
     }
     this.setMounted(next);
+  }
+
+  /**
+   * The window's size. The focused file counts within it; every other pinned file (one with opened lines, kept
+   * mounted) comes on top, so the files near the viewport always get their viewers.
+   */
+  private mountLimit(): number {
+    return MAX_MOUNTED_CODE_VIEWS + Math.max(0, this.pinned.size - 1);
   }
 
   private farthestMountedFrom(protectedId: string, ids: ReadonlySet<string>): string | null {

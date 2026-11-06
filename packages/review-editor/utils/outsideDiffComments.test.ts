@@ -17,7 +17,7 @@ import type { CodeAnnotation } from '@plannotator/ui/types';
 import { prBlobPermalink, type PRMetadata } from '@plannotator/shared/pr-types';
 import { buildReviewSubmission, OUTSIDE_DIFF_BODY_HEADING, OUTSIDE_DIFF_QUOTE_MAX_LINES } from '../components/ReviewSubmissionDialog';
 import { exportReviewFeedback, OUTSIDE_DIFF_ANNOTATION_LABEL } from './exportFeedback';
-import { canPostInline, reanchorCodeAnnotations } from './codeAnnotationAnchor';
+import { canPostInline, reanchorCodeAnnotations } from '@plannotator/ui/utils/codeAnnotationAnchor';
 import { wholeFileMarks, wholeFileMarksCss } from './wholeFileMarks';
 import type { DiffFile } from '../types';
 

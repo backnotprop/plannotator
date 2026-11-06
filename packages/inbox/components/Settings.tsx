@@ -27,6 +27,7 @@ import { VoiceSettings } from './VoiceSettings';
 import { useVoiceSettings } from '../voice';
 import { RowsSection, rowsSummary } from './RowsSettings';
 import { useListLook } from '../listLook';
+import { DecisionAsk } from './DecisionAsk';
 
 const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'claude-code', name: 'Claude Code' },
@@ -46,6 +47,7 @@ const SECTION_ICON: Record<SettingsSection, IconName> = {
   voice: 'mic',
   archived: 'archive',
   storage: 'disk',
+  'decision-data': 'contents',
   about: 'info',
   capabilities: 'puzzle',
 };
@@ -618,7 +620,7 @@ function AgentsSection({
   if (agents && onAgents) {
     return (
       <section className="ib-sgroup" aria-label="Agents">
-        <AgentsSettings model={agents} onModel={onAgents} context={context} />
+        <AgentsSettings model={agents} onModel={onAgents} context={context} launch={settings.launch ?? null} />
       </section>
     );
   }
@@ -765,6 +767,7 @@ function StoreTable({
 }
 
 const LEDE: Record<SettingsSection, string> = {
+  'decision-data': '',
   general: 'How the Inbox looks, and how it gets your attention.',
   // Rows draws its own lede, with the presets beside it (RowsSettings.tsx).
   rows: '',
@@ -902,7 +905,7 @@ export function SettingsPage(props: SettingsPageProps) {
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
     { label: 'Settings', ids: sections.filter((id) => SETTINGS_SECTIONS.indexOf(id) <= SETTINGS_SECTIONS.indexOf('capabilities')) },
-    { label: 'Your data and Plannotator', ids: sections.filter((id) => id === 'archived' || id === 'storage' || id === 'about') },
+    { label: 'Your data and Plannotator', ids: sections.filter((id) => id === 'archived' || id === 'storage' || id === 'decision-data' || id === 'about') },
   ].filter((group) => group.ids.length > 0);
 
   const devicesDot = devicesNeedAttention(phonesOn ? phones : null, settings?.tailscale);
@@ -960,6 +963,8 @@ export function SettingsPage(props: SettingsPageProps) {
       case 'storage':
         // Only once Storage was opened this visit: the list never asks for the walk.
         return store ? formatBytes(store.bytes) : '';
+      case 'decision-data':
+        return '';
       case 'about':
         return settings.version;
       case 'voice':
@@ -1063,6 +1068,9 @@ export function SettingsPage(props: SettingsPageProps) {
             )}
           </section>
         );
+        break;
+      case 'decision-data':
+        body = <DecisionAsk />;
         break;
       case 'about':
         body = about;

@@ -89,8 +89,22 @@ function ownChild(raw: string[], line: number): boolean {
 }
 
 /**
+ * The string opening at `quote` is a `kill -0` existence probe and nothing
+ * more: a shell string `kill -0 <pid>` with no other kill in it, or the argv
+ * list / spawn arguments `"kill", "-0"` (`["-0", …]`).
+ */
+function killZeroProbe(text: string, quote: number): boolean {
+  const q = text[quote]!;
+  const close = text.indexOf(q, quote + 1);
+  if (close < 0) return false;
+  const inner = text.slice(quote + 1, close);
+  if (/^\s*kill\s+-0(?![\w-])/.test(inner)) return !/\b(?:kill|pkill|killall)\b/.test(inner.replace(/\bkill\s+-0(?![\w-])/g, ""));
+  return inner.trim() === "kill" && /^\s*,\s*\[?\s*(["'`])-0\1/.test(text.slice(close + 1));
+}
+
+/**
  * Signals in a file that handles Inbox processes: `process.kill` with any
- * signal but 0, a `kill`/`pkill`/`killall` run through spawn/exec or written
+ * signal but 0 (and `kill -0`, a probe, in a string or argv), a `kill`/`pkill`/`killall` run through spawn/exec or written
  * as a shell command in a string, and `kill` taken off `process`.
  */
 export function signalFindings(source: string): string[] {
@@ -108,9 +122,14 @@ export function signalFindings(source: string): string[] {
     add(m.index!, `process.kill(${args.join(", ")})`);
   }
   // A shell command in a string or template literal, or an argv list: "kill -9 …", `kill ${pid}`, ["kill", …].
-  for (const m of text.matchAll(/["'`]\s*(?:kill|pkill|killall)(?:\s|["'`])/g)) add(m.index!, `${m[0].trim()}…`);
+  // `kill -0 <pid>` is an existence probe like `process.kill(pid, 0)`: it sends nothing.
+  for (const m of text.matchAll(/["'`]\s*(?:kill|pkill|killall)(?:\s|["'`])/g)) {
+    if (!killZeroProbe(text, m.index!)) add(m.index!, `${m[0].trim()}…`);
+  }
   // spawn("kill", …) / execSync("pkill …") and friends.
-  for (const m of text.matchAll(/\b(?:spawn|spawnSync|exec|execSync|execFile|execFileSync)\s*\(\s*["'`]\s*(?:kill|pkill|killall)\b/g)) add(m.index!, m[0]);
+  for (const m of text.matchAll(/\b(?:spawn|spawnSync|exec|execSync|execFile|execFileSync)\s*\(\s*(["'`])\s*(?:kill|pkill|killall)\b/g)) {
+    if (!killZeroProbe(text, m.index! + m[0].lastIndexOf(m[1]!))) add(m.index!, m[0]);
+  }
   // const { kill } = process; const kill = process.kill; process.kill.bind(…)
   for (const m of text.matchAll(/\{[^{}]*\bkill\b[^{}]*\}\s*=\s*(?:globalThis\.)?process\b|=\s*(?:globalThis\.)?process\.kill\b(?!\s*\()|\bprocess\.kill\.(?:bind|call|apply)\b/g)) add(m.index!, m[0]);
   return [...new Set(found)];

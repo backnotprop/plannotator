@@ -33,16 +33,23 @@ export interface ShapeSkillText {
  */
 export const SHAPE_GUIDE = `## The stance
 
-- Draw the real thing, small. If the work is a dialog, draw the dialog with its real words. If it is a settings row, draw the row. Crop to the part the work is about. Draw an abstract diagram only when the work has no face (a policy, an architecture).
-- Few words. Every mark is part of the real thing, a short label touching what it names, or the one accent on the point. No decoration.
+- Draw the thing itself, as you would on a whiteboard for someone new to it: the pieces, where each one lives, and what passes between them. Big pictures, little words, nothing key withheld.
+- Each piece: an icon, its name, and a short line or two under it (what it holds or does). Group the pieces by where they run or who owns them, and name each group. Label each arrow with what crosses it.
+- Draw things as what they are: a database as a database, a phone as a phone, a product by its real logo. Draw nothing too complex to read at a glance.
+- Sharp: straight lines, across or down, through the gaps between pieces, never through words or a piece. An arrow's label sits just above its line, clear of it. One stroke weight, the board's own fonts.
+- A few colours, each with one meaning: a soft zone per group, a small chip for a status (new, open, unproven), a red box for what must never happen. About 200 words at most; no paragraphs.
+- The Picture says what it is; How it works says how it goes. Steps in order go in How it works, not on the Picture. A flow of pictures and logos is fine when the flow is the idea.
+- Paste real images, not boxes that name them. If a screenshot in the folder shows the thing, open it, cut the file down to the part that matters (\`sips -c <h> <w> --cropOffset <y> <x> in.png --out crop.png\`, or any tool), and put it on the Picture beside what it shows, never over it: \`<image href="crop.png" x="…" y="…" width="…" height="…"/>\` (relative to the board file, or absolute; it is copied in). Icons, real logos and drawn things come by name (below). Never make up a logo.
+- What you would say aloud goes behind a number: a reference's \`sub\` (one line), and \`images\` only if the picture shows what the line says. \`crop\` picks the part to show: a whole screen is unreadable in a bubble.
 - Use the source's own words, names and numbers (the thread, the conversation, the code). Never invent data. If the source contradicts itself and nothing settles it, draw the latest statement and say it is open.
 - Commit to a clear reading. A clear picture can be corrected; a vague one cannot.
+- Handing the board to a helper or subagent? Give it the strongest model you can choose: the board is only as good as the model that draws it.
 
 ## Keeping it current
 
 - Before you draw a new version, run \`plannotator shape drawing <id>\`, so the board shows that you are drawing.
 - Store the new version with \`plannotator shape update --file <file> --id <id> --base <the version you started from>\`. If someone changed it since, it is refused and prints the latest version: start from that one.
-- Keep the same ids (\`data-mark\`, requirement ids, ref numbers) for the same parts in every version. The board redraws only what changed.
+- Keep the same ids (\`data-mark\`, ref numbers) for the same parts in every version. The board redraws only what changed.
 - The person points at parts of the board to change or ask about them. Run \`plannotator shape read <id> --notes\` at the start of each turn. It prints the notes that wait for you and marks them as received:
   - a \`change\` note: draw the change as a new version;
   - an \`ask\` note: answer it with \`plannotator shape answer <id> --re <the note's id> --text '<your answer>'\`, in one or two sentences.
@@ -56,41 +63,44 @@ export const SHAPE_GUIDE = `## The stance
   "claim": "Built. Nothing waits on you.",
   "note": "v2: the dialog now says 2 days.",
   "views": {
-    "picture": { "html": "<figure data-step=\\"1\\" data-mark=\\"dialog\\">…</figure>", "css": ".x { … }" },
+    "picture": { "html": "<figure data-step=\\"1\\" data-mark=\\"dialog\\">…</figure>", "css": ".x { … }", "width": 1200, "height": 620, "tall": { "html": "…" } },
     "how": { "html": "<svg viewBox=\\"0 0 1200 420\\">…</svg>", "width": 1200, "height": 420 },
-    "reqs": {
-      "groups": [
-        { "id": "when", "label": "When it shows", "items": [
-          { "id": "r1", "text": "After **2 days** of use, once ever [^1]", "code": { "path": "src/snooze.ts", "line": 42 } }
-        ] }
-      ]
-    }
+    "know": "It shows **once, after 2 days** of use, and never again [^1]. Nobody who already snoozed sees it."
   },
   "refs": [
     { "n": 1, "kind": "message", "title": "You set it to 2 days", "target": "msg_…" },
     { "n": 2, "kind": "file", "title": "The dialog", "target": "src/SnoozeDialog.tsx", "line": 10 },
     { "n": 3, "kind": "image", "title": "Today's dialog", "target": "shot.png" },
-    { "n": 4, "kind": "pr", "title": "#2547", "target": "https://github.com/owner/repo/pull/2547" }
+    { "n": 4, "kind": "pr", "title": "#2547", "sub": "Adds the dialog", "target": "https://github.com/owner/repo/pull/2547", "images": [{ "src": "pr.png", "alt": "The PR's page" }] }
   ]
 }
 \`\`\`
 
 - **title:** the subject in plain words. **claim:** one line: where it stands, and whether anything waits on the person now. **note** (optional): one line about this version.
-- **views.picture** (the main view): HTML and inline SVG. The real thing, small.
-- **views.how** (How it works, optional): one precise diagram that answers three questions: when it starts, how it is processed, and what it produces. Give every arrow a verb. 4 to 8 boxes. Use \`width\` and \`height\` for a fixed canvas the board scales to fit.
-- **views.reqs** (Requirements, optional): short lines in groups. Inline Markdown: \`**bold**\`, \`code\`, links, and \`[^n]\` for reference n.
+- **views.picture** (the main view): one screen. HTML and inline SVG. \`width\` and \`height\` make a fixed canvas the board scales to fit. A phone pans it, unless you add \`tall\`: the same parts stacked about 400 px wide.
+- **views.how** (How it works, optional): one precise diagram that answers three questions: when it starts, how it is processed, and what it produces. A flow is often not a straight line: where there are optional branches or different paths, draw them, have them meet in the one drawing, and let the person follow or focus on one (the kit's \`pick\` and \`on\`). A straight line is right when the thing really is one. Give every arrow a verb. Use \`width\` and \`height\` for a fixed canvas the board scales to fit.
+- **views.know** (What to know, optional): what the person needs to know that the drawings can't say, in at most two short paragraphs of prose (1,200 characters). Inline Markdown: \`**bold**\`, \`code\`, links, and \`[^n]\` for reference n.
 - **views.code** (Code, optional): a Guided Review of the change. Leave it out unless the person asks.
-- **refs:** numbered sources. \`message\` targets a thread message id; \`file\` a path in the project (with \`line\`); \`image\` an image file next to the board's JSON (the store keeps a copy); \`pr\` and \`link\` an https URL.
+- **refs:** numbered sources; on the Picture, a handful. Any kind can have \`sub\` and \`images\` (\`{ src, alt, crop: [x, y, width, height] }\`, 0 to 1); the bubble shows the first. \`message\` targets a thread message id; \`file\` a path in the project (with \`line\`); \`image\` an image file next to the board's JSON (the store keeps a copy); \`pr\` and \`link\` an https URL.
 
 ## Drawing rules
 
+Draw it however you like, by hand or from a one-off script. The board makes it behave (hover, tap, full view, the person's theme, phone) if you keep these.
+
 - \`data-mark="id"\` on each part the person may point at. Keep the id across versions.
 - \`data-step="N"\` on parts that should appear together; steps arrive in number order, the order you would explain them aloud.
-- \`<span data-ref="n"></span>\` puts reference bubble n on the drawing.
-- Colours only through the board's variables: \`var(--ink)\`, \`var(--ink2)\`, \`var(--grey)\`, \`var(--rule)\`, \`var(--paper)\`, \`var(--surface)\`, \`var(--sunk)\`, and the one accent \`var(--mark)\` (\`var(--mark-soft)\` for a fill). Then light and dark both work. In SVG: \`class="line"\`, \`"grey"\`, \`"acc"\`, \`"acc-fill"\`, \`"dash"\`, and \`"t-acc"\` / \`"t-grey"\` for text.
+- \`data-ref="n"\` is the number for reference n: empty (\`<span data-ref="n"></span>\`), the board draws it; around your own (\`<g data-ref="n">…</g>\`), yours is used.
+- Colours only through the board's variables: \`var(--ink)\`, \`var(--ink2)\`, \`var(--grey)\`, \`var(--rule)\`, \`var(--paper)\`, \`var(--surface)\`, \`var(--sunk)\`, the accent \`var(--mark)\` (\`var(--mark-soft)\` for a fill), \`var(--alert)\` for what is wrong (\`var(--alert-soft)\`), and for zones \`var(--blue)\`, \`var(--amber)\`, \`var(--green)\` and \`var(--plum)\`, each with a \`-soft\` fill. Then light and dark both work. In SVG: \`class="line"\`, \`"grey"\`, \`"acc"\`, \`"acc-fill"\`, \`"alert"\`, \`"dash"\`, and \`"t-acc"\`, \`"t-grey"\`, \`"t-alert"\`, \`"t-mono"\` for text.
+- Icons, logos and drawn things by name; the store draws them:
+  - \`<svg data-icon="server" x="…" y="…" width="28" height="28"/>\`: any Lucide icon (lucide.dev), in the ink, or \`style="color:var(--blue)"\`.
+  - \`<svg data-logo="stripe" x="…" y="…" width="40" height="40"/>\`: a product's real logo, in its own colours. Simple Icons names: stripe, postgresql, redis, supabase, cloudflare, vercel, google, apple, github, claude… \`shape update\` says when there is none: then its name in words, with an icon.
+  - \`<svg data-draw="database" x="…" y="…" width="160" height="120" data-label="Postgres"/>\`: a drawn database, server, phone, laptop, browser, envelope or queue. Its \`data-label\` is written on it, or just under a server, queue or envelope: leave the 30 px under those free.
+  - \`data-to="x y"\` on one of them sends it there again and again, as an envelope crossing a wire. It holds still for anyone who turns motion off. Once on a board, where the movement is the point.
 - Nothing from outside: no scripts, no event handlers, no \`<style>\` in the HTML (use \`css\`), no external images, fonts or \`url()\`, no iframes, forms or popovers. The store refuses them and says which.
 - Links: \`#id\` scrolls inside the drawing; an https link opens in a new tab.
 - A phone shows the board narrow. For a wide How it works, add \`"tall": { "html": … }\` with the same parts stacked about 400 px wide.
+- \`shape update\` prints \`notes\` when a board will not behave. It stores the board anyway: fix them and update again.
+- Optional helpers: \`plannotator shape kit > kit.mjs\` (JavaScript, no dependencies). Its first lines show how.
 `;
 
 /**
@@ -99,7 +109,7 @@ export const SHAPE_GUIDE = `## The stance
  */
 export const SHAPE_HELP_INTRO = [
   "Welcome to Shape. The person wants to see the work the way you see it, so they can say",
-  "\"yes, that's it\" or point at the part that is wrong. Draw it as a board: a JSON file you",
+  "\"yes, that's it\" or point at the part that is wrong. Draw it as you would on a whiteboard: a JSON file you",
   "store with `plannotator shape update`. The board opens in their browser. You keep it current:",
   "each update is a new version, and the board shows what changed.",
   "",
@@ -126,14 +136,14 @@ export const SHAPE_HELP_INTRO = [
   "  plannotator shape open [<shp_id>]",
   "  plannotator shape on | off",
   "",
-  "A shape is a board you draw for the person: a Picture, How it works, Requirements",
+  "A shape is a board you draw for the person: a Picture, How it works, What to know",
   "and Code, with numbered references. Each update stores a new version of the whole board.",
   "",
   "(none)   Opens Shape's page in the person's browser, or the one already open, and prints its address.",
   "update   Stores the board in <board.json>. Without --id it makes a new shape and",
   "         prints its id. With --id, --base is the version you drew from; if the shape",
   "         changed since, the update is refused and the latest version is printed.",
-  "         Keep the same ids (data-mark, requirement ids) for the same parts, so the",
+  "         Keep the same ids (data-mark, ref numbers) for the same parts, so the",
   "         board redraws only what changed.",
   "read     Prints the latest version (or --version <n>). --notes also prints the notes",
   "         that wait for you (Change it and Ask) and marks them as received.",
@@ -170,7 +180,7 @@ DRAFT. The person wants to see the work in this thread the way you see it, so th
 
 ## Steps
 
-1. Read the whole thread (\`read_thread\`, every message). Note: what the work makes, what is settled, what is open and whose call it is, and what happens next.
+1. Read the whole thread (\`read_thread\`, every message). Note: what the work makes, what is settled, what is open and whose call it is, and what happens next. Then pick the one idea to draw; the rest goes behind numbers or in What to know.
 2. Write the board as JSON (the format is below) in a scratch file, such as \`/tmp/shape-<topic>.json\`.
 3. Store it: \`plannotator shape update --file /tmp/shape-<topic>.json --thread <the thread's id: thread_id from read_thread> --through <the latest message id you read>\`. It prints \`{ id, v }\`. Keep the id.
 4. If it is refused, fix what it lists and run it again. Each problem names its field.

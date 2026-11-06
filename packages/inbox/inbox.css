@@ -580,8 +580,21 @@ button.ib-mut { border-radius: 6px; }
    On line 3 of three-line and phone rows its auto margin pushes it before the badge and the counts whether the
    preview before it is short or cut (a phone row with nothing else for line 3 keeps it on line 1, before the time).
    A wide row has it in its own column (`.ib-cpin`, below the wide row). */
-.ib-pinmark { display: inline-flex; flex: none; color: var(--muted-foreground); }
-.pn-inbox .ib-pinmark svg.ib-ic { width: 13px; height: 13px; stroke-width: 1.8; }
+.pn-inbox { --ib-star: oklch(0.74 0.17 72); }
+:root:not(.light) .pn-inbox { --ib-star: oklch(0.83 0.15 86); }
+.ib-pinmark { display: inline-flex; flex: none; color: var(--ib-star); }
+.pn-inbox .ib-pinmark svg.ib-ic { width: 13px; height: 13px; stroke-width: 1.8; fill: currentColor; }
+.pn-inbox :is(.ib-side-sec > svg, .ib-pmi svg).ib-star-on { color: var(--ib-star); fill: currentColor; }
+/* Starring: the star lands, one small pop and a settle, only just after the person starred (starPop.ts). */
+@keyframes ib-star-pop {
+  0% { transform: scale(0.3) rotate(-30deg); opacity: 0; }
+  55% { transform: scale(1.32) rotate(8deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+:is(.ib-pinmark[data-pop] svg.ib-ic, .ib-side-sec > svg.ib-star-pop) { animation: ib-star-pop 460ms cubic-bezier(0.2, 0.8, 0.2, 1) both; transform-origin: 50% 55%; }
+@media (prefers-reduced-motion: reduce) {
+  :is(.ib-pinmark[data-pop] svg.ib-ic, .ib-side-sec > svg.ib-star-pop) { animation: none; }
+}
 :is(.ib-nrow .ib-l3, .ib-m3) > .ib-pinmark { margin-left: auto; }
 /* A phone row with nothing else for line 3 keeps its pin on line 1, before the time (PhoneRow's `pinOnLine1`). */
 .ib-m1 > .ib-pinmark { margin-left: auto; }
@@ -1819,7 +1832,7 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 .ib-dpage { padding: 28px 44px; flex: 1; min-width: 0; overflow-y: auto; }
 .ib-dh { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
 .ib-dh h1 { font-size: var(--ib-fs-22, 22px); font-weight: 650; margin: 0; letter-spacing: -0.01em; }
-.ib-dsub { color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); margin: 0 0 22px; }
+.ib-drafts .ib-dh { margin-bottom: 18px; }
 
 /* attachments (step 2, record 2.1 to 2.8) */
 /* One line, "Changed 6:43 PM": the whole sentence is the hover text (tiles of a grid kept their heights uneven when it wrapped). */
@@ -2074,6 +2087,8 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .ib-fvchip, .ib-fvchip.ib-on { transition: none; } }
 /* The question row comes back as an overlay at the foot (there is no bar to sit on). */
 .ib-view.ib-fullview > .ib-stepguard { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 9; width: min(760px, calc(100% - 24px)); box-sizing: border-box; border: 1px solid color-mix(in oklab, var(--primary) 30%, transparent); border-radius: 10px; box-shadow: 0 12px 34px rgba(0, 0, 0, 0.3); }
+/* With the drawer open the question is on the page, as the chip is; the drawer's foot stays free to press. */
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) > .ib-stepguard { left: calc((100% - 320px) / 2); width: min(760px, calc(100% - 344px)); }
 /* The drawer's foot: what rides the next Send, and the way to the reply. */
 .ib-fvfoot { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 14px; border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); background: var(--card); }
 .ib-fvsend { margin: 0; font-size: var(--ib-fs-13, 13px); line-height: 1.4; color: var(--muted-foreground); }
@@ -2293,9 +2308,13 @@ pre code.pn-code[data-keep-layout] {
    `text-xs` at 13px is what the review stylesheet sets for Plannotator's code
    review and guides.show (packages/review-editor/index.css), scoped to the guide. */
 .ib-gerror { padding: 12px 30px 0; }
+/* GuideFileCard holds the reader's place here, for every browser. */
+.ib-gbody { overflow-anchor: none; }
 .ib-gbody { min-height: 0; overflow-y: auto; --text-xs: 0.8125rem; --text-xs--line-height: calc(1 / 0.75); }
 /* Pierre's diff colours from the theme, as the review stylesheet passes them into its shadow DOM. */
 .ib-gbody diffs-container { --diffs-dark-bg: var(--background); --diffs-light-bg: var(--background); --diffs-dark: var(--foreground); --diffs-light: var(--foreground); }
+/* FileHeader's height is this variable, which only the review stylesheet defined: here the row shrank onto its file name. */
+.ib-gbody { --panel-header-h: 33px; }
 /* The guide beside its comments: the attachment pane's panel column, with what rides the next Send at its foot. */
 .ib-gsplit { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; }
 .ib-gstrip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
@@ -2377,6 +2396,8 @@ pre code.pn-code[data-keep-layout] {
 .ib-esc { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-esc kbd { font-family: var(--font-sans); font-size: var(--ib-fs-11, 11px); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
 @media (max-width: 560px), (pointer: coarse) { .ib-esc { display: none; } }
+.ib-route-acts { flex-wrap: wrap; }
+.ib-route-acts .ib-btn { max-width: 100%; }
 @media (max-width: 560px) { .pn-inbox .ib-route-acts .ib-btn.ib-pri { flex: 1; justify-content: center; } }
 @media (prefers-reduced-motion: no-preference) {
   .ib-route { animation: ib-route-in 140ms ease-out; }
@@ -2899,6 +2920,9 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
    file (.ib-view.ib-full is z-index 40). Its words always show whole: a long detail wraps to a second line. */
 .ib-toast { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 41; box-sizing: border-box; display: flex; align-items: center; gap: 10px; width: max-content; max-width: min(520px, calc(100vw - 32px)); min-height: 40px; padding: 6px 6px 6px 12px; border-radius: 8px; background: var(--card); color: var(--card-foreground); border: 1px solid var(--border); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.04); font-size: var(--ib-fs-13, 13px); line-height: 20px; animation: ib-toast-in 180ms cubic-bezier(0.23, 1, 0.32, 1); }
 :root:not(.light) .ib-toast { box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.6); }
+/* An open Shape's bar (and the pill over it) hold the window's foot: the toast sits above them, never over their buttons. */
+body:has([data-shape-layer] .shp-dock) .ib-toast:not(.ib-toast-phone) { bottom: 72px; }
+body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 124px; }
 @keyframes ib-toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 .ib-toast > .ib-ic { color: var(--muted-foreground); flex: none; }
 .ib-toast.ib-toast-warn > .ib-ic { color: var(--warning, oklch(0.75 0.15 85)); }
@@ -3267,7 +3291,7 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-dpage { padding: 0 0 calc(24px + env(safe-area-inset-bottom)); }
   .ib-dh { min-height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 4px; gap: 6px; margin-bottom: 6px; }
   .ib-dh h1 { font-size: var(--ib-fs-22, 22px); flex: none; }
-  .ib-dsub { margin: 0 16px 14px; }
+  .ib-drafts .ib-dh { margin-bottom: 6px; }
 
   /* settings, What's new, the first run */
   .ib-spage { padding: 0 16px calc(32px + env(safe-area-inset-bottom)); }
@@ -3629,6 +3653,9 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 .ib-agrow .ib-agv code { font-size: var(--ib-fs-12, 12px); color: var(--foreground); }
 .pn-inbox .ib-agrow .ib-agv .ib-lnk { font-size: var(--ib-fs-12-5, 12.5px); margin: 0 0 0 6px; display: inline; }
 .ib-agrow .ib-agr { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+/* Settings → Agents' "Scratch folders" path, while it is changed. */
+.ib-agrow .ib-agpath { width: 100%; min-width: 0; height: 30px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: inherit; font-family: var(--font-mono); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-agrow .ib-agpath:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
 .ib-agrow .ib-agsub { grid-column: 2 / 4; margin-top: -2px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; display: flex; gap: 6px; align-items: flex-start; color: var(--muted-foreground); }
 .ib-agrow .ib-agsub.ib-agwarn { color: color-mix(in oklch, var(--warning) 80%, var(--foreground)); }
 .pn-inbox .ib-agrow .ib-agsub svg.ib-ic { width: 13px; height: 13px; margin-top: 2px; flex: none; }
@@ -3996,6 +4023,38 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-cp-check { width: 16px; flex: none; color: var(--primary); display: inline-flex; }
 .ib-cp-none { grid-column: 1 / -1; padding: 14px 10px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .ib-cp-pickhead { display: none; }
+/* Launch (inboxLaunch.enabled): "Start a new session in <project>" under the live sessions, then one row per agent. */
+.ib-cp-cap { grid-column: 1 / -1; padding: 10px 8px 4px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-cp-cap b { color: var(--foreground); font-weight: 600; }
+.ib-cp-cap-line { margin-top: 4px; border-top: 1px solid var(--ib-line); }
+.ib-cp-ons { grid-column: 3 / -2; color: var(--muted-foreground); white-space: nowrap; }
+.ib-cp-start .ib-cp-check { grid-column: -2; }
+/* To as a sentence: "New Claude Code session ▾ in <project> ▾". */
+.ib-cp-startin { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.ib-cp-in { color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-cp-to[data-start] { flex-wrap: wrap; row-gap: 0; }
+/* Trust and start (approval "inbox-launch-trust-compose"). The question circle, quiet as any icon button unless the folder has hooks or similar;
+   its details, the Inbox's popover at the button (`.ib-state.ib-nmpop`, a sheet on a phone), over the dialog: nothing under it moves. */
+.ib-cp-foot { position: relative; }
+.pn-inbox .ib-iconbtn.ib-cp-trustcircle { flex: none; }
+.pn-inbox .ib-iconbtn.ib-cp-trustcircle[data-warning], .pn-inbox .ib-iconbtn.ib-cp-trustcircle[data-warning]:hover { color: var(--warning, oklch(0.75 0.15 85)); }
+.pn-inbox .ib-iconbtn.ib-cp-trustcircle[aria-expanded="true"], .pn-inbox .ib-iconbtn.ib-cp-trustcircle[aria-expanded="true"]:hover { background: var(--muted); color: var(--foreground); }
+.ib-cp-trustask { display: flex; flex-direction: column; overflow-wrap: anywhere; }
+dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12px; width: 440px; }
+.ib-cp-trustask p span { display: block; }
+.ib-state.ib-cp-trustask p { line-height: 1.45; margin-bottom: 0; }
+.ib-state.ib-cp-trustask p.ib-cp-trustsaid { margin-top: 6px; color: var(--destructive); }
+.ib-cp-error[data-in-details] { visibility: hidden; }
+/* The folder menu: under "in <project>", the picker's look; folder icon, name, path, check. */
+.ib-cp-picker.ib-cp-folders { left: 200px; width: min(480px, calc(100% - 210px)); }
+.ib-cp-folders .ib-cp-list { grid-template-columns: auto minmax(0, max-content) minmax(min(12ch, 30%), 1fr) 16px; }
+.ib-cp-fopt > svg.ib-ic { color: var(--muted-foreground); }
+.ib-cp-fopt s { color: var(--muted-foreground); }
+/* Last, under a line: "New scratch folder" (· trust it once, while the agent does not trust its root). */
+.ib-cp-folders .ib-cp-list > .ib-cp-cap-line { grid-column: 1 / -1; margin: 4px 2px; }
+.ib-cp-scratch .ib-cp-trust { color: var(--muted-foreground); }
+/* Under an untrusted scratch row: what the first start asks (the root is the folder to trust). */
+.ib-cp-scratch-hint { grid-column: 2 / -1; padding: 0 8px 6px 0; margin-top: -4px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.4; color: var(--muted-foreground); }
 /* A list with a session label caps the column it shares with the project, so one long label cannot take the folder's room from every row. */
 .ib-cp-list[data-session-labels] { grid-template-columns: auto max-content fit-content(24ch) minmax(min(12ch, 30%), 1fr) max-content 16px; }
 .ib-cp-ol { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -4125,7 +4184,6 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-readdress .ib-routeform { max-width: 460px; }
 
 /* The Drafts page. */
-.ib-drafts-n { color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
 .ib-drafts-empty { color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
 .ib-draft { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--ib-hair); }
 .pn-inbox .ib-draft-open { flex: 1; min-width: 0; display: grid; grid-template-columns: var(--ib-mark-30) minmax(0, 1fr) max-content; align-items: center; gap: 14px; padding: 12px 8px 12px 0; border: 0; background: none; text-align: left; color: var(--foreground); }
@@ -4276,12 +4334,21 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-openin { position: relative; display: inline-flex; align-items: center; flex: none; }
 .ib-split { display: inline-flex; align-items: stretch; height: 28px; border-radius: 7px; flex: none; }
 .ib-split:hover, .ib-split.ib-on { box-shadow: inset 0 0 0 1px var(--border); }
-.pn-inbox .ib-split .ib-sa { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px 0 7px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--foreground); border-radius: 7px 0 0 7px; text-decoration: none; }
-.pn-inbox .ib-split .ib-sa:disabled { opacity: 0.5; cursor: default; }
-.pn-inbox .ib-split .ib-st { width: 20px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted-foreground); border-radius: 0 7px 7px 0; }
+.pn-inbox .ib-split .ib-sa, [data-popout] .ib-split .ib-sa { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px 0 7px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--foreground); border-radius: 7px 0 0 7px; text-decoration: none; }
+.pn-inbox .ib-split .ib-sa:disabled, [data-popout] .ib-split .ib-sa:disabled { opacity: 0.5; cursor: default; }
+.pn-inbox .ib-split .ib-st, [data-popout] .ib-split .ib-st { width: 20px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted-foreground); border-radius: 0 7px 7px 0; }
 .ib-split.ib-on .ib-st { background: var(--muted); color: var(--foreground); }
 .ib-split .ib-sa:hover:not(:disabled), .ib-split .ib-st:hover { background: color-mix(in oklch, var(--muted) 60%, transparent); }
 .ib-appi { width: 16px; height: 16px; flex: none; display: block; }
+/* Shape's file popout portals out of .pn-inbox, as a menu does: the caret keeps its stroke there too. */
+[data-popout] .ib-split svg.ib-ic { width: 12px; height: 12px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+/* A code span naming a file looks like any other code span until the pointer is on it. */
+.ib-openin-span { cursor: pointer; border-radius: 4px; }
+.ib-openin-span:hover code { color: var(--primary); }
+.ib-openin-span:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* A referenced file's Open in, in a message's line of text: it stays within the line. */
+.ib-body .ib-openin { vertical-align: middle; margin-left: 4px; }
+.ib-body .ib-split { height: 20px; }
 /* A menu portals out of .pn-inbox (Open in, full screen's ⋯): its line glyphs keep their stroke there too, never a filled shape. */
 svg.ib-ic.ib-glyph { stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; color: var(--muted-foreground); }
 /* The menu portals to the body, outside .pn-inbox: its glyphs carry their own stroke. */
@@ -4319,6 +4386,27 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .ib-delivered .ib-dl-main { display: inline-flex; align-items: flex-start; gap: 6px; min-width: 0; }
 .ib-delivered .ib-dl-main > svg { flex: none; margin-top: 2px; }
 .ib-delivered .ib-dl-text { min-width: 0; }
+/* A launched thread's run line (components/RunLine.tsx): the delivery line's place and look; Stop is a text button. */
+.ib-run { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-run-main { display: inline-flex; align-items: flex-start; gap: 7px; min-width: 0; }
+.ib-run-main > svg { flex: none; margin-top: 2px; color: var(--warning); }
+.ib-run[data-run="waiting_terminal"], .ib-run[data-run="failed"], .ib-run[data-run="missing"] { color: var(--foreground); flex-direction: column; align-items: flex-start; }
+.ib-run b { font-weight: 600; color: var(--foreground); }
+.ib-run-text { min-width: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.ib-run .ib-error { overflow-wrap: anywhere; }
+.ib-run-sub { display: block; color: var(--muted-foreground); }
+.ib-run-acts { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ib-run[data-run="waiting_terminal"] .ib-run-acts, .ib-run[data-run="failed"] .ib-run-acts { padding-left: 21px; }
+.pn-inbox .ib-run-btn { border: 0; background: none; padding: 2px 4px; color: var(--muted-foreground); font-size: inherit; border-radius: 5px; }
+.pn-inbox .ib-run-btn:hover:not(:disabled) { color: var(--foreground); background: color-mix(in oklch, var(--muted) 70%, transparent); }
+.ib-run-cmd { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 9px; border-radius: 6px; background: var(--muted); color: var(--foreground); }
+.ib-run-cmd code { font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); overflow-wrap: anywhere; }
+.ib-run-spin { flex: none; width: 11px; height: 11px; margin-top: 3px; border-radius: 50%; border: 1.5px dashed currentColor; }
+@media (prefers-reduced-motion: no-preference) {
+  .ib-run-spin { animation: ib-run-spin 2.4s linear infinite; }
+}
+@keyframes ib-run-spin { to { transform: rotate(360deg); } }
+.ib-run-stopmark { flex: none; width: 10px; height: 10px; margin-top: 3px; border-radius: 2px; border: 1.5px solid currentColor; }
 .pn-inbox .ib-sendnow { margin-left: 4px; height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; cursor: pointer; white-space: nowrap; }
 .pn-inbox .ib-sendnow:hover { background: var(--muted); }
 .pn-inbox .ib-sendnow:disabled { opacity: 0.6; cursor: progress; }
@@ -5141,7 +5229,7 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .pn-inbox .ib-undl .ib-m-whybox { margin: 0; padding: 0; border: 0; background: none; width: 100%; }
 .pn-inbox .ib-undl .ib-m-why { color: var(--muted-foreground); padding-left: 20px; line-height: 1.7; margin: 0; }
 .pn-inbox .ib-undl .ib-m-why > span { margin-right: 6px; }
-.pn-inbox .ib-undl .ib-m-why code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.92em; padding: 1px 5px; border-radius: 5px; background: color-mix(in oklch, var(--foreground) 7%, transparent); color: var(--foreground); white-space: nowrap; }
+.pn-inbox .ib-undl .ib-m-why code { font-family: var(--font-mono); font-size: 0.92em; padding: 1px 5px; border-radius: 5px; background: color-mix(in oklch, var(--foreground) 7%, transparent); color: var(--foreground); white-space: nowrap; }
 .pn-inbox .ib-undl .ib-m-whybox .ib-rl-lead, .pn-inbox .ib-undl .ib-m-whybox .ib-rl-fold { padding-left: 20px; }
 /* OpenCode's one quiet line (approval "reload-hosts"): under the lead, in its column and tone. */
 .pn-inbox .ib-undl .ib-m-whybox > .ib-rw-after { padding-left: 20px; margin: 0; color: var(--muted-foreground); line-height: 1.7; }
@@ -6205,8 +6293,8 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-inid-add .ib-inid-in { border-color: var(--ib-line); }
 .ib-inid-del { flex: none; border: 0; background: none; cursor: pointer; }
 .pn-inbox .ib-inid-del:hover { color: var(--destructive); background: var(--ib-hover); }
-.ib-inid-ask { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 36px; padding: 6px 8px; border-radius: 8px; background: color-mix(in oklab, var(--destructive) 8%, var(--card)); }
-.ib-inid-askt { flex: 1 1 200px; min-width: 0; font-size: var(--ib-fs-13, 13px); line-height: 1.45; overflow-wrap: anywhere; }
+/* The toast inside the dialog (its Undo must be above the modal): at the window's foot, as ever. A phone's toast is `absolute`, which here would be the dialog's foot, over Done. */
+.ib-inid .ib-toast { position: fixed; }
 .ib-inid-err { margin: 8px 0 0; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .pn-inbox .ib-bflt-btn { width: 44px; height: 44px; }
@@ -6662,7 +6750,13 @@ kbd[data-keycap]::after { content: attr(data-keycap); }
 /* Sidebar → Feedback (components/FeedbackDialog.tsx): the message, an optional category and email, the line
    saying what is sent, then Prompt your agent to send feedback, Cancel and Send; a short "sent" state. On a phone the
    dialog is a bottom sheet (the sheet corner on top, the safe area below), 44 px targets. */
-dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
+dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100vh - 580px))); width: min(540px, calc(100vw - 32px)); margin: var(--ib-fbk-top) auto auto; max-height: calc(100vh - var(--ib-fbk-top) - 24px); }
+/* "These might help". Empty it takes no room. On a computer the dialog is placed from its top (above), so the box stays put when lines show; in a short window it starts higher, so five lines leave Send in view. */
+.ib-fbk-rel-h { margin: 10px 0 3px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-fbk-rel ul { list-style: none; margin: 0; padding: 0; }
+.ib-fbk-rel li { position: relative; padding: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); line-height: 1.4; color: var(--muted-foreground); }
+.ib-fbk-rel a { color: var(--foreground); text-decoration: underline; text-underline-offset: 2px; }
+.ib-fbk-rel a:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: 3px; }
 .ib-fbk-form .ib-bfield { margin-top: 14px; }
 .ib-bfield .ib-fbk-msg { min-height: 136px; line-height: 1.5; }
 .ib-fbk-count { margin: 6px 0 0; text-align: right; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
@@ -6694,6 +6788,21 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
     border-radius: var(--ib-sheet-corner, 12px) var(--ib-sheet-corner, 12px) 0 0; border-bottom: 0;
   }
   .ib-fbk-phone .ib-dlg-in { padding: 18px calc(16px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); }
+  /* The whole row is a 44 px target. Three lines, so Send stays on screen on a small phone. */
+  .ib-fbk-rel li { padding: 0; line-height: 44px; font-size: var(--ib-fs-14, 14px); }
+  .ib-fbk-rel li:nth-child(n + 4) { display: none; }
+  .ib-fbk-rel a::after { content: ''; position: absolute; inset: 0; }
+  /* Over a keyboard: no title, a shorter box and one line, with its room kept, so nothing moves under a thumb and Send and Cancel stay above the keyboard. The line's target reaches over the heading and the gap below it. */
+  :root[data-ib-keyboard] .ib-fbk-phone .ib-dlg-head { display: none; }
+  :root[data-ib-keyboard] .ib-bfield .ib-fbk-msg { min-height: 112px; height: 112px; }
+  :root[data-ib-keyboard] .ib-fbk-rel { display: flow-root; min-height: calc(33px + var(--ib-fs-12, 12px) * 1.5); }
+  :root[data-ib-keyboard] .ib-fbk-rel-h { margin: 8px 0 1px; }
+  :root[data-ib-keyboard] .ib-fbk-rel li { margin: -10px 0; }
+  :root[data-ib-keyboard] .ib-fbk-rel li + li { display: none; }
+  /* Cancel beside Send, the prompt button under them. */
+  :root[data-ib-keyboard] .ib-fbk-acts { flex-direction: row; }
+  :root[data-ib-keyboard] .ib-fbk-acts .ib-btn { flex: 1; }
+  :root[data-ib-keyboard] .ib-fbk-acts .ib-left { order: 1; flex-basis: 100%; }
   .ib-fbk-row { flex-direction: column; align-items: stretch; }
   .ib-fbk-cats { display: flex; }
   .pn-inbox .ib-fbk-cat { flex: 1; height: 44px; font-size: var(--ib-fs-15, 15px); }
@@ -6825,6 +6934,11 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 
 /* Minimized: a quiet 30 px pill at the foot, centred, in the card's material. The words say a draft waits; no dot, no motion. */
 .ib-fcomp-pillwrap { position: absolute; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 9; transition: var(--ib-gather-back, opacity 180ms ease, visibility 0s linear 0s); }
+/* An HTML page's card sits on the pane, not inside the file as an image's or a film's does, so it does not narrow with the drawer: it keeps to the page beside the drawer (320 px, as the chip above it), and a phone's sheet hides it, as the sheet covers an image's card and hides the toolbar. */
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) > :is(.ib-fcomp, .ib-fcomp-pillwrap) { left: calc((100% - 320px) / 2); }
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) > .ib-fcomp { width: min(680px, calc(100% - 352px)); }
+/* The comments sheet covers the file, and its foot holds Write the reply: the card and its pill step aside with the dock, on the pane (an HTML page) or inside the file (an image, a film). */
+.ib-view.ib-fullview.ib-phone.ib-panel-open :is(.ib-fcomp, .ib-fcomp-pillwrap) { visibility: hidden; }
 .pn-inbox .ib-fcomp-pill { --fc-accent: var(--primary); display: inline-flex; align-items: center; gap: 6px; height: 30px; max-width: min(320px, calc(100vw - 32px)); padding: 0 9px 0 11px; border-radius: 15px; border: 1px solid color-mix(in oklch, var(--border) 85%, transparent); background: color-mix(in oklch, var(--popover) 92%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); color: var(--popover-foreground); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; white-space: nowrap; cursor: pointer; }
 :root.light .pn-inbox .ib-fcomp-pill { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1); }
 .pn-inbox .ib-fcomp-pill.ib-mode-comment { --fc-accent: var(--warning, #d79b3a); }
@@ -6900,7 +7014,42 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 .pn-inbox .ib-fcomp.ib-phone .ib-ccard .ib-btn { height: 40px; min-width: 40px; margin-bottom: 2px; }
 .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-send { width: 40px; height: 40px; padding: 0; justify-content: center; margin-bottom: 2px; }
 .ib-fcomp.ib-phone .ib-fcomp-foot { min-height: 32px; font-size: var(--ib-fs-13, 13px); }
+/* The foot is one row at 320 px and up. The mic takes its own room, not half the row's, so the chips get what is left;
+   a chip never wraps or shrinks. When the row runs short, what yields is decided in footFit.ts (`cardFootFitCandidates`)
+   and drawn from `data-fit`: the words go, into visually hidden text, so names stay whole. */
+.ib-fcomp.ib-phone .ib-fcomp-foot > .ib-dtfoot { flex: none; margin-left: 0; }
+.ib-fcomp.ib-phone .ib-fcomp-foot > .ib-dtfoot:has(.ib-vline) { flex: 1 1 0; }
+/* Dictating, the status has the row: the link or "Sent to …" would squeeze Cancel and the clock out of it at 320. */
+.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-foot:has(.ib-vline) > :is(.ib-fcomp-link, .ib-fcomp-sent) { display: none; }
+.ib-fcomp.ib-phone .ib-fcomp-chips { flex-wrap: nowrap; min-width: 44px; }
+.ib-fcomp.ib-phone .ib-fcomp-chip { flex: none; height: auto; min-height: 22px; }
+.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-q { height: auto; min-height: 22px; }
+.pn-inbox .ib-fcomp.ib-phone :is(button.ib-fcomp-chip, .ib-fcomp-q) { justify-content: center; min-width: 44px; box-sizing: border-box; }
+.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="chips"] .ib-fcomp-w,
+.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="link"] .ib-fcomp-lo { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="link"] .ib-fcomp-lt { display: inline-block; text-transform: capitalize; }
+.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] { flex-wrap: wrap; row-gap: 2px; }
+.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] > .ib-fcomp-chips { order: -1; flex: 1 0 100%; }
+.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] > .ib-dtfoot { margin-left: auto; }
+.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] > .ib-dtfoot ~ .ib-fcomp-link { margin-left: 0; }
+.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="wrap"] > .ib-fcomp-chips { flex-wrap: wrap; }
+/* What stands in for the chips stays in the row: a long agent's name is cut, and the note takes its own line. */
+.ib-fcomp.ib-phone .ib-fcomp-sent { min-width: 0; }
+.ib-fcomp.ib-phone .ib-fcomp-sentl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-fcomp.ib-phone .ib-fcomp-foot:has(> .ib-fcomp-note) { flex-wrap: wrap; row-gap: 2px; }
+.ib-fcomp.ib-phone .ib-fcomp-foot > .ib-fcomp-note { order: -1; flex: 1 0 100%; }
+/* A long agent's name: "Reply to" keeps its line and the name is cut. An empty field's words are cut too: the field is
+   one line tall, and a second line of placeholder showed cut through. */
+.ib-fcomp.ib-phone .ib-fcomp-solo { min-width: 0; white-space: nowrap; }
+.ib-fcomp.ib-phone .ib-fcomp-solo b { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-fcomp.ib-phone :is(.ib-rtext, .ib-ta)::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 44 px to press, drawn on an overlay: the card's controls stay the size they are, and nothing moves. The top row's
+   reach over the field's first pixels, so it is painted over the field (its textarea is positioned). */
+.ib-fcomp.ib-phone .ib-fcomp-top { position: relative; z-index: 1; }
+.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-tabs button, .ib-fcomp-send, .ib-ccard .ib-btn, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink) { position: relative; }
+.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-tabs button, .ib-fcomp-min, .ib-fcomp-clip, .ib-fcomp-send, .ib-ccard .ib-btn, .ib-vmic, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink)::after { content: ''; position: absolute; inset: auto; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 .ib-fcomp-pillwrap.ib-phone { left: calc(12px + env(safe-area-inset-left)); bottom: calc(14px + env(safe-area-inset-bottom)); transform: none; }
+.ib-fcomp-pillwrap.ib-phone[data-fcomp-pill-above] { bottom: calc(14px + 52px + 8px + env(safe-area-inset-bottom)); }
 .pn-inbox .ib-fcomp-pillwrap.ib-phone .ib-fcomp-pill { height: 52px; min-width: 52px; justify-content: center; border-radius: 14px; padding: 0 14px; gap: 7px; font-size: var(--ib-fs-14, 14px); }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .pn-inbox:has(.ib-fcomp) .ib-toast { bottom: calc(148px + env(safe-area-inset-bottom)); }
@@ -7331,6 +7480,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-annat .ib-annpop { left: auto; right: 0; bottom: 0; width: min(540px, 100%); }
 .ib-annfoot { left: 0; right: 0; bottom: calc(100% + 8px); padding-inline: inherit; }
 .ib-anncard { left: 50%; bottom: calc(28px + var(--ib-fcomp-h, 0px) + env(safe-area-inset-bottom)); transform: translateX(-50%); width: min(540px, calc(100% - 32px)); }
+/* Over an HTML page's card (it sits on the pane too): on the page beside the drawer, centred over the card. */
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) > .ib-anncard { left: calc((100% - 320px) / 2); width: min(540px, calc(100% - 352px)); }
 /* A tall card in a short window leaves the list what is above it, and keeps its Close on screen. */
 .ib-anncard .ib-annpop { max-height: min(60vh, calc(100dvh - 44px - var(--ib-fcomp-h, 0px) - env(safe-area-inset-bottom))); }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
@@ -7549,22 +7700,205 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-rv-mark[data-done] { background: Highlight; color: HighlightText; }
 }
 
+/* The full-window review without its left rail (approval "review-deslop", r7; `.ib-rv-walk` is ReviewPane, never the
+   PR page). The top bar holds Walkthrough | All files, the chapter menu (ReviewJump) and the review's title in quiet
+   grey; each chapter keeps its card, notes and file clickers beside the diffs, the notes narrower. Split | Unified is
+   the tab above each chapter's card, as two marks, and docks in the bar while no tab is in view. */
+.ib-review.ib-rv-walk .ib-rsplit { grid-template-columns: minmax(0, 1fr) 300px; }
+.ib-review.ib-rv-walk.ib-fold .ib-rsplit { grid-template-columns: minmax(0, 1fr); }
+.ib-rv-walk .ib-vhead { gap: 10px; }
+.ib-rv-walk .ib-vhead > * { flex: none; }
+.ib-rv-walk .ib-vhead > .ib-sp { flex: 1 1 0; min-width: 0; }
+/* The height the diff renderer reserves for a file's header (review-editor's index.css sets it in the review app). */
+.ib-rv-walk .ib-gbody { --panel-header-h: 33px; }
+/* The title asks for no room: it takes what is free, up to its own width, so the chapter name gives way only after it. */
+.ib-review.ib-rv-walk .ib-vhead .ib-rv-title { flex: 1000 1 0; max-width: max-content; min-width: 0; text-overflow: ellipsis; font-size: var(--ib-fs-13, 13px); font-weight: 400; color: var(--muted-foreground); }
+.ib-rv-walk .ib-vhead > .ib-rv-nav { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 6px; min-width: 0; margin-left: -2px; }
+.ib-rv-nav .ib-rv-modes { flex: none; }
+.ib-rv-nav > [data-review-jump] { min-width: 0; }
+.pn-inbox .ib-rj-btn { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 340px; height: 32px; padding: 0 8px 0 10px; border-radius: 8px; font-size: var(--ib-fs-13, 13px); color: var(--foreground); }
+.pn-inbox .ib-rj-btn:hover, .pn-inbox .ib-rj-btn[aria-expanded='true'] { background: var(--ib-hover-s, var(--muted)); }
+.pn-inbox .ib-rj-btn:focus-visible { outline: 1.5px solid color-mix(in oklch, var(--ring) 55%, transparent); outline-offset: -1.5px; }
+.ib-rj-lead { flex: none; color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-rj-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.ib-rj-mono { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-rj-btn .ib-ic { flex: none; color: var(--muted-foreground); }
+.ib-rj-btn .ib-rj-done { color: var(--success); }
+/* Where the bar is short of room the place (the switch, the chapter) keeps it, and the title goes: the heading under
+   the bar holds the same facts. */
+@media (min-width: 768px) and (max-width: 959px) {
+  .ib-rv-nav ~ .ib-rv-titlesep, .ib-review.ib-rv-walk .ib-vhead .ib-rv-nav ~ .ib-rv-title { display: none; }
+}
+/* Less to read in the bar: Thread is its arrow, the destination its marks. Each keeps its name in a tooltip. */
+.pn-inbox .ib-rv-walk .ib-vhead .ib-back { gap: 0; padding-inline: 8px; }
+.ib-rv-walk .ib-vhead .ib-rv-dest .ib-seg-o > span[aria-hidden] { display: none; }
+/* Split | Unified as marks: a line drawing, the chosen one's panes filled faintly on the raised seat. */
+.pn-inbox .ib-gtab-marks .ib-seg-o { padding: 0 5px; }
+/* Dark: the card is darker than the switch's track, so a chosen mark would sit in a hole; its seat rises instead. */
+.pn-inbox .ib-gtab-marks .ib-seg-o[data-on] { background: color-mix(in oklch, var(--foreground) 20%, var(--card)); }
+:root.light .pn-inbox .ib-gtab-marks .ib-seg-o[data-on], .ib-lightscope.light .ib-gtab-marks .ib-seg-o[data-on] { background: var(--card); }
+.ib-gtab-marks .ib-seg-o:not([data-on]) .ib-mark { opacity: 0.75; }
+.ib-gtab-marks .ib-seg-o:hover .ib-mark { opacity: 1; }
+.ib-gtab-marks .ib-seg-o[data-on] .ib-mark-old { fill: currentColor; fill-opacity: 0.1; }
+.ib-gtab-marks .ib-seg-o[data-on] .ib-mark-new { fill: currentColor; fill-opacity: 0.24; }
+/* While no chapter's tab shows it sits in the bar: nothing it could cover, and the row's right side stays put. */
+.ib-rv-docked { display: inline-flex; animation: ib-rv-dock-in 120ms ease-out; }
+.pn-inbox .ib-rv-docked .ib-gtab { height: 28px; }
+@keyframes ib-rv-dock-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .ib-rv-docked { animation: none; }
+}
+/* The menu portals to the body, outside .pn-inbox. Long titles wrap and many chapters scroll; the count stays. */
+.ib-rj-menu[data-review-jump-menu] { display: flex; flex-direction: column; width: 380px; max-width: calc(100vw - 16px); padding: 6px; border-radius: 12px; border: 1px solid color-mix(in oklch, var(--border) 80%, transparent); box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.28); }
+.ib-rj-menu[data-review-jump-menu]:focus-visible { outline: none; }
+.ib-rj-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; max-height: min(480px, 70vh); overflow-y: auto; overscroll-behavior: contain; }
+[data-review-jump-menu] .ib-rj-row { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 6px 8px; border-radius: 8px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 400; color: var(--foreground); cursor: pointer; }
+[data-review-jump-menu] .ib-rj-row[data-highlighted] { background: var(--ib-hover-s, var(--muted)); color: var(--foreground); }
+[data-review-jump-menu] .ib-rj-row[data-on] { background: var(--muted); font-weight: 550; }
+[data-review-jump-menu] .ib-rj-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-rj-mark { width: 20px; height: 20px; flex: none; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: var(--ib-fs-11, 11px); font-weight: 400; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-rj-mark[data-done] { background: var(--success); color: var(--background); }
+.ib-rj-mark svg.ib-ic { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+/* The menu's item recolours any svg in it: the tick keeps the disc's own colour. */
+[data-review-jump-menu] .ib-rj-mark[data-done] svg.ib-ic { color: var(--background); }
+.ib-rj-t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* A phone's menu opens with what its one-row bar has no room for: the title, its source and the mode switch. */
+.ib-rj-head { display: grid; gap: 2px; padding: 6px 8px 10px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-rj-title { overflow-wrap: anywhere; }
+.ib-rj-source { font-size: var(--ib-fs-12, 12px); overflow-wrap: anywhere; }
+.ib-rj-modes { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; margin-bottom: 6px; padding: 2px; border-radius: 8px; background: var(--muted); }
+[data-review-jump-menu] .ib-rj-mode { justify-content: center; min-height: 36px; padding: 0 8px; border-radius: 6px; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
+[data-review-jump-menu] .ib-rj-mode > span:first-child { display: none; }
+[data-review-jump-menu] .ib-rj-mode[data-highlighted] { background: transparent; color: var(--foreground); }
+[data-review-jump-menu] .ib-rj-mode[data-checked] { background: var(--card); color: var(--foreground); font-weight: 550; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.ib-rj-head ~ .ib-rj-list { max-height: min(420px, 50vh); }
+.ib-rj-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-12, 12px); direction: rtl; text-align: left; }
+.ib-rj-dir { color: var(--muted-foreground); }
+.ib-rj-n { flex: none; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-rj-foot { flex: none; margin: 4px 0 0; padding: 8px 8px 4px; border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+@media (forced-colors: active) {
+  .ib-rj-mark[data-done] { background: Highlight; color: HighlightText; }
+}
+
+/* The review's heading, in the thread view's type and rhythm (.ib-subject, .ib-tmeta): one title, one quiet line of
+   facts split by dots, then the summary; the review's own actions (Show me, Global comment) on the title's line. */
+.gv-guide { padding: 20px 24px 72px; }
+.gv-head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.gv-title { margin: 0; min-width: 0; max-width: 60ch; font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: var(--ib-subj-track-s, -0.01em); line-height: 1.3; color: var(--foreground); text-wrap: pretty; overflow-wrap: anywhere; }
+.gv-title-gap { flex: 1; }
+.gv-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: 10px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.gv-meta > span:not(.gv-dot) { min-width: 0; overflow-wrap: anywhere; }
+.gv-dot { width: 3px; height: 3px; flex: none; border-radius: 50%; background: currentColor; opacity: 0.6; }
+.gv-tools { display: flex; align-items: center; gap: 8px; flex: none; margin-top: -1px; }
+.gv-tools [data-guide-global-comment-add] { height: 30px; }
+.pn-inbox .ib-btn.gv-head-showme { height: 30px; padding: 0 12px; font-size: var(--ib-fs-13, 13px); }
+.gv-overview { margin-top: 14px; }
+.gv-prose { max-width: 72ch; font-size: var(--ib-fs-14, 14px); line-height: 1.6; color: var(--foreground); }
+.gv-prose > * + * { margin-top: 8px; }
+.gv-chapters { display: flex; flex-direction: column; gap: 20px; margin-top: 28px; }
+/* The notes column, narrower than the review app's 440 px so the code keeps the room (approval r7); the cards sit closer to the window's edges. */
+@media (min-width: 768px) {
+  .ib-rv-walk [data-guide-section-grid] { grid-template-columns: minmax(220px, 30%) minmax(0, 1fr); }
+  .ib-rv-walk [data-guide-section-narrative] > div { padding: 18px 20px; }
+  .ib-rv-walk [data-guide-section-grid] > :last-child { padding: 14px 14px 16px; }
+}
+@media (min-width: 1024px) { .ib-rv-walk [data-guide-section-grid] { grid-template-columns: 272px minmax(0, 1fr); } }
+@media (min-width: 1360px) { .ib-rv-walk [data-guide-section-grid] { grid-template-columns: 296px minmax(0, 1fr); } }
+/* A long unbroken chapter name wraps in the notes column instead of running under the diffs. */
+.ib-rv-walk [data-guide-section-narrative] h3 { min-width: 0; overflow-wrap: anywhere; }
+/* A jump lands with air under the top bar: the card's edge clear of it (the file sits inside the card's padding). */
+.ib-rv-walk [data-guide-file-shell] { scroll-margin-top: 30px; }
+.ib-rv-walk[data-review-mode='files'] [data-guide-file-shell] { scroll-margin-top: 16px; }
+/* A jump to a chapter lands on its first file, with the chapter's tab above it in view. */
+.ib-rv-walk [data-guide-section-tabbed] [data-guide-file-shell]:first-child { scroll-margin-top: 62px; }
+/* All files: every changed file in one full-width column, no chapter card (the menu lists them). */
+.ib-rv-walk[data-review-mode='files'] [data-guide-section] { border: 0; border-radius: 0; background: transparent; overflow: visible; }
+.ib-rv-walk[data-review-mode='files'] [data-guide-section-grid] { display: block; }
+.ib-rv-walk[data-review-mode='files'] [data-guide-section-narrative] { display: none; }
+.ib-rv-walk[data-review-mode='files'] [data-guide-section-grid] > :last-child { padding: 0; background: transparent; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .gv-guide { padding: 14px 12px 48px; }
+  .gv-chapters { gap: 14px; margin-top: 22px; }
+  /* A phone: the title, its line of facts, then the two actions under them. */
+  .gv-head { display: flex; flex-direction: column; }
+  .gv-head-row { display: contents; }
+  .gv-head .gv-meta { order: 1; margin-top: 8px; }
+  .gv-head .gv-tools { order: 2; margin-top: 12px; }
+  /* A phone's bar: one row, every control one height. Each keeps a 44 px target over the row's own height. */
+  .pn-inbox .ib-review.ib-rv-walk .ib-vhead { gap: 6px; padding-inline: 4px 6px; }
+  .pn-inbox .ib-rv-walk .ib-vhead :is(.ib-back, .ib-iconbtn, .ib-btn.ib-sm, .ib-rj-btn, .ib-rv-decide button) { position: relative; height: 36px; min-height: 0; }
+  .pn-inbox .ib-rv-walk .ib-vhead :is(.ib-back, .ib-iconbtn, .ib-btn.ib-sm, .ib-rj-btn, .ib-rv-decide button)::after { content: ''; position: absolute; inset: -4px 0; }
+  .pn-inbox .ib-rv-walk .ib-vhead .ib-iconbtn { width: 36px; }
+  .pn-inbox .ib-rv-walk .ib-vhead .ib-vcomments { min-width: 0; padding-inline: 10px; }
+  .pn-inbox .ib-rv-walk .ib-vhead > .ib-rj-btn { flex: 1 1 0; max-width: none; background: var(--ib-hover-s, var(--muted)); }
+  /* The name over the count: the menu's rows and foot say where the chapter sits. */
+  .ib-rv-walk .ib-vhead > .ib-rj-btn .ib-rj-lead { display: none; }
+  .ib-rv-walk .ib-vhead > .ib-rj-btn .ib-rj-chev { margin-left: auto; }
+  /* Approve says so: the word stays, and takes the check's room. */
+  .ib-rv-decide .md\:inline { display: inline; }
+  .ib-rv-decide [data-slot='button-icon'] { display: none; }
+}
+/* No room for the word: a window this narrow, or a pull request's destination beside it. The check and the green say it. */
+@media (max-width: 349px) {
+  .ib-rv-decide .md\:inline { display: none; }
+  .ib-rv-decide [data-slot='button-icon'] { display: inline-flex; }
+}
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-review.ib-rv-walk .ib-vhead:has([data-review-destination]) { gap: 2px; }
+  .ib-rv-walk .ib-vhead:has([data-review-destination]) .ib-rv-decide .md\:inline { display: none; }
+  .ib-rv-walk .ib-vhead:has([data-review-destination]) .ib-rv-decide [data-slot='button-icon'] { display: inline-flex; }
+}
+
 /* Pull requests (approval "inbox-code-review-direction", items 4 and 5; concept B take 1; PullsPage.tsx,
    PullReview.tsx). Drawn only while Settings → Capabilities → Code review is on. The list is the Inbox list's own
    column, bands and three-line rows; a stack's third line is a chain of PR marks (the Board's own drawing). The stack view is a
    thread pane's place: a bar, the stack, the landing order, and Reply at the foot. */
 .ib-prlist .ib-lhead { gap: 10px; padding-right: 14px; }
 .ib-prlist .ib-lhead h1 { flex: none; outline: none; }
-/* The title and its count always fit; the project filter gives way: unset, it is its folder mark and caret
-   ("All projects" stays its accessible name), and a picked project's name is cut with "…" (its tooltip says it). */
-.ib-prlist .ib-lhead .ib-bpf { flex: 0 1 auto; min-width: 0; max-width: 150px; }
-.ib-prlist .ib-lhead .ib-bpf:not([data-set]) .ib-bpf-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.pn-inbox .ib-prlist .ib-lhead .ib-bpf:not([data-set]) .ib-bpf-btn { gap: 4px; padding: 0 8px; }
-.ib-pr-onyou { flex: none; font-size: var(--ib-fs-14, 14px); font-weight: 600; color: var(--ib-wait-fg, var(--warning)); white-space: nowrap; }
+/* The filter (approval "pr-list-filters", round 7 take B "One filter button"; PullFilter.tsx): the head holds the
+   filter mark alone, 28px (44px on a phone), muted at rest; narrowed, in full ink with a dot. What is picked is named
+   once, in one quiet line over the list (`.ib-pscope`), the project's name cut short with an ellipsis. */
+.ib-prlist .ib-lhead .ib-pf-slot { display: flex; margin-left: auto; margin-right: -6px; }
+.pn-inbox .ib-pf-ico { position: relative; display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted-foreground); cursor: pointer; transition: background-color 120ms ease-out, color 120ms ease-out; }
+.pn-inbox .ib-pf-ico:hover, .pn-inbox .ib-pf-ico[data-popup-open] { background: var(--ib-hover-s, var(--muted)); color: var(--foreground); }
+.pn-inbox .ib-pf-ico:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-pf-mark { display: inline-grid; place-items: center; }
+.pn-inbox .ib-pf-ico svg.ib-ic { width: 16px; height: 16px; stroke-width: 1.8; }
+.pn-inbox .ib-pf-ico[data-set] { color: var(--foreground); }
+.ib-pf-dot { position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--primary); }
+.ib-pscope { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; height: 30px; margin: 8px 10px 4px; padding: 0 2px 0 12px; border-radius: 6px; background: var(--ib-hover-s, var(--muted)); color: var(--foreground); font-size: var(--ib-fs-13, 13px); }
+.ib-pscope-v, .ib-pscope-p { display: inline-flex; align-items: center; gap: 5px; min-width: 0; white-space: nowrap; }
+.ib-pscope-v { flex: none; }
+.ib-pscope-p { flex: 0 1 auto; }
+.ib-pscope-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-pscope svg.ib-ic { flex: none; width: 14px; height: 14px; stroke-width: 1.7; color: var(--muted-foreground); }
+.pn-inbox .ib-pscope-x { flex: none; display: inline-grid; place-items: center; width: 26px; height: 26px; margin-left: auto; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--muted-foreground); cursor: pointer; }
+.pn-inbox .ib-pscope-x:hover { color: var(--foreground); background: color-mix(in oklch, var(--foreground) 8%, transparent); }
+.pn-inbox .ib-pscope-x:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.pn-inbox .ib-pscope-x svg.ib-ic { width: 12px; height: 12px; stroke-width: 2; color: inherit; }
+/* The menu, Linear's shape: a 16px icon per row, the row's count on the right, a tick column, 32px rows. The title
+   ("Filter") shows on a phone's sheet only (`.ib-pm-title`). The picked rows (the owner's "highlights when open") are
+   tinted as the sidebar's selected row is (`--ib-cur-*`), with the tick; the row under the pointer or the keys takes
+   the menu's own highlight instead (its ink and tick stay), so where the keys are always reads. */
+.ib-pm.ib-pc-menu { min-width: 232px; max-width: 300px; }
+.ib-pc-menu .ib-pmi { height: 32px; gap: 10px; }
+.ib-pc-menu .ib-pmi + .ib-pmi { margin-top: 1px; }
+.ib-pc-menu .ib-pmi .ib-ic { width: 16px; height: 16px; stroke-width: 1.6; }
+.ib-pc-menu .ib-pmi-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-pc-menu .ib-pmi[data-checked] { background: var(--ib-cur-bg); color: var(--ib-cur-fg); box-shadow: var(--ib-cur-shadow); }
+.ib-pc-menu .ib-pmi[data-checked] .ib-pmi-l { font-weight: 550; }
+.ib-pc-menu .ib-pmi[data-checked] .ib-ic { color: var(--ib-cur-fg); }
+.ib-pc-menu .ib-pmi[data-checked][data-highlighted] { background: var(--ib-hover-s, color-mix(in oklch, var(--muted) 80%, transparent)); }
+.ib-pc-menu .ib-pmi .ib-pmi-n { padding-left: 12px; font-size: var(--ib-fs-12, 12px); font-variant-numeric: tabular-nums; }
+.ib-pc-tick { flex: none; display: grid; place-items: center; width: 16px; }
+.ib-pc-menu .ib-pmi .ib-pc-tick .ib-ic { width: 14px; height: 14px; stroke-width: 2; color: currentColor; }
 .ib-prlist .ib-lbody { display: flex; flex-direction: column; }
 .ib-pr-empty { padding: 18px 14px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; }
 .ib-pr-empty p { margin: 0 0 4px; }
 .ib-pr-empty-h { color: var(--foreground); font-weight: 600; }
+/* A centred word in the list column, with its one button: Code review off. */
+.ib-pr-off { display: flex; align-items: center; justify-content: center; text-align: center; }
+.ib-pr-off .ib-btn { margin-top: 14px; }
 .ib-prrow .ib-l3.ib-pr-l3 { justify-content: flex-start; gap: 7px; }
 .ib-prrow .ib-l3.ib-pr-l3 > .ib-pv { margin-right: 0; }
 .ib-mrow.ib-prrow { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--ib-hair); }
@@ -7767,8 +8101,21 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-prlist { width: 100%; }
-  /* The band under the head says "On you 3"; the head keeps its title and the project filter. */
-  .ib-pr-onyou { display: none; }
+  /* The filter: a 44px target round the same mark; no grey box behind the open sheet's trigger; the quiet line 44px
+     tall with a 44px ×; the menu is a modal bottom sheet with 48px rows. */
+  .ib-prlist .ib-lhead .ib-pf-slot { margin-right: -8px; }
+  .pn-inbox .ib-pf-ico { width: 44px; height: 44px; border-radius: 8px; }
+  .pn-inbox .ib-pf-ico:hover, .pn-inbox .ib-pf-ico[data-popup-open] { background: none; }
+  .pn-inbox .ib-pf-ico svg.ib-ic { width: 20px; height: 20px; }
+  .ib-pf-dot { top: 11px; right: 10px; width: 7px; height: 7px; }
+  .ib-pscope { height: 44px; margin: 8px 12px 0; padding-left: 12px; font-size: var(--ib-fs-15, 15px); border-radius: 8px; }
+  .pn-inbox .ib-pscope-x { width: 44px; height: 44px; margin-right: -2px; }
+  .pn-inbox .ib-pscope-x:hover { background: none; }
+  .ib-pscope svg.ib-ic { width: 16px; height: 16px; }
+  .ib-pm-pos[data-phone] .ib-pc-menu { max-width: none; }
+  .ib-pm-pos[data-phone] .ib-pc-menu .ib-pmi { height: 48px; gap: 12px; }
+  .ib-pm-pos[data-phone] .ib-pc-menu .ib-pmi .ib-ic { width: 18px; height: 18px; }
+  .ib-pm-pos[data-phone] .ib-pc-menu .ib-pmi .ib-pmi-n { font-size: var(--ib-fs-14, 14px); }
   .ib-pr-bar { height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 8px 0 4px; }
   .pn-inbox .ib-pr-bar .ib-iconbtn, .pn-inbox .ib-pr-ext { min-width: 44px; min-height: 44px; justify-content: center; }
   .ib-pr-body { padding: 18px 16px 24px; }
@@ -7815,6 +8162,11 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-shape-layer { position: absolute; inset: var(--ib-gutter); z-index: 19; display: flex; flex-direction: column; background: var(--background); border-radius: inherit; overflow: hidden; }
 .ib-shape-layer > * { flex: 1; min-height: 0; }
 .ib-shape-loading { flex: 1; }
+/* The board's sidebar toggle sits alone in the gutter, 22px from the pane's edge where every full page's head has it;
+   the title and the claim share one left edge after it (the board's own phone layout: 10px, its padding). */
+.ib-shape-layer .shp-root:not(.phone) .shp-head-start { margin-left: -18px; }
+.ib-shape-layer .shp-root:not(.phone) .shp-head:has(.shp-head-start) .shp-claim { margin-left: 24px; }
+.ib-shape-layer .shp-root.phone .shp-head:has(.shp-head-start) .shp-claim { margin-left: 42px; }
 .ib-shape-thread { display: flex; flex-direction: column; gap: 18px; padding: 4px 2px 24px; }
 .ib-shape-msg { border-radius: 10px; padding: 6px 8px; transition: box-shadow .4s; }
 .ib-shape-who { display: flex; align-items: baseline; gap: 8px; font-size: var(--ib-fs-13-5, 13.5px); margin-bottom: 4px; }
@@ -7832,6 +8184,18 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-shape-find { width: 46vw; }
   /* A phone has no gutter around the pane: the board covers it edge to edge. */
   .ib-shape-layer { inset: 0; border-radius: 0; }
+}
+
+/* "Session ended" on a row: quiet, beside the row's own words. */
+.ib-rended { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); white-space: nowrap; flex: none; }
+.ib-row .ib-cw:has(.ib-rended) { gap: 10px; }
+.ib-noproj .ib-row:has(.ib-rended) { --ib-words-track: max-content; }
+.ib-rended + .ib-c { margin-left: 8px; }
+
+/* Send to another session and Archive beside Reply when the session ended; a phone gives them their own line. */
+.ib-footended { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-footended { flex: 1 0 100%; order: 1; }
 }
 
 /* Show me in the code review (approval "shape-in-code-review", mock ac2; packages/inbox/review-drawing). The box, the
@@ -7883,7 +8247,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-sm-pip-f span { font: var(--ib-fs-11-5, 11.5px) var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); }
 .ib-ov-fig { margin: 18px 0 4px; border-radius: 12px; background: var(--shp-paper); box-shadow: 0 0 0 1px var(--ib-line); overflow: hidden; }
 .ib-ov-fig-h { display: flex; align-items: center; gap: 8px; padding: 10px 12px 0 14px; font-size: var(--ib-fs-13, 13px); }
-.ib-ov-fig.ib-ov-ask .ib-ov-fig-h { padding-bottom: 10px; }
 .ib-ov-fig-h b { font-weight: 600; white-space: nowrap; }
 .ib-ov-fig-m { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
 .ib-ov-fig-b { padding: 10px 18px 6px; }
@@ -7968,3 +8331,18 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* The Inbox's own neutral badge (.ib-badge.ib-b-mut), a size down in the preview; a column's count after its name. */
 .pn-inbox .ib-tagpeek .ib-badge.ib-tagpeek-badge { height: 20px; padding: 0 6px; gap: 0; font-size: var(--ib-fs-12, 12px); font-weight: 500; border-color: color-mix(in oklch, var(--foreground) 18%, transparent); }
 .ib-tagpeek .ib-tagpeek-n { color: var(--foreground); font-variant-numeric: tabular-nums; margin-left: 2px; }
+
+/* Settings -> Decision data (approval decision-data, 2026-11-05). */
+.ib-dd-box { display: flex; gap: 8px; margin-top: 10px; }
+.ib-dd-box input { flex: 1; min-width: 0; height: 36px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); }
+.ib-dd-box input:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+.pn-inbox .ib-dd-box .ib-btn { height: 36px; flex: none; max-width: 50%; }
+.ib-dd-box .ib-btn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-dd-who { margin-top: 8px; }
+.ib-dd-who select { max-width: 100%; height: 30px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); }
+.ib-sgroup > p.ib-dd-note { margin: 10px 0 0; }
+@media (max-width: 480px) {
+  .ib-dd-box { flex-wrap: wrap; }
+  .ib-dd-box input { flex-basis: 100%; }
+  .pn-inbox .ib-dd-box .ib-btn { max-width: 100%; }
+}

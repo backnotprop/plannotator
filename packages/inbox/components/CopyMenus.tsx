@@ -141,7 +141,21 @@ export interface ThreadSnoozeProps {
 }
 
 /**
+ * A launched thread's items on top of ⋯ (UX screen 07): Copy attach command, Stop <agent>, and Delete session
+ * (it asks first, in the thread). Each is absent where it cannot work. Open in Terminal is not here: it shows
+ * on the run line, only when a session waits on Terminal or can't start.
+ */
+export interface ThreadMoreLaunch {
+  name: string;
+  copyAttach: (() => void) | null;
+  stop: (() => void) | null;
+  remove: (() => void) | null;
+}
+
+/**
  * The thread header's ⋯ More (approval "inbox-thread-header", 2026-11-02).
+ *
+ * A launched thread (`launch`) leads with its own group above all of these, on desktop and phone alike.
  *
  * Off a phone the read button and Snooze are icons in the bar (`ThreadSnooze`), so the menu leads with Unsnooze (a
  * snoozed thread), Pin thread (Unpin thread while pinned; only when the Inbox keeps pins: `pin` is absent on an older
@@ -167,9 +181,10 @@ export function ThreadMore(
     snooze?: ThreadSnoozeProps;
     /** Request guided review (guideRequest.ts): its own group above Archive, only where the thread offers it. */
     requestGuide?: () => void;
+    launch?: ThreadMoreLaunch | null;
   },
 ) {
-  const { thread, phone, pin, markRead, moveBack, markUnread, archive, snooze, requestGuide } = props;
+  const { thread, phone, pin, markRead, moveBack, markUnread, archive, snooze, requestGuide, launch } = props;
   const copies = useCopies(props);
   const { ref, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
@@ -211,9 +226,9 @@ export function ThreadMore(
     </Menu.Item>
   );
   const pinItem = pin && (
-    <Menu.Item className="ib-pmi" label={pin.pinned ? 'Unpin thread' : 'Pin thread'} onClick={pin.onToggle} data-thread-pin-item="">
-      <Icon name={pin.pinned ? 'pinOff' : 'pin'} size={15} />
-      {pin.pinned ? 'Unpin thread' : 'Pin thread'}
+    <Menu.Item className="ib-pmi" label={pin.pinned ? 'Unstar thread' : 'Star thread'} onClick={pin.onToggle} data-thread-pin-item="">
+      <Icon name="star" size={15} className={pin.pinned ? 'ib-star-on' : undefined} />
+      {pin.pinned ? 'Unstar thread' : 'Star thread'}
     </Menu.Item>
   );
   const phoneLeads = !!(markRead || moveBack || markUnread || snooze);
@@ -284,6 +299,29 @@ export function ThreadMore(
                 <div className="ib-pm-title" dir="auto" aria-hidden="true">
                   {thread.subject ?? '(no subject)'}
                 </div>
+                {launch && (launch.copyAttach || launch.stop || launch.remove) && (
+                  <>
+                    {launch.copyAttach && (
+                      <Menu.Item className="ib-pmi" label="Copy attach command" onClick={launch.copyAttach} data-launch-item="attach">
+                        <Icon name="copy" size={15} />
+                        Copy attach command
+                      </Menu.Item>
+                    )}
+                    {launch.stop && (
+                      <Menu.Item className="ib-pmi" label={`Stop ${launch.name}`} onClick={launch.stop} data-launch-item="stop">
+                        <Icon name="xCircle" size={15} />
+                        Stop {launch.name}
+                      </Menu.Item>
+                    )}
+                    {launch.remove && (
+                      <Menu.Item className="ib-pmi" label={`Delete ${launch.name} session…`} onClick={launch.remove} data-launch-item="delete">
+                        <Icon name="x" size={15} />
+                        Delete {launch.name} session…
+                      </Menu.Item>
+                    )}
+                    <Menu.Separator className="ib-pm-sep" />
+                  </>
+                )}
                 {lead}
                 {leads && <Menu.Separator className="ib-pm-sep" />}
                 <Menu.Item className="ib-pmi" label="Copy thread" onClick={() => copies.thread()} data-copy-item="thread">

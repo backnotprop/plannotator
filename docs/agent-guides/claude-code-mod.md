@@ -21,6 +21,11 @@ skills run as they do without mods. (One gap: a `/rename` or `/clear` that beats
 `session.start` to its decision still records the name; see "The session's name".)
 See the env table row.
 
+**Sessions the Inbox launched** carry a second PermissionRequest hook in their
+`--settings` file (`plannotator inbox permission-hook`, `inbox-launch.md`,
+"Permission prompts"). It prints nothing for ExitPlanMode, so plan review stays
+with the mod or the classic hook exactly as above.
+
 **Inert without mods.** Checked live: Claude Code 2.1.150 (no hooks modules)
 validates and loads the plugin with the `modules` key, ignores it, and runs the
 classic PermissionRequest command hook (the blocking review) exactly as before;

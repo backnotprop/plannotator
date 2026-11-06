@@ -174,8 +174,8 @@ describe("the event stream", () => {
     await w.setSteps(false);
     await until(() => windowStream.frames.filter((frame) => frame.event === "capabilities").length >= 2);
     const told = windowStream.frames.filter((frame) => frame.event === "capabilities");
-    // The frame carries the window-followed capabilities (the Board's too); Code review and Shape, off here, are held for
-    // 0.28.50 (inbox.ts heldSwitch) and left out, so a window that never drew their rows does not start to.
+    // The frame carries the window-followed capabilities (the Board's too); Code review and Shape, off here, are held until
+    // the next big release (inbox.ts heldSwitch) and left out, so a window that never drew their rows does not start to.
     expect(told.map((frame) => JSON.parse(frame.data))).toEqual([
       { board: { on: false }, steps: { on: true } },
       { board: { on: false }, steps: { on: false } },

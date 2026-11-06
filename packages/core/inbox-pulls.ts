@@ -36,6 +36,8 @@ export interface InboxPull {
   mine: boolean;
   /** Review was requested from the person (or one of their teams). */
   requested: boolean;
+  /** The person is one of its assignees (GitHub `assignee:@me`, GitLab `assignedMergeRequests`); absent from an older Inbox. */
+  assigned?: boolean;
   state: InboxPullState;
   /** The branch it merges into. */
   base: string;
@@ -111,11 +113,20 @@ export interface InboxPullHost {
   /** With `error`: when the answer still shown for this host was read; absent when there is none (its PRs are not shown). */
   last_read?: string;
   /**
-   * The searches found more open PRs than one read takes (`INBOX_PULLS_SEARCH_MAX` a search): `shown`, the host's open
-   * PRs in this list; `total`, those plus the ones the searches left out. Null `total`: the searches were not limited
-   * to the projects' repositories, so how many of the ones left out are the projects' is not known.
+   * Why the Others read (every open PR of the projects' repositories, a read of its own) gave nothing this time; the
+   * person's own lists are unaffected. Absent when it answered.
    */
-  capped?: { shown: number; total: number | null };
+  others_error?: "rate_limited" | "unavailable";
+  /** With `others_error`: when the Others answer still shown was read; absent when there is none (Others is not shown). */
+  others_last_read?: string;
+  /** The Others read is running in the background (the list never waits for it): ask again shortly for its answer. */
+  others_pending?: true;
+  /**
+   * The reads found more open PRs than they take: `shown`, the host's open PRs in this list; `total`, how many there
+   * are. Null `total`: not known (the person's own searches were not limited to the projects' repositories, or Others
+   * searched only the most active ones). `of: "others"`: only Others left PRs out; the person's own lists are whole.
+   */
+  capped?: { shown: number; total: number | null; of?: "others" };
 }
 
 /** A CLI as the Inbox found it: not installed, installed and signed in to no host, or signed in to at least one. */
@@ -148,13 +159,24 @@ export interface InboxPullDiffAnswer {
   head: string;
   patch: string;
   /**
-   * The head commit this layer's patch is of, read from the forge just before and just after the patch (null when
-   * they differ, when the forge did not say, and for the whole stack). A review posted from it is pinned to it.
+   * The head commit this patch is of, read from the forge just before and just after the patch (null when they differ
+   * or the forge did not say). The window keeps comments per this head; a review posted from the patch is pinned to it.
    */
   head_sha?: string | null;
 }
 
 export type InboxPullDiffScope = "layer" | "stack";
+
+/**
+ * One changed file's whole text at both ends of its diff, so the viewer's gaps can open. Both null when there is
+ * nothing to open into (see `GET /api/inbox/pulls/file`): the diff then shows as it came, with no arrows.
+ */
+export interface InboxFileContents {
+  /** The forge did not answer (rate limited, offline): both texts are null for now, and asking again may work. */
+  failed?: true;
+  oldContent: string | null;
+  newContent: string | null;
+}
 
 /** The CLI's answers are this many PRs per search at most. */
 export const INBOX_PULLS_SEARCH_MAX = 50;
@@ -385,6 +407,7 @@ export type InboxPullMove = "on_you" | "ready" | "waiting";
 /**
  * Why a PR is where it is; the window turns it into words:
  * - `requested`: a teammate asked for the person's review;
+ * - `assigned`: a teammate's PR the person is assigned to;
  * - `agent_ready`: the person's agent opened it (not a draft, its checks done), so the person reviews it;
  * - `running`: the person's agent opened it and its checks still run;
  * - `changes`: a reviewer asked for changes on the person's PR;
@@ -399,6 +422,7 @@ export type InboxPullMove = "on_you" | "ready" | "waiting";
  */
 export type InboxPullReason =
   | "requested"
+  | "assigned"
   | "agent_ready"
   | "running"
   | "changes"
@@ -418,6 +442,7 @@ export function inboxPullMove(pull: InboxPull, linked: boolean): { move: InboxPu
   if (pull.state === "closed") return { move: "waiting", reason: "closed" };
   if (pull.state === "draft") return { move: "waiting", reason: "draft" };
   if (pull.requested && !pull.mine) return { move: "on_you", reason: "requested" };
+  if (pull.assigned && !pull.mine) return { move: "on_you", reason: "assigned" };
   if (!pull.mine) return { move: "waiting", reason: "others" };
   if (pull.review === "changes_requested") return { move: "on_you", reason: "changes" };
   if (pull.checks === "failure") return { move: "on_you", reason: "failing" };
@@ -472,6 +497,26 @@ export function inboxPullGroups(items: readonly InboxPullItem[]): InboxPullGroup
     ready: items.filter((i) => i.move === "ready").sort(byNewest),
     waiting: items.filter((i) => i.move === "waiting").sort(byNewest),
   };
+}
+
+/** A repository path as a forge names one: `owner/repo`, GitLab's groups included. Never `.` or `..`, nor anything a URL could smuggle in. */
+const INBOX_PULL_REPO = /^(?!.*(?:^|\/)\.{1,2}(?:\/|$))[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+$/;
+
+/** A pull or merge request's parts from its web address (`/pull/N`, `/pulls/N`, `/-/merge_requests/N`), its key included; null for anything else. */
+export function inboxPullRefOfUrl(url: string): { key: string; platform: InboxPull["platform"]; host: string; repo: string; number: number } | null {
+  const match = /^https:\/\/([A-Za-z0-9.-]+)\/([^?#]+?)\/(pulls?|-\/merge_requests)\/(\d+)(?:[/?#].*)?$/.exec(url);
+  if (!match || !INBOX_PULL_REPO.test(match[2]!)) return null;
+  const host = match[1]!.toLowerCase();
+  const repo = match[2]!;
+  const number = Number(match[4]);
+  return { key: `${host}/${repo}#${number}`, platform: match[3] === "-/merge_requests" ? "gitlab" : "github", host, repo, number };
+}
+
+/** A pull key's parts (`host/repo#number`); null for anything else. */
+export function inboxPullRefOfKey(key: string): { host: string; repo: string; number: number } | null {
+  const match = /^([A-Za-z0-9.-]+)\/(.+)#(\d+)$/.exec(key);
+  if (!match || !INBOX_PULL_REPO.test(match[2]!)) return null;
+  return { host: match[1]!.toLowerCase(), repo: match[2]!, number: Number(match[3]) };
 }
 
 /**

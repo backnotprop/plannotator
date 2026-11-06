@@ -69,7 +69,15 @@ const SCANNER_FILES = new Set(["tests/helpers/real-inbox-scan.ts", "tests/never-
 const SIGNAL_ALLOWED = new Set(["tests/helpers/inbox-process.ts", ...SCANNER_FILES]);
 const HOME_PATH_ALLOWED = new Set(["tests/helpers/real-data-dir.ts", ...SCANNER_FILES]);
 /** vibe-plan.test.ts only compares the default it resolves (~/.vibe/plans) with the expected path; it reads and writes nothing there. */
-const AGENT_HOME_ALLOWED = new Set(["apps/hook/server/vibe-plan.test.ts", ...SCANNER_FILES]);
+/**
+ * scripts/launch-smoke/{day1,claude,permission}.ts are manual smokes against the real `claude` (never in CI). They already
+ * sandbox the data dir, the Inbox (startInboxServer with dataDir, PLANNOTATOR_DATA_DIR, NO_BROWSER) and the login
+ * env; the one real-home path is a READ of ~/.claude/projects/<dir>/<session>.jsonl to count a session's
+ * permissionMode (permission.ts also checks the deny reason reached Claude), because a real `--bg` worker writes
+ * its transcript there and nothing else reports it.
+ * They write nothing under the agent's folder.
+ */
+const AGENT_HOME_ALLOWED = new Set(["apps/hook/server/vibe-plan.test.ts", "scripts/launch-smoke/day1.ts", "scripts/launch-smoke/claude.ts", "scripts/launch-smoke/permission.ts", ...SCANNER_FILES]);
 
 const isStandaloneScript = (rel: string) => !/\.(?:test|spec)\.(?:ts|tsx|mts|js|mjs)$/.test(rel);
 
@@ -113,6 +121,12 @@ describe("the source scan", () => {
     expect(signalFindings(inboxFile("process.kill(pid);"))).toHaveLength(1);
     expect(signalFindings(inboxFile("process.kill(pid, 0);"))).toEqual([]);
     expect(signalFindings(inboxFile("execSync(`kill -9 ${pid}`);"))).not.toEqual([]);
+    // `kill -0` is a probe, like process.kill(pid, 0); a probe followed by a real kill is still a signal.
+    expect(signalFindings(inboxFile("expect(command).toContain(`kill -0 ${pid}`);"))).toEqual([]);
+    expect(signalFindings(inboxFile('spawnSync("kill", ["-0", String(pid)]);'))).toEqual([]);
+    expect(signalFindings(inboxFile('Bun.spawnSync(["kill", "-0", String(pid)]);'))).toEqual([]);
+    expect(signalFindings(inboxFile("execSync(`kill -0 ${pid} && kill ${pid}`);"))).not.toEqual([]);
+    expect(signalFindings(inboxFile("execSync(`kill -05 ${pid}`);"))).not.toEqual([]);
     expect(signalFindings(inboxFile('spawnSync("kill", [String(pid)]);'))).not.toEqual([]);
     expect(signalFindings(inboxFile('Bun.spawnSync(["pkill", "-f", "plannotator inbox"]);'))).not.toEqual([]);
     expect(signalFindings(inboxFile("const { kill } = process;\nkill(pid, 9);"))).not.toEqual([]);
