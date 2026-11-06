@@ -385,12 +385,11 @@ const changedType = (message: string): { ok: false; unavailable: InboxAttachment
 });
 
 /**
- * The one check before the current file is read, for every route that reads
- * it (the window's and, through it, the phone's door): the recorded realpath
- * still leads to itself, the named symlink still points there, it is a
- * regular file, and its name is not of the dotenv family. Exported for the
- * routes that hand the file to something other than a read: the new-tab
- * page and the "Open in" launcher (packages/server/inbox-open-in.ts).
+ * The one check before the current file is read: the recorded realpath still
+ * leads to itself, the named symlink still points there, it is a regular file,
+ * and its name is not of the dotenv family. The routes use `checkCurrentAsync`,
+ * the same check off the event loop; this synchronous form is its reference
+ * (attachments.test.ts holds the two to the same answers).
  */
 export function checkCurrent(attachment: InboxAttachment): CurrentCheck {
   let real: string;
@@ -428,9 +427,9 @@ function checkedStat(attachment: InboxAttachment, stat: Stats): CurrentCheck {
 
 /**
  * `checkCurrent` off the event loop: the same three reads (the path's realpath, the named path's, the path's
- * lstat), made at once, judged in the same order with the same answers. A thread with hundreds of files lists them
- * without stopping the Inbox for each (the listing, the reads and the opens use it; `checkCurrent` stays for a
- * caller that needs the answer at once).
+ * lstat), made at once, judged in the same order with the same answers. Every route that reads the file or hands
+ * it on (the listing, the reads and opens, the new-tab page, the launch check) uses it, so a thread with hundreds
+ * of files lists them without stopping the Inbox for each.
  */
 export async function checkCurrentAsync(attachment: InboxAttachment): Promise<CurrentCheck> {
   const settle = <T>(read: Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> => read.then((value) => ({ ok: true as const, value }), () => ({ ok: false as const }));

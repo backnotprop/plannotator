@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { INBOX_DEBUG_BATCH_RECORDS, INBOX_DEBUG_BODY_BYTES, INBOX_DEBUG_ID_HEADER, INBOX_DEBUG_ON_HEADER, INBOX_DEBUG_PATH } from "@plannotator/shared/inbox/debug-log";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { createInboxDebugLog, flushInboxDebugLogs } from "./inbox-debug-log";
+import { createInboxDebugLog, flushInboxDebugLogs, INBOX_DEBUG_PENDING_MAX_BYTES } from "./inbox-debug-log";
 
 type Line = Record<string, unknown>;
 
@@ -316,6 +316,87 @@ describe("written off the request path", () => {
     // Kept, not yet written: the stop writes it before it returns.
     log.note("store_load", { ms: 1 });
     log.close();
+    expect(lines(log.path).at(-1)).toMatchObject({ ev: "store_load" });
+  });
+});
+
+describe("a stop or an exit while a write is in flight", () => {
+  const seqs = (path: string) => (existsSync(path) ? lines(path).map((line) => line.n) : []);
+
+  test("every line lands once, in order, whatever stage the write in flight is at", async () => {
+    // Each round stops at a different point of the write in flight (before its file is open, before or after the bytes).
+    for (let turns = 0; turns < 12; turns += 1) {
+      const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-debug-")));
+      roots.push(dir);
+      const log = createInboxDebugLog(dir);
+      let n = 0;
+      const some = (count: number) => {
+        for (let i = 0; i < count; i += 1) log.note("loop_stall", { n: n++ });
+      };
+      some(3);
+      await log.flush();
+      some(40);
+      const inFlight = log.flush();
+      for (let i = 0; i < turns; i += 1) await new Promise((resolve) => (i % 2 ? setTimeout(resolve, 0) : setImmediate(resolve)));
+      some(5);
+      log.close();
+      // On disk when the stop returns: nothing waits for the write in flight.
+      expect({ turns, seqs: seqs(log.path) }).toEqual({ turns, seqs: Array.from({ length: n }, (_, i) => i) });
+      // And the write in flight, ending after, adds nothing: no line twice.
+      await inFlight;
+      await flushInboxDebugLogs();
+      expect({ turns, seqs: seqs(log.path) }).toEqual({ turns, seqs: Array.from({ length: n }, (_, i) => i) });
+      // Lines after the stop still go in.
+      some(1);
+      await log.flush();
+      expect(seqs(log.path).at(-1)).toBe(n - 1);
+    }
+  });
+
+  test("a process that exits right after (Ctrl-C, a restart), with a write in flight, still has every line", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-debug-")));
+    roots.push(dir);
+    const script = join(dir, "exit.ts");
+    writeFileSync(
+      script,
+      `import { createInboxDebugLog } from ${JSON.stringify(join(import.meta.dir, "inbox-debug-log.ts"))};
+const mode = process.argv[2];
+const log = createInboxDebugLog(process.argv[3]);
+let n = 0;
+for (let i = 0; i < 3; i += 1) log.note("loop_stall", { n: n++ });
+await log.flush();
+for (let i = 0; i < 50; i += 1) log.note("loop_stall", { n: n++ });
+void log.flush();
+for (let i = 0; i < 5; i += 1) log.note("loop_stall", { n: n++ });
+if (mode === "stop") log.close();
+process.exit(143);
+`,
+    );
+    for (const mode of ["stop", "exit"]) {
+      const logDir = join(dir, mode);
+      const run = Bun.spawnSync([process.execPath, script, mode, logDir], { env: { PATH: process.env.PATH ?? "", HOME: dir, PLANNOTATOR_DATA_DIR: join(dir, "data"), NO_BROWSER: "1", PLANNOTATOR_TEST_SANDBOX: "1" }, stdout: "pipe", stderr: "pipe" });
+      expect({ mode, code: run.exitCode }).toEqual({ mode, code: 143 });
+      expect({ mode, seqs: seqs(join(logDir, "debug.log")) }).toEqual({ mode, seqs: Array.from({ length: 58 }, (_, i) => i) });
+    }
+  });
+
+  test("lines not yet on disk are capped: a writer that never gets a turn keeps the first 4 MB, in order, then drops", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-debug-")));
+    roots.push(dir);
+    const log = createInboxDebugLog(dir, 64 * 1024 * 1024);
+    const pad = "x".repeat(1000);
+    // 12 MB of lines with no turn of the loop: every write planned (64 KB at a time) waits.
+    const total = Math.ceil((12 * 1024 * 1024) / 1050);
+    for (let n = 0; n < total; n += 1) log.note("loop_stall", { n, pad });
+    await log.flush();
+    const kept = lines(log.path).map((line) => line.n as number);
+    expect(kept.length).toBeGreaterThan(0);
+    expect(kept.length).toBeLessThan(total);
+    expect(kept).toEqual(Array.from({ length: kept.length }, (_, i) => i));
+    expect(readFileSync(log.path).byteLength).toBeLessThanOrEqual(INBOX_DEBUG_PENDING_MAX_BYTES);
+    // Once written, there is room again.
+    log.note("store_load", { ms: 1 });
+    await log.flush();
     expect(lines(log.path).at(-1)).toMatchObject({ ev: "store_load" });
   });
 });

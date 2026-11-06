@@ -61,10 +61,9 @@ describe("the list's memo", () => {
       ["mark read", () => store.markRead(first.message.thread_id, true)],
       ["archive", () => store.resolveThread(first.message.id, true, "person")],
       ["back", () => store.resolveThread(first.message.id, false, "person")],
-      ["discard a draft", () => {
-        store.saveReplyDraft(first.message.thread_id, { body: "later", base: store.replyDraft(first.message.thread_id)?.updated_at ?? null });
-        store.deleteReplyDraft(first.message.thread_id);
-      }],
+      ["another draft", () => store.saveReplyDraft(first.message.thread_id, { body: "later", base: store.replyDraft(first.message.thread_id)?.updated_at ?? null })],
+      // Read between the save and this: the save's own change cannot stand in for the discard's.
+      ["discard it", () => store.deleteReplyDraft(first.message.thread_id)],
       ["a rename", () => store.renameProject(project.id, "Shop front")],
       ["a deletion", () => store.deleteThread(first.message.thread_id)],
     ];
