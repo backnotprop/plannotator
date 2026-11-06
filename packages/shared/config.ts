@@ -407,6 +407,11 @@ export interface PlannotatorConfig {
   /** How many times `inboxRows` was saved: windows take a look only when it is newer than the last they took. */
   inboxRowsRev?: number;
   /**
+   * The defaults `inboxRows` was saved under (core `INBOX_ROWS_DEFAULTS_VERSION`, 2: smaller thread names on).
+   * Unset: saved before that, so an empty `inboxRows` is read as today's defaults (core `inboxRowsSaved`).
+   */
+  inboxRowsDefaults?: number;
+  /**
    * The Inbox's onboarding tour, per machine (approval "inbox-onboarding-tour"):
    * when it was started, finished or skipped, and whether the first real thread
    * offers notifications once more. Written by the server only, through POST

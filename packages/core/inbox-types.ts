@@ -1953,6 +1953,31 @@ export function inboxRowsRead(value: unknown): InboxRowsOption[] | null {
 }
 
 /**
+ * The look for someone who chose none: smaller thread names on, every other option off (the owner, 2026-11-05: "I
+ * feel like we should make it the default"). Before that, every option was off.
+ */
+export const INBOX_ROWS_DEFAULT: readonly InboxRowsOption[] = ["smallNames"];
+
+/**
+ * The defaults a look is saved under (config.json `inboxRowsDefaults`): 2 since smaller thread names are on by
+ * default. Every save writes it beside `inboxRows`.
+ */
+export const INBOX_ROWS_DEFAULTS_VERSION = 2;
+
+/**
+ * A kept look as the windows read it. One saved before the defaults changed (`savedUnder` unset) that is the old
+ * defaults, every option off, was never a choice (a window saves the look whenever it is touched, Balanced
+ * included): it is today's defaults, so the person gets the smaller names like someone who never saved one. Any
+ * other old look is the person's own and stays as it is. A look saved since then (`savedUnder` 2) is read as is, so
+ * "every option off" chosen today stays off.
+ */
+export function inboxRowsSaved(rows: InboxRowsOption[] | null, savedUnder: unknown): InboxRowsOption[] | null {
+  const current = typeof savedUnder === "number" && savedUnder >= INBOX_ROWS_DEFAULTS_VERSION;
+  if (rows && rows.length === 0 && !current) return [...INBOX_ROWS_DEFAULT];
+  return rows;
+}
+
+/**
  * The agents the Inbox connects itself to on `plannotator inbox` (the
  * approved "inbox-agent-awareness" design; packages/server/inbox-agents.ts).
  * Terminal agents and the Claude desktop app; editors keep their one-click
