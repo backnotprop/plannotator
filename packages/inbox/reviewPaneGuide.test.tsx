@@ -16,7 +16,7 @@
  * The diff reader is stubbed to read the props the review hands it.
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
-import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
@@ -79,6 +79,10 @@ let savedFetch: typeof fetch;
 let asked: string[] = [];
 let annotations: InboxAnnotationRecord[] = [];
 let writeReplies = 0;
+/** The pull list's answer waits for this (a test that reads the header while the list loads). */
+let pullsGate: Promise<void> = Promise.resolve();
+const PR_KEY = 'github.com/acme/ledger#880';
+let pullsListed: Record<string, unknown>[] = [];
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -87,11 +91,17 @@ beforeEach(() => {
   annotations = [];
   writeReplies = 0;
   readerProps = null;
+  pullsGate = Promise.resolve();
+  pullsListed = [];
   window.localStorage.clear();
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     asked.push(`${init?.method ?? 'GET'} ${path}`);
     if (init?.method === 'POST') return Response.json({ reply: {}, questions: [], replayed: false });
+    if (/\/api\/inbox\/pulls(\?|$)/.test(path)) {
+      await pullsGate;
+      return Response.json({ fetched_at: null, hosts: [], pulls: pullsListed, links: {}, projects: {}, cards: {} });
+    }
     if (path.includes('/guide')) return Response.json({ message_id: GUIDE, guide: GUIDE_META, snapshot });
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations });
     if (path.includes('/sessions')) return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: [], asker: { session: 'ses_a', live: true } });
@@ -109,7 +119,7 @@ afterEach(() => {
   globalThis.fetch = savedFetch;
 });
 
-async function render(review: boolean, codeReview: boolean) {
+async function render(review: boolean, codeReview: boolean, threadPatch: Partial<InboxThread> = {}) {
   const message = messageOf(review);
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -118,7 +128,7 @@ async function render(review: boolean, codeReview: boolean) {
     root.render(
       <div className="pn-inbox">
         <ReviewPane
-          thread={threadOf(message)}
+          thread={{ ...threadOf(message), ...threadPatch }}
           message={message}
           codeReview={codeReview}
           onBack={() => {}}
@@ -184,7 +194,7 @@ test.skipIf(!hasDom)("a guide's comments wait for the next Send: the panel says 
   annotations = [commentRecord('ann-1', 'Name the retry limit.'), commentRecord('ann-2', 'Log the expiry.')];
   await render(false, true);
   const rides = document.querySelector('[data-review-rides]');
-  expect(rides?.textContent).toBe('2 comments ride your next Send to Claude Code.');
+  expect(rides?.textContent).toBe('2 comments go with your next reply to Claude Code.');
   expect(document.querySelector('[data-guide-comments]')?.getAttribute('data-guide-comments')).toBe('2');
   await act(async () => document.querySelector<HTMLElement>('[data-review-write-reply]')!.click());
   expect(writeReplies).toBe(1);
@@ -204,7 +214,7 @@ test.skipIf(!hasDom)("a guide's comments wait for the next Send: the panel says 
 test.skipIf(!hasDom)('one comment rides (the singular), and a resolved thread reads with no way to reply from the review', async () => {
   annotations = [commentRecord('ann-1', 'Name the retry limit.')];
   await render(false, false);
-  expect(document.querySelector('[data-review-rides]')?.textContent).toBe('1 comment rides your next Send to Claude Code.');
+  expect(document.querySelector('[data-review-rides]')?.textContent).toBe('1 comment goes with your next reply to Claude Code.');
   act(() => root?.unmount());
   host?.remove();
   const message = { ...messageOf(false), resolved_at: '2026-10-11T11:00:00.000Z' };
@@ -222,4 +232,87 @@ test.skipIf(!hasDom)('one comment rides (the singular), and a resolved thread re
   expect(pane() !== null).toBe(true);
   expect(has('[data-review-write-reply]')).toBe(false);
   expect(has('[data-review-rides]')).toBe(false);
+});
+
+/** The review pane measured this wide (happy-dom has no layout: unmeasured reads as folded). */
+function wide(width: number) {
+  const real = HTMLElement.prototype.getBoundingClientRect;
+  return spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    return this.hasAttribute('data-review-message') ? ({ width, height: 900, top: 0, left: 0, right: width, bottom: 900, x: 0, y: 0, toJSON() {} } as DOMRect) : real.call(this);
+  });
+}
+const panel = () => document.querySelector<HTMLElement>('[data-review-panel]')!;
+const commentsButton = () => document.querySelector<HTMLButtonElement>('[data-guide-comments-sheet]')!;
+
+test.skipIf(!hasDom)('wide (1,600 px), no comments: the panel starts closed and nothing of it shows; the Comments button opens and closes it', async () => {
+  const measured = wide(1600);
+  try {
+    await render(false, true);
+    expect(panel().dataset.reviewPanel).toBe('closed');
+    expect(pane()!.classList.contains('ib-rv-shut')).toBe(true);
+    expect(commentsButton().getAttribute('aria-expanded')).toBe('false');
+    await act(async () => commentsButton().click());
+    expect(panel().dataset.reviewPanel).toBe('open');
+    expect(pane()!.classList.contains('ib-rv-shut')).toBe(false);
+    expect(commentsButton().getAttribute('aria-expanded')).toBe('true');
+    await act(async () => commentsButton().click());
+    expect(panel().dataset.reviewPanel).toBe('closed');
+  } finally {
+    measured.mockRestore();
+  }
+});
+
+test.skipIf(!hasDom)('wide, a Code review review with comments: the panel starts open, its close hides it and gives focus to the button, and the comments still count and ride the verdict', async () => {
+  annotations = [commentRecord('ann-1', 'Name the retry limit.'), commentRecord('ann-2', 'Log the expiry.')];
+  const measured = wide(1600);
+  try {
+    await render(true, true);
+    expect(panel().dataset.reviewPanel).toBe('open');
+    expect(pane()!.classList.contains('ib-rv-shut')).toBe(false);
+    const close = panel().querySelector<HTMLButtonElement>('[aria-label="Close the comments"]')!;
+    await act(async () => close.click());
+    expect(panel().dataset.reviewPanel).toBe('closed');
+    expect(pane()!.classList.contains('ib-rv-shut')).toBe(true);
+    expect(document.activeElement === commentsButton()).toBe(true);
+    // Closed is not gone: the count stays on the button and the verdict still carries them.
+    expect(commentsButton().getAttribute('aria-label')).toBe('Comments, 2');
+    expect(document.querySelector('[data-review-decision] [data-decision-primary]')?.textContent).toContain('Send Feedback');
+    // Escape in the open panel closes it before anything else.
+    await act(async () => commentsButton().click());
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    await act(async () => panel().querySelector<HTMLElement>('[aria-label="Close the comments"]')!.dispatchEvent(escape));
+    expect(escape.defaultPrevented).toBe(true);
+    expect(panel().dataset.reviewPanel).toBe('closed');
+  } finally {
+    measured.mockRestore();
+  }
+});
+
+test.skipIf(!hasDom)('narrow (folded), with comments: the panel starts closed, so it never covers the review on arrival', async () => {
+  annotations = [commentRecord('ann-1', 'Name the retry limit.')];
+  await render(false, false);
+  expect(pane()!.classList.contains('ib-fold')).toBe(true);
+  expect(panel().dataset.reviewPanel).toBe('closed');
+  await act(async () => commentsButton().click());
+  expect(panel().dataset.reviewPanel).toBe('open');
+  expect(pane()!.classList.contains('ib-panel-open')).toBe(true);
+});
+
+test.skipIf(!hasDom)('the header says who sent it, from which project, and when', async () => {
+  await render(false, false);
+  expect(document.querySelector('.ib-vhead [data-review-from]')?.textContent).toMatch(/^from Claude Code in ledger, sent (Oct 11, )?\d{1,2}:\d{2}\s?[AP]M$/);
+});
+
+test.skipIf(!hasDom)("a teammate's PR review: nothing in the decision's place until the pull list answers, then Post, or Write the reply when the PR is not listed", async () => {
+  let open!: () => void;
+  pullsGate = new Promise<void>((resolve) => (open = resolve));
+  await render(true, true, { pull_theirs: true, pull_keys: [PR_KEY] });
+  expect(has('[data-review-write-reply]')).toBe(false);
+  expect(has('[data-review-decision]')).toBe(false);
+  await act(async () => {
+    open();
+    for (let i = 0; i < 4; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  // Not listed (closed, or not read): the agent's way, which for a teammate's PR is the reply.
+  expect(has('[data-review-write-reply]')).toBe(true);
 });

@@ -31,6 +31,8 @@ export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
   const [saveError, setSaveError] = useState<string | null>(null);
   // This guide's comments waiting for a Send, as the store keeps them.
   const [records, setRecords] = useState<InboxAnnotationRecord[]>([]);
+  /** The first read of the comments answered (or failed): the panel's default can be chosen. */
+  const [commentsRead, setCommentsRead] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scrollTarget, setScrollTarget] = useState<{ id: string; token: number } | null>(null);
   // Read only once archived, unless the guide arrived after the archive line (it behaves as an open thread's).
@@ -75,11 +77,14 @@ export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
     inboxApi
       .attachments(thread.thread_id)
       .then((model) => {
-        if (cancelled || localWrites.current !== startedAt) return;
+        if (cancelled) return;
+        setCommentsRead(true);
+        if (localWrites.current !== startedAt) return;
         setRecords(model.annotations.filter((r) => r.message_id === message.id && r.guide));
       })
       .catch(() => {
         // The thread went away; the pane closes with it.
+        if (!cancelled) setCommentsRead(true);
       });
     return () => {
       cancelled = true;
@@ -143,5 +148,5 @@ export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
 
   // The expand arrows' whole files, as the guide's patch names them.
   const fileContents = useCallback((path: string, signal: AbortSignal) => inboxApi.guideFile(message.id, path, signal), [message.id]);
-  return { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, scrollTarget, readOnly, changeReviewed, save, remove, edit, showComment, readerComments, localWrites, fileContents };
+  return { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, commentsRead, comments, selectedId, setSelectedId, scrollTarget, readOnly, changeReviewed, save, remove, edit, showComment, readerComments, localWrites, fileContents };
 }

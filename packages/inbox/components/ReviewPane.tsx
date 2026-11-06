@@ -64,7 +64,7 @@ import { SHEET_HOME, type SheetOffset } from '../review-drawing/useSheetDrag';
 import type { GuideSelectionActions } from '../guide/types';
 import { reviewSourceLine } from '../guide/sourceLine';
 import { InboxApiError, inboxApi } from '../api';
-import { agentName } from '../format';
+import { agentName, whenTime } from '../format';
 import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
@@ -124,9 +124,10 @@ type RailMode = 'walkthrough' | 'files';
 
 export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onAsk, codeReview, onWriteReply }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
-  const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = state;
+  const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, commentsRead, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = state;
   // Code review's own review: the agent sent it as one (`review: true`) while Code review is on. A guide, or a review
-  // while Code review is off, reads with none of it (no verdict, Viewed ticks, Show me or Post): the server refuses each.
+  // while Code review is off, reads with none of it: no verdict, Viewed ticks, Show me, Overview picture or Post. With
+  // Code review off the server refuses the verdict, Viewed ticks, Show me and posting; the rest is the window's choice.
   const isReview = codeReview && message.guide?.review === true;
   // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
   // conversation in the thread, and no Approve or Request changes is offered.
@@ -136,24 +137,32 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   // A stack's review spans several PRs and posts from each layer's own review (Pull requests) instead.
   const postKey = isReview && !state.readOnly && thread.pull_keys?.length === 1 ? thread.pull_keys[0]! : null;
   const [postPull, setPostPull] = useState<InboxPull | null>(null);
+  /** The pull list answered (or failed) for this review's PR: until then its ending is not known, and none shows. */
+  const [pullsRead, setPullsRead] = useState(false);
   // A post refused at its commit (`pull_commit_gone` on GitHub after a force-push, `pull_moved` on GitLab after any push;
   // GitHub takes a commit still on the PR). Read again from the forge, then offered at its new
   // head (the review's comments ride the body, so they do not depend on the commit).
   const [moved, setMoved] = useState<'reading' | 'read' | 'failed' | null>(null);
   const [reread, setReread] = useState(0);
   useEffect(() => {
-    if (reread === 0) setPostPull(null);
+    if (reread === 0) {
+      setPostPull(null);
+      setPullsRead(false);
+    }
     if (!postKey) return;
     const controller = new AbortController();
     inboxApi.pulls(reread > 0, controller.signal).then(
       (answer) => {
         if (controller.signal.aborted) return;
         setPostPull(answer.pulls.find((pull) => pull.key === postKey) ?? null);
+        setPullsRead(true);
         if (reread > 0) setMoved('read');
       },
       () => {
         // The list could not be read: the agent's ending alone, as before.
-        if (!controller.signal.aborted && reread > 0) setMoved('failed');
+        if (controller.signal.aborted) return;
+        setPullsRead(true);
+        if (reread > 0) setMoved('failed');
       },
     );
     return () => controller.abort();
@@ -178,13 +187,24 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   const bodyRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [paneRef, folded] = useNarrowerThan<HTMLElement>(REVIEW_FOLD_PANEL_BELOW, true);
+  // The comments panel opens and closes from the header's Comments button at every width: docked beside the diff
+  // where there is room, over it (a sheet) below REVIEW_FOLD_PANEL_BELOW. Docked, it starts open when the review
+  // already has comments and closed with none; the sheet starts closed. Closed, nothing of it stays on screen.
   const [sheet, setSheet] = useState(false);
+  const [panelDocked, setPanelDocked] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (commentsRead && panelDocked === null) setPanelDocked(comments.length > 0);
+    // Chosen once, when the comments are first read; after that the person's choice holds.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commentsRead]);
+  const panelOpen = folded ? sheet : panelDocked === true;
+  const setPanelOpen = (open: boolean) => (folded ? setSheet(open) : setPanelDocked(open));
   const sheetButtonRef = useRef<HTMLButtonElement>(null);
   const sheetId = useId();
   useEffect(() => {
     if (!folded) setSheet(false);
   }, [folded]);
-  // A global comment chosen in the guide: selected in the panel, and the folded panel opens on it.
+  // A global comment chosen in the guide: selected in the panel, and a closed panel opens on it.
   const readerComments = useMemo(
     () =>
       stateComments && {
@@ -192,6 +212,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
         onShowGlobalComment: (id: string) => {
           setSelectedId(id);
           if (folded) setSheet(true);
+          else setPanelDocked(true);
         },
       },
     [stateComments, setSelectedId, folded],
@@ -376,7 +397,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   const [earlierOverview, setEarlierOverview] = useState<GuideOverviewDiagram | null>(null);
   useEffect(() => {
     setEarlierOverview(null);
-    if (!earlierReview || !overviewHtml) return;
+    if (!isReview || !earlierReview || !overviewHtml) return;
     let live = true;
     inboxApi.guide(earlierReview).then(
       (answer) => {
@@ -389,7 +410,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     return () => {
       live = false;
     };
-  }, [earlierReview, !!overviewHtml]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isReview, earlierReview, !!overviewHtml]); // eslint-disable-line react-hooks/exhaustive-deps
   const overviewChanged = useMemo(
     () =>
       overviewHtml && earlierOverview
@@ -429,13 +450,13 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     },
     [viewed, message.id, setSaveError],
   );
-  // Viewed ticks are Code review's (the server keeps them only for a review while it is on).
+  // Viewed ticks are Code review's: the server takes them only on a review, and only while Code review is on.
   const viewedProp = useMemo(() => (readOnly || !isReview ? undefined : { files: viewedSet, onToggle: toggleViewed }), [readOnly, isReview, viewedSet, toggleViewed]);
   // The top bar's menu lists what the review draws, in the order it draws it (code, then tests, then generated).
   const jumpChapters = chapters.map((chapter, index) => ({ title: chapter.title, reviewed: reviewed[index] ?? snapshot?.guide.reviewed[index] ?? false }));
   const jumpFiles = groupByFileKind(files, (file) => file.path)
     .flatMap((group) => group.items)
-    .map((file) => ({ path: file.path, additions: file.additions, deletions: file.deletions, viewed: viewedSet.has(file.path) }));
+    .map((file) => ({ path: file.path, additions: file.additions, deletions: file.deletions, viewed: isReview && viewedSet.has(file.path) }));
   const jumpAt = mode === 'walkthrough' ? current : Math.max(0, jumpFiles.findIndex((file) => file.path === fileSpot));
 
   // The notes the person writes on a decision: kept per review until its verdict went (a failed send, a close
@@ -543,12 +564,14 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     [sendVerdict],
   );
 
+  /** Close the panel from inside it (its close, Escape): focus goes back to the button that opens it. */
   const closeSheet = () => {
-    setSheet(false);
+    setPanelOpen(false);
     sheetButtonRef.current?.focus({ preventScroll: true });
   };
+  // Escape closes the open panel before it closes the review (App's handler skips a used Escape).
   const onSheetKey = (event: React.KeyboardEvent) => {
-    if (event.key === 'Escape' && folded && sheet && !event.defaultPrevented) {
+    if (event.key === 'Escape' && panelOpen && !event.defaultPrevented) {
       event.preventDefault();
       closeSheet();
     }
@@ -556,7 +579,9 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
 
   const title = message.guide?.title ?? snapshot?.guide.title ?? 'Review';
   // With no verdict and no post here, what the comments do: ride the person's next Send from the thread.
-  const rides = !readOnly && !verdict && !postPull && comments.length > 0 ? `${plural(comments.length, 'comment')} ${comments.length === 1 ? 'rides' : 'ride'} your next Send to ${author}.` : null;
+  const rides = !readOnly && !verdict && !postPull && comments.length > 0 ? `${plural(comments.length, 'comment')} ${comments.length === 1 ? 'goes' : 'go'} with your next reply to ${author}.` : null;
+  // Who sent it and when, as the thread's message says (the old guide pane's line).
+  const from = `from ${author} in ${thread.project.name}, sent ${whenTime(message.created_at)}`;
   const source = snapshot ? reviewSourceLine(snapshot) : '';
   const railModes = (
     <div className="ib-seg ib-rv-modes" role="radiogroup" aria-label="Review by">
@@ -572,7 +597,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer ib-review ib-rv-walk${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
+      className={`ib-viewer ib-review ib-rv-walk${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${!folded && !panelOpen ? ' ib-rv-shut' : ''}`}
       aria-label="Review"
       data-review-message={message.id}
       data-review-mode={mode}
@@ -587,7 +612,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
         {!phone && (
           <span className="ib-rv-nav" data-review-nav="">
             {railModes}
-            {snapshot && <ReviewJump mode={mode} chapters={jumpChapters} files={jumpFiles} current={jumpAt} onChapter={toChapter} onFile={toFile} />}
+            {snapshot && <ReviewJump mode={mode} chapters={jumpChapters} files={jumpFiles} current={jumpAt} onChapter={toChapter} onFile={toFile} viewedTicks={isReview} />}
           </span>
         )}
         {/* A phone's bar is one row: the place, and in its menu the title and the switch that had rows of their own. */}
@@ -599,6 +624,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
             current={jumpAt}
             onChapter={toChapter}
             onFile={toFile}
+            viewedTicks={isReview}
             head={
               <>
                 <div className="ib-rj-head">
@@ -610,6 +636,9 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
                       {source}
                     </span>
                   )}
+                  <span className="ib-rj-source" data-review-from="">
+                    {from}
+                  </span>
                 </div>
                 <DropdownMenuRadioGroup className="ib-rj-modes" aria-label="Review by" value={mode} onValueChange={(value) => flip(value as typeof mode)}>
                   {(['walkthrough', 'files'] as const).map((value) => (
@@ -642,28 +671,31 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
             </span>
           </Tip>
         )}
+        {!phone && (
+          <span className="ib-from ib-rv-from" data-review-from="">
+            {from}
+          </span>
+        )}
         <span className="ib-sp" />
         {docked && !phone && (
           <span ref={dockRef} className="ib-rv-docked" data-review-diff-style-docked="">
             <DiffStyleSwitch icons name="ib-diff-style-docked" label="Diff layout, top bar" />
           </span>
         )}
-        {folded && (
-          <button
-            type="button"
-            ref={sheetButtonRef}
-            className={`ib-btn ib-sm ib-vcomments${sheet ? ' ib-on' : ''}`}
-            onClick={() => setSheet((v) => !v)}
-            onKeyDown={onSheetKey}
-            aria-expanded={sheet}
-            aria-controls={sheetId}
-            aria-label={`Comments, ${comments.length}`}
-            data-guide-comments-sheet=""
-          >
-            <Icon name="comment" size={15} />
-            {comments.length}
-          </button>
-        )}
+        <button
+          type="button"
+          ref={sheetButtonRef}
+          className={`ib-btn ib-sm ib-vcomments${panelOpen ? ' ib-on' : ''}`}
+          onClick={() => setPanelOpen(!panelOpen)}
+          onKeyDown={onSheetKey}
+          aria-expanded={panelOpen}
+          aria-controls={sheetId}
+          aria-label={`Comments, ${comments.length}`}
+          data-guide-comments-sheet=""
+        >
+          <Icon name="comment" size={15} />
+          {comments.length}
+        </button>
         {!readOnly && snapshot && postPull ? (
           <PostEnding
             pull={postPull}
@@ -700,9 +732,11 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
           </span>
         ) : (
           // No verdict to give: the comments ride the next Send, from the thread's reply box.
+          // A PR's review waits for the pull list: Post may take this place (no Write the reply flashing first).
           !readOnly &&
           snapshot &&
-          onWriteReply && (
+          onWriteReply &&
+          (!postKey || pullsRead) && (
             <Tip content={rides}>
               <button type="button" className="ib-btn ib-sm ib-pri" onClick={onWriteReply} aria-label="Write the reply" data-review-write-reply="">
                 <Icon name="reply" size={14} />
@@ -800,11 +834,12 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
           className="ib-apanel ib-gpanel"
           id={sheetId}
           onKeyDown={onSheetKey}
-          role={folded ? 'region' : undefined}
-          aria-label={folded ? 'Comments' : undefined}
+          role="region"
+          aria-label="Comments"
           data-guide-comments={comments.length}
+          data-review-panel={panelOpen ? 'open' : 'closed'}
         >
-          {folded && (
+          {panelOpen && (
             <div className="ib-sheet-h">
               <b>Comments</b>
               <span className="ib-mut">{comments.length}</span>
@@ -817,7 +852,8 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
           <AnnotationPanel
             emptyHint={readOnly ? undefined : 'Click a line number, drag across lines, or select code to comment'}
             isOpen
-            presentation={folded ? 'embedded' : undefined}
+            // The panel's own head (title, count, close) is above: the list draws as embedded at every width.
+            presentation="embedded"
             annotations={NO_ANNOTATIONS}
             blocks={NO_BLOCKS}
             codeAnnotations={comments}
@@ -837,14 +873,9 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
             readOnly={readOnly}
           />
           {rides && (
-            <div className="ib-gstrip" data-review-rides="">
-              <span className="ib-rchip" data-strip-chip="">
-                {plural(comments.length, 'comment')}
-              </span>{' '}
-              <span className="ib-l">
-                {comments.length === 1 ? 'rides' : 'ride'} your next Send to {author}.
-              </span>
-            </div>
+            <p className="ib-gstrip" data-review-rides="">
+              {rides}
+            </p>
           )}
         </div>
       </div>

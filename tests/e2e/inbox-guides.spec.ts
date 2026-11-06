@@ -361,7 +361,7 @@ test('a comment on the guide\'s diffs: a line and a range, listed beside the gui
   await expect(panel).toContainText('package.json · line 3');
   // At 1440 px the comments fold into the header's button: open them, with what rides the next Send at their foot.
   await viewer.locator('[data-guide-comments-sheet]').click();
-  await expect(viewer.locator('[data-review-rides]')).toHaveText('2 comments ride your next Send to Claude Code.');
+  await expect(viewer.locator('[data-review-rides]')).toHaveText('2 comments go with your next reply to Claude Code.');
   await expect(viewer.locator('[data-review-write-reply]')).toBeVisible();
   await shot('4.3-guide-comments-in-the-panel');
   await viewer.getByRole('button', { name: 'Close the comments' }).click();

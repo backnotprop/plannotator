@@ -489,9 +489,24 @@ test('a guided review at 1024 and 900 keeps its diffs readable, with its comment
         await expect(button).toBeFocused();
         await expect(viewer).toBeVisible();
       } else {
+        // Wide: the panel docks beside the diff, and the same Comments button opens and closes it. It starts open only
+        // when the review already has comments; closed, nothing of it shows and the diff takes the width.
         await expect(viewer).not.toHaveClass(/\bib-fold\b/);
-        await expect(viewer.locator('[data-guide-comments-sheet]')).toHaveCount(0);
-        await expect(viewer.locator('.ib-gpanel')).toBeVisible();
+        const button = viewer.locator('[data-guide-comments-sheet]');
+        const panel = viewer.locator('.ib-gpanel');
+        const count = Number(await panel.getAttribute('data-guide-comments'));
+        await expect(button).toHaveAttribute('aria-expanded', count > 0 ? 'true' : 'false');
+        if (count === 0) {
+          await expect(panel).toBeHidden();
+          expect((await viewer.locator('.ib-gbody').boundingBox())!.width).toBeGreaterThan(width - 40);
+          await button.click();
+        }
+        await expect(panel).toBeVisible();
+        await shot(page, `guide-${width}-docked`);
+        await viewer.getByRole('button', { name: 'Close the comments' }).click();
+        await expect(panel).toBeHidden();
+        await expect(button).toBeFocused();
+        await expect(button).toHaveAttribute('aria-expanded', 'false');
       }
       await shot(page, `guide-${width}`);
     } finally {
