@@ -131,6 +131,7 @@ One long-lived local server per machine. Agents leave messages, `:::question` bl
 - Layout under `inbox/`:
   - `projects/<key>/` holds `project.json`, `messages.jsonl`, `questions.jsonl`, `annotations.jsonl`, `cards.jsonl` (the Board's cards; see "The Board") and `steps.jsonl` (each agent session's steps per thread; see "Thread steps") (an older store's `decisions.jsonl` stays there, kept only so sequence numbers are never reused; see "Decisions were removed"). `<key>` is the project name plus 6 hex of the root's hash. A key that collides takes more of the hash.
   - `initiatives.jsonl` holds the Board's initiatives, across projects (kind `initiative`, on the one seq; see "Initiatives" in inbox-notifications-and-agents.md).
+  - `decision-lines.jsonl` holds one no-words line per question of a deleted thread or project, so Settings -> Decision data's totals don't change (`packages/shared/inbox/decision-data.ts`; see "Decision data" in inbox-window.md).
   - `blobs/<sha256>` holds sent attachment versions, the images messages show (`inline_images`) and guided-review snapshots.
   - `seq.json` holds the highest seq across deletions.
   - The Pi and OpenCode connections keep `claims/<reply id>/` (delivery claims), `connection-tools.json` (the last tool list) and `leases/<host>-<session>.json` (which process of a session delivers).
