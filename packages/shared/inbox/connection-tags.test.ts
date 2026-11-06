@@ -10,6 +10,7 @@ import {
   INBOX_REDIRECTED_NAME_MAX,
   INBOX_WAKE_AGENT_NAMES,
   INBOX_TAGGED_INSTRUCTION,
+  INBOX_WAKE_CLOSING_LINE,
   INBOX_WAKE_INSTRUCTION,
   inboxAlsoTaggedLine,
   inboxTaggedLine,
@@ -26,10 +27,11 @@ test("a tagged session's wake: its own instruction, whose thread it is, read fir
       "Plannotator Inbox: Dead-letter queue (msg_R)",
       INBOX_TAGGED_INSTRUCTION,
       "The thread belongs to another session (Claude Code); you have not seen it. Read it first with read_thread (message_id msg_R). Answer only what is addressed to you, in the same thread: plannotator_inbox send_message with reply_to msg_R.",
+      "[Thread msg_T]",
       "",
       "@Pi raise it to 30 s.",
       "",
-      "[thread msg_T · more: plannotator_inbox read_thread · how it works: plannotator inbox --help]",
+      INBOX_WAKE_CLOSING_LINE,
     ].join("\n"),
   );
   expect(text).not.toContain(INBOX_WAKE_INSTRUCTION);

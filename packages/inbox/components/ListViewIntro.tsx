@@ -28,8 +28,10 @@ export interface ListViewIntroProps {
   phone: boolean;
   /** The view the list draws now: its choice is marked "In use". */
   current: ListView;
-  /** Smart groups, or Escape: the groups stay. */
+  /** Smart groups: the groups stay. */
   onSmart: () => void;
+  /** Escape or a click outside: the current view stays (the line counts it as Not now). Without it, `onSmart`. */
+  onDismiss?: () => void;
   /** Simple list: the list switches at once, remembered as the ⋮ menu's choice. */
   onSimple: () => void;
 }
@@ -51,10 +53,10 @@ function Thumb({ groups, flat, look, projectNames, awayMachines }: Pick<ListView
  * groups, but you could also treat it like a simple email list"): two columns side by side, each a small picture of
  * the person's own list, its name, one line and a button. Smart groups is marked "Recommended" and its button is the
  * primary one (the owner's pick); the view the list draws now is marked "In use". One click picks either and closes
- * it; Escape and a click outside keep Smart groups. Focus starts on the question (Tab reaches Smart groups first).
+ * it; Escape and a click outside keep the current view. Focus starts on the question (Tab reaches Smart groups first).
  * No keyboard shortcut.
  */
-export function ListViewIntro({ groups, flat, look, projectNames, awayMachines, phone, current, onSmart, onSimple }: ListViewIntroProps) {
+export function ListViewIntro({ groups, flat, look, projectNames, awayMachines, phone, current, onSmart, onDismiss, onSimple }: ListViewIntroProps) {
   const words = LIST_VIEW_INTRO_WORDS;
   const thumbs = { look, projectNames, awayMachines };
   const choices = [
@@ -66,7 +68,7 @@ export function ListViewIntro({ groups, flat, look, projectNames, awayMachines, 
       labelledBy="ib-lvc-title"
       describedBy="ib-lvc-note"
       testId="list-view-intro"
-      onClose={onSmart}
+      onClose={onDismiss ?? onSmart}
       ownKeys
       initialFocus="#ib-lvc-title"
       className={`ib-lvc${phone ? ' ib-lvc-phone' : ''}`}
