@@ -149,7 +149,7 @@ export function SystemSetupDialog(props: SystemSetupDialogProps) {
     setRepos(next.setup?.repos ?? []);
     setDocs(next.setup?.docs ?? []);
     setAgent(next.setup?.agent ?? 'claude');
-    setModel(next.setup ? next.setup.model : systemRecommendedModel(next.setup?.agent ?? 'claude'));
+    setModel(next.setup ? next.setup.model : systemRecommendedModel('claude'));
     setRepoDraft(null);
     setDocDraft('');
     setRepoError(null);
