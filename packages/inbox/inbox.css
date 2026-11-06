@@ -1695,7 +1695,8 @@ button.ib-acct-r:focus-visible .ib-acct-sw { opacity: 0.72; }
 .ib-acct-n { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: var(--ib-fs-13-5, 13.5px); color: color-mix(in oklch, var(--foreground) 82%, transparent); }
 .ib-acct-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-acct-num { color: var(--muted-foreground); font-weight: 400; }
-.ib-acct-n small { flex: 0 10 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-12, 12px); font-weight: 400; color: var(--muted-foreground); }
+/* A long name gives way before its note: "on Mac mini" keeps its words, up to 45% of the row's text. */
+.ib-acct-n small { flex: 0 0 auto; max-width: 45%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-12, 12px); font-weight: 400; color: var(--muted-foreground); }
 .ib-acct-r[data-in-use] .ib-acct-n { color: var(--foreground); font-weight: 600; font-size: var(--ib-fs-14, 14px); }
 /* Usage: limit, bar, figure, one line of detail (the in-use row's other limits, or "resets <time>" at 90%) */
 .ib-acct-use { display: grid; grid-template-columns: 112px 38px; column-gap: 10px; align-items: center; font-size: var(--ib-fs-12-5, 12.5px); }
