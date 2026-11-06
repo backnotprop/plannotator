@@ -1,0 +1,1 @@
+{"schemaVersion": 1, "switched": true, "from": {"number": 2, "email": "b@fake.test"}, "to": {"number": 1, "email": "a@fake.test"}, "strategy": "direct", "reason": "switched", "message": "Switched to Account-1 (a@fake.test)", "warnings": []}
