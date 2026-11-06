@@ -15,15 +15,15 @@ import { realpathSync } from "node:fs";
 import { basename, isAbsolute } from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
-import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
+import { findQuestionBlocks, QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
-import { inboxQuestionKeysWithRecommendedMarker } from "@plannotator/core/inbox-questions";
+import { inboxQuestionKeysWithRecommendedMarker, parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from "@plannotator/core/inbox-actions";
 import { checkInboxSubject, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, inboxTidyMcpLine, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
 import { inboxStopNoticeReply, INBOX_AGENT_RULES, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
-import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
+import { inboxMessageImageRefsInOrder, inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
 import { attachedImagesNotInBody, attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly } from "@plannotator/shared/inbox/tidy";
 import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
@@ -663,6 +663,46 @@ export function recommendedInLabelText(count: number): string {
     : ` ${count} questions mark their recommendation inside a choice label; next time mark each only with \`Recommended: <label>\` on its own line after the choices, and keep labels plain.`;
 }
 
+/**
+ * Questions asked about pictures with bare text choices (the owner,
+ * 2026-11-06): an agent wrote a rundown with each option's picture above the
+ * question, then asked with plain choices, so the person could not pick by
+ * picture. The keys of the pick-one and pick-several questions whose choices
+ * all lack a picture, when two or more pictures (`![alt](src)` or `<img>`,
+ * each once, outside code) sit in the body outside every question block;
+ * else no keys. Pure; never throws.
+ */
+export function questionsWithoutPictureChoices(body: string): { keys: string[]; pictures: number } {
+  const none = { keys: [], pictures: 0 };
+  if (typeof body !== "string" || !body.includes(":::question")) return none;
+  const bare = parseInboxQuestionBlocks(body)
+    .filter((q) => (q.kind === "single" || q.kind === "multi") && q.parsed.choices.length > 0 && q.parsed.choices.every((c) => !c.image))
+    .map((q) => q.key);
+  if (bare.length === 0) return none;
+  // The body with every question block blanked (its lines kept), so only the pictures outside them count.
+  const lines = body.split("\n");
+  for (const block of findQuestionBlocks(body, { frontmatter: false })) {
+    for (let i = block.startLine - 1; i < block.endLine && i < lines.length; i++) lines[i] = "";
+  }
+  const outside = lines.join("\n");
+  const pictures = inboxMessageImageRefsInOrder(outside).length + inboxMessageRemoteImageRefsInOrder(outside).length;
+  return pictures >= 2 ? { keys: bare, pictures } : none;
+}
+
+/**
+ * The send_message result's advice for each such question: send it again as
+ * picture choices, replacing this one (`reply_to` the message just sent,
+ * `supersedes` its `<message id>/<key>`). Never a refusal. "" when there is none.
+ */
+export function choicesWithoutPicturesText(messageId: string, found: { keys: readonly string[]; pictures: number }): string {
+  return found.keys
+    .map(
+      (key) =>
+        ` The question's choices have no pictures, but ${found.pictures} pictures sit above it: visual options are picture choices. Send the question again with reply_to "${messageId}" and supersedes "${messageId}/${key}", each choice as \`- [ ] Label — ![alt](path) what it means\`.`,
+    )
+    .join("");
+}
+
 /** A message id (`msg_` and a 26-character ULID), as an agent might pass one as `thread` by mistake. */
 const MESSAGE_ID_SHAPE = /^msg_[0-9A-HJKMNP-TV-Z]{26}$/i;
 
@@ -706,7 +746,7 @@ export async function sendAgentMessage(
   input: AgentSendInput,
   guide?: InboxGuideRef,
   wakes = false,
-): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; naming: InboxSendResult["naming"] | null }> {
+): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null }> {
   const { store } = context;
   refuseIdShapedThread(input.thread, input.reply_to);
   refuseBadSubject(input.subject);
@@ -798,12 +838,15 @@ export async function sendAgentMessage(
   // A question written with a recommended marker in a choice label (read
   // by the parser or not, with or without a `Recommended:` line).
   const recommendedInLabel = inboxQuestionKeysWithRecommendedMarker(message.body);
+  // A question with bare text choices under two or more pictures: send_message advises sending it again as picture choices.
+  const choicesWithoutPictures = questionsWithoutPictureChoices(message.body);
   return {
     imagesNotShown: notShown,
     attachedImagesNotInBody: attachedOnly,
     questionOpenersWithText: openers,
     noStakes: noStakes.length,
     recommendedInLabel: recommendedInLabel.length,
+    choicesWithoutPictures,
     superseded: superseded.length,
     actions: actions.length,
     done: markedDone.length,
@@ -1017,7 +1060,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             .array(z.string())
             .optional()
             .describe(
-              `Files to show the person beside your message, e.g. ["docs/plan.md", "proto/admin.html", "src/retry.mjs"]: absolute (anywhere you can read) or relative to project_path. ${INBOX_ATTACHMENTS_PICTURES_LINE} Any regular file, any size. Markdown, plain text, config and data files, Mermaid and Graphviz sources and HTML (its relative images and frames load from its folder) open in Plannotator's viewers; images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show below the message; videos (MP4, MOV, WebM) play beside it, and the person comments at moments (each comment comes back with its time and the paused frame's path); source code, scripts and other text open as code with line comments; PDFs and anything else are offered as a download. Folders and .env files are refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations, including comments on images and code lines, come back in their reply. Each attachment's kind in the result is markdown, text, html, mermaid, graphviz, code, image, video, pdf or file; treat any other as file. A markdown link to an attached file in the body, e.g. [the mock](proto/admin.html), opens it beside the thread.`,
+              `Files to show the person beside your message, e.g. ["docs/plan.md", "proto/admin.html", "src/retry.mjs"]: absolute (anywhere you can read) or relative to project_path. ${INBOX_ATTACHMENTS_PICTURES_LINE} Any regular file, any size. Markdown, plain text, config and data files, Mermaid and Graphviz sources and HTML (its frames load from its folder; its images from anywhere on this computer, or the web) open in Plannotator's viewers; images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show below the message; videos (MP4, MOV, WebM) play beside it, and the person comments at moments (each comment comes back with its time and the paused frame's path); source code, scripts and other text open as code with line comments; PDFs and anything else are offered as a download. Folders and .env files are refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations, including comments on images and code lines, come back in their reply. Each attachment's kind in the result is markdown, text, html, mermaid, graphviz, code, image, video, pdf or file; treat any other as file. A markdown link to an attached file in the body, e.g. [the mock](proto/admin.html), opens it beside the thread.`,
             ),
           // Thread steps (approval "inbox-thread-steps"): a message and its list together, only while the person has steps on.
           ...(context.stepsOn?.() ? { steps: STEPS_FIELD.optional() } : {}),
@@ -1065,6 +1108,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           attachedImagesNotInBodyText(sent.attachedImagesNotInBody.length),
           noStakesText(sent.noStakes),
           recommendedInLabelText(sent.recommendedInLabel),
+          choicesWithoutPicturesText(String(sent.structured.message_id), sent.choicesWithoutPictures),
           questionOpenersWithTextText(sent.questionOpenersWithText),
         ];
         if (stale) hints.push(`\n${staleThreadText(stale, shortTime)}`);
