@@ -14,6 +14,7 @@ import DOMPurify from 'dompurify';
 import {
   parseShapeCodeTarget,
   shapeCssProblems,
+  shapeKeepSvgWhole,
   shapeLinkUrl,
   shapePaintAllowed,
   shapeUrlAllowed,
@@ -25,6 +26,7 @@ import {
   type ShapeRef,
 } from '@plannotator/core/shape';
 import { useReducedMotion } from './Pebble';
+import { syncKeptBoxes, type KeptBox } from './boxSelect';
 
 /** A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first. */
 function resolveFiles(html: string, resolve: ((src: string) => string) | undefined): string {
@@ -114,6 +116,12 @@ svg .obj { filter: drop-shadow(0 3px 10px rgb(0 0 0 / .18)); }
 @media (prefers-reduced-motion: reduce) { .shp-go { animation: none; transform: translate(calc(var(--dx) / 2), calc(var(--dy) / 2)); } }
 .board.reduce.entering [data-step], .board.reduce.entering .draw { animation: shp-fade-only .16s linear both; animation-delay: 0s; stroke-dasharray: none; }
 
+/* A board that takes a dragged box: the cross everywhere but a number, and no words selected on the way. */
+@media (pointer: fine) {
+  .board.boxable, .board.boxable * { cursor: crosshair !important; -webkit-user-select: none; user-select: none; }
+  .board.boxable .shp-rb, .board.boxable .shp-rb * { cursor: pointer !important; }
+}
+
 /* A marked part: the ring while the agent reads it; erased and redrawn when it changes. */
 .mk { border-radius: 6px; transition: box-shadow .25s, background-color .25s; }
 .pinpointing .mk { cursor: pointer; }
@@ -153,6 +161,9 @@ svg .obj { filter: drop-shadow(0 3px 10px rgb(0 0 0 / .18)); }
 .shp-rb.own.flash { animation: shp-rb-own-flash 1.2s ease-out; }
 @keyframes shp-rb-own-flash { 0%, 40% { transform: scale(1.3); } 100% { transform: none; } }
 @media (prefers-reduced-motion: reduce) { .shp-rb.own, .shp-rb.own:hover, .shp-rb.own.lit { transform: none; transition: none; } .shp-rb.own.flash { animation: none; } }
+/* A number in an SVG's words. */
+svg tspan.shp-rb { display: inline; fill: var(--mark); }
+svg tspan.shp-rb:hover, svg tspan.shp-rb.lit { text-decoration: underline; }
 /* A finger needs more than 16 px. */
 @media (pointer: coarse) { .shp-rb.own:focus-visible { outline: none; } .board.peek .shp-rb:not(.own) { position: relative; min-width: 22px; height: 22px; font-size: 12px; } .board.peek .shp-rb:not(.own)::after { content: ""; position: absolute; inset: -11px; } }
 `;
@@ -207,7 +218,50 @@ function sanitizer(): ReturnType<typeof DOMPurify> | null {
 /** An agent's drawing, made safe: no script, handlers, outside loads, frames or <style>. Empty when this page cannot sanitize. */
 export function sanitizeShapeHtml(html: string): string {
   const p = sanitizer();
-  return p ? p.sanitize(html, CONFIG) : '';
+  return p ? p.sanitize(shapeKeepSvgWhole(html), CONFIG) : '';
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+// Parts of an SVG that are never drawn where they stand.
+const UNDRAWN = new Set(['defs', 'symbol', 'clippath', 'mask', 'marker', 'pattern', 'lineargradient', 'radialgradient', 'filter']);
+const drawnWords = (root: Element): Element[] =>
+  [root, ...root.querySelectorAll('text')].filter((t) => {
+    if (t.localName !== 'text') return false;
+    for (let at: Element | null = t; at && at.namespaceURI === SVG_NS; at = at.parentElement) if (UNDRAWN.has(at.localName.toLowerCase())) return false;
+    return true;
+  });
+
+/**
+ * In SVG only a `<text>` shows words, so an empty number among the shapes
+ * (`<g data-ref="1"/>`) is drawn at the end of the nearest words: those just
+ * before it, else just after it, in its own group first, then in the groups
+ * around it. With no words in the drawing, it goes just after the SVG, as a
+ * bubble. A shape (`<circle data-ref>`) stays where it is: it is the number.
+ */
+function placeNumber(el: Element): Element {
+  const doc = el.ownerDocument;
+  const copy = (spot: Element) => {
+    for (const a of el.attributes) if (a.name === 'class' || a.name.startsWith('data-')) spot.setAttribute(a.name, a.value);
+    el.remove();
+    return spot;
+  };
+  for (let node: Element | null = el; node && node.parentElement?.namespaceURI === SVG_NS; node = node.parentElement) {
+    let words: Element | undefined;
+    for (let at = node.previousElementSibling; at && !words; at = at.previousElementSibling) words = drawnWords(at).pop();
+    for (let at = node.nextElementSibling; at && !words; at = at.nextElementSibling) words = drawnWords(at)[0];
+    if (!words) continue;
+    const spot = copy(doc.createElementNS(SVG_NS, 'tspan'));
+    spot.setAttribute('dx', '5');
+    words.append(spot);
+    return spot;
+  }
+  let svg = el.closest('svg');
+  while (svg?.parentElement?.namespaceURI === SVG_NS) svg = svg.parentElement.closest('svg');
+  if (!svg) return el;
+  const spot = copy(doc.createElement('span'));
+  svg.after(spot);
+  return spot;
 }
 
 const markOf = (path: EventTarget[]) => path.find((t): t is HTMLElement => t instanceof Element && (t as Element).hasAttribute('data-mark')) as HTMLElement | undefined;
@@ -253,9 +307,19 @@ export interface ShapeDrawnProps {
   stale?: ReadonlySet<string>;
   /** Words a host puts on parts: `fresh` on `marks.fresh` parts ("changed"), `stale` on `stale` ones. Absent: no tag. */
   tags?: { fresh?: string; stale?: string };
+  /** A dragged box can start here: the cross cursor, and no text selection. Board only. */
+  boxable?: boolean;
+  /** Kept boxes with their comments, on this view. Board only. */
+  boxes?: readonly KeptBox[];
   onHoverMark?: (el: HTMLElement | null) => void;
   /** A marked part was chosen; `text` is the selected words in Select mode. */
   onPickMark?: (el: HTMLElement, text?: string) => void;
+  /**
+   * The drawing's `.board`, each time it is drawn afresh (new content, or the
+   * wide and tall layouts swapping), and null once it is gone. For a layer
+   * that works on the drawing itself ("Follow an example").
+   */
+  onBoard?: (board: HTMLElement | null) => void;
 }
 
 /** How much room the view has, for a fixed canvas. */
@@ -318,7 +382,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     const order = [...new Set(steps.map((el) => Number(el.getAttribute('data-step')) || 0))].sort((a, b) => a - b);
     for (const el of steps) el.style.setProperty('--i', String(order.indexOf(Number(el.getAttribute('data-step')) || 0)));
     for (const el of board.querySelectorAll<HTMLElement>('[data-mark]')) el.classList.add('mk');
-    for (const el of board.querySelectorAll<HTMLElement>('[data-ref]')) {
+    for (let el of board.querySelectorAll<Element>('[data-ref]')) {
       const n = Number(el.getAttribute('data-ref'));
       const ref = (handlers.current.refs ?? []).find((r) => r.n === n);
       if (!ref) {
@@ -326,8 +390,10 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
         continue;
       }
       // Empty: the board draws the number. Not empty: what the agent drew is the number.
-      if (!el.children.length && !el.textContent?.trim()) el.textContent = String(n);
-      else el.classList.add('own');
+      if (!el.children.length && !el.textContent?.trim()) {
+        if (el.namespaceURI === SVG_NS && (el.localName === 'g' || el.localName === 'tspan') && !el.closest('text')) el = placeNumber(el);
+        el.textContent = String(n);
+      } else el.classList.add('own');
       el.classList.add('shp-rb');
       el.setAttribute('role', ref.kind === 'pr' || ref.kind === 'link' ? 'link' : 'button');
       el.setAttribute('tabindex', '0');
@@ -344,7 +410,9 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       }
     }
     setContentKey((x) => x + 1);
+    handlers.current.onBoard?.(board);
   }, [html, css, scaled]);
+  useEffect(() => () => handlers.current.onBoard?.(null), []);
 
   // The canvas scale.
   useLayoutEffect(() => {
@@ -367,7 +435,15 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     board.classList.toggle('skip', skip);
     board.classList.toggle('reduce', reduce);
     board.classList.toggle('pinpointing', pinpoint);
-  }, [phase, skip, reduce, pinpoint, contentKey]);
+    board.classList.toggle('boxable', !!props.boxable);
+  }, [phase, skip, reduce, pinpoint, props.boxable, contentKey]);
+
+  // Kept boxes: inside the drawing, so they scroll and scale with it. A box belongs to the layout it was drawn on.
+  const boxes = props.boxes;
+  useLayoutEffect(() => {
+    const board = rootRef.current?.querySelector<HTMLElement>('.board');
+    if (board && boxes) syncKeptBoxes(board, boxes.filter((b) => !!b.box.tall === useTall), scaled ? k : 1);
+  }, [boxes, useTall, scaled, k, contentKey]);
 
   // Marks, and a host's tags on them.
   const stale = props.stale;

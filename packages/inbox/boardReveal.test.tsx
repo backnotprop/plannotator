@@ -108,11 +108,12 @@ const claims = () => posts.filter((p) => p.path.endsWith('/api/inbox/reveal'));
 const switchSaves = () => posts.filter((p) => p.path.endsWith('/api/inbox/settings'));
 const dialog = () => document.querySelector<HTMLDialogElement>('dialog[data-dialog="board-intro"]');
 
-function row(id: string): InboxListRow {
+/** A row; `project` 2 puts it in a second project (the Board's need: two projects or more). */
+function row(id: string, project: 1 | 2 = 1): InboxListRow {
   const at = new Date(Date.now() - 60_000).toISOString();
   return {
     thread_id: id,
-    project_id: 'prj_1',
+    project_id: `prj_${project}`,
     subject: `Subject ${id}`,
     author: { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null },
     created_at: at,
@@ -123,7 +124,7 @@ function row(id: string): InboxListRow {
     resolved_at: null,
     questions: { open: 0, picked: 0, stopped: false, holds_up: [], prompt: null },
     waiting_on_person: false,
-    project: { id: 'prj_1', name: 'billing' },
+    project: project === 1 ? { id: 'prj_1', name: 'billing' } : { id: 'prj_2', name: 'docs' },
     thread_name: `name-${id}`,
     section: 'sent',
     unread: false,
@@ -136,7 +137,7 @@ function row(id: string): InboxListRow {
   };
 }
 
-const ROWS = ['msg_a', 'msg_b', 'msg_c', 'msg_d', 'msg_e'].map(row);
+const ROWS = ['msg_a', 'msg_b', 'msg_c', 'msg_d', 'msg_e'].map((id, i) => row(id, i === 4 ? 2 : 1));
 
 interface State {
   due: boolean;
@@ -343,6 +344,8 @@ describe.skipIf(!hasDom)('the calm moment', () => {
     ['the thread was open under the read time', {}, { early: true }],
     ['the page is younger than its age', {}, { young: true }],
     ['under five rows', { rows: ROWS.slice(0, 4) }],
+    // Approval "inbox-one-time-dialogs": five threads in flight in two projects or more.
+    ['five rows in one project', { rows: ['msg_a', 'msg_b', 'msg_c', 'msg_d', 'msg_e'].map((id) => row(id)) }],
     ['the first-run screen', { firstRun: true }],
     ['the tour, an update or another one-time dialog this load', { blocked: true }],
     ['a toast is up', { toast: true }],
@@ -383,16 +386,23 @@ describe.skipIf(!hasDom)('the calm moment', () => {
 describe('the load latch (App: revealArmed)', () => {
   test('only reveal.next is armed; Snooze only while it is next', async () => {
     const { revealArmed } = await import('./reveal');
-    expect(revealArmed({ reveal: { next: 'board' }, snooze_intro: { due: true } })).toEqual({ next: 'board', snoozeDue: false });
-    expect(revealArmed({ reveal: { next: 'snooze' }, snooze_intro: { due: true } })).toEqual({ next: 'snooze', snoozeDue: true });
-    expect(revealArmed({ reveal: { next: null }, snooze_intro: { due: true } })).toEqual({ next: null, snoozeDue: false });
+    expect(revealArmed({ reveal: { next: 'board' }, snooze_intro: { due: true } })).toEqual({ next: 'board', snoozeDue: false, ahead: [] });
+    expect(revealArmed({ reveal: { next: 'snooze' }, snooze_intro: { due: true } })).toEqual({ next: 'snooze', snoozeDue: true, ahead: [] });
+    expect(revealArmed({ reveal: { next: null }, snooze_intro: { due: true } })).toEqual({ next: null, snoozeDue: false, ahead: [] });
+  });
+
+  test('an ahead offer (List view) is latched beside next, so it can go at its own moment (approval "inbox-one-time-dialogs")', async () => {
+    const { revealArmed } = await import('./reveal');
+    const armed = revealArmed({ reveal: { next: 'board', ahead: ['steps'] }, snooze_intro: { due: false } });
+    expect(armed.next).toBe('board');
+    expect(armed.ahead).toEqual(['steps']);
   });
 
   test('an older Inbox (no reveal in settings): its Snooze rule alone, never the Board', async () => {
     const { revealArmed } = await import('./reveal');
-    expect(revealArmed({ snooze_intro: { due: true } })).toEqual({ next: 'snooze', snoozeDue: true });
-    expect(revealArmed({ snooze_intro: { due: false } })).toEqual({ next: null, snoozeDue: false });
-    expect(revealArmed({})).toEqual({ next: null, snoozeDue: false });
+    expect(revealArmed({ snooze_intro: { due: true } })).toEqual({ next: 'snooze', snoozeDue: true, ahead: [] });
+    expect(revealArmed({ snooze_intro: { due: false } })).toEqual({ next: null, snoozeDue: false, ahead: [] });
+    expect(revealArmed({})).toEqual({ next: null, snoozeDue: false, ahead: [] });
   });
 });
 
