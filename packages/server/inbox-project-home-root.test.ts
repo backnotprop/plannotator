@@ -9,7 +9,8 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
+import { accountHome } from "../../tests/helpers/real-data-dir";
 import { basename, join, parse } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { InboxStore } from "@plannotator/shared/inbox/store";
@@ -164,7 +165,7 @@ describe("a dotfiles home and rule 4", () => {
   // stand-in git names it, so nothing runs there.
   const shapedFolder = (() => {
     try {
-      const real = realpathSync(homedir());
+      const real = realpathSync(accountHome()!);
       return isHomeOrRootShape(real) && real !== parse(real).root ? real : null;
     } catch {
       return null;

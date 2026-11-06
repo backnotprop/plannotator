@@ -646,7 +646,7 @@ function guideCommentFields(fields: Record<string, unknown>, scope: "line" | "ge
   }
   const kept: Record<string, unknown> = { id: fields.id, type: fields.type, scope };
   if (fields.text !== undefined) kept.text = fields.text;
-  const strings = scope === "general" ? ["author", "conventionalLabel"] : ["author", "conventionalLabel", "suggestedCode", "originalCode", "selectedText", "tokenText"];
+  const strings = scope === "general" ? ["author", "conventionalLabel"] : ["author", "conventionalLabel", "suggestedCode", "originalCode", "selectedText", "tokenText", "anchorText"];
   for (const field of strings) {
     const value = fields[field];
     if (value === undefined || value === null) continue;
@@ -654,6 +654,8 @@ function guideCommentFields(fields: Record<string, unknown>, scope: "line" | "ge
     kept[field] = value;
   }
   if (scope === "line") {
+    // On a line an expand arrow opened: a PR's review posts it in its main comment, never inline.
+    if (fields.outsideDiff === true) kept.outsideDiff = true;
     for (const field of ["charStart", "charEnd"]) {
       const value = fields[field];
       if (value === undefined || value === null) continue;
@@ -5051,7 +5053,8 @@ export class InboxStore {
     if (!Number.isInteger(start) || !Number.isInteger(end) || (start as number) < 1 || (end as number) < (start as number)) {
       throw new InboxError("validation_error", "annotation.lineStart / lineEnd: line numbers, start first.", { field: "annotation.lineStart" });
     }
-    if (!isLineRangeInPatch(diff.patch, start as number, end as number, side)) {
+    // A line an expand arrow opened is outside every hunk by its nature; the file must still be one the patch changes.
+    if (fields.outsideDiff !== true && !isLineRangeInPatch(diff.patch, start as number, end as number, side)) {
       const range = start === end ? `line ${start}` : `lines ${start}-${end}`;
       throw new InboxError("validation_error", `annotation.lineStart / lineEnd: ${range} on the ${side} side of ${file} is not in one hunk of the guided review's patch.`, { field: "annotation.lineStart" });
     }
@@ -6197,6 +6200,11 @@ export class InboxStore {
      * first Send's.
      */
     board_request?: unknown;
+    /**
+     * Sent from Settings -> Decision data's Ask: the root carries `decision_ask`, and what the agent receives for it
+     * says how to answer. Only `true` sets it; a replay keeps the first Send's.
+     */
+    decision_ask?: unknown;
     /** Launch: the agent the Inbox starts for this thread (the server's record; `to` is then its placeholder). */
     launch?: InboxLaunchRecord;
   }): { message: InboxMessage; replayed: boolean } {
@@ -6238,6 +6246,7 @@ export class InboxStore {
       started_by_person: true,
       ...(input.by_guest ? { by_guest: true as const } : {}),
       ...(input.board_request === true ? { board_request: true as const } : {}),
+      ...(input.decision_ask === true ? { decision_ask: true as const } : {}),
       ...(input.launch ? { launch: input.launch } : {}),
       ...(threadName ? { thread_name: threadName, named_by: { kind: auto ? ("auto" as const) : ("person" as const), at } } : {}),
       ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
