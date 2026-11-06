@@ -199,6 +199,7 @@ function Reader({
   threadHeading = false,
   hostDiffControls = false,
   collapseAll,
+  onGlobalCommentOpener,
 }: GuideReaderProps) {
   const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
@@ -404,10 +405,18 @@ function Reader({
             onAdd: setGlobalAnchor,
             onSelect: showGlobalComment,
             selectedId: comments.selectedId,
+            ...(onGlobalCommentOpener ? { hostButton: true } : {}),
           }
         : undefined,
-    [comments, globalAnnotations, showGlobalComment],
+    [comments, globalAnnotations, showGlobalComment, onGlobalCommentOpener],
   );
+  // The host's own Global comment button opens the same composer, anchored to that button.
+  const takesGlobalComments = !!globalComments;
+  useEffect(() => {
+    if (!onGlobalCommentOpener) return;
+    onGlobalCommentOpener(takesGlobalComments ? setGlobalAnchor : null);
+    return () => onGlobalCommentOpener(null);
+  }, [onGlobalCommentOpener, takesGlobalComments]);
   // A global comment chosen in the panel: its place in the guide's list comes into view.
   useEffect(() => {
     if (!scrollTarget || !globalAnnotations.some((a) => a.id === scrollTarget.id)) return;

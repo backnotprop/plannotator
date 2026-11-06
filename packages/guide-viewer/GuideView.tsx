@@ -98,7 +98,8 @@ export const GuideView: React.FC<GuideViewProps> = ({
   const host = useGuideHost();
   const overviewFigure = host.renderOverviewFigure?.() ?? null;
   const headActions = threadHeading ? (host.renderHeadActions?.() ?? null) : null;
-  const addGlobalComment = host.globalComments?.onAdd;
+  // A host that draws its own button (the Inbox's pull request page) gets none here.
+  const addGlobalComment = host.globalComments?.hostButton ? undefined : host.globalComments?.onAdd;
   const resolved = useMemo(() => resolveGuideSectionFiles(guide, host.files), [guide, host.files]);
   // Only the guide's own files register shells; in-app the review may hold many more.
   const guideFileCount = resolved.sectionFiles.reduce((n, files) => n + files.length, 0) + resolved.unplacedFiles.length;

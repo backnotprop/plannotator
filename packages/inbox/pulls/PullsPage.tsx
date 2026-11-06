@@ -65,9 +65,10 @@ import {
   type PullFilter,
 } from './model';
 import { PullFilterControl, PullScopeLine, useFilterTrigger } from './PullFilter';
-import { forgeName, initials, repoLabels, repoName } from './labels';
+import { forgeName, repoLabels, repoName } from './labels';
 import { answeredClis, pullsEmptyWords, pullsNotices } from './notices';
 import { ReviewPicker } from './ReviewPicker';
+import { AuthorAvatar } from './AuthorAvatar';
 import { chainMarks, landsNextLayer, layerBaseWords, stackLink, startLayer } from './topology';
 import type { PullsState } from './usePulls';
 
@@ -338,25 +339,14 @@ function PullList({
  * Who the row is from: the agent's tile when one is tied to it, else the author's initials (a teammate), an empty tile
  * for a teammate's PR whose account is gone (the column stays even), else nothing (the person's own).
  */
-/** Pictures that failed or drew nothing in this window, so a row drawn again never asks twice. */
-const failedAvatars = new Set<string>();
-
 /**
  * The row's top-left spot: always the PR author's profile picture (the person's own PRs too; a stack's bottom layer's
- * author), read through the Inbox's own route (`GET /api/inbox/pulls/avatar`): the window's CSP never loads a remote
- * image. The initials show while it loads and stay when it cannot; a deleted account is a grey person.
+ * author; AuthorAvatar). A deleted account is a grey person.
  */
 function RowLead({ item }: { item: InboxPullItem }) {
   const bottom = item.stack.layers[0]!;
   const author = bottom.author;
-  const src = author ? inboxApi.pullAvatarUrl(bottom.host, author) : null;
-  const [shown, setShown] = useState(false);
-  const [failed, setFailed] = useState(() => (src ? failedAvatars.has(src) : false));
-  useEffect(() => {
-    setShown(false);
-    setFailed(src ? failedAvatars.has(src) : false);
-  }, [src]);
-  if (!author || !src) {
+  if (!author) {
     return (
       <Tip content="A deleted account">
         <span className="ib-pr-av ib-pr-av-ghost" role="img" aria-label="A deleted account" data-pulls-ghost="">
@@ -365,32 +355,9 @@ function RowLead({ item }: { item: InboxPullItem }) {
       </Tip>
     );
   }
-  const fail = () => {
-    failedAvatars.add(src);
-    setFailed(true);
-  };
   return (
     <Tip content={author}>
-      <span className="ib-pr-av" role="img" aria-label={author} data-pulls-author={author} data-pulls-avatar={failed ? 'none' : shown ? 'shown' : 'loading'}>
-        {!shown && <span aria-hidden="true">{initials(author)}</span>}
-        {!failed && (
-          <img
-            src={src}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            referrerPolicy="no-referrer"
-            draggable={false}
-            data-shown={shown ? '' : undefined}
-            onLoad={(event) => {
-              const img = event.currentTarget;
-              if (img.naturalWidth > 1 && img.naturalHeight > 1) setShown(true);
-              else fail();
-            }}
-            onError={fail}
-          />
-        )}
-      </span>
+      <AuthorAvatar host={bottom.host} author={author} data-pulls-author={author} />
     </Tip>
   );
 }

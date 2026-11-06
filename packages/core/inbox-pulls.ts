@@ -168,6 +168,20 @@ export interface InboxPullDiffAnswer {
 export type InboxPullDiffScope = "layer" | "stack";
 
 /**
+ * `GET /api/inbox/pulls/description`: what the PR's author wrote on it (GitHub's body, GitLab's description), as
+ * markdown, for the review's description line. Null when they wrote nothing. `cut`: longer than the Inbox reads
+ * (`INBOX_PULL_DESCRIPTION_MAX`), the rest on the forge.
+ */
+export interface InboxPullDescriptionAnswer {
+  key: string;
+  body: string | null;
+  cut?: true;
+}
+
+/** A description is read up to this many characters. */
+export const INBOX_PULL_DESCRIPTION_MAX = 64_000;
+
+/**
  * One changed file's whole text at both ends of its diff, so the viewer's gaps can open. Both null when there is
  * nothing to open into (see `GET /api/inbox/pulls/file`): the diff then shows as it came, with no arrows.
  */

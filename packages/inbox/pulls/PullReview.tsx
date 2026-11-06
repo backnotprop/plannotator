@@ -9,6 +9,12 @@
  *   reader draws none of its own (`GuideReader` `bare`), and the strip under
  *   the header names every layer by its number, bottom to top, the one on
  *   screen marked, with "This layer | Whole stack" (native radios).
+ * - The top (approval "diff-controls-headers", take A, "Description line"):
+ *   the header names the author after the title and carries the diff
+ *   controls (DiffControls: one Split / Unified button, Collapse all, the
+ *   Diff display gear); the strip holds the description's first line with
+ *   More (PullDescription) and the Global comment button (the reader's
+ *   composer, `onGlobalCommentOpener`). No card has a Split | Unified tab.
  * - Under 900 px of review the file rail folds into the "Files · N files"
  *   picker over the diff (`RAIL_FOLD_BELOW`), so the diff keeps the width.
  * - "This layer" is the PR's own diff; "Whole stack" is the compare from the
@@ -52,6 +58,9 @@ import { findStack, inboxPullLabel, linkAgentName, pullGroups, pullNounWord, pul
 import { forgeName } from './labels';
 import { railRows } from './rail';
 import { isOpen, layerPosition, layerVerdictLink, nextLayer, stackVerdictLink } from './topology';
+import { AuthorAvatar } from './AuthorAvatar';
+import { PullDescription } from './PullDescription';
+import { DiffControls, nextCollapseAll, type CollapseAllState } from '../components/DiffControls';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 /** The review's width (px) under which its file rail folds into the Files picker over the diff. */
@@ -485,6 +494,12 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const viewedSet = useMemo(() => new Set(viewed), [viewed]);
   const toggleViewed = useCallback((path: string) => write({ viewed: viewed.includes(path) ? viewed.filter((p) => p !== path) : [...viewed, path] }), [viewed, comments]); // eslint-disable-line react-hooks/exhaustive-deps
   const [reveal, setReveal] = useState<{ path: string; token: number } | null>(null);
+  // The header's Collapse all (DiffControls): every file's diff, this view only.
+  const [collapseAll, setCollapseAll] = useState<CollapseAllState | null>(null);
+  // The strip's Global comment opens the reader's composer (set while the review takes comments).
+  const [openGlobalComment, setOpenGlobalComment] = useState<((anchor: HTMLElement) => void) | null>(null);
+  const globalOpener = useCallback((open: ((anchor: HTMLElement) => void) | null) => setOpenGlobalComment(() => open), []);
+  const globalButtonRef = useRef<HTMLButtonElement>(null);
   const move = (path: string) => setReveal((was) => ({ path, token: (was?.token ?? 0) + 1 }));
 
   // The verdict: one reply to the agent's last message in its thread.
@@ -603,7 +618,16 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           <span className="ib-prr-num">{label}</span>
           <bdi>{layer.title}</bdi>
         </span>
+        {/* Who wrote it, after the title (a teammate's PR said so in a note over the diff before). */}
+        {layer.author && !phone && (
+          <span className="ib-prr-by" data-pull-review-author={layer.author}>
+            <AuthorAvatar host={layer.host} author={layer.author} className="ib-pr-av ib-prr-by-av" />
+            <span className="ib-prr-by-name">{layer.author}</span>
+          </span>
+        )}
         <span className="ib-sp" />
+        {snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
+        {snapshot && !phone && <span className="ib-vsep ib-dctl-sep" aria-hidden="true" />}
         {folded && (readerComments || comments.length > 0) && (
           <button
             type="button"
@@ -687,7 +711,20 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             );
           })}
         </nav>
+        <PullDescription pull={layer} />
         {scopeSwitch}
+        {openGlobalComment && (
+          <button
+            ref={globalButtonRef}
+            type="button"
+            className="ib-btn ib-sm ib-prr-global"
+            onClick={() => globalButtonRef.current && openGlobalComment(globalButtonRef.current)}
+            data-guide-global-comment-add=""
+          >
+            <Icon name="globe" size={14} />
+            Global comment
+          </button>
+        )}
       </div>
       <div className="ib-rsplit" ref={splitRef}>
         <nav className="ib-rrail" aria-label="Changed files">
@@ -758,11 +795,6 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               </a>
             </div>
           )}
-          {!canDecide && !posted && !diffError && (
-            <p className="ib-prr-note" data-pull-review-readonly={layer.mine ? 'unlinked' : 'teammate'}>
-              {layer.mine ? 'No review thread yet' : `${layer.author ?? 'A teammate'}'s ${noun}`}
-            </p>
-          )}
           {sendError && (
             <div className="ib-error ib-gerror" role="alert">
               {sendError}
@@ -785,7 +817,21 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             // arrive says so here (GuidePane).
             <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ repo: repoKey ?? '' }} on={!!repoKey}>
-                <GuideReader bare snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} fileContents={fileContents} />
+                <GuideReader
+                  bare
+                  snapshot={snapshot}
+                  reviewed={[]}
+                  onReviewedChange={() => {}}
+                  comments={readerComments}
+                  mode="files"
+                  reveal={reveal}
+                  viewed={{ files: viewedSet, onToggle: toggleViewed }}
+                  fileOpenIn={fileOpenIn}
+                  fileContents={fileContents}
+                  hostDiffControls
+                  {...(collapseAll ? { collapseAll } : {})}
+                  onGlobalCommentOpener={globalOpener}
+                />
               </OpenInCodeSpans>
             </ReaderPart>
           ) : (

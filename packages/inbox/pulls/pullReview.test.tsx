@@ -32,11 +32,14 @@ const shown: { patch: string; title: string }[] = [];
 let readerComments: { onSave: (annotation: unknown) => void } | undefined;
 /** The reader's whole-file seam as the review last gave it. */
 let readerFiles: ((path: string, signal: AbortSignal, patch: string) => Promise<unknown>) | undefined;
+/** The props the review last gave the reader. */
+let readerProps: { hostDiffControls?: boolean; onGlobalCommentOpener?: (open: ((anchor: HTMLElement) => void) | null) => void } | undefined;
 if (hasDom) {
   mock.module('#guide-reader', () => ({
     default: (props: { snapshot: { review: { rawPatch: string }; guide: { title: string } }; comments?: { onSave: (annotation: unknown) => void }; fileContents?: typeof readerFiles }) => {
       readerComments = props.comments;
       readerFiles = props.fileContents;
+      readerProps = props as typeof readerProps;
       shown.push({ patch: props.snapshot.review.rawPatch, title: props.snapshot.guide.title });
       return null;
     },
@@ -139,11 +142,16 @@ let sessionReads = 0;
 let holdSend: Promise<void> | null = null;
 /** What the diff door answers instead of a one-file patch (a refused branch, an empty diff); null: the patch. */
 let diffOverride: ((key: string, scope: string) => Response) | null = null;
+/** What the description door answers (the PR's body). */
+let descriptionBody: string | null = null;
+let descriptionAsks: string[] = [];
 
 beforeEach(() => {
   if (!hasDom) return;
   savedFetch = globalThis.fetch;
   diffOverride = null;
+  descriptionBody = null;
+  descriptionAsks = [];
   asked = [];
   posted = [];
   sessionsAnswer = {
@@ -187,6 +195,11 @@ beforeEach(() => {
     if (url.pathname.endsWith('/pulls/file')) {
       fileAsks.push(url.searchParams.get('scope')!);
       return Response.json({ serverSession: 's', oldContent: 'a\n', newContent: 'b\n' });
+    }
+    if (url.pathname.endsWith('/pulls/description')) {
+      const key = url.searchParams.get('key')!;
+      descriptionAsks.push(key);
+      return Response.json({ serverSession: 's', key, body: descriptionBody });
     }
     if (url.pathname.endsWith('/pulls/diff')) {
       const key = url.searchParams.get('key')!;
@@ -648,7 +661,8 @@ test.skipIf(!hasDom)("a teammate's layer in a stack with the person's linked one
   await settle();
   expect(asked).toEqual([{ key: theirs.key, scope: 'layer' }]);
   expect(document.querySelector('[data-review-decision]')).toBeNull();
-  expect(el('[data-pull-review-readonly]').getAttribute('data-pull-review-readonly')).toBe('teammate');
+  // Whose it is: the author after the title.
+  expect(el('[data-pull-review-author]').getAttribute('data-pull-review-author')).toBe('tomas');
   expect(el<HTMLAnchorElement>('[data-pull-review-forge]').href).toBe(theirs.url);
 });
 
@@ -1602,4 +1616,65 @@ test.skipIf(!hasDom)('an ended agent stays named: "Claude Code ended"; no Reply;
   await act(async () => el('[data-pulls-start]').click());
   await settle();
   expect(posted.at(-1)!.body).toMatchObject({ thread_id: 'thr_new', ask: 'guide' });
+});
+
+// --- the top (approval "diff-controls-headers", take A: the Description line) ---
+
+test.skipIf(!hasDom)("the top: the author after the title, the diff controls in the header, the description's first line in the strip; More opens it whole, Less closes it", async () => {
+  const theirs = pull(7, { mine: false, requested: true, author: 'tomas' });
+  descriptionBody = '## Summary\n\nThe settings pages now follow the **page direction**, see [#861](https://github.com/northwind/billing-svc/issues/861).\n\n- Layout uses logical margins\n- A Language picker';
+  mount(<Review stackId={theirs.key} from={theirs.key} answer={{ ...model, pulls: [theirs], links: {} }} />);
+  await settle();
+  expect(descriptionAsks).toEqual([theirs.key]);
+  const head = el('.ib-vhead');
+  expect(el('[data-pull-review-author] .ib-prr-by-name').textContent).toBe('tomas');
+  // After the title, and the diff controls after the space; no card tab (the reader is told the header has them).
+  expect(head.querySelector('[data-pull-review-title]')!.compareDocumentPosition(el('[data-pull-review-author]')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(head.querySelector('[data-diff-controls] [data-diff-layout-toggle]')).not.toBeNull();
+  expect(readerProps?.hostDiffControls).toBe(true);
+  // The first line that is not a heading, as words; More, since there is more.
+  const line = el('.ib-prr-strip [data-pull-description]');
+  expect(line.getAttribute('data-pull-description')).toBe('line');
+  expect(line.querySelector('.ib-prr-desc-lead')!.textContent).toBe('The settings pages now follow the page direction, see #861.');
+  const toggle = () => el<HTMLButtonElement>('[data-pull-description-toggle]');
+  expect(toggle().textContent).toBe('More');
+  expect(toggle().getAttribute('aria-expanded')).toBe('false');
+  expect(document.querySelector('[data-pull-description-panel]')).toBeNull();
+  await act(async () => toggle().click());
+  await settle();
+  const panel = el('[data-pull-description-panel]');
+  expect(panel.textContent).toContain('Summary');
+  expect(panel.textContent).toContain('A Language picker');
+  expect(toggle().textContent).toBe('Less');
+  expect(toggle().getAttribute('aria-expanded')).toBe('true');
+  await act(async () => toggle().click());
+  await settle();
+  expect(document.querySelector('[data-pull-description-panel]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a PR with no description says so in the strip, with nothing to open', async () => {
+  const mine = pull(8);
+  descriptionBody = null;
+  mount(<Review stackId={mine.key} from={mine.key} answer={{ ...model, pulls: [mine], links: { [mine.key]: link } }} />);
+  await settle();
+  expect(el('[data-pull-description]').getAttribute('data-pull-description')).toBe('none');
+  expect(el('[data-pull-description]').textContent).toBe('No description');
+  expect(document.querySelector('[data-pull-description-toggle]')).toBeNull();
+});
+
+test.skipIf(!hasDom)("Global comment sits in the strip and opens the reader's composer at that button; none while the reader takes no comments", async () => {
+  const mine = pull(9);
+  mount(<Review stackId={mine.key} from={mine.key} answer={{ ...model, pulls: [mine], links: { [mine.key]: link } }} />);
+  await settle();
+  expect(document.querySelector('.ib-prr-strip [data-guide-global-comment-add]')).toBeNull();
+  const opened: HTMLElement[] = [];
+  await act(async () => readerProps!.onGlobalCommentOpener!((anchor) => opened.push(anchor)));
+  await settle();
+  const button = el<HTMLButtonElement>('.ib-prr-strip [data-guide-global-comment-add]');
+  expect(button.textContent).toBe('Global comment');
+  await act(async () => button.click());
+  expect(opened).toEqual([button]);
+  await act(async () => readerProps!.onGlobalCommentOpener!(null));
+  await settle();
+  expect(document.querySelector('.ib-prr-strip [data-guide-global-comment-add]')).toBeNull();
 });

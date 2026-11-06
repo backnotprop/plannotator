@@ -78,6 +78,11 @@ export interface GuideGlobalComments {
   /** The comment chosen in the list: the host shows it where it lists comments. */
   onSelect?: (id: string) => void;
   selectedId?: string | null;
+  /**
+   * The host draws its own "Global comment" button (outside the guide, which then draws none) and calls `onAdd`
+   * from it. Absent: the chain's button, as before.
+   */
+  hostButton?: boolean;
 }
 
 export interface GuideHostValue<P extends object = Record<string, unknown>> {

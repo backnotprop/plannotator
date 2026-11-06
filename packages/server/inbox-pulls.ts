@@ -56,6 +56,8 @@ import {
   type InboxPullCliState,
   inboxPullCompareBranch,
   type InboxPullDiffAnswer,
+  type InboxPullDescriptionAnswer,
+  INBOX_PULL_DESCRIPTION_MAX,
   type InboxPullDiffScope,
   type InboxPullHost,
   inboxPullSafeBranch,
@@ -560,7 +562,7 @@ interface HostState {
 
 export class InboxPullsError extends Error {
   constructor(
-    readonly code: "pull_unknown" | "pull_diff_failed" | "pull_diff_too_large" | "pull_diff_fork" | "validation_error",
+    readonly code: "pull_unknown" | "pull_diff_failed" | "pull_diff_too_large" | "pull_diff_fork" | "pull_description_failed" | "validation_error",
     message: string,
   ) {
     super(message);
@@ -588,6 +590,8 @@ export interface InboxPulls {
   avatarUrls(host: string): Record<string, string>;
   /** One layer's patch, or the stack's from its base up to that layer. Throws InboxPullsError. */
   diff(key: string, scope: InboxPullDiffScope): Promise<InboxPullDiffAnswer>;
+  /** What the PR's author wrote on it, read once per change of the PR (its `updated_at`). Throws InboxPullsError. */
+  description(key: string): Promise<InboxPullDescriptionAnswer>;
   /** The head commit of the last patch read for this PR, either scope (`diff`'s `head_sha`), or null. */
   readHead(key: string): string | null;
   /** Whether a GitHub PR still has this commit (a force-push takes it off); null when the forge did not say. */
@@ -712,6 +716,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   const budgetHold = new Map<string, number>();
   const signed =new Map<RefCli, { at: number; ttl: number; set: Promise<Set<string>>; missing: boolean }>();
   const diffs = new Map<string, { at: number; answer: InboxPullDiffAnswer }>();
+  const descriptions = new Map<string, { at: number; answer: InboxPullDescriptionAnswer }>();
   const readHeads = new Map<string, string>();
   let known = new Map<string, InboxPull>();
   let lastRepos = new Set<string>();
@@ -1144,6 +1149,37 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       diffs.set(cacheKey, { at: now(), answer });
       // Bounded: only the last few diffs are kept.
       while (diffs.size > 24) diffs.delete(diffs.keys().next().value!);
+      return answer;
+    },
+    async description(key) {
+      const pull = known.get(key);
+      if (!pull || !lastRepos.has(inboxPullRepoKey(pull.host, pull.repo))) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
+      // An edit to the description moves `updated_at`, so it reads again then.
+      const cacheKey = `${key}\u0000${pull.updated_at}`;
+      const hit = descriptions.get(cacheKey);
+      if (hit && now() - hit.at < INBOX_PULL_DIFF_FRESH_MS) return hit.answer;
+      if (now() < (holdUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_description_failed", `${pull.host} asked to slow down. Try again in a minute.`);
+      const cli: RefCli = hosts.get(pull.host)?.cli ?? (pull.platform === "github" ? "gh" : "glab");
+      const parts = splitPath(pull.repo)!;
+      const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
+      const read = await run(cli, ["api", "--hostname", pull.host, endpoint]).catch(() => null);
+      if (!read || read.exitCode !== 0) {
+        if (read && refErrorOf(cli, read) === "rate_limited") holdUntil.set(pull.host, now() + REF_RATE_LIMIT_MS);
+        throw new InboxPullsError("pull_description_failed", `${cli} could not read this description.`);
+      }
+      let text: unknown;
+      try {
+        const answer = obj(JSON.parse(read.stdout));
+        text = pull.platform === "github" ? answer.body : answer.description;
+      } catch {
+        throw new InboxPullsError("pull_description_failed", `${cli} answered something other than a pull request.`);
+      }
+      const whole = typeof text === "string" ? text.replace(/\r\n?/g, "\n") : "";
+      const cut = whole.length > INBOX_PULL_DESCRIPTION_MAX;
+      const body = (cut ? whole.slice(0, INBOX_PULL_DESCRIPTION_MAX) : whole).trim();
+      const answer: InboxPullDescriptionAnswer = { key, body: body || null, ...(cut ? { cut: true as const } : {}) };
+      descriptions.set(cacheKey, { at: now(), answer });
+      while (descriptions.size > 24) descriptions.delete(descriptions.keys().next().value!);
       return answer;
     },
     async fileContents(key, scope, path, roots, ids, oldPath) {
