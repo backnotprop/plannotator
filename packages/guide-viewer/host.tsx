@@ -170,6 +170,11 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
   diffStyle?: 'split' | 'unified';
   /** The renderer's files sit flush (no spacing around a separator): a content-fit box's estimate counts it so. */
   flushFiles?: boolean;
+  /**
+   * Fold or open every file's diff at once (a host bar's Collapse all). Each new `token` applies `collapsed` to every
+   * card again; a file folded or opened by hand after that keeps its own state. Absent: each card keeps its own.
+   */
+  collapseAll?: { collapsed: boolean; token: number };
 }
 
 // The context erases the renderer's extra-prop generic; hosts recover typing at the provider site.

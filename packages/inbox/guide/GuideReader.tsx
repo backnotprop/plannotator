@@ -13,9 +13,11 @@
  * served by the Inbox (build/pack-inbox.ts, #2593): its modules (the guide
  * chain, the diff renderer) load and run on the first Open, never at page load.
  * The first section card carries the Split | Unified tab (DiffStyleSwitch,
- * through the chain's `renderSectionTab`; under `threadHeading`, every open
- * chapter with diffs does); a phone draws every diff Unified
- * and has no tab. No new Tailwind classes here or in the chain. The comment cards, toolbar
+ * through the chain's `renderSectionTab`) unless the host draws the diff
+ * controls in its own bar (`hostDiffControls`: the guided review and the
+ * full-window review, approval "diff-controls-headers"); a phone draws every
+ * diff Unified and has no tab. The diffs follow every display setting the
+ * "Diff display" popover writes, the tab size included. No new Tailwind classes here or in the chain. The comment cards, toolbar
  * and suggestion blocks are styled by packages/review-editor/comments.css,
  * which apps/inbox/index.css imports (guides.show gets it through
  * review-editor's index.css; its pinned manifest follows the viewer build).
@@ -179,6 +181,8 @@ export default function GuideReader({
   bare = false,
   controlsHost = null,
   threadHeading = false,
+  hostDiffControls = false,
+  collapseAll,
 }: GuideReaderProps) {
   const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
@@ -322,20 +326,17 @@ export default function GuideReader({
   }, [commentFile, reveal]);
 
   // A phone draws one column, always, and offers no switch (two ~130 px columns read as nothing);
-  // the saved layout is left as it is. Elsewhere the first card carries the Split | Unified tab (the review: every open chapter).
+  // the saved layout is left as it is. Elsewhere the first card carries the Split | Unified tab, unless the host's bar has it.
   const phone = usePhone();
+  // The tab size the popover sets, as code review applies it (Pierre reads it off the page).
+  const tabSize = useConfigValue('diffTabSize');
+  useEffect(() => {
+    document.documentElement.style.setProperty('--diffs-tab-size', String(tabSize));
+  }, [tabSize]);
   // AllFilesCodeView compares Viewed sets by identity: a new Set only when the ticks change.
   const viewedFilesKey = viewed ? [...viewed.files].sort().join('\n') : null;
   const viewedSet = useMemo(() => (viewed ? new Set(viewed.files) : undefined), [viewedFilesKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  // The review: every open chapter with diffs carries it too, so a jump to a chapter lands with the control attached.
-  const renderSectionTab = useCallback(
-    (index: number, card: { folded: boolean; diffs: number; title: string }) => {
-      if (index === 0) return <DiffStyleSwitch icons={threadHeading || !!controlsHost} name={threadHeading ? 'ib-diff-style-0' : undefined} />;
-      if (!threadHeading || card.folded || card.diffs === 0) return null;
-      return <DiffStyleSwitch icons name={`ib-diff-style-${index}`} label={`Diff layout, ${card.title}`} />;
-    },
-    [threadHeading, controlsHost],
-  );
+  const renderSectionTab = useCallback((index: number) => (index === 0 ? <DiffStyleSwitch /> : null), []);
 
   const getDiffRendererProps = useCallback(
     ({ file, focused }: GuideDiffRendererContext): {
@@ -403,7 +404,7 @@ export default function GuideReader({
       DiffRenderer: GuideDiff,
       getDiffRendererProps,
       ...(revealFile ? { revealFile } : {}),
-      ...(phone ? {} : { renderSectionTab }),
+      ...(phone || hostDiffControls ? {} : { renderSectionTab }),
       ...(renderOverviewDiagram ? { renderOverviewDiagram } : {}),
       ...(renderOverviewFigure ? { renderOverviewFigure } : {}),
       ...(renderHeadActions ? { renderHeadActions } : {}),
@@ -411,8 +412,9 @@ export default function GuideReader({
       // What GuideDiff draws (a phone: always Unified), for a file box's first estimate.
       diffStyle: phone ? ('unified' as const) : savedDiffStyle,
       flushFiles: bare,
+      ...(collapseAll ? { collapseAll } : {}),
     }),
-    [files, getDiffRendererProps, bare, revealFile, phone, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle],
+    [files, getDiffRendererProps, bare, revealFile, phone, hostDiffControls, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, collapseAll],
   );
 
   // The window's wrap for a code span, for the viewer's own inline parser.

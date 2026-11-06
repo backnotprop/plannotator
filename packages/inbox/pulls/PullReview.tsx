@@ -41,7 +41,7 @@ import { guideCommentSections } from '../attachments';
 import { RefMarkIcon } from '../board/RefMark';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
-import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
+import { DiffControls, nextCollapseAll, type CollapseAllState } from '../components/DiffControls';
 import { SidebarTrigger } from '../shell/sidebar';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
@@ -468,27 +468,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       // Storage full or off: this visit only.
     }
   };
-  // Once the tab on the first file has scrolled away, the same switch sits in the bar. Nothing floats over the code.
-  const [diffBody, setDiffBody] = useState<HTMLDivElement | null>(null);
-  const [docked, setDocked] = useState(false);
-  useEffect(() => {
-    if (!diffBody || phone) return;
-    let frame = 0;
-    const read = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        const box = diffBody.getBoundingClientRect();
-        const tab = diffBody.querySelector('[data-guide-section-tab] [data-diff-style-switch]')?.getBoundingClientRect();
-        setDocked(!!tab && tab.bottom <= box.top);
-      });
-    };
-    read();
-    diffBody.addEventListener('scroll', read, { passive: true });
-    return () => {
-      cancelAnimationFrame(frame);
-      diffBody.removeEventListener('scroll', read);
-    };
-  }, [phone, diffBody]);
+  // The bar's Collapse all (DiffControls): every file's diff, this view only.
+  const [collapseAll, setCollapseAll] = useState<CollapseAllState | null>(null);
   const [sheet, setSheet] = useState(false);
   const sheetId = useId();
   useEffect(() => {
@@ -796,7 +777,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           </Tip>
         )}
         <span className="ib-sp" />
-        {!phone && docked && <DiffStyleSwitch icons name="ib-diff-style-held" />}
+        {snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
         {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
         {folded && (readerComments || comments.length > 0) && (
           <button
@@ -928,7 +909,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             data-pull-rail-handle=""
           />
         )}
-        <div className="ib-gbody" ref={setDiffBody} data-repo-open={repoOpen && repoSha ? '' : undefined}>
+        <div className="ib-gbody" data-repo-open={repoOpen && repoSha ? '' : undefined}>
           {repoOpen && repoSha && (
             <PanePart>
               <PullRepoFilePart.Part key={repoOpen} pullKey={layer.key} sha={repoSha} path={repoOpen} />
@@ -968,7 +949,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             // arrive says so here (GuidePane).
             <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ repo: repoKey ?? '' }} on={!!repoKey}>
-                <GuideReader bare controlsHost={controlsHost} snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} />
+                <GuideReader bare controlsHost={controlsHost} hostDiffControls {...(collapseAll ? { collapseAll } : {})} snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} />
               </OpenInCodeSpans>
             </ReaderPart>
           ) : (

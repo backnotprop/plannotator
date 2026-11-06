@@ -1044,10 +1044,12 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   const sqlBox = (await sqlShell.locator('[data-guide-code-view-mounted]').boundingBox())!;
   const sqlLast = (await sqlShell.locator('[data-line="5"]').first().boundingBox())!;
   expect(sqlBox.y + sqlBox.height - (sqlLast.y + sqlLast.height)).toBeLessThan(24);
-  // Global comment is a quiet mark in the bar; Split | Unified a tab on the first file.
+  // Global comment is a quiet mark in the bar, and so are the diff controls (Split / Unified, Collapse all, the gear):
+  // no tab on the first file (approval "diff-controls-headers").
   await expect(review.locator('.ib-vhead [data-guide-global-comment-add]')).toBeVisible();
-  await expect(review.locator('[data-guide-section-tab] [data-diff-style-switch]')).toBeVisible();
-  await expect(review.locator('.ib-vhead [data-diff-style-switch]')).toHaveCount(0);
+  await expect(review.locator('.ib-vhead [data-diff-controls] [data-diff-layout-toggle]')).toBeVisible();
+  await expect(review.locator('.ib-vhead [data-diff-controls] [data-diff-display-options]')).toBeVisible();
+  await expect(review.locator('[data-guide-section-tab]')).toHaveCount(0);
   // Flat: the code is a sheet on the rail's surface, a file its soft head and its lines, with no card and no rule.
   const frame = await review.evaluate((root) => {
     const read = (el: Element) => { const s = getComputedStyle(el); return { border: s.borderTopWidth, radius: s.borderTopLeftRadius, fill: s.backgroundColor }; };
@@ -1072,13 +1074,6 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
     return { barHeight: bar.height, railTop: rail.top - bar.bottom, railFoot: root.getBoundingClientRect().bottom - rail.bottom, beside: body.left - rail.right };
   });
   expect(layers).toEqual({ barHeight: 37, railTop: 0, railFoot: 0, beside: 0 });
-  // Scrolled past the first file, its Split | Unified tab has gone, and the same switch sits in the bar.
-  await page.setViewportSize({ width: 1440, height: 420 });
-  await review.locator('.ib-gbody').evaluate((el) => (el.scrollTop = 300));
-  await expect(review.locator('.ib-vhead [data-diff-style-switch]')).toBeVisible();
-  await review.locator('.ib-gbody').evaluate((el) => (el.scrollTop = 0));
-  await expect(review.locator('.ib-vhead [data-diff-style-switch]')).toHaveCount(0);
-  await page.setViewportSize({ width: 1440, height: 900 });
   await shot(page, '7-layer-review');
   // A long title gives way in the header: cut with "…" (whole in its hover); Back and the decision stay in the window.
   const fn = review.locator('[data-pull-review-title]');
@@ -1938,7 +1933,7 @@ test('the same small gap between files, whatever separators a file draws: above 
     const review = page.locator('[data-pull-review]');
     await expect(review.locator('[data-guide-file-shell]')).toHaveCount(5);
     await expect.poll(() => seams(review)).toEqual([12, 12, 12, 12]);
-    await review.locator('[data-diff-style-switch] input[value="unified"]').locator('..').click();
+    await review.locator('.ib-vhead [data-diff-layout-toggle="split"]').click();
     await expect.poll(() => seams(review)).toEqual([12, 12, 12, 12]);
   } finally {
     await context.close();

@@ -100,11 +100,18 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   onActivate,
   fitContent = false,
 }) => {
-  const { DiffRenderer, getDiffRendererProps, renderFileActions, diffStyle, flushFiles } = useGuideHost();
+  const { DiffRenderer, getDiffRendererProps, renderFileActions, diffStyle, flushFiles, collapseAll } = useGuideHost();
   const actions = renderFileActions?.(file) ?? null;
   const shellRef = useRef<HTMLDivElement | null>(null);
   const scrollPositionRef = useRef(0);
-  const [collapsed, setCollapsed] = useState(kind === 'generated');
+  const [collapsed, setCollapsed] = useState(collapseAll && collapseAll.token > 0 ? collapseAll.collapsed : kind === 'generated');
+  // The host's Collapse all: a new token folds or opens this card too. The renderer reads `mountCollapsed` once, so it
+  // mounts again under the new token (`key` below).
+  const [collapseToken, setCollapseToken] = useState(collapseAll?.token ?? 0);
+  if (collapseAll && collapseAll.token !== collapseToken) {
+    setCollapseToken(collapseAll.token);
+    setCollapsed(collapseAll.collapsed);
+  }
   const fileList = useMemo(() => [file], [file]);
   const { mounted, register, requestMount } = useGuideFileWindow(file.path, focused);
   const diffHeight = useMemo(
@@ -224,6 +231,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
       >
         {mounted ? (
           <DiffRenderer
+            key={collapseToken}
             {...getDiffRendererProps({ file, focused })}
             files={fileList}
             fileScrollTarget={target}
