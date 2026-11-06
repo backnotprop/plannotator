@@ -22,11 +22,13 @@
  *   PLAYWRIGHT_BROWSERS_PATH keeps pointing at the real browser cache, by path.
  * - `tests/e2e/*.spec.ts` run under Playwright (tests/e2e/playwright.config.ts);
  *   the files tests/dom-test-list.txt lists under `DOM_TESTS=1 --isolate`, and
- *   those CI runs in its own-process DOM steps under `DOM_TESTS=1`, each alone,
- *   as CI runs them; the rest under one `bun test`. Runs go from the repo root,
+ *   those CI runs in its own-process DOM steps under `DOM_TESTS=1` (each alone;
+ *   CI runs a step's files together); the rest under one `bun test`. A file that
+ *   needs happy-dom but is in neither place is refused (every test in it would
+ *   skip, green). Runs go from the repo root,
  *   so the root bunfig preload always loads.
- * - SIGINT, SIGTERM and SIGHUP go to the running child; once it exits, no
- *   further run starts and teardown still runs.
+ * - A stop signal reaches the running child once, then SIGKILL follows if it
+ *   does not exit (see runSandbox); no further run starts and teardown still runs.
  * - Teardown stops only the Inboxes it can prove the root started
  *   (tests/helpers/inbox-process.ts), fails when any registry under the root
  *   names port 59812 (never contacted, never signalled), and removes the root.
@@ -38,11 +40,11 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { NO_BROWSER } from "../tests/helpers/no-browser";
+import { DOM_GATE_SELF, DOM_LIST, domListFiles, isDomGated, ownProcessDomStepFiles, WORKFLOW } from "./dom-gating";
 import { accountHome, isScratchDataDir } from "../tests/helpers/real-data-dir";
 
 export const REPO_ROOT = resolve(import.meta.dir, "..");
 const OWNER_INBOX_PORT = "59812";
-const DOM_LIST = "tests/dom-test-list.txt";
 /** Specs another config runs (tests/e2e/playwright.config.ts OWN_CONFIG). */
 const OWN_CONFIG_SPECS = new Set(["tests/e2e/inbox-thread-parity.spec.ts"]);
 const E2E_SPEC = /^tests\/e2e\/[^/]+\.spec\.ts$/;
@@ -93,7 +95,11 @@ export function parseSandboxArgs(argv: readonly string[], cwd: string, env: Read
   if (positional !== undefined) {
     throw new SandboxRefusal(`${positional || '""'}: after \`--\` only runner flags, with values as --flag=value (e.g. --test-name-pattern=name); name files before \`--\``);
   }
+  // Another config would swap the e2e config (the parity spec's own) or the bunfig preload that sandboxes bun tests.
+  const config = passthrough.find((arg) => /^(-c|--config)(=|$)/.test(arg));
+  if (config) throw new SandboxRefusal(`${config}: this command picks the config itself`);
   if (named.length === 0) throw new SandboxRefusal("name the test files to run; refusing an empty list, which would run the whole suite");
+  const domFiles = new Set([...domListFiles(), ...ownProcessDomStepFiles()]);
   const files = named.map((arg) => {
     const path = resolve(cwd, arg);
     let isFile = false;
@@ -109,6 +115,9 @@ export function parseSandboxArgs(argv: readonly string[], cwd: string, env: Read
     if (REFUSED[file]) throw new SandboxRefusal(`${file} ${REFUSED[file]}`);
     if (OWN_CONFIG_SPECS.has(file)) throw new SandboxRefusal(`${file} runs under its own config: bun run test:parity:inbox-thread`);
     if (file.startsWith("tests/e2e/") && !E2E_SPEC.test(file)) throw new SandboxRefusal(`${file} is not a tests/e2e/*.spec.ts spec`);
+    if (!E2E_SPEC.test(file) && !domFiles.has(file) && !DOM_GATE_SELF.has(file) && isDomGated(readFileSync(join(REPO_ROOT, file), "utf8"))) {
+      throw new SandboxRefusal(`${file} needs happy-dom but is in neither ${DOM_LIST} nor a DOM step of ${WORKFLOW}: add it to ${DOM_LIST}, or every test in it skips, here and in CI`);
+    }
     return file;
   });
   return { files, passthrough };
@@ -135,6 +144,8 @@ export interface Sandbox {
 
 /** A new root and the env every child runs with. Throws rather than hand a child anything but the scratch home. */
 export function makeSandbox(parentEnv: Readonly<Record<string, string | undefined>> = process.env): Sandbox {
+  // Before the root exists, so a failure here leaves nothing behind.
+  const markers = new Set(originMarkers());
   // /tmp on POSIX: shorter than macOS's per-user temp dir, so socket paths under TMPDIR stay short.
   const root = realpathSync(mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", "plannotator-sbx-")));
   const realHome = accountHome();
@@ -144,7 +155,6 @@ export function makeSandbox(parentEnv: Readonly<Record<string, string | undefine
     throw new Error(`test-sandbox: ${home} is not a scratch folder; refusing to run`);
   }
   writeFileSync(join(home, ".gitconfig"), "[user]\n\tname = Sandbox Test\n\temail = sandbox@example.com\n[init]\n\tdefaultBranch = main\n");
-  const markers = new Set(originMarkers());
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(parentEnv)) if (value !== undefined && !DROPPED.test(key) && !markers.has(key)) env[key] = value;
   Object.assign(env, {
@@ -168,32 +178,6 @@ export function makeSandbox(parentEnv: Readonly<Record<string, string | undefine
   return { root, home, env };
 }
 
-/**
- * The files .github/workflows/test.yml runs in their own `DOM_TESTS=1 bun test`
- * step (the rule scripts/dom-test-allowlist.test.ts applies), YAML comments left out.
- */
-function ownProcessDomFiles(): Set<string> {
-  const workflow = readFileSync(join(REPO_ROOT, ".github/workflows/test.yml"), "utf8")
-    .split("\n")
-    .filter((line) => !line.trimStart().startsWith("#"))
-    .join("\n");
-  return new Set(
-    workflow
-      .split(/^\s*- name:/m)
-      .filter((step) => /DOM_TESTS=1 bun test/.test(step))
-      .flatMap((step) => step.match(/[\w./-]+\.test\.tsx?/g) ?? []),
-  );
-}
-
-function domList(): Set<string> {
-  return new Set(
-    readFileSync(join(REPO_ROOT, DOM_LIST), "utf8")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line !== "" && !line.startsWith("#")),
-  );
-}
-
 export interface Run {
   argv: string[];
   env: Record<string, string>;
@@ -208,9 +192,9 @@ export interface Runners {
 export function planRuns(args: SandboxArgs, env: Record<string, string>, runners: Runners): Run[] {
   const e2e = args.files.filter((f) => E2E_SPEC.test(f));
   const rest = args.files.filter((f) => !e2e.includes(f));
-  const listed = domList();
+  const listed = new Set(domListFiles());
   const dom = rest.filter((f) => listed.has(f));
-  const ownSteps = ownProcessDomFiles();
+  const ownSteps = new Set(ownProcessDomStepFiles());
   const ownProcessDom = rest.filter((f) => !listed.has(f) && ownSteps.has(f));
   const plain = rest.filter((f) => !dom.includes(f) && !ownProcessDom.includes(f));
   const domEnv = { ...env, DOM_TESTS: "1" };
@@ -268,22 +252,56 @@ export async function teardown(root: string): Promise<string[]> {
   return owner;
 }
 
-/** Run `args` in a fresh sandbox; resolves to the exit code. */
-export async function runSandbox(args: SandboxArgs, runners: Runners, parentEnv: Readonly<Record<string, string | undefined>> = process.env): Promise<number> {
+/** Where the stop signals come from (the process; a test passes its own), and how long a child gets to stop. */
+export interface SandboxOptions {
+  signals?: Pick<NodeJS.EventEmitter, "on" | "off">;
+  graceMs?: number;
+}
+
+/**
+ * Run `args` in a fresh sandbox; resolves to the exit code.
+ *
+ * A stop (a harness may signal only this pid): SIGTERM or SIGHUP sends the
+ * running child SIGTERM, then SIGKILL `graceMs` later if it is still alive.
+ * SIGINT is not passed on at once, because a terminal Ctrl-C already reached
+ * the child (same process group) and a second one makes Playwright skip its
+ * cleanup; SIGTERM follows `graceMs` later only if the child is still running.
+ * A second signal kills the child at once. No later run starts. The handlers
+ * stay until teardown ends, so another signal cannot stop this process halfway.
+ */
+export async function runSandbox(
+  args: SandboxArgs,
+  runners: Runners,
+  parentEnv: Readonly<Record<string, string | undefined>> = process.env,
+  options: SandboxOptions = {},
+): Promise<number> {
+  const source = options.signals ?? process;
+  const graceMs = options.graceMs ?? 5_000;
   const sandbox = makeSandbox(parentEnv);
-  // A stop goes to the running child (a harness may signal only this pid); this process waits for it, then tears down.
   let child: ReturnType<typeof Bun.spawn> | null = null;
-  let stopped: NodeJS.Signals | null = null;
-  const forward = (signal: NodeJS.Signals) => {
-    stopped = signal;
+  let stopped = false;
+  let signalsSeen = 0;
+  const timers: ReturnType<typeof setTimeout>[] = [];
+  const send = (signal: NodeJS.Signals) => {
+    if (!child || child.exitCode !== null || child.signalCode !== null) return;
     try {
-      child?.kill(signal);
+      child.kill(signal);
     } catch {
       // Already gone.
     }
   };
+  const terminate = () => {
+    send("SIGTERM");
+    timers.push(setTimeout(() => send("SIGKILL"), graceMs));
+  };
+  const onSignal = (signal: NodeJS.Signals) => {
+    stopped = true;
+    if (++signalsSeen > 1) return send("SIGKILL");
+    if (signal === "SIGINT") timers.push(setTimeout(terminate, graceMs));
+    else terminate();
+  };
   const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
-  for (const signal of signals) process.on(signal, forward);
+  for (const signal of signals) source.on(signal, onSignal);
   let code = 0;
   try {
     for (const run of planRuns(args, sandbox.env, runners)) {
@@ -295,10 +313,14 @@ export async function runSandbox(args: SandboxArgs, runners: Runners, parentEnv:
     }
     if (stopped && code === 0) code = 1;
   } finally {
-    for (const signal of signals) process.off(signal, forward);
-    const owner = await teardown(sandbox.root);
-    for (const file of owner) process.stderr.write(`test-sandbox: ${relative(sandbox.root, file)} names port ${OWNER_INBOX_PORT}, the person's Inbox. Not contacted; failing the run.\n`);
-    if (owner.length > 0) code = 3;
+    for (const timer of timers) clearTimeout(timer);
+    try {
+      const owner = await teardown(sandbox.root);
+      for (const file of owner) process.stderr.write(`test-sandbox: ${relative(sandbox.root, file)} names port ${OWNER_INBOX_PORT}, the person's Inbox. Not contacted; failing the run.\n`);
+      if (owner.length > 0) code = 3;
+    } finally {
+      for (const signal of signals) source.off(signal, onSignal);
+    }
   }
   return code;
 }
