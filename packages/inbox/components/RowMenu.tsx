@@ -37,9 +37,9 @@ export interface ThreadRowMenuProps {
   children: ReactNode;
 }
 
-const LABELS: Record<RowMenuAction, { label: string; icon: IconName }> = {
-  pin: { label: 'Pin thread', icon: 'pin' },
-  unpin: { label: 'Unpin thread', icon: 'pinOff' },
+const LABELS: Record<RowMenuAction, { label: string; icon: IconName; iconClass?: string }> = {
+  pin: { label: 'Star thread', icon: 'star' },
+  unpin: { label: 'Unstar thread', icon: 'star', iconClass: 'ib-star-on' },
   'copy-thread': { label: 'Copy thread', icon: 'stack' },
   'copy-link': { label: 'Copy link', icon: 'link' },
   'copy-id': { label: 'Copy thread ID', icon: 'hash' },
@@ -136,7 +136,7 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
           props.onAction(target, action);
         }}
       >
-        <Icon name={LABELS[action].icon} size={15} />
+        <Icon name={LABELS[action].icon} size={15} className={LABELS[action].iconClass} />
         {LABELS[action].label}
       </Menu.Item>
     );

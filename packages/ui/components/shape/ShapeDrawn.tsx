@@ -25,6 +25,7 @@ import {
   type ShapeRef,
 } from '@plannotator/core/shape';
 import { useReducedMotion } from './Pebble';
+import { syncKeptBoxes, type KeptBox } from './boxSelect';
 
 /** A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first. */
 function resolveFiles(html: string, resolve: ((src: string) => string) | undefined): string {
@@ -113,6 +114,12 @@ svg .obj { filter: drop-shadow(0 3px 10px rgb(0 0 0 / .18)); }
 .board.reduce .shp-go { animation: none; transform: translate(calc(var(--dx) / 2), calc(var(--dy) / 2)); }
 @media (prefers-reduced-motion: reduce) { .shp-go { animation: none; transform: translate(calc(var(--dx) / 2), calc(var(--dy) / 2)); } }
 .board.reduce.entering [data-step], .board.reduce.entering .draw { animation: shp-fade-only .16s linear both; animation-delay: 0s; stroke-dasharray: none; }
+
+/* A board that takes a dragged box: the cross everywhere but a number, and no words selected on the way. */
+@media (pointer: fine) {
+  .board.boxable, .board.boxable * { cursor: crosshair !important; -webkit-user-select: none; user-select: none; }
+  .board.boxable .shp-rb, .board.boxable .shp-rb * { cursor: pointer !important; }
+}
 
 /* A marked part: the ring while the agent reads it; erased and redrawn when it changes. */
 .mk { border-radius: 6px; transition: box-shadow .25s, background-color .25s; }
@@ -253,6 +260,10 @@ export interface ShapeDrawnProps {
   stale?: ReadonlySet<string>;
   /** Words a host puts on parts: `fresh` on `marks.fresh` parts ("changed"), `stale` on `stale` ones. Absent: no tag. */
   tags?: { fresh?: string; stale?: string };
+  /** A dragged box can start here: the cross cursor, and no text selection. Board only. */
+  boxable?: boolean;
+  /** Kept boxes with their comments, on this view. Board only. */
+  boxes?: readonly KeptBox[];
   onHoverMark?: (el: HTMLElement | null) => void;
   /** A marked part was chosen; `text` is the selected words in Select mode. */
   onPickMark?: (el: HTMLElement, text?: string) => void;
@@ -375,7 +386,15 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     board.classList.toggle('skip', skip);
     board.classList.toggle('reduce', reduce);
     board.classList.toggle('pinpointing', pinpoint);
-  }, [phase, skip, reduce, pinpoint, contentKey]);
+    board.classList.toggle('boxable', !!props.boxable);
+  }, [phase, skip, reduce, pinpoint, props.boxable, contentKey]);
+
+  // Kept boxes: inside the drawing, so they scroll and scale with it. A box belongs to the layout it was drawn on.
+  const boxes = props.boxes;
+  useLayoutEffect(() => {
+    const board = rootRef.current?.querySelector<HTMLElement>('.board');
+    if (board && boxes) syncKeptBoxes(board, boxes.filter((b) => !!b.box.tall === useTall), scaled ? k : 1);
+  }, [boxes, useTall, scaled, k, contentKey]);
 
   // Marks, and a host's tags on them.
   const stale = props.stale;
