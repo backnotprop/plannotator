@@ -251,10 +251,11 @@ async function open(context: BrowserContext, t: Thread, name: string): Promise<P
   return page;
 }
 
-/** The page's frame (the HTML file). */
+/** The page's frame (the HTML file, served by the Inbox at /api/inbox/pages/<id>). */
+const isPageFrame = (f: Frame) => /\/api\/inbox\/pages\/[0-9a-f]+$/.test(f.url());
 async function pageFrame(page: Page): Promise<Frame> {
-  await expect.poll(() => page.frames().some((f) => f.url().startsWith('about:srcdoc'))).toBe(true);
-  return page.frames().find((f) => f.url().startsWith('about:srcdoc'))!;
+  await expect.poll(() => page.frames().some(isPageFrame)).toBe(true);
+  return page.frames().find(isPageFrame)!;
 }
 
 /** A comment's mark on the HTML page, in the window's coordinates. */
