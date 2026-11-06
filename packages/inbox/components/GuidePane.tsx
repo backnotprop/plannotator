@@ -37,6 +37,8 @@ const GuideReader = GuideReaderPart.Part;
 export interface GuidePaneProps {
   thread: InboxThread;
   message: InboxMessageWire;
+  /** A tailnet guest's page: the expand arrows' route refuses it, so nothing is asked. */
+  guest?: boolean;
   /** Back to the thread. */
   onBack: () => void;
   /** Close the guide and the thread. */
@@ -177,11 +179,13 @@ export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
     [readOnly, comments, selectedId, save, remove, scrollTarget, message.id],
   );
 
-  return { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, scrollTarget, readOnly, changeReviewed, save, remove, edit, showComment, readerComments, localWrites };
+  // The expand arrows' whole files, as the guide's patch names them.
+  const fileContents = useCallback((path: string, signal: AbortSignal) => inboxApi.guideFile(message.id, path, signal), [message.id]);
+  return { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, scrollTarget, readOnly, changeReviewed, save, remove, edit, showComment, readerComments, localWrites, fileContents };
 }
 
-export function GuidePane({ thread, message, onBack, onClose, codeReview = false }: GuidePaneProps) {
-  const { snapshot, error, reviewed, saveError, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments } = useGuideState(thread, message);
+export function GuidePane({ thread, message, onBack, onClose, guest = false, codeReview = false }: GuidePaneProps) {
+  const { snapshot, error, reviewed, saveError, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = useGuideState(thread, message);
   const fileOpenIn = useCallback((path: string) => <OpenInFile scope={{ thread: thread.thread_id, message: message.id, from: 'root' }} path={path} />, [thread.thread_id, message.id]);
   const [paneRef, folded] = useNarrowerThan<HTMLElement>(GUIDE_FOLD_PANEL_BELOW, false);
   /** The folded panel, open over the guide. */
@@ -219,7 +223,7 @@ export function GuidePane({ thread, message, onBack, onClose, codeReview = false
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
+      className={`ib-viewer ib-wlayer${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
       aria-label="Guided review"
       data-guide-message={message.id}
     >
@@ -270,7 +274,14 @@ export function GuidePane({ thread, message, onBack, onClose, codeReview = false
           ) : snapshot ? (
             <ReaderPart diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on={codeReview === true}>
-                <GuideReader snapshot={snapshot} reviewed={reviewed} onReviewedChange={changeReviewed} comments={readerComments} fileOpenIn={codeReview ? fileOpenIn : undefined} />
+                <GuideReader
+                  snapshot={snapshot}
+                  reviewed={reviewed}
+                  onReviewedChange={changeReviewed}
+                  comments={readerComments}
+                  fileOpenIn={codeReview ? fileOpenIn : undefined}
+                  {...(guest ? {} : { fileContents })}
+                />
               </OpenInCodeSpans>
             </ReaderPart>
           ) : null}

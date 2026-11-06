@@ -17,10 +17,13 @@ permissions:
 # a PR only once it has the `ci:full` label; see windows.yml.
 #
 # One run per PR at a time: a new push cancels the PR's older run, which no one
-# will merge. A push to main is never cancelled: deploy.yml runs after the Test
-# run of each main commit, so every one of them gets a group of its own.
+# will merge. Pushes to main share one group that never cancels a running run:
+# the running one finishes, at most one waits, and a newer push replaces the
+# waiting one. A merge train lands several PRs in a minute, and testing each of
+# their merge commits on main would fill every runner. deploy.yml diffs from the
+# last main commit whose Test passed, so a skipped commit deploys with the next.
 concurrency:
-  group: test-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  group: test-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && format('push-{0}', github.ref) || format('run-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

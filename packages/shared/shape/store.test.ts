@@ -145,6 +145,22 @@ describe("finished, drawing and seen", () => {
 });
 
 describe("notes", () => {
+  test("a box's picture becomes a file of the shape, and a note without one stays as it was", () => {
+    const { store } = storeAt(scratch());
+    const first = store.update({ board: board(), project });
+    if (!first.ok) throw new Error("setup");
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    const boxed = store.addNote(first.id, { kind: "change", v: 1, view: "picture", part: "a,b", text: "x", box: { x: 0, y: 0, w: 1, h: 1 }, picture: `data:image/png;base64,${bytes.toString("base64")}` });
+    if (!boxed.ok) throw new Error("note");
+    expect(boxed.note.picture).toMatch(/^files\/note-shn_.+\.png$/);
+    expect(readFileSync(store.filePath(first.id, boxed.note.picture!)!)).toEqual(bytes);
+    const plain = store.addNote(first.id, { kind: "change", v: 1, text: "y" });
+    if (!plain.ok) throw new Error("note");
+    expect(Object.keys(plain.note)).not.toContain("picture");
+    expect(Object.keys(plain.note)).not.toContain("box");
+    expect(Object.keys(plain.note)).not.toContain("code");
+  });
+
   test("a change waits for the agent until one reads it, once", () => {
     const { store } = storeAt(scratch());
     const first = store.update({ board: board(), project });
@@ -241,7 +257,7 @@ const r = createShapeStore({ dataDir }).update({ board, id, base: 1, project: ${
 console.log(r.ok ? "OK" : r.code);`,
     );
     const runs = Array.from({ length: count }, (_, i) =>
-      Bun.spawn([process.execPath, worker, dataDir, id, String(i)], { stdout: "pipe", stderr: "pipe", env: { PATH: process.env.PATH ?? "" } }),
+      Bun.spawn([process.execPath, worker, dataDir, id, String(i)], { stdout: "pipe", stderr: "pipe", env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME! } }),
     );
     return Promise.all(runs.map(async (p) => (await new Response(p.stdout).text()).trim()));
   }

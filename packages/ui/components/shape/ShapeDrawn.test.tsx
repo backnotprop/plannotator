@@ -14,6 +14,8 @@
  *   board (code review's "show me how this works") cannot open the code;
  * - while pointing (Change it / Ask), a marked part opens the code instead of
  *   being picked, or a bad `data-code` reaches the host;
+ * - an icon, logo or drawn thing `shape update` stamped loses strokes, colour or
+ *   its motion to the sanitizer, or keeps moving when motion is reduced;
  * - a drawing's `#…` link changes the host page's hash (the Inbox's route), or
  *   its https link opens in the same tab (leaving the Inbox), or an image map's
  *   `<area href>` gets past either.
@@ -24,6 +26,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { ShapeCodeTarget, ShapeRef } from '@plannotator/core/shape';
 import { bridgeSanitizerDom } from '../../../../tests/helpers/chat-sanitizer-dom';
 import { OUTSIDE_HOST, SHAPE_OUTSIDE_HTML, SHAPE_SAFE_HTML } from '../../../../tests/fixtures/shape-outside-loads';
+import { expandShapeStamps } from '../../../shared/shape/stamps';
 
 const hasDom = typeof document !== 'undefined';
 const drawnModule = hasDom ? await import('./ShapeDrawn') : null;
@@ -226,6 +229,36 @@ describe.skipIf(!hasDom)('a drawn view', () => {
   });
 });
 
+describe.skipIf(!hasDom)('icons, logos and drawn things by name (stamped by `shape update`)', () => {
+  // Inside a drawing's own <svg>, as a board has them.
+  const STAMPED = expandShapeStamps(
+    '<svg viewBox="0 0 900 400"><svg data-icon="database" x="10" y="10" width="28" height="28" style="color:var(--blue)"/><svg data-logo="stripe" x="60" y="10"/><svg data-logo="github" x="110" y="10"/>'
+      + '<svg data-draw="database" x="10" y="80" width="140" height="120" data-label="Postgres"/><svg data-draw="queue" x="200" y="80" width="200" height="60" data-label="jobs"/>'
+      + '<svg data-draw="envelope" x="10" y="260" width="56" height="40" data-to="400 260"/></svg>',
+  ).html;
+  const shapes = (html: string) => html.match(/<(path|rect|ellipse|circle|text)\b/g)!.length;
+
+  test('come through the same sanitizer whole: every stroke, the logo, the label and the motion', () => {
+    const out = drawnModule!.sanitizeShapeHtml(STAMPED);
+    expect(shapes(out)).toBe(shapes(STAMPED));
+    expect(out).toContain('fill="#635BFF"');
+    expect(out).toContain('fill:var(--ink)');
+    expect(out).toMatch(/<g class="shp-go" style="--dx:\s*390px;\s*--dy:\s*0px;?">/);
+    expect(out).toContain('>Postgres</text>');
+  });
+
+  test('a thing sent along moves, and holds still halfway when motion is reduced', async () => {
+    const html = STAMPED;
+    const moving = await draw({ html, reduce: false });
+    expect(getComputedStyle(moving.shadow.querySelector('.shp-go')!).animation).toMatch(/^shp-go /);
+    act(() => root?.unmount());
+    const still = await draw({ html, reduce: true });
+    const style = getComputedStyle(still.shadow.querySelector('.shp-go')!);
+    expect(style.animation).toBe('none');
+    expect(style.transform).toContain('/ 2');
+  });
+});
+
 describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures', () => {
   const REFS: ShapeRef[] = [
     { n: 1, kind: 'image', title: 'The dialog', target: 'files/a.png' },
@@ -298,6 +331,54 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
     expect(plain.textContent).toBe('2');
     expect(plain.classList.contains('own')).toBe(false);
     expect(shadow.querySelector('[data-ref="9"]')).toBeNull();
+  });
+
+  // A <span> or <div> inside an <svg> ends the SVG where it stands in a browser, and all drawn after it was lost
+  // (shapeKeepSvgWhole's parse5 test shows that parse; happy-dom drops the span instead).
+  test('an HTML tag inside an SVG keeps the rest of the drawing; an empty <span data-ref> there is its number, once, in place', async () => {
+    const { shadow } = await draw({
+      html:
+        '<svg viewBox="0 0 400 200"><g data-mark="queue"><rect class="ink" x="10" y="10" width="100" height="40"/><text x="20" y="35">Queue</text><span data-ref="1"></span></g>' +
+        '<g data-mark="diff"><rect class="ink" x="200" y="10" width="100" height="40"/><text x="210" y="35">Diff <span data-ref="2"></span></text></g>' +
+        '<div></div><circle id="last" cx="50" cy="150" r="9"/><text x="1" y="1">x</text><circle data-ref="3" r="4"/></svg>',
+      refs: REFS,
+    });
+    const svg = shadow.querySelector('svg')!;
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    // Every part drawn after the span is still in the SVG, as SVG.
+    expect(svg.querySelector('[data-mark="diff"] rect')?.namespaceURI).toBe(SVG_NS);
+    expect(svg.querySelector('#last')?.namespaceURI).toBe(SVG_NS);
+    // One number each, in the SVG, in the words it follows.
+    for (const [n, words] of [[1, 'Queue'], [2, 'Diff']] as const) {
+      const spots = shadow.querySelectorAll(`[data-ref="${n}"]`);
+      expect(spots.length).toBe(1);
+      const spot = spots[0]!;
+      expect(spot.namespaceURI).toBe(SVG_NS);
+      expect(spot.textContent).toBe(String(n));
+      expect(spot.classList.contains('shp-rb')).toBe(true);
+      expect(spot.closest('text')?.textContent?.startsWith(words)).toBe(true);
+    }
+    // A shape that is a number stays that shape.
+    expect(shadow.querySelector('[data-ref="3"]')?.localName).toBe('circle');
+  });
+
+  test('an empty number in an SVG with no words before it goes to the nearest drawn words, else just after the SVG; never a hidden one', async () => {
+    const { shadow } = await draw({
+      html:
+        '<svg><g><span data-ref="1"></span><rect width="9" height="9"/><text x="1" y="9">Label</text></g></svg>' +
+        '<svg id="bare"><defs><text id="tucked">tucked</text></defs><span data-ref="2"></span><rect width="9" height="9"/></svg>',
+      refs: REFS,
+    });
+    const one = shadow.querySelectorAll('[data-ref="1"]');
+    expect(one.length).toBe(1);
+    expect(one[0]!.closest('text')?.textContent).toBe('Label1');
+    // No drawn words: a bubble just after the SVG, not one inside <defs>.
+    const two = shadow.querySelectorAll('[data-ref="2"]');
+    expect(two.length).toBe(1);
+    expect(shadow.querySelector('#tucked')?.textContent).toBe('tucked');
+    expect(two[0]!.localName).toBe('span');
+    expect(two[0]!.previousElementSibling?.id).toBe('bare');
+    expect(two[0]!.textContent).toBe('2');
   });
 
   test('kept pictures reach the host, in HTML and in SVG, and nothing else is rewritten', async () => {

@@ -109,9 +109,10 @@ describe.skipIf(!hasDom)('the Feedback dialog', () => {
     const dialog = render();
     // The box takes focus on open: the person types at once.
     expect(document.activeElement).toBe(dialog.box());
-    // The line says what is sent, naming this version (the data it must keep truthful) and the OS.
+    // The line says what is sent, naming this version (the data it must keep truthful), the OS and the agents.
     expect(dialog.what().textContent).toContain('0.28.33');
     expect(dialog.what().textContent).toMatch(/\bOS\b/);
+    expect(dialog.what().textContent).toMatch(/\bagents\b/);
     expect(calls).toHaveLength(0);
 
     type(dialog.box(), '  Reload loses my place in the list  ');

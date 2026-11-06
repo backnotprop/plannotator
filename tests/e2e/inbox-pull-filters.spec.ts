@@ -3,7 +3,7 @@
  * "highlights when open"), proved in a real browser against the compiled binary. The same sandbox as
  * inbox-pull-requests.spec.ts: `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR, `gh` and `glab` sh
  * fakes first on PATH (nothing reaches GitHub or GitLab; the real CLIs never run), simulated agents through
- * `plannotator inbox mcp`. HOME is never changed.
+ * `plannotator inbox mcp`. HOME is the scratch folder.
  *
  * What is proved, in order:
  *  1. The read: the person's own lists, then Others as a call of its own scoped to the projects (never unscoped).
@@ -21,7 +21,7 @@
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
@@ -51,39 +51,43 @@ function project(parent: string, name: string, origin: string): string {
   return dir;
 }
 
-/** The fake gh / glab (list answers only): each list read is one line in `calls`, with its arguments. */
+/**
+ * The fake gh / glab (list answers only): each list read is one file of its own in `calls/`, its arguments on one line,
+ * written aside and moved in whole. Not one shared file: gh and glab read at the same time, and a long line appended in
+ * parts by two of them at once comes out as one merged line, the other call lost.
+ */
 function writeForge(dir: string) {
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'calls'), '');
+  mkdirSync(join(dir, 'calls'), { recursive: true });
   const gh = [
     '#!/bin/sh',
     `dir='${dir}'`,
-    'calls="$dir/calls"',
+    'record() { t=$(mktemp "$dir/call.XXXXXX"); printf "%s" "$*" | tr "\\n" " " > "$t"; mv "$t" "$dir/calls/"; }',
     'if [ "$1" = auth ] && [ "$2" = status ]; then',
     '  echo \'{"hosts":{"github.com":[{"login":"dana","active":true,"state":"success","tokenSource":"keyring"}]}}\'',
     '  exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$2" = graphql ]; then',
-    '  case "$*" in *"query InboxPullsOthers"*) echo "gh others $*" | tr "\\n" " " >> "$calls"; echo >> "$calls"; cat "$dir/gh-others.json"; exit 0;; esac',
-    '  case "$*" in *"requested: search"*) echo "gh pulls $*" | tr "\\n" " " >> "$calls"; echo >> "$calls"; cat "$dir/gh-pulls.json"; exit 0;; esac',
-    '  echo "gh graphql-other" >> "$calls"; echo \'{"data":null}\'; exit 1',
+    '  case "$*" in *"query InboxPullsOthers"*) record "gh others $*"; cat "$dir/gh-others.json"; exit 0;; esac',
+    '  case "$*" in *"requested: search"*) record "gh pulls $*"; cat "$dir/gh-pulls.json"; exit 0;; esac',
+    '  record "gh graphql-other"; echo \'{"data":null}\'; exit 1',
     'fi',
-    'echo "gh other $1" >> "$calls"; exit 1',
+    'record "gh other $1"; exit 1',
     '',
   ].join('\n');
   const glab = [
     '#!/bin/sh',
     `dir='${dir}'`,
-    'calls="$dir/calls"',
+    'record() { t=$(mktemp "$dir/call.XXXXXX"); printf "%s" "$*" | tr "\\n" " " > "$t"; mv "$t" "$dir/calls/"; }',
     'if [ "$1" = auth ] && [ "$2" = status ]; then',
     '  echo "gitlab.com"; echo "  ✓ Logged in to gitlab.com as dana (keyring)"; exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$4" = graphql ]; then',
-    '  case "$*" in *"query InboxPullsOthers"*) echo "glab others $*" | tr "\\n" " " >> "$calls"; echo >> "$calls"; cat "$dir/glab-others.json"; exit 0;; esac',
-    '  case "$*" in *reviewRequestedMergeRequests*) echo "glab pulls $*" | tr "\\n" " " >> "$calls"; echo >> "$calls"; cat "$dir/glab-pulls.json"; exit 0;; esac',
-    '  echo "glab graphql-other" >> "$calls"; echo \'{"data":null}\'; exit 1',
+    '  case "$*" in *"query InboxPullsOthers"*) record "glab others $*"; cat "$dir/glab-others.json"; exit 0;; esac',
+    '  case "$*" in *reviewRequestedMergeRequests*) record "glab pulls $*"; cat "$dir/glab-pulls.json"; exit 0;; esac',
+    '  record "glab graphql-other"; echo \'{"data":null}\'; exit 1',
     'fi',
-    'echo "glab other $1" >> "$calls"; exit 1',
+    'record "glab other $1"; exit 1',
     '',
   ].join('\n');
   for (const [file, body] of [['gh', gh], ['glab', glab]] as const) {
@@ -238,7 +242,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 
   const env: Record<string, string> = {
     PATH: `${forge}:${process.env.PATH ?? ''}`,
-    ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
@@ -396,7 +400,7 @@ test('the read: the person\'s own lists, then Others as a call of its own scoped
   const { page } = world;
   await landed(page, async () => (await page.goto('about:blank'), page.goto(`${world.url}#pulls`)));
   await expect(page.locator('[data-pulls-row]').first()).toBeVisible();
-  const read = () => readFileSync(join(world.forge, 'calls'), 'utf8').split('\n').filter(Boolean);
+  const read = () => readdirSync(join(world.forge, 'calls')).map((f) => readFileSync(join(world.forge, 'calls', f), 'utf8'));
   // The first row shows when one forge has answered; the other calls may still be on their way.
   await expect
     .poll(() => ['gh pulls', 'glab pulls', 'gh others', 'glab others'].filter((name) => read().some((c) => c.startsWith(name))))

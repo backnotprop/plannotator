@@ -21,7 +21,7 @@
  *     "changed since asked", with Show me again.
  *  5. The same popover and picture at 390 px; "Tell your agents" never shows.
  *
- * Code review is on in the scratch config; HOME is never changed: the sandbox
+ * Code review is on in the scratch config; HOME is the scratch folder, and the sandbox
  * env keeps the binary off the person's agents. gh and glab are traps.
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-show-me.spec.ts`.
@@ -334,7 +334,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   for (const dir of ['claude', 'codex', 'xdg', 'opencode']) mkdirSync(join(root, dir), { recursive: true });
   const env: Record<string, string> = {
     PATH: `${trap}:${process.env.PATH ?? ''}`,
-    ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_INBOX_TAILSCALE: '0',

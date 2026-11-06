@@ -13,7 +13,7 @@
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
-import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, expect, setSystemTime, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -137,6 +137,7 @@ beforeEach(() => {
 
 afterEach(() => {
   if (!hasDom) return;
+  setSystemTime();
   act(() => root?.unmount());
   host?.remove();
   root = null;
@@ -257,7 +258,7 @@ test('the link is the Inbox one address plus #thread=, and the items follow the 
 test.skipIf(!hasDom)('a right-click opens the menu on that row, without opening the thread; Copy link writes its address', async () => {
   await renderApp();
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Archive']);
+  expect(items()).toEqual(['Star thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Archive']);
   expect(menu()!.querySelector('[role="separator"]')).not.toBeNull();
   // The row keeps a muted background while its menu is open; nothing opened, nothing selected.
   expect(rowWrap(ids.waiting)!.hasAttribute('data-menu')).toBe(true);
@@ -318,7 +319,7 @@ test.skipIf(!hasDom)('Mark read moves the row to Quiet with its toast; the menu 
   });
   await until(() => !!rowButton(ids.waiting), 'the row in Quiet');
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark unread', 'Move back', 'Archive']);
+  expect(items()).toEqual(['Star thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark unread', 'Move back', 'Archive']);
   const before = JSON.parse((await loopback(`/api/inbox/threads/${ids.waiting}`)).text) as { thread: { messages: { questions?: { state: string }[] }[] } };
   await choose('mark-unread');
   expect(posted.some((p) => p.path === `/api/inbox/threads/${ids.waiting}/mark-unread`)).toBe(true);
@@ -348,7 +349,7 @@ test.skipIf(!hasDom)('a row Mark unread brought back keeps Move back in its menu
   await loopback(`/api/inbox/threads/${ids.waiting}/mark-unread`, 'POST', '{}');
   await renderApp();
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Move back', 'Archive']);
+  expect(items()).toEqual(['Star thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Move back', 'Archive']);
   await choose('unread');
   await until(async () => (await serverSections()).get(ids.waiting) === 'waiting', 'the question reopened');
   const thread = JSON.parse((await loopback(`/api/inbox/threads/${ids.waiting}`)).text) as { thread: { messages: { questions?: { state: string }[] }[] } };
@@ -398,6 +399,8 @@ test.skipIf(!hasDom)('Escape closes the menu and puts focus back on the row; the
 });
 
 test.skipIf(!hasDom)('Snooze by keyboard: focus lands on the first time, and Back puts it on Snooze again, never on the page', async () => {
+  // A Wednesday morning, so the times are all four: after 6 PM there is no Later today, and on a Friday Next week is In 3 days.
+  setSystemTime(new Date('2026-11-04T10:00:00Z'));
   await renderApp();
   const row = rowButton(ids.waiting)!;
   act(() => row.focus());

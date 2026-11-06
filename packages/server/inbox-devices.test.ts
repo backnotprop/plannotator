@@ -34,7 +34,10 @@ import {
   worldEnv,
   type InboxWorld,
 } from "../../tests/helpers/inbox-world";
+import { inboxId } from "@plannotator/core/inbox-types";
+import { inboxUploadAttachments } from "@plannotator/shared/inbox/uploads";
 import { resetServedHostnamesForTests } from "./request-host-guard";
+import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { startInboxServer } from "./inbox";
 import { createInboxDevices, takeDownInboxTailnet } from "./inbox-devices";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
@@ -268,6 +271,7 @@ describe("the device door, on the binary", () => {
       ["GET", "skills"],
       ["GET", "skills/content?name=readback"],
       ["POST", "uploads?name=a.txt"],
+      ["POST", "uploads/reuse"],
       ["POST", "markups"],
       ["POST", `messages/${guideMessage}/guide/annotations`],
       ["POST", `messages/${threadId}/annotations`],
@@ -288,7 +292,7 @@ describe("the device door, on the binary", () => {
     const health = await door("health");
     expect(health.status).toBe(200);
     const h = (await health.json()) as Json;
-    expect(Object.keys(h).sort()).toEqual(["app", "event_streams", "inbox_id", "machine_links", "notify_reach", "ok", "peek", "pid", "serverSession", "update", "version"]);
+    expect(Object.keys(h).sort()).toEqual(["app", "event_streams", "inbox_id", "machine_links", "notify_reach", "ok", "peek", "pid", "serverSession", "update", "version", "window_controls"]);
     expect(h).toMatchObject({ ok: true, app: "plannotator-inbox", serverSession });
     expect(await (await door("health", { token: null })).json()).toEqual({ error: "This request needs the phone's token.", code: "device_token_missing" });
   });
@@ -1254,7 +1258,8 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
   });
 
   test("7.39 to 7.41: the live sessions, a thread the phone starts (replayed by its key, refusals unchanged), and Send to another session", async () => {
-    const { ledger, inbox, door, poll } = await world();
+    let now = 1_000_000;
+    const { ledger, inbox, door, poll } = await world({ sessionsNow: () => now });
     await poll("ses-a", "claude-code");
     await poll("ses-b", "pi");
 
@@ -1281,6 +1286,9 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
     const gone = await door("messages", { body: { idempotency_key: "compose-2", to: { session: "ses-gone" }, body: "Hello" } });
     expect([gone.status, ((await gone.json()) as Json).code]).toEqual([409, "session_not_live"]);
 
+    // A move needs the session it waits on to have ended.
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
+    await poll("ses-b", "pi");
     const moved = await door(`messages/${first.message.id}/to`, { body: { idempotency_key: "to-1", to: { host: "pi", session: "ses-b" } } });
     expect(moved.status).toBe(200);
     const m = (await moved.json()) as Json;
@@ -1419,6 +1427,22 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
     const read = await door(`markups/${markup.name}`);
     expect(Buffer.from(await read.arrayBuffer()).equals(ONE_PIXEL_PNG)).toBe(true);
     expect((await door("markups?idempotency_key=mk-2", { raw: "<svg/>" })).status).toBe(422);
+  });
+
+  test("a phone adds a file it can see through the door: no bytes, the same pending upload the window gets", async () => {
+    const { ledger, inbox, door } = await world();
+    const { store } = inbox;
+    const project = store.ensureProject({ name: "ledger", root: ledger });
+    const uploaded = await door("uploads?name=shot.png&idempotency_key=reuse-up-1", { raw: ONE_PIXEL_PNG, headers: { "Content-Type": "image/png" } });
+    const upload = ((await uploaded.json()) as Json).upload;
+    const asked = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: "ses-a", name: null }, body: "A picture.", thread: "Shots", attachments: await inboxUploadAttachments(store.dir, [upload.upload_id], new Date().toISOString()) }).message;
+    const source = asked.attachments![0]!;
+    const answer = await door("uploads/reuse", { body: { attachment_id: source.id, version: "sent", idempotency_key: "reuse-1" } });
+    expect(answer.status).toBe(200);
+    const reused = ((await answer.json()) as Json).upload;
+    expect([reused.name, reused.sha256]).toEqual(["shot.png", source.sent_sha256]);
+    const unknown = await door("uploads/reuse", { body: { attachment_id: inboxId("att"), version: "sent", idempotency_key: "reuse-2" } });
+    expect([unknown.status, ((await unknown.json()) as Json).code]).toEqual([404, "upload_not_found"]);
   });
 
   test("7.57: a reply carries uploads through the door unchanged: they become the reply's attachments, a replay copies nothing, a gone id is the window's 404", async () => {

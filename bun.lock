@@ -415,6 +415,16 @@
         "fast-check": "4.10.2",
       },
     },
+    "packages/system": {
+      "name": "@plannotator/system",
+      "version": "0.1.0",
+      "dependencies": {
+        "yaml": "2.9.0",
+      },
+      "devDependencies": {
+        "typescript": "~5.8.2",
+      },
+    },
     "packages/t3-code": {
       "name": "@plannotator/t3-code",
       "version": "0.0.1",
@@ -1170,6 +1180,8 @@
     "@plannotator/server": ["@plannotator/server@workspace:packages/server"],
 
     "@plannotator/shared": ["@plannotator/shared@workspace:packages/shared"],
+
+    "@plannotator/system": ["@plannotator/system@workspace:packages/system"],
 
     "@plannotator/t3-code": ["@plannotator/t3-code@workspace:packages/t3-code"],
 
