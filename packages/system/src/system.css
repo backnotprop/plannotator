@@ -81,9 +81,60 @@
 .sys .sys-btn { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: var(--ib-r8-s, 6px); border: 1px solid var(--ib-line, var(--border)); font-size: var(--ib-fs-13, 13px); color: var(--foreground); white-space: nowrap; }
 .sys .sys-btn:hover, .sys .sys-icon-btn:hover { background: var(--ib-fill, var(--muted)); }
 .sys .sys-icon-btn { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--ib-r8-s, 6px); color: var(--muted-foreground); }
-.sys-stage { position: relative; flex: 1; min-height: 0; overflow: auto; }
-.sys-window .sys-stage { overflow: hidden; }
+.sys-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none; cursor: grab; outline: none; }
+.sys-stage.sys-drag { cursor: grabbing; }
+.sys-stage:focus-visible { box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--ring) 70%, transparent); }
+/* a pane grows down to its sheet; the height follows the sheet on screen */
+.sys-pane .sys-stage { flex: none; transition: height .375s var(--sys-ease-out); }
 .sys-fit { position: relative; overflow: hidden; }
+.sys-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.sys-layer { position: absolute; left: 0; top: 0; }
+.sys-ghost { pointer-events: none; }
+/* a window's inside, drawn into its box as the person goes in */
+.sys-mini { position: absolute; transform-origin: 0 0; pointer-events: none; }
+.sys-mini .sys-paper { opacity: var(--sys-mini-paper, 1); }
+/* the Simple / Full move: while a box travels its frame is drawn by an SVG that scales, and its own border steps aside */
+.sys-pframe { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.sys-pframe > g { transform-origin: 0 0; }
+.sys-pframe path, .sys-pframe rect { vector-effect: non-scaling-stroke; }
+.sys-part.sys-flip > .sys-pv { border-color: transparent !important; background: transparent !important; overflow: visible; }
+.sys-win-stack { transform-origin: 0 0; }
+.sys-zones rect { transform-box: view-box; }
+.sys-live .sys-part:focus { outline: none; }
+.sys-live .sys-part:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; border-radius: 3px; }
+@media (prefers-reduced-motion: reduce) { .sys-pane .sys-stage { transition: none; } }
+
+/* the zoom group and the Key, flat at the bottom left of the stage */
+.sys-zoom { position: absolute; left: 14px; bottom: 14px; display: flex; align-items: center; height: 32px; padding: 0 3px; gap: 1px; border-radius: var(--ib-r8-s, 6px); border: 1px solid var(--ib-line, var(--border)); background: var(--sys-paper); cursor: default; }
+.sys .sys-zoom button { height: 26px; min-width: 26px; padding: 0 7px; border-radius: var(--ib-r8-s, 5px); font-size: var(--ib-fs-13, 13px); color: var(--sys-ink2); display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
+.sys .sys-zoom button:hover { background: var(--ib-fill, var(--muted)); color: var(--foreground); }
+.sys .sys-zoom button[aria-expanded="true"] { background: var(--ib-sel, var(--muted)); color: var(--foreground); }
+.sys .sys-zoom button:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.sys .sys-zoom .sys-pct { font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); min-width: 48px; font-variant-numeric: tabular-nums; }
+.sys-zoom .sys-zsep { width: 1px; height: 16px; background: var(--ib-hair, var(--border)); margin: 0 3px; }
+.sys-card-pop { position: absolute; left: 14px; bottom: 54px; max-height: calc(100% - 70px); overflow: auto; background: var(--sys-paper); border: 1px solid var(--ib-line, var(--border)); border-radius: var(--ib-r10-s, 8px); box-shadow: 0 8px 28px color-mix(in oklab, var(--foreground) 12%, transparent); padding: 12px 14px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--sys-ink); cursor: default; z-index: 3; }
+.sys-keycard { width: 300px; }
+.sys-notescard { width: min(560px, calc(100% - 28px)); display: grid; gap: 9px; }
+.sys-kc-h { font-size: var(--ib-fs-12, 12px); font-weight: 600; color: var(--sys-ink2); margin: 10px 0 5px; }
+.sys-kc-h:first-child { margin-top: 0; }
+.sys-kc-r { display: flex; align-items: center; gap: 10px; min-height: 22px; }
+.sys-kc-i { width: 40px; flex: none; display: inline-flex; justify-content: center; }
+.sys-kc-k { display: flex; align-items: center; gap: 4px; min-height: 22px; }
+.sys-kc-k > span:last-child { margin-left: 6px; color: var(--sys-ink2); }
+.sys-kbd { font-family: var(--font-mono); font-size: var(--ib-fs-11, 11px); min-width: 20px; height: 20px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ib-line, var(--border)); border-radius: 4px; color: var(--sys-ink); }
+.sys-note-row { display: flex; gap: 9px; align-items: flex-start; }
+.sys-note-row .sys-letter { margin-top: 1px; }
+.sys-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* the sheet chips: one per sheet of the scope, the one on screen named by its kind */
+.sys-chips { display: inline-flex; align-items: center; gap: 2px; }
+.sys .sys-chip-b { height: 28px; min-width: 28px; padding: 0 9px; border-radius: var(--ib-r8-s, 6px); font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); white-space: nowrap; }
+.sys .sys-chip-b:hover { color: var(--foreground); background: var(--ib-fill, var(--muted)); }
+.sys .sys-chip-b[aria-current="page"] { color: var(--foreground); font-weight: 500; background: var(--ib-sel, var(--muted)); }
+.sys .sys-chip-b .sys-chip-k { font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); }
+.sys .sys-chip-b:focus-visible, .sys .sys-crumb-b:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.sys .sys-crumb-b { border-radius: 4px; padding: 1px 3px; margin: -1px -3px; }
+.sys .sys-crumb-b:hover { color: var(--foreground); background: var(--ib-fill, var(--muted)); }
 .sys-empty { padding: 24px; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
 .sys-scaled { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .sys-thumb { position: relative; overflow: hidden; background: var(--sys-paper); }
@@ -261,6 +312,10 @@
 .sys-lod-1 .sys-t-phrase, .sys-lod-1 .sys-t-quiet,
 .sys-lod-2 .sys-t-quiet { opacity: 0 !important; }
 .sys-lod-0 .sys-letter.sys-mk, .sys-lod-1 .sys-letter.sys-mk { opacity: 0 !important; }
+/* what the level of detail hides can not be clicked or focused either */
+.sys-lod-0 :is(.sys-t-name, .sys-t-phrase, .sys-t-quiet), .sys-lod-1 :is(.sys-t-phrase, .sys-t-quiet), .sys-lod-2 .sys-t-quiet,
+.sys-lod-0 .sys-letter, .sys-lod-1 .sys-letter.sys-mk { visibility: hidden; }
+.sys-elabel.sys-show.sys-t-quiet, .sys-elabel.sys-show.sys-t-phrase { visibility: visible; }
 .sys-elabel.sys-show.sys-t-quiet, .sys-elabel.sys-show.sys-t-phrase { opacity: 1 !important; }
 
 @media (forced-colors: active) {
