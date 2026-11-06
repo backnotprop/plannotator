@@ -1102,6 +1102,8 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   const after = (await review.locator('.ib-vhead [data-review-decision]').boundingBox())!;
   expect(after.x + after.width).toBeLessThanOrEqual(900);
   await fn.locator('bdi').evaluate((node, text) => (node.textContent = text), was);
+  // The world's window back to its size: the tests after this one share it.
+  await page.setViewportSize({ width: 1440, height: 900 });
   await review.locator(`[data-pull-next-layer="${LAYER_413}"]`).click();
   await expect(review).toHaveAttribute('data-pull-review', LAYER_413);
   await expect(review.locator('[data-review-files] [data-review-file]')).toHaveCount(1);
@@ -1367,7 +1369,9 @@ test('Escape closes an open sheet wherever focus is; what used the key keeps it,
   const { context, page } = await stubbedReview(browser, 1280, COLLIDING_PATHS_DIFF);
   try {
     const review = page.locator('[data-pull-review]');
-    // The sidebar's room, for the diff beside the sheet.
+    // The sidebar's room, for the diff beside the sheet. The pointer off the left edge first: a new page's pointer rests
+    // at 0,0 in Linux's Chromium, where the closed sidebar's peek would show the navigation again.
+    await page.mouse.move(700, 450);
     await page.keyboard.press('ControlOrMeta+b');
     await expect(page.locator('.ib-side').getByRole('button', { name: /Reviews/ })).toBeHidden();
     const panel = review.locator('.ib-gpanel');
@@ -1674,7 +1678,9 @@ test('the sidebar toggle: first in the bar, ⌘B and the button both hide and sh
     expect(await left()).toBeGreaterThanOrEqual(row.x + row.width);
     expect(await page.evaluate(([x, y]) => !!document.elementFromPoint(x!, y!)?.closest('.ib-side'), [row.x + 8, row.y + 8])).toBe(true);
     const beside = await left();
-    // The key hides it and the page takes the room; the rail stays.
+    // The key hides it and the page takes the room; the rail stays. The pointer off the left edge, where the closed
+    // sidebar's peek would show the navigation (a new page's pointer rests at 0,0 in Linux's Chromium).
+    await page.mouse.move(700, 450);
     await page.keyboard.press('ControlOrMeta+b');
     await expect.poll(left).toBeLessThan(beside - 100);
     await expect(review.locator('.ib-rrail')).toBeVisible();
