@@ -6,7 +6,9 @@ import type { SystemSetup } from './setup.ts';
 /**
  * The `plannotator system` subcommands the recipes and the scheduled job
  * call. The command itself is a thin file over this package
- * (`apps/hook/server/system-command.ts`, step A7); its help prints these lines.
+ * (`apps/hook/server/system-command.ts`, step A7); its help prints these lines
+ * (it imports them from `@plannotator/system/commands`, this file, so the CLI's
+ * help loads none of the loader).
  * Every command prints one JSON value on stdout and nothing on failure,
  * writes `<code>: <message>` on stderr, and exits 0 ok, 1 failed, 2 bad usage,
  * as `plannotator inbox call` does.
@@ -20,6 +22,14 @@ export const SYSTEM_COMMANDS = {
 } as const;
 
 export type SystemSubcommand = keyof typeof SYSTEM_COMMANDS;
+
+/**
+ * How often the scheduled check runs: every 15 minutes while the Mac is awake.
+ * Owner ruling 2026-11-06 (System build spec, settled default 5). The check
+ * itself costs no model; launchd runs a missed interval when the Mac wakes and
+ * nothing while it sleeps.
+ */
+export const SYSTEM_TICK_INTERVAL_SECONDS = 15 * 60;
 
 /**
  * What a Claude Code redraw may do with no one to ask: read, search and edit

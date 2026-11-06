@@ -11,15 +11,11 @@ import { execFile } from 'node:child_process';
 import { mkdir, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { SYSTEM_TICK_INTERVAL_SECONDS } from '../agent/command.ts';
 import { checkKey, systemPaths } from './state.ts';
 
-/**
- * How often the check runs: every 15 minutes while the Mac is awake. Owner
- * ruling 2026-11-06 (System build spec, settled default 5). The check itself
- * costs no model; launchd runs a missed interval when the Mac wakes and
- * nothing while it sleeps.
- */
-export const SYSTEM_TICK_INTERVAL_SECONDS = 15 * 60;
+// How often the check runs: in agent/command.ts, beside the command's usage lines, so the help can say it.
+export { SYSTEM_TICK_INTERVAL_SECONDS };
 
 export const LABEL_PREFIX = 'ai.plannotator.system.';
 

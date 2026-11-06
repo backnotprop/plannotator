@@ -5,6 +5,7 @@ import { INBOX_REF_LINK_RULE, INBOX_TOOL_ACTIONS } from "@plannotator/shared/inb
 import { FEEDBACK_HEREDOC_END } from "@plannotator/core/product-feedback";
 import { SHAPE_GUIDE, SHAPE_HELP_INTRO } from "@plannotator/core/shape-skill";
 import { INBOX_LINK_USAGE } from "./inbox-link-command";
+import { SYSTEM_COMMANDS, SYSTEM_TICK_INTERVAL_SECONDS } from "@plannotator/system/commands";
 
 const HELP_FLAGS = new Set(["--help", "-h"]);
 
@@ -248,9 +249,10 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
  *
  * `t3` (the T3 Code connection) was the last one to launch. Today:
  * `t3-hook`, the T3 Claude hook's settings helper, which only the installer
- * runs.
+ * runs; `shape`; and `system`, System's drawing commands, until the Inbox's
+ * System surfaces ship.
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook", "shape"]);
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook", "shape", "system"]);
 
 /**
  * `plannotator card …` (card-command.ts): the Board's card call from a shell,
@@ -333,6 +335,109 @@ export const FEEDBACK_COMMAND_USAGE = [
   "A short message typed by hand can also be given as words: plannotator feedback 'it works'",
   "",
   "Exit 0 sent, 1 not sent (the reason on stderr), 2 bad usage.",
+].join("\n");
+
+/**
+ * `plannotator system …` (system-command.ts): System's drawing of a project,
+ * for the agents that draw it and the launchd job that keeps it current. The
+ * usage lines are the package's SYSTEM_COMMANDS, which its recipes name too.
+ * Unreleased (HIDDEN_SUBCOMMANDS) while the Inbox's System surfaces are built.
+ * An agent reads only this text, so it says what each command reads, prints
+ * and refuses (AGENTS.md: agent-facing text is tested clean room).
+ */
+export const SYSTEM_COMMAND_USAGE = [
+  "Usage:",
+  ...Object.values(SYSTEM_COMMANDS).map((line) => `  ${line}`),
+  "",
+  "System is a drawing of a project's code, kept in its repo in .plannotator/system/:",
+  "system.yaml (every part and line), sheets/<CODE>.yaml (the views) and revisions/.",
+  "In system.yaml each part (under parts:) and each line (under flows:) names the files",
+  "it rests on in code:, a map from a path to what that file does for it. A path is",
+  "relative to the repo's root; <alias>:<path> is a file in another repo, named under",
+  "sources.repos. sources.repos.self.at is the commit the drawing was drawn from.",
+  "None of these commands edits a file in the repo.",
+  "",
+  "Every command prints its result on stdout (check as lines, or one JSON value with",
+  "--json; the others one JSON value) and nothing else, writes <code>: <message> on",
+  "stderr when it fails, and exits 0 ok, 1 failed, 2 bad usage. check's findings are",
+  "its result: printed on stdout, with exit 1.",
+  "",
+  "check: is the drawing right?",
+  "  Loads the drawing, then looks every cited path up in the repo's git tree at",
+  "  sources.repos.self.at. A cited file must be committed at that commit: a file only",
+  "  on disk (untracked, or committed later) does not count, nor does a symlink. Case",
+  "  matters. The drawing itself is read from disk, so an edit counts at once. One line",
+  "  per finding:",
+  "    error: <file> <field>: <message>      the drawing does not load as written",
+  "    warning: <file> <field>: <message>",
+  "    missing: <path> (cited by parts.<id>.code; not in the repo at <commit>)",
+  "    clean: <drawing folder>               no findings",
+  "  Fix a missing path in system.yaml: cite the file's real path at that commit",
+  "  (git -C <repo folder> ls-tree -r --name-only <commit> lists them), or drop the",
+  "  citation when the file is gone. Run check again until it prints clean.",
+  "  --root <repo folder>     The repo. Default: the nearest folder, from here up, that",
+  "                           holds .plannotator/system/system.yaml.",
+  "  --dir <drawing folder>   The drawing. Default: <repo folder>/.plannotator/system.",
+  "  --repo <alias>=<folder>  A checkout of a repo named in sources.repos, to check its",
+  "                           <alias>:<path> citations. Repeat for each. Without it they",
+  "                           are not checked, and a warning says so.",
+  "  --at <commit>            Check this repo's paths at this commit (a sha, a branch, a",
+  "                           tag, HEAD) instead of sources.repos.self.at.",
+  "  --json                   One JSON value: { ok, errors, warnings, missing, cited_by }.",
+  "                           errors and warnings hold { file, field, message }; cited_by",
+  "                           maps each missing path to the fields that cite it.",
+  "  Exit 0 clean, 1 findings or no drawing, 2 bad usage.",
+  "",
+  "gate: what does a change touch, and does the drawing need a redraw?",
+  "  Compares the files changed from --from to --to (git diff --name-status -M, read",
+  "  only) with the files the drawing cites. Reads the drawing on disk in",
+  "  <repo folder>/.plannotator/system, as check does. A commit is a sha, a branch or a",
+  "  tag; for a branch, --from is where it left main (git merge-base main <branch>).",
+  "  --project <repo folder>  The repo. Default: as check's --root.",
+  "  Prints one JSON value:",
+  '    { "touched": { "parts": [<id>...], "flows": [<id>...] }, "wake": true | false,',
+  '      "why": [{ "path": <path>, "reason": <reason> }...], "ignored": [<path>...] }',
+  "  touched  The ids (keys under parts: and flows:) of every part and line that cites a",
+  "           changed file, or a folder holding one: what the change touches, and what",
+  "           may now be stale.",
+  "  wake     true when the change may alter the drawing's shape, so it wants a redraw:",
+  "           a file was added, deleted or renamed, a file matching a watch: glob",
+  "           changed, or a cited file is gone. Edits to files that already exist do",
+  "           not wake it, cited or not, unless they match watch:.",
+  "  why      Each file that woke it, with its reason: added, deleted, renamed, watched",
+  "           or cited-gone. Empty when wake is false.",
+  "  ignored  Changed tests, docs, lockfiles and the drawing itself. They never wake it,",
+  "           and touch a part only when it cites that very file.",
+  "",
+  "tick: one scheduled check of one project (the launchd job runs it)",
+  "  Fetches the default branch, gates from the last checked commit to its tip, and when",
+  "  the gate wakes, runs the person's agent to redraw on the branch",
+  "  plannotator/system-redraw, then offers the redraw as one pull request and sends one",
+  "  Inbox note. Never pushes to the default branch. Reads",
+  "  <data dir>/system/<key>/setup.json, which the Inbox writes when the person sets the",
+  "  project up; without it nothing runs. <key> is the Inbox's key for the project.",
+  '  Prints { "ran": "nothing" | "gated" | "redrew", "gated": <commit>, "why"?, "pr"?,',
+  '  "note"? }. A failed tick exits 1.',
+  "",
+  "revision: store an open pull request's change, for the Inbox to draw",
+  "  Reads one revision (format 1 YAML, the open form: new parts as full entries with",
+  "  place:) on stdin, loads it against the drawing committed on the default branch",
+  "  (origin/HEAD, else origin/main or origin/master, else HEAD), and stores it as",
+  "  <data dir>/system/<key>/reviews/<host>/<owner>/<repo>/<n>@<head, 7 characters>.yaml.",
+  "  A revision that does not load is refused with one line per problem, naming its",
+  "  field; fix it and send it again. Its pr: and repo: must match --pr. --head is the",
+  "  pull request's head commit, as a sha. <key> is the Inbox's key for the --project",
+  "  folder. Nothing is committed anywhere.",
+  '  Prints { "stored": <path>, "revision": <id>, "pr": <host/owner/repo#n>, "head": <sha> }.',
+  "",
+  `schedule: the launchd job that runs tick every ${SYSTEM_TICK_INTERVAL_SECONDS / 60} minutes while the Mac is awake`,
+  "  (macOS only)",
+  "  install writes ~/Library/LaunchAgents/ai.plannotator.system.<key>.plist and loads",
+  "  it; remove unloads it and deletes the plist; list prints the keys that have one, as",
+  "  one JSON array. The job runs the installed plannotator binary, so install refuses",
+  "  to run from a source checkout.",
+  "",
+  "<data dir> is what 'plannotator data-dir' prints (PLANNOTATOR_DATA_DIR when set).",
 ].join("\n");
 
 /** `plannotator inbox projects …` (inbox-projects-command.ts): list, combine and undo, on the person's request. */
@@ -670,6 +775,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   card: CARD_COMMAND_USAGE,
   shape: SHAPE_COMMAND_USAGE,
   feedback: FEEDBACK_COMMAND_USAGE,
+  system: SYSTEM_COMMAND_USAGE,
   "t3-hook": [
     "Usage:",
     "  plannotator t3-hook install --settings <settings.json> --executable <plannotator>",

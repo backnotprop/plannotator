@@ -67,6 +67,7 @@
         "@plannotator/inbox": "workspace:*",
         "@plannotator/server": "workspace:*",
         "@plannotator/shared": "workspace:*",
+        "@plannotator/system": "workspace:*",
         "@plannotator/t3-code": "workspace:*",
         "@plannotator/ui": "workspace:*",
         "@tailwindcss/vite": "^4.3.3",

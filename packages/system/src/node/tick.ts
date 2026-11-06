@@ -56,7 +56,8 @@ export type Forge = {
   openPr(o: { cwd: string; base: string; head: string; title: string; body: string }): Promise<string>;
 };
 export type Notify = (o: { project: string; subject: string; body: string; replyTo: string | null }) => Promise<void>;
-export type TickDeps = { runAgent?: RunAgent; forge?: Forge; notify?: Notify; plannotator?: string };
+/** `plannotator`: the command that sends the note, one word (the binary) or more (`bun <script>` from a source checkout). */
+export type TickDeps = { runAgent?: RunAgent; forge?: Forge; notify?: Notify; plannotator?: string | readonly string[] };
 
 type Run = { code: number; stdout: string; stderr: string };
 
@@ -201,9 +202,10 @@ const ghForge: Forge = {
 };
 
 /** The default note: `plannotator inbox call send_message`, the JSON on stdin. */
-const inboxNotify = (plannotator: string): Notify => async ({ project, subject, body, replyTo }) => {
+const inboxNotify = (plannotator: string | readonly string[]): Notify => async ({ project, subject, body, replyTo }) => {
   const message = { body, project_path: project, ...(replyTo ? { reply_to: replyTo } : { subject }) };
-  const r = await run([plannotator, 'inbox', 'call', 'send_message', '-'], { cwd: project, stdin: JSON.stringify(message) });
+  const self = typeof plannotator === 'string' ? [plannotator] : [...plannotator];
+  const r = await run([...self, 'inbox', 'call', 'send_message', '-'], { cwd: project, stdin: JSON.stringify(message) });
   if (r.code !== 0) throw new Error(`plannotator inbox call send_message: ${r.stderr.trim() || `exit ${r.code}`}`);
 };
 

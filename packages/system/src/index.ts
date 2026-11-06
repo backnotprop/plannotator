@@ -1,6 +1,7 @@
 // @plannotator/system: pure and browser-safe. Nothing here reads disk, git or
 // the network; @plannotator/system/node does that.
 export { FORMAT } from './format/types.ts';
+export { MAX_FILE_BYTES, MAX_TOTAL_BYTES } from './format/keys.ts';
 export type {
   AlgoStep, Band, Callout, Cell, CodeRef, Column, Flow, Group, Hop, LoadIssue, LoadResult, Note, Part, Payload, Place, Revision, Sheet,
   SideSection, Sources, StepHop, SystemFiles, SystemModel, Wanted,
@@ -15,4 +16,4 @@ export { DRAW_BRANCH, firstDrawPrompt, recipes, REDRAW_BRANCH, updatePrompt, typ
 export { parseSetup, SYSTEM_AGENTS, type SystemAgent, type SystemSetup } from './agent/setup.ts';
 export { agentModel } from './agent/model.ts';
 export { unattendedDocs, unattendedDocUrl, type DocUrlCheck } from './agent/docs.ts';
-export { CLAUDE_REDRAW_TOOLS, redrawCommand, SYSTEM_COMMANDS, type SystemSubcommand } from './agent/command.ts';
+export { CLAUDE_REDRAW_TOOLS, redrawCommand, SYSTEM_COMMANDS, SYSTEM_TICK_INTERVAL_SECONDS, type SystemSubcommand } from './agent/command.ts';

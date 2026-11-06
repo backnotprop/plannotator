@@ -8,7 +8,8 @@
   "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
-    "./node": "./src/node/index.ts"
+    "./node": "./src/node/index.ts",
+    "./commands": "./src/agent/command.ts"
   },
   "scripts": {
     "check": "bun src/node/check-cli.ts",
