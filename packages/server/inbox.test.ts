@@ -888,7 +888,7 @@ describe("the window's routes: settings, restart, favicon", () => {
       const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: ["previewTwo", "roomy", "compact", "previewTwo"] });
       expect(saved.status).toBe(200);
       expect(await saved.json()).toMatchObject({ rows: ["compact", "previewTwo"], rows_rev: 1 });
-      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "previewTwo"], inboxRowsRev: 1 });
+      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "previewTwo"], inboxRowsRev: 1, inboxRowsDefaults: 2 });
       expect(await settings()).toMatchObject({ rows: ["compact", "previewTwo"], rows_rev: 1 });
 
       const deadline = Date.now() + 1500;
@@ -910,8 +910,17 @@ describe("the window's routes: settings, restart, favicon", () => {
       // look stays, so no window adopts its old cookies over it. Writing that name is still refused (above).
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: ["sparkles", "unreadDot"], inboxRowsRev: 7 }));
       expect(await settings()).toMatchObject({ rows: ["smallNames", "unreadDot"], rows_rev: 7 });
-      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: ["sparkles"] }));
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: ["sparkles"], inboxRowsDefaults: 2 }));
       expect(await settings()).toMatchObject({ rows: [], rows_rev: 0 });
+      // Smaller thread names became a default (2026-11-05). A look saved before that (no `inboxRowsDefaults`) that is
+      // the old defaults, every option off, was never a choice: it reads as today's defaults. Any other old look is the
+      // person's, kept as it is (smaller names off). One saved since then is read as saved, every option off included.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: [], inboxRowsRev: 3 }));
+      expect(await settings()).toMatchObject({ rows: ["smallNames"], rows_rev: 3 });
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: ["compact"], inboxRowsRev: 3 }));
+      expect(await settings()).toMatchObject({ rows: ["compact"], rows_rev: 3 });
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: [], inboxRowsRev: 3, inboxRowsDefaults: 2 }));
+      expect(await settings()).toMatchObject({ rows: [], rows_rev: 3 });
       // The next save counts on from the file's.
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: [], inboxRowsRev: 7 }));
       const after = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: ["highlight"] });
