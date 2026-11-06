@@ -215,7 +215,11 @@ export const schedule: {
 - **Time bounds.** Every child the tick starts runs in its own process group and has a time bound
   (`TICK_TIMEOUTS_MS`, engineering defaults): the agent 45 minutes, git 5, `gh` 2, the note 2. Past it the group gets
   SIGTERM, then SIGKILL 5 seconds later, and the tick records why in `state.json`. So a hung agent, a credential
-  prompt or a stalled network never holds the lock for good.
+  prompt or a stalled network never holds the lock for good. A child that ended returns at the latest 5 seconds
+  later even when something that left its group still holds its output open. While a child runs, a SIGINT, SIGTERM
+  or SIGHUP to the tick (Ctrl-C, `launchctl bootout`) goes on to every child's group the same way, and the groups are
+  SIGKILLed when the tick exits, so a stopped tick leaves no agent running. On Windows the tree is stopped with
+  `taskkill /T /F`.
 
 ### What a tick does
 
