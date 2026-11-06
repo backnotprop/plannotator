@@ -2756,7 +2756,14 @@ Optional seams, so a host can put its own control beside a file a board or a mes
 
 - `ShapeHost.fileAction?(id, { path, line? })`: drawn in the References row and bubble, the Code view's file cards and planned files, the whole-file head, the file popout and the diff popout. `ShapeCodeGuideProps.fileAction?(path)` is the same slot on `ShapeCodeGuide`.
 - `CodeFilePopout`'s `headerAction?: ReactNode`, before the line count.
-- `LocalLinkResolution`'s `unavailable` result takes `after?: ReactNode`, drawn after the inert link.
+- `LocalLinkResolution`'s `unavailable` result takes `after?: ReactNode`, drawn after the inert link. It still works as before, and is now marked deprecated.
+- `LocalLinkResolution`'s `unavailable` result also takes `wrap?: (text: ReactNode) => ReactNode`: the host draws the inert link's text itself (a hover of its own), and decides when `title` shows. With `wrap`, the default tooltip is not drawn. `after` is still drawn after it when both are given.
+- `CodeSnippetPreview` takes `actions` (a host's controls in its header), `container` (where it portals; the body by default), `sheet` (a sheet from the bottom edge over a scrim, whose click calls `onDismiss`) and `windowRef`.
+- `CodeSnippetPreview` changes that every host sees, with none of the new props:
+  - Its height is capped at the room on the side it opens to (at most 300 px, as before), so a window near the screen's edge scrolls instead of running off the screen.
+  - Scrolling inside its own code no longer calls `onDismiss`. A scroll anywhere else still does.
+  - A long file name in the header is cut with an ellipsis, and the line count beside it stays whole.
+  - With `actions` (or `sheet`), the window has `role="dialog"` and the file name as its `aria-label`. Without them it has no role, as before.
 - `CodeSpanContext` (in `components/LocalLinkContext`): a `(text, code) => ReactNode` wrap for an inline code span that names a code file, in `InlineMarkdown` and in a board's own text (`ShapeInline`). Without a provider the span draws as before. `ShapeSurface` stops passing it on while the board is annotating.
 - `DropdownMenuContent` takes `anchor`, for a menu opened from something that is not its trigger.
 

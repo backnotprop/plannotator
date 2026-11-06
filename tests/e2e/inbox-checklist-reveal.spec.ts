@@ -3,7 +3,7 @@
  * against a compiled binary with a release version (0.30.0): the shared e2e binary is 0.0.0-dev, which never decides a
  * reveal, so the spec compiles its own (as inbox-board-reveal.spec.ts does). Each case is its own Inbox in a temp data
  * dir, seeded at day 8 with six threads (inbox-board-reveal-seed.ts), Snooze and the Board already revealed (the Board
- * on, its reveal 3 days ago, so the 48 h spacing holds), the Checklist as each case says.
+ * on, its reveal 3 days ago, so the spacing holds), the Checklist as each case says.
  *
  * Reveals are opt-in (the owner, 2026-11-04): showing the dialog turns nothing on.
  *
