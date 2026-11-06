@@ -6,13 +6,13 @@
  * so a mic deep in a thread needs no props; and `useVoiceSession`, one composer's dictation. A host calls the hook,
  * passes the result to `InboxComposerField` and `VoiceFoot`, and keeps Send off while `busy`.
  */
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { InboxVoiceSettings, InboxVoiceStatus } from '@plannotator/core/inbox-types';
 import { inboxApi } from './api';
 import { debugNote } from './debugLog';
 import { useTouchScreen } from './phone';
 import { microphoneUsable, microphoneWillPrompt, openVoiceRecorder } from './voiceRecorder';
-import { createVoiceSession, type VoiceDeps, type VoiceSession, type VoiceView } from './voiceSession';
+import { createVoiceSession, type VoiceDeps, type VoiceLate, type VoiceSession, type VoiceView } from './voiceSession';
 
 /** How soon a computer that was not ready may be asked again without a person's press. */
 const RECHECK_MS = 30_000;
@@ -130,14 +130,21 @@ export interface VoiceHandle {
   busy: boolean;
 }
 
-export function useVoiceSession(): VoiceHandle {
-  const [session] = useState(() => createVoiceSession(browserDeps));
+/**
+ * `ownsEscape` false: Esc stays with what covers the box (its status is out of sight, so it cannot be what Esc means).
+ * `late`: a take being transcribed outlives its field, and this takes its words (voiceSession.ts `attach`). It can run
+ * after this host is gone, with the last one it was given.
+ */
+export function useVoiceSession(ownsEscape = true, late?: (outcome: VoiceLate) => void): VoiceHandle {
+  const lateRef = useRef(late);
+  lateRef.current = late;
+  const [session] = useState(() => createVoiceSession(browserDeps, late && ((outcome) => lateRef.current?.(outcome))));
   const view = useSyncExternalStore(session.subscribe, session.view, session.view);
   const busy = view.phase !== 'idle';
   // Esc belongs to the voice control only while it is running, and this press only cancels: it does not also close
   // the box or the dialog. A plain capture listener, so no shortcut registry entry, as approved.
   useEffect(() => {
-    if (!busy) return;
+    if (!busy || !ownsEscape) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.isComposing) return;
       event.preventDefault();
@@ -146,6 +153,6 @@ export function useVoiceSession(): VoiceHandle {
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [busy, session]);
+  }, [busy, ownsEscape, session]);
   return useMemo(() => ({ session, view, busy }), [session, view, busy]);
 }

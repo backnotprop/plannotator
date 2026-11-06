@@ -369,7 +369,7 @@ test('Pinned and Projects close like folders: the count, the project on screen k
   await header('pinned').click();
   await expect(header('pinned')).toHaveAttribute('aria-expanded', 'false');
   await expect(side(page).locator('[data-pinned-row]')).toHaveCount(0);
-  await expect(header('pinned')).toHaveAccessibleName('Pinned 1 waiting on you');
+  await expect(header('pinned')).toHaveAccessibleName('Starred 1 waiting on you');
 
   // In a project, Projects closed keeps that project under its header, and nothing else.
   await side(page).getByRole('button', { name: /^docs-site(?: \d+)?$/ }).click();

@@ -9,6 +9,7 @@ import { connectPrompt } from '../connectPrompt';
 import { formatCount } from '../format';
 import { Icon, type IconName } from '../icons';
 import { pinnedState } from '../pins';
+import { starPopping } from '../starPop';
 import { awayLine, isAway, machineNotice, type MachinesModel } from '../machines';
 import { MachineSidebarWord } from './MachineUpdate';
 import { useSidebarSections, type SidebarSection } from '../sidebarSections';
@@ -32,7 +33,7 @@ import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'pulls' | 'shapes';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'shapes';
   /**
    * The Board (approval "inbox-board", step 2): the row under Inbox, always
    * shown with `onBoard`. No count: the approval keeps the count in the
@@ -40,7 +41,7 @@ export interface SidebarProps {
    */
   onBoard?: () => void;
   /**
-   * Pull requests (approval "inbox-code-review-direction", item 4): a row of its own (after Board when the Board is on; it needs none), shown only with
+   * Reviews (approvals "inbox-code-review-direction", item 4, and "inbox-reviews-page"): a row of its own (after Board when the Board is on; it needs none), shown only with
    * `onPulls` (Settings → Capabilities → Code review on). `pullsCount`: the last read's "On you".
    */
   onPulls?: () => void;
@@ -421,13 +422,13 @@ export function Sidebar(props: SidebarProps) {
       {props.onPulls && (
         <button
           type="button"
-          className={`ib-nav${props.page === 'pulls' ? ' ib-on' : ''}`}
+          className={`ib-nav${props.page === 'reviews' ? ' ib-on' : ''}`}
           onClick={pick(props.onPulls)}
-          aria-current={props.page === 'pulls' ? 'page' : undefined}
+          aria-current={props.page === 'reviews' ? 'page' : undefined}
           data-pulls-nav=""
         >
           <Icon name="pullRequest" />
-          Pull requests
+          Reviews
           {(props.pullsCount ?? 0) > 0 && (
             <span className="ib-n" aria-label={`${props.pullsCount} on you`}>
               {formatCount(props.pullsCount ?? 0)}
@@ -455,8 +456,10 @@ export function Sidebar(props: SidebarProps) {
               section="pinned"
               id={pinnedLabelId}
               controls={pinnedBodyId}
-              label="Pinned"
-              icon="pin"
+              label="Starred"
+              icon="star"
+              iconClass="ib-star-on"
+              pop={starPopping()}
               open={!pinnedClosed}
               count={pinsWaiting}
               onToggle={() => sections.toggle('pinned')}
@@ -672,6 +675,9 @@ function SectionHeader(props: {
   controls: string;
   label: string;
   icon: IconName;
+  iconClass?: string;
+  /** The section's star takes the little pop: a thread was starred just now. */
+  pop?: boolean;
   open: boolean;
   count: number;
   onToggle: () => void;
@@ -686,7 +692,7 @@ function SectionHeader(props: {
       data-sidebar-section={props.section}
       onClick={props.onToggle}
     >
-      <Icon name={props.icon} />
+      <Icon name={props.icon} className={[props.iconClass, props.pop ? 'ib-star-pop' : ''].filter(Boolean).join(' ') || undefined} />
       <span className="ib-side-sec-l">{props.label}</span>
       <span className="ib-side-sec-tail">
         {props.count > 0 && (

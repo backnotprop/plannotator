@@ -21,7 +21,8 @@
  *   pick, and on its side; the reply field shows above the keyboard. A drag on
  *   the header or a short draft is refused (Safari would pan the page); a drag
  *   on the thread, a wide code block or an overflowing draft is not. A field in
- *   the thread (an action item's note) gets the room: the foot steps aside.
+ *   the thread (an action item's note) gets the room: the foot steps aside, also
+ *   when the note is taken before Done's save has finished.
  *   With the keyboard down, all is as before.
  * - Chromium as a Pixel 7: the reply foot sits on the keyboard as before, and
  *   nothing is pinned or guarded (Android is unchanged).
@@ -75,6 +76,8 @@ interface World {
   url: string;
   reply: string;
   action: string;
+  /** Its own thread: a Done stays in the thread's draft, so two tests cannot press it on one. */
+  slowAction: string;
   agent: SimAgent;
 }
 
@@ -89,6 +92,7 @@ test.beforeAll(async () => {
   markTourDecided(dataDir);
   const env = {
     PATH: process.env.PATH ?? '',
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,
@@ -114,23 +118,20 @@ test.beforeAll(async () => {
   ].join('\n\n');
   // Named threads: without one, both go to the session's default thread, and the question folds behind the newer message.
   const reply = await agent.send({ project_path: project, subject: 'Checkout: the sticky footer on phones', thread: 'checkout-footer', body }, { wakes: true });
-  const action = await agent.send({
-    project_path: project,
-    subject: 'Publish blocked on a token',
-    thread: 'publish-token',
-    body: [
-      'The publish failed with E401.',
-      '',
-      ':::action',
-      'Rotate the npm token',
-      'The publish token expired. Make a new automation token and put it in the repo secrets.',
-      '',
-      'Where: [npm tokens](https://www.npmjs.com/settings/acme/tokens)',
-      'Stopped: 4.2 cannot be published until the token is replaced',
-      ':::',
-    ].join('\n'),
-  });
-  world = { url: started.stdout.trim(), reply: reply.thread_id as string, action: action.thread_id as string, agent };
+  const actionBody = [
+    'The publish failed with E401.',
+    '',
+    ':::action',
+    'Rotate the npm token',
+    'The publish token expired. Make a new automation token and put it in the repo secrets.',
+    '',
+    'Where: [npm tokens](https://www.npmjs.com/settings/acme/tokens)',
+    'Stopped: 4.2 cannot be published until the token is replaced',
+    ':::',
+  ].join('\n');
+  const action = await agent.send({ project_path: project, subject: 'Publish blocked on a token', thread: 'publish-token', body: actionBody });
+  const slowAction = await agent.send({ project_path: project, subject: 'Publish blocked on a token, on a slow network', thread: 'publish-token-slow', body: actionBody });
+  world = { url: started.stdout.trim(), reply: reply.thread_id as string, action: action.thread_id as string, slowAction: slowAction.thread_id as string, agent };
 });
 
 test.afterAll(async () => {
@@ -416,6 +417,30 @@ test.describe('WebKit as an iPhone 15 (iOS 26 keyboard)', () => {
     await keyboardDown(page);
     // The draft is where it was.
     await expect(page.locator('section.ib-pane .ib-pfoot textarea')).toHaveValue('Working on it.');
+    await page.context().close();
+  });
+
+  test("the note taken while Done is still saving (a slow list read): it keeps focus, and the foot stays aside", async () => {
+    const page = await phone();
+    const field = await openReply(page, world.slowAction);
+    await field.fill('Working on it.');
+    // The note draws from the thread's read; Done's save ends with the list's. Held, that is the slow network's gap, every time.
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route(/\/api\/inbox\/threads\?/, async (route) => {
+      await held;
+      await route.continue();
+    });
+    const card = page.locator('section.ib-pane [data-action-card]');
+    await card.locator('[data-action-done]').click();
+    const note = card.locator('[data-action-draft-note]');
+    await note.focus();
+    await iosKeyboardUp(page, IOS_KEYBOARD);
+    release();
+    // Said once the save has finished, so whatever Done does to focus has happened by now.
+    await expect(page.locator('[data-inbox-live]')).toHaveText('Done. It goes with your reply.');
+    await expect(note).toBeFocused();
+    await expect(page.locator('section.ib-pane .ib-pfoot')).toBeHidden();
     await page.context().close();
   });
 });

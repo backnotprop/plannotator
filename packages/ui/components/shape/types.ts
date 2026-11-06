@@ -6,6 +6,7 @@
  * standalone Shapes page each pass an adapter over the same routes
  * (SPEC.md §3, "Host seam"); the dev harness passes an in-memory one.
  */
+import type { ShapeBoxSelection, ShapeReadAsset } from './boxSelect';
 import type { ComponentType, ReactNode } from 'react';
 import type { ShapeNote, ShapeNoteInput, ShapeRecord, ShapeVersion, ShapeViewId } from '@plannotator/core/shape';
 
@@ -59,6 +60,8 @@ export interface ShapeHost {
   assetUrl?(id: string, src: string): string;
   /** A file's text, for a file reference and the Code view's whole-file viewer. */
   readFile?(id: string, path: string): Promise<string | null>;
+  /** A control beside a file the board names (a reference, the file viewer, the guide's file cards): the host's "open in". Absent: none. */
+  fileAction?(id: string, file: { path: string; line?: number }): ReactNode;
   /** Hover insight data for a code token (code review's `/api/code-nav/hover`), handed to `CodeHoverCard`. */
   codeHover?(id: string, request: ShapeCodeHoverRequest): Promise<unknown | null>;
   /** The prompt that resumes waiting changes in any session ("Copy prompt"). */
@@ -78,6 +81,19 @@ export interface ShapeHost {
   sessionless?: boolean;
 }
 
+/** A board that takes a dragged box (`boxSelect` on ShapeSurface). */
+export interface ShapeBoxOptions {
+  /** A same-site image or font as a data: URL, for the box's picture. Absent: the picture has no images and the system's font. */
+  readAsset?: ShapeReadAsset;
+  /** The box's Show me: the same object a comment is made from, and whatever was typed. Absent: no Show me. */
+  onShowMe?: (selection: ShapeBoxSelection, text: string) => void;
+  /**
+   * The box's Add to reply: the same object and whatever was typed, for the host's reply to the board's thread (the
+   * Inbox: the picture as a file, the label and words as text). Absent: no Add to reply.
+   */
+  onAddToReply?: (selection: ShapeBoxSelection, text: string) => void;
+}
+
 export interface ShapeCodeHoverRequest {
   symbol: string;
   filePath: string;
@@ -93,6 +109,8 @@ export interface ShapeCodeGuideProps {
   openLine?: (path: string) => number | null;
   onOpenFile?: (path: string, line: number) => void;
   headerActions?: ReactNode;
+  /** The host's control beside a file (`ShapeHost.fileAction`). */
+  fileAction?: (path: string) => ReactNode;
 }
 
 /** The props a code hover card takes (code review's `TokenHoverCard` matches them). */
@@ -116,9 +134,23 @@ export interface ShapeSurfaceProps {
   CodeHoverCard?: ComponentType<ShapeCodeHoverCardProps>;
   /** The Thread tab's body (an Inbox shape). Absent: no Thread tab. Mark each message `data-shape-message="<id>"`. */
   renderThread?: (options: { flash: string | null }) => ReactNode;
+  /**
+   * Plannotator's board: annotation starts off behind an Annotate button, a number pops out a bubble with its
+   * picture and line (a file's lines through `host.readFile`, and a PR or link with a picture opens the picture),
+   * and a narrow canvas scrolls sideways. Absent: a part can be marked at once, a number lights and opens, a
+   * narrow canvas shrinks to fit.
+   */
+  readFirst?: boolean;
   /** Where to start. */
   initialView?: ShapeViewId;
   initialPanel?: ShapePanelTab | null;
   /** The view or the panel changed (a host keeps its URL in step). */
   onNavigate?: (state: { view: ShapeViewId; panel: ShapePanelTab | null }) => void;
+  /** Before the title, on its line (the Inbox: its sidebar toggle). Absent: the title comes first. */
+  headStart?: ReactNode;
+  /**
+   * While annotating with the pointer, a mouse drag draws a box and comments on what is inside it (the Inbox, by
+   * ShapeBoard). Absent: pointing and clicking only, as always.
+   */
+  boxSelect?: ShapeBoxOptions;
 }

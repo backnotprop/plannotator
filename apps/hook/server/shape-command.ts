@@ -19,11 +19,12 @@
  * of text otherwise. A refusal goes to stderr as `<code>: <message>` and exits
  * 1; bad usage exits 2.
  */
-import { readFileSync, statSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { resolveInboxProjectRoot } from "@plannotator/server/inbox-project-root";
-import { createShapeStore, type ShapeStore } from "@plannotator/shared/shape/store";
-import { diffShapeVersions, summarizeShapeDiff, type ShapeSession } from "@plannotator/shared/shape/format";
+import { createShapeStore, type ShapeProject, type ShapeStore } from "@plannotator/shared/shape/store";
+import { expandBoardStamps } from "@plannotator/shared/shape/stamps";
+import { diffShapeVersions, shapeBoardNotes, summarizeShapeDiff, type ShapeSession } from "@plannotator/shared/shape/format";
 import { inboxHostSessionFromEnv, inboxProjectFolderFor, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
 import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch } from "@plannotator/shared/shape/switch";
 import { SHAPE_COMMAND_USAGE } from "./cli";
@@ -151,12 +152,14 @@ export interface ShapeCommandDeps {
   stdout?: (text: string) => void | Promise<void>;
   stderr?: (text: string) => void;
   /** The project a folder belongs to (the Inbox's rule). Tests pass a stand-in. */
-  projectRootOf?: (folder: string) => Promise<{ root: string; name: string }>;
+  projectRootOf?: (folder: string) => Promise<ShapeProject>;
 }
 
 async function defaultProjectRoot(folder: string) {
   const resolved = await resolveInboxProjectRoot(folder);
-  return { root: resolved.root, name: resolved.name };
+  // A linked worktree folds into its project; the board's code is the worktree's. (A folder of checkouts is not one.)
+  const worktree = resolved.worktree && existsSync(join(resolved.worktree, ".git")) ? resolved.worktree : null;
+  return { root: resolved.root, name: resolved.name, ...(worktree ? { worktree } : {}) };
 }
 
 /** Write to stdout and settle once the text is flushed (or the pipe is closed). */
@@ -190,7 +193,12 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     } catch {
       return null;
     }
-    return (deps.projectRootOf ?? defaultProjectRoot)(folder);
+    const rootOf = deps.projectRootOf ?? defaultProjectRoot;
+    const project = await rootOf(folder);
+    if (c.project || folder === deps.cwd) return project;
+    // The session's folder does not follow a shell `cd`, and the checkout does: within the project, the one it runs in now.
+    const here = await rootOf(deps.cwd).catch(() => null);
+    return here?.root === project.root ? here : project;
   };
 
   /** Output where a closed pipe changes nothing: the reader is gone either way. */
@@ -223,11 +231,15 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     } catch (error) {
       return refuse("invalid", `could not read ${path} as JSON: ${(error as Error).message}`);
     }
-    let project: { name: string; root: string } | null = null;
+    // Icons, logos and drawn things named in the drawing become plain SVG here, so the stored board
+    // holds the drawing and nothing is looked up when it is shown (shared/shape/stamps.ts).
+    board = expandBoardStamps(board).board;
+    let project: ShapeProject | null = null;
     if (c.id) {
       const record = store.get(c.id);
       if (!record) return refuse("not_found", `No shape ${c.id}. List them with \`plannotator shape list\`.`);
-      project = record.project;
+      // Written from this folder now: the store moves the board there if it is the same project.
+      project = (await projectOf().catch(() => null)) ?? record.project;
     } else {
       project = await projectOf();
       if (!project) return refuse("project_unresolved", `${folder} is not a folder. Pass --project <folder>.`);
@@ -250,7 +262,8 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     const before = result.v > 1 ? store.read(result.id, result.v - 1) : null;
     const after = store.read(result.id, result.v);
     const changed = before && after ? summarizeShapeDiff(diffShapeVersions(before, after)) : [];
-    await say(JSON.stringify({ id: result.id, v: result.v, created: result.created, changed }, null, 2));
+    const notes = after ? shapeBoardNotes(after) : [];
+    await say(JSON.stringify({ id: result.id, v: result.v, created: result.created, changed, ...(notes.length ? { notes } : {}) }, null, 2));
     return 0;
   }
 
@@ -291,7 +304,9 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     // The notes count as received only once the agent has them: written first, marked after.
     const waiting = store.waiting(id);
     try {
-      await out(JSON.stringify({ shape: record, version, notes: waiting }, null, 2));
+      // A box's picture: its full path, so the agent can open it.
+      const notes = waiting.map((n) => (n.picture ? { ...n, picture: store.filePath(id, n.picture) ?? n.picture } : n));
+      await out(JSON.stringify({ shape: record, version, notes }, null, 2));
     } catch (error) {
       err(`output_failed: the notes were not handed over and still wait: ${(error as Error).message}`);
       return 1;

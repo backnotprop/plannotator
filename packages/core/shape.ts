@@ -3,7 +3,7 @@
  *
  * A shape is one thing being worked out with one agent session. Each time the
  * agent draws it, the store keeps a full snapshot: a version. A version holds
- * four views (Picture, How it works, Requirements, Code), the numbered
+ * four views (Picture, How it works, What to know, Code), the numbered
  * references the views cite, and the parts the person can point at.
  *
  * Browser-safe and dependency-free: the store (packages/shared/shape), the
@@ -12,7 +12,7 @@
  *  - `checkShapeBoard` validates what an agent writes (`plannotator shape
  *    update --file`) and names the exact field that is wrong.
  *  - `shapeParts` lists the parts of a board: every `data-mark` of a drawn
- *    view, every requirement, every Code step, the title and the claim. Ids
+ *    view, every paragraph of What to know, every Code step, the title and the claim. Ids
  *    stay the same across versions, which is what lets the board redraw only
  *    what changed.
  *  - `diffShapeVersions` compares two snapshots by those ids ("what changed
@@ -26,13 +26,13 @@ import { ulid } from './ulid';
 
 export const SHAPE_FORMAT_VERSION = 1;
 
-export type ShapeViewId = 'picture' | 'how' | 'reqs' | 'code';
+export type ShapeViewId = 'picture' | 'how' | 'know' | 'code';
 
 /** The four views, in the dock's order. Their labels are the product's words. */
 export const SHAPE_VIEWS: readonly { id: ShapeViewId; label: string }[] = [
   { id: 'picture', label: 'Picture' },
   { id: 'how', label: 'How it works' },
-  { id: 'reqs', label: 'Requirements' },
+  { id: 'know', label: 'What to know' },
   { id: 'code', label: 'Code' },
 ];
 
@@ -66,8 +66,14 @@ export interface ShapeDrawnView {
   height?: number;
   /** A stacked drawing for a narrow board (a phone), shown below 700 px. */
   tall?: { html: string; css?: string };
+  /**
+   * The Picture only: a fuller drawing behind the board's "Show more", when there is more
+   * that must be drawn. It flows and scrolls like a page. Most boards have none.
+   */
+  more?: { html: string; css?: string };
 }
 
+// An old board's Requirements. Nothing new writes them (`checkShapeBoard` refuses them); a saved version keeps them and What to know shows them.
 export interface ShapeRequirement {
   /** Stable across versions. */
   id: string;
@@ -136,7 +142,7 @@ export interface ShapeRef {
   sub?: string;
   target: string;
   line?: number;
-  images?: { src: string; alt: string }[];
+  images?: { src: string; alt: string; crop?: [number, number, number, number] }[];
 }
 
 /** What an agent writes: one whole board. */
@@ -151,6 +157,9 @@ export interface ShapeBoard {
   views: {
     picture?: ShapeDrawnView;
     how?: ShapeDrawnView;
+    /** What the person needs to know: at most two short paragraphs of prose. Inline Markdown. */
+    know?: string;
+    /** Only on a version saved before What to know. */
     reqs?: ShapeRequirements;
     code?: ShapeCodeView;
   };
@@ -188,12 +197,19 @@ export interface ShapeVersion extends ShapeBoard {
 
 export type ShapeState = 'active' | 'finished';
 
+export interface ShapeProject {
+  name: string;
+  root: string;
+  /** The linked worktree the board was written from, when that folds into the project at `root`. */
+  worktree?: string;
+}
+
 /** `shape.json`: the shape itself. */
 export interface ShapeRecord {
   v: typeof SHAPE_FORMAT_VERSION;
   id: string;
   title: string;
-  project: { name: string; root: string };
+  project: ShapeProject;
   session: ShapeSession | null;
   /** The Inbox thread it hangs off (`msg_…`), or null for a standalone shape. */
   thread: string | null;
@@ -229,6 +245,22 @@ export interface ShapeNote {
   re: string | null;
   /** When an agent picked it up (`shape read`); null while it waits. */
   delivered: string | null;
+  /** A box dragged over the board: where it sits. `part` then names every part inside it, comma-separated. */
+  box?: ShapeNoteBox;
+  /** The `data-code` places inside the box ("src/a.ts#L42"). */
+  code?: string[];
+  /** A picture of the box, grown to the whole of the parts it picked, the box drawn on it: `files/…` in the store, its full path in `shape read --notes`. */
+  picture?: string;
+}
+
+/** Where a box sits, as fractions of its drawing (or of What to know). `tall` and `more`: on that layout of the view. */
+export interface ShapeNoteBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  tall?: true;
+  more?: true;
 }
 
 /** A Change it that no agent has picked up: "1 change waits for the agent". */
@@ -267,8 +299,8 @@ export const SHAPE_LIMITS = {
   html: 300_000,
   css: 60_000,
   canvas: { min: 200, max: 4000 },
-  groups: 12,
-  items: 40,
+  know: 1200,
+  knowParagraphs: 2,
   line: 400,
   sections: 20,
   patch: 3_000_000,
@@ -280,6 +312,8 @@ export const SHAPE_LIMITS = {
   images: 12,
   noteText: 4000,
   quote: 600,
+  /** A box's picture, as a data: URL. */
+  notePicture: 6_000_000,
 } as const;
 
 const PART_ID_RE = /^[A-Za-z][\w.-]{0,63}$/;
@@ -547,7 +581,7 @@ export function shapeHtmlProblems(html: string): string[] {
       else if (SHAPE_URL_ATTRS.includes(name)) {
         const link = tag === 'a' && (name === 'href' || name === 'xlink:href');
         if (!shapeUrlAllowed(value, link)) {
-          add(`<${tag} ${name}="${shown}">: nothing may load from outside the board; use files/<name>, #id or a data:image${link ? ' (a link may be https://)' : ''}`);
+          add(`<${tag} ${name}="${shown}">: nothing may load from outside the board; use a file on this computer, files/<name>, #id or a data:image${link ? ' (a link may be https://)' : ''}`);
         }
       } else if (name === 'style') {
         for (const p of shapeCssProblems(value)) add(`<${tag} style>: ${p}`);
@@ -743,69 +777,48 @@ function checkDrawn(c: Checker, value: unknown, field: string): ShapeDrawnView |
       if (th !== undefined) tall = { html: th, ...(tc ? { css: tc } : {}) };
     }
   }
+  let more: ShapeDrawnView['more'];
+  if (value.more !== undefined && value.more !== null) {
+    if (!isRecord(value.more)) c.fail(`${field}.more`, 'must be an object with html');
+    else {
+      const mh = c.text(value.more.html, `${field}.more.html`, SHAPE_LIMITS.html);
+      if (mh !== undefined) for (const p of shapeHtmlProblems(mh)) c.fail(`${field}.more.html`, p);
+      const mc = c.text(value.more.css, `${field}.more.css`, SHAPE_LIMITS.css, false);
+      if (mc !== undefined) for (const p of shapeCssProblems(mc)) c.fail(`${field}.more.css`, p);
+      if (mh !== undefined) more = { html: mh, ...(mc ? { css: mc } : {}) };
+    }
+  }
   if (html === undefined) return undefined;
   return {
     html,
     ...(css ? { css } : {}),
     ...(width !== undefined && height !== undefined ? { width, height } : {}),
     ...(tall ? { tall } : {}),
+    ...(more ? { more } : {}),
   };
 }
 
-function checkReqs(c: Checker, value: unknown, field: string): ShapeRequirements | undefined {
+/** What to know's paragraphs: blank lines part them. */
+export function shapeKnowParagraphs(text: string): string[] {
+  return text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+}
+
+function checkKnow(c: Checker, value: unknown, field: string): string | undefined {
   if (value === undefined || value === null) return undefined;
-  if (!isRecord(value)) {
-    c.fail(field, 'must be an object with groups');
+  if (typeof value !== 'string') {
+    c.fail(field, 'must be a string of Markdown');
     return undefined;
   }
-  const heading = c.text(value.heading, `${field}.heading`, SHAPE_LIMITS.line, false);
-  const groups = c.list(value.groups, `${field}.groups`, SHAPE_LIMITS.groups);
-  if (!groups) {
-    if (value.groups === undefined) c.fail(`${field}.groups`, 'is required');
+  const text = value.trim();
+  if (!text) {
+    c.fail(field, 'is empty');
     return undefined;
   }
-  const ids = new Set<string>();
-  const out: ShapeRequirementGroup[] = [];
-  groups.forEach((g, gi) => {
-    const gf = `${field}.groups[${gi}]`;
-    if (!isRecord(g)) return c.fail(gf, 'must be an object');
-    const id = c.id(g.id, `${gf}.id`);
-    const label = c.text(g.label, `${gf}.label`, 80);
-    const items = c.list(g.items, `${gf}.items`, SHAPE_LIMITS.items) ?? [];
-    if (g.items === undefined) c.fail(`${gf}.items`, 'is required');
-    const rows: ShapeRequirement[] = [];
-    items.forEach((it, ii) => {
-      const f = `${gf}.items[${ii}]`;
-      if (!isRecord(it)) return c.fail(f, 'must be an object');
-      const iid = c.id(it.id, `${f}.id`);
-      if (iid && ids.has(iid)) c.fail(`${f}.id`, `"${iid}" is used twice`);
-      if (iid) ids.add(iid);
-      const text = c.text(it.text, `${f}.text`, SHAPE_LIMITS.line);
-      let code: ShapeRequirement['code'];
-      if (it.code !== undefined && it.code !== null) {
-        if (!isRecord(it.code)) c.fail(`${f}.code`, 'must be { path, line }');
-        else {
-          const path = c.path(it.code.path, `${f}.code.path`);
-          const line = c.int(it.code.line, `${f}.code.line`, 1, 10_000_000);
-          if (path && line) code = { path, line };
-        }
-      }
-      if (iid && text) rows.push({ id: iid, text, ...(code ? { code } : {}) });
-    });
-    if (id && label) out.push({ id, label, items: rows });
-  });
-  let foot: ShapeRequirements['foot'];
-  const feet = c.list(value.foot, `${field}.foot`, 6);
-  if (feet) {
-    foot = [];
-    feet.forEach((f, i) => {
-      if (!isRecord(f)) return c.fail(`${field}.foot[${i}]`, 'must be { label, text }');
-      const label = c.text(f.label, `${field}.foot[${i}].label`, 24);
-      const text = c.text(f.text, `${field}.foot[${i}].text`, SHAPE_LIMITS.line);
-      if (label && text) foot!.push({ label, text });
-    });
-  }
-  return { ...(heading ? { heading } : {}), groups: out, ...(foot?.length ? { foot } : {}) };
+  const cut = 'Cut it to what the person needs to know.';
+  if (text.length > SHAPE_LIMITS.know) c.fail(field, `is ${text.length} characters; at most ${SHAPE_LIMITS.know}. ${cut}`);
+  const paragraphs = shapeKnowParagraphs(text).length;
+  if (paragraphs > SHAPE_LIMITS.knowParagraphs) c.fail(field, `is ${paragraphs} paragraphs; at most ${SHAPE_LIMITS.knowParagraphs}. ${cut}`);
+  return text;
 }
 
 function checkCode(c: Checker, value: unknown, field: string): ShapeCodeView | undefined {
@@ -917,7 +930,10 @@ function checkRefs(c: Checker, value: unknown): ShapeRef[] | undefined {
         }
         const src = c.text(im.src, `${f}.images[${j}].src`, SHAPE_LIMITS.target);
         const alt = c.text(im.alt, `${f}.images[${j}].alt`, SHAPE_LIMITS.refText, false) ?? '';
-        return src ? [{ src, alt }] : [];
+        const crop = im.crop;
+        const goodCrop = Array.isArray(crop) && crop.length === 4 && crop.every((v) => typeof v === 'number' && v >= 0 && v <= 1) && crop[2] > 0 && crop[3] > 0 && crop[0] + crop[2] <= 1 && crop[1] + crop[3] <= 1;
+        if (crop !== undefined && !goodCrop) c.fail(`${f}.images[${j}].crop`, 'must be [x, y, width, height], each from 0 to 1');
+        return src ? [{ src, alt, ...(goodCrop ? { crop: crop as [number, number, number, number] } : {}) }] : [];
       });
     }
     if (n !== undefined && kind && title && target) {
@@ -953,20 +969,21 @@ export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
     else asOf = new Date(input.asOf).toISOString();
   }
   const views: ShapeBoard['views'] = {};
-  if (!isRecord(input.views)) c.fail('views', 'is required: { picture, how, reqs, code }, at least one');
+  if (!isRecord(input.views)) c.fail('views', 'is required: { picture, how, know, code }, at least one');
   else {
     for (const key of Object.keys(input.views)) {
-      if (!SHAPE_VIEWS.some((v) => v.id === key)) c.fail(`views.${key}`, 'is not a view (picture, how, reqs, code)');
+      if (key === 'reqs') c.fail('views.reqs', 'Requirements are gone. Put what the person needs to know in views.know, as at most two short paragraphs');
+      else if (!SHAPE_VIEWS.some((v) => v.id === key)) c.fail(`views.${key}`, 'is not a view (picture, how, know, code)');
     }
     const picture = checkDrawn(c, input.views.picture, 'views.picture');
     const how = checkDrawn(c, input.views.how, 'views.how');
-    const reqs = checkReqs(c, input.views.reqs, 'views.reqs');
+    const know = checkKnow(c, input.views.know, 'views.know');
     const code = checkCode(c, input.views.code, 'views.code');
     if (picture) views.picture = picture;
     if (how) views.how = how;
-    if (reqs) views.reqs = reqs;
+    if (know) views.know = know;
     if (code) views.code = code;
-    if (!input.views.picture && !input.views.how && !input.views.reqs && !input.views.code) c.fail('views', 'needs at least one view');
+    if (!input.views.picture && !input.views.how && !input.views.know && !input.views.reqs && !input.views.code) c.fail('views', 'needs at least one view');
   }
   const refs = checkRefs(c, input.refs);
   if (c.errors.length || !title || !claim) return { ok: false, errors: c.errors.length ? c.errors : ['title and claim are required'] };
@@ -1062,7 +1079,7 @@ export function shapeParts(board: ShapeBoard): ShapePart[] {
     const drawn = board.views[view];
     if (!drawn) continue;
     const seen = new Set<string>();
-    for (const html of [drawn.html, drawn.tall?.html ?? '']) {
+    for (const html of [drawn.html, drawn.tall?.html ?? '', drawn.more?.html ?? '']) {
       for (const mark of shapeHtmlMarks(html)) {
         if (seen.has(mark.id)) continue;
         seen.add(mark.id);
@@ -1070,8 +1087,9 @@ export function shapeParts(board: ShapeBoard): ShapePart[] {
       }
     }
   }
+  shapeKnowParagraphs(board.views.know ?? '').forEach((text, i) => parts.push({ view: 'know', id: `know-${i + 1}`, text: fold(text) }));
   for (const group of board.views.reqs?.groups ?? []) {
-    for (const item of group.items) parts.push({ view: 'reqs', id: item.id, text: fold(`${group.label}: ${item.text}`) });
+    for (const item of group.items) parts.push({ view: 'know', id: item.id, text: fold(`${group.label}: ${item.text}`) });
   }
   board.views.code?.guide.sections.forEach((section, i) => {
     parts.push({ view: 'code', id: `step-${i + 1}`, text: fold(`${section.title}. ${section.overview} ${section.diffs.map((d) => d.file).join(' ')}`) });
@@ -1116,7 +1134,9 @@ export function shapeCitedRefs(board: ShapeBoard): Set<number> {
   for (const view of ['picture', 'how'] as const) {
     fromHtml(board.views[view]?.html);
     fromHtml(board.views[view]?.tall?.html);
+    fromHtml(board.views[view]?.more?.html);
   }
+  fromText(board.views.know);
   for (const group of board.views.reqs?.groups ?? []) for (const item of group.items) fromText(item.text);
   for (const foot of board.views.reqs?.foot ?? []) fromText(foot.text);
   fromText(board.views.code?.source);
@@ -1142,24 +1162,37 @@ export interface ShapeDiff {
   refs: { added: number[]; removed: number[]; changed: number[] };
 }
 
+/** What a view holds on this version. What to know is the words, or an old board's Requirements. */
+/** A view, part or note saved when What to know was Requirements says "reqs": it is `know` now. */
+export function shapeViewNow<T>(view: T): T | 'know' {
+  return (view as unknown) === 'reqs' ? 'know' : view;
+}
+
+export function shapeViewContent(views: ShapeBoard['views'], view: ShapeViewId): unknown {
+  return view === 'know' ? views.know ?? views.reqs : views[view];
+}
+
 type Diffable = Pick<ShapeVersion, 'n' | 'views' | 'parts' | 'refs'> & Partial<Pick<ShapeVersion, 'title' | 'claim'>>;
 
 /** What changed from `a` to `b`, by part ids. Snapshots, so any two versions compare. */
 export function diffShapeVersions(a: Diffable, b: Diffable): ShapeDiff {
   const key = (p: ShapePart) => `${p.view}\u0000${p.id}`;
-  const before = new Map(a.parts.map((p) => [key(p), p]));
-  const after = new Map(b.parts.map((p) => [key(p), p]));
+  const now = (p: ShapePart): ShapePart => ({ ...p, view: shapeViewNow(p.view) });
+  const partsA = a.parts.map(now);
+  const partsB = b.parts.map(now);
+  const before = new Map(partsA.map((p) => [key(p), p]));
+  const after = new Map(partsB.map((p) => [key(p), p]));
   const changes: ShapeChange[] = [];
-  for (const p of b.parts) {
+  for (const p of partsB) {
     const old = before.get(key(p));
     if (!old) changes.push({ view: p.view, id: p.id, kind: 'added', after: p.text });
     else if (old.text !== p.text) changes.push({ view: p.view, id: p.id, kind: 'changed', before: old.text, after: p.text });
   }
-  for (const p of a.parts) if (!after.has(key(p))) changes.push({ view: p.view, id: p.id, kind: 'removed', before: p.text });
+  for (const p of partsA) if (!after.has(key(p))) changes.push({ view: p.view, id: p.id, kind: 'removed', before: p.text });
 
   const views = SHAPE_VIEWS.map((v) => v.id).filter((view) => {
     if (changes.some((c) => c.view === view)) return true;
-    return JSON.stringify(a.views[view] ?? null) !== JSON.stringify(b.views[view] ?? null);
+    return JSON.stringify(shapeViewContent(a.views, view) ?? null) !== JSON.stringify(shapeViewContent(b.views, view) ?? null);
   });
 
   const refsA = new Map((a.refs ?? []).map((r) => [r.n, JSON.stringify(r)]));
@@ -1203,6 +1236,24 @@ export interface ShapeNoteInput {
   part?: string | null;
   quote?: string | null;
   text: string;
+  box?: ShapeNoteBox;
+  code?: string[];
+  /** A PNG as a data: URL; the store keeps it as a file. */
+  picture?: string;
+}
+
+const NOTE_PICTURE_RE = /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/;
+
+function checkNoteBox(c: Checker, input: unknown): ShapeNoteBox | undefined {
+  if (input === undefined) return undefined;
+  const b = isRecord(input) ? input : {};
+  const at = [b.x, b.y, b.w, b.h];
+  if (!at.every((n) => typeof n === 'number' && n >= 0 && n <= 1)) {
+    c.fail('box', 'must be x, y, w and h, each from 0 to 1');
+    return undefined;
+  }
+  const [x, y, w, h] = at as number[];
+  return { x: x!, y: y!, w: w!, h: h!, ...(b.tall === true ? { tall: true as const } : {}), ...(b.more === true ? { more: true as const } : {}) };
 }
 
 /** Validate a person's Change it or Ask. No part: a general comment (on a view, or the whole board). */
@@ -1214,8 +1265,9 @@ export function checkShapeNoteInput(input: unknown): ShapeCheck<ShapeNoteInput> 
   const v = c.int(input.v, 'v', 1, 1_000_000);
   let view: ShapeViewId | null = null;
   if (input.view !== undefined && input.view !== null) {
-    if (!SHAPE_VIEWS.some((x) => x.id === input.view)) c.fail('view', 'must be picture, how, reqs or code');
-    else view = input.view as ShapeViewId;
+    const now = shapeViewNow(input.view);
+    if (!SHAPE_VIEWS.some((x) => x.id === now)) c.fail('view', 'must be picture, how, know or code');
+    else view = now as ShapeViewId;
   }
   let part: string | null = null;
   if (input.part !== undefined && input.part !== null) {
@@ -1225,6 +1277,70 @@ export function checkShapeNoteInput(input: unknown): ShapeCheck<ShapeNoteInput> 
   if (part && !view) c.fail('view', 'is required with a part');
   const quote = c.text(input.quote, 'quote', SHAPE_LIMITS.quote, false) ?? null;
   const text = c.text(input.text, 'text', SHAPE_LIMITS.noteText);
+  const box = checkNoteBox(c, input.box);
+  if (box && !view) c.fail('view', 'is required with a box');
+  const code = input.code === undefined ? undefined : Array.isArray(input.code) && input.code.length <= 40 && input.code.every((t) => typeof t === 'string' && parseShapeCodeTarget(t)) ? (input.code as string[]) : undefined;
+  if (input.code !== undefined && !code) c.fail('code', 'must be up to 40 data-code places');
+  const picture = input.picture === undefined ? undefined : typeof input.picture === 'string' && input.picture.length <= SHAPE_LIMITS.notePicture && NOTE_PICTURE_RE.test(input.picture) ? input.picture : undefined;
+  if (input.picture !== undefined && !picture) c.fail('picture', 'must be a PNG data: URL within the limit');
   if (c.errors.length || !kind || !v || !text) return { ok: false, errors: c.errors };
-  return { ok: true, value: { kind, v, view, part, quote, text } };
+  return { ok: true, value: { kind, v, view, part, quote, text, ...(box ? { box } : {}), ...(code ? { code } : {}), ...(picture ? { picture } : {}) } };
+}
+
+/** The words a person reads on a drawing. */
+export function shapeDrawnWords(html: string): number {
+  html = html.replace(/<title\b[^>]*>.*?<\/title>/gis, ' ');
+  const text = html.replace(/<(style|script)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]*>/g, ' ').replace(/&[a-z#0-9]+;/gi, ' ');
+  return text.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
+}
+
+/** How much of an SVG's viewBox its boxes and words span. Null when it cannot tell (no viewBox, transforms, HTML). */
+function shapeDrawingSpan(html: string): { w: number; h: number } | null {
+  const box = html.match(/<svg[^>]*viewBox="([-\d.]+)[ ,]+([-\d.]+)[ ,]+([\d.]+)[ ,]+([\d.]+)"/);
+  if (!box || !Number(box[3]) || !Number(box[4])) return null;
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (const m of html.matchAll(/<(rect|text)\b([^>]*)>/g)) {
+    const a = (k: string) => Number(m[2]?.match(new RegExp(`\\s${k}="([-\\d.]+)"`))?.[1] ?? NaN);
+    if (![a('x'), a('y')].every(Number.isFinite)) continue;
+    xs.push(a('x'), a('x') + (a('width') || 0));
+    ys.push(a('y'), a('y') + (a('height') || 0));
+  }
+  if (xs.length < 4) return null;
+  return { w: (Math.max(...xs) - Math.min(...xs)) / Number(box[3]), h: (Math.max(...ys) - Math.min(...ys)) / Number(box[4]) };
+}
+
+/**
+ * What `shape update` tells the agent about a stored board: how it will behave, not a verdict.
+ * Each note says what to change. It never refuses: the board is stored either way.
+ */
+export function shapeBoardNotes(board: Pick<ShapeBoard, 'views' | 'refs'>): string[] {
+  const notes: string[] = [];
+  const picture = board.views.picture;
+  if (!picture) return notes;
+  const words = shapeDrawnWords(picture.html);
+  if (words > 240) notes.push(`The Picture has ${words} words. Read at a glance, about 200 is the most. Move the rest behind numbers (a ref's sub and images) or to views.know.`);
+  if (picture.width === undefined) notes.push('The Picture has no width and height, so it scrolls like a page. Give it a fixed canvas: it then always fits one screen.');
+  else if (!picture.tall) notes.push('The Picture has no tall drawing, so a phone pans it sideways. That works. For a board you expect on a phone, add views.picture.tall.');
+  const cited = [...picture.html.matchAll(/\sdata-ref\s*=\s*["']?(\d{1,3})/g)].map((m) => Number(m[1]));
+  const onPicture = (board.refs ?? []).filter((r) => cited.includes(r.n));
+  if (!onPicture.length) notes.push('The Picture has no numbers. Put data-ref="n" on the things that have more behind them: the person hovers a number to see its picture and line.');
+  const bare = onPicture.filter((r) => !r.sub && !r.images?.length && r.kind !== 'image').map((r) => r.n);
+  if (bare.length === 1) notes.push(`Bubble ${bare[0]} shows only a title. Give that ref a sub (one line) or images (a small real picture).`);
+  else if (bare.length) notes.push(`Bubbles ${bare.join(', ')} show only a title. Give those refs a sub (one line) or images (a small real picture).`);
+  if (!/\sdata-mark\s*=/.test(picture.html)) notes.push('The Picture has no data-mark, so the person cannot point at a part. Put data-mark="id" on each part.');
+  const seen = shapeDrawingSpan(picture.html);
+  if (seen && (seen.w < 0.6 || seen.h < 0.6)) notes.push(`The drawing fills ${Math.round(seen.w * 100)}% of the canvas's width and ${Math.round(seen.h * 100)}% of its height. Spread it out, or make the viewBox fit it.`);
+  // A name `shape update` has no icon, logo or drawn thing for (shared/shape/stamps.ts leaves it empty with data-missing),
+  // in any drawing, the phone's and the more's too; each once.
+  const how = board.views.how;
+  for (const view of [picture, picture.tall, picture.more, how, how?.tall, how?.more])
+    for (const m of (view?.html ?? '').matchAll(/\sdata-missing="([^"]*)"/g)) {
+      const note = m[1]!.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+      if (!notes.includes(note)) notes.push(note);
+    }
+  // A real logo keeps its own colours: the kit's marks say so with data-brand.
+  const colours = [picture.html.replace(/<svg data-brand\b.*?<\/svg>/gs, ''), picture.css ?? ''].join(' ').match(/#[0-9a-f]{3,8}\b(?=[^<>]*[;"'}])|\brgba?\(/gi);
+  if (colours?.length) notes.push(`The Picture has ${colours.length} fixed colours (such as ${colours[0]}), which break in light or dark. Use var(--ink), var(--grey), var(--mark) and the rest.`);
+  return notes;
 }

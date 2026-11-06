@@ -199,6 +199,8 @@ describe("the guide against what it describes", () => {
     // The check bites: on, both name it.
     expect(help).toContain("\n### card\n");
     expect(cardText(help).length).toBeGreaterThan(0);
+    // Clearing initiatives out is in `plannotator card --help` and the nudge, not here (the owner: no bloat).
+    expect(help).not.toMatch(/work is done, delete|\bdelete it \(/);
     expect(formatTopLevelHelp({ board: true })).toContain("plannotator card ");
   });
 

@@ -35,6 +35,7 @@ import {
   type InboxWorld,
 } from "../../tests/helpers/inbox-world";
 import { resetServedHostnamesForTests } from "./request-host-guard";
+import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { startInboxServer } from "./inbox";
 import { createInboxDevices, takeDownInboxTailnet } from "./inbox-devices";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
@@ -301,6 +302,8 @@ describe("the device door, on the binary", () => {
       // "Open in" launches an app on the computer: never from a phone (and no new-tab page there either).
       ["POST", "open-in"],
       ["GET", "open-in/apps"],
+      ["GET", "open-in/file"],
+      ["POST", "open-in/file"],
       ["GET", "attachments/att_x/page"],
       ["POST", "restart"],
       ["POST", "mcp"],
@@ -1285,7 +1288,8 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
   });
 
   test("7.39 to 7.41: the live sessions, a thread the phone starts (replayed by its key, refusals unchanged), and Send to another session", async () => {
-    const { ledger, inbox, door, poll } = await world();
+    let now = 1_000_000;
+    const { ledger, inbox, door, poll } = await world({ sessionsNow: () => now });
     await poll("ses-a", "claude-code");
     await poll("ses-b", "pi");
 
@@ -1312,6 +1316,9 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
     const gone = await door("messages", { body: { idempotency_key: "compose-2", to: { session: "ses-gone" }, body: "Hello" } });
     expect([gone.status, ((await gone.json()) as Json).code]).toEqual([409, "session_not_live"]);
 
+    // A move needs the session it waits on to have ended.
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
+    await poll("ses-b", "pi");
     const moved = await door(`messages/${first.message.id}/to`, { body: { idempotency_key: "to-1", to: { host: "pi", session: "ses-b" } } });
     expect(moved.status).toBe(200);
     const m = (await moved.json()) as Json;
