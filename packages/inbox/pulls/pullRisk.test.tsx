@@ -7,6 +7,8 @@
  *  - the filter closing the stack open beside the list;
  *  - a tap on a mark opening the row instead of showing the sentence;
  *  - a local review (no PR to rank) shown or counted under the filter, or a thread's row not judged by the PRs it owns;
+ *  - a fold under the filter that does nothing, or that changes the folds saved for All;
+ *  - an empty filter hiding that a host could not be read;
  *  - the dialog losing the person's words when a save fails, or keeping the last agent's model after a switch;
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -547,4 +549,30 @@ test.skipIf(!hasDom)("a thread's row is judged by the PR it owns; a local review
     if (root) await act(async () => root!.unmount());
     document.body.innerHTML = '';
   }
+});
+
+test.skipIf(!hasDom)('under the filter a folded group starts open, and a click folds it for the filter only: the folds saved for All stay', async () => {
+  window.localStorage.setItem('plannotator-inbox-reviews-folds', JSON.stringify({ waiting: false, not_reviewed: false }));
+  window.localStorage.setItem('plannotator-inbox-pr-risk-filter', 'high');
+  spy('pullRisk', async () => JUDGED);
+  await mount(page());
+  // #4 is the person's own, nobody's review: Open, not reviewed.
+  const fold = () => document.querySelector<HTMLButtonElement>('[data-reviews-fold="not_reviewed"]')!;
+  expect(fold().getAttribute('aria-expanded')).toBe('true');
+  expect(shownRows()).toContain(key(4));
+  await act(async () => fold().click());
+  expect(fold().getAttribute('aria-expanded')).toBe('false');
+  expect(shownRows()).not.toContain(key(4));
+  expect(JSON.parse(window.localStorage.getItem('plannotator-inbox-reviews-folds')!)).toEqual({ waiting: false, not_reviewed: false });
+  await act(async () => fold().click());
+  expect(shownRows()).toContain(key(4));
+});
+
+test.skipIf(!hasDom)('an empty filter still says a host could not be read', async () => {
+  window.localStorage.setItem('plannotator-inbox-pr-risk-filter', 'high');
+  spy('pullRisk', async () => ({ ...JUDGED, judgments: { [key(1)]: { level: 'low', why: 'Docs.' } } }));
+  const failing = { ...LIST, hosts: [{ ...LIST.hosts[0]!, error: 'rate_limited' }] } as InboxPullsAnswer;
+  await mount(page(null, [], pullsStateOf(failing)));
+  expect(document.querySelector('[data-pulls-empty]')?.getAttribute('data-pulls-empty')).toBe('risk');
+  expect(document.querySelector('[data-pulls-notice]')?.textContent).toContain('asked to slow down');
 });

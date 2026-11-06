@@ -69,7 +69,7 @@ import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
 import { fetchPRFileContent, ghEntryMissingContent, glEntryMissingContent, parsePaginatedArray, reconstructGhPatch, reconstructGitlabPatch, type GitHubFileEntry, type GitLabDiffEntry, type PRRef, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { MAX_REPO_FILE_BYTES } from "@plannotator/shared/repo-file";
 import { MAX_REVIEW_FILE_CONTENT_BYTES, prepareGitCommand, readGitObjectBytes, validateFilePath } from "@plannotator/shared/review-core";
-import { runtime as gitRuntime } from "./git";
+import { killGitTree, runtime as gitRuntime, trackIsolatedGitGroup } from "./git";
 import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
 
 /** A host's answer is fresh this long. */
@@ -594,10 +594,11 @@ export interface InboxPulls {
    * One layer's diff for an agent to read: no limit of ours on its size, and when the forge won't serve it as one
    * document, whatever its per-file read gives; `partial` when that is known to be less than the whole diff.
    * When that read is partial or empty and `roots` holds a clone of the PR's repository on this computer, git reads
-   * the whole diff there instead (`localWholeDiff`), and it is not partial.
+   * the whole diff there instead (`localWholeDiff`), and it is not partial; `held_back` is then the forge's own read
+   * (its held-back files as their headers), for an agent the whole is too long for.
    * `head_sha` as `diff`'s. Throws InboxPullsError when there is nothing.
    */
-  wholeDiff(key: string, signal?: AbortSignal, roots?: readonly string[]): Promise<{ patch: string; head_sha: string | null; partial: boolean }>;
+  wholeDiff(key: string, signal?: AbortSignal, roots?: readonly string[]): Promise<{ patch: string; head_sha: string | null; partial: boolean; held_back?: string }>;
   /** The head commit of the last patch read for this PR, either scope (`diff`'s `head_sha`), or null. */
   readHead(key: string): string | null;
   /**
@@ -679,30 +680,39 @@ export type PullGitRunner = (root: string, args: string[], reading: { timeoutMs:
 
 /**
  * git with no way to ask anything (no credential or SSH prompt: `prepareGitCommand`'s "forbid"), and no automatic gc
- * or maintenance started by a fetch. `environment`: tests give git a scratch HOME.
+ * or maintenance started by a fetch. It runs in its own process group, as git.ts's `runGit` does, so the timeout and
+ * `signal` stop what it started too (ssh, git-remote-https), and no window opens on Windows. `environment`: tests
+ * give git a scratch HOME.
  */
 export function createPullGitRunner(environment: () => Readonly<Record<string, string | undefined>> = () => process.env): PullGitRunner {
   return async (root, args, reading) => {
+    if (reading.signal?.aborted) return { stdout: "", stderr: "git: stopped", exitCode: 130 };
     const prepared = prepareGitCommand(args, { interaction: "forbid", timeoutMs: reading.timeoutMs, config: { "maintenance.auto": "false", "gc.auto": "0" } }, environment());
     let proc: ReturnType<typeof Bun.spawn>;
     try {
       proc = Bun.spawn(["git", ...prepared.args], {
         cwd: root,
+        detached: prepared.isolateProcessGroup,
         env: { ...environment(), ...prepared.env },
         stdin: "ignore",
         stdout: "pipe",
         stderr: "pipe",
-        signal: reading.signal,
+        windowsHide: true,
       });
     } catch {
       return { stdout: "", stderr: "git: could not start", exitCode: 127 };
     }
-    const timer = setTimeout(() => proc.kill(), reading.timeoutMs);
+    const untrack = prepared.isolateProcessGroup ? trackIsolatedGitGroup(proc.pid) : undefined;
+    const stop = () => killGitTree(proc, prepared.isolateProcessGroup);
+    const timer = setTimeout(stop, reading.timeoutMs);
+    reading.signal?.addEventListener("abort", stop, { once: true });
     try {
       const [stdout, stderr, exitCode] = await Promise.all([new Response(proc.stdout as ReadableStream).text(), new Response(proc.stderr as ReadableStream).text(), proc.exited]);
       return { stdout, stderr, exitCode };
     } finally {
       clearTimeout(timer);
+      reading.signal?.removeEventListener("abort", stop);
+      untrack?.();
     }
   };
 }
@@ -817,7 +827,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const from = shaOf((await git(["merge-base", base, head]))?.trim());
       if (!from) continue;
       // The person's own diff settings never apply: no external diff or textconv runs, and the prefixes are the forge's.
-      const patch = await git(["diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", from, head, "--"]);
+      const patch = await git(["diff", "--no-ext-diff", "--no-textconv", "--no-relative", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", from, head, "--"]);
       if (patch?.trim()) return patch;
     }
     return null;
@@ -1322,6 +1332,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         : await read(`${project}/raw_diffs`);
       let patch = whole.exitCode === 0 ? whole.stdout : "";
       let partial = false;
+      let heldBack: string | undefined;
       if (!patch.trim()) {
         const stop = whole.exitCode === 0 ? null : stopFor(whole);
         if (stop) throw new InboxPullsError("pull_diff_failed", stop);
@@ -1340,6 +1351,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         // Less than the whole diff, or nothing: a clone on this computer gives the whole of it, when there is one.
         const local = (partial || !patch.trim()) && headBefore && roots.length > 0 ? await localWholeDiff(pull, headBefore, roots, signal) : null;
         if (local) {
+          if (patch.trim()) heldBack = patch;
           patch = local;
           partial = false;
         }
@@ -1349,7 +1361,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         }
       }
       const headAfter = headBefore ? await readHeadNow(pull, cli) : null;
-      return { patch, partial, head_sha: headBefore && headBefore === headAfter ? headBefore : null };
+      return { patch, partial, head_sha: headBefore && headBefore === headAfter ? headBefore : null, ...(heldBack ? { held_back: heldBack } : {}) };
     },
     async fileContents(key, scope, path, roots, ids, oldPath) {
       const none: InboxFileContents = { oldContent: null, newContent: null };

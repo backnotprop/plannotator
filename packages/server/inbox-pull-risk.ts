@@ -16,9 +16,12 @@
  * - A failed run keeps no judgment: the PR shows the reason, a diff too big for the
  *   model included, and never a level. It waits (`RISK_RETRY_MS`). A forge that won't
  *   serve the diff as one document is read file by file (`wholeDiff`), and a Low from
- *   a read known to be incomplete is kept as Medium. Failures
- *   in a row mean the agent itself is broken: nothing runs for a while
- *   (`RISK_AGENT_PAUSE_MS`). It never blocks the list.
+ *   a read known to be incomplete is kept as Medium. A diff a clone on this computer
+ *   gave whole, which the agent finds too long, is tried once more as the forge gave it
+ *   (its held-back files as their headers), and is then a read known to be incomplete.
+ *   Failures in a row mean the agent itself is broken: nothing runs for a while
+ *   (`RISK_AGENT_PAUSE_MS`); a diff too long for the model is that PR's alone and
+ *   doesn't count. It never blocks the list.
  * - The agent is an Ask AI provider started for one answer (`oneShot`): no tools where
  *   its CLI allows, in an empty folder. A provider that still reaches for a tool or asks
  *   permission is stopped and its run discarded, so a diff can't get a judgment out of
@@ -262,6 +265,11 @@ function settingsOf(value: unknown): PullRiskSettings {
   };
 }
 
+/** The agent's words for a prompt past its model's context: that diff's, not a broken agent's. */
+export function isPromptTooLong(text: string): boolean {
+  return /prompt is too long|input is too long|too many (input )?tokens|context[ _-]?length[ _-]?exceeded|maximum context length|exceeds? (the |its )?(model'?s? )?context( window)?|context window (is )?exceeded|request too large/i.test(text);
+}
+
 const hashOf = (rules: string) => createHash("sha256").update(rules).digest("hex").slice(0, 32);
 
 export function createPullRisk(options: PullRiskOptions): PullRisk {
@@ -352,8 +360,9 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     const failed = (reason: string) => {
       failures.set(pull.key, { head: pull.head_sha, base: pull.base, rules, reason });
     };
-    let patch: string;
+    let patch: string | null;
     let partial: boolean;
+    let heldBack: string | null;
     try {
       const roots = options.roots ? await options.roots(pull.key).catch(() => []) : [];
       const diff = await options.pulls.wholeDiff(pull.key, stopping.signal, roots);
@@ -364,6 +373,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       }
       patch = diff.patch;
       partial = diff.partial;
+      heldBack = diff.held_back ?? null;
     } catch (cause) {
       const { code, message } = cause as { code?: string; message?: string };
       waits.set(job, now() + RISK_RETRY_MS);
@@ -374,28 +384,44 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     // The Inbox stopped during that read: no agent starts now.
     if (stopping.signal.aborted) return;
     mkdirSync(agentDir, { recursive: true });
-    let result: RiskRunResult;
-    try {
-      result = await run({
-        provider,
-        model: current.model,
-        system: RISK_SYSTEM_PROMPT,
-        prompt: buildRiskPrompt({ rules: current.rules, title: pull.title, diff: patch, fence: riskFence() }),
-        cwd: agentDir,
-      });
-    } catch (cause) {
-      result = { failed: (cause instanceof Error && cause.message) || "The agent could not start." };
-    }
+    const ask = async (diff: string): Promise<RiskRunResult> => {
+      try {
+        return await run({
+          provider,
+          model: current.model,
+          system: RISK_SYSTEM_PROMPT,
+          prompt: buildRiskPrompt({ rules: current.rules, title: pull.title, diff, fence: riskFence() }),
+          cwd: agentDir,
+        });
+      } catch (cause) {
+        return { failed: (cause instanceof Error && cause.message) || "The agent could not start." };
+      }
+    };
+    let result = await ask(patch);
+    // The whole diff is held only for its run.
+    patch = null;
     if (stopping.signal.aborted) return;
-    const judgment = "text" in result ? parseRiskAnswer(result.text) : null;
+    let judgment = "text" in result ? parseRiskAnswer(result.text) : null;
+    // An answer that is no ranking may still say why: "Prompt is too long" comes back as a CLI's ordinary answer.
+    const said = (one: RiskRunResult) => ("failed" in one ? one.failed : one.text);
+    if (!judgment && heldBack && isPromptTooLong(said(result))) {
+      // Too long whole, from a clone: once more as the forge gave it, its held-back files as their headers.
+      result = await ask(heldBack);
+      heldBack = null;
+      partial = true;
+      if (stopping.signal.aborted) return;
+      judgment = "text" in result ? parseRiskAnswer(result.text) : null;
+    }
     if (!judgment) {
-      // An answer that is no ranking may still say why: "Prompt is too long" comes back as a CLI's ordinary answer.
       const reason = riskFailureLine("failed" in result ? result.failed : `The agent didn\u2019t answer with a ranking: ${result.text}`) || "The agent gave no answer.";
       failed(reason);
       lastFailure = reason;
       waits.set(job, now() + RISK_RETRY_MS);
-      failuresInARow++;
-      if (failuresInARow >= RISK_AGENT_FAILURES) agentPausedUntil = now() + RISK_AGENT_PAUSE_MS;
+      // A diff too long for the model is this PR's alone: it says nothing of the agent.
+      if (!isPromptTooLong(said(result))) {
+        failuresInARow++;
+        if (failuresInARow >= RISK_AGENT_FAILURES) agentPausedUntil = now() + RISK_AGENT_PAUSE_MS;
+      }
       return;
     }
     lastFailure = null;

@@ -125,7 +125,7 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
   type Answer = { stdout?: string; stderr?: string; exitCode?: number };
   const answered = (a: Answer) => ({ stdout: a.stdout ?? "", stderr: a.stderr ?? "", exitCode: a.exitCode ?? 0 });
   /** The real reader and queue. `whole` answers the one-document read, `paged` the per-file read; the rest of the forge just works. */
-  async function reading(platform: "github" | "gitlab", script: { whole: Answer; paged?: Answer }, options: { now?: () => number; answer?: string; files?: number; head?: string; clones?: string[]; gitEnv?: Record<string, string> } = {}) {
+  async function reading(platform: "github" | "gitlab", script: { whole: Answer; paged?: Answer }, options: { now?: () => number; answer?: string; respond?: (run: RiskRun, n: number) => RiskRunResult; files?: number; head?: string; clones?: string[]; gitEnv?: Record<string, string> } = {}) {
     const github = platform === "github";
     const node = { ...ghNode, headRefOid: options.head ?? ghNode.headRefOid };
     const endpoints: string[] = [];
@@ -159,7 +159,7 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
       ...(options.clones ? { roots: async () => options.clones! } : {}),
       run: async (one) => {
         runs.push(one);
-        return { text: options.answer ?? HIGH };
+        return options.respond ? options.respond(one, runs.length) : { text: options.answer ?? HIGH };
       },
     });
     const judge = async () => {
@@ -349,6 +349,63 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
       expect(risk.answer().judgments[key]?.level).toBe("low");
       // Objects only: every ref, the branch, the worktree, the index and the stash as they were, and no FETCH_HEAD.
       expect(stateOf(clone)).toEqual(before);
+    }, 30_000);
+
+    const TOO_LONG = "prompt is too long: 900000 tokens > 200000 maximum";
+    test("too long whole for the model: tried once more as the forge gave it, its held-back files as headers, and a Low from that is Medium", async () => {
+      setRules();
+      const { clone, head } = repositories();
+      const { risk, runs, judge, key } = await reading("github", { whole: refused, paged: heldBack }, { head, clones: [clone], gitEnv, respond: (_run, n) => (n === 1 ? { failed: TOO_LONG } : { text: LOW }) });
+      await judge();
+      expect(runs).toHaveLength(2);
+      expect(runs[0]!.prompt).toContain("+v2 sends the card number home");
+      expect(runs[1]!.prompt).not.toContain("+v2 sends the card number home");
+      expect(runs[1]!.prompt).toContain("diff --git a/vendor/huge.bin b/vendor/huge.bin");
+      expect(runs[1]!.prompt).toContain("+charge twice");
+      expect(risk.answer().judgments[key]?.level).toBe("medium");
+      expect(risk.answer().failed).toEqual({});
+    }, 30_000);
+
+    test("too long both ways: the PR says why, and that one try is all", async () => {
+      setRules();
+      const { clone, head } = repositories();
+      const { risk, runs, judge, key } = await reading("github", { whole: refused, paged: heldBack }, { head, clones: [clone], gitEnv, respond: () => ({ text: "Prompt is too long" }) });
+      await judge();
+      expect(runs).toHaveLength(2);
+      expect(risk.answer().judgments[key]).toBeUndefined();
+      expect(risk.answer().failed[key]).toContain("Prompt is too long");
+    }, 30_000);
+
+    test.skipIf(process.platform === "win32").each([
+      ["the timeout", undefined],
+      ["the queue's stop", "abort"],
+    ])("%s stops what git started too: its ssh doesn't outlive it", async (_name, how) => {
+      const pidFile = join(scratch, "ssh.pid");
+      const ssh = join(scratch, "fake-ssh");
+      writeFileSync(ssh, `#!/bin/sh\necho $$ > '${pidFile}'\nexec sleep 30\n`);
+      chmodSync(ssh, 0o755);
+      const runner = createPullGitRunner(() => ({ ...process.env, ...gitEnv, GIT_SSH_COMMAND: ssh }));
+      const stop = new AbortController();
+      const started = Date.now();
+      const running = runner(scratch, ["ls-remote", "ssh://git@example.invalid/n/b.git"], { timeoutMs: how ? 20_000 : 1_000, signal: stop.signal });
+      // The ssh is up: git is waiting on it.
+      for (let i = 0; i < 200 && !existsSync(pidFile); i++) await Bun.sleep(25);
+      const pid = Number(readFileSync(pidFile, "utf8").trim());
+      expect(pid).toBeGreaterThan(0);
+      if (how) stop.abort();
+      const result = await running;
+      expect(result.exitCode).not.toBe(0);
+      expect(Date.now() - started).toBeLessThan(10_000);
+      const alive = () => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      for (let i = 0; i < 80 && alive(); i++) await Bun.sleep(25);
+      expect(alive()).toBe(false);
     }, 30_000);
 
     test("no clone, or one git can't fetch the head into: the forge's read stands, and Low shows Medium", async () => {
@@ -680,6 +737,15 @@ describe("no cost repeats", () => {
     await settled();
     expect(runs).toHaveLength(RISK_CONCURRENCY * 2);
     expect(new Set(runs.map((r) => r.prompt)).size).toBe(RISK_CONCURRENCY * 2);
+  });
+
+  test("diffs too long for the model are each PR's own: they never pause the others", async () => {
+    setRules();
+    const { risk, runs } = engine({ answer: async () => ({ failed: "prompt is too long: 2500000 tokens > 200000 maximum" }) });
+    risk.assess(many);
+    await settled();
+    expect(runs).toHaveLength(many.length);
+    expect(Object.keys(risk.answer().failed)).toHaveLength(many.length);
   });
 
   test("one PR that keeps failing can't stop the others", async () => {

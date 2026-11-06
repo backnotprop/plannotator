@@ -266,15 +266,24 @@ export function ReviewsList({
   const now = useRelativeClock(true);
   const groups = useMemo(() => (risk === 'all' ? inboxReviewGroups(rows) : riskOrder(inboxReviewGroups(rows), judgments)), [rows, risk, judgments]);
   const [folds, setFolds] = useState<ReviewFolds>(readReviewFolds);
+  // Under a risk filter nothing it kept starts folded away, and a click folds a group for that filter only: the
+  // saved folds stay the person's choice for All.
+  const [riskFolds, setRiskFolds] = useState<{ risk: RiskFilterValue; folded: Partial<ReviewFolds> }>({ risk, folded: {} });
+  const riskFolded = riskFolds.risk === risk ? riskFolds.folded : {};
+  const unfolded = (name: keyof ReviewFolds) => (risk === 'all' ? folds[name] : !riskFolded[name]);
   const toggle = (name: keyof ReviewFolds) => {
+    if (risk !== 'all') {
+      setRiskFolds({ risk, folded: { ...riskFolded, [name]: !riskFolded[name] } });
+      return;
+    }
     const next = { ...folds, [name]: !folds[name] };
     setFolds(next);
     saveReviewFolds(next);
   };
   const isOpenRow = (row: InboxReviewRow) => selected !== null && (row.thread_id === selected || row.id === selected || row.stacks.some((stack) => stack.id === selected || stack.layers.some((l) => l.key === selected)));
-  // A row opened from a folded group keeps its group open. With the risk filter on, nothing it kept stays folded away.
-  const waitingOpen = folds.waiting || risk !== 'all' || groups.waiting.some(isOpenRow);
-  const listedOpen = folds.not_reviewed || risk !== 'all' || groups.not_reviewed.some(isOpenRow);
+  // A row opened from a folded group keeps its group open.
+  const waitingOpen = unfolded('waiting') || groups.waiting.some(isOpenRow);
+  const listedOpen = unfolded('not_reviewed') || groups.not_reviewed.some(isOpenRow);
   // Those High could not place, behind one quiet line; one opened from there keeps them shown.
   const [notRankedFolded, setNotRankedOpen] = useState(false);
   const notRankedOpen = notRankedFolded || notRanked.some(isOpenRow);
@@ -335,8 +344,10 @@ export function ReviewsList({
       </div>
     ) : null;
   if (rows.length === 0 && risk !== 'all') {
+    // What could not be read (signed out, rate limited) is said here too: an empty filter is no "nothing".
     return (
       <>
+        {notice}
         <div className="ib-pr-empty" data-pulls-empty="risk">
           <p className="ib-pr-empty-h">{risk === 'high' ? 'Nothing high risk.' : 'Nothing at medium risk or above.'}</p>
           {notJudgedLine}
