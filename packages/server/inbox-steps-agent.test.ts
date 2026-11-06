@@ -30,6 +30,7 @@ import { INBOX_TOOL_COST_STEPS, type InboxAuthor } from "@plannotator/core/inbox
 import {
   INBOX_BRIDGE_POLL_PATH,
   INBOX_STEPS_LEAD,
+  INBOX_WAKE_CLOSING_LINE,
   inboxAgentTool,
   inboxSessionThreadsText,
   inboxWakeText,
@@ -244,7 +245,7 @@ describe("on", () => {
     const [command] = await w.poll();
     expect(command!.steps).toEqual({ done: 2, total: 5, doing: "Replay the failures in staging" });
     const wake = inboxWakeText(command!);
-    expect(wake).toContain(`\n\n${APPROVED_WAKE}\n\n[thread ${w.thread}`);
+    expect(wake.endsWith(`\n\n${APPROVED_WAKE}\n\n${INBOX_WAKE_CLOSING_LINE}`)).toBe(true);
   });
 
   test("the entry with steps on stays within 5% of the size the window states", async () => {

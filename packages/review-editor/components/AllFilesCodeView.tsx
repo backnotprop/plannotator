@@ -454,7 +454,7 @@ export interface AllFilesCodeViewProps {
   selectionActions?: DiffSelectionActions;
   /** EXPERIMENTAL flag-gated edit-to-suggestion mode. Only the plain all-files
    * dock panel passes this — Guided Review surfaces deliberately do NOT (the
-   * GuideViewportManager evicts CodeViews beyond ~8 mounted, which would
+   * GuideViewportManager drops CodeViews that leave its outer window, which would
    * destroy an active editor's state; scoping edit mode to this surface is the
    * simple safe v1 choice). When absent/false, no edit UI renders and no
    * editor is ever constructed (code-split hosts also never fetch the editor

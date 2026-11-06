@@ -71,6 +71,81 @@ export interface ShapeDrawnView {
    * that must be drawn. It flows and scrolls like a page. Most boards have none.
    */
   more?: { html: string; css?: string };
+  /**
+   * How it works only: examples a person can follow through the drawing
+   * ("Follow an example"), one per way it can go. Each step names the parts it
+   * lights by the drawing's own ids: `data-mark` for a part, `data-edge` for
+   * an arrow (put `data-edge="id"` on the arrow and on its words).
+   */
+  examples?: ShapeExample[];
+}
+
+/**
+ * One example, followed through How it works: a real case, read from the code
+ * (nothing is run). Named by where it ends ("It opens", "Nothing shows").
+ */
+export interface ShapeExample {
+  /** Where it ends, for the switch: "It opens". */
+  name: string;
+  /** The case, in a line: "You leave a thread you just read". */
+  title: string;
+  /** What happens, in a sentence, shown before stepping. */
+  lead?: string;
+  steps: ShapeExampleStep[];
+}
+
+/** Where a value going into a step came from: a line of code, an earlier step's output (1-based), or a few words. */
+export type ShapeExampleSource = { path: string; line: number } | { step: number } | string;
+
+export interface ShapeExampleInput {
+  /** As the code names it: `gate.pageAge`. */
+  name: string;
+  /** As the code holds it: `240_000`, `true`, `'open'`. */
+  value: string;
+  /** Its type: `number`. */
+  type?: string;
+  /** The value in plain words, when the literal is hard to read: `4 min`. */
+  reading?: string;
+  from: ShapeExampleSource;
+}
+
+export type ShapeExampleResult = 'pass' | 'fail' | 'not-reached';
+
+export interface ShapeExampleCheck {
+  /** The expression as the code writes it: `gate.pageAge >= SNOOZE_INTRO_TIMES.pageAgeMs`. */
+  code: string;
+  /** The constant's value, shown as a comment: `60_000`. */
+  constant?: string;
+  /** The value the check saw (absent when it was not reached). */
+  saw?: string;
+  result: ShapeExampleResult;
+  /** The check that decided which way the step went. One per step. */
+  decides?: boolean;
+  /** A failing check's shortfall: `20_000 short (20 s)`. */
+  short?: string;
+}
+
+export interface ShapeExampleStep {
+  /** The part it lights (`data-mark`). */
+  part?: string;
+  /** The arrow it takes to get there (`data-edge`). */
+  arrow?: string;
+  /** The example's value at this step, written on the part: `9 s, past the 5 s it needs`. */
+  tag: string;
+  /** Where the tag sits on its part: its top edge (default) or its bottom edge. */
+  tagAt?: 'top' | 'bottom';
+  /** What happens, in a plain sentence. */
+  text: string;
+  /** The example's numbers against the rule, in words, when they explain the tag. */
+  detail?: string;
+  inputs: ShapeExampleInput[];
+  /** The function, as declared: `snoozeIntroMayClaim(gate: …, now: Date = new Date()): boolean`. */
+  signature: string;
+  /** In code order. */
+  checks: ShapeExampleCheck[];
+  output: { name: string; value: string; type: string; note?: string };
+  /** The function's line: the card's link into the code. */
+  code: { path: string; line: number };
 }
 
 // An old board's Requirements. Nothing new writes them (`checkShapeBoard` refuses them); a saved version keeps them and What to know shows them.
@@ -312,6 +387,10 @@ export const SHAPE_LIMITS = {
   images: 12,
   noteText: 4000,
   quote: 600,
+  examples: 6,
+  exampleSteps: 12,
+  exampleRows: 12,
+  exampleCode: 600,
   /** A box's picture, as a data: URL. */
   notePicture: 6_000_000,
 } as const;
@@ -667,6 +746,148 @@ export function shapeHtmlDataCodes(html: string): string[] {
   return out;
 }
 
+// HTML start tags that end an <svg> where they stand (the spec's "breakout" tags in foreign content);
+// `font` only with color, face or size. Of them, the ones with no end tag and no picture.
+const SVG_BREAKOUT_TAGS = new Set(['b', 'big', 'blockquote', 'body', 'br', 'center', 'code', 'dd', 'div', 'dl', 'dt', 'em', 'embed', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'hr', 'i', 'img', 'li', 'listing', 'menu', 'meta', 'nobr', 'ol', 'p', 'pre', 'ruby', 's', 'small', 'span', 'strong', 'strike', 'sub', 'sup', 'table', 'tt', 'u', 'ul', 'var']);
+const SVG_BREAKOUT_VOID = new Set(['br', 'embed', 'hr', 'meta']);
+// Inside these SVG parts the page reads HTML again.
+const SVG_HTML_POINTS = new Set(['foreignobject', 'desc', 'title']);
+// Outside SVG, the page reads these elements' content as text: an `<svg` in it is no drawing.
+const HTML_RAW_TEXT = new Set(['script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes']);
+
+/**
+ * The drawing with the HTML tags the page would let end an `<svg>` renamed to
+ * SVG ones where they stand, so the page keeps the rest of the drawing in the
+ * SVG instead of dropping it. Inside a `<text>` such a tag becomes a `tspan`,
+ * which still shows its words. Elsewhere only a tag that holds nothing (an
+ * empty `<span data-ref="1"></span>` among the shapes, a `<br>`) becomes a
+ * `g`, keeping its attributes (a `data-ref` stays a number): SVG would not
+ * show the words of a `<div>Legend</div>` or the picture of an `<img>`, so
+ * those are left as written and the page shows them as HTML, as it always
+ * did. Everything else, HTML inside a foreignObject included, is left as
+ * written.
+ */
+export function shapeKeepSvgWhole(html: string): string {
+  if (!/<svg/i.test(html)) return html;
+  const n = html.length;
+  const lower = html.toLowerCase();
+  // What is open inside the outermost <svg>, as written (`name`) and as now written (`as`).
+  const open: { name: string; as: string }[] = [];
+  const inSvg = () => open.length > 0 && !SVG_HTML_POINTS.has(open[open.length - 1]!.name);
+  const inText = () => {
+    for (let k = open.length - 1; k >= 0 && open[k]!.name !== 'svg'; k--) if (open[k]!.as === 'text') return true;
+    return false;
+  };
+  let out = '';
+  let copied = 0;
+  for (let lt = html.indexOf('<'); lt >= 0 && lt < n; lt = html.indexOf('<', lt + 1)) {
+    // Deeper than any page nests a drawing: the rest stays as written.
+    if (open.length > 512) break;
+    if (html.startsWith('<!--', lt)) {
+      // A comment ends at `-->` or `--!>`; `<!-->` and `<!--->` end at once.
+      if (html.startsWith('>', lt + 4) || html.startsWith('->', lt + 4)) {
+        lt = html.indexOf('>', lt + 4);
+        continue;
+      }
+      let e = html.indexOf('--', lt + 4);
+      while (e >= 0 && html[e + 2] !== '>' && !html.startsWith('!>', e + 2)) e = html.indexOf('--', e + 1);
+      lt = e < 0 ? n : html.indexOf('>', e);
+      continue;
+    }
+    if (inSvg() && html.startsWith('<![CDATA[', lt)) {
+      const e = html.indexOf(']]>', lt + 9);
+      lt = e < 0 ? n : e + 2;
+      continue;
+    }
+    const at = lt;
+    const end = html[lt + 1] === '/';
+    const start = end ? lt + 2 : lt + 1;
+    // `<!…>`, `<?…>` and `</` with no name are comments to the next `>`.
+    if (html[lt + 1] === '!' || html[lt + 1] === '?' || (end && !isAsciiAlpha(html[start]))) {
+      const e = html.indexOf('>', lt + 1);
+      lt = e < 0 ? n : e;
+      continue;
+    }
+    if (!isAsciiAlpha(html[start])) continue;
+    let i = start;
+    while (i < n && !isHtmlSpace(html[i]) && html[i] !== '/' && html[i] !== '>') i++;
+    const nameEnd = i;
+    const name = html.slice(start, nameEnd).toLowerCase();
+    // The tag's attributes, read as the page reads them, up to its `>`.
+    for (;;) {
+      while (i < n && (isHtmlSpace(html[i]) || html[i] === '/')) i++;
+      if (i >= n || html[i] === '>') break;
+      i++;
+      while (i < n && !isHtmlSpace(html[i]) && html[i] !== '/' && html[i] !== '>' && html[i] !== '=') i++;
+      while (i < n && isHtmlSpace(html[i])) i++;
+      if (html[i] !== '=') continue;
+      i++;
+      while (i < n && isHtmlSpace(html[i])) i++;
+      if (html[i] === '"' || html[i] === "'") {
+        const q = html.indexOf(html[i]!, i + 1);
+        i = q < 0 ? n : q + 1;
+      } else while (i < n && !isHtmlSpace(html[i]) && html[i] !== '>') i++;
+    }
+    const gt = i;
+    const selfClosing = html[gt - 1] === '/' && gt - 1 >= nameEnd;
+    lt = gt;
+    if (!inSvg()) {
+      const point = open[open.length - 1];
+      if (!end && name === 'svg') {
+        if (!selfClosing) open.push({ name, as: name });
+      } else if (end && point && name === point.name) open.pop();
+      else if (!end && HTML_RAW_TEXT.has(name)) {
+        const close = lower.indexOf(`</${name}`, gt);
+        lt = close < 0 ? n : close;
+      } else if (!end && name === 'plaintext') break;
+      continue;
+    }
+    if (!end) {
+      const breakout =
+        SVG_BREAKOUT_TAGS.has(name) || (name === 'font' && /[\s/](?:color|face|size)(?=[\s/=>]|$)/i.test(html.slice(nameEnd, gt)));
+      if (!breakout) {
+        if (!selfClosing) open.push({ name, as: name });
+        continue;
+      }
+      const words = inText();
+      let empty = selfClosing || SVG_BREAKOUT_VOID.has(name);
+      if (!empty && !words && name !== 'img') {
+        let k = gt + 1;
+        while (k < n && isHtmlSpace(html[k])) k++;
+        empty = lower.startsWith(`</${name}`, k) && /^[\s/>]?$/.test(html[k + 2 + name.length] ?? '');
+      }
+      if (name === 'img' || (!words && !empty)) {
+        // Left as written, it ends the SVG here: what follows is HTML again.
+        while (inSvg()) open.pop();
+        continue;
+      }
+      const as = words ? 'tspan' : 'g';
+      const close = SVG_BREAKOUT_VOID.has(name) && !selfClosing;
+      out += html.slice(copied, start) + as + html.slice(nameEnd, gt) + (close ? ' /' : '');
+      copied = gt;
+      if (!selfClosing && !close) open.push({ name, as });
+      continue;
+    }
+    // An end tag closes the nearest part of its name, as written or as now written.
+    let k = open.length - 1;
+    while (k >= 0 && open[k]!.name !== name && open[k]!.as !== name) k--;
+    if (k < 0) {
+      // `</p>` or `</br>` with nothing to close would end the SVG too: an empty part instead.
+      if (name !== 'p' && name !== 'br') continue;
+      out += html.slice(copied, at) + `<${inText() ? 'tspan' : 'g'}/>`;
+      copied = Math.min(gt + 1, n);
+      continue;
+    }
+    const as = open[k]!.as;
+    if (as !== name) {
+      out += html.slice(copied, at) + `</${as}>`;
+      copied = Math.min(gt + 1, n);
+    }
+    open.length = open.map((o) => o.as).lastIndexOf(as);
+  }
+  return copied ? out + html.slice(copied) : html;
+}
+
 /**
  * A path in the project, relative to its root: `src/a.ts`. Not absolute
  * (`/x`, `C:/x`, `~/x`), no `.` or `..` part, no backslash (a UNC path or a
@@ -751,7 +972,7 @@ class Checker {
   }
 }
 
-function checkDrawn(c: Checker, value: unknown, field: string): ShapeDrawnView | undefined {
+function checkDrawn(c: Checker, value: unknown, field: string, withExamples = false): ShapeDrawnView | undefined {
   if (value === undefined || value === null) return undefined;
   if (!isRecord(value)) {
     c.fail(field, 'must be an object with html');
@@ -777,6 +998,11 @@ function checkDrawn(c: Checker, value: unknown, field: string): ShapeDrawnView |
       if (th !== undefined) tall = { html: th, ...(tc ? { css: tc } : {}) };
     }
   }
+  let examples: ShapeExample[] | undefined;
+  if (value.examples !== undefined && value.examples !== null) {
+    if (!withExamples) c.fail(`${field}.examples`, 'examples go on views.how (How it works), the drawing they are followed through');
+    else if (html !== undefined) examples = checkExamples(c, value.examples, `${field}.examples`, html, tall?.html);
+  }
   let more: ShapeDrawnView['more'];
   if (value.more !== undefined && value.more !== null) {
     if (!isRecord(value.more)) c.fail(`${field}.more`, 'must be an object with html');
@@ -794,8 +1020,178 @@ function checkDrawn(c: Checker, value: unknown, field: string): ShapeDrawnView |
     ...(css ? { css } : {}),
     ...(width !== undefined && height !== undefined ? { width, height } : {}),
     ...(tall ? { tall } : {}),
+    ...(examples?.length ? { examples } : {}),
     ...(more ? { more } : {}),
   };
+}
+
+/** The ids of a drawing's arrows: every `data-edge` value. */
+export function shapeHtmlEdges(html: string): Set<string> {
+  const out = new Set<string>();
+  for (const m of html.matchAll(/\sdata-edge\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+    const id = (m[1] ?? m[2] ?? m[3] ?? '').trim();
+    if (id) out.add(id);
+  }
+  return out;
+}
+
+const EXAMPLE_RESULTS: readonly ShapeExampleResult[] = ['pass', 'fail', 'not-reached'];
+
+/**
+ * How it works' examples. Each step lights a part (`data-mark`) or an arrow
+ * (`data-edge`) the drawing has, in the wide drawing and in the tall one when
+ * there is one (a phone follows the same path). A value handed on names an
+ * earlier step; a step's checks are in code order, with the one that decided
+ * it marked, and none after a failing check ran.
+ */
+function checkExamples(c: Checker, value: unknown, field: string, html: string, tallHtml: string | undefined): ShapeExample[] | undefined {
+  const list = c.list(value, field, SHAPE_LIMITS.examples);
+  if (!list) return undefined;
+  const drawings = [{ name: 'html', marks: new Set(shapeHtmlMarks(html).map((m) => m.id)), edges: shapeHtmlEdges(html) }];
+  if (tallHtml !== undefined) drawings.push({ name: 'tall.html', marks: new Set(shapeHtmlMarks(tallHtml).map((m) => m.id)), edges: shapeHtmlEdges(tallHtml) });
+  const view = field.replace(/\.examples$/, '');
+  const out: ShapeExample[] = [];
+  const names = new Set<string>();
+  list.forEach((ex, ei) => {
+    const ef = `${field}[${ei}]`;
+    if (!isRecord(ex)) return c.fail(ef, 'must be { name, title, steps }');
+    const name = c.text(ex.name, `${ef}.name`, 40);
+    if (name && names.has(name)) c.fail(`${ef}.name`, `"${name}" is used twice; name each example by where it ends`);
+    if (name) names.add(name);
+    const title = c.text(ex.title, `${ef}.title`, 140);
+    const lead = c.text(ex.lead, `${ef}.lead`, SHAPE_LIMITS.line, false);
+    const steps = c.list(ex.steps, `${ef}.steps`, SHAPE_LIMITS.exampleSteps);
+    if (!steps) {
+      if (ex.steps === undefined) c.fail(`${ef}.steps`, 'is required');
+      return;
+    }
+    if (!steps.length) c.fail(`${ef}.steps`, 'needs at least one step');
+    const outSteps: ShapeExampleStep[] = [];
+    steps.forEach((st, si) => {
+      const step = checkExampleStep(c, st, `${ef}.steps[${si}]`, si, drawings, view);
+      if (step) outSteps.push(step);
+    });
+    if (name && title && outSteps.length === steps.length && steps.length) out.push({ name, title, ...(lead ? { lead } : {}), steps: outSteps });
+  });
+  return out;
+}
+
+function checkExampleStep(
+  c: Checker,
+  st: unknown,
+  f: string,
+  index: number,
+  drawings: { name: string; marks: Set<string>; edges: Set<string> }[],
+  view: string,
+): ShapeExampleStep | undefined {
+  if (!isRecord(st)) {
+    c.fail(f, 'must be { part or arrow, tag, text, inputs, signature, checks, output, code }');
+    return undefined;
+  }
+  const before = c.errors.length;
+  const part = st.part === undefined || st.part === null ? undefined : c.id(st.part, `${f}.part`);
+  const arrow = st.arrow === undefined || st.arrow === null ? undefined : c.id(st.arrow, `${f}.arrow`);
+  if (st.part == null && st.arrow == null) c.fail(f, 'needs a part (a data-mark) or an arrow (a data-edge) to light');
+  for (const d of drawings) {
+    if (part && !d.marks.has(part)) c.fail(`${f}.part`, `"${part}" is not a data-mark in ${view}.${d.name}`);
+    if (arrow && !d.edges.has(arrow)) c.fail(`${f}.arrow`, `"${arrow}" is not a data-edge in ${view}.${d.name}; put data-edge="${arrow}" on the arrow`);
+  }
+  const tag = c.text(st.tag, `${f}.tag`, 60);
+  let tagAt: ShapeExampleStep['tagAt'];
+  if (st.tagAt !== undefined && st.tagAt !== null) {
+    if (st.tagAt !== 'top' && st.tagAt !== 'bottom') c.fail(`${f}.tagAt`, 'must be "top" or "bottom"');
+    else tagAt = st.tagAt;
+  }
+  const text = c.text(st.text, `${f}.text`, 200);
+  const detail = c.text(st.detail, `${f}.detail`, SHAPE_LIMITS.line, false);
+  const signature = c.text(st.signature, `${f}.signature`, SHAPE_LIMITS.exampleCode);
+  if (signature && !/^[\w$.]+\s*\(/.test(signature)) c.fail(`${f}.signature`, 'must start with the function\'s name and its parameters: name(a: A): R');
+
+  const inputs: ShapeExampleInput[] = [];
+  const ins = c.list(st.inputs, `${f}.inputs`, SHAPE_LIMITS.exampleRows);
+  (ins ?? []).forEach((v, i) => {
+    const vf = `${f}.inputs[${i}]`;
+    if (!isRecord(v)) return c.fail(vf, 'must be { name, value, type, reading, from }');
+    const name = c.text(v.name, `${vf}.name`, 80);
+    const val = c.text(v.value, `${vf}.value`, 200);
+    const type = c.text(v.type, `${vf}.type`, 120, false);
+    const reading = c.text(v.reading, `${vf}.reading`, 60, false);
+    const from = checkExampleSource(c, v.from, `${vf}.from`, index);
+    if (name && val !== undefined && from !== undefined) inputs.push({ name, value: val, ...(type ? { type } : {}), ...(reading ? { reading } : {}), from });
+  });
+
+  const checks: ShapeExampleCheck[] = [];
+  const cl = c.list(st.checks, `${f}.checks`, SHAPE_LIMITS.exampleRows);
+  let failed = false;
+  (cl ?? []).forEach((k, i) => {
+    const kf = `${f}.checks[${i}]`;
+    if (!isRecord(k)) return c.fail(kf, 'must be { code, constant, saw, result, decides, short }');
+    const code = c.text(k.code, `${kf}.code`, SHAPE_LIMITS.exampleCode);
+    const constant = c.text(k.constant, `${kf}.constant`, 60, false);
+    const result = EXAMPLE_RESULTS.includes(k.result as ShapeExampleResult) ? (k.result as ShapeExampleResult) : undefined;
+    if (!result) c.fail(`${kf}.result`, 'must be "pass", "fail" or "not-reached"');
+    const saw = c.text(k.saw, `${kf}.saw`, 120, result !== 'not-reached');
+    if (k.decides !== undefined && k.decides !== null && typeof k.decides !== 'boolean') c.fail(`${kf}.decides`, 'must be true or false');
+    const decides = k.decides === true;
+    if (decides && result === 'not-reached') c.fail(`${kf}.decides`, 'a check that was not reached cannot decide the step');
+    const short = c.text(k.short, `${kf}.short`, 80, false);
+    if (short && result !== 'fail') c.fail(`${kf}.short`, 'only a failing check has a shortfall');
+    if (failed && result && result !== 'not-reached') c.fail(`${kf}.result`, 'must be "not-reached": an earlier check failed, so the code never got here');
+    if (result === 'fail') failed = true;
+    if (code && result) checks.push({ code, ...(constant ? { constant } : {}), ...(saw ? { saw } : {}), result, ...(decides ? { decides } : {}), ...(short ? { short } : {}) });
+  });
+  const deciding = (cl ?? []).filter((k) => isRecord(k) && k.decides === true).length;
+  if (cl?.length && deciding !== 1) c.fail(`${f}.checks`, `mark exactly one check "decides": true, the one that settled the step (${deciding} are marked)`);
+
+  let output: ShapeExampleStep['output'] | undefined;
+  if (!isRecord(st.output)) c.fail(`${f}.output`, 'must be { name, value, type }');
+  else {
+    const name = c.text(st.output.name, `${f}.output.name`, 80);
+    const val = c.text(st.output.value, `${f}.output.value`, 200);
+    const type = c.text(st.output.type, `${f}.output.type`, 120);
+    const note = c.text(st.output.note, `${f}.output.note`, 120, false);
+    if (name && val !== undefined && type) output = { name, value: val, type, ...(note ? { note } : {}) };
+  }
+  let code: ShapeExampleStep['code'] | undefined;
+  if (!isRecord(st.code)) c.fail(`${f}.code`, "must be { path, line }: the function's line");
+  else {
+    const path = c.path(st.code.path, `${f}.code.path`);
+    const line = c.int(st.code.line, `${f}.code.line`, 1, 10_000_000);
+    if (path && line) code = { path, line };
+  }
+  if (c.errors.length > before || !tag || !text || !signature || !output || !code) return undefined;
+  return {
+    ...(part ? { part } : {}),
+    ...(arrow ? { arrow } : {}),
+    tag,
+    ...(tagAt ? { tagAt } : {}),
+    text,
+    ...(detail ? { detail } : {}),
+    inputs,
+    signature,
+    checks,
+    output,
+    code,
+  };
+}
+
+function checkExampleSource(c: Checker, from: unknown, f: string, index: number): ShapeExampleSource | undefined {
+  if (typeof from === 'string') return c.text(from, f, 80);
+  if (!isRecord(from)) {
+    c.fail(f, 'must be { path, line } (where it is read in the code), { step: n } (an earlier step\'s output) or a few words');
+    return undefined;
+  }
+  if (from.step !== undefined) {
+    if (!index) {
+      c.fail(`${f}.step`, 'the first step has no earlier step; name the code it is read from: { path, line }');
+      return undefined;
+    }
+    const step = c.int(from.step, `${f}.step`, 1, index);
+    return step === undefined ? undefined : { step };
+  }
+  const path = c.path(from.path, `${f}.path`);
+  const line = c.int(from.line, `${f}.line`, 1, 10_000_000);
+  return path && line ? { path, line } : undefined;
 }
 
 /** What to know's paragraphs: blank lines part them. */
@@ -976,7 +1372,7 @@ export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
       else if (!SHAPE_VIEWS.some((v) => v.id === key)) c.fail(`views.${key}`, 'is not a view (picture, how, know, code)');
     }
     const picture = checkDrawn(c, input.views.picture, 'views.picture');
-    const how = checkDrawn(c, input.views.how, 'views.how');
+    const how = checkDrawn(c, input.views.how, 'views.how', true);
     const know = checkKnow(c, input.views.know, 'views.know');
     const code = checkCode(c, input.views.code, 'views.code');
     if (picture) views.picture = picture;
