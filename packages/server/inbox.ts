@@ -3346,8 +3346,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const embeds = createInboxEmbeds({ readBody: (req) => readBody(req), json });
   // Attached HTML pages ("Pages only"): the documents the window frames for an attached page, under their own policy (inbox-pages.ts).
   const attachedPages = createInboxPages({ readBody: (req) => readBody(req), json });
-  // The sidebar's Feedback dialog: forwards what the person typed to the feedback Worker (inbox-feedback.ts).
-  const feedback = createInboxFeedback({ version, json, ...(options.feedbackUrl ? { url: () => options.feedbackUrl! } : {}) });
+  // The sidebar's Feedback dialog: forwards what the person typed to the feedback Worker (inbox-feedback.ts),
+  // with the names of the agents that wrote here (names only, read at each Send).
+  const feedback = createInboxFeedback({ version, json, store, ...(options.feedbackUrl ? { url: () => options.feedbackUrl! } : {}) });
   const stopPinEvents = store.onPinsChange(() => {
     for (const listener of pinListeners) listener();
   });
