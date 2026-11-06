@@ -129,6 +129,15 @@ const isOpen = (id: InboxListGroupId) => header(id).getAttribute('aria-expanded'
 const rowsIn = (id: InboxListGroupId) => group(id).querySelectorAll('[data-thread-id]').length;
 const count = (id: InboxListGroupId) => header(id).querySelector<HTMLElement>('.ib-n')!;
 const click = (el: HTMLElement) => act(() => el.click());
+/** What has focus, in words (a failed match on an element itself prints the whole DOM). */
+function focused(): string {
+  const el = document.activeElement;
+  if (!el || el === document.body) return 'the page';
+  const row = el.getAttribute('data-thread-id');
+  if (row) return `row ${row}`;
+  if (el.classList.contains('ib-band')) return `header ${el.closest('[data-section-id]')?.getAttribute('data-section-id')}`;
+  return el.tagName;
+}
 /** The header's icons but the closed group's warning triangle (a chevron would be one). */
 const otherIcons = (id: InboxListGroupId) => [...header(id).querySelectorAll('svg')].filter((svg) => !svg.closest('.ib-zband-tri'));
 
@@ -235,14 +244,14 @@ test('focus in a row of the group that closes moves to its header', () => {
   draw(sections());
   const focusable = group('waiting').querySelector<HTMLElement>('[data-thread-id]')!;
   act(() => focusable.focus());
-  expect(document.activeElement).toBe(focusable);
+  expect(focused()).toBe('row t_waiting');
   // A click that does not move focus itself (Safari does not focus a clicked button).
   click(header('waiting'));
   expect(isOpen('waiting')).toBe(false);
-  expect(document.activeElement).toBe(header('waiting'));
+  expect(focused()).toBe('header waiting');
   // Focus elsewhere stays where it is.
   const other = group('stopped').querySelector<HTMLElement>('[data-thread-id]')!;
   act(() => other.focus());
   click(header('new'));
-  expect(document.activeElement).toBe(other);
+  expect(focused()).toBe('row t_stopped');
 });
