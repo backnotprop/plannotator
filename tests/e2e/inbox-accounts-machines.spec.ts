@@ -29,6 +29,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from '@pla
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { INBOX_ACCOUNT_SWITCHING } from '../../packages/core/inbox-types';
 import { writeFakeCswap } from '../helpers/fake-cswap';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
@@ -217,8 +218,8 @@ test('Settings: one block per machine, this one first, each with its own list, a
   await expect(notesOf(page, 'Mini', 'team')).not.toContainText('most room');
   await expect(rowOf(page, 'Mini').locator('.ib-acct-r').filter({ has: page.locator('.ib-acct-name', { hasText: /^team$/ }) })).toHaveAttribute('title', /Most room/);
   await expect(rowOf(page, 'Mini').locator('[data-in-use] [data-l="hot"]')).toHaveCount(1);
-  // This machine's other rows are the switch; a linked machine's rows are not, in this build.
-  await expect(rowOf(page, 'Studio').locator('button[data-account]')).toHaveCount(1);
+  // This machine's other rows are the switch while switching is on; a linked machine's rows are not, in this build.
+  await expect(rowOf(page, 'Studio').locator('button[data-account]')).toHaveCount(INBOX_ACCOUNT_SWITCHING ? 1 : 0);
   await expect(rowOf(page, 'Mini').locator('button[data-account]')).toHaveCount(0);
 
   // The usage lines up down the page, every machine's rows in one column.

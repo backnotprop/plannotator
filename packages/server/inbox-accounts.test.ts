@@ -8,7 +8,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { InboxAccountsRead, InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
+import { INBOX_ACCOUNT_SWITCHING, type InboxAccountsRead, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createInboxAccounts, createInboxAccountsFor, INBOX_ACCOUNTS_TIMEOUT_MS, INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS } from "./inbox-accounts";
@@ -913,7 +913,24 @@ const SWAPPED = (() => {
 const inUse = (read: InboxAccountsRead) => listed(read).find((account) => account.active)?.number;
 const switchCalls = (bin: string) => fakeCswapCalls(bin).filter((call) => call.startsWith("switch"));
 
-describe.skipIf(process.platform === "win32")("switch", () => {
+/** The switch's own tests run while switching is on (INBOX_ACCOUNT_SWITCHING); while it is off the route is not there. */
+const withSwitching = process.platform === "win32" || !INBOX_ACCOUNT_SWITCHING;
+
+describe.skipIf(process.platform === "win32" || INBOX_ACCOUNT_SWITCHING)("switching off", () => {
+  test("the Inbox has no switch route: 404 not_found for any method, a refusal over the tailnet, and nothing runs", async () => {
+    const w = await world({ tailnet: true, cswapSwitch: { stdout: SWITCH_OK, listAfter: LIST_AFTER } });
+    for (const init of [{}, { method: "GET" }, { method: "PUT" }]) {
+      const refused = await w.switchTo(PERSONAL, init);
+      expect(refused.status).toBe(404);
+      expect(((await refused.json()) as { code: string }).code).toBe("not_found");
+    }
+    for (const login of [OWNER, GUEST]) expect((await w.switchTo(PERSONAL, { login })).ok).toBe(false);
+    expect(switchCalls(w.bin)).toEqual([]);
+    expect(inUse(await w.read())).toBe(2);
+  });
+});
+
+describe.skipIf(withSwitching)("switch", () => {
   test("runs `cswap switch <n> --json`, answers the number alone, and the next read runs again and shows it in use, inside the kept answer's time", async () => {
     const w = await world({ cswapSwitch: { stdout: SWITCH_OK, listAfter: LIST_AFTER }, cacheMs: 30_000 });
     expect(inUse(await w.read())).toBe(2);
@@ -1104,7 +1121,7 @@ describe.skipIf(process.platform === "win32")("switch", () => {
   });
 });
 
-describe.skipIf(process.platform === "win32")("who may switch", () => {
+describe.skipIf(withSwitching)("who may switch", () => {
   test("a tailnet guest gets 403 owner_only from the server and runs nothing; the owner switches from a phone's browser", async () => {
     const w = await world({ tailnet: true, cswapSwitch: { stdout: SWITCH_OK, listAfter: LIST_AFTER } });
     const refused = await w.switchTo(PERSONAL, { login: GUEST });
@@ -1126,6 +1143,10 @@ describe.skipIf(process.platform === "win32")("who may switch", () => {
     expect(fakeCswapCalls(w.bin)).toEqual([]);
   });
 
+});
+
+// Switching on or off: nothing but this machine's own window reaches a switch.
+describe.skipIf(process.platform === "win32")("nothing else reaches a switch", () => {
   test("a phone's token doesn't reach it", async () => {
     const w = await world({ phones: true, cswapSwitch: { stdout: SWITCH_OK } });
     const made = (await (await fetch(`${w.base}/api/inbox/pairing`, { method: "POST", body: "{}" })).json()) as { offer: { code: string } };
@@ -1153,7 +1174,7 @@ describe.skipIf(process.platform === "win32")("who may switch", () => {
   });
 });
 
-test.skipIf(process.platform === "win32")("a switch's credential fields never leave it: not in the answer, the logs or the data dir", async () => {
+test.skipIf(withSwitching)("a switch's credential fields never leave it: not in the answer, the logs or the data dir", async () => {
   const TOKEN = "sk-ant-oat01-never-shown-switch-9c1e";
   const ok = JSON.parse(SWITCH_OK) as Record<string, unknown>;
   const stdout = JSON.stringify({ ...ok, accessToken: TOKEN, to: { ...(ok.to as object), refreshToken: TOKEN }, warnings: [`token ${TOKEN}`] });

@@ -365,8 +365,9 @@ function isTarget(account: InboxAccount, to: AccountSwitch['to']): boolean {
 
 /**
  * One tool's list on one machine: the login in use first, in bold with a
- * filled circle, then the others, muted, each of which is the switch.
- * Pressing one opens the confirm under it.
+ * filled circle, then the others, muted. Where `canSwitch` allows (never while
+ * INBOX_ACCOUNT_SWITCHING is off), each of those is the switch, and pressing
+ * one opens the confirm under it; otherwise every row is plain.
  */
 function ToolList({
   tool,
@@ -586,7 +587,7 @@ function AccountRow({
   detail: string;
   /** The in-use row at 90% or more on a reading it can trust: its circle goes amber. */
   hot: boolean;
-  /** Pressing the row opens its confirm. A machine this build cannot switch has plain rows. */
+  /** Pressing the row opens its confirm. A machine this build cannot switch (any, while switching is off) has plain rows: no button, no "Switch". */
   switchable: boolean;
   /** A switch is going on this machine: no other starts there. */
   busy: boolean;

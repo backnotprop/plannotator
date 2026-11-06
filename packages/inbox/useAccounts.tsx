@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { InboxAccount, InboxAccountsFailure, InboxAccountsRead, InboxAccountSwitch, InboxAccountSwitchFailure, InboxAccountSwitchTarget, InboxMachineAccountsRead } from '@plannotator/core/inbox-types';
+import { INBOX_ACCOUNT_SWITCHING, type InboxAccount, type InboxAccountsFailure, type InboxAccountsRead, type InboxAccountSwitch, type InboxAccountSwitchFailure, type InboxAccountSwitchTarget, type InboxMachineAccountsRead } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi } from './api';
 
 /** The read's answer, or why there is none: a tailnet guest, or an Inbox that did not answer. */
@@ -57,7 +57,7 @@ export interface Accounts {
   read: (options?: { fresh?: boolean }) => Promise<void>;
   /** Each machine's last switch, until its next one, by `SELF` or machine id. None before any. */
   switches: Record<string, AccountSwitch>;
-  /** Whether the page offers a switch on this machine (`SELF` or an id): this build switches this computer only. */
+  /** Whether the page offers a switch on this machine (`SELF` or an id): none while INBOX_ACCOUNT_SWITCHING is off, else this computer only. */
   canSwitch: (machine: string) => boolean;
   /** Switch a machine's Claude Code to `to`, then read it again: the page shows what that read says, never a guess. */
   switchTo: (machine: string, to: InboxAccountSwitchTarget, label: string) => Promise<void>;
@@ -116,8 +116,8 @@ export function switchLine(answer: InboxAccountSwitch | { state: 'failed'; reaso
   return answer.reason;
 }
 
-/** A linked machine's switch is a later step: this build switches this computer only. */
-const canSwitch = (machine: string) => machine === SELF;
+/** No switch while INBOX_ACCOUNT_SWITCHING is off. A linked machine's switch is a later step: this build switches this computer only. */
+const canSwitch = (machine: string) => INBOX_ACCOUNT_SWITCHING && machine === SELF;
 
 /** `switches` with `machine`'s line answered by a read that shows a list. */
 function clearLine(switches: Record<string, AccountSwitch>, machine: string): Record<string, AccountSwitch> {
@@ -169,8 +169,8 @@ function useAccountsRead(): Accounts {
 
   const switchTo = useCallback(
     async (machine: string, to: InboxAccountSwitchTarget, label: string) => {
-      // A linked machine's switch is a later step: this build switches this computer only.
-      if (machine !== SELF) return;
+      // Off, or a linked machine (a later step): nothing to ask.
+      if (!canSwitch(machine)) return;
       const set = (change: AccountSwitch) => setSwitches((held) => ({ ...held, [machine]: change }));
       set({ machine, to, label, going: true, line: null });
       let answer: InboxAccountSwitch | { state: 'failed'; reason: 'owner_only' | 'unreachable' };

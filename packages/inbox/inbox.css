@@ -1644,7 +1644,8 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-card .ib-arcrow:last-child { border-bottom: 0; }
 /* Settings → Accounts (components/Accounts.tsx, mock .product/approved/accounts-page/, the by-machine list): one
    block per machine, one short list per tool, the login in use first. Every row's usage sits in fixed columns, so the
-   bars line up down the page. Every row that is not in use is the switch: hover tints it and shows a quiet "Switch". */
+   bars line up down the page. While switching is on (INBOX_ACCOUNT_SWITCHING), every row not in use is the switch, a
+   button: hover tints it and shows a quiet "Switch". Off, every row is a plain div, and none of the button rules match. */
 .ib-spg-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .ib-spg-h > h1 { font-size: var(--ib-fs-20, 20px); font-weight: 650; margin: 2px 0 4px; letter-spacing: -0.01em; }
 .pn-inbox .ib-spg-h > h1:focus, .pn-inbox .ib-spg-h > h1:focus-visible { outline: none; }

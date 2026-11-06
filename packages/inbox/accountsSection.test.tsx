@@ -19,8 +19,14 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fakeCswapCalls, removeFakeCswap, writeFakeCswap, type FakeCswapAnswer } from '../../tests/helpers/fake-cswap';
+import { INBOX_ACCOUNT_SWITCHING } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
+/** The switch's own tests run only while switching is on; the tests that it is off run only while it is off. */
+const withSwitching = !hasDom || !INBOX_ACCOUNT_SWITCHING;
+const withoutSwitching = !hasDom || INBOX_ACCOUNT_SWITCHING;
+/** What a row not in use is: the switch's button, or a plain row while switching is off. */
+const OTHER_ROW = INBOX_ACCOUNT_SWITCHING ? 'BUTTON' : 'DIV';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
 const { PHONE_QUERY } = (hasDom ? await import('./phone') : {}) as typeof import('./phone');
 
@@ -258,7 +264,7 @@ test.skipIf(!hasDom)('the sample: alias, else the start of the address, else "AP
   expect(el.querySelector('.ib-spg')?.textContent ?? el.textContent).not.toContain('@');
 });
 
-test.skipIf(!hasDom)('the login in use is first, a plain row with the filled circle; the others follow as buttons, most room first, no reading next, API keys last', async () => {
+test.skipIf(!hasDom)('the login in use is first, a plain row with the filled circle; the others follow, most room first, no reading next, API keys last', async () => {
   answer({
     stdout: listOf(
       { alias: 'key', usageStatus: 'api_key' },
@@ -275,7 +281,7 @@ test.skipIf(!hasDom)('the login in use is first, a plain row with the filled cir
   expect(inUse.hasAttribute('data-in-use')).toBe(true);
   expect(inUse.querySelector('.ib-acct-dot')?.hasAttribute('data-on')).toBe(true);
   for (const number of [1, 2, 3, 4]) {
-    expect(row(el, number).tagName).toBe('BUTTON');
+    expect(row(el, number).tagName).toBe(OTHER_ROW);
     expect(row(el, number).querySelector('.ib-acct-dot')?.hasAttribute('data-on')).toBe(false);
   }
   // Every row shows one figure and no limit's name; each of its limits is on hover.
@@ -389,7 +395,7 @@ test.skipIf(!hasDom)('"Most room", on hover, only once the login in use is at 90
   expect(withNote(await open('accounts'))).toEqual([]);
 });
 
-test.skipIf(!hasDom)('API-key rows: just the name, no bar; "API key" on hover; their confirm alone says billed per token', async () => {
+test.skipIf(!hasDom)('API-key rows: just the name, no bar; "API key" on hover', async () => {
   answer({
     stdout: listOf(
       { alias: 'work', active: true, usage: { fiveHour: limit(95) } },
@@ -399,13 +405,22 @@ test.skipIf(!hasDom)('API-key rows: just the name, no bar; "API key" on hover; t
   });
   const el = await open('accounts');
   expect(row(el, 2).querySelector('[data-account-use]')?.getAttribute('data-account-use')).toBe('api-key');
-  expect(faceOf(row(el, 2))).toBe('build keySwitch');
+  expect(faceOf(row(el, 2))).toBe(INBOX_ACCOUNT_SWITCHING ? 'build keySwitch' : 'build key');
   expect(row(el, 2).querySelector('i')).toBeNull();
   expect(detailOf(row(el, 2))).toEqual(['API key, billed per token']);
   expect(nameOf(row(el, 3))).toBe('API key');
   expect(row(el, 3).querySelector('[data-account-use]')?.textContent).toBe('');
   expect(notesOf(row(el, 2))).toBeNull();
-  // Money gets its word in the confirm: a phone has no hover.
+});
+
+test.skipIf(withSwitching)("an API key's confirm alone says billed per token: a phone has no hover", async () => {
+  answer({
+    stdout: listOf(
+      { alias: 'work', active: true, usage: { fiveHour: limit(95) } },
+      { alias: 'build key', email: 'api-key-2@token.local', usageStatus: 'api_key' },
+    ),
+  });
+  const el = await open('accounts');
   act(() => row(el, 2).click());
   expect(confirmOf(el)?.textContent).toContain('Billed per token');
   expect(confirmOf(el)?.querySelector('[data-accounts-billed]')).not.toBeNull();
@@ -455,7 +470,7 @@ test.skipIf(!hasDom)("an organization named after the address is no organization
   expect(el.textContent).not.toContain('@');
 });
 
-test.skipIf(!hasDom)('a non-current row opens the confirm under it; another row moves it there; Cancel closes it, switches nothing, and gives focus back', async () => {
+test.skipIf(withSwitching)('a non-current row opens the confirm under it; another row moves it there; Cancel closes it, switches nothing, and gives focus back', async () => {
   answer({ stdout: LIST });
   const el = await open('accounts');
   const personal = row(el, 1);
@@ -481,7 +496,7 @@ test.skipIf(!hasDom)('a non-current row opens the confirm under it; another row 
   expect(switchRuns()).toEqual([]);
 });
 
-test.skipIf(!hasDom)('on a desktop a non-current row carries a quiet "Switch" at its end; on a phone no row does, and the row itself is still the switch', async () => {
+test.skipIf(withSwitching)('on a desktop a non-current row carries a quiet "Switch" at its end; on a phone no row does, and the row itself is still the switch', async () => {
   answer({ stdout: LIST });
   const el = await open('accounts');
   const hoverText = (number: number) => row(el, number).querySelector('.ib-acct-sw')?.textContent;
@@ -998,7 +1013,8 @@ test.skipIf(!hasDom)('one block per machine, this one first, each with its own l
   expect(machineOf(el, 'ibx_mini')!.querySelector('[data-accounts-tool]')?.textContent).toContain('Claude Code');
 });
 
-test.skipIf(!hasDom)('a login another machine is using says "on <machine>" beside its name, and only there: its confirm does not repeat it', async () => {
+/** Studio (this machine) and three linked machines, where some logins are in use elsewhere. */
+function sharedLogins() {
   answer({
     stdout: listOf(
       { alias: 'work', email: 'w@fake.test', active: true, usage: { fiveHour: limit(92) } },
@@ -1013,8 +1029,17 @@ test.skipIf(!hasDom)('a login another machine is using says "on <machine>" besid
     { id: 'ibx_studio', name: 'Studio', answer: () => farList({ alias: 'personal', email: 'p@fake.test', organizationName: 'Other', active: true }) },
     { id: 'ibx_key', name: 'Key box', answer: () => farList({ alias: 'build key', usageStatus: 'api_key', active: true }) },
   ];
+}
+
+async function openShared() {
+  sharedLogins();
   const el = await open('accounts');
   await until(() => order(el, 'ibx_key').length === 1 && order(el, 'ibx_studio').length === 1 && order(el, 'ibx_mini').length === 2, 'every machine');
+  return el;
+}
+
+test.skipIf(!hasDom)('a login another machine is using says "on <machine>" beside its name, and only there', async () => {
+  const el = await openShared();
   expect(notesOf(row(el, 2))).toBe('on Mac mini');
   expect(notesOf(row(el, 3))).toBeNull();
   // An API key has no address: no other machine shares it.
@@ -1022,7 +1047,10 @@ test.skipIf(!hasDom)('a login another machine is using says "on <machine>" besid
   // The in-use row says it too, on the other side.
   expect(notesOf(row(el, 2, 'ibx_mini'))).toBe(`on ${machineName(el)}`);
   expect(notesOf(row(el, 1, 'ibx_mini'))).toBeNull();
+});
 
+test.skipIf(withSwitching)('the confirm for a login another machine is using does not repeat "on <machine>"', async () => {
+  const el = await openShared();
   act(() => row(el, 2).click());
   expect(confirmOf(el)!.textContent).toBe('Switch to personal?CancelSwitch');
 });
@@ -1059,7 +1087,7 @@ test.skipIf(!hasDom)("a linked machine's rows are not a switch in this build: no
   await until(() => order(el, 'ibx_mini').length === 2, "the other machine's rows");
   expect(shown(machineOf(el, 'ibx_mini')!.querySelector('button'))).toBeNull();
   expect(row(el, 2, 'ibx_mini').querySelector('.ib-acct-sw')?.textContent).toBe('');
-  expect(row(el, 2).tagName).toBe('BUTTON');
+  expect(row(el, 2).tagName).toBe(OTHER_ROW);
 });
 
 test.skipIf(!hasDom)('Refresh reads every machine again, and one slow machine holds up only its own block', async () => {
@@ -1078,6 +1106,104 @@ test.skipIf(!hasDom)('Refresh reads every machine again, and one slow machine ho
   expect(machineReads.filter((url) => url.includes('ibx_mini')).at(-1)).toContain('fresh=1');
   await act(async () => letGo(farList({ alias: 'late', active: true })));
   await until(() => order(el, 'ibx_slow')[0] === 'late', 'the slow machine');
+});
+
+/** Everything in the list a person could press or Tab to. Refresh sits by the page's title, outside it. */
+const pressable = (el: ParentNode) => [...(el.querySelector('.ib-accts')?.querySelectorAll('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"]), [role="button"], [aria-expanded]') ?? [])];
+
+test.skipIf(withoutSwitching)('switching is off: no row is a switch by mouse, keyboard or tap, no word or hover says switch, and nothing is asked or run', async () => {
+  // A switch would work here if anything reached it.
+  writeFakeCswap(bin, { stdout: LIST }, { stdout: SWITCH_OK, listAfter: LIST_AFTER });
+  linked = [{ id: 'ibx_mini', name: 'Mac mini', answer: () => farList({ alias: 'personal', email: 'a@fake.test', organizationName: 'Fake a@fake.test', active: true }, { alias: 'build' }) }];
+  for (const onPhone of [false, true]) {
+    phone = onPhone;
+    const el = await open('accounts');
+    await until(() => order(el, 'ibx_mini').length === 2, "the other machine's rows");
+    const rows = [...el.querySelectorAll('[data-account]')];
+    expect(rows).toHaveLength(5);
+    for (const rowEl of rows) {
+      expect(rowEl.tagName).toBe('DIV');
+      expect(['tabindex', 'role', 'aria-expanded', 'aria-disabled'].filter((name) => rowEl.hasAttribute(name))).toEqual([]);
+      // No dead hover word, and the hover's detail never offers one.
+      expect(rowEl.querySelector('.ib-acct-sw')?.textContent).toBe('');
+      expect(detailOf(rowEl).join(' ')).not.toMatch(/switch/i);
+    }
+    expect(pressable(el).map(shown)).toEqual([]);
+    expect(el.querySelector('.ib-accts')?.textContent).not.toMatch(/switch|tap|press|click/i);
+    // A click (a tap), Enter and Space on every row open nothing.
+    for (const rowEl of rows) {
+      act(() => (rowEl as HTMLElement).click());
+      for (const key of ['Enter', ' ']) act(() => void rowEl.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })));
+    }
+    expect(shown(confirmOf(el))).toBeNull();
+    if (!onPhone) {
+      act(() => root?.unmount());
+      host?.remove();
+    }
+  }
+  expect(switches).toEqual([]);
+  expect(switchRuns()).toEqual([]);
+});
+
+test.skipIf(withoutSwitching)('switching is off: the Inbox has no switch route, so nothing runs whatever is sent to it', async () => {
+  writeFakeCswap(bin, { stdout: LIST }, { stdout: SWITCH_OK, listAfter: LIST_AFTER });
+  const target = JSON.stringify({ number: 1, email: 'a@fake.test', organizationName: 'Fake a@fake.test', alias: 'personal' });
+  for (const method of ['POST', 'GET', 'PUT']) {
+    const refused = await call('/api/inbox/accounts/switch', method, method === 'GET' ? undefined : target);
+    expect(refused.status).toBe(404);
+    expect((JSON.parse(refused.text) as { code: string }).code).toBe('not_found');
+  }
+  // The read is still there, and the account in use is still the one it was.
+  const read = await call('/api/inbox/accounts?fresh=1');
+  expect(read.status).toBe(200);
+  expect((JSON.parse(read.text) as { accounts: { number: number; active: boolean }[] }).accounts.find((account) => account.active)?.number).toBe(2);
+  expect(switchRuns()).toEqual([]);
+});
+
+/** `count` logins with long, unbroken names: no organization, so a row's only note can be "on <machine>". */
+function worstLogins(count: number, start: number, inUse: number) {
+  return Array.from({ length: count }, (_, i) => {
+    const n = start + i;
+    const base = { email: `${'averyveryverylongaddressthatneverbreaks'.repeat(2)}${n}@fake.test`, organizationName: '', active: i === inUse };
+    if (n % 9 === 4) return { ...base, alias: `build-key-with-a-name-far-too-long-for-any-row-${n}`, email: `api-key-${n}@token.local`, usageStatus: 'api_key', usage: null };
+    return { ...base, alias: n % 3 === 0 ? null : `${'login-with-a-name-far-too-long-for-any-row-'.repeat(3)}${n}`, usage: { fiveHour: limit((n * 7) % 100), sevenDay: limit((n * 13) % 100), scoped: [{ ...limit((n * 11) % 100), name: 'Fable' }] } };
+  });
+}
+
+test.skipIf(!hasDom)('the worst case: long unbroken names, 30 logins a machine, three machines: every row is its name, one figure and at most "on <machine>"; the rest is on hover', async () => {
+  // This machine and Mac mini share logins 0-14; Build VM has its own. Mac mini's in use is this machine's login 3.
+  answer({ stdout: listOf(...worstLogins(30, 0, 1)) });
+  linked = [
+    { id: 'ibx_mini', name: 'Mac mini', answer: () => farList(...worstLogins(15, 0, 3).map((row) => ({ ...row, organizationName: null })), ...worstLogins(15, 100, -1)) },
+    { id: 'ibx_vm', name: 'Build VM', answer: () => farList(...worstLogins(30, 200, 0)) },
+  ];
+  const el = await open('accounts');
+  await until(() => order(el, 'ibx_mini').length === 30 && order(el, 'ibx_vm').length === 30, 'every machine');
+  expect(blocks(el)).toEqual([machineName(el)!, 'Mac mini', 'Build VM']);
+  for (const key of ['self', 'ibx_mini', 'ibx_vm']) {
+    const rows = [...machineOf(el, key)!.querySelectorAll('[data-account]')];
+    expect(rows).toHaveLength(30);
+    expect(rows[0]!.hasAttribute('data-in-use')).toBe(true);
+    for (const rowEl of rows) {
+      const figure = rowEl.querySelector('b[data-usage]')?.textContent ?? '';
+      const notes = notesOf(rowEl);
+      // Only this machine's rows not in use carry the hover's "Switch", and only while switching is on.
+      const hover = INBOX_ACCOUNT_SWITCHING && key === 'self' && !rowEl.hasAttribute('data-in-use') ? 'Switch' : '';
+      // The face is the name, its note and its figure: nothing else.
+      expect(faceOf(rowEl)).toBe(`${nameOf(rowEl)}${notes ?? ''}${figure}${hover}`);
+      expect(notes === null || notes.startsWith('on ')).toBe(true);
+      expect(bars(rowEl).length).toBeLessThanOrEqual(1);
+      // The name is whole in the page (the browser shortens it): no letters dropped.
+      expect(nameOf(rowEl)!.length).toBeGreaterThan(20);
+      if (figure) expect(detailOf(rowEl)[0]).toMatch(/^5h \d+% · Fable \d+% · week \d+%$/);
+      else expect(detailOf(rowEl)).toEqual(['API key, billed per token']);
+    }
+  }
+  // Shared logins say where else they are in use; Build VM's own logins never do.
+  expect(notesOf(row(el, 4))).toBe('on Mac mini');
+  expect(notesOf(row(el, 2, 'ibx_mini'))).toBe(`on ${machineName(el)}`);
+  expect([...machineOf(el, 'ibx_vm')!.querySelectorAll('[data-account-notes]')].map((note) => note.textContent)).toEqual([]);
+  expect(el.querySelector('.ib-accts')?.textContent).not.toContain('@');
 });
 
 /** Switch: every non-current row, its confirm under it, and what the page says after. */
@@ -1108,7 +1234,7 @@ async function switchTo(el: ParentNode, number: number) {
   await act(async () => (confirmOf(el)!.querySelector('[data-accounts-switch-go]') as HTMLButtonElement).click());
 }
 
-test.skipIf(!hasDom)('Switch says Switching… on its row and holds every row until the read after it, which puts the new login first', async () => {
+test.skipIf(withSwitching)('Switch says Switching… on its row and holds every row until the read after it, which puts the new login first', async () => {
   writeFakeCswap(bin, { stdout: LIST }, { stdout: SWITCH_OK, listAfter: LIST_AFTER, delay: 0.4 });
   const el = await open('accounts');
   expect(inUseName(el)).toBe('b');
@@ -1132,7 +1258,7 @@ test.skipIf(!hasDom)('Switch says Switching… on its row and holds every row un
   expect((row(el, 2) as HTMLButtonElement).disabled).toBe(false);
 });
 
-test.skipIf(!hasDom)("a failed switch says so under the row it was for, in the page's words, never cswap's; Try again asks again", async () => {
+test.skipIf(withSwitching)("a failed switch says so under the row it was for, in the page's words, never cswap's; Try again asks again", async () => {
   writeFakeCswap(bin, { stdout: LIST }, { stdout: SWITCH_ERROR, stderr: 'stderr-words-of-cswap', exit: 1 });
   const el = await open('accounts');
   await switchTo(el, 1);
@@ -1157,7 +1283,7 @@ test.skipIf(!hasDom)("a failed switch says so under the row it was for, in the p
   expect(lineText(el)).toBeNull();
 });
 
-test.skipIf(!hasDom)('a switch that outlasts the wait: the read after it has the last word', async () => {
+test.skipIf(withSwitching)('a switch that outlasts the wait: the read after it has the last word', async () => {
   answer({ stdout: LIST });
   const el = await open('accounts');
 
@@ -1186,7 +1312,7 @@ test.skipIf(!hasDom)('a switch that outlasts the wait: the read after it has the
   expect(inUseName(el)).toBe('personal');
 });
 
-test.skipIf(!hasDom)('a switch that worked, with a read after it that failed, says it switched: never a failure, never a guess in the list', async () => {
+test.skipIf(withSwitching)('a switch that worked, with a read after it that failed, says it switched: never a failure, never a guess in the list', async () => {
   answer({ stdout: LIST });
   const el = await open('accounts');
   switchRoute = async () => {
@@ -1202,7 +1328,7 @@ test.skipIf(!hasDom)('a switch that worked, with a read after it that failed, sa
   expect(inUseName(el)).toBe('b');
 });
 
-test.skipIf(!hasDom)('a list renumbered since the page read it switches nothing and says to pick again, above the list', async () => {
+test.skipIf(withSwitching)('a list renumbered since the page read it switches nothing and says to pick again, above the list', async () => {
   answer({ stdout: LIST });
   const el = await open('accounts');
   // In a terminal, meanwhile: `cswap swap 1 3`.
@@ -1217,7 +1343,7 @@ test.skipIf(!hasDom)('a list renumbered since the page read it switches nothing 
   expect(switchRuns()).toEqual([]);
 });
 
-test.skipIf(!hasDom)('a switch the server refuses says Owner only; another login under the same number says so', async () => {
+test.skipIf(withSwitching)('a switch the server refuses says Owner only; another login under the same number says so', async () => {
   answer({ stdout: LIST });
   const el = await open('accounts');
   switchRoute = async () => json({ error: 'refused', code: 'owner_only' }, 403);
@@ -1231,7 +1357,7 @@ test.skipIf(!hasDom)('a switch the server refuses says Owner only; another login
   expect(switchNote(el)!.querySelector('span')?.textContent).toBe("Couldn't switch to API key. The accounts changed during the switch. The list shows the one in use.");
 });
 
-test.skipIf(!hasDom)('the peek stays read-only: no switch in it, before or after a switch', async () => {
+test.skipIf(withSwitching)('the peek stays read-only: no switch in it, before or after a switch', async () => {
   writeFakeCswap(bin, { stdout: LIST }, { stdout: SWITCH_OK, listAfter: LIST_AFTER });
   const el = await open('accounts');
   await switchTo(el, 1);
@@ -1246,7 +1372,7 @@ test.skipIf(!hasDom)('the peek stays read-only: no switch in it, before or after
   expect(peek()!.textContent).toContain('personal');
 });
 
-test.skipIf(!hasDom)("a later read answers the switch's line: Refresh clears \"Still switching\" once it shows the account in use, and a \"Couldn't switch\" too", async () => {
+test.skipIf(withSwitching)("a later read answers the switch's line: Refresh clears \"Still switching\" once it shows the account in use, and a \"Couldn't switch\" too", async () => {
   answer({ stdout: LIST });
   const el = await open('accounts');
   switchRoute = async () => json({ state: 'failed', reason: 'timed_out' });
@@ -1268,7 +1394,7 @@ test.skipIf(!hasDom)("a later read answers the switch's line: Refresh clears \"S
   expect(inUseName(el)).toBe('personal');
 });
 
-test.skipIf(!hasDom)('an open confirm holds its login: a read after `cswap swap` in a terminal keeps it on that login under its new number, and a login gone closes it', async () => {
+test.skipIf(withSwitching)('an open confirm holds its login: a read after `cswap swap` in a terminal keeps it on that login under its new number, and a login gone closes it', async () => {
   answer({ stdout: listOf({ alias: 'work', active: true }, { alias: 'personal' }, { alias: 'side' }) });
   const el = await open('accounts');
   act(() => row(el, 2).click());
@@ -1288,7 +1414,7 @@ test.skipIf(!hasDom)('an open confirm holds its login: a read after `cswap swap`
   expect(switches).toEqual([]);
 });
 
-test.skipIf(!hasDom)('with no account in use and nothing shared, the confirm is its question alone: no empty line', async () => {
+test.skipIf(withSwitching)('with no account in use and nothing shared, the confirm is its question alone: no empty line', async () => {
   answer({ stdout: listOf({ alias: 'work' }, { alias: 'personal' }) });
   const el = await open('accounts');
   act(() => row(el, 1).click());

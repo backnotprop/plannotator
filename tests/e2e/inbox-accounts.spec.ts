@@ -18,6 +18,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from '@pla
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { INBOX_ACCOUNT_SWITCHING } from '../../packages/core/inbox-types';
 import { fakeCswapCalls, removeFakeCswap, writeFakeCswap } from '../helpers/fake-cswap';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
@@ -191,8 +192,19 @@ async function expectColumns(page: Page) {
   expect(columns.figures).toHaveLength(1);
 }
 
-/** Presses a row, proves its confirm opens under it and fits, takes its picture, and cancels. */
+/**
+ * Presses a row, proves its confirm opens under it and fits, takes its picture, and cancels.
+ * While switching is off (INBOX_ACCOUNT_SWITCHING), proves the row is plain and pressing it opens nothing.
+ */
 async function shotConfirm(page: Page, account: number, name: string) {
+  if (!INBOX_ACCOUNT_SWITCHING) {
+    const plain = page.locator(`[data-machine-key="self"] [data-account="${account}"]`);
+    await expect(plain).toHaveJSProperty('tagName', 'DIV');
+    await plain.click();
+    await expect(page.locator('[data-accounts-confirm]')).toHaveCount(0);
+    await expect(page.locator('.ib-accts button')).toHaveCount(0);
+    return;
+  }
   const row = page.locator(`[data-machine-key="self"] button[data-account="${account}"]`);
   await row.click();
   const confirm = page.locator('[data-accounts-confirm]');

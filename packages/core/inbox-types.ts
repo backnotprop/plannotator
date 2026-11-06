@@ -2188,6 +2188,15 @@ export type InboxAccountsRead =
 export type InboxMachineAccountsRead = InboxAccountsRead | { state: "offline" } | { state: "needs_update" } | { state: "unreachable" };
 
 /**
+ * Whether Settings → Accounts switches logins. Off until switching is tried
+ * with the owner on two real logins (approval "accounts-page", 2026-11-06):
+ * while off, no row is a switch and the Inbox has no
+ * `POST /api/inbox/accounts/switch` (404 `not_found`, nothing runs). The page
+ * and the server both read this one constant; it is no setting.
+ */
+export const INBOX_ACCOUNT_SWITCHING: boolean = false;
+
+/**
  * `POST /api/inbox/accounts/switch`: the account a person picked, as the window
  * showed it. `number` is `cswap`'s on this machine; the address, organization
  * and alias are only matched against a new read before the switch, so a list

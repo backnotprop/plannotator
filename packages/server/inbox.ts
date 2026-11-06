@@ -180,6 +180,7 @@ import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
+import { INBOX_ACCOUNT_SWITCHING } from "@plannotator/core/inbox-types";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { inboxBodyForAgent, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
@@ -4245,7 +4246,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Switch this computer's Claude account (step 3): it writes the login Claude Code uses, so the same two
       // checks as the read, on the server and not only in the window. No door route and no forward reaches it:
       // a linked machine's switch is a later step. The answer has no address: a door would keep it on disk.
-      if (path === "/api/inbox/accounts/switch") {
+      // Not there at all while INBOX_ACCOUNT_SWITCHING is off: the path falls through to the 404 below.
+      if (INBOX_ACCOUNT_SWITCHING && path === "/api/inbox/accounts/switch") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
