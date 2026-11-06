@@ -133,6 +133,7 @@ test.skipIf(!RUNS)(
       ["-c", process.platform === "darwin" ? `sleep 300 | /usr/bin/script -q /dev/null ${quoted}` : `sleep 300 | script -qfec ${`'${quoted.replace(/'/g, `'\\''`)}'`} /dev/null`],
       { env, cwd: project, detached: true, stdio: "ignore" },
     );
+    // inbox-guard: own child (the pty process group this test spawned for the Cline TUI, never an Inbox)
     cleanups.push(() => void process.kill(-pty.pid!, "SIGTERM"));
 
     const base = `http://127.0.0.1:${inbox.port}`;
