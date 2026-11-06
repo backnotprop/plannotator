@@ -81,6 +81,8 @@ import {
   type InboxTextSize,
   inboxRowsList,
   inboxRowsRead,
+  inboxRowsSaved,
+  INBOX_ROWS_DEFAULTS_VERSION,
   type InboxRowsOption,
   type InboxHealth,
   type InboxLine,
@@ -1281,6 +1283,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     machine_links: 1,
     // Additive (remote launch): a linked machine may start agents here (launch is on; the door takes its Stop, Try again, Trust folder and Delete).
     ...(launch.enabled() ? { launch_from_machines: 1 } : {}),
+    // Additive: the page honours --pn-window-controls-width and -height on :root and names their line in
+    // --pn-window-controls-center-y (inbox.css, for a desktop host).
+    window_controls: 2,
   });
 
   /** Which list rows each window already holds, so a list read sends only the changed ones (#2593). */
@@ -1959,12 +1964,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * Null until a window first saves it, so the first window adopts its browser's old cookies. Lenient on read (a name
    * this build does not know is dropped, so a downgrade or a typo never reads as "never saved"), strict on write (a
    * `422`). `inboxRowsRev` counts the saves: every answer and `event: rows` carries it, so a window takes a look only
-   * when it is newer than the last it took, whatever order the answers and events arrive in.
+   * when it is newer than the last it took, whatever order the answers and events arrive in. `inboxRowsDefaults`
+   * says which defaults it was saved under: an old look that is the old defaults (every option off) is read as
+   * today's (core `inboxRowsSaved`).
    */
   const rowsState = (): { rows: InboxRowsOption[] | null; rev: number } => {
     const config = loadConfig();
     const rev = config.inboxRowsRev;
-    return { rows: inboxRowsRead(config.inboxRows), rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0 };
+    return { rows: inboxRowsSaved(inboxRowsRead(config.inboxRows), config.inboxRowsDefaults), rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0 };
   };
 
   const saveRows = (input: unknown, validateOnly = false): { rows: InboxRowsOption[]; rev: number } => {
@@ -1972,7 +1979,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (!rows) throw new InboxError("validation_error", `rows: a list of row options (${INBOX_ROWS_OPTIONS.join(", ")}).`, { field: "rows" });
     const rev = rowsState().rev + 1;
     if (validateOnly) return { rows, rev };
-    saveConfig({ inboxRows: rows, inboxRowsRev: rev });
+    saveConfig({ inboxRows: rows, inboxRowsRev: rev, inboxRowsDefaults: INBOX_ROWS_DEFAULTS_VERSION });
     const saved = rowsState();
     if (saved.rev !== rev || saved.rows?.join() !== rows.join()) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     for (const listener of rowsListeners) listener(rows, rev);

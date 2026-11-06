@@ -138,7 +138,7 @@
 - The window (`packages/inbox/steps/`; the mock's A1 "Linear" look, its CSS in `inbox.css` "Thread steps"):
   - The thread foot's button, after the open questions and 👍 Looks good: the plan's pie and "3/6" (`StepsButton.tsx`), named "Claude Code's checklist: 3 of 6 steps done". It shows the newest list; none while the switch is off or every list is cleared. No keyboard shortcut.
   - The crowded phone foot (amendment `.product/approved/inbox-thread-steps-amendments-2026-11-03-3/approval.md`, not in this repo, the owner's "Yes, as shown"):
-    - Read only, the button gives way first. The whole row's `steps` step (`FOOT_ROW_STEPS` in `footFit.ts`, before `oq`) and the buttons' own fit (`footFitCandidatesWithSteps`, `data-steps-fit`) drop its chevron before the open-items label shortens. Alone (no open-items button), it fits itself the same way. At a phone's `icon` step: the pie and the count only.
+    - Read only, the button gives way first. The whole row's `steps` step (`FOOT_ROW_STEPS` in `footFit.ts`, before `oq`) and the buttons' own fit (`footFitCandidatesWithSteps`, `data-steps-fit`) drop its chevron before the open-items label shortens. Alone (no open-items button), it fits itself the same way.
     - 👍 Looks good sits before it: the actions first, the status after.
     - Another session's list: a quiet "+1" (`.ib-st-more`); the name ends ", and 1 more checklist".
     - On a phone (the sheet, and the opened Board card) a step's words wrap to two lines, then "…".

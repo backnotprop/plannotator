@@ -7,11 +7,13 @@
  *
  * Proved in a real browser against the compiled binary, with the agent writing
  * through `plannotator inbox mcp` (scripts/inbox-sim.ts):
- *  - the foot says "10 questions stay open · Skip them" by default; a Send
- *    with the one pick is ONE reply, the other 10 stay open, and the agent's
- *    read_thread gets "You have 10 other questions open in this thread…";
- *  - "Skip them" turns it into "10 questions will be skipped · Keep open";
- *    that Send is still ONE reply, skipping exactly those 10;
+ *  - the open questions list's first row (approval "reply-bar-pairs") says
+ *    "10 stay open when you send · Skip them" by default; a Send with the one
+ *    pick is ONE reply, the other 10 stay open, and the agent's read_thread
+ *    gets "You have 10 other questions open in this thread…";
+ *  - "Skip them" turns it into "10 skipped when you send · Keep open" and the
+ *    button into "10 to skip"; that Send is still ONE reply, skipping exactly
+ *    those 10;
  *  - the same on a phone (390 by 844, touch).
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
@@ -81,7 +83,7 @@ async function pickLast(page: Page, last: string): Promise<void> {
   const card = page.locator(`[data-message-id="${last}"] [data-question-key]`).first();
   await card.scrollIntoViewIfNeeded();
   await card.getByText('Yes', { exact: true }).click();
-  await expect(page.locator('.ib-pfoot').getByRole('button', { name: 'Send' })).toBeVisible();
+  await expect(page.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true })).toBeVisible();
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -118,19 +120,26 @@ test("desktop: answer 1 of 11 and Send: one reply, the other 10 stay open, and t
     await page.goto(`${world.url}#thread=${threadId}`);
     await expect(page.locator('section.ib-pane').getByRole('heading', { name: 'Triage: the backlog is sorted' })).toBeVisible();
     await pickLast(page, last);
-    const chip = page.locator('.ib-pfoot [data-skip-chip]');
-    await expect(chip).toHaveAttribute('data-skip-chip', 'keep');
-    await expect(chip).toContainText('10 questions stay open');
-    await expect(chip.getByRole('button', { name: 'Skip them' })).toBeVisible();
+    // The skip for this Send is the open questions list's first row (approval "reply-bar-pairs").
+    const oq = page.locator('.ib-pfoot [data-open-questions]');
+    await expect(oq).toHaveAccessibleName('10 open questions');
+    await oq.click();
+    const row = page.locator('[data-open-questions-list] [data-open-questions-skip-row]');
+    await expect(row).toHaveAttribute('data-open-questions-skip-row', 'keep');
+    await expect(row).toContainText('10 stay open when you send');
+    await expect(row.getByRole('menuitem', { name: /^Skip them/ })).toBeVisible();
     await footShots(page, 'desktop-1-default');
-    await chip.getByRole('button', { name: 'Skip them' }).click();
-    await expect(chip).toHaveAttribute('data-skip-chip', 'skip');
-    await expect(chip).toContainText('10 questions will be skipped');
+    await row.getByRole('menuitem', { name: /^Skip them/ }).click();
+    await expect(row).toHaveAttribute('data-open-questions-skip-row', 'skip');
+    await expect(row).toContainText('10 skipped when you send');
+    await expect(oq).toHaveText(/10 to skip/);
     await footShots(page, 'desktop-2-skip-them');
     // Back to the default, and Send: nothing is skipped.
-    await chip.getByRole('button', { name: 'Keep open' }).click();
-    await expect(chip).toHaveAttribute('data-skip-chip', 'keep');
-    await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
+    await row.getByRole('menuitem', { name: /^Keep open/ }).click();
+    await expect(row).toHaveAttribute('data-open-questions-skip-row', 'keep');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-open-questions-list]')).toHaveCount(0);
+    await page.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
     await expect.poll(async () => (await readThread(threadId)).thread.messages.filter((m) => m.author.kind === 'person').length).toBe(1);
     await page.waitForTimeout(500);
     const model = await readThread(threadId);
@@ -160,14 +169,20 @@ test('a phone: the foot by default and after Skip them; that Send is one reply s
     await page.goto(`${world.url}#thread=${threadId}`);
     await expect(page.locator('section.ib-pane').getByRole('heading', { name: 'Triage on a phone' })).toBeVisible();
     await pickLast(page, last);
-    const chip = page.locator('.ib-pfoot [data-skip-chip]');
-    await expect(chip).toContainText('10 questions stay open');
-    await chip.scrollIntoViewIfNeeded();
+    // The foot counts the 10 unanswered once; the sheet's first row holds this Send's skip (approval "reply-bar-pairs").
+    const oq = page.locator('.ib-pfoot [data-open-questions]');
+    await expect(oq).toHaveAccessibleName('10 open questions');
     await footShots(page, 'phone-1-default');
-    await chip.getByRole('button', { name: 'Skip them' }).click();
-    await expect(chip).toContainText('10 questions will be skipped');
+    await oq.click();
+    const row = page.locator('[data-open-questions-list] [data-open-questions-skip-row]');
+    await expect(row).toContainText('10 stay open when you send');
+    await row.getByRole('menuitem', { name: /^Skip them/ }).click();
+    await expect(row).toContainText('10 skipped when you send');
+    await page.locator('[data-open-questions-close]').click();
+    await expect(page.locator('[data-open-questions-list]')).toHaveCount(0);
+    await expect(oq).toHaveAccessibleName('10 questions skipped when you send');
     await footShots(page, 'phone-2-skip-them');
-    await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
+    await page.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
     await expect.poll(async () => (await readThread(threadId)).thread.messages.filter((m) => m.author.kind === 'person').length).toBe(1);
     await page.waitForTimeout(500);
     const model = await readThread(threadId);

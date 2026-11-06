@@ -60,6 +60,7 @@ import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { INBOX_BRIDGE_POLL_PATH } from '../../packages/shared/inbox/connection';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { expectNoBlankFiles } from './on-screen-files';
 import { markTourDecided } from '../helpers/tour-decided';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { startFakeAvatars, type FakeAvatars } from '../helpers/fake-avatars';
@@ -915,7 +916,7 @@ test('a PR with no review thread: Review with an agent, the picker (Ask for, the
   const threadId = String(await line.getAttribute('data-pulls-thread'));
   const opening = await world.claude.nextReply(threadId);
   const words = String(opening.body);
-  expect(words.startsWith("You're being asked to help me review and understand a pull request. Don't change any code unless I explicitly tell you to.\n")).toBe(true);
+  expect(words.startsWith("You're being asked to help me review and understand a pull request.\n")).toBe(true);
   expect(words).toContain('\n- Title: Fall back to English for missing strings\n- Number: #869\n');
   expect(words).toContain('\n- Link: https://github.com/northwind/web-app/pull/869\n');
   expect(words).toContain('\n1. Send me a guided review of its diff against main, using /review-curate (its instructions are at the end of this message).\n');
@@ -1253,6 +1254,27 @@ test("Post to GitHub (the owner's answer C): the choice beside the decision, a t
     rmSync(join(world.forge, 'gh-post-fail'), { force: true });
   }
   expect(world.errors).toEqual([]);
+});
+
+test('a PR of 21 small files on a tall window: every file on screen draws, all the way down', async ({ browser }) => {
+  const patch = Array.from({ length: 21 }, (_, i) => {
+    const path = `src/small/f${String(i).padStart(2, '0')}.ts`;
+    return `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1,2 +1,2 @@\n export const a = 1;\n-export const b = ${i};\n+export const b = ${i + 1};\n`;
+  }).join('');
+  const context = await browser.newContext({ viewport: { width: 1920, height: 1200 }, colorScheme: 'light' });
+  const page = await context.newPage();
+  await page.route('**/api/inbox/pulls/diff*', async (route) => {
+    const real = await route.fetch();
+    await route.fulfill({ response: real, json: { ...(await real.json()), patch } });
+  });
+  try {
+    await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(TEAMMATE)}&layer=${encodeURIComponent(TEAMMATE)}&scope=layer`);
+    const body = page.locator('[data-pull-review] .ib-gbody');
+    await expect(body.locator('[data-guide-file-shell]')).toHaveCount(21, { timeout: 30_000 });
+    await expectNoBlankFiles(body);
+  } finally {
+    await context.close();
+  }
 });
 
 test('the expand arrows on the PR page: read from the forge, opening a gap grows the box; a comment on an opened line posts in the main comment', async () => {
