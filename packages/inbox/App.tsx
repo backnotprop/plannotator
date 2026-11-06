@@ -150,7 +150,7 @@ import { backBy, backTo, pushScreen, settleLanding, whileWritingRoute, withoutCl
 import { parseFileView, sameScreenAnyView } from './fileView';
 import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, withFullMark, type FrameMove, type FullMark } from './fullScreenOrigin';
 import { adoptSavedTheme, inboxServerSync } from './theme';
-import { adoptSavedDiffStyle } from './diffStyle';
+import { adoptSavedDiffOptions } from './diffOptions';
 import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
 import { parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 import { ComposeDialog, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
@@ -1514,7 +1514,7 @@ function Inbox() {
       adoptSavedTheme(next.theme);
       adoptSavedTextSize(next.text_size);
       adoptSavedRows(next.rows, next.rows_rev, mark);
-      adoptSavedDiffStyle(next.diff_style);
+      adoptSavedDiffOptions(next.diff_options, next.diff_style);
       // The name on the person's comments on the PR page and the review, as plan and code review read it; nothing posted
       // carries it. Only with Code review on: off, every comment reads as on main.
       if (next.display_name && next.code_review?.on) configStore.init({ displayName: next.display_name });
