@@ -17,8 +17,8 @@
  * Pure; reads only the per-file patch text.
  */
 
-import type { DiffFile } from '../types';
-import type { CodeAnnotation } from '@plannotator/ui/types';
+import type { DiffFile } from '@plannotator/core/diff-files';
+import type { CodeAnnotation } from '../types';
 
 /** Upper bound on recorded anchor text; larger selections record nothing. */
 export const MAX_ANCHOR_TEXT_CHARS = 20_000;
