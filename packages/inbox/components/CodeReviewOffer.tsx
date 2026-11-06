@@ -6,7 +6,7 @@ import { Modal } from './Updates';
 /**
  * Code review's one-time offer (approval "code-review-offer-card", 2026-11-06; the owner picked "Card"): a dialog over
  * the list with the brand kit's static storm on top, the title, what code review brings, and two buttons. Its words are
- * the owner's (the approval's 15:25Z addendum, take 1; the risk line joins with #2664).
+ * the owner's (the approval's 15:25Z addendum, take 1, with the risk and System parts by the owner's call).
  * "Turn on code review" turns Code review on, as Settings → Capabilities does; "Not now", Escape and a click outside
  * leave it off. Every way out is final (the claim already spent it); Settings is the way on later. No keyboard
  * shortcut. Its slot in the line: `CODE_REVIEW_OFFER` (packages/shared/inbox/reveals.ts); its moment:
@@ -20,7 +20,10 @@ export function CodeReviewOffer({ phone, onClose, onTurnOn }: { phone: boolean; 
       <div className="ib-cro-body">
         <h2 id="ib-cro-title">A new way to review</h2>
         <ul className="ib-cro-feats" id="ib-cro-feats">
-          {/* The risk line goes first, when #2664 (risk filters) merges: "Filter PRs by your own risk rules". */}
+          <li>
+            <RiskIcon />
+            <span>Filter PRs by your own risk rules</span>
+          </li>
           <li>
             <MapIcon />
             <span>A review curator walks you through each change</span>
@@ -91,6 +94,15 @@ function CodeReviewOfferArt({ phone }: { phone: boolean }) {
     <div className="ib-cro-art" aria-hidden="true">
       <canvas ref={canvas} />
     </div>
+  );
+}
+
+/** A flag on a pole: risk rules. */
+function RiskIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5 21V4m0 0.5c3.5-1.8 6 1.8 9.5 0s4.5-0.6 4.5-0.6v9.6s-1-1.2-4.5 0.6-6-1.8-9.5 0" />
+    </svg>
   );
 }
 
