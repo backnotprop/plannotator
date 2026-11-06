@@ -735,8 +735,14 @@ async function swapIn(paths: ReturnType<typeof systemPaths>, move: (from: string
   } catch (e) {
     // the second rename failed (on Windows a file held open in redraw/: EBUSY, EPERM): put the drawing back
     // before the failure sets redraw/ aside, or no drawing would be left
-    await move(paths.previous, paths.drawing);
-    throw e;
+    const first = e as Error;
+    try {
+      await move(paths.previous, paths.drawing);
+    } catch (back) {
+      // both failed: the first failure stays the one reported, with the second beside it
+      throw new AggregateError([first, back], `${first.message}; moving the drawing back from previous/ also failed: ${(back as Error).message}`);
+    }
+    throw first;
   }
 }
 

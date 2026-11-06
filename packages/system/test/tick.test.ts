@@ -559,6 +559,21 @@ echo changed > src/main.ts`);
     expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).toMatchObject({ ran: 'nothing', why: expect.stringContaining('failed; waiting for main to move') });
   });
 
+  test('a swap whose second rename and move back both fail reports the first failure, with the second', async () => {
+    const p = project();
+    p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
+    const rename: TickDeps['rename'] = async (from, to) => {
+      if (from === p.paths.redraw) throw Object.assign(new Error(`EBUSY: resource busy or locked, rename '${from}'`), { code: 'EBUSY' });
+      if (from === p.paths.previous) throw Object.assign(new Error(`EACCES: permission denied, rename '${from}'`), { code: 'EACCES' });
+      renameSync(from, to);
+    };
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, ...fakes(), rename } });
+    expect(r.ran).toBe('failed');
+    expect(r.error).toStartWith('EBUSY');
+    expect(r.error).toContain('EACCES');
+    expect(await readState(p.dataDir, KEY)).toMatchObject({ last_error: expect.stringMatching(/^EBUSY.*EACCES/) });
+  });
+
   test('a drawing still being drawn (sheets under wanted:) is not redrawn or fetched for; once nothing is wanted, the next tick redraws', async () => {
     const p = project();
     const half = drawing(p.drawnAt);
