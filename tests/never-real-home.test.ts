@@ -10,7 +10,7 @@
  */
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import os, { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { startInboxServer } from "../packages/server/inbox";
@@ -122,53 +122,5 @@ describe("refuseRealHome", () => {
     await expect(SimAgent.connect({ ...options, env })).rejects.toThrow("HOME must be a scratch folder");
     await expect(SimAgent.connect({ ...options, env: { ...env, HOME: account } })).rejects.toThrow("HOME must be a scratch folder");
     expect(() => refuseRealHome("", "test")).toThrow("HOME must be a scratch folder");
-  });
-});
-
-/** Comments blanked out, so a commented-out env never counts; line numbers stay. */
-function withoutComments(source: string): string {
-  const blank = (text: string) => text.replace(/[^\n]/g, " ");
-  return source.replace(/\/\*[\s\S]*?\*\//g, blank).replace(/(^|[^:"'`\\])(\/\/[^\n]*)/g, (_, before: string, comment: string) => before + blank(comment));
-}
-
-/** The object literal around `at`: from its unmatched `{` to the matching `}`. */
-function enclosingLiteral(source: string, at: number): string {
-  let depth = 0;
-  let open = 0;
-  for (let i = at; i >= 0; i--) {
-    if (source[i] === "}") depth++;
-    else if (source[i] === "{" && depth-- === 0) {
-      open = i;
-      break;
-    }
-  }
-  depth = 0;
-  for (let i = open + 1; i < source.length; i++) {
-    if (source[i] === "{") depth++;
-    else if (source[i] === "}" && depth-- === 0) return source.slice(open, i + 1);
-  }
-  return source.slice(open);
-}
-
-describe("an e2e spawn env", () => {
-  // The Playwright runner keeps the caller's HOME (tests/e2e/global-setup.ts sets none), so a spec's
-  // env that names a data dir but no HOME starts Plannotator on the account's home.
-  test("that sets PLANNOTATOR_DATA_DIR also sets HOME, or spreads scratchEnv()", () => {
-    const dir = join(import.meta.dir, "e2e");
-    let scanned = 0;
-    const missing: string[] = [];
-    for (const name of readdirSync(dir).filter((n) => n.endsWith(".ts")).sort()) {
-      const source = withoutComments(readFileSync(join(dir, name), "utf8"));
-      for (const match of source.matchAll(/(^|[\s{,])PLANNOTATOR_DATA_DIR\s*:/g)) {
-        scanned++;
-        const at = match.index! + match[1]!.length;
-        const literal = enclosingLiteral(source, at);
-        if (/(^|[\s{,])HOME\s*[:,}]/.test(literal) || /\.\.\.\s*scratchEnv\(/.test(literal)) continue;
-        missing.push(`tests/e2e/${name}:${source.slice(0, at).split("\n").length}`);
-      }
-    }
-    // A matcher that stopped matching would pass forever: the specs hold about 200 of these envs.
-    expect(scanned).toBeGreaterThan(100);
-    expect(missing).toEqual([]);
   });
 });

@@ -1,10 +1,13 @@
 /**
  * `bun run test:sandbox <file…> [-- runner flags]`: run the test files you name
  * in a throwaway world, so no test, child or Inbox can reach your real home,
- * data dir, browser, Inbox or agent config.
+ * data dir, browser, Inbox or agent config. Paths are relative to the repo root
+ * (`bun run` starts scripts there).
  *
  * - Refuses an empty list (a bare `bun test` runs the whole suite), a path that is
- *   not a file, and any argument or PLANNOTATOR_PORT that names 59812 (the
+ *   not a file, the files listed in REFUSED, anything after `--` that is not a
+ *   flag (a path or a bare word there would add files: give values as
+ *   `--flag=value`), and any argument or PLANNOTATOR_PORT that names 59812 (the
  *   person's Inbox port).
  * - Makes one temp root: `home/` (a seeded `.gitconfig`, scratch XDG, Claude and
  *   Codex folders), `data/` and `tmp/`. The CHILD's env points HOME, TMPDIR,
@@ -12,14 +15,18 @@
  *   Bun's `os.homedir()` (fixed at startup), `$HOME` and every grandchild agree.
  *   This process keeps its own env.
  * - Opens no browser (PLANNOTATOR_BROWSER from tests/helpers/no-browser.ts), sends
- *   no ping or feedback, connects no agents, checks no updates, offers no notes.
- *   The calling agent's session variables are dropped, as on CI.
+ *   no ping or feedback, connects no agents. Drops the calling agent's markers
+ *   (every variable apps/hook/server/detect-origin.ts reads, its session
+ *   variables), SSH_* and PLANNOTATOR_REMOTE (remote mode), and GIT_DIR and its
+ *   kin (a test's temp-repo git would act on the outer repo).
  *   PLAYWRIGHT_BROWSERS_PATH keeps pointing at the real browser cache, by path.
  * - `tests/e2e/*.spec.ts` run under Playwright (tests/e2e/playwright.config.ts);
- *   DOM-gated files under `DOM_TESTS=1` (with `--isolate` when
- *   tests/dom-test-list.txt lists them, each in its own process when it does not,
- *   as CI runs them); the rest under one `bun test`. Runs go from the repo root,
+ *   the files tests/dom-test-list.txt lists under `DOM_TESTS=1 --isolate`, and
+ *   those CI runs in its own-process DOM steps under `DOM_TESTS=1`, each alone,
+ *   as CI runs them; the rest under one `bun test`. Runs go from the repo root,
  *   so the root bunfig preload always loads.
+ * - SIGINT, SIGTERM and SIGHUP go to the running child; once it exits, no
+ *   further run starts and teardown still runs.
  * - Teardown stops only the Inboxes it can prove the root started
  *   (tests/helpers/inbox-process.ts), fails when any registry under the root
  *   names port 59812 (never contacted, never signalled), and removes the root.
@@ -40,8 +47,28 @@ const DOM_LIST = "tests/dom-test-list.txt";
 const OWN_CONFIG_SPECS = new Set(["tests/e2e/inbox-thread-parity.spec.ts"]);
 const E2E_SPEC = /^tests\/e2e\/[^/]+\.spec\.ts$/;
 
-/** Variables from the caller that would point a child at real config or at the calling agent's own session. */
-const DROPPED = /^(CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_PROJECT_DIR|CODEX_.*|OPENCODE.*|PI_.*|VIBE_HOME|COPILOT_HOME|QWEN_HOME|FACTORY_CONFIG_DIR|DSH_HOME|GEMINI_CLI_HOME|GIT_CONFIG_GLOBAL|DOM_TESTS|PLANNOTATOR_PORT|PLANNOTATOR_SESSION_.*|PLANNOTATOR_INBOX_REMINDER)$/;
+/** Files this command does not run: each starts something real on purpose. */
+const REFUSED: Record<string, string> = {
+  "apps/pi-extension/inbox.test.ts": "starts the installed Pi agent; run it on purpose, not through test:sandbox",
+  "tests/never-touch-the-real-inbox.test.ts": "starts Inbox servers to prove the real-Inbox guards; run it on purpose, not through test:sandbox",
+};
+
+/** Variables from the caller that would point a child at real config, remote mode, an outer git repo or the calling agent's own session. */
+const DROPPED = /^(CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_PROJECT_DIR|CODEX_.*|OPENCODE.*|PI_.*|QWEN_CODE.*|DSH_.*|T3CODE_.*|VIBE_HOME|COPILOT_HOME|QWEN_HOME|FACTORY_CONFIG_DIR|GEMINI_CLI_HOME|SSH_.*|GIT_DIR|GIT_WORK_TREE|GIT_INDEX_FILE|GIT_COMMON_DIR|GIT_CONFIG_GLOBAL|DOM_TESTS|PLANNOTATOR_PORT|PLANNOTATOR_LIVE_PORT|PLANNOTATOR_REMOTE|PLANNOTATOR_HOST_.*|PLANNOTATOR_SESSION_.*|PLANNOTATOR_INBOX_REMINDER)$/;
+
+/**
+ * Every variable apps/hook/server/detect-origin.ts reads to tell which agent
+ * called (`env.NAME`, `env["NAME"]`, and the quoted names in its marker lists),
+ * read from the source so a new agent's marker is dropped too. Throws when it
+ * finds too few to be the real list.
+ */
+export function originMarkers(source = readFileSync(join(REPO_ROOT, "apps/hook/server/detect-origin.ts"), "utf8")): string[] {
+  const names = new Set<string>();
+  for (const m of source.matchAll(/\benv(?:\.([A-Z][A-Z0-9_]*)|\[\s*["']([A-Z][A-Z0-9_]*)["']\s*\])/g)) names.add((m[1] ?? m[2])!);
+  for (const list of source.matchAll(/=\s*\[([^\]]*)\]\s*as const/g)) for (const m of list[1]!.matchAll(/["']([A-Z][A-Z0-9_]*)["']/g)) names.add(m[1]!);
+  if (names.size < 8) throw new Error(`test-sandbox: found only ${names.size} agent markers in detect-origin.ts; refusing to run with a short list`);
+  return [...names].sort();
+}
 
 export class SandboxRefusal extends Error {}
 
@@ -61,6 +88,11 @@ export function parseSandboxArgs(argv: readonly string[], cwd: string, env: Read
   }
   const flag = named.find((arg) => arg.startsWith("-"));
   if (flag) throw new SandboxRefusal(`${flag}: put runner flags after \`--\` (bun run test:sandbox <file…> -- ${flag})`);
+  // The runners read any other word as a file or a filter that adds files (a trailing `./` runs the whole suite).
+  const positional = passthrough.find((arg) => !arg.startsWith("-"));
+  if (positional !== undefined) {
+    throw new SandboxRefusal(`${positional || '""'}: after \`--\` only runner flags, with values as --flag=value (e.g. --test-name-pattern=name); name files before \`--\``);
+  }
   if (named.length === 0) throw new SandboxRefusal("name the test files to run; refusing an empty list, which would run the whole suite");
   const files = named.map((arg) => {
     const path = resolve(cwd, arg);
@@ -74,6 +106,7 @@ export function parseSandboxArgs(argv: readonly string[], cwd: string, env: Read
     const rel = relative(REPO_ROOT, realpathSync(path));
     if (rel.startsWith("..") || isAbsolute(rel)) throw new SandboxRefusal(`${arg} is outside this repository`);
     const file = rel.split(sep).join("/");
+    if (REFUSED[file]) throw new SandboxRefusal(`${file} ${REFUSED[file]}`);
     if (OWN_CONFIG_SPECS.has(file)) throw new SandboxRefusal(`${file} runs under its own config: bun run test:parity:inbox-thread`);
     if (file.startsWith("tests/e2e/") && !E2E_SPEC.test(file)) throw new SandboxRefusal(`${file} is not a tests/e2e/*.spec.ts spec`);
     return file;
@@ -111,8 +144,9 @@ export function makeSandbox(parentEnv: Readonly<Record<string, string | undefine
     throw new Error(`test-sandbox: ${home} is not a scratch folder; refusing to run`);
   }
   writeFileSync(join(home, ".gitconfig"), "[user]\n\tname = Sandbox Test\n\temail = sandbox@example.com\n[init]\n\tdefaultBranch = main\n");
+  const markers = new Set(originMarkers());
   const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(parentEnv)) if (value !== undefined && !DROPPED.test(key)) env[key] = value;
+  for (const [key, value] of Object.entries(parentEnv)) if (value !== undefined && !DROPPED.test(key) && !markers.has(key)) env[key] = value;
   Object.assign(env, {
     HOME: home,
     ...(process.platform === "win32" ? { USERPROFILE: home } : {}),
@@ -123,8 +157,6 @@ export function makeSandbox(parentEnv: Readonly<Record<string, string | undefine
     NO_ANON_PING: "1",
     PLANNOTATOR_FEEDBACK_URL: "http://127.0.0.1:9/feedback",
     PLANNOTATOR_INBOX_CONNECT: "0",
-    PLANNOTATOR_UPDATE_CHECK: "0",
-    PLANNOTATOR_INBOX_NOTES: "0",
     XDG_CONFIG_HOME: mk(home, ".config"),
     XDG_DATA_HOME: mk(home, ".local", "share"),
     XDG_CACHE_HOME: mk(home, ".cache"),
@@ -136,10 +168,21 @@ export function makeSandbox(parentEnv: Readonly<Record<string, string | undefine
   return { root, home, env };
 }
 
-/** A file that skips itself without happy-dom (the rule scripts/dom-test-allowlist.test.ts applies). */
-function isDomGated(file: string): boolean {
-  const source = readFileSync(join(REPO_ROOT, file), "utf8");
-  return /\b(describe|test|it)\.(if|skipIf)\(!?hasDom\)/.test(source) || /DOM_TESTS/.test(source);
+/**
+ * The files .github/workflows/test.yml runs in their own `DOM_TESTS=1 bun test`
+ * step (the rule scripts/dom-test-allowlist.test.ts applies), YAML comments left out.
+ */
+function ownProcessDomFiles(): Set<string> {
+  const workflow = readFileSync(join(REPO_ROOT, ".github/workflows/test.yml"), "utf8")
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n");
+  return new Set(
+    workflow
+      .split(/^\s*- name:/m)
+      .filter((step) => /DOM_TESTS=1 bun test/.test(step))
+      .flatMap((step) => step.match(/[\w./-]+\.test\.tsx?/g) ?? []),
+  );
 }
 
 function domList(): Set<string> {
@@ -161,13 +204,14 @@ export interface Runners {
   playwright: string;
 }
 
-/** The runs, in order: plain bun tests, the listed DOM files, each unlisted DOM file, then the e2e specs. */
+/** The runs, in order: plain bun tests, the listed DOM files, each file of CI's own-process DOM steps, then the e2e specs. */
 export function planRuns(args: SandboxArgs, env: Record<string, string>, runners: Runners): Run[] {
   const e2e = args.files.filter((f) => E2E_SPEC.test(f));
   const rest = args.files.filter((f) => !e2e.includes(f));
   const listed = domList();
   const dom = rest.filter((f) => listed.has(f));
-  const ownProcessDom = rest.filter((f) => !listed.has(f) && isDomGated(f));
+  const ownSteps = ownProcessDomFiles();
+  const ownProcessDom = rest.filter((f) => !listed.has(f) && ownSteps.has(f));
   const plain = rest.filter((f) => !dom.includes(f) && !ownProcessDom.includes(f));
   const domEnv = { ...env, DOM_TESTS: "1" };
   const bunTest = (files: string[], flags: string[] = []) => [runners.bun, "test", ...flags, ...files.map((f) => `./${f}`), ...args.passthrough];
@@ -216,27 +260,42 @@ export async function teardown(root: string): Promise<string[]> {
     }
     await stopProvenInboxes(targets);
   }
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  try {
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch (error) {
+    process.stderr.write(`test-sandbox: could not remove ${root}: ${(error as Error).message}\n`);
+  }
   return owner;
 }
 
 /** Run `args` in a fresh sandbox; resolves to the exit code. */
 export async function runSandbox(args: SandboxArgs, runners: Runners, parentEnv: Readonly<Record<string, string | undefined>> = process.env): Promise<number> {
   const sandbox = makeSandbox(parentEnv);
-  // Ctrl-C reaches the runner too (same process group); this process waits for it, then tears down.
-  const ignore = () => {};
-  process.on("SIGINT", ignore);
-  process.on("SIGTERM", ignore);
+  // A stop goes to the running child (a harness may signal only this pid); this process waits for it, then tears down.
+  let child: ReturnType<typeof Bun.spawn> | null = null;
+  let stopped: NodeJS.Signals | null = null;
+  const forward = (signal: NodeJS.Signals) => {
+    stopped = signal;
+    try {
+      child?.kill(signal);
+    } catch {
+      // Already gone.
+    }
+  };
+  const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+  for (const signal of signals) process.on(signal, forward);
   let code = 0;
   try {
     for (const run of planRuns(args, sandbox.env, runners)) {
-      const child = Bun.spawn(run.argv, { cwd: REPO_ROOT, env: run.env, stdio: ["inherit", "inherit", "inherit"] });
+      if (stopped) break;
+      child = Bun.spawn(run.argv, { cwd: REPO_ROOT, env: run.env, stdio: ["inherit", "inherit", "inherit"] });
       const exit = await child.exited;
+      child = null;
       if (exit !== 0 && code === 0) code = exit;
     }
+    if (stopped && code === 0) code = 1;
   } finally {
-    process.off("SIGINT", ignore);
-    process.off("SIGTERM", ignore);
+    for (const signal of signals) process.off(signal, forward);
     const owner = await teardown(sandbox.root);
     for (const file of owner) process.stderr.write(`test-sandbox: ${relative(sandbox.root, file)} names port ${OWNER_INBOX_PORT}, the person's Inbox. Not contacted; failing the run.\n`);
     if (owner.length > 0) code = 3;
@@ -251,7 +310,7 @@ function defaultRunners(): Runners {
 
 if (import.meta.main) {
   try {
-    const args = parseSandboxArgs(process.argv.slice(2), process.env.INIT_CWD || process.cwd());
+    const args = parseSandboxArgs(process.argv.slice(2), process.cwd());
     const runners = defaultRunners();
     if (args.files.some((f) => f.startsWith("tests/e2e/")) && !existsSync(runners.playwright)) throw new SandboxRefusal(`no Playwright at ${runners.playwright}: run bun install`);
     process.exit(await runSandbox(args, runners));

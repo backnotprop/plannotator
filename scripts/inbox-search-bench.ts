@@ -175,13 +175,22 @@ async function main() {
   }
 }
 
+const RERUN_MARK = "PLANNOTATOR_BENCH_SCRATCH_HOME_RERUN";
+
 /**
  * Bun fixes `homedir()` at startup, and the Inbox's sandbox guard refuses a real one even when
- * HOME is changed later: run again with a scratch HOME from the start, then remove it.
+ * HOME is changed later: run again once with a scratch HOME (USERPROFILE on Windows) from the
+ * start, then remove it. A rerun whose `homedir()` is still not scratch stops instead of
+ * starting another.
  */
 function rerunWithScratchHome(): never {
+  if (process.env[RERUN_MARK]) {
+    process.stderr.write(`scripts/inbox-search-bench.ts: homedir() is ${homedir()} even with a scratch HOME; refusing to run\n`);
+    process.exit(2);
+  }
   const home = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-search-bench-home-")));
-  const child = Bun.spawnSync([process.execPath, ...process.argv.slice(1)], { env: { ...process.env, HOME: home }, stdio: ["inherit", "inherit", "inherit"] });
+  const env = { ...process.env, HOME: home, USERPROFILE: home, [RERUN_MARK]: "1" };
+  const child = Bun.spawnSync([process.execPath, ...process.argv.slice(1)], { env, stdio: ["inherit", "inherit", "inherit"] });
   rmSync(home, { recursive: true, force: true });
   process.exit(child.exitCode ?? 1);
 }

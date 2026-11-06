@@ -47,8 +47,9 @@ export function inboxScratch(prefix: string): string {
  * What every Plannotator process a spec starts under `root` needs: a scratch
  * HOME (with none, `os.homedir()` falls back to the account's home), a scratch
  * data dir, no browser and no ping. Spread it into the spawn env, then add the
- * spec's own variables. tests/never-real-home.test.ts fails on an e2e env that
- * sets a data dir with neither HOME nor this.
+ * spec's own variables. For new specs (the existing ones name HOME themselves);
+ * tests/e2e-spawn-home.test.ts fails on an e2e env that sets a data dir with
+ * neither a scratch HOME nor this.
  */
 export function scratchEnv(root: string): { HOME: string; PLANNOTATOR_DATA_DIR: string; PLANNOTATOR_BROWSER: string; NO_ANON_PING: string } {
   const HOME = refuseRealHome(join(root, 'home'), 'tests/e2e/inbox-scratch.ts scratchEnv');

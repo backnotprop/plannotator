@@ -10,7 +10,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NO_BROWSER } from "../tests/helpers/no-browser";
 import { accountHome, isScratchDataDir } from "../tests/helpers/real-data-dir";
-import { parseSandboxArgs, planRuns, REPO_ROOT, runSandbox, SandboxRefusal } from "./test-sandbox";
+import { detectOrigin } from "../apps/hook/server/detect-origin";
+import { originMarkers, parseSandboxArgs, planRuns, REPO_ROOT, runSandbox, SandboxRefusal } from "./test-sandbox";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -41,7 +42,7 @@ function fakeRunner(extra = "") {
     );
     return { argv: readFileSync(join(out, "argv"), "utf8").trim().split("\n"), env, gitconfig: readFileSync(join(out, "gitconfig"), "utf8") };
   };
-  return { bin, run };
+  return { bin, run, dir };
 }
 
 describe("the refusals", () => {
@@ -61,6 +62,19 @@ describe("the refusals", () => {
     expect(refused(["--isolate", plainFile])).toContain("after `--`");
     expect(refused(["nope.test.ts"])).toContain("not a file");
     expect(refused(["tests/e2e/inbox-thread-parity.spec.ts"])).toContain("own config");
+    expect(refused(["tests/e2e"])).toContain("not a file");
+    expect(refused(["apps/pi-extension/inbox.test.ts"])).toContain("on purpose");
+    expect(refused(["tests/never-touch-the-real-inbox.test.ts"])).toContain("on purpose");
+    const outside = mkdtempSync(join(tmpdir(), "test-sandbox-outside-"));
+    dirs.push(outside);
+    writeFileSync(join(outside, "a.test.ts"), "");
+    expect(refused([join(outside, "a.test.ts")])).toContain("outside this repository");
+  });
+
+  test("anything after -- that is not a flag: a path or a bare word would add files to the run", () => {
+    for (const extra of ["./", ".", "./apps/pi-extension/inbox.test.ts", "tests/never-touch-the-real-inbox.test.ts", "store", ""]) {
+      expect(refused([plainFile, "--", "--bail", extra])).toContain("only runner flags");
+    }
   });
 
   test("anything naming the person's Inbox port", () => {
@@ -69,7 +83,7 @@ describe("the refusals", () => {
   });
 
   test("files resolve from the cwd to repo paths; flags after -- pass through", () => {
-    expect(parseSandboxArgs([`./${plainFile}`, "--", "--bail"], REPO_ROOT, {})).toEqual({ files: [plainFile], passthrough: ["--bail"] });
+    expect(parseSandboxArgs([`./${plainFile}`, "--", "--bail", "--test-name-pattern=x"], REPO_ROOT, {})).toEqual({ files: [plainFile], passthrough: ["--bail", "--test-name-pattern=x"] });
   });
 });
 
@@ -92,7 +106,21 @@ describe("the routing", () => {
 });
 
 describe("a run", () => {
-  const parentEnv = { PATH: process.env.PATH, HOME: accountHome() ?? "/", CLAUDECODE: "1", PLANNOTATOR_SESSION_TAG: "caller", CODEX_HOME: "/real/.codex", DOM_TESTS: "1" };
+  const parentEnv: Record<string, string | undefined> = {
+    PATH: process.env.PATH,
+    HOME: accountHome() ?? "/",
+    PLANNOTATOR_DATA_DIR: "/real/data",
+    XDG_DATA_HOME: "/real/share",
+    CODEX_HOME: "/real/.codex",
+    DOM_TESTS: "1",
+    SSH_CONNECTION: "1 2 3 4",
+    PLANNOTATOR_REMOTE: "1",
+    GIT_DIR: "/outer/.git",
+    GIT_WORK_TREE: "/outer",
+    T3CODE_THREAD_ID: "t",
+    // Every agent marker the origin detection reads.
+    ...Object.fromEntries(originMarkers().map((name) => [name, name === "PLANNOTATOR_SESSION_TAG" ? "claude-code:caller" : name === "PLANNOTATOR_ORIGIN" ? "codex" : "1"])),
+  };
 
   test("the child starts with the scratch home and sandbox, never the caller's, and the root is gone after", async () => {
     const fake = fakeRunner();
@@ -104,13 +132,16 @@ describe("a run", () => {
     expect(isScratchDataDir(root)).toBe(true);
     expect(env.HOME).toBe(join(root, "home"));
     expect(env.HOME).not.toBe(accountHome());
-    for (const key of ["PLANNOTATOR_DATA_DIR", "TMPDIR", "XDG_CONFIG_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"]) expect(env[key]!.startsWith(`${root}/`)).toBe(true);
+    for (const key of ["PLANNOTATOR_DATA_DIR", "TMPDIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"]) expect(env[key]!.startsWith(`${root}/`)).toBe(true);
     expect(env.PLANNOTATOR_BROWSER).toBe(NO_BROWSER);
     expect(env.NO_ANON_PING).toBe("1");
     expect(env.PLANNOTATOR_INBOX_CONNECT).toBe("0");
     expect(env.PLANNOTATOR_FEEDBACK_URL).toBe("http://127.0.0.1:9/feedback");
-    // The calling agent's session never reaches the tests.
-    for (const key of ["CLAUDECODE", "PLANNOTATOR_SESSION_TAG", "DOM_TESTS"]) expect(env[key]).toBeUndefined();
+    // The calling agent, remote mode and an outer repo never reach the tests: the child looks like CI.
+    expect(detectOrigin(env)).toBe(detectOrigin({}));
+    for (const key of [...originMarkers(), "DOM_TESTS", "SSH_CONNECTION", "PLANNOTATOR_REMOTE", "GIT_DIR", "GIT_WORK_TREE", "T3CODE_THREAD_ID"]) expect(env[key]).toBeUndefined();
+    // Switches CI leaves at their defaults stay unset.
+    for (const key of ["PLANNOTATOR_UPDATE_CHECK", "PLANNOTATOR_INBOX_NOTES"]) expect(env[key]).toBeUndefined();
     expect(gitconfig).toContain("email =");
     expect(existsSync(root)).toBe(false);
   });
@@ -119,6 +150,31 @@ describe("a run", () => {
     const fake = fakeRunner(`mkdir -p "$PLANNOTATOR_DATA_DIR/inbox" && printf '{"pid":2,"port":59812,"serverSession":"s"}' > "$PLANNOTATOR_DATA_DIR/inbox/inbox.json"`);
     const code = await runSandbox({ files: [plainFile], passthrough: [] }, { bun: fake.bin, playwright: fake.bin }, parentEnv);
     expect(code).toBe(3);
+    expect(existsSync(fake.run(0).env.PLANNOTATOR_TEST_SANDBOX!)).toBe(false);
+  });
+
+  test("a registry naming a live process that is not an Inbox leaves it alone", async () => {
+    const other = Bun.spawn(["sleep", "30"]);
+    try {
+      const fake = fakeRunner(`mkdir -p "$PLANNOTATOR_DATA_DIR/inbox" && printf '{"pid":${other.pid},"port":9,"serverSession":"s"}' > "$PLANNOTATOR_DATA_DIR/inbox/inbox.json"`);
+      expect(await runSandbox({ files: [plainFile], passthrough: [] }, { bun: fake.bin, playwright: fake.bin }, parentEnv)).toBe(0);
+      expect(other.exitCode).toBeNull();
+      expect(existsSync(fake.run(0).env.PLANNOTATOR_TEST_SANDBOX!)).toBe(false);
+    } finally {
+      other.kill(); // inbox-guard: own child
+    }
+  });
+
+  test("a SIGTERM goes to the running child, no later run starts, and the root still goes", async () => {
+    const fake = fakeRunner(`trap 'echo got > "$out/term"; kill $! 2>/dev/null; exit 143' TERM\nsleep 20 &\nwait`);
+    const running = runSandbox({ files: [plainFile, domFile], passthrough: [] }, { bun: fake.bin, playwright: fake.bin }, parentEnv);
+    const started = join(fake.dir, "run-0", "gitconfig");
+    for (let i = 0; i < 100 && !existsSync(started); i++) await Bun.sleep(50);
+    await Bun.sleep(100);
+    process.emit("SIGTERM", "SIGTERM");
+    expect(await running).toBe(143);
+    expect(readFileSync(join(fake.dir, "run-0", "term"), "utf8")).toContain("got");
+    expect(existsSync(join(fake.dir, "run-1"))).toBe(false);
     expect(existsSync(fake.run(0).env.PLANNOTATOR_TEST_SANDBOX!)).toBe(false);
   });
 
