@@ -79,7 +79,15 @@ export function useListView(remember = true): [ListView, (view: ListView) => voi
 }
 
 /**
- * The List view's one-time announcement (reveal.ts `useListViewReveal`, components/ListViewIntro.tsx): shown once per
+ * The List view's one-time choice is off until the Inbox's dialog schedule lands (approval "inbox-one-time-dialogs":
+ * once the list is taller than the screen on Smart groups, at most one new dialog a day, two days between offers;
+ * built on feat/inbox-dialog-schedule). The choice then registers with that schedule instead of its own moment, and
+ * this goes. Until then App never asks for it (`due` stays false), so the List view itself can ship first.
+ */
+export const LIST_VIEW_CHOICE_ON = false;
+
+/**
+ * The List view's one-time choice (reveal.ts `useListViewReveal`, components/ListViewIntro.tsx): shown once per
  * browser, remembered in its own cookie the moment it opens, so a reload or another tab never shows it again.
  */
 export const LIST_VIEW_INTRO_COOKIE = 'plannotator-inbox-list-view-intro';

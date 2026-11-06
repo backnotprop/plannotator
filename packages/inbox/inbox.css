@@ -6491,9 +6491,10 @@ dialog.ib-dlg.ib-lvc { width: min(620px, calc(100vw - 32px)); }
 .ib-lvc-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; padding: 18px 22px 20px; background: var(--lvc-well); }
 .ib-lvc-col { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .ib-lvc-name { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; font-size: var(--ib-fs-14, 14px); font-weight: 600; }
-.ib-lvc-tag { padding: 1px 7px; border-radius: 999px; background: color-mix(in oklch, var(--primary) 16%, transparent); color: var(--primary); font-size: var(--ib-fs-11, 11px); font-weight: 600; line-height: 1.5; }
-/* The view in use now: the same small tag, quiet (muted text on the dialog's own grey), beside Recommended. */
-.ib-lvc-inuse { background: color-mix(in oklch, var(--muted-foreground) 14%, transparent); color: var(--muted-foreground); }
+/* The tags: text 4.5:1 or more and a 1 px edge 3:1 or more against the well, in light and dark. */
+.ib-lvc-tag { padding: 0 7px; border: 1px solid color-mix(in oklch, var(--primary) 80%, var(--foreground)); border-radius: 999px; background: color-mix(in oklch, var(--primary) 12%, var(--card)); color: color-mix(in oklch, var(--primary) 72%, var(--foreground)); font-size: var(--ib-fs-11, 11px); font-weight: 600; line-height: 1.5; }
+/* The view in use now: the same small tag, plain (the window's text on the card, a grey edge), beside Recommended. */
+.ib-lvc-inuse { border-color: color-mix(in oklch, var(--foreground) 56%, var(--card)); background: var(--card); color: var(--foreground); }
 .ib-lvc-line { margin-bottom: 12px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); line-height: 1.45; }
 .pn-inbox .ib-lvc-pick, dialog .ib-lvc-pick { margin-top: auto; justify-content: center; min-height: 36px; }
 /* The picture: the real list column drawn 400 px wide in a light scope, scaled to the thumbnail (--th-s). */

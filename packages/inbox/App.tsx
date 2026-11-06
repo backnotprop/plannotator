@@ -51,7 +51,7 @@ import { listsThread, newRecordBatch, noteRecord, openThreadRead } from './openT
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
 import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, threadAwayLine, threadOutbox } from './machines';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
-import { flatRows, listViewIntroSeen, markListViewIntroSeen, useListView, type ListSort } from './listView';
+import { flatRows, LIST_VIEW_CHOICE_ON, listViewIntroSeen, markListViewIntroSeen, useListView, type ListSort } from './listView';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { deliveriesReadList } from './rowDelivery';
@@ -4473,7 +4473,8 @@ function Inbox() {
   const listViewIntroDue = useRef<boolean | null>(null);
   listViewIntroDue.current ??= !listViewIntroSeen();
   const listViewReveal = useListViewReveal({
-    due: listViewIntroDue.current,
+    // Off until the dialog schedule lands (listView.ts `LIST_VIEW_CHOICE_ON`).
+    due: LIST_VIEW_CHOICE_ON && listViewIntroDue.current,
     release: releaseVersion(latest?.version),
     listLoaded: snoozeIntroLatch.current !== null,
     firstRun,

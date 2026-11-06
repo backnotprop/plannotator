@@ -28,6 +28,8 @@ const shots = resolve(process.env.PLANNOTATOR_LIST_VIEW_SHOTS ?? join(repo, '.lo
 
 test.describe.configure({ mode: 'serial' });
 test.skip(!binary, 'set PLANNOTATOR_E2E_RELEASE_BINARY to a release build');
+// Off until the Inbox's dialog schedule lands (listView.ts `LIST_VIEW_CHOICE_ON`); this spec comes back with it.
+test.skip(true, 'the List view choice is off until the dialog schedule lands');
 
 let url = '';
 let first = '';
@@ -127,7 +129,7 @@ test('a minute in, back on the grouped list after reading a thread: the choice, 
     // Desktop: read a thread, back to the list.
     await readAndLeave(page, false);
     await expect(dialog(page)).toBeVisible({ timeout: 10_000 });
-    await expect(dialog(page)).toHaveAccessibleName('Smart groups or a simple list?');
+    await expect(dialog(page)).toHaveAccessibleName('Which view do you prefer?');
     // Focus on the question; Smart groups is marked In use (the list is grouped) and its button is the primary one.
     await expect(dialog(page).locator('#ib-lvc-title')).toBeFocused();
     await expect(dialog(page).locator('[data-list-view-in-use]')).toHaveCount(1);

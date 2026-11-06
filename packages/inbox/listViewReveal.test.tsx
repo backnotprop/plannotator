@@ -192,7 +192,7 @@ describe.skipIf(!hasDom)('the List view announcement', () => {
     // Spent as it opens: a reload now would not show it again.
     expect(stored.has(listView.LIST_VIEW_INTRO_COOKIE)).toBe(true);
     // Named and described for a screen reader; focus on the question, so neither choice looks picked.
-    expect(document.getElementById(dialog()!.getAttribute('aria-labelledby')!)?.textContent).toBe('Smart groups or a simple list?');
+    expect(document.getElementById(dialog()!.getAttribute('aria-labelledby')!)?.textContent).toBe('Which view do you prefer?');
     expect(document.getElementById(dialog()!.getAttribute('aria-describedby')!)?.textContent).toBe('You can change this any time in the ⋮ menu.');
     expect(document.activeElement?.id).toBe('ib-lvc-title');
     // Two equals, each with the person's own rows in its picture: the groups with their band, the list without.

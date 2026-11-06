@@ -5,9 +5,9 @@ import { lightScope, PreviewList, type ListIntroGroup } from './ListLookIntro';
 import { Modal } from './Updates';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 
-/** The dialog's words (a proposal for the owner, in the PR's "Words for the owner"). */
+/** The dialog's words, as the owner approved them (2026-11-05). */
 export const LIST_VIEW_INTRO_WORDS = {
-  title: 'Smart groups or a simple list?',
+  title: 'Which view do you prefer?',
   note: 'You can change this any time in the ⋮ menu.',
   smart: 'Smart groups',
   recommended: 'Recommended',

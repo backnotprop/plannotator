@@ -486,8 +486,8 @@ describe.if(hasDom)('the ⋮ menu', () => {
     expect(items.map((i) => [i.getAttribute('role'), i.textContent, i.getAttribute('aria-checked')])).toEqual([
       ['menuitem', 'Tidy', null],
       ['menuitem', 'Refresh', null],
-      ['menuitemradio', 'Grouped', 'true'],
-      ['menuitemradio', 'List', 'false'],
+      ['menuitemradio', 'Smart groups', 'true'],
+      ['menuitemradio', 'Simple list', 'false'],
       ['menuitemcheckbox', 'Highlight thread subject', 'false'],
       ['menuitemcheckbox', 'Compact rows', 'false'],
       ['menuitemcheckbox', 'Hide agent icons', 'false'],
