@@ -1638,6 +1638,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   }, [pinched]);
   const pinchTucks = pinched && !pinchShown && !htmlComment.open;
   const shownToolbar: ToolbarState = pinchTucks ? 'tucked' : toolbar;
+  // Tools gathered into the corner while a comment holds words (they stay, hidden): the corner control carries a dot.
+  // Read as they gather; nothing can be typed while they are away.
+  const [commentWaits, setCommentWaits] = useState(false);
+  useLayoutEffect(() => {
+    setCommentWaits(full && shownToolbar === 'tucked' && !props.readOnly && unsavedComposer(sectionRef.current, savedTextRef.current) !== null);
+  }, [full, shownToolbar, props.readOnly]);
   shownToolbarRef.current = shownToolbar;
   // Every way back to showing (the corner control, Keep writing, ⌘⇧X, leaving full screen, a pinch let go) forgets
   // what gathered the tools, once the corner control's press has put focus back: the next » brings focus back to ».
@@ -1674,7 +1680,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     gatheredFrom.current = 'bar';
     if (from !== 'composer') return null;
     const card = sectionRef.current?.querySelector<HTMLElement>('[data-fcomp]');
-    return card?.querySelector<HTMLElement>('.ib-fcomp-row > :not([hidden]) textarea') ?? sectionRef.current?.querySelector<HTMLElement>('[data-fcomp-pill]') ?? card ?? null;
+    return card?.querySelector<HTMLElement>('[data-fcomp-body] > :not([hidden]) textarea') ?? sectionRef.current?.querySelector<HTMLElement>('[data-fcomp-pill]') ?? card ?? null;
   };
 
   const remove = async (id: string) => {
@@ -1892,6 +1898,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             if (!pinchTucks || toolbar === 'tucked') setToolbar(next);
           }}
           draft={hasComposer && !!props.composer && (props.composer.reply.value.trim() !== '' || props.composer.reply.files.length > 0)}
+          commentDraft={commentWaits}
           restoreTarget={restoreTarget}
           announce={announce}
           armed={armed}
@@ -2086,6 +2093,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               // A phone's comment goes in the composer's card (HtmlPageComment.tsx), and a selection made with a finger counts.
               onHostDraft={phoneHtml && hasComposer ? htmlComment.onHostDraft : undefined}
               touchSelection={phoneHtml && hasComposer}
+              // The Inbox's upload takes no image: the page's comment boxes draw no image button (the owner, 2026-11-07).
+              allowCommentImages={false}
               rawHtml={view.html}
               // Its own document, served under its own policy: web pictures load in the page, never in the window.
               frameUrl={source.pageFrameUrl}

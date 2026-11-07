@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { diagramTargetName, diagramTargetText } from '@plannotator/core/diagram-anchor';
 import { cn } from '../../lib/utils';
 import type { ScreenRect } from '../../utils/diagram-projection';
@@ -6,6 +6,14 @@ import { SparklesIcon } from '../SparklesIcon';
 import { Button } from '../ui/button';
 import { isCommentSubmitKey } from '../../utils/commentSubmitKey';
 import type { DiagramComposerDraft } from './useDiagramComments';
+import { getCommentCardEnabled } from '../../utils/commentCardPolicy';
+import { Icon } from '../inbox-thread/icons';
+import { CommentDraftScopeContext } from '../../utils/commentDraftScope';
+
+// The comment card (opt-in): the words typed on a part outlive a close, one draft per part of one document (the
+// Viewer's draft scope, the part's id and ends, and the diagram's line), as the text box's draft store keeps them.
+// The bin, a Comment that went, and a question Ask AI took drop them.
+const cardDrafts = new Map<string, string>();
 
 /**
  * The inline composer beside the ring: the part's label as the context
@@ -58,7 +66,18 @@ export function DiagramComposer({
    * Absent: no Ask AI button. */
   onAskAI?: (question: string) => Promise<boolean>;
 }) {
-  const [text, setText] = useState('');
+  // The comment card (opt-in, `configurePlannotatorUI({ commentCard })`): read once, so a box never changes look open.
+  const [card] = useState(getCommentCardEnabled);
+  const scope = useContext(CommentDraftScopeContext);
+  const part = draft.primary.target;
+  const cardKey = [scope, draft.sourceLine?.[0] ?? '', part.id ?? '', part.from ?? '', part.to ?? '', part.kind ?? '', diagramTargetText(part)].join('\u0000');
+  const [text, setTextState] = useState(() => (card ? cardDrafts.get(cardKey) ?? '' : ''));
+  const setText = (value: string) => {
+    setTextState(value);
+    if (!card) return;
+    if (value.trim() !== '') cardDrafts.set(cardKey, value);
+    else cardDrafts.delete(cardKey);
+  };
   const [asking, setAsking] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   useEffect(() => {
@@ -102,6 +121,7 @@ export function DiagramComposer({
       setAsking(false);
     }
     if (!accepted) setRefocus((n) => n + 1);
+    else if (card) cardDrafts.delete(cardKey);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -118,9 +138,90 @@ export function DiagramComposer({
     // the IME guard Safari needs (keyCode 229) and keeps Shift+Enter a newline.
     if (isCommentSubmitKey(event, true)) {
       event.preventDefault();
-      if (canWrite && !asking && text.trim() !== '') onSubmit(text);
+      if (canWrite && !asking && text.trim() !== '') submit();
     }
   };
+  // A Comment drops the draft only once it went (the host unmounts the box with no error); a refused save keeps the
+  // words, so the chevron still keeps them.
+  const sent = useRef(false);
+  const submit = () => {
+    if (card) sent.current = true;
+    onSubmit(text);
+  };
+  useEffect(() => {
+    if (error !== null) sent.current = false;
+  }, [error]);
+  const keyRef = useRef(cardKey);
+  keyRef.current = cardKey;
+  useEffect(() => () => {
+    if (sent.current) cardDrafts.delete(keyRef.current);
+  }, []);
+
+  if (card && disabledReason === undefined) {
+    // The comment card by the ring: the part it is on, the words, then the row (Ask AI at the left, the bin, and a
+    // solid "Comment" at the right end). The chevron closes it and keeps the words (comment-card.css).
+    const on = diagramTargetText(target);
+    return (
+      <div
+        ref={rootRef}
+        data-diagram-composer=""
+        data-comment-card=""
+        data-in-canvas=""
+        role="dialog"
+        aria-label={`Comment on ${on}`}
+        className="pn-cbox"
+        style={{ left, top, width: COMPOSER_WIDTH_PX }}
+        onPointerDown={(event) => event.stopPropagation()}
+        onPointerUp={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
+        <button type="button" className="pn-cbox-close" onClick={onCancel} aria-label="Close (your words are kept)" title="Close (your words are kept)" data-comment-card-close="">
+          <Icon name="chevD" size={16} />
+        </button>
+        <div className="pn-cbox-quote">
+          On {on} ({diagramTargetName(target)}){draft.sourceLine !== null && ` · line ${draft.sourceLine[0]}`}{draft.additional.length > 0 && ` · +${draft.additional.length} more`}
+        </div>
+        {unsavedPart && <p className="pn-cbox-note">This part is only in your unsaved draft. Save the diagram to comment on it.</p>}
+        <div className="pn-cbox-field">
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="Comment…"
+            rows={1}
+            disabled={submitting || asking}
+            className="pn-cbox-ta pn-cbox-plain"
+          />
+        </div>
+        {error !== null && <p role="alert" className="pn-cbox-note pn-cbox-err">{error}</p>}
+        <div className="pn-cbox-row">
+          {onAskAI !== undefined && (
+            <button type="button" data-diagram-ask-ai="" className="pn-cbox-tool pn-cbox-word" onClick={() => void askAI()} disabled={!canAskAI} title={canAskAI ? 'Ask AI this question' : 'Type a question to ask AI'}>
+              <SparklesIcon className="h-3.5 w-3.5" />
+              Ask AI
+            </button>
+          )}
+          <span className="pn-cbox-mid" />
+          {text !== '' && (
+            <button
+              type="button"
+              className="pn-cbox-tool pn-cbox-bin"
+              onClick={() => { cardDrafts.delete(cardKey); setTextState(''); onCancel(); }}
+              aria-label="Discard this comment"
+              title="Discard this comment"
+              data-comment-card-discard=""
+            >
+              <Icon name="trash" size={15} />
+            </button>
+          )}
+          <button type="button" className="pn-cbox-save" disabled={!canWrite || submitting || asking || text.trim() === ''} onClick={submit} data-comment-card-submit="">
+            Comment
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -182,7 +283,7 @@ export function DiagramComposer({
             <Button type="button" variant="ghost" size="xs" onClick={onCancel}>
               Cancel
             </Button>
-            <Button type="button" size="xs" disabled={!canWrite || submitting || asking || text.trim() === ''} onClick={() => onSubmit(text)}>
+            <Button type="button" size="xs" disabled={!canWrite || submitting || asking || text.trim() === ''} onClick={submit}>
               Comment
             </Button>
           </div>

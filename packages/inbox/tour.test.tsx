@@ -291,14 +291,14 @@ async function select(scope: HTMLElement, phrase: string) {
 
 const popoverBox = () => document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea');
 
-/** Select words, press the toolbar's Comment, keep the suggestion the box opens with, Save. Returns the suggestion. */
+/** Select words, press the toolbar's Comment, keep the suggestion the box opens with, Comment. Returns the suggestion. */
 async function commentOn(scope: HTMLElement, phrase: string): Promise<string> {
   await select(scope, phrase);
   await until(() => document.querySelector('.annotation-toolbar button[aria-label="Comment"], [data-pn-annotation-toolbar-row] button[aria-label="Comment"]') !== null, 'the selection toolbar');
   await click(document.querySelector('.annotation-toolbar button[aria-label="Comment"], [data-pn-annotation-toolbar-row] button[aria-label="Comment"]'));
   await until(() => popoverBox() !== null, 'the composer');
   const suggested = popoverBox()!.value;
-  const save = [...document.querySelectorAll<HTMLButtonElement>('[data-comment-popover] button')].find((x) => x.textContent?.trim() === 'Save');
+  const save = [...document.querySelectorAll<HTMLButtonElement>('[data-comment-popover] button')].find((x) => x.textContent?.trim() === 'Comment');
   await click(save);
   return suggested;
 }
