@@ -14,6 +14,7 @@
 import { inboxAttachmentKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { inboxApi, type AttachmentView, type ProjectFileContent } from '../api';
 import type { InboxFileSource } from '../fileSource';
+import { inboxUrl, machineOf } from '../inboxUrl';
 
 const PREFIX = 'pf:';
 
@@ -83,7 +84,7 @@ export function projectFileState(path: string, content?: ProjectFileContent | nu
 }
 
 function rawUrl(threadId: string, path: string, download = false): string {
-  return `/api/inbox/threads/${encodeURIComponent(threadId)}/files/raw?path=${encodeURIComponent(path)}${download ? '&download=1' : ''}`;
+  return inboxUrl(`/threads/${encodeURIComponent(threadId)}/files/raw`, `path=${encodeURIComponent(path)}${download ? '&download=1' : ''}`, machineOf(threadId));
 }
 
 /**
