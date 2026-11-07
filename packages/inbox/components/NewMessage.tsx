@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { INBOX_HOST_NAMES, type InboxThread } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi, type LiveSession, type LiveSessionsModel } from '../api';
 import { whenTime, tildePath } from '../format';
@@ -43,6 +43,11 @@ export function sessionWords(session: LiveSession): string {
   else if (session.busy === false && session.idle_since) parts.push(`Idle since ${whenTime(session.idle_since)}.`);
   else if (!session.wrote_thread) parts.push(`Seen ${whenTime(session.last_seen_at)}.`);
   return parts.join(' ');
+}
+
+/** What type-ahead in the session picker matches: the host's name, then "started" and the time ("pi started 10:05 am"). */
+function typeaheadLabel(session: LiveSession): string {
+  return `${hostName(session.host)} started ${whenTime(session.started_at)}`.toLowerCase();
 }
 
 export type NewMessageMode = { kind: 'pick' } | { kind: 'none' } | { kind: 'compose'; target: LiveSession } | null;
@@ -118,6 +123,65 @@ export function NewMessagePopover({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const items = useRef<(HTMLButtonElement | null)[]>([]);
+  // The menu keeps one item in the Tab order and moves focus between items itself (APG menu pattern).
+  const [active, setActive] = useState(0);
+  const typed = useRef({ text: '', at: 0 });
+  const picking = mode?.kind === 'pick' && live !== null;
+  // Opened, focus goes into the menu, on the first item (the thread's own writers are first).
+  useEffect(() => {
+    if (!picking) return;
+    setActive(0);
+    typed.current = { text: '', at: 0 };
+    items.current[0]?.focus();
+  }, [picking]);
+  const focusItem = (index: number) => {
+    const el = items.current[index];
+    if (!el) return;
+    setActive(index);
+    el.focus();
+  };
+  /** Up / Down (wrapping), Home / End and type-ahead on the host and start time, inside the open menu. */
+  const onMenuKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!live) return;
+    const count = live.sessions.length;
+    if (count === 0) return;
+    const at = Math.max(0, items.current.findIndex((el) => el === document.activeElement));
+    if (event.key === 'Escape') {
+      // One layer: the menu closes, focus goes back to New message, and the key stops here.
+      event.preventDefault();
+      event.stopPropagation();
+      const opener = ref.current?.closest('section')?.querySelector<HTMLElement>('[data-new-message]');
+      onClose();
+      opener?.focus();
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    let next: number | null = null;
+    if (event.key === 'ArrowDown') next = (at + 1) % count;
+    else if (event.key === 'ArrowUp') next = (at - 1 + count) % count;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = count - 1;
+    else if (event.key.length === 1 && event.key.trim() !== '') {
+      const now = Date.now();
+      const key = event.key.toLowerCase();
+      const text = now - typed.current.at > 500 ? key : typed.current.text + key;
+      typed.current = { text, at: now };
+      // The same letter pressed again cycles through the items it starts; more letters narrow from the current item.
+      const query = [...text].every((c) => c === key) ? key : text;
+      const from = query === text && text.length > 1 ? at : at + 1;
+      for (let step = 0; step < count; step += 1) {
+        const index = (from + step) % count;
+        if (typeaheadLabel(live.sessions[index]!).startsWith(query)) {
+          next = index;
+          break;
+        }
+      }
+      if (next === null) return;
+    } else return;
+    event.preventDefault();
+    focusItem(next);
+  };
   useEffect(() => {
     if (mode?.kind !== 'pick' && mode?.kind !== 'none') return;
     const onKey = (event: KeyboardEvent) => {
@@ -136,16 +200,30 @@ export function NewMessagePopover({
   }, [mode, onClose]);
 
   if (mode?.kind === 'pick' && live) {
+    // A refresh can take sessions away: the Tab stop stays on an item that is still there.
+    const current = Math.min(active, live.sessions.length - 1);
     return (
-      <div className="ib-menu ib-nmpop" ref={ref} role="menu" aria-label={pickerHeading(live.sessions, thread.project.name)} data-session-picker="">
-        <div className="ib-mh">{pickerHeading(live.sessions, thread.project.name)}</div>
+      <div
+        className="ib-menu ib-nmpop"
+        ref={ref}
+        role="menu"
+        aria-label={pickerHeading(live.sessions, thread.project.name)}
+        data-session-picker=""
+        onKeyDown={onMenuKey}
+      >
+        <div className="ib-mh" aria-hidden="true">{pickerHeading(live.sessions, thread.project.name)}</div>
         {live.sessions.map((session, index) => (
           <button
             type="button"
             role="menuitem"
-            className={`ib-mi${index === 0 ? ' ib-on' : ''}`}
+            ref={(el) => {
+              items.current[index] = el;
+            }}
+            tabIndex={index === current ? 0 : -1}
+            className={`ib-mi${index === current ? ' ib-on' : ''}`}
             key={session.session}
             data-session={session.session}
+            onFocus={() => setActive(index)}
             onClick={() => onPick(session)}
           >
             <HostMark host={session.host} />
