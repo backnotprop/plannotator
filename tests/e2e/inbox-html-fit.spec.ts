@@ -12,6 +12,9 @@
  * on Phone size and one tap fits it; the tap is remembered for the
  * file across a reload; a pin placed with the pen on a fitted page lands on
  * the element under the finger; a desktop shows no control and no scale.
+ * The icon gets out of the way (addendum 17:53Z): shown when the page opens,
+ * faded after about 3 seconds, and faded a tap at its corner reaches the page;
+ * a scroll back up in the page brings it back, and it fades again.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-html-fit.spec.ts`.
@@ -89,6 +92,13 @@ async function withBrowser(engine: 'webkit' | 'chromium', device: Record<string,
 const frameBox = (page: Page) => page.locator('.ib-htmlframe');
 const frame = (page: Page) => page.frameLocator('.ib-htmlframe iframe');
 const toggle = (page: Page) => page.locator('[data-page-size-toggle]');
+const corner = (page: Page) => page.locator('[data-page-size-corner]');
+
+/** The icon fades after about 3 seconds (sizeIconFade.ts): a tap near the page's top left brings it back first. */
+async function iconShown(page: Page) {
+  if (await corner(page).getAttribute('data-faded') !== null) await page.touchscreen.tap(24, 24);
+  await expect(corner(page)).not.toHaveAttribute('data-faded', /.*/);
+}
 
 async function open(w: World, page: Page, name: string, ready: string) {
   await page.goto(`${w.url}#thread=${w.thread}&file=${w.ids[name]}`);
@@ -123,6 +133,7 @@ for (const phone of [
       expect(target.w).toBeGreaterThanOrEqual(44);
       expect(target.h).toBeGreaterThanOrEqual(44);
 
+      await iconShown(page);
       await toggle(page).tap();
       await expect(frameBox(page)).toHaveAttribute('data-page-size', 'phone');
       await expect(toggle(page)).toHaveAttribute('aria-label', 'Desktop size');
@@ -138,9 +149,36 @@ for (const phone of [
       await open(w, page, 'fluid.html', '#title');
       await page.waitForTimeout(600);
       await expect(frameBox(page)).toHaveAttribute('data-page-size', 'phone');
+      await iconShown(page);
       await toggle(page).tap();
       await expect(frameBox(page)).toHaveAttribute('data-page-size', 'desktop');
       await expect.poll(() => frame(page).locator('body').evaluate(() => document.documentElement.clientWidth)).toBe(1280);
+    });
+  });
+
+  test(`${phone.name}: the icon fades after about 3 seconds and takes no taps; a scroll back up brings it back`, async () => {
+    await withBrowser(phone.engine, phone.device, async (w, page) => {
+      await open(w, page, 'wide.html', '#k0');
+      await expect(corner(page)).not.toHaveAttribute('data-faded', /.*/);
+      const icon = (await toggle(page).boundingBox())!;
+      const hit = () => page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('[data-page-size-toggle], iframe')?.tagName ?? null, { x: icon.x + icon.width / 2, y: icon.y + icon.height / 2 });
+      expect(await hit()).toBe('BUTTON');
+      await expect(corner(page)).toHaveAttribute('data-faded', '', { timeout: 6000 });
+      await expect.poll(() => toggle(page).evaluate((el) => Number(getComputedStyle(el).opacity))).toBe(0);
+      // Faded: a tap there lands on the page. Its name stays for a screen reader.
+      expect(await hit()).toBe('IFRAME');
+      await expect(toggle(page)).toHaveAttribute('aria-label', 'Phone size');
+      // Down the page, then back up: the icon comes back, then fades again.
+      await frame(page).locator('body').evaluate(() => {
+        document.body.style.minHeight = '4000px';
+        window.scrollTo(0, 1200);
+      });
+      await page.waitForTimeout(300);
+      await expect(corner(page)).toHaveAttribute('data-faded', '');
+      await frame(page).locator('body').evaluate(() => window.scrollTo(0, 600));
+      await expect(corner(page)).not.toHaveAttribute('data-faded', /.*/);
+      expect(await hit()).toBe('BUTTON');
+      await expect(corner(page)).toHaveAttribute('data-faded', '', { timeout: 6000 });
     });
   });
 

@@ -480,6 +480,47 @@ export const BRIDGE_SCRIPT = `(function() {
   window.addEventListener('load', postContentWidth);
   window.addEventListener('resize', postContentWidth, { passive: true });
 
+  // The person scrolling back up, and a tap: a host with a control that fades
+  // over the page (the Inbox's size icon on a phone) shows it again on either.
+  // The page or any scroller in it, at least 16 px up in one go, at most every
+  // 200 ms. A tap is a press and a lift close together, posted with where it
+  // landed (the page's own pixels). A host that does not listen ignores both.
+  var scrollTops = typeof WeakMap === 'function' ? new WeakMap() : null;
+  var scrollUpRun = 0;
+  var lastScrollUpPost = 0;
+  function noteScrollForHost(e) {
+    if (LIVE || !scrollTops) return;
+    var t = e.target;
+    var el = t && t.nodeType === 1 ? t : (document.scrollingElement || document.documentElement);
+    if (!el) return;
+    var top = el.scrollTop || 0;
+    var prev = scrollTops.get(el);
+    scrollTops.set(el, top);
+    if (prev === undefined) return;
+    if (top >= prev) { scrollUpRun = 0; return; }
+    scrollUpRun += prev - top;
+    var now = Date.now();
+    if (scrollUpRun < 16 || now - lastScrollUpPost < 200) return;
+    scrollUpRun = 0;
+    lastScrollUpPost = now;
+    postToParent({ type: PREFIX + 'page-scroll-up' });
+  }
+  var tapStart = null;
+  function noteTapStart(e) {
+    tapStart = e.isPrimary === false ? null : { x: e.clientX, y: e.clientY, t: Date.now() };
+  }
+  function noteTapEnd(e) {
+    var s = tapStart;
+    tapStart = null;
+    if (LIVE || !s || !e) return;
+    if (Math.abs(e.clientX - s.x) > 10 || Math.abs(e.clientY - s.y) > 10 || Date.now() - s.t > 600) return;
+    postToParent({ type: PREFIX + 'page-tap', y: Math.round(e.clientY) });
+  }
+  window.addEventListener('scroll', noteScrollForHost, { passive: true, capture: true });
+  window.addEventListener('pointerdown', noteTapStart, { passive: true, capture: true });
+  window.addEventListener('pointercancel', function() { tapStart = null; }, { passive: true, capture: true });
+  window.addEventListener('pointerup', noteTapEnd, { passive: true, capture: true });
+
   // --- Selection ---
   var pendingSelection = null;
   var pendingRange = null; // live range for the pending selection (scroll tracking)

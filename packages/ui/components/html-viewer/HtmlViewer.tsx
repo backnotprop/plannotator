@@ -403,6 +403,19 @@ export interface HtmlViewerProps {
    */
   onContentWidth?: (report: HtmlContentWidth) => void;
   /**
+   * Opt-in: the person scrolled the page (or a scroller in it) back up, at
+   * least a little, reported by the bridge. For a host control that fades over
+   * the page and comes back on a scroll up. Absent → ignored.
+   */
+  onPageScrollUp?: () => void;
+  /**
+   * Opt-in: a tap on the page (a press and a lift close together), with where
+   * it landed as a `clientY` in this window (through `frameScale`). For a host
+   * control that comes back on a tap near it. The tap still reaches the page.
+   * Absent → ignored.
+   */
+  onPageTap?: (clientY: number) => void;
+  /**
    * Opt-in: on a touch screen (`pointer: coarse`), a text selection made with
    * a finger counts, read from `selectionchange` once it rests (a long press
    * sends no mouseup). The Inbox's phone layout turns it on. Absent → only a
@@ -516,6 +529,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onHostDraft,
       frameScale,
       onContentWidth,
+      onPageScrollUp,
+      onPageTap,
       touchSelection = false,
       hostNavigates = false,
       sandbox = HTML_VIEWER_SANDBOX,
@@ -814,6 +829,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onHostDraft: readOnly ? undefined : onHostDraft,
       frameScale,
       onContentWidth,
+      onPageScrollUp,
+      onPageTap,
     });
     createdIdsRef.current = hook.createdAnnotationIds;
 

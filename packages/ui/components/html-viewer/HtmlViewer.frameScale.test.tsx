@@ -13,7 +13,9 @@
  * `clearBottom` reaches the bridge in page pixels; with no scale (every other
  * host) the numbers are exactly as before. `onContentWidth` gets the bridge's
  * report, also on a read-only page, and a forged or out-of-range report never
- * reaches it.
+ * reaches it. `onPageTap` gets where a tap landed on screen (through the
+ * scale) and `onPageScrollUp` a scroll back up, on a read-only page too; a
+ * forged tap does not reach it.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { createRef } from 'react';
@@ -37,7 +39,15 @@ afterEach(async () => {
 /** Where the frame sits on screen (happy-dom lays nothing out). */
 const FRAME = { left: 10, top: 50 };
 
-async function mount(props: { frameScale?: number; readOnly?: boolean; onContentWidth?: (r: { width: number; viewport: number }) => void } = {}) {
+async function mount(
+  props: {
+    frameScale?: number;
+    readOnly?: boolean;
+    onContentWidth?: (r: { width: number; viewport: number }) => void;
+    onPageTap?: (clientY: number) => void;
+    onPageScrollUp?: () => void;
+  } = {},
+) {
   if (!htmlViewerModule) throw new Error('DOM test environment is not registered');
   const HtmlViewer = htmlViewerModule.HtmlViewer;
   const host = document.createElement('div');
@@ -153,5 +163,20 @@ describe.if(hasDom)('the page width report', () => {
       window.dispatchEvent(new MessageEvent('message', { source: window, data: { type: 'plannotator-bridge-content-width', width: 1180, viewport: 390 } }));
     });
     expect(reports).toEqual([]);
+  });
+});
+
+describe.if(hasDom)('a tap and a scroll up on the page', () => {
+  test('a tap reaches onPageTap where it is drawn on screen, also on a read-only page; a forged one does not', async () => {
+    const taps: number[] = [];
+    let ups = 0;
+    const { post } = await mount({ readOnly: true, frameScale: 0.5, onPageTap: (y) => taps.push(y), onPageScrollUp: () => ups++ });
+    // 60 page px down, at half size: 30 px under the frame's top.
+    await post({ type: 'plannotator-bridge-page-tap', y: 60 });
+    await post({ type: 'plannotator-bridge-page-tap', y: '60' });
+    await post({ type: 'plannotator-bridge-page-tap', y: Number.NaN });
+    await post({ type: 'plannotator-bridge-page-scroll-up' });
+    expect(taps).toEqual([FRAME.top + 30]);
+    expect(ups).toBe(1);
   });
 });

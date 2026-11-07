@@ -1996,10 +1996,15 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
    owner's pick: "Just the icon no words"), a phone at Phone size, a laptop at Desktop size. It floats like the other
    tools and gathers with them. Desktop size lays the page out at a laptop's width and scales it to the phone's; pinch
    zoom then zooms the window, and the page redraws sharp at the new zoom. */
-.ib-sizecorner { position: absolute; top: calc(8px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right)); z-index: 4; }
+.ib-sizecorner { position: absolute; top: calc(8px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right)); z-index: 4; pointer-events: none; }
 .ib-sizebtn { position: relative; display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid color-mix(in oklch, var(--border) 80%, transparent); border-radius: 10px; background: color-mix(in oklch, var(--popover) 90%, transparent); color: color-mix(in oklch, var(--popover-foreground) 82%, transparent); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.18); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); cursor: pointer; -webkit-tap-highlight-color: transparent; }
 :root.light .ib-sizebtn { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10), 0 1px 2px rgba(0, 0, 0, 0.08); }
 .ib-sizebtn:active { background: var(--muted); }
+/* It gets out of the way (sizeIconFade.ts): faded after about 3 seconds, and faded it takes no taps, so they reach the
+   page. It stays in the accessibility tree; keyboard focus holds it shown. Back quickly, away slowly. */
+.ib-sizebtn { pointer-events: auto; transition: opacity 160ms ease-out; }
+.ib-sizecorner[data-faded] .ib-sizebtn { opacity: 0; pointer-events: none; transition: opacity 400ms ease; }
+@media (prefers-reduced-motion: reduce) { .ib-sizebtn, .ib-sizecorner[data-faded] .ib-sizebtn { transition: none; } }
 .ib-sizebtn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 /* 44 px to press, the button drawn at 34. */
 .ib-sizebtn::after { content: ''; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }

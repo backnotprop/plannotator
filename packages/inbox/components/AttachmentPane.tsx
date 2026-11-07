@@ -90,6 +90,7 @@ import { Tip } from './Tip';
 import { CopyFileButton } from './CopyFileButton';
 import { LinkedMarkdown } from './LinkedMarkdown';
 import { PAGE_DESKTOP_WIDTH, desktopFitScale, pageIsWide, readPageSize, shownPageSize, writePageSize, type PageSize } from '../pageSize';
+import { tapNearSizeIcon, useSizeIconFade } from '../sizeIconFade';
 
 /**
  * The pane width below which the 300 px comments panel beside the thread
@@ -367,6 +368,14 @@ interface FileMemory {
 
 const NO_ANNOTATIONS: Annotation[] = [];
 const noop = () => {};
+/** Focus that shows its ring (the keyboard's), not a finger's press. Where `:focus-visible` is unknown, counted as shown. */
+const focusVisible = (el: Element) => {
+  try {
+    return el.matches(':focus-visible');
+  } catch {
+    return true;
+  }
+};
 
 const recordKey = (path: string, version: string) => (version === 'current' ? path : `${path}#${version.slice(0, 12)}`);
 
@@ -1657,6 +1666,18 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     setPickedNow({ file: attachment.path, size: next });
     announce(next === 'desktop' ? 'Desktop size: the page is laid out at laptop width and fitted to the screen.' : 'Phone size: the page is laid out at the phone\'s width.');
   };
+  // The icon gets out of the way (sizeIconFade.ts): shown when the page opens, faded after about 3 seconds, back on a
+  // scroll up or a tap near the top. Faded, it takes no taps, so they reach the page.
+  const sizeIconOn = phoneHtml && !linkedTop && !!view && view.html !== null;
+  const sizeIcon = useSizeIconFade(sizeIconOn, pageKey);
+  const sizeBtnRef = useRef<HTMLButtonElement | null>(null);
+  const onPageTap = useCallback(
+    (clientY: number) => {
+      const bottom = sizeBtnRef.current?.getBoundingClientRect().bottom ?? 0;
+      if (tapNearSizeIcon(clientY, bottom)) sizeIcon.wake();
+    },
+    [sizeIcon.wake],
+  );
   // It opens clear, like Markdown: the reply is the pill in the toolbar's row, whatever the last file left open.
   useLayoutEffect(() => {
     if (phoneHtml && threadId) forgetComposerOpened(threadId);
@@ -2148,6 +2169,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               // Desktop size scales the page down: what the page measures converts through it.
               frameScale={fitted ? fitScale : undefined}
               onContentWidth={phoneHtml ? onContentWidth : undefined}
+              onPageScrollUp={phoneHtml ? sizeIcon.wake : undefined}
+              onPageTap={phoneHtml ? onPageTap : undefined}
               rawHtml={view.html}
               // Its own document, served under its own policy: web pictures load in the page, never in the window.
               frameUrl={source.pageFrameUrl}
@@ -2188,11 +2211,18 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           {view && isHtml && view.html !== null && phoneHtml && !linkedTop && (
             // One size control (pageSize.ts; the owner's pick, 2026-11-07: "Just the icon no words"): a small icon in
             // the page's top right corner showing the size the page is at. Its name says what a press does.
-            <div className="ib-sizecorner" data-page-size-corner="">
+            <div className="ib-sizecorner" data-page-size-corner="" data-faded={sizeIcon.shown ? undefined : ''}>
               <button
+                ref={sizeBtnRef}
                 type="button"
                 className="ib-sizebtn"
-                onClick={togglePageSize}
+                onClick={() => {
+                  togglePageSize();
+                  sizeIcon.wake();
+                }}
+                // Keyboard focus holds it shown; a finger's press does not (a tapped button may keep focus).
+                onFocus={(e) => sizeIcon.hold(focusVisible(e.currentTarget))}
+                onBlur={() => sizeIcon.hold(false)}
                 aria-label={pageSize === 'desktop' ? 'Phone size' : 'Desktop size'}
                 title={pageSize === 'desktop' ? 'Phone size' : 'Desktop size'}
                 data-page-size-toggle={pageSize}

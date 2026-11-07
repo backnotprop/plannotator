@@ -164,6 +164,8 @@ type BridgeMessage =
   | { type: `${typeof PREFIX}unanchored`; ids: string[] }
   | { type: `${typeof PREFIX}resize`; height: number }
   | { type: `${typeof PREFIX}content-width`; width: number; viewport: number }
+  | { type: `${typeof PREFIX}page-scroll-up` }
+  | { type: `${typeof PREFIX}page-tap`; y: number }
   | { type: `${typeof PREFIX}page-change`; pageUrl: string }
   | { type: `${typeof PREFIX}link-click`; href: string };
 
@@ -254,6 +256,13 @@ export interface UseHtmlAnnotationOptions {
    *  `content-width`, in the page's own pixels), each time either changes.
    *  Delivered in readOnly mode too. Absent: ignored. */
   onContentWidth?: (report: HtmlContentWidth) => void;
+  /** The person scrolled the page (or a scroller in it) back up. Delivered in
+   *  readOnly mode too. Absent: ignored. */
+  onPageScrollUp?: () => void;
+  /** A tap on the page, with where it landed as a `clientY` in the parent
+   *  (converted through `frameScale`). Delivered in readOnly mode too.
+   *  Absent: ignored. */
+  onPageTap?: (clientY: number) => void;
 }
 
 /** The page's laid-out width and the frame's own width, in the page's pixels. */
@@ -513,6 +522,12 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
       const fits = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1_000_000;
       return fits(width) && fits(viewport) ? { type: value.type, width, viewport } : null;
     }
+    case `${PREFIX}page-scroll-up`:
+      return { type: value.type };
+    case `${PREFIX}page-tap`:
+      return typeof value.y === "number" && Number.isFinite(value.y) && Math.abs(value.y) <= 1_000_000
+        ? { type: value.type, y: value.y }
+        : null;
     case `${PREFIX}link-click`: {
       // The raw href of a link the framed document just swallowed. It is
       // page-controlled text, so it is bounded and screened here — the trust
@@ -560,6 +575,8 @@ export function useHtmlAnnotation({
   onHostDraft,
   frameScale,
   onContentWidth,
+  onPageScrollUp,
+  onPageTap,
 }: UseHtmlAnnotationOptions): Omit<
   UseAnnotationHighlighterReturn,
   "highlighterRef" | "highlightRange" | "highlightMathElement"
@@ -653,6 +670,10 @@ export function useHtmlAnnotation({
   frameScaleRef.current = resolveFrameScale(frameScale);
   const onContentWidthRef = useRef(onContentWidth);
   onContentWidthRef.current = onContentWidth;
+  const onPageScrollUpRef = useRef(onPageScrollUp);
+  onPageScrollUpRef.current = onPageScrollUp;
+  const onPageTapRef = useRef(onPageTap);
+  onPageTapRef.current = onPageTap;
   onHostDraftRef.current = onHostDraft;
   // The id of the draft the host holds, so a stale cancel cannot drop a newer one.
   const hostDraftIdRef = useRef<string | null>(null);
@@ -774,6 +795,9 @@ export function useHtmlAnnotation({
         && type !== `${PREFIX}unanchored`
         && type !== `${PREFIX}resize`
         && type !== `${PREFIX}content-width`
+        // Scrolling and tapping are reading, reported for a host's own controls.
+        && type !== `${PREFIX}page-scroll-up`
+        && type !== `${PREFIX}page-tap`
         // Page identity is navigation state, not an annotation mutation.
         && type !== `${PREFIX}page-change`
         // Following a link is a read action; a read-only document still navigates.
@@ -1037,6 +1061,15 @@ export function useHtmlAnnotation({
 
       if (type === `${PREFIX}content-width`) {
         onContentWidthRef.current?.({ width: message.width, viewport: message.viewport });
+      }
+
+      if (type === `${PREFIX}page-scroll-up`) {
+        onPageScrollUpRef.current?.();
+      }
+
+      if (type === `${PREFIX}page-tap`) {
+        const top = iframeRef.current?.getBoundingClientRect().top ?? 0;
+        onPageTapRef.current?.(top + message.y * frameScaleRef.current);
       }
 
       if (type === `${PREFIX}page-change`) {

@@ -14,15 +14,21 @@
  * left even when the page is wide; the remembered choice is per file; the
  * scale reaches the viewer, so the pen's coordinates convert (the math is
  * HtmlViewer.frameScale.test.tsx's); a desktop draws no control and no scale.
+ * The icon gets out of the way (addendum 17:53Z, sizeIconFade.ts): shown when
+ * the page opens, faded after about 3 seconds, back on a scroll up or a tap
+ * near the top (not one lower down), held by keyboard focus; faded, it takes
+ * no taps (inbox.css's own rules, applied here), and its name stays.
  * The real layout and a real tap are tests/e2e/inbox-html-fit.spec.ts.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
-import { afterEach, beforeAll, expect, test } from 'bun:test';
+import { afterEach, beforeAll, expect, jest, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { PAGE_SIZE_KEY } from './pageSize';
+import { SIZE_ICON_SHOW_MS } from './sizeIconFade';
 
 const hasDom = typeof document !== 'undefined';
 const { AttachmentPane } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');
@@ -36,8 +42,12 @@ beforeAll(() => {
   if (hasDom) (window as unknown as { happyDOM: { setURL: (url: string) => void } }).happyDOM.setURL('http://localhost:4000/');
 });
 
+let fakeTimers = false;
+
 afterEach(() => {
   unmount();
+  if (fakeTimers) jest.useRealTimers();
+  fakeTimers = false;
   globalThis.fetch = realFetch;
   if (hasDom) {
     window.localStorage.removeItem(PAGE_SIZE_KEY);
@@ -102,7 +112,21 @@ function phoneWidth(width = 390) {
 
 async function settle(ms = 60) {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, ms));
+    if (!fakeTimers) {
+      await new Promise((resolve) => setTimeout(resolve, ms));
+      return;
+    }
+    // Fake timers: the view's fetch settles on microtasks; the clock moves only as told.
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    jest.advanceTimersByTime(ms);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+  });
+}
+
+/** The clock moves `ms`, and React draws what changed. */
+function elapse(ms: number) {
+  act(() => {
+    jest.advanceTimersByTime(ms);
   });
 }
 
@@ -159,6 +183,94 @@ async function reportWidth(width: number, viewport = 390) {
 async function press() {
   await act(async () => toggle()!.click());
 }
+
+/** The page's bridge: the person scrolled back up, or tapped at `y` (the page's own pixels; unscaled here). */
+async function fromPage(data: Record<string, unknown>) {
+  const iframe = frameBox().querySelector('iframe')!;
+  await act(async () => {
+    window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow, data }));
+  });
+}
+
+const faded = () => corner()!.hasAttribute('data-faded');
+
+/** inbox.css's own rules for the corner and its icon (single-line rules, outside media queries), so taps are real CSS. */
+function sizeIconCss() {
+  const css = readFileSync(new URL('./inbox.css', import.meta.url), 'utf8');
+  const rules = css.split('\n').filter((line) => /^\.ib-size(corner|btn)\b/.test(line));
+  const style = document.createElement('style');
+  style.textContent = rules.join('\n');
+  document.head.appendChild(style);
+  return style;
+}
+
+/** Whether a tap at the icon would land on it: its own pointer-events, as the cascade computes them. */
+const takesTaps = () => getComputedStyle(toggle()!).pointerEvents !== 'none';
+
+test.if(hasDom)('the icon shows when the page opens, fades after about 3 seconds without catching taps, and a scroll up brings it back', async () => {
+  const style = sizeIconCss();
+  try {
+    jest.useFakeTimers();
+    fakeTimers = true;
+    await render(dashboard);
+    await reportWidth(1180);
+    expect(faded()).toBe(false);
+    expect(takesTaps()).toBe(true);
+    // The corner itself never catches a tap: only the drawn icon does.
+    expect(getComputedStyle(corner()!).pointerEvents).toBe('none');
+
+    elapse(SIZE_ICON_SHOW_MS - 200);
+    expect(faded()).toBe(false);
+    elapse(200);
+    expect(faded()).toBe(true);
+    // Faded: a tap there reaches the page. Still in the tree, under the same name.
+    expect(takesTaps()).toBe(false);
+    expect(name()).toBe('Phone size');
+
+    await fromPage({ type: 'plannotator-bridge-page-scroll-up' });
+    expect(faded()).toBe(false);
+    expect(takesTaps()).toBe(true);
+    elapse(SIZE_ICON_SHOW_MS);
+    expect(faded()).toBe(true);
+  } finally {
+    style.remove();
+  }
+});
+
+test.if(hasDom)('a tap near the top of the page brings the icon back, a tap lower down does not, and a press starts the 3 seconds over', async () => {
+  jest.useFakeTimers();
+  fakeTimers = true;
+  await render(dashboard);
+  await reportWidth(390);
+  elapse(SIZE_ICON_SHOW_MS);
+  expect(faded()).toBe(true);
+
+  await fromPage({ type: 'plannotator-bridge-page-tap', y: 400 });
+  expect(faded()).toBe(true);
+  await fromPage({ type: 'plannotator-bridge-page-tap', y: 20 });
+  expect(faded()).toBe(false);
+
+  elapse(SIZE_ICON_SHOW_MS - 500);
+  await press();
+  expect(frameBox().dataset.pageSize).toBe('desktop');
+  elapse(SIZE_ICON_SHOW_MS - 200);
+  expect(faded()).toBe(false);
+  elapse(200);
+  expect(faded()).toBe(true);
+});
+
+test.if(hasDom)('keyboard focus on the icon holds it shown; leaving lets it fade', async () => {
+  jest.useFakeTimers();
+  fakeTimers = true;
+  await render(dashboard);
+  await reportWidth(390);
+  act(() => toggle()!.focus());
+  elapse(SIZE_ICON_SHOW_MS * 3);
+  expect(faded()).toBe(false);
+  act(() => toggle()!.blur());
+  elapse(SIZE_ICON_SHOW_MS);
+  expect(faded()).toBe(true);
+});
 
 test.if(hasDom)('a page that fits opens on Phone size; the control is one icon with no words, outside the scaled page', async () => {
   await render(dashboard);
