@@ -257,7 +257,7 @@ import { createInboxPullStates, createInboxReviewIndex } from "./inbox-reviews";
 import { readInboxReviewChanges } from "./inbox-review-changes";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
-import { createInboxStepsRoute, inboxStepsStale } from "./inbox-steps";
+import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as stepsListWaitsOnPerson } from "./inbox-steps";
 import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller } from "./inbox-devices";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
@@ -1387,6 +1387,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * A checklist still waits on the person (the row's `steps_waiting`): a waiting step, its session not ended, and
+   * the person has not answered in the thread since the list was last written: no message of theirs and no 👍 Looks
+   * good (`store.personAnsweredSince`, which reads the stored messages, 👍 included).
+   */
+  const inboxStepsWaitOnPerson = (list: Parameters<typeof stepsListWaitsOnPerson>[0], now: number): boolean =>
+    stepsListWaitsOnPerson(list, live, now, (threadId, since) => store.personAnsweredSince(threadId, since));
+  /** A row without `steps_waiting` (a linked machine's: this window never shows that machine's checklists). */
+  const withoutStepsWaiting = (row: InboxListRow): InboxListRow => {
+    if (!("steps_waiting" in row)) return row;
+    const { steps_waiting: _dropped, ...rest } = row;
+    return rest;
+  };
+
+  /**
    * The list model: one row per thread, placed in the approved sections, with
    * the project as a label and an optional filter (`?project=prj_...`), which
    * keeps the sections and drops other projects' rows.
@@ -1408,13 +1422,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Applied after the launch decoration, so a launched row keeps its run word and section under a snooze.
     const now = new Date();
     const byThread = snoozesById();
+    // `steps_waiting` (additive, approval "inbox-checklist-spinners-2026-11-07"): while the Checklist switch is on, a
+    // thread whose checklist has a step waiting on the person; the row's still amber pause (and the Board lane card's,
+    // which reads this flag). Only while the thread still waits: the person has written nothing there since that list
+    // was last written, and its session has not ended (an ended session never updates the list). Off: never.
+    const stepsWaiting = stepsOn() ? new Set(store.allSteps().filter((list) => inboxStepsWaitOnPerson(list, now.getTime())).map((list) => list.thread_id)) : null;
+    const withStepsWaiting = (row: InboxListRow): InboxListRow => (stepsWaiting?.has(row.thread_id) ? { ...row, steps_waiting: true } : row);
     const own = store
       .listRows()
-      .map((row) => withSnooze(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row), byThread, now));
+      .map((row) => withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now));
     // A linked machine never lists an id this store holds (archived and pinned included): its row is dropped, never merged.
     // The same clock over its rows: a machine asleep past a thread's `until` still gives that thread back.
+    // A linked machine's row loses its `steps_waiting`: this window never shows that machine's checklists.
     const rows: InboxListRow[] = merged
-      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => inboxRowAsOf(row, now))]
+      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => inboxRowAsOf(withoutStepsWaiting(row), now))]
       : own;
     // Rows carry the head of a combined project; an id from before the combine (a phone, an API client) means that head.
     const shownProject = projectFilter ? store.canonicalProjectId(projectFilter) : null;

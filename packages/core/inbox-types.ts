@@ -316,6 +316,33 @@ export function isInboxNote(message: {
 }
 
 /**
+ * The person answered in a thread at or after `since` (an ISO time, a checklist's last write): a message of theirs
+ * (the Inbox's own notes read past), or a 👍 Looks good still standing on an agent's message (its `ack.at`). The
+ * checklist's waiting rule (approval "inbox-checklist-spinners-2026-11-07": the amber pause "only while the thread
+ * waits on the person") reads it, on the server (the row's `steps_waiting`) and in the window (the foot's button),
+ * so the two agree. `messages` may be the store's or the wire's (a 👍 rides its agent message on both).
+ */
+export function inboxPersonAnsweredSince(
+  messages: readonly {
+    author: { kind: string };
+    created_at: string;
+    ack?: { at: string } | null;
+    set_aside?: readonly string[] | null;
+    reopened?: readonly string[] | null;
+    ack_of?: string | null;
+    tidy?: InboxTidyMark | null;
+  }[],
+  since: string,
+): boolean {
+  const after = Date.parse(since) || 0;
+  return messages.some(
+    (message) =>
+      (message.author.kind === "person" && !isInboxNote(message) && Date.parse(message.created_at) >= after) ||
+      (message.author.kind === "agent" && message.ack != null && Date.parse(message.ack.at) >= after),
+  );
+}
+
+/**
  * The reply the Inbox writes for the person's Done / Can't do it on an action item
  * (`action_report`, approval "inbox-next-actions"), once its Undo window
  * passed. It is the person's reply for delivery (Sent, the wake, Send now),
@@ -1545,6 +1572,14 @@ export interface InboxListRow extends InboxThreadSummary {
    * since: the row's small clock. Only on the list model, like `snoozed`.
    */
   snooze_back?: string | null;
+  /**
+   * A checklist in this thread has a step waiting on the person (approval
+   * "inbox-checklist-spinners-2026-11-07", the calm row): the row's still
+   * amber pause. Only while the person's Checklist switch is on, and only on
+   * the list model the window and the phone read, never on anything an agent
+   * reads. Absent otherwise, and from an older Inbox.
+   */
+  steps_waiting?: true;
 
   /**
    * Agent messages after the person's last look (a reply of theirs counts as
