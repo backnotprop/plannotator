@@ -8,7 +8,7 @@
  */
 import type { ShapeBoxSelection, ShapeReadAsset } from './boxSelect';
 import type { ComponentType, ReactNode } from 'react';
-import type { ShapeNote, ShapeNoteInput, ShapeRecord, ShapeVersion, ShapeViewId } from '@plannotator/core/shape';
+import type { ShapeCodeTarget, ShapeNote, ShapeNoteInput, ShapeRecord, ShapeVersion, ShapeViewId } from '@plannotator/core/shape';
 
 export type { ShapeBoard, ShapeNote, ShapeNoteInput, ShapeRecord, ShapeRef, ShapeVersion, ShapeViewId } from '@plannotator/core/shape';
 
@@ -56,6 +56,8 @@ export interface ShapeHost {
 
   /** "Bring it up to date": a quiet request to the agent. Absent: no button. */
   refresh?(id: string): Promise<void>;
+  /** The refresh button's words, when a host has its own. Absent: "Bring it up to date". */
+  refreshLabel?: string;
   /** The URL of a file the shape keeps (`files/…`). Absent: the src as written. */
   assetUrl?(id: string, src: string): string;
   /** A file's text, for a file reference and the Code view's whole-file viewer. */
@@ -162,6 +164,12 @@ export interface ShapeSurfaceProps {
   CodeGuide?: ComponentType<ShapeCodeGuideProps>;
   /** The hover card for code tokens in the whole-file viewer. Absent: no hover insights. */
   CodeHoverCard?: ComponentType<ShapeCodeHoverCardProps>;
+  /**
+   * A drawn part with `data-code` was clicked: a host that shows this code itself (code review's diff) takes it and
+   * returns true. False: the Code view, else the board's own viewer opens it (never `review`). Absent: as any code
+   * link (the Code view, `review`, the viewer).
+   */
+  onCode?: (target: ShapeCodeTarget, el: HTMLElement, version?: ShapeVersion | null) => boolean;
   /** The Thread tab's body (an Inbox shape). Absent: no Thread tab. Mark each message `data-shape-message="<id>"`. */
   renderThread?: (options: { flash: string | null }) => ReactNode;
   /**
