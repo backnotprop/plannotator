@@ -8679,6 +8679,11 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rmid > .ib-vline .ib-vhint { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-rmid > .ib-vline .ib-vsp { flex: 1 1 0; min-width: 0; }
 .ib-rmid > .ib-vline .ib-dttime { flex: none; font-variant-numeric: tabular-nums; }
+/* "No skills are installed" for a moment after a press on Skills with none to pick: a quiet line in the middle cell,
+   over the chips on a computer (they step aside, as for voice); a phone draws it after the paperclip and Skills. */
+.ib-rhint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 8px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); animation: ib-rfade-in 120ms ease-out; }
+.ib-rmid > .ib-rhint { align-self: center; }
+.ib-rmid[data-hint] > .ib-rlayer { visibility: hidden; }
 @container ib-rmid (max-width: 470px) { .ib-rmid > .ib-vline .ib-vhint { display: none; } }
 @container ib-rmid (max-width: 110px) { .ib-rmid > .ib-vline .ib-vbars { display: none; } }
 @container ib-rmid (max-width: 180px) { .ib-rmid > .ib-vline b { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); } }
@@ -8722,7 +8727,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 }
 :root[data-ib-keyboard-pin] .ib-rscroll { max-height: max(96px, calc(var(--ib-vvh, 100dvh) * 0.34)); }
 @media (prefers-reduced-motion: reduce) {
-  .pn-inbox .ib-pfoot :is(.ib-rlayer, .ib-rmid > .ib-vline, .ib-rscroll .ib-vnote, .ib-rnote, .ib-rclose, .ib-ricon) { transition: none; animation: none; }
+  .pn-inbox .ib-pfoot :is(.ib-rlayer, .ib-rmid > .ib-vline, .ib-rscroll .ib-vnote, .ib-rnote, .ib-rhint, .ib-rclose, .ib-ricon) { transition: none; animation: none; }
   .pn-inbox .ib-pfoot .ib-rscroll .ib-vnote-leaving { animation: none; display: none; }
   .pn-inbox .ib-rrow .ib-vmic .ib-spin { animation: ib-rfade-in 1ms 150ms backwards; }
 }

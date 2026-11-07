@@ -1293,6 +1293,8 @@ const SHOW_NEW_MESSAGE_BUTTON = false;
 
 /** From this many files the box's row says "7 files" (approval "inbox-reply-box", decision D2: no cap on files). */
 const REPLY_FILES_SUMMARY_FROM = 7;
+/** How long "No skills are installed" stays in the reply box's row after a press on Skills with none to pick. */
+const NO_SKILLS_HINT_MS = 2000;
 
 /** Where a 👍 Looks good is on its way to the agent (amended 2026-10-16: it is sent through). */
 export type AckPillState = 'pending' | 'queued' | 'sending' | 'saved' | 'delivered' | 'not-sent';
@@ -5043,22 +5045,36 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     region.scrollTo({ top: files.offsetTop - region.offsetTop, behavior: reduce ? 'auto' : 'smooth' });
   };
+  /** "No skills are installed" in the row's middle cell for a moment, after a press on Skills with none to pick. */
+  const [noSkillsHint, setNoSkillsHint] = useState(false);
+  const noSkillsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (noSkillsTimer.current) clearTimeout(noSkillsTimer.current);
+  }, []);
   /**
    * Skills (the cube): a real `/` at the caret (after a space when it follows a word), so the field's own skill picker
-   * opens. With no skill to pick here, no `/` (it would open nothing and stay in the words): it says so instead.
+   * opens. With no skill to pick here, no `/` (it would open nothing and stay in the words) and no focus on the field
+   * (a phone's keyboard would come up for nothing): "No skills are installed" shows in the row for about 2 s instead,
+   * and the live region says it.
    */
   const openSkillsFromBox = () => {
     const field = textRef.current;
     if (!field) return;
-    field.focus();
     const slash = () => {
       if (textRef.current !== field) return;
+      field.focus();
       const at = field.selectionStart ?? field.value.length;
       const before = field.value.slice(0, at);
       document.execCommand('insertText', false, at === 0 || /\s$/.test(before) ? '/' : ' /');
     };
+    const none = () => {
+      setNoSkillsHint(true);
+      announce('No skills are installed to pick from.');
+      if (noSkillsTimer.current) clearTimeout(noSkillsTimer.current);
+      noSkillsTimer.current = setTimeout(() => setNoSkillsHint(false), NO_SKILLS_HINT_MS);
+    };
     if (getCachedSkillCatalog().some(skillFilter)) return slash();
-    void fetchSkillCatalog().then((catalog) => (catalog.some(skillFilter) ? slash() : announce('No skills are installed to pick from.')));
+    void fetchSkillCatalog().then((catalog) => (catalog.some(skillFilter) ? slash() : none()));
   };
   // On a phone the Draft line is above the box. Where the foot scrolls in its own box (the keyboard up, the phone
   // on its side), a line coming or going at its top would push the box and its mic down or pull them up: the
@@ -6637,6 +6653,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                 chips={replyChips}
                 summary={<ReplySummary skip={replySkip} dropped={dropped.length} comments={takesAnnotations ? { props: commentsListProps, list: commentsList?.card ? null : commentsList, onList: setCommentsList } : null} />}
                 pill={!phone && pillActive ? rcptPill : null}
+                hint={noSkillsHint ? 'No skills are installed' : null}
                 discard={
                   // While the live-session choice is open it stands in for Send and the bin, as it did for Send's
                   // row, so nothing can close the box under it. After a conflict the bin is "Discard mine": the

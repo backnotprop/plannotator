@@ -30,6 +30,7 @@ export function ReplyRow({
   summary,
   pill,
   discard,
+  hint = null,
   fold,
   onFold,
   fitKey,
@@ -53,6 +54,11 @@ export function ReplyRow({
   pill: ReactNode;
   /** A computer: the bin. */
   discard: ReactNode;
+  /**
+   * A short quiet line for a moment ("No skills are installed"), in the middle cell: over the chips on a computer (they
+   * step aside, as for voice), after the paperclip and Skills on a phone.
+   */
+  hint?: ReactNode;
   fold: boolean;
   onFold: (fold: boolean) => void;
   /** Changes whenever the chips' words do. */
@@ -106,6 +112,11 @@ export function ReplyRow({
             {clip}
             {skills}
             {files}
+            {hint && (
+              <span className="ib-rhint" data-reply-hint="">
+                {hint}
+              </span>
+            )}
           </div>
           {status}
         </div>
@@ -122,7 +133,7 @@ export function ReplyRow({
         {skills}
         {mic}
       </div>
-      <div className="ib-rmid" ref={midRef} data-fold={fold ? '' : undefined}>
+      <div className="ib-rmid" ref={midRef} data-fold={fold ? '' : undefined} data-hint={hint ? '' : undefined}>
         <div
           className="ib-rlayer"
           ref={layerRef}
@@ -135,6 +146,11 @@ export function ReplyRow({
           {fold ? summary : <span className="ib-rchips">{chips}</span>}
           {pill && <span className="ib-rto-cell">{pill}</span>}
         </div>
+        {hint && (
+          <span className="ib-rhint" data-reply-hint="">
+            {hint}
+          </span>
+        )}
         {status}
       </div>
       {discard}

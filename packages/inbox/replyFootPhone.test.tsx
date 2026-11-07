@@ -310,6 +310,57 @@ test.skipIf(!hasDom)('a computer, after a conflict: the bin is "Discard mine": o
   expect(!!el.querySelector('[data-draft-conflict]')).toBe(false);
 });
 
+for (const phone of [false, true]) {
+  test.skipIf(!hasDom)(`${phone ? 'a phone' : 'a computer'}: Skills with no skill to pick says "No skills are installed" in the row for a moment; no "/", and the field (a phone's keyboard) is not focused`, async () => {
+    const catalog = await import('@plannotator/ui/utils/skillCatalog');
+    catalog.resetSkillCatalogCache();
+    catalog.setSkillCatalogTransport(async () => []);
+    try {
+      const el = await open({ questions: false, phone });
+      const field = el.querySelector('.ib-rbox textarea') as HTMLTextAreaElement;
+      act(() => (document.activeElement as HTMLElement | null)?.blur());
+      await press(el.querySelector<HTMLButtonElement>('.ib-rbox [data-reply-skills]'));
+      expect(field.value).toBe('Mostly yes.');
+      expect(document.activeElement === field).toBe(false);
+      expect(el.querySelector('.ib-rbox [data-reply-row] .ib-rmid [data-reply-hint]')?.textContent).toBe('No skills are installed');
+      expect([...el.querySelectorAll('[aria-live]')].map((n) => n.textContent).join(' ')).toContain('No skills are installed to pick from.');
+      await settle(4, 600);
+      expect(!!el.querySelector('[data-reply-hint]')).toBe(false);
+    } finally {
+      catalog.resetSkillCatalogTransport();
+      catalog.resetSkillCatalogCache();
+    }
+  });
+}
+
+test.skipIf(!hasDom)('Skills with a skill to pick types a real "/" at the caret, in the focused field, and says nothing in the row', async () => {
+  const catalog = await import('@plannotator/ui/utils/skillCatalog');
+  catalog.resetSkillCatalogCache();
+  catalog.setSkillCatalogTransport(async () => [{ name: 'release-notes', root: 'claude', humanOnly: false }]);
+  // happy-dom has no editing commands: the browser's insertText, as a field takes it.
+  const saved = document.execCommand;
+  document.execCommand = ((command: string, _ui?: boolean, value?: string) => {
+    const field = document.activeElement as HTMLTextAreaElement;
+    if (command !== 'insertText' || !(field instanceof HTMLTextAreaElement)) return false;
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, field.value + (value ?? ''));
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  }) as typeof document.execCommand;
+  try {
+    const el = await open({ questions: false, phone: false });
+    const field = el.querySelector('.ib-rbox textarea') as HTMLTextAreaElement;
+    act(() => field.setSelectionRange(field.value.length, field.value.length));
+    await press(el.querySelector<HTMLButtonElement>('.ib-rbox [data-reply-skills]'));
+    expect(document.activeElement === field).toBe(true);
+    expect(field.value).toBe('Mostly yes. /');
+    expect(!!el.querySelector('[data-reply-hint]')).toBe(false);
+  } finally {
+    document.execCommand = saved;
+    catalog.resetSkillCatalogTransport();
+    catalog.resetSkillCatalogCache();
+  }
+});
+
 /** The words a failed Send leaves under the box, and its Details. */
 const failure = (el: HTMLElement) => {
   const alert = el.querySelector<HTMLElement>('.ib-pfoot .ib-error[role="alert"]');
