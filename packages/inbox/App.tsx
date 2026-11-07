@@ -103,6 +103,8 @@ import { EmptyThreadPanel } from './components/EmptyThreadPanel';
 import { AgentNoteDialog } from './components/AgentNoteDialog';
 import { FeedbackDialog } from './components/FeedbackDialog';
 import { SystemSetupHost } from './system/SetupHost';
+import { systemShown } from './system/gate';
+import { useSystemProjects } from './system/projects';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { cardReport, noteQuestionRows } from './agents';
 import type { InboxAgentRow, InboxAgentsModel, InboxConnectReport, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
@@ -323,6 +325,14 @@ interface Route {
   /** Reviews' view (`&view=mine|review|others`; absent: All), beside `project`. */
   view?: PullFilter;
   /**
+   * System in Reviews (approval "system-inbox", screens 4a and 4b): the project whose drawing is open in the pane
+   * (`&system=prj_…`), the sheet on screen (`&sheet=C-001`) and the full window (`&full=1`). A stack opened over it
+   * (`&stack=`) closes back to it.
+   */
+  system?: string | null;
+  sheet?: string | null;
+  full?: boolean;
+  /**
    * Shape (approval "shape-inbox-placement"): the board open over its thread (`#thread=…&shape=shp_…`), or over
    * the grid for a board with no thread (`#shapes&shape=shp_…`). The grid alone is `#shapes`.
    */
@@ -405,7 +415,20 @@ function routeOf(fullHash: string): Route {
   if (params.has('reviews') || params.has('pulls')) {
     const stack = params.get('stack') || null;
     const layer = stack ? params.get('layer') || null : null;
-    return { page: 'reviews', project: params.get('project') || null, view: pullFilterOf(params.get('view')), thread: null, stack, layer, scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer', new: params.has('new') };
+    const system = params.get('system') || null;
+    return {
+      page: 'reviews',
+      project: params.get('project') || null,
+      view: pullFilterOf(params.get('view')),
+      thread: null,
+      stack,
+      layer,
+      scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer',
+      new: params.has('new'),
+      system,
+      sheet: system ? params.get('sheet') || null : null,
+      full: system ? params.get('full') === '1' : false,
+    };
   }
   if (params.has('board'))
     return {
@@ -456,6 +479,9 @@ function hashOf(route: Route): string {
       (route.view && route.view !== 'all' ? `&view=${route.view}` : '') +
       (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +
       (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}` : '') +
+      (route.system ? `&system=${encodeURIComponent(route.system)}` : '') +
+      (route.system && route.sheet ? `&sheet=${encodeURIComponent(route.sheet)}` : '') +
+      (route.system && route.full ? '&full=1' : '') +
       (route.new ? '&new' : '');
   else if (route.page === 'tour') hash = `tour=${route.step ?? 1}`;
   else {
@@ -2436,6 +2462,16 @@ function Inbox() {
         pageBackRef.current();
         return;
       }
+      // System's drawing in Reviews (approval "system-inbox", 4b: "Reviews, top left, or Esc goes back"): one layer per
+      // press, the full window, then the drawing. The drawing's own Escape (a card, a sheet inside) runs first and marks
+      // the key used. A PR's pane open over it owns the screen.
+      if (event.key === 'Escape' && routeRef.current.page === 'reviews' && routeRef.current.system && !routeRef.current.stack) {
+        const from = keyTarget(event);
+        if (event.defaultPrevented || isComposingKey(event) || modalOpen() || (from && (isEditableTarget(from) || inOverlay(from) || from.closest('[role="menu"], [role="listbox"]')))) return;
+        const now = routeRef.current;
+        closeTo(now.full ? { ...now, full: false } : { ...now, system: null, sheet: null, full: false });
+        return;
+      }
       // Shape's grid and a board open over it (approval "shape-landing-grid": Esc returns). The board's own Escape
       // (its panel, its draw-in) runs first and marks the key used.
       if (event.key === 'Escape' && routeRef.current.page === 'shapes') {
@@ -4139,6 +4175,19 @@ function Inbox() {
     }
   };
 
+  // System (approval "system-inbox", screen 1): under Code review; every other window hears `event: capabilities`.
+  const toggleSystem = async (next: boolean) => {
+    setSettingsError(null);
+    setSettings((current) => (current ? { ...current, system: { on: next } } : current));
+    try {
+      const saved = await inboxApi.saveSystem(next);
+      setSettings((current) => (current ? { ...current, system: saved.system ?? { on: next } } : current));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      void refreshSettings();
+    }
+  };
+
   const toggleShape = async (next: boolean) => {
     setSettingsError(null);
     setSettings((current) => (current ? { ...current, shape: { on: next } } : current));
@@ -4646,6 +4695,9 @@ function Inbox() {
   const codeReviewOn = settings?.code_review?.on === true;
   const pullsShown = codeReviewOn && !guestPage;
   const pulls = usePulls(route.page === 'reviews' && pullsShown, pullsShown, route.page === 'reviews' && route.view === 'others');
+  // System in Reviews and in Settings (approval "system-inbox"): only while it shows (System on, Code review on).
+  const systemOnHere = systemShown(settings) && !guestPage;
+  const systemProjects = useSystemProjects(systemOnHere && (route.page === 'reviews' || (route.page === 'settings' && route.section === 'capabilities')));
   // A #reviews link on a guest's page (it could not turn Code review on): the Inbox, as if the page were not there.
   useEffect(() => {
     // In place: Back from the Inbox must not land on #reviews and be sent back again.
@@ -5507,6 +5559,8 @@ function Inbox() {
         onToggleSteps={(next) => void toggleSteps(next)}
         onToggleCodeReview={(next) => void toggleCodeReview(next)}
         onToggleShape={(next) => void toggleShape(next)}
+        onToggleSystem={(next) => void toggleSystem(next)}
+        systemProjects={systemProjects.projects}
         agents={agents}
         onAgents={setAgents}
         onPrompts={(prompts) => setSettings((current) => (current ? { ...current, prompts } : current))}
@@ -5701,8 +5755,23 @@ function Inbox() {
         projects={projects}
         projectNames={projectNames}
         phone={phone}
-        onOpenStack={(id) => (id ? writeRoute({ ...route, stack: id, layer: null }, { replace: !!route.stack && !phone }) : close({ ...route, stack: null, layer: null }))}
-        onScope={({ filter, project }) => go({ page: 'reviews', project, view: filter, thread: null, stack: null })}
+        onOpenStack={(id) => (id ? writeRoute({ ...route, stack: id, layer: null, full: false }, { replace: !!route.stack && !phone }) : close({ ...route, stack: null, layer: null }))}
+        onScope={({ filter, project }) => go({ page: 'reviews', project, view: filter, thread: null, stack: null, system: route.system, sheet: route.sheet })}
+        system={
+          systemOnHere
+            ? {
+                projects: systemProjects.projects,
+                open: route.system ?? null,
+                sheet: route.sheet ?? null,
+                full: route.full === true,
+                // Picking a project opens its drawing in place of a PR's pane; the list keeps its filter.
+                onOpen: (project) => (project ? go({ ...route, stack: null, layer: null, system: project, sheet: null, full: false }) : close({ ...route, system: null, sheet: null, full: false })),
+                onSheet: (sheet) => writeRoute({ ...route, sheet }, { replace: true }),
+                onFull: (full) => (full ? go({ ...route, full: true }) : close({ ...route, full: false })),
+                onMenu: systemProjects.reload,
+              }
+            : null
+        }
         onReview={(stack, layer, scope) => go({ ...route, stack, layer, scope })}
         onOpenThread={(threadId) => go({ page: 'inbox', project: null, thread: threadId })}
         onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
