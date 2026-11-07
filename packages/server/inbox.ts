@@ -226,6 +226,7 @@ import {
   revealAgentNoteAgents,
   revealAgentNoteNew,
   revealAhead,
+  revealAsideNow,
   revealHeavyUse,
   revealLastShown,
   revealLineFree,
@@ -240,6 +241,8 @@ import {
   type RevealLoads,
   type RevealState,
 } from "@plannotator/shared/inbox/reveals";
+import { configStarAskStore, createStarAsk, readStarAskRecord, runGh, starAskEnabled, starAskOpen, type StarAskClaim } from "@plannotator/shared/star-ask";
+import { claimInboxStar, inboxStarAction } from "./inbox-star-ask";
 import { createInboxEmbeds } from "./inbox-embeds";
 import { createInboxPages } from "./inbox-pages";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
@@ -2410,10 +2413,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * set its switch). The claim stamps `inboxReveals[id]` with the page's key and turns nothing on; its dialog's "Turn it
    * on" writes the switch. A registered offer (Bro mode, List view) adds its own here, and its id to `INBOX_REVEALS`.
    */
+  /**
+   * The "Star the repo" ask (approval "star-ask"; packages/shared/star-ask.ts): open while no surface showed or answered
+   * it (config.json `starAsk`, shared with plan review, code review and annotate), in a release build. It stands aside
+   * from the line (reveals.ts `aside`): the line gives it its day and a free moment, never a turn; its claim
+   * (`claimStarReveal`, inbox-star-ask.ts) runs the already-starred check before any stamp and stamps nothing of the line.
+   */
+  const starUndecided = () => {
+    if (!starAskEnabled()) return false;
+    const config = loadConfig();
+    return starAskOpen(readStarAskRecord(config), (config as { starAsk?: unknown }).starAsk);
+  };
+  const starAsk = createStarAsk({ store: configStarAskStore, run: runGh, enabled: () => starAskEnabled(), returning: () => true });
   const lineOffers: Partial<Record<RevealId, () => boolean>> = {
     code_review: codeReviewUndecided,
     board: boardUndecided,
     steps: stepsUndecided,
+    star: starUndecided,
     // List view's choice (approval "inbox-list-view-dialog"): the view is each browser's own (packages/inbox/listView.ts),
     // so the Inbox never sees it decided; the page holds it back on Simple list (`holds`, `mayClaim`).
     list_view: () => true,
@@ -2528,6 +2544,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return lineOfferSaved(id)?.shownAt === at;
   };
   /**
+   * The "Star the repo" ask's claim (inbox-star-ask.ts `claimInboxStar`): only while the line is free (checked before
+   * the already-starred check and again after it), then one save stamps `inboxReveals.star` and config.json `starAsk`,
+   * nothing of the line. Starred already: `starAsk.answer` "already", nothing shown. `key`: the same page's retry after
+   * a lost answer is shown it again, while it is still unanswered.
+   */
+  const claimStarReveal = (owner: boolean, key: string | null, load: string | null): Promise<StarAskClaim> =>
+    claimInboxStar(
+      {
+        service: starAsk,
+        release: snoozeIntroRelease,
+        mayClaim: () => {
+          const now = new Date();
+          return revealMayClaim("star", revealState(now, load), now);
+        },
+      },
+      owner,
+      key,
+    );
+  /**
    * The agent note (approval "inbox-one-time-dialogs": setup): never on the load after a dialog, never on a day that had
    * one; it stamps the day, not the spacing. Once for each agent (`agents`, the ones it would ask about): a note left
    * unanswered is not shown again for the same agents, so it never takes another day (`revealAgentNoteNew`). A dev
@@ -2553,6 +2588,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return {
       next,
       ahead: owner && snoozeIntroRelease ? revealAhead(state, now) : [],
+      // The star ask (reveals.ts `aside`): armed beside `next` while the line is free; it moves no one.
+      aside: owner && snoozeIntroRelease ? revealAsideNow(state, now) : [],
       setup: via === "local" && revealLineFree("setup", state, now),
       line: snoozeIntroRelease,
     };
@@ -4609,8 +4646,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           revealNotNow(owner);
           return json({ show: false, reveal: { next: revealNow(owner, load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
         }
+        // The star ask: its claim waits on the already-starred check (gh, up to 3 s) and says how the button works.
+        if (id === "star") {
+          const star = await claimStarReveal(owner, key ?? null, load);
+          return json({ show: star.show, star: { can_star: star.canStar }, reveal: { next: revealNow(owner, load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+        }
         const show = claimReveal(id as RevealId | "agent_note", owner, key ?? null, load, via, agents);
         return json({ show, reveal: { next: revealNow(owner, load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+      }
+
+      // The "Star the repo" ask once shown (packages/shared/star-ask.ts): `action: "star"` stars it with the person's
+      // own gh (their click; only while the claim found gh able to), `action: "answer"` records Not now (and the line's
+      // three-day wait) or the GitHub page opened from the link. The owner's pages only.
+      if (path === "/api/inbox/star-ask") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        return json(await inboxStarAction(starAsk, ownerOrLocal(req, via), body));
       }
 
       // The Board's first-visit dialog (approval "inbox-board", intro amendment): the first page on this

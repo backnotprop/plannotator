@@ -122,7 +122,19 @@ function world(askTurns: unknown[][], options: { gate?: Promise<void>; rawPatch?
   const sidecarPath = join(process.env.PLANNOTATOR_DATA_DIR!, "guides", REPO_KEY, "vscode", `${GUIDE_ID}.json`);
   const about = { kind: "file" as const, chapter: 0, chapterTitle: "The loop", path: "src/deliver.ts", side: "head" as const };
   const ask = (q: string) => (asks as unknown as { ask(g: LoadedGuide, a: typeof about, q: string, o: object): Promise<void> }).ask(guide, about, q, {});
-  return { asks, guide, ask, shown, panels, root, sidecarPath, log: () => (existsSync(logPath) ? readFileSync(logPath, "utf8").trim().split("\n").map((l) => JSON.parse(l)) : []) };
+// The fake agent may be mid-write: a line that isn't whole JSON yet is skipped, and read again on the next poll.
+  const log = () =>
+    existsSync(logPath)
+      ? readFileSync(logPath, "utf8").split("\n").flatMap((l) => {
+          if (!l.trim()) return [];
+          try {
+            return [JSON.parse(l)];
+          } catch {
+            return [];
+          }
+        })
+      : [];
+  return { asks, guide, ask, shown, panels, root, sidecarPath, log };
 }
 
 const answer = (title: string) => ({ mcp: { name: "show_answer", args: { title, html: "<p>ok</p>" } } });
