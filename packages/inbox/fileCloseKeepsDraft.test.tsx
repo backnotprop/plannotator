@@ -21,7 +21,7 @@ import { act, StrictMode, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAnnotationRecord, InboxAttachmentState, InboxMessageWire } from '@plannotator/core/inbox-types';
 import { attachmentSequence, type AttachmentStep } from './stepping';
-import { clearFileDrafts } from './fileCommentDrafts';
+import { clearFileDrafts, fileDraftKey, peekFileDrafts } from './fileCommentDrafts';
 
 const hasDom = typeof document !== 'undefined';
 const { AttachmentPane } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');
@@ -790,4 +790,85 @@ test('a kept line comment goes back where its lines are now, and nowhere when th
   expect(relocateCodeRange(range, '// one\n// two\nconst a = 1;\nconst b = 2;\nconst c = 3;')).toEqual({ lineStart: 4, lineEnd: 5 });
   // The lines changed: no place (the words wait, on nothing).
   expect(relocateCodeRange(range, 'const a = 1;\nconst b = 20;\nconst c = 3;')).toBeNull();
+  // A file cut from 300 lines to 100, the lines moved from 250 up to 80: still found.
+  const before = Array.from({ length: 300 }, (_, i) => `line ${i + 1}`);
+  before[249] = 'const kept = true;';
+  before[250] = 'return kept;';
+  const far = codeRangeOf(codeCommentAnnotation({ id: 'f', lineStart: 250, lineEnd: 251, text: 'x', code: 'const kept = true;\nreturn kept;' }))!;
+  const after = Array.from({ length: 100 }, (_, i) => `other ${i + 1}`);
+  after[79] = 'const kept = true;';
+  after[80] = 'return kept;';
+  expect(relocateCodeRange(far, after.join('\n'))).toEqual({ lineStart: 80, lineEnd: 81 });
+});
+
+// What would regress (N1): a page that never answers the request to pin a kept comment again, its 3 s wait running
+// out after the person stepped to another file, and the words landing in that other file's drafts.
+test.skipIf(!hasDom)('a kept HTML comment the page never answered stays the page\'s when the person steps on', async () => {
+  serve();
+  const steps: { id: string }[] = [];
+  await render(<Pane start={page} steps={steps} />);
+  await pinParagraph();
+  await type(popoverBox()!, 'Only on the page.');
+  await pressNext();
+  expect(openId()).toBe(flow.id);
+  await pressPrev();
+  expect(openId()).toBe(page.id);
+  // The page's bridge is ready and asked to pin it again, and never answers.
+  await waitFor(() => expect(pane().querySelector('iframe')).not.toBeNull());
+  const iframe = pane().querySelector('iframe')!;
+  const posted: Record<string, unknown>[] = [];
+  (iframe.contentWindow as unknown as { postMessage: (data: unknown) => void }).postMessage = (data: unknown) => {
+    if (data && typeof data === 'object') posted.push(data as Record<string, unknown>);
+  };
+  await act(async () => {
+    window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow, data: { type: 'plannotator-bridge-ready', protocolVersion: bridge!.BRIDGE_PROTOCOL_VERSION } }));
+  });
+  await waitFor(() => expect(posted.some((m) => m.type === 'plannotator-bridge-restore-draft')).toBe(true));
+  // On to the diagram before the wait runs out, and past it.
+  await pressNext();
+  expect(openId()).toBe(flow.id);
+  await settle(3300);
+  await pressNext();
+  expect(openId()).toBe(policy.id);
+  expect(peekFileDrafts(fileDraftKey(flow.id, 'current'))).toEqual([]);
+  const kept = peekFileDrafts(fileDraftKey(page.id, 'current'));
+  expect(kept.map((d) => (d.kind === 'comment' ? d.annotation.text : d.kind))).toEqual(['Only on the page.']);
+});
+
+// What would regress (N3): while a put-back comment is awaited, another surface's popover with words taken for the
+// pane's own, then "saved" by the pane's capture as the file closes (its owner would really save it).
+test.skipIf(!hasDom)('a comment being put back never claims another surface\'s popover', async () => {
+  serve();
+  const { CommentPopover } = await import('@plannotator/ui/components/CommentPopover');
+  const elsewhere: string[] = [];
+  const anchor = document.createElement('span');
+  document.body.appendChild(anchor);
+  let closed = 0;
+  await render(
+    <>
+      <CommentPopover anchorEl={anchor} contextText="elsewhere" isGlobal={false} autoFocus={false} onSubmit={(text) => elsewhere.push(text)} onClose={noop} />
+      <Shown>
+        <Pane
+          start={scope}
+          steps={[]}
+          onClose={() => {
+            closed++;
+            showPane(false);
+          }}
+        />
+      </Shown>
+    </>,
+  );
+  const foreign = document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea')!;
+  await type(foreign, 'Words of another surface.');
+  await commentOnPhrase('Partial refunds');
+  const own = [...document.querySelectorAll<HTMLTextAreaElement>('[data-comment-popover] textarea')].find((a) => a !== foreign)!;
+  await type(own, 'Which refunds?');
+  await pressNext();
+  await pressPrev();
+  await waitFor(() => expect([...document.querySelectorAll<HTMLTextAreaElement>('[data-comment-popover] textarea')].some((a) => a !== foreign && a.value === 'Which refunds?')).toBe(true));
+  await act(async () => host!.querySelector<HTMLButtonElement>('[aria-label="Close SCOPE.md"]')!.click());
+  expect(closed).toBe(1);
+  expect(elsewhere).toEqual([]);
+  expect(foreign.value).toBe('Words of another surface.');
 });

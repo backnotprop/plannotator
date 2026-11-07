@@ -374,7 +374,9 @@ export function relocateCodeRange(range: InboxCodeRange, text: string): { lineSt
   const lines = text.split('\n');
   const count = range.lineEnd - range.lineStart + 1;
   const matchesAt = (start: number) => start >= 1 && start + count - 1 <= lines.length && codeRangeMatches(range, lines.slice(start - 1, start - 1 + count).join('\n'));
-  for (let distance = 0; distance < lines.length; distance++) {
+  // Every start, nearest first: a file cut far shorter still finds lines that moved a long way up.
+  const reach = Math.max(range.lineStart, lines.length);
+  for (let distance = 0; distance <= reach; distance++) {
     for (const start of distance === 0 ? [range.lineStart] : [range.lineStart - distance, range.lineStart + distance]) {
       if (matchesAt(start)) return { lineStart: start, lineEnd: start + count - 1 };
     }
@@ -1526,9 +1528,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         return Promise.resolve(true);
       }
       // Written again on what a set-aside draft was on: that draft is spent.
-      if (waiting.current.length > 0) {
+      if (waiting.current.length > 0 || reopening.current.length > 0) {
         const at = anchorKeyOf(annotation);
-        waiting.current = waiting.current.filter((d) => !(d.kind === 'comment' && anchorKeyOf(d.annotation) === at) && !(d.kind === 'edit' && d.id === annotation.id));
+        const spent = (d: FileCommentDraft) => (d.kind === 'comment' && anchorKeyOf(d.annotation) === at) || (d.kind === 'edit' && d.id === annotation.id);
+        waiting.current = waiting.current.filter((d) => !spent(d));
+        reopening.current = reopening.current.filter((entry) => !spent(entry.draft));
       }
       const answer = (async () => {
         try {
@@ -1744,12 +1748,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     if (reopeningWatch.current !== null) cancelAnimationFrame(reopeningWatch.current);
     reopeningWatch.current = null;
   };
-  /** The comment popover's box with words, as a put-back comment shows it (registered as this pane's when seen). */
-  const popoverShown = () => {
-    const area = [...document.querySelectorAll<HTMLTextAreaElement>('[data-comment-popover] textarea')].find((a) => a.value.trim() !== '');
-    if (area) ownBoxes.current.add(area);
-    return area !== undefined;
-  };
+  /**
+   * Whether a put-back comment's box shows: a popover box with words that is the pane's own (it takes focus as it
+   * opens, which reaches the section through React's tree: `claimBox`). Never another surface's popover.
+   */
+  const popoverShown = () =>
+    [...document.querySelectorAll<HTMLTextAreaElement>('[data-comment-popover] textarea')].some((a) => ownsBox(a) && a.value.trim() !== '');
   /** Whether an edit box for the comment `id` shows (the panel's card, or under a code line in Pierre's shadow root). */
   const editShown = (id: string) => {
     const scope = sectionRef.current;
@@ -1865,10 +1869,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     if (!annotation || !view || view.attachment.id !== attachment.id) return;
     reopenNext.current = null;
     const draft: FileCommentDraft = { kind: 'comment', annotation };
+    const key = draftKeyRef.current;
     let missed = false;
     const missing = () => {
-      // Not on the file any more (the file changed): the words still wait, on nothing.
-      if (missed) return;
+      // Not on the file any more (the file changed): the words still wait, on nothing. Told after the pane went or
+      // moved to another file, it is too late: what this file held was kept as it left (`reopening`).
+      if (missed || !mountedRef.current || draftKeyRef.current !== key) return;
       missed = true;
       reopening.current = reopening.current.filter((entry) => entry.draft !== draft);
       waiting.current = [...waiting.current, draft];

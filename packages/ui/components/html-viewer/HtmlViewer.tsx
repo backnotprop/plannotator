@@ -1078,11 +1078,25 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     // A bridge that never answers restore-draft (an older cached asset): after
     // REOPEN_ANSWER_MS the host gets the words back through its onMissing.
     const postReopenRef = useRef<(message: Record<string, unknown>) => void>(() => {});
+    const reopenTimersRef = useRef(new Set<ReturnType<typeof setTimeout>>());
     postReopenRef.current = (message: Record<string, unknown>) => {
       postToBridge(message);
       const id = typeof message.id === "string" ? message.id : null;
-      if (id) setTimeout(() => hook.expireReopen(id), REOPEN_ANSWER_MS);
+      if (!id) return;
+      const timer = setTimeout(() => {
+        reopenTimersRef.current.delete(timer);
+        hook.expireReopen(id);
+      }, REOPEN_ANSWER_MS);
+      reopenTimersRef.current.add(timer);
     };
+    // Gone before the answer: the host is not told later (it kept the words as the viewer went).
+    useEffect(() => {
+      const timers = reopenTimersRef.current;
+      return () => {
+        for (const timer of timers) clearTimeout(timer);
+        timers.clear();
+      };
+    }, []);
     const iframeReadyRef = useRef(iframeReadyVersion);
     iframeReadyRef.current = iframeReadyVersion;
     useEffect(() => {
