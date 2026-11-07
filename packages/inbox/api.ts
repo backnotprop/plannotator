@@ -721,6 +721,13 @@ export interface LanState {
   error: string | null;
 }
 
+const draftChangeListeners = new Set<() => void>();
+
+export function onInboxDraftChange(listener: () => void): () => void {
+  draftChangeListeners.add(listener);
+  return () => { draftChangeListeners.delete(listener); };
+}
+
 export class InboxApiError extends Error {
   constructor(
     readonly status: number,
@@ -1557,6 +1564,9 @@ export const inboxApi = {
   /** `replies` (additive): open threads holding unsent work; an older Inbox sends none. */
   drafts: () => get<{ serverSession: string; drafts: DraftView[]; replies?: InboxReplyDraftRow[] }>(inboxUrl('/drafts')),
   // Reply drafts (approval "inbox-reply-drafts"): the reply box's words per thread.
+  commentDraft: (messageId: string, scope: string) => get<{ draft: InboxReplyDraft | null }>(messageUrl(messageId, '/comment-draft', `scope=${encodeURIComponent(scope)}`)),
+  saveCommentDraft: (messageId: string, scope: string, body: Record<string, unknown>) => post<{ draft: InboxReplyDraft | null }>(messageUrl(messageId, '/comment-draft', `scope=${encodeURIComponent(scope)}`), body),
+  discardCommentDraft: (messageId: string, scope: string, base?: string | null) => post<{ deleted: boolean }>(messageUrl(messageId, '/comment-draft/delete', `scope=${encodeURIComponent(scope)}`), base === undefined ? {} : { base }),
   replyDraft: (threadId: string) => get<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`)),
   /** Save (compare-and-set on `base`, the `updated_at` last read; null to create); an empty body deletes it. */
   /**
@@ -2048,8 +2058,10 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     case 'drafts':
       try {
         const data = JSON.parse(frame.data) as { thread_id?: unknown; compose?: unknown };
-        if (typeof data.thread_id === 'string') handlers.onDrafts?.(data.thread_id);
-        else if (data.compose === true) handlers.onDrafts?.(null);
+        if (typeof data.thread_id === 'string') {
+          handlers.onDrafts?.(data.thread_id);
+          for (const listener of draftChangeListeners) listener();
+        } else if (data.compose === true) handlers.onDrafts?.(null);
       } catch {
         // A malformed frame changes nothing.
       }

@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback, useId } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, useId, useContext, createContext } from 'react';
 import { createPortal } from 'react-dom';
-import type { ImageAttachment } from '../types';
+import type { ImageAttachment, CommentFileAttachment } from '../types';
 import { AttachmentsButton } from './AttachmentsButton';
 import { useDraggable } from '../hooks/useDraggable';
 import { SparklesIcon } from './SparklesIcon';
@@ -53,7 +53,7 @@ export interface CommentTargetChip {
 /** Composer-yield stage while the user is shift-selecting (see composerYield.ts). */
 export type CommentPopoverYieldState = 'none' | 'near' | 'over';
 
-interface CommentPopoverProps {
+export interface CommentPopoverProps {
   /** Element to anchor the popover near (re-reads position on scroll) */
   anchorEl?: HTMLElement;
   /** Static viewport rect to anchor near when no stable DOM element exists */
@@ -70,7 +70,7 @@ interface CommentPopoverProps {
    * when a `mentionSource` is supplied — without one the call is the two
    * arguments it has always been.
    */
-  onSubmit: (text: string, images?: ImageAttachment[], mentions?: readonly string[]) => void;
+  onSubmit: (text: string, images?: ImageAttachment[], mentions?: readonly string[], files?: CommentFileAttachment[]) => unknown;
   /**
    * One-click 👍 "Looks good" (comment-only HTML / live-app surfaces, where a
    * pinpoint click opens this composer directly and never shows the selection
@@ -145,6 +145,20 @@ interface CommentPopoverProps {
    *  pin's composer shown again when its hidden target returns, so focus
    *  stays where the person is). Absent → focuses on mount, as always. */
   autoFocus?: boolean;
+}
+
+/** An optional global composer supplied by the surrounding host. */
+export const GlobalCommentComposerContext = createContext<React.ComponentType<CommentPopoverProps> | null>(null);
+
+export function CommentPopover(props: CommentPopoverProps) {
+  const HostComposer = useContext(GlobalCommentComposerContext);
+  return props.isGlobal && HostComposer ? <HostComposer {...props} /> : <CommentPopoverFrame {...props} />;
+}
+
+export interface CommentPopoverBody {
+  content: React.ReactNode;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  hasContent: boolean;
 }
 
 const MAX_POPOVER_WIDTH = 384;
@@ -222,7 +236,7 @@ export function computeCommentPopoverPosition(
   };
 }
 
-export const CommentPopover: React.FC<CommentPopoverProps> = ({
+export const CommentPopoverFrame: React.FC<CommentPopoverProps & { body?: CommentPopoverBody }> = ({
   anchorEl,
   anchorRect,
   contextText,
@@ -254,6 +268,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   placement = 'below',
   zIndex,
   autoFocus = true,
+  body,
 }) => {
   const visibleBounds = useVisibleViewportBounds(16);
   const coarsePointer = hasPrimaryCoarsePointer();
@@ -278,9 +293,10 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   const [position, setPosition] = useState<CommentPopoverPosition | null>(null);
   // Direction of an open popover that has scrolled out of view, or null when on-screen.
   const [offscreen, setOffscreen] = useState<'above' | 'below' | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const ownTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = body?.textareaRef ?? ownTextareaRef;
   const popoverRef = useRef<HTMLDivElement>(null);
-  const hasUnsavedContent = hasUnsavedCommentContent(text, allowImages ? images : []);
+  const hasUnsavedContent = body?.hasContent ?? hasUnsavedCommentContent(text, allowImages ? images : []);
   const hasUnsavedContentRef = useRef(hasUnsavedContent);
   hasUnsavedContentRef.current = hasUnsavedContent;
   const { dragPosition, dragHandleProps, wasDragged, reset: resetDrag } = useDraggable(popoverRef);
@@ -537,7 +553,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     text,
     setText,
     textareaRef,
-    source: mentionSource,
+    source: body ? undefined : mentionSource,
   });
 
   // The mention half of the composer's highlight layer: present for the whole
@@ -600,7 +616,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     text,
     setText,
     textareaRef,
-    enabled: skillReferences,
+    enabled: skillReferences && !body,
   });
   const readComposerCaret = useCallback(() => {
     skillAc.onSelect();
@@ -622,22 +638,16 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   const activeComposerOptionId = activeSkillOptionId ?? activeMentionOptionId;
 
   const enterSavesComment = useConfigValue('enterSavesComment');
+  const handleEscape = (e: React.KeyboardEvent) => {
+    if (e.key !== 'Escape') return;
+    e.stopPropagation();
+    if (mode === 'dialog' && !prefersExpandedComposer && !forcedDialog) setMode('popover');
+    else handleClose();
+  };
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (skillAc.onKeyDown(e)) return;
     if (mentionAc.onKeyDown(e)) return;
-    if (e.key === 'Escape') {
-      e.stopPropagation();
-      if (mode === 'dialog') {
-        // Collapsing a forced dialog is geometrically impossible, so Escape
-        // closes it (draft-preserving) instead of being swallowed by the
-        // re-expand.
-        if (prefersExpandedComposer || forcedDialog) handleClose();
-        else setMode('popover');
-      } else {
-        handleClose();
-      }
-      return;
-    }
+    if (e.key === 'Escape') { handleEscape(e); return; }
     if (isCommentSubmitKey(e, enterSavesComment)) {
       e.preventDefault();
       handleSubmit();
@@ -730,7 +740,8 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             if (e.key !== 'Escape') return;
             e.preventDefault();
             e.stopPropagation();
-            handleClose();
+            if (body) handleEscape(e);
+            else handleClose();
           }}
         >
           <style>{`
@@ -768,6 +779,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           {errorRow}
           {chipsRow}
 
+          {body ? body.content : <>
           {/* Textarea */}
           <div className={`relative px-4 py-3 min-h-0 flex-1 ${
             showsSkillMenu ? 'overflow-visible' : 'overflow-y-auto'
@@ -848,6 +860,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
               )}
             </div>
           </div>
+          </>}
         </div>
       </div>,
       document.body
@@ -898,6 +911,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           }
       }
       onPointerDown={(e) => e.stopPropagation()}
+      onKeyDown={body ? handleEscape : undefined}
     >
       <style>{`
         @keyframes comment-popover-in {
@@ -937,6 +951,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       {errorRow}
       {chipsRow}
 
+      {body ? body.content : <>
       {/* Textarea */}
       <div className="relative px-3 py-2">
         {skillAc.menu && (
@@ -1015,6 +1030,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           )}
         </div>
       </div>
+      </>}
       </div>
     </>,
     document.body

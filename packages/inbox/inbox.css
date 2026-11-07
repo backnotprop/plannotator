@@ -8904,3 +8904,15 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-sys-phone .ib-sys-x, .pn-inbox .ib-sys-phone .ib-sys-x { width: 32px; height: 32px; }
   .ib-sys-phone .ib-sys-acts .ib-btn { height: 44px; }
 }
+
+/* The reply's editing controls inside the shared floating comment shell. */
+.ib-global-comment { border: 0; margin: 0; padding: 12px; min-width: 0; min-height: 0; overflow-y: auto; font-size: var(--ib-fs-14, 14px); }
+.ib-global-comment .ib-rbox { margin-bottom: 10px; }
+.ib-global-comment .ib-rtext, .ib-global-comment .ib-rmirror { min-height: 76px; }
+.ib-global-files:empty { display: none; }
+.ib-global-files { padding: 0 8px; }
+.ib-global-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.ib-global-actions .ib-draft-stamp { margin-left: auto; flex-wrap: wrap; }
+.ib-global-error { margin-bottom: 8px; color: var(--destructive); overflow-wrap: anywhere; }
+
+[role="dialog"] .ib-global-comment .ib-rtext, [role="dialog"] .ib-global-comment .ib-rmirror { min-height: 160px; max-height: min(360px, 45vh); }

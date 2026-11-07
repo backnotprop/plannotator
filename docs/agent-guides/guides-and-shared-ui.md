@@ -402,3 +402,13 @@ used to print as empty boxes — near-black text on a near-black node fill. The
 zoom strip stays `data-print-hide`; rings and badges still print.
 
 **Bundle note:** Pierre imports Shiki's full bundle, so every grammar and theme is already packed into the single-file builds (each its own chunk, fetched when first used); reusing its shared highlighter costs no extra bytes and needs no CDN or runtime wasm fetch. The Oniguruma WASM engine is dead weight under `shiki-js` and is aliased to `build/shiki-wasm-stub.ts` in the review, hook and portal Vite configs (via `resolve.alias`, which — unlike `plugins` — is shared with Vite's worker build).
+
+### Host-owned global comment composers
+
+`GlobalCommentComposerContext` from `@plannotator/ui/components/CommentPopover` lets a surrounding host supply a component for global comments only. Without a provider, `CommentPopover` renders its existing editor. Selection and line composers do not use this override.
+
+The host can render `CommentPopoverFrame` with `body: { content, textareaRef, hasContent }`. The frame retains placement, dragging, expansion, close, and focus return. The host owns editing, persistence, submission, and its controls. Use the frame directly inside an override to avoid recursively invoking the override.
+
+A host composer can pass `CommentFileAttachment[]` as the fourth `onSubmit` argument. Each file has an opaque `id` and a display `name`; the host resolves and validates those ids. Viewer and HtmlViewer forward files on global annotations. A global save returning `false`, or a promise resolving to `false`, leaves the composer open. Existing callbacks returning nothing retain their behavior. The annotation panel lists file names when supplied.
+
+The Inbox opts in for local document and guided-review global comments. Its component reuses `InboxComposerField`, `useComposeFiles`, `useReplyDraft` through a scoped store, and the existing voice session. No private Inbox module is imported by the published UI.

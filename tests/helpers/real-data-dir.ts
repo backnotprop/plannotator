@@ -156,6 +156,7 @@ export function isScratchDataDir(dir: string): boolean {
   return expansions(dir).every((candidate) => {
     const path = canonical(candidate);
     if (markerPath && (path === markerPath || path.startsWith(`${markerPath}${sep}`))) return true;
+    if (roots.includes(path)) return false;
     return roots.some((root) => path.startsWith(`${root}${sep}`));
   });
 }

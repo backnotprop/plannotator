@@ -1060,10 +1060,10 @@ test.skipIf(!hasDom)('"Make it yours": a pick applies at once and is saved; Skip
     // Skip: back to what the step opened with, on the window and in config.json, and on to step 11.
     await click($(el, '[data-tour-skip]'));
     await until(() => window.location.hash === '#tour=11', 'step 11 after Skip');
+    await until(() => config().theme?.mode === 'system' && config().theme?.light === 'plannotator' && config().theme?.dark === 'plannotator' && config().inboxTextSize === 14, 'Skip saved');
     expect(htmlClass()).toContain('theme-plannotator');
     expect(htmlClass()).not.toContain('theme-catppuccin');
     expect(document.documentElement.style.getPropertyValue('--inbox-text-size')).toBe('');
-    await until(() => config().theme?.mode === 'system' && config().theme?.light === 'plannotator' && config().theme?.dark === 'plannotator' && config().inboxTextSize === 14, 'Skip saved');
     // Next ("Connect agents next") keeps the picks.
     await act(async () => {
       window.location.hash = '#tour=10';

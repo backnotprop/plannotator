@@ -2645,6 +2645,8 @@ export function inboxHasUnsent(unsent: InboxRowUnsent | null | undefined): boole
  * stream and search never see it.
  */
 export interface InboxReplyDraft {
+  /** A global comment draft, separate from the thread's reply. */
+  target?: string;
   v: 1;
   thread_id: string;
   body: string;

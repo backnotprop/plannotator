@@ -23,6 +23,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
+import { GlobalCommentProvider } from './GlobalCommentComposer';
 import { parseGuideSnapshot, type GuideSnapshot } from '@plannotator/core/guide-format';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import type { InboxAnnotationRecord, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
@@ -303,18 +304,20 @@ export function GuidePane({ thread, message, onBack, onClose, guest = false, cod
           ) : snapshot ? (
             <ReaderPart diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on={codeReview === true}>
-                <GuideReader
-                  snapshot={snapshot}
-                  reviewed={reviewed}
-                  onReviewedChange={changeReviewed}
-                  comments={readerComments}
-                  fileOpenIn={codeReview ? fileOpenIn : undefined}
-                  reveal={reveal}
-                  highlight={highlight}
-                  {...(guest ? {} : { fileContents })}
-                  hostDiffControls
-                  {...(collapseAll ? { collapseAll } : {})}
-                />
+                <GlobalCommentProvider messageId={message.id} scope="guide-global">
+                  <GuideReader
+                    snapshot={snapshot}
+                    reviewed={reviewed}
+                    onReviewedChange={changeReviewed}
+                    comments={readerComments}
+                    fileOpenIn={codeReview ? fileOpenIn : undefined}
+                    reveal={reveal}
+                    highlight={highlight}
+                    {...(guest ? {} : { fileContents })}
+                    hostDiffControls
+                    {...(collapseAll ? { collapseAll } : {})}
+                  />
+                </GlobalCommentProvider>
               </OpenInCodeSpans>
             </ReaderPart>
           ) : null}

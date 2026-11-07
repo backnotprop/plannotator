@@ -187,6 +187,7 @@ import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
 import { INBOX_ACCOUNT_SWITCHING } from "@plannotator/core/inbox-types";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
+import { commentFilesOf, commentFilesFeedback } from "@plannotator/shared/inbox/comment-files";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
@@ -5199,8 +5200,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             // attachments on the reply, exactly as compose's become a thread's.
             // A replay answers the reply it wrote before anything is copied
             // (its uploads are gone by then); the rest checks the message first.
-            const uploads = body.uploads === undefined || body.uploads === null ? [] : body.uploads;
-            if (!Array.isArray(uploads)) throw new InboxError("validation_error", "uploads: a list of upload ids.", { field: "uploads" });
+            const givenUploads = body.uploads === undefined || body.uploads === null ? [] : body.uploads;
+            if (!Array.isArray(givenUploads)) throw new InboxError("validation_error", "uploads: a list of upload ids.", { field: "uploads" });
+            const replaying = store.replyByKey(messageId, tagKey);
+            const commentsWithFiles = replaying ? [] : store.commentFilesForReply(messageId, body.annotation_ids);
+            const uploads = [...new Set([...givenUploads, ...commentsWithFiles.flatMap((record) => commentFilesOf(record).map((file) => file.id))])];
             const replayKey = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
             const fresh = uploads.length > 0 && !store.replyByKey(messageId, replayKey);
             if (fresh && !store.message(messageId)) throw new InboxError("message_not_found", `No message ${messageId}.`);
@@ -5219,7 +5223,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 words: typeof body.words === "string" ? body.words : undefined,
                 questions: (body.questions as never) ?? [],
                 idempotency_key: body.idempotency_key as string,
-                feedback: typeof body.feedback === "string" ? body.feedback : undefined,
+                feedback: [typeof body.feedback === "string" ? body.feedback : "", commentFilesFeedback(commentsWithFiles, uploads, attachments)].filter(Boolean).join("\n\n") || undefined,
                 annotation_ids: body.annotation_ids as never,
                 viewing: body.viewing,
                 // A verdict on a review (Approve / Send feedback in the review's header): only while Code review is on.
@@ -5261,7 +5265,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             // a paste this Send did not carry, or another thread's): each draft that changed is told to its windows.
             else if (attachments.length > 0) {
               const sentIds = uploads.filter((id): id is string => typeof id === "string");
-              removeInboxUploads(store.dir, sentIds);
+              const kept = store.globalCommentUploadIds();
+              removeInboxUploads(store.dir, sentIds.filter((id) => !kept.has(id)));
               for (const threadId of store.dropSentUploadsFromReplyDrafts(sentIds)) for (const listener of draftListeners) listener(threadId);
             }
             return json({

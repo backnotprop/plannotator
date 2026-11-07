@@ -272,7 +272,7 @@ for (const tls of [undefined, 'untrusted'] as const) {
     expect(el.textContent).toContain('If this keeps happening, install it yourself');
     expect(el.textContent).toContain('curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-gemini');
     expect(el.querySelector('[data-failed-release]')?.getAttribute('href')).toBe('https://github.com/backnotprop/plannotator/releases/tag/v0.28.12');
-    expect(el.textContent.includes('NODE_EXTRA_CA_CERTS=/path/to/its-root.pem plannotator update')).toBe(tls === 'untrusted');
+    expect((el.textContent ?? '').includes('NODE_EXTRA_CA_CERTS=/path/to/its-root.pem plannotator update')).toBe(tls === 'untrusted');
   });
 }
 

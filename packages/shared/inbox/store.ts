@@ -26,6 +26,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { checkCommentFiles, commentFilesOf } from "./comment-files";
+import { inboxReplyDraftKey } from "./reply-drafts";
 import { inboxDecisionExcerpt, orderInboxDecisions, type InboxDecisionCandidate } from "./decisions";
 import {
   checkInboxAnswer,
@@ -646,8 +648,10 @@ function guideCommentFields(fields: Record<string, unknown>, scope: "line" | "ge
   } else {
     if (!GUIDE_COMMENT_TYPES.has(fields.type)) refuse("type", '"comment", "suggestion" or "concern".');
     if (!absent(fields.images)) refuse("images", "a comment on a guided review takes none.");
+    if (!absent(fields.files)) refuse("files", "only global comments take files.");
   }
   const kept: Record<string, unknown> = { id: fields.id, type: fields.type, scope };
+  if (scope === "general" && Array.isArray(fields.files) && fields.files.length > 0) kept.files = fields.files;
   if (fields.text !== undefined) kept.text = fields.text;
   const strings = scope === "general" ? ["author", "conventionalLabel"] : ["author", "conventionalLabel", "suggestedCode", "originalCode", "selectedText", "tokenText", "anchorText"];
   for (const field of strings) {
@@ -2387,7 +2391,7 @@ export class InboxStore {
    * question and every action item in the draft does.
    */
   unsentRows(): InboxListRow[] {
-    const threads = new Set<string>([...this.replyDrafts.keys(), ...this.unsentAnnotations.keys()]);
+    const threads = new Set<string>([...[...this.replyDrafts.values()].map((draft) => draft.thread_id), ...this.unsentAnnotations.keys()]);
     for (const record of this.questions.values()) {
       if (record.answer === null && record.action_result == null) continue;
       if (record.revision > 0 && record.sent_revision === record.revision) continue;
@@ -5148,6 +5152,9 @@ export class InboxStore {
     if (existing && (existing.sent_reply_id !== null || existing.removed_at !== null)) {
       throw new InboxError("annotation_closed", "This annotation was already sent or removed.");
     }
+    const fields = annotation as Record<string, unknown>;
+    const files = checkCommentFiles(this.dir, fields.files);
+    if (files.length > 0 && fields.type !== "GLOBAL_COMMENT") throw new InboxError("validation_error", "annotation.files: only global comments take files.");
     const at = this.stamp();
     const record: InboxAnnotationRecord = {
       id,
@@ -5159,7 +5166,7 @@ export class InboxStore {
       version: input.version,
       // `exportLocation` is the exporter's line the window computes at Send
       // (a video comment's "At 1:42 …"): never taken from a client.
-      annotation: withoutExportLocation(annotation as Record<string, unknown>),
+      annotation: withoutExportLocation({ ...fields, ...(files.length > 0 ? { files } : {}) }),
       created_at: existing?.created_at ?? at,
       updated_at: at,
       removed_at: null,
@@ -5251,8 +5258,10 @@ export class InboxStore {
     if (fields.filePath !== undefined && fields.filePath !== "") {
       throw new InboxError("validation_error", "annotation.filePath: a global comment is on the whole review, on no file.", { field: "annotation.filePath" });
     }
+    const files = checkCommentFiles(this.dir, fields.files);
+    fields = { ...fields, ...(files.length > 0 ? { files } : {}) };
     const text = fields.text;
-    if (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX) {
+    if (typeof text !== "string" || (text.trim() === "" && files.length === 0) || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX) {
       throw new InboxError("validation_error", `annotation.text: the comment (1 to ${INBOX_MESSAGE_COMMENT_TEXT_MAX} characters).`, { field: "annotation.text" });
     }
     const kept = guideCommentFields(fields, "general");
@@ -5476,8 +5485,8 @@ export class InboxStore {
   // ─────────────────────────── reply drafts ───────────────────────────
 
   /** The words typed in a thread's reply box and not sent, or null. */
-  replyDraft(threadId: string): InboxReplyDraft | null {
-    return this.replyDrafts.get(threadId) ?? null;
+  replyDraft(threadId: string, target?: string): InboxReplyDraft | null {
+    return this.replyDrafts.get(inboxReplyDraftKey(threadId, target)) ?? null;
   }
 
   /**
@@ -5490,11 +5499,13 @@ export class InboxStore {
   saveReplyDraft(
     threadId: string,
     input: InboxReplyDraftInput,
+    target?: string,
   ): InboxReplyDraft | null {
+    const key = inboxReplyDraftKey(threadId, target);
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
     const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops, recipients: given } = checkInboxReplyDraftInput(this.dir, input);
-    const existing = this.replyDrafts.get(threadId) ?? null;
+    const existing = this.replyDrafts.get(key) ?? null;
     if (ops) {
       // This Inbox's page: the box's file changes, applied to the files as they are now (another window's stay).
       // Only the words are compared: a file change elsewhere never refuses this save.
@@ -5509,15 +5520,15 @@ export class InboxStore {
       // A save a step behind (its own words, `base_body`) adds no file the draft lost since the version it names:
       // another window took it out after this page's earlier save of it landed (its answer lost), so the add is
       // that save's, sent again, not a new one.
-      const removals = existing && existing.updated_at !== base ? this.replyDraftRemovals.get(threadId) : undefined;
+      const removals = existing && existing.updated_at !== base ? this.replyDraftRemovals.get(key) : undefined;
       const add = removals ? ops.add.filter((file) => !((removals.get(file.upload_id) ?? "") > (base ?? ""))) : ops.add;
       // Words changed: another window's long paste this save does not place moves with them.
       const after = applyReplyDraftFileOps(existing?.files ?? [], { ...ops, add }, existing ? { from: existing.body, to: body } : undefined);
       if (body.trim() === "" && after.length === 0) {
-        this.deleteReplyDraft(threadId);
+        this.deleteReplyDraft(threadId, target);
         return null;
       }
-      return this.writeReplyDraft(threadId, existing, body, after, given);
+      return this.writeReplyDraft(threadId, existing, body, after, given, target);
     }
     // An older page (no `all_files`) names long pastes only: the draft's other files stay (a file it does not know
     // is never dropped by it).
@@ -5546,23 +5557,25 @@ export class InboxStore {
     }
     // Nothing left: no words and no file kept beside them.
     if (body.trim() === "" && files.length === 0) {
-      this.deleteReplyDraft(threadId);
+      this.deleteReplyDraft(threadId, target);
       return null;
     }
-    return this.writeReplyDraft(threadId, existing, body, files, given);
+    return this.writeReplyDraft(threadId, existing, body, files, given, target);
   }
 
   /**
    * Write a thread's draft whole, its `updated_at` strictly later than the last one's. `recipients`: who the reply
    * goes to as the save names it (the recipient pill; empty: none chosen); null keeps the draft's own.
    */
-  private writeReplyDraft(threadId: string, existing: InboxReplyDraft | null, body: string, files: readonly InboxDraftFile[], recipients: readonly string[] | null = null): InboxReplyDraft {
+  private writeReplyDraft(threadId: string, existing: InboxReplyDraft | null, body: string, files: readonly InboxDraftFile[], recipients: readonly string[] | null = null, target = existing?.target): InboxReplyDraft {
+    const key = inboxReplyDraftKey(threadId, target);
     const at = this.stamp();
     // Strictly later than the last save, so a compare-and-set within one millisecond still tells the two apart.
     const updatedAt = existing && at <= existing.updated_at ? new Date(Date.parse(existing.updated_at) + 1).toISOString() : at;
     const draft: InboxReplyDraft = {
       v: 1,
       thread_id: threadId,
+      ...(target ? { target } : {}),
       body,
       created_at: existing?.created_at ?? at,
       updated_at: updatedAt,
@@ -5571,9 +5584,9 @@ export class InboxStore {
     const aimed = recipients ?? existing?.recipients ?? [];
     if (aimed.length > 0) draft.recipients = [...aimed];
     writeInboxReplyDraft(this.dir, draft);
-    this.replyDrafts.set(threadId, draft);
+    this.replyDrafts.set(key, draft);
     this.changes += 1;
-    this.noteReplyDraftRemovals(threadId, existing, draft);
+    this.noteReplyDraftRemovals(key, existing, draft);
     this.replyDraftChanged(threadId);
     return draft;
   }
@@ -5627,6 +5640,7 @@ export class InboxStore {
     if (sent.size === 0) return [];
     const changed: string[] = [];
     for (const draft of [...this.replyDrafts.values()]) {
+      if (draft.target) continue;
       const files = draft.files ?? [];
       const kept = files.filter((file) => !sent.has(file.upload_id));
       if (kept.length === files.length) continue;
@@ -5641,12 +5655,13 @@ export class InboxStore {
   }
 
   /** Drop a thread's reply draft (Discard); true when there was one. */
-  deleteReplyDraft(threadId: string): boolean {
+  deleteReplyDraft(threadId: string, target?: string): boolean {
+    const key = inboxReplyDraftKey(threadId, target);
     // Gone whole: a draft made again later starts with no removals (a save against no draft adds every file it names).
-    this.replyDraftRemovals.delete(threadId);
-    const had = this.replyDrafts.delete(threadId);
+    this.replyDraftRemovals.delete(key);
+    const had = this.replyDrafts.delete(key);
     this.changes += 1;
-    const removed = removeInboxReplyDraft(this.dir, threadId) || had;
+    const removed = removeInboxReplyDraft(this.dir, threadId, target) || had;
     if (removed) this.replyDraftChanged(threadId);
     return removed;
   }
@@ -5655,7 +5670,25 @@ export class InboxStore {
   replyDraftUploadIds(): Set<string> {
     const out = new Set<string>();
     for (const draft of this.replyDrafts.values()) for (const id of inboxReplyDraftFileIds(draft)) out.add(id);
+    for (const id of this.globalCommentUploadIds()) out.add(id);
     return out;
+  }
+
+  commentFilesForReply(messageId: string, annotationIds: unknown): InboxAnnotationRecord[] {
+    const message = this.messages.get(messageId);
+    if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
+    return this.planSentAnnotations(message.thread_id, annotationIds);
+  }
+
+  globalCommentUploadIds(): Set<string> {
+    const held = new Set<string>();
+    for (const draft of this.replyDrafts.values()) {
+      if (draft.target) for (const file of draft.files ?? []) held.add(file.upload_id);
+    }
+    for (const record of this.annotations.values()) {
+      if (record.removed_at === null && record.sent_reply_id === null) for (const file of commentFilesOf(record)) held.add(file.id);
+    }
+    return held;
   }
 
   /** Bytes the reply drafts take on disk (Settings → Storage). */
@@ -5771,11 +5804,11 @@ export class InboxStore {
     }
     removeUnusedInboxBlobs(this.dir, used);
     // A deleted thread's reply draft goes with it.
-    for (const threadId of [...this.replyDrafts.keys()]) {
-      if (this.messages.get(threadId)?.thread_id === threadId) continue;
-      removeInboxReplyDraft(this.dir, threadId);
-      this.replyDrafts.delete(threadId);
-      this.replyDraftRemovals.delete(threadId);
+    for (const [key, draft] of [...this.replyDrafts]) {
+      if (this.messages.get(draft.thread_id)?.thread_id === draft.thread_id) continue;
+      removeInboxReplyDraft(this.dir, draft.thread_id, draft.target);
+      this.replyDrafts.delete(key);
+      this.replyDraftRemovals.delete(key);
       this.changes += 1;
     }
     // So does its Ask AI conversation.

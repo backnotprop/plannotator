@@ -22,6 +22,13 @@ import { isCommentSubmitKey } from '../utils/commentSubmitKey';
 import { useConfigValue } from '../config/useConfig';
 import { imageRegionNumbers, RegionCardInfo, RegionNumber, regionOf } from './ImageRegions';
 
+function CommentFiles({ files }: { files: Annotation['files'] }) {
+  if (!files?.length) return null;
+  return <ul aria-label="Attached files" className="mt-2 space-y-1 text-xs text-muted-foreground">
+    {files.map((file) => <li key={file.id} className="truncate" title={file.name}>{file.name}</li>)}
+  </ul>;
+}
+
 /** What a region card (#2100) needs from its panel: each region's number on
  *  its image, and how to load the image for the crop thumbnail. */
 const RegionCardContext = createContext<{ numbers: ReadonlyMap<string, number>; thumbSrc?: (src: string) => string | null }>({
@@ -1300,6 +1307,8 @@ const AnnotationCard: React.FC<{
         </>
       )}
 
+      <CommentFiles files={annotation.files} />
+
       {/* Attached Images */}
       {parts?.images !== false && annotation.images && annotation.images.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
@@ -1476,6 +1485,7 @@ const CodeAnnotationCard: React.FC<{
         )
       )}
 
+      <CommentFiles files={annotation.files} />
       {annotation.images && annotation.images.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {annotation.images.map((img) => (
