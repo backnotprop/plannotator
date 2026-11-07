@@ -2859,3 +2859,14 @@ How it runs:
 - The pass reruns when the html element's `class`, `style` or `data-theme` changes and a theme token really changed, and when the system's light/dark changes. It runs in the next frame, after any other pass on the same mutation.
 - It sets inline variables on `.board` and puts back any inline value it replaced when it is taken back.
 - With #2721 (palette contrast, `holdShapeContrast`): that pass fixes zone colours, `--grey`, `--ink2`, `--mark`, `--alert` and the `-soft` fills against the ink. This pass reads the result as its starting point and adds what #2721 does not cover: `--rule`, `--surface`, zone edges and picture tiles. #2721 lifts `--grey` to 4.5:1, and this pass only lifts it further, so the two never pull a value in opposite directions.
+
+## Shape: runs and step-throughs (unreleased; needs the core with `./shape-run` and `./shape-steps`; additive)
+
+A board may carry `runs` and `steps`, and a drawn view plays one where it puts `<div data-run="id"></div>` or `<div data-steps="id"></div>`. A host that passes neither prop sees no change: no player renders, no player code loads, and such a div stays empty.
+
+- Core: new subpaths `@plannotator/core/shape-run` (`ShapeRun`, `checkShapeRun`, `shapeHtmlRuns`, `SHAPE_RUN_LIMITS`) and `@plannotator/core/shape-steps` (`ShapeSteps`, `checkShapeSteps`, `shapeHtmlSteps`, `SHAPE_STEPS_LIMITS`). `ShapeBoard` gains `runs?` and `steps?` (at most 8 each, `SHAPE_LIMITS.played`). `checkShapeBoard` checks each one and refuses a drawing (its wide, tall or Show more HTML) that plays an id the board does not have.
+- `ShapeDrawnProps.runs?` and `ShapeDrawnProps.steps?`: the board's parts by id. With either one, `ShapePlayers` (new, `components/shape/ShapePlayers.tsx`) adds a host to each matching slot of the sanitized drawing and portals a lazily loaded player into that host's own shadow root. The board's frame CSS and the agent's drawing CSS stop at that boundary; the board's variables and font still inherit. A player that throws leaves its slot empty and the board drawn.
+- `ShapeSurface` passes `version.runs` and `version.steps` to its Picture and How it works.
+- New, loaded only when a drawing has a slot: `components/shape/run/RunPlayer.tsx` (flat swimlanes, time to scale, play, scrub, speed, "By lane" and "By resource") with its pure `run/scene.ts`, and `components/shape/steps/StepPlayer.tsx` (array, graph and rows, beside the code line). Each draws SVG with its own `<style>`, from the drawing's colour variables (`--ink`, `--paper`, `--rule`, `--mark`, `--alert`, `--green`, `--amber`, `--blue`, `--grey`, `--sunk`), with no Tailwind classes. Under reduced motion a run opens at its end and nothing moves by itself.
+- `darkContrast` is unchanged: it never reaches into a player's own shadow root.
+- `ShapeDiagram` does not pass `runs` or `steps`.

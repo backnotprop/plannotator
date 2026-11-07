@@ -19,11 +19,18 @@
  *  - `diffShapeVersions` compares two snapshots by those ids ("what changed
  *    since you looked"). The agent never writes what changed; it is worked
  *    out here.
+ *  - A board may carry `runs` (`./shape-run`) and `steps` (`./shape-steps`),
+ *    which a drawn view plays where it puts `<div data-run="id">` or
+ *    `<div data-steps="id">`.
  *
  * Spec: the approved Shape design record ("shape-living-board"), sections 3 and 4.
  */
 import type { CodeGuideOutput } from './guide';
 import { ulid } from './ulid';
+import { checkShapeRun, shapeHtmlRuns, type ShapeRun } from './shape-run';
+import { checkShapeSteps, shapeHtmlSteps, type ShapeSteps } from './shape-steps';
+export type { ShapeRun } from './shape-run';
+export type { ShapeSteps } from './shape-steps';
 
 export const SHAPE_FORMAT_VERSION = 1;
 
@@ -318,6 +325,10 @@ export interface ShapeBoard {
     code?: ShapeCodeView;
   };
   refs?: ShapeRef[];
+  /** Runs a drawn view plays where it puts `<div data-run="id"></div>`, by id (`./shape-run`). */
+  runs?: Record<string, ShapeRun>;
+  /** Step-throughs a drawn view plays where it puts `<div data-steps="id"></div>`, by id (`./shape-steps`). */
+  steps?: Record<string, ShapeSteps>;
 }
 
 // ───────────────────────────── what the store keeps ─────────────────────────────
@@ -447,6 +458,8 @@ export function isShapeNoteId(value: unknown): value is string {
 
 /** The most a board may hold. A refusal names the field and the limit. */
 export const SHAPE_LIMITS = {
+  /** Runs, and step-throughs, a board holds (each). */
+  played: 8,
   title: 140,
   claim: 400,
   note: 280,
@@ -1616,6 +1629,29 @@ export function checkShapeDrawnView(input: unknown, field = 'view'): ShapeCheck<
   return { ok: true, value: view };
 }
 
+/** A board's runs or step-throughs, by id: each checked by its own format, its problems named under `field.id`. */
+function checkPlayed<T>(c: Checker, input: unknown, field: string, what: string, check: (v: unknown, field: string) => ShapeCheck<T>): Record<string, T> | undefined {
+  if (input === undefined || input === null) return undefined;
+  if (!isRecord(input)) {
+    c.fail(field, `must be an object of ${what}s by id: { "pool": { … } }`);
+    return undefined;
+  }
+  const entries = Object.entries(input);
+  if (entries.length > SHAPE_LIMITS.played) c.fail(field, `has ${entries.length}; at most ${SHAPE_LIMITS.played}`);
+  const out: Record<string, T> = {};
+  for (const [id, value] of entries.slice(0, SHAPE_LIMITS.played)) {
+    if (!SHAPE_PLAYED_ID.test(id)) {
+      c.fail(`${field}.${id}`, 'the id must be a short word: letters, digits, _ and -, starting with a letter or digit, at most 40');
+      continue;
+    }
+    const checked = check(value, `${field}.${id}`);
+    if (checked.ok === false) c.errors.push(...checked.errors);
+    else out[id] = checked.value;
+  }
+  return entries.length ? out : undefined;
+}
+const SHAPE_PLAYED_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
+
 export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
   const c = new Checker();
   if (!isRecord(input)) return { ok: false, errors: ['the board must be a JSON object: { title, claim, views, refs }'] };
@@ -1647,8 +1683,26 @@ export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
     if (!input.views.picture && !input.views.how && !input.views.changed && !input.views.know && !input.views.reqs && !input.views.code) c.fail('views', 'needs at least one view');
   }
   const refs = checkRefs(c, input.refs);
+  const runs = checkPlayed(c, input.runs, 'runs', 'run', checkShapeRun);
+  const steps = checkPlayed(c, input.steps, 'steps', 'step-through', checkShapeSteps);
+  for (const v of ['picture', 'how'] as const) {
+    const view = views[v];
+    if (!view) continue;
+    // A run or step-through with its own problems is named by them; only one that is not there at all is named here.
+    // It says what it found, so a typo is plain: `data-steps="1"` on a board with no steps reads as the reveal order's `data-step` with an s.
+    const played = (ids: string[], have: unknown, attr: string, part: string, near?: string) => {
+      for (const id of new Set(ids)) {
+        if (isRecord(have) && Object.hasOwn(have, id)) continue;
+        const why = isRecord(have) ? `${part} has no "${id}"` : `the board has no ${part}`;
+        c.fail(`views.${v}.html`, `has ${attr}="${id}", but ${why}${near && !isRecord(have) ? ` (${near} is a different attribute)` : ''}`);
+      }
+    };
+    const html = [view.html, view.tall?.html ?? '', view.more?.html ?? ''];
+    played(html.flatMap(shapeHtmlRuns), input.runs, 'data-run', 'runs');
+    played(html.flatMap(shapeHtmlSteps), input.steps, 'data-steps', 'steps', 'data-step, the reveal order,');
+  }
   if (c.errors.length || !title || !claim) return { ok: false, errors: c.errors.length ? c.errors : ['title and claim are required'] };
-  const board: ShapeBoard = { title, claim, ...(asOf ? { asOf } : {}), ...(note ? { note } : {}), views, ...(refs?.length ? { refs } : {}) };
+  const board: ShapeBoard = { title, claim, ...(asOf ? { asOf } : {}), ...(note ? { note } : {}), views, ...(refs?.length ? { refs } : {}), ...(runs ? { runs } : {}), ...(steps ? { steps } : {}) };
   // Every cited reference must exist.
   const known = new Set((refs ?? []).map((r) => r.n));
   const cited = shapeCitedRefs(board);

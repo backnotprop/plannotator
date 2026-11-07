@@ -931,6 +931,8 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
           onPickMark={(el, text) => pickMark(el, v, text)}
           onCode={phase === 'leaving' ? undefined : openCodeTarget}
           onBoard={v === 'how' && phase !== 'leaving' ? setHowBoard : undefined}
+          runs={version.runs}
+          steps={version.steps}
         />
       );
     }
