@@ -162,16 +162,25 @@ async function withReview(browser: Browser, run: (page: Page) => Promise<void>) 
   }
 }
 
-/** Each file of the All changes list with the top of its header (one `diffs-container` per file). */
+/**
+ * Each file of the All changes list, top to bottom: the box of its item (one
+ * `diffs-container` per file) and of its path in the header (`span[title]`,
+ * the one header part every mode draws; the action buttons change with the
+ * session, e.g. "Choose app to open in" on a live checkout).
+ */
 const mainHeaders = (page: Page) =>
-  page.evaluate(() =>
-    [...document.querySelectorAll('diffs-container')]
-      .filter((item) => item.querySelector('button[aria-label="File actions"]'))
-      .map((item) => {
-        const box = item.getBoundingClientRect();
-        return { path: item.querySelector('[title]')?.getAttribute('title') ?? item.textContent ?? '', top: box.top, height: box.height };
-      }),
-  );
+  page.evaluate((paths) => {
+    const out: { path: string; top: number; height: number; nameX: number; nameY: number }[] = [];
+    for (const path of paths) {
+      const name = document.querySelector(`diffs-container span[title="${CSS.escape(path)}"]`);
+      const item = name?.closest('diffs-container');
+      if (!name || !item) continue;
+      const box = item.getBoundingClientRect();
+      const nameBox = name.getBoundingClientRect();
+      out.push({ path, top: box.top, height: box.height, nameX: nameBox.left + nameBox.width / 2, nameY: nameBox.top + nameBox.height / 2 });
+    }
+    return out.sort((a, b) => a.top - b.top);
+  }, [...MODIFIED, ...ADDED]);
 
 test('All changes: opening a folded file leaves every header where it was', async ({ browser }) => {
   await withReview(browser, async (page) => {
@@ -181,30 +190,32 @@ test('All changes: opening a folded file leaves every header where it was', asyn
     await expect(foldToggle).toBeVisible();
     if ((await foldToggle.getAttribute('aria-label')) === 'Collapse all files') await foldToggle.click();
     await expect(page.getByRole('button', { name: 'Expand all files' })).toBeVisible();
-    await expect.poll(async () => (await mainHeaders(page)).filter((h) => h.height > 40).length).toBe(0);
     await expect.poll(async () => (await mainHeaders(page)).length).toBe(15);
+    await expect.poll(async () => (await mainHeaders(page)).filter((h) => h.height > 40).length).toBe(0);
 
     const before = await mainHeaders(page);
     const target = before[12]!;
-    const x = 600;
-    const y = target.top + target.height / 2;
+    const x = target.nameX;
+    const y = target.nameY;
     await page.mouse.move(x, y);
     await page.mouse.click(x, y);
+    const opened = async () => (await mainHeaders(page)).find((h) => h.path === target.path)!.height;
     // Open: its code drawn, then two frames for Pierre's sticky window to settle.
-    await expect.poll(async () => (await mainHeaders(page))[12]!.height).toBeGreaterThan(200);
+    await expect.poll(opened).toBeGreaterThan(200);
     await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
     await page.waitForTimeout(300);
 
     const after = await mainHeaders(page);
-    for (let i = 0; i <= 12; i++) {
-      expect(Math.abs(after[i]!.top - before[i]!.top), `header ${i} (${before[i]!.path}) moved`).toBeLessThan(0.5);
+    for (const was of before.slice(0, 13)) {
+      const now = after.find((h) => h.path === was.path)!;
+      expect(Math.abs(now.top - was.top), `${was.path} moved`).toBeLessThan(0.5);
     }
     // The pointer is still on the header it clicked.
-    const underIndex = await page.evaluate(([px, py]) => {
-      const hit = document.elementFromPoint(px!, py!)?.closest('diffs-container');
-      return [...document.querySelectorAll('diffs-container')].filter((item) => item.querySelector('button[aria-label="File actions"]')).indexOf(hit!);
-    }, [x, y]);
-    expect(underIndex).toBe(12);
+    const underPath = await page.evaluate(
+      ([px, py]) => document.elementFromPoint(px!, py!)?.closest('diffs-container')?.querySelector('span[title]')?.getAttribute('title') ?? null,
+      [x, y],
+    );
+    expect(underPath).toBe(target.path);
   });
 });
 
