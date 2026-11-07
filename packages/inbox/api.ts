@@ -1102,10 +1102,19 @@ export interface ComposeTrustPick {
   project: string;
 }
 
+/** `GET /api/inbox/launch/folders`: the folder names in one folder under home, and the path as the server read it (`~/…`). */
+export interface HomeFoldersAnswer {
+  path: string;
+  exists: boolean;
+  folders: string[];
+  /** A path that isn't there: the nearest folder above it that is, and its folders (absent from an older Inbox). */
+  nearest?: { path: string; folders: string[] };
+}
+
 /** What compose sends: a new thread to one live session. */
 export interface StartThreadInput {
-  /** A live session, or (launch on) a new session of `agent` started in the project; `trust`: Trust and start, on this reading. */
-  to: { host: string; session: string } | { launch: ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true }) & { trust?: InboxLaunchTrust } };
+  /** A live session, or (launch on) a new session of `agent` started in the project, a new scratch folder, or a folder under home (`~/…`); `trust`: Trust and start, on this reading. */
+  to: { host: string; session: string } | { launch: ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true } | { agent: InboxLaunchAgent; folder: string }) & { trust?: InboxLaunchTrust } };
   body: string;
   idempotency_key: string;
   uploads?: string[];
@@ -1546,6 +1555,14 @@ export const inboxApi = {
     const query = new URLSearchParams({ ...(session ? { session } : {}), ...(trust ? { trust_agent: trust.agent, trust_project: trust.project } : {}) }).toString();
     return get<ComposeSessionsModel>(inboxUrl('/sessions', query || undefined, machine));
   },
+  /**
+   * "Another folder on <machine>…": the folder names in one folder under that machine's home (`GET
+   * /api/inbox/launch/folders?path=~/…`), one level, no hidden ones. `machine`: a linked machine's, through the
+   * forward; null: this computer's. A path that isn't there is `exists: false`; a hidden one or one outside home is a
+   * 422 (`folder_hidden`, `folder_outside_home`), a guest or a call from outside the window a 403.
+   */
+  homeFolders: (path: string, machine?: string | null, signal?: AbortSignal) =>
+    get<HomeFoldersAnswer>(inboxUrl('/launch/folders', new URLSearchParams({ path }).toString(), machine), signal),
   /** `machine`: start the agent on that linked machine (remote launch), through the forward; a `202` is `InboxHeldError`. */
   startThread: (input: StartThreadInput, machine?: string | null) =>
     post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean; launch?: { id: string; state: 'starting' | 'failed' } }>(inboxUrl('/messages', undefined, machine), { ...input }),

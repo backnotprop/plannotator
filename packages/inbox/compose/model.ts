@@ -366,6 +366,22 @@ export interface ComposeStart {
   project: LaunchProject;
   /** A new scratch folder ("New scratch folder" in the folder menu), made when the person sends. */
   scratch?: true;
+  /**
+   * A folder under that machine's home that is not one of its projects ("Another folder on <machine>…"), as the server
+   * takes it (`~/code/billing-api`): `project` stands in for it (`folderProject`), and the Send names the folder.
+   */
+  folder?: string;
+}
+
+/** A folder start's stand-in project: never a project id, so no project's facts or check marks are taken for it. */
+export function folderProject(folder: string, name: string): LaunchProject {
+  return { id: `folder:${folder}`, name, root: folder, exists: true };
+}
+
+/** A `~/…` path as an absolute one under `home` (as a draft keeps a project's root); as it is without a home. */
+export function untildePath(path: string, home: string | null): string {
+  if (!home || !(path === '~' || path.startsWith('~/'))) return path;
+  return `${home.replace(/\/+$/, '')}${path.slice(1)}`;
 }
 
 /** The folder menu's "New scratch folder" as the pick (`ComposeStart.project.id`): never a project id (`prj_…`). */
@@ -379,6 +395,11 @@ export function scratchProject(root: string): LaunchProject {
 /** The scratch folder a Send would make for this thread name (the server adds `-2`, `-3` when it is taken). */
 export function scratchFolderOf(root: string, threadName: string): string {
   return `${root.replace(/\/+$/, '')}/${inboxScratchSlug(threadName)}`;
+}
+
+/** The folder menu shows "Another folder…" for no filter, or one its words match. */
+export function otherFolderMatches(query: string): boolean {
+  return queryWords(query).every((w) => 'another folder'.includes(w));
 }
 
 /** The folder menu shows "New scratch folder" for no filter, or one its words match. */
