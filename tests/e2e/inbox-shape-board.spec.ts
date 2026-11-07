@@ -9,8 +9,10 @@
  *  - a nested SVG clips (a crop stays cropped), and a lone `class="dash"` is an outline, not a solid box;
  *  - a picture a drawing names is copied in and loads, on the board and on the grid's thumbnail;
  *  - a number shows its bubble on hover, with its picture and line;
- *  - What to know reads as paragraphs; a board saved with Requirements still opens, its words all there;
- *  - a phone pans a canvas with no tall drawing.
+ *  - `views.know` reads as paragraphs under the drawing, with no tab of its own; a board saved with Requirements still opens, its words all there;
+ *  - a phone pans a canvas with no tall drawing;
+ *  - a number never lets its punctuation start a line, and never pushes the words past a 320 phone.
+ *  - a long path or link with no number beside it never makes the Shape scroll sideways on a phone.
  *
  * Build first: see inbox.spec.ts.
  */
@@ -155,7 +157,7 @@ test('a nested svg clips, a lone dash is an outline, a kept picture loads, a num
   expect(styles.href).toContain('/files/');
   expect((await page.request.get(new URL(styles.href!, w.url).href)).status()).toBe(200);
 
-  await page.locator('.shp-view:not(.leaving) [data-ref="1"]').hover();
+  await page.locator('.shp-view:not(.leaving) .shp-drawn [data-ref="1"]').hover();
   const peek = page.locator('.shp-peek');
   await expect(peek).toContainText('One line about it.');
   await expect(peek.locator('.shp-peek-crop')).toBeVisible();
@@ -174,14 +176,24 @@ test('a nested svg clips, a lone dash is an outline, a kept picture loads, a num
   await context.close();
 });
 
-test('What to know is paragraphs; a board saved with Requirements still opens with all its words', async ({ browser }) => {
+test('The words are paragraphs under the drawing, in its scroll, with no tab; a board saved with Requirements still opens with all its words', async ({ browser }) => {
   const { context, page, problems } = await openBoard(browser, store('know', board));
-  await view(page, 'What to know');
-  const know = page.locator('.shp-know');
+  await expect(page.locator('.shp-dock').getByRole('button', { name: 'Shape', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.shp-dock').getByRole('button', { name: 'What to know', exact: true })).toHaveCount(0);
+  const know = page.locator('.shp-view:not(.leaving) > .shp-drawn + .shp-know');
   await expect(know.locator('p')).toHaveCount(2);
   await expect(know.locator('p').first()).toContainText('The first thing to know');
   await expect(know.locator('.shp-rb')).toHaveText('1');
   expect(await know.locator('p').first().evaluate((p) => parseFloat(getComputedStyle(p).fontSize))).toBeGreaterThanOrEqual(16);
+  // Under the drawing itself, not a screen below it, and the view is what scrolls.
+  const place = await know.evaluate((el) => {
+    const frame = el.previousElementSibling!.getBoundingClientRect();
+    const view = el.closest('.shp-view')!.getBoundingClientRect();
+    return { gap: el.getBoundingClientRect().top - frame.bottom, framed: frame.height, room: view.height };
+  });
+  expect(place.gap).toBeGreaterThanOrEqual(0);
+  expect(place.gap).toBeLessThan(48);
+  expect(place.framed).toBeLessThan(place.room);
   await context.close();
   expect(problems).toEqual([]);
 
@@ -195,11 +207,77 @@ test('What to know is paragraphs; a board saved with Requirements still opens wi
   writeFileSync(file, `${JSON.stringify(v)}\n`);
 
   const old = await openBoard(browser, id);
-  await view(old.page, 'What to know');
-  const words = old.page.locator('.shp-know');
+  const words = old.page.locator('.shp-view:not(.leaving) > .shp-drawn + .shp-know');
   for (const line of ['What I understand', 'Who gets it', 'At least 2 days', 'Never a guest', 'Open:', 'Nothing waits.']) await expect(words).toContainText(line);
   expect(old.problems).toEqual([]);
   await old.context.close();
+});
+
+test('a number stays with its word and punctuation at every width, and a long path beside it still fits a phone', async ({ browser }) => {
+  const id = store('marker-line', {
+    title: 'Numbers at a line end',
+    claim: 'Built.',
+    views: { know: `It stays quiet until you lift it off the base [^1]. Then \`packages/ui/components/shape/a/very/long/path/that/fills/the/phone/ShapeSurface.tsx:1234\` [^1], and a_very_long_word_with_no_place_at_all_to_break_it_on_a_small_phone_screen [^2]; the end.` },
+    refs: board.refs,
+  });
+  const { context, page, problems } = await openBoard(browser, id, { ...phone, viewport: { width: 320, height: 700 }, screen: { width: 320, height: 700 } });
+  const words = page.locator('.shp-know');
+  const sizes = [320, 330, 345, 360, 375, 390, 412, 430, 500, 640, 800, 1000, 1280, 1440];
+  for (const width of sizes) {
+    await page.setViewportSize({ width, height: 700 });
+    await page.waitForTimeout(120);
+    const seen = await words.evaluate((el) => {
+      const view = el.closest('.shp-view')!;
+      const room = view.getBoundingClientRect();
+      const rects = [...el.querySelectorAll('.shp-rb')].map((b) => b.getBoundingClientRect());
+      // A number on another line than the punctuation after it, or than the last letter before it. A word or path too
+      // wide to share one line with its number has to end somewhere: only then may the number start the next line.
+      const numbers = [...el.querySelectorAll('.shp-rb')];
+      const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const texts: Text[] = [];
+      while (walk.nextNode()) if (!numbers.some((n) => n.contains(walk.currentNode))) texts.push(walk.currentNode as Text);
+      const stray = numbers.filter((number) => {
+        const at = number.getBoundingClientRect();
+        const range = document.createRange();
+        const sameLine = (node: Text, index: number) => {
+          range.setStart(node, index);
+          range.setEnd(node, index + 1);
+          const r = range.getBoundingClientRect();
+          return r.top < at.bottom && r.bottom > at.top;
+        };
+        const isBefore = (t: Text) => number.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_PRECEDING;
+        const before = texts.filter((t) => isBefore(t) && t.data.trim()).at(-1)!;
+        const after = texts.find((t) => !isBefore(t) && t.data)!;
+        const last = before.data.trimEnd().length;
+        range.setStart(before, before.data.slice(0, last).search(/\S+$/));
+        range.setEnd(before, last);
+        const word = [...range.getClientRects()].reduce((sum, r) => sum + r.width, 0);
+        const fits = word + at.width + 16 <= el.clientWidth;
+        return (fits && !sameLine(before, last - 1)) || !sameLine(after, 0);
+      }).length;
+      return { over: view.scrollWidth - view.clientWidth, past: rects.filter((r) => r.right > room.right + 0.5 || r.left < room.left - 0.5).length, stray };
+    });
+    expect(seen, `at ${width}`).toEqual({ over: 0, past: 0, stray: 0 });
+  }
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+test('a long path or link with no number beside it never pushes the Shape sideways on a phone', async ({ browser }) => {
+  const id = store('long-path', {
+    ...board,
+    title: 'A long path alone',
+    views: { picture: board.views.picture, know: 'It lives in `packages/ui/components/shape/a/very/long/path/that/fills/the/phone/ShapeSurface.tsx` today.\n\nSee https://example.com/a/very/long/link/with/no/place/to/break/it/on/a/small/phone/screen for more.' },
+  });
+  const { context, page, problems } = await openBoard(browser, id, { ...phone, viewport: { width: 320, height: 700 }, screen: { width: 320, height: 700 } });
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 700 });
+    await page.waitForTimeout(120);
+    const sideways = await page.locator('.shp-view:not(.leaving)').evaluate((v) => [v.scrollWidth - v.clientWidth, document.documentElement.scrollWidth - document.documentElement.clientWidth]);
+    expect(sideways, `at ${width}`).toEqual([0, 0]);
+  }
+  expect(problems).toEqual([]);
+  await context.close();
 });
 
 test('a phone pans a canvas with no tall drawing', async ({ browser }) => {

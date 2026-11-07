@@ -1,6 +1,6 @@
-// What to know: what the person needs to know, in a paragraph or two of plain
-// prose. Each paragraph is a part the person can mark. An old board's
-// Requirements show here too, as plain lines.
+// `views.know`, under the drawing in the Shape view: what the person needs to
+// know, in a paragraph or two of plain prose. Each paragraph is a part the person
+// can mark. An old board's Requirements show here too, as plain lines.
 import React, { useLayoutEffect, useRef } from 'react';
 import { shapeKnowParagraphs, type ShapeRequirements } from '@plannotator/core/shape';
 import type { MarkState } from './ShapeDrawn';

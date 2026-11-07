@@ -78,7 +78,7 @@
 .shp-stage.reduce .shp-view.leaving { animation: shp-fade-out .16s linear forwards; -webkit-mask-image: none; mask-image: none; }
 .shp-stage.reduce .shp-view.entering [data-step], .shp-stage.reduce .shp-view.v-code.entering { animation: shp-fade-only .16s linear both; animation-delay: 0s; }
 
-/* A marked part (What to know; drawn views carry the same rules in their shadow root). */
+/* A marked part (`views.know`'s words; drawn views carry the same rules in their shadow root). */
 .shp-know .mk { border-radius: 6px; transition: box-shadow .25s, background-color .25s; }
 .shp-stage.pinpointing .shp-know [data-mark] { cursor: pointer; }
 .shp-know .mk.noted { box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 70%, transparent); background-color: color-mix(in oklab, var(--primary) 7%, transparent); }
@@ -134,8 +134,14 @@
 .shp-tstrip > div { flex-wrap: nowrap !important; }
 .shp-tstrip button { flex-shrink: 0; }
 
-/* ── What to know: prose, set for reading ── */
-.shp-know { max-width: 66ch; padding: 10px 0 8px; font-size: 18px; line-height: 1.65; letter-spacing: -.003em; text-wrap: pretty; }
+/* ── views.know: prose, set for reading, under the drawing or (with none) as the view ── */
+.shp-know { max-width: 66ch; padding: 10px 0 8px; font-size: 18px; line-height: 1.65; letter-spacing: -.003em; text-wrap: pretty; overflow-wrap: anywhere; }
+.shp-drawn.followed { min-height: 0; }
+.shp-drawn.canvas.followed:not(.tall) { height: auto; }
+.shp-drawn.followed + .shp-know { margin-top: 18px; scroll-margin-top: 14px; font-size: 16px; }
+.shp-drawn.canvas.followed:not(.tall) + .shp-know { margin-inline: auto; }
+/* A scrollbar that comes and goes would rescale the canvas that made it come and go. */
+.shp-view:has(> .shp-drawn.followed) { scrollbar-gutter: stable; }
 .shp-know p { margin: 0 0 1em; padding: 2px 0; }
 .shp-know p:last-child { margin-bottom: 0; }
 /* An old board's Requirements: plain lines under their group's name. */
@@ -208,6 +214,10 @@
 .shp-dock, .shp-pill { transition: left .32s cubic-bezier(.2,.8,.2,1); }
 
 /* ── reference bubbles and the References list ── */
+/* A number with its word and punctuation: no break between them. A word wider than the line still breaks inside itself, so a phone never overflows. */
+.shp-rb-with { overflow-wrap: anywhere; }
+.shp-rb-end { white-space: nowrap; }
+.shp-rb-end::before { content: "\2060"; }
 .shp-rb { appearance: none; border: 0; display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; margin: 0 0 0 5px; border-radius: 999px; vertical-align: 2px;
   font: 600 10px/1 var(--font-mono); color: var(--primary); background: color-mix(in oklab, var(--primary) 12%, var(--background)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 30%, transparent);
   cursor: pointer; text-decoration: none !important; transition: transform .15s, background-color .15s, color .15s; font-style: normal; letter-spacing: 0; }
@@ -425,7 +435,7 @@
 .shp-chg-fr.fork .lab { font-family: var(--font-mono); }
 .shp-chg-fr.fork .call { font: 500 13px/22px var(--font-sans); }
 
-/* Pointing at a change or a path (Annotate), and a version that redrew one: What to know's marks. */
+/* Pointing at a change or a path (Annotate), and a version that redrew one: as the marks in `views.know`'s words. */
 .shp-chg .mk { transition: box-shadow .25s, background-color .25s; }
 .shp-stage.pinpointing .shp-chg [data-mark] { cursor: pointer; }
 .shp-chg .mk.noted { box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--primary) 70%, transparent); background-color: color-mix(in oklab, var(--primary) 7%, var(--chg-surface)); }

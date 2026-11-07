@@ -169,13 +169,15 @@ describe('What to know', () => {
     expect(r.ok && r.value.views.know).toBe('Just this.');
   });
 
-  test('a new board cannot write Requirements: the refusal names where the words go', () => {
+  test('a new board cannot write Requirements: the refusal sends the words behind a number, never to views.know', () => {
     const b = board() as unknown as { views: Record<string, unknown> };
     b.views.reqs = { groups: [{ id: 'g', label: 'G', items: [{ id: 'r', text: 'a' }] }] };
     const r = checkShapeBoard(b);
     expect(r.ok).toBe(false);
     expect(errors(r)).toContain('views.reqs: Requirements are gone');
-    expect(errors(r)).toContain('views.know');
+    expect(errors(r)).toContain("ref's sub");
+    // Agents are no longer asked for views.know (approval "shape-know-removed").
+    expect(errors(r)).not.toContain('know');
   });
 
   test('each paragraph is a part: a change to one marks that one, and says What to know', () => {

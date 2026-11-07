@@ -3,7 +3,7 @@
  *
  * A shape is one thing being worked out with one agent session. Each time the
  * agent draws it, the store keeps a full snapshot: a version. A version holds
- * its views (Picture, How it works, What's changed, What to know, Code), the numbered
+ * its views (Picture, How it works, What's changed, `views.know`, Code), the numbered
  * references the views cite, and the parts the person can point at.
  *
  * Browser-safe and dependency-free: the store (packages/shared/shape), the
@@ -12,7 +12,7 @@
  *  - `checkShapeBoard` validates what an agent writes (`plannotator shape
  *    update --file`) and names the exact field that is wrong.
  *  - `shapeParts` lists the parts of a board: every `data-mark` of a drawn
- *    view, every change and call path of What's changed, every paragraph of What to know,
+ *    view, every change and call path of What's changed, every paragraph of `views.know`,
  *    every Code step, the title and the claim. Ids
  *    stay the same across versions, which is what lets the board redraw only
  *    what changed.
@@ -29,7 +29,7 @@ export const SHAPE_FORMAT_VERSION = 1;
 
 export type ShapeViewId = 'picture' | 'how' | 'changed' | 'know' | 'code';
 
-/** The views, in the dock's order. Their labels are the product's words. */
+/** The views a board holds. Their labels are the words `shape update` reports to the agent; the bar's words are ShapeSurface's. */
 export const SHAPE_VIEWS: readonly { id: ShapeViewId; label: string }[] = [
   { id: 'picture', label: 'Picture' },
   { id: 'how', label: 'How it works' },
@@ -150,7 +150,7 @@ export interface ShapeExampleStep {
   code: { path: string; line: number };
 }
 
-// An old board's Requirements. Nothing new writes them (`checkShapeBoard` refuses them); a saved version keeps them and What to know shows them.
+// An old board's Requirements. Nothing new writes them (`checkShapeBoard` refuses them); a saved version keeps them and the Shape view shows them under the drawing.
 export interface ShapeRequirement {
   /** Stable across versions. */
   id: string;
@@ -313,7 +313,7 @@ export interface ShapeBoard {
     changed?: ShapeChanged;
     /** What the person needs to know: at most two short paragraphs of prose. Inline Markdown. */
     know?: string;
-    /** Only on a version saved before What to know. */
+    /** Only on a version saved before `views.know`. */
     reqs?: ShapeRequirements;
     code?: ShapeCodeView;
   };
@@ -407,7 +407,7 @@ export interface ShapeNote {
   picture?: string;
 }
 
-/** Where a box sits, as fractions of its drawing (or of What to know). `tall` and `more`: on that layout of the view. */
+/** Where a box sits, as fractions of its drawing (or of `views.know`'s words). `tall` and `more`: on that layout of the view. */
 export interface ShapeNoteBox {
   x: number;
   y: number;
@@ -1279,7 +1279,7 @@ function checkExampleSource(c: Checker, from: unknown, f: string, index: number)
   return path && line ? { path, line } : undefined;
 }
 
-/** What to know's paragraphs: blank lines part them. */
+/** `views.know`'s paragraphs: blank lines part them. */
 export function shapeKnowParagraphs(text: string): string[] {
   return text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
 }
@@ -1628,11 +1628,11 @@ export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
     else asOf = new Date(input.asOf).toISOString();
   }
   const views: ShapeBoard['views'] = {};
-  if (!isRecord(input.views)) c.fail('views', 'is required: { picture, how, know, code }, at least one');
+  if (!isRecord(input.views)) c.fail('views', 'is required: { picture, how, code }, at least one');
   else {
     for (const key of Object.keys(input.views)) {
-      if (key === 'reqs') c.fail('views.reqs', 'Requirements are gone. Put what the person needs to know in views.know, as at most two short paragraphs');
-      else if (!SHAPE_VIEWS.some((v) => v.id === key)) c.fail(`views.${key}`, 'is not a view (picture, how, changed, know, code)');
+      if (key === 'reqs') c.fail('views.reqs', 'Requirements are gone. Put a caveat behind a numbered mark (a ref\'s sub), or say it in your message to the person');
+      else if (!SHAPE_VIEWS.some((v) => v.id === key)) c.fail(`views.${key}`, 'is not a view (picture, how, changed, code)');
     }
     const picture = checkDrawn(c, input.views.picture, 'views.picture');
     const how = checkDrawn(c, input.views.how, 'views.how', true);
@@ -1836,8 +1836,8 @@ export interface ShapeDiff {
   refs: { added: number[]; removed: number[]; changed: number[] };
 }
 
-/** What a view holds on this version. What to know is the words, or an old board's Requirements. */
-/** A view, part or note saved when What to know was Requirements says "reqs": it is `know` now. */
+/** What a view holds on this version. `know` is the words, or an old board's Requirements. */
+/** A view, part or note saved when `know` was Requirements says "reqs": it is `know` now. */
 export function shapeViewNow<T>(view: T): T | 'know' {
   return (view as unknown) === 'reqs' ? 'know' : view;
 }
@@ -1993,7 +1993,7 @@ export function shapeBoardNotes(board: Pick<ShapeBoard, 'views' | 'refs'>): stri
   const picture = board.views.picture;
   if (!picture) return notes;
   const words = shapeDrawnWords(picture.html);
-  if (words > 240) notes.push(`The Picture has ${words} words. Read at a glance, about 200 is the most. Move the rest behind numbers (a ref's sub and images) or to views.know.`);
+  if (words > 240) notes.push(`The Picture has ${words} words. Read at a glance, about 200 is the most. Move the rest behind numbers (a ref's sub and images) or to your message to the person.`);
   if (picture.width === undefined) notes.push('The Picture has no width and height, so it scrolls like a page. Give it a fixed canvas: it then always fits one screen.');
   else if (!picture.tall) notes.push('The Picture has no tall drawing, so a phone pans it sideways. That works. For a board you expect on a phone, add views.picture.tall.');
   const cited = [...picture.html.matchAll(/\sdata-ref\s*=\s*["']?(\d{1,3})/g)].map((m) => Number(m[1]));

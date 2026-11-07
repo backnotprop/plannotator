@@ -91,20 +91,20 @@ async function openChanged() {
 describe.if(hasDom)("What's changed", () => {
   test('a board without it has no tab; a board with it has one, after How it works', async () => {
     await mount({ picture: PICTURE, how: PICTURE, know: 'Once.' });
-    expect(tabs()).toEqual(['Picture', 'How it works', 'What to know']);
+    expect(tabs()).toEqual(['Shape', 'How it works']);
     act(() => root!.unmount());
     await mount({ picture: PICTURE, how: PICTURE, changed: KETTLE_CHANGED, know: 'Once.' });
-    expect(tabs()).toEqual(['Picture', 'How it works', "What's changed", 'What to know']);
-    // The board still opens on the Picture.
+    expect(tabs()).toEqual(['Shape', 'How it works', "What's changed"]);
+    // The board still opens on the Shape view.
     expect(document.querySelector('.shp-view.v-picture')).not.toBeNull();
   });
 
   test('a host that turns the Code view off has no Code tab; one that does not keeps it', async () => {
     await mount({ picture: PICTURE, changed: KETTLE_CHANGED, code: CODE }, { codeView: false });
-    expect(tabs()).toEqual(['Picture', "What's changed"]);
+    expect(tabs()).toEqual(['Shape', "What's changed"]);
     act(() => root!.unmount());
     await mount({ picture: PICTURE, changed: KETTLE_CHANGED, code: CODE });
-    expect(tabs()).toEqual(['Picture', "What's changed", 'Code']);
+    expect(tabs()).toEqual(['Shape', "What's changed", 'Code']);
   });
 
   test('a saved Code view on a board without one opens on the first view instead', async () => {

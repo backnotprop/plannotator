@@ -128,8 +128,8 @@ async function openChanged() {
 
 test.skipIf(!hasDom)("the Inbox's board has no Code tab, and What's changed sits after How it works", async () => {
   await mount(THREAD);
-  expect(tabs()).toEqual(['Picture', 'How it works', "What's changed", 'What to know']);
-  // It still opens on the Picture.
+  expect(tabs()).toEqual(['Shape', 'How it works', "What's changed"]);
+  // It still opens on the Shape view.
   expect(document.querySelector('.shp-view.v-picture')).not.toBeNull();
 });
 

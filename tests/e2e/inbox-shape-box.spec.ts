@@ -227,7 +227,7 @@ for (const scheme of ['light', 'dark'] as const) {
     await hideCursor(page);
 
     await expect(composer(page)).toBeVisible();
-    await expect(composer(page)).toContainText('Picture · 3 parts');
+    await expect(composer(page)).toContainText('Shape · 3 parts');
     // The owner's order, with Change it the filled one.
     expect(await buttonOrder(page)).toEqual(['Ask', 'Change it', 'Show me', 'Add to reply']);
     await composerClearOfBox(page);
@@ -268,7 +268,7 @@ test('a click still marks one part; a tiny drag is a click; Esc cancels a drag a
   await crosshair(page).click();
   const s = await at(page, 'save', 0.5, 0.5);
   await drag(page, s, { x: s.x + 3, y: s.y + 2 }, 3);
-  await expect(composer(page)).toContainText('Picture · “Save”');
+  await expect(composer(page)).toContainText('Shape · “Save”');
   await expect(composer(page).getByRole('button', { name: 'Show me' })).toHaveCount(0);
   await expect(box(page)).toHaveCount(0);
   await page.keyboard.press('Escape');
@@ -289,7 +289,7 @@ test('a click still marks one part; a tiny drag is a click; Esc cancels a drag a
   await context.close();
 });
 
-test('How it works and What to know: a lazy drag over a diagram and over words', async ({ browser }) => {
+test('How it works and the words under the drawing: a lazy drag over a diagram and over words', async ({ browser }) => {
   const id = store('views');
   const { context, page, problems } = await openBoard(browser, id);
   await crosshair(page).click();
@@ -301,9 +301,11 @@ test('How it works and What to know: a lazy drag over a diagram and over words',
   await page.screenshot({ path: join(shots, '06-diagram-comment.png') });
   await composer(page).getByRole('button', { name: 'Ask' }).click();
   await expect(composer(page)).toHaveCount(0);
-  await view(page, 'What to know');
+  // views.know's words sit under the drawing in the Shape view.
+  await view(page, 'Shape');
+  await part(page, 'know-1').scrollIntoViewIfNeeded();
   await drag(page, await at(page, 'know-1', 0.02, 0.1), await at(page, 'know-1', 0.55, 0.6));
-  await expect(composer(page)).toContainText('What to know · “Adding an engine takes');
+  await expect(composer(page)).toContainText('Shape · “Adding an engine takes');
   await composer(page).locator('textarea').fill('Plainer, please.');
   // An Ask opened the chat beside the board; the composer's own buttons still work (they are not a click on the board).
   await expect(page.locator('.shp-sidep.open')).toBeVisible();
@@ -398,12 +400,12 @@ for (const [look, options, thread] of [
     const reply = page.getByRole('textbox', { name: /^Reply to / });
     const files = page.locator('[data-compose-file-name]');
     const toast = page.locator('.ib-toast');
-    const words = '> Picture · 3 parts · “Google DuckDuckGo Bing”\n\nMake Kagi the default and put it first.';
+    const words = '> Shape · 3 parts · “Google DuckDuckGo Bing”\n\nMake Kagi the default and put it first.';
 
     await crosshair(page).click();
     await page.mouse.move(5, 5);
     await drag(page, await at(page, 'row-google', 0.12, 0.45), await at(page, 'row-bing', 0.85, 0.6));
-    await expect(composer(page)).toContainText('Picture · 3 parts');
+    await expect(composer(page)).toContainText('Shape · 3 parts');
     expect(await buttonOrder(page)).toEqual(['Ask', 'Change it', 'Show me', 'Add to reply']);
     await composer(page).locator('textarea').fill('Make Kagi the default and put it first.');
     await page.waitForTimeout(250);
@@ -418,6 +420,12 @@ for (const [look, options, thread] of [
     await clearOfDock(page, toast.last());
     await page.screenshot({ path: join(replyShots, `02-added-toast-${look}.png`) });
     expect(waiting(id)).toEqual([]);
+    // A phone's toast floats over the board (above the thread's reply under it), where the omnibox sits once the
+    // words are under the drawing: a press there swipes the toast, not a box. Dismissed first, as a person would.
+    if (await page.locator('.ib-toast-phone').count()) {
+      await toast.last().locator('[data-toast-dismiss]').click();
+      await expect(toast).toHaveCount(0);
+    }
 
     // A second box, then its Undo: only the second goes, and its toast with it.
     await drag(page, await at(page, 'omnibox', 0.05, 0.2), await at(page, 'omnibox', 0.4, 0.8));
@@ -484,7 +492,7 @@ test('Add to reply’s Undo: once, its own press only (even of the same words), 
   await addToReply(page, 'Between.');
   const one = await reply.inputValue();
   const quote = one.split('\n\n')[0]!;
-  expect(quote.startsWith('> Picture · ')).toBe(true);
+  expect(quote.startsWith('> Shape · ')).toBe(true);
   expect(one).toBe(`${quote}\n\nBetween.`);
   await omniboxBox(page);
   await addToReply(page);
