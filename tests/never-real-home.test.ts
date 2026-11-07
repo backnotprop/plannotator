@@ -56,6 +56,13 @@ describe("the refusal under the sandbox flag", () => {
     expect(refusal({ ...flag, HOME: "/Users/someone" }, "win32")).toBeNull();
   });
 
+  test("refuses a scratch HOME set after start while os.homedir() is still the account's", () => {
+    const at = (osHome: string) => testHomeRefusal({ ...flag, HOME: "/tmp/world/home" }, "darwin", () => "/Users/someone", () => osHome);
+    expect(at("/Users/someone")).toContain("os.homedir()");
+    expect(at("/tmp/world/home")).toBeNull();
+    expect(testHomeRefusal({ HOME: "/tmp/world/home" }, "darwin", () => "/Users/someone", () => "/Users/someone")).toBeNull();
+  });
+
   test("sees through a symlink to the account's home", () => {
     const dir = mkdtempSync(join(tmpdir(), "plannotator-home-link-"));
     try {

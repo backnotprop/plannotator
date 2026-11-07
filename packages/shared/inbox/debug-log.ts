@@ -100,7 +100,7 @@ const ERRORS = new Set(["AbortError", "TimeoutError", "TypeError", "NetworkError
 const VOICE_INPUTS = new Set(["press", "release", "lost", "toggle"]);
 const VOICE_PHASES = new Set(["idle", "opening", "listening", "sending"]);
 const VOICE_MODES = new Set(["hold", "tap"]);
-const VOICE_TROUBLES = new Set(["notheard", "blocked", "micfailed", "nothing", "badclip", "expired", "refused", "keyrefused", "offline", "inboxgone", "codexfailed", "notready", "voiceoff"]);
+const VOICE_TROUBLES = new Set(["notheard", "blocked", "micfailed", "nothing", "badclip", "expired", "refused", "keyrefused", "offline", "inboxgone", "codexfailed", "notready", "voiceoff", "failed"]);
 const VOICE_STEPS = new Set(["context", "stream", "worklet", "ready"]);
 /** Where a `voice_miss` landed, seen from the mic's hit box. */
 const VOICE_EDGES = new Set(["above", "below", "left", "right"]);

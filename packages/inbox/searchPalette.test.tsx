@@ -717,6 +717,29 @@ test.skipIf(!hasDom)('the Type chip: All types sends the request as before; a pi
   expect(options()).toHaveLength(0);
 });
 
+test.skipIf(!hasDom)('Show 50 more drops a row already shown (a message that came in moved the next page down by one)', async () => {
+  respond = async (call) => {
+    const p = call.url.searchParams;
+    if (p.get('group') === 'files' && p.get('offset') === '50') {
+      // One new file came first since the last page: the page starts one row early.
+      return answer({ q: p.get('q') ?? '', terms: [p.get('q') ?? ''], totals: typeTotals, groups: { files: Array.from({ length: 11 }, (_, i) => fileRow(49 + i)) }, recent: null });
+    }
+    return typeAnswers(call);
+  };
+  await renderTyped(true);
+  await type('relay');
+  await waitFor(() => groupHeadings().includes('Threads'));
+  await pickType('Files');
+  await waitFor(() => groupHeadings()[0] === 'Files60' && options().length === 51);
+  await act(async () => {
+    options().at(-1)!.click();
+  });
+  await waitFor(() => options().length === 60);
+  const ids = options().map((o) => o.getAttribute('data-result-id'));
+  expect(new Set(ids).size).toBe(ids.length);
+  expect(ids.at(-1)).toBe('att_f59');
+});
+
 test.skipIf(!hasDom)('the Type chip goes back to All types on ×, on Clear filters, on Search everywhere and at every open', async () => {
   respond = typeAnswers;
   const plainAgain = async () => {
@@ -813,4 +836,86 @@ test.skipIf(!hasDom)('a type change on its way draws the last answer as it was a
   await act(async () => release!());
   await waitFor(() => groupHeadings().includes('Actions'));
   expect(groupHeadings()).toEqual(['Threads', 'Messages12', 'Files60', 'Actions']);
+});
+
+test.skipIf(!hasDom)('Best match | Newest: shown for words, asks again in the order picked, Show all keeps it, and the pick is remembered at the next open', async () => {
+  const { SEARCH_SORT_COOKIE } = await import('./search/searchSort');
+  const { storage, setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
+  // The pick persists through Plannotator's storage (cookies in the app); a map stands in for them here.
+  const kept = new Map<string, string>();
+  setStorageBackend({ getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => void kept.set(k, v), removeItem: (k) => void kept.delete(k) });
+  try {
+    respond = async (call) => {
+      const q = call.url.searchParams.get('q')!;
+      if (call.url.searchParams.get('group') === 'messages') {
+        return answer({ q, terms: ['rate'], totals: totals({ threads: 1, messages: 12 }), groups: { messages: Array.from({ length: 12 }, (_, i) => messageRow(`msg_m${i}`, 'msg_t2', `rate ${i}`)) }, recent: null });
+      }
+      return q ? results(q) : answer({});
+    };
+    const sortSwitch = () => host!.querySelector<HTMLElement>('[data-search-sort]');
+    const radio = (value: string) => host!.querySelector<HTMLInputElement>(`[data-search-sort] input[value="${value}"]`)!;
+    await renderTyped(true);
+    // No words: nothing to order, no switch.
+    expect(sortSwitch()).toBeNull();
+    await type('rate');
+    await waitFor(() => options().length > 0 && searches().some((c) => c.url.searchParams.get('q') === 'rate'));
+    expect(sortSwitch()!.getAttribute('role')).toBe('radiogroup');
+    expect([...sortSwitch()!.querySelectorAll('label')].map((l) => l.textContent)).toEqual(['Best match', 'Newest']);
+    expect(radio('best').checked).toBe(true);
+    // Best match is today's request: no sort sent.
+    expect(searches().at(-1)!.url.searchParams.get('sort')).toBeNull();
+
+    const before = searches().length;
+    await act(async () => {
+      radio('newest').click();
+    });
+    await waitFor(() => searches().length > before);
+    expect(searches().at(-1)!.url.searchParams.get('q')).toBe('rate');
+    expect(searches().at(-1)!.url.searchParams.get('sort')).toBe('newest');
+    expect(radio('newest').checked).toBe(true);
+    expect(storage.getItem(SEARCH_SORT_COOKIE)).toBe('newest');
+
+    // "Show all" goes on in the order picked.
+    await waitFor(() => host!.querySelector('[data-show-more]') !== null);
+    await act(async () => {
+      host!.querySelector<HTMLElement>('[data-show-more]')!.click();
+    });
+    await waitFor(() => calls.some((c) => c.url.searchParams.get('group') === 'messages'));
+    expect(calls.find((c) => c.url.searchParams.get('group') === 'messages')!.url.searchParams.get('sort')).toBe('newest');
+
+    // Closed and opened again: still Newest, and the first words go out in that order.
+    await renderTyped(false);
+    await renderTyped(true);
+    await type('limit');
+    await waitFor(() => searches().some((c) => c.url.searchParams.get('q') === 'limit'));
+    expect(searches().at(-1)!.url.searchParams.get('sort')).toBe('newest');
+    await waitFor(() => sortSwitch() !== null);
+    expect(radio('newest').checked).toBe(true);
+
+    // Back to Best match: forgotten (the default), and asked again without a sort.
+    const again = searches().length;
+    await act(async () => {
+      radio('best').click();
+    });
+    await waitFor(() => searches().length > again);
+    expect(searches().at(-1)!.url.searchParams.get('sort')).toBeNull();
+    expect(storage.getItem(SEARCH_SORT_COOKIE)).toBeNull();
+  } finally {
+    resetStorageBackend();
+  }
+});
+
+test.skipIf(!hasDom)('Tab reaches the order once (the chosen half), as a radio group', async () => {
+  respond = async (call) => (call.url.searchParams.get('q') ? results(call.url.searchParams.get('q')!) : answer({}));
+  await renderTyped(true);
+  await type('rate');
+  await waitFor(() => host!.querySelector('[data-search-sort]') !== null);
+  const stops: string[] = [];
+  input().focus();
+  for (let i = 0; i < 8; i++) {
+    await key(document.activeElement!, { key: 'Tab' });
+    const el = document.activeElement as HTMLElement;
+    stops.push(el instanceof HTMLInputElement && el.type === 'radio' ? `radio:${el.value}` : (el.getAttribute('data-chip') ?? el.className));
+  }
+  expect(stops.filter((s) => s.startsWith('radio:'))).toEqual(['radio:best']);
 });
