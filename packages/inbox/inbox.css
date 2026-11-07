@@ -5762,15 +5762,8 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-artbtn-n { font-size: var(--ib-fs-12, 12px); font-weight: 600; font-variant-numeric: tabular-nums; }
 .pn-inbox .ib-iconbtn.ib-artbtn[aria-pressed="true"] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
 .ib-phead .ib-artbtn + .ib-iconbtn, .ib-phead .ib-artbtn + span + .ib-iconbtn { margin-left: 2px; }
-.ib-art-ph-title { margin-left: 4px; font-size: var(--ib-fs-15, 15px); font-weight: 650; white-space: nowrap; }
-.ib-art-ph-n { margin-left: 6px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 
 .ib-art { padding: 2px 0 28px; }
-.ib-art-top { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 16px; }
-.pn-inbox .ib-art-back { align-self: center; display: inline-flex; align-items: center; gap: 2px; height: 28px; padding: 0 9px 0 4px; margin-left: -6px; border-radius: var(--ib-lr-xs); color: var(--primary); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 550; white-space: nowrap; }
-.pn-inbox .ib-art-back:hover { background: color-mix(in oklch, var(--primary) 10%, transparent); }
-.ib-art-h { margin: 0; font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: -0.01em; outline: none; }
-.ib-art-sum { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .ib-art-load { margin: 24px 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .ib-art-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(208px, 1fr)); gap: 14px; }
 .ib-pane.ib-withfile .ib-art-grid { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px; }
@@ -5822,10 +5815,38 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-art-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 72px 20px; text-align: center; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
 .ib-art-empty b { font-size: var(--ib-fs-15, 15px); color: var(--foreground); }
 .ib-art-empty-ic { width: 52px; height: 52px; margin-bottom: 6px; display: grid; place-items: center; border-radius: var(--ib-lr-xl); background: var(--muted); color: var(--foreground); }
+/* The view's header: a row under the bar, with no line of its own. The way back, then the switch. */
+.ib-artbar { flex: none; display: flex; align-items: center; gap: 6px; padding: 10px 30px 0 22px; }
+.ib-pane.ib-withfile .ib-artbar { padding-left: 12px; padding-right: 20px; }
+.pn-inbox .ib-pane[data-full] .ib-artbar { padding-left: max(22px, calc((100% - 760px) / 2 - 8px)); }
+.pn-inbox .ib-iconbtn.ib-artbar-back { color: var(--muted-foreground); }
+.pn-inbox .ib-iconbtn.ib-artbar-back:hover { color: var(--foreground); }
+.ib-pbody.ib-artbody { padding-top: 12px; }
+.ib-artswitch-n { color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); font-weight: 400; font-variant-numeric: tabular-nums; }
+.ib-artswitch-one { display: inline-flex; align-items: baseline; gap: 6px; font-size: var(--ib-fs-13, 13px); font-weight: 550; white-space: nowrap; }
+/* The Links side of the view (ThreadLinksView.tsx): rows and space, no boxes, no lines. */
+.ib-tl-rows { list-style: none; margin: 0; padding: 0; }
+.ib-tl-repo { margin: 0 0 18px; }
+.ib-tl-rh { margin: 0; font: inherit; }
+.ib-tl-repo > .ib-tl-rows { padding-left: 24px; }
+.ib-tl-others { margin-top: 2px; }
+.pn-inbox a.ib-tl-a { display: flex; align-items: center; gap: 8px; min-height: 30px; margin: 0 -8px; padding: 3px 8px; border-radius: var(--ib-lr-xs); color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.35; text-decoration: none; }
+.pn-inbox a.ib-tl-a:hover { background: var(--muted); }
+.pn-inbox a.ib-tl-a:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.ib-tl-ic { flex: none; width: 16px; height: 16px; color: var(--muted-foreground); }
+.ib-tl-rh .ib-tl-ic { color: var(--foreground); }
+.ib-tl-lead { flex: none; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-tl-text { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-tl-name { font-weight: 600; }
+.ib-tl-tail { flex: none; max-width: 45%; margin-left: auto; padding-left: 12px; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
 @media (prefers-reduced-motion: reduce) { .pn-inbox .ib-art-tile { transition: none; } }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-art-grid, .ib-pane.ib-withfile .ib-art-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .ib-art-top { margin-bottom: 12px; }
+  .pn-inbox a.ib-tl-a { min-height: 40px; font-size: var(--ib-fs-14, 14px); }
+  .ib-tl-repo > .ib-tl-rows { padding-left: 20px; }
+  .pn-inbox .ib-artswitch { margin: 0 6px 0 auto; flex: none; }
+  .pn-inbox .ib-artswitch .ib-seg-o { height: 34px; padding: 0 12px; font-size: var(--ib-fs-13-5, 13.5px); }
+  .ib-artswitch-one { margin-left: 4px; font-size: var(--ib-fs-15, 15px); font-weight: 650; }
   .ib-art-who { display: none; }
   .pn-inbox .ib-iconbtn.ib-artbtn { min-width: 44px; height: 44px; }
   /* The header's icons keep their 44 px. Short of room for the subject it gives way (headFit.ts, `data-fit`): the
