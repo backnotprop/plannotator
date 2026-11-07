@@ -2,10 +2,13 @@
  * Assertions compare booleans and strings, never elements: a failed `expect(element)` makes bun print a happy-dom
  * node, which can take the test process down instead of failing the test.
  *
- * The reply box's foot on a phone (approval "inbox-reply-foot-phone", variant B "Summary"): one row, the
- * paperclip, one quiet line naming only what goes with this Send ("4 questions open · 3 comments"), the mic. The
- * owner, of the stacked chips it replaces: "very bad looking on mobile. not good, not acceptable".
+ * The reply box's foot on a phone (approval "inbox-reply-foot-phone", variant B "Summary"): one quiet line naming
+ * only what goes with this Send ("4 questions open · 3 comments"), over the box's row (approval "inbox-reply-box",
+ * T6). The owner, of the stacked chips it replaces: "very bad looking on mobile. not good, not acceptable".
  *
+ * - The row (T6, and the owner's note on it: "maybe we don't need delete icon. I like attachment on left"): the
+ *   paperclip first, then Skills, the mic and Send at the right edge; no bin, and Discard stays on the Draft line
+ *   above the box.
  * - Nothing waiting: no line, and no "2 picks" chip (the answers list above says it).
  * - Comments only: the line opens the comments list itself, and closing the list puts focus back on the line.
  * - Questions: the line opens a sheet; its "Skip them" skips them for this Send, and the line says so.
@@ -16,9 +19,12 @@
  * - Questions gone while the sheet is open: it closes for good; a later question does not reopen it or take focus.
  * - The last comment removed from the list: focus goes to the field.
  * - The line's name is its own words; the full sentence is its description.
- * - Desktop keeps today's chips.
+ * - A computer shows the chips while they fit (ReplyRow.tsx folds them into the line when they don't).
+ * - A failed Send (decision D3): one plain line, the Inbox's own words behind Details; a refusal written for people
+ *   stays as it is.
  *
- * The layout (one row, 44 px targets at 390 and 320) is proved in tests/e2e/inbox-reply-foot-phone.spec.ts.
+ * The layout (one row, 44 px targets at 390 and 320, the box's cap, the row still while dictating) is proved in
+ * tests/e2e/inbox-reply-foot-phone.spec.ts.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -138,11 +144,14 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let comments: InboxAnnotationRecord[] = [];
 let closes = 0;
+/** What a reply's POST gets back; null: the stub's plain `{}`. */
+let replyAnswer: (() => Response) | null = null;
 
 beforeEach(() => {
   if (!hasDom) return;
   comments = [];
   closes = 0;
+  replyAnswer = null;
   savedFetch = globalThis.fetch;
   const draft = (body: string): InboxReplyDraft => ({ v: 1, thread_id: THREAD, body, created_at: '2026-11-02T10:10:00.000Z', updated_at: new Date().toISOString() });
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -151,6 +160,9 @@ beforeEach(() => {
     if (path.includes('/draft')) return Response.json({ serverSession: 's', draft: draft(init?.method === 'POST' ? JSON.parse(String(init.body)).body : 'Mostly yes.') });
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: comments.length ? [file] : [], annotations: comments });
     if (path.includes('/sessions')) return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: [] });
+    if (path.endsWith('/reply') && replyAnswer) return replyAnswer();
+    // The thread read again after a Send that failed: the reply is not in it, so nothing went.
+    if (path.endsWith(`/threads/${THREAD}`) && (!init?.method || init.method === 'GET')) return Response.json({ serverSession: 's', thread: thread(false) });
     return Response.json({});
   }) as typeof fetch;
 });
@@ -209,12 +221,80 @@ const description = (el: HTMLElement | null) => {
 const buttonIn = (el: ParentNode | null, name: string) =>
   [...(el?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((b) => b.textContent?.trim() === name || b.getAttribute('aria-label') === name) ?? null;
 
-test.skipIf(!hasDom)('nothing waiting: one row of the paperclip alone, no line', async () => {
-  const el = await open({ questions: false });
-  expect(!!el.querySelector('.ib-rbox [data-reply-foot-phone] [data-reply-attach]')).toBe(true);
-  expect(!!(line(el))).toBe(false);
-  // Today's chips are gone from the phone's box.
-  expect(!!(el.querySelector('.ib-rbox [data-annotations-chip], .ib-rbox [data-skip-chip], .ib-rbox [data-picks-chip]'))).toBe(false);
+/** The row's controls in order, by what each is: what a press there does, not how it looks. */
+const rowOrder = (el: HTMLElement) =>
+  [...el.querySelectorAll<HTMLElement>('.ib-rbox [data-reply-row] :is([data-reply-attach], [data-reply-skills], [data-voice-mic], [data-reply-send], [data-reply-discard])')].map((c) =>
+    c.hasAttribute('data-reply-attach') ? 'attach' : c.hasAttribute('data-reply-skills') ? 'skills' : c.hasAttribute('data-voice-mic') ? 'mic' : c.hasAttribute('data-reply-send') ? 'send' : 'bin',
+  );
+
+test.skipIf(!hasDom)('a phone: the row is the paperclip first, Skills, then the mic and Send at the right edge; no bin, and Discard is on the Draft line above the box', async () => {
+  // The mic is in the row only with voice on.
+  const { adoptVoiceSettings } = await import('./voice');
+  adoptVoiceSettings({ on: true, phones_only: false, engine: 'codex', key: { source: null, last4: null }, computer: null, intro_due: false, guest: false });
+  try {
+    const el = await open({ questions: false });
+    expect(rowOrder(el)).toEqual(['attach', 'skills', 'mic', 'send']);
+    expect(!!el.querySelector('.ib-rbox [data-reply-discard]')).toBe(false);
+    // The draft the box opened with is saved: the line above the box says so, with its Discard.
+    expect(el.querySelector('[data-draft-above] [data-draft-stamp]')?.textContent).toContain('Saved');
+    expect(!!el.querySelector('[data-draft-above] [data-draft-discard]')).toBe(true);
+    // Nothing goes with this reply: no line over the row, and none of a computer's chips.
+    expect(!!(line(el))).toBe(false);
+    expect(!!(el.querySelector('.ib-rbox [data-annotations-chip], .ib-rbox [data-skip-chip], .ib-rbox [data-picks-chip]'))).toBe(false);
+  } finally {
+    adoptVoiceSettings(null);
+  }
+});
+
+test.skipIf(!hasDom)('a computer: Send first, the paperclip, Skills and the mic, and the bin at the far right', async () => {
+  const { adoptVoiceSettings } = await import('./voice');
+  adoptVoiceSettings({ on: true, phones_only: false, engine: 'codex', key: { source: null, last4: null }, computer: null, intro_due: false, guest: false });
+  try {
+    const el = await open({ questions: false, phone: false });
+    expect(rowOrder(el)).toEqual(['send', 'attach', 'skills', 'mic', 'bin']);
+    // Nothing sits above the box on a computer: the bin is its Discard.
+    expect(!!el.querySelector('[data-draft-above]')).toBe(false);
+    expect(el.querySelector('.ib-rbox [data-reply-discard]')?.getAttribute('aria-label')).toBe('Discard draft');
+  } finally {
+    adoptVoiceSettings(null);
+  }
+});
+
+/** The words a failed Send leaves under the box, and its Details. */
+const failure = (el: HTMLElement) => {
+  const alert = el.querySelector<HTMLElement>('.ib-pfoot .ib-error[role="alert"]');
+  const details = alert?.querySelector<HTMLDetailsElement>('[data-error-details]') ?? null;
+  return {
+    line: alert ? [...alert.childNodes].filter((n) => !(n instanceof HTMLElement && n.matches('[data-error-details]'))).map((n) => n.textContent).join('').trim() : null,
+    details: details?.querySelector('.ib-errd-t')?.textContent ?? null,
+    folded: details ? !details.open : null,
+  };
+};
+
+for (const phone of [false, true]) {
+  test.skipIf(!hasDom)(`${phone ? 'a phone' : 'a computer'}: a Send the Inbox fails says so in one plain line, its own words folded behind Details; the words stay in the box (decision D3)`, async () => {
+    replyAnswer = () =>
+      Response.json({ error: "ENOSPC: no space left on device, write '/Users/me/.plannotator/inbox/projects/ledger-abcdef/threads/msg_01M6RF.jsonl'", code: 'internal' }, { status: 500 });
+    const el = await open({ questions: false, phone });
+    await press(el.querySelector<HTMLButtonElement>('.ib-rbox [data-reply-send]'));
+    await settle();
+    expect(failure(el)).toEqual({
+      line: 'The reply was not sent: the Inbox could not write it. Send again to retry.',
+      details: "ENOSPC: no space left on device, write '/Users/me/.plannotator/inbox/projects/ledger-abcdef/threads/msg_01M6RF.jsonl'",
+      folded: true,
+    });
+    // Nothing was lost: the box is still open with the words, and Send can be pressed again.
+    expect((el.querySelector('.ib-rbox textarea') as HTMLTextAreaElement | null)?.value).toBe('Mostly yes.');
+    expect(el.querySelector<HTMLButtonElement>('.ib-rbox [data-reply-send]')?.disabled).toBe(false);
+  });
+}
+
+test.skipIf(!hasDom)('a refusal written for people stays the line as it is, with no Details (decision D3)', async () => {
+  replyAnswer = () => Response.json({ error: 'That question was already answered in another window.', code: 'question_closed' }, { status: 409 });
+  const el = await open({ questions: false, phone: false });
+  await press(el.querySelector<HTMLButtonElement>('.ib-rbox [data-reply-send]'));
+  await settle();
+  expect(failure(el)).toEqual({ line: 'That question was already answered in another window.', details: null, folded: null });
 });
 
 test.skipIf(!hasDom)('comments only: the line names them and opens their list in one press; closing it puts focus back on the line', async () => {
@@ -400,10 +480,9 @@ test.skipIf(!hasDom)('a smaller text size, the row as wide as before: the line i
   }
 });
 
-test.skipIf(!hasDom)('desktop keeps its chips: the skip chip and "3 comments", no line', async () => {
+test.skipIf(!hasDom)('a computer shows the chips while they fit: the skip chip and "3 comments" in the row, no line', async () => {
   const el = await open({ questions: true, n: 3, phone: false });
   expect(!!(line(el))).toBe(false);
-  expect(!!(el.querySelector('[data-reply-foot-phone]'))).toBe(false);
-  expect(el.querySelector('.ib-rbox .ib-rfoot [data-skip-chip]')?.textContent).toContain('4 questions stay open');
-  expect(el.querySelector('.ib-rbox .ib-rfoot [data-annotations-chip]')?.textContent).toBe('3 comments');
+  expect(el.querySelector('.ib-rbox [data-reply-row] [data-skip-chip]')?.textContent).toContain('4 questions stay open');
+  expect(el.querySelector('.ib-rbox [data-reply-row] [data-annotations-chip]')?.textContent).toBe('3 comments');
 });

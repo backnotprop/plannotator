@@ -96,14 +96,14 @@ export function ReplyRecipient({
   }, [open, onOpen]);
 
   // On a phone the keyboard leaves little room and the foot clips what is inside it: the list sits over the box,
-  // from just above Send's row (the pill stays in sight, a tap on it closes the list) up to the header, never behind it.
+  // from just above the pill's line (the pill stays in sight, a tap on it closes the list) up to the header, never behind it.
   const [spot, setSpot] = useState<CSSProperties | undefined>(undefined);
   useLayoutEffect(() => {
     if (!open || !phone || !section) {
       setSpot(undefined);
       return;
     }
-    const row = section.querySelector('[data-reply-row] .ib-footbtns')?.getBoundingClientRect();
+    const row = (section.querySelector('[data-recipient-anchor]') ?? section.querySelector('[data-reply-row]'))?.getBoundingClientRect();
     const head = section.querySelector('.ib-phead')?.getBoundingClientRect();
     if (!row || !head) return;
     const top = Math.round(row.top - 6);

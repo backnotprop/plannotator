@@ -510,18 +510,38 @@ test('the HTML prototype opens full screen: its image and frame load from its fo
 });
 
 /**
- * The open reply box's chips (picks, skip, annotations): each inside the box,
- * none overflowing its own box, each label on one line. Problems as text, so a
- * failure names the chip.
+ * The open reply box's row on a computer (approval "inbox-reply-box", T6, decision D4): one row inside the box, and
+ * what goes with the reply as chips (picks, skip, annotations) when they fit, else as the one summary line. Each chip
+ * inside the box, none overflowing its own box, each label on one line; the summary line on one line, inside the row.
+ * Problems as text, so a failure names the chip.
  */
 async function replyChipProblems(page: Page, sentenceMayWrap = false): Promise<string[]> {
   return page.evaluate((sentenceMayWrap) => {
     const box = [...document.querySelectorAll<HTMLElement>('section.ib-pane .ib-rbox')].find((b) => b.getClientRects().length > 0);
     if (!box) return ['no reply box on screen'];
     const outer = box.getBoundingClientRect();
-    const chips = [...box.querySelectorAll<HTMLElement>('.ib-rfoot .ib-rchip, .ib-rfoot .ib-skipchip')];
-    if (chips.length < 2) return [`expected at least two chips, found ${chips.length}`];
+    const row = box.querySelector<HTMLElement>('[data-reply-row]');
+    if (!row) return ['no row in the reply box'];
     const problems: string[] = [];
+    const controls = [...row.querySelectorAll<HTMLElement>('button, label')].filter((el) => el.getClientRects().length > 0);
+    const middles = controls.map((el) => {
+      const r = el.getBoundingClientRect();
+      const name = el.getAttribute('aria-label') ?? el.textContent?.trim() ?? '?';
+      if (r.left < outer.left - 0.5 || r.right > outer.right + 0.5) problems.push(`"${name}" leaves the reply box`);
+      return { name, middle: r.top + r.height / 2 };
+    });
+    for (const m of middles) if (Math.abs(m.middle - middles[0]!.middle) > 2) problems.push(`"${m.name}" is not on the row`);
+    const summary = row.querySelector<HTMLElement>('[data-foot-summary-text]');
+    if (summary) {
+      const range = document.createRange();
+      range.selectNodeContents(summary);
+      const tops = new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top)));
+      if (tops.size > 1) problems.push('the summary line breaks across lines');
+      if (row.querySelector('.ib-rchips')) problems.push('both the chips and the summary line');
+      return problems;
+    }
+    const chips = [...row.querySelectorAll<HTMLElement>('.ib-rchips .ib-rchip, .ib-rchips .ib-skipchip')];
+    if (chips.length < 2) return [...problems, `expected at least two chips or the summary line, found ${chips.length} chips`];
     for (const chip of chips) {
       const name = chip.textContent?.replace(/\s+/g, ' ').trim() ?? '?';
       const r = chip.getBoundingClientRect();
@@ -541,20 +561,27 @@ async function replyChipProblems(page: Page, sentenceMayWrap = false): Promise<s
 }
 
 /**
- * A phone's open reply box foot (approval "inbox-reply-foot-phone"): one row inside the box (the paperclip, the line
- * naming the questions and comments, the mic), no chip, and the line's words on one line. Problems as text.
+ * A phone's open reply box (approval "inbox-reply-box", T6): no chip; the line naming the questions and comments on its
+ * own line over the row, its words on one line; the row (paperclip, Skills, mic, Send) one row inside the box. Problems
+ * as text. `narrow`: a box far narrower than its row, where Send and the mic must still be inside it.
  */
-async function phoneFootProblems(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
+async function phoneFootProblems(page: Page, narrow = false): Promise<string[]> {
+  return page.evaluate((narrow) => {
     const box = [...document.querySelectorAll<HTMLElement>('section.ib-pane .ib-rbox')].find((b) => b.getClientRects().length > 0);
     if (!box) return ['no reply box on screen'];
-    const foot = box.querySelector<HTMLElement>('.ib-rfoot[data-reply-foot-phone]');
-    if (!foot) return ['no phone foot in the reply box'];
+    const row = box.querySelector<HTMLElement>('[data-reply-row][data-phone]');
+    if (!row) return ['no phone row in the reply box'];
+    const foot = box.querySelector<HTMLElement>('[data-reply-line]');
+    if (!foot) return ['no line over the row'];
     const problems: string[] = [];
-    if (box.querySelector('.ib-rfoot .ib-rchip, .ib-rfoot .ib-skipchip')) problems.push('a chip in the phone foot');
+    if (box.querySelector('.ib-rchip:not(.ib-rfilesn), .ib-skipchip')) problems.push('a chip in the phone box');
     const outer = box.getBoundingClientRect();
-    const controls = [...foot.querySelectorAll<HTMLElement>('button, label')].filter((el) => el.getClientRects().length > 0);
-    if (!controls.some((el) => el.matches('[data-foot-summary]'))) problems.push('no line for the questions and comments');
+    if (!foot.querySelector('[data-foot-summary]')) problems.push('no line for the questions and comments');
+    const lineBox = foot.getBoundingClientRect();
+    if (lineBox.left < outer.left - 0.5 || lineBox.right > outer.right + 0.5) problems.push('the line leaves the reply box');
+    const kept = narrow ? '[data-reply-send], [data-voice-mic]' : 'button, label';
+    const controls = [...row.querySelectorAll<HTMLElement>(kept)].filter((el) => el.getClientRects().length > 0);
+    if (!controls.some((el) => el.matches('[data-reply-send]'))) problems.push('no Send in the row');
     const middles = controls.map((el) => {
       const r = el.getBoundingClientRect();
       const name = el.getAttribute('aria-label') ?? el.textContent?.trim() ?? '?';
@@ -570,7 +597,7 @@ async function phoneFootProblems(page: Page): Promise<string[]> {
       if (tops.size > 1) problems.push('the line breaks across lines');
     }
     return problems;
-  });
+  }, narrow);
 }
 
 /** Wait until the open reply box keeps its place and size for 150 ms: the layout a new window size settles on. */
@@ -599,11 +626,12 @@ async function replyBoxSettled(page: Page): Promise<void> {
  * wrapped inside the list, the long ones over more than one line.
  */
 async function annotationListProblems(page: Page, shotName?: string): Promise<string[]> {
-  const chip = page.locator('section.ib-pane .ib-rfoot [data-annotations-chip]');
+  const chip = page.locator('section.ib-pane .ib-rbox [data-annotations-chip]');
   if (await chip.count()) await chip.click();
   else {
-    // A phone: the foot's line, then (with questions too) its sheet's Review (approval "inbox-reply-foot-phone").
-    await page.locator('section.ib-pane .ib-rfoot [data-foot-summary]').click();
+    // The summary line (a phone, or a computer row too narrow for the chips), then (with questions too) its sheet's
+    // Review (approval "inbox-reply-foot-phone"; "inbox-reply-box", D4).
+    await page.locator('section.ib-pane .ib-rbox [data-foot-summary]').click();
     const sheet = page.getByRole('dialog', { name: 'Goes with this reply' });
     if (await sheet.count()) await sheet.getByRole('button', { name: 'Review comments' }).click();
   }
@@ -639,8 +667,8 @@ test("the reply box's chips wrap inside it beside a file and stacked, a phone's 
   const pane = page.locator(`[data-attachment-pane="${world.attachments.html}"]`);
   await pane.getByRole('button', { name: 'Side by side' }).click();
   await expect(pane).not.toHaveClass(/ib-full/);
-  // The 440 px thread column beside the file.
-  await expect(page.locator('section.ib-pane .ib-rfoot [data-annotations-chip]')).toHaveText('3 comments');
+  // The 440 px thread column beside the file: the chips, or the summary line when they don't fit beside the tools.
+  await expect(page.locator('section.ib-pane .ib-rbox :is([data-annotations-chip], [data-foot-summary])').first()).toBeVisible();
   expect(await replyChipProblems(page)).toEqual([]);
   expect(await annotationListProblems(page)).toEqual([]);
   await pane.getByRole('button', { name: 'Close admin-view.html' }).click();
@@ -659,17 +687,18 @@ test("the reply box's chips wrap inside it beside a file and stacked, a phone's 
       // Measure the layout this size settles on, not the frame before the window's own resize reaches React
       // (the docked sidebar still beside a 134 px reply box at 390 px; the narrow-box step below proves that frame).
       await replyBoxSettled(page);
-      // A phone draws one row instead of chips: the paperclip, one line, the mic (approval "inbox-reply-foot-phone").
+      // A phone draws no chips: one line over the row, then the paperclip, Skills, the mic and Send (approval "inbox-reply-box").
       expect(await ('phone' in size ? phoneFootProblems(page) : replyChipProblems(page)), `${size.width} by ${size.height}`).toEqual([]);
       expect(await annotationListProblems(page, size.width === 1440 ? '2.4f-annotation-list-inside-the-window' : undefined), `the list at ${size.width} by ${size.height}`).toEqual([]);
       if (size.width === 1440) {
-        // The two-pane desktop draws the chips as before: one row, each 26 px tall.
-        const rows = await page.locator('section.ib-pane .ib-rfoot > *').evaluateAll((els) =>
+        // The two-pane desktop has room for the chips: one row, each 26 px tall.
+        const rows = await page.locator('section.ib-pane [data-reply-row] .ib-rchips > *').evaluateAll((els) =>
           els.map((el) => {
             const chip = (el.matches('.ib-annchip') ? el.firstElementChild! : el).getBoundingClientRect();
             return { top: Math.round(chip.top), height: Math.round(chip.height) };
           }),
         );
+        expect(rows.length).toBeGreaterThanOrEqual(2);
         expect(new Set(rows.map((r) => r.top)).size).toBe(1);
         expect(rows.every((r) => r.height === 26)).toBe(true);
       }
@@ -680,7 +709,7 @@ test("the reply box's chips wrap inside it beside a file and stacked, a phone's 
         // the row stays one row inside the box, the line cut short rather than pushed out.
         const narrow = await page.addStyleTag({ content: 'section.ib-pane .ib-rbox { width: 134px !important; }' });
         try {
-          expect(await phoneFootProblems(page), 'a 134 px reply box').toEqual([]);
+          expect(await phoneFootProblems(page, true), 'a 134 px reply box').toEqual([]);
           await shot('2.4h-reply-chips-narrow-box');
         } finally {
           await narrow.evaluate((el) => el.remove());

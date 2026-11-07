@@ -207,7 +207,7 @@ async function send(el: HTMLElement) {
   await settle();
 }
 
-test.skipIf(!hasDom)('one agent: nothing new, no pill and no label above the box; Draft and Saved sit under it in Send\'s row', async () => {
+test.skipIf(!hasDom)('one agent: nothing new, no pill and no label above the box; a computer saves silently, and the bin sits in Send\'s row', async () => {
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, CLAUDE, 45)));
   const text = await write(el, 'Ship it.');
   await settle(1100);
@@ -215,9 +215,9 @@ test.skipIf(!hasDom)('one agent: nothing new, no pill and no label above the box
   expect(text.getAttribute('aria-label')).toBe('Reply to Claude Code');
   const leaves = [...el.querySelectorAll('.ib-pfoot *')].filter((n) => n.children.length === 0).map((n) => n.textContent ?? '');
   expect(leaves.some((t) => t.startsWith('Reply to'))).toBe(false);
-  const stamp = el.querySelector('[data-draft-stamp]');
-  expect(stamp).not.toBeNull();
-  expect(el.querySelector('[data-reply-row]')?.contains(stamp)).toBe(true);
+  // The draft saved (below), and nothing says so in the box; Discard is the bin in Send's row (approval "inbox-reply-box", T6).
+  expect(el.querySelector('[data-draft-stamp]')).toBeNull();
+  expect(el.querySelector('[data-reply-row] [data-reply-discard]')?.getAttribute('aria-label')).toBe('Discard draft');
   // The one-agent draft names no recipient.
   expect(drafts().at(-1)!.body.recipients).toBeUndefined();
 });

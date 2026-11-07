@@ -177,7 +177,7 @@ const pane = (page: Page) => page.locator('section.ib-pane');
 const mic = (scope: Page | Locator) => scope.locator('[data-voice-mic]');
 const line = (scope: Page | Locator, state: string) => scope.locator(`[data-voice-line="${state}"]`);
 const note = (scope: Page | Locator, trouble: string) => scope.locator(`[data-voice-note="${trouble}"]`);
-const sendButton = (page: Page) => pane(page).locator('.ib-acts .ib-btn.ib-pri');
+const sendButton = (page: Page) => pane(page).locator('.ib-rbox [data-reply-send]');
 
 async function openReply(page: Page, w: World, thread: string): Promise<Locator> {
   await page.goto(`${w.url}#thread=${thread}`);
@@ -871,7 +871,7 @@ test('a phone: hold to talk, the keyboard stays down, Cancel on screen, and a ta
   await shot(page, 'phone-listening');
   expect(await box.evaluate((el) => el === document.activeElement)).toBe(false);
   // Nothing runs past the box, and the row never wraps.
-  const row = await pane(page).locator('.ib-rfoot').evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth, height: el.clientHeight }));
+  const row = await pane(page).locator('.ib-rbox [data-reply-row]').evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth, height: el.clientHeight }));
   expect(row.scroll).toBeLessThanOrEqual(row.client);
   await touch('touchEnd');
   await expect(line(pane(page), 'sending')).toBeVisible();
@@ -1221,7 +1221,7 @@ test.describe('a take being transcribed outlives full screen’s card', () => {
         });
         await box(page).focus();
         await page.keyboard.type(' Typed.');
-        await pane(page).getByRole('button', { name: 'Cancel', exact: true }).first().click();
+        await pane(page).locator('.ib-rbox [data-reply-close]').click();
         await expect(box(page)).toHaveCount(0);
         w.send({ release: true });
         await expect.poll(() => w.upstreamCalls().length).toBeGreaterThan(0);
@@ -1421,9 +1421,10 @@ test.describe('New message dictates as the reply box does', () => {
   /** The row as drawn. `bars`: the level's strokes with room to show. */
   const readRow = (scope: Locator) =>
     scope.evaluate((box) => {
-      const row = box.querySelector('.ib-rfoot, .ib-cp-foot')!.getBoundingClientRect();
+      const row = box.querySelector('[data-reply-row], .ib-cp-foot')!.getBoundingClientRect();
       const mic = box.querySelector('[data-voice-mic]')!.getBoundingClientRect();
-      const send = box.querySelector('.ib-cp-foot [data-compose-send]')?.getBoundingClientRect();
+      // A phone's reply box has Send right after the mic too (approval "inbox-reply-box", T6).
+      const send = box.querySelector('.ib-cp-foot [data-compose-send], [data-reply-row][data-phone] [data-reply-send]')?.getBoundingClientRect();
       const strip = box.querySelector('.ib-vbars');
       const room = strip?.getBoundingClientRect();
       const strokes = strip ? [...strip.children] : [];

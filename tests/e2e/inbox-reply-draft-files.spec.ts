@@ -129,7 +129,7 @@ test('a draft started on the computer with a picture and a file opens on the pho
   await box.screenshot({ path: join(shotsDir, 'phone-draft-tiles-box-390.png') });
 
   // Send on the phone: the agent gets the words and both files, and the draft is done.
-  await mobile.locator('section.ib-pane .ib-acts').getByRole('button', { name: 'Send' }).click();
+  await mobile.locator('section.ib-pane .ib-rbox [data-reply-send]').click();
   const reply = (await world.agent.nextReply(world.thread)) as { body: string; attachments?: { name: string; path: string }[] };
   expect(reply.body.startsWith(WORDS)).toBe(true);
   expect((reply.attachments ?? []).map((a) => a.name)).toEqual(['header-jump.png', 'header-notes.md']);

@@ -309,7 +309,7 @@ test.skipIf(!hasDom)('E marks the open thread read; a stopped thread warns with 
   press('e', el.querySelector('textarea')!);
   await settle();
   expect(posted.length).toBe(before);
-  act(() => button(el, 'Cancel').click());
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
 
   press('z');
   await until(() => head().getAttribute('aria-pressed') === 'false', 'the button back up');

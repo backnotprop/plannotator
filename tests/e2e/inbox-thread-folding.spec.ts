@@ -337,7 +337,7 @@ test('keys: n goes to the first new message, Shift+K and Shift+J move between me
   await box.pressSequentially('njJ');
   await expect(box).toHaveValue('njJ');
   await expect(box).toBeFocused();
-  await pane().locator('.ib-pfoot').getByRole('button', { name: 'Cancel' }).click();
+  await pane().locator('.ib-pfoot [data-reply-close]').click();
 });
 
 test("Expand all gives back today's fully open thread; scrolled up past the new message already read, no pill comes back; n goes down to it", async () => {

@@ -144,7 +144,7 @@ const preview = (p: Page, name: string) => p.locator(`[data-gallery-image][data-
 const tile = (p: Page, name: string) => p.locator(`.ib-attachments:not(.ib-hatts-tiles) .ib-att-t[data-attachment-name="${name}"]`).first();
 const button = (p: Page, surface: string, name: string) => p.locator(`[data-reuse-surface="${surface}"][data-reuse][aria-label*="${name}"]`).first();
 const replyTiles = (p: Page) => p.locator('[data-reply-files] [data-compose-file]');
-const sendReply = (p: Page) => p.locator('section.ib-pane .ib-acts').getByRole('button', { name: 'Send' }).first().click();
+const sendReply = (p: Page) => p.locator('section.ib-pane .ib-rbox [data-reply-send]').click();
 
 /** Where every element of the pane's attachments and text is. */
 const boxes = (p: Page) =>
@@ -810,7 +810,7 @@ test('the reply box closed with its draft: adding those bytes again opens the bo
   await tile(page, REF_A).hover();
   await button(page, 'tile', REF_A).click();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
-  await page.locator('section.ib-pane .ib-acts').getByRole('button', { name: 'Cancel' }).click();
+  await page.locator('section.ib-pane .ib-rbox [data-reply-close]').click();
   await expect(replyTiles(page)).toHaveCount(0);
   await tile(page, REF_A).hover();
   await button(page, 'tile', REF_A).click();

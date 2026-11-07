@@ -78,7 +78,7 @@ test('the foot count opens the list without the reply box: a real button, nothin
   await link.click();
   const list = theList(page, t.count);
   await expect(list).toBeVisible();
-  await expect(pane(page).locator('.ib-rfoot')).toHaveCount(0);
+  await expect(pane(page).locator('.ib-rbox')).toHaveCount(0);
   await expect(link).toHaveAttribute('aria-expanded', 'true');
   expect(await layout(page)).toBe(before);
   await expect(rowOf(page, t.onMessage)).toContainText('Is that true when the first request times out?');

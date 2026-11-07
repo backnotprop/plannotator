@@ -92,9 +92,9 @@ function useKeyboardSpot(): { ref: RefObject<HTMLDivElement | null>; style: CSSP
     }
     const headBottom = foot.closest('.ib-pane')?.querySelector('.ib-phead')?.getBoundingClientRect().bottom ?? 0;
     // Room above the field: there. With the keyboard leaving ~257 px the field starts under the header, so the list
-    // covers the box instead, from just above Send's row up to the header (as the recipient list does).
+    // covers the box instead, from just above the box's row (Send's) up to the header (as the recipient list does).
     const above = Math.round(field.top - 10);
-    const row = foot.querySelector('[data-reply-row] .ib-footbtns')?.getBoundingClientRect();
+    const row = foot.querySelector('[data-reply-row]')?.getBoundingClientRect();
     const top = above - headBottom - 8 >= 120 || !row ? above : Math.round(row.top - 6);
     const left = Math.round(field.left);
     const room = Math.max(88, top - headBottom - 8);
