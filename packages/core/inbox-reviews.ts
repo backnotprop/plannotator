@@ -218,6 +218,62 @@ export function inboxReviewLandingOf(
   return { key: pull.key, thread_id: threadId, state: pull.state, at: pull.at, url: pull.url, number: pull.number, title: pull.title, platform: pull.platform, head: pull.head, through_review: review && !newer ? review.latest_review_id : null };
 }
 
+/** Which local changes a New review is of. */
+export type InboxReviewChanges = "uncommitted" | "last" | "branch";
+
+/** New review on local changes: what the box asked for, so its row shows "Curating…" before any review arrives. */
+export interface InboxReviewStart {
+  kind: "local";
+  changes: InboxReviewChanges;
+  branch: string | null;
+  base: string | null;
+  /** The words decide: none is a guided review, the person's own make it a custom curation. */
+  ask: "guide" | "custom";
+  /** The agent it went to, and the project it works in. */
+  host: string;
+  project_id: string;
+  at: string;
+  /** The thread's name now, for its row. On a row, not stored. */
+  name?: string | null;
+}
+
+/** A `review` field from a Send, checked; null when it isn't one. */
+export function inboxReviewStartOf(value: unknown, where: Pick<InboxReviewStart, "host" | "project_id" | "at">): InboxReviewStart | null {
+  if (!value || typeof value !== "object") return null;
+  const review = value as Record<string, unknown>;
+  if (review.kind !== "local" || (review.changes !== "uncommitted" && review.changes !== "last" && review.changes !== "branch")) return null;
+  const ref = (ref: unknown) => (typeof ref === "string" && ref.length > 0 && ref.length <= 200 ? ref : null);
+  return { kind: "local", changes: review.changes, branch: ref(review.branch), base: ref(review.base), ask: review.ask === "custom" ? "custom" : "guide", ...where };
+}
+
+/** `GET /api/inbox/reviews/changes`: the size of those changes. `git: false`: the project is not a repository. */
+export interface InboxReviewChangesAnswer {
+  git: boolean;
+  files: number;
+  additions: number;
+  deletions: number;
+  branch: string | null;
+  base: string | null;
+}
+
+/** The files and lines a unified patch changes. */
+export function inboxReviewPatchSize(patch: string): { files: number; additions: number; deletions: number } {
+  let files = 0;
+  let additions = 0;
+  let deletions = 0;
+  // Only inside a hunk: a file's own "--- a/x" and "+++ b/x" lines are not changes.
+  let inHunk = false;
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("diff --git ")) {
+      files += 1;
+      inHunk = false;
+    } else if (line.startsWith("@@")) inHunk = true;
+    else if (inHunk && line.startsWith("+")) additions += 1;
+    else if (inHunk && line.startsWith("-")) deletions += 1;
+  }
+  return { files, additions, deletions };
+}
+
 /** One row of the Reviews page. */
 export interface InboxReviewRow {
   /** The thread's id for a thread's row; the stack's id for a PR row. */
@@ -242,6 +298,8 @@ export interface InboxReviewRow {
   landed: InboxReviewLanding[];
   /** The latest activity: the thread's or any of its PRs'. */
   updated_at: string;
+  /** New review on local changes: what it asked for, kept once its review arrives. */
+  started?: InboxReviewStart | null;
 }
 
 /** `GET /api/inbox/reviews`. */
@@ -437,6 +495,10 @@ export function inboxReviewRows(input: {
   landed?: readonly InboxReviewLanding[];
   /** Every PR the person handed to a thread (pull key → thread), on the list or not: one with no record may still be open. */
   owners?: ReadonlyMap<string, { thread_id: string }>;
+  /** New reviews on local changes, by thread: open threads only. Each has a row from the moment it starts. */
+  started?: ReadonlyMap<string, InboxReviewStart>;
+  /** The thread's agent ended: a started review with no card is curated by no one, so it has no row. */
+  ended?: (threadId: string) => boolean;
   /** The person's last review posted on a PR from here, by pull key: their answer to any review before it. */
   posted?: ReadonlyMap<string, InboxReviewPosted>;
 }): InboxReviewRow[] {
@@ -482,13 +544,15 @@ export function inboxReviewRows(input: {
       link: own?.link ?? null,
       pull_reason: reasonOf(stacks),
       landed,
-      updated_at: latest([review?.updated_at ?? own?.link.last?.at ?? "", ...open.map((p) => p.updated_at)]),
+      updated_at: latest([review?.updated_at ?? own?.link.last?.at ?? input.started?.get(threadId)?.at ?? "", ...open.map((p) => p.updated_at)]),
+      started: input.started?.get(threadId) ?? null,
     });
   };
   for (const thread of input.threads) push(thread.thread_id, thread, owned.get(thread.thread_id));
   // Curating only while someone can: with the agent ended the PR is back to not reviewed (its stack row, the stack view's Start a new review thread).
   // A thread archived before its review drops out earlier, as the PR's owner (the server's `pullOwnersNow`).
   for (const [threadId, own] of owned) if (!byThread.has(threadId) && own.link.agent?.ended !== true) push(threadId, null, own);
+  for (const threadId of input.started?.keys() ?? []) if (!byThread.has(threadId) && !owned.has(threadId) && !input.ended?.(threadId)) push(threadId, null, undefined);
   for (const stack of input.stacks) {
     if (attached.has(stack.id)) continue;
     // The agent's own thread, when its message names one of the layers (topmost open first): shown, never a review.

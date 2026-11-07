@@ -12,7 +12,7 @@
  *   GET  /api/inbox/sessions                 every live session, grouped by project;
  *                                            `?session=<id>` adds `session: { session, live }`
  *                                            (with the asker grace) for a thread's delivery line
- *   POST /api/inbox/messages                 `{ to, body, idempotency_key, uploads?, draft_id?, thread_name?, thread_name_auto?, board_request?, decision_ask? }`:
+ *   POST /api/inbox/messages                 `{ to, body, idempotency_key, uploads?, draft_id?, thread_name?, thread_name_auto?, thread_name_numbered?, review?, board_request?, decision_ask? }`:
  *                                            a new thread (409 `session_not_live`, nothing written). With
  *                                            `to.launch.trust` (Trust and start) only the owner's window: the
  *                                            Send saves the folder's trust, so this form alone is never a plain write
@@ -94,6 +94,8 @@ export function createInboxCompose(options: {
   now?: () => Date;
   /** Whether the person has the Board on: a Send's `board_request` is kept only then. Absent: off. */
   boardOn?: () => boolean;
+  /** A New review on local changes started this thread (`review` on a Send): its row shows from now on. */
+  onReviewStart?: (threadId: string, review: unknown, where: { host: string; project_id: string; at: string }) => void;
   /** This Inbox's stable id (linked machines): the sessions answer says whose sessions they are. */
   machine?: () => string;
   /** A compose draft was saved, deleted or sent: every window's stream says `event: drafts`, so its Drafts count follows (#2593). */
@@ -198,7 +200,7 @@ export function createInboxCompose(options: {
       // Trust and start: every check first, the trust next, and only then the thread. A name the thread would be
       // refused must not leave the folder trusted, and `trust_failed` sends nothing.
       if (prepared?.trust) {
-        const name = { project_id: project.id, thread_name: body.thread_name, thread_name_auto: body.thread_name_auto };
+        const name = { project_id: project.id, thread_name: body.thread_name, thread_name_auto: body.thread_name_auto, thread_name_numbered: body.thread_name_numbered };
         store.checkPersonThreadName(name);
         // Again under the agent's lock, whose wait can run to 12 s: a name taken meanwhile saves nothing, and the write
         // below refuses the thread as usual.
@@ -219,6 +221,7 @@ export function createInboxCompose(options: {
         attachments,
         thread_name: body.thread_name,
         thread_name_auto: body.thread_name_auto,
+        thread_name_numbered: body.thread_name_numbered,
         // The Board chip (approval "inbox-compose-board-chip"): kept only while the Board is on, so an agent is
         // never asked for cards the Board would refuse (`board_off`).
         board_request: body.board_request === true && boardOn(),
@@ -239,7 +242,10 @@ export function createInboxCompose(options: {
       if (prepared) options.launch!.abandon(prepared.launch, prepared.project);
     }
     // The thread is written: only now does the agent start (in the background; the answer comes at once).
-    else if (prepared) options.launch!.begin(result.message);
+    else {
+      if (body.review) options.onReviewStart?.(result.message.thread_id, body.review, { host: target.host, project_id: project.id, at });
+      if (prepared) options.launch!.begin(result.message);
+    }
     // Sent: the uploads are attachments now, and the draft it came from is done.
     removeInboxUploads(store.dir, uploads.filter((id): id is string => typeof id === "string"));
     if (body.draft_id !== undefined && deleteInboxDraft(store.dir, body.draft_id)) options.onDraftsChange?.();

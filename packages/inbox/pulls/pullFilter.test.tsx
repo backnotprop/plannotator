@@ -159,8 +159,7 @@ function draw(over: Partial<PullsPageProps> = {}) {
     },
     onReview: () => {},
     onOpenThread: () => {},
-    onLaunch: () => {},
-    onStarted: () => {},
+    onNewReview: () => {},
     ...over,
   };
   const render = () =>
