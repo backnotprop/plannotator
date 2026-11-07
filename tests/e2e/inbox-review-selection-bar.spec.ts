@@ -248,9 +248,11 @@ async function openReview(page: Page, chapter = 1, thread = world.thread): Promi
   await page.locator('[data-review-chapters] li').nth(chapter).click();
 }
 
+/** The top bar's one Split / Unified button (DiffControls): it names the layout on screen, and a press flips it. */
 async function setStyle(page: Page, style: 'split' | 'unified'): Promise<void> {
-  await page.locator(`[data-diff-style="${style}"]`).first().click();
-  await expect(page.locator('[data-diff-style-switch]').first()).toHaveAttribute('data-diff-style-switch', style);
+  const toggle = page.locator('[data-diff-controls] [data-diff-layout-toggle]').first();
+  if ((await toggle.getAttribute('data-diff-layout-toggle')) !== style) await toggle.click();
+  await expect(toggle).toHaveAttribute('data-diff-layout-toggle', style);
   await page.waitForTimeout(400);
 }
 
