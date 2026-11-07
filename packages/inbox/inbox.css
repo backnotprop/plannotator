@@ -8887,8 +8887,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prreview .ib-rrail { background: transparent; border: 0; gap: 0; }
 .ib-prreview:not(.ib-fold) :is(.ib-gpanel, .ib-gpanel > [data-annotation-panel]) { background: var(--ib-prp-chrome); border: 0; }
 .ib-prreview .ib-gbody { background: var(--background); }
-.ib-prr-wide .ib-gbody { border-top-left-radius: 12px; }
-.ib-prr-wide:not(.ib-fold) .ib-gbody { border-top-right-radius: 12px; }
 /* One surface, as the code review app (approval pr-view-one-surface, follow-up): every width but a phone's, the rail
    and the code share the page's colour with a hairline between them, no sheet and no corner; the bar is the one strip
    that stands out, a hairline under it. The comments column keeps its fill. */

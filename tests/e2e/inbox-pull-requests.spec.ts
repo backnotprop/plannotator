@@ -1065,12 +1065,13 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
       oneSurface: getComputedStyle(root.querySelector('.ib-gbody')!).backgroundColor === getComputedStyle(root.querySelector('.ib-rsplit')!).backgroundColor,
       railLine: getComputedStyle(root.querySelector('.ib-rrail')!).borderRightWidth,
       corner: getComputedStyle(root.querySelector('.ib-gbody')!).borderTopLeftRadius,
+      cornerRight: getComputedStyle(root.querySelector('.ib-gbody')!).borderTopRightRadius,
       barApart: getComputedStyle(root.querySelector('.ib-vhead')!).backgroundColor !== getComputedStyle(root.querySelector('.ib-gbody')!).backgroundColor,
     };
   });
   expect(frame.section).toEqual(frame.none);
   expect(frame.box).toEqual(frame.none);
-  expect(frame).toMatchObject({ head: { rule: '1px', radius: '0px', pageColour: true }, firstHeadTop: 0, oneSurface: true, railLine: '1px', corner: '0px', barApart: true });
+  expect(frame).toMatchObject({ head: { rule: '1px', radius: '0px', pageColour: true }, firstHeadTop: 0, oneSurface: true, railLine: '1px', corner: '0px', cornerRight: '0px', barApart: true });
   // A 37 px bar over everything; the rail runs to the foot of the page, the code beside it.
   const layers = await review.evaluate((root) => {
     const box = (selector: string) => root.querySelector(selector)!.getBoundingClientRect();
@@ -1334,6 +1335,42 @@ test('the next file\'s header right under the last code row, whatever separators
     await expect.poll(() => seams(review)).toEqual([0, 0, 0, 0]);
     await review.locator('[data-diff-style-switch] input[value="unified"]').locator('..').click();
     await expect.poll(() => seams(review)).toEqual([0, 0, 0, 0]);
+  } finally {
+    await context.close();
+  }
+});
+
+test('the row after the last hunk (approval pr-view-one-surface): "N unmodified lines" once the file\'s length shows lines there, no row when none, never "More unchanged context may be available"', async ({ browser }) => {
+  const OLD = ['one', 'two', 'three', 'four', 'five'];
+  const NEW = ['one', 'two', 'THREE', 'four', 'five'];
+  const file = (path: string) => `diff --git a/${path} b/${path}\nindex 1111111..2222222 100644\n--- a/${path}\n+++ b/${path}\n@@ -1,5 +1,5 @@\n one\n two\n-three\n+THREE\n four\n five\n`;
+  const text = (lines: string[]) => `${lines.join('\n')}\n`;
+  // The whole texts the arrows' reader would get: more.ts goes on for two lines after its hunk, ends.ts stops with it.
+  const contents: Record<string, { oldContent: string; newContent: string }> = {
+    'more.ts': { oldContent: text([...OLD, 'six', 'seven']), newContent: text([...NEW, 'six', 'seven']) },
+    'ends.ts': { oldContent: text(OLD), newContent: text(NEW) },
+  };
+  const { context, page } = await stubbedReview(browser, 1440, file('more.ts') + file('ends.ts'));
+  try {
+    await page.route('**/api/inbox/pulls/file*', (route) => route.fulfill({ status: 200, json: contents[new URL(route.request().url()).searchParams.get('path') ?? ''] ?? { oldContent: null, newContent: null } }));
+    await page.reload();
+    const review = page.locator('[data-pull-review]');
+    await expect(review.locator('[data-guide-file-shell]')).toHaveCount(2);
+    // The trailing row's words as drawn (Pierre's, or the count laid over them), per file, only where they show.
+    const rows = () =>
+      review.locator('[data-guide-file-shell]').evaluateAll((shells) =>
+        shells.map((shell) => {
+          const root = shell.querySelector('diffs-container')?.shadowRoot;
+          const row = root?.querySelector<HTMLElement>('[data-separator-last]');
+          if (!row || !row.checkVisibility()) return null;
+          const content = row.querySelector('[data-separator-content]')!;
+          const over = getComputedStyle(content, '::after').content;
+          return over && over !== 'none' && over !== 'normal' ? JSON.parse(over) : (content as HTMLElement).innerText.trim();
+        }),
+      );
+    await expect.poll(rows).toEqual(['2 unmodified lines', null]);
+    await expect.poll(() => seams(review)).toEqual([0]);
+    expect(await review.evaluate((root) => [...root.querySelectorAll('diffs-container')].some((host) => (host.shadowRoot?.textContent ?? '').includes('More unchanged context') && [...host.shadowRoot!.querySelectorAll<HTMLElement>('[data-separator-last]')].some((row) => row.checkVisibility())))).toBe(false);
   } finally {
     await context.close();
   }

@@ -53,7 +53,7 @@ describe.if(hasDom)('FileHeader, narrow', () => {
     );
     const labels = [...el.querySelectorAll('[data-file-header] span[title]')].map((span) => span.textContent);
     expect(labels).toEqual(['src/admin/Layout.tsx', 'src/settings/Layout.tsx']);
-    // The folder is the part that gives way: it is cut from its start, the name after it is never shortened.
+    // The folder and the name are spans of their own, the folder first (which gives way first is the stylesheet's).
     const folder = el.querySelector<HTMLElement>('[data-file-header-folder]')!;
     expect(folder.textContent).toBe('src/admin/');
     expect(folder.nextElementSibling!.textContent).toBe('Layout.tsx');

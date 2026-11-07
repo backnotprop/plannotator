@@ -700,6 +700,8 @@ const SCROLLS_WITH_PAGE_CSS = `
   @keyframes reading-whole-file { 50% { opacity: 0.5; } }
   @media (prefers-reduced-motion: reduce) { :host([data-reading-whole-file]) [data-expand-button] { animation: none; } }
 `;
+/** A host reader's answer for a file's whole text (`fetchFileContent`). */
+type FileContentAnswer = { oldContent: string | null; newContent: string | null } | null;
 const STUCK_HEADER_LINE_CSS = `
   @container sticky-header scroll-state(stuck: top) {
     [data-diffs-header]::after { content: ''; position: absolute; left: 0; bottom: -1px; width: 100%; height: 1px; background: var(--border); }
@@ -1917,6 +1919,20 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   wholeFileGoneRef.current = wholeFileGone;
   useEffect(() => setWholeFileGone(false), [fileSetKey]);
   const wholeFileFailedRef = useRef(0);
+  // Flush files: the lines after an unread file's last hunk, counted from the arrows' own reader once the file renders,
+  // which is when its box nears the viewport (syncTrailingRow, below). The reader keeps what it read, so an arrow's
+  // first click afterwards reads nothing again; a click while the count is still on its way shares that read.
+  // count null: not known yet.
+  type TrailingRead = { key: string; itemId: string; count: number | null; controller: AbortController; promise: Promise<FileContentAnswer> };
+  const trailingCountRef = useRef<TrailingRead | null>(null);
+  // Cleared, not only stopped: under StrictMode the effects run twice, and a key left behind would never ask again.
+  useEffect(
+    () => () => {
+      trailingCountRef.current?.controller.abort();
+      trailingCountRef.current = null;
+    },
+    [],
+  );
   const loadWholeFile = useStableCallback((fileDiff: FileDiffMetadata): Promise<FileDiffLoadedFiles> => {
     const generation = fileSetKeyRef.current;
     const entry = [...itemIdToFileRef.current].find(([, candidate]) => candidate.path === fileDiff.name);
@@ -1934,7 +1950,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // The arrows say a read is on its way (SCROLLS_WITH_PAGE_CSS): the click's rows arrive with it.
     const shown = viewerRef.current?.getInstance()?.getRenderedItems().find((candidate) => candidate.id === itemId)?.element;
     shown?.setAttribute('data-reading-whole-file', '');
-    return read(file, controller.signal).finally(() => shown?.removeAttribute('data-reading-whole-file')).then(
+    const counting = trailingCountRef.current;
+    const shared = counting && counting.key === `${generation}\u0000${itemId}` && counting.count === null && !counting.controller.signal.aborted ? counting.promise : null;
+    return (shared ?? read(file, controller.signal)).finally(() => shown?.removeAttribute('data-reading-whole-file')).then(
       (data) => {
         augmentRef.current.set(itemId, { status: 'done', controller, generation });
         if (data?.oldContent == null || data.newContent == null) return none();
@@ -1966,10 +1984,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     item.fileDiff.isPartial &&
     (item.fileDiff.type === 'change' || item.fileDiff.type === 'rename-changed') &&
     item.fileDiff.hunks.length > 0;
-  // The lines after that file's last hunk, counted from the arrows' own reader (cached there, so an arrow's first click
-  // reads nothing again) once the file renders, which is when its box nears the viewport. null: not known yet.
-  const trailingCountRef = useRef<{ key: string; count: number | null; controller: AbortController } | null>(null);
-  useEffect(() => () => trailingCountRef.current?.controller.abort(), []);
   const syncTrailingRow = useStableCallback((node: HTMLElement, item: CodeViewItem<DiffAnnotationMetadata>) => {
     const unread = hidesTrailingRow(item);
     const key = `${fileSetKeyRef.current}\u0000${item.id}`;
@@ -1987,9 +2001,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (!file || !read) return;
     kept?.controller.abort();
     const controller = new AbortController();
-    const entry: { key: string; count: number | null; controller: AbortController } = { key, count: null, controller };
+    const promise = read(file, controller.signal);
+    const entry: TrailingRead = { key, itemId: item.id, count: null, controller, promise };
     trailingCountRef.current = entry;
-    read(file, controller.signal).then(
+    promise.then(
       (data) => {
         if (trailingCountRef.current !== entry || controller.signal.aborted) return;
         const live = viewerRef.current?.getItem(item.id);
@@ -2002,7 +2017,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         if (live && shown?.element) syncTrailingRow(shown.element as HTMLElement, live);
       },
       // A failed read: the row stays hidden, and this file is not asked again until the diff changes.
-      () => {},
+      () => {
+        if (trailingCountRef.current === entry) entry.count = 0;
+      },
     );
   });
 

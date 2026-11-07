@@ -11,7 +11,10 @@ export function linesAfterLastHunk(hunks: readonly { additionStart: number; addi
   return Math.max(0, lines - end);
 }
 
-/** Pierre's own words for a closed run of lines (DiffHunksRenderer `getModifiedLinesString`). */
+/**
+ * Pierre's own words for a closed run of lines (DiffHunksRenderer `getModifiedLinesString`, @pierre/diffs 1.5.2): check
+ * them again on an upgrade, so this row reads as Pierre's once the file is read.
+ */
 export function unmodifiedLinesLabel(count: number): string {
   return `${count} unmodified line${count === 1 ? '' : 's'}`;
 }

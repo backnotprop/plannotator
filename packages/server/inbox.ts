@@ -216,6 +216,7 @@ import { createInboxPins } from "./inbox-pins";
 import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
+import { changedFileOf } from "./inbox-pull-diff-files";
 import { snoozeIntroDue, snoozeIntroFirstUse, type SnoozeIntroSaved } from "./inbox-snooze-intro";
 import {
   INBOX_REVEALS,
@@ -4069,7 +4070,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             const [oldId, newId] = [url.searchParams.get("old"), url.searchParams.get("new")];
             const ids = oldId && newId && /^[0-9a-f]{7,64}$/.test(oldId) && /^[0-9a-f]{7,64}$/.test(newId) ? { oldId, newId } : null;
             // Only a file the diff changes: the route is for that diff's arrows, not for any file whose blob id one knows.
-            const changed = ids ? parseDiffToFiles((await pulls.diff(key, scope)).patch).find((file) => file.path === filePath) : null;
+            // Parsed once per diff (`changedFileOf`): the PR page asks for every changed file as it nears the viewport.
+            const changed = ids ? changedFileOf(await pulls.diff(key, scope), filePath) : null;
             if (ids && !changed) return json({ serverSession, oldContent: null, newContent: null });
             return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, ids ? await pullRoots(key) : [], ids, changed?.oldPath)) });
           } catch (cause) {

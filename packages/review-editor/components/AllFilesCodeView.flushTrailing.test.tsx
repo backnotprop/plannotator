@@ -16,6 +16,10 @@ const realResolveSyntaxTheme = (await import('@plannotator/ui/utils/syntaxTheme'
 
 /** The stand-in's host element for its one item, as Pierre's `<diffs-container>`. */
 let itemHost: HTMLElement | null = null;
+/** The item renders again (a scroll, an update): Pierre calls `onPostRender` once more. */
+let renderAgain: () => void = () => {};
+/** An expand arrow's first click: Pierre calls the loader it was given. */
+let clickArrow: () => Promise<unknown> = async () => undefined;
 
 mock.module('../workerPool', () => ({
   useIsWorkerPoolReadyOrDisabled: () => true,
@@ -31,13 +35,16 @@ mock.module('../hooks/usePierreTheme', () => ({
 type Item = { id: string; type: 'diff'; collapsed?: boolean; fileDiff: unknown };
 mock.module('@pierre/diffs/react', () => ({
   CodeView: React.forwardRef(function MockCodeView(
-    props: { initialItems?: Item[]; className?: string; containerRef?: React.Ref<HTMLDivElement>; options?: { onPostRender?: (node: HTMLElement, instance: unknown, phase: string, context: { item: Item }) => void } },
+    props: { initialItems?: Item[]; className?: string; containerRef?: React.Ref<HTMLDivElement>; options?: { onPostRender?: (node: HTMLElement, instance: unknown, phase: string, context: { item: Item }) => void; loadDiffFiles?: (fileDiff: unknown) => Promise<unknown> } },
     ref: React.ForwardedRef<unknown>,
   ) {
     const itemsRef = useRef(new Map((props.initialItems ?? []).map((item) => [item.id, item])));
     const element = useRef(document.createElement('div'));
     itemHost = element.current;
-    useImperativeHandle(ref, () => ({
+    renderAgain = () => {
+      for (const item of itemsRef.current.values()) props.options?.onPostRender?.(element.current, {}, 'update', { item });
+    };
+    clickArrow = () => props.options!.loadDiffFiles!([...itemsRef.current.values()][0]!.fileDiff);    useImperativeHandle(ref, () => ({
       addItems: () => {},
       getItem: (id: string) => itemsRef.current.get(id),
       updateItem: () => true,
@@ -83,7 +90,7 @@ const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 
-// Line 3 of a file changes; the hunk shows lines 1 to 5.
+// Line 3 of a file changes; the hunk shows lines 1 to 5. The index line names its blobs, as a forge's patch does.
 const OLD = ['one', 'two', 'three', 'four', 'five'];
 const NEW = ['one', 'two', 'THREE', 'four', 'five'];
 const file: DiffFile = {
@@ -131,6 +138,8 @@ afterEach(async () => {
   host?.remove();
   host = null;
   itemHost = null;
+  renderAgain = () => {};
+  clickArrow = async () => undefined;
 });
 
 afterAll(() => {
@@ -162,6 +171,61 @@ describe.if(hasDom)('flush files: the row after the last hunk', () => {
     expect(itemHost!.hasAttribute('data-trailing-unread')).toBe(true);
     expect(itemHost!.hasAttribute('data-trailing-count')).toBe(false);
     expect(itemHost!.style.getPropertyValue('--pn-trailing-label')).toBe('');
+  });
+
+  test('a failed read keeps the row hidden and is not asked again when the file renders again', async () => {
+    let reads = 0;
+    await render(async () => {
+      reads += 1;
+      throw new Error('forge refused');
+    });
+    await settle();
+    await act(async () => renderAgain());
+    await settle();
+    expect(reads).toBe(1);
+    expect(itemHost!.hasAttribute('data-trailing-unread')).toBe(true);
+    expect(itemHost!.hasAttribute('data-trailing-count')).toBe(false);
+  });
+
+  test('a file that renders again keeps its count and reads nothing more', async () => {
+    let reads = 0;
+    await render(async () => {
+      reads += 1;
+      return { oldContent: text([...OLD, 'six']), newContent: text([...NEW, 'six']) };
+    });
+    await settle();
+    await act(async () => renderAgain());
+    await settle();
+    expect(reads).toBe(1);
+    expect(itemHost!.style.getPropertyValue('--pn-trailing-label')).toBe('"1 unmodified line"');
+  });
+
+  test('an arrow clicked while the count is on its way shares that read', async () => {
+    let reads = 0;
+    let answer: (value: { oldContent: string; newContent: string }) => void = () => {};
+    await render(() => {
+      reads += 1;
+      return new Promise((resolve) => (answer = resolve));
+    });
+    let opened: unknown = null;
+    await act(async () => void clickArrow().then((files) => (opened = files)));
+    expect(reads).toBe(1);
+    await act(async () => answer({ oldContent: text(OLD), newContent: text(NEW) }));
+    await settle();
+    expect(reads).toBe(1);
+    expect(opened).toMatchObject({ newFile: { name: 'a.ts', contents: text(NEW) } });
+  });
+
+  test('leaving the page stops a count still on its way', async () => {
+    let signal: AbortSignal | null = null;
+    await render((_file, given) => {
+      signal = given;
+      return new Promise(() => {});
+    });
+    expect(signal!.aborted).toBe(false);
+    await act(async () => root!.unmount());
+    root = null;
+    expect(signal!.aborted).toBe(true);
   });
 
   test('no text to count (the reader has none) leaves the row hidden', async () => {
