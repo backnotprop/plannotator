@@ -24,7 +24,7 @@ import type { InboxAuthor, InboxMessageWire, InboxProject, InboxQuestion, InboxT
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { parseInboxActionBlocks } from '@plannotator/core/inbox-actions';
 import { openActionState, openItemsHeading, openItemsLabel, openQuestionsShown, openQuestionState, placeOf, reaskItemLabel, skipAllCandidates, skipSelection, skipToggledAnswer, threadOpenActions, threadOpenQuestions } from './openQuestions';
-import { footFitCandidates, footRowOpenQuestionsForm, footRowTokens, onOneLine, onOneRow, openQuestionsFormText, pillHitsButtons } from './footFit';
+import { footFitCandidates, footFitCandidatesWithSteps, footRowOpenQuestionsForm, footRowTokens, onOneLine, onOneRow, openQuestionsFormText, pillHitsButtons } from './footFit';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
@@ -279,14 +279,18 @@ describe('fitting the foot on one line (footFit.ts)', () => {
     expect(onOneLine([553, 553, 605])).toBe(false);
   });
 
-  test('the whole row shortens in the owner\'s order before the status wraps: the keycaps, Edit, the count, the draft words, tight', () => {
-    // The checklist has no step here: it is a line at the top of the thread, not a foot button.
-    expect([0, 1, 2, 3, 4, 5].map((level) => footRowTokens(level))).toEqual(['', 'keys', 'keys edit', 'keys edit oq', 'keys edit oq draft', 'keys edit oq draft tight']);
+  test('the whole row shortens in the owner\'s order before the status wraps: the keycaps, Edit, the checklist, the count, the draft words, tight', () => {
+    expect([0, 1, 2, 3, 4, 5, 6].map((level) => footRowTokens(level))).toEqual(['', 'keys', 'keys edit', 'keys edit steps', 'keys edit steps oq', 'keys edit steps oq draft', 'keys edit steps oq draft tight']);
     // No step for a skip chip (it lives in the open questions list) and none past tight.
-    expect(footRowTokens(9)).toBe('keys edit oq draft tight');
-    // The open questions button keeps its longest form until the oq step, then shows its count.
-    expect([0, 1, 2, 3, 4, 5].map((level) => footRowOpenQuestionsForm(level, 'full'))).toEqual(['full', 'full', 'full', 'count', 'count', 'count']);
+    expect(footRowTokens(9)).toBe('keys edit steps oq draft tight');
+    // The open questions button keeps its longest form until the oq step (after the checklist gave way), then shows its count.
+    expect([0, 1, 2, 3, 4, 5, 6].map((level) => footRowOpenQuestionsForm(level, 'full'))).toEqual(['full', 'full', 'full', 'full', 'count', 'count', 'count']);
     expect(footRowOpenQuestionsForm(0, 'short')).toBe('short');
+  });
+
+  test('beside the checklist, the buttons\' own fit narrows the checklist before the open questions\' words change at all', () => {
+    const order = footFitCandidatesWithSteps('full').map((f) => `${f.form}${f.tight ? '+tight' : ''}${f.steps ? '+steps' : ''}`);
+    expect(order).toEqual(['full', 'full+steps', 'full+tight+steps', 'short+steps', 'short+tight+steps', 'count+steps', 'count+tight+steps']);
   });
 
   test('one row: the middles of buttons and status parts of different heights line up; a wrapped status does not', () => {

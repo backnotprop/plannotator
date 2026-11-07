@@ -1,9 +1,9 @@
 /**
  * Thread steps in the window (approval "inbox-thread-steps", 2026-11-03; the
- * look is "inbox-checklist-spinners-2026-11-07", Take C with spinners): what
- * the line at the top of the thread, the list it opens, the list row, the
- * Board's lane card and its opened card draw from a thread's lists. Pure: no
- * DOM, no fetch.
+ * marks are "inbox-checklist-spinners-2026-11-07", mock 1 "today's layout with
+ * spinners", its 11:25Z addendum): what the foot's button, its popover or
+ * sheet, the list row, the Board's lane card and its opened card draw from a
+ * thread's lists. Pure: no DOM, no fetch.
  *
  * One list per agent session (the server's read, latest first). A cleared
  * list (no steps) shows nothing. Done of total counts every step but dropped
@@ -86,8 +86,6 @@ export function stepMeta(step: InboxStep, now: Date = new Date()): StepMeta {
     const text = shortTime(step.at, now);
     return text ? { kind: 'time', text, title: whenTime(step.at, now) } : null;
   }
-  // A dropped step says so in words, beside its struck words (approval "inbox-checklist-spinners-2026-11-07").
-  if (step.status === 'dropped') return { kind: 'note', text: step.note ? `Dropped: ${step.note}` : 'Dropped' };
   return step.note ? { kind: 'note', text: step.note } : null;
 }
 
@@ -96,10 +94,10 @@ export function stepsAsOf(list: Pick<InboxStepsWire, 'presence' | 'updated_at'>,
   return list.presence === 'ended' ? whenTime(list.updated_at, now) || null : null;
 }
 
-/** "3 of 6 done" and its parts. */
+/** "3/6" and its parts. */
 export function stepsCount(list: Pick<InboxStepsWire, 'steps'>): { done: number; total: number; text: string } {
   const { done, total } = inboxStepsProgress(list.steps);
-  return { done, total, text: `${done} of ${total} done` };
+  return { done, total, text: `${done}/${total}` };
 }
 
 /** The button's and the panel's name: "Claude Code's checklist: 3 of 6 steps done" (owner, 2026-11-03: on screen it is the checklist; each line a step). */
@@ -128,41 +126,43 @@ export function stepsWaitTarget(
   return null;
 }
 
-/** The class the presence gives a list and the line: the spinner turns only while `working`. */
+/** The class the presence gives a list and the foot's button: the spinner turns only while `working`. */
 export function presenceClass(presence: InboxStepsPresence): string {
   return `ib-st-${presence}`;
 }
 
 /**
- * What the line at the top of the thread says for a list (approval "inbox-checklist-spinners-2026-11-07"):
- *  - a step waiting on the person: "Waiting on you: <step>" (the first words amber), with the amber pause;
- *  - else the step in progress: "<step>", with the spinner;
- *  - else every counted step done: "All steps done", with the check, and "6 of 6" (no "done" twice);
- *  - else the next step: "Next: <step>", with the empty ring.
- * `count` is the quieter count after it ("2 of 4 done").
+ * The plan's mark (Linear's project progress): a ring, and the done share as a wedge inside it. On the foot's button
+ * when no step is worked on or waits (fresh, all done), and on each list's head. `path` is null for none done; `full`
+ * for all.
  */
-export type StepsLine = { kind: 'waiting' | 'doing' | 'next' | 'done'; step: string | null; mark: InboxStepStatus; count: string };
-
-export function stepsLine(list: Pick<InboxStepsWire, 'steps'>): StepsLine {
-  const { done, total } = inboxStepsProgress(list.steps);
-  const count = `${done} of ${total} done`;
-  const waiting = list.steps.find((step) => step.status === 'waiting');
-  if (waiting) return { kind: 'waiting', step: waiting.step, mark: 'waiting', count };
-  const doing = list.steps.find((step) => step.status === 'doing');
-  if (doing) return { kind: 'doing', step: doing.step, mark: 'doing', count };
-  const next = list.steps.find((step) => step.status === 'todo');
-  if (!next) return { kind: 'done', step: null, mark: 'done', count: `${done} of ${total}` };
-  return { kind: 'next', step: next.step, mark: 'todo', count };
+export function pieGeometry(done: number, total: number, size: number): { c: number; r: number; ri: number; path: string | null; full: boolean } {
+  const c = size / 2;
+  const r = c - 0.9;
+  const ri = r - 2;
+  const share = total > 0 ? Math.min(1, Math.max(0, done / total)) : 0;
+  if (share >= 1) return { c, r, ri, path: null, full: true };
+  if (share <= 0) return { c, r, ri, path: null, full: false };
+  const angle = share * 2 * Math.PI;
+  const x = c + ri * Math.sin(angle);
+  const y = c - ri * Math.cos(angle);
+  return { c, r, ri, path: `M${c} ${c}V${c - ri}A${ri} ${ri} 0 ${share > 0.5 ? 1 : 0} 1 ${x.toFixed(2)} ${y.toFixed(2)}Z`, full: false };
 }
 
-/** The list the line names: one that waits on the person first (that is what they need to see), else the newest. */
-export function stepsLineList<T extends Pick<InboxStepsWire, 'steps'>>(lists: readonly T[]): T | null {
+/**
+ * The foot button's mark (approval "inbox-checklist-spinners-2026-11-07", mock 1): the current step's mark, the amber
+ * pause while a step waits on the person, else the spinner while one is worked on; null otherwise (fresh, all done),
+ * when the button keeps the pie.
+ */
+export function stepsButtonMark(list: Pick<InboxStepsWire, 'steps'>): 'waiting' | 'doing' | null {
+  if (list.steps.some((step) => step.status === 'waiting')) return 'waiting';
+  if (list.steps.some((step) => step.status === 'doing')) return 'doing';
+  return null;
+}
+
+/** The list the foot's button shows: one that waits on the person first (that is what they need to see), else the newest. */
+export function stepsButtonList<T extends Pick<InboxStepsWire, 'steps'>>(lists: readonly T[]): T | null {
   return lists.find((list) => list.steps.some((step) => step.status === 'waiting')) ?? lists[0] ?? null;
-}
-
-/** Some list waits on the person: the list row's and the lane card's still amber pause (nothing else shows there). */
-export function stepsWaitOnPerson(lists: readonly Pick<InboxStepsWire, 'steps'>[]): boolean {
-  return lists.some((list) => list.steps.some((step) => step.status === 'waiting'));
 }
 
 /** The lane card's amber pause, read aloud and on hover: "Checklist: 2 of 4 steps done; waiting on you: Pick the window". Null when nothing waits. */
@@ -171,14 +171,3 @@ export function stepsWaitWords(lists: readonly Pick<InboxStepsWire, 'steps'>[]):
   const step = list?.steps.find((one) => one.status === 'waiting');
   return list && step ? `Checklist: ${stepsDoneWords(list)}; waiting on you: ${step.step}` : null;
 }
-
-/** The line's name: whose checklist, how far, and the step it names ("…: 2 of 4 steps done; waiting on you: Pick the window"). */
-export function stepsLineName(agent: string, list: Pick<InboxStepsWire, 'steps'>): string {
-  const line = stepsLine(list);
-  const base = stepsName(agent, list);
-  if (line.kind === 'waiting') return `${base}; waiting on you: ${line.step}`;
-  if (line.kind === 'doing') return `${base}; doing: ${line.step}`;
-  if (line.kind === 'next') return `${base}; next: ${line.step}`;
-  return base;
-}
-

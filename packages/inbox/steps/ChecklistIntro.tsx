@@ -1,19 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { InboxStepStatus, InboxStepsWire } from '@plannotator/core/inbox-types';
-import { HostMark } from '../icons';
+import { HostMark, Icon } from '../icons';
 import { Modal } from '../components/Updates';
 import { useReducedMotion } from '../tour/Tour';
 import { stepsCount } from './model';
-import { StepsLine } from './StepsLine';
+import { StepsButtonFace } from './StepsButton';
+import { StepsLists } from './StepsList';
 
 /**
  * The Checklist's one-time reveal (approval "inbox-checklist-reveal", 2026-11-04): the Board's first-visit
- * dialog's frame, type and buttons (`.ib-bi`), over a small thread whose checklist line, at its top, ticks itself from
- * 1 of 4 to all done, with its list open in place for a moment (the look of approval
- * "inbox-checklist-spinners-2026-11-07": the line at the top of the thread, the spinner on the step in progress).
- * Shown once, as an offer (the owner, 2026-11-04: reveals are opt-in): "Turn it on" turns the Checklist on; "Not
- * now", Escape and a click outside close it and leave it off. Every way out is final. No keyboard shortcut. Under
- * reduced motion the picture rests on its last open beat: all done, the list open.
+ * dialog's frame, type and buttons (`.ib-bi`), over a small thread foot whose checklist ticks itself from 1/4 to 4/4,
+ * with its list open for a moment. Shown once, as an offer (the owner, 2026-11-04: reveals are opt-in): "Turn it on"
+ * turns the Checklist on; "Not now", Escape and a click outside close it and leave it off. Every way out is final. No
+ * keyboard shortcut. Under reduced motion the picture rests on its last beat: 4/4, the list open.
  */
 export function ChecklistIntro({ phone, onClose, onTurnOn }: { phone: boolean; onClose: () => void; onTurnOn: () => void }) {
   return (
@@ -21,7 +20,7 @@ export function ChecklistIntro({ phone, onClose, onTurnOn }: { phone: boolean; o
       <ChecklistIntroArt />
       <div className="ib-bi-text">
         <h2 id="ib-ci-title">Checklist</h2>
-        <p id="ib-ci-desc">For longer work, agents keep a checklist at the top of the thread and tick off steps as they go.</p>
+        <p id="ib-ci-desc">For longer work, agents keep a checklist at the foot of the thread and tick off steps as they go.</p>
         <p className="ib-bi-q">It starts with their next session after you turn it on. A tick never notifies you.</p>
       </div>
       <div className="ib-bi-acts">
@@ -76,7 +75,7 @@ function useBeat(still: boolean): { done: number; open: boolean; fading: boolean
   return { done: BEATS[index]!.done, open: BEATS[index]!.open, fading };
 }
 
-/** The picture: the top of a thread (its subject and meta line as bars), the checklist line, and an agent's message. Decoration only. */
+/** The picture: the end of an agent's message and the thread's foot, Reply and the checklist button. Decoration only. */
 function ChecklistIntroArt() {
   const still = useReducedMotion();
   const { done, open, fading } = useBeat(still);
@@ -94,16 +93,10 @@ function ChecklistIntroArt() {
       presence: 'working',
     };
   }, [done]);
-  const { done: d, total } = stepsCount(list);
+  const { text } = stepsCount(list);
   return (
     <div className="ib-bi-art ib-ci-art" aria-hidden="true" inert>
-      <div className="ib-ci-stage" data-fading={fading ? '' : undefined} data-checklist-intro-count={`${d}/${total}`}>
-        <div className="ib-ci-head">
-          <b style={{ width: '48%' }} />
-          <b style={{ width: '30%' }} />
-        </div>
-        {/* Decoration: the desktop line at every width (a phone's 44 px targets would crowd the small picture). */}
-        <StepsLine lists={[list]} phone={false} open={open} />
+      <div className="ib-ci-stage" data-fading={fading ? '' : undefined} data-checklist-intro-count={text}>
         <div className="ib-ci-msg">
           <div className="ib-ci-who">
             <HostMark host="claude-code" />
@@ -116,6 +109,27 @@ function ChecklistIntroArt() {
             <b style={{ width: '84%' }} />
             <b style={{ width: '58%' }} />
           </span>
+        </div>
+        <div className="ib-acts ib-footrow ib-ci-foot">
+          <div className="ib-footbtns">
+            <span className="ib-btn">
+              <Icon name="reply" size={15} />
+              Reply
+            </span>
+            <span className="ib-ci-anchor">
+              <span className="ib-btn ib-st-btn ib-st-working" data-popup-open={open ? '' : undefined}>
+                <StepsButtonFace list={list} />
+              </span>
+              {/* Over the message, from the button's left edge (a phone's: the stage's, as the popover shifts to fit). */}
+              {open && (
+                <div className="ib-stp ib-ci-pop">
+                  <div className="ib-stp-scroll">
+                    <StepsLists lists={[list]} />
+                  </div>
+                </div>
+              )}
+            </span>
+          </div>
         </div>
       </div>
     </div>

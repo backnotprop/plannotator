@@ -87,6 +87,23 @@ export function cardFootFitCandidates(): CardFootFit[] {
   return [...rows(words, ''), ...rows([count], 'chips'), ...rows([count], 'chips link'), ...rows(words, 'stack'), ...rows([count], 'stack chips'), ...rows([count], 'stack chips link wrap')];
 }
 
+/** A way to draw the row's buttons with the checklist button beside them: `steps`, its chevron gone. */
+export type FootFitWithSteps = FootFit & { steps: boolean };
+
+/**
+ * `footFitCandidates` with the checklist button beside the open questions: before the open questions button
+ * changes at all, the checklist drops its chevron (it is read only; the open items should "say both").
+ */
+export function footFitCandidatesWithSteps(max: OpenQuestionsLabelForm): FootFitWithSteps[] {
+  const [first, ...rest] = footFitCandidates(max);
+  return [{ ...first!, steps: false }, { ...first!, steps: true }, ...rest.map((fit) => ({ ...fit, steps: true }))];
+}
+
+/** Where the row's own fitting left the checklist button narrow (`data-steps-fit` on the buttons, inbox.css). */
+export function drawStepsFit(buttons: HTMLElement, narrow: boolean): void {
+  buttons.toggleAttribute('data-steps-fit', narrow);
+}
+
 /** All on one line: every box starts within a pixel of the first. */
 export function onOneLine(tops: readonly number[]): boolean {
   return tops.every((top) => Math.abs(top - tops[0]!) <= 1);
@@ -163,13 +180,13 @@ export function fitFootRow<T>(buttons: HTMLElement, candidates: readonly T[], ap
 //   0. keys   the buttons' keycaps (R): drawn for the eye only, so they go before any words
 //             (approval "inbox-keyboard-shortcuts"; the key stays in aria-keyshortcuts and the map)
 //   1. edit   "Edit draft" → "Edit"
-//   2. oq     "2 open questions ⌄" → the icon, "2" and the chevron
-//   3. draft  the pick words after the Draft pill go; the comment count stays,
+//   2. steps  the checklist button "◑ 10/12 ⌄" → "◑ 10/12": it is read only, so it gives way
+//             before the open questions' words ("it should say both")
+//   3. oq     "2 open questions ⌄" → the icon, "2" and the chevron
+//   4. draft  the pick words after the Draft pill go; the comment count stays,
 //             as a comment glyph and the number inside the pill ("Draft 💬3";
 //             with no comments, "Draft" alone)
-//   4. tight  the buttons' side padding and the gaps (the status's too) get smaller
-// (The checklist's own step went with its foot button: the checklist is a line at the top of the thread now,
-// approval "inbox-checklist-spinners-2026-11-07".)
+//   5. tight  the buttons' side padding and the gaps (the status's too) get smaller
 // Each step keeps the ones before it. The long words stay in the page as
 // visually hidden text (inbox.css), so names and descriptions are whole.
 // A phone has no status at the row's end (approval "reply-bar-pairs": Edit draft carries the draft's count and the
@@ -177,10 +194,10 @@ export function fitFootRow<T>(buttons: HTMLElement, candidates: readonly T[], ap
 // itself among the buttons.
 
 /** One step of shortening; a level is the first N of them. */
-export type FootRowStep = 'keys' | 'edit' | 'oq' | 'draft' | 'tight';
+export type FootRowStep = 'keys' | 'edit' | 'steps' | 'oq' | 'draft' | 'tight';
 
 /** The steps, in order. */
-export const FOOT_ROW_STEPS: readonly FootRowStep[] = ['keys', 'edit', 'oq', 'draft', 'tight'];
+export const FOOT_ROW_STEPS: readonly FootRowStep[] = ['keys', 'edit', 'steps', 'oq', 'draft', 'tight'];
 
 /** The row's `data-fit` at a level: the steps taken, space-separated ("" at level 0). */
 export function footRowTokens(level: number): string {

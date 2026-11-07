@@ -153,8 +153,8 @@ import { bareKeyAllowed, inOverlay, keyTarget, modalOpen } from '../shortcuts/gu
 import { INBOX_SHORTCUT_EXTRAS } from '../shortcuts/extras';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
-import { StepsLine } from '../steps/StepsLine';
-import { stepsWaitTarget } from '../steps/model';
+import { StepsButton } from '../steps/StepsButton';
+import { stepsCount, stepsWaitTarget } from '../steps/model';
 import { useThreadSteps, type StepsSubscribe } from '../steps/useThreadSteps';
 import { linkHashtags, useInitiativeTags } from '../hashtags';
 import { replyWordsCount, withFreeName, withoutReplyWords, type ShapeReplyPart } from '../shape/addToReply';
@@ -1171,8 +1171,8 @@ export interface ThreadPaneProps {
   cardChip?: React.ReactNode;
   /**
    * Thread steps (approval "inbox-thread-steps"): the switch, and the window's steps changes (a steps line naming
-   * this thread, presence moved, a catch-up). Null or off: no checklist line. `boardCard`: the Board card that links
-   * the thread (the Board on), opened by the Board icon at the open line's end.
+   * this thread, presence moved, a catch-up). Null or off: no steps button. `boardCard`: the Board card that links
+   * the thread (the Board on), opened by the panel head's Board icon.
    */
   threadSteps?: { on: boolean; subscribe: StepsSubscribe; boardCard?: { title: string; onOpen: () => void } | null } | null;
   /**
@@ -5096,9 +5096,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const footRowShown = !resolved && !(guard && staleQuestions.length > 0) && newMessage?.kind !== 'compose' && !box.open && !(route.open && asking);
   // What the row shows; a change re-fits it (with its width).
   // The Reply keycap (Show keys on buttons) takes room too: turning it on or off re-fits the row.
+  // So does the checklist button ("3/6"), which arrives after its own read and changes width as steps tick, or as
+  // another session's list adds or drops its "+1".
   const replyKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'reply' });
   const openItemsKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'openItems' });
-  const footSig = [showAskerNote, anyOtherLive, footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, openActions.length, phone, replyKeyShown, openItemsKeyShown].join('|');
+  const footSig = [showAskerNote, anyOtherLive, footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, openActions.length, phone, replyKeyShown, openItemsKeyShown, stepLists[0] ? stepsCount(stepLists[0]).text : '', stepLists.length].join('|');
   const rowFittedFor = useRef('');
   const fitRowRef = useRef<(force?: boolean) => void>(() => {});
   fitRowRef.current = (force = false) => {
@@ -5823,20 +5825,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 )}
               </span>
           </div>
-        )}
-        {/* The agents' checklist (approval "inbox-checklist-spinners-2026-11-07", Take C): one line at the top of
-            the thread, the list opening in place under it. Keyed by thread: another thread's line starts closed. */}
-        {stepLists.length > 0 && (
-          <StepsLine
-            key={thread.thread_id}
-            lists={stepLists}
-            phone={phone}
-            onWaiting={(list) => {
-              const target = stepsWaitTarget(list.agent.session ?? null, openQ.questions, openActions, (id) => { const author = thread.messages.find((m) => m.id === id)?.author; return author?.kind === 'agent' ? (author.session ?? null) : null; });
-              return target ? () => jumpTo(target) : null;
-            }}
-            boardCard={threadSteps?.boardCard ?? null}
-          />
         )}
         {thread.messages.flatMap((message, index) => {
           const before: React.ReactNode[] = [];
@@ -6760,6 +6748,18 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     Archive
                   </button>
                 </div>
+              )}
+              {/* The agents' steps (approval "inbox-thread-steps", A1): beside the open questions, by their list's rules. */}
+              {stepLists.length > 0 && (
+                <StepsButton
+                  lists={stepLists}
+                  phone={phone}
+                  onWaiting={(list) => {
+                    const target = stepsWaitTarget(list.agent.session ?? null, openQ.questions, openActions, (id) => { const author = thread.messages.find((m) => m.id === id)?.author; return author?.kind === 'agent' ? (author.session ?? null) : null; });
+                    return target ? () => jumpTo(target) : null;
+                  }}
+                  boardCard={threadSteps?.boardCard ?? null}
+                />
               )}
               {/* The in-thread New message button is off (approval "inbox-acknowledge", 2026-10-15): Reply and compose cover it.
                   Its route, door row and code stay; turn SHOW_NEW_MESSAGE_BUTTON on to bring it back. */}

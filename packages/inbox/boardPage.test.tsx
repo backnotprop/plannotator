@@ -673,7 +673,7 @@ test.if(hasDom)('the lane card: the still amber pause only while a list waits on
 /** The card agent's session in the live sessions read (the opened card's head reads it working, or idle). */
 const LIVE_CLAUDE = (busy: boolean) => [{ project: { id: 'prj_1', name: 'web', root: '/Users/ada/src/web' }, sessions: [{ session: 'ses_claude', host: 'claude-code', started_at: OLD, last_seen_at: NEW, busy, idle_since: busy ? null : NEW, last_thread: null }] }];
 
-test.if(hasDom)('the opened card: the checklist read only, "Checklist 1 of 3 done" and its rows; "Waiting on you ›" opens the list\'s thread', async () => {
+test.if(hasDom)('the opened card: the checklist read only, "Checklist 1/3" and its rows; "Waiting on you ›" opens the list\'s thread', async () => {
   scriptFetch(LIVE_CLAUDE(true));
   const threads: string[] = [];
   draw({
@@ -684,7 +684,7 @@ test.if(hasDom)('the opened card: the checklist read only, "Checklist 1 of 3 don
   await settle();
   const list = $('[data-card-panel="crd_auto"] [data-card-checklist]')!;
   expect(list.querySelector('h3.ib-st-lbl')!.textContent).toBe('Checklist');
-  expect(list.querySelector('[data-steps-head]')!.textContent).toBe('Checklist1 of 3 done');
+  expect(list.querySelector('[data-steps-head]')!.textContent).toBe('Checklist1/3');
   expect([...list.querySelectorAll<HTMLElement>('.ib-st-row')].map((r) => r.dataset.stepStatus)).toEqual(['done', 'waiting', 'doing']);
   // The same marks as the thread's list: the check, the amber pause, the spinner.
   expect([...list.querySelectorAll('.ib-st-row [data-step-mark]')].map((m) => m.getAttribute('data-step-mark'))).toEqual(['done', 'waiting', 'doing']);

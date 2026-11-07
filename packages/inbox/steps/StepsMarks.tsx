@@ -1,5 +1,5 @@
 /**
- * The checklist's marks (approval "inbox-checklist-spinners-2026-11-07", Take C with spinners): one 14 px box per
+ * The checklist's marks (approval "inbox-checklist-spinners-2026-11-07", mock 1): one 14 px box per
  * status, each its own shape, so no status rests on colour alone.
  *
  *  - todo: an empty ring (the quiet grey, 3:1 or better);
@@ -15,6 +15,7 @@
  */
 
 import type { InboxStepStatus } from '@plannotator/core/inbox-types';
+import { pieGeometry } from './model';
 
 export function StepGlyph({ status, size = 14 }: { status: InboxStepStatus; size?: number }) {
   const box = { width: size, height: size, viewBox: '0 0 14 14', 'aria-hidden': true as const };
@@ -55,6 +56,17 @@ export function StepSpinner({ size = 14 }: { size?: number }) {
     <svg className="ib-stg ib-stg-spin" width={size} height={size} viewBox="0 0 14 14" aria-hidden="true" data-step-mark="doing">
       <circle className="tr" cx="7" cy="7" r="6" />
       <circle className="arc" cx="7" cy="7" r="6" pathLength={100} strokeDasharray="28 72" transform="rotate(-90 7 7)" />
+    </svg>
+  );
+}
+
+/** The plan's mark: a ring with the done share as a wedge (the foot's button when no step is worked on or waits, and each list's head). */
+export function StepsPie({ done, total, size = 13 }: { done: number; total: number; size?: number }) {
+  const { c, r, ri, path, full } = pieGeometry(done, total, size);
+  return (
+    <svg className="ib-stpie" width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true" data-steps-pie={`${done}/${total}`}>
+      <circle className="o" cx={c} cy={c} r={r} />
+      {full ? <circle className="w" cx={c} cy={c} r={ri} /> : path ? <path className="w" d={path} /> : null}
     </svg>
   );
 }
