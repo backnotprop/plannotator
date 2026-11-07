@@ -1,18 +1,19 @@
 /**
- * Bro mode's one-time offer in a DOM (approval "bro-mode"): the calm-moment gate (reveal.ts `useBroReveal`) driving
- * `BroIntro`, as App wires them.
+ * Bro mode's one-time offer in a DOM (approval "bro-mode"; its moment, approval "inbox-one-time-dialogs"): the line's
+ * hook (reveal.ts `useLineReveal`) with Bro mode's moment (`broRevealLeaveCounts`) driving `BroIntro`, as App wires them.
  *
- * What regresses: the card showing on load, or for a thread left too soon or on another thread, too young a page, the
- * tour or another one-time dialog this load, a toast, or something typed; a list too short holding it back (it is for
- * everyone); Bro mode turned on by the card showing or by any way out but "Turn it on"; "Turn it on" not saving the
- * switch; a second claim after any way out; the card opening once another window turned it on.
+ * What regresses: the card showing on load, or for a thread whose last agent message is short, a thread left too soon
+ * or for another thread, the tour or another one-time dialog this load, or something typed; Bro mode turned on by the
+ * card showing or by any way out but "Turn it on"; Not now or Escape not telling the Inbox (the line's three-day gap);
+ * "Turn it on" not saving the switch; a second claim after any way out; the card opening once another window turned
+ * it on.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxListRow } from '@plannotator/core/inbox-types';
+import type { InboxListRow, InboxThread } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
 const reveal = (hasDom ? await import('./reveal') : {}) as typeof import('./reveal');
@@ -20,7 +21,7 @@ const { BroIntro } = (hasDom ? await import('./components/BroIntro') : {}) as ty
 const { inboxApi } = (hasDom ? await import('./api') : {}) as typeof import('./api');
 const { turnOnFromReveal } = (hasDom ? await import('./revealTurnOn') : {}) as typeof import('./revealTurnOn');
 
-const TIMES = { pageAgeMs: 300, readMs: 60, settledMs: 60, momentMs: 1500, recheckMs: 20, claimRetryMs: 30 };
+const TIMES = { pageAgeMs: 300, readMs: 60, settledMs: 60, momentMs: 1500, recheckMs: 20, claimRetryMs: 30, broReadMs: 120 };
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -66,22 +67,28 @@ async function until(done: () => boolean, ms = 2_000): Promise<void> {
   const end = Date.now() + ms;
   while (!done() && Date.now() < end) await wait(10);
 }
-const claims = () => posts.filter((p) => p.path.endsWith('/api/inbox/reveal'));
+const claims = () => posts.filter((p) => p.path.endsWith('/api/inbox/reveal') && p.body.answer === undefined);
+const notNows = () => posts.filter((p) => p.path.endsWith('/api/inbox/reveal') && p.body.answer === 'not_now');
 const saves = () => posts.filter((p) => p.path.endsWith('/api/inbox/settings'));
 const card = () => document.querySelector<HTMLDialogElement>('dialog[data-dialog="bro-intro"]');
 const press = (selector: string) => act(() => document.querySelector<HTMLButtonElement>(selector)!.click());
 
 const ROW = { thread_id: 'msg_a', section: 'sent', unseen: 0 } as InboxListRow;
 
+/** A thread as the window loads it (App's `noteRevealThread`): its last agent message has `words` words. */
+function loaded(threadId: string, words: number) {
+  const body = Array.from({ length: words }, (_, i) => `word${i}`).join(' ');
+  reveal.noteRevealThread({ thread_id: threadId, messages: [{ author: { kind: 'agent', host: 'claude-code', session: 's1' }, body }] } as unknown as InboxThread);
+}
+
 interface State {
   due: boolean;
   blocked: boolean;
-  firstRun: boolean;
   toast: boolean;
   thread: string | null;
 }
 
-const BASE: State = { due: true, blocked: false, firstRun: false, toast: false, thread: 'msg_a' };
+const BASE: State = { due: true, blocked: false, toast: false, thread: 'msg_a' };
 
 let shownOn = false;
 
@@ -89,10 +96,9 @@ function Harness({ state }: { state: State }) {
   const [settings, setSettings] = useState<{ bro?: { on: boolean } } | null>({ bro: { on: false } });
   shownOn = settings?.bro?.on === true;
   setOnElsewhere = (on) => setSettings({ bro: { on } });
-  const r = reveal.useBroReveal({
+  const r = reveal.useLineReveal({
+    id: 'bro',
     due: state.due,
-    listLoaded: true,
-    firstRun: state.firstRun,
     blocked: state.blocked,
     rows: [ROW],
     toast: state.toast,
@@ -100,13 +106,18 @@ function Harness({ state }: { state: State }) {
     clear: true,
     place: state.thread ?? '',
     heldBack: () => held,
-    on: shownOn,
+    leaveCounts: (visit, now, _row, next) => reveal.broRevealLeaveCounts(visit, now, next),
+    mayClaim: () => true,
+    holds: () => !shownOn,
   });
   if (r.stage !== 'open') return null;
   return (
     <BroIntro
       phone={false}
-      onClose={r.close}
+      onClose={() => {
+        void inboxApi.revealNotNow('bro');
+        r.close();
+      }}
       onTurnOn={() =>
         void turnOnFromReveal('bro', r.close, {
           save: () => inboxApi.saveBro(true).then((saved) => saved.bro),
@@ -132,15 +143,16 @@ function mount(state: State) {
   return (next: State) => act(() => root!.render(<Harness state={next} />));
 }
 
-/** The page old enough and the thread read: what comes next is leaving it. */
-async function readThread(state: State = BASE) {
+/** A thread whose last agent message is long, open long enough: what comes next is leaving it. */
+async function readThread(state: State = BASE, words = 150) {
+  loaded('msg_a', words);
   const render = mount(state);
-  await wait(TIMES.pageAgeMs + 20);
+  await wait(TIMES.broReadMs + 20);
   return render;
 }
 
 describe.skipIf(!hasDom)('the Bro mode offer', () => {
-  test('never on load; at the calm moment back on the list it opens, with one row in the list, and nothing is on', async () => {
+  test('never on load; back on the list after a long agent message read long enough it opens, and nothing is on', async () => {
     const render = await readThread();
     expect(card()).toBeNull();
     expect(claims()).toHaveLength(0);
@@ -153,21 +165,36 @@ describe.skipIf(!hasDom)('the Bro mode offer', () => {
     expect(shownOn).toBe(false);
   });
 
-  for (const [name, state, age] of [
-    ['a page too young', {}, 0],
-    ['the tour or another one-time dialog this load', { blocked: true }, TIMES.pageAgeMs + 20],
-    ['the first-run screen', { firstRun: true }, TIMES.pageAgeMs + 20],
-    ['not next in the queue', { due: false }, TIMES.pageAgeMs + 20],
+  for (const [name, state] of [
+    ['the tour or another one-time dialog this load', { blocked: true }],
+    ['not next in the queue', { due: false }],
   ] as const) {
     test(`held back by ${name}`, async () => {
-      const render = mount({ ...BASE, ...state });
-      if (age) await wait(age);
+      const render = await readThread({ ...BASE, ...state });
       render({ ...BASE, ...state, thread: null });
       await wait(TIMES.settledMs + 80);
       expect(card()).toBeNull();
       expect(claims()).toHaveLength(0);
     });
   }
+
+  test('a short last agent message is not the moment', async () => {
+    const render = await readThread(BASE, 149);
+    render({ ...BASE, thread: null });
+    await wait(TIMES.settledMs + 80);
+    expect(card()).toBeNull();
+    expect(claims()).toHaveLength(0);
+  });
+
+  test('a long message left too soon is not the moment', async () => {
+    loaded('msg_a', 400);
+    const render = mount(BASE);
+    await wait(TIMES.readMs + 10);
+    render({ ...BASE, thread: null });
+    await wait(TIMES.settledMs + 80);
+    expect(card()).toBeNull();
+    expect(claims()).toHaveLength(0);
+  });
 
   test('leaving for another thread is not the moment', async () => {
     const render = await readThread();
@@ -217,24 +244,26 @@ describe.skipIf(!hasDom)('the Bro mode offer', () => {
     expect(card()).toBeNull();
   });
 
-  test('Not now closes it for good and writes nothing', async () => {
+  test("Not now closes it for good, tells the Inbox (the line's gap) and saves no switch", async () => {
     const render = await readThread();
     render({ ...BASE, thread: null });
     await until(() => card() !== null);
     press('[data-bro-intro-close]');
     expect(card()).toBeNull();
+    await until(() => notNows().length === 1);
+    expect(notNows()[0]!.body.id).toBe('bro');
     expect(saves()).toHaveLength(0);
     expect(shownOn).toBe(false);
     // The next visit and leave asks nothing more.
     render({ ...BASE, thread: 'msg_a' });
-    await wait(TIMES.readMs + 10);
+    await wait(TIMES.broReadMs + 20);
     render({ ...BASE, thread: null });
     await wait(TIMES.settledMs + 80);
     expect(card()).toBeNull();
     expect(claims()).toHaveLength(1);
   });
 
-  test('Escape closes it and writes nothing', async () => {
+  test('Escape is Not now: it tells the Inbox and saves no switch', async () => {
     const render = await readThread();
     render({ ...BASE, thread: null });
     await until(() => card() !== null);
@@ -243,6 +272,7 @@ describe.skipIf(!hasDom)('the Bro mode offer', () => {
     });
     await until(() => card() === null);
     expect(card()).toBeNull();
+    await until(() => notNows().length === 1);
     expect(saves()).toHaveLength(0);
   });
 

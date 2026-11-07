@@ -1,10 +1,11 @@
 /**
  * Bro mode's one-time offer in the whole window (InboxApp) over a real Inbox in a temp data dir
- * (tests/helpers/inbox-dom-server.ts `bro-offer`), where `broReveal.test.tsx` drives the gate alone.
+ * (tests/helpers/inbox-dom-server.ts `bro-offer`: heavy use, the line's other dialogs behind the person), where
+ * `broReveal.test.tsx` drives the gate alone.
  *
- * What regresses: App not drawing the card, or not arming it when the queue says `bro`; a click outside writing the
- * switch; a late "Tell your agents" stacking on the card, or lost behind it; a tailnet guest changing what every agent
- * here reads.
+ * What regresses: App not drawing the card, or not arming it when the line says `bro`, at its moment (back on the list
+ * from a long agent message); a click outside writing the switch, or not telling the Inbox (the line's Not now gap); a
+ * tailnet guest changing what every agent here reads.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -22,7 +23,7 @@ const reveal = (hasDom ? await import('./reveal') : {}) as typeof import('./reve
 const { resetPageSessionForTests } = (hasDom ? await import('./api') : {}) as typeof import('./api');
 
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
-const TIMES = { pageAgeMs: 200, readMs: 50, settledMs: 50, momentMs: 3_000, recheckMs: 20, claimRetryMs: 30 };
+const TIMES = { pageAgeMs: 200, readMs: 50, settledMs: 50, momentMs: 3_000, recheckMs: 20, claimRetryMs: 30, broReadMs: 250 };
 
 interface Server {
   child: ReturnType<typeof Bun.spawn>;
@@ -72,8 +73,8 @@ async function spawnServer(): Promise<Server> {
     line += new TextDecoder().decode(value);
   }
   reader.releaseLock();
-  const started = JSON.parse(line.trim()) as { port: number; worlds: { waiting: string }[]; tailnet: Server['tailnet'] };
-  return { child, port: started.port, dataDir, thread: started.worlds[0]!.waiting, tailnet: started.tailnet };
+  const started = JSON.parse(line.trim()) as { port: number; bro: string; tailnet: Server['tailnet'] };
+  return { child, port: started.port, dataDir, thread: started.bro, tailnet: started.tailnet };
 }
 
 beforeEach(async () => {
@@ -160,10 +161,10 @@ async function renderApp(hash: string) {
   await until(() => host!.querySelector('.ib-listcol, section.ib-pane') !== null, 'the window');
 }
 
-/** Read the waiting thread past the page's and the visit's times, then go back to the list: the calm moment. */
+/** Read the thread whose last agent message is long, past the page's and the visit's times, then go back to the list: the moment. */
 async function readAndLeave() {
   await renderApp(`#thread=${server!.thread}`);
-  await wait(TIMES.pageAgeMs + 100);
+  await wait(Math.max(TIMES.pageAgeMs, TIMES.broReadMs) + 100);
   expect(openDialogs()).toEqual([]);
   act(() => {
     window.location.hash = '';
@@ -180,7 +181,7 @@ test.skipIf(!hasDom)('the card opens in the window when the queue says bro, at t
   await until(() => card() === null, 'the card to close');
 }, 30_000);
 
-test.skipIf(!hasDom)('a click outside closes the card and writes nothing, and it does not come back', async () => {
+test.skipIf(!hasDom)("a click outside is Not now: no switch, the line's gap stamped, and it does not come back", async () => {
   await readAndLeave();
   await until(() => card() !== null, 'the card');
   const shownAt = config().inboxReveals.bro.shownAt;
@@ -189,29 +190,9 @@ test.skipIf(!hasDom)('a click outside closes the card and writes nothing, and it
   await wait(100);
   expect(config().inboxBro).toBeUndefined();
   expect(config().inboxReveals.bro.shownAt).toBe(shownAt);
+  await until(() => typeof config().inboxReveals.notNowAt === 'string', 'the Not now stamp');
   const settings = JSON.parse((await call(server!.port, '/api/inbox/settings?store=0')).text) as { reveal: { next: string | null } };
   expect(settings.reveal.next).not.toBe('bro');
-}, 30_000);
-
-test.skipIf(!hasDom)('"Tell your agents", decided while the card is open, waits for it, then opens once it closes', async () => {
-  let connecting = true;
-  agentsOver = (model) => {
-    model.connecting = connecting;
-    model.notes_env_off = false;
-    model.notes_asked = [];
-    model.notes_offered = false;
-    Object.assign(model.agents[0], { detected: true, note: { state: 'absent', file: '/tmp/x/AGENTS.md' }, reach: { ...(model.agents[0].reach ?? {}), on: true } });
-  };
-  await readAndLeave();
-  await until(() => card() !== null, 'the card');
-  connecting = false;
-  // The agents are read again in 1.5 s, once more 2.5 s after that, and only then the dialog decides, every 0.7 s: past all three.
-  await wait(6_000);
-  expect(openDialogs()).toEqual(['bro-intro']);
-  act(() => document.querySelector<HTMLButtonElement>('[data-bro-intro-close]')!.click());
-  await until(() => openDialogs().includes('agent-note'), 'the note dialog');
-  expect(openDialogs()).toEqual(['agent-note']);
-  expect(config().inboxBro).toBeUndefined();
 }, 30_000);
 
 test.skipIf(!hasDom)("a tailnet guest's bro save is refused and writes nothing; the owner's over the tailnet saves", async () => {

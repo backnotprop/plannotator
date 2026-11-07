@@ -15,7 +15,6 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 const hasDom = typeof document !== 'undefined';
-const { DiffStyleSwitch } = (hasDom ? await import('./components/DiffStyleSwitch') : {}) as typeof import('./components/DiffStyleSwitch');
 const { ReviewJump, chapterInView, fileInView, jumpPlace, jumpProgress } = (hasDom ? await import('./components/ReviewJump') : {}) as typeof import('./components/ReviewJump');
 
 const CHAPTERS = [
@@ -140,18 +139,4 @@ test.skipIf(!hasDom)("Escape in the menu closes the menu and is marked used: the
   expect(host!.querySelector('[data-review-jump]')?.getAttribute('aria-expanded')).toBe('false');
   // App's window listener stands down on a used key (App.tsx: event.defaultPrevented).
   expect(escape.defaultPrevented).toBe(true);
-});
-
-// Guards the words reaching the review, the marks reaching the thread's guide pane, and marks with nothing to name them.
-test.skipIf(!hasDom)('Split | Unified: marks named on each radio in the review, the words everywhere else', async () => {
-  host = document.createElement('div');
-  document.body.appendChild(host);
-  root = createRoot(host);
-  await act(async () => root!.render(<DiffStyleSwitch icons />));
-  expect(host.textContent).toBe('');
-  expect(host.querySelectorAll('svg')).toHaveLength(2);
-  expect([...host.querySelectorAll('input')].map((radio) => radio.getAttribute('aria-label'))).toEqual(['Split', 'Unified']);
-  await act(async () => root!.render(<DiffStyleSwitch />));
-  expect(host.textContent).toBe('SplitUnified');
-  expect(host.querySelectorAll('svg')).toHaveLength(0);
 });

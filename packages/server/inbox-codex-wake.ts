@@ -59,8 +59,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { lstat, open, readdir, type FileHandle } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { INBOX_CODEX_HOST, codexCallWakes, codexCliQueues, codexThreadOfCall, isCodexThreadId, parseCodexCliVersion, type InboxMessage } from "@plannotator/core/inbox-types";
-import { INBOX_TOOL_NAME, inboxWakeText, type InboxReplyCommand } from "@plannotator/shared/inbox/connection";
-import { INBOX_BOARD_REQUEST_CLOSE, INBOX_BOARD_REQUEST_OPEN } from "@plannotator/core/inbox-types";
+import { INBOX_TOOL_NAME, inboxWakeCommand, inboxWakeText, type InboxReplyCommand } from "@plannotator/shared/inbox/connection";
+import { INBOX_BOARD_REQUEST_CLOSE, INBOX_BOARD_REQUEST_OPEN, INBOX_DECISION_ASK_CLOSE, INBOX_DECISION_ASK_OPEN } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { agentHomeAllowed, codexHome, type AgentEnvironment } from "./inbox-agents";
 
@@ -291,8 +291,10 @@ const BODY_SLOT = "\u0000PLANNOTATOR_BODY\u0000";
  * connections). The person's words are never touched.
  */
 export function codexWakeText(command: InboxReplyCommand): string {
-  const template = inboxWakeText({ ...command, body: BODY_SLOT }).split(`${INBOX_TOOL_NAME} `).join("");
-  return template.replace(BODY_SLOT, () => command.body);
+  const { body } = inboxWakeCommand(command);
+  // Worded now and held by the host from here (Codex, Qwen, T3 Code): `queued`, so it never says "nothing open".
+  const template = inboxWakeText({ ...command, body: BODY_SLOT }, Date.now(), { queued: true }).split(`${INBOX_TOOL_NAME} `).join("");
+  return template.replace(BODY_SLOT, () => body);
 }
 
 /** The wake text, cut to INBOX_CODEX_MESSAGE_MAX_BYTES with a pointer to the thread when the reply is longer. */
@@ -301,9 +303,11 @@ export function codexQueueMessage(command: InboxReplyCommand): string {
   const whole = clean(command.body);
   const full = codexWakeText({ ...command, body: whole });
   if (Buffer.byteLength(full) <= INBOX_CODEX_MESSAGE_MAX_BYTES) return full;
-  // The Board request (compose's chip) ends the body: only the words before it are cut, and it stays whole after the note.
-  const at = whole.lastIndexOf(`\n\n${INBOX_BOARD_REQUEST_OPEN}\n`);
-  const tail = at >= 0 && whole.endsWith(INBOX_BOARD_REQUEST_CLOSE) ? whole.slice(at) : "";
+  // The Board request (compose's chip) or a Decision data Ask's instructions end the body: only the words before them
+  // are cut, and they stay whole after the note.
+  const closing = whole.endsWith(INBOX_DECISION_ASK_CLOSE) ? INBOX_DECISION_ASK_OPEN : whole.endsWith(INBOX_BOARD_REQUEST_CLOSE) ? INBOX_BOARD_REQUEST_OPEN : null;
+  const at = closing ? whole.lastIndexOf(`\n\n${closing}\n`) : -1;
+  const tail = at >= 0 ? whole.slice(at) : "";
   const body = tail ? whole.slice(0, at) : whole;
   const note = `\n\n[Cut here: the rest is in the Inbox. read_thread with message_id ${command.id} shows it whole.]${tail}`;
   const overhead = Buffer.byteLength(codexWakeText({ ...command, body: note }));

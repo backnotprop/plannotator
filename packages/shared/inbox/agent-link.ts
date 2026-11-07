@@ -819,6 +819,9 @@ export class InboxWake {
       if ((error as NodeJS.ErrnoException).code === "EEXIST") this.settle(command.id);
       return;
     }
+    // Who holds it: the Inbox calls it stuck only once this process is gone (never while it may still deliver).
+    writeQuietly(join(claim, "by"), this.instanceId);
+    writeQuietly(join(claim, "pid"), String(process.pid));
     if (steering) {
       try {
         await this.target.steer!(inboxWakeText(command), command);

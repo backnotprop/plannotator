@@ -27,7 +27,7 @@ import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
   INBOX_MESSAGE_INSTRUCTION,
-  inboxWakeClosingLine,
+  INBOX_WAKE_CLOSING_LINE,
   inboxWakeText,
   parseInboxBridgeCommands,
   type InboxReplyCommand,
@@ -244,7 +244,7 @@ test('one live session (5.1): a message sent through the route is drawn "to Pi",
   const wake = inboxWakeText(command);
   expect(wake.split('\n').slice(0, 2)).toEqual([`Plannotator Inbox: a message (${command.id})`, INBOX_MESSAGE_INSTRUCTION]);
   expect(wake).not.toContain(SUBJECT);
-  expect(wake.endsWith(`\n\n${words}\n\n${inboxWakeClosingLine(world.threadId)}`)).toBe(true);
+  expect(wake.endsWith(`\n\n${words}\n\n${INBOX_WAKE_CLOSING_LINE}`)).toBe(true);
   const messages = await threadMessages();
   expect(messages.at(-1)).toMatchObject({ id: command.id, author: { kind: 'person' }, to: { host: 'pi', session: world.writer } });
   // The session's connection polls idle: it takes it within seconds.

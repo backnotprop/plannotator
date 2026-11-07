@@ -4,12 +4,14 @@
  *
  * What regresses: Bro mode off or undecided changing a byte of what an agent reads; on, the line reaching anything but
  * send_message's `body`; the switch needing a restart; the offer turning anything on, showing twice, or overriding a
- * person's own setting; a test run or dev build meeting the offer, which would put a dialog in front of every spec.
+ * person's own setting; the offer leaving the line of one-time dialogs (approval "inbox-one-time-dialogs": heavy use
+ * only, never on day 0 or 1, the one-day spacing, Not now's gap); a dev build meeting the offer.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxAgentTool, INBOX_BRO_LINE, parseInboxToolList } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createAgentEnvironmentFor } from "./inbox-agents";
@@ -39,8 +41,19 @@ function setEnv(name: string, value: string | undefined): void {
 
 type Json = Record<string, any>;
 
-/** An Inbox with Snooze and the rest of the queue behind the person, so only Bro mode can be next. */
-async function world(options: { config?: Record<string, unknown>; version?: string; broOffer?: boolean; firstUseDays?: number } = {}) {
+interface WorldOptions {
+  config?: Record<string, unknown>;
+  version?: string;
+  /** Days since first use (default 3: past the offer's two days). */
+  firstUseDays?: number;
+  /** Threads the person read, each with an agent message on one of the last two days (default 0). */
+  read?: number;
+  /** The reads all on one day (heavy use needs two or more). */
+  oneDay?: boolean;
+}
+
+/** An Inbox with Snooze and the rest of the line behind the person, so only Bro mode can be next. */
+async function world(options: WorldOptions = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-bro-")));
   roots.push(root);
   const dataDir = join(root, "data");
@@ -53,10 +66,24 @@ async function world(options: { config?: Record<string, unknown>; version?: stri
       updateCheck: false,
       inboxBoard: false,
       inboxSteps: false,
-      inboxSnoozeIntro: { firstUseAt: new Date(Date.now() - (options.firstUseDays ?? 0) * DAY).toISOString(), snoozedAt: new Date(Date.now() - 3 * DAY).toISOString() },
+      inboxCodeReview: false,
+      inboxSnoozeIntro: { firstUseAt: new Date(Date.now() - (options.firstUseDays ?? 3) * DAY).toISOString(), snoozedAt: new Date(Date.now() - 3 * DAY).toISOString() },
+      // The update-day dialogs (sound, list options, voice) come first in the line: settled here (a fresh install's marks).
+      inboxSound: { dialogShownFor: options.version ?? "0.30.0" },
+      inboxListIntro: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() },
+      inboxVoiceIntro: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() },
       ...options.config,
     }),
   );
+  // What the person read: heavy use counts the dates of the agent messages they looked at.
+  let clock = new Date();
+  const store = InboxStore.open(dataDir, { now: () => clock });
+  const project = store.ensureProject({ name: "docs", root: join(root, "docs") });
+  for (let i = 0; i < (options.read ?? 0); i++) {
+    clock = new Date(Date.now() - (options.oneDay || i % 2 === 0 ? 1 : 2) * DAY);
+    const thread = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: `ses_${i}`, name: "Claude Code" }, body: `Update ${i}.` }).message;
+    store.markSeen(thread.id);
+  }
   const home = join(root, "home");
   mkdirSync(home);
   const server = await startInboxServer({
@@ -64,7 +91,6 @@ async function world(options: { config?: Record<string, unknown>; version?: stri
     binaryPath: null,
     phones: false,
     version: options.version ?? "0.30.0",
-    ...(options.broOffer === undefined ? {} : { broOffer: options.broOffer }),
     agentEnvironment: createAgentEnvironmentFor({ platform: "linux", homeDir: home, env: {} }),
   });
   servers.push(server);
@@ -130,16 +156,18 @@ describe("the line", () => {
   });
 });
 
+/** Heavy use (approval "inbox-one-time-dialogs"): 10 threads read in the last 7 days, on 2 days. */
+const HEAVY = { read: 10 } as const;
+
 describe("the offer", () => {
-  test("a test run's build never meets it, and neither does a dev build", async () => {
-    expect(await (await world()).next()).toBeNull();
-    const dev = await world({ version: "0.0.0-dev", broOffer: true });
+  test("a dev build never meets it", async () => {
+    const dev = await world({ ...HEAVY, version: "0.0.0-dev" });
     expect(await dev.next()).toBeNull();
     expect((await dev.claim()).show).toBe(false);
   });
 
-  test("everyone, from the first day: next, once; the claim turns nothing on and leaves agent text as off", async () => {
-    const w = await world({ broOffer: true });
+  test("heavy use: next, once; the claim turns nothing on and leaves agent text as off", async () => {
+    const w = await world(HEAVY);
     const before = await w.agent();
     expect(await w.next()).toBe("bro");
     expect((await w.claim("key-one-1")).show).toBe(true);
@@ -156,17 +184,31 @@ describe("the offer", () => {
     expect((await w.claim("key-one-1")).show).toBe(false);
   });
 
-  test("goes ahead of Snooze, and the 48 h spacing still holds it back", async () => {
-    const ahead = await world({ broOffer: true, firstUseDays: 3, config: { inboxSnoozeIntro: { firstUseAt: new Date(Date.now() - 3 * 24 * 3_600_000).toISOString() } } });
-    expect(await ahead.next()).toBe("bro");
-    const spaced = await world({ broOffer: true, config: { inboxReveals: { lastShownAt: new Date(Date.now() - 3_600_000).toISOString() } } });
-    expect(await spaced.next()).toBeNull();
-    expect((await spaced.claim()).show).toBe(false);
+  for (const [name, options] of [
+    ["nine threads read", { read: 9 }],
+    ["ten threads read, all on one day", { read: 10, oneDay: true }],
+    ["day 1 of use", { ...HEAVY, firstUseDays: 1 }],
+    ["a dialog of the line less than a day ago", { ...HEAVY, config: { inboxReveals: { lastShownAt: new Date(Date.now() - 3_600_000).toISOString() } } }],
+  ] as const) {
+    test(`never for ${name}`, async () => {
+      const w = await world(options);
+      expect(await w.next()).toBeNull();
+      expect((await w.claim()).show).toBe(false);
+      expect(w.saved().inboxReveals?.bro).toBeUndefined();
+    });
+  }
+
+  test("Not now writes no switch and holds the next dialog back (the line's gap)", async () => {
+    const w = await world(HEAVY);
+    expect((await w.claim()).show).toBe(true);
+    expect((await w.post("/api/inbox/reveal", { id: "bro", answer: "not_now" })).status).toBe(200);
+    expect(w.saved().inboxReveals.notNowAt).toMatch(/^\d{4}-/);
+    expect(w.saved().inboxBro).toBeUndefined();
   });
 
   for (const inboxBro of [true, false]) {
     test(`a person who set it ${inboxBro ? "on" : "off"} is never offered it, and their setting stays`, async () => {
-      const w = await world({ broOffer: true, config: { inboxBro } });
+      const w = await world({ ...HEAVY, config: { inboxBro } });
       expect(await w.next()).toBeNull();
       expect((await w.claim()).show).toBe(false);
       expect(w.saved().inboxBro).toBe(inboxBro);
