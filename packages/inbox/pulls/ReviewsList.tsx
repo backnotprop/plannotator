@@ -6,7 +6,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { inboxPullRepoKey, inboxReviewGroups, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack, type InboxReviewMove, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
-import { formatCount } from '@plannotator/core/inbox-format';
+import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { inboxApi } from '../api';
 import { HostMark, Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
@@ -17,6 +17,12 @@ import { initials, repoLabels, repoName } from './labels';
 import { pullsEmptyWords, pullsNotices } from './notices';
 import { chainMarks } from './topology';
 import { readReviewFolds, reviewRowLine, reviewRowProject, reviewRowTitle, saveReviewFolds, type ReviewFolds } from './reviewsModel';
+import { riskOrder, rowStack, stackRisk, stackRiskFailure, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
+import { RiskMark } from './RiskMark';
+
+const NO_ROWS: readonly InboxReviewRow[] = [];
+const NO_JUDGMENTS: RiskJudgments = {};
+const NO_FAILURES: RiskFailures = {};
 
 /** Pictures that failed or drew nothing in this window, so a row drawn again never asks twice. */
 const failedAvatars = new Set<string>();
@@ -104,6 +110,8 @@ function ReviewRowItem({
   selected,
   phone,
   now,
+  judgments,
+  riskFailed,
   onOpen,
 }: {
   row: InboxReviewRow;
@@ -112,9 +120,14 @@ function ReviewRowItem({
   selected: boolean;
   phone: boolean;
   now: number;
+  judgments: RiskJudgments;
+  riskFailed: RiskFailures;
   onOpen: () => void;
 }) {
   const stack = row.stacks[0] ?? null;
+  // A thread's row is judged by the PRs it owns; a local review has none, so no mark.
+  const judged = stackRisk(rowStack(row), judgments);
+  const riskFailure = stackRiskFailure(rowStack(row), judgments, riskFailed);
   const line = reviewRowLine(row);
   const layers = stack?.layers.length ?? 0;
   const focusPull = stack?.layers.find((pull) => pull.state === 'open' || pull.state === 'draft') ?? stack?.layers[0] ?? null;
@@ -146,6 +159,8 @@ function ReviewRowItem({
             {place}
           </span>
         </span>
+        {judged && <RiskMark judgment={judged} />}
+        {riskFailure && <RiskMark failed={riskFailure} />}
         <span className="ib-t">
           <span aria-hidden="true">{relativeTime(row.updated_at, now)}</span>
           <span className="ib-sr">{relativeWords(row.updated_at, now)}</span>
@@ -220,6 +235,11 @@ export function ReviewsList({
   model,
   rows,
   filter,
+  risk = 'all',
+  notJudged = 0,
+  notRanked = NO_ROWS,
+  judgments = NO_JUDGMENTS,
+  riskFailed = NO_FAILURES,
   projectNames,
   selected,
   phone,
@@ -230,6 +250,12 @@ export function ReviewsList({
   model: InboxPullsAnswer;
   rows: readonly InboxReviewRow[];
   filter: PullFilter;
+  /** The risk filter (risk.ts `filterReviewRows`): `rows` are the ones it kept. */
+  risk?: RiskFilterValue;
+  notJudged?: number;
+  notRanked?: readonly InboxReviewRow[];
+  judgments?: RiskJudgments;
+  riskFailed?: RiskFailures;
   projectNames: ReadonlyMap<string, string>;
   /** The open thread's id, or the open stack's. */
   selected: string | null;
@@ -238,17 +264,29 @@ export function ReviewsList({
   onNew: () => void;
 }) {
   const now = useRelativeClock(true);
-  const groups = useMemo(() => inboxReviewGroups(rows), [rows]);
+  const groups = useMemo(() => (risk === 'all' ? inboxReviewGroups(rows) : riskOrder(inboxReviewGroups(rows), judgments)), [rows, risk, judgments]);
   const [folds, setFolds] = useState<ReviewFolds>(readReviewFolds);
+  // Under a risk filter nothing it kept starts folded away, and a click folds a group for that filter only, kept for
+  // it while the page is open: the saved folds stay the person's choice for All.
+  const [riskFolds, setRiskFolds] = useState<Partial<Record<RiskFilterValue, Partial<ReviewFolds>>>>({});
+  const riskFolded = riskFolds[risk] ?? {};
+  const unfolded = (name: keyof ReviewFolds) => (risk === 'all' ? folds[name] : !riskFolded[name]);
   const toggle = (name: keyof ReviewFolds) => {
+    if (risk !== 'all') {
+      setRiskFolds((kept) => ({ ...kept, [risk]: { ...kept[risk], [name]: !kept[risk]?.[name] } }));
+      return;
+    }
     const next = { ...folds, [name]: !folds[name] };
     setFolds(next);
     saveReviewFolds(next);
   };
   const isOpenRow = (row: InboxReviewRow) => selected !== null && (row.thread_id === selected || row.id === selected || row.stacks.some((stack) => stack.id === selected || stack.layers.some((l) => l.key === selected)));
   // A row opened from a folded group keeps its group open.
-  const waitingOpen = folds.waiting || groups.waiting.some(isOpenRow);
-  const listedOpen = folds.not_reviewed || groups.not_reviewed.some(isOpenRow);
+  const waitingOpen = unfolded('waiting') || groups.waiting.some(isOpenRow);
+  const listedOpen = unfolded('not_reviewed') || groups.not_reviewed.some(isOpenRow);
+  // Those High could not place, behind one quiet line; one opened from there keeps them shown.
+  const [notRankedFolded, setNotRankedOpen] = useState(false);
+  const notRankedOpen = notRankedFolded || notRanked.some(isOpenRow);
   const notices = pullsNotices(model, filter);
   const notice =
     notices.length > 0 ? (
@@ -271,6 +309,54 @@ export function ReviewsList({
         ))}
       </div>
     ) : null;
+  const notJudgedLine =
+    notJudged > 0 ? (
+      <p className="ib-pr-risknote" data-pulls-risk-not-judged={notJudged}>
+        {plural(notJudged, 'pull request')} not ranked yet.
+      </p>
+    ) : null;
+  const labels = repoLabels([...rows, ...notRanked].flatMap((row) => row.stacks));
+  const placeOf = (row: InboxReviewRow) => {
+    const stack = row.stacks[0];
+    if (stack) return labels.get(inboxPullRepoKey(stack.host, stack.repo)) ?? repoName(stack.repo);
+    const id = reviewRowProject(row);
+    const project = id ? projectNames.get(id) : null;
+    return project ?? row.review?.source?.repo ?? 'A project';
+  };
+  const links = { ...model.links, ...Object.fromEntries(answer.rows.flatMap((row) => (row.link ? row.pull_keys.map((key) => [key, row.link!] as const) : []))) };
+  const draw = (row: InboxReviewRow) => (
+    <ReviewRowItem key={row.id} row={row} links={links} place={placeOf(row)} selected={isOpenRow(row)} phone={phone} now={now} judgments={judgments} riskFailed={riskFailed} onOpen={() => onOpen(row)} />
+  );
+  // High: what it can't place, behind one quiet line in the fold's own shape.
+  const notRankedLine =
+    notRanked.length > 0 ? (
+      <div className="ib-group ib-pr-fold" role="group" aria-label="Not ranked" data-pulls-risk-not-ranked={notRanked.length}>
+        <button type="button" className="ib-pr-foldbtn" onClick={() => setNotRankedOpen((v) => !v)} aria-expanded={notRankedOpen} data-pulls-risk-not-ranked-toggle="">
+          <Icon name={notRankedOpen ? 'chevD' : 'chevR'} size={14} />
+          {notRankedOpen ? (
+            <>
+              Not ranked <span className="ib-n">{formatCount(notRanked.length)}</span>
+            </>
+          ) : (
+            `${formatCount(notRanked.length)} not ranked`
+          )}
+        </button>
+        {notRankedOpen && notRanked.map(draw)}
+      </div>
+    ) : null;
+  if (rows.length === 0 && risk !== 'all') {
+    // What could not be read (signed out, rate limited) is said here too: an empty filter is no "nothing".
+    return (
+      <>
+        {notice}
+        <div className="ib-pr-empty" data-pulls-empty="risk">
+          <p className="ib-pr-empty-h">{risk === 'high' ? 'Nothing high risk.' : 'Nothing at medium risk or above.'}</p>
+          {notJudgedLine}
+        </div>
+        {notRankedLine}
+      </>
+    );
+  }
   if (rows.length === 0) {
     // Never "nothing" before Others answers, and the wait never hides a host's own failure.
     const othersOnItsWay = (filter === 'all' || filter === 'others') && model.hosts.some((h) => h.others_pending) && !model.hosts.some((h) => h.error);
@@ -302,16 +388,6 @@ export function ReviewsList({
       </div>
     );
   }
-  const labels = repoLabels(rows.flatMap((row) => row.stacks));
-  const placeOf = (row: InboxReviewRow) => {
-    const stack = row.stacks[0];
-    if (stack) return labels.get(inboxPullRepoKey(stack.host, stack.repo)) ?? repoName(stack.repo);
-    const id = reviewRowProject(row);
-    const project = id ? projectNames.get(id) : null;
-    return project ?? row.review?.source?.repo ?? 'A project';
-  };
-  const links = { ...model.links, ...Object.fromEntries(answer.rows.flatMap((row) => (row.link ? row.pull_keys.map((key) => [key, row.link!] as const) : []))) };
-  const draw = (row: InboxReviewRow) => <ReviewRowItem key={row.id} row={row} links={links} place={placeOf(row)} selected={isOpenRow(row)} phone={phone} now={now} onOpen={() => onOpen(row)} />;
   return (
     <>
       {notice}
@@ -320,6 +396,8 @@ export function ReviewsList({
       <Band label="Ready to land" name="ready" rows={groups.ready} draw={draw} />
       <FoldedGroup label="Waiting on others" name="waiting" rows={groups.waiting} open={waitingOpen} onToggle={() => toggle('waiting')} draw={draw} />
       <FoldedGroup label="Open, not reviewed" name="not_reviewed" rows={groups.not_reviewed} open={listedOpen} onToggle={() => toggle('not_reviewed')} draw={draw} />
+      {notJudgedLine}
+      {notRankedLine}
     </>
   );
 }

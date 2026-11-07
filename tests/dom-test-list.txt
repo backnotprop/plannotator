@@ -537,6 +537,7 @@ packages/inbox/guideExpandContext.test.tsx
 packages/inbox/guideScrollsWithPage.test.tsx
 packages/inbox/pulls/pullReview.test.tsx
 packages/inbox/pulls/usePulls.test.tsx
+packages/inbox/pulls/pullRisk.test.tsx
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/inbox/pulls/pullReviewKept.test.tsx
 packages/ui/components/shape/ShapeDrawn.test.tsx
