@@ -44,14 +44,19 @@ function dirOf(inboxDirPath: string): string {
   return join(inboxDirPath, INBOX_REPLY_DRAFTS_DIR);
 }
 
-function fileOf(inboxDirPath: string, threadId: string): string {
-  return join(dirOf(inboxDirPath), `${threadId}.json`);
+export function inboxReplyDraftKey(threadId: string, target?: string): string {
+  return target ? `${threadId}-${target}` : threadId;
+}
+
+function fileOf(inboxDirPath: string, threadId: string, target?: string): string {
+  return join(dirOf(inboxDirPath), `${inboxReplyDraftKey(threadId, target)}.json`);
 }
 
 function parse(text: string): InboxReplyDraft | null {
   try {
     const value = JSON.parse(text) as InboxReplyDraft;
     if (!value || value.v !== 1 || !isInboxId("msg", value.thread_id)) return null;
+    if (value.target !== undefined && !/^[a-f0-9]{64}$/.test(value.target)) return null;
     if (typeof value.body !== "string" || typeof value.updated_at !== "string" || typeof value.created_at !== "string") return null;
     // Every file the box held; a long paste also names its place (an Inbox of 0.28.46 or earlier kept only those).
     const files = Array.isArray(value.files)
@@ -62,6 +67,7 @@ function parse(text: string): InboxReplyDraft | null {
     return {
       v: 1,
       thread_id: value.thread_id,
+      ...(value.target ? { target: value.target } : {}),
       body: value.body,
       created_at: value.created_at,
       updated_at: value.updated_at,
@@ -94,7 +100,7 @@ export function readInboxReplyDrafts(inboxDirPath: string): Map<string, InboxRep
     if (!name.endsWith(".json")) continue;
     try {
       const draft = parse(readFileSync(join(dirOf(inboxDirPath), name), "utf8"));
-      if (draft && `${draft.thread_id}.json` === name) out.set(draft.thread_id, draft);
+      if (draft && `${inboxReplyDraftKey(draft.thread_id, draft.target)}.json` === name) out.set(inboxReplyDraftKey(draft.thread_id, draft.target), draft);
     } catch {
       // Unreadable: skipped.
     }
@@ -184,7 +190,7 @@ export interface InboxReplyDraftInput {
 /** Write one draft whole (owner-only folder and file). */
 export function writeInboxReplyDraft(inboxDirPath: string, draft: InboxReplyDraft): void {
   mkdirSync(dirOf(inboxDirPath), { recursive: true, mode: 0o700 });
-  const file = fileOf(inboxDirPath, draft.thread_id);
+  const file = fileOf(inboxDirPath, draft.thread_id, draft.target);
   const temp = `${file}.${process.pid}.tmp`;
   writeFileSync(temp, `${JSON.stringify(draft)}\n`, { mode: 0o600 });
   chmodSync(temp, 0o600); // `mode` applies only on create: a left-over temp file keeps its old mode.
@@ -192,9 +198,9 @@ export function writeInboxReplyDraft(inboxDirPath: string, draft: InboxReplyDraf
 }
 
 /** Remove one draft's file; true when there was one. */
-export function removeInboxReplyDraft(inboxDirPath: string, threadId: string): boolean {
+export function removeInboxReplyDraft(inboxDirPath: string, threadId: string, target?: string): boolean {
   try {
-    unlinkSync(fileOf(inboxDirPath, threadId));
+    unlinkSync(fileOf(inboxDirPath, threadId, target));
     return true;
   } catch {
     return false;

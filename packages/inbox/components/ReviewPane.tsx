@@ -36,6 +36,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
+import { GlobalCommentProvider } from './GlobalCommentComposer';
 import type { InboxMessageWire, InboxPull, InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import { groupByFileKind } from '@plannotator/core/file-kind';
@@ -778,6 +779,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
             <div ref={contentRef}>
             <ReaderPart diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on>
+              <GlobalCommentProvider messageId={message.id} scope="guide-global">
               <GuideReader
                 snapshot={snapshot}
                 reviewed={reviewed}
@@ -796,6 +798,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
                 hostDiffControls
                 {...(collapseAll ? { collapseAll } : {})}
               />
+              </GlobalCommentProvider>
               </OpenInCodeSpans>
             </ReaderPart>
             </div>

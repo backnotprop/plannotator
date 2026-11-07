@@ -29,6 +29,7 @@ import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import type {
   CodeAnnotation,
   CodeAnnotationType,
+  CommentFileAttachment,
   ConventionalDecoration,
   ConventionalLabel,
   TokenAnnotationMeta,
@@ -250,19 +251,16 @@ function Reader({
   /** The global comment composer, open on the header's "Global comment" button. */
   const [globalAnchor, setGlobalAnchor] = useState<HTMLElement | null>(null);
   const globalDraftKey = comments ? `guide-global:${comments.draftScope}` : null;
-  const addGlobalComment = useCallback((text: string) => {
+  const addGlobalComment = useCallback((text: string, _images?: unknown, mentions?: readonly string[], files?: CommentFileAttachment[]) => {
     const wiring = commentsRef.current;
     const trimmed = text.trim();
-    setGlobalAnchor(null);
-    if (!wiring || !trimmed) return;
+    if (!wiring || (!trimmed && !files?.length)) return false;
     const draftKey = `guide-global:${wiring.draftScope}`;
-    // The review app's general comment: no file and no lines (its '' / 0 / 0 sentinels).
-    void wiring
-      .onSave({ id: newCommentId(), type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text: trimmed, createdAt: Date.now() })
-      // Refused (too long, the thread resolved elsewhere, offline): the words wait in the composer for the next open.
-      .then((saved) => {
-        if (!saved) restoreCommentDraft(draftKey, text);
-      });
+    return wiring.onSave({ id: newCommentId(), type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text: trimmed, createdAt: Date.now(), ...(files?.length ? { files } : {}), ...(mentions?.length ? { mentions } : {}) }).then((saved) => {
+      if (saved) setGlobalAnchor(null);
+      else restoreCommentDraft(draftKey, text);
+      return saved;
+    });
   }, []);
   const addComment = useCallback<GuideDiffComments['onAddAnnotationForFile']>(
     (filePath, type, text, suggestedCode, originalCode, conventionalLabel, decorations, tokenMeta) => {
@@ -400,7 +398,7 @@ function Reader({
     () =>
       comments
         ? {
-            comments: globalAnnotations.map((a) => ({ id: a.id, text: a.text ?? '' })),
+            comments: globalAnnotations.map((a) => ({ id: a.id, text: [a.text, ...(a.files ?? []).map((file) => file.name)].filter(Boolean).join('\n') })),
             onAdd: setGlobalAnchor,
             onSelect: showGlobalComment,
             selectedId: comments.selectedId,
@@ -461,9 +459,8 @@ function Reader({
           anchorEl={globalAnchor}
           contextText=""
           isGlobal
-          // The export prints a global comment's words only.
           allowImages={false}
-          // The words typed survive a close (Escape, a click outside) and a refused save, one draft per message.
+          // One draft per review, including when the same guide is shown in another thread.
           draftKey={globalDraftKey}
           onSubmit={addGlobalComment}
           onClose={() => setGlobalAnchor(null)}

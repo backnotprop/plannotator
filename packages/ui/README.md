@@ -44,6 +44,14 @@ configurePlannotatorUI({
 
 Anything you don't pass keeps Plannotator's default. A few component-specific overrides (e.g. an "open in editor" diff action) are passed as props where you render that component.
 
+### Global comment composer hosts
+
+`components/CommentPopover` exports `GlobalCommentComposerContext`. A provider supplies a React component receiving `CommentPopoverProps` for global comments. Without a provider, or for a selection comment, the existing composer is unchanged.
+
+Inside the host component, render `CommentPopoverFrame` to keep the positioning, drag, expand, and close behavior. Its optional `body` takes `content`, `textareaRef`, and `hasContent`. The host owns the body and submit controls. Call the frame directly rather than `CommentPopover`, which would invoke the override again.
+
+`CommentFileAttachment` in `types` names a host file by opaque `id` and display `name`. A host composer passes these as the fourth `onSubmit` argument. Global annotations carry them in `files`; the annotation panel lists their names. The host must validate and resolve ids before storage or delivery. Viewer and HtmlViewer keep a global composer open when `onAddAnnotation` returns `false` or a promise resolving to `false`.
+
 ### Resize-handle seams (`ResizeHandle` / `useResizablePanel`)
 
 The sidebar/panel resize handle exposes seams for hosts that want different edge interactions (e.g. no hover reveal, click-to-collapse). All default to today's behavior — pass nothing and it's unchanged.

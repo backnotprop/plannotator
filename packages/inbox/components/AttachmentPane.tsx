@@ -1,3 +1,4 @@
+import { GlobalCommentProvider } from './GlobalCommentComposer';
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
 import {
@@ -316,7 +317,7 @@ export function unsavedComposer(pane: HTMLElement | null, savedText: (id: string
   const typed = (area: HTMLTextAreaElement) => area.value.trim() !== '';
   // Plannotator's comment popover (text, HTML pinpoint, code lines) draws in a portal on the page.
   for (const area of document.querySelectorAll<HTMLTextAreaElement>('[data-comment-popover] textarea')) {
-    if (typed(area)) return area;
+    if (!area.closest('[data-global-composer]') && typed(area)) return area;
   }
   if (!pane) return null;
   for (const area of pane.querySelectorAll<HTMLTextAreaElement>('[data-diagram-composer] textarea, [data-image-composer] textarea')) {
@@ -1136,7 +1137,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   /** The textarea of a composer this pane owns that holds unsaved words, when the key came from inside that composer. */
   function composerAskedAbout(target: Element | null): HTMLTextAreaElement | null {
     const container = target?.closest(CLOSING_COMPOSERS);
-    if (!container) return null;
+    if (!container || container.querySelector('[data-global-composer]')) return null;
     const area = target instanceof HTMLTextAreaElement && container.contains(target) ? target : container.querySelector('textarea');
     // A skill or mention menu open in the composer takes this Escape first.
     if (!area || area.getAttribute('aria-expanded') === 'true') return null;
@@ -1885,6 +1886,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   }, [noteShown, isCode, view]);
 
   return (
+    <GlobalCommentProvider messageId={attachment.message_id} scope={`attachment:${attachment.id}:${annotationVersion}`} enabled={source.writes}>
     <section
       ref={sectionRef}
       tabIndex={-1}
@@ -2109,7 +2111,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               frameUrl={source.pageFrameUrl}
               title={attachment.name}
               annotations={annotations}
-              onAddAnnotation={(annotation) => void save(annotation)}
+              onAddAnnotation={save}
               onSelectAnnotation={setSelectedId}
               selectedAnnotationId={selectedId}
               // The floating comments panel covers the page's right side: a comment picked there scrolls its mark clear of it.
@@ -2350,7 +2352,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 questionDecisionLines={false}
                 annotations={annotations}
                 mentionSource={props.mentionSource}
-                onAddAnnotation={(annotation) => void save(annotation)}
+                onAddAnnotation={save}
                 onSelectAnnotation={setSelectedId}
                 selectedAnnotationId={selectedId}
                 mode={isText ? mode : 'comment'}
@@ -2683,5 +2685,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       </div>
       </FullScreenComposerContext.Provider>
     </section>
+    </GlobalCommentProvider>
   );
 });

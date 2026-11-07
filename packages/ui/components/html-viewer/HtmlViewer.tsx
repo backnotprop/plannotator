@@ -16,7 +16,7 @@ import {
   isVimSelectionActionId,
   type VimSelectionHudContext,
 } from "../../shortcuts";
-import type { Annotation, EditorMode, HostDraft, ImageAttachment, InputMethod } from "../../types";
+import type { Annotation, CommentFileAttachment, EditorMode, HostDraft, ImageAttachment, InputMethod } from "../../types";
 import { AnnotationType } from "../../types";
 import { copyTextPreservingFocus } from "../../utils/clipboard";
 import { getRichCopyEnabled } from "../../utils/richCopyPolicy";
@@ -238,7 +238,7 @@ export interface HtmlViewerProps {
    *  linked document opened from a `#`-carrying link. Bare id, no `#`. */
   initialFragment?: string;
   annotations: Annotation[];
-  onAddAnnotation: (ann: Annotation) => void;
+  onAddAnnotation: (ann: Annotation) => unknown;
   onSelectAnnotation: (id: string | null) => void;
   selectedAnnotationId: string | null;
   mode: EditorMode;
@@ -1288,9 +1288,9 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     }));
 
     const handleGlobalCommentSubmit = useCallback(
-      (text: string, images?: ImageAttachment[], mentions?: readonly string[]) => {
-        if (readOnly) return;
-        onAddAnnotation({
+      (text: string, images?: ImageAttachment[], mentions?: readonly string[], files?: CommentFileAttachment[]) => {
+        if (readOnly) return false;
+        const saved = onAddAnnotation({
           id: `global-${Date.now()}`,
           blockId: "",
           startOffset: 0,
@@ -1301,9 +1301,15 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
           author: getIdentity(),
           createdA: Date.now(),
           images,
+          ...(files?.length ? { files } : {}),
           ...(mentions && mentions.length > 0 ? { mentions } : {}),
         });
-        setGlobalCommentPopover(null);
+        if (saved instanceof Promise) return saved.then((accepted) => {
+          if (accepted !== false) setGlobalCommentPopover(null);
+          return accepted;
+        });
+        if (saved !== false) setGlobalCommentPopover(null);
+        return saved;
       },
       [onAddAnnotation, readOnly],
     );

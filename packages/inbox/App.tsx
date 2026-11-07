@@ -207,8 +207,8 @@ import { connectCommand } from './connectPrompt';
 // the page's own cookies, except the theme, which goes to config.json `theme`
 // through the Inbox's settings route so plan review follows it (theme.ts).
 // WebMCP is off.
-// No image uploads either: a comment's image would need an upload route the
-// Inbox does not have, so the composer says so instead of posting nowhere.
+// Selection comments keep the default image-upload policy. Global comments
+// use the pending-upload path through their host composer.
 // The text size this browser last showed, on the document before the first render (textSize.ts).
 applyRememberedTextSize();
 

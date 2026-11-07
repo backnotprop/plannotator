@@ -3,7 +3,7 @@ import React, { useRef, useState, useEffect, useLayoutEffect, useMemo, forwardRe
 import { createPortal } from 'react-dom';
 import { collectDocumentImages, ImageLightbox, type LightboxImage, type LightboxRegionComments } from './ImageLightbox';
 import { imageReferenceIndex, imageSourceLine, regionOf } from './ImageRegions';
-import { AnnotationType, type Block, type Annotation, type EditorMode, type InputMethod, type ImageAttachment, type ActionsLabelMode, type HostDraft } from '../types';
+import { AnnotationType, type Block, type Annotation, type EditorMode, type InputMethod, type ImageAttachment, type CommentFileAttachment, type ActionsLabelMode, type HostDraft } from '../types';
 import { applyHighlight, codeBlockClassName, onCodeHighlightSwap } from '../utils/codeHighlight';
 import { paintCodeBlockMark } from '../utils/codeBlockMark';
 import { useFenceTheme } from '../hooks/useFenceTheme';
@@ -144,7 +144,7 @@ export interface ViewerProps {
   markdown: string;
   frontmatter?: Frontmatter | null;
   annotations: Annotation[];
-  onAddAnnotation: (ann: Annotation) => void;
+  onAddAnnotation: (ann: Annotation) => unknown;
   onSelectAnnotation: (id: string | null) => void;
   selectedAnnotationId: string | null;
   mode: EditorMode;
@@ -1507,8 +1507,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     text: string,
     images?: ImageAttachment[],
     mentions?: readonly string[],
+    files?: CommentFileAttachment[],
   ) => {
-    if (readOnlyRef.current || !viewerCommentPopover) return;
+    if (readOnlyRef.current || !viewerCommentPopover) return false;
 
     if (viewerCommentPopover.isGlobal) {
       const newAnnotation: Annotation = {
@@ -1525,9 +1526,15 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         createdA: Date.now(),
         author: getIdentity(),
         images,
+        ...(files?.length ? { files } : {}),
         ...(mentions && mentions.length > 0 ? { mentions } : {}),
       };
-      onAddAnnotation(newAnnotation);
+      const saved = onAddAnnotation(newAnnotation);
+      if (saved instanceof Promise) return saved.then((accepted) => {
+        if (accepted !== false) setViewerCommentPopover(null);
+        return accepted;
+      });
+      if (saved === false) return false;
     } else if (viewerCommentPopover.codeBlock) {
       const codeEl = viewerCommentPopover.codeBlock.element.querySelector('code');
       if (codeEl) {
