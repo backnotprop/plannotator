@@ -6,6 +6,8 @@
  * script and gives its POSIX text; the active shell turns that into the argv.
  */
 
+import { findGitBash, gitBashShell } from './git-bash'
+
 /** Every script the mod runs, by the builder that runs it. */
 export type ShellScriptId =
   | 'wait'
@@ -26,6 +28,8 @@ export type ShellScriptId =
 export interface ModShell {
   /** The argv that runs script `id` with `args`; `posix` is its `sh` text and `tag` its `$0`. */
   argv(id: ShellScriptId, posix: string, tag: string, args: readonly string[]): string[]
+  /** True for the Windows shells: the host is Windows, whatever the shell's own syntax. */
+  readonly windows?: boolean
 }
 
 /** `/bin/sh`, as on every macOS and Linux host. */
@@ -40,6 +44,11 @@ export function useShell(shell: ModShell): void {
   active = shell
 }
 
+/** Whether the mod runs on Windows (through one of its Windows shells). */
+export function onWindows(): boolean {
+  return active.windows === true
+}
+
 /** The argv for script `id` in the active shell. */
 export function shellArgv(id: ShellScriptId, posix: string, tag: string, args: readonly string[]): string[] {
   return active.argv(id, posix, tag, args)
@@ -51,7 +60,15 @@ export interface ShellHost {
   env(name: string): Promise<string | undefined>
 }
 
-/** The shell this host offers, or null when there is none and the mod stays inert. */
+/**
+ * The shell this host offers, or null when there is none and the mod stays
+ * inert. On Windows (`OS` is `Windows_NT` in every Windows process) that is Git
+ * Bash, never a `/bin/sh` that resolves to some file on the current drive.
+ */
 export async function resolveShell(host: ShellHost): Promise<ModShell | null> {
+  if ((await host.env('OS')) === 'Windows_NT') {
+    const bash = await findGitBash(host)
+    return bash ? gitBashShell(bash) : null
+  }
   return (await host.exists('/bin/sh')) ? POSIX_SHELL : null
 }

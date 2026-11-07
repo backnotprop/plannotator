@@ -641,6 +641,11 @@ async function shellEnvOf($: Engine): Promise<Record<string, string | undefined>
   const text = (value: unknown) => (typeof value === 'string' && value ? value : undefined)
   return {
     OS: text(await $.env.get('OS')),
+    // Where findGitBash looks. Windows matches variable names in any case, so PROGRAMFILES reads ProgramFiles.
+    CLAUDE_CODE_GIT_BASH_PATH: text(await $.env.get('CLAUDE_CODE_GIT_BASH_PATH')),
+    PATH: text(await $.env.get('PATH')),
+    PROGRAMFILES: text(await $.env.get('PROGRAMFILES')),
+    LOCALAPPDATA: text(await $.env.get('LOCALAPPDATA')),
   }
 }
 

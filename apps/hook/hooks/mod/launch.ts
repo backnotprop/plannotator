@@ -22,7 +22,7 @@
 
 import type { SessionKind } from './delivery'
 import { isAbsolutePath, trimTrailingSeparators } from './paths'
-import { shellArgv } from './shell'
+import { onWindows, shellArgv } from './shell'
 import { splitShellWords } from './shell-words'
 import { PLAN_APPROVALS_DIR } from './plan'
 import { looksLikeFilePath, plannotatorBundleSubject, plannotatorTargetSubject, type PlannotatorTarget } from './tool'
@@ -528,9 +528,13 @@ export function isModCommand(name: string): name is CommandName {
   return Object.prototype.hasOwnProperty.call(COMMANDS, name)
 }
 
-/** A slash command's typed arguments split like its shell line, or words that are already split (a tool call). */
+/**
+ * A slash command's typed arguments split like its shell line, or words that
+ * are already split (a tool call). On Windows a typed backslash stays, since
+ * it is a path separator there, not an escape.
+ */
 export function wordsOf(args: string | readonly string[]): string[] {
-  return typeof args === 'string' ? splitShellWords(args) : [...args]
+  return typeof args === 'string' ? splitShellWords(args, { windows: onWindows() }) : [...args]
 }
 
 /** The CLI argv for a command, with the user's words passed through unchanged. */

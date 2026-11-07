@@ -52,8 +52,18 @@ operation the engine has no call for (the `mkdir` claims, `rm`, the debug log's
 append, `kill`, the detached launch) is a short script. Every argv builder
 names its script (`ShellScriptId`) and gives its POSIX text, and `shellArgv`
 turns that into the argv of the shell `resolveShell` picked at `session.start`:
-`/bin/sh` on macOS and Linux. Windows has no `/bin/sh`, so there the mod stands
-down. The variables `resolveShell` reads are read in `register.ts`
+`/bin/sh` on macOS and Linux. Windows has no `/bin/sh`: there it is Git Bash
+(`git-bash.ts`), the bash that ships with Git for Windows. Git Bash is its
+standard name, and Claude Code uses the same name and the same bash for its own
+shell commands. The mod finds it through `CLAUDE_CODE_GIT_BASH_PATH` (Claude
+Code's setting), then next to a `git.exe` on `PATH`, then under
+`%PROGRAMFILES%` and `%LOCALAPPDATA%\Programs`; no drive or folder is fixed.
+Without Git Bash the mod stands down. MSYS runs
+the POSIX scripts as they are except where it reports something differently:
+its `ps` has no `-o`, so the stop check reads the pid's command line from
+`/proc`, and `pwd` prints `/c/…`, so the scripts that print a folder use
+`pwd -W`. A pid from `$!` is an MSYS pid, which `kill` in another MSYS shell
+understands. The variables `resolveShell` reads are read in `register.ts`
 (`shellEnvOf`), each named as a literal: Claude Code refuses to load a hooks
 module whose `$.env.get` takes anything else (`env-get-literal.test.ts`).
 Every check for an absolute path goes through `isAbsolutePath`, since Claude
