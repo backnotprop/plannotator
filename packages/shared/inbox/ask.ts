@@ -242,8 +242,10 @@ export interface ShowMeBoardVersion {
  *  - A Show me: a new board through its review. Only when the turn has ended
  *    with none does it take another board moved through that review (the agent
  *    chose to update one), or a new one stored with no `--through`.
- *  - A Show me from a board with no review behind it (`review` null): the same,
- *    with no `--through`: a new board stored with none comes first.
+ *  - A Show me from a board with no review behind it (`review` null): the first
+ *    new board of the thread written in the turn, whatever its `--through` (an
+ *    agent following `shape --help` adds one); once ended with none, a board it
+ *    moved with no `--through`.
  *  - No end kept and not the turn running now (`running`): nothing. A session
  *    that goes away with no words writes nothing at all, so the turn alone can't
  *    say it is over.
@@ -270,12 +272,16 @@ export function showMeShapes(turns: readonly InboxAskTurn[], boards: readonly { 
       }
       return first?.id;
     };
-    const review = turn.show_me?.review;
+    const review = turn.show_me?.review ?? null;
     const made =
       turn.again_shape !== undefined
         ? firstOf((board) => board === turn.again_shape)
-        : (firstOf((_, version) => version.n === 1 && version.through === review) ??
-          (hasEnd && !cut ? firstOf((_, version) => version.through === review || (version.n === 1 && version.through === null)) : undefined));
+        : review === null
+          ? // No review behind the board: the thread's first new board in the turn, whatever its `--through` (agents
+            // follow `shape --help` and add one); once ended with none, a board moved with no `--through`.
+            (firstOf((_, version) => version.n === 1) ?? (hasEnd && !cut ? firstOf((_, version) => version.through === null) : undefined))
+          : (firstOf((_, version) => version.n === 1 && version.through === review) ??
+            (hasEnd && !cut ? firstOf((_, version) => version.through === review || (version.n === 1 && version.through === null)) : undefined));
     if (made) out.set(turn.id, made);
   });
   return out;
