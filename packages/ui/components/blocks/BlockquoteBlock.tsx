@@ -52,6 +52,9 @@ export const MAX_QUOTE_DEPTH = 12;
 /** The number of quotes around the one rendering (0 at the top). */
 const QuoteDepthContext = createContext(0);
 
+/** Whether a quote or callout rendering here is at MAX_QUOTE_DEPTH and must not parse its body. */
+export const useAtQuoteDepthCap = (): boolean => useContext(QuoteDepthContext) + 1 >= MAX_QUOTE_DEPTH;
+
 export interface BlockquoteBlockProps {
   block: Block;
   onOpenLinkedDoc?: (path: string) => void;

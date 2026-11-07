@@ -1,7 +1,7 @@
 import React from 'react';
 import type { AlertKind } from '../../types';
 import { renderProseBody } from './proseBody';
-import { CalloutBlocks, calloutNeedsBlocks, parseQuoteBody } from './BlockquoteBlock';
+import { CalloutBlocks, calloutNeedsBlocks, parseQuoteBody, useAtQuoteDepthCap } from './BlockquoteBlock';
 import { InlineMarkdown } from '../InlineMarkdown';
 import { parseAlertTitleLine } from '../../utils/alertTitle';
 
@@ -73,7 +73,10 @@ export const AlertBlock: React.FC<AlertBlockProps> = ({
   // with no such line renders exactly as before.
   const titleLine = parseAlertTitleLine(body);
   const bodyText = titleLine ? titleLine.rest : body;
-  const inner = React.useMemo(() => parseQuoteBody(bodyText), [bodyText]);
+  // A callout nests through the quote layout, so it stops where quotes stop:
+  // past the cap its body renders as prose text, inner markers included.
+  const atCap = useAtQuoteDepthCap();
+  const inner = React.useMemo(() => (atCap ? [] : parseQuoteBody(bodyText)), [atCap, bodyText]);
   // Paragraphs and lists render as they always have; a fence, a table, a heading
   // or a nested quote needs the block layout a plain quote gets.
   const renderBody = () =>
