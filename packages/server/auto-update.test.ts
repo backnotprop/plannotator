@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { tmpdir } from "node:os";
+import { getPriority, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   AUTO_UPDATE_INTERVAL_MS,
@@ -526,6 +526,102 @@ describe.skipIf(process.platform === "win32")("POSIX wrapper end to end", () => 
     } finally {
       server.stop(true);
     }
+  }, 30_000);
+});
+
+/**
+ * The detached wrapper lowers its own priority before anything else runs, so
+ * update-prepare, install.sh and all they start inherit it. Stub commands on
+ * PATH stand in for renice and ionice, and a stub binary for update-prepare
+ * stages an install.sh that reports what it sees.
+ */
+describe.skipIf(process.platform === "win32")("the detached update runs at low priority", () => {
+  const sh = (body: string) => `#!/bin/sh\n${body}\n`;
+  function stage(opts: { stubPriority: boolean }) {
+    const bin = join(dataDir, "bin");
+    const tmp = join(dataDir, "tmp");
+    mkdirSync(bin);
+    mkdirSync(tmp);
+    const log = join(dataDir, "calls.log");
+    if (opts.stubPriority) {
+      // Both fail loudly: the wrapper must ignore it and keep its exit code.
+      writeFileSync(join(bin, "renice"), sh(`echo "renice $*" >> "${log}"\necho "renice: denied" >&2\nexit 1`), { mode: 0o755 });
+      writeFileSync(join(bin, "ionice"), sh(`echo "ionice $*" >> "${log}"\necho "ionice: denied" >&2\nexit 1`), { mode: 0o755 });
+    }
+    const install = sh(
+      [
+        `echo "install nice=$(ps -o nice= -p $$ | tr -d ' ') lock=$(cut -d' ' -f1 "$PLANNOTATOR_UPDATE_LOCK")" >> "${log}"`,
+        "exit 7",
+      ].join("\n"),
+    );
+    writeFileSync(join(dataDir, "install.sh.src"), install);
+    const prepare = join(bin, "plannotator-stub");
+    writeFileSync(
+      prepare,
+      sh(
+        [
+          `echo "prepare $*" >> "${log}"`,
+          `d="${tmp}/plannotator-update-stub"`,
+          'mkdir -p "$d"',
+          `cp "${join(dataDir, "install.sh.src")}" "$d/install.sh"`,
+          'echo "$d"',
+        ].join("\n"),
+      ),
+      { mode: 0o755 },
+    );
+    return { bin, tmp, log, prepare };
+  }
+
+  async function run(opts: { stubPriority: boolean; detached: boolean }) {
+    const s = stage(opts);
+    const paths = autoUpdatePaths(dataDir);
+    const { file, args } = installerCommand("linux", []);
+    const proc = Bun.spawn([file, ...args], {
+      env: {
+        PATH: `${s.bin}:${process.env.PATH ?? "/usr/bin:/bin"}`,
+        TMPDIR: s.tmp,
+        PLANNOTATOR_UPDATE_VERSION: "v0.28.0",
+        PLANNOTATOR_UPDATE_RESULT: paths.result,
+        PLANNOTATOR_UPDATE_LOCK: paths.lock,
+        PLANNOTATOR_UPDATE_BINARY: s.prepare,
+        PLANNOTATOR_UPDATE_ENTRY: "",
+        ...(opts.detached ? { PLANNOTATOR_UPDATE_DETACHED: "1" } : {}),
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+    await proc.exited;
+    const calls = readFileSync(s.log, "utf-8").trim().split("\n");
+    return { pid: proc.pid, calls, stdout, stderr, paths };
+  }
+
+  test("renice and ionice name the wrapper first; their failure changes neither the exit code nor the lock", async () => {
+    const { pid, calls, stdout, stderr, paths } = await run({ stubPriority: true, detached: true });
+    expect(calls).toEqual([
+      `renice -n 10 -p ${pid}`,
+      `ionice -c 3 -p ${pid}`,
+      "prepare update-prepare v0.28.0",
+      expect.stringMatching(new RegExp(`^install nice=-?\\d+ lock=pid=${pid}$`)),
+    ]);
+    expect(stderr + stdout).not.toContain("denied");
+    expect(JSON.parse(readFileSync(paths.result, "utf-8"))).toEqual({ version: "v0.28.0", exitCode: 7 });
+    expect(existsSync(paths.lock)).toBe(false);
+  }, 30_000);
+
+  test.skipIf(!Bun.which("renice"))("with the real renice the installer inherits the lower priority; the foreground run keeps its own", async () => {
+    const base = getPriority();
+    const detached = await run({ stubPriority: false, detached: true });
+    const niceOf = (calls: string[]) => Number(/install nice=(-?\d+)/.exec(calls.find((c) => c.startsWith("install")) ?? "")?.[1]);
+    expect(niceOf(detached.calls)).toBeGreaterThanOrEqual(Math.min(19, base + 10));
+    expect(JSON.parse(readFileSync(detached.paths.result, "utf-8")).exitCode).toBe(7);
+    expect(existsSync(detached.paths.lock)).toBe(false);
+
+    rmSync(dataDir, { recursive: true, force: true });
+    mkdirSync(dataDir);
+    const foreground = await run({ stubPriority: false, detached: false });
+    expect(niceOf(foreground.calls)).toBe(base);
+    expect(JSON.parse(readFileSync(foreground.paths.result, "utf-8")).exitCode).toBe(7);
   }, 30_000);
 });
 
