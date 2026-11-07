@@ -33,6 +33,8 @@ For local testing, the same settings helper can register the built binary direct
   --executable "$PWD/packages/t3-code/dist/plannotator"
 ```
 
+Run it again after updating a build that registered the hook this way. Hooks registered before T3 began reporting `CLAUDE_CODE_ENTRYPOINT=t3-code` keep the old `sdk*`-only gate, which T3 sessions never pass. Reinstalling replaces that gate, and the installer's own `--with-t3` does this on every update.
+
 `t3-hook` is an internal installer/helper command; agents do not invoke it. The commands below use `plannotator` for that build (`packages/t3-code/dist/plannotator`). A running Claude provider session needs to restart to load changed hooks. The normal Claude plugin is unchanged and is not needed to register the T3 hook; its plan-review integration remains separate. The live routing verification used an equivalent command hook in isolated project settings. Installer tests use isolated profiles rather than changing a person's installed configuration.
 
 In T3 Settings → Environments, open the environment's menu and choose **Copy MCP URL**. A person authorizes once:

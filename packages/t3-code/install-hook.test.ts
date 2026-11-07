@@ -127,7 +127,8 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("the compiled installer helper regi
   expect(interactive.exitCode).toBe(0);
   expect(interactive.stdout.toString()).toBe("");
   // The binary's own gate, for a hook registered without the shell's: `{}` before any startup work.
-  // Unparseable input past the gate is logged to t3-code/hook.log, so the log tells the two apart.
+  // Unparseable input that gets past the binary's entrypoint checks is logged to t3-code/hook.log,
+  // so the log shows whether `t3-code` got through them.
   const hookLog = join(dataDir, "t3-code", "hook.log");
   mkdirSync(join(dataDir, "t3-code"), { recursive: true });
   const direct = (entrypoint: string) => Bun.spawnSync([executable, "t3-hook"], { env: { ...env, CLAUDE_CODE_ENTRYPOINT: entrypoint }, stdin: Buffer.from("not json"), stdout: "pipe", stderr: "pipe" });

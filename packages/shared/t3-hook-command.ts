@@ -18,6 +18,8 @@ export function quoteHookWord(value: string): string {
  *
  * One list, as shell `case` patterns, for the shell gate and
  * `isAgentSdkEntrypoint` (the binary's own check), so the two cannot drift.
+ * Each entry is an exact name or a name with one trailing `*` (a prefix):
+ * `isAgentSdkEntrypoint` reads no other glob syntax.
  */
 const T3_ENTRYPOINT_PATTERNS = ["sdk*", "t3-code"] as const;
 const T3_HOOK_GATE_OPEN = `case "$CLAUDE_CODE_ENTRYPOINT" in ${T3_ENTRYPOINT_PATTERNS.join("|")}) `;
