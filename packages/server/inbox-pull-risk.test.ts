@@ -16,7 +16,7 @@ import { PiSDKProvider } from "@plannotator/ai/providers/pi-sdk";
 import { saveConfig } from "@plannotator/shared/config";
 import { INBOX_PULL_RISK_FILE, RISK_AGENT_PAUSE_MS, RISK_CONCURRENCY, RISK_RETRY_MS, createPullRisk, installedPath, runRiskAgent, startingRiskModel, type RiskRunResult, type RiskRun, type RiskRunner } from "./inbox-pull-risk";
 import { buildRiskPrompt, parseRiskAnswer } from "./inbox-pull-risk-prompt";
-import { INBOX_PULL_WHOLE_DIFF_TIMEOUT_MS, createInboxPulls, createPullGitRunner, pullDiffCliRunner } from "./inbox-pulls";
+import { INBOX_PULL_GIT_DIFF_MAX_BYTES, INBOX_PULL_WHOLE_DIFF_TIMEOUT_MS, createInboxPulls, createPullGitRunner, pullDiffCliRunner, pullRemoteMayPrompt } from "./inbox-pulls";
 
 const AGENTS = [{ id: "pi-sdk", label: "Pi" }];
 const HIGH = '{"risk":"high","why":"It changes the billing webhook."}';
@@ -129,7 +129,7 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
   type Answer = { stdout?: string; stderr?: string; exitCode?: number };
   const answered = (a: Answer) => ({ stdout: a.stdout ?? "", stderr: a.stderr ?? "", exitCode: a.exitCode ?? 0 });
   /** The real reader and queue. `whole` answers the one-document read, `paged` the per-file read; the rest of the forge just works. */
-  async function reading(platform: "github" | "gitlab", script: { whole: Answer; paged?: Answer }, options: { now?: () => number; answer?: string; respond?: (run: RiskRun, n: number) => RiskRunResult; files?: number; head?: string; clones?: string[]; gitEnv?: Record<string, string> } = {}) {
+  async function reading(platform: "github" | "gitlab", script: { whole: Answer; paged?: Answer }, options: { now?: () => number; answer?: string; respond?: (run: RiskRun, n: number) => RiskRunResult; files?: number; head?: string; base?: string; clones?: string[]; gitEnv?: Record<string, string> } = {}) {
     const github = platform === "github";
     const node = { ...ghNode, headRefOid: options.head ?? ghNode.headRefOid };
     const endpoints: string[] = [];
@@ -148,6 +148,7 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
       endpoints.push(endpoint);
       if (/\/files\?|\/diffs\?/.test(endpoint)) return answered(script.paged ?? { stderr: "no paged read scripted", exitCode: 1 });
       if (endpoint.endsWith("/raw_diffs") || args.includes("Accept: application/vnd.github.v3.diff")) return answered(script.whole);
+      if (endpoint.includes("/git/ref/heads/") || endpoint.includes("/repository/branches/")) return answered(options.base ? { stdout: github ? `${options.base}\n` : JSON.stringify({ commit: { id: options.base } }) } : { stderr: "no base scripted", exitCode: 1 });
       return answered({ stdout: github ? `${node.headRefOid}\n` : JSON.stringify({ sha: glNode.diffHeadSha }) });
     };
     const pulls = createInboxPulls({ run, now: options.now, ...(options.gitEnv ? { gitRun: createPullGitRunner(() => ({ ...process.env, ...options.gitEnv })) } : {}) });
@@ -417,6 +418,77 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
       expect(alive()).toBe(false);
     }, 30_000);
 
+    test("a whole diff past any model's context: git stops reading, and the forge's read stands", async () => {
+      setRules();
+      const { upstream, clone } = repositories();
+      // The PR also regenerates a 9 MB artefact.
+      git(upstream, "checkout", "-q", "refs/pull/880/head");
+      writeFileSync(join(upstream, "vendor", "dump.json"), `${"{\"row\": 1}\n".repeat(800_000)}`);
+      git(upstream, "add", ".");
+      git(upstream, "commit", "-q", "-m", "the dump");
+      const head = git(upstream, "rev-parse", "HEAD");
+      git(upstream, "update-ref", "refs/pull/880/head", head);
+      git(upstream, "checkout", "-q", "main");
+      expect(INBOX_PULL_GIT_DIFF_MAX_BYTES).toBe(8 * 1024 * 1024);
+      const { risk, runs, judge, key } = await reading("github", { whole: refused, paged: heldBack }, { answer: LOW, head, clones: [clone], gitEnv });
+      await judge();
+      expect(runs).toHaveLength(1);
+      expect(runs[0]!.prompt).not.toContain('{"row": 1}');
+      expect(runs[0]!.prompt).toContain("diff --git a/vendor/huge.bin b/vendor/huge.bin");
+      expect(risk.answer().judgments[key]?.level).toBe("medium");
+    }, 30_000);
+
+    test("git's own read stops at its byte cap", async () => {
+      const runner = createPullGitRunner(() => ({ ...process.env, ...gitEnv }));
+      const capped = await runner(scratch, ["--version"], { timeoutMs: 10_000, maxBytes: 3 });
+      expect(capped).toMatchObject({ stdout: "", tooLarge: true });
+      expect(capped.exitCode).not.toBe(0);
+      const whole = await runner(scratch, ["--version"], { timeoutMs: 10_000, maxBytes: 1024 });
+      expect(whole.stdout).toContain("git version");
+      expect(whole.tooLarge).toBeUndefined();
+    }, 30_000);
+
+    describe.skipIf(process.platform === "win32")("an origin over ssh", () => {
+      /** An ssh that only says it ran: no network git may reach it, whatever the clone lacks. */
+      const sshWatch = () => {
+        const ran = join(scratch, "ssh.ran");
+        const ssh = join(scratch, "fake-ssh");
+        writeFileSync(ssh, `#!/bin/sh\necho "$@" >> '${ran}'\nexit 255\n`);
+        chmodSync(ssh, 0o755);
+        return { ran, env: { ...gitEnv, GIT_SSH_COMMAND: ssh } };
+      };
+
+      test("no ls-remote or fetch: the forge gives the base's tip, and a clone with both commits gives the whole diff", async () => {
+        setRules();
+        const { upstream, clone, head } = repositories();
+        const base = git(upstream, "rev-parse", "main");
+        // The person already has the PR's head and today's main (they pushed it, they pulled).
+        git(clone, "fetch", "-q", "origin", "refs/pull/880/head:refs/heads/topic", "main:refs/remotes/origin/main");
+        git(clone, "remote", "set-url", "origin", "git@github.com:n/b.git");
+        const { ran, env } = sshWatch();
+        const { risk, runs, judge, key, endpoints } = await reading("github", { whole: refused, paged: heldBack }, { answer: LOW, head, base, clones: [clone], gitEnv: env });
+        await judge();
+        expect(existsSync(ran)).toBe(false);
+        expect(endpoints).toContain("repos/n/b/git/ref/heads/main");
+        expect(runs).toHaveLength(1);
+        expect(runs[0]!.prompt).toContain("+v2 sends the card number home");
+        expect(runs[0]!.prompt).not.toContain("README");
+        expect(risk.answer().judgments[key]?.level).toBe("low");
+      }, 30_000);
+
+      test("a clone that lacks a commit fetches nothing: the forge's read stands, and Low shows Medium", async () => {
+        setRules();
+        const { upstream, clone, head } = repositories();
+        git(clone, "remote", "set-url", "origin", "ssh://git@github.com/n/b.git");
+        const { ran, env } = sshWatch();
+        const { risk, runs, judge, key } = await reading("github", { whole: refused, paged: heldBack }, { answer: LOW, head, base: git(upstream, "rev-parse", "main"), clones: [clone], gitEnv: env });
+        await judge();
+        expect(existsSync(ran)).toBe(false);
+        expect(runs[0]!.prompt).not.toContain("+v2 sends the card number home");
+        expect(risk.answer().judgments[key]?.level).toBe("medium");
+      }, 30_000);
+    });
+
     test("no clone, or one git can't fetch the head into: the forge's read stands, and Low shows Medium", async () => {
       setRules();
       const { clone } = repositories();
@@ -559,6 +631,30 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
     } finally {
       process.env.PATH = savedPath;
     }
+  });
+});
+
+describe("which remotes a background git may reach", () => {
+  test.each([
+    ["git@github.com:n/b.git", true],
+    ["github.com:n/b.git", true],
+    ["ssh://git@github.com/n/b.git", true],
+    ["git+ssh://git@github.com/n/b.git", true],
+    ["SSH://git@gitlab.com:2222/n/l.git", true],
+    ["ext::ssh -i key example.com %S 'n/b.git'", true],
+    ["", true],
+    ["https://github.com/n/b.git", false],
+    ["HTTPS://github.com/n/b.git", false],
+    ["http://gitlab.internal/n/l.git", false],
+    ["git://example.com/n/b.git", false],
+    ["file:///srv/git/b.git", false],
+    ["/srv/git/b.git", false],
+    ["../b.git", false],
+    ["C:\\repos\\b.git", false],
+    ["C:/repos/b.git", false],
+    ["repos/b.git", false],
+  ] as [string, boolean][])("%p: ssh or unknown, so no network git: %p", (url, prompts) => {
+    expect(pullRemoteMayPrompt(url)).toBe(prompts);
   });
 });
 

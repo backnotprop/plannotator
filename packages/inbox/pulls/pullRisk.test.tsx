@@ -567,6 +567,33 @@ test.skipIf(!hasDom)('under the filter a folded group starts open, and a click f
   expect(shownRows()).toContain(key(4));
 });
 
+test.skipIf(!hasDom)("a filter's folds come back when it is picked again, after another filter", async () => {
+  window.localStorage.setItem('plannotator-inbox-pr-risk-filter', 'high');
+  spy('pullRisk', async () => JUDGED);
+  await mount(page());
+  const fold = () => document.querySelector<HTMLButtonElement>('[data-reviews-fold="not_reviewed"]')!;
+  const pick = async (filter: string) => {
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-pulls-risk-chip]')!.click());
+    const option = document.querySelector<HTMLElement>(`[data-pulls-risk-option="${filter}"]`);
+    expect(option).not.toBeNull();
+    await act(async () => option!.click());
+    expect(document.querySelector('[data-pulls-risk-filter]')?.getAttribute('data-pulls-risk-filter')).toBe(filter);
+  };
+  await act(async () => fold().click());
+  expect(fold().getAttribute('aria-expanded')).toBe('false');
+  await pick('medium');
+  expect(fold().getAttribute('aria-expanded')).toBe('true');
+  // A fold under Medium is Medium's own, and High keeps what was folded under it.
+  await act(async () => fold().click());
+  await pick('high');
+  expect(fold().getAttribute('aria-expanded')).toBe('false');
+  await act(async () => fold().click());
+  await pick('medium');
+  expect(fold().getAttribute('aria-expanded')).toBe('false');
+  await pick('high');
+  expect(fold().getAttribute('aria-expanded')).toBe('true');
+});
+
 test.skipIf(!hasDom)('an empty filter still says a host could not be read', async () => {
   window.localStorage.setItem('plannotator-inbox-pr-risk-filter', 'high');
   spy('pullRisk', async () => ({ ...JUDGED, judgments: { [key(1)]: { level: 'low', why: 'Docs.' } } }));

@@ -675,8 +675,36 @@ function compareRef(name: string): string {
 /** A diff read: the CLI's answer, or `tooLarge` once its output passed `maxBytes` (it is stopped there). */
 export type PullDiffRunner = (cli: RefCli, args: string[], maxBytes: number, reading?: { timeoutMs: number; signal?: AbortSignal }) => Promise<RefCommandResult & { tooLarge?: boolean }>;
 
-/** A git command in a clone on this computer, for an agent's diff read. Ends at `timeoutMs` and at `signal`. */
-export type PullGitRunner = (root: string, args: string[], reading: { timeoutMs: number; signal?: AbortSignal }) => Promise<RefCommandResult>;
+/**
+ * A git command in a clone on this computer, for an agent's diff read. Ends at `timeoutMs` and at `signal`, and, with
+ * `maxBytes`, once its output passes that (`tooLarge`, its output dropped).
+ */
+export type PullGitRunner = (root: string, args: string[], reading: { timeoutMs: number; signal?: AbortSignal; maxBytes?: number }) => Promise<RefCommandResult & { tooLarge?: boolean }>;
+
+/**
+ * The most a clone's git diff is read to, well past any model's context (about 4 MB of prompt): past it the read
+ * stops, and the forge's own read stands, rather than an agent run that is sure to fail.
+ */
+export const INBOX_PULL_GIT_DIFF_MAX_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Whether a network git call to this remote URL (`git remote get-url`, so `insteadOf` already applied) may go through
+ * ssh, or a transport we don't know: an SSH agent can ask for approval there (1Password, a Touch ID key), and
+ * `BatchMode` doesn't stop it. Only https, http, git, file and a local path are quiet.
+ */
+export function pullRemoteMayPrompt(url: string): boolean {
+  const remote = url.trim();
+  if (!remote) return true;
+  if (/^(https?|git|file):\/\//i.test(remote)) return false;
+  // Any other URL scheme (ssh://, git+ssh://) or a remote helper (ext::, <helper>::<address>).
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(remote) || /^[a-z][a-z0-9+.-]*::/i.test(remote)) return true;
+  // A local path: absolute, relative, or a Windows drive or share.
+  if (remote.startsWith("/") || remote.startsWith(".") || /^[a-z]:[\\/]/i.test(remote) || remote.startsWith("\\\\")) return false;
+  // scp-like `[user@]host:path` (a colon before any slash) is ssh; anything else is a local path.
+  const colon = remote.indexOf(":");
+  const slash = remote.indexOf("/");
+  return colon > 0 && (slash < 0 || colon < slash);
+}
 
 /**
  * git with no way to ask anything (no credential or SSH prompt: `prepareGitCommand`'s "forbid"), and no automatic gc
@@ -706,8 +734,27 @@ export function createPullGitRunner(environment: () => Readonly<Record<string, s
     const stop = () => killGitTree(proc, prepared.isolateProcessGroup);
     const timer = setTimeout(stop, reading.timeoutMs);
     reading.signal?.addEventListener("abort", stop, { once: true });
+    const readOut = async (): Promise<string | null> => {
+      if (reading.maxBytes === undefined) return new Response(proc.stdout as ReadableStream).text();
+      // Counted as it comes: past the cap, git is stopped and nothing more is held.
+      const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
+      const chunks: Uint8Array[] = [];
+      let bytes = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return Buffer.concat(chunks).toString("utf8");
+        bytes += value.byteLength;
+        if (bytes > reading.maxBytes) {
+          stop();
+          await reader.cancel().catch(() => {});
+          return null;
+        }
+        chunks.push(value);
+      }
+    };
     try {
-      const [stdout, stderr, exitCode] = await Promise.all([new Response(proc.stdout as ReadableStream).text(), new Response(proc.stderr as ReadableStream).text(), proc.exited]);
+      const [stdout, stderr, exitCode] = await Promise.all([readOut(), new Response(proc.stderr as ReadableStream).text(), proc.exited]);
+      if (stdout === null) return { stdout: "", stderr, exitCode: exitCode || 1, tooLarge: true };
       return { stdout, stderr, exitCode };
     } finally {
       clearTimeout(timer);
@@ -801,36 +848,67 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
    * PR's repository: that is how the clone is one of its projects). What the clone lacks is fetched by the PR's own
    * ref and the base branch, with no ref written: no branch, remote-tracking ref, tag or FETCH_HEAD changes, and the
    * worktree, index and stash are never touched. The diff runs from where the head left the base's tip, as the
-   * forge's does. Null when no clone gives it; the forge's read stands then.
+   * forge's does. Null when no clone gives it, or the diff passes `INBOX_PULL_GIT_DIFF_MAX_BYTES`; the forge's read
+   * stands then.
+   *
+   * An `origin` reached over ssh (`pullRemoteMayPrompt`) gets no network git at all: this runs in the background, and
+   * an SSH agent could ask the person to approve a key they never chose to use. The forge gives the base's tip
+   * instead, and only a clone that already has both commits is read.
    */
-  const localWholeDiff = async (pull: InboxPull, head: string, roots: readonly string[], signal?: AbortSignal): Promise<string | null> => {
+  const localWholeDiff = async (pull: InboxPull, head: string, roots: readonly string[], cli: RefCli, signal?: AbortSignal): Promise<string | null> => {
     if (!compareBranch(pull.base)) return null;
     const baseRef = `refs/heads/${pull.base}`;
     const pullRef = pull.platform === "github" ? `refs/pull/${pull.number}/head` : `refs/merge-requests/${pull.number}/head`;
     const deadline = Date.now() + INBOX_PULL_WHOLE_DIFF_TIMEOUT_MS;
+    let forgeBase: Promise<string | null> | undefined;
     for (const root of new Set(roots)) {
       if (signal?.aborted) return null;
+      const reading = () => ({ timeoutMs: Math.max(1_000, deadline - Date.now()), signal });
       const git = async (args: string[]) => {
-        const result = await gitRun(root, args, { timeoutMs: Math.max(1_000, deadline - Date.now()), signal }).catch(() => null);
+        const result = await gitRun(root, args, reading()).catch(() => null);
         return result && result.exitCode === 0 ? result.stdout : null;
       };
-      const listed = await git(["ls-remote", "--refs", "origin", baseRef]);
-      const base = shaOf(listed?.split("\n").map((line) => line.split("\t")).find(([, ref]) => ref === baseRef)?.[0]);
+      const quiet = !pullRemoteMayPrompt((await git(["remote", "get-url", "origin"])) ?? "");
+      let base: string | null;
+      if (quiet) {
+        const listed = await git(["ls-remote", "--refs", "origin", baseRef]);
+        base = shaOf(listed?.split("\n").map((line) => line.split("\t")).find(([, ref]) => ref === baseRef)?.[0]);
+      } else {
+        base = await (forgeBase ??= readBaseNow(pull, cli));
+      }
       if (!base) continue;
+      const tip = base;
       const has = async (sha: string) => (await git(["cat-file", "-e", `${sha}^{commit}`])) !== null;
-      const both = async () => (await has(head)) && (await has(base));
+      const both = async () => (await has(head)) && (await has(tip));
       if (!(await both())) {
+        if (!quiet) continue;
         // `--refmap=` with no destination: nothing but objects is written, not even the remote-tracking branch.
         await git(["fetch", "--no-write-fetch-head", "--refmap=", "--no-tags", "--no-prune", "--no-recurse-submodules", "--quiet", "origin", pullRef, baseRef]);
         if (!(await both())) continue;
       }
-      const from = shaOf((await git(["merge-base", base, head]))?.trim());
+      const from = shaOf((await git(["merge-base", tip, head]))?.trim());
       if (!from) continue;
       // The person's own diff settings never apply: no external diff or textconv runs, and the prefixes are the forge's.
-      const patch = await git(["diff", "--no-ext-diff", "--no-textconv", "--no-relative", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", from, head, "--"]);
-      if (patch?.trim()) return patch;
+      const diff = await gitRun(root, ["diff", "--no-ext-diff", "--no-textconv", "--no-relative", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", from, head, "--"], { ...reading(), maxBytes: INBOX_PULL_GIT_DIFF_MAX_BYTES }).catch(() => null);
+      // Past any model's context: another clone has the same diff, so the forge's read stands.
+      if (diff?.tooLarge) return null;
+      if (diff && diff.exitCode === 0 && diff.stdout.trim()) return diff.stdout;
     }
     return null;
+  };
+  /** The tip of a PR's base branch, from the forge (over its API, never ssh). */
+  const readBaseNow = async (pull: InboxPull, cli: RefCli): Promise<string | null> => {
+    const parts = splitPath(pull.repo)!;
+    const github = pull.platform === "github";
+    const endpoint = github ? `repos/${parts.owner}/${parts.repo}/git/ref/heads/${compareRef(pull.base)}` : `projects/${encodeURIComponent(pull.repo)}/repository/branches/${encodeURIComponent(pull.base)}`;
+    const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(github ? ["--jq", ".object.sha"] : [])]).catch(() => null);
+    if (!read || read.exitCode !== 0) return null;
+    if (github) return shaOf(read.stdout.trim());
+    try {
+      return shaOf(obj(obj(JSON.parse(read.stdout)).commit).id);
+    } catch {
+      return null;
+    }
   };
   const readHeadNow = async (pull: InboxPull, cli: RefCli): Promise<string | null> => {
     const parts = splitPath(pull.repo)!;
@@ -1349,7 +1427,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           patch = "";
         }
         // Less than the whole diff, or nothing: a clone on this computer gives the whole of it, when there is one.
-        const local = (partial || !patch.trim()) && headBefore && roots.length > 0 ? await localWholeDiff(pull, headBefore, roots, signal) : null;
+        const local = (partial || !patch.trim()) && headBefore && roots.length > 0 ? await localWholeDiff(pull, headBefore, roots, cli, signal) : null;
         if (local) {
           if (patch.trim()) heldBack = patch;
           patch = local;

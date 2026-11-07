@@ -266,14 +266,14 @@ export function ReviewsList({
   const now = useRelativeClock(true);
   const groups = useMemo(() => (risk === 'all' ? inboxReviewGroups(rows) : riskOrder(inboxReviewGroups(rows), judgments)), [rows, risk, judgments]);
   const [folds, setFolds] = useState<ReviewFolds>(readReviewFolds);
-  // Under a risk filter nothing it kept starts folded away, and a click folds a group for that filter only: the
-  // saved folds stay the person's choice for All.
-  const [riskFolds, setRiskFolds] = useState<{ risk: RiskFilterValue; folded: Partial<ReviewFolds> }>({ risk, folded: {} });
-  const riskFolded = riskFolds.risk === risk ? riskFolds.folded : {};
+  // Under a risk filter nothing it kept starts folded away, and a click folds a group for that filter only, kept for
+  // it while the page is open: the saved folds stay the person's choice for All.
+  const [riskFolds, setRiskFolds] = useState<Partial<Record<RiskFilterValue, Partial<ReviewFolds>>>>({});
+  const riskFolded = riskFolds[risk] ?? {};
   const unfolded = (name: keyof ReviewFolds) => (risk === 'all' ? folds[name] : !riskFolded[name]);
   const toggle = (name: keyof ReviewFolds) => {
     if (risk !== 'all') {
-      setRiskFolds({ risk, folded: { ...riskFolded, [name]: !riskFolded[name] } });
+      setRiskFolds((kept) => ({ ...kept, [risk]: { ...kept[risk], [name]: !kept[risk]?.[name] } }));
       return;
     }
     const next = { ...folds, [name]: !folds[name] };
