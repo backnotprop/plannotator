@@ -6,7 +6,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  * shows when the page opens and fades after about 3 seconds; a scroll back up,
  * or a tap near the top of the page, brings it back for another 3 seconds.
  * Faded, it takes no taps (inbox.css), so they reach the page. Keyboard focus on
- * it holds it shown. The tools hidden (») still hide it, as before.
+ * it holds it shown. The tools hidden (») still hide it, as before, and the
+ * tools coming back bring it back.
  */
 export const SIZE_ICON_SHOW_MS = 3000;
 
@@ -23,7 +24,8 @@ export interface SizeIconFade {
   shown: boolean;
   /** Show it again and start the 3 seconds over. */
   wake: () => void;
-  /** Keyboard focus is on it: hold it shown (true), or let it fade again (false). */
+  /** Keyboard focus is on it: hold it shown (true), or let it fade again (false; starts the 3 seconds over only
+   *  if it was held, so a blur after a finger's press does not bring a faded icon back). */
   hold: (held: boolean) => void;
 }
 
@@ -53,8 +55,9 @@ export function useSizeIconFade(active: boolean, openKey: string): SizeIconFade 
 
   const hold = useCallback(
     (on: boolean) => {
+      const was = held.current;
       held.current = on;
-      wake();
+      if (on || was) wake();
     },
     [wake],
   );

@@ -2006,6 +2006,8 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 .ib-sizecorner[data-faded] .ib-sizebtn { opacity: 0; pointer-events: none; transition: opacity 400ms ease; }
 @media (prefers-reduced-motion: reduce) { .ib-sizebtn, .ib-sizecorner[data-faded] .ib-sizebtn { transition: none; } }
 .ib-sizebtn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* Keyboard focus keeps it shown whatever the fade timer does. */
+.ib-sizecorner[data-faded] .ib-sizebtn:focus-visible { opacity: 1; pointer-events: auto; }
 /* 44 px to press, the button drawn at 34. */
 .ib-sizebtn::after { content: ''; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
 .ib-htmlframe.ib-fitdesk { overflow: hidden; }

@@ -16,8 +16,11 @@
  * HtmlViewer.frameScale.test.tsx's); a desktop draws no control and no scale.
  * The icon gets out of the way (addendum 17:53Z, sizeIconFade.ts): shown when
  * the page opens, faded after about 3 seconds, back on a scroll up or a tap
- * near the top (not one lower down), held by keyboard focus; faded, it takes
- * no taps (inbox.css's own rules, applied here), and its name stays.
+ * near the top (not one lower down), held by keyboard focus (a finger's
+ * focus, and its blur, do not bring a faded icon back); faded, it takes
+ * no taps (inbox.css's own rules, applied here), and its name stays. Hiding
+ * the tools (») and bringing them back brings a faded icon back with them.
+ * A press is announced with the approved words only.
  * The real layout and a real tap are tests/e2e/inbox-html-fit.spec.ts.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -272,6 +275,46 @@ test.if(hasDom)('keyboard focus on the icon holds it shown; leaving lets it fade
   expect(faded()).toBe(true);
 });
 
+test.if(hasDom)('a blur after a finger press does not bring a faded icon back', async () => {
+  jest.useFakeTimers();
+  fakeTimers = true;
+  await render(dashboard);
+  await reportWidth(390);
+  // A finger's press leaves focus on the button (Android Chrome), not a keyboard's focus ring.
+  const realMatches = Element.prototype.matches;
+  Element.prototype.matches = function (this: Element, selector: string) {
+    return selector === ':focus-visible' ? false : realMatches.call(this, selector);
+  } as typeof realMatches;
+  try {
+    act(() => toggle()!.focus());
+    elapse(SIZE_ICON_SHOW_MS);
+    // Not held: it fades with focus still on it.
+    expect(faded()).toBe(true);
+    // A later tap on the page takes focus away: the icon stays faded.
+    act(() => toggle()!.blur());
+    expect(faded()).toBe(true);
+  } finally {
+    Element.prototype.matches = realMatches;
+  }
+});
+
+test.if(hasDom)('the tools coming back bring a faded icon back with them', async () => {
+  jest.useFakeTimers();
+  fakeTimers = true;
+  await render(dashboard);
+  await reportWidth(390);
+  elapse(SIZE_ICON_SHOW_MS);
+  expect(faded()).toBe(true);
+  await act(async () => host!.querySelector<HTMLButtonElement>('[data-full-view-hide]')!.click());
+  expect(host!.querySelector('[data-tools]')!.getAttribute('data-tools')).toBe('tucked');
+  expect(faded()).toBe(true);
+  await act(async () => host!.querySelector<HTMLButtonElement>('[data-full-view-handle]')!.click());
+  expect(host!.querySelector('[data-tools]')!.getAttribute('data-tools')).toBe('pinned');
+  expect(faded()).toBe(false);
+  elapse(SIZE_ICON_SHOW_MS);
+  expect(faded()).toBe(true);
+});
+
 test.if(hasDom)('a page that fits opens on Phone size; the control is one icon with no words, outside the scaled page', async () => {
   await render(dashboard);
   await reportWidth(390);
@@ -323,7 +366,11 @@ test.if(hasDom)('a squeezed page takes one press, and the press is remembered af
   expect(name()).toBe('Phone size');
   // The icon and its name changed; the pane's live region says what happened.
   await settle();
-  expect(host!.querySelector('[data-step-live]')!.textContent).toContain('Desktop size');
+  expect(host!.querySelector('[data-step-live]')!.textContent).toBe('Desktop size');
+  await press();
+  await settle();
+  expect(host!.querySelector('[data-step-live]')!.textContent).toBe('Phone size');
+  await press();
 
   unmount();
   await render(dashboard);

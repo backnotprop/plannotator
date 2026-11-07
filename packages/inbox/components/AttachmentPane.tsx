@@ -1664,7 +1664,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     const next: PageSize = pageSize === 'desktop' ? 'phone' : 'desktop';
     writePageSize(attachment.path, next);
     setPickedNow({ file: attachment.path, size: next });
-    announce(next === 'desktop' ? 'Desktop size: the page is laid out at laptop width and fitted to the screen.' : 'Phone size: the page is laid out at the phone\'s width.');
+    announce(next === 'desktop' ? 'Desktop size' : 'Phone size');
   };
   // The icon gets out of the way (sizeIconFade.ts): shown when the page opens, faded after about 3 seconds, back on a
   // scroll up or a tap near the top. Faded, it takes no taps, so they reach the page.
@@ -1715,6 +1715,13 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   useEffect(() => {
     if (shownToolbar === 'pinned') gatheredFrom.current = 'bar';
   }, [shownToolbar]);
+  // The size icon comes back with the other tools (» or a pinch let go), even if it had faded before they went.
+  const toolsWereTucked = useRef(false);
+  useEffect(() => {
+    const tucked = shownToolbar === 'tucked';
+    if (toolsWereTucked.current && !tucked && sizeIconOn) sizeIcon.wake();
+    toolsWereTucked.current = tucked;
+  }, [shownToolbar, sizeIconOn, sizeIcon.wake]);
   // A pinch's tuck does not pass through the toolbar's state: measured as it is committed, before it is drawn. (A tuck
   // by hand is measured in onState; with the tools already gathered there is nothing to fly.)
   const pinchFromShowing = pinchTucks && toolbar === 'pinned';
@@ -2220,8 +2227,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   togglePageSize();
                   sizeIcon.wake();
                 }}
-                // Keyboard focus holds it shown; a finger's press does not (a tapped button may keep focus).
-                onFocus={(e) => sizeIcon.hold(focusVisible(e.currentTarget))}
+                // Keyboard focus holds it shown; a finger's press does not (a tapped button may keep focus), and
+                // leaving lets it fade again only after keyboard focus held it (hold(false) wakes only then).
+                onFocus={(e) => (focusVisible(e.currentTarget) ? sizeIcon.hold(true) : sizeIcon.wake())}
                 onBlur={() => sizeIcon.hold(false)}
                 aria-label={pageSize === 'desktop' ? 'Phone size' : 'Desktop size'}
                 title={pageSize === 'desktop' ? 'Phone size' : 'Desktop size'}

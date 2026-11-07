@@ -15,13 +15,17 @@
  * report, also on a read-only page, and a forged or out-of-range report never
  * reaches it. `onPageTap` gets where a tap landed on screen (through the
  * scale) and `onPageScrollUp` a scroll back up, on a read-only page too; a
- * forged tap does not reach it.
+ * forged tap does not reach it. The bridge reports only when asked: a viewer
+ * with none of these callbacks never sends `set-page-reports` (Plannotator's
+ * other surfaces and Workspaces are unchanged); one with them asks once the
+ * page is ready, with its scale, and asks again when the scale changes.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { createRef } from 'react';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { ViewerHandle } from '../Viewer';
+import { BRIDGE_PROTOCOL_VERSION } from './bridge-script';
 
 const hasDom = typeof document !== 'undefined';
 const htmlViewerModule = hasDom ? await import('./HtmlViewer') : null;
@@ -84,8 +88,28 @@ async function mount(
   win.postMessage = ((msg: Record<string, unknown>) => {
     sent.push(msg);
   }) as typeof win.postMessage;
-  return { ref, post, sent };
+  const rerender = async (next: typeof props) => {
+    await act(async () => {
+      root.render(
+        <HtmlViewer
+          ref={ref}
+          rawHtml="<html><body><p>Pinpoint target</p></body></html>"
+          annotations={[]}
+          onAddAnnotation={() => {}}
+          onSelectAnnotation={() => {}}
+          selectedAnnotationId={null}
+          mode="selection"
+          inputMethod="pinpoint"
+          {...next}
+        />,
+      );
+    });
+  };
+  return { ref, post, sent, rerender };
 }
+
+const asks = (sent: Record<string, unknown>[]) => sent.filter((m) => m.type === 'plannotator-bridge-set-page-reports');
+const ready = { type: 'plannotator-bridge-ready', protocolVersion: BRIDGE_PROTOCOL_VERSION };
 
 /** The fixed 1 px anchor the composer is placed on (useHtmlAnnotation's positionAnchor). */
 function anchor(): { top: number; left: number } {
@@ -178,5 +202,32 @@ describe.if(hasDom)('a tap and a scroll up on the page', () => {
     await post({ type: 'plannotator-bridge-page-scroll-up' });
     expect(taps).toEqual([FRAME.top + 30]);
     expect(ups).toBe(1);
+  });
+});
+
+describe.if(hasDom)('asking the bridge for its page reports', () => {
+  test('a viewer with none of the callbacks never asks', async () => {
+    const { post, sent } = await mount({ frameScale: 0.3 });
+    await post(ready);
+    expect(sent.length).toBeGreaterThan(0);
+    expect(asks(sent)).toEqual([]);
+  });
+
+  test('a viewer with them asks once the page is ready, with its scale, and again when the scale changes', async () => {
+    const onPageTap = () => {};
+    const onContentWidth = () => {};
+    const { post, sent, rerender } = await mount({ readOnly: true, onPageTap, onContentWidth });
+    expect(asks(sent)).toEqual([]);
+    await post(ready);
+    expect(asks(sent)).toEqual([{ type: 'plannotator-bridge-set-page-reports', contentWidth: true, scrollUp: false, tap: true, scale: 1 }]);
+    await rerender({ readOnly: true, onPageTap, onContentWidth, frameScale: 0.3 });
+    expect(asks(sent).at(-1)).toEqual({ type: 'plannotator-bridge-set-page-reports', contentWidth: true, scrollUp: false, tap: true, scale: 0.3 });
+    // A new callback of the same kind is not a new ask.
+    const before = asks(sent).length;
+    await rerender({ readOnly: true, onPageTap: () => {}, onContentWidth, frameScale: 0.3 });
+    expect(asks(sent).length).toBe(before);
+    // Dropping them all tells the bridge to stop.
+    await rerender({ readOnly: true });
+    expect(asks(sent).at(-1)).toEqual({ type: 'plannotator-bridge-set-page-reports', contentWidth: false, scrollUp: false, tap: false, scale: 1 });
   });
 });

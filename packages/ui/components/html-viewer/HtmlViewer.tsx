@@ -392,14 +392,17 @@ export interface HtmlViewerProps {
    * on an ancestor; the Inbox's phone "Desktop size" lays the page out wide
    * and scales it to fit). The bridge measures in the page's own pixels, so
    * the selection anchor, the composer's yield and `revealPin`'s
-   * `clearBottom` convert through it. Absent → 1, unchanged.
+   * `clearBottom` convert through it, and with `onPageScrollUp`/`onPageTap`
+   * the bridge measures a scroll or a tap's movement on screen through it.
+   * Absent → 1, unchanged.
    */
   frameScale?: number;
   /**
    * Opt-in: how wide the page lays out against the frame's own width, in the
    * page's pixels, reported by the bridge after it loads and whenever either
    * changes (a page wider than its frame was made for a wider screen).
-   * Delivered in readOnly mode too. Absent → ignored.
+   * Delivered in readOnly mode too. Absent → the bridge is never asked
+   * (`set-page-reports`), so it neither measures nor posts.
    */
   onContentWidth?: (report: HtmlContentWidth) => void;
   /**
@@ -412,7 +415,8 @@ export interface HtmlViewerProps {
    * Opt-in: a tap on the page (a press and a lift close together), with where
    * it landed as a `clientY` in this window (through `frameScale`). For a host
    * control that comes back on a tap near it. The tap still reaches the page.
-   * Absent → ignored.
+   * With neither this nor `onPageScrollUp`, the bridge is never asked and adds
+   * no listeners.
    */
   onPageTap?: (clientY: number) => void;
   /**
@@ -1190,6 +1194,28 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       if (iframeReadyVersion === 0 || !hostNavigates) return;
       postToBridge({ type: `${PREFIX}set-host-navigates`, active: true });
     }, [iframeReadyVersion, hostNavigates]);
+
+    // The page reports a host's own controls read (`onContentWidth`,
+    // `onPageScrollUp`, `onPageTap`), and the scale the bridge needs to measure
+    // a tap or a scroll in screen pixels. A viewer that never asked posts
+    // nothing, and the bridge then neither listens nor reports.
+    const wantsContentWidth = !!onContentWidth;
+    const wantsScrollUp = !!onPageScrollUp;
+    const wantsTap = !!onPageTap;
+    const reportScale = resolveFrameScale(frameScale);
+    const pageReportsAskedRef = useRef(false);
+    useEffect(() => {
+      const wants = wantsContentWidth || wantsScrollUp || wantsTap;
+      if (iframeReadyVersion === 0 || (!wants && !pageReportsAskedRef.current)) return;
+      pageReportsAskedRef.current = wants;
+      postToBridge({
+        type: `${PREFIX}set-page-reports`,
+        contentWidth: wantsContentWidth,
+        scrollUp: wantsScrollUp,
+        tap: wantsTap,
+        scale: reportScale,
+      });
+    }, [iframeReadyVersion, wantsContentWidth, wantsScrollUp, wantsTap, reportScale]);
 
     // Selections made with a finger (`touchSelection`). A viewer that never
     // asked posts nothing.
