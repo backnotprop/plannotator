@@ -24,6 +24,7 @@ import { diffHunkLines, isLineRangeInPatch } from '@plannotator/core/diff-files'
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import { inboxNoteBlocks, type InboxNoteSide } from '@plannotator/core/inbox-context-notes';
 import type { InboxPullRiskJudgment } from '@plannotator/core/inbox-types';
+import { agentName } from '../format';
 import { anchorLines, shiftLines, reviewDrawnOn } from '../review-drawing/showMeModel';
 
 export type ContextNoteWriter = 'guide' | 'risk' | 'thread' | 'picture';
@@ -59,9 +60,14 @@ export interface NoteFile {
   patch: string;
 }
 
-/** The writer in words: what tells a review note, a risk, an answer and a picture apart (never color alone). */
-export function writerWord(note: Pick<ContextNote, 'writer'>): string {
-  return note.writer === 'guide' ? 'Review note' : note.writer === 'risk' ? 'Risk' : note.writer === 'thread' ? 'Answer' : 'Picture';
+/**
+ * The writer in words: what tells a review note, a risk, the thread agent's note and a picture apart (never color
+ * alone). The thread agent's note is labelled with that agent's name as the thread shows it ("Claude Code"; the
+ * owner, q-38221c8b), and the thread's own fallback when none is known.
+ */
+export function writerWord(note: Pick<ContextNote, 'writer' | 'agent'>): string {
+  if (note.writer === 'thread') return note.agent || agentName(null);
+  return note.writer === 'guide' ? 'Review note' : note.writer === 'risk' ? 'Risk' : 'Picture';
 }
 
 /** "16–18", or "5". */

@@ -42,7 +42,7 @@ function mount(notes: ContextNote[], actions: Parameters<typeof useContextNotes>
   return host;
 }
 
-const answer: ContextNote = { id: 't1', writer: 'thread', file: 'src/a.ts', side: 'new', lineStart: 4, lineEnd: 6, text: 'The retry lives here.', agent: 'Claude', asked: 'Why retry?' };
+const answer: ContextNote = { id: 't1', writer: 'thread', file: 'src/a.ts', side: 'new', lineStart: 4, lineEnd: 6, text: 'The retry lives here.', agent: 'Claude Code', asked: 'Why retry?' };
 
 test.skipIf(!hasDom)('a row is a button that opens its note in place, and nothing to reply, edit or post', () => {
   const el = mount([answer], {});
@@ -50,9 +50,7 @@ test.skipIf(!hasDom)('a row is a button that opens its note in place, and nothin
   expect(button.getAttribute('aria-expanded')).toBe('false');
   const body = el.querySelector(`#${CSS.escape(button.getAttribute('aria-controls')!)}`) as HTMLElement;
   expect(body.hidden).toBe(true);
-  expect(button.textContent).toContain('Answer');
   expect(button.querySelector('.ib-ctxn-peb, .ib-ctxn-risk-mark')).toBeNull();
-  expect(button.querySelector('.ib-ctxn-h')!.firstElementChild!.textContent).toBe('Answer');
   act(() => button.click());
   expect(button.getAttribute('aria-expanded')).toBe('true');
   expect(body.hidden).toBe(false);
@@ -62,6 +60,29 @@ test.skipIf(!hasDom)('a row is a button that opens its note in place, and nothin
   expect(words.some((w) => /reply|edit|post|delete/i.test(w))).toBe(false);
   act(() => button.click());
   expect(button.getAttribute('aria-expanded')).toBe('false');
+});
+
+test.skipIf(!hasDom)('the thread agent’s note is labelled with its name, as the thread names it (the owner, q-38221c8b)', () => {
+  const head = (note: ContextNote) => {
+    const el = mount([note], {});
+    const button = el.querySelector<HTMLButtonElement>('button.ib-ctxn-row')!;
+    const label = button.querySelector('.ib-ctxn-h')!.textContent;
+    const name = button.textContent ?? '';
+    act(() => root?.unmount());
+    host?.remove();
+    root = null;
+    return { label, name };
+  };
+  const named = head(answer);
+  expect(named.label).toBe('Claude Code');
+  // The button's accessible name (its text) starts with the agent, never "Answer".
+  expect(named.name.startsWith('Claude Code')).toBe(true);
+  expect(named.name).not.toContain('Answer');
+  expect(head({ ...answer, agent: 'Codex' }).label).toBe('Codex');
+  // No name known: the thread's own word for an agent (format's agentName).
+  expect(head({ ...answer, agent: undefined }).label).toBe('An agent');
+  // The other writers keep their words.
+  expect(head({ ...answer, writer: 'guide' }).label).toBe('Review note');
 });
 
 test.skipIf(!hasDom)('a stale answer says the code changed, on which round, and asks again with its lines', () => {
