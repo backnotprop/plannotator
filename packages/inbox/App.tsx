@@ -184,7 +184,7 @@ import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPa
 import { actedSince, inputMark, lastInput } from './lastInput';
 import { backFocusTargets, focusKept, focusLost } from './backFocus';
 import { askArrivalFocus, listOrder as drawnOrder, threadStep } from './threadStep';
-import { LIST_STOPS, listMoveIndex, listStops } from './listKeys';
+import { LIST_STOPS, listKeyTarget } from './listKeys';
 import { emitAskChange } from './ask/askEvents';
 import { useInboxAsk } from './ask/useInboxAsk';
 import { setSessionLabels } from './sessionLabels';
@@ -3715,7 +3715,7 @@ function Inbox() {
    * list as it shows (threadStep.ts), opened as Enter opens a row, replacing the open one in history so Back still
    * goes to the list. From the thread focus lands where N puts it (Thread.tsx takes it); from the list it stays on
    * the rows, on the new one. Not from a file, a guided review or the Artifacts view. With no thread open, on the
-   * list's rows, they move along them as ↓ ↑ do: the next thread there, nothing opened (`listMoveIndex`, no wrap).
+   * list's rows, they move along the threads: the next one there, past the groups' headers, nothing opened (`listKeyTarget`, no wrap).
    */
   const threadStepKey = (dir: 1 | -1) => ({
     when: (event: KeyboardEvent) => {
@@ -3731,9 +3731,8 @@ function Inbox() {
       const body = listBody(rootRef.current);
       if (!body) return;
       if (!now.thread) {
-        const stops = listStops(body);
-        const at = listMoveIndex(stops.length, stops.indexOf(keyTarget(event) as HTMLElement), dir > 0 ? 'next' : 'previous');
-        const next = at === null ? null : stops[at];
+        // Threads only: J K pass over the groups' headers (listKeys.ts), as they step threads with one open.
+        const next = listKeyTarget(body, keyTarget(event), dir > 0 ? 'j' : 'k');
         next?.focus({ preventScroll: true });
         next?.scrollIntoView?.({ block: 'nearest' });
         return;

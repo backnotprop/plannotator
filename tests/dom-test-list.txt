@@ -214,6 +214,7 @@ packages/inbox/perfMarks.test.ts
 packages/inbox/themeToggle.test.tsx
 packages/inbox/sidebarUpdateDot.test.tsx
 packages/inbox/sidebarSections.test.tsx
+packages/inbox/listGroups.test.tsx
 packages/inbox/projectSort.test.tsx
 packages/inbox/updateStuck.test.tsx
 packages/inbox/palettePicker.test.tsx
