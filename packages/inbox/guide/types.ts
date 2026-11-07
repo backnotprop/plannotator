@@ -92,7 +92,6 @@ export interface GuideSelection {
 export interface GuideSelectionActions {
   onAsk?: (selection: GuideSelection) => void;
   onShowMe?: (selection: GuideSelection) => void;
-  showMeIcon?: ReactNode;
 }
 
 /** The surface's guide reader (SurfaceGuideReader.tsx): the sections (6.1), then one section per screen (6.2). */

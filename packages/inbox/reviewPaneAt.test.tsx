@@ -4,7 +4,8 @@
  * told. What regresses:
  *  - a board's `file:line` opens the review at its top, not at that file with the lines painted;
  *  - a guide step opens a chapter other than that step's, or Full review opens the walkthrough;
- *  - the place is not let go once there (a reload would jump again), or is let go before the review is read.
+ *  - the place is not let go once there (a reload would jump again), or is let go before the review is read;
+ *  - the painted line is left off screen or under the corner card (the review paints it but does not scroll to it).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -14,6 +15,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
 import type { ShapeReviewAt } from '@plannotator/ui/components/shape/types';
+import type { ShapeHost } from '@plannotator/ui/components/shape';
+import type { InboxShapes } from './shape/useInboxShapes';
+
+const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
 type ReaderProps = { mode?: string; reveal?: { path: string } | null; highlight?: { path: string; start: number; end: number } | null };
 let reader: ReaderProps | null = null;
@@ -22,12 +27,19 @@ if (hasDom) {
   mock.module('#guide-reader', () => ({
     default: (props: ReaderProps) => {
       reader = props;
-      return null;
+      // The painted row, as Pierre marks it, in its file's box.
+      const lit = props.highlight;
+      return lit ? (
+        <div data-guide-file-shell={lit.path}>
+          <div data-line={lit.start} data-selected-line="" />
+        </div>
+      ) : null;
     },
   }));
 }
 const { ReviewPane } = (hasDom ? await import('./components/ReviewPane') : {}) as typeof import('./components/ReviewPane');
 const { GuidePane } = (hasDom ? await import('./components/GuidePane') : {}) as typeof import('./components/GuidePane');
+const { lineScrollBy } = (hasDom ? await import('./components/reviewLineInView') : {}) as typeof import('./components/reviewLineInView');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'kettle-abcdef', name: 'kettle', root: '/work/kettle', created_at: '2026-11-05T10:00:00.000Z' };
 const REVIEW = 'msg_01M4H6G73M9H3Z32T859E7KETL';
@@ -95,7 +107,7 @@ async function open(at: ShapeReviewAt | null, pane: 'review' | 'guide' = 'review
     root.render(
       <div className="pn-inbox">
         {pane === 'review' ? (
-          <ReviewPane thread={thread} message={message} onBack={() => {}} onClose={() => {}} onSent={() => {}} at={at} onLanded={() => (landed += 1)} />
+          <ReviewPane thread={thread} message={message} onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} at={at} onLanded={() => (landed += 1)} />
         ) : (
           <GuidePane thread={thread} message={message} onBack={() => {}} onClose={() => {}} at={at} onLanded={() => (landed += 1)} />
         )}
@@ -153,4 +165,82 @@ test.skipIf(!hasDom)('with Code review off, the guide opens at the file with the
   await open({ step: 2 }, 'guide');
   expect(reader?.reveal?.path).toBe('src/settings.ts');
   expect(reader?.highlight ?? null).toBeNull();
+});
+
+/**
+ * happy-dom lays nothing out: the review's body is a window from y=100 to y=900, and the painted row sits at `rowAt`
+ * in the page, so it moves up as the body scrolls (the line is far below the fold, as the reviewer measured: y=1082).
+ */
+function layOut(rowAt: number, drawn: () => boolean = () => true): () => void {
+  const saved = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'getBoundingClientRect');
+  Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', {
+    configurable: true,
+    value(this: HTMLElement) {
+      const body = document.querySelector<HTMLElement>('.ib-gbody');
+      if (this === body) return new DOMRect(0, 100, 1440, 800);
+      if (this.hasAttribute('data-selected-line') && drawn()) return new DOMRect(0, rowAt - (body?.scrollTop ?? 0), 900, 20);
+      return new DOMRect(0, 0, 0, 0);
+    },
+  });
+  return () => {
+    if (saved) Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', saved);
+    else delete (HTMLElement.prototype as { getBoundingClientRect?: unknown }).getBoundingClientRect;
+  };
+}
+const frames = (ms: number) => act(() => new Promise((r) => setTimeout(r, ms)));
+
+test.skipIf(!hasDom)("a board's file:line scrolls the review until the painted line is in view", async () => {
+  const restore = layOut(1500);
+  try {
+    await open({ path: 'src/settings.ts', line: 2 });
+    await frames(600);
+    const body = document.querySelector<HTMLElement>('.ib-gbody')!;
+    const top = 1500 - body.scrollTop;
+    // In view, below the file's sticky header, in the upper part of the room.
+    expect(top).toBeGreaterThanOrEqual(100 + 72);
+    expect(top).toBeLessThan(900 / 2);
+  } finally {
+    restore();
+  }
+});
+
+test.skipIf(!hasDom)('the person scrolling first keeps their scroll; a line already in view does not move', async () => {
+  // The diff is still drawing when the person scrolls.
+  let drawn = false;
+  const restore = layOut(1500, () => drawn);
+  try {
+    await open({ path: 'src/settings.ts', line: 2 });
+    document.querySelector('.ib-gbody')!.dispatchEvent(new Event('wheel', { bubbles: true }));
+    drawn = true;
+    await frames(600);
+    expect(document.querySelector<HTMLElement>('.ib-gbody')!.scrollTop).toBe(0);
+  } finally {
+    restore();
+  }
+  act(() => root?.unmount());
+  el?.remove();
+  const inView = layOut(400);
+  try {
+    await open({ path: 'src/settings.ts', line: 2 });
+    await frames(600);
+    expect(document.querySelector<HTMLElement>('.ib-gbody')!.scrollTop).toBe(0);
+  } finally {
+    inView();
+  }
+});
+
+test.skipIf(!hasDom)('the line lands clear of the corner card: above its top, on a desktop and on a phone', () => {
+  const view = { top: 100, bottom: 900 };
+  // Desktop: the card's top at y=622. Phone (844 high): the card spans the width from y=470.
+  for (const [bottom, card] of [[900, 622], [844, 470]] as const) {
+    const by = lineScrollBy({ top: 1500, bottom: 1520 }, { top: view.top, bottom }, card);
+    expect(1500 - by).toBeGreaterThanOrEqual(view.top + 72);
+    expect(1520 - by).toBeLessThanOrEqual(card);
+  }
+  // Under the card but on screen: it still moves up.
+  expect(lineScrollBy({ top: 700, bottom: 720 }, view, 622)).toBeGreaterThan(0);
+  // Clear of both already: no scroll.
+  expect(lineScrollBy({ top: 300, bottom: 320 }, view, 622)).toBe(0);
+  // A range taller than the room: its first line at the top of the room.
+  expect(lineScrollBy({ top: 1500, bottom: 2600 }, view, 622)).toBe(1500 - (100 + 72));
 });
