@@ -82,7 +82,8 @@ export function parseInboxDiffOptionsChange(body: { diff_options?: unknown; diff
     const entries = Object.entries(input as Record<string, unknown>);
     if (entries.length === 0) return { ok: false, field: "diff_options", error: `diff_options: at least one of ${WIRE_KEYS.join(", ")}.` };
     for (const [key, value] of entries) {
-      const field = INBOX_DIFF_OPTION_FIELDS[key as WireKey];
+      // Own keys only: `toString` or `__proto__` would otherwise find Object.prototype's.
+      const field = Object.hasOwn(INBOX_DIFF_OPTION_FIELDS, key) ? INBOX_DIFF_OPTION_FIELDS[key as WireKey] : undefined;
       if (!field) return { ok: false, field: `diff_options.${key}`, error: `diff_options.${key}: not a diff option; use ${WIRE_KEYS.join(", ")}.` };
       const valid = field.read(value);
       if (valid === undefined) return { ok: false, field: `diff_options.${key}`, error: `diff_options.${key}: ${field.rule}.` };

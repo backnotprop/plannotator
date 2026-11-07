@@ -6,7 +6,9 @@
  * lines together, Dot without bold) or takes two saves to change; a preset that is not exactly its look, or that is
  * not shown as chosen when the look matches it, or that is a radio again (an arrow key would apply it); "Custom" missing once the look matches
  * none, or not tied to the presets for a screen reader; a Show switch without its words, or that reads
- * backwards; pictures that do not follow the look, or a phone that draws the full-width picture.
+ * backwards; pictures that do not follow the look, or a phone that draws the full-width picture. Letter marks
+ * (approval "inbox-letter-marks"): on by default anywhere, a Mark style picked while off that does nothing, a picture
+ * switch that does nothing while project marks are off, Detailed not turning them on (Both, Avatar, no pictures).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -16,7 +18,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 const hasDom = typeof document !== 'undefined';
 const { RowsSection, ROWS_PRESETS, rowsSummary } = (hasDom ? await import('./components/RowsSettings') : {}) as typeof import('./components/RowsSettings');
-const { LIST_LOOK_OFF, readListLook, resetListLookForTests } = await import('./listLook');
+const { LIST_LOOK_DEFAULT, LIST_LOOK_OFF, readListLook, resetListLookForTests } = await import('./listLook');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 const saves: unknown[][] = [];
@@ -83,14 +85,15 @@ const chosen = (el: HTMLElement, control: string) => {
   return [...scope.querySelectorAll('label')].filter((l) => l.querySelector('input')!.checked).map((l) => l.textContent);
 };
 
-const lookOf = (keys: Partial<typeof LIST_LOOK_OFF>) => ({ ...LIST_LOOK_OFF, ...keys });
+/** The defaults (smaller names on) with some options changed. */
+const lookOf = (keys: Partial<typeof LIST_LOOK_OFF>) => ({ ...LIST_LOOK_DEFAULT, ...keys });
 
 describe.if(hasDom)('Settings → Rows', () => {
-  test('a browser with the defaults: Balanced, every choice at its first, both pictures, no "Custom"', () => {
+  test('a browser with the defaults: Balanced, Bold unread names, every other choice at its first, both pictures, no "Custom"', () => {
     const el = render();
     expect(chosen(el, 'preset')).toEqual(['Balanced']);
     expect(el.querySelector('.ib-rws-custom')).toBeNull();
-    expect(['density', 'first', 'names', 'unread', 'preview', 'time'].map((c) => chosen(el, c)[0])).toEqual(['Comfortable', 'Project', 'Plain', 'Larger', '1 line', 'Clock']);
+    expect(['density', 'first', 'names', 'unread', 'preview', 'time'].map((c) => chosen(el, c)[0])).toEqual(['Comfortable', 'Project', 'Plain', 'Bold', '1 line', 'Clock']);
     expect([...el.querySelectorAll('[data-rows-preview]')].map((p) => p.getAttribute('data-rows-preview'))).toEqual(['narrow', 'wide']);
   });
 
@@ -101,18 +104,18 @@ describe.if(hasDom)('Settings → Rows', () => {
     await pick(el, 'density', 'Compact');
     expect(readListLook()).toEqual(lookOf({ compact: true }));
     await pick(el, 'density', 'Comfortable');
-    expect(readListLook()).toEqual(LIST_LOOK_OFF);
-    expect(saves).toEqual([['roomy'], ['compact'], []]);
+    expect(readListLook()).toEqual(LIST_LOOK_DEFAULT);
+    expect(saves).toEqual([['smallNames', 'roomy'], ['compact', 'smallNames'], ['smallNames']]);
   });
 
   test('Unread: Larger, Bold (the read size, bold), Dot (bold with a dot)', async () => {
     const el = render();
     await pick(el, 'unread', 'Dot');
     expect(readListLook()).toEqual(lookOf({ smallNames: true, unreadDot: true }));
-    await pick(el, 'unread', 'Bold');
-    expect(readListLook()).toEqual(lookOf({ smallNames: true }));
     await pick(el, 'unread', 'Larger');
     expect(readListLook()).toEqual(LIST_LOOK_OFF);
+    await pick(el, 'unread', 'Bold');
+    expect(readListLook()).toEqual(LIST_LOOK_DEFAULT);
     expect(saves).toHaveLength(3);
   });
 
@@ -123,7 +126,7 @@ describe.if(hasDom)('Settings → Rows', () => {
     await pick(el, 'preview', 'None');
     expect(readListLook()).toEqual(lookOf({ hidePreview: true }));
     await pick(el, 'preview', '1 line');
-    expect(readListLook()).toEqual(LIST_LOOK_OFF);
+    expect(readListLook()).toEqual(LIST_LOOK_DEFAULT);
   });
 
   test('the two-way choices and the Show switches (on is shown)', async () => {
@@ -154,7 +157,7 @@ describe.if(hasDom)('Settings → Rows', () => {
     expect(el.querySelector('.ib-rws-custom')!.textContent).toBe('Custom');
     expect(rowsSummary(readListLook())).toBe('Custom');
     await pick(el, 'preset', 'Balanced');
-    expect(readListLook()).toEqual(LIST_LOOK_OFF);
+    expect(readListLook()).toEqual(LIST_LOOK_DEFAULT);
     expect(el.querySelector('.ib-rws-custom')).toBeNull();
   });
 
@@ -196,5 +199,57 @@ describe.if(hasDom)('Settings → Rows', () => {
     const phone = render(true);
     expect([...phone.querySelectorAll('[data-rows-preview]')].map((p) => p.getAttribute('data-rows-preview'))).toEqual(['phone']);
     expect(phone.querySelectorAll('[data-rows-preview] .ib-mrow').length).toBe(3);
+  });
+
+  test('letter marks: all off by default, no style picked; picking a style turns thread marks on in one save', async () => {
+    const el = render();
+    expect(chosen(el, 'markstyle')).toEqual([]);
+    expect(chosen(el, 'marks')).toEqual(['Off']);
+    for (const key of ['repoLogo', 'githubPictures']) expect(el.querySelector(`[data-rows-control="${key}"] [role="switch"]`)!.getAttribute('aria-checked')).toBe('false');
+    // The pictures draw no mark while marks are off.
+    expect(el.querySelectorAll('[data-rows-preview] :is(.ib-lm, .ib-lm-dot, .ib-lm-av)').length).toBe(0);
+    await pick(el, 'markstyle', 'Dot');
+    expect(chosen(el, 'markstyle')).toEqual(['Dot']);
+    expect(chosen(el, 'marks')).toEqual(['Threads']);
+    expect(saves).toEqual([['smallNames', 'marksThreads', 'markDot']]);
+    expect(el.querySelectorAll('[data-rows-preview] .ib-lm-dot').length).toBeGreaterThan(0);
+    // Off again, then on: the first style is Avatar.
+    await pick(el, 'marks', 'Off');
+    expect(chosen(el, 'markstyle')).toEqual([]);
+    await pick(el, 'marks', 'Projects');
+    expect(chosen(el, 'markstyle')).toEqual(['Avatar']);
+  });
+
+  test('a picture switch turned on while project marks are off turns them on: Off becomes Projects, Threads becomes Both', async () => {
+    const el = render();
+    const sw = (key: string) => el.querySelector<HTMLElement>(`[data-rows-control="${key}"] [role="switch"]`)!;
+    act(() => sw('repoLogo').click());
+    await settle();
+    expect(chosen(el, 'marks')).toEqual(['Projects']);
+    expect(sw('repoLogo').getAttribute('aria-checked')).toBe('true');
+    await pick(el, 'marks', 'Threads');
+    // Project marks gone: the switch reads off, as nothing it does shows.
+    expect(sw('repoLogo').getAttribute('aria-checked')).toBe('false');
+    act(() => sw('githubPictures').click());
+    await settle();
+    expect(chosen(el, 'marks')).toEqual(['Both']);
+    expect(sw('githubPictures').getAttribute('aria-checked')).toBe('true');
+  });
+
+  test('Detailed turns marks on (Both, Avatar, both picture switches off); Minimal and Balanced keep them off', async () => {
+    const el = render();
+    await pick(el, 'preset', 'Detailed');
+    expect(chosen(el, 'marks')).toEqual(['Both']);
+    expect(chosen(el, 'markstyle')).toEqual(['Avatar']);
+    for (const key of ['repoLogo', 'githubPictures']) expect(el.querySelector(`[data-rows-control="${key}"] [role="switch"]`)!.getAttribute('aria-checked')).toBe('false');
+    // A picture switch on is no longer Detailed.
+    act(() => el.querySelector<HTMLElement>('[data-rows-control="repoLogo"] [role="switch"]')!.click());
+    await settle();
+    expect(chosen(el, 'preset')).toEqual([]);
+    for (const preset of ['Minimal', 'Balanced']) {
+      await pick(el, 'preset', preset);
+      expect(chosen(el, 'marks')).toEqual(['Off']);
+      expect(chosen(el, 'markstyle')).toEqual([]);
+    }
   });
 });

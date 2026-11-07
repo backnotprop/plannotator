@@ -12,7 +12,7 @@ Open settings with the **gear icon** in the header. Available tabs depend on the
 
 ## Theme
 
-The sun/moon toggle in the header switches between **Dark**, **Light**, and **System** themes. System follows your OS preference and updates automatically. Dark is the default.
+The sun/moon toggle in the header switches between **Dark**, **Light**, and **System** themes. System uses your OS preference and updates automatically. Dark is the default.
 
 The **Theme** tab in Settings assigns a palette to each half of a pair: one theme for light mode, one for dark mode. A Light/Dark switch above the grid decides which half you are assigning, and the grid then lists only the palettes that can render it (Kanagawa Wave appears under Dark, Kanagawa Lotus under Light, and a palette that ships both variants appears under each with that mode's colors). The summary line above the grid always names both halves, and clicking either side jumps the grid to it.
 

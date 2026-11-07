@@ -326,6 +326,27 @@ export function isInboxActionReport(message: { author: { kind: string }; action_
   return message.author.kind === "person" && (message.action_report?.length ?? 0) > 0;
 }
 
+/** The markers around what an agent receives with a question asked from Decision data, each on its own line. */
+export const INBOX_DECISION_ASK_OPEN = "<plannotator-decision-ask>";
+export const INBOX_DECISION_ASK_CLOSE = "</plannotator-decision-ask>";
+
+/**
+ * What the agent receives after the person's words when they ask from Settings -> Decision data. The owner approved
+ * these exact words (2026-11-05, `.product/approved/decision-data/ask-block.txt`), so they change only with the owner.
+ * It goes out only with an Ask: no tool text, skill or `--help` carries it.
+ */
+export const INBOX_DECISION_ASK_BLOCK = [
+  INBOX_DECISION_ASK_OPEN,
+  "The person asked this from Decision data in the Inbox. Answer from what the Inbox has stored, in a reply to this thread:",
+  "- Search with all_projects, more than once, with other words if the first find nothing. Then read each thread that matches: the answer alone does not say why.",
+  "- Say what was asked, the choices, what they chose and when, their own words, and the reasoning in the thread. Give the thread's link.",
+  "- A decision can be made in a plain reply, or changed later in the same thread or in another one. Give the newest and say what it changed from.",
+  "- Say who decided: a recommendation they took, a choice they made, or something the agent did after they said nothing.",
+  "- If it was asked but never decided, say that. If it is not stored, write \"I can't tell from what's stored\" and what you did find. A deleted thread cannot be read. Do not guess a reason.",
+  "- If you can't tell which decision they mean, ask them. Do not pick one for them.",
+  INBOX_DECISION_ASK_CLOSE,
+].join("\n");
+
 export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   "claude-code": "Claude Code",
   claude: "Claude Code",
@@ -338,11 +359,13 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   qwen: "Qwen Code",
   dsh: "DeepSeek Harness",
   t3: "T3 Code",
+  cline: "Cline",
 };
 
 /**
  * The agent hosts a person's reply wakes as a new turn by itself: Claude Code,
- * Pi, OpenCode 2 and DeepSeek Harness through Plannotator's own connection
+ * Pi, OpenCode 2, DeepSeek Harness and Cline (its plugin: CLI, hub, Kanban,
+ * desktop app, VS Code's new bundle) through Plannotator's own connection
  * (OpenCode 1 has the tool but no wake), and Codex through MCP alone, where the Inbox puts the
  * reply into the Codex thread with `codex queue` (Codex CLI
  * INBOX_CODEX_QUEUE_MIN_VERSION or later; packages/server/inbox-codex-wake.ts),
@@ -354,7 +377,7 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
  * (packages/server/inbox-t3-wake.ts).
  * The one list: wording that names which agents a reply wakes reads it.
  */
-export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "codex", "qwen", "t3"] as const;
+export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "cline", "codex", "qwen", "t3"] as const;
 
 /** Of INBOX_WAKING_HOSTS, the ones an MCP connection alone wakes (no Plannotator plugin): Codex, Qwen Code and T3 Code. */
 export const INBOX_MCP_WAKING_HOSTS: readonly string[] = ["codex", "qwen", "t3"];
@@ -643,6 +666,12 @@ export interface InboxMessage {
    * other message.
    */
   board_request?: true;
+  /**
+   * On the root of a thread the person started from Settings -> Decision data's Ask. The body stays as typed; what
+   * the agent receives for this message (the delivered turn, read_thread) carries `INBOX_DECISION_ASK_BLOCK` after it.
+   * Absent on every other message.
+   */
+  decision_ask?: true;
   /** On a person's reply sent from full screen's floating box: the file on screen. Rendered for the agent at read time; the body never holds it. */
   viewing?: InboxReplyViewing;
   /**
@@ -703,6 +732,12 @@ export interface InboxMessage {
    * tag) and no longer moves the thread. Absent on every other message.
    */
   handoff?: InboxHandoff | null;
+  /**
+   * A person's reply whose `to` took the place of a session that had ended (the recipient pill, or Send to another
+   * session). Until an agent writes again the person's next reply follows its `to`. Set only by the server, which
+   * checks the session really ended; a reply aimed elsewhere while the asker is live does not carry it.
+   */
+  took_over?: boolean;
 }
 
 /** A hand-off a person's reply carries (`InboxMessage.handoff`). */
@@ -714,7 +749,7 @@ export interface InboxHandoff {
   at: string;
   /** The Undo window passed: the new owner and the former one are handed it. */
   settled_at?: string | null;
-  /** Taken back inside the Undo window: the reply went as an Ask instead. */
+  /** Taken back inside the Undo window (the reply went as an Ask instead), or moved back to the former owner later. */
   undone_at?: string | null;
 }
 
@@ -915,10 +950,11 @@ export interface InboxAddressee {
 
 /**
  * Launch (start an agent from compose): the agents the Inbox can start a
- * session of, one per line. PR 1: Claude Code only.
+ * session of, one per line: Claude Code (`claude --bg`), Pi (`pi --mode rpc`, owned by the Inbox).
  */
 export type InboxLaunchAgent =
-  | "claude-code";
+  | "claude-code"
+  | "pi";
 
 /** Why a launch did not start (`InboxLaunchRecord.error`): `untrusted` folder, the CLI `missing`, or anything else. */
 export interface InboxLaunchError {
@@ -939,6 +975,8 @@ export interface InboxLaunchRecord {
   agent: InboxLaunchAgent;
   /** The host's own short id (`claude attach <ref>`); null until it started. */
   session_ref: string | null;
+  /** The session it started as, which the root's `to` stops naming once the root moves. Absent until it started, and on an older launch (`inboxLaunchedSession`). */
+  session?: string;
   /** The folder it runs in: the project root, or the scratch folder the Inbox made (its real path). */
   folder: string;
   /** A new scratch folder (`<scratch root>/<slug>`): Delete purges and removes it. Never a project folder. */
@@ -962,6 +1000,14 @@ export interface InboxLaunchRecord {
   error?: InboxLaunchError | null;
   /** The ⋯ menu's Delete removed the session and its files; the thread stays, with no run line. */
   deleted_at?: string;
+  /** Started from a linked machine's window (remote launch): which one. Where the click came from, never a credential. Absent: this computer. */
+  from?: InboxLaunchFrom;
+}
+
+/** The linked machine a launch was started from: its Inbox id (`ibx_…`) and its name as this Inbox knows it. */
+export interface InboxLaunchFrom {
+  machine: string;
+  name: string;
 }
 
 /** The run line's state (`packages/core/inbox-run-line.ts`). Absent: no line (the agent is resting). */
@@ -987,6 +1033,8 @@ export interface InboxRun {
   untrusted: boolean;
   /** With `untrusted`: the folder is the home folder, which is never trusted (the how-to says to start inside it). */
   home_folder?: true;
+  /** With `untrusted`: trust here would cover home (a repo rooted there) or the folder is `/`; the how-to says to start in a project with its own repo. Wins over `home_folder`, which home in such a repo carries too, for a window that predates this. */
+  trust_covers_home?: true;
   /** With `untrusted`, for the machine's owner when the host can do it: Trust folder, and what would run once trusted. */
   trust?: { warning: string | null };
   /** `claude attach <ref>` from the folder, for Copy; null before the session exists. */
@@ -1456,6 +1504,11 @@ export interface InboxListRow extends InboxThreadSummary {
   thread_name: string | null;
   section: InboxSectionId;
   /**
+   * The session this thread would reach has ended, as the thread's own note and the delivery line know it (only a
+   * host that can tell: a waking connection, not heard from past the grace). Never in Quiet. Absent otherwise.
+   */
+  session_ended?: boolean;
+  /**
    * Waiting on the person or new to them: drawn bold. Not for a row in New only
    * for the person's own unsent words or comments (`unsent`).
    */
@@ -1690,6 +1743,8 @@ export interface InboxThread {
    * the owner's direction, "a teammate's PR shows its diff with no verdict". Absent otherwise.
    */
   pull_theirs?: true;
+  /** A New review on local changes started this thread: its first message is the box's words, not the person's own. */
+  review_started?: true;
   /**
    * The window's read only, with Code review on: the pull requests the person handed to this thread (their list
    * keys). Its review can be posted to one of them on GitHub/GitLab (`POST /api/inbox/pulls/review`). Absent otherwise.
@@ -1753,6 +1808,15 @@ export interface InboxHealth {
   inbox_id?: string;
   /** The machine-link protocol this Inbox speaks (additive; absent: it cannot link). */
   machine_links?: number;
+  /** Remote launch: 1 while a linked machine may start agents here, 0 while launch is off. Absent from an older Inbox. */
+  launch_from_machines?: number;
+  /**
+   * The page honours `--pn-window-controls-width` and `-height` on `:root`, for
+   * a desktop host that draws the window's buttons over it, and from 2 names
+   * the line they go on in `--pn-window-controls-center-y` (additive; absent
+   * from an older Inbox).
+   */
+  window_controls?: number;
 }
 
 /** What an Inbox window reports about its browser's notification permission for its own origin. */
@@ -1880,18 +1944,51 @@ export function isInboxTextSize(value: unknown): value is InboxTextSize {
  * set goes wherever they're using the app"). GET answers null until a window
  * first saves it.
  */
-export const INBOX_ROWS_OPTIONS = ["highlight", "compact", "hideAgents", "smallNames", "hideProject", "hidePreview", "roomy", "unreadDot", "previewTwo", "relativeTime", "titleFirst"] as const;
+export const INBOX_ROWS_OPTIONS = [
+  "highlight",
+  "compact",
+  "hideAgents",
+  "smallNames",
+  "hideProject",
+  "hidePreview",
+  "roomy",
+  "unreadDot",
+  "previewTwo",
+  "relativeTime",
+  "titleFirst",
+  // Letter marks (approval "inbox-letter-marks", 2026-11-07), all off by default. Show → Letter marks is the pair
+  // `marksThreads` / `marksProjects` (Off, Threads, Projects, Both). Look → Mark style is Avatar unless `markInline`
+  // or `markDot` is on. Show's two picture switches: `repoLogo` (Logo from the repo) and `githubPictures`.
+  "marksThreads",
+  "marksProjects",
+  "markInline",
+  "markDot",
+  "repoLogo",
+  "githubPictures",
+] as const;
 export type InboxRowsOption = (typeof INBOX_ROWS_OPTIONS)[number];
 
 /**
  * The options' rivals, never on together: Compact wins over Roomy, no preview over two lines, and Dot is Bold with
  * a dot (`unreadDot` brings `smallNames`). A look in any other shape is read as this one.
+ *
+ * Letter marks: Inline wins over Dot. A mark style counts only while some marks show, and the picture switches only
+ * while project marks show, so with marks off the look holds none of them (turned on again, marks start as Avatar).
  */
 export function inboxRowsCanonical(rows: readonly InboxRowsOption[]): InboxRowsOption[] {
   const on = new Set(rows);
   if (on.has("compact")) on.delete("roomy");
   if (on.has("hidePreview")) on.delete("previewTwo");
   if (on.has("unreadDot")) on.add("smallNames");
+  if (on.has("markInline")) on.delete("markDot");
+  if (!on.has("marksThreads") && !on.has("marksProjects")) {
+    on.delete("markInline");
+    on.delete("markDot");
+  }
+  if (!on.has("marksProjects")) {
+    on.delete("repoLogo");
+    on.delete("githubPictures");
+  }
   return INBOX_ROWS_OPTIONS.filter((name) => on.has(name));
 }
 
@@ -1908,6 +2005,31 @@ export function inboxRowsList(value: unknown): InboxRowsOption[] | null {
 export function inboxRowsRead(value: unknown): InboxRowsOption[] | null {
   if (!Array.isArray(value)) return null;
   return inboxRowsCanonical(INBOX_ROWS_OPTIONS.filter((name) => value.includes(name)));
+}
+
+/**
+ * The look for someone who chose none: smaller thread names on, every other option off (the owner, 2026-11-05: "I
+ * feel like we should make it the default"). Before that, every option was off.
+ */
+export const INBOX_ROWS_DEFAULT: readonly InboxRowsOption[] = ["smallNames"];
+
+/**
+ * The defaults a look is saved under (config.json `inboxRowsDefaults`): 2 since smaller thread names are on by
+ * default. Every save writes it beside `inboxRows`.
+ */
+export const INBOX_ROWS_DEFAULTS_VERSION = 2;
+
+/**
+ * A kept look as the windows read it. One saved before the defaults changed (`savedUnder` unset) that is the old
+ * defaults, every option off, was never a choice (a window saves the look whenever it is touched, Balanced
+ * included): it is today's defaults, so the person gets the smaller names like someone who never saved one. Any
+ * other old look is the person's own and stays as it is. A look saved since then (`savedUnder` 2) is read as is, so
+ * "every option off" chosen today stays off.
+ */
+export function inboxRowsSaved(rows: InboxRowsOption[] | null, savedUnder: unknown): InboxRowsOption[] | null {
+  const current = typeof savedUnder === "number" && savedUnder >= INBOX_ROWS_DEFAULTS_VERSION;
+  if (rows && rows.length === 0 && !current) return [...INBOX_ROWS_DEFAULT];
+  return rows;
 }
 
 /**
@@ -2145,6 +2267,42 @@ export type InboxAccountsRead =
  */
 export type InboxMachineAccountsRead = InboxAccountsRead | { state: "offline" } | { state: "needs_update" } | { state: "unreachable" };
 
+/**
+ * Whether Settings → Accounts switches logins. Off until switching is tried
+ * with the owner on two real logins (approval "accounts-page", 2026-11-06):
+ * while off, no row is a switch and the Inbox has no
+ * `POST /api/inbox/accounts/switch` (404 `not_found`, nothing runs). The page
+ * and the server both read this one constant; it is no setting.
+ */
+export const INBOX_ACCOUNT_SWITCHING: boolean = false;
+
+/**
+ * `POST /api/inbox/accounts/switch`: the account a person picked, as the window
+ * showed it. `number` is `cswap`'s on this machine; the address, organization
+ * and alias are only matched against a new read before the switch, so a list
+ * that changed since (`cswap swap`, `cswap remove`) switches nothing. An API
+ * key has no address: its alias is what tells it from another.
+ */
+export interface InboxAccountSwitchTarget {
+  number: number;
+  email: string | null;
+  organizationName: string | null;
+  alias: string | null;
+}
+
+/**
+ * Why a switch did not happen, or may not have: a read's failure, or
+ * `changed`, the list no longer has that login under that number (nothing
+ * ran); `renumbered`, it moved between that read and the switch, which went to
+ * another login (the next read shows which); `busy`, another switch is going.
+ * `timed_out` is the person's wait, not the run's: the switch goes on, and the
+ * next read says how it ended.
+ */
+export type InboxAccountSwitchFailure = InboxAccountsFailure | "changed" | "renumbered" | "busy";
+
+/** The switch's answer. No address and no `cswap` words: `number` is the account in use after it. */
+export type InboxAccountSwitch = { state: "switched"; number: number } | { state: "failed"; reason: InboxAccountSwitchFailure } | { state: "not_installed" };
+
 export interface InboxAgentsModel {
   agents: InboxAgentRow[];
   last_report: (InboxConnectReport & { seen?: boolean }) | null;
@@ -2172,7 +2330,7 @@ export interface InboxAgentsModel {
 }
 
 /** The hosts that connect through Plannotator's own plugin or extension. */
-export type InboxToolHostId = "claude-code" | "pi" | "opencode" | "dsh";
+export type InboxToolHostId = "claude-code" | "pi" | "opencode" | "dsh" | "cline";
 
 /**
  * The runtime a polling session runs in, as the window names its fix: Claude
@@ -2258,7 +2416,7 @@ export interface InboxHostSessions {
 }
 
 /** The hosts whose every request carries the `plannotator_inbox` tool in full once it is on (Claude Code defers it behind tool search). */
-export type InboxToolCostHost = "pi" | "opencode" | "dsh";
+export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline";
 
 /**
  * What turning the Inbox tool on adds to every request on Pi and OpenCode 2,
@@ -2427,6 +2585,8 @@ export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number
   // DeepSeek Harness sends the same JSON Schema with every request; not measured on a real DSH (tests never run
   // it), so Pi's measurement stands in until one is.
   dsh: INBOX_TOOL_COST_NOW,
+  // Cline sends every tool's JSON Schema with each request too; not measured on a real Cline, so Pi's stands in.
+  cline: INBOX_TOOL_COST_NOW,
 };
 
 /** "about 9 KB, roughly 2,500 tokens" for a host's measured cost. */
@@ -2463,6 +2623,10 @@ export interface InboxUpload {
   media_type?: string;
   width?: number;
   height?: number;
+  /** A film's length, when the file came from a message that knew it (a reuse, inboxUploadFromAttachment). */
+  duration_ms?: number;
+  /** The listing's stat name for a big changed file this was added from, so the button knows its tile after a reload. */
+  shown_sha256?: string;
 }
 
 /** The session a draft was written for, with enough to name it after it has ended. */
@@ -2653,6 +2817,13 @@ export interface InboxLaunchUntrusted {
 }
 
 /**
+ * Why an agent can't start on a machine: its CLI is not there (`missing`), older than launch needs (`too_old`),
+ * Plannotator's plugin is not on (`plugin_off`) or its Inbox tool is off (`tool_off`), or it is not signed in
+ * (`signed_out`). `unknown`: the check itself failed.
+ */
+export type InboxLaunchNotReady = "missing" | "too_old" | "plugin_off" | "tool_off" | "signed_out" | "unknown";
+
+/**
  * Compose's launch block (`GET /api/inbox/sessions` `launch`, only while
  * `inboxLaunch.enabled`): the agents To offers to start (only those
  * available: no grey rows), and the projects the folder menu lists, the most
@@ -2666,6 +2837,12 @@ export interface InboxComposeLaunch {
    */
   agents: { agent: InboxLaunchAgent; name: string; scratch_trusted?: boolean; untrusted?: Record<string, InboxLaunchUntrusted> }[];
   projects: { id: string; name: string; root: string; exists: boolean }[];
+  /**
+   * Additive (remote launch): the agents this machine has a host for but can't start now, and why, so a linked
+   * machine's window can say so with this machine's name (`inboxLaunchNotReadyWords`). `over_ssh`: this Inbox was
+   * started over SSH, which is why Claude Code reads as signed out (macOS keeps its login locked for SSH).
+   */
+  not_ready?: { agent: InboxLaunchAgent; name: string; code: InboxLaunchNotReady; over_ssh?: true }[];
   /** The folder menu's "New scratch folder": the root new scratch folders go in (Settings → Agents). Absent from an older Inbox. */
   scratch?: { root: string };
 }
@@ -2822,17 +2999,24 @@ export interface InboxVoiceStatus {
   plan: string | null;
 }
 
-/** Why a clip came back with no words: the `code` of a `POST /api/inbox/voice/transcribe` failure. */
-export type InboxVoiceFailure =
-  | "voice_off"
-  | "voice_not_ready"
-  | "voice_bad_clip"
-  | "voice_expired"
-  | "voice_refused"
-  | "voice_key_refused"
-  | "voice_unreachable"
-  | "voice_codex_failed"
-  | "voice_empty";
+/**
+ * Every `code` a `POST /api/inbox/voice/transcribe` failure can carry: why a clip came back with no words. The server
+ * sends only these; a page must still take a code it does not know (a newer Inbox may add one) as a generic failure.
+ */
+export const INBOX_VOICE_FAILURES = [
+  "voice_off",
+  "voice_not_ready",
+  "voice_bad_clip",
+  "voice_expired",
+  "voice_refused",
+  "voice_key_refused",
+  "voice_unreachable",
+  "voice_codex_failed",
+  "voice_empty",
+] as const;
+
+/** Why a clip came back with no words: one of `INBOX_VOICE_FAILURES`. */
+export type InboxVoiceFailure = (typeof INBOX_VOICE_FAILURES)[number];
 
 /** The largest clip the Inbox takes: a 2:00 clip at 24 kHz, 16-bit mono is 5.76 MB. */
 export const INBOX_VOICE_MAX_CLIP_BYTES = 6 * 1024 * 1024;

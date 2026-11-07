@@ -143,9 +143,9 @@ function PinnedMenuItems({ subject, first, last, onAction }: { subject: string; 
       <div className="ib-pm-title" dir="auto" aria-hidden="true">
         {subject}
       </div>
-      <Menu.Item className="ib-pmi" label="Unpin" onClick={() => onAction('unpin')} data-pin-action="unpin">
-        <Icon name="pinOff" size={15} />
-        Unpin
+      <Menu.Item className="ib-pmi" label="Unstar" onClick={() => onAction('unpin')} data-pin-action="unpin">
+        <Icon name="star" size={15} className="ib-star-on" />
+        Unstar
       </Menu.Item>
       <Menu.Item className="ib-pmi" label="Move up" disabled={first} onClick={() => onAction('up')} data-pin-action="up">
         <Icon name="arrowUp" size={15} />

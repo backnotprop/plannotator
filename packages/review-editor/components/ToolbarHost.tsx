@@ -174,6 +174,7 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
       <SelectionChooser
         toolbarRef={toolbar.toolbarRef}
         position={toolbar.toolbarState.position}
+        range={toolbar.toolbarState.range}
         // A picture is of the code as it is now: Show me only when both ends are on the new side (added or unchanged lines).
         actions={
           toolbar.toolbarState.range.side === 'deletions' || (toolbar.toolbarState.range.endSide ?? toolbar.toolbarState.range.side) === 'deletions'

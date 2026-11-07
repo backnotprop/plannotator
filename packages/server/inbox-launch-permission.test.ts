@@ -92,6 +92,8 @@ describe("the permission route", () => {
     expect(question.reply_to).toBe(root.id);
     expect(question.author).toEqual({ kind: "agent", host: "claude-code", session: `perm:${SESSION}`, name: "Claude Code" });
     expect(question.wakes).toBeUndefined();
+    // The prompt is not its session writing: the thread is still that session's.
+    expect(store.threadOwner(root.id)?.session).toBe(SESSION);
     expect(store.questionsOf(question.id)[0]!.choices.map((c) => c.label)).toEqual(["Allow once", "Allow `bun run` for this session", "Deny", "Allow and switch to Auto mode", "Approve in Terminal"]);
     // The same request again (the hook's first call answered, but the answer was lost): the same question.
     const again = await call({ key: KEY, request_id: "req-00000001", event: EVENT });

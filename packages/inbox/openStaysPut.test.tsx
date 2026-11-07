@@ -27,6 +27,7 @@ import type { InboxListSection } from '@plannotator/core/inbox-types';
 import { MARK_READ_LOOK_WAIT_MS } from './markRead';
 import { PHONE_QUERY } from './phone';
 import { rowInSlot, SETTLE_BEAT_MS, SHOW_LIT_AFTER_SLIDE_MS, SHOW_LIT_MS } from './settle';
+import { resetListGroupsForTests } from './listGroups';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
@@ -163,6 +164,8 @@ afterEach(() => {
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
+  // Which groups are closed is kept for the page (listGroups.ts): each test starts with Quiet and Snoozed closed.
+  resetListGroupsForTests();
   root = null;
   host = null;
   pokeStream = null;
@@ -800,7 +803,7 @@ test.skipIf(!hasDom)('pinning the open thread leaves the held row order and the 
   const held = order(el);
   const notice = el.querySelector('[data-inbox-notice]')!.textContent;
   expect(notice).toContain('1 new in');
-  // Pin thread from the header's ⋯ menu (Base UI opens on the pointer's press).
+  // Star thread from the header's ⋯ menu (Base UI opens on the pointer's press).
   const more = el.querySelector<HTMLElement>('[data-thread-more]')!;
   await act(async () => {
     more.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
@@ -809,7 +812,7 @@ test.skipIf(!hasDom)('pinning the open thread leaves the held row order and the 
     more.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
     more.click();
   });
-  await until(() => document.querySelector('[data-thread-pin-item]') !== null, 'the Pin thread item');
+  await until(() => document.querySelector('[data-thread-pin-item]') !== null, 'the Star thread item');
   await act(async () => document.querySelector<HTMLElement>('[data-thread-pin-item]')!.click());
   await until(() => el.querySelector(`[data-pinned-row="${first}"]`) !== null, 'the pinned row');
   await wait(150);

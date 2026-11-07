@@ -4,7 +4,7 @@
  * (`RailTree`); All files the repository at the head the patch on screen was read at, from the Inbox's
  * `/api/inbox/pulls/repo-files`, drawn by the review app's own tree (`guide/PullRepoParts.tsx`).
  */
-import type { TreeScope } from '@plannotator/review-editor/hooks/useTreeScope';
+import type { TreeScope } from '@plannotator/ui/hooks/useTreeScope';
 import { inboxUrl } from '../inboxUrl';
 
 const FOCUS =

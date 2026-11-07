@@ -28,6 +28,7 @@ import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import type { InboxAnnotationRecord, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import type { CodeAnnotation } from '@plannotator/ui/types';
+import type { ShapeReviewAt } from '@plannotator/ui/components/shape/types';
 import { InboxApiError, inboxApi } from '../api';
 import { guideCommentOf } from '../attachments';
 import { agentName, whenTime, plural } from '../format';
@@ -43,12 +44,17 @@ const GuideReader = GuideReaderPart.Part;
 export interface GuidePaneProps {
   thread: InboxThread;
   message: InboxMessageWire;
+  /** A tailnet guest's page: the expand arrows' route refuses it, so nothing is asked. */
+  guest?: boolean;
   /** Back to the thread. */
   onBack: () => void;
   /** Close the guide and the thread. */
   onClose: () => void;
   /** Settings → Capabilities → Code review: each diff header offers Open in. */
   codeReview?: boolean;
+  /** Where to open (a Shape board's link): a file at a line, or a chapter's first file. Then `onLanded`. */
+  at?: ShapeReviewAt | null;
+  onLanded?: () => void;
 }
 
 /**
@@ -183,11 +189,28 @@ export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
     [readOnly, comments, selectedId, save, remove, scrollTarget, message.id],
   );
 
-  return { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, scrollTarget, readOnly, changeReviewed, save, remove, edit, showComment, readerComments, localWrites };
+  // The expand arrows' whole files, as the guide's patch names them.
+  const fileContents = useCallback((path: string, signal: AbortSignal) => inboxApi.guideFile(message.id, path, signal), [message.id]);
+  return { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, scrollTarget, readOnly, changeReviewed, save, remove, edit, showComment, readerComments, localWrites, fileContents };
 }
 
-export function GuidePane({ thread, message, onBack, onClose, codeReview = false }: GuidePaneProps) {
-  const { snapshot, error, reviewed, saveError, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments } = useGuideState(thread, message);
+export function GuidePane({ thread, message, onBack, onClose, guest = false, codeReview = false, at = null, onLanded }: GuidePaneProps) {
+  const { snapshot, error, reviewed, saveError, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = useGuideState(thread, message);
+  // A place to open at (a Shape board's link): the file's card, its lines painted; a chapter, at its first file.
+  const [reveal, setReveal] = useState<{ path: string; token: number } | null>(null);
+  const [highlight, setHighlight] = useState<{ path: string; start: number; end: number; token: number } | null>(null);
+  const landed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!at || !snapshot) return;
+    const key = JSON.stringify(at);
+    if (landed.current === key) return;
+    landed.current = key;
+    const path = at.path ?? (at.step ? snapshot.guide.sections[at.step - 1]?.diffs[0]?.file : undefined);
+    if (path) setReveal((was) => ({ path, token: (was?.token ?? 0) + 1 }));
+    if (at.path && at.line) setHighlight((was) => ({ path: at.path!, start: at.line!, end: at.line!, token: (was?.token ?? 0) + 1 }));
+    onLanded?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [at, snapshot]);
   const fileOpenIn = useCallback((path: string) => <OpenInFile scope={{ thread: thread.thread_id, message: message.id, from: 'root' }} path={path} />, [thread.thread_id, message.id]);
   const [paneRef, folded] = useNarrowerThan<HTMLElement>(GUIDE_FOLD_PANEL_BELOW, false);
   /** The folded panel, open over the guide. */
@@ -228,7 +251,7 @@ export function GuidePane({ thread, message, onBack, onClose, codeReview = false
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
+      className={`ib-viewer ib-wlayer${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
       aria-label="Guided review"
       data-guide-message={message.id}
     >
@@ -286,6 +309,9 @@ export function GuidePane({ thread, message, onBack, onClose, codeReview = false
                   onReviewedChange={changeReviewed}
                   comments={readerComments}
                   fileOpenIn={codeReview ? fileOpenIn : undefined}
+                  reveal={reveal}
+                  highlight={highlight}
+                  {...(guest ? {} : { fileContents })}
                   hostDiffControls
                   {...(collapseAll ? { collapseAll } : {})}
                 />
@@ -313,6 +339,7 @@ export function GuidePane({ thread, message, onBack, onClose, codeReview = false
             </div>
           )}
           <AnnotationPanel
+            title="Comments"
             emptyHint={readOnly ? undefined : 'Click a line number, drag across lines, or select code to comment'}
             isOpen
             // A folded panel draws as a sheet of its own (the panel's window-wide overlay below 768 px has no close here).

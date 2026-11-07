@@ -18,10 +18,10 @@ import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buil
 import { createRequestHostGuard } from "./request-host-guard";
 import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-guard";
-import { getRepoInfo } from "./repo";
+import { getSourceRepoInfo } from "./repo";
 import { createRefCards, refCardRouteResponse, refCardsTailnetAllowed, type RefRunner } from "./ref-cards";
 import type { Origin } from "@plannotator/shared/agents";
-import { handleImage, handleUpload, handleServerReady, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
+import { handleImage, handleStarAsk, handleUpload, handleServerReady, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, resolveAllowedDocPath, type FolderAnnotateHistory } from "./reference-handlers";
 import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
 import { getExtraMarkdownExtensions, isAnnotatableTextPath, MAX_ANNOTATABLE_FILE_BYTES, resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
@@ -793,8 +793,14 @@ export async function startAnnotateServer(
     bundlePaths,
   });
 
-  // Detect repo info (cached for this session)
-  const repoInfo = await getRepoInfo();
+  // Repo identity follows the annotated source when it is on disk and in a repo.
+  // A source outside any repo and rootless sessions (URLs, agent messages, live
+  // apps) keep the launch directory.
+  const repoInfoCwd =
+    mode === "annotate-folder" && folderPath
+      ? folderPath
+      : bundleRoot ?? (draftFilePath ? dirname(draftFilePath) : undefined);
+  const repoInfo = await getSourceRepoInfo(repoInfoCwd);
 
   // Decision promise
   let resolveDecision: (result: {
@@ -1239,6 +1245,11 @@ export async function startAnnotateServer(
             } catch {
               return Response.json({ error: "Invalid request" }, { status: 400 });
             }
+          }
+
+          // The "Star the repo" ask on the done screen (packages/shared/star-ask.ts).
+          if (url.pathname.startsWith("/api/star-ask/")) {
+            return (await handleStarAsk(req, url, "annotate", { remote: isRemote })) ?? handleApiNotFound(url.pathname);
           }
 
           // API: Serve images (local paths or temp uploads)

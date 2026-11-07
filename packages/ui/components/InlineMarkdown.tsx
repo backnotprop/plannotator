@@ -159,6 +159,30 @@ const CodeFileLink: React.FC<{
 };
 
 const DANGEROUS_PROTOCOL = /^\s*(javascript|data|vbscript|file)\s*:/i;
+/**
+ * A code span at the start of `text`, as CommonMark reads one: a run of N
+ * backticks closed by the next run of exactly N, so a span can hold shorter
+ * runs (``use `x` here``). One space comes off each side when both sides have
+ * one and the content is not all spaces, so `` `x` `` shows `x` in backticks.
+ * Null when no run of the same length closes it.
+ */
+export function matchCodeSpan(text: string): { content: string; length: number } | null {
+  const open = /^`+/.exec(text);
+  if (!open) return null;
+  const width = open[0].length;
+  const runs = /`+/g;
+  runs.lastIndex = width;
+  for (let run = runs.exec(text); run; run = runs.exec(text)) {
+    if (run[0].length !== width) continue;
+    let content = text.slice(width, run.index);
+    if (content.length > 1 && content[0] === ' ' && content[content.length - 1] === ' ' && content.trim() !== '') {
+      content = content.slice(1, -1);
+    }
+    return content ? { content, length: run.index + width } : null;
+  }
+  return null;
+}
+
 function sanitizeLinkUrl(url: string): string | null {
   if (DANGEROUS_PROTOCOL.test(url)) return null;
   return url;
@@ -476,7 +500,13 @@ export const InlineMarkdown: React.FC<{
   githubRepo?: string;
   /** Host of that repo's git remote; picks the forge refs link to. Absent means github.com. */
   repoHost?: string;
-}> = ({ text, onOpenLinkedDoc, resolveLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo, repoHost }) => {
+  /**
+   * The text is a link's label: code, emphasis, strikethrough, escapes, math
+   * and images render, and nothing that is itself a link does, since a link
+   * cannot hold another.
+   */
+  linkLabel?: boolean;
+}> = ({ text, onOpenLinkedDoc, resolveLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo, repoHost, linkLabel = false }) => {
   const validation = useCodePathValidation();
   const resolveLocalLink = useLocalLinkResolver();
   const softLineBreaks = useContext(SoftLineBreaksContext);
@@ -572,7 +602,7 @@ export const InlineMarkdown: React.FC<{
     // renders the period outside the link. Closing brackets are kept when
     // they balance an earlier opener inside the URL (e.g. Wikipedia's
     // https://…/Function_(mathematics) keeps its trailing paren).
-    if (!/\w/.test(previousChar)) {
+    if (!linkLabel && !/\w/.test(previousChar)) {
       const bareMatch = remaining.match(/^https?:\/\/[^\s<>"']+/);
       if (bareMatch) {
         const url = trimUrlTail(bareMatch[0]);
@@ -600,7 +630,7 @@ export const InlineMarkdown: React.FC<{
     // project's forge host. Read before file-path detection, so
     // `vercel/next.js#1` is a ref, not a path (unless the viewer knows that
     // file, see crossRepoAccept); `docs/guide.md#2` stays a path.
-    const crossRepoRef = crossRepoProject ? matchCrossRepoRef(remaining, previousChar, crossRepoProject) : null;
+    const crossRepoRef = crossRepoProject && !linkLabel ? matchCrossRepoRef(remaining, previousChar, crossRepoProject) : null;
     if (crossRepoRef && crossRepoAccept(crossRepoRef)) {
       parts.push(
         crossRepoRef.href ? (
@@ -624,7 +654,7 @@ export const InlineMarkdown: React.FC<{
 
     // Autolinks: <https://url> or <email@domain.com>
     match = remaining.match(/^<(https?:\/\/[^>]+)>/);
-    if (match) {
+    if (match && !linkLabel) {
       const url = match[1];
       parts.push(
         <a
@@ -642,7 +672,7 @@ export const InlineMarkdown: React.FC<{
       continue;
     }
     match = remaining.match(/^<([^@>\s]+@[^>\s]+)>/);
-    if (match) {
+    if (match && !linkLabel) {
       const email = match[1];
       parts.push(
         <a
@@ -788,9 +818,18 @@ export const InlineMarkdown: React.FC<{
     }
 
     // Inline code: `code` — when the content is a code file path, render as clickable
-    match = remaining.match(/^`([^`]+)`/);
-    if (match) {
-      const codeContent = match[1];
+    const codeSpan = remaining[0] === '`' ? matchCodeSpan(remaining) : null;
+    if (remaining[0] === '`' && !codeSpan) {
+      // A run with no closing run of the same length is literal, all of it: its
+      // tail must not open a shorter span with a later backtick.
+      const run = remaining.match(/^`+/)![0];
+      parts.push(run);
+      remaining = remaining.slice(run.length);
+      previousChar = '`';
+      continue;
+    }
+    if (codeSpan) {
+      const codeContent = codeSpan.content;
       if (isCodeFilePath(codeContent) && onOpenCodeFile) {
         const cleanPath = codeContent.replace(/#.*$/, '');
         parts.push(
@@ -811,8 +850,8 @@ export const InlineMarkdown: React.FC<{
           </CodeSpan>,
         );
       }
-      remaining = remaining.slice(match[0].length);
-      previousChar = match[0][match[0].length - 1] || previousChar;
+      remaining = remaining.slice(codeSpan.length);
+      previousChar = '`';
       continue;
     }
 
@@ -855,7 +894,7 @@ export const InlineMarkdown: React.FC<{
     // Issue / PR reference: #123 — only at word boundary, digits only.
     // Hex-swatch branch above already consumed #fff / #123abc etc. (and digit-only
     // #123456 / #12345678 unless the host opted in), so a bare #\d+ here is an issue ref.
-    if (!/\w/.test(previousChar)) {
+    if (!linkLabel && !/\w/.test(previousChar)) {
       match = remaining.match(/^#(\d+)(?!\w)/);
       if (match) {
         const num = match[1];
@@ -883,7 +922,7 @@ export const InlineMarkdown: React.FC<{
     }
 
     // @mention — only at word boundary. GitHub-style handle pattern.
-    if (!/\w/.test(previousChar)) {
+    if (!linkLabel && !/\w/.test(previousChar)) {
       match = remaining.match(/^@([a-zA-Z][a-zA-Z0-9_-]{0,38})(?!\w)/);
       if (match) {
         const handle = match[1];
@@ -912,7 +951,7 @@ export const InlineMarkdown: React.FC<{
 
     // Wikilinks: [[filename]] or [[filename|display text]]
     match = remaining.match(/^\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/);
-    if (match) {
+    if (match && !linkLabel) {
       const target = match[1].trim();
       const storedLabel = match[2]?.trim();
       // Host resolution gets the RAW target (pre-`.md` normalization): host
@@ -1033,7 +1072,7 @@ export const InlineMarkdown: React.FC<{
     // /Function_(mathematics)). Plain `[^)]+` would truncate at the first
     // inner close-paren, so we scan the destination manually tracking depth.
     const linkParsed = (() => {
-      if (remaining[0] !== '[') return null;
+      if (linkLabel || remaining[0] !== '[') return null;
       let i = 1;
       let depth = 1;
       while (i < remaining.length && depth > 0) {
@@ -1064,11 +1103,13 @@ export const InlineMarkdown: React.FC<{
     })();
     if (linkParsed) {
       const { linkText, linkUrl, consumed } = linkParsed;
+      // Its label is markdown too (`` [`README.md`](…) ``), drawn without links.
+      const label = <InlineMarkdown text={linkText} linkLabel imageBaseDir={imageBaseDir} githubRepo={githubRepo} repoHost={repoHost} />;
       const safeLinkUrl = sanitizeLinkUrl(linkUrl);
 
       // Dangerous protocol stripped — render as plain text, not a dead link
       if (safeLinkUrl === null) {
-        parts.push(<span key={key++}>{linkText}</span>);
+        parts.push(<span key={key++}>{label}</span>);
         remaining = remaining.slice(consumed);
         previousChar = ')';
         continue;
@@ -1108,7 +1149,7 @@ export const InlineMarkdown: React.FC<{
             className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer"
             data-local-link="open"
           >
-            {linkText}
+            {label}
             <svg
               className="w-3 h-3 opacity-50 flex-shrink-0"
               fill="none"
@@ -1127,12 +1168,15 @@ export const InlineMarkdown: React.FC<{
           </HostTitle>,
         );
       } else if (localLink?.kind === 'unavailable') {
+        const inert = (
+          <span className="text-muted-foreground underline decoration-dotted underline-offset-2" data-local-link="unavailable">
+            {label}
+          </span>
+        );
         parts.push(
-          <HostTitle key={key++} title={localLink.title}>
-            <span className="text-muted-foreground underline decoration-dotted underline-offset-2" data-local-link="unavailable">
-              {linkText}
-            </span>
-          </HostTitle>,
+          localLink.wrap
+            ? <React.Fragment key={key++}>{localLink.wrap(inert)}</React.Fragment>
+            : <HostTitle key={key++} title={localLink.title}>{inert}</HostTitle>,
         );
         if (localLink.after) parts.push(<React.Fragment key={key++}>{localLink.after}</React.Fragment>);
       } else if (isInPageAnchor) {
@@ -1146,7 +1190,7 @@ export const InlineMarkdown: React.FC<{
             } : undefined}
             className="text-primary underline underline-offset-2 hover:text-primary/80"
           >
-            {linkText}
+            {label}
           </a>,
         );
       } else if (isLocalDoc && onOpenLinkedDoc) {
@@ -1161,7 +1205,7 @@ export const InlineMarkdown: React.FC<{
             className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer"
             title={`Open: ${linkUrl}`}
           >
-            {linkText}
+            {label}
             <svg
               className="w-3 h-3 opacity-50 flex-shrink-0"
               fill="none"
@@ -1190,7 +1234,7 @@ export const InlineMarkdown: React.FC<{
             className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer"
             title={`View: ${linkUrl}`}
           >
-            {linkText}
+            {label}
             <CodeFileIcon />
           </a>,
         );
@@ -1202,7 +1246,7 @@ export const InlineMarkdown: React.FC<{
             href={safeLinkUrl}
             className="text-primary underline underline-offset-2 hover:text-primary/80"
           >
-            {linkText}
+            {label}
           </a>,
         );
       } else {
@@ -1214,7 +1258,7 @@ export const InlineMarkdown: React.FC<{
             rel="noopener noreferrer"
             className="text-primary underline underline-offset-2 hover:text-primary/80"
           >
-            {linkText}
+            {label}
           </a>,
         );
       }
@@ -1271,18 +1315,20 @@ export const InlineMarkdown: React.FC<{
     // Same for an owner/repo#123 ref: `#` (and `_` in a name) ends a chunk, so
     // stop before the ref and let the cross-repo branch above take it whole.
     // A ref inside a URL never splits it: the URL starts first and wins.
-    const urlAt = bareUrlRunningPast(remaining, chunkEnd);
-    const refAt = crossRepoProject ? findCrossRepoRef(remaining, urlAt === -1 ? chunkEnd : urlAt, crossRepoProject, crossRepoAccept) : -1;
+    const urlAt = linkLabel ? -1 : bareUrlRunningPast(remaining, chunkEnd);
+    const refAt = crossRepoProject && !linkLabel ? findCrossRepoRef(remaining, urlAt === -1 ? chunkEnd : urlAt, crossRepoProject, crossRepoAccept) : -1;
     const splitAt = refAt !== -1 ? refAt : urlAt;
     if (splitAt !== -1) {
       const before = remaining.slice(0, splitAt);
-      emitPlainTextWithBareUrls(before, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir);
+      if (linkLabel) parts.push(transformPlainText(before));
+      else emitPlainTextWithBareUrls(before, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir);
       previousChar = before[before.length - 1] || previousChar;
       remaining = remaining.slice(splitAt);
       continue;
     }
     const plainText = nextSpecial === -1 ? remaining : remaining.slice(0, nextSpecial + 1);
-    emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir);
+    if (linkLabel) parts.push(transformPlainText(plainText));
+    else emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir);
     previousChar = plainText[plainText.length - 1] || previousChar;
     if (nextSpecial === -1) {
       break;

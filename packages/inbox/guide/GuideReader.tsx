@@ -33,6 +33,9 @@ import type {
   ConventionalLabel,
   TokenAnnotationMeta,
 } from '@plannotator/ui/types';
+import { ReviewWorkerPoolProvider } from '@plannotator/review-editor/worker-pool';
+import { openedLinesQuote } from '../attachments';
+import { wholeFileReader, type KeptWholeFiles } from './wholeFileReader';
 import type { GuideReaderProps } from './types';
 import type ReaderShape from './reader-module';
 import { GuideHostProvider, GuideView, type GuideDiffRendererContext, type GuideDiffRendererProps, type GuideGlobalComments } from '@plannotator/guide-viewer';
@@ -43,7 +46,7 @@ import { parseDiffToFiles } from '@plannotator/guide-viewer/diffParser';
 import { engineLabel } from '@plannotator/guide-viewer/GuideViewer';
 import { AllFilesCodeView, type AllFilesCodeViewProps } from '@plannotator/review-editor/components/AllFilesCodeView';
 import type { DiffSelectionActions } from '@plannotator/review-editor/components/SelectionChooser';
-import { extractLinesFromPatch } from '@plannotator/review-editor/utils/patchParser';
+import { extractLinesFromPatch, isLineRangeInPatch } from '@plannotator/review-editor/utils/patchParser';
 import { useConfigValue } from '@plannotator/ui/config';
 import { getIdentity } from '@plannotator/ui/utils/identity';
 import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
@@ -101,6 +104,8 @@ export const GuideDiff: FC<
     /** The review's Viewed ticks (the header's Viewed control). Absent: none, as before. */
     viewedFiles?: Set<string>;
     onToggleViewed?: (filePath: string) => void;
+    /** Reads a file's whole text for the expand arrows. Absent: the diff shows as it came. */
+    fetchFileContent?: AllFilesCodeViewProps['fetchFileContent'];
     fileOpenIn?: (filePath: string) => ReactNode;
   }
 > = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, fileOpenIn, ...props }) => {
@@ -164,7 +169,19 @@ function allFilesGuide(snapshot: GuideSnapshot, files: readonly { path: string }
   };
 }
 
-export default function GuideReader({
+/**
+ * Highlighting runs off the page's thread, or a long file freezes it. The pool's three workers start with the first
+ * reader on screen and end with the last, so a page with no diff does not hold them.
+ */
+export default function GuideReader(props: GuideReaderProps) {
+  return (
+    <ReviewWorkerPoolProvider>
+      <Reader {...props} />
+    </ReviewWorkerPoolProvider>
+  );
+}
+
+function Reader({
   snapshot,
   reviewed,
   onReviewedChange,
@@ -180,12 +197,15 @@ export default function GuideReader({
   highlight = null,
   bare = false,
   controlsHost = null,
+  fileContents,
   threadHeading = false,
   hostDiffControls = false,
   collapseAll,
 }: GuideReaderProps) {
   const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
+  const wholeFiles = useRef<KeptWholeFiles>(new Map());
+  const fetchFileContent = useMemo<AllFilesCodeViewProps['fetchFileContent']>(() => (fileContents ? wholeFileReader(fileContents, wholeFiles.current) : undefined), [fileContents]);
   const walkthrough = useMemo<CodeGuideData>(
     () => ({
       title: snapshot.guide.title,
@@ -214,12 +234,31 @@ export default function GuideReader({
     [mode, ticks, onReviewedChange],
   );
 
-  // Line comments: the selection the toolbar opens on, as the review app keeps it (one, on the focused card).
+  // Line comments: the selection the toolbar opens on, as the review app keeps it (one), on the file it was made in:
+  // the next file taking focus has the same line numbers, but not these lines.
   const [pendingSelection, setPendingSelection] = useState<SelectedLineRange | null>(null);
+  const [selectionFile, setSelectionFile] = useState<string | null>(null);
+  const selectionSetters = useRef(new Map<string, (range: SelectedLineRange | null) => void>());
+  const selectionSetter = useCallback((path: string) => {
+    let set = selectionSetters.current.get(path);
+    if (!set) {
+      set = (range) => {
+        setSelectionFile(path);
+        setPendingSelection(range);
+      };
+      selectionSetters.current.set(path, set);
+    }
+    return set;
+  }, []);
   // A host's highlight (a picture's part opened its code): those lines are painted on that file's card, which takes focus.
   useEffect(() => {
-    if (!highlight) return;
+    if (!highlight) {
+      // The host took it back (a part landed where nothing may be painted).
+      setPendingSelection(null);
+      return;
+    }
     setFocusedFile(highlight.path);
+    setSelectionFile(highlight.path);
     setPendingSelection({ start: highlight.start, end: highlight.end, side: 'additions' });
   }, [highlight?.token]); // eslint-disable-line react-hooks/exhaustive-deps
   const commentsRef = useRef(comments);
@@ -260,7 +299,11 @@ export default function GuideReader({
       const side = range.side === 'additions' ? 'new' : 'old';
       const file = files.find((f) => f.path === filePath);
       // The lines as the person read them, quoted in the reply.
-      const selectedText = file ? extractLinesFromPatch(file.patch, lineStart, lineEnd, side) : '';
+      // On a line an expand arrow opened: no forge takes it inline, so a PR's review posts it in its main comment, the code quoted.
+      const outsideDiff = !!file && !isLineRangeInPatch(file.patch, lineStart, lineEnd, side);
+      const whole = wholeFiles.current.get(filePath);
+      const openedCode = outsideDiff && whole ? openedLinesQuote(whole.contents, side, lineStart, lineEnd) : '';
+      const selectedText = !outsideDiff && file ? extractLinesFromPatch(file.patch, lineStart, lineEnd, side) : '';
       wiring.onSave({
         id: newCommentId(),
         type,
@@ -274,6 +317,7 @@ export default function GuideReader({
         originalCode,
         ...(tokenMeta && { charStart: tokenMeta.charStart, charEnd: tokenMeta.charEnd, tokenText: tokenMeta.tokenText }),
         ...(selectedText && { selectedText }),
+        ...(outsideDiff && { outsideDiff: true, ...(openedCode && { anchorText: openedCode }) }),
         createdAt: Date.now(),
         ...signed(),
         conventionalLabel,
@@ -336,19 +380,24 @@ export default function GuideReader({
   // AllFilesCodeView compares Viewed sets by identity: a new Set only when the ticks change.
   const viewedFilesKey = viewed ? [...viewed.files].sort().join('\n') : null;
   const viewedSet = useMemo(() => (viewed ? new Set(viewed.files) : undefined), [viewedFilesKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  const renderSectionTab = useCallback((index: number) => (index === 0 ? <DiffStyleSwitch /> : null), []);
+  // The pull request page's flat review, whose bar holds its actions, draws the tab as two marks.
+  const renderSectionTab = useCallback((index: number) => (index === 0 ? <DiffStyleSwitch icons={!!controlsHost} /> : null), [controlsHost]);
 
   const getDiffRendererProps = useCallback(
-    ({ file, focused }: GuideDiffRendererContext): {
+    ({ file }: GuideDiffRendererContext): {
       comments?: GuideDiffComments;
       diffStyleOverride?: 'unified';
       viewedFiles?: Set<string>;
       onToggleViewed?: (filePath: string) => void;
+      fetchFileContent?: AllFilesCodeViewProps['fetchFileContent'];
       fileOpenIn?: (filePath: string) => ReactNode;
       flushFiles?: boolean;
+      headerKeepsFolder?: boolean;
     } => ({
-      ...(bare && { flushFiles: true }),
+      // The PR page: files flush, and a narrow header (a phone's) keeps the folder, so two files of one name read apart.
+      ...(bare && { flushFiles: true, headerKeepsFolder: true }),
       ...(phone && { diffStyleOverride: 'unified' as const }),
+      ...(fetchFileContent && { fetchFileContent }),
       ...(fileOpenIn ? { fileOpenIn } : {}),
       ...(viewedSet && viewed ? { viewedFiles: viewedSet, onToggleViewed: viewed.onToggle } : {}),
       ...(comments
@@ -357,9 +406,8 @@ export default function GuideReader({
               annotations,
               selectedAnnotationId: comments.selectedId,
               scrollTargetAnnotation: scrollTarget && annotations.some((a) => a.id === scrollTarget.id && a.filePath === file.path) ? scrollTarget : null,
-              // Only the focused card is the selection target, as in the review app.
-              pendingSelection: focused ? pendingSelection : null,
-              onLineSelection: setPendingSelection,
+              pendingSelection: selectionFile === file.path ? pendingSelection : null,
+              onLineSelection: selectionSetter(file.path),
               onAddAnnotationForFile: addComment,
               onEditAnnotation: editComment,
               onSelectAnnotation: selectComment,
@@ -369,7 +417,7 @@ export default function GuideReader({
           }
         : {}),
     }),
-    [bare, phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fileOpenIn],
+    [bare, phone, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, fileOpenIn],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).
@@ -411,10 +459,13 @@ export default function GuideReader({
       ...(globalComments ? { globalComments } : {}),
       // What GuideDiff draws (a phone: always Unified), for a file box's first estimate.
       diffStyle: phone ? ('unified' as const) : savedDiffStyle,
-      flushFiles: bare,
+      // The PR page's flush files draw no row after the last hunk until a file's text is read (flushFiles).
+      opensWholeFiles: !!fetchFileContent && !bare,
+      // The PR page: files edge to edge, each box exactly its header and code.
+      ...(bare ? { flushFiles: true } : {}),
       ...(collapseAll ? { collapseAll } : {}),
     }),
-    [files, getDiffRendererProps, bare, revealFile, phone, hostDiffControls, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, collapseAll],
+    [files, getDiffRendererProps, revealFile, phone, hostDiffControls, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent, collapseAll, bare],
   );
 
   // The window's wrap for a code span, for the viewer's own inline parser.
