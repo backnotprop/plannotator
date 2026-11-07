@@ -348,7 +348,7 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck }: Re
   const spoken = on && current ? reactionSpeech(current) : LOOKS_GOOD_LABEL;
   const tip = on
     ? `Take back ${current ? (current.label ? current.label : `your ${current.emoji}`) : LOOKS_GOOD_LABEL}`
-    : `Tells ${agent} you read it and need nothing more. Moves to Quiet until it writes again.${phone ? ' Hold for more reactions.' : ''}`;
+    : `Sends ${agent} 👍 Looks good. Moves to Quiet until it writes again.${phone ? ' Hold for more reactions.' : ''}`;
   const cells = 1 + saved.length + free + 1;
 
   const main = (
