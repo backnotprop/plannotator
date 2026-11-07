@@ -71,7 +71,7 @@ class ToolbarErrorBoundary extends React.Component<
   }
 }
 
-import { CommentPopover, type CommentAskAIHandler } from './CommentPopover';
+import { CommentPopover, hasCommentDraft, type CommentAskAIHandler } from './CommentPopover';
 import { TaterSpriteSitting } from './TaterSpriteSitting';
 import { AttachmentsButton } from './AttachmentsButton';
 import { MessagesIcon } from './icons/MessagesIcon';
@@ -89,7 +89,9 @@ import { DocBadges, type DocBadgesProps, type LinkedDocBadgeInfo } from './DocBa
 import { legacyBadgesMaxWidth } from './docBadgesWidth';
 import { PinpointOverlay } from './PinpointOverlay';
 import { usePinpoint } from '../hooks/usePinpoint';
-import { rangeInsideExcluded, useAnnotationHighlighter, type AnnotationRestoreReport } from '../hooks/useAnnotationHighlighter';
+import { rangeInsideExcluded, useAnnotationHighlighter, type AnnotationRestoreReport, type CommentPopoverState } from '../hooks/useAnnotationHighlighter';
+import { getVisibleCommentDrafts } from '../utils/commentCardPolicy';
+import { CommentDraftBadges } from './CommentDraftBadges';
 import { useVimSelection } from '../hooks/useVimSelection';
 import {
   getScrollViewportIntersectionRoot,
@@ -1025,6 +1027,15 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     );
   }, []);
 
+  // Visible comment drafts (opt-in, `configurePlannotatorUI({ visibleCommentDrafts })`): a selection's comment closed
+  // with words keeps its highlight and a "Draft" badge (CommentDraftBadges). The draft's key is the popover's below.
+  const [visibleDrafts] = useState(getVisibleCommentDrafts);
+  const draftScopeRef = useRef('');
+  const keepsCommentDraft = useCallback(
+    (popover: CommentPopoverState) => hasCommentDraft(`plan:${draftScopeRef.current}:${popover.draftKey}`),
+    [],
+  );
+
   // Shared annotation infrastructure via hook
   const {
     toolbarState,
@@ -1044,6 +1055,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     clearAllHighlights,
     applyAnnotations,
     takeSelection,
+    highlighterRef,
+    commentDrafts,
+    reopenCommentDraft,
   } = useAnnotationHighlighter({
     containerRef,
     annotations,
@@ -1064,6 +1078,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     onRestoreMismatch: handleRestoreMismatch,
     onRestoreReport,
     onHostDraft: hostComposes ? onHostDraft : undefined,
+    keepsCommentDraft: visibleDrafts && !hostComposes ? keepsCommentDraft : undefined,
   });
 
   // Refs for code block annotation path
@@ -1545,6 +1560,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   }, []);
 
   const commentDraftScope = linkedDocInfo?.filepath ?? sourceInfo ?? markdown.slice(0, 120);
+  draftScopeRef.current = commentDraftScope;
 
   const codePathValidation = useValidatedCodePaths(markdown, codePathBaseDir, disableCodePathValidation);
 
@@ -2266,6 +2282,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               window.getSelection()?.removeAllRanges();
             }}
           />
+        )}
+        {visibleDrafts && commentDrafts.length > 0 && (
+          <CommentDraftBadges drafts={commentDrafts} highlighterRef={highlighterRef} containerRef={containerRef} onOpen={reopenCommentDraft} />
         )}
       </article>
 

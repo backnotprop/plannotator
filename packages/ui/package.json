@@ -36,6 +36,7 @@
     "./theme": "./theme.css",
     "./styles.css": "./styles.css",
     "./contents-rail.css": "./contents-rail.css",
+    "./comment-card.css": "./comment-card.css",
     "./inbox-thread.css": "./inbox-thread.css"
   },
   "files": [
@@ -59,6 +60,7 @@
     "print.css",
     "styles.css",
     "contents-rail.css",
+    "comment-card.css",
     "inbox-thread.css",
     "plannotator.webp",
     "HANDOFF.md",

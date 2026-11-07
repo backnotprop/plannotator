@@ -2086,6 +2086,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               // A phone's comment goes in the composer's card (HtmlPageComment.tsx), and a selection made with a finger counts.
               onHostDraft={phoneHtml && hasComposer ? htmlComment.onHostDraft : undefined}
               touchSelection={phoneHtml && hasComposer}
+              // The Inbox's upload takes no image: the page's comment boxes draw no image button (the owner, 2026-11-07).
+              allowCommentImages={false}
               rawHtml={view.html}
               // Its own document, served under its own policy: web pictures load in the page, never in the window.
               frameUrl={source.pageFrameUrl}
