@@ -696,6 +696,9 @@ test('a #reviews link on a tailnet guest\'s page: the Inbox, and Back goes where
 test('#reviews&new opens the box over the page once: the address goes back to #reviews, so a reload does not reopen it', async () => {
   const { page } = world;
   await setCodeReview(true);
+  // A fresh load: the page is still on #reviews from the test before, where Code review was off. A hash change alone
+  // can land before the switch reaches it, and an off window rightly forgets `&new`.
+  await page.goto('about:blank');
   await page.goto(`${world.url}#reviews&new`);
   await expect(page.locator('[data-pulls-list]')).toBeVisible();
   await expect(page.locator('dialog[data-compose]')).toBeVisible();
@@ -1522,8 +1525,8 @@ test("A guided review of a PR's own diff posts its comment inline, and what post
   const words = 'Should this fall back further?';
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('about:blank');
-  await page.goto(`${world.url}#pulls`);
-  await page.locator(`[data-pulls-row="${LOCALE}"]`).click();
+  // The PR's own page: its row opens its review thread now that it has one, so the stack is asked for by name.
+  await page.goto(`${world.url}#reviews&stack=${encodeURIComponent(LOCALE)}`);
   const threadId = String(await page.locator('[data-pulls-stack] [data-pulls-thread]').first().getAttribute('data-pulls-thread'));
   await claude.submitGuide({
     project_path: world.projects.web,

@@ -241,11 +241,18 @@ async function closeBar(page: Page): Promise<void> {
   await expect(bar(page)).toHaveCount(0);
 }
 
-async function openReview(page: Page, chapter = 1, thread = world.thread): Promise<void> {
+/** The review's chapter menu in its top bar (ReviewJump): go to a chapter, by its index. */
+async function pickChapter(page: Page, chapter: number): Promise<void> {
+  await page.locator('[data-review-message] [data-review-jump]').click();
+  await page.locator(`[data-review-chapters] [data-review-jump-row="${chapter}"]`).click();
+  await expect(page.locator('[data-review-jump-menu]')).toHaveCount(0);
+}
+
+async function openReview(page: Page, chapter = 0, thread = world.thread): Promise<void> {
   await page.goto(`${world.url}#thread=${thread}`);
   await page.locator('[data-review-card]').last().getByRole('button', { name: /review/ }).click();
   await expect(page.locator('[data-review-message]')).toBeVisible();
-  await page.locator('[data-review-chapters] li').nth(chapter).click();
+  await pickChapter(page, chapter);
 }
 
 /** The top bar's one Split / Unified button (DiffControls): it names the layout on screen, and a press flips it. */
@@ -345,7 +352,7 @@ test('Split: under the side the selection ends on', async () => {
 
 test('the bottom of a card: under the file\'s last line, on screen, nothing clipped', async () => {
   const { page } = world;
-  await openReview(page, 2);
+  await openReview(page, 1);
   await expect(line(page, TAIL, 9)).toBeVisible({ timeout: 30_000 });
   for (const style of ['split', 'unified'] as const) {
     await setStyle(page, style);
@@ -481,7 +488,7 @@ test('a phone at 390 px: touch-sized, on screen, not on the lines, at the bottom
     await page.goto(`${world.url}#thread=${world.thread}`);
     await page.locator('[data-review-card]').last().getByRole('button', { name: /review/ }).click();
     await expect(page.locator('[data-review-message]')).toBeVisible();
-    await page.locator('[data-review-phonebar] select').selectOption('0');
+    await pickChapter(page, 0);
     await expect(line(page, LONG, 1)).toBeVisible({ timeout: 30_000 });
     await line(page, LONG, 17).evaluate((el) => el.scrollIntoView({ block: 'center' }));
     await page.waitForTimeout(300);
@@ -536,7 +543,7 @@ test('two files with the same line numbers: scrolled to the next file, the lines
   const both = { ...guide, sections: [{ title: 'Both files', overview: 'Both.', diffs: [{ file: LONG, summary: 'The worker.' }, { file: NEXT, summary: 'The next one.' }] }] };
   const sent = (await world.client.callTool({ name: 'submit_guide', arguments: { project_path: world.path, guide: both, patch: world.patch, review: true, thread: 'two-files', subject: 'Two files', body: 'Ready for review.', agent_session: 'ses-bar', agent_host: 'claude-code', agent_name: 'Claude Code' } })) as { isError?: boolean; content?: { text: string }[]; structuredContent: { thread_id: string } };
   if (sent.isError) throw new Error(sent.content?.map((c) => c.text).join(' '));
-  await openReview(page, 1, sent.structuredContent.thread_id);
+  await openReview(page, 0, sent.structuredContent.thread_id);
   await expect(line(page, LONG, 1)).toBeVisible({ timeout: 30_000 });
   await setStyle(page, 'split');
   await line(page, LONG, 1).evaluate((el) => el.scrollIntoView({ block: 'center' }));
