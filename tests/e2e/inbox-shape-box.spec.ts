@@ -185,26 +185,25 @@ const LAZY: { name: string; from: [string, number, number]; to: [string, number,
 ];
 
 test('lazy drags pick what a person meant', async ({ browser }) => {
-  const id = store('lazy');
-  const { context, page, problems } = await openBoard(browser, id);
-  await crosshair(page).click();
+  test.setTimeout(240_000);
   const got: { name: string; want: string[]; parts: string[]; words: string }[] = [];
-  const logged: string[] = [];
-  page.on('console', (m) => {
-    if (m.text().startsWith('[shape-box] Show me stub ')) logged.push(m.text().slice('[shape-box] Show me stub '.length));
-  });
-  for (const l of LAZY) {
+  // Each drag on a board of its own, read back as the agent reads it: the note Change it keeps names the parts.
+  for (const [i, l] of LAZY.entries()) {
+    const id = store(`lazy-${i}`);
+    const { context, page, problems } = await openBoard(browser, id);
+    await crosshair(page).click();
     await drag(page, await at(page, ...l.from), await at(page, ...l.to));
     await expect(composer(page)).toBeVisible();
-    await composer(page).getByRole('button', { name: 'Show me' }).click();
-    await expect.poll(() => logged.length).toBe(got.length + 1);
-    const sel = JSON.parse(logged[got.length]!) as { parts: string[]; words: string };
-    got.push({ name: l.name, want: l.want, parts: sel.parts, words: sel.words });
+    await composer(page).locator('textarea').fill('This.');
+    await composer(page).getByRole('button', { name: 'Change it' }).click();
+    await expect.poll(() => waiting(id).length).toBe(1);
+    const note = waiting(id)[0] as { part: string | null; quote: string | null };
+    got.push({ name: l.name, want: l.want, parts: note.part ? note.part.split(',') : [], words: note.quote ?? '' });
+    expect(problems).toEqual([]);
+    await context.close();
   }
   writeFileSync(join(shots, 'lazy-drags.json'), JSON.stringify(got, null, 2));
   for (const g of got) expect(g.parts, g.name).toEqual(g.want);
-  expect(problems).toEqual([]);
-  await context.close();
 });
 
 for (const scheme of ['light', 'dark'] as const) {
@@ -228,8 +227,9 @@ for (const scheme of ['light', 'dark'] as const) {
 
     await expect(composer(page)).toBeVisible();
     await expect(composer(page)).toContainText('Picture · 3 parts');
-    // The owner's order, with Change it the filled one.
-    expect(await buttonOrder(page)).toEqual(['Ask', 'Change it', 'Show me', 'Add to reply']);
+    // The owner's order, with Change it the filled one. No agent here can draw, so no Show me (the box's Show me is
+    // the board's own, which needs one: inbox-show-me-part.spec.ts).
+    expect(await buttonOrder(page)).toEqual(['Ask', 'Change it', 'Add to reply']);
     await composerClearOfBox(page);
     await composer(page).locator('textarea').fill('Make Kagi the default and put it first.');
     await page.waitForTimeout(250);
@@ -404,13 +404,11 @@ for (const [look, options, thread] of [
     await page.mouse.move(5, 5);
     await drag(page, await at(page, 'row-google', 0.12, 0.45), await at(page, 'row-bing', 0.85, 0.6));
     await expect(composer(page)).toContainText('Picture · 3 parts');
-    expect(await buttonOrder(page)).toEqual(['Ask', 'Change it', 'Show me', 'Add to reply']);
+    // No agent here can draw, so no Show me.
+    expect(await buttonOrder(page)).toEqual(['Ask', 'Change it', 'Add to reply']);
     await composer(page).locator('textarea').fill('Make Kagi the default and put it first.');
     await page.waitForTimeout(250);
-    await page.screenshot({ path: join(replyShots, `01-box-four-buttons-${look}.png`) });
-    // Show me (a stub here) keeps the composer and its words.
-    await composer(page).getByRole('button', { name: 'Show me' }).click();
-    await expect(composer(page).locator('textarea')).toHaveValue('Make Kagi the default and put it first.');
+    await page.screenshot({ path: join(replyShots, `01-box-buttons-${look}.png`) });
     await composer(page).getByRole('button', { name: 'Add to reply' }).click();
     await expect(composer(page)).toHaveCount(0);
     await expect(box(page)).toHaveCount(0);
@@ -631,7 +629,7 @@ test('a picture too big for the limit comes smaller, never missing', async ({ br
   await context.close();
 });
 
-test('the video: the crosshair, a lazy drag, a comment, a kept box, then Show me', async ({ browser }) => {
+test('the video: the crosshair, a lazy drag, a comment, a kept box, then Change it', async ({ browser }) => {
   // A recording for people, made with ffmpeg: only when asked for.
   test.skip(!process.env.PLANNOTATOR_SHAPE_BOX_VIDEO, 'no video asked for (PLANNOTATOR_SHAPE_BOX_VIDEO=1)');
   const id = store('video');
@@ -664,7 +662,7 @@ test('the video: the crosshair, a lazy drag, a comment, a kept box, then Show me
   await page.mouse.up();
   await page.waitForTimeout(500);
   await composer(page).locator('textarea').pressSequentially('Show me how this works', { delay: 32 });
-  const s = (await composer(page).getByRole('button', { name: 'Show me' }).boundingBox())!;
+  const s = (await composer(page).getByRole('button', { name: 'Change it' }).boundingBox())!;
   await page.mouse.move(s.x + s.width / 2, s.y + s.height / 2, { steps: 20 });
   await page.waitForTimeout(1300);
   const video = page.video()!;
