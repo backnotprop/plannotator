@@ -567,7 +567,7 @@ test('the toast closes early: the × (focus back, Z no longer undoes), a mouse s
   await expect.poll(() => sectionOf(page, threads.worker)).toBe('stopped');
 });
 
-test('the row hover action marks read without opening the thread; its Undo puts the row back; no page errors', async () => {
+test('the row hover action marks read without opening the thread, in place; its Undo makes it bold again; no page errors', async () => {
   const { page, threads } = world;
   const row = page.locator(`.ib-lbody [data-row="${threads.news}"]`);
   await row.hover();
@@ -576,16 +576,21 @@ test('the row hover action marks read without opening the thread; its Undo puts 
   await shot('08-row-hover-action', ['light']);
   await action.click();
   await expect(page.locator('section.ib-pane')).toHaveCount(0);
-  await expect.poll(() => sectionOf(page, threads.news)).toBe('quiet');
+  // The list holds still (approval "inbox-list-view", R7): the row stays in New, not bold, until the list settles.
+  const button = row.locator('[data-thread-id]');
+  await expect(button).not.toHaveClass(/\bib-u\b/);
+  expect(await sectionOf(page, threads.news)).toBe('new');
   // No thread open: the same place, centered on the window, 16 px from its bottom edge.
   const toast = page.locator('[data-inbox-toast]');
-  await expect(toast).toContainText('Moved to Quiet');
+  await expect(toast).toContainText('Marked read');
+  await expect(toast).not.toContainText('Moved to Quiet');
   await toast.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)).then(() => undefined));
   const toastBox = await toast.boundingBox();
   const viewport = page.viewportSize()!;
   expect(Math.abs(toastBox!.x + toastBox!.width / 2 - viewport.width / 2)).toBeLessThanOrEqual(1);
   expect(Math.abs(viewport.height - (toastBox!.y + toastBox!.height) - 16)).toBeLessThanOrEqual(1);
   await toast.getByRole('button', { name: /Undo/ }).click();
-  await expect.poll(() => sectionOf(page, threads.news)).toBe('new');
+  await expect(button).toHaveClass(/\bib-u\b/);
+  expect(await sectionOf(page, threads.news)).toBe('new');
   expect(world.errors).toEqual([]);
 });

@@ -308,6 +308,14 @@ export const INBOX_POLL_WAIT_MS = 20_000
 export const INBOX_RETRY_MS = { first: 5_000, max: 60_000 } as const
 /** The tick: one per second, as the mod's review watcher. */
 export const INBOX_TICK_MS = 1_000
+/**
+ * A tick seen not firing for at least this long is armed again by the
+ * self-heal (`InboxLink.ensureTicking`). Its looks are MOD_HEAL_EVERY_MS
+ * apart, so a stopped tick is armed again 30 to 60 s after it stopped.
+ */
+const INBOX_TICK_STALL_MS = 10_000
+/** Each reason a reply was not submitted is logged at most this often (`PLANNOTATOR_MOD_DEBUG`). */
+const NOT_DELIVERING_LOG_EVERY_MS = 60_000
 /** How often the lease is renewed or re-read. */
 const LEASE_EVERY_MS = 5_000
 /** A lease not renewed for this long belongs to a process that exited, slept or hung. */
@@ -835,6 +843,12 @@ export class InboxLink {
   private folder: Promise<string | null> | null = null
   /** The Ask AI client, from a poll saying a question waits until it stops (`startAskClient`). */
   private askClient: BridgeHandle | null = null
+  /** Times the tick fired, and the count and time the self-heal last saw (`ensureTicking`). */
+  private fires = 0
+  private firesSeen = 0
+  private firesSeenAt: number | null = null
+  /** When each reason a reply was not submitted was last logged (`notDelivering`). */
+  private notDeliveringLogged = new Map<string, number>()
 
   constructor(private readonly options: InboxLinkOptions) {
     this.host = options.host
@@ -846,15 +860,46 @@ export class InboxLink {
     return this.disposed
   }
 
-  /** Start the tick. The person is in this process now. */
-  start(): void {
+  /**
+   * Start the tick. The person is in this process now, unless `touch` is
+   * false (the self-heal made this link: the lease goes to it only when no
+   * live process holds it).
+   */
+  start(options: { touch?: boolean } = {}): void {
     if (this.timer || this.disposed) return
     void this.host.now().then((now) => {
       this.startedAt ||= now
       this.idleSince ||= now
     })
-    void this.touch()
+    if (options.touch !== false) void this.touch()
+    this.arm()
+  }
+
+  /**
+   * The self-heal's look (self-heal.ts): a tick that did not fire between
+   * two looks at least INBOX_TICK_STALL_MS apart (the engine refused one
+   * `$.clock.every` period, which ends the interval) is armed again. Never a touch.
+   */
+  async ensureTicking(): Promise<void> {
+    if (this.disposed) return
+    const now = await this.host.now()
+    if (this.disposed) return
+    if (this.fires !== this.firesSeen || this.firesSeenAt === null) {
+      this.firesSeen = this.fires
+      this.firesSeenAt = now
+      return
+    }
+    if (this.timer && now - this.firesSeenAt < INBOX_TICK_STALL_MS) return
+    this.host.debug(`inbox: the tick has not fired for ${Math.round((now - this.firesSeenAt) / 1000)} s; armed again`)
+    this.timer?.cancel()
+    this.timer = null
+    this.firesSeenAt = now
+    this.arm()
+  }
+
+  private arm(): void {
     this.timer = this.host.every(INBOX_TICK_MS, () => {
+      this.fires++
       if (this.ticking) return
       this.ticking = true
       void this.tick()
@@ -1301,7 +1346,7 @@ export class InboxLink {
     // Still waiting? An agent may have read it through the tool meanwhile, or
     // another process delivered it.
     const fresh = await this.pendingNow(0)
-    if (fresh === null) return
+    if (fresh === null) return this.notDelivering(waiting.id, 'fresh_null', 'the Inbox did not say whether it still waits')
     // The same reply as this poll words it: a reply that waited through a turn says what the thread holds now.
     // What the Inbox says now is what goes in: a reply can have moved here since it was first handed out.
     const command = fresh.find((candidate) => candidate.id === waiting.id)
@@ -1309,17 +1354,18 @@ export class InboxLink {
       // Not settled: nothing went in here, so if the reply moves back before the next poll, it goes in.
       this.pending.delete(waiting.id)
       this.held.delete(waiting.id)
-      return
+      return this.notDelivering(waiting.id, 'not_listed', 'the Inbox no longer has it waiting here')
     }
-    if (this.disposed || !(await this.holdLease(await this.host.now()))) return
+    if (this.disposed) return this.notDelivering(command.id, 'disposed', 'this link was disposed')
+    if (!(await this.holdLease(await this.host.now()))) return this.notDelivering(command.id, 'lease_lost', 'another process on this session holds the lease')
     const dir = this.claimDir(command.id)
     const claim = await this.host.run(inboxClaimArgv(dir, this.options.instanceId), { timeoutMs: 5_000 }).catch(() => null)
     if (claim?.exitCode === INBOX_CLAIM_EXIT.lost) {
       this.pending.delete(command.id)
       this.elsewhere.set(command.id, { command, since: await this.host.now() })
-      return
+      return this.notDelivering(command.id, 'claim_lost', 'another process claimed it')
     }
-    if (claim?.exitCode !== INBOX_CLAIM_EXIT.won) return
+    if (claim?.exitCode !== INBOX_CLAIM_EXIT.won) return this.notDelivering(command.id, 'claim_failed', `the claim failed (exit ${claim?.exitCode ?? 'none'})`)
     this.submitting = command.id
     this.held.add(command.id)
     await this.host.writeFile(`${dir}/alive`, String(await this.host.now())).catch(() => undefined)
@@ -1332,7 +1378,7 @@ export class InboxLink {
       // may lose the lease while the turn runs, and a claim it kept would leave the reply with nobody).
       this.submitting = null
       await this.release(command.id)
-      return
+      return this.notDelivering(command.id, 'busy_at_claim', 'a turn runs; the claim is given back')
     }
     this.host.debug(`inbox: delivering ${command.type} ${command.id}${turn ? ` into the running turn ${turn}` : ''}`)
     try {
@@ -1386,6 +1432,15 @@ export class InboxLink {
     this.settle(command.id)
     this.unacked.add(command.id)
     await this.acknowledge(command.id)
+  }
+
+  /** One debug line for a reply not submitted now, at most once a minute per reason. */
+  private async notDelivering(id: string, reason: string, why: string): Promise<void> {
+    const now = await this.host.now()
+    const last = this.notDeliveringLogged.get(reason)
+    if (last !== undefined && now - last < NOT_DELIVERING_LOG_EVERY_MS) return
+    this.notDeliveringLogged.set(reason, now)
+    this.host.debug(`inbox: not delivering ${id}: ${reason} (${why})`)
   }
 
   /** Give back a claim nothing was submitted under; it stays pending here, for a later claim. */
