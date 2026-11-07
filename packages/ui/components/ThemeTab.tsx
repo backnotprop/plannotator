@@ -123,7 +123,7 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
         )}
         {!compact && (
           <p className="text-[11px] text-muted-foreground/70">
-            System follows your OS and switches between the two themes below.
+            System uses your OS and switches between the two themes below.
           </p>
         )}
         {compact && (
