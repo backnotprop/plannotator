@@ -27,7 +27,7 @@ import { VoiceSettings } from './VoiceSettings';
 import { useVoiceSettings } from '../voice';
 import { RowsSection, rowsSummary } from './RowsSettings';
 import { useListLook } from '../listLook';
-import { DecisionAsk } from './DecisionAsk';
+import { DecisionData } from './DecisionData';
 
 const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'claude-code', name: 'Claude Code' },
@@ -1071,7 +1071,7 @@ export function SettingsPage(props: SettingsPageProps) {
         );
         break;
       case 'decision-data':
-        body = <DecisionAsk />;
+        body = <DecisionData />;
         break;
       case 'about':
         body = about;
