@@ -10,6 +10,9 @@ export { bySheetOrder, formatIssue, loadFiles, parseRevision, sheetParts } from 
 export { drawingProgress, drawingStatus, type DrawingStatus } from './format/status.ts';
 export { citations, type Citation } from './format/cited.ts';
 export { gate, globMatch, isIgnoredPath, LOCKFILE_NAMES, TEST_FOLDERS, type ChangedFile, type GateInput, type GateReason, type GateResult } from './gate/gate.ts';
+export { applyChange, hasSteps, STEPS_CODE, type ChangeView } from './change/apply.ts';
+export { changeSummary, changeWords, isRevision, linesOf, type ChangeFile, type ChangePart, type ChangeSummary } from './change/summary.ts';
+export type { ChangeIs } from './change/marks.ts';
 // The recipes and the first-draw prompt are pure text, so the window can build
 // Copy prompt's text as the server builds launch's.
 export { firstDrawPrompt, recipes, reviewPrompt, updatePrompt, type ReviewPromptInput, type UpdatePromptInput } from './recipe/prompts.ts';

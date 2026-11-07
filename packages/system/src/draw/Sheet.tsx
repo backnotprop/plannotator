@@ -6,8 +6,10 @@
 // the figures over the lines; the line words; the title, callouts, split words
 // and note letters.
 //
-// Step A4 adds the camera, the dive and the Simple / Full move around this
-// component; step A5 adds the change inks (every `status` is null at rest).
+// The view (view/SystemView.tsx) adds the camera, the dive and the Simple /
+// Full move around this component. A change's marks ride on the layout: a part
+// or a line added (green), changed (amber) or removed (grey, struck), a part's
+// number in the change on its corner, and its line counts as its second line.
 import { createContext, Fragment, memo, useContext, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import type { Part, SystemModel } from '../format/types.ts';
 import type { Edge, Figure, PartBox, SheetLayout } from '../layout/types.ts';
@@ -31,6 +33,8 @@ export type SheetProps = {
   onNavigate?: (sheet: string) => void;
   /** A window's cue, or Enter on a window: the person asked to go inside the part (the view dives). */
   onEnter?: (part: string) => void;
+  /** A part picked from outside the sheet (a row of the parts list): drawn with the selected fill. */
+  picked?: string | null;
 };
 
 // A part's second line is prose, set in the sans; only the code names in it (a
@@ -42,7 +46,9 @@ const prose = (t: string): ReactNode =>
 const echoes = (m: string, p: Part) =>
   (TEXT_MARKS.has(m) || !hasMark(m)) && new RegExp(`(^|[^a-z])${m.replace(/[^a-z0-9]/gi, '')}([^a-z]|$)`, 'i').test([p.name, p.role, p.sub].filter(Boolean).join(' '));
 
-const Sub = ({ text }: { text: string }) => <div className="sys-sub sys-t-phrase">{prose(text)}</div>;
+/** A part's second line: prose, or a change's line counts ("frame.ts · +532"), set in mono. */
+const Sub = ({ text, lines }: { text: string; lines?: string | null }) =>
+  lines && text === lines ? <div className="sys-sub sys-lines sys-mono sys-t-phrase">{text}</div> : <div className="sys-sub sys-t-phrase">{prose(text)}</div>;
 
 // ---------------------------------------------------------------- part bodies
 function PartBody({ p, box, simple }: { p: Part; box: PartBox; simple: boolean }) {
@@ -78,7 +84,7 @@ function PartBody({ p, box, simple }: { p: Part; box: PartBox; simple: boolean }
           {marks.length <= 2 && <Marks ids={marks} s={16} />}
         </div>
         <div className="sys-rl sys-t-phrase">{p.role}</div>
-        {sub && <Sub text={sub} />}
+        {sub && <Sub text={sub} lines={box.lines} />}
         {marks.length > 2 && <div className="sys-mk-row"><Marks ids={marks} s={18} /></div>}
       </div>
     );
@@ -87,7 +93,7 @@ function PartBody({ p, box, simple }: { p: Part; box: PartBox; simple: boolean }
     return (
       <div className="sys-pv sys-chip">
         <div className="sys-top"><Marks ids={marks} s={15} /><span className="sys-nm sys-t-name">{p.name}</span></div>
-        <Sub text={sub || p.role} />
+        <Sub text={sub || p.role} lines={box.lines} />
       </div>
     );
   }
@@ -121,7 +127,7 @@ function PartBody({ p, box, simple }: { p: Part; box: PartBox; simple: boolean }
         <span className={'sys-nm sys-t-name' + (box.nl ? ' sys-fit' : '')}>{box.nl ? box.nl.map((l, i) => <span key={i}>{l}</span>) : p.name}</span>
         <Marks ids={marks} s={15} />
       </div>
-      {second ? <Sub text={second} /> : p.role && <div className="sys-rl sys-t-phrase">{p.role}</div>}
+      {second ? <Sub text={second} lines={box.lines} /> : p.role && <div className="sys-rl sys-t-phrase">{p.role}</div>}
     </div>
   );
 }
@@ -228,20 +234,23 @@ function EdgeLayer({ edges, focus, live, onHover }: { edges: Edge[]; focus: Focu
         const lit = !!focus?.edges.has(e.id);
         const aud = e.style === 'aud';
         const w0 = e.line?.w ?? 1.3;
-        const sw = aud ? 2.6 : w0 + (lit ? 0.6 : 0);
+        const sw = aud ? 2.6 : w0 + (lit ? 0.6 : 0) + (e.status === 'added' || e.status === 'changed' ? 0.5 : 0);
         const hl = aud ? 14 : 9, hw = aud ? 6 : 3.6;
         let pts = trimEnd(e.pts, hl - 1);
         if (e.both) pts = trimEnd(pts.slice().reverse(), hl - 1).reverse();
         // the hue for what moves; an overlay's ink replaces it
         const hue = !aud && e.line ? e.line.ink || MOVES[e.line.moves].ink : null;
-        const ink = aud ? 'var(--sys-ink)' : lit ? hue || 'var(--sys-ink)' : hue || 'var(--sys-line)';
+        // a change's ink replaces the line's own hue: added green, changed amber, removed grey and dotted
+        const st = aud ? null : e.status;
+        const ink = st ? STATUS_INK[st] : aud ? 'var(--sys-ink)' : lit ? hue || 'var(--sys-ink)' : hue || 'var(--sys-line)';
+        const dash = st === 'removed' ? '2 4' : e.dash ?? undefined;
         const dim = focus && !lit && !aud ? 0.2 : 1;
         const all = [...(e.paths ?? []), e.pts];
         const end = (k: 0 | 1) => (k === 0 ? e.pts![0]! : e.pts![e.pts!.length - 1]!);
         return (
-          <g key={e.id} opacity={dim} className={'sys-edge' + (lit ? ' sys-lit' : '')} data-edge={e.id}>
-            {(e.paths ?? []).map((p, i) => <path key={i} d={roundedPath(p)} fill="none" stroke={ink} strokeWidth={sw} strokeDasharray={e.dash ?? undefined} />)}
-            <path d={roundedPath(pts)} fill="none" stroke={ink} strokeWidth={sw} strokeDasharray={e.dash ?? undefined} />
+          <g key={e.id} opacity={dim} className={'sys-edge' + (lit ? ' sys-lit' : '') + (st ? ' sys-st-' + st : '')} data-edge={e.id} data-status={st ?? undefined}>
+            {(e.paths ?? []).map((p, i) => <path key={i} className="sys-stroke" d={roundedPath(p)} fill="none" stroke={ink} strokeWidth={sw} strokeDasharray={dash} />)}
+            <path className="sys-stroke" d={roundedPath(pts)} fill="none" stroke={ink} strokeWidth={sw} strokeDasharray={dash} />
             <path d={arrowHead(e.pts, hl, hw)} fill={ink} />
             {e.both && <path d={arrowHead(e.pts, hl, hw, true)} fill={ink} />}
             {e.port && (
@@ -314,7 +323,7 @@ function EdgeLabels({ edges, focus }: { edges: Edge[]; focus: Focus }) {
         const lit = !!focus?.edges.has(e.id);
         if (e.lb.hidden && !lit) return null;
         const dim = focus && !lit ? 0.25 : 1;
-        const cls = 'sys-elabel ' + (e.quiet ? 'sys-t-quiet' : 'sys-t-phrase') + (lit ? ' sys-show' : '') + (e.lb.hidden ? ' sys-float' : '');
+        const cls = 'sys-elabel ' + (e.quiet ? 'sys-t-quiet' : 'sys-t-phrase') + (lit ? ' sys-show' : '') + (e.lb.hidden ? ' sys-float' : '') + (e.status ? ' sys-st-' + e.status : '');
         const lines = e.tails ? tailSplit(e.lb.lines, e.tails) : e.lb.lines;
         return (
           <div key={e.id} data-edge={e.id} className={cls} style={{ left: e.lb.x, top: e.lb.y, width: e.lb.w, opacity: dim < 1 ? dim : undefined }}>
@@ -385,7 +394,7 @@ function Figures({ list, under, focus }: { list: Figure[]; under: boolean; focus
             return <div key={f.id + ':t'} className="sys-fig-dia sys-t-phrase" style={box}><span><Lines lines={f.lines} /></span>{letter}</div>;
           case 'step':
             return (
-              <div key={f.id} className={'sys-fig-step' + (f.strong ? ' sys-strong' : '')} style={box}>
+              <div key={f.id} className={'sys-fig-step' + (f.strong ? ' sys-strong' : '') + (f.status ? ' sys-st-' + f.status : '')} style={box} data-status={f.status ?? undefined}>
                 <div className={f.strong ? 'sys-st-t sys-t-name' : 'sys-st-s sys-t-phrase'}>{(f.lines ?? []).map((l, i) => <div key={i}>{l}</div>)}</div>
                 {!!f.code?.length && <div className="sys-st-c sys-mono sys-t-phrase">{f.code.map((l, i) => <div key={i}>{l}</div>)}</div>}
                 {letter}
@@ -405,7 +414,7 @@ function Figures({ list, under, focus }: { list: Figure[]; under: boolean; focus
             const lit = !!(focus && f.edge && focus.edges.has(f.edge));
             const dim = !!(focus && f.edge && !lit);
             return (
-              <div key={f.id} className={'sys-fig-pl' + (f.schema ? ' sys-schema' : '') + (lit ? ' sys-lit' : '')} style={{ ...box, opacity: dim ? 0.3 : undefined }}>
+              <div key={f.id} className={'sys-fig-pl' + (f.schema ? ' sys-schema' : '') + (lit ? ' sys-lit' : '') + (f.status ? ' sys-st-' + f.status : '')} style={{ ...box, opacity: dim ? 0.3 : undefined }}>
                 {f.title && <div className="sys-pl-h sys-mono sys-t-name">{f.title}</div>}
                 <div className="sys-pl-b sys-mono sys-t-phrase">{(f.lines ?? []).map((l, i) => <div key={i}>{l || ' '}</div>)}</div>
               </div>
@@ -420,9 +429,9 @@ function Figures({ list, under, focus }: { list: Figure[]; under: boolean; focus
 }
 
 // ---------------------------------------------------------------- the sheet
-function SheetImpl({ layout: L, model, lod = 2, live = false, onNavigate, onEnter }: SheetProps) {
+function SheetImpl({ layout: L, model, lod = 2, live = false, onNavigate, onEnter, picked = null }: SheetProps) {
   const [hover, setHover] = useState<string | null>(null);
-  const focus = live ? focusOf(hover, L) : null;
+  const focus = live ? focusOf(hover ?? picked, L) : null;
   const P = model.parts;
   // parts in reading order (bands top to bottom, left to right): the order Tab walks them in
   const order = useMemo(() => Object.entries(L.parts).sort(([, a], [, b]) => (Math.abs(a.y - b.y) < 8 ? a.x - b.x : a.y - b.y)), [L]);
@@ -462,21 +471,23 @@ function SheetImpl({ layout: L, model, lod = 2, live = false, onNavigate, onEnte
             return (
               <div
                 key={id}
-                className={'sys-part' + (lit ? ' sys-lit' : '') + (hover === id ? ' sys-hov' : '')}
+                className={'sys-part' + (lit ? ' sys-lit' : '') + (hover === id ? ' sys-hov' : '') + (box.status ? ' sys-st-' + box.status : '') + (picked === id ? ' sys-picked' : '')}
                 data-part={id}
+                data-status={box.status ?? undefined}
                 data-opens={opens ? '' : undefined}
                 title={p.name}
                 style={{ left: box.x, top: box.y, width: box.w, height: box.h, opacity: dim < 1 ? dim : undefined }}
                 // a live sheet's parts take the keyboard: Tab walks them in reading
                 // order, the view moves between them with the arrows and dives on Enter
                 tabIndex={live ? 0 : undefined}
-                aria-label={live ? [p.name, p.role, opens ? `${plural(box.cw!, 'sheet')} inside, Enter opens it` : ''].filter(Boolean).join('. ') : undefined}
+                aria-label={live ? [box.n ? `${box.n}. ${p.name}, ${box.status}` : p.name, p.role, box.lines ?? '', opens ? `${plural(box.cw!, 'sheet')} inside, Enter opens it` : ''].filter(Boolean).join('. ') : undefined}
                 onPointerEnter={() => onHover(id)}
                 onPointerLeave={() => onHover(null)}
                 onFocus={live ? () => onHover(id) : undefined}
                 onBlur={live ? () => onHover(null) : undefined}
               >
                 <PartBody p={p} box={box} simple={L.simple} />
+                {box.n ? <span className="sys-num sys-t-name" aria-hidden="true">{box.n}</span> : null}
                 {box.ov && (
                   <>
                     {box.ov.tint && <span className="sys-ov-tint" style={{ background: box.ov.tint }} aria-hidden="true" />}
@@ -530,6 +541,8 @@ function SheetImpl({ layout: L, model, lod = 2, live = false, onNavigate, onEnte
     </NotesCtx.Provider>
   );
 }
+
+const STATUS_INK = { added: 'var(--sys-add-ink)', changed: 'var(--sys-chg-ink)', removed: 'var(--sys-gone-ink)' } as const;
 
 const Chevron = () => (
   <svg width="7" height="10" viewBox="0 0 7 10" aria-hidden="true">

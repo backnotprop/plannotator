@@ -4,6 +4,8 @@
 // the Inbox's tokens (packages/ui and packages/inbox), light and dark.
 export { SystemView, type Reading, type SystemViewProps } from './view/SystemView.tsx';
 export { SystemThumb, type SystemThumbProps } from './view/SystemThumb.tsx';
+export { SystemChangePicture, ChangeLine, changeCrop, type SystemChangePictureProps } from './view/SystemChangePicture.tsx';
+export { PartsList, type PartsListProps } from './view/PartsList.tsx';
 export { Sheet, type Lod, type SheetProps } from './draw/Sheet.tsx';
 export { hasSimple, layoutSheet, layoutSystem, restLayout, type LayoutOpts, type SystemLayouts } from './layout/compose.ts';
 export { fontsReady, setText, type TextSetting } from './layout/measure.ts';
