@@ -73,6 +73,7 @@ export {
   INBOX_SEARCH_GROUPS,
   INBOX_SEARCH_LIMIT_MAX,
   INBOX_SEARCH_RECENT_THREADS,
+  INBOX_SEARCH_SORTS,
   INBOX_SEARCH_STATUSES,
   type InboxSearchAnswer,
   type InboxSearchFileRow,
@@ -83,6 +84,7 @@ export {
   type InboxSearchProjectRow,
   type InboxSearchQuery,
   type InboxSearchRow,
+  type InboxSearchSort,
   type InboxSearchStatus,
   type InboxSearchThreadRow,
 } from "@plannotator/core/inbox-search";
@@ -1035,12 +1037,31 @@ export class InboxSearchIndex {
         groups.threads.push({ doc: number, score: doc.at });
       }
     } else {
+      // Newest, for a project: its threads' latest message (a combined project's too), read once and only when a project
+      // matched; a project with no thread keeps the time it was added.
+      let projectLatest: Map<string, number> | null = null;
+      const latestOf = (doc: Doc): number => {
+        if (doc.type !== "project") return doc.at;
+        if (!projectLatest) {
+          projectLatest = new Map();
+          for (const [key, number] of this.byKey) {
+            if (!key.startsWith("t:")) continue;
+            const thread = this.docs[number]!;
+            const id = this.store.canonicalProjectId(thread.projectId);
+            if (thread.at > (projectLatest.get(id) ?? -Infinity)) projectLatest.set(id, thread.at);
+          }
+        }
+        return projectLatest.get(doc.ref) ?? doc.at;
+      };
       for (const hit of this.match(terms)) {
         const doc = this.docs[hit.doc]!;
         const admitted = admit(doc);
         if (!admitted) continue;
         const archived = admitted.facts?.archived ?? false;
-        groups[admitted.group].push({ doc: hit.doc, score: score(hit.tier, hit.title, archived, !!query.current && this.store.sameProject(doc.projectId, query.current), doc.at) });
+        // Newest: by the latest message alone (a thread's latest message, a message's own time, a project's latest
+        // thread); best match ranks first.
+        const ranked = query.sort === "newest" ? Math.max(0, latestOf(doc)) : score(hit.tier, hit.title, archived, !!query.current && this.store.sameProject(doc.projectId, query.current), doc.at);
+        groups[admitted.group].push({ doc: hit.doc, score: ranked });
       }
     }
     const totals = {} as Record<InboxSearchGroupId, number>;

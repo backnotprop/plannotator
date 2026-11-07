@@ -10,6 +10,7 @@
  * file; name it `*-webkit.spec.ts` to run it in the `webkit` project only.
  */
 import { defineConfig } from '@playwright/test';
+import { quarantineFilter } from './quarantine';
 
 /** Specs that their own config runs, never this one: the thread parity harness (inbox-thread-parity.config.ts). */
 const OWN_CONFIG = ['inbox-thread-parity.spec.ts'];
@@ -20,6 +21,8 @@ export default defineConfig({
   testDir: '.',
   testMatch: '*.spec.ts',
   testIgnore: OWN_CONFIG,
+  // In CI, the flaky tests in quarantine.json are left out; `bun run test:e2e:quarantine` runs their specs locally.
+  ...quarantineFilter(process.env),
   outputDir: '../../.local/test-results',
   // Feedback never reaches the live Worker, and agent CLI stubs go first on PATH: a stub that is called fails the run (global-setup.ts, agent-cli-stubs.ts).
   globalSetup: './global-setup.ts',

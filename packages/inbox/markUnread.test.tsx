@@ -27,6 +27,7 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { InboxListSection, InboxQuestion } from '@plannotator/core/inbox-types';
+import { resetListGroupsForTests } from './listGroups';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
@@ -141,6 +142,8 @@ afterEach(() => {
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
+  // Which groups are closed is kept for the page (listGroups.ts): each test starts with Quiet and Snoozed closed.
+  resetListGroupsForTests();
   root = null;
   host = null;
   globalThis.fetch = savedFetch;
@@ -185,9 +188,12 @@ async function renderList(firstRow: string) {
 }
 
 /** Quiet is folded: open it to reach the rows there. */
+/** Opens Quiet; a Quiet already open stays open (a click on its header would close it). */
 async function openQuiet() {
+  const band = document.querySelector<HTMLButtonElement>('[data-section-id="quiet"] button.ib-band')!;
+  if (band.getAttribute('aria-expanded') === 'true') return;
   await act(async () => {
-    document.querySelector<HTMLButtonElement>('[data-section-id="quiet"] button.ib-band')!.click();
+    band.click();
   });
 }
 
