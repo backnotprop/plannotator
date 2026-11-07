@@ -8968,6 +8968,18 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-react-ed button.ib-react-cell:hover { background: color-mix(in oklch, var(--muted) 60%, transparent); }
 .ib-react-ed button.ib-react-cell[data-highlighted] { background: color-mix(in oklch, var(--muted) 95%, transparent); }
 .ib-react-ed button.ib-react-cell:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+/* Under the name field the row is the tray itself: the emoji just saved reacts from it at once. */
+.ib-react-namer button.ib-react-cell { border: 0; padding: 0; background: transparent; font: inherit; color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.ib-react-namer button.ib-react-cell:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-react-namer button.ib-react-cell:active .ib-react-e { transform: scale(0.9); transition-duration: 80ms; }
+.ib-react-namer[data-ending-style] { pointer-events: none; }
+@media (hover: hover) and (pointer: fine) {
+  .ib-react-namer button.ib-react-cell:hover { background: color-mix(in oklch, var(--muted) 60%, transparent); }
+}
+/* A phone's Reply opens the tray when held (holdPress.ts): the hold is ours, not the browser's (no selection or
+   callout), and the button sinks a little while the finger rests on it. */
+.pn-inbox .ib-btn[data-reply-hold] { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms ease-out; }
+.pn-inbox .ib-btn[data-reply-hold][data-holding] { transform: scale(0.95); background: var(--muted); transition: transform 450ms cubic-bezier(0.23, 1, 0.32, 1), background-color 450ms ease-out; }
 .ib-namer-in { display: block; width: 100%; height: 30px; margin: 0 0 6px; padding: 0 10px; border: 0; border-radius: 9px; background: color-mix(in oklch, var(--muted) 70%, transparent); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); outline: none; animation: ib-react-in 160ms 70ms cubic-bezier(0.23, 1, 0.32, 1) both; transition: box-shadow 140ms ease-out, background-color 140ms ease-out; }
 .ib-namer-in::placeholder { color: var(--muted-foreground); }
 .ib-namer-in:focus { background: color-mix(in oklch, var(--muted) 45%, transparent); box-shadow: 0 0 0 1.5px color-mix(in oklch, var(--ring) 75%, transparent); }
@@ -9051,6 +9063,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-react-pop .ib-react-cell[data-highlighted] .ib-react-e, .ib-react-pop .ib-react-cell:active .ib-react-e, .ib-emo-cell:active, :is(.ib-react-a, .ib-react-done):active { transform: none; }
   .ib-react-pop[data-reaction-tray] .ib-react-cell[data-tip]::after { transition: opacity 110ms ease-out; transform: translate(-50%, 0); }
   .ib-react-kedit { transform: none; }
+  .pn-inbox .ib-btn[data-reply-hold][data-holding], .ib-react-namer button.ib-react-cell:active .ib-react-e { transform: none; }
   .ib-react-namer, .ib-react-ed, .ib-react-namer[data-starting-style], .ib-react-ed[data-starting-style] { clip-path: none; transition: opacity 120ms ease-out; }
   .ib-react-namer[data-starting-style], .ib-react-ed[data-starting-style] { opacity: 0; }
   .ib-emo, .ib-emo-pos[data-phone] .ib-emo { clip-path: none; transition: opacity 120ms ease-out; }

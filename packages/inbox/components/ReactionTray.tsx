@@ -6,7 +6,9 @@
  * button after it opens the tray above it: 👍, the person's saved emoji, then free + slots, then …. There is
  * always one free + until INBOX_SAVED_REACTIONS_MAX emoji are saved (two while none is). A + saves an emoji
  * (the picker, a little spring, then a light name field: Enter or a click away keeps what was typed, Escape
- * skips it). … reacts once with any emoji; nothing is saved. A right-click or a hold on a saved emoji, or the pen
+ * skips it). The row under that field is the tray itself: the emoji just saved reacts from it at once, with the
+ * name typed or none, so a phone never has to name it, close and hold again. … reacts once with any emoji;
+ * nothing is saved. On a phone, holding Reply opens the tray too (Thread.tsx, `openRequest`). A right-click or a hold on a saved emoji, or the pen
  * the arrow keys reach at the tray's end, edits it (its name, another emoji, Remove).
  *
  * No words on the tray (a name is a tooltip) and no toast: the picked emoji flies from where it was pressed
@@ -19,7 +21,7 @@
  * Enter opens the tray; Left and Right move along it; Enter picks; Escape closes the tray, the picker and the
  * fields, and gives focus back.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { Popover } from '@base-ui/react/popover';
 import { INBOX_REACTION_LABEL_MAX, type InboxReaction } from '@plannotator/core/inbox-types';
@@ -172,11 +174,13 @@ export interface ReactionTrayProps {
    * back). `was`: only when the message already had the mark, the reaction it had (null: 👍): only the emoji changes.
    */
   onAck: (on: boolean, reaction: InboxReaction | null, was?: InboxReaction | null) => void;
+  /** Opens the tray when it changes (a hold on Reply, on a phone); 0 or unchanged does nothing. */
+  openRequest?: number;
 }
 
 type PickerFor = { kind: 'save' } | { kind: 'once' } | { kind: 'change'; index: number };
 
-export function ReactionTray({ messageId, agent, on, current, phone, onAck }: ReactionTrayProps) {
+export function ReactionTray({ messageId, agent, on, current, phone, onAck, openRequest = 0 }: ReactionTrayProps) {
   const saved = useSavedReactions();
   const free = freeSlots(saved.length);
   const [open, setOpen] = useState(false);
@@ -292,6 +296,16 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck }: Re
   const up = () => {
     if (!open) clear();
   };
+  // A hold elsewhere (Reply, on a phone) opens the tray as a hold on the 👍 does: the release does not close it.
+  const seenRequest = useRef(openRequest);
+  useEffect(() => {
+    if (openRequest === seenRequest.current) return;
+    seenRequest.current = openRequest;
+    if (picker !== null || naming !== null || editing !== null || between.current) return;
+    clear();
+    heldAt.current = Date.now();
+    show();
+  }, [openRequest]); // eslint-disable-line react-hooks/exhaustive-deps -- only a new request opens it
 
   const openPicker = (next: PickerFor) => {
     handOff.current = true;
@@ -568,6 +582,17 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck }: Re
           if (how === 'enter') reopenNow(true);
           else handOff.current = false;
         }}
+        // The row under the field is the tray: an emoji reacts at once (the name typed is already kept), + and … go on.
+        onReact={(what, from) => {
+          setNaming(null);
+          setFresh(null);
+          if (what === 'add' || what === 'any') {
+            openPicker({ kind: what === 'add' ? 'save' : 'once' });
+            return;
+          }
+          handOff.current = false;
+          send(what === 'looks-good' ? null : (savedReactions()[what] ?? null), from);
+        }}
       />
       <SavedEditor
         container={portal}
@@ -590,10 +615,55 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck }: Re
   );
 }
 
+/** What a press in the name field's row does: 👍, a saved emoji (its index), a free +, or …. */
+type RowPress = 'looks-good' | number | 'add' | 'any';
+
 /** The tray's row as it is now, drawn under a field (not a menu: nothing in it is picked). */
-function TrayRow({ highlight, fresh, onPick }: { highlight: number | null; fresh?: number | null; onPick?: (index: number) => void }) {
+function TrayRow({ highlight, fresh, onPick, onPress }: { highlight: number | null; fresh?: number | null; onPick?: (index: number) => void; onPress?: (what: RowPress, from: Element | null) => void }) {
   const saved = useSavedReactions();
   const free = freeSlots(saved.length);
+  if (onPress) {
+    // Under the name field: the tray itself, each cell a button (the same names as the tray's own cells).
+    const cell = (what: RowPress, label: string, fresh: boolean, child: ReactNode, key: string) => (
+      <button
+        key={key}
+        type="button"
+        className="ib-react-cell"
+        data-row-press={typeof what === 'number' ? `saved-${what}` : what}
+        data-fresh={fresh ? '' : undefined}
+        aria-label={label}
+        onClick={(e) => onPress(what, e.currentTarget.querySelector('.ib-react-e'))}
+      >
+        {child}
+      </button>
+    );
+    return (
+      <div className="ib-react-cells" role="group" aria-label="Reactions">
+        {cell('looks-good', `👍 ${LOOKS_GOOD_LABEL}`, false, <span className="ib-react-e">👍</span>, 'lg')}
+        {saved.map((r, i) => cell(i, `${r.emoji} ${r.label || capFirst(emojiName(r.emoji))}`, i === fresh, <span className="ib-react-e">{r.emoji}</span>, `s-${r.emoji}`))}
+        {Array.from({ length: free }, (_, k) =>
+          cell(
+            'add',
+            'Save an emoji to your tray',
+            false,
+            <span className="ib-react-e ib-react-hole" aria-hidden="true">
+              <Icon name="plus" size={14} />
+            </span>,
+            `a-${k}`,
+          ),
+        )}
+        {cell(
+          'any',
+          'React with any emoji, once',
+          false,
+          <span className="ib-react-e ib-react-hole ib-react-dots" aria-hidden="true">
+            <Icon name="dots" size={16} />
+          </span>,
+          'any',
+        )}
+      </div>
+    );
+  }
   return (
     <div className="ib-react-cells" role={onPick ? 'group' : undefined} aria-label={onPick ? 'Your saved emoji' : undefined} aria-hidden={onPick ? undefined : 'true'}>
       <span className="ib-react-cell ib-react-fixed">
@@ -637,11 +707,12 @@ function TrayRow({ highlight, fresh, onPick }: { highlight: number | null; fresh
 
 /**
  * Right after a save: a light name field over the tray (optional). The row under it is the tray as it now is,
- * the new emoji springing in. Enter keeps the name (or none) and brings the tray back; a click or tap away keeps
- * what was typed (on a phone that is how one finishes); only Escape skips it. A phone waits for a tap on the field
- * (no keyboard popping up for an optional name). Closing, it keeps its words and row while it fades.
+ * the new emoji springing in, and it works: a press there reacts at once (or goes on to + or …), keeping what was
+ * typed, so the new emoji is usable without naming it or opening the tray again. Enter keeps the name (or none)
+ * and brings the tray back; a click or tap away keeps what was typed; only Escape skips it. A phone waits for a
+ * tap on the field (no keyboard popping up for an optional name). Closing, it keeps its words and row while it fades.
  */
-function NameField({ container, index, fresh, anchor, phone, onClose }: { container: HTMLElement | null; index: number | null; fresh: number | null; anchor: RefObject<HTMLButtonElement | null>; phone: boolean; onClose: (how: 'enter' | 'escape' | 'dismiss') => void }) {
+function NameField({ container, index, fresh, anchor, phone, onClose, onReact }: { container: HTMLElement | null; index: number | null; fresh: number | null; anchor: RefObject<HTMLButtonElement | null>; phone: boolean; onClose: (how: 'enter' | 'escape' | 'dismiss') => void; onReact: (what: RowPress, from: Element | null) => void }) {
   const saved = useSavedReactions();
   // The last emoji it named: drawn while the field fades out, so it never empties before it goes.
   const last = useRef<number | null>(null);
@@ -693,7 +764,17 @@ function NameField({ container, index, fresh, anchor, phone, onClose }: { contai
                     }
                   }}
                 />
-                <TrayRow highlight={shown} fresh={fresh} />
+                <TrayRow
+                  highlight={null}
+                  fresh={fresh}
+                  onPress={(what, from) => {
+                    if (index === null) return;
+                    // The name typed so far goes with it; nothing typed leaves it unnamed.
+                    if (text.trim()) nameSavedReaction(index, text);
+                    closing.current = 'dismiss';
+                    onReact(what, from);
+                  }}
+                />
               </>
             )}
           </Popover.Popup>

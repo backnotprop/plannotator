@@ -8,7 +8,8 @@
  * focus to the page; … saving its emoji, or not reacting with it;
  * a saved emoji not reacting with its name; the 👍 no longer one click (a tray in the way, two calls, or a
  * reaction where Looks good was), or not taking the mark back when pressed; Escape not closing the tray or
- * the picker.
+ * the picker; a just-saved emoji that cannot react until the person names it or closes and opens the tray
+ * again (the owner's phone, 2026-11-07): the row under the name field must react at once, named or not.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -62,7 +63,7 @@ afterEach(() => {
 
 const settle = (ms = 60) => act(() => new Promise<void>((done) => setTimeout(done, ms)));
 
-async function render(opts: { on?: boolean; current?: InboxReaction | null; saved?: InboxReaction[] } = {}) {
+async function render(opts: { on?: boolean; current?: InboxReaction | null; saved?: InboxReaction[]; phone?: boolean } = {}) {
   resetSavedReactionsForTests(opts.saved ?? []);
   onServer = opts.saved ?? [];
   rev = 0;
@@ -73,7 +74,7 @@ async function render(opts: { on?: boolean; current?: InboxReaction | null; save
   act(() =>
     root!.render(
       <div className="ib-pfoot">
-        <ReactionTray messageId="msg_1" agent="Claude Code" on={opts.on ?? false} current={opts.current ?? null} phone={false} onAck={(on, reaction, was) => acks.push(was === undefined ? [on, reaction] : [on, reaction, was])} />
+        <ReactionTray messageId="msg_1" agent="Claude Code" on={opts.on ?? false} current={opts.current ?? null} phone={opts.phone ?? false} onAck={(on, reaction, was) => acks.push(was === undefined ? [on, reaction] : [on, reaction, was])} />
       </div>,
     ),
   );
@@ -318,4 +319,48 @@ test.skipIf(!hasDom)('👍 is still one click: Looks good at once, no tray in th
   await openTray();
   await press($('[data-reaction="saved-1"]')!);
   expect(acks).toEqual([[true, { emoji: '🧪' }, { emoji: '🚀', label: 'Ship it' }]]);
+});
+
+test.skipIf(!hasDom)('a phone: the emoji just saved reacts at once from the row under the name field, with no name and no reopening', async () => {
+  await render({ phone: true });
+  await openTray();
+  await press($('[data-reaction="add"]')!);
+  await pickEmoji('🚀');
+  // The name field is there, optional: a phone does not even focus it.
+  const field = $('[data-name-field]') as HTMLInputElement;
+  expect(field).not.toBeNull();
+  expect(document.activeElement).not.toBe(field);
+  // Its row is the tray, live: 👍, the new emoji, one free +, then ….
+  const row = $$('.ib-react-namer [data-row-press]').map((el) => el.getAttribute('data-row-press'));
+  expect(row).toEqual(['looks-good', 'saved-0', 'add', 'any']);
+  // One tap on the new emoji reacts with it: nothing typed, nothing closed or opened again first.
+  await act(async () => $('.ib-react-namer [data-row-press="saved-0"]')!.click());
+  await settle(200);
+  expect(acks).toEqual([[true, { emoji: '🚀' }]]);
+  expect($('[data-name-field]')).toBeNull();
+  expect(tray()).toBeNull();
+  expect(savedReactions()).toEqual([{ emoji: '🚀' }]);
+  // No name was made up for it.
+  expect(settingsPosts()).toEqual([{ op: 'add', emoji: '🚀' }]);
+});
+
+test.skipIf(!hasDom)('a name typed before the tap goes with the reaction; the row\'s + goes on to save another', async () => {
+  await render({ phone: true });
+  await saveRocket('Ship it');
+  await act(async () => $('.ib-react-namer [data-row-press="saved-0"]')!.click());
+  await settle(200);
+  expect(acks).toEqual([[true, { emoji: '🚀', label: 'Ship it' }]]);
+  expect(settingsPosts()).toEqual([{ op: 'add', emoji: '🚀' }, { op: 'name', emoji: '🚀', label: 'Ship it' }]);
+
+  // From the name field's row, + opens the picker again for the next save (no reopening the tray).
+  acks = [];
+  await openTray();
+  await press($('[data-reaction="add"]')!);
+  await pickEmoji('🧪');
+  await act(async () => $('.ib-react-namer [data-row-press="add"]')!.click());
+  await settle(120);
+  expect($('[data-name-field]')).toBeNull();
+  await pickEmoji('👀');
+  expect(savedReactions()).toEqual([{ emoji: '🚀', label: 'Ship it' }, { emoji: '🧪' }, { emoji: '👀' }]);
+  expect(acks).toEqual([]);
 });

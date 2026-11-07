@@ -141,6 +141,7 @@ import { actionForBlock } from '../actions';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import { Tip } from './Tip';
 import { ReactionTray, justReacted, reactionSpeech } from './ReactionTray';
+import { useHoldPress } from '../holdPress';
 import { threadChipName } from '../threadChip';
 import { OpenQuestionsButton, type OpenQuestionsDecide } from './OpenQuestions';
 import { fitWholeFootRowForms, footRowOpenQuestionsForm, footRowTokens, laidOutChildren, pillHitsButtons, type OpenQuestionsLabelForm } from '../footFit';
@@ -3663,6 +3664,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const waiting = picksCount > 0 || records.length > 0 || draftActions.length > 0;
   /** The box is closed and its words are kept as a draft (Cancel or Escape kept them): Edit draft brings them back. */
   const draftKept = !box.open && (replyDraft.draft !== null || replyDraft.conflict !== null);
+  // On a phone, holding Reply opens the reaction tray (owner, 2026-11-07, approval "inbox-reaction-tray"); a tap still replies.
+  const [trayRequest, setTrayRequest] = useState(0);
+  const replyHold = useHoldPress(phone && ackOffered && !waiting && !draftKept, () => setTrayRequest((n) => n + 1));
   /** What a phone's Edit draft counts (approval "reply-bar-pairs"): the picks, comments and marked action items. */
   const draftCount = picksCount + records.length + draftActions.length;
   /** The same in words: "your reply, 1 pick, 1 comment". */
@@ -6672,9 +6676,15 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               <button
                 type="button"
                 className="ib-btn"
-                onClick={() => openBox()}
+                {...replyHold.props}
+                onClick={() => {
+                  if (replyHold.swallowClick()) return;
+                  openBox();
+                }}
                 data-edit-draft={waiting || draftKept ? '' : undefined}
                 data-reply-button=""
+                data-reply-hold={'onPointerDown' in replyHold.props ? '' : undefined}
+                data-holding={replyHold.holding ? '' : undefined}
                 // Its name starts with what it shows (WCAG 2.5.3): "Draft 2: 1 pick, 1 comment. Edit draft".
                 aria-label={phone && (waiting || draftKept) ? `Draft${draftCount > 0 ? ` ${formatCount(draftCount)}` : ''}: ${draftWords}. Edit draft` : undefined}
                 aria-describedby={waiting || draftKept ? footStatusIds : undefined}
@@ -6741,6 +6751,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   current={ackTarget!.ack?.reaction ?? null}
                   phone={phone}
                   onAck={(next, reaction, was) => onAck!(ackTarget!.id, next, agentName(ackTarget!.author), reaction, was)}
+                  openRequest={trayRequest}
                 />
               )}
               {/* The session ended (the note above says so): what the person can do about it, with Reply. */}
