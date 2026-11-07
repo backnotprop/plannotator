@@ -72,7 +72,7 @@ plannotator/
 │   │   └── package.json           # Extension manifest (publisher: backnotprop)
 │   └── skills/                    # Agent skills (agentskills.io format)
 │       ├── core/                  # CORE skills (single-sourced) — installed to ~/.claude/skills and ~/.agents/skills (Codex)
-│       │   ├── plannotator/           # Knowledge layer: model-invocable CLI reference (subcommands, flags, exit codes) an agent loads on generic "use Plannotator" intent; freshness-guarded against apps/hook/server/cli.ts by plannotator-skill-reference.test.ts. Unreleased subcommands (`HIDDEN_SUBCOMMANDS` in cli.ts: today `t3` and `t3-hook`, the opt-in T3 Code connection, and `card`, the Board's card call from a shell; `inbox` was the last to launch) still run and keep `<sub> --help`, but stay out of `plannotator --help`, "Did you mean" suggestions and this skill (the test requires their absence); un-hide by deleting from that set, adding the top-level usage lines and documenting it here
+│       │   ├── plannotator/           # Knowledge layer: model-invocable CLI reference (subcommands, flags, exit codes) an agent loads on generic "use Plannotator" intent; freshness-guarded against apps/hook/server/cli.ts by plannotator-skill-reference.test.ts. Unreleased subcommands (`HIDDEN_SUBCOMMANDS` in cli.ts: today `t3-hook`, the opt-in T3 Code connection's hook helper, `shape`, and `system`, System's drawing commands; `t3` was the last to launch) still run and keep `<sub> --help`, but stay out of `plannotator --help`, "Did you mean" suggestions and this skill (the test requires their absence); un-hide by deleting from that set, adding the top-level usage lines and documenting it here
 │       │   ├── plannotator-review/    # Lightweight: opens review UI
 │       │   ├── plannotator-annotate/  # Lightweight: opens annotate UI
 │       │   ├── plannotator-last/      # Lightweight: annotates last message
@@ -124,7 +124,7 @@ plannotator/
 │   │   └── inbox/                # The Inbox store (store.ts, append-only JSONL; thread routing), the per-thread list sections (list.ts), layout + line reader (schema.ts), registry (registry.ts: inbox/inbox.json)
 │   ├── inbox/                    # The Plannotator Inbox window (App, sidebar, list, thread, empty state, Settings), composed from ui, and surface/ (what a phone hosts); built by apps/inbox
 │   ├── references/               # @plannotator/references — published, Apache-2.0: the read side of reference integrations (URL grammars, registry, GitHub/GitLab/Linear read adapters) behind one credential port; never reads env or runs auth. Cut from Workspaces: see its PROVENANCE.md
-│   ├── system/                   # @plannotator/system: System, a living drawing of a codebase. Format 1 and its loader, `check` (every cited path exists), and the gate (which changes may make a drawing stale). No UI and no Inbox wiring yet; see its README.md
+│   ├── system/                   # @plannotator/system: System, a living drawing of a codebase. Format 1 and its loader, `check` (every cited path exists), and the gate (which changes may make a drawing stale). No UI and no Inbox wiring yet; `plannotator system` (apps/hook/server/system-command.ts) is its command; its tests keep Plannotator's own drawing as a fixture in `test/fixtures/plannotator/`; see its README.md
 │   ├── acp-client/               # @plannotator/acp-client — the ACP client (client, agent table, spawn plan, ensure-launch, own-tool permission policy, same-program check, which); used by Guides in VS Code
 │   ├── t3-code/                  # @plannotator/t3-code — the opt-in T3 Code connection (Ask this session through a Claude Bash hook); loaded by the CLI only for `t3` / `t3-hook` (see "T3 Code")
 │   ├── guide-viewer/             # @plannotator/guide-viewer — the Guided Review chain (GuideView → GuideSectionCard → GuideFileCard → GuideViewportManager) behind a narrow GuideHost context; used by review-editor (ReviewGuideHost + AllFilesCodeView) and by the guides.show viewer (readOnly). Also home of diffParser, DiffFile, and the two markdown renderers.
@@ -138,7 +138,6 @@ plannotator/
 │       ├── dock/                 # Dockview center panel infrastructure
 │       ├── demoData.ts           # Demo diff for standalone mode
 │       └── index.css             # Review-specific styles
-├── .plannotator/system/           # Plannotator's own System drawing (format 1): system.yaml, sheets/, revisions/; `bun run --cwd packages/system check` checks it
 ├── .claude-plugin/marketplace.json  # For marketplace install
 └── legacy/                       # Old pre-monorepo code (reference only)
 ```

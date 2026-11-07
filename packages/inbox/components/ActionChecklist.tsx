@@ -240,12 +240,23 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState<'ok' | 'failed' | null>(null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
+  const cantRef = useRef<HTMLButtonElement>(null);
+  /** The note was put away by Escape or Cancel: focus goes back to "Can't do it…", the button that opened it, never the page. */
+  const refocusCant = useRef(false);
+  const closeNote = () => {
+    refocusCant.current = true;
+    setComposing(null);
+  };
   // When Done was last marked from the tick: a second click of a double-click must not undo it.
   const tickDoneAt = useRef(0);
   const panelId = useId();
   const noteId = useId();
   useEffect(() => {
     if (composing) areaRef.current?.focus();
+    else if (refocusCant.current) {
+      refocusCant.current = false;
+      cantRef.current?.focus();
+    }
   }, [composing]);
   useEffect(() => {
     if (!live) setComposing(null);
@@ -460,7 +471,7 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
                 if (event.key === 'Escape') {
                   event.preventDefault();
                   event.stopPropagation();
-                  setComposing(null);
+                  closeNote();
                 } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                   // The reason counts only once "Can't do it" is pressed: a thread-wide Send from here would go with the
                   // pick and leave the reason behind. The key stands down (the default is taken, so the thread's Send passes).
@@ -478,7 +489,7 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
               >
                 Can't do it
               </button>
-              <button type="button" className="ib-btn ib-sm ib-ghost" onClick={() => setComposing(null)}>
+              <button type="button" className="ib-btn ib-sm ib-ghost" data-action-cant-cancel="" onClick={closeNote}>
                 Cancel
               </button>
             </div>
@@ -489,7 +500,7 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
               <Icon name="check" />
               Done
             </button>
-            <button type="button" className="ib-btn ib-sm ib-ghost" data-action-cant="" disabled={busy} onClick={() => setComposing('cant')}>
+            <button type="button" className="ib-btn ib-sm ib-ghost" data-action-cant="" ref={cantRef} disabled={busy} onClick={() => setComposing('cant')}>
               Can't do it…
             </button>
           </div>
