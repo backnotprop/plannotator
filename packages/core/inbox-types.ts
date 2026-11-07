@@ -1814,6 +1814,8 @@ export interface InboxHealth {
   self_update?: boolean;
   /** Additive: a linked machine's Update ended with no error and no new binary: the version it was for. */
   update_no_change?: string | null;
+  /** Remote launch: 1 while a linked machine may start agents here, 0 while launch is off. Absent from an older Inbox. */
+  launch_from_machines?: number;
   /**
    * The page honours `--pn-window-controls-width` and `-height` on `:root`, for
    * a desktop host that draws the window's buttons over it, and from 2 names
@@ -1948,18 +1950,51 @@ export function isInboxTextSize(value: unknown): value is InboxTextSize {
  * set goes wherever they're using the app"). GET answers null until a window
  * first saves it.
  */
-export const INBOX_ROWS_OPTIONS = ["highlight", "compact", "hideAgents", "smallNames", "hideProject", "hidePreview", "roomy", "unreadDot", "previewTwo", "relativeTime", "titleFirst"] as const;
+export const INBOX_ROWS_OPTIONS = [
+  "highlight",
+  "compact",
+  "hideAgents",
+  "smallNames",
+  "hideProject",
+  "hidePreview",
+  "roomy",
+  "unreadDot",
+  "previewTwo",
+  "relativeTime",
+  "titleFirst",
+  // Letter marks (approval "inbox-letter-marks", 2026-11-07), all off by default. Show → Letter marks is the pair
+  // `marksThreads` / `marksProjects` (Off, Threads, Projects, Both). Look → Mark style is Avatar unless `markInline`
+  // or `markDot` is on. Show's two picture switches: `repoLogo` (Logo from the repo) and `githubPictures`.
+  "marksThreads",
+  "marksProjects",
+  "markInline",
+  "markDot",
+  "repoLogo",
+  "githubPictures",
+] as const;
 export type InboxRowsOption = (typeof INBOX_ROWS_OPTIONS)[number];
 
 /**
  * The options' rivals, never on together: Compact wins over Roomy, no preview over two lines, and Dot is Bold with
  * a dot (`unreadDot` brings `smallNames`). A look in any other shape is read as this one.
+ *
+ * Letter marks: Inline wins over Dot. A mark style counts only while some marks show, and the picture switches only
+ * while project marks show, so with marks off the look holds none of them (turned on again, marks start as Avatar).
  */
 export function inboxRowsCanonical(rows: readonly InboxRowsOption[]): InboxRowsOption[] {
   const on = new Set(rows);
   if (on.has("compact")) on.delete("roomy");
   if (on.has("hidePreview")) on.delete("previewTwo");
   if (on.has("unreadDot")) on.add("smallNames");
+  if (on.has("markInline")) on.delete("markDot");
+  if (!on.has("marksThreads") && !on.has("marksProjects")) {
+    on.delete("markInline");
+    on.delete("markDot");
+  }
+  if (!on.has("marksProjects")) {
+    on.delete("repoLogo");
+    on.delete("githubPictures");
+  }
   return INBOX_ROWS_OPTIONS.filter((name) => on.has(name));
 }
 
@@ -2788,6 +2823,13 @@ export interface InboxLaunchUntrusted {
 }
 
 /**
+ * Why an agent can't start on a machine: its CLI is not there (`missing`), older than launch needs (`too_old`),
+ * Plannotator's plugin is not on (`plugin_off`) or its Inbox tool is off (`tool_off`), or it is not signed in
+ * (`signed_out`). `unknown`: the check itself failed.
+ */
+export type InboxLaunchNotReady = "missing" | "too_old" | "plugin_off" | "tool_off" | "signed_out" | "unknown";
+
+/**
  * Compose's launch block (`GET /api/inbox/sessions` `launch`, only while
  * `inboxLaunch.enabled`): the agents To offers to start (only those
  * available: no grey rows), and the projects the folder menu lists, the most
@@ -2801,6 +2843,12 @@ export interface InboxComposeLaunch {
    */
   agents: { agent: InboxLaunchAgent; name: string; scratch_trusted?: boolean; untrusted?: Record<string, InboxLaunchUntrusted> }[];
   projects: { id: string; name: string; root: string; exists: boolean }[];
+  /**
+   * Additive (remote launch): the agents this machine has a host for but can't start now, and why, so a linked
+   * machine's window can say so with this machine's name (`inboxLaunchNotReadyWords`). `over_ssh`: this Inbox was
+   * started over SSH, which is why Claude Code reads as signed out (macOS keeps its login locked for SSH).
+   */
+  not_ready?: { agent: InboxLaunchAgent; name: string; code: InboxLaunchNotReady; over_ssh?: true }[];
   /** The folder menu's "New scratch folder": the root new scratch folders go in (Settings → Agents). Absent from an older Inbox. */
   scratch?: { root: string };
 }

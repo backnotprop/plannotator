@@ -1,4 +1,5 @@
 import { perfInteraction, perfKeystroke } from '../perfMarks';
+import { LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
 import { inboxUrl, machineOf } from '../inboxUrl';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -5585,6 +5586,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               // subject: always under a name (the owner, 2026-11-02), else only when the subject is cut.
               <Tip content={thread.subject ?? '(no subject)'} cut={!nameChip}>
                 <span className="ib-phsubj" dir="auto" data-header-subject="" data-header-name={nameChip ? '' : undefined} data-on={nameChip || chrome.subject || artifactsOn ? '' : undefined} aria-hidden="true">
+                  <HeadMark thread={thread} where="bar" />
                   {nameChip ?? thread.subject ?? '(no subject)'}
                 </span>
               </Tip>
@@ -5673,6 +5675,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             )}
           </div>
         )}
+        <HeadMark thread={thread} where="body" />
         <h2 className="ib-subject" dir="auto" tabIndex={-1}>{reviewView?.title ?? (thread.pull_keys?.length || thread.review_started ? thread.thread_name : null) ?? thread.subject ?? '(no subject)'}</h2>
         {reviewView?.fromThread && (
           <p className="ib-rvfrom" data-review-from="">
@@ -6920,4 +6923,35 @@ function SkipChip({ count, keepOpen, onToggle }: { count: number; keepOpen: bool
       </button>
     </span>
   );
+}
+
+/**
+ * Letter marks (letterMarks.tsx) in the thread's header. Styles "Inline" and "Avatar": the bar's title leads with the
+ * mark (Avatar: solid, with the project's on its corner). Style "Dot": a 30 px mark over the subject, where the list
+ * showed only the colour.
+ */
+function HeadMark({ thread, where }: { thread: { thread_id: string; subject: string | null; thread_name?: string | null; project: { id: string; name: string } }; where: 'bar' | 'body' }) {
+  const { marks } = useRowMarks();
+  if (marks.what === 'off') return null;
+  const style = marks.style;
+  const name = thread.thread_name?.trim() ? thread.thread_name : (thread.subject ?? '');
+  const threads = showsThreads(marks.what);
+  const projects = showsProjects(marks.what);
+  if (where === 'bar' && style !== 'dot') {
+    return (
+      <span className="ib-lm-head" data-take={style} aria-hidden="true">
+        {threads ? <LetterMark name={name} seed={thread.thread_id} size={20} solid={style === 'avatar'} /> : <ProjectMark projectId={thread.project.id} name={thread.project.name} size={20} solid={style === 'avatar'} />}
+        {style === 'avatar' && threads && projects && <ProjectMark projectId={thread.project.id} name={thread.project.name} size={12} solid className="ib-lm-badge" />}
+      </span>
+    );
+  }
+  if (where === 'body' && style === 'dot') {
+    return (
+      <div className="ib-lm-hero" aria-hidden="true">
+        {threads && <LetterMark name={name} seed={thread.thread_id} size={30} />}
+        {projects && <ProjectMark projectId={thread.project.id} name={thread.project.name} size={threads ? 16 : 30} className={threads ? 'ib-lm-heroP' : undefined} />}
+      </div>
+    );
+  }
+  return null;
 }
