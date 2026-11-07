@@ -13,10 +13,17 @@
  * spec always runs somewhere. Shard 1 also runs the update specs on the
  * release-numbered binary, so it starts with that time already counted.
  *
+ * On a PR the plan job may leave out specs that passed in an earlier run of
+ * the same change (scripts/ci-e2e-reuse.ts). Its plan (E2E_PLAN, a JSON file)
+ * then gives the specs that remain and how many shards share them; with no
+ * plan, or a full one, every spec runs over E2E_SHARDS shards as above. Each
+ * shard also writes Playwright's JSON report (E2E_REPORT), from which the
+ * workflow records the specs it passed for the next run.
+ *
  * scripts/ci-e2e-shard.test.ts checks that the shards together are every spec,
  * each once, and that the workflow's matrix runs every shard.
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 export const repoRoot = resolve(import.meta.dir, '..');
@@ -51,21 +58,41 @@ export function shards(files = specFiles(), times = specTimes(), n = E2E_SHARDS)
   return out.map((list) => list.sort());
 }
 
+/** The specs of shard k (1-based) and the shard count, from the reuse plan when it leaves specs out. */
+export function shardOf(k: number, plan: { count: number; specs: string[] | null } | null): { count: number; files: string[] } {
+  if (!plan || plan.specs === null) return { count: E2E_SHARDS, files: shards()[k - 1] ?? [] };
+  return { count: plan.count, files: shards(plan.specs, specTimes(), plan.count)[k - 1] ?? [] };
+}
+
 /** A Playwright file filter that matches this one file only. */
 export function fileFilter(file: string): string {
   return `${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`;
 }
 
 if (import.meta.main) {
-  const k = Number(process.argv[2]);
-  if (!Number.isInteger(k) || k < 1 || k > E2E_SHARDS) {
-    console.error(`usage: bun run scripts/ci-e2e-shard.ts <1..${E2E_SHARDS}>`);
+  const planFile = process.env.E2E_PLAN;
+  // A missing plan would mean the 16-shard split on a smaller matrix, which drops specs: fail instead.
+  if (planFile && !existsSync(planFile)) {
+    console.error(`e2e shard: no plan at ${planFile}`);
     process.exit(2);
   }
-  const files = shards()[k - 1];
-  console.log(`e2e shard ${k}/${E2E_SHARDS}: ${files.length} specs\n  ${files.join('\n  ')}`);
-  const child = Bun.spawnSync(['bunx', 'playwright', 'test', '-c', E2E_CONFIG, ...files.map(fileFilter)], {
+  const plan = planFile ? (JSON.parse(readFileSync(planFile, 'utf8')) as { count: number; specs: string[] | null }) : null;
+  const k = Number(process.argv[2]);
+  const count = plan?.specs ? plan.count : E2E_SHARDS;
+  if (!Number.isInteger(k) || k < 1 || k > count) {
+    console.error(`usage: bun run scripts/ci-e2e-shard.ts <1..${count}>`);
+    process.exit(2);
+  }
+  const { files } = shardOf(k, plan);
+  console.log(`e2e shard ${k}/${count}: ${files.length} specs\n  ${files.join('\n  ')}`);
+  // No file filter would run every spec: a shard the plan left empty runs nothing.
+  if (files.length === 0) process.exit(0);
+  const report = resolve(process.env.E2E_REPORT ?? join(repoRoot, '.local/e2e-report/report.json'));
+  // A planned shard may hold only specs whose every test is quarantined in CI.
+  const noTests = plan?.specs ? ['--pass-with-no-tests'] : [];
+  const child = Bun.spawnSync(['bunx', 'playwright', 'test', '-c', E2E_CONFIG, '--reporter=list,json', ...noTests, ...files.map(fileFilter)], {
     cwd: repoRoot,
+    env: { ...process.env, PLAYWRIGHT_JSON_OUTPUT_NAME: report },
     stdio: ['inherit', 'inherit', 'inherit'],
   });
   process.exit(child.exitCode ?? 1);
