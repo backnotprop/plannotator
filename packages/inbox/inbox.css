@@ -770,14 +770,14 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 /* main list */
 .ib-main { background: var(--ib-main-bg); display: flex; flex: 1; min-width: 0; height: 100%; padding: var(--ib-gutter); gap: var(--ib-gutter); }
 /* Each pane is a card on the ground: the list, a thread, a file beside its thread, Settings, Drafts, What's new. */
-.ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage) { border-radius: var(--ib-pane-r); box-shadow: var(--ib-pane-shadow); min-height: 0; }
+.ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage, .ib-prreview) { border-radius: var(--ib-pane-r); box-shadow: var(--ib-pane-shadow); min-height: 0; }
 /* Each takes the card's colour under the panes switch. Off, today's: the thread pane its own card, a file the
    window's background, and the rest none of their own (an opaque scroller draws its text differently). */
 .ib-main > :is(.ib-listcol, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage) { background: var(--ib-pane-bg-s, transparent); }
 .ib-main > .ib-view { background: var(--ib-pane-bg-s, var(--background)); }
 /* The list keeps its resize edge in the gutter beside it (never clipped); its scroll box follows the card's corners instead.
    Settings, Drafts and What's new scroll themselves, which clips them to their corners already. */
-.ib-main > :is(.ib-pane, .ib-view:not(.ib-full)) { overflow: var(--ib-clip-s, visible); }
+.ib-main > :is(.ib-pane, .ib-view:not(.ib-full), .ib-prreview) { overflow: var(--ib-clip-s, visible); }
 .ib-main > .ib-listcol > .ib-lbody { border-radius: 0 0 var(--ib-pane-r) var(--ib-pane-r); }
 .ib-listcol { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .ib-listcol.ib-narrow { flex: none; width: 380px; border-right: 1px solid var(--ib-pane-line); }
@@ -3151,7 +3151,7 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   :root[data-ib-keyboard-pin]:has(.pn-inbox) { height: var(--ib-vvh, 100%); overflow: hidden; overscroll-behavior: none; }
   .ib-main { padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); gap: 0; position: relative; overflow: hidden; }
   /* One screen at a time: the pane is the screen, edge to edge, with no card around it. */
-  .ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage) { border-radius: 0; box-shadow: none; }
+  .ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage, .ib-prreview) { border-radius: 0; box-shadow: none; }
   .ib-main > .ib-listcol > .ib-lbody { border-radius: 0; }
   body:has(.pn-inbox) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select) { font-size: 16px !important; }
   .ib-lbody, .ib-pbody, .ib-spage, .ib-dpage, .ib-docscroll, .ib-gbody, .ib-wn { overscroll-behavior: contain; }
@@ -9020,6 +9020,15 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-prreview .ib-prp-row, .pn-inbox .ib-prp-file, .pn-inbox .ib-prp-folder { min-height: 28px; }
 .ib-prp-files { padding-top: 16px; }
 .ib-prp-fileshead { padding-bottom: 6px; }
+/* As the code review app (approval pr-view-one-surface, 11-07 19:08), every width but a phone's: the bar its header's
+   fill (bg-card/50 on the page), and over the code its muted tab row (dockview's strip, 33 px) with Split | Unified at
+   the right end, where the review app keeps its view controls. */
+.ib-prr-wide .ib-vhead { background: color-mix(in oklab, var(--card) 50%, var(--background)); }
+.ib-prp-tabs { display: flex; align-items: center; justify-content: flex-end; gap: 6px; height: 33px; padding: 0 8px; background: var(--muted); }
+.ib-prr-wide:not(.ib-railfold) .ib-prp-tabs { grid-column: 2; grid-row: 1; }
+.pn-inbox .ib-prp-tabs :is(.ib-seg, .ib-gtab) { height: 27px; box-sizing: border-box; border: 0; background: transparent; align-items: stretch; }
+.pn-inbox .ib-prp-tabs .ib-seg-o { height: auto; padding: 0 7px; }
+.pn-inbox .ib-prp-tabs .ib-seg-o[data-on] { background: var(--background); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1); }
 
 
 /* ─────────────── Window controls (a desktop host; inbox-window.md "Window controls") ───────────────

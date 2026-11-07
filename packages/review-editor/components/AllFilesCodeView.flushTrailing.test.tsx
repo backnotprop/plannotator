@@ -1,7 +1,7 @@
 /**
- * Flush files (the Inbox's PR page): the row after an unread file's last hunk. Its length is read with the host's
- * whole-file reader when the file renders; the row shows "N unmodified lines" only when N > 0, and stays hidden while
- * unknown or when the last hunk reaches the end of the file.
+ * Flush files (the Inbox's PR page): the row after an unread file's last hunk. As in the code review app, nothing is
+ * drawn there, whatever the file's length, and nothing is read for it: the row's room is given back, and an arrow above
+ * it opens the file's whole text with the host's reader.
  *
  * CodeView is a stand-in that renders the one item through `onPostRender` on a host element of its own, the way
  * Pierre hands AllFilesCodeView its `<diffs-container>`; the item is the real partial diff of the patch.
@@ -147,47 +147,18 @@ afterAll(() => {
 });
 
 describe.if(hasDom)('flush files: the row after the last hunk', () => {
-  test('a file with lines after its last change gets "N unmodified lines" once its length is known', async () => {
-    let answer: (value: { oldContent: string; newContent: string }) => void = () => {};
+  test('a file that goes on after its last change draws no row there, and nothing is read for it', async () => {
     const reads: string[] = [];
-    await render((asked) => {
+    await render(async (asked) => {
       reads.push(asked.path);
-      return new Promise((resolve) => (answer = resolve));
-    });
-    // Unknown: nothing shows, and the row's room is given back.
-    expect(reads).toEqual(['a.ts']);
-    expect(itemHost!.hasAttribute('data-trailing-unread')).toBe(true);
-    expect(itemHost!.hasAttribute('data-trailing-count')).toBe(false);
-    await act(async () => answer({ oldContent: text([...OLD, 'six', 'seven']), newContent: text([...NEW, 'six', 'seven']) }));
-    await settle();
-    expect(itemHost!.hasAttribute('data-trailing-unread')).toBe(false);
-    expect(itemHost!.hasAttribute('data-trailing-count')).toBe(true);
-    expect(itemHost!.style.getPropertyValue('--pn-trailing-label')).toBe('"2 unmodified lines"');
-  });
-
-  test('a file whose last change reaches its end never gets the row', async () => {
-    await render(async () => ({ oldContent: text(OLD), newContent: text(NEW) }));
-    await settle();
-    expect(itemHost!.hasAttribute('data-trailing-unread')).toBe(true);
-    expect(itemHost!.hasAttribute('data-trailing-count')).toBe(false);
-    expect(itemHost!.style.getPropertyValue('--pn-trailing-label')).toBe('');
-  });
-
-  test('a failed read keeps the row hidden and is not asked again when the file renders again', async () => {
-    let reads = 0;
-    await render(async () => {
-      reads += 1;
-      throw new Error('forge refused');
+      return { oldContent: text([...OLD, 'six', 'seven']), newContent: text([...NEW, 'six', 'seven']) };
     });
     await settle();
-    await act(async () => renderAgain());
-    await settle();
-    expect(reads).toBe(1);
+    expect(reads).toEqual([]);
     expect(itemHost!.hasAttribute('data-trailing-unread')).toBe(true);
-    expect(itemHost!.hasAttribute('data-trailing-count')).toBe(false);
   });
 
-  test('a file that renders again keeps its count and reads nothing more', async () => {
+  test('a file that renders again keeps the row hidden and still reads nothing', async () => {
     let reads = 0;
     await render(async () => {
       reads += 1;
@@ -196,42 +167,20 @@ describe.if(hasDom)('flush files: the row after the last hunk', () => {
     await settle();
     await act(async () => renderAgain());
     await settle();
-    expect(reads).toBe(1);
-    expect(itemHost!.style.getPropertyValue('--pn-trailing-label')).toBe('"1 unmodified line"');
+    expect(reads).toBe(0);
+    expect(itemHost!.hasAttribute('data-trailing-unread')).toBe(true);
   });
 
-  test('an arrow clicked while the count is on its way shares that read', async () => {
+  test("an arrow opens the file's whole text with one read", async () => {
     let reads = 0;
-    let answer: (value: { oldContent: string; newContent: string }) => void = () => {};
-    await render(() => {
+    await render(async () => {
       reads += 1;
-      return new Promise((resolve) => (answer = resolve));
+      return { oldContent: text([...OLD, 'six']), newContent: text([...NEW, 'six']) };
     });
     let opened: unknown = null;
     await act(async () => void clickArrow().then((files) => (opened = files)));
-    expect(reads).toBe(1);
-    await act(async () => answer({ oldContent: text(OLD), newContent: text(NEW) }));
     await settle();
     expect(reads).toBe(1);
-    expect(opened).toMatchObject({ newFile: { name: 'a.ts', contents: text(NEW) } });
-  });
-
-  test('leaving the page stops a count still on its way', async () => {
-    let signal: AbortSignal | null = null;
-    await render((_file, given) => {
-      signal = given;
-      return new Promise(() => {});
-    });
-    expect(signal!.aborted).toBe(false);
-    await act(async () => root!.unmount());
-    root = null;
-    expect(signal!.aborted).toBe(true);
-  });
-
-  test('no text to count (the reader has none) leaves the row hidden', async () => {
-    await render(async () => null);
-    await settle();
-    expect(itemHost!.hasAttribute('data-trailing-unread')).toBe(true);
-    expect(itemHost!.hasAttribute('data-trailing-count')).toBe(false);
+    expect(opened).toMatchObject({ newFile: { name: 'a.ts', contents: text([...NEW, 'six']) } });
   });
 });

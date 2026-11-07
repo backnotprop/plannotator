@@ -764,9 +764,6 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         {!phone && title}
         {!phone && readOnlyNote}
         <span className="ib-sp" />
-        {/* Split | Unified in the bar, over the diff's right edge, where the review app's tab row holds it: the files
-            start at the top of the code, with no band of their own above them (approval pr-view-one-surface, 11-07). */}
-        {!phone && <DiffStyleSwitch icons />}
         {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
         {folded && (readerComments || comments.length > 0) && (
           <button
@@ -879,6 +876,13 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             }}
             data-pull-rail-handle=""
           />
+        )}
+        {/* The review app's muted tab row over the code, its view controls at the right end; no tabs of its own here
+            (approval pr-view-one-surface, 11-07 19:08). */}
+        {!phone && (
+          <div className="ib-prp-tabs" data-pull-tabs="">
+            <DiffStyleSwitch icons />
+          </div>
         )}
         <div className="ib-gbody" data-repo-open={repoOpen && repoSha ? '' : undefined}>
           {repoOpen && repoSha && (

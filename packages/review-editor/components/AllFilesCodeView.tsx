@@ -37,7 +37,6 @@ import { getFileKindOrder } from '../utils/fileKindTree';
 import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
 import { getDiffSelection, getLineNumberFromNode, getSideFromNode, snapshotDiffSelection, rangeForGutterClick, type DiffSelectionSnapshot } from '../utils/diffSelection';
 import { isContentConsistentWithPatch } from '../utils/patchConsistency';
-import { linesAfterLastHunk, unmodifiedLinesLabel } from '../utils/trailingLines';
 import { isLineRangeInPatch } from '../utils/patchParser';
 import { hashString } from '../utils/hashString';
 import {
@@ -425,10 +424,10 @@ export interface AllFilesCodeViewProps {
   /**
    * Files that sit flush, a header's own hairline the only seam (the Inbox's PR page, one file per viewer that scrolls
    * with the page). Every list counts no spacing around a hunk separator (#2713). Here a file whose whole text is not
-   * read yet draws no "More unchanged context may be available" row after its last hunk: when it renders, its length
-   * is read with `fetchFileContent`, and the row shows "N unmodified lines" when N > 0 (an arrow there opens them);
-   * unknown or none, it is hidden and its room given back, so the next file's header sits right under the last code
-   * row. The header draws its hairline whether stuck or not.
+   * read yet draws no row after its last hunk (neither "More unchanged context may be available" nor "N unmodified
+   * lines"), and gives back the room it is laid out in, so the next file's header sits right under the last code row,
+   * as in the code review app; once the text is read (an arrow above it), what is left below shows as "N unmodified
+   * lines". The header draws its hairline whether stuck or not.
    */
   flushFiles?: boolean;
   /** A narrow header keeps the folder before the name (FileHeader `keepsFolder`). */
@@ -700,20 +699,15 @@ const SCROLLS_WITH_PAGE_CSS = `
   @keyframes reading-whole-file { 50% { opacity: 0.5; } }
   @media (prefers-reduced-motion: reduce) { :host([data-reading-whole-file]) [data-expand-button] { animation: none; } }
 `;
-/** A host reader's answer for a file's whole text (`fetchFileContent`). */
-type FileContentAnswer = { oldContent: string | null; newContent: string | null } | null;
 const STUCK_HEADER_LINE_CSS = `
   @container sticky-header scroll-state(stuck: top) {
     [data-diffs-header]::after { content: ''; position: absolute; left: 0; bottom: -1px; width: 100%; height: 1px; background: var(--border); }
   }
 `;
-// Flush files (`flushFiles`): the header's own hairline is the seam. An unread file's trailing "More unchanged context"
-// row is not drawn while the lines after its last hunk are unknown or none (the viewer gives its room back,
-// HUNK_SEPARATOR_HEIGHT); with some, it shows their count, as Pierre words it once it has the whole file.
+// Flush files (`flushFiles`): the header's own hairline is the seam, and an unread file's trailing row is not drawn
+// (the viewer gives its room back, HUNK_SEPARATOR_HEIGHT).
 const FLUSH_FILES_CSS = `
   :host([data-trailing-unread]) [data-separator][data-separator-last] { display: none; }
-  :host([data-trailing-count]) [data-separator][data-separator-last] [data-unmodified-lines] { display: none; }
-  :host([data-trailing-count]) [data-separator][data-separator-last] [data-separator-content]::after { content: var(--pn-trailing-label); }
 `;
 
 // How long the scroller must be quiet before queued augmentation applies
@@ -1919,20 +1913,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   wholeFileGoneRef.current = wholeFileGone;
   useEffect(() => setWholeFileGone(false), [fileSetKey]);
   const wholeFileFailedRef = useRef(0);
-  // Flush files: the lines after an unread file's last hunk, counted from the arrows' own reader once the file renders,
-  // which is when its box nears the viewport (syncTrailingRow, below). The reader keeps what it read, so an arrow's
-  // first click afterwards reads nothing again; a click while the count is still on its way shares that read.
-  // count null: not known yet.
-  type TrailingRead = { key: string; itemId: string; count: number | null; controller: AbortController; promise: Promise<FileContentAnswer> };
-  const trailingCountRef = useRef<TrailingRead | null>(null);
-  // Cleared, not only stopped: under StrictMode the effects run twice, and a key left behind would never ask again.
-  useEffect(
-    () => () => {
-      trailingCountRef.current?.controller.abort();
-      trailingCountRef.current = null;
-    },
-    [],
-  );
   const loadWholeFile = useStableCallback((fileDiff: FileDiffMetadata): Promise<FileDiffLoadedFiles> => {
     const generation = fileSetKeyRef.current;
     const entry = [...itemIdToFileRef.current].find(([, candidate]) => candidate.path === fileDiff.name);
@@ -1950,9 +1930,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // The arrows say a read is on its way (SCROLLS_WITH_PAGE_CSS): the click's rows arrive with it.
     const shown = viewerRef.current?.getInstance()?.getRenderedItems().find((candidate) => candidate.id === itemId)?.element;
     shown?.setAttribute('data-reading-whole-file', '');
-    const counting = trailingCountRef.current;
-    const shared = counting && counting.key === `${generation}\u0000${itemId}` && counting.count === null && !counting.controller.signal.aborted ? counting.promise : null;
-    return (shared ?? read(file, controller.signal)).finally(() => shown?.removeAttribute('data-reading-whole-file')).then(
+    return read(file, controller.signal).finally(() => shown?.removeAttribute('data-reading-whole-file')).then(
       (data) => {
         augmentRef.current.set(itemId, { status: 'done', controller, generation });
         if (data?.oldContent == null || data.newContent == null) return none();
@@ -1984,44 +1962,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     item.fileDiff.isPartial &&
     (item.fileDiff.type === 'change' || item.fileDiff.type === 'rename-changed') &&
     item.fileDiff.hunks.length > 0;
-  const syncTrailingRow = useStableCallback((node: HTMLElement, item: CodeViewItem<DiffAnnotationMetadata>) => {
+  // Nothing is read for it: the row stays hidden until an arrow above it opens the file's whole text.
+  const syncTrailingRow = (node: HTMLElement, item: CodeViewItem<DiffAnnotationMetadata>) => {
     const unread = hidesTrailingRow(item);
-    const key = `${fileSetKeyRef.current}\u0000${item.id}`;
-    const kept = trailingCountRef.current;
-    const count = unread && kept?.key === key ? kept.count : null;
-    const shows = count !== null && count > 0;
-    node.toggleAttribute('data-trailing-unread', unread && !shows);
-    node.toggleAttribute('data-trailing-count', shows);
-    if (shows) node.style.setProperty('--pn-trailing-label', JSON.stringify(unmodifiedLinesLabel(count)));
-    else node.style.removeProperty('--pn-trailing-label');
-    setTrailingUnread(unread && !shows);
-    if (!unread || kept?.key === key) return;
-    const file = itemIdToFileRef.current.get(item.id);
-    const read = fetchFileContentRef.current;
-    if (!file || !read) return;
-    kept?.controller.abort();
-    const controller = new AbortController();
-    const promise = read(file, controller.signal);
-    const entry: TrailingRead = { key, itemId: item.id, count: null, controller, promise };
-    trailingCountRef.current = entry;
-    promise.then(
-      (data) => {
-        if (trailingCountRef.current !== entry || controller.signal.aborted) return;
-        const live = viewerRef.current?.getItem(item.id);
-        // Text that is not this patch's file (the tree moved on) says nothing: the row stays hidden.
-        entry.count =
-          live?.type === 'diff' && data?.oldContent != null && data.newContent != null && isContentConsistentWithPatch(file.patch, data.oldContent, data.newContent)
-            ? linesAfterLastHunk(live.fileDiff.hunks, data.newContent)
-            : 0;
-        const shown = viewerRef.current?.getInstance()?.getRenderedItems().find((candidate: { id: string }) => candidate.id === item.id);
-        if (live && shown?.element) syncTrailingRow(shown.element as HTMLElement, live);
-      },
-      // A failed read: the row stays hidden, and this file is not asked again until the diff changes.
-      () => {
-        if (trailingCountRef.current === entry) entry.count = 0;
-      },
-    );
-  });
+    node.toggleAttribute('data-trailing-unread', unread);
+    setTrailingUnread(unread);
+  };
 
   // A comment on a line an arrow opened, after a reload: the gap is closed again. Open what holds it (a first read if
   // need be), then scroll, once the rows are there. Answers whether it took the jump on.
