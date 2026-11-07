@@ -7,6 +7,7 @@
  * session), agents reached through MCP after (Codex's replies wake it too:
  * the Inbox runs `codex queue`). Pure.
  */
+import { INBOX_CLAUDE_PLUGIN_INSTALL } from '@plannotator/core/inbox-launch-ready';
 import { INBOX_AGENT_IDS, INBOX_HOST_NAMES, INBOX_MCP_WAKE_MIN_VERSIONS, INBOX_MCP_WAKING_HOSTS, INBOX_WAKING_HOSTS, inboxToolCostText, type InboxAgentId, type InboxAgentRow, type InboxAgentsModel } from '@plannotator/core/inbox-types';
 import type { HarnessId } from './harnesses';
 
@@ -252,8 +253,8 @@ export function mcpWakeName(host: string): string {
   return min ? `${INBOX_HOST_NAMES[host] ?? host} ${min.replace(/\.0$/, '')} or later` : (INBOX_HOST_NAMES[host] ?? host);
 }
 // The first-run line names no DeepSeek Harness (the owner, #2529): it keeps its words whether DSH is here or not,
-// though a reply does wake a DSH session through Plannotator's plugin.
-const WAKE_LINE_UNNAMED: ReadonlySet<string> = new Set(['dsh']);
+// though a reply does wake a DSH session through Plannotator's plugin. Cline likewise (its plugin; words unchanged).
+const WAKE_LINE_UNNAMED: ReadonlySet<string> = new Set(['dsh', 'cline']);
 const BRIDGE_HOSTS = INBOX_WAKING_HOSTS.filter((host) => !INBOX_MCP_WAKING_HOSTS.includes(host) && !WAKE_LINE_UNNAMED.has(host));
 
 /**
@@ -326,7 +327,7 @@ export function harnessOf(id: InboxAgentId): HarnessId {
 }
 
 /** The commands that install Plannotator's own connection. */
-export const CLAUDE_PLUGIN_INSTALL = 'claude plugin marketplace add backnotprop/plannotator\nclaude plugin install plannotator@plannotator';
+export const CLAUDE_PLUGIN_INSTALL = INBOX_CLAUDE_PLUGIN_INSTALL;
 export const PI_EXTENSION_INSTALL = 'pi install npm:@plannotator/pi-extension';
 export const OPENCODE_PLUGIN_LINES = {
   '2': '"plugins": [{ "package": "@plannotator/opencode@latest" }]',

@@ -30,6 +30,7 @@ import { HostMark, Icon, type IconName } from '../icons';
 import { ArtifactDiagramFace } from './ArtifactDiagramFace';
 import { opensInWindow, sizeLine } from './AttachmentTiles';
 import { FileName } from './FileName';
+import { ReuseButton } from '../reuse';
 import { OpenInTileMenu, type OpenInSurface } from './OpenIn';
 import { Tip } from './Tip';
 
@@ -419,8 +420,9 @@ function Tile({
   }
   return (
     <li className="ib-art-cell" ref={ref}>
-      <div className="ib-art-w">
+      <div className={`ib-art-w${openIn === 'apps' ? ' ib-art-w-more' : ''}`}>
         {tile}
+        {artifact.type === 'file' && <ReuseButton file={artifact.attachment} surface="card" />}
         {/* The tile's ⋯ "Open in" is its sibling (a button in a button is invalid): the next tab stop after the tile. */}
         {artifact.type === 'file' && openIn === 'apps' && (
           <OpenInTileMenu

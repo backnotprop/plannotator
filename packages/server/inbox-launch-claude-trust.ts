@@ -28,7 +28,7 @@ function regularText(path: string): string {
 }
 
 /** A `.git` git would take: a file or a folder, never a FIFO or a socket of that name. */
-function hasGit(dir: string): boolean {
+export function hasGit(dir: string): boolean {
   try {
     const stat = statSync(join(dir, ".git"));
     return stat.isFile() || stat.isDirectory();

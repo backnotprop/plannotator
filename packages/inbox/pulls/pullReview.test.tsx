@@ -33,10 +33,13 @@ const hasDom = typeof document !== 'undefined';
 const shown: { patch: string; title: string }[] = [];
 /** The reader's comment seam as the review last gave it (a test writes a comment through it). */
 let readerComments: { onSave: (annotation: unknown) => void } | undefined;
+/** The reader's whole-file seam as the review last gave it. */
+let readerFiles: ((path: string, signal: AbortSignal, patch: string) => Promise<unknown>) | undefined;
 if (hasDom) {
   mock.module('#guide-reader', () => ({
-    default: (props: { snapshot: { review: { rawPatch: string }; guide: { title: string } }; comments?: { onSave: (annotation: unknown) => void } }) => {
+    default: (props: { snapshot: { review: { rawPatch: string }; guide: { title: string } }; comments?: { onSave: (annotation: unknown) => void }; fileContents?: typeof readerFiles }) => {
       readerComments = props.comments;
+      readerFiles = props.fileContents;
       shown.push({ patch: props.snapshot.review.rawPatch, title: props.snapshot.guide.title });
       return null;
     },
@@ -124,12 +127,18 @@ const liveSession = (session: string, _project: string) => ({ session, host: 'cl
 let sessionsAnswer: Record<string, unknown> = {};
 /** What `POST /api/inbox/pulls/review` answers (Post to GitHub/GitLab), and its status. */
 let reviewAnswer: { status: number; body: Record<string, unknown> } = { status: 200, body: {} };
-/** The head commit the layer patch is read at (`InboxPullDiffAnswer.head_sha`). */
+/** The head commit the patch is read at (`InboxPullDiffAnswer.head_sha`). */
 let diffHead: string | null = 'a'.repeat(40);
+/** The diff door's patch instead of the one named after the layer. */
+let diffPatch: string | null = null;
+/** The whole files asked for behind the expand arrows. */
+let fileAsks: string[] = [];
 /** What starting a thread answers for one session (an ended agent: 409 session_not_live), and how often compose's sessions were read. */
 let refuse: Record<string, { status: number; body: Record<string, unknown> }> = {};
 /** Thread names another open thread already has: starting a thread with one answers 409 thread_name_taken. */
 let takenNames: string[] = [];
+/** Local changes per project (`/reviews/changes`), changed files by project id; a project not here answers `{}`. */
+let changedFiles: Record<string, number> = {};
 let sessionReads = 0;
 /** While set, starting a thread waits for it: a send still on its way. */
 let holdSend: Promise<void> | null = null;
@@ -153,8 +162,11 @@ beforeEach(() => {
   shown.length = 0;
   reviewAnswer = { status: 200, body: { ok: true, prUrl: '', submission: { status: 'complete' } } };
   diffHead = 'a'.repeat(40);
+  diffPatch = null;
+  fileAsks = [];
   refuse = {};
   takenNames = [];
+  changedFiles = {};
   sessionReads = 0;
   holdSend = null;
   window.localStorage.clear();
@@ -174,9 +186,17 @@ beforeEach(() => {
       if (url.pathname.endsWith('/pulls/review')) return Response.json(reviewAnswer.body, { status: reviewAnswer.status });
       return Response.json({ reply: {}, questions: [], replayed: false });
     }
+    if (url.pathname.endsWith('/reviews/changes')) {
+      const files = changedFiles[url.searchParams.get('project')!];
+      return Response.json(files === undefined ? {} : { git: true, files, additions: files, deletions: 0, branch: 'main', base: 'main' });
+    }
     if (url.pathname.endsWith('/api/inbox/sessions')) {
       sessionReads += 1;
       return Response.json(sessionsAnswer);
+    }
+    if (url.pathname.endsWith('/pulls/file')) {
+      fileAsks.push(url.searchParams.get('scope')!);
+      return Response.json({ serverSession: 's', oldContent: 'a\n', newContent: 'b\n' });
     }
     if (url.pathname.endsWith('/pulls/diff')) {
       const key = url.searchParams.get('key')!;
@@ -184,7 +204,7 @@ beforeEach(() => {
       asked.push({ key, scope });
       if (diffOverride) return diffOverride(key, scope);
       const patch = `diff --git a/${scope}-${key.split('#')[1]}.ts b/${scope}-${key.split('#')[1]}.ts\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n`;
-      return Response.json({ serverSession: 's', key, scope, base: scope === 'stack' ? 'main' : 'x', head: 'y', patch, ...(scope === 'layer' ? { head_sha: diffHead } : {}) });
+      return Response.json({ serverSession: 's', key, scope, base: scope === 'stack' ? 'main' : 'x', head: 'y', patch: diffPatch ?? patch, head_sha: diffHead });
     }
     return Response.json({});
   }) as typeof fetch;
@@ -228,6 +248,30 @@ const el = <T extends Element = HTMLElement>(selector: string) => {
   if (!found) throw new Error(`${selector} did not render`);
   return found as unknown as T;
 };
+
+// Guards a whole file read at another commit than the patch on screen, in either scope.
+test.skipIf(!hasDom)('a diff whose head moved during its read asks for no whole files; one that held does', async () => {
+  diffPatch = 'diff --git a/a.ts b/a.ts\nindex 1111111..2222222 100644\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-a\n+b\n';
+  const theirs = { ...model.pulls.find((p) => p.number === 880)!, head_sha: SHA };
+  const answer = { ...model, pulls: model.pulls.map((p) => (p.number === 880 ? theirs : p)) };
+  const ask = async (scope: 'layer' | 'stack', head: string | null, pushed: string) => {
+    diffHead = head;
+    // Its own push time: the window keeps a patch read a moment ago per push.
+    const fresh = { ...answer, pulls: answer.pulls.map((p) => (p.number === 880 ? { ...theirs, updated_at: pushed } : p)) };
+    mount(<PullReview model={fresh} modelError={null} stackId={theirs.key} layerKey={theirs.key} scope={scope} onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+    await settle();
+    await readerFiles!('a.ts', new AbortController().signal, diffPatch!);
+    act(() => root!.unmount());
+    root = null;
+    host!.remove();
+  };
+  await ask('layer', null, '2026-11-03T13:00:00.000Z');
+  await ask('stack', null, '2026-11-03T13:01:00.000Z');
+  expect(fileAsks).toEqual([]);
+  await ask('layer', 'c'.repeat(40), '2026-11-03T13:02:00.000Z');
+  await ask('stack', 'c'.repeat(40), '2026-11-03T13:03:00.000Z');
+  expect(fileAsks).toEqual(['layer', 'stack']);
+});
 
 test.skipIf(!hasDom)('a layer opens its own diff; Whole stack asks for the stack up to it; Next layer moves up', async () => {
   mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={model} />);
@@ -278,10 +322,10 @@ test.skipIf(!hasDom)("a teammate's PR has no agent thread here: its diff reads w
 // --- Post to GitHub/GitLab (the owner's answer C on #2590: the person chooses at the end) ---
 
 const SHA = 'a'.repeat(40);
-/** A comment kept for a layer's review, as the review keeps them (per push). */
+/** A comment kept for a layer's review, as the review keeps them (per head commit). */
 function keepComment(p: InboxPull, text: string) {
   const comment = { id: `c-${p.number}`, type: 'comment', scope: 'line', filePath: 'src/retry.ts', lineStart: 12, lineEnd: 12, side: 'new', text, createdAt: 1 };
-  window.localStorage.setItem(`plannotator-inbox-pull-review:${p.key}:layer:${p.updated_at}`, JSON.stringify({ comments: [comment], viewed: [] }));
+  window.localStorage.setItem(`plannotator-inbox-pull-review:${p.key}:layer:${p.head_sha ?? SHA}`, JSON.stringify({ comments: [comment], viewed: [] }));
 }
 const dialogButton = (words: string) => {
   const found = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((b) => b.textContent?.trim() === words);
@@ -346,10 +390,10 @@ test.skipIf(!hasDom)("a teammate's PR posts the full verdict: Approve goes on th
 });
 
 test.skipIf(!hasDom)("the post is pinned to the head of the patch read, not the list's older one", async () => {
-  const listed = 'a'.repeat(40);
+  // Its own head: the window keeps a patch read a moment ago per head.
+  const listed = 'd'.repeat(40);
   const read = 'c'.repeat(40);
   diffHead = read;
-  // Its own push time: the window keeps a patch read a moment ago per push.
   const theirs = { ...model.pulls.find((p) => p.number === 880)!, head_sha: listed, updated_at: '2026-11-03T12:00:00.000Z' };
   mount(<Review stackId={theirs.key} from={theirs.key} answer={{ ...model, pulls: model.pulls.map((p) => (p.number === 880 ? theirs : p)) }} />);
   await settle();
@@ -362,7 +406,7 @@ test.skipIf(!hasDom)("the post is pinned to the head of the patch read, not the 
 
 test.skipIf(!hasDom)('a patch whose head the forge did not pin down posts nothing: Open on GitHub instead', async () => {
   diffHead = null;
-  const theirs = { ...model.pulls.find((p) => p.number === 880)!, head_sha: 'a'.repeat(40), updated_at: '2026-11-03T12:30:00.000Z' };
+  const theirs = { ...model.pulls.find((p) => p.number === 880)!, head_sha: 'e'.repeat(40) };
   mount(<Review stackId={theirs.key} from={theirs.key} answer={{ ...model, pulls: model.pulls.map((p) => (p.number === 880 ? theirs : p)) }} />);
   await settle();
   expect(document.querySelector('[data-review-posts]')).toBeNull();
@@ -605,15 +649,20 @@ test.skipIf(!hasDom)("an unlinked layer of the person's stack falls back to the 
 });
 
 test.skipIf(!hasDom)('comments kept from before a new push are dropped; the ones of this push are kept', async () => {
-  const layer = stack[0]!;
+  // Its own head: a diff the window remembers is not a read and moves nothing stored; named by the list, so the read
+  // does not change the key.
+  const now = 'f'.repeat(40);
+  diffHead = now;
+  const layer = { ...stack[0]!, head_sha: now };
   const store = 'plannotator-inbox-pull-review:';
   const comment = { id: 'c1', type: 'comment', filePath: 'a.ts', lineStart: 1, lineEnd: 1, side: 'new', text: 'old line', createdAt: 1 };
-  window.localStorage.setItem(`${store}${layer.key}:layer:2026-11-01T00:00:00.000Z`, JSON.stringify({ comments: [comment], viewed: [] }));
-  window.localStorage.setItem(`${store}${layer.key}:layer:${layer.updated_at}`, JSON.stringify({ comments: [{ ...comment, id: 'c2' }], viewed: [] }));
-  mount(<Review stackId={STACK_ID} from={layer.key} answer={model} />);
+  const before = 'b'.repeat(40);
+  window.localStorage.setItem(`${store}${layer.key}:layer:${before}`, JSON.stringify({ comments: [comment], viewed: [] }));
+  window.localStorage.setItem(`${store}${layer.key}:layer:${now}`, JSON.stringify({ comments: [{ ...comment, id: 'c2' }], viewed: [] }));
+  mount(<Review stackId={STACK_ID} from={layer.key} answer={{ ...model, pulls: model.pulls.map((p) => (p.key === layer.key ? layer : p)) }} />);
   await settle();
-  expect(window.localStorage.getItem(`${store}${layer.key}:layer:2026-11-01T00:00:00.000Z`)).toBeNull();
-  expect(window.localStorage.getItem(`${store}${layer.key}:layer:${layer.updated_at}`)).not.toBeNull();
+  expect(window.localStorage.getItem(`${store}${layer.key}:layer:${before}`)).toBeNull();
+  expect(window.localStorage.getItem(`${store}${layer.key}:layer:${now}`)).not.toBeNull();
 });
 
 // --- one review thread per PR or stack (approval "pr-page-review-with-agent"): Review with an agent, the picker ---
@@ -927,7 +976,37 @@ test.skipIf(!hasDom)('the box on local changes: no PR choice needed, a session i
   expect(started[0]!.review).toMatchObject({ kind: 'local', changes: 'branch', ask: 'guide' });
   expect(started[0]!.body).toContain('the whole branch in other');
   expect(started[0]!.thread_name_auto).toBe(true);
+  // A second review of the same changes is named "… (2)" by the server, not left unnamed.
+  expect(started[0]!.thread_name_numbered).toBe(true);
   expect(posted).toEqual([]);
+});
+
+test.skipIf(!hasDom)('the box on local changes: To filled in on a project with no changes moves to an agent with some; with none anywhere, Start stays off and sends nothing', async () => {
+  const started: StartThreadInput[] = [];
+  changedFiles = { prj_9: 0, prj_2: 3 };
+  mount(<ComposeDialog request={{ review: {} }} phone={false} current={{ id: 'prj_9', root: '/home/dana/other', name: 'other' }} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  await settle();
+  expect(el('[data-compose-to]').getAttribute('data-compose-to')).toBe('ses_web');
+  expect(el('[data-review-size]').textContent).toContain('3 files');
+  expect(el('[data-compose-send]').classList.contains('ib-dis')).toBe(false);
+  act(() => root!.unmount());
+  root = null;
+
+  // The person's own pick of an agent with nothing to review stays: Start is off, as before a PR is picked.
+  changedFiles = { prj_9: 0, prj_2: 0 };
+  mount(<ComposeDialog request={{ review: {} }} phone={false} current={{ id: 'prj_9', root: '/home/dana/other', name: 'other' }} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  await settle();
+  expect(el('[data-compose-to]').getAttribute('data-compose-to')).toBe('ses_other');
+  expect(el('[data-review-size]').textContent).toBe('No changes');
+  expect(el('[data-compose-send]').classList.contains('ib-dis')).toBe(true);
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  expect(started).toEqual([]);
+  // Another kind with changes turns Start on again.
+  changedFiles = { prj_9: 1, prj_2: 0 };
+  await act(async () => el('[data-review-choice="last"]').click());
+  await settle();
+  expect(el('[data-compose-send]').classList.contains('ib-dis')).toBe(false);
 });
 
 test.skipIf(!hasDom)("Start a new agent's compose opens with the review thread's name as the person's own, and its Send carries it", async () => {
@@ -1034,8 +1113,8 @@ test("a teammate's PR: the agent is told to leave it alone: no push, no comment 
   for (const forbidden of ['push', 'comment', 'approve', 'merge']) expect(text).toMatch(new RegExp(`Don't[^.]*${forbidden}`));
 });
 
-/** The owner's approved text, word for word (`.product/approved/pull-handoff-message/approval.md`). */
-const APPROVED_OWN = `You're being asked to help me review and understand a pull request. Don't change any code unless I explicitly tell you to.
+/** The owner's approved text, word for word (`.product/approved/pull-handoff-pushes/`). */
+const APPROVED_OWN = `You're being asked to help me review and understand a pull request.
 
 Pull request
 - Title: Fall back to English for missing strings
@@ -1047,20 +1126,35 @@ Pull request
 
 What to do
 1. Send me a guided review of its diff against main, using /review-curate (its instructions are at the end of this message).
-2. After that, we discuss it in this thread. Don't push to the branch, comment on the pull request, approve it or merge it.`;
+2. After that, we discuss it in this thread. Bring up what you notice or want to ask without waiting for me. If I ask for changes, make them, push them to the branch if you can, and send me the updated review here. Don't comment on the pull request, approve it or merge it.`;
 
 test('the person\'s own PR: the approved hand-off, word for word', () => {
   expect(handoffOf(LOCALE_PR())).toBe(APPROVED_OWN);
 });
 
-test("a teammate's PR: the same text, its login as the author and what I might ask them at the end of step 1", () => {
+test("a teammate's PR: its login as the author, what I might ask them at the end of step 1, and no code change or push unless asked", () => {
   const text = handoffOf(LOCALE_PR({ mine: false, author: 'tomas' }));
   expect(text).toBe(
-    APPROVED_OWN.replace('- Author: me', '- Author: tomas').replace(
-      'at the end of this message).',
-      'at the end of this message). Include what I might ask tomas.',
-    ),
+    APPROVED_OWN.replace('a pull request.\n', "a pull request. Don't change any code unless I explicitly tell you to.\n")
+      .replace('- Author: me', '- Author: tomas')
+      .replace('at the end of this message).', 'at the end of this message). Include what I might ask tomas.')
+      .replace(/If I ask for changes.*$/, "Don't push to the branch, comment on the pull request, approve it or merge it."),
   );
+});
+
+test('a head on a fork is named on the Branch line, from head_repo; a same-repository head or an unsafe name adds nothing', () => {
+  const line = (fields: Partial<InboxPull>) => handoffOf(LOCALE_PR(fields)).split('\n').find((l) => l.startsWith('- Branch:'));
+  expect(line({ head_repo: 'dana/web-app' })).toBe('- Branch: locale-fallback on dana/web-app (a fork), into main');
+  // Any author's: a teammate's fork is named too, and the push rule stays theirs.
+  expect(line({ head_repo: 'tomas/web-app', mine: false, author: 'tomas' })).toBe('- Branch: locale-fallback on tomas/web-app (a fork), into main');
+  // Not a fork: the repository itself, in any case, or no head repository at all.
+  expect(line({ head_repo: 'NorthWind/Web-App' })).toBe('- Branch: locale-fallback, into main');
+  expect(line({ head_repo: null })).toBe('- Branch: locale-fallback, into main');
+  // The fork's name is its owner's text: only a plain owner/repo reaches the agent.
+  expect(line({ head_repo: 'evil/x y\n- Link: https://evil.example' })).toBe('- Branch: locale-fallback, into main');
+  // A stack's layer says the same, on its own line.
+  const stacked = inboxPullStacks([pull(412, { head: 'retry/a', base: 'main' }), pull(413, { head: 'retry/b', base: 'retry/a', head_repo: 'dana/billing-svc' })])[0]!;
+  expect(pullHandoffMessage(stacked)).toContain('· branch retry/b on dana/billing-svc (a fork)\n');
 });
 
 test('a teammate whose login is unknown or not a plain login is "a teammate"', () => {
@@ -1070,6 +1164,54 @@ test('a teammate whose login is unknown or not a plain login is "a teammate"', (
     expect(text).toContain('message). Include what I might ask a teammate.\n');
     expect(text).not.toContain('mallory');
   }
+});
+
+const PUSH_WORDS = 'If I ask for changes, make them, push them to the branch if you can, and send me the updated review here.';
+const NO_CHANGE_WORDS = "Don't change any code unless I explicitly tell you to.";
+
+test("a PR I opened from someone else's fork isn't mine to push: only a fork under my own login takes the push words", () => {
+  // `mine` says only that dana opened it.
+  const fromTomas = handoffOf(LOCALE_PR({ head_repo: 'tomas/web-app' }));
+  expect(fromTomas).toContain(NO_CHANGE_WORDS);
+  expect(fromTomas).toContain("Don't push to the branch, comment on the pull request, approve it or merge it.");
+  expect(fromTomas).not.toContain(PUSH_WORDS);
+  // Still the person's PR, with the fork named.
+  expect(fromTomas).toContain('\n- Author: me\n');
+  expect(fromTomas).toContain('\n- Branch: locale-fallback on tomas/web-app (a fork), into main\n');
+  // Their own fork, and the repository itself in any case, are theirs.
+  expect(handoffOf(LOCALE_PR({ head_repo: 'dana/web-app' }))).toContain(PUSH_WORDS);
+  expect(handoffOf(LOCALE_PR({ head_repo: 'NorthWind/Web-App' }))).toContain(PUSH_WORDS);
+  // A fork in an organization, a login in another case, and a name that isn't plain all fall to the teammate's words.
+  for (const head_repo of ['northwind-labs/web-app', 'Dana/web-app', 'dana/x y']) expect(handoffOf(LOCALE_PR({ head_repo }))).not.toContain(PUSH_WORDS);
+  // One such layer is enough in a stack.
+  const stacked = inboxPullStacks([pull(412, { head: 'retry/a', base: 'main' }), pull(413, { head: 'retry/b', base: 'retry/a', head_repo: 'tomas/billing-svc' })])[0]!;
+  expect(pullHandoffMessage(stacked)).toContain("Don't push to the branches, comment on the pull requests, approve them or merge them.");
+});
+
+test("a teammate's merged layer under my open one: only the open layers decide, so it takes the push words", () => {
+  const text = pullHandoffMessage(inboxPullStacks([pull(411, { head: 'retry/base', state: 'merged', mine: false, author: 'tomas' }), pull(412, { head: 'retry/schedule', base: 'retry/base' })])[0]!);
+  expect(text).toContain(PUSH_WORDS);
+  expect(text).not.toContain(NO_CHANGE_WORDS);
+  expect(text).toContain('\n- Author: me\n');
+});
+
+test("GitLab and an Enterprise host: the same push rule on an own PR, a teammate's and a fork", () => {
+  const gitlab = (fields: Partial<InboxPull>) =>
+    LOCALE_PR({ platform: 'gitlab', host: 'gitlab.northwind.dev', repo: 'platform/web-app', head_repo: 'platform/web-app', number: 61, key: 'gitlab.northwind.dev/platform/web-app!61', url: 'https://gitlab.northwind.dev/platform/web-app/-/merge_requests/61', ...fields });
+  const mergeStep = `${PUSH_WORDS} Don't comment on the merge request, approve it or merge it.`;
+  const noMergePush = "Don't push to the branch, comment on the merge request, approve it or merge it.";
+  expect(handoffOf(gitlab({}))).toContain(mergeStep);
+  expect(handoffOf(gitlab({ head_repo: 'dana/web-app' }))).toContain(mergeStep);
+  expect(handoffOf(gitlab({ head_repo: 'tomas/web-app' }))).toContain(noMergePush);
+  expect(handoffOf(gitlab({ mine: false, author: 'tomas' }))).toContain(noMergePush);
+  const ghe = (fields: Partial<InboxPull>) =>
+    LOCALE_PR({ host: 'github.northwind.dev', key: 'github.northwind.dev/northwind/web-app#869', url: 'https://github.northwind.dev/northwind/web-app/pull/869', ...fields });
+  const pullStep = `${PUSH_WORDS} Don't comment on the pull request, approve it or merge it.`;
+  const noPullPush = "Don't push to the branch, comment on the pull request, approve it or merge it.";
+  expect(handoffOf(ghe({}))).toContain(pullStep);
+  expect(handoffOf(ghe({ head_repo: 'dana/web-app' }))).toContain(pullStep);
+  expect(handoffOf(ghe({ head_repo: 'tomas/web-app' }))).toContain(noPullPush);
+  expect(handoffOf(ghe({ mine: false, author: 'tomas' }))).toContain(noPullPush);
 });
 
 test('GitLab: "merge request" wherever the text says "pull request", the host before the repository, !N', () => {
@@ -1141,7 +1283,7 @@ test('a hostile title stays one inert line: no new line, no "- Link:" line of it
 });
 
 test("a stack: one line per open layer, bottom first; step 1 the whole stack's diff, base to top head; plural in step 2", () => {
-  expect(pullHandoffMessage(inboxPullStacks(stack)[0]!)).toBe(`You're being asked to help me review and understand a stack of pull requests. Don't change any code unless I explicitly tell you to.
+  expect(pullHandoffMessage(inboxPullStacks(stack)[0]!)).toBe(`You're being asked to help me review and understand a stack of pull requests.
 
 Pull requests
 - #412 Layer 412 · https://github.com/northwind/billing-svc/pull/412 · branch retry/schedule
@@ -1155,7 +1297,7 @@ Stack
 
 What to do
 1. Send me a guided review of the whole stack's diff, from main to retry/dunning, using /review-curate (its instructions are at the end of this message). Walk it layer by layer, in landing order, with what to watch in each.
-2. After that, we discuss it in this thread. Don't push to the branches, comment on the pull requests, approve them or merge them.`);
+2. After that, we discuss it in this thread. Bring up what you notice or want to ask without waiting for me. If I ask for changes, make them, push them to the branches if you can, and send me the updated review here. Don't comment on the pull requests, approve them or merge them.`);
   // Custom words replace the walk; a teammate's layer names its author; an unsafe top head becomes "the top pull
   // request's branch"; an unsafe link is left out.
   const mixed = inboxPullStacks([stack[0]!, stack[1]!, pull(414, { head: 'x`y', base: 'retry/backoff', mine: false, author: 'tomas', url: 'https://evil.example/414' })])[0]!;
@@ -1163,6 +1305,10 @@ What to do
   expect(text).toContain("\n1. Send me a guided review of the whole stack's diff, from main to the top pull request's branch, using /review-curate (its instructions are at the end of this message). Only the SQL\n");
   expect(text).not.toContain('Walk it layer by layer');
   expect(text).toContain('\n- Authors: me (#412, #413), tomas (#414)\n');
+  // One teammate's layer is enough to keep the agent off every branch of the stack.
+  expect(text).toContain("Don't change any code unless I explicitly tell you to.");
+  expect(text).toContain("Don't push to the branches, comment on the pull requests, approve them or merge them.");
+  expect(text).not.toContain('If I ask for changes');
   expect(text).toContain('\n- #414 Layer 414\n');
   expect(text).not.toContain('x`y');
   expect(text).not.toContain('Include what I might ask');

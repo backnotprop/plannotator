@@ -13,7 +13,7 @@
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
-import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, expect, setSystemTime, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -21,6 +21,7 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { InboxListSection } from '@plannotator/core/inbox-types';
+import { resetListGroupsForTests } from './listGroups';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
@@ -137,8 +138,11 @@ beforeEach(() => {
 
 afterEach(() => {
   if (!hasDom) return;
+  setSystemTime();
   act(() => root?.unmount());
   host?.remove();
+  // Which groups are closed is kept for the page (listGroups.ts): each test starts with Quiet and Snoozed closed.
+  resetListGroupsForTests();
   root = null;
   host = null;
   globalThis.fetch = savedFetch;
@@ -257,7 +261,7 @@ test('the link is the Inbox one address plus #thread=, and the items follow the 
 test.skipIf(!hasDom)('a right-click opens the menu on that row, without opening the thread; Copy link writes its address', async () => {
   await renderApp();
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Archive']);
+  expect(items()).toEqual(['Star thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Archive']);
   expect(menu()!.querySelector('[role="separator"]')).not.toBeNull();
   // The row keeps a muted background while its menu is open; nothing opened, nothing selected.
   expect(rowWrap(ids.waiting)!.hasAttribute('data-menu')).toBe(true);
@@ -303,28 +307,38 @@ test.skipIf(!hasDom)('Copy thread on a row whose thread is not open reads it and
   expect((await serverSections()).get(ids.waiting)).toBe(before);
 });
 
-test.skipIf(!hasDom)('Mark read moves the row to Quiet with its toast; the menu then offers Mark unread, which brings it back to New, bold, sending nothing', async () => {
+test.skipIf(!hasDom)('Mark read leaves the row in place, read, with its toast; in Quiet after a tidy the menu offers Mark unread, bold in place and in New after a tidy, sending nothing', async () => {
   await renderApp();
   await openMenu(ids.waiting);
   await choose('read');
   await until(() => !!toast(), 'the toast');
   expect(posted.some((p) => p.path === `/api/inbox/threads/${ids.waiting}/read`)).toBe(true);
-  // No thread open: the row moved, and the toast names it.
-  expect(toast()!.textContent).toContain('Moved to Quiet');
+  // No thread open: the list holds still (approval "inbox-list-view", R7), so the row stays in Waiting, not bold, and
+  // the toast names it without saying it moved.
+  expect(toast()!.textContent).toContain('Marked read');
+  expect(toast()!.textContent).not.toContain('Moved to Quiet');
   expect((await serverSections()).get(ids.waiting)).toBe('quiet');
-  // Quiet is folded: open it to reach the row.
+  await until(() => rowButton(ids.waiting)?.classList.contains('ib-u') === false, 'the row read in place');
+  expect(rowWrap(ids.waiting)?.closest('[data-section-id="waiting"]')).not.toBeNull();
+  // The tidy (the list's title refreshes it): the row goes to Quiet, which is folded; open it to reach the row.
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-list-refresh]')!.click());
+  await until(() => !!document.querySelector('[data-section-id="quiet"] button.ib-band'), 'Quiet');
   await act(async () => {
     document.querySelector<HTMLButtonElement>('[data-section-id="quiet"] button.ib-band')!.click();
   });
   await until(() => !!rowButton(ids.waiting), 'the row in Quiet');
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark unread', 'Move back', 'Archive']);
+  expect(items()).toEqual(['Star thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark unread', 'Move back', 'Archive']);
   const before = JSON.parse((await loopback(`/api/inbox/threads/${ids.waiting}`)).text) as { thread: { messages: { questions?: { state: string }[] }[] } };
   await choose('mark-unread');
   expect(posted.some((p) => p.path === `/api/inbox/threads/${ids.waiting}/mark-unread`)).toBe(true);
   // New, not Waiting: the question Mark read set aside stays closed; the row is bold again.
   await until(async () => (await serverSections()).get(ids.waiting) === 'new', 'the row back in New');
   await until(() => toast()?.textContent?.includes('Marked unread') === true, 'the toast');
+  // Bold in place, in Quiet, until the tidy; then drawn in New.
+  await until(() => rowButton(ids.waiting)?.classList.contains('ib-u') === true, 'the row bold in place');
+  expect(rowWrap(ids.waiting)?.closest('[data-section-id="quiet"]')).not.toBeNull();
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-list-refresh]')!.click());
   await until(() => rowWrap(ids.waiting)?.closest('[data-section-id="new"]') != null, 'the row drawn in New');
   expect(rowButton(ids.waiting)!.classList.contains('ib-u')).toBe(true);
   const after = JSON.parse((await loopback(`/api/inbox/threads/${ids.waiting}`)).text) as typeof before;
@@ -335,6 +349,9 @@ test.skipIf(!hasDom)('Mark read moves the row to Quiet with its toast; the menu 
     toast()!.querySelector<HTMLButtonElement>('[data-toast-undo]')!.click();
   });
   await until(async () => (await serverSections()).get(ids.waiting) === 'quiet', 'the row back in Quiet');
+  // Read again in place, in New, until the tidy; then drawn in Quiet.
+  await until(() => rowButton(ids.waiting)?.classList.contains('ib-u') === false, 'the row read again in place');
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-list-refresh]')!.click());
   await until(() => rowWrap(ids.waiting)?.closest('[data-section-id="quiet"]') != null, 'the row drawn in Quiet');
   await openMenu(ids.waiting);
   await choose('unread');
@@ -348,25 +365,33 @@ test.skipIf(!hasDom)('a row Mark unread brought back keeps Move back in its menu
   await loopback(`/api/inbox/threads/${ids.waiting}/mark-unread`, 'POST', '{}');
   await renderApp();
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Move back', 'Archive']);
+  expect(items()).toEqual(['Star thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Move back', 'Archive']);
   await choose('unread');
   await until(async () => (await serverSections()).get(ids.waiting) === 'waiting', 'the question reopened');
   const thread = JSON.parse((await loopback(`/api/inbox/threads/${ids.waiting}`)).text) as { thread: { messages: { questions?: { state: string }[] }[] } };
   expect(thread.thread.messages.flatMap((m) => (m.questions ?? []).map((q) => q.state))).toEqual(['open']);
 });
 
-test.skipIf(!hasDom)('Archive takes the row out of the list with the Archived toast and its Undo', async () => {
+test.skipIf(!hasDom)('Archive shows the row archived in place, faded, with the Archived toast; it leaves at the tidy, and Undo then brings it back', async () => {
   await renderApp();
   await openMenu(ids.waiting);
   await choose('archive');
   await until(() => !!toast(), 'the toast');
   expect(posted.some((p) => p.path === `/api/inbox/messages/${ids.waiting}/resolve` && p.body.resolved === true)).toBe(true);
   expect(toast()!.textContent).toContain('Archived');
+  // The list holds still (approval "inbox-list-view", R7): the row stays where it was, faded, reading Archived.
+  await until(() => rowWrap(ids.waiting)?.hasAttribute('data-archived') === true, 'the row archived in place');
+  expect(rowWrap(ids.waiting)!.textContent).toContain('Archived');
+  // The tidy (the list's title refreshes it): the row leaves.
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-list-refresh]')!.click());
   await until(() => !rowButton(ids.waiting), 'the row to leave');
+  // Undo after the tidy (#2716 review N1): the row comes back at its place, not as "N new".
   await act(async () => {
     toast()!.querySelector<HTMLButtonElement>('[data-toast-undo]')!.click();
   });
   await until(() => !!rowButton(ids.waiting), 'the row back');
+  expect(rowWrap(ids.waiting)!.hasAttribute('data-archived')).toBe(false);
+  expect(document.querySelector('[data-inbox-notice]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('Escape closes the menu and puts focus back on the row; the keyboard opens it too', async () => {
@@ -398,6 +423,8 @@ test.skipIf(!hasDom)('Escape closes the menu and puts focus back on the row; the
 });
 
 test.skipIf(!hasDom)('Snooze by keyboard: focus lands on the first time, and Back puts it on Snooze again, never on the page', async () => {
+  // A Wednesday morning, so the times are all four: after 6 PM there is no Later today, and on a Friday Next week is In 3 days.
+  setSystemTime(new Date('2026-11-04T10:00:00Z'));
   await renderApp();
   const row = rowButton(ids.waiting)!;
   act(() => row.focus());
@@ -484,15 +511,20 @@ test.skipIf(!hasDom)('focus was elsewhere: Escape, Copy and Tab each put it on t
   await until(() => document.activeElement === rowButton(ids.waiting), 'focus on the row after Tab');
 });
 
-test.skipIf(!hasDom)('Archive with no thread open: the row leaves and focus goes to the row now in its slot', async () => {
+test.skipIf(!hasDom)('Archive with no thread open: the row stays in its slot, archived, and no row moves; at the tidy it leaves and the next row takes its slot', async () => {
   await renderApp();
   await focusElsewhere();
-  const order = [...document.querySelectorAll('.ib-lbody [data-thread-id]')].map((el) => el.getAttribute('data-thread-id')!);
-  const next = order[order.indexOf(ids.waiting) + 1]!;
+  const listed = () => [...document.querySelectorAll('.ib-lbody [data-thread-id]')].map((el) => el.getAttribute('data-thread-id')!);
+  const order = listed();
   await openMenu(ids.waiting);
   await choose('archive');
+  // The list holds still (approval "inbox-list-view", R7): the same rows in the same order, this one archived.
+  await until(() => rowWrap(ids.waiting)?.hasAttribute('data-archived') === true, 'the row archived in place');
+  expect(listed()).toEqual(order);
+  expect(document.activeElement).not.toBe(document.body);
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-list-refresh]')!.click());
   await until(() => !rowButton(ids.waiting), 'the row to leave');
-  await until(() => document.activeElement === rowButton(next), 'focus on the row in its slot');
+  expect(listed()).toEqual(order.filter((id) => id !== ids.waiting));
 });
 
 test.skipIf(!hasDom)('the context-menu key: the keyup `contextmenu` (Chromium on Windows) is cancelled while the menu is open; rows name Shift+F10', async () => {

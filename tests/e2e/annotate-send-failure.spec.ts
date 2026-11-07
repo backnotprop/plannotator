@@ -9,7 +9,7 @@
  *
  * Against the compiled binary (see inbox.spec.ts for the build), under a temp
  * HOME and PLANNOTATOR_DATA_DIR, headless. PNGs of the failure, light and
- * dark at 1440 by 900, land in .local/proof/ (PLANNOTATOR_E2E_PROOF_DIR).
+ * dark at 1440 by 900, land in .local/proof/annotate-send-failure/ (under PLANNOTATOR_E2E_PROOF_DIR).
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -20,7 +20,8 @@ import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
-const proofDir = resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof'));
+// Its own folder: inbox.spec.ts clears the proof root's pictures and lists them in its contact sheet, on another worker at the same time.
+const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'annotate-send-failure');
 
 const SEEN_COOKIES = [
   ['plannotator-plan-look-choice-resolved', 'true'],

@@ -10,9 +10,15 @@ import { GuideSectionCard } from './GuideSectionCard';
 
 const hasDom = typeof document !== 'undefined';
 let mountedProps: Record<string, unknown>[] = [];
+/** Each mount of the renderer (not each render), by file path. */
+let mounts: string[] = [];
 
 function FakeDiffRenderer(props: Record<string, unknown>) {
   mountedProps.push(props);
+  const path = (props.files as DiffFile[])[0].path;
+  React.useEffect(() => {
+    mounts.push(path);
+  }, []);
   return <div data-testid="file-code-view" />;
 }
 
@@ -33,9 +39,10 @@ afterEach(async () => {
   host?.remove();
   host = null;
   mountedProps = [];
+  mounts = [];
 });
 
-async function renderChapter(paths: string[], generatedFiles?: ReadonlySet<string>) {
+async function renderChapter(paths: string[], generatedFiles?: ReadonlySet<string>, collapseAll?: GuideHostValue<Record<string, unknown>>['collapseAll']) {
   const files = paths.map(makeFile);
   const section: GuideSection = { title: 'Chapter', overview: '', diffs: paths.map((file) => ({ file })) };
   const value: GuideHostValue<Record<string, unknown>> = {
@@ -43,11 +50,14 @@ async function renderChapter(paths: string[], generatedFiles?: ReadonlySet<strin
     DiffRenderer: FakeDiffRenderer as unknown as GuideHostValue<Record<string, unknown>>['DiffRenderer'],
     getDiffRendererProps: () => ({}),
     generatedFiles,
+    collapseAll,
   };
-  host = document.createElement('div');
-  document.body.appendChild(host);
+  if (!host) {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+  }
   await act(async () => {
-    root = createRoot(host!);
+    root ??= createRoot(host!);
     root.render(
       <GuideHostProvider value={value}>
         <GuideViewportProvider eager>
@@ -113,5 +123,25 @@ describe('GuideSectionCard file kinds', () => {
     const el = await renderChapter(['src/schema.gen.ts', 'bun.lock'], new Set(['src/schema.gen.ts']));
     expect(subheads(el)).toEqual(['Generated1']);
     expect(cardOrder(el)).toEqual(['bun.lock', 'src/schema.gen.ts']);
+  });
+
+  test.skipIf(!hasDom)('Collapse all / Expand all mount again only the files whose state changes', async () => {
+    const paths = ['src/a.ts', 'bun.lock'];
+    await renderChapter(paths);
+    expect(mounts.sort()).toEqual(['bun.lock', 'src/a.ts']);
+    const lastCollapsed = (path: string) => mountedProps.filter((p) => (p.files as DiffFile[])[0].path === path).at(-1)?.mountCollapsed;
+
+    // Expand all: the folded generated file opens; the open one keeps its viewer (its opened gaps, an open comment).
+    mounts = [];
+    await renderChapter(paths, undefined, { collapsed: false, token: 1 });
+    expect(mounts).toEqual(['bun.lock']);
+    expect(lastCollapsed('bun.lock')).toBe(false);
+
+    // Collapse all: both change, both fold.
+    mounts = [];
+    await renderChapter(paths, undefined, { collapsed: true, token: 2 });
+    expect(mounts.sort()).toEqual(['bun.lock', 'src/a.ts']);
+    expect(lastCollapsed('src/a.ts')).toBe(true);
+    expect(lastCollapsed('bun.lock')).toBe(true);
   });
 });

@@ -26,7 +26,8 @@ import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
-import { parseDiffToFiles } from "@plannotator/core/diff-files";
+import { parseDiffToFiles, patchBlobIds, type DiffFile, type PatchBlobIds } from "@plannotator/core/diff-files";
+import { forgeRefKey, parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
 import { GUIDE_REVIEW_PROMPT, GUIDE_SCHEMA_JSON } from "@plannotator/core/guide-prompt";
 import {
   GUIDE_SNAPSHOT_DRAWN_VERSION,
@@ -38,7 +39,7 @@ import {
   type GuideSnapshot,
 } from "@plannotator/core/guide-format";
 import type { GuideOverviewDiagram } from "@plannotator/core/guide";
-import { displayInboxSubject, inboxReviewSourceOf, type InboxGuideRef } from "@plannotator/core/inbox-types";
+import { displayInboxSubject, inboxReviewSourceOf, type InboxFileContents, type InboxGuideRef } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { readFileSync } from "node:fs";
 import { checkInboxDrawing, INBOX_REVIEW_FIELD_DESCRIPTION, INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC, INBOX_WALKTHROUGH_FIELD_DESCRIPTION, inboxReviewTitleLine } from "@plannotator/core/inbox-review";
@@ -47,6 +48,9 @@ import { inboxBlobPath, writeBlob } from "@plannotator/shared/inbox/attachments"
 import { questionOpenersWithTextText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { readDiffSideBytes, readGitObjectBytes } from "@plannotator/shared/review-core";
+import { runtime as gitRuntime } from "./git";
+import { gitBlobId, INBOX_PULL_FILE_MAX_BYTES, textOfBytes } from "./inbox-pulls";
 import { buildAuthoredGuideSnapshot } from "./guide/guide-cli";
 import { SEND_ROUTING_FIELDS, replyNextStepText, senderWakes, guarded, imagesNotShownText, noStakesText, recommendedInLabelText,
   callerWorkingFolder, namingLine, ok, sendAgentMessage, sendProject, type InboxMcpContext } from "./inbox-mcp";
@@ -240,6 +244,83 @@ const JSON_HEADERS = {
   "Cache-Control": "no-store",
   "X-Content-Type-Options": "nosniff",
 };
+
+/** A snapshot's patch is read once per guide, not once per file the page asks for. */
+const guidePatchFiles = new Map<string, DiffFile[]>();
+
+function patchFilesOf(store: InboxStore, sha256: string): DiffFile[] {
+  const hit = guidePatchFiles.get(sha256);
+  if (hit) return hit;
+  let files: DiffFile[] = [];
+  try {
+    const parsed = parseGuideSnapshotJson(readFileSync(inboxBlobPath(store.dir, sha256), "utf8"));
+    if (parsed.ok) files = parseDiffToFiles(parsed.value.review.rawPatch);
+  } catch {
+    // Gone from the store: no file to read.
+  }
+  guidePatchFiles.set(sha256, files);
+  while (guidePatchFiles.size > 8) guidePatchFiles.delete(guidePatchFiles.keys().next().value!);
+  return files;
+}
+
+/**
+ * One changed file's whole text for a guided review's expand arrows
+ * (`GET /api/inbox/messages/:id/guide/file`). The guide keeps the diff as sent
+ * and the working tree moves on, so each side is taken only when it is the very
+ * file the patch's `index` line names:
+ *  - the project's git for either side, by that blob id;
+ *  - the working tree for the new side (a diff of uncommitted edits names a blob
+ *    git never stored), when its bytes hash to that id;
+ *  - `forge`, a guide of a pull request whose commits this clone never fetched,
+ *    held to the same ids.
+ * Both null otherwise, and for a path the patch does not change, a renamed,
+ * added or deleted file, a binary or too large one: no arrows.
+ */
+export async function inboxGuideFileContents(
+  store: InboxStore,
+  sha256: string,
+  path: string,
+  root: string | null,
+  forge?: (ids: PatchBlobIds, oldPath: string | undefined) => Promise<InboxFileContents> | null,
+): Promise<InboxFileContents> {
+  const none: InboxFileContents = { oldContent: null, newContent: null };
+  const file = patchFilesOf(store, sha256).find((f) => f.path === path);
+  if (!file) return none;
+  const ids = patchBlobIds(file.patch);
+  if (!ids) return none;
+  const { oldId, newId } = ids;
+  const stored = async (id: string): Promise<Uint8Array | null> => {
+    if (!root) return null;
+    const read = await readGitObjectBytes(gitRuntime, id, INBOX_PULL_FILE_MAX_BYTES, root);
+    return read.kind === "ok" ? read.bytes : null;
+  };
+  const inTree = async (): Promise<Uint8Array | null> => {
+    if (!root) return null;
+    const read = await readDiffSideBytes(gitRuntime, { kind: "worktree", path }, INBOX_PULL_FILE_MAX_BYTES, root);
+    return read.kind === "ok" && gitBlobId(read.bytes).startsWith(newId) ? read.bytes : null;
+  };
+  const oldBytes = await stored(oldId);
+  const newBytes = oldBytes ? ((await stored(newId)) ?? (await inTree())) : null;
+  if (oldBytes && newBytes) {
+    const oldContent = textOfBytes(oldBytes);
+    const newContent = textOfBytes(newBytes);
+    return oldContent !== null && newContent !== null ? { oldContent, newContent } : none;
+  }
+  // The forge's reader checks both texts against these ids.
+  return (await forge?.(ids, file.oldPath)) ?? none;
+}
+
+/** The key the Pull requests list would give the pull request a guide is of, or null. */
+export function guidePullKey(store: InboxStore, sha256: string): string | null {
+  try {
+    const parsed = parseGuideSnapshotJson(readFileSync(inboxBlobPath(store.dir, sha256), "utf8"));
+    const url = parsed.ok ? parsed.value.source.pr?.url : undefined;
+    const ref = url ? parseForgeRefUrl(url) : null;
+    return ref && ref.kind === "pull" ? forgeRefKey(ref) : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * The window's guide routes, null when the path is neither:

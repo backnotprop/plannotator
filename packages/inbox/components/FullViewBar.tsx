@@ -86,6 +86,8 @@ export interface FullViewBarProps {
   } | null;
   /** Ask AI's icon, before ⋯. Absent: nothing there. */
   ask?: ReactNode;
+  /** The button that adds this file to the reply (reuse.tsx). Absent: nothing there. */
+  reuse?: ReactNode;
   /** ⋯: the trigger and its menu (OpenIn.tsx `FullScreenMore`), with whether its menu is open. */
   more: ReactNode;
   moreOpen: boolean;
@@ -106,8 +108,6 @@ export interface FullViewBarProps {
   exitCloses?: boolean;
   /** The Hide / Show tools chord (`Mod+Shift+X`, HTML only), shown in the tooltips. */
   chord: string | null;
-  /** The comments drawer is open beside the page (desktop): the dock sits left of it. */
-  shifted: boolean;
 }
 
 export interface FullViewBarHandle {
@@ -151,11 +151,11 @@ const HIDDEN_SAYING = 'Tools hidden. They are in the bottom right corner.';
 /**
  * What floats over a file in full screen and gathers into the corner control (inbox.css): this toolbar, the composer
  * or its pill, an image's size bar and its "Your marked-up copy" chip, a text file's toolstrip, its Contents button
- * and ui's Contents rail (the ticks at the page's right edge, with the panel and its Hide). The changed chip is not
- * here: it is a fact about the file.
+ * and ui's Contents rail (the ticks at the page's right edge, with the panel and its Hide), and the floating comments
+ * panel when it is open. The changed chip is not here: it is a fact about the file.
  */
 export const GATHERED =
-  '.ib-fvbar, .ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail';
+  '.ib-fvbar, .ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-drawer .ib-apanel';
 /** Focus sits in something that is about to gather (and go inert or hidden). */
 const focusGathers = () => document.activeElement instanceof Element && document.activeElement.closest(GATHERED) !== null;
 
@@ -264,7 +264,7 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
 
   return (
     <div
-      className={`ib-fvdock${phone ? ' ib-fvdock-phone' : ''}${props.shifted ? ' ib-shift' : ''}`}
+      className={`ib-fvdock${phone ? ' ib-fvdock-phone' : ''}`}
       data-full-view-dock=""
       data-bar={state}
     >
@@ -313,6 +313,7 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
             </button>
           </Tip>
         )}
+        {props.reuse}
         {comments && (
           <Tip text={comments.open ? 'Close the comments' : 'Comments'} phone={phone}>
             <button

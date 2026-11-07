@@ -18,6 +18,10 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
+import type { ShapeHost } from '@plannotator/ui/components/shape';
+import type { InboxShapes } from './shape/useInboxShapes';
+
+const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
 const hasDom = typeof document !== 'undefined';
 if (hasDom) {
@@ -78,6 +82,8 @@ let listHead = 'a'.repeat(40);
 let listReads: string[] = [];
 /** The thread's annotation records (`/attachments`): a guided-review comment when a test writes one. */
 let annotations: Record<string, unknown>[] = [];
+/** `GET /api/inbox/pulls/diff`: the PR's own diff, when a test gives one (else the door answers `{}`, a diff not read). */
+let pullDiffAnswer: Record<string, unknown> | null = null;
 const PR_KEY = 'github.com/acme/ledger#880';
 const PR = {
   key: PR_KEY, platform: 'github', host: 'github.com', repo: 'acme/ledger', number: 880, url: 'https://github.com/acme/ledger/pull/880', title: 'RTL layout',
@@ -94,6 +100,7 @@ beforeEach(() => {
   listHead = 'a'.repeat(40);
   listReads = [];
   annotations = [];
+  pullDiffAnswer = null;
   window.localStorage.clear();
   others = [OTHER];
   backs = 0;
@@ -112,6 +119,7 @@ beforeEach(() => {
       }
       return Response.json({});
     }
+    if (path.includes('/api/inbox/pulls/diff') && pullDiffAnswer) return Response.json(pullDiffAnswer);
     if (/\/api\/inbox\/pulls(\?|$)/.test(path)) {
       listReads.push(path);
       return Response.json({ fetched_at: null, hosts: [], pulls: [{ ...PR, head_sha: listHead }], links: {}, projects: {}, cards: {} });
@@ -150,7 +158,7 @@ async function render(on: InboxThread = thread) {
     root = createRoot(host!);
     root.render(
       <div className="pn-inbox">
-        <ReviewPane thread={on} message={message} onBack={() => (backs += 1)} onClose={() => {}} onSent={() => {}} />
+        <ReviewPane thread={on} message={message} onBack={() => (backs += 1)} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />
       </div>,
     );
   });
@@ -164,9 +172,32 @@ const click = async (selector: string) => {
   await settle();
 };
 
+test.skipIf(!hasDom)('the top bar holds what the rail held: Walkthrough | All files, the chapter menu, the title, then the diff controls; no rail', async () => {
+  await render();
+  const bar = document.querySelector<HTMLElement>('[data-review-message] .ib-vhead')!;
+  expect(document.querySelector('[data-review-message] .ib-rrail')).toBeNull();
+  expect(bar.querySelector('[data-review-mode-choice="walkthrough"]')).not.toBeNull();
+  expect(bar.querySelector('[data-review-mode-choice="files"]')).not.toBeNull();
+  expect(bar.querySelector('[data-review-jump]')?.textContent).toContain('Overview');
+  expect(bar.querySelector('[data-review-title]')?.textContent).toBe('Token refresh');
+  // Less to read: the way back is its arrow, still named for a screen reader and a tooltip.
+  const back = bar.querySelector<HTMLElement>('.ib-back')!;
+  expect(back.textContent).toBe('');
+  expect(back.getAttribute('aria-label')).toBe('Thread');
+  // Nothing of the old header's: the review's name is said once.
+  expect(bar.textContent).not.toContain('· from');
+  // The diff controls are the bar's (approval "diff-controls-headers"): one Split / Unified button, not the old radios.
+  const controls = bar.querySelector<HTMLElement>('[data-diff-controls]')!;
+  expect(controls).not.toBeNull();
+  expect(bar.querySelector('[data-review-title]')!.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(controls.querySelector('[data-diff-layout-toggle]')).not.toBeNull();
+  expect(controls.querySelector('[data-diff-display-options]')).not.toBeNull();
+  expect(document.querySelector('[data-review-message] [data-diff-style-switch]')).toBeNull();
+});
+
 test.skipIf(!hasDom)("a teammate's pull request (the thread holds only theirs): the review reads with no Approve or Request changes, and its card waits on no verdict", async () => {
   await render({ ...thread, pull_theirs: true });
-  expect(document.querySelector('[data-review-chapters]')).not.toBeNull();
+  expect(document.querySelector('[data-review-jump="walkthrough"]')).not.toBeNull();
   expect(document.querySelector('[data-review-decision]')).toBeNull();
   expect(document.querySelector('[data-decision-primary]')).toBeNull();
   expect(document.querySelector('[data-asker-ended]')).toBeNull();
@@ -246,6 +277,23 @@ test.skipIf(!hasDom)('after a post: a follow-up main comment still posts; a push
   expect(reviewPosts.at(-1)).toMatchObject({ action: 'approve', head_sha: 'b'.repeat(40) });
 });
 
+test.skipIf(!hasDom)('a force-push under a post (pull_commit_gone): the PR is read again, and the decision is back at its new head', async () => {
+  await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY] });
+  reviewReply = () => Response.json({ error: 'The commit you read is no longer on this pull request.', code: 'pull_commit_gone' }, { status: 409 });
+  listHead = 'b'.repeat(40);
+  await click('[data-review-posts] [data-decision-primary]');
+  await act(async () => dialogButton('Approve').click());
+  await settle();
+  expect(listReads.at(-1)).toContain('refresh=1');
+  expect(document.querySelector('[data-review-pull-moved]')?.getAttribute('data-review-pull-moved')).toBe('read');
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  reviewReply = () => Response.json({ ok: true, prUrl: PR.url, submission: { status: 'complete' } });
+  await click('[data-review-posts] [data-decision-primary]');
+  await act(async () => dialogButton('Approve').click());
+  await settle();
+  expect(reviewPosts.at(-1)).toMatchObject({ action: 'approve', head_sha: 'b'.repeat(40) });
+});
+
 test.skipIf(!hasDom)('a comment posted once is never posted again, even after a push (pull_moved) and a read at the new head', async () => {
   const comment = { id: 'ann-1', type: 'comment', scope: 'line', filePath: 'src/settings/Layout.tsx', lineStart: 3, lineEnd: 3, side: 'new', text: 'Mirror the icons.', createdAt: 1 };
   annotations = [{ id: 'rec-1', message_id: REVIEW, created_at: '2026-10-11T10:40:00.000Z', annotation: comment, guide: { line_start: 3, line_end: 3, file: 'src/settings/Layout.tsx', side: 'new' } }];
@@ -273,6 +321,27 @@ test.skipIf(!hasDom)('a comment posted once is never posted again, even after a 
   const last = reviewPosts.at(-1)!;
   expect(last).toMatchObject({ action: 'approve', head_sha: 'b'.repeat(40) });
   expect(JSON.stringify(last)).not.toContain('Mirror the icons.');
+});
+
+test.skipIf(!hasDom)("a guided review's comment on lines that read the same on the PR's own diff posts inline, at that diff's commit; one off it rides the body", async () => {
+  const DIFF_HEAD = 'c'.repeat(40);
+  pullDiffAnswer = { key: PR_KEY, scope: 'layer', base: 'main', head: 'rtl', patch: snapshot.review.rawPatch, head_sha: DIFF_HEAD };
+  const onDiff = { id: 'ann-in', type: 'comment', scope: 'line', filePath: 'src/auth.ts', lineStart: 1, lineEnd: 1, side: 'new', text: 'Refresh earlier.', createdAt: 1 };
+  const offDiff = { id: 'ann-out', type: 'comment', scope: 'line', filePath: 'src/settings/Layout.tsx', lineStart: 3, lineEnd: 3, side: 'new', text: 'Mirror the icons.', createdAt: 2 };
+  annotations = [onDiff, offDiff].map((annotation, i) => ({ id: `rec-${i}`, message_id: REVIEW, created_at: '2026-10-11T10:40:00.000Z', annotation, guide: { line_start: annotation.lineStart, line_end: annotation.lineEnd, file: annotation.filePath, side: 'new' } }));
+  await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY] });
+  await click('[data-review-posts] [data-decision-caret]');
+  const approveWith = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => /Approve with comments/.test(item.textContent ?? ''))!;
+  await act(async () => approveWith.click());
+  await settle();
+  await act(async () => dialogButton('Approve').click());
+  await settle();
+  expect(reviewPosts).toHaveLength(1);
+  const sent = reviewPosts[0]!;
+  expect(sent).toMatchObject({ action: 'approve', head_sha: DIFF_HEAD });
+  expect(sent.fileComments).toEqual([expect.objectContaining({ path: 'src/auth.ts', line: 1, side: 'RIGHT', body: expect.stringContaining('Refresh earlier.') })]);
+  expect(String(sent.body)).not.toContain('Refresh earlier.');
+  expect(String(sent.body)).toContain('Mirror the icons.');
 });
 
 test.skipIf(!hasDom)('a thread that owns the person\'s PR offers both endings: its agent by default, GitHub on a pick', async () => {

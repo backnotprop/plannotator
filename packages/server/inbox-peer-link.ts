@@ -23,7 +23,7 @@
 
 import type { InboxListRow } from "@plannotator/core/inbox-types";
 import type { InboxLinkRecord } from "./inbox-links";
-import type { InboxOutbox, OutboxAnswer, OutboxEntry } from "./inbox-outbox";
+import { MACHINE_WINDOW_HEADER, type InboxOutbox, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
 import type { InboxPeerTransport } from "./inbox-transport";
 
 /** The oldest link protocol this Inbox links to: health's `machine_links`. */
@@ -40,9 +40,11 @@ export interface PeerLinkTimings {
   requestMs: number;
   /** One outbox try. */
   sendMs: number;
+  /** How long `deliveries` frames gather before one read of the list: each read is the whole list. */
+  deliveriesMs: number;
 }
 
-export const PEER_LINK_TIMINGS: PeerLinkTimings = { silenceMs: 20_000, backoffMinMs: 250, backoffMaxMs: 30_000, requestMs: 15_000, sendMs: 15_000 };
+export const PEER_LINK_TIMINGS: PeerLinkTimings = { silenceMs: 20_000, backoffMinMs: 250, backoffMaxMs: 30_000, requestMs: 15_000, sendMs: 15_000, deliveriesMs: 5_000 };
 
 /** A record from the other machine's event stream, as the window's stream passes it on. */
 export interface PeerRecord {
@@ -70,6 +72,8 @@ export interface PeerLinkOptions {
   onChange: () => void;
   /** That machine's snoozes changed and its list was read again: the windows read theirs. */
   onSnoozes?: () => void;
+  /** That machine's live sessions moved its rows (a delivery, "Session ended") and its list was read again: the windows read theirs. `sessions`: a session ended or came back there. */
+  onDeliveries?: (change: { sessions: boolean }) => void;
   /** That machine removed this one (401 device_revoked): the owner of the link cleans up. */
   onRevoked: () => void;
   timings?: Partial<PeerLinkTimings>;
@@ -114,6 +118,8 @@ export class PeerLink {
   since = Date.now();
   reason: string | null = null;
   version: string | null = null;
+  /** Its health's `launch_from_machines` (remote launch): agents can start there (true), launch is off (false), or its Inbox is too old to say (null). */
+  launch: boolean | null = null;
   list: PeerList | null = null;
   private cursor: number | null = null;
   private running = false;
@@ -122,6 +128,8 @@ export class PeerLink {
   private listing: Promise<void> | null = null;
   private listAgain = false;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private deliveriesTimer: ReturnType<typeof setTimeout> | null = null;
+  private deliveriesSessions = false;
   private flushDelay = 0;
   private readonly t: PeerLinkTimings;
 
@@ -158,6 +166,21 @@ export class PeerLink {
     this.wake?.();
     if (this.flushTimer) clearTimeout(this.flushTimer);
     this.flushTimer = null;
+    if (this.deliveriesTimer) clearTimeout(this.deliveriesTimer);
+    this.deliveriesTimer = null;
+  }
+
+  /** That machine's live sessions moved: one read of its list for all that moved in `deliveriesMs`, at its end. */
+  private deliveriesMoved(sessions: boolean): void {
+    this.deliveriesSessions ||= sessions;
+    if (this.deliveriesTimer) return;
+    this.deliveriesTimer = setTimeout(() => {
+      this.deliveriesTimer = null;
+      const moved = this.deliveriesSessions;
+      this.deliveriesSessions = false;
+      void this.refreshList().then(() => this.options.onDeliveries?.({ sessions: moved }));
+    }, this.t.deliveriesMs);
+    (this.deliveriesTimer as { unref?: () => void }).unref?.();
   }
 
   /** The person acted on this machine: redial now instead of waiting out the backoff. */
@@ -208,6 +231,7 @@ export class PeerLink {
     if (health.status === 401 && (body.code === "device_revoked" || body.code === "device_token_invalid")) return "revoked";
     if (!health.ok) return `health answered ${health.status}`;
     this.version = typeof body.version === "string" ? body.version : null;
+    this.launch = typeof body.launch_from_machines === "number" ? body.launch_from_machines >= 1 : null;
     if (body.inbox_id !== this.id) return "a different Inbox answers at this address";
     if (typeof body.machine_links !== "number" || body.machine_links < MACHINE_LINKS_PROTOCOL) {
       this.setState("needs_update", `Update Plannotator on ${this.options.link.name} (it runs ${this.version ?? "an older version"}).`);
@@ -225,8 +249,8 @@ export class PeerLink {
     }, this.t.silenceMs);
     let response: Response;
     try {
-      // `snoozes=1`: a snooze writes no record, so the stream tells this machine when to read the list again.
-      response = await this.options.transport.events(headers, this.cursor === null ? "?snoozes=1" : `?cursor=${this.cursor}&snoozes=1`, abort.signal);
+      // `snoozes=1`, `deliveries=1`: neither writes a record, so the stream tells this machine when to read the list again.
+      response = await this.options.transport.events(headers, this.cursor === null ? "?snoozes=1&deliveries=1" : `?cursor=${this.cursor}&snoozes=1&deliveries=1`, abort.signal);
     } catch (error) {
       if (this.stream === abort) this.stream = null;
       if (headersLate) return `the event stream did not answer for ${Math.round(this.t.silenceMs / 1000)} s`;
@@ -278,6 +302,8 @@ export class PeerLink {
           } else if (parsed.event === "snoozes") {
             // The list's cursor does not move, so the windows are told apart from a list that changes it.
             void this.refreshList().then(() => this.options.onSnoozes?.());
+          } else if (parsed.event === "deliveries") {
+            this.deliveriesMoved((JSON.parse(parsed.data) as Json).sessions === true);
           }
         }
       }
@@ -373,7 +399,8 @@ export class PeerLink {
     try {
       const response = await this.options.transport.request(entry.route, "", {
         method: "POST",
-        headers: this.auth({ "Content-Type": "application/json" }),
+        // A press in the person's window here: the other machine's door hands that on (inbox-devices.ts).
+        headers: this.auth({ "Content-Type": "application/json", ...(entry.window ? { [MACHINE_WINDOW_HEADER]: "1" } : {}) }),
         body: JSON.stringify(entry.body),
         signal: AbortSignal.timeout(this.t.sendMs),
       });

@@ -13,6 +13,7 @@ import { inboxProjectDisplayName } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { foldCheckoutFolderProjects, INBOX_CHECKOUT_FOLDS_FILE, INBOX_CHECKOUT_FOLDS_MAX_STARTS } from "./inbox-checkout-folders";
+import { flushInboxDebugLogs } from "./inbox-debug-log";
 import type { InboxGitRunner } from "./inbox-project-root";
 
 const scratch: string[] = [];
@@ -114,6 +115,7 @@ test("an old store with the folder project and the repository's becomes one proj
   expect(rowsOf(server.store)).toEqual(rows);
   expect(server.store.snoozes().map((s) => s.thread_id)).toEqual([fromCheckout.thread_id]);
   // One debug line for it.
+  await flushInboxDebugLogs();
   const debug = readFileSync(join(server.store.dir, "debug.log"), "utf8").split("\n").filter((line) => line.includes('"project_folded"'));
   expect(debug.length).toBe(1);
   expect(JSON.parse(debug[0]!)).toMatchObject({ ev: "project_folded", project: old.id, into: repo.id, root: folder, into_root: main });

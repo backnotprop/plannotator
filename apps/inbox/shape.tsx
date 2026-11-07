@@ -10,6 +10,7 @@ import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { configurePlannotatorUI } from '@plannotator/ui/configure';
 import { ShapePage } from '@plannotator/inbox/shape/standalone/ShapePage';
 import { createShapePageApi } from '@plannotator/inbox/shape/standalone/api';
+import { sceneFrameFromHash, setSceneFrame } from '@plannotator/ui/components/shape/scene/frame';
 import './shape.css';
 
 configurePlannotatorUI({
@@ -19,6 +20,9 @@ configurePlannotatorUI({
   webmcp: { enabled: false, namePrefix: 'plannotator.' },
   skillCatalogTransport: async () => [],
 });
+
+// `plannotator shape frame` opens `#shape=<id>&frame=<scene>&at=<time>`: that scene, still, at that moment.
+setSceneFrame(sceneFrameFromHash(window.location.hash));
 
 const rootElement = document.getElementById('root');
 if (!rootElement) throw new Error('Could not find root element to mount to');
