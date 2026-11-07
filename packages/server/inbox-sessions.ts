@@ -981,6 +981,20 @@ export function createInboxLiveSessions(options: {
     return out;
   };
 
+  /**
+   * The version a `/reload-plugins` loads for this Claude Code session, when
+   * the Inbox judges it outdated with a reload as the fix (`restart`): what a
+   * poll answer tells a connection that reloads itself (INBOX_RELOAD_FIELD).
+   * Null for any other session, or one that is up to date. The same judgment
+   * as Settings → Agents and the sidebar, so the two never disagree.
+   */
+  const reloadOfferFor = (session: string): { installed: string | null } | null => {
+    const entry = sessions.get(session);
+    if (!entry || entry.host !== "claude-code") return null;
+    const outdated = outdatedOf(entry);
+    return outdated?.fix === "restart" ? { installed: outdated.installed ?? null } : null;
+  };
+
   /** Live Claude Code sessions a restart brings up to date: the sidebar's "Reload Claude Code N". */
   const restartCount = (): number => {
     let count = 0;
@@ -1210,6 +1224,7 @@ export function createInboxLiveSessions(options: {
     steerDone,
     hostOf: (session: string): string | null => sessions.get(session)?.host ?? mcpSeen.get(session)?.host ?? null,
     hostSessions,
+    reloadOfferFor,
     restartCount,
     restartAgents,
     mcpAgents,
