@@ -227,7 +227,7 @@ export const ROWS_PRESETS: readonly { id: RowsPreset; label: string; look: ListL
     look: {
       ...LIST_LOOK_OFF,
       roomy: true,
-      highlight: true,
+      // No subject pill beside the avatars (pending owner answer q-70c1a472). To undo: `highlight: true`.
       previewTwo: true,
       marksThreads: true,
       marksProjects: true,
