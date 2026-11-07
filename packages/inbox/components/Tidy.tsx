@@ -9,6 +9,7 @@ import { Tip } from './Tip';
 import { LIST_LOOK_OPTIONS, type ListLook, type MenuLookKey } from '../listLook';
 import { shortProjectNames } from '../projectLabels';
 import { THREAD_PANEL_LABEL } from '../threadPanel';
+import { LIST_VIEW_LABEL, LIST_VIEW_OPTIONS, type ListView } from '../listView';
 
 /**
  * Tidy (owner-approved design, 2026-10-28, simplified the same day: "quiet,
@@ -163,6 +164,25 @@ function MenuCheckbox({
   );
 }
 
+/**
+ * The list's view (listView.ts): Grouped or List, one choice of two (`menuitemradio`, its state announced), drawn as
+ * the checkboxes are with a round box, under its label (the radio group is the labelled group). A pick changes the
+ * list at once and leaves the menu open, as a tick does.
+ */
+function MenuViewChoice({ view, onChange }: { view: ListView; onChange: (view: ListView) => void }) {
+  return (
+    <Menu.RadioGroup value={view} onValueChange={(next: ListView) => onChange(next)}>
+      <Menu.GroupLabel className="ib-pm-glabel">{LIST_VIEW_LABEL}</Menu.GroupLabel>
+      {LIST_VIEW_OPTIONS.map((option) => (
+        <Menu.RadioItem key={option.value} className="ib-pmi" value={option.value} label={option.label} closeOnClick={false} data-list-view={option.value}>
+          <span className="ib-pmi-box" aria-hidden="true" data-radio="" data-on={view === option.value ? '' : undefined} />
+          <span className="ib-pmi-l">{option.label}</span>
+        </Menu.RadioItem>
+      ))}
+    </Menu.RadioGroup>
+  );
+}
+
 /** "Tidy · 3/4" while a run shows. */
 const runLabel = (run: InboxTidyRun) => `Tidy · ${run.done}/${run.agents.length}`;
 
@@ -182,6 +202,7 @@ export function TidyMenu({
   onLook,
   threadPanel,
   onCustomize,
+  view,
 }: {
   tidy: TidyController;
   phone: boolean;
@@ -195,6 +216,8 @@ export function TidyMenu({
   threadPanel?: { on: boolean; onChange: (on: boolean) => void };
   /** "Customize rows…", last in the Rows group: Settings → Rows. Absent (the tour): no item. */
   onCustomize?: () => void;
+  /** The list's view (listView.ts), Grouped or List, first of the options. Absent (the Board, the tour): no item. */
+  view?: { value: ListView; onChange: (view: ListView) => void };
 }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -256,6 +279,12 @@ export function TidyMenu({
                 <Icon name="refresh" size={15} />
                 Refresh
               </Menu.Item>
+              {view && (
+                <>
+                  <Menu.Separator className="ib-pm-sep" />
+                  <MenuViewChoice view={view.value} onChange={view.onChange} />
+                </>
+              )}
               {look && onLook && (
                 <>
                   <Menu.Separator className="ib-pm-sep" />

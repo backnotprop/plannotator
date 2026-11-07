@@ -5,21 +5,24 @@
  * Each case is its own Inbox (the dialog is once per machine); agents write through `plannotator inbox mcp`.
  *
  *  - A new user (a fresh install) never gets it, even with a long list.
- *  - Someone who used an Inbox before: it shows once, in one of two tabs, plays its preview (each option on in turn,
- *    then all off), and Done puts the switches on the real list at once, which a reload keeps; it never shows again.
+ *  - Someone who used an Inbox before: it shows once, in one of two tabs, plays its preview (each option that is off
+ *    on in turn, then back to the defaults: smaller names on), and Done puts the switches on the real list at once,
+ *    which a reload keeps; it never shows again.
  *  - Escape and Keep as it is change nothing and retire it (with reduced motion: no preview at all).
  *  - A key or a click during the preview ends it at once, back to the defaults.
- *  - Never on the same load as the sound dialog or the tour; the next load shows it.
- *  - With a thread open too (the owner, 2026-10-31): a first load on a thread link (desktop or phone) shows it over the
- *    thread after the same short wait as a first load on the list, with the picture's rows drawn (a phone hides the
- *    real list under a thread); never while a reply is being typed there or left with words in its box, then once
- *    it is not; never while a file is open beside the thread, then after the short wait once it is closed; never
- *    under an image opened full size or a modal layer; another thread opened just before the wait ends starts it again.
+ *  - Never on the same load as the tour (the next load shows it); after the sound dialog, never that load nor the next
+ *    (the line of one-time dialogs, approval "inbox-one-time-dialogs": one a day, two days apart).
+ *  - Its moment is back on the list (approval "inbox-one-time-dialogs"; it replaced "over a thread", the owner's
+ *    2026-10-31 note): a first load on a thread link (desktop or phone) never shows it over the thread; back on the
+ *    list it shows after the same short wait as a first load on the list, with the picture's rows drawn; never while
+ *    a file is open beside the thread, nor with the thread alone, then on the list after the short wait; never under
+ *    an image opened full size or a modal layer; a thread opened just before the wait ends starts it again.
  *  - The dialog follows the window's mode, its text and switches at WCAG AA in dark and light (desktop and a dark
  *    phone); only its picture is light, in both (and under Synthwave '84), and nothing else on the page is a light
  *    scope or a second window root.
  *  - The picture's thread names stay on one line, a long one cut with "…" (the owner: no long names in the examples).
- *  - Smaller thread names is the fourth switch, in the preview and saved by Done.
+ *  - Smaller thread names is the fourth switch, on from the start (a default since 2026-11-05): the preview never
+ *    shows it turning on, and turning it off is saved by Done.
  *  - Dark, and a 390 px phone: a bottom sheet with the phone's rows.
  *
  * Build the apps first (bun run --cwd apps/review build && bun run build:hook), then
@@ -142,15 +145,16 @@ async function context(browser: Browser, options: { phone?: boolean; dark?: bool
 const lookClasses = (page: Page) => page.locator('.pn-inbox .ib-listcol:not(.ib-lo-list)').first().evaluate((el) => [...el.classList].filter((c) => c.startsWith('ib-lk-')).sort());
 const option = (page: Page, key: string) => page.locator(`${DIALOG} [data-list-intro-option="${key}"]`);
 
-async function allOff(page: Page) {
-  for (const key of KEYS) await expect(option(page, key)).toHaveAttribute('aria-checked', 'false');
+/** The switches at the defaults: Smaller thread names on (since 2026-11-05), the other three off. */
+async function atDefaults(page: Page) {
+  for (const key of KEYS) await expect(option(page, key)).toHaveAttribute('aria-checked', key === 'smallNames' ? 'true' : 'false');
 }
 
-/** The dialog is up and its preview has played out (or never played): every switch off and usable. */
+/** The dialog is up and its preview has played out (or never played): the switches at the defaults and usable. */
 async function settledDialog(page: Page) {
   await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('[data-list-intro-playing]')).toHaveCount(0, { timeout: 5_000 });
-  await allOff(page);
+  await atDefaults(page);
 }
 
 async function shot(page: Page, name: string) {
@@ -279,15 +283,15 @@ test('once, in one of two tabs: the preview plays, Done puts the switches on the
   await expect(page.locator(`${DIALOG} .ib-lo-list.ib-lk-pill.ib-lk-compact`)).toHaveCount(1);
   await namesOneLine(page);
   await shot(page, 'desktop-light-options-on');
-  // The real list is today's until Done.
-  expect(await lookClasses(page)).toEqual([]);
+  // The real list keeps the defaults until Done.
+  expect(await lookClasses(page)).toEqual(['ib-lk-small']);
   await page.locator('[data-list-intro-done]').click();
   await expect(page.locator(DIALOG)).toHaveCount(0);
-  expect(await lookClasses(page)).toEqual(['ib-lk-compact', 'ib-lk-pill']);
+  expect(await lookClasses(page)).toEqual(['ib-lk-compact', 'ib-lk-pill', 'ib-lk-small']);
   await shot(page, 'after-done');
   await page.reload();
   await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
-  expect(await lookClasses(page)).toEqual(['ib-lk-compact', 'ib-lk-pill']);
+  expect(await lookClasses(page)).toEqual(['ib-lk-compact', 'ib-lk-pill', 'ib-lk-small']);
   await other.reload();
   await page.waitForTimeout(3000);
   await expect(page.locator(DIALOG)).toHaveCount(0);
@@ -304,7 +308,7 @@ for (const how of ['Escape', 'Keep as it is'] as const) {
     // Reduced motion: never a preview; the switches are usable from the start.
     await expect(page.locator('[data-list-intro-playing]')).toHaveCount(0);
     await page.waitForTimeout(700);
-    await allOff(page);
+    await atDefaults(page);
     // Tab stays inside the dialog and never lands on the picture's (inert) rows.
     await expect(page.locator('[data-list-intro-done]')).toBeFocused();
     await page.keyboard.press('Tab');
@@ -316,14 +320,14 @@ for (const how of ['Escape', 'Keep as it is'] as const) {
     if (how === 'Escape') await page.keyboard.press('Escape');
     else await page.locator('[data-list-intro-keep]').click();
     await expect(page.locator(DIALOG)).toHaveCount(0);
-    expect(await lookClasses(page)).toEqual([]);
+    expect(await lookClasses(page)).toEqual(['ib-lk-small']);
     // The list is still there: Escape closed only the dialog.
     await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
     await page.reload();
     await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
     await page.waitForTimeout(3000);
     await expect(page.locator(DIALOG)).toHaveCount(0);
-    expect(await lookClasses(page)).toEqual([]);
+    expect(await lookClasses(page)).toEqual(['ib-lk-small']);
   });
 }
 
@@ -339,17 +343,18 @@ for (const how of ['a key', 'a click'] as const) {
     else await page.locator(`${DIALOG} #ib-lo-title`).click();
     await expect(page.locator('[data-list-intro-playing]')).toHaveCount(0);
     if (how === 'a key') await expect(option(page, 'highlight')).toBeFocused();
-    await allOff(page);
-    await expect(page.locator(`${DIALOG} .ib-lo-list`)).not.toHaveClass(/ib-lk-/);
+    await atDefaults(page);
+    await expect(page.locator(`${DIALOG} .ib-lo-list`)).not.toHaveClass(/ib-lk-(pill|compact|noagents)/);
+    await expect(page.locator(`${DIALOG} .ib-lo-list`)).toHaveClass(/ib-lk-small/);
     // Nothing plays on after it, and the switches answer.
     await page.waitForTimeout(1800);
-    await allOff(page);
+    await atDefaults(page);
     await option(page, 'hideAgents').click();
     await expect(option(page, 'hideAgents')).toHaveAttribute('aria-checked', 'true');
   });
 }
 
-test('never on the same load as the sound dialog: the next load shows it', async ({ browser }) => {
+test('after the sound dialog: never on that load, nor on the next (one a day, two days apart)', async ({ browser }) => {
   const w = await world({ earlier: true, soundDue: true });
   const page = await (await context(browser, { reduce: true })).newPage();
   await page.goto(w.url);
@@ -362,8 +367,11 @@ test('never on the same load as the sound dialog: the next load shows it', async
   await expect(page.locator(DIALOG)).toHaveCount(0);
   expect(saved(w)?.shownAt).toBeUndefined();
   await page.reload();
-  await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible({ timeout: 15_000 });
+  await page.waitForTimeout(6000);
+  await expect(page.locator(DIALOG)).toHaveCount(0);
   await expect(sound).toHaveCount(0);
+  expect(saved(w)?.shownAt).toBeUndefined();
 });
 
 test('never on the same load as the tour: the next load shows it', async ({ browser }) => {
@@ -397,70 +405,44 @@ test('a first load on the list: it shows after the short wait, not the moment th
 });
 
 for (const phone of [false, true]) {
-  test(`a first load on a thread link${phone ? ' on a phone' : ''}: it shows over the thread after the short wait`, async ({ browser }) => {
+  test(`a first load on a thread link${phone ? ' on a phone' : ''}: never over the thread; back on the list, after the short wait`, async ({ browser }) => {
     const w = await world({ earlier: true });
     const page = await (await context(browser, { phone, reduce: true })).newPage();
-    const t0 = Date.now();
     await page.goto(`${w.url}#thread=${w.opened}`);
     const subject = page.locator('.ib-pane h2.ib-subject').first();
     await expect(subject).toBeVisible({ timeout: 15_000 });
-    // Not the moment the thread is up: after the same short wait as a first load on the list.
+    // Well past the wait: nothing over the thread, and the claim is not spent.
+    await page.waitForTimeout(6000);
     await expect(page.locator(DIALOG)).toHaveCount(0);
+    expect(saved(w)?.shownAt).toBeUndefined();
+    // Back on the list: after the same short wait as a first load on the list.
+    await page.locator(phone ? '[data-phone-back]' : 'button[aria-label="Close the thread"]').first().click();
+    await expect(subject).toHaveCount(0);
+    const back = Date.now();
     await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
-    expect(Date.now() - t0).toBeGreaterThanOrEqual(2000);
+    expect(Date.now() - back).toBeGreaterThanOrEqual(2000);
     expect(saved(w)?.shownAt).toMatch(/^\d{4}-/);
     await settledDialog(page);
-    // The thread stays open behind it, and the picture's rows are drawn (a phone hides its real list under a thread).
-    await expect(subject).toBeAttached();
-    expect(await page.evaluate(() => location.hash)).toContain(`thread=${w.opened}`);
     await expect(page.locator(`${DIALOG} .ib-lo-frame ${phone ? '.ib-mrow' : '.ib-nrow'}`).first()).toBeVisible();
     await namesOneLine(page);
     await shot(page, `thread-link${phone ? '-phone' : ''}-dialog`);
-    // Once: Keep as it is retires it, and closing and opening the thread never brings it again.
+    // Once: Keep as it is retires it, and opening a thread and closing it never brings it again.
     await page.locator('[data-list-intro-keep]').click();
     await expect(page.locator(DIALOG)).toHaveCount(0);
+    await page.locator('.ib-lbody [data-thread-id]').first().click();
     await expect(subject).toBeVisible();
     await page.locator(phone ? '[data-phone-back]' : 'button[aria-label="Close the thread"]').first().click();
     await expect(subject).toHaveCount(0);
-    await page.locator('.ib-lbody [data-thread-id]').first().click();
-    await expect(subject).toBeVisible();
     await page.waitForTimeout(3500);
     await expect(page.locator(DIALOG)).toHaveCount(0);
   });
 }
 
-test('over a thread, never while a reply is being typed: it waits, unspent, and shows once the reply is gone', async ({ browser }) => {
-  const w = await world({ earlier: true });
-  const page = await (await context(browser, { reduce: true })).newPage();
-  await page.goto(`${w.url}#thread=${w.opened}`);
-  const pane = page.locator('section.ib-pane');
-  await expect(pane.locator('h2.ib-subject')).toBeVisible({ timeout: 15_000 });
-  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply' }).click();
-  const box = pane.locator('textarea');
-  await box.fill('Build the pill version.');
-  // Well past the wait: nothing over the reply, and the claim is not spent.
-  await page.waitForTimeout(6000);
-  await expect(page.locator(DIALOG)).toHaveCount(0);
-  expect(saved(w)?.shownAt).toBeUndefined();
-  // Focus leaves the box, its words still in it: still nothing, still unspent.
-  await pane.locator('h2.ib-subject').click();
-  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe('TEXTAREA');
-  await expect(box).toHaveValue('Build the pill version.');
-  await page.waitForTimeout(6000);
-  await expect(page.locator(DIALOG)).toHaveCount(0);
-  expect(saved(w)?.shownAt).toBeUndefined();
-  // The reply gone and the box left: it shows over the thread.
-  await box.fill('');
-  await pane.locator('h2.ib-subject').click();
-  await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
-  expect(saved(w)?.shownAt).toMatch(/^\d{4}-/);
-});
-
 test('never under an image opened full size or another modal layer: it waits, unspent, and shows once it is gone', async ({ browser }) => {
   const w = await world({ earlier: true });
   const page = await (await context(browser, { reduce: true })).newPage();
-  await page.goto(`${w.url}#thread=${w.opened}`);
-  await expect(page.locator('.ib-pane h2.ib-subject').first()).toBeVisible({ timeout: 15_000 });
+  await page.goto(w.url);
+  await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible({ timeout: 15_000 });
   // The layers ui draws over the page by itself, outside the route and the window's dialogs: the image lightbox's
   // own marker (`data-image-lightbox`), then a modal panel (`aria-modal`), each as ui renders it on <body>.
   for (const layer of ['[data-image-lightbox]', '[role="dialog"][aria-modal="true"]']) {
@@ -485,7 +467,7 @@ test('never under an image opened full size or another modal layer: it waits, un
   expect(saved(w)?.shownAt).toMatch(/^\d{4}-/);
 });
 
-test('another thread opened just before the wait ends: the wait starts again from there', async ({ browser }) => {
+test('a thread opened just before the wait ends: never over it; back on the list, the wait starts again from there', async ({ browser }) => {
   const w = await world({ earlier: true });
   const page = await (await context(browser, { reduce: true })).newPage();
   await page.goto(w.url);
@@ -495,13 +477,18 @@ test('another thread opened just before the wait ends: the wait starts again fro
   await page.waitForTimeout(2000);
   await expect(page.locator(DIALOG)).toHaveCount(0);
   await rows.first().click();
-  const opened = Date.now();
-  await expect(page.locator('.ib-pane h2.ib-subject').first()).toBeVisible();
+  const subject = page.locator('.ib-pane h2.ib-subject').first();
+  await expect(subject).toBeVisible();
+  await page.waitForTimeout(4000);
+  await expect(page.locator(DIALOG)).toHaveCount(0);
+  await page.locator('button[aria-label="Close the thread"]').first().click();
+  await expect(subject).toHaveCount(0);
+  const back = Date.now();
   await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
-  expect(Date.now() - opened).toBeGreaterThanOrEqual(2000);
+  expect(Date.now() - back).toBeGreaterThanOrEqual(2000);
 });
 
-test('never over a file open beside a thread: it waits, unspent; closed, it shows after the short wait', async ({ browser }) => {
+test('never over a file open beside a thread, nor the thread alone: it waits, unspent; back on the list, after the short wait', async ({ browser }) => {
   const w = await world({ earlier: true, attachment: true });
   const page = await (await context(browser, { reduce: true })).newPage();
   await page.goto(`${w.url}#thread=${w.opened}&file=${w.file}&view=side`);
@@ -513,10 +500,15 @@ test('never over a file open beside a thread: it waits, unspent; closed, it show
   await expect(page.locator(DIALOG)).toHaveCount(0);
   expect(saved(w)?.shownAt).toBeUndefined();
   await shot(page, 'file-open-no-dialog');
-  // The file closed, the thread alone: after the same short wait, never at once.
+  // The file closed, the thread alone: still nothing.
   await close.click();
-  const closed = Date.now();
   await expect(close).toHaveCount(0);
+  await page.waitForTimeout(4000);
+  await expect(page.locator(DIALOG)).toHaveCount(0);
+  expect(saved(w)?.shownAt).toBeUndefined();
+  // Back on the list: after the same short wait, never at once.
+  await page.locator('button[aria-label="Close the thread"]').first().click();
+  const closed = Date.now();
   await page.waitForTimeout(1000);
   await expect(page.locator(DIALOG)).toHaveCount(0);
   await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
@@ -534,7 +526,7 @@ test('the dialog follows the window\'s mode and passes WCAG AA in both; only its
   for (const { dark, phone, name } of cases) {
     const w = await world({ earlier: true });
     const page = await (await context(browser, { dark, phone, reduce: true })).newPage();
-    await page.goto(`${w.url}#thread=${w.opened}`);
+    await page.goto(w.url);
     await settledDialog(page);
     expect(await page.evaluate(() => document.documentElement.classList.contains('light'))).toBe(!dark);
     // The light scope is the picture alone: no other element of the page is light or a scope, and the picture is
@@ -545,15 +537,15 @@ test('the dialog follows the window\'s mode and passes WCAG AA in both; only its
       pictureRoot: document.querySelector('[data-list-intro-picture]')!.classList.contains('pn-inbox'),
     }));
     expect(scopes).toEqual({ light: [{ picture: true, dialogText: 0 }], roots: 1, pictureRoot: false });
-    // The thread behind keeps the window's mode.
-    const paneLight = await page.locator('section.ib-pane').first().evaluate((el) => {
+    // The list behind keeps the window's mode.
+    const paneLight = await page.locator('.pn-inbox .ib-listcol:not(.ib-lo-list)').first().evaluate((el) => {
       const ctx = document.createElement('canvas').getContext('2d')!;
       ctx.fillStyle = getComputedStyle(el).backgroundColor;
       ctx.fillRect(0, 0, 1, 1);
       const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
       return (r! + g! + b!) / 3 > 128;
     });
-    expect(paneLight, 'the thread behind').toBe(!dark);
+    expect(paneLight, 'the list behind').toBe(!dark);
     const c = await dialogContrast(page);
     // The dialog in the window's mode; the picture light in both.
     if (dark) expect(c.background, `a dark dialog: ${JSON.stringify(c)}`).toBeLessThan(0.1);
@@ -595,25 +587,26 @@ test('the dialog follows the window\'s mode and passes WCAG AA in both; only its
   }
 });
 
-test('Smaller thread names: the fourth switch, in the preview, saved by Done', async ({ browser }) => {
+test('Smaller thread names: the fourth switch, on from the start, turned off by Done', async ({ browser }) => {
   const w = await world({ earlier: true });
   const page = await (await context(browser)).newPage();
   await page.goto(w.url);
   await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(`${DIALOG} [role="switch"]`)).toHaveCount(4);
   await expect(page.locator(`${DIALOG} .ib-lo-opt > span`)).toHaveText(['Highlight thread subject', 'Compact rows', 'Hide agent icons', 'Smaller thread names']);
-  // The preview reaches it last, all four on together, then all off.
-  await expect(option(page, 'smallNames')).toHaveAttribute('aria-checked', 'true', { timeout: 4_000 });
+  // A default (2026-11-05): on from the open, and the preview never shows it turning on; the other three reach on.
+  await expect(option(page, 'smallNames')).toHaveAttribute('aria-checked', 'true');
   await expect(page.locator(`${DIALOG} .ib-lo-list.ib-lk-small`)).toHaveCount(1);
+  await expect(option(page, 'hideAgents')).toHaveAttribute('aria-checked', 'true', { timeout: 4_000 });
   for (const key of KEYS) await expect(option(page, key)).toHaveAttribute('aria-checked', 'true');
   await settledDialog(page);
   await option(page, 'smallNames').click();
   await page.locator('[data-list-intro-done]').click();
   await expect(page.locator(DIALOG)).toHaveCount(0);
-  expect(await lookClasses(page)).toEqual(['ib-lk-small']);
+  expect(await lookClasses(page)).toEqual([]);
   await page.reload();
   await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
-  expect(await lookClasses(page)).toEqual(['ib-lk-small']);
+  expect(await lookClasses(page)).toEqual([]);
 });
 
 test('dark, with options on', async ({ browser }) => {

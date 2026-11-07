@@ -97,7 +97,7 @@ async function phone(browser: Browser, width: number): Promise<Page> {
 /** The thread with the reply box open, two files in it. */
 async function openBox(page: Page): Promise<void> {
   await page.goto(`${world.url}#thread=${thread}`);
-  await pane(page).locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ }).first().click();
+  await pane(page).locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
   await expect(pane(page).locator('.ib-rbox textarea')).toBeVisible();
   await pane(page).locator('.ib-rbox [data-reply-attach]').setInputFiles([
     { name: 'retry-worker-backoff-screenshot.png', mimeType: 'image/png', buffer: PNG },
@@ -227,7 +227,7 @@ test('a desktop window keeps its chips', async ({ browser }) => {
   const page = await context.newPage();
   await voiceReady(page);
   await page.goto(`${world.url}#thread=${thread}`);
-  await pane(page).locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ }).first().click();
+  await pane(page).locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
   const foot = pane(page).locator('.ib-rbox .ib-rfoot');
   await expect(foot.locator('[data-skip-chip]')).toContainText('4 questions stay open');
   await expect(foot.locator('[data-annotations-chip]')).toHaveText('3 comments');

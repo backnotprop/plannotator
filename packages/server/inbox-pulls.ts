@@ -38,6 +38,8 @@
  * per folder, cached).
  */
 
+import { createHash } from "node:crypto";
+import type { PatchBlobIds } from "@plannotator/core/diff-files";
 import { forgeRefKey } from "@plannotator/core/forge-ref-card";
 import {
   INBOX_PULLS_MERGED_DAYS,
@@ -47,6 +49,7 @@ import {
   inboxPullStacks,
   inboxPullUrlsIn,
   type InboxCard,
+  type InboxFileContents,
   type InboxMessage,
   type InboxPull,
   type InboxPullChecks,
@@ -55,6 +58,7 @@ import {
   type InboxPullDiffAnswer,
   type InboxPullDiffScope,
   type InboxPullHost,
+  inboxPullLabel,
   inboxPullSafeBranch,
   type InboxPullCard,
   type InboxPullLink,
@@ -62,7 +66,10 @@ import {
   type InboxPullState,
 } from "@plannotator/core/inbox-types";
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
-import { reconstructGitlabPatch, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
+import { fetchPRFileContent, reconstructGitlabPatch, type GitLabDiffEntry, type PRRef, type PRRuntime } from "@plannotator/shared/pr-provider";
+import { MAX_REPO_FILE_BYTES } from "@plannotator/shared/repo-file";
+import { MAX_REVIEW_FILE_CONTENT_BYTES, readGitObjectBytes, validateFilePath } from "@plannotator/shared/review-core";
+import { runtime as gitRuntime } from "./git";
 import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
 
 /** A host's answer is fresh this long. */
@@ -75,6 +82,15 @@ export const INBOX_PULLS_RATE_FLOOR = 100;
 export const INBOX_PULL_DIFF_MAX_BYTES = 8 * 1024 * 1024;
 /** A layer's diff is kept this long (keyed by the PR's last update too). */
 export const INBOX_PULL_DIFF_FRESH_MS = 5 * 60_000;
+
+/** One file's text larger than this is not read (the diff stays as it came): the review's own expansion cap. */
+export const INBOX_PULL_FILE_MAX_BYTES = MAX_REVIEW_FILE_CONTENT_BYTES;
+/** Texts kept in memory, across files: past this the oldest go. A commit's file never changes, so nothing else ages them. */
+export const INBOX_PULL_FILE_CACHE_BYTES = 64 * 1024 * 1024;
+/** And at most this many (a missing or binary file's answer weighs nothing). */
+const INBOX_PULL_FILE_CACHE_ENTRIES = 2048;
+/** At most this many reads at once: a PR's first screen asks for every file on it together. */
+const INBOX_PULL_FILE_READS_AT_ONCE = 6;
 
 /** A commit id as the forge answered it (40 or 64 hex digits), or null. */
 function shaOf(value: unknown): string | null {
@@ -574,11 +590,68 @@ export interface InboxPulls {
   avatarUrls(host: string): Record<string, string>;
   /** One layer's patch, or the stack's from its base up to that layer. Throws InboxPullsError. */
   diff(key: string, scope: InboxPullDiffScope): Promise<InboxPullDiffAnswer>;
-  /** The head commit of the last layer patch read for this PR (`diff`'s `head_sha`), or null. */
+  /** The head commit of the last patch read for this PR, either scope (`diff`'s `head_sha`), or null. */
   readHead(key: string): string | null;
+  /**
+   * A file as this PR has it at its head commit, read from the forge with the person's own CLI, so it needs no checkout.
+   * Null when the PR is not in the last list, has no known head, or has no such text file there. Never throws.
+   */
+  file(key: string, path: string, repos?: InboxPullRepo[]): Promise<InboxPullFile | null>;
+  /** Whether a GitHub PR still has this commit (a force-push takes it off); null when the forge did not say. */
+  hasCommit(key: string, sha: string): Promise<boolean | null>;
+  /**
+   * One file's whole text at the commits this PR's diff runs between, for the viewer's expand arrows: read from the
+   * first of `roots` (local clones of the repository) that has the commit, else from the forge, a fork's commits too:
+   * they are reachable by id from the base repository. `oldPath`: a renamed file's old side. Both sides null when either
+   * is missing, binary or too large, with `failed` when the forge did not answer. Throws InboxPullsError only for a PR
+   * the last list did not name.
+   */
+  /** `ids` are the blobs the patch on screen names: a text that does not hash to them is not that patch's file, and no arrows open. */
+  fileContents(key: string, scope: InboxPullDiffScope, path: string, roots: readonly string[], ids: PatchBlobIds | null, oldPath?: string): Promise<InboxFileContents>;
 }
 
+/** A file at a PR's head commit: its text, and its address on the forge. */
+export interface InboxPullFile {
+  contents: string;
+  label: string;
+  platform: InboxPull["platform"];
+  url: string;
+}
+
+/** The files read at a head commit, kept while the Inbox runs: a commit never changes, so nor do they. */
+const INBOX_PULL_FILES_KEPT = 64;
+/** A file's read stops here: the local limit, as the base64 GitHub answers with. */
+const INBOX_PULL_FILE_READ_BYTES = Math.ceil((MAX_REPO_FILE_BYTES * 4) / 3) + 1024 * 1024;
+
+/** A local clone's read of one file at one commit (`<sha>:<path>`), capped. Null: this clone can't say. "none": it has the commit but no usable text. */
+export type PullFileGitReader = (root: string, sha: string, path: string, maxBytes: number) => Promise<string | "none" | null>;
+
+/** The id git gives a blob of these bytes. */
+export function gitBlobId(bytes: Uint8Array): string {
+  return createHash("sha1").update(`blob ${bytes.byteLength}\u0000`).update(bytes).digest("hex");
+}
+
+/** This text is the blob a patch's `index` line names (the line carries a prefix of the id). */
+function isBlob(text: string, id: string): boolean {
+  return gitBlobId(Buffer.from(text, "utf8")).startsWith(id);
+}
+
+/** The text in these bytes, or null when they are binary (a NUL early on, git's own test). */
+export function textOfBytes(bytes: Uint8Array): string | null {
+  if (bytes.subarray(0, 8000).includes(0)) return null;
+  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("utf8");
+}
+
+const pullFileGitRead: PullFileGitReader = async (root, sha, path, maxBytes) => {
+  const read = await readGitObjectBytes(gitRuntime, `${sha}:${path}`, maxBytes, root);
+  if (read.kind === "too-large") return "none";
+  if (read.kind !== "ok") return null;
+  return textOfBytes(read.bytes) ?? "none";
+};
+
 /** A GitHub owner as `owner:branch` takes it in a compare (a fork's head). */
+/** The most commits GitHub lists for a pull request. */
+const PULL_COMMITS_LISTED_MAX = 250;
 const FORK_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 /** Core's branch check for words (`inboxPullSafeBranch`): the hand-off names a branch only when it passes. */
 export const safeBranch = inboxPullSafeBranch;
@@ -647,20 +720,40 @@ function cappedDiffRunner(run: RefRunner): PullDiffRunner {
   };
 }
 
-export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffRunner; now?: () => number } = {}): InboxPulls {
+export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffRunner; gitRead?: PullFileGitReader; now?: () => number } = {}): InboxPulls {
   const run = options.run ?? refCliRunner;
   const diffRun = options.diffRun ?? (options.run ? cappedDiffRunner(options.run) : pullDiffCliRunner);
+  const gitRead = options.gitRead ?? pullFileGitRead;
   const now = options.now ?? Date.now;
   const hosts = new Map<string, HostState>();
   const holdUntil = new Map<string, number>();
+  const fileHoldUntil = new Map<string, number>();
   /** GitHub's GraphQL budget nearly spent: list reads of the host wait until `resetAt` (diffs do not). */
   const budgetHold = new Map<string, number>();
   const signed =new Map<RefCli, { at: number; ttl: number; set: Promise<Set<string>>; missing: boolean }>();
   const diffs = new Map<string, { at: number; answer: InboxPullDiffAnswer }>();
   const readHeads = new Map<string, string>();
+  const headFiles = new Map<string, string | null>();
   let known = new Map<string, InboxPull>();
   let lastRepos = new Set<string>();
   let avatars = new Map<string, Record<string, string>>();
+  // A diff's base commit, by its head (a pushed head has its own), and each file's text by commit: a commit's file
+  // never changes, so a settled answer stays until the bound. A failed read is forgotten, for the next look to retry.
+  const mergeBases = new Map<string, Promise<string | null>>();
+  const fileTexts = new Map<string, { read: Promise<string | null>; bytes: number }>();
+  let fileTextBytes = 0;
+  let readsRunning = 0;
+  const readsWaiting: (() => void)[] = [];
+  const inTurn = async <T>(task: () => Promise<T>): Promise<T> => {
+    if (readsRunning >= INBOX_PULL_FILE_READS_AT_ONCE) await new Promise<void>((resolve) => readsWaiting.push(resolve));
+    readsRunning++;
+    try {
+      return await task();
+    } finally {
+      readsRunning--;
+      readsWaiting.shift()?.();
+    }
+  };
 
   const signedIn = (cli: RefCli): Promise<Set<string>> => {
     const hit = signed.get(cli);
@@ -970,6 +1063,58 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       return { ...(avatars.get(host.toLowerCase()) ?? {}) };
     },
     readHead: (key) => readHeads.get(key) ?? null,
+    async file(key, path, repos) {
+      // The PR may have moved since the last read of the list: its head is what the code is read at.
+      if (repos) await this.list(repos, { refresh: false }).catch(() => {});
+      const pull = known.get(key);
+      const sha = pull ? (pull.head_sha ?? readHeads.get(key)) : null;
+      const parts = pull ? splitPath(pull.repo) : null;
+      if (!pull || !sha || !parts) return null;
+      const kept = `${pull.host}/${pull.repo}@${sha}:${path}`;
+      let contents = headFiles.get(kept);
+      if (contents === undefined) {
+        if (now() < (holdUntil.get(pull.host) ?? 0)) return null;
+        const ref: PRRef =
+          pull.platform === "github"
+            ? { platform: "github", host: pull.host, owner: parts.owner, repo: parts.repo, number: pull.number }
+            : { platform: "gitlab", host: pull.host, projectPath: pull.repo, iid: pull.number };
+        // Only a real answer is kept: a read that failed says nothing about the file, and asks again next time.
+        let failed = false;
+        // The host always named, as for every read here: neither GH_HOST nor a folder's remote picks it.
+        const runtime: PRRuntime = {
+          runCommand: async (cli, args) => {
+            const result = await diffRun(cli as RefCli, args.includes("--hostname") ? args : [...args, "--hostname", pull.host], INBOX_PULL_FILE_READ_BYTES);
+            if (result.exitCode !== 0 && !result.tooLarge && !/\b404\b/.test(`${result.stderr} ${result.stdout}`)) failed = true;
+            return result;
+          },
+        };
+        const read = await fetchPRFileContent(runtime, ref, sha, path).catch(() => {
+          failed = true;
+          return null;
+        });
+        // Text only, and no larger than a file on this computer: what is not, the preview cannot show.
+        contents = read === null || read.includes("\0") || Buffer.byteLength(read, "utf8") > MAX_REPO_FILE_BYTES ? null : read;
+        if (!failed) {
+          headFiles.set(kept, contents);
+          while (headFiles.size > INBOX_PULL_FILES_KEPT) headFiles.delete(headFiles.keys().next().value!);
+        }
+      }
+      if (contents === null) return null;
+      const encoded = path.split("/").map(encodeURIComponent).join("/");
+      const url = `https://${pull.host}/${pull.repo}/${pull.platform === "gitlab" ? "-/" : ""}blob/${sha}/${encoded}`;
+      return { contents, label: inboxPullLabel(pull), platform: pull.platform, url };
+    },
+    async hasCommit(key, sha) {
+      const pull = known.get(key);
+      const parts = pull ? splitPath(pull.repo) : null;
+      if (!pull || !parts || pull.platform !== "github") return null;
+      const read = await run("gh", ["api", "--hostname", pull.host, `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}/commits?per_page=100`, "--paginate", "--jq", ".[].sha"]).catch(() => null);
+      if (!read || read.exitCode !== 0) return null;
+      const commits = read.stdout.split("\n").map((line) => line.trim().toLowerCase()).filter(Boolean);
+      if (commits.includes(sha.toLowerCase())) return true;
+      // GitHub lists at most 250: past that, not listed says nothing.
+      return commits.length >= PULL_COMMITS_LISTED_MAX ? null : false;
+    },
     async diff(key, scope) {
       const pull = known.get(key);
       if (!pull || !lastRepos.has(inboxPullRepoKey(pull.host, pull.repo))) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
@@ -993,9 +1138,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         head = `${owner}:${pull.head}`;
         headRef = `${owner}:${compareRef(pull.head)}`;
       }
-      const cacheKey = `${key}\u0000${scope}\u0000${bases[0]}\u0000${pull.updated_at}`;
+      // By what makes the diff: a label or a comment moves `updated_at` and costs no read.
+      const cacheKey = `${key}\u0000${scope}\u0000${bases[0]}\u0000${pull.head_sha ?? pull.updated_at}`;
       const hit = diffs.get(cacheKey);
-      if (hit && now() - hit.at < INBOX_PULL_DIFF_FRESH_MS) return hit.answer;
+      // Only an answer naming the head last read here: a list gone back to an older head reads the forge, and so does a
+      // head the forge did not pin down.
+      if (hit && now() - hit.at < INBOX_PULL_DIFF_FRESH_MS && readHeads.get(key) === hit.answer.head_sha) return hit.answer;
       if (scope === "stack" && (!bases.every(compareBranch) || !compareBranch(pull.head))) throw new InboxPullsError("pull_diff_failed", "This stack's branch names can't be compared here. Open it on the forge.");
       const state = hosts.get(pull.host);
       const cli: RefCli = state?.cli ?? (pull.platform === "github" ? "gh" : "glab");
@@ -1013,7 +1161,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
             : `projects/${project}/repository/compare?from=${encodeURIComponent(base)}&to=${encodeURIComponent(pull.head)}&straight=false`;
         return ["api", "--hostname", pull.host, endpoint];
       };
-      // A layer's head commit, read around its patch: a push between the two reads leaves it unknown (no post).
+      // The head commit, read around the patch: a push between the two reads leaves it unknown (a layer posts nothing).
       const headNow = async (): Promise<string | null> => {
         const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
         const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", ".head.sha"] : [])]).catch(() => null);
@@ -1026,7 +1174,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           return null;
         }
       };
-      const headBefore = scope === "layer" ? await headNow() : null;
+      const headBefore = await headNow();
       let base = bases[0]!;
       let result = await diffRun(cli, argsFor(base), INBOX_PULL_DIFF_MAX_BYTES);
       if (result.exitCode !== 0 && !result.tooLarge && bases.length > 1 && /\b404\b|not found|no common ancestor|could not compare/i.test(`${result.stderr}\n${result.stdout}`)) {
@@ -1054,11 +1202,143 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const headAfter = headBefore ? await headNow() : null;
       const head_sha = headBefore && headBefore === headAfter ? headBefore : null;
       if (head_sha) readHeads.set(key, head_sha);
-      const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, ...(scope === "layer" ? { head_sha } : {}) };
+      const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, head_sha };
       diffs.set(cacheKey, { at: now(), answer });
       // Bounded: only the last few diffs are kept.
       while (diffs.size > 24) diffs.delete(diffs.keys().next().value!);
       return answer;
+    },
+    async fileContents(key, scope, path, roots, ids, oldPath) {
+      const none: InboxFileContents = { oldContent: null, newContent: null };
+      // Nothing to check a text against (GitLab's whole-stack patches carry no index line): no arrows, and nothing runs.
+      if (!ids) return none;
+      // A rename's old path comes from the patch, which a guide's author wrote: it must not walk out of the forge's route.
+      if (oldPath !== undefined) {
+        try {
+          validateFilePath(oldPath);
+        } catch {
+          return none;
+        }
+      }
+      const pull = known.get(key);
+      if (!pull || !lastRepos.has(inboxPullRepoKey(pull.host, pull.repo))) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
+      // The commit the patch on screen was read at, when the Inbox read one, else the list's. A patch whose head moved
+      // during its read is the client's to catch (its answer has no head_sha, so it asks nothing); the blob ids catch the rest.
+      const head = shaOf(readHeads.get(key) ?? pull.head_sha);
+      if (!head) return none;
+      const cli: RefCli = hosts.get(pull.host)?.cli ?? (pull.platform === "github" ? "gh" : "glab");
+      const parts = splitPath(pull.repo)!;
+      const project = encodeURIComponent(pull.repo);
+      /** A forge read: the command's output, null when the forge says there is none, and a throw for anything passing. */
+      const ask = async (endpoint: string, extra: string[] = []): Promise<string | null> => {
+        if (now() < Math.max(holdUntil.get(pull.host) ?? 0, fileHoldUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_diff_failed", "rate limited");
+        const result = await diffRun(cli, ["api", "--hostname", pull.host, endpoint, ...extra], INBOX_PULL_FILE_MAX_BYTES);
+        if (result.tooLarge) return null;
+        if (result.exitCode === 0) return result.stdout;
+        // Its own hold: scrolling a big PR must not refuse the next layer's diff.
+        if (refErrorOf(cli, result) === "rate_limited") fileHoldUntil.set(pull.host, now() + REF_RATE_LIMIT_MS);
+        else if (/\b404\b|not found/i.test(`${result.stderr}\n${result.stdout}`)) return null;
+        throw new InboxPullsError("pull_diff_failed", `${cli} could not read this file.`);
+      };
+      /** The commit the diff runs from: where the head left its base branch, not the branch's tip. */
+      const mergeBase = (): Promise<string | null> => {
+        const bases =
+          scope === "layer"
+            ? [pull.base]
+            : (() => {
+                const stack = inboxPullStacks([...known.values()].filter((p) => p.host === pull.host && p.repo === pull.repo)).find((s) => s.layers.some((l) => l.key === key));
+                return [...new Set([stack?.open_base ?? pull.base, stack?.base ?? pull.base])];
+              })();
+        // With the bases: a retarget keeps the head and moves where the diff runs from.
+        const baseKey = `${key}\u0000${scope}\u0000${head}\u0000${bases.join("\u0000")}`;
+        const hit = mergeBases.get(baseKey);
+        if (hit) return hit;
+        const read = (async () => {
+          if (pull.platform === "gitlab" && scope === "layer") {
+            const answer = await ask(`projects/${project}/merge_requests/${pull.number}`);
+            return answer === null ? null : shaOf(obj(obj(JSON.parse(answer)).diff_refs).base_sha);
+          }
+          for (const base of bases) {
+            const answer =
+              pull.platform === "github"
+                ? await ask(`repos/${parts.owner}/${parts.repo}/compare/${compareRef(base)}...${head}?per_page=1`, ["--jq", ".merge_base_commit.sha"])
+                : await ask(`projects/${project}/repository/merge_base?refs%5B%5D=${encodeURIComponent(base)}&refs%5B%5D=${head}`);
+            if (answer === null) continue;
+            return pull.platform === "github" ? shaOf(answer.trim()) : shaOf(obj(JSON.parse(answer)).id);
+          }
+          return null;
+        })();
+        mergeBases.set(baseKey, read);
+        // Only a commit is kept: "no base" can be a passing sign-in problem, and the next click asks again.
+        const drop = () => {
+          if (mergeBases.get(baseKey) === read) mergeBases.delete(baseKey);
+        };
+        read.then((base) => {
+          if (!base) drop();
+        }, drop);
+        while (mergeBases.size > 64) mergeBases.delete(mergeBases.keys().next().value!);
+        return read;
+      };
+      const textAt = (sha: string, filePath: string): Promise<string | null> => {
+        const textKey = `${pull.host}/${pull.repo}\u0000${sha}\u0000${filePath}`;
+        const hit = fileTexts.get(textKey);
+        if (hit) {
+          // Used again: the last to go.
+          fileTexts.delete(textKey);
+          fileTexts.set(textKey, hit);
+          return hit.read;
+        }
+        const read = inTurn(async () => {
+          for (const root of roots) {
+            const local = await gitRead(root, sha, filePath, INBOX_PULL_FILE_MAX_BYTES).catch(() => null);
+            if (local === "none") return null;
+            if (local !== null) return local;
+          }
+          const endpoint =
+            pull.platform === "github"
+              ? `repos/${parts.owner}/${parts.repo}/contents/${compareRef(filePath)}?ref=${sha}`
+              : `projects/${project}/repository/files/${encodeURIComponent(filePath)}/raw?ref=${sha}`;
+          const text = await ask(endpoint, pull.platform === "github" ? ["-H", "Accept: application/vnd.github.v3.raw"] : []);
+          return text === null || text.slice(0, 8000).includes("\u0000") ? null : text;
+        });
+        const entry = { read, bytes: 0 };
+        fileTexts.set(textKey, entry);
+        read.then(
+          (text) => {
+            // Still the one kept (the bound may have dropped it while it ran).
+            if (fileTexts.get(textKey) !== entry) return;
+            // Only a text is kept: an empty answer or a 404 can be a passing sign-in problem, and the next click asks again.
+            if (!text) {
+              fileTexts.delete(textKey);
+              return;
+            }
+            entry.bytes = Buffer.byteLength(text, "utf8");
+            fileTextBytes += entry.bytes;
+            for (const [oldest, kept] of fileTexts) {
+              if (fileTextBytes <= INBOX_PULL_FILE_CACHE_BYTES && fileTexts.size <= INBOX_PULL_FILE_CACHE_ENTRIES) break;
+              if (oldest === textKey) continue;
+              fileTexts.delete(oldest);
+              fileTextBytes -= kept.bytes;
+            }
+          },
+          () => {
+            if (fileTexts.get(textKey) === entry) fileTexts.delete(textKey);
+          },
+        );
+        return read;
+      };
+      try {
+        const newContent = await textAt(head, path);
+        if (newContent === null || !isBlob(newContent, ids.newId)) return none;
+        const base = await mergeBase();
+        if (!base) return none;
+        const oldContent = await textAt(base, oldPath ?? path);
+        // The list can be behind the patch, and a merged PR's base can be its head: only the patch's own blobs open.
+        return oldContent === null || !isBlob(oldContent, ids.oldId) ? none : { oldContent, newContent };
+      } catch {
+        // A forge that did not answer (rate limited, offline, signed out, not JSON): the next click asks again.
+        return { ...none, failed: true };
+      }
     },
   };
 }

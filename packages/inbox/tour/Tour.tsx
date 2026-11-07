@@ -867,7 +867,7 @@ export function TourViewer({ picture, onPick, onClose }: { picture: TourViewerPi
   };
   return createPortal(
     <div className="pn-inbox ib-tour-layer">
-      <div ref={ref} className="ib-tour-viewer" role="dialog" aria-modal="true" aria-label={picture.name} onKeyDown={onKeyDown} data-tour-viewer="">
+      <div ref={ref} className="ib-tour-viewer ib-wlayer" role="dialog" aria-modal="true" aria-label={picture.name} onKeyDown={onKeyDown} data-tour-viewer="">
         <header>
           <b>{picture.name}</b>
           <span className="ib-mut">{picture.caption}</span>

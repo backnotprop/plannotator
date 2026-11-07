@@ -21,7 +21,7 @@
  *     "changed since asked", with Show me again.
  *  5. The same popover and picture at 390 px; "Tell your agents" never shows.
  *
- * Code review is on in the scratch config; HOME is never changed: the sandbox
+ * Code review is on in the scratch config; HOME is the scratch folder, and the sandbox
  * env keeps the binary off the person's agents. gh and glab are traps.
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-show-me.spec.ts`.
@@ -301,6 +301,13 @@ async function selectLines(page: Page, file: string, from: number, to: number): 
   if (to !== from) await line(to).click({ modifiers: ['Shift'] });
 }
 
+/** The review's chapter menu in its top bar: go to a chapter, or to the Overview. */
+async function pickChapter(page: Page, row: number | 'overview'): Promise<void> {
+  await page.locator('[data-review-message] [data-review-jump]').click();
+  await page.locator(`[data-review-jump-menu] [data-review-jump-row="${row}"]`).click();
+  await expect(page.locator('[data-review-jump-menu]')).toHaveCount(0);
+}
+
 const chooser = (page: Page) => page.locator('[data-selection-chooser]');
 const sheet = (page: Page) => page.locator('[data-show-me-sheet]');
 const corner = (page: Page) => page.locator('[data-show-me-corner]');
@@ -327,7 +334,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   for (const dir of ['claude', 'codex', 'xdg', 'opencode']) mkdirSync(join(root, dir), { recursive: true });
   const env: Record<string, string> = {
     PATH: `${trap}:${process.env.PATH ?? ''}`,
-    ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_INBOX_TAILSCALE: '0',
@@ -405,7 +412,7 @@ test('Show me on selected lines: the popover, the box, the agent draws, the pict
   await page.locator('[data-review-card]').getByRole('button', { name: 'Start review' }).click();
   const pane = page.locator('[data-review-message]');
   await expect(pane).toBeVisible();
-  await pane.locator('[data-review-chapters] li').nth(3).click();
+  await pickChapter(page, 2);
 
   await selectLines(page, WORKER, 16, 18);
   await expect(chooser(page)).toBeVisible();
@@ -439,7 +446,7 @@ test('Show me on selected lines: the popover, the box, the agent draws, the pict
   await expect(page.locator('[data-review-card]').getByRole('button', { name: /review/ }).or(reopened).first()).toBeVisible();
   if (!(await reopened.isVisible())) await page.locator('[data-review-card]').getByRole('button', { name: /review/ }).click();
   await expect(reopened).toBeVisible();
-  await reopened.locator('[data-review-chapters] li').nth(3).click();
+  await pickChapter(page, 2);
   await selectLines(page, WORKER, 17, 17);
   await chooser(page).getByRole('button', { name: 'Show me' }).click();
   await expect(box).toHaveAttribute('data-show-me-box', 'drawing');
@@ -464,7 +471,7 @@ test('a part opens its code and the picture shrinks to the corner card; plain As
   const pane = page.locator('[data-review-message]');
   // From another chapter: the part's chapter opens.
   await page.locator('[data-show-me-sheet]').getByRole('button', { name: 'Shrink the picture' }).click();
-  await pane.locator('[data-review-chapters] li').nth(1).click();
+  await pickChapter(page, 0);
   await corner(page).getByRole('button', { name: 'Grow the picture' }).click();
   await part(sheet(page), 'cmail').click();
   await expect(sheet(page)).toHaveCount(0);
@@ -490,7 +497,7 @@ test('a part opens its code and the picture shrinks to the corner card; plain As
   try {
     await other.goto(`${world.url}#thread=${round1.thread_id}`);
     await other.locator('[data-review-card]').getByRole('button', { name: /review/ }).click();
-    await other.locator('[data-review-message] [data-review-chapters] li').nth(3).click();
+    await pickChapter(other, 2);
     await selectLines(other, WORKER, 16, 16);
     await chooser(other).getByRole('button', { name: 'Show me' }).click();
     await expect(sheet(other)).toContainText('After the third failure');
@@ -520,7 +527,7 @@ test('a part opens its code and the picture shrinks to the corner card; plain As
 test("a busy agent: the box offers the Ask window's choice, never says it draws; interrupt asks now; this round's picture has Show me again", async () => {
   const { page } = world;
   const pane = page.locator('[data-review-message]');
-  await pane.locator('[data-review-chapters] li').nth(3).click();
+  await pickChapter(page, 2);
   const asked = world.agent.asked.length;
   world.agent.setBusy(true);
   await selectLines(page, WORKER, 7, 9);
@@ -554,7 +561,7 @@ test("the Overview draws the agent's picture, a part opens its code; with no pic
   await page.goto(`${world.url}#thread=${round1.thread_id}`);
   await page.locator('[data-review-card]').getByRole('button', { name: /review/ }).click();
   const pane = page.locator('[data-review-message]');
-  await pane.locator('[data-review-chapters] li').first().click();
+  await pickChapter(page, 'overview');
   const fig = page.locator('[data-overview-figure]');
   await expect(fig).toBeVisible();
   await expect(fig).toContainText('How it works');
@@ -570,7 +577,9 @@ test("the Overview draws the agent's picture, a part opens its code; with no pic
   await page.locator('[data-review-card]').getByRole('button', { name: 'Start review' }).click();
   const ask = page.locator('[data-overview-show-me]');
   await expect(ask).toBeVisible();
-  await ask.getByRole('button', { name: 'Show me' }).click();
+  // Beside Global comment, on the heading's line (approval "review-deslop").
+  await expect(page.locator('[data-guide-heading] .gv-tools button')).toHaveText(['Show me', 'Global comment']);
+  await ask.click();
   await expect(page.locator('[data-show-me-place]')).toHaveText('The whole review');
   await page.locator('[data-show-me-box]').getByRole('button', { name: 'Close Show me' }).click();
 });
@@ -592,7 +601,7 @@ test('round 2: the redrawn Overview tags its changed parts; a Show me picture st
   await shot(page, '08-r2-ov');
 
   // Lines asked in round 1 (now 17–20 after the new import): the round-1 picture, as asked.
-  await pane.locator('[data-review-chapters] li').nth(3).click();
+  await pickChapter(page, 2);
   await selectLines(page, WORKER, 17, 18);
   await chooser(page).getByRole('button', { name: 'Show me' }).click();
   await expect(sheet(page)).toBeVisible();
@@ -644,7 +653,7 @@ test('the picture moves by its header like the window, stays in the pane, keeps 
     await page.locator('[data-review-card]').last().getByRole('button', { name: /review/ }).click();
     const pane = page.locator(`[data-review-message="${round2.message_id}"]`);
     await expect(pane).toBeVisible();
-    await pane.locator('[data-review-chapters] li').nth(3).click();
+    await pickChapter(page, 2);
     await selectLines(page, WORKER, 17, 18);
     await chooser(page).getByRole('button', { name: 'Show me' }).click();
     const picture = sheet(page);
@@ -758,7 +767,7 @@ test("reloaded while it draws, and the agent ends with no words: the box goes ba
   await page.locator('[data-review-card]').last().getByRole('button', { name: /review/ }).click();
   const pane = page.locator(`[data-review-message="${round2.message_id}"]`);
   await expect(pane).toBeVisible();
-  await pane.locator('[data-review-chapters] li').nth(3).click();
+  await pickChapter(page, 2);
   await selectLines(page, WORKER, 22, 23);
   await chooser(page).getByRole('button', { name: 'Show me' }).click();
   const box = page.locator('[data-show-me-box]');
@@ -774,7 +783,7 @@ test("reloaded while it draws, and the agent ends with no words: the box goes ba
   await expect(start.or(pane).first()).toBeVisible();
   if (!(await pane.isVisible())) await start.click();
   await expect(pane).toBeVisible();
-  await pane.locator('[data-review-chapters] li').nth(3).click();
+  await pickChapter(page, 2);
   await selectLines(page, WORKER, 22, 22);
   await chooser(page).getByRole('button', { name: 'Show me' }).click();
   await expect(box).toHaveAttribute('data-show-me-box', 'drawing');
@@ -797,7 +806,7 @@ test("the agent gone: a Show me it never answers goes back to the box with the A
   await page.locator('[data-review-card]').last().getByRole('button', { name: /review/ }).click();
   const pane = page.locator(`[data-review-message="${round2.message_id}"]`);
   await expect(pane).toBeVisible();
-  await pane.locator('[data-review-chapters] li').nth(3).click();
+  await pickChapter(page, 2);
   // Line 21: no picture of it in any round.
   await selectLines(page, WORKER, 21, 21);
   await chooser(page).getByRole('button', { name: 'Show me' }).click();

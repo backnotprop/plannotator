@@ -94,15 +94,18 @@ function forge(answer: unknown = GH_ANSWER) {
   const calls: { cli: string; args: string[] }[] = [];
   /** What `gh api repos/…/pulls/N` answers; null: it fails. */
   const prState: { answer: Record<string, unknown> | null } = { answer: null };
+  /** What `gh api …/pulls/N/commits` lists; null: it fails, and the Inbox can't say a commit is gone. */
+  const commits: { shas: string[] | null } = { shas: null };
   const run: RefRunner = async (cli, args) => {
     calls.push({ cli, args });
+    if (cli === "gh" && args[0] === "api" && commits.shas && args.some((arg) => arg.includes("/commits?"))) return { stdout: commits.shas.join("\n"), stderr: "", exitCode: 0 };
     if (cli === "gh" && args[0] === "auth") return { stdout: JSON.stringify({ hosts: { "github.com": [{ login: "dana", active: true, state: "success" }] } }), stderr: "", exitCode: 0 };
     if (cli === "glab" && args[0] === "auth") return { stdout: "", stderr: "No hosts logged in", exitCode: 1 };
     if (cli === "gh" && args.includes("graphql")) return { stdout: JSON.stringify(answer), stderr: "", exitCode: 0 };
     if (cli === "gh" && args[0] === "api" && prState.answer) return { stdout: JSON.stringify(prState.answer), stderr: "", exitCode: 0 };
     return { stdout: "", stderr: "unexpected", exitCode: 1 };
   };
-  return { run, calls, prState };
+  return { run, calls, prState, commits };
 }
 
 async function world(options: { repoDelayMs?: number; answer?: unknown; launchHost?: ReturnType<typeof fakeLaunchHost>["host"] } = {}) {
@@ -374,8 +377,11 @@ describe("a teammate's PR assigned to the person, reviewed by their agent", () =
 
   test("a post that fails answers nothing", async () => {
     const { w, thread_id } = await handed();
+    // GitHub takes a review at an older commit of the PR: this one is no longer on it.
+    w.forge.commits.shas = [String(TEAMMATE).padStart(40, "a")];
     const res = await w.post("/api/inbox/pulls/review", { key: key(TEAMMATE), head_sha: "b".repeat(40), action: "approve", body: "Old commit." });
     expect(res.status).toBe(409);
+    expect(w.posts).toEqual([]);
     expect(rowsOf(await w.reviews(), thread_id)).toMatchObject([{ move: "on_you", reason: "review_ready" }]);
   });
 });

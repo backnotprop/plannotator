@@ -325,6 +325,10 @@ export interface ViewerProps {
    *  `QuestionBlock` `onZoomChoice`). Absent: the zoom opens the picture
    *  through `onImageClick`, as before. */
   onQuestionPictureZoom?: (key: string, index: number, url: string, alt: string) => void;
+  /** A picture choice's size in pixels, given the URL its picture loads from,
+   *  when the host knows it before the picture loads (see `QuestionBlock`
+   *  `pictureSize`). Absent: unknown, and nothing changes. */
+  questionPictureSize?: (url: string) => { width: number; height: number } | null;
   /** Makes a question's "Records a decision" tag a toggle button
    *  (`aria-pressed`); a click calls this with the question's key and the
    *  next state, which the host stores and returns from
@@ -414,6 +418,12 @@ export interface ViewerProps {
    * under `readOnly`. Absent → unchanged.
    */
   textComments?: boolean;
+  /**
+   * Opt-in, with `textComments`: the comment-only selection toolbar also
+   * offers Delete (a DELETION on the words selected, as everywhere else).
+   * The label picker stays off. Absent → unchanged.
+   */
+  textDeletions?: boolean;
   /**
    * Opt-in: words a text-selection comment box opens with, for the selected
    * text (a host's suggested comment, kept with one press or written over).
@@ -847,6 +857,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   questionPictureChoices = true,
   questionPictureBadge,
   onQuestionPictureZoom,
+  questionPictureSize,
   onToggleQuestionDecisionRecording,
   onOpenQuestionDecision,
   questionDecisionLocked,
@@ -862,6 +873,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   answerOnly = false,
   htmlEmbeds,
   textComments = false,
+  textDeletions = false,
   suggestComment,
   vimModeEnabled = false,
   vimHudEnabled = false,
@@ -2017,6 +2029,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   questionPictureChoices={questionPictureChoices}
                   questionPictureBadge={questionPictureBadge}
                   onQuestionPictureZoom={onQuestionPictureZoom}
+                  questionPictureSize={questionPictureSize}
                 />
               );
               // `textComments`: a question card's words are not commented on
@@ -2041,6 +2054,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               element={toolbarState.element}
               positionMode="center-above"
               commentOnly={textCommentsOnly || undefined}
+              showDelete={textCommentsOnly && textDeletions ? true : undefined}
               onAnnotate={handleAnnotate}
               onClose={handleToolbarClose}
               onRequestComment={handleRequestComment}

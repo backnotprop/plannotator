@@ -339,6 +339,13 @@ export interface PlannotatorConfig {
    */
   agentTool?: boolean;
   /**
+   * Plan review of Claude Code's ExitPlanMode (Claude Code only: Pi and
+   * OpenCode have no such hook). `false` leaves plan approval to Claude
+   * Code's own dialog. The rest of Plannotator is unchanged.
+   * PLANNOTATOR_PLAN_REVIEW wins over this key. Default: true.
+   */
+  planReview?: boolean;
+  /**
    * The Plannotator Inbox's `plannotator_inbox` tool on the hosts that will
    * register it (the Claude Code mod, Pi, OpenCode 2), set from the Inbox's
    * own Settings: `true` / `false` for every host, or one boolean per host
@@ -406,6 +413,11 @@ export interface PlannotatorConfig {
   inboxRows?: string[];
   /** How many times `inboxRows` was saved: windows take a look only when it is newer than the last they took. */
   inboxRowsRev?: number;
+  /**
+   * The defaults `inboxRows` was saved under (core `INBOX_ROWS_DEFAULTS_VERSION`, 2: smaller thread names on).
+   * Unset: saved before that, so an empty `inboxRows` is read as today's defaults (core `inboxRowsSaved`).
+   */
+  inboxRowsDefaults?: number;
   /**
    * The Inbox's onboarding tour, per machine (approval "inbox-onboarding-tour"):
    * when it was started, finished or skipped, and whether the first real thread
@@ -496,21 +508,42 @@ export interface PlannotatorConfig {
    */
   inboxShape?: boolean;
   /**
+   * System in the Inbox (approval "system-inbox"): a drawing of each project's code, kept current by an agent.
+   * Shown only while Code review is on. Off unless turned on; config only until Settings → Capabilities' switch
+   * lands. Read on every request.
+   */
+  inboxSystem?: boolean;
+  /**
    * The queue of one-time reveals for returning users (approval
    * "inbox-feature-reveal"; rules in packages/shared/inbox/reveals.ts). Written
    * only by the server. `lastShownAt`: the last one-time announcement claimed
-   * on this machine (list options, voice, Snooze, the Board), the 48 h
+   * on this machine (list options, voice, Snooze, the Board), the one-day
    * spacing's clock. `waitingSince`: when each reveal first became next, for
    * the 3-day patience. `board.shownAt`: the Board reveal was claimed.
    * `steps.shownAt`: the Checklist reveal was claimed. `key` beside either:
    * the claiming page's own key, so that page's retry after a lost answer is
-   * shown it again (any other key is not).
+   * shown it again (any other key is not). The schedule (approval
+   * "inbox-one-time-dialogs"): `dayShownAt`, the last dialog of the line on
+   * any day (the agent note included: one a day); `notNowAt`, the last offer
+   * closed with Not now (three days before the next); `shownLoad`, the page
+   * load that showed the last dialog (never on two loads in a row; the loads
+   * seen since are kept in memory). `agentNote.shownFor`: the agents the
+   * agent note was shown for (once each, so an unanswered note never takes
+   * another day). `waitingSince` also counts the 14 days after which an offer
+   * retires (an update-day dialog never does).
    */
   inboxReveals?: {
     lastShownAt?: string;
-    waitingSince?: { snooze?: string; board?: string; steps?: string };
+    dayShownAt?: string;
+    notNowAt?: string;
+    shownLoad?: string;
+    agentNote?: { shownFor?: string[] };
+    waitingSince?: { code_review?: string; sound?: string; list_intro?: string; voice?: string; snooze?: string; board?: string; steps?: string; list_view?: string };
+    /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
+    code_review?: { shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
+    list_view?: { shownAt?: string; key?: string };
   };
   inboxSound?: {
     enabled?: boolean;
@@ -1521,34 +1554,55 @@ export function resolveAgentTool(
   return parseAgentToolEnv(env) ?? parseConfigBoolean(config.agentTool) ?? AGENT_TOOL_DEFAULTS[host];
 }
 
+/** The PLANNOTATOR_PLAN_REVIEW override, or undefined when it does not decide. */
+export function parsePlanReviewEnv(env: NodeJS.ProcessEnv = process.env): boolean | undefined {
+  const v = env.PLANNOTATOR_PLAN_REVIEW?.trim().toLowerCase();
+  if (v === "1" || v === "true" || v === "on") return true;
+  if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
+  return undefined;
+}
+
+/**
+ * Whether Plannotator reviews Claude Code's ExitPlanMode.
+ * Priority: PLANNOTATOR_PLAN_REVIEW → config.planReview → on.
+ */
+export function resolvePlanReview(config: PlannotatorConfig, env: NodeJS.ProcessEnv): boolean {
+  return parsePlanReviewEnv(env) ?? parseConfigBoolean(config.planReview) ?? true;
+}
+
 /**
  * The hosts that register the Inbox's `plannotator_inbox` tool. The Pi
  * extension registers it as `pi` in Oh My Pi too: OMP has no Inbox host key
  * of its own (yet), so `inboxTool.pi` and the Pi default decide there.
- * `dsh` is the DeepSeek Harness plugin (`@plannotator/dsh`).
+ * `dsh` is the DeepSeek Harness plugin (`@plannotator/dsh`), `cline` the
+ * Cline plugin (`@plannotator/cline`).
  */
-export type InboxToolHost = "claude-code" | "pi" | "opencode" | "dsh";
+export type InboxToolHost = "claude-code" | "pi" | "opencode" | "dsh" | "cline";
 
 /**
  * Whether each host registers the Inbox's `plannotator_inbox` tool when
  * nothing is set: the agent tool's rule (on for the Claude Code mod, where
  * tools are deferred behind tool search; off on Pi, OpenCode 2 and DeepSeek
  * Harness, which send every tool's full definition with each request; DSH
- * also keeps its tool list fixed for request caching).
+ * also keeps its tool list fixed for request caching). Cline sends every
+ * tool's definition too and has no `plannotator` agent tool, so its entry is
+ * its own, off like Pi's.
  */
 export const INBOX_TOOL_DEFAULTS: Readonly<Record<InboxToolHost, boolean>> = {
   "claude-code": AGENT_TOOL_DEFAULTS["claude-code"],
   pi: AGENT_TOOL_DEFAULTS.pi,
   opencode: AGENT_TOOL_DEFAULTS.opencode,
   dsh: AGENT_TOOL_DEFAULTS.dsh,
+  cline: false,
 };
 
-export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode", "dsh"];
+export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode", "dsh", "cline"];
 
 /**
  * The hosts that give a session the Inbox reminder (INBOX_REMINDER_TEXT) with
  * the tool. DeepSeek Harness does not yet: it has no hidden-message slot like
- * Pi's, and a context message there shows as the person's own words.
+ * Pi's, and a context message there shows as the person's own words. Nor does
+ * Cline (its plugin has no hidden-message slot either).
  */
 export const INBOX_REMINDER_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode"];
 

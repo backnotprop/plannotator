@@ -1,6 +1,6 @@
 /**
  * The reveals' queue (approval "inbox-feature-reveal", 2026-11-03), by a clock the test moves. What regresses: the
- * order (Snooze, then the Board); the 48 h spacing moving or letting two through; a stuck Snooze holding the Board
+ * order (Snooze, then the Board); the one-day spacing moving or letting two through; a stuck Snooze holding the Board
  * back for ever, or patience skipping an entry with nothing behind it; the Board's tenure (3 days, the owner's
  * change) or its 5 threads moving; a dev build or a feature the person decided being revealed; the Checklist (approval
  * "inbox-checklist-reveal", 2026-11-04) leaving its place after Snooze and the Board, its 5 days or 5 threads moving, or
@@ -21,7 +21,9 @@ function state(over: Partial<RevealState> = {}): RevealState {
 
 describe("the order", () => {
   test("Snooze first, then the Board once Snooze is no longer open; nothing once both are spent", () => {
-    expect(INBOX_REVEALS.map((entry) => entry.id)).toEqual(["snooze", "board", "steps"]);
+    // Code review's day-0 offer (approval "code-review-offer-card"), the update-day dialogs (approval
+    // "inbox-one-time-dialogs"), then the offers.
+    expect(INBOX_REVEALS.map((entry) => entry.id)).toEqual(["code_review", "sound", "list_intro", "voice", "snooze", "board", "steps", "list_view"]);
     expect(revealNext(state(), NOW)).toBe("snooze");
     expect(revealNext(state({ open: { snooze: false, board: true } }), NOW)).toBe("board");
     expect(revealNext(state({ open: { snooze: false, board: false } }), NOW)).toBeNull();
@@ -43,10 +45,10 @@ describe("the order", () => {
     expect(revealMayClaim("steps", state({ ...day6, open: { steps: true } }), NOW)).toBe(true);
   });
 
-  test("the Checklist keeps the 48 h spacing after the Board", () => {
+  test("the Checklist keeps the one-day spacing after the Board", () => {
     const after = (ms: number) => revealNext(state({ firstUseAt: ago(6 * DAY), lastShownAt: ago(ms), open: { steps: true } }), NOW);
-    expect(after(48 * HOUR - 1)).toBeNull();
-    expect(after(48 * HOUR)).toBe("steps");
+    expect(after(24 * HOUR - 1)).toBeNull();
+    expect(after(24 * HOUR)).toBe("steps");
   });
 
   test("a dev build, or no first use known, decides nothing", () => {
@@ -99,10 +101,10 @@ describe("the Checklist's who", () => {
 });
 
 describe("the spacing", () => {
-  test("never within 48 h of the last announcement: open again at exactly 48 h", () => {
-    expect(REVEAL_SPACING_MS).toBe(48 * HOUR);
-    expect(revealNext(state({ lastShownAt: ago(48 * HOUR - 1) }), NOW)).toBeNull();
-    expect(revealNext(state({ lastShownAt: ago(48 * HOUR) }), NOW)).toBe("snooze");
+  test("never within a day of the last announcement: open again at exactly 24 h (the owner, 2026-11-06: one day apart)", () => {
+    expect(REVEAL_SPACING_MS).toBe(24 * HOUR);
+    expect(revealNext(state({ lastShownAt: ago(24 * HOUR - 1) }), NOW)).toBeNull();
+    expect(revealNext(state({ lastShownAt: ago(24 * HOUR) }), NOW)).toBe("snooze");
     // A claim checks it too.
     expect(revealMayClaim("snooze", state({ lastShownAt: ago(HOUR) }), NOW)).toBe(false);
   });
@@ -119,7 +121,7 @@ describe("the patience", () => {
     expect(revealNext(state({ waitingSince: { snooze: ago(3 * DAY - 1) } }), NOW)).toBe("snooze");
     expect(revealNext(state({ waitingSince: { snooze: ago(3 * DAY) } }), NOW)).toBe("board");
     // The Board shown (no longer open) and spaced: Snooze is still in line, and nothing is behind it.
-    expect(revealNext(state({ waitingSince: { snooze: ago(6 * DAY) }, open: { snooze: true, board: false }, lastShownAt: ago(48 * HOUR) }), NOW)).toBe("snooze");
+    expect(revealNext(state({ waitingSince: { snooze: ago(6 * DAY) }, open: { snooze: true, board: false }, lastShownAt: ago(24 * HOUR) }), NOW)).toBe("snooze");
   });
 
   test("both past patience: the one that has waited longest goes, so the Board never replaces Snooze for good", () => {

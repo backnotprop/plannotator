@@ -23,6 +23,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { resolveInboxProjectRoot } from "@plannotator/server/inbox-project-root";
 import { createShapeStore, type ShapeProject, type ShapeStore } from "@plannotator/shared/shape/store";
+import { expandBoardStamps } from "@plannotator/shared/shape/stamps";
+import { fetchShapeWebPictures } from "@plannotator/shared/shape/web-pictures";
 import { diffShapeVersions, shapeBoardNotes, summarizeShapeDiff, type ShapeSession } from "@plannotator/shared/shape/format";
 import { inboxHostSessionFromEnv, inboxProjectFolderFor, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
 import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch } from "@plannotator/shared/shape/switch";
@@ -152,6 +154,8 @@ export interface ShapeCommandDeps {
   stderr?: (text: string) => void;
   /** The project a folder belongs to (the Inbox's rule). Tests pass a stand-in. */
   projectRootOf?: (folder: string) => Promise<ShapeProject>;
+  /** How `shape update` fetches the board's web pictures. Tests pass a stand-in. */
+  fetch?: (input: string | URL, init?: RequestInit) => Promise<Response>;
 }
 
 async function defaultProjectRoot(folder: string) {
@@ -186,14 +190,25 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     if (c.project) return isAbsolute(c.project) ? c.project : resolve(deps.cwd, c.project);
     return inboxProjectFolderFor(inboxSessionProjectFromEnv(deps.env), host ? { host: host.host, session: host.session } : null, deps.cwd);
   })();
+  /** Why the last `projectOf` found no project, as the one line `update` refuses with. */
+  let projectProblem = `${folder} is not a folder`;
   const projectOf = async () => {
     try {
       if (!statSync(folder).isDirectory()) throw new Error();
     } catch {
+      projectProblem = `${folder} is not a folder`;
       return null;
     }
     const rootOf = deps.projectRootOf ?? defaultProjectRoot;
-    const project = await rootOf(folder);
+    let project: ShapeProject;
+    try {
+      project = await rootOf(folder);
+    } catch (error) {
+      // An unreadable folder (or `/`): a line like every other refusal, not a stack trace.
+      const why = (error instanceof Error ? error.message : String(error)).replace(/^project_path:\s*/, "").replace(/\.$/, "");
+      projectProblem = `could not use ${folder} as the project: ${why}`;
+      return null;
+    }
     if (c.project || folder === deps.cwd) return project;
     // The session's folder does not follow a shell `cd`, and the checkout does: within the project, the one it runs in now.
     const here = await rootOf(deps.cwd).catch(() => null);
@@ -230,6 +245,12 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     } catch (error) {
       return refuse("invalid", `could not read ${path} as JSON: ${(error as Error).message}`);
     }
+    // Icons, logos and drawn things named in the drawing become plain SVG here, so the stored board
+    // holds the drawing and nothing is looked up when it is shown (shared/shape/stamps.ts).
+    board = expandBoardStamps(board).board;
+    // Web pictures are fetched once, here, and kept in the board's files like a picture on this computer.
+    const web = await fetchShapeWebPictures(board, deps.fetch ? { fetch: deps.fetch } : {});
+    if (web.errors.length) return refuse("invalid", `the board has problems:\n${web.errors.map((e) => `  - ${e}`).join("\n")}`);
     let project: ShapeProject | null = null;
     if (c.id) {
       const record = store.get(c.id);
@@ -238,7 +259,7 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
       project = (await projectOf().catch(() => null)) ?? record.project;
     } else {
       project = await projectOf();
-      if (!project) return refuse("project_unresolved", `${folder} is not a folder. Pass --project <folder>.`);
+      if (!project) return refuse("project_unresolved", `${projectProblem}. Pass --project <folder>.`);
     }
     const result = store.update({
       board,
@@ -249,6 +270,7 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
       project,
       session,
       sourceDir: dirname(path),
+      webPictures: web.pictures,
     });
     if (!result.ok) {
       if (result.code === "invalid") return refuse("invalid", `the board has problems:\n${result.errors.map((e) => `  - ${e}`).join("\n")}`);
@@ -300,7 +322,9 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     // The notes count as received only once the agent has them: written first, marked after.
     const waiting = store.waiting(id);
     try {
-      await out(JSON.stringify({ shape: record, version, notes: waiting }, null, 2));
+      // A box's picture: its full path, so the agent can open it.
+      const notes = waiting.map((n) => (n.picture ? { ...n, picture: store.filePath(id, n.picture) ?? n.picture } : n));
+      await out(JSON.stringify({ shape: record, version, notes }, null, 2));
     } catch (error) {
       err(`output_failed: the notes were not handed over and still wait: ${(error as Error).message}`);
       return 1;

@@ -1,0 +1,720 @@
+# Plannotator, drawn from its own code. System format 1.
+# Every part and line names the files it rests on (code:). Paths are relative to
+# this repo's root. The Desktop app and Workspaces are built in other repos: they
+# appear on the landing as outside parts, with no window and no code.
+# Check it: bun run --cwd packages/system check
+
+format: 1
+system: Plannotator
+root: C-001
+sources:
+  repos:
+    self: { repo: github.com/backnotprop/plannotator, at: efd8239747d2b1e1b4a9f1f20654e31892eee99a }
+  docs: []
+watch:
+  - apps/*/wrangler.toml
+  - apps/hook/hooks/hooks.json
+  - .github/workflows/release.yml
+scopes:
+  root: Plannotator
+  local: The plannotator binary
+  inbox: The Inbox
+
+parts:
+  # ================================================================ root
+  you:
+    name: You
+    kind: people
+    role: Read the plan, mark it up, approve it or send it back. Answer agents in the Inbox.
+  agents:
+    name: Coding agents
+    kind: agents
+    role: Claude Code, Codex, OpenCode, Pi, Gemini CLI, Copilot CLI, Qwen Code and more, on your computer.
+    marks: [ claude, codex ]
+    code:
+      apps/hook/hooks/hooks.json: Claude Code hooks
+      packages/core/inbox-types.ts: the Inbox's agent list and which hosts wake
+      scripts/install.sh: writes each agent's wiring
+  team:
+    name: Teammates
+    kind: people
+    role: Open a shared workspace in the browser and edit with you live.
+  cli:
+    name: plannotator
+    kind: binary
+    role: "One binary on your computer: plan review, code review, annotate, guided reviews."
+    sub: Bun, compiled per platform
+    marks: [ ts, react ]
+    child: local
+    facts:
+      Built by: "bun build --compile, six targets (release.yml)"
+      Installed by: "scripts/install.sh into ~/.local/bin"
+    code:
+      apps/hook/server/index.ts: the entry, every subcommand and hook mode
+      apps/hook/server/cli.ts: help text and hidden subcommands
+      .github/workflows/release.yml: compiles the binaries
+  inbox:
+    name: The Inbox
+    kind: local server
+    role: One loopback server per computer. Agents ask and hand over work; you answer.
+    sub: plannotator inbox
+    marks: [ mcp ]
+    child: inbox
+    code:
+      packages/server/inbox.ts: startInboxServer
+      packages/inbox: the Inbox window
+  desktop:
+    name: Desktop app
+    kind: app
+    role: A Mac window over this computer's Inbox page.
+    sub: built in another repo
+  share:
+    name: Share links
+    kind: web service
+    role: A plan in a link, in the URL hash or as an encrypted paste kept 7 days.
+    sub: share.plannotator.ai
+    facts:
+      Portal: "apps/portal, static, S3 bucket plannotator-portal"
+      Paste: "plannotator-paste Worker, KV PASTE_KV"
+      Default: "on; PLANNOTATOR_SHARE or config share turns it off"
+    code:
+      packages/ui/utils/sharing.ts: hash links and short links
+      apps/paste-service/core/handler.ts: POST /api/paste, 7-day TTL
+      apps/portal/index.tsx: the share page
+  guides:
+    name: guides.show
+    kind: worker
+    role: Hosts a shared Guided Review, plain or encrypted.
+    marks: [ workers ]
+    facts:
+      Bindings: "R2 VIEWER, R2 GUIDES, GUIDE_CREATE_LIMITER"
+      Deployed: on release tags (guides-show-deploy.yml)
+    code:
+      apps/guides-show/worker/index.ts: /g/<id> and /api/g
+      packages/server/guide/guide-share.ts: the CLI's share call
+  ping:
+    name: Daily ping
+    kind: worker
+    role: Counts how many computers ran each tool today. No ID, nothing else kept.
+    sub: ping.plannotator.ai
+    marks: [ workers ]
+    facts:
+      Storage: "D1 plannotator-ping, two tables of daily totals"
+      Sends from: release builds only
+      Once a day: "ping.json in the data dir, shared by every tool"
+      Off with: "NO_ANON_PING, DO_NOT_TRACK, CI"
+      Deployed: by the owner, never from CI
+    code:
+      apps/telemetry/src/handler.ts: POST /ping, GET /totals
+      apps/telemetry/wrangler.toml: custom domain, logs off
+      packages/shared/daily-ping.ts: the client
+  workspaces:
+    name: Workspaces
+    kind: hosted product
+    role: Shared workspaces of documents, live editing, git history, and MCP for agents.
+    sub: hosted, built in another repo
+
+  # Built and off: drawn on the Inbox sheet (L-201) as the far end of its phone
+  # lines, never on the landing while they are off.
+  phones:
+    name: Phone apps
+    kind: iOS and Android
+    role: Pair with your Inbox and answer with one tap. Built in CI, not shipped yet.
+    sub: built in another repo · off until they ship
+    facts:
+      Inbox side: phones off until the iPhone app ships (inboxPhones, default false)
+    code:
+      packages/shared/config.ts: inboxPhones, default false
+  relay:
+    name: Inbox relay
+    kind: worker + Durable Objects
+    role: Carries sealed Inbox items and pushes to a paired phone. Holds only what it cannot read.
+    sub: relay.plannotator.ai · off until phones ship
+    marks: [ cloudflare ]
+    facts:
+      Deploy: by the owner only, never from CI
+      Custom domain: not yet deployed
+    code:
+      apps/relay/src/mailbox.ts: Mailbox Durable Object
+      apps/relay/wrangler.toml: plannotator-relay, MAILBOX
+      packages/server/inbox-relay.ts: the Inbox's side
+  # ================================================================ local: the plannotator binary
+  hkclaude:
+    in: local
+    name: Claude Code plugin
+    kind: plugin
+    role: "The mod, on by default, reviews ExitPlanMode without blocking; the hook covers the rest."
+    marks: [ claude ]
+    facts:
+      PermissionRequest hook: "runs only with the mod off, or in -p and SDK sessions"
+      Hook timeout: 345600 s (96 h)
+      Mod: "on by default; PLANNOTATOR_CLAUDE_MOD=0 turns it off"
+    code:
+      apps/hook/hooks/hooks.json: PermissionRequest, PreToolUse, SessionStart
+      apps/hook/hooks/mod/register.ts: the mod
+      apps/hook/hooks/mod/launch.ts: runs plannotator claude-mod-plan detached
+  hkcodex:
+    in: local
+    name: Codex Stop hook
+    kind: hook
+    role: Runs plannotator when a turn stops; the plan is read from the rollout.
+    marks: [ codex ]
+    code:
+      scripts/install.sh: writes the Stop hook
+      apps/hook/server/index.ts: hook_event_name Stop
+  hkopencode:
+    in: local
+    name: OpenCode plugin
+    kind: plugin
+    role: A submit_plan tool; runs the server embedded or calls the CLI.
+    sub: npm @plannotator/opencode
+    code:
+      apps/opencode-plugin/index.ts: OpenCode 1
+      apps/opencode-plugin/server.ts: OpenCode 2
+      apps/opencode-plugin/embedded.ts: imports @plannotator/server
+  hkpi:
+    in: local
+    name: Pi extension
+    kind: plugin
+    role: Pi's plan tool and commands, on its own servers.
+    sub: npm @plannotator/pi-extension
+    code:
+      apps/pi-extension/index.ts: tools and /plannotator-* commands
+  hkother:
+    in: local
+    name: Other plan hooks
+    kind: hooks
+    role: Gemini CLI, Copilot CLI, Qwen Code, Mistral Vibe and DeepSeek Harness run plannotator on their exit-plan step.
+    code:
+      apps/gemini/hooks/settings-snippet.json: BeforeTool on exit_plan_mode
+      apps/copilot/hooks.json: preToolUse
+      apps/qwen-code/extension/hooks/hooks.json: PermissionRequest
+      apps/vibe/hooks/hooks.toml: pre_tool
+      apps/dsh-plugin/plan-review.ts: plannotator dsh-plan
+  hkcmds:
+    in: local
+    name: Commands only
+    kind: commands
+    role: Amp, Droid and Kiro run review, annotate and last as commands. No plan step.
+    code:
+      apps/amp-plugin/plannotator.ts: Amp command palette
+      apps/droid-plugin/commands: Droid slash commands
+      apps/kiro-cli/skills: Kiro skills
+  vscode:
+    in: local
+    name: VS Code extension
+    kind: extension
+    role: Opens the review pages in editor tabs, and reads Guided Reviews.
+    code:
+      apps/vscode-extension/src/extension.ts: sets PLANNOTATOR_BROWSER for the terminal
+      apps/vscode-extension/bin/open-in-vscode: routes URLs into tabs
+  cliEntry:
+    in: local
+    name: CLI entry
+    kind: process
+    role: "With no subcommand it is the hook: it reads the event on stdin. Else review, annotate, last, archive, inbox, guide."
+    sub: apps/hook/server/index.ts
+    code:
+      apps/hook/server/index.ts: hook mode reads Bun.stdin, line 3158
+      apps/hook/server/cli.ts: subcommands, HIDDEN_SUBCOMMANDS t3-hook and shape
+  planSrv:
+    in: local
+    name: Plan server
+    kind: Bun.serve
+    role: Serves the plan, waits for approve or deny.
+    sub: /api/plan · /api/approve · /api/deny
+    code:
+      packages/server/index.ts: startPlannotatorServer, Bun.serve line 444
+      packages/server/remote.ts: 127.0.0.1 and a free port; 19432 when remote
+  reviewSrv:
+    in: local
+    name: Code review server
+    kind: Bun.serve
+    role: Serves a diff or a pull request and takes the feedback.
+    sub: /api/diff · /api/feedback · /api/pr-*
+    code:
+      packages/server/review.ts: startReviewServer
+      packages/server/vcs.ts: git, jj, GitButler, p4
+  annotateSrv:
+    in: local
+    name: Annotate server
+    kind: Bun.serve
+    role: A file, a folder, an HTML page, a URL or the agent's last message, to mark up.
+    code:
+      packages/server/annotate.ts: startAnnotateServer
+      packages/shared/annotate-target.ts: what can be annotated
+      apps/hook/server/session-log.ts: reads the agent's session log for last
+  piSrv:
+    in: local
+    name: Pi servers
+    kind: node:http
+    role: The second server runtime. Each endpoint change goes here and to the Bun servers.
+    code:
+      apps/pi-extension/server/serverPlan.ts: plan review
+      apps/pi-extension/server/serverReview.ts: code review
+      apps/pi-extension/server/serverAnnotate.ts: annotate
+  guideJobs:
+    in: local
+    name: Guided Reviews
+    kind: module
+    role: An agent job writes a walk through the change; saved on disk, shared to guides.show.
+    code:
+      packages/server/guide/guide-review.ts: the generation job
+      packages/server/agent-jobs.ts: Claude, Codex, Cursor, OpenCode, Pi engines
+      packages/shared/guide-store.ts: guides/<repoKey>/<id>.json
+  askAI:
+    in: local
+    name: Ask AI
+    kind: module
+    role: Questions about the plan or diff to an agent SDK found on your PATH, or to this agent's own session.
+    code:
+      packages/ai/providers: claude-agent-sdk, codex-sdk, pi-sdk, opencode-sdk, qwen-sdk
+      packages/ai/session-bridge.ts: Ask this session
+      packages/server/ai-runtime.ts: loads a provider only when its CLI is on PATH
+    facts:
+      Off with: PLANNOTATOR_AI=disabled
+  editorUI:
+    in: local
+    name: Plan and annotate page
+    kind: page
+    role: The page you read and mark up, in your browser.
+    sub: packages/editor → dist/index.html
+    marks: [ react ]
+    code:
+      packages/editor/App.tsx: the plan review app
+      apps/hook/package.json: builds dist/index.html
+  reviewUI:
+    in: local
+    name: Code review page
+    kind: page
+    role: Diffs, comments and the guided review, in your browser.
+    sub: packages/review-editor → dist/review.html
+    marks: [ react ]
+    code:
+      packages/review-editor/App.tsx: the review app
+      packages/guide-viewer: the guided review reader
+  dataDir:
+    in: local
+    name: ~/.plannotator
+    kind: folder
+    role: Plans, version history, drafts, guides, settings and the Inbox's files.
+    sub: plans/ · history/ · drafts/ · config.json · ping.json
+    code:
+      packages/shared/data-dir.ts: PLANNOTATOR_DATA_DIR, else ~/.plannotator
+      packages/shared/storage.ts: plans and history
+      packages/shared/draft.ts: drafts
+  repo:
+    in: local
+    name: Your repository
+    kind: files
+    role: The working tree the diff is read from.
+    sub: git · jj · GitButler · p4
+    code:
+      packages/server/vcs.ts: the four sources
+  forges:
+    in: local
+    name: GitHub, GitLab, Bitbucket
+    kind: vendor
+    role: A pull request by URL, through gh, glab or Bitbucket's REST API.
+    marks: [ github ]
+    code:
+      packages/shared/pr-github.ts: gh
+      packages/shared/pr-gitlab.ts: glab
+      packages/shared/pr-bitbucket.ts: REST
+  noteApps:
+    in: local
+    name: Note apps
+    kind: vendor
+    role: An approved plan can be saved to Obsidian, Bear, Octarine or Notion.
+    code:
+      packages/server/integrations.ts: the four targets
+
+  # ================================================================ inbox: the Inbox
+  iclaude:
+    in: inbox
+    name: Claude Code
+    kind: agent + the Plannotator mod
+    role: The mod gives Claude the plannotator_inbox tool and turns your reply into its next turn.
+    sub: on by default
+    marks: [ claude ]
+    code:
+      apps/hook/hooks/mod/inbox.ts: the tool and the reply wake
+      apps/hook/hooks/mod/register.ts: the mod, on by default
+  iplugins:
+    in: inbox
+    name: Pi, OpenCode, DeepSeek Harness, Cline
+    kind: agent plugins
+    role: The same tool and reply wake through each agent's own plugin.
+    sub: inbox tool off by default
+    code:
+      packages/shared/inbox/agent-link.ts: shared link to the Inbox
+      apps/pi-extension/inbox.ts: Pi
+      apps/opencode-plugin/inbox.ts: OpenCode 2
+      apps/dsh-plugin/inbox.ts: DeepSeek Harness
+      apps/cline-plugin/inbox.ts: Cline
+      packages/shared/config.ts: inboxTool default off for these
+  imcp:
+    in: inbox
+    name: MCP-only agents
+    kind: agents
+    role: Gemini CLI, Cursor, Windsurf, Amp, Kiro, the Claude app and Cline without its plugin call the Inbox's tools; they read replies when they next look.
+    marks: [ cursor ]
+    code:
+      packages/server/inbox-agents.ts: the agents it connects
+  icodex:
+    in: inbox
+    name: Codex
+    kind: agent
+    role: Calls the tools over MCP; the Inbox queues your reply into its thread.
+    sub: codex queue --thread, Codex 0.149+
+    marks: [ codex ]
+    code:
+      packages/server/inbox-codex-wake.ts: the Codex wake
+  iqwen:
+    in: inbox
+    name: Qwen Code
+    kind: agent
+    role: Calls the tools over MCP; the Inbox sends your reply into the running session.
+    sub: cross-session message, Qwen 0.24+
+    code:
+      packages/server/inbox-qwen-wake.ts: the Qwen wake
+      packages/server/inbox-qwen-trust.ts: trusted-sender token
+  it3:
+    in: inbox
+    name: T3 Code
+    kind: agent host
+    role: Its Claude threads call the tools over MCP; the Inbox sends your reply as a new turn through T3's MCP API.
+    sub: t3_thread_send · after plannotator t3 login
+    code:
+      packages/server/inbox-t3-wake.ts: the T3 wake
+      packages/t3-code/auth.ts: "the T3 grant (T3Credentials)"
+      apps/hook/server/inbox-mcp-shim.ts: T3CODE_THREAD_ID names the session
+  shim:
+    in: inbox
+    name: MCP shim
+    kind: stdio process
+    role: What an agent's plannotator-inbox MCP entry runs. Forwards each call to the Inbox and starts it if stopped.
+    sub: plannotator inbox mcp
+    code:
+      apps/hook/server/inbox-mcp-shim.ts: stdin JSON-RPC to POST /mcp
+  isetup:
+    in: inbox
+    name: Agent setup
+    kind: module
+    role: On plannotator inbox, adds a plannotator-inbox MCP entry to each agent it finds.
+    sub: mcp add, or one JSON key
+    code:
+      packages/server/inbox-agents.ts: connectInboxAgents
+  iserver:
+    in: inbox
+    name: Inbox server
+    kind: Bun server
+    role: One per computer. Serves the page, the MCP tools and the agents' long-poll; the only writer of the store.
+    sub: 127.0.0.1, port kept in inbox.json
+    marks: [ mcp ]
+    facts:
+      MCP tools: send_message, read_thread, search, resolve_message, snooze_thread, get_guide_brief, submit_guide
+      Off until you turn them on: card (Board), steps
+    code:
+      packages/server/inbox.ts: startInboxServer, routes
+      packages/server/inbox-mcp.ts: tool list
+      packages/server/inbox-guides.ts: guided reviews
+  ilinks:
+    in: inbox
+    name: Your other computers
+    kind: their Inboxes
+    role: A linked Inbox shows and answers another computer's threads; a thread stays where its agent started it.
+    sub: plannotator inbox link · tailnet :8443
+    code:
+      packages/server/inbox-machines.ts: merged view
+      packages/server/inbox-transport.ts: tailnet, the one transport
+      packages/server/inbox-peer-link.ts: the link
+      apps/hook/server/inbox-link-command.ts: plannotator inbox link
+  istore:
+    in: inbox
+    name: Inbox store
+    kind: files
+    role: Append-only JSONL per project; the last line per id is current.
+    sub: ~/.plannotator/inbox/projects/
+    code:
+      packages/shared/inbox/store.ts: append and read
+      packages/shared/inbox/schema.ts: layout
+  iregistry:
+    in: inbox
+    name: Registry
+    kind: file
+    role: Where the running Inbox is. pid, port, url and a token that changes every start.
+    sub: ~/.plannotator/inbox/inbox.json · 0600
+    code:
+      packages/shared/inbox/registry.ts: read and write
+  iwindow:
+    in: inbox
+    name: Inbox page
+    kind: browser tab
+    role: Threads, answers, guided reviews and browser notifications.
+    sub: inbox.html, built into the binary
+    marks: [ react ]
+    code:
+      packages/inbox/App.tsx: the page
+      packages/inbox/api.ts: REST calls
+      packages/inbox/notify.ts: browser notifications
+  idoor:
+    in: inbox
+    name: Phone door
+    kind: routes + listeners
+    role: Pairing by QR, /api/inbox/device/*, a tailnet door and a Wi-Fi TLS listener.
+    sub: off until phones ship
+    code:
+      packages/server/inbox-devices.ts: pairing and the door
+      packages/server/inbox-lan.ts: Wi-Fi TLS listener, Bonjour
+      packages/server/inbox-tailnet-door.ts: tailnet door
+  irelayc:
+    in: inbox
+    name: Relay client
+    kind: module
+    role: Makes the mailbox, seals each new line per phone, posts pushes.
+    sub: off until phones ship
+    code:
+      packages/server/inbox-relay.ts: DEFAULT_RELAY_URL, sealing
+      packages/core/crypto.ts: HKDF keys, AES-GCM
+  ilaunch:
+    in: inbox
+    name: Launch Claude Code
+    kind: module
+    role: Starts claude --bg in a project from a new message.
+    sub: off by default (inboxLaunch.enabled)
+    code:
+      packages/server/inbox-launch.ts: the engine
+      packages/server/inbox-launch-claude.ts: the Claude host
+
+stack:
+  t-bun: { name: Bun, mark: bun, for: The plannotator binary and its local servers, used_by: [ cli, inbox ] }
+  t-ts: { name: TypeScript, mark: ts, for: Every package and app in this repo, used_by: [ cli, inbox ] }
+  t-react: { name: React, mark: react, for: "Every page: plan review, code review, the Inbox", used_by: [ editorUI, reviewUI, iwindow ] }
+  t-workers: { name: Workers, mark: workers, for: "Cloudflare Workers: the small hosted services", used_by: [ share, guides, ping, relay ] }
+  t-do: { name: Durable Objects, mark: cloudflare, for: The relay's mailboxes, used_by: [ relay ] }
+  t-r2: { name: R2 and KV, mark: r2, for: "Shared guides in R2, encrypted pastes in KV", used_by: [ guides, share ] }
+  t-d1: { name: D1, mark: cloudflare, for: The daily ping's totals, used_by: [ ping ] }
+  t-jsonl: { name: Files on disk, mark: jsonl, for: "Plans, history, the Inbox store", used_by: [ dataDir, istore ] }
+  t-mcp: { name: MCP, mark: mcp, for: The Inbox's tools for agents, used_by: [ iserver ] }
+  t-sse: { name: Event streams, mark: sse, for: "Server-Sent Events: the Inbox page's live events", used_by: [ iserver ] }
+
+flows:
+  # ================================================================ root
+  review:
+    from: agents
+    to: cli
+    says: a plan to review
+    carries: "The exit-plan hook event on stdin: the plan, or the path of the plan file."
+    lands: hkclaude
+    code: { from: apps/hook/hooks/hooks.json, to: apps/hook/server/index.ts }
+  decision:
+    from: cli
+    to: agents
+    says: approved, or your notes
+    carries: "JSON on stdout: allow, or deny with the feedback. The mod sends it back as a new turn."
+    leaves: cliEntry
+    code: { from: apps/hook/server/index.ts, to: apps/hook/hooks/mod/register.ts }
+  reviewpage:
+    from: cli
+    to: you
+    both: true
+    says: a review page in your browser
+    carries: "A loopback page. Approve, deny or annotate goes back to the server."
+    leaves: editorUI
+    code: { from: packages/server/browser.ts, to: packages/editor/App.tsx }
+  ask:
+    from: agents
+    to: inbox
+    says: questions and finished work
+    carries: "plannotator_inbox calls (send_message, submit_guide ...) over MCP."
+    lands: iserver
+    code: { from: apps/hook/hooks/mod/inbox.ts, to: packages/server/inbox-mcp.ts }
+  wake:
+    from: inbox
+    to: agents
+    says: your reply wakes the session
+    carries: "A pending reply, picked up by the host's long poll or sent in by a waker."
+    leaves: iserver
+    code: { from: packages/server/inbox.ts, to: apps/hook/hooks/mod/inbox.ts }
+  answer:
+    from: you
+    to: inbox
+    says: you answer when you can
+    carries: Replies, picks on a question block, resolve and snooze.
+    lands: iwindow
+    code: { from: packages/inbox, to: packages/server/inbox.ts }
+  hostsinbox:
+    from: desktop
+    to: inbox
+    says: hosts its page; starts it if none runs
+    carries: "Finds the running Inbox, asks /api/inbox/health, then shows the Inbox's own page."
+    lands: iserver
+    code: { to: packages/server/inbox.ts }
+  shareflow:
+    from: cli
+    to: share
+    says: share a plan as a link
+    carries: "Compressed into the hash, or encrypted and posted to /api/paste."
+    leaves: editorUI
+    code: { from: packages/ui/utils/sharing.ts, to: apps/paste-service/core/handler.ts }
+  guideshare:
+    from: cli
+    to: guides
+    says: share a guided review
+    carries: "POST /api/g, plain or encrypted, with an optional expiry."
+    leaves: guideJobs
+    code: { from: packages/server/guide/guide-share.ts, to: apps/guides-show/worker/index.ts }
+  cliping:
+    from: cli
+    to: ping
+    says: one ping a day per tool
+    carries: '{"version","age_week","tool","first"} to POST /ping; plan, review, annotate or last.'
+    leaves: cliEntry
+    code: { from: apps/hook/server/index.ts, to: apps/telemetry/src/handler.ts }
+  inboxping:
+    from: inbox
+    to: ping
+    says: one ping a day
+    carries: "The same ping with tool inbox: checked when the Inbox starts, then at most once an hour; sent at most once a UTC day."
+    leaves: iserver
+    code: { from: packages/server/inbox.ts, to: apps/telemetry/src/handler.ts }
+  mcpws:
+    from: agents
+    to: workspaces
+    says: files and comments over MCP
+    carries: "Workspaces' own MCP tools, for the files and comments of a shared workspace."
+  teamws:
+    from: team
+    to: workspaces
+    says: edit together in the browser
+    carries: Pages and live editing in the hosted app.
+
+  # ================================================================ local
+  h-claude: { from: hkclaude, to: cliEntry, says: "ExitPlanMode: the mod starts it detached", carries: "PermissionRequest hook runs plannotator; the mod runs plannotator claude-mod-plan detached instead.", code: { from: apps/hook/hooks/hooks.json, to: apps/hook/server/index.ts } }
+  h-codex: { from: hkcodex, to: cliEntry, says: Stop hook, carries: The plan is read from the Codex rollout., code: { from: scripts/install.sh, to: apps/hook/server/index.ts } }
+  h-other: { from: hkother, to: cliEntry, says: exit-plan hooks, carries: "Gemini, Qwen and Vibe run plannotator; Copilot runs copilot-plan; DSH runs dsh-plan.", code: { from: apps/gemini/hooks/settings-snippet.json, to: apps/hook/server/index.ts } }
+  h-cmds: { from: hkcmds, to: cliEntry, says: review · annotate · last, carries: Slash commands that run the CLI., code: { from: apps/droid-plugin/lib/run-plannotator.js, to: apps/hook/server/index.ts } }
+  h-opencode: { from: hkopencode, to: planSrv, says: embedded server or CLI, carries: "embedded.ts imports @plannotator/server; CLI mode runs plannotator opencode-plan.", code: { from: apps/opencode-plugin/embedded.ts, to: packages/server/index.ts } }
+  h-pi: { from: hkpi, to: piSrv, says: its own servers, carries: Pi starts node:http servers from vendored shared code., code: { from: apps/pi-extension/index.ts, to: apps/pi-extension/server/serverPlan.ts } }
+  s-plan: { from: cliEntry, to: planSrv, says: starts and waits, carries: "startPlannotatorServer, then waitForDecision.", code: { from: apps/hook/server/index.ts, to: packages/server/index.ts } }
+  s-review: { from: cliEntry, to: reviewSrv, says: plannotator review, carries: A local diff or a PR URL., code: { from: apps/hook/server/index.ts, to: packages/server/review.ts } }
+  s-annotate: { from: cliEntry, to: annotateSrv, says: annotate · last, carries: "A file, folder, URL or the last message.", code: { from: apps/hook/server/index.ts, to: packages/server/annotate.ts } }
+  p-plan: { from: planSrv, to: editorUI, both: true, says: the plan; your decision, carries: "GET /api/plan; POST /api/approve or /api/deny.", code: { from: packages/server/index.ts, to: packages/editor/App.tsx } }
+  p-annotate: { from: annotateSrv, to: editorUI, says: "same page, annotate mode", carries: The document to mark up; feedback goes back., code: { from: packages/server/annotate.ts, to: packages/editor/App.tsx } }
+  p-review: { from: reviewSrv, to: reviewUI, both: true, says: the diff; your feedback, carries: "/api/diff in; /api/feedback back.", code: { from: packages/server/review.ts, to: packages/review-editor/App.tsx } }
+  p-pi: { from: piSrv, to: editorUI, says: the same pages, carries: Pi copies the built HTML as plannotator.html and review-editor.html., code: { from: apps/pi-extension/package.json, to: packages/editor/App.tsx } }
+  d-plan: { from: planSrv, to: dataDir, says: history and the saved decision, carries: "history/<project>/<slug>/NNN.md; plans/<slug>-approved.md.", code: { from: packages/server/index.ts, to: packages/shared/storage.ts } }
+  r-repo: { from: reviewSrv, to: repo, says: reads the diff, carries: "git, jj, GitButler or p4.", code: { from: packages/server/review.ts, to: packages/server/vcs.ts } }
+  r-forge: { from: reviewSrv, to: forges, says: a PR by URL, carries: The diff and comments through gh or glab., code: { from: packages/server/pr.ts, to: packages/shared/pr-github.ts } }
+  r-guide: { from: reviewSrv, to: guideJobs, says: write a guided review, carries: /api/guides starts an agent job., code: { from: packages/server/review.ts, to: packages/server/guide/guide-review.ts } }
+  r-ai: { from: reviewSrv, to: askAI, says: Ask AI, carries: "/api/ai/* to an SDK provider or the session bridge.", code: { from: packages/server/review.ts, to: packages/server/ai-runtime.ts } }
+  n-apps: { from: planSrv, to: noteApps, says: save the approved plan, carries: A note in the app you set up., code: { from: packages/server/index.ts, to: packages/server/integrations.ts } }
+  v-tabs: { from: vscode, to: editorUI, says: opens pages in tabs, carries: PLANNOTATOR_BROWSER points the CLI at the extension., code: { from: apps/vscode-extension/bin/open-in-vscode, to: apps/vscode-extension/src/panel-manager.ts } }
+
+  # ================================================================ inbox
+  i_claude:
+    from: iclaude
+    to: iserver
+    both: true
+    says: tool calls on /mcp, then a long-poll for your reply
+    carries: plannotator_inbox; /api/inbox/bridge/poll with the registry's token.
+    code: { from: apps/hook/hooks/mod/inbox.ts, to: packages/server/inbox.ts }
+  i_plugins:
+    from: iplugins
+    to: iserver
+    both: true
+    says: the same tool and long-poll
+    code: { from: packages/shared/inbox/agent-link.ts, to: packages/server/inbox.ts }
+  i_stdio:
+    from: [ imcp, icodex, iqwen ]
+    to: shim
+    says: MCP over stdio
+    code: { to: apps/hook/server/inbox-mcp-shim.ts }
+  i_t3stdio:
+    from: it3
+    to: shim
+    says: MCP over stdio, as host t3
+    carries: Inside a T3 thread the shim reads T3CODE_THREAD_ID and files the calls as host t3, session the thread id. The --t3 entry only lists no tools outside a T3 thread.
+    code: { from: packages/core/inbox-t3.ts, to: apps/hook/server/inbox-mcp-shim.ts }
+  i_shim:
+    from: shim
+    to: iserver
+    says: POST /mcp on loopback
+    carries: The port is read from inbox.json on each call; a stopped Inbox is started.
+    code: { from: apps/hook/server/inbox-mcp-shim.ts, to: packages/server/inbox-mcp.ts }
+  i_wcodex:
+    from: iserver
+    to: icodex
+    says: codex queue --thread
+    code: { from: packages/server/inbox-codex-wake.ts }
+  i_wqwen:
+    from: iserver
+    to: iqwen
+    says: into the running session
+    code: { from: packages/server/inbox-qwen-wake.ts }
+  i_wt3:
+    from: iserver
+    to: it3
+    says: t3_thread_send
+    carries: "Your reply as a queued turn in the T3 thread (t3_thread_read finds it first), under the grant plannotator t3 login saved."
+    code: { from: packages/server/inbox-t3-wake.ts, to: packages/t3-code/t3-client.ts }
+  i_setup:
+    from: isetup
+    to: imcp
+    says: adds a plannotator-inbox entry
+    code: { from: packages/server/inbox-agents.ts }
+  i_store:
+    from: iserver
+    to: istore
+    says: appends lines
+    code: { from: packages/server/inbox.ts, to: packages/shared/inbox/store.ts }
+  i_reg:
+    from: iserver
+    to: iregistry
+    says: pid, port, token
+    code: { to: packages/shared/inbox/registry.ts }
+  i_page:
+    from: iwindow
+    to: iserver
+    both: true
+    says: REST and one event stream
+    code: { from: packages/inbox/api.ts, to: packages/server/inbox.ts }
+  i_you:
+    from: you
+    to: iwindow
+    says: reads and answers
+  i_links:
+    from: iserver
+    to: ilinks
+    both: true
+    says: door requests and events
+    code: { from: packages/server/inbox-transport-tailnet.ts }
+  i_relay:
+    from: irelayc
+    to: relay
+    says: mailbox, sealed items, pushes
+    code: { from: packages/server/inbox-relay.ts }
+  i_door:
+    from: phones
+    to: idoor
+    says: reads and commands, bearer token
+    code: { to: packages/server/inbox-devices.ts }
+  i_launch:
+    from: ilaunch
+    to: iclaude
+    says: starts claude --bg
+    code: { from: packages/server/inbox-launch-claude.ts }
+
+  # ================================================================ crossing lines, drawn at an inner sheet's margin
+  # (the same facts as the root lines above, written against the inner part they reach)
+  x-review: { from: agents, to: hkclaude, says: a plan to review, carries: "Claude Code's ExitPlanMode; the other hosts' exit-plan steps.", code: { from: apps/hook/hooks/hooks.json, to: apps/hook/hooks/mod/register.ts } }
+  x-decision: { from: cliEntry, to: agents, says: the decision on stdout, carries: "allow, or deny with your notes.", code: { from: apps/hook/server/index.ts, to: apps/hook/hooks/hooks.json } }
+  x-you: { from: editorUI, to: you, both: true, says: you read and decide, carries: The page in your browser., code: { from: packages/editor/App.tsx, to: packages/server/browser.ts } }
+  x-share: { from: editorUI, to: share, says: a share link, carries: "Hash link, or an encrypted paste via /api/paste.", code: { from: packages/ui/utils/sharing.ts, to: apps/paste-service/core/handler.ts } }
+  x-guide: { from: guideJobs, to: guides, says: plannotator guide share, carries: POST /api/g., code: { from: packages/server/guide/guide-share.ts, to: apps/guides-show/worker/index.ts } }
+  x-ping: { from: cliEntry, to: ping, says: one ping a day per tool, carries: "POST https://ping.plannotator.ai/ping, background, 3 s timeout.", code: { from: packages/shared/daily-ping.ts, to: apps/telemetry/src/handler.ts } }
+  x-ping2: { from: iserver, to: ping, says: one ping a day, carries: "Tool inbox: checked at start, then at most once an hour; sent at most once a UTC day.", code: { from: packages/server/inbox.ts, to: apps/telemetry/src/handler.ts } }
+  d-ping: { from: cliEntry, to: dataDir, says: sent today?, carries: "ping.json says which tools pinged today; ping.lock keeps two runs from both sending.", code: { from: packages/shared/daily-ping.ts, to: packages/shared/data-dir.ts } }
+  x-ping-oc: { from: hkopencode, to: ping, says: its own daily ping, carries: "Published plugin only (dist/release.json); shares ping.json with the CLI.", code: { from: apps/opencode-plugin/daily-ping.ts, to: apps/telemetry/src/handler.ts } }
+  x-ping-pi: { from: piSrv, to: ping, says: its own daily ping, carries: "Published package only (release.json); shares ping.json with the CLI.", code: { from: apps/pi-extension/server/daily-ping.ts, to: apps/telemetry/src/handler.ts } }

@@ -13,13 +13,15 @@
  *  - A hold ends where the pointer comes up, on the button or off it, with one transcription. Cancel stays on screen,
  *    and a touch the system takes away ends the take with nothing sent.
  *  - Reply box, compose, and full screen's composer.
+ *  - Typing while dictation shows keeps every key, and undo under the highlight takes the words back.
  *  - New message dictates as the reply box does, in Chromium and in WebKit (WebKit has no fake capture device, so a tone
  *    through a real MediaStream stands in for the microphone), at 320 to 430 px, the keyboard a stand-in: the mic at the
  *    row's right end and still when it starts, the level drawn and moving, nothing over the clock, "Listening" whole or
  *    not there. Words land where they
  *    did; Cancel and the draft question leave no microphone open; To ends a take and keeps its words; a save waits for
  *    a take on its way. On a desktop Save draft stays put when listening starts.
- *  - The announcement: once, on a computer with a ChatGPT login only, its Phones only option saved by Turn on voice.
+ *  - The announcement: once, on a computer with a ChatGPT login only, its Phones only option saved by Turn on voice. It
+ *    waits for its moment (approval "inbox-one-time-dialogs"): a reply of 40 or more words just sent.
  *  - A file or the artifacts opening over the box closes the microphone.
  *  - A take full screen's card is transcribing outlives the card: Write the reply (through the unsaved-comment question
  *    too), the Comment tab and browser Back; its words reach the thread it was said in, never the thread now open. A
@@ -180,7 +182,7 @@ const sendButton = (page: Page) => pane(page).locator('.ib-acts .ib-btn.ib-pri')
 async function openReply(page: Page, w: World, thread: string): Promise<Locator> {
   await page.goto(`${w.url}#thread=${thread}`);
   const box = pane(page).locator('.ib-rbox textarea');
-  const button = page.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
+  const button = page.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ });
   for (let attempt = 0; attempt < 20 && !(await box.isVisible()); attempt += 1) await button.click({ timeout: 1_000 }).catch(() => {});
   await expect(box).toBeVisible();
   await box.focus();
@@ -448,6 +450,75 @@ test('compose: the words land, and Send waits', async () => {
   // The real `disabled` is voice's. This world has no agent to send to, so the button stays aria-disabled for that.
   await expect(dialog.locator('[data-compose-send]')).toHaveJSProperty('disabled', false);
   await context.close();
+});
+
+test.describe('typing while dictation shows', () => {
+  /** The reply box, its take held at the answer, and focus in the box. */
+  const landing = async (page: Page, w: World, thread: string, words: string) => {
+    const box = await openReply(page, w, thread);
+    await box.fill('Cards.');
+    w.send({ upstream: [{ text: words, hold: true }] });
+    await hold(page);
+    await page.mouse.up();
+    await expect(line(pane(page), 'sending')).toBeVisible();
+    await box.focus();
+    return box;
+  };
+  const highlight = (page: Page) => pane(page).locator('mark.ib-vmark');
+
+  test('under the highlight: the first key is kept', async () => {
+    const w = await mainWorld();
+    const { context, page } = await open(speech, w);
+    const box = await landing(page, w, w.threads[2]!, 'Under the wash.');
+    w.send({ release: true });
+    await expect(box).toHaveValue('Cards. Under the wash.');
+    await expect(highlight(page)).toBeVisible();
+    await page.keyboard.type('abc');
+    await expect(box).toHaveValue('Cards. Under the wash.abc');
+    await expect(highlight(page)).toHaveCount(0);
+    await context.close();
+  });
+
+  test('under the highlight: undo takes the words back', async () => {
+    const w = await mainWorld();
+    const { context, page } = await open(speech, w);
+    const box = await landing(page, w, w.threads[3]!, 'Taken back.');
+    w.send({ release: true });
+    await expect(box).toHaveValue('Cards. Taken back.');
+    await expect(highlight(page)).toBeVisible();
+    await box.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
+    await expect(box).toHaveValue('Cards.');
+    await expect(highlight(page)).toHaveCount(0);
+    await context.close();
+  });
+
+  test('while the words are on their way: every key is kept, and they land at the caret', async () => {
+    const w = await mainWorld();
+    const { context, page } = await open(speech, w);
+    const box = await landing(page, w, w.threads[4]!, 'Then these.');
+    await page.keyboard.type('xyz');
+    await expect(box).toHaveValue('Cards.xyz');
+    w.send({ release: true });
+    await expect(box).toHaveValue('Cards.xyz Then these.');
+    await context.close();
+  });
+
+  test('a line with nothing to retry: the key that clears it is kept', async () => {
+    const w = await mainWorld();
+    const { context, page } = await open(speech, w);
+    const box = await openReply(page, w, w.threads[5]!);
+    await box.fill('Cards.');
+    await box.focus();
+    w.send({ upstream: [{ text: '   ', hold: false }] });
+    await hold(page);
+    await page.mouse.up();
+    await expect(pane(page).locator('[data-voice-note]')).toBeVisible();
+    await box.focus();
+    await page.keyboard.type('abc');
+    await expect(box).toHaveValue('Cards.abc');
+    await expect(pane(page).locator('[data-voice-note]')).toHaveCount(0);
+    await context.close();
+  });
 });
 
 test('full screen’s composer: the words land in the reply', async () => {
@@ -1426,6 +1497,36 @@ test.describe('New message dictates as the reply box does', () => {
   ] as const;
 
   for (const engine of ENGINES) {
+    test(`${engine.name} as a phone: keys typed while the words are on their way are kept, and the one that clears the highlight`, async () => {
+      const w = await mainWorld();
+      const browser = engine.ios ? await webkit.launch({ args: [] }) : speech;
+      try {
+        const context = await browser.newContext({ userAgent: engine.device.userAgent, isMobile: true, hasTouch: true, deviceScaleFactor: 2, viewport: { width: 390, height: 660 } });
+        if (!engine.ios) await context.grantPermissions(['microphone'], { origin: new URL(w.url).origin });
+        const page = await context.newPage();
+        if (engine.ios) await page.addInitScript(toneForAMicrophone);
+        await openCompose(page, w, { pick: false });
+        await field(page).fill('Cards.');
+        w.send({ upstream: [{ text: 'Then these.', hold: true }] });
+        await mic(sheet(page)).tap();
+        await expect(line(sheet(page), 'tap')).toBeVisible();
+        await page.waitForTimeout(1200);
+        await mic(sheet(page)).tap();
+        await expect(line(sheet(page), 'sending')).toBeVisible();
+        await field(page).focus();
+        await page.keyboard.type('xyz');
+        await expect(field(page)).toHaveValue('Cards.xyz');
+        w.send({ release: true });
+        await expect(field(page)).toHaveValue('Cards.xyz Then these.');
+        await expect(sheet(page).locator('mark.ib-vmark')).toBeVisible();
+        await page.keyboard.type('abc');
+        await expect(field(page)).toHaveValue('Cards.xyz Then these.abc');
+        await context.close();
+      } finally {
+        if (engine.ios) await browser.close();
+      }
+    });
+
     test(`${engine.name} as a phone: the mic on the same side, the level drawn and moving, keyboard down and up`, async () => {
       const w = await mainWorld();
       const browser = engine.ios ? await webkit.launch({ args: [] }) : speech;
@@ -1781,6 +1882,20 @@ test.describe('New message dictates as the reply box does', () => {
 test.describe('the announcement', () => {
   const dialog = (page: Page) => page.locator('[data-dialog="voice-intro"]');
   const SETTLE = 6_000;
+  /** Over 40 words: a reply long enough that talking would have been quicker, the announcement's moment. */
+  const LONG = Array.from({ length: 45 }, (_, i) => `word${i}`).join(' ');
+  /** Sends what the box holds, and waits for it to go. */
+  const send = async (page: Page) => {
+    const sent = page.waitForResponse((r) => r.request().method() === 'POST' && /\/api\/inbox\/.*\/reply$/.test(r.url()) && r.ok());
+    await sendButton(page).click();
+    await sent;
+  };
+  /** Sends a long reply into `thread`. */
+  const sendLong = async (page: Page, w: World, thread: string) => {
+    const box = await openReply(page, w, thread);
+    await box.fill(LONG);
+    await send(page);
+  };
 
   test('on a computer with a ChatGPT login: once; Phones only is saved by Turn on voice, which asks for no microphone', async () => {
     const w = await startWorld({ version: '0.30.0', used: true });
@@ -1794,6 +1909,9 @@ test.describe('the announcement', () => {
       };
     });
     await page.goto(w.url);
+    await page.waitForTimeout(SETTLE);
+    await expect(dialog(page), 'no long reply sent yet: not its moment').toHaveCount(0);
+    await sendLong(page, w, w.threads[0]!);
     await expect(dialog(page)).toBeVisible({ timeout: 15_000 });
     await expect(dialog(page).getByRole('switch', { name: 'Phones only' })).toHaveAttribute('aria-checked', 'false');
     await shot(page, 'dialog');
@@ -1813,7 +1931,7 @@ test.describe('the announcement', () => {
     const w = await startWorld({ version: '0.30.0', used: true });
     const { context, page } = await open(speech, w);
     await page.route('**/api/inbox/settings', (route) => (route.request().method() === 'POST' ? route.fulfill({ status: 500, json: { error: 'Not saved.', code: 'config_not_saved' } }) : route.continue()));
-    await page.goto(w.url);
+    await sendLong(page, w, w.threads[0]!);
     await expect(dialog(page)).toBeVisible({ timeout: 15_000 });
     await dialog(page).locator('[data-voice-intro-on]').click();
     const toast = page.locator('.ib-toast');
@@ -1823,16 +1941,20 @@ test.describe('the announcement', () => {
     await context.close();
   });
 
-  test('Not now changes nothing and retires it, and over a reply being written it waits', async () => {
+  test('Not now changes nothing and retires it; a short reply, or a long one still being written, is not its moment', async () => {
     const w = await startWorld({ version: '0.30.0', used: true });
     const { context, page } = await open(speech, w);
     const box = await openReply(page, w, w.threads[0]!);
-    await box.fill('Words in the box');
+    await box.fill('Short words.');
+    await send(page);
     await page.waitForTimeout(SETTLE);
-    await expect(dialog(page)).toHaveCount(0);
+    await expect(dialog(page), 'a short reply').toHaveCount(0);
+    const again = await openReply(page, w, w.threads[1]!);
+    await again.fill(LONG);
+    await page.waitForTimeout(SETTLE);
+    await expect(dialog(page), 'a long reply still in the box').toHaveCount(0);
     expect(saved(w).inboxVoiceIntro?.shownAt).toBeUndefined();
-    await box.fill('');
-    await pane(page).locator('.ib-acts .ib-btn.ib-ghost').click();
+    await send(page);
     await expect(dialog(page)).toBeVisible({ timeout: 15_000 });
     await dialog(page).locator('[data-voice-intro-keep]').click();
     await expect(dialog(page)).toHaveCount(0);
@@ -1844,14 +1966,14 @@ test.describe('the announcement', () => {
   test('no ChatGPT login: never shown, and not spent', async () => {
     const w = await startWorld({ version: '0.30.0', used: true, codex: { account: { type: 'apiKey' } } });
     const { context, page } = await open(speech, w);
-    await page.goto(w.url);
+    await sendLong(page, w, w.threads[0]!);
     await page.waitForTimeout(SETTLE);
     await expect(dialog(page)).toHaveCount(0);
     expect(saved(w).inboxVoiceIntro?.shownAt).toBeUndefined();
     await context.close();
   });
 
-  test('a fresh install, and a load with the list options dialog due: not shown', async () => {
+  test('a fresh install, and a day the list options dialog showed: not shown, and not spent', async () => {
     const fresh = await startWorld({ version: '0.30.0', fresh: true });
     const first = await open(speech, fresh);
     await first.page.goto(fresh.url);
@@ -1866,10 +1988,15 @@ test.describe('the announcement', () => {
     await second.page.goto(queued.url);
     await expect(second.page.locator('[data-dialog="list-look-intro"]')).toBeVisible({ timeout: 15_000 });
     await second.page.keyboard.press('Escape');
+    // One dialog a day: a long reply on this load, and on the next, finds the moment but not the day.
+    await sendLong(second.page, queued, queued.threads[0]!);
     await second.page.waitForTimeout(SETTLE);
     await expect(dialog(second.page)).toHaveCount(0);
     await second.page.reload();
-    await expect(dialog(second.page)).toBeVisible({ timeout: 15_000 });
+    await sendLong(second.page, queued, queued.threads[1]!);
+    await second.page.waitForTimeout(SETTLE);
+    await expect(dialog(second.page)).toHaveCount(0);
+    expect(saved(queued).inboxVoiceIntro?.shownAt).toBeUndefined();
     await second.context.close();
   });
 });

@@ -4,9 +4,13 @@
  * review card opens, while the person has Settings → Capabilities → Code
  * review on.
  *
- * - The agent's walkthrough is the spine: the overview and its chapters down
- *   the left rail, with a "Walkthrough | All files" switch that turns the same
- *   rail into the list of changed files.
+ * - The agent's walkthrough is the spine. There is no left rail (approval
+ *   "review-deslop", r7): the top bar holds the "Walkthrough | All files"
+ *   switch, the menu of chapters or changed files (ReviewJump) and the review's
+ *   title in quiet grey. The diff controls (one Split / Unified button,
+ *   Collapse all, the "Diff display" gear: DiffControls, approval
+ *   "diff-controls-headers") sit in the bar only, never on the chapters. A
+ *   phone's bar is one row: the same menu holds its title and switch.
  * - The diff is Plannotator's own (`GuideReader` over review-editor's
  *   `AllFilesCodeView`): line comments as in code review, and a Viewed tick on
  *   each file's header, kept on the message.
@@ -22,17 +26,20 @@
  *   Comment · Ask · Show me. Show me asks the agent for a picture of the
  *   lines, which opens over the diff; a click on a part opens its code and the
  *   picture shrinks to a corner card. The Overview draws the agent's own
- *   picture sent with the guide, or offers one Show me for the whole review.
+ *   picture sent with the guide; a review with none has one Show me in its
+ *   heading, for the whole review.
  *   Plain Ask opens the Inbox's Ask window with the lines named.
  *
  * No new keyboard shortcuts: Escape and "Thread" go back as the guide pane's do.
  */
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import type { InboxMessageWire, InboxPull, InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
-import { formatCount, plural } from '@plannotator/core/inbox-format';
+import { groupByFileKind } from '@plannotator/core/file-kind';
+import { plural } from '@plannotator/core/inbox-format';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
 import { buildDecisionSpec, type DecisionActionId } from '@plannotator/ui/utils/decisionSpec';
@@ -40,18 +47,21 @@ import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 import { parseGuideSnapshot } from '@plannotator/core/guide-format';
 import { inboxDrawnViewOf, inboxReviewLines, inboxReviewRound } from '@plannotator/core/inbox-review';
 import type { ShapeCodeTarget } from '@plannotator/core/shape';
+import type { ShapeReviewAt } from '@plannotator/ui/components/shape/types';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
-import { OverviewFigure, OverviewShowMe } from '../review-drawing/OverviewFigure';
+import { OverviewFigure, ShowMeButton } from '../review-drawing/OverviewFigure';
 import { ShowMeBox, ShowMeCorner, ShowMeSheet } from '../review-drawing/ShowMeLayer';
 import { anchorDrawing, anchorLines, overviewPicture, baseName, changedMarks, chapterOf, codeKey, markOf, newSideLines, partName, targetLines } from '../review-drawing/showMeModel';
 import { useShowMe, type ShowMePlace } from '../review-drawing/useShowMe';
 import { SHEET_HOME, type SheetOffset } from '../review-drawing/useSheetDrag';
 import type { GuideSelectionActions } from '../guide/types';
+import { reviewSourceLine } from '../guide/sourceLine';
 import { InboxApiError, inboxApi } from '../api';
 import { agentName } from '../format';
 import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
+import { holdBarAfterClose, usePhoneCommentsSheet } from './phoneCommentsSheet';
 import { clearReviewNotes, readReviewNotes, saveReviewNotes, VerdictKeys, verdictOf, verdictReply } from '../reviewVerdict';
 import { useGuideState } from './GuidePane';
 import { PostEnding, reviewEnding, useReviewDestination } from '../pulls/PostEnding';
@@ -70,6 +80,9 @@ import {
   type AskingSession,
   type RouteState,
 } from './ReplyRoute';
+import { DiffControls, nextCollapseAll, type CollapseAllState } from './DiffControls';
+import { DropdownMenuRadioGroup, DropdownMenuRadioItem } from '@plannotator/ui/components/ui/dropdown-menu';
+import { chapterInView, fileInView, ReviewJump } from './ReviewJump';
 import { OpenInCodeSpans, OpenInFile } from './OpenIn';
 import { Tip } from './Tip';
 
@@ -78,6 +91,8 @@ const GuideReader = GuideReaderPart.Part;
 
 export interface ReviewPaneProps {
   thread: InboxThread;
+  /** A tailnet guest's page: the routes behind the arrows refuse it, so no reader. */
+  guest?: boolean;
   message: InboxMessageWire;
   /** Back to the thread. */
   onBack: () => void;
@@ -89,6 +104,12 @@ export interface ReviewPaneProps {
   onPosted?: () => void;
   /** Plain Ask on selected lines: the Inbox's Ask window opens with these words in its box. Absent: no Ask. */
   onAsk?: (words: string) => void;
+  /**
+   * Where to open (a Shape board's link, `&code=`, `&step=`, `&files`): a file at a line, a chapter, or All files.
+   * Once there, `onLanded` (the window drops it from the address, so a reload starts at the top).
+   */
+  at?: ShapeReviewAt | null;
+  onLanded?: () => void;
 }
 
 /** Below this width the comments panel folds into the header's Comments button: the rail and the diff keep the room. */
@@ -99,9 +120,9 @@ const NO_ANNOTATIONS: never[] = [];
 
 type RailMode = 'walkthrough' | 'files';
 
-export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted, onAsk }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onPosted, onAsk, at = null, onLanded }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
-  const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments } = state;
+  const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = state;
   // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
   // conversation in the thread, and no Approve or Request changes is offered.
   const verdict = !thread.pull_theirs;
@@ -110,7 +131,8 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
   // A stack's review spans several PRs and posts from each layer's own review (Pull requests) instead.
   const postKey = !state.readOnly && thread.pull_keys?.length === 1 ? thread.pull_keys[0]! : null;
   const [postPull, setPostPull] = useState<InboxPull | null>(null);
-  // `pull_moved` on a post: the PR was pushed since it was read here. Read again from the forge, then offered at its new
+  // A post refused at its commit (`pull_commit_gone` on GitHub after a force-push, `pull_moved` on GitLab after any push;
+  // GitHub takes a commit still on the PR). Read again from the forge, then offered at its new
   // head (the review's comments ride the body, so they do not depend on the commit).
   const [moved, setMoved] = useState<'reading' | 'read' | 'failed' | null>(null);
   const [reread, setReread] = useState(0);
@@ -149,9 +171,11 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const [paneRef, folded] = useNarrowerThan<HTMLElement>(REVIEW_FOLD_PANEL_BELOW, true);
   const [sheet, setSheet] = useState(false);
   const sheetButtonRef = useRef<HTMLButtonElement>(null);
+  const sheetCloseRef = useRef<HTMLButtonElement>(null);
   const sheetId = useId();
   useEffect(() => {
     if (!folded) setSheet(false);
@@ -172,10 +196,47 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
 
   const files = useMemo(() => (snapshot ? parseDiffToFiles(snapshot.review.rawPatch) : []), [snapshot]);
   const chapters = snapshot?.guide.sections ?? [];
-  const reviewedCount = chapters.filter((_, i) => reviewed[i] ?? snapshot?.guide.reviewed[i] ?? false).length;
 
   const move = (path: string) => setReveal((was) => ({ path, token: (was?.token ?? 0) + 1 }));
+  // Where the person is: the top bar's chapter (or file) follows the scroll. A jump holds the one picked until the
+  // person moves the page themselves, so the name does not run through the chapters a smooth scroll passes, and a
+  // last chapter too short to reach the top of the scroll keeps its name.
+  const [fileSpot, setFileSpot] = useState<string | null>(null);
+  const jumped = useRef(false);
+  // The top bar's Collapse all (DiffControls): every file's diff, this view only.
+  const [collapseAll, setCollapseAll] = useState<CollapseAllState | null>(null);
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    let frame = 0;
+    const read = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (jumped.current) return;
+        if (mode === 'walkthrough') setCurrent(chapterInView(body, chapters.length));
+        else setFileSpot(fileInView(body));
+      });
+    };
+    const release = () => {
+      jumped.current = false;
+    };
+    const HAND = ['wheel', 'touchmove', 'pointerdown', 'keydown'] as const;
+    read();
+    body.addEventListener('scroll', read, { passive: true });
+    for (const kind of HAND) body.addEventListener(kind, release, { passive: true });
+    // Where the person is changes with no scroll too: a taller or shorter window, and a file or chapter that folds.
+    const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(read);
+    resized?.observe(body);
+    if (contentRef.current) resized?.observe(contentRef.current);
+    return () => {
+      resized?.disconnect();
+      cancelAnimationFrame(frame);
+      body.removeEventListener('scroll', read);
+      for (const kind of HAND) body.removeEventListener(kind, release);
+    };
+  }, [mode, snapshot, chapters.length]);
   const toChapter = (index: number | null) => {
+    jumped.current = true;
     setCurrent(index);
     if (mode !== 'walkthrough') setMode('walkthrough');
     if (index === null) {
@@ -187,8 +248,22 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
     else bodyRef.current?.querySelector(`[data-guide-section="${index}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   };
   const toFile = (path: string) => {
+    jumped.current = true;
+    setFileSpot(path);
     if (mode !== 'files') setMode('files');
     move(path);
+  };
+  /** The switch keeps the person's place: the file at the top of the view stays there in the other mode. */
+  const flip = (next: RailMode) => {
+    const body = bodyRef.current;
+    const path = body ? fileInView(body) : null;
+    jumped.current = true;
+    setMode(next);
+    if (next === 'files') setFileSpot(path);
+    // A file no chapter placed sits after the last chapter: the name a scroll by hand gives it there.
+    else setCurrent(path ? (chapterOf(chapters, path) ?? Math.max(chapters.length - 1, 0)) : null);
+    if (path) move(path);
+    else body?.scrollTo({ top: 0 });
   };
 
   // Show me: a picture of selected lines (or the whole review), over the diff.
@@ -230,7 +305,9 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
   const openCode = (target: ShapeCodeTarget): boolean => {
     if (!files.some((file) => file.path === target.path)) return false;
     const index = chapterOf(chapters, target.path);
+    jumped.current = true;
     if (index === null) {
+      setFileSpot(target.path);
       if (mode !== 'files') setMode('files');
     } else {
       setCurrent(index);
@@ -241,6 +318,35 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
     setHighlight((was) => ({ path: target.path, start, end, token: (was?.token ?? 0) + 1 }));
     return true;
   };
+  // A place to open at (a Shape board's link): once the review is read, then the address lets it go.
+  const landed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!at || !snapshot) return;
+    const key = JSON.stringify(at);
+    if (landed.current === key) return;
+    landed.current = key;
+    if (at.path && at.line) openCode({ path: at.path, line: at.line });
+    else if (at.path && files.some((file) => file.path === at.path)) toFile(at.path);
+    else if (at.step && at.step <= chapters.length) {
+      // A chapter with no diff has only its heading to scroll to: wait for the reader to draw it.
+      const index = at.step - 1;
+      if (chapters[index]?.diffs.some((ref) => files.some((file) => file.path === ref.file))) toChapter(index);
+      else {
+        jumped.current = true;
+        setCurrent(index);
+        let tries = 0;
+        const look = () => {
+          const heading = bodyRef.current?.querySelector(`[data-guide-section="${index}"]`);
+          if (heading) heading.scrollIntoView({ block: 'start' });
+          else if (tries++ < 120) requestAnimationFrame(look);
+        };
+        look();
+      }
+    } else if (at.files) flip('files');
+    onLanded?.();
+    // The place is read once per review; the jumps read the latest render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [at, snapshot]);
   // The actions are made once per switch (a new object each render would re-render every diff); Show me reads
   // the latest render's open through this ref, so it sees the drawings and turns read since.
   const showMeOpen = useRef(showMe.open);
@@ -318,8 +424,9 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [overviewHtml, overviewMeta, overviewChanged, files, chapters, mode],
   );
-  const renderOverviewFigure = useCallback(
-    (): ReactNode | null => (!overviewHtml && showMe.state.canAsk ? <OverviewShowMe onShowMe={() => showMe.open({ file: null, lines: null })} /> : null),
+  // Before there is a picture, Show me is one of the review's own actions, in its heading beside Global comment.
+  const renderHeadActions = useCallback(
+    (): ReactNode | null => (!overviewHtml && showMe.state.canAsk ? <ShowMeButton onShowMe={() => showMe.open({ file: null, lines: null })} /> : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [overviewHtml, showMe.state.canAsk],
   );
@@ -337,6 +444,12 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
     [viewed, message.id, setSaveError],
   );
   const viewedProp = useMemo(() => (readOnly ? undefined : { files: viewedSet, onToggle: toggleViewed }), [readOnly, viewedSet, toggleViewed]);
+  // The top bar's menu lists what the review draws, in the order it draws it (code, then tests, then generated).
+  const jumpChapters = chapters.map((chapter, index) => ({ title: chapter.title, reviewed: reviewed[index] ?? snapshot?.guide.reviewed[index] ?? false }));
+  const jumpFiles = groupByFileKind(files, (file) => file.path)
+    .flatMap((group) => group.items)
+    .map((file) => ({ path: file.path, additions: file.additions, deletions: file.deletions, viewed: viewedSet.has(file.path) }));
+  const jumpAt = mode === 'walkthrough' ? current : Math.max(0, jumpFiles.findIndex((file) => file.path === fileSpot));
 
   // The notes the person writes on a decision: kept per review until its verdict went (a failed send, a close
   // and a reload keep them), the way the reply box keeps its draft.
@@ -444,9 +557,12 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
   );
 
   const closeSheet = () => {
-    setSheet(false);
+    // At once: on a phone the button can take focus only once the page shows again.
+    flushSync(() => setSheet(false));
     sheetButtonRef.current?.focus({ preventScroll: true });
+    if (phone) holdBarAfterClose(sheetButtonRef.current);
   };
+  usePhoneCommentsSheet(phone && sheet, sheetCloseRef, closeSheet);
   const onSheetKey = (event: React.KeyboardEvent) => {
     if (event.key === 'Escape' && folded && sheet && !event.defaultPrevented) {
       event.preventDefault();
@@ -454,11 +570,13 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
     }
   };
 
+  const title = message.guide?.title ?? snapshot?.guide.title ?? 'Review';
+  const source = snapshot ? reviewSourceLine(snapshot) : '';
   const railModes = (
     <div className="ib-seg ib-rv-modes" role="radiogroup" aria-label="Review by">
       {(['walkthrough', 'files'] as const).map((value) => (
         <label key={value} className="ib-seg-o" data-on={mode === value ? '' : undefined} data-review-mode-choice={value}>
-          <input type="radio" name={`ib-rv-mode-${sheetId}`} checked={mode === value} onChange={() => setMode(value)} />
+          <input type="radio" name={`ib-rv-mode-${sheetId}`} checked={mode === value} onChange={() => flip(value)} />
           {value === 'walkthrough' ? 'Walkthrough' : 'All files'}
         </label>
       ))}
@@ -468,22 +586,78 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer ib-review${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
+      className={`ib-viewer ib-wlayer ib-review ib-rv-walk${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
       aria-label="Review"
       data-review-message={message.id}
       data-review-mode={mode}
     >
       <div className="ib-vhead">
-        <button type="button" className="ib-back" onClick={onBack}>
-          <Icon name="back" size={15} />
-          Thread
-        </button>
-        <span className="ib-vsep" />
-        <span className="ib-fn">Review</span>
-        <span className="ib-from">
-          <bdi>{message.guide?.title ?? ''}</bdi> · from {author}
-        </span>
+        <Tip content="Thread">
+          <button type="button" className="ib-back" aria-label="Thread" onClick={onBack}>
+            <Icon name="back" size={15} />
+          </button>
+        </Tip>
+        {!phone && <span className="ib-vsep" />}
+        {!phone && (
+          <span className="ib-rv-nav" data-review-nav="">
+            {railModes}
+            {snapshot && <ReviewJump mode={mode} chapters={jumpChapters} files={jumpFiles} current={jumpAt} onChapter={toChapter} onFile={toFile} />}
+          </span>
+        )}
+        {/* A phone's bar is one row: the place, and in its menu the title and the switch that had rows of their own. */}
+        {phone && snapshot && (
+          <ReviewJump
+            mode={mode}
+            chapters={jumpChapters}
+            files={jumpFiles}
+            current={jumpAt}
+            onChapter={toChapter}
+            onFile={toFile}
+            head={
+              <>
+                <div className="ib-rj-head">
+                  <bdi className="ib-rj-title" data-review-title="">
+                    {title}
+                  </bdi>
+                  {source && (
+                    <span className="ib-rj-source" dir="ltr" data-review-source="">
+                      {source}
+                    </span>
+                  )}
+                </div>
+                <DropdownMenuRadioGroup className="ib-rj-modes" aria-label="Review by" value={mode} onValueChange={(value) => flip(value as typeof mode)}>
+                  {(['walkthrough', 'files'] as const).map((value) => (
+                    <DropdownMenuRadioItem key={value} value={value} className="ib-rj-mode" data-review-mode-choice={value}>
+                      {value === 'walkthrough' ? 'Walkthrough' : 'All files'}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </>
+            }
+          />
+        )}
+        {!phone && <span className="ib-vsep ib-rv-titlesep" aria-hidden="true" />}
+        {/* The review's title, quiet; where it gives way (a short bar) the heading holds the same facts. */}
+        {!phone && (
+          <Tip
+            content={
+              <span className="ib-tip-proj">
+                <bdi className="ib-tip-name">{title}</bdi>
+                {source && (
+                  <span className="ib-tip-path" dir="ltr" data-review-source="">
+                    {source}
+                  </span>
+                )}
+              </span>
+            }
+          >
+            <span className="ib-fn ib-rv-title" data-review-title="">
+              <bdi>{title}</bdi>
+            </span>
+          </Tip>
+        )}
         <span className="ib-sp" />
+        {snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
         {folded && (
           <button
             type="button"
@@ -547,114 +721,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
         </Tip>
       </div>
       <div className="ib-rsplit">
-        <nav className="ib-rrail" aria-label="Review">
-          {railModes}
-          {mode === 'walkthrough' ? (
-            <ol className="ib-rv-list" data-review-chapters="">
-              <li>
-                <button type="button" className="ib-rv-row" data-on={current === null ? '' : undefined} onClick={() => toChapter(null)}>
-                  <span className="ib-rv-mark ib-rv-overview" aria-hidden="true">
-                    <Icon name="book" size={13} />
-                  </span>
-                  <span className="ib-rv-t">Overview</span>
-                </button>
-              </li>
-              {chapters.map((chapter, index) => {
-                const done = reviewed[index] ?? snapshot?.guide.reviewed[index] ?? false;
-                const count = chapter.diffs.length;
-                return (
-                  <li key={`${chapter.title}:${index}`}>
-                    <button
-                      type="button"
-                      className="ib-rv-row"
-                      data-on={current === index ? '' : undefined}
-                      onClick={() => toChapter(index)}
-                      aria-label={`Chapter ${index + 1}: ${chapter.title}${done ? ', reviewed' : ''}`}
-                    >
-                      <span className="ib-rv-mark" data-done={done ? '' : undefined} aria-hidden="true">
-                        {done ? <Icon name="check" size={12} /> : index + 1}
-                      </span>
-                      <span className="ib-rv-t">{chapter.title}</span>
-                      <span className="ib-rv-n">{count}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-          ) : (
-            <ul className="ib-rv-list" data-review-files="">
-              {files.map((file) => {
-                const seen = viewedSet.has(file.path);
-                const slash = file.path.lastIndexOf('/');
-                return (
-                  <li key={file.path}>
-                    <button type="button" className="ib-rv-row ib-rv-file" onClick={() => toFile(file.path)} aria-label={`${file.path}${seen ? ', viewed' : ''}`}>
-                      <span className="ib-rv-mark" data-done={seen ? '' : undefined} aria-hidden="true">
-                        {seen ? <Icon name="check" size={12} /> : null}
-                      </span>
-                      <span className="ib-rv-t">
-                        <Tip content={file.path} cut>
-                          <span className="ib-rv-path">
-                            {/* Cut at the start (the box is right to left); the path itself reads left to right, a leading dot included. */}
-                            <bdi dir="ltr">
-                              {slash >= 0 && <span className="ib-rv-dir">{file.path.slice(0, slash + 1)}</span>}
-                              {file.path.slice(slash + 1)}
-                            </bdi>
-                          </span>
-                        </Tip>
-                      </span>
-                      <span className="ib-rv-n">
-                        <span className="ib-add">+{formatCount(file.additions)}</span> <span className="ib-del">-{formatCount(file.deletions)}</span>
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          <div className="ib-rv-progress" aria-live="polite">
-            {mode === 'walkthrough'
-              ? `${reviewedCount} of ${plural(chapters.length, 'chapter')} reviewed`
-              : `${viewed.filter((path) => files.some((file) => file.path === path)).length} of ${plural(files.length, 'file')} viewed`}
-          </div>
-        </nav>
         <div className="ib-gbody" ref={bodyRef}>
-          {phone && (
-            // A phone has no rail: its switch, and the chapters or files as a native list to jump to.
-            <div className="ib-rv-phonebar" data-review-phonebar="">
-              {railModes}
-              <select
-                className="ib-rv-jump"
-                aria-label={mode === 'walkthrough' ? 'Go to a chapter' : 'Go to a file'}
-                value=""
-                onChange={(event) => {
-                  const value = event.target.value;
-                  if (mode === 'walkthrough') toChapter(value === 'overview' ? null : Number(value));
-                  else if (value) toFile(value);
-                }}
-              >
-                <option value="" disabled>
-                  {mode === 'walkthrough' ? `Chapters · ${reviewedCount} of ${chapters.length} reviewed` : `Files · ${plural(files.length, 'file')}`}
-                </option>
-                {mode === 'walkthrough' ? (
-                  <>
-                    <option value="overview">Overview</option>
-                    {chapters.map((chapter, index) => (
-                      <option key={`${chapter.title}:${index}`} value={String(index)}>
-                        {`${index + 1}. ${chapter.title}${(reviewed[index] ?? snapshot?.guide.reviewed[index]) ? ' ✓' : ''}`}
-                      </option>
-                    ))}
-                  </>
-                ) : (
-                  files.map((file) => (
-                    <option key={file.path} value={file.path}>
-                      {`${file.path}${viewedSet.has(file.path) ? ' ✓' : ''}`}
-                    </option>
-                  ))
-                )}
-              </select>
-            </div>
-          )}
           {moved && (
             <p className="ib-prr-note" role="status" data-review-pull-moved={moved}>
               {moved === 'reading'
@@ -708,6 +775,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
             </div>
           ) : snapshot ? (
             // The reader is a chunk loaded on first use: one that cannot arrive says so here (GuidePane).
+            <div ref={contentRef}>
             <ReaderPart diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on>
               <GuideReader
@@ -718,14 +786,19 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
                 mode={mode}
                 reveal={reveal}
                 viewed={viewedProp}
+                {...(guest ? {} : { fileContents })}
                 fileOpenIn={fileOpenIn}
                 {...(selectionActions ? { selectionActions } : {})}
                 renderOverviewDiagram={renderOverviewDiagram}
-                renderOverviewFigure={renderOverviewFigure}
+                renderHeadActions={renderHeadActions}
                 highlight={highlight}
+                threadHeading
+                hostDiffControls
+                {...(collapseAll ? { collapseAll } : {})}
               />
               </OpenInCodeSpans>
             </ReaderPart>
+            </div>
           ) : null}
         </div>
         <div
@@ -741,7 +814,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
               <b>Comments</b>
               <span className="ib-mut">{comments.length}</span>
               <span className="ib-sp" />
-              <button type="button" className="ib-iconbtn" onClick={closeSheet} aria-label="Close the comments">
+              <button ref={sheetCloseRef} type="button" className="ib-iconbtn" onClick={closeSheet} aria-label="Close the comments">
                 <Icon name="x" />
               </button>
             </div>
