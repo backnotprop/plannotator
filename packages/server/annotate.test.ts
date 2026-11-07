@@ -15,6 +15,7 @@
  */
 
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "os";
@@ -86,6 +87,30 @@ describe("annotate server: /api/save-notes wiring", () => {
       expect(await response.text()).toContain("Plannotator");
     } finally {
       server.stop();
+    }
+  });
+
+  test("/api/plan identifies the annotated file's repository, not the launch repository", async () => {
+    const targetRoot = mkdtempSync(join(tmpdir(), "plannotator-annotate-target-repo-"));
+    const filePath = join(targetRoot, "specs", "refunds.md");
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, "# Refunds\n", "utf-8");
+    execFileSync("git", ["init", "-q"], { cwd: targetRoot });
+    execFileSync("git", ["remote", "add", "origin", "https://github.com/acme/payments-docs.git"], { cwd: targetRoot });
+
+    const server = await startAnnotateServer({
+      markdown: "# Refunds\n",
+      filePath,
+      htmlContent: MINIMAL_HTML,
+    });
+    try {
+      const payload = (await (await fetch(`${server.url}/api/plan`)).json()) as {
+        repoInfo?: { display: string };
+      };
+      expect(payload.repoInfo?.display).toBe("acme/payments-docs");
+    } finally {
+      server.stop();
+      rmSync(targetRoot, { recursive: true, force: true });
     }
   });
 });

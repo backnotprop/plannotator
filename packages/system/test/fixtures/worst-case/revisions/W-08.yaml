@@ -1,0 +1,5 @@
+revision: W-08
+scope: core
+title: Small plan 8
+change:
+  partnerapi: "Small change number 8."

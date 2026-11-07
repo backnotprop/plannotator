@@ -1,0 +1,53 @@
+# The big plan on 60 parts: 38 changed, 1 added, 2 removed (break-ui fixture, dev only).
+revision: H-01
+scope: root
+title: Move every service to the new region and retire the voice line
+add:
+  parts:
+    sanctions: { name: "Sanctions screening", kind: service, role: "Holds a booking that names a listed party." }
+  flows:
+    sx: { from: pricing, to: sanctions, says: "every booking, before a quote" }
+  place:
+    L-001: { sanctions: { band: svc, after: claims } }
+change:
+  shipperweb: "Moves to eu-west-1, step 1 of 38."
+  driverios: "Moves to eu-west-1, step 2 of 38."
+  kiosk: "Moves to eu-west-1, step 3 of 38."
+  partnerapi: "Moves to eu-west-1, step 4 of 38."
+  emailintake: "Moves to eu-west-1, step 5 of 38."
+  slackbot: "Moves to eu-west-1, step 6 of 38."
+  publicgateway: "Moves to eu-west-1, step 7 of 38."
+  partnergateway: "Moves to eu-west-1, step 8 of 38."
+  webhooks: "Moves to eu-west-1, step 9 of 38."
+  ratelimiter: "Moves to eu-west-1, step 10 of 38."
+  graphql: "Moves to eu-west-1, step 11 of 38."
+  grpcedge: "Moves to eu-west-1, step 12 of 38."
+  adminapi: "Moves to eu-west-1, step 13 of 38."
+  statuspage: "Moves to eu-west-1, step 14 of 38."
+  dispatch: "Moves to eu-west-1, step 15 of 38."
+  routing: "Moves to eu-west-1, step 16 of 38."
+  quotes: "Moves to eu-west-1, step 17 of 38."
+  billing: "Moves to eu-west-1, step 18 of 38."
+  ledger: "Moves to eu-west-1, step 19 of 38."
+  notify: "Moves to eu-west-1, step 20 of 38."
+  eta: "Moves to eu-west-1, step 21 of 38."
+  fraud: "Moves to eu-west-1, step 22 of 38."
+  scheduler: "Moves to eu-west-1, step 23 of 38."
+  kafka: "Moves to eu-west-1, step 24 of 38."
+  searchindexer: "Moves to eu-west-1, step 25 of 38."
+  exports: "Moves to eu-west-1, step 26 of 38."
+  geocoder: "Moves to eu-west-1, step 27 of 38."
+  photoresizer: "Moves to eu-west-1, step 28 of 38."
+  payouts: "Moves to eu-west-1, step 29 of 38."
+  auditlog: "Moves to eu-west-1, step 30 of 38."
+  postgres: "Moves to eu-west-1, step 31 of 38."
+  readreplica: "Moves to eu-west-1, step 32 of 38."
+  s3: "Moves to eu-west-1, step 33 of 38."
+  snowflake: "Moves to eu-west-1, step 34 of 38."
+  clickhouse: "Moves to eu-west-1, step 35 of 38."
+  dynamodb: "Moves to eu-west-1, step 36 of 38."
+  kms: "Moves to eu-west-1, step 37 of 38."
+  backups: "Moves to eu-west-1, step 38 of 38."
+remove:
+  voice: Nobody has called in 11 months.
+  sftp: Carriers move to the partner API.

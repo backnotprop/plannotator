@@ -78,6 +78,12 @@ export const SHAPE_GUIDE = `## The stance
 - **title:** the subject in plain words. **claim:** one line: where it stands, and whether anything waits on the person now. **note** (optional): one line about this version.
 - **views.picture** (the main view): one screen. HTML and inline SVG. \`width\` and \`height\` make a fixed canvas the board scales to fit. A phone pans it, unless you add \`tall\`: the same parts stacked about 400 px wide.
 - **views.how** (How it works, optional): one precise diagram that answers three questions: when it starts, how it is processed, and what it produces. A flow is often not a straight line: where there are optional branches or different paths, draw them, have them meet in the one drawing, and let the person follow or focus on one (the kit's \`pick\` and \`on\`). A straight line is right when the thing really is one. Give every arrow a verb. Use \`width\` and \`height\` for a fixed canvas the board scales to fit.
+- **views.how.examples** (optional): when How it works has a branch, add one example per way it can go, named by where it ends ("It opens", "Nothing shows"). The person follows each one through your diagram, step by step. Read every value, line and constant from the code; run nothing. When the case leaves a value open, pick one and mark it on the board as an assumption: the input's \`from\` reads "assumed: lid closed". An example is \`{ name, title, lead, steps }\`: \`title\` is the case in a line, \`lead\` what happens in a sentence. Each step:
+  - \`part\` (a \`data-mark\`) and/or \`arrow\` (a \`data-edge\`): what it lights. \`tag\`: the value written on it, in a few words. \`text\`: what happens, in one plain sentence.
+  - \`inputs\`: \`[{ name, value, type, reading, from }]\`. \`from\` is \`{ path, line }\`, \`{ step: n }\` for an earlier step's output, or a few words.
+  - \`signature\`: name, parameters and return type, no keywords: \`sound(r: Reading): Sound\`. \`code\`: its \`{ path, line }\`.
+  - \`checks\`, in code order: \`[{ code, constant, saw, result }]\`. A check is a condition the code needs to go on (\`a || b\` is one check). \`result\` is \`pass\`, \`fail\` (the code stops there; later checks are \`not-reached\`) or \`not-reached\`. Mark the check that decided the step \`"decides": true\`; give a failing one its \`short\` ("20_000 short (20 s)").
+  - \`output\`: \`{ name, value, type }\`.
 - **views.code** (Code, optional): a Guided Review of the change. Leave it out unless the person asks.
 - **refs:** numbered sources; on the Picture, a handful. Any kind can have \`sub\` and \`images\` (\`{ src, alt, crop: [x, y, width, height] }\`, 0 to 1); the bubble shows the first. \`message\` targets a thread message id; \`file\` a path in the project (with \`line\`); \`image\` an image file next to the board's JSON (the store keeps a copy); \`pr\` and \`link\` an https URL.
 
@@ -86,6 +92,7 @@ export const SHAPE_GUIDE = `## The stance
 Draw it however you like, by hand or from a one-off script. The board makes it behave (hover, tap, full view, the person's theme, phone) if you keep these.
 
 - \`data-mark="id"\` on each part the person may point at. Keep the id across versions.
+- \`data-edge="id"\` on an arrow an example takes, and the same id on its words.
 - \`data-step="N"\` on parts that should appear together; steps arrive in number order, the order you would explain them aloud.
 - \`data-ref="n"\` is the number for reference n: empty (\`<span data-ref="n"></span>\`), the board draws it; around your own (\`<g data-ref="n">…</g>\`), yours is used.
 - Colours only through the board's variables: \`var(--ink)\`, \`var(--ink2)\`, \`var(--grey)\`, \`var(--rule)\`, \`var(--paper)\`, \`var(--surface)\`, \`var(--sunk)\`, the accent \`var(--mark)\` (\`var(--mark-soft)\` for a fill), \`var(--alert)\` for what is wrong (\`var(--alert-soft)\`), and for zones \`var(--blue)\`, \`var(--amber)\`, \`var(--green)\` and \`var(--plum)\`, each with a \`-soft\` fill. Then light and dark both work. In SVG: \`class="line"\`, \`"grey"\`, \`"acc"\`, \`"acc-fill"\`, \`"alert"\`, \`"dash"\`, and \`"t-acc"\`, \`"t-grey"\`, \`"t-alert"\`, \`"t-mono"\` for text.
