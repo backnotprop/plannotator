@@ -21,12 +21,35 @@ import {
   SHAPE_DROPPED_ATTRS,
   SHAPE_TOP_LAYER_ATTRS,
   SHAPE_URL_ATTRS,
+  type ShapeBoardStyle,
   type ShapeCodeTarget,
   type ShapeDrawnView,
   type ShapeRef,
 } from '@plannotator/core/shape';
 import { useReducedMotion } from './Pebble';
 import { syncKeptBoxes, type KeptBox } from './boxSelect';
+import { parseCssColor } from '../../utils/cssColor';
+import { readThemeTokenValues } from '../../utils/themeTokens';
+import { SHAPE_SHARP_COLOR_NAMES, shapeSharpFixes, type ShapeSharpColors } from './sharpContrast';
+
+/**
+ * Sharp's line colours held to their bars in the palette on screen (`sharpContrast.ts`): set on `.board` only where
+ * the frame's own mix falls short. Returns the undo. Nothing changes where the colours cannot be read.
+ */
+function holdSharpLines(board: HTMLElement): () => void {
+  const read = readThemeTokenValues(SHAPE_SHARP_COLOR_NAMES, board);
+  const colors = {} as ShapeSharpColors;
+  for (const name of SHAPE_SHARP_COLOR_NAMES) {
+    const c = parseCssColor(read?.[name]);
+    if (!c) return () => {};
+    colors[name] = c;
+  }
+  const fixes = shapeSharpFixes(colors);
+  for (const [name, value] of Object.entries(fixes)) board.style.setProperty(name, value);
+  return () => {
+    for (const name of Object.keys(fixes)) board.style.removeProperty(name);
+  };
+}
 
 /** A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first. */
 function resolveFiles(html: string, resolve: ((src: string) => string) | undefined): string {
@@ -47,6 +70,65 @@ const TAG_ROOM = 28;
 const tagPads = new WeakMap<HTMLElement, string>();
 
 export const NO_MARKS: MarkState = { fresh: new Set(), erasing: new Set(), noted: new Set() };
+
+/**
+ * The Sharp board style (approval "shape-board-style-switch"), on a board whose host passes `boardStyle="sharp"`
+ * (`data-shp-style="sharp"` on `.board`). CSS beats an SVG's presentation attributes, so it reaches every board as
+ * shown, stored or new, and rewrites none: 1 px lines at any zoom (`vector-effect: non-scaling-stroke`), 2 px corners
+ * on boxes, panels, chips and pills (3 canvas units, about 2 px on a board shown at 1440), square ends and joins, box
+ * borders a softer grey and connectors stronger (`--shp-hair`, `--shp-wire`), quieter zone fills with a 1 px edge in
+ * the zone's hue (`--shp-zone-*`), no drop shadow. The kit's lines carry a square-elbow twin and a small filled
+ * arrowhead (`data-shp-sharp`, hidden unless Sharp shows them) beside today's (`data-shp-round`, hidden on Sharp), so
+ * a board drawn since flips both ways; an older board keeps its elbows and open arrowheads. `sharpContrast.ts`
+ * holds the line colours to their bars in every palette. Without the attribute nothing here applies: Rounded, and any
+ * host that passes no style, draw exactly as before.
+ */
+const SHARP = '.board[data-shp-style="sharp"]';
+const SHARP_ZONE = ':not(.line, .ink, .grey, .acc, .alert, .acc-fill)';
+const softIs = (zone: string) => `:is([style*="--${zone}-soft"], [fill*="--${zone}-soft"])`;
+export const SHAPE_SHARP_CSS = `
+/* Sharp: thin lines, small corners, quiet zones with a thin edge, filled heads. */
+${SHARP} {
+  --shp-r: 3px;
+  --shp-hair: color-mix(in oklab, var(--ink) 52%, var(--paper));
+  --shp-wire: color-mix(in oklab, var(--ink) 64%, var(--paper));
+  --blue-soft: color-mix(in oklab, #2f6fb0 6%, var(--paper));
+  --amber-soft: color-mix(in oklab, #d9971f 7%, var(--paper));
+  --green-soft: color-mix(in oklab, #2b8a57 6%, var(--paper));
+  --plum-soft: color-mix(in oklab, #9b3f78 6%, var(--paper));
+  --alert-soft: color-mix(in oklab, var(--destructive) 8%, var(--paper));
+  --shp-zone-blue: color-mix(in oklab, var(--blue) 82%, var(--paper));
+  --shp-zone-amber: color-mix(in oklab, var(--amber) 82%, var(--paper));
+  --shp-zone-green: color-mix(in oklab, var(--green) 82%, var(--paper));
+  --shp-zone-plum: color-mix(in oklab, var(--plum) 82%, var(--paper));
+  --shp-zone-alert: var(--alert);
+}
+${SHARP} svg :is(.line, .grey, .acc, .alert, .ink, .acc-fill) { stroke-width: 1px; vector-effect: non-scaling-stroke; stroke-linecap: butt; stroke-linejoin: miter; }
+${SHARP} svg .dash { stroke-dasharray: 5 4; }
+${SHARP} svg :is(rect, circle, ellipse, polygon):is(.line, .ink) { stroke: var(--shp-hair); }
+${SHARP} svg :is(path, line, polyline).line { stroke: var(--shp-wire); }
+${SHARP} svg rect:is(.line, .ink, .grey, .acc, .alert, .acc-fill) { rx: var(--shp-r); ry: var(--shp-r); }
+/* The kit's twins: the square elbow and the filled head show; the rounded elbow and the open head go. */
+${SHARP} [data-shp-round] { display: none; }
+${SHARP} [data-shp-sharp] { display: inline; }
+${SHARP} svg path.head:is(.line, .grey, .acc, .alert) { stroke: none; }
+${SHARP} svg .head.line { fill: var(--shp-wire); } ${SHARP} svg .head.grey { fill: var(--grey); } ${SHARP} svg .head.acc { fill: var(--mark); } ${SHARP} svg .head.alert { fill: var(--alert); }
+/* A zone: a rect the drawing fills with a -soft colour. Small corners, and a 1 px edge in its hue. */
+${SHARP} svg rect${SHARP_ZONE}:is([style*="-soft"], [fill*="-soft"]) { rx: var(--shp-r); ry: var(--shp-r); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+${['blue', 'amber', 'green', 'plum', 'alert'].map((z) => `${SHARP} svg rect${SHARP_ZONE}${softIs(z)} { stroke: var(--shp-zone-${z}); }`).join('\n')}
+/* darkContrast's zone edge (a shape it found with no line of its own), as thin as the rest. */
+${SHARP}.dark-hold [data-shp-edge] { stroke-width: 1px; vector-effect: non-scaling-stroke; box-shadow: inset 0 0 0 1px var(--shp-edge); }
+/* Chips, cards, tiles, stickies, pictures, drawn things and path pills: the same corner, the same hairline. */
+${SHARP} svg .tag rect { rx: 2px; ry: 2px; stroke-width: 1px; vector-effect: non-scaling-stroke; }
+${SHARP} svg .tag rect[stroke-dasharray] { stroke-dasharray: 5 4; }
+${SHARP} svg :is(rect.obj, .obj rect) { rx: var(--shp-r); ry: var(--shp-r); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+${SHARP} svg .obj { filter: none; }
+${SHARP} svg svg[data-draw] [stroke-width] { stroke-width: 1.25px; vector-effect: non-scaling-stroke; }
+${SHARP} svg svg[data-draw] rect { rx: 2px; ry: 2px; }
+${SHARP} svg svg[data-icon] { stroke-width: 1.5; }
+${SHARP} .pick { border-radius: 3px; border-width: 1px; }
+${SHARP} .mk { border-radius: 2px; }
+`;
 
 /**
  * The frame every drawn view sits in: the variables an agent colours with
@@ -166,6 +248,7 @@ svg tspan.shp-rb { display: inline; fill: var(--mark); }
 svg tspan.shp-rb:hover, svg tspan.shp-rb.lit { text-decoration: underline; }
 /* A finger needs more than 16 px. */
 @media (pointer: coarse) { .shp-rb.own:focus-visible { outline: none; } .board.peek .shp-rb:not(.own) { position: relative; min-width: 22px; height: 22px; font-size: 12px; } .board.peek .shp-rb:not(.own)::after { content: ""; position: absolute; inset: -11px; } }
+${SHAPE_SHARP_CSS}
 `;
 
 // One sanitizer of our own, so its hook reaches no other DOMPurify user.
@@ -298,6 +381,11 @@ export interface ShapeDrawnProps {
   onCode?: (target: ShapeCodeTarget, el: HTMLElement) => void;
   /** A `files/…` image's URL. */
   resolveSrc?: (src: string) => string;
+  /**
+   * How the board is drawn (`ShapeSurfaceProps.boardStyle`): `sharp` puts `data-shp-style="sharp"` on `.board`
+   * (`SHAPE_SHARP_CSS`), `rounded` puts `data-shp-style="rounded"` and draws as before. Absent: as before, no attribute.
+   */
+  boardStyle?: ShapeBoardStyle;
   /** Pointing at marked parts (Change it / Ask). Board only. */
   pinpoint?: boolean;
   /** Select mode: a text selection inside a mark picks it. Board only. */
@@ -367,6 +455,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
   const pan = !!props.pan && scaled && narrow;
   const k = scaled && fit ? Math.max(pan ? 0.55 : 0.2, Math.min(fit.w / drawn.width!, fit.h > 40 ? fit.h / drawn.height! : Infinity, 1.08)) : 1;
   const [contentKey, setContentKey] = useState(0);
+  const boardStyle = props.boardStyle;
 
   // The content: sanitized once per change, then marked up for the board.
   useLayoutEffect(() => {
@@ -375,7 +464,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     const root = rootRef.current ?? host.attachShadow({ mode: 'open' });
     rootRef.current = root;
     const safeCss = shapeCssProblems(css).length ? '' : css;
-    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}${handlers.current.onRefPeek ? ' peek' : ''}">${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc)}</div>`;
+    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}${handlers.current.onRefPeek ? ' peek' : ''}"${boardStyle ? ` data-shp-style="${boardStyle}"` : ''}>${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc)}</div>`;
     const board = root.querySelector<HTMLElement>('.board')!;
     // Steps: the agent's numbers, in order, become 0, 1, 2… however sparse.
     const steps = [...board.querySelectorAll<HTMLElement | SVGElement>('[data-step]')];
@@ -411,7 +500,8 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     }
     setContentKey((x) => x + 1);
     handlers.current.onBoard?.(board);
-  }, [html, css, scaled]);
+    // A style change draws the board afresh, so every pass over its colours runs again on the new look.
+  }, [html, css, scaled, boardStyle]);
   useEffect(() => () => handlers.current.onBoard?.(null), []);
 
   // The canvas scale.
@@ -481,6 +571,33 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       }
     }
   }, [marks, stale, freshTag, staleTag, contentKey]);
+
+  // Sharp's line colours, after every other pass over the board's colours; again when the page's theme changes.
+  const sharp = boardStyle === 'sharp';
+  useLayoutEffect(() => {
+    const board = rootRef.current?.querySelector<HTMLElement>('.board');
+    if (!board || !sharp) return;
+    let undo = holdSharpLines(board);
+    if (typeof MutationObserver === 'undefined') return undo;
+    let frame = 0;
+    const again = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        undo();
+        undo = holdSharpLines(board);
+      });
+    };
+    const watch = new MutationObserver(again);
+    watch.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
+    const scheme = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
+    scheme?.addEventListener?.('change', again);
+    return () => {
+      watch.disconnect();
+      cancelAnimationFrame(frame);
+      scheme?.removeEventListener?.('change', again);
+      undo();
+    };
+  }, [sharp, contentKey]);
 
   // Bubbles: lit with their list row, flashed from it.
   useEffect(() => {

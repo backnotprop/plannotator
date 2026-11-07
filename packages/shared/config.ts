@@ -508,6 +508,15 @@ export interface PlannotatorConfig {
    */
   inboxShape?: boolean;
   /**
+   * How every Shape board is drawn (approval "shape-board-style-switch"):
+   * `"sharp"` (1 px lines, 2 px corners; the default, also while unset or
+   * unreadable) or `"rounded"` (the earlier look). The renderer applies it to
+   * every board, old ones too; no board is rewritten. Written by Settings →
+   * Capabilities → Board style (`POST /api/inbox/settings` `{ shape_style }`);
+   * read by the Inbox and the Shapes server (`/api/shape-server` `board_style`).
+   */
+  shapeBoardStyle?: "rounded" | "sharp";
+  /**
    * The queue of one-time reveals for returning users (approval
    * "inbox-feature-reveal"; rules in packages/shared/inbox/reveals.ts). Written
    * only by the server. `lastShownAt`: the last one-time announcement claimed

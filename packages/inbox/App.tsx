@@ -156,6 +156,7 @@ import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, withFullMa
 import { adoptSavedTheme, inboxServerSync } from './theme';
 import { adoptSavedDiffStyle } from './diffStyle';
 import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
+import { adoptSavedShapeStyle } from './shapeStyle';
 import { parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 import { ComposeDialog, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { DraftsPage } from './compose/DraftsPage';
@@ -1540,6 +1541,7 @@ function Inbox() {
       const next = await inboxApi.settings();
       adoptSavedTheme(next.theme);
       adoptSavedTextSize(next.text_size);
+      adoptSavedShapeStyle(next.shape_style);
       adoptSavedRows(next.rows, next.rows_rev, mark);
       adoptSavedDiffStyle(next.diff_style);
       adoptVoiceSettings(next.voice);

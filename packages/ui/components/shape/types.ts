@@ -8,9 +8,9 @@
  */
 import type { ShapeBoxSelection, ShapeReadAsset } from './boxSelect';
 import type { ComponentType, ReactNode } from 'react';
-import type { ShapeNote, ShapeNoteInput, ShapeRecord, ShapeVersion, ShapeViewId } from '@plannotator/core/shape';
+import type { ShapeBoardStyle, ShapeNote, ShapeNoteInput, ShapeRecord, ShapeVersion, ShapeViewId } from '@plannotator/core/shape';
 
-export type { ShapeBoard, ShapeNote, ShapeNoteInput, ShapeRecord, ShapeRef, ShapeVersion, ShapeViewId } from '@plannotator/core/shape';
+export type { ShapeBoard, ShapeBoardStyle, ShapeNote, ShapeNoteInput, ShapeRecord, ShapeRef, ShapeVersion, ShapeViewId } from '@plannotator/core/shape';
 
 /** The agent session that drew the shape, as the host knows it now. */
 export interface ShapeSessionStatus {
@@ -153,4 +153,11 @@ export interface ShapeSurfaceProps {
    * ShapeBoard). Absent: pointing and clicking only, as always.
    */
   boxSelect?: ShapeBoxOptions;
+  /**
+   * How the board is drawn (approval "shape-board-style-switch"; Plannotator passes the person's Settings → Board
+   * style): `sharp` is 1 px lines at any zoom, 2 px corners, quieter zones with a thin edge and filled arrowheads,
+   * applied by the frame's CSS to any board, old ones too (`SHAPE_SHARP_CSS` in ShapeDrawn); `rounded` is the look
+   * as it was. Absent: as it was, exactly (`rounded`, with no attribute on the board).
+   */
+  boardStyle?: ShapeBoardStyle;
 }

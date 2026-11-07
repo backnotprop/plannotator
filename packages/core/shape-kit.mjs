@@ -36,23 +36,37 @@ const paint = (tone, dash) => `class="${strokeClass[tone] ?? 'line'}${dash ? ' d
 export const box = (x, y, w, h, { tone = 'ink', dash = false, r = 8 } = {}) =>
   `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" ${paint(tone, dash).replace('fill="none"', 'style="fill:var(--paper)"')}/>`;
 
+// The board has two styles, Rounded and Sharp. Where they draw a line differently, a line has a twin for each:
+// data-shp-round shows on Rounded, data-shp-sharp (square elbows, a small filled head) on Sharp.
+const SHARP_TWIN = 'data-shp-sharp="" display="none"';
+const ROUND_TWIN = 'data-shp-round=""';
+
 /** Straight segments with rounded elbows. Points are [x, y]. */
 export function line(points, { tone = 'ink', dash = false, arrow = false, head = 12, r = 12 } = {}) {
-  let d = `M${points[0][0]} ${points[0][1]}`;
-  for (let i = 1; i < points.length - 1; i++) {
-    const [a, b, c] = [points[i - 1], points[i], points[i + 1]];
-    const k = Math.min(r, Math.hypot(b[0] - a[0], b[1] - a[1]) / 2, Math.hypot(c[0] - b[0], c[1] - b[1]) / 2);
-    const to = (p) => { const L = Math.hypot(p[0] - b[0], p[1] - b[1]); return `${b[0] + ((p[0] - b[0]) / L) * k} ${b[1] + ((p[1] - b[1]) / L) * k}`; };
-    d += `L${to(a)}Q${b[0]} ${b[1]} ${to(c)}`;
-  }
-  const end = points[points.length - 1];
-  d += `L${end[0]} ${end[1]}`;
-  let out = `<path d="${d}" ${paint(tone, dash)}/>`;
+  const path = (r) => {
+    let d = `M${points[0][0]} ${points[0][1]}`;
+    for (let i = 1; i < points.length - 1; i++) {
+      const [a, b, c] = [points[i - 1], points[i], points[i + 1]];
+      const k = Math.min(r, Math.hypot(b[0] - a[0], b[1] - a[1]) / 2, Math.hypot(c[0] - b[0], c[1] - b[1]) / 2);
+      if (k <= 0) { d += `L${b[0]} ${b[1]}`; continue; }
+      const to = (p) => { const L = Math.hypot(p[0] - b[0], p[1] - b[1]); return `${b[0] + ((p[0] - b[0]) / L) * k} ${b[1] + ((p[1] - b[1]) / L) * k}`; };
+      d += `L${to(a)}Q${b[0]} ${b[1]} ${to(c)}`;
+    }
+    const end = points[points.length - 1];
+    return `${d}L${end[0]} ${end[1]}`;
+  };
+  const round = path(r), square = path(0);
+  let out = round === square
+    ? `<path d="${round}" ${paint(tone, dash)}/>`
+    : `<path d="${round}" ${paint(tone, dash)} ${ROUND_TWIN}/><path d="${square}" ${paint(tone, dash)} ${SHARP_TWIN}/>`;
   if (arrow) {
+    const end = points[points.length - 1];
     const prev = points[points.length - 2];
     const a = Math.atan2(end[1] - prev[1], end[0] - prev[0]);
-    const wing = (t) => `${(end[0] + Math.cos(a + t) * head).toFixed(1)} ${(end[1] + Math.sin(a + t) * head).toFixed(1)}`;
-    out += `<path d="M${wing(2.55)}L${end[0]} ${end[1]}L${wing(-2.55)}" ${paint(tone)}/>`;
+    const wing = (t, l) => `${(end[0] + Math.cos(a + t) * l).toFixed(1)} ${(end[1] + Math.sin(a + t) * l).toFixed(1)}`;
+    out += `<path d="M${wing(2.55, head)}L${end[0]} ${end[1]}L${wing(-2.55, head)}" ${paint(tone)} ${ROUND_TWIN}/>`;
+    const small = head * 5 / 6;
+    out += `<path d="M${wing(2.76, small)}L${end[0]} ${end[1]}L${wing(-2.76, small)}Z" ${paint(tone).replace('class="', 'class="head ')} ${SHARP_TWIN}/>`;
   }
   return out;
 }
@@ -104,7 +118,7 @@ export const followCss = (paths) => `
 .pick:hover { background: var(--mark-soft); }
 .pick:has(input:checked) { background: var(--mark); border-color: var(--mark); color: var(--paper); }
 .pick:has(input:focus-visible) { outline: 3px solid var(--mark); outline-offset: 2px; }
-${paths.map((p) => `.board:has(.f-${p}:checked) .d:not(.on-${p}) { opacity: .12; }\n.board:has(.f-${p}:checked) .pick:not(.on-${p}):not(:has(input:checked)) { color: var(--grey); border-color: var(--rule); }\n.board:has(.f-${p}:checked) .on-${p} path.grey { stroke: var(--mark); }`).join('\n')}
+${paths.map((p) => `.board:has(.f-${p}:checked) .d:not(.on-${p}) { opacity: .12; }\n.board:has(.f-${p}:checked) .pick:not(.on-${p}):not(:has(input:checked)) { color: var(--grey); border-color: var(--rule); }\n.board:has(.f-${p}:checked) .on-${p} path.grey { stroke: var(--mark); }\n.board:has(.f-${p}:checked) .on-${p} path.head.grey { fill: var(--mark); }`).join('\n')}
 .board.reduce .d { transition: none; }
 @media (prefers-reduced-motion: reduce) { .d { transition: none; } }
 `;

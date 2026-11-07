@@ -36,6 +36,20 @@ export const SHAPE_VIEWS: readonly { id: ShapeViewId; label: string }[] = [
   { id: 'code', label: 'Code' },
 ];
 
+/**
+ * How every board is drawn (approval "shape-board-style-switch"): `sharp` has 1 px lines at any zoom and 2 px corners,
+ * `rounded` is the earlier look. The person picks it in the Inbox (config.json `shapeBoardStyle`); the renderer
+ * applies it to every board, old ones too, without rewriting them. `SHAPE_BOARD_STYLE_DEFAULT` is Plannotator's
+ * default; a host that passes no style to the board components gets `rounded`, as before.
+ */
+export type ShapeBoardStyle = 'rounded' | 'sharp';
+export const SHAPE_BOARD_STYLES: readonly ShapeBoardStyle[] = ['rounded', 'sharp'];
+export const SHAPE_BOARD_STYLE_DEFAULT: ShapeBoardStyle = 'sharp';
+
+export function isShapeBoardStyle(value: unknown): value is ShapeBoardStyle {
+  return value === 'rounded' || value === 'sharp';
+}
+
 export function shapeViewLabel(view: ShapeViewId): string {
   return SHAPE_VIEWS.find((v) => v.id === view)?.label ?? view;
 }

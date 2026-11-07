@@ -2751,6 +2751,16 @@ These did not change: `@codemirror/autocomplete` `^6.20.3`, `lang-javascript` `^
 - **`parseMarkdownToBlocks(text, { keepBlankLines: true })`**: a paragraph that follows 2+ blank lines carries `Block.blankLinesBefore` (capped at 10), and `BlockRenderer` gives it a top margin of that many lines. Absent: nothing is set and no style is emitted, so plan, review and annotate blocks and DOM are unchanged.
 - **`SoftLineBreaksContext`** (exported from `components/InlineMarkdown`; `RenderedMarkdown`'s `softLineBreaks` provides it): inside it a bare newline is a `<br>`. Together the two show text as typed (single breaks and blank lines), as Slack does. Workspaces can wrap a Viewer holding the person's own text in the provider and pass the option; a document or an agent's text should not.
 
+## Shape: the board style, Rounded or Sharp (unreleased; additive; needs core's `ShapeBoardStyle`)
+
+Approval `shape-board-style-switch`. Plannotator lets the person pick how every board is drawn; a host that passes nothing keeps today's board exactly (no attribute on `.board`, no rule applies).
+
+- **`boardStyle?: 'rounded' | 'sharp'`** (type `ShapeBoardStyle` from `@plannotator/core/shape`, re-exported from `components/shape`) on `ShapeSurface`, `ShapeDrawn`, `ShapeGrid` and `ShapeThumb`. Given, `ShapeDrawn` writes `data-shp-style="<style>"` on the shadow root's `.board` and draws the board afresh when it changes (so `onBoard` fires again, as for a wide/tall swap). `ShapeDiagram` takes none.
+- **`SHAPE_SHARP_CSS`** (new export, appended to `SHAPE_FRAME_CSS`; every rule is under `.board[data-shp-style="sharp"]`): 1 px non-scaling lines, butt caps and miter joins on the stroke classes; 3-unit corners (`--shp-r`) on kit boxes, zone rects (`rect` filled with a `-soft` colour by `style` or `fill`, not one of the stroke classes), `.obj` rects and pick pills, 2 px on `.tag` chips and `.mk` rings; `--shp-hair` (box borders) and `--shp-wire` (connectors, filled heads); quieter `--*-soft`; a 1 px zone edge `--shp-zone-<blue|amber|green|plum|alert>`; no `.obj` shadow; a thin `[data-shp-edge]` under `darkContrast`'s `.dark-hold`.
+- **`sharpContrast.ts`** (new, pure): `shapeSharpFixes(colors)` returns the line colours that fall short in the palette on screen (border 3:1, connector 5:1, zone edge 3:1, capped at what the ink reaches). `ShapeDrawn` reads the colours with `readThemeTokenValues` on a Sharp board and sets only those on `.board`, after the other colour passes, again when `<html>`'s class, style or `data-theme` changes.
+- **The kit's twins** (`@plannotator/core/shape-kit.mjs` `line`): an elbowed line and an arrowhead come twice, `data-shp-round` (today's paths, unchanged) and `data-shp-sharp` with `display="none"` (square elbows, a filled `.head`). With no style or Rounded, only today's show; Sharp swaps them. A host's own CSS that styles `path.line` reaches both.
+- New class and attributes a host should not reuse on its own drawings: `.head`, `data-shp-style`, `data-shp-round`, `data-shp-sharp`.
+
 ## Shape and links: a slot for a file's action (unreleased; additive)
 
 Optional seams, so a host can put its own control beside a file a board or a message names. A host that passes none of them sees no change. Plannotator's Inbox uses them for "Open in".

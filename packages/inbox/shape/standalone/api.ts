@@ -5,7 +5,7 @@
  * so a page left open across a restart gets a 409 instead of writing blind).
  */
 import { SERVER_SESSION_MISMATCH_CODE } from '@plannotator/core/server-session';
-import type { ShapeNote } from '@plannotator/core/shape';
+import type { ShapeBoardStyle, ShapeNote } from '@plannotator/core/shape';
 import type { InboxShapeSummary, ShapeLoadedWire } from '../../api';
 
 export type ShapeSummaryWire = InboxShapeSummary;
@@ -18,6 +18,8 @@ export interface ShapeServerInfoWire {
   on: boolean;
   /** Pages open on the server (an older server leaves it out). */
   pages?: number;
+  /** How every board is drawn (config.json `shapeBoardStyle`; an older server leaves it out). */
+  board_style?: ShapeBoardStyle;
 }
 
 /** A refused request: the status and the server's words. */
