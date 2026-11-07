@@ -253,3 +253,17 @@ test("a link's row and header speak only for its own PR's landing, not for a mer
   expect(view(plain).pullUrl).toBe('https://github.com/o/app/pull/999');
 });
 
+
+test('a walkthrough says Walkthrough, not a branch, from its start (Curating) and once its review is in', () => {
+  const started = { kind: 'walkthrough', changes: null, branch: null, base: null, ask: 'custom', host: 'claude-code', project_id: 'p', at: '' };
+  const curating = row({ reviewed: false, reason: 'curating', review: null, started } as unknown as Partial<InboxReviewRow>);
+  expect(reviewRowLine(curating).lead).toBe('Walkthrough');
+  expect(reviewContextLine(curating, 'charges')).toBe('charges · Walkthrough');
+  expect(reviewViewOf(curating, { messages: [], subject: null }, { projectName: null, onWholeThread: () => {}, onOpenStack: () => {} }).asked).toBe('New review · Walkthrough');
+  // Its review in: the source names a branch, but the row still says what it is; there is no verdict to wait on.
+  const ready = row({ started, review: review({ walkthrough: true }) } as unknown as Partial<InboxReviewRow>);
+  expect(reviewRowLine(ready)).toMatchObject({ lead: 'Walkthrough', status: 'Ready' });
+  expect(reviewContextLine(ready, 'charges')).toBe('charges · Walkthrough');
+  // A walkthrough an agent sent unasked (no New review start) reads the same.
+  expect(reviewRowLine(row({ review: review({ walkthrough: true }) })).lead).toBe('Walkthrough');
+});

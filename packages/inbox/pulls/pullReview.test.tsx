@@ -981,6 +981,40 @@ test.skipIf(!hasDom)('the box on local changes: no PR choice needed, a session i
   expect(posted).toEqual([]);
 });
 
+test.skipIf(!hasDom)('the box as a Walkthrough: no changes or PR to pick, words required, and they go first with the walkthrough skill', async () => {
+  const started: StartThreadInput[] = [];
+  // A project with no changes: a walkthrough is of the code as it is, so that never holds it back.
+  changedFiles = { prj_9: 0, prj_2: 0 };
+  mount(<ComposeDialog request={{ review: {} }} phone={false} current={{ id: 'prj_9', root: '/home/dana/other', name: 'other' }} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  await settle();
+  await act(async () => el('[data-review-choice="walkthrough"]').click());
+  await settle();
+  expect(document.querySelector('[data-review-choice="branch"]')).toBeNull();
+  expect(document.querySelector('[data-review-pick]')).toBeNull();
+  expect(el('[data-compose-to]').getAttribute('data-compose-to')).toBe('ses_other');
+  // No words yet: Start is off, and a press says what is missing and sends nothing.
+  expect(el('[data-compose-send]').classList.contains('ib-dis')).toBe(true);
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  expect(started).toEqual([]);
+  expect(document.querySelector('[data-review-box]')!.textContent).toContain('say what to walk you through first');
+  const words = el<HTMLTextAreaElement>('[data-compose-text] textarea');
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(words, 'How does a failed charge get retried?');
+    words.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+  expect(el('[data-compose-send]').classList.contains('ib-dis')).toBe(false);
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  expect(started).toHaveLength(1);
+  expect(started[0]!.review).toEqual({ kind: 'walkthrough' });
+  expect(started[0]!.body.startsWith('How does a failed charge get retried?')).toBe(true);
+  expect(started[0]!.body).toContain('/review-walkthrough');
+  expect(started[0]!.thread_name_auto).toBe(true);
+  expect(posted).toEqual([]);
+});
+
 test.skipIf(!hasDom)('the box on local changes: To filled in on a project with no changes moves to an agent with some; with none anywhere, Start stays off and sends nothing', async () => {
   const started: StartThreadInput[] = [];
   changedFiles = { prj_9: 0, prj_2: 3 };

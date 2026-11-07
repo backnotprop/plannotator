@@ -2163,6 +2163,9 @@ test('New review, a walkthrough: the words are the ask, its thread is named from
   // Open: the code once, not side by side, and no verdict to give.
   await card.locator('[data-review-start]').click();
   await expect(page.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0);
+  // The top bar keeps its diff controls but no Split / Unified button: nothing is marked as changed.
+  await expect(page.locator('[data-review-message] [data-diff-controls]')).toBeVisible();
+  await expect(page.locator('[data-review-message] [data-diff-layout-toggle]')).toHaveCount(0);
   await expect(page.locator('[data-diff-style-switch]')).toHaveCount(0);
   await expect(page.getByText('No chapter files in the current diff')).toHaveCount(0);
   await expect(page.locator('[data-section-no-code]')).toHaveText('No code in this chapter.');

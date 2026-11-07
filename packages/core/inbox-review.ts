@@ -37,11 +37,11 @@ export interface InboxReviewSkill {
   afterReview?: true;
 }
 
-/** Shared tail of every skill: what to do when there is nothing to review, and the fallback for a session that started before the switch. */
 /** A walkthrough's agent text (approval item 6): submit_guide's field while Code review is on, and its skill below. */
 export const INBOX_WALKTHROUGH_FIELD_DESCRIPTION =
   'true sends a walkthrough of the code as it is now, not a change: no `patch`, each `diffs` entry names `file` and `lines` ("10-40, 80-95", or none for the whole file), and the Inbox reads them from the project. It takes no verdict.';
 
+/** Shared tail of every skill: what to do when there is nothing to review, and the fallback for a session that started before the switch. */
 const NO_CODE = 'If you changed no code for this thread, say so in one sentence instead.';
 const OLD_SESSION = 'If submit_guide takes no `review` field in this session, send it without one.';
 
