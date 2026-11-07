@@ -2182,7 +2182,7 @@ export class InboxStore {
     const connectionOf = (session: string): InboxDeliveryConnection | null | undefined => {
       if (!presence) return undefined;
       const connection = presence.connection(session);
-      return connection ? { busy: connection.busy, send_now: connection.send_now } : null;
+      return connection ? { busy: connection.busy, send_now: connection.send_now, ...(connection.held ? { held: true } : {}) } : null;
     };
     const askerLive = (session: string): boolean => (presence ? presence.askerLive(session) : true);
     const uncertain = (session: string | null, itemId: string): boolean => !!session && presence?.uncertain?.(session, itemId) === true;
