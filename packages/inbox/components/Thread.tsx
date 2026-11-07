@@ -144,6 +144,7 @@ import { ReactionTray, justReacted, reactionSpeech } from './ReactionTray';
 import { threadChipName } from '../threadChip';
 import { OpenQuestionsButton, type OpenQuestionsDecide } from './OpenQuestions';
 import { fitWholeFootRowForms, footRowOpenQuestionsForm, footRowTokens, laidOutChildren, pillHitsButtons, type OpenQuestionsLabelForm } from '../footFit';
+import { useTextUnderFoot } from '../footLine';
 import { clearPhoneHead, fitPhoneHead } from '../headFit';
 import { useInboxTextSize } from '../textSize';
 import { openQuestionsShown, placeOf, reaskItemLabel, skipToggledAnswer, threadOpenActions, threadOpenQuestions, type OpenQuestion, type OpenQuestionPlace } from '../openQuestions';
@@ -1821,6 +1822,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     if (el) el.readOnly = sending;
   }, [sending, box.open]);
   const bodyRef = useRef<HTMLDivElement>(null);
+  // The bottom bar's line shows only while thread text scrolls under it (approval "inbox-reaction-tray", B1; footLine.ts).
+  const textUnder = useTextUnderFoot(bodyRef, thread.thread_id);
   const sendRef = useRef<HTMLButtonElement>(null);
   const guardRef = useRef<HTMLDivElement>(null);
 
@@ -6405,7 +6408,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           />
         </div>
       )}
-      <div className="ib-pfoot" hidden={artifactsOn}>
+      <div className="ib-pfoot" hidden={artifactsOn} data-under={textUnder ? '' : undefined}>
         {/* One status region, always mounted, so a screen reader announces the note when it appears. */}
         <div role="status" id={noteId} data-asker-note="">
           {/* With the pill there, the open box's pill says who gets the reply (and that it ended): no note above it. */}
@@ -6702,32 +6705,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 )}
                 <ShortcutHint scope={inboxThreadShortcuts} action="reply" className="ib-kbd ib-btn-kbd" />
               </button>
-              {/* The thread's open questions (approval "inbox-thread-open-questions"): a list that takes the person to each
-                  card, with Re-ask at its foot (owner, 2026-10-23: the open questions again, in one message per session). */}
-              {openQShown && (
-                <OpenQuestionsButton
-                  questions={openQ.questions}
-                  actions={openActions}
-                  reask={
-                    reaskShown
-                      ? { label: reaskItemLabel(reaskOpen), tooltip: reaskTooltip(reaskList), busy: reasking, onReask: () => void sendReask() }
-                      : null
-                  }
-                  decide={decide}
-                  triggerRef={reaskRef}
-                  phone={phone}
-                  measure={measureOpenQuestions}
-                  onPick={(q) => jumpTo({ kind: 'question', messageId: q.messageId, key: q.key })}
-                  onPickAction={(a) => jumpTo({ kind: 'action', messageId: a.messageId, key: a.key })}
-                  onSetSkipped={setSkippedFromList}
-                  rowForm={rowFit && footStatusShown ? footRowOpenQuestionsForm(rowFit.level, rowFit.max) : null}
-                  openRequest={openItemsRequest}
-                  keyShortcuts={openItemsKeys}
-                  keyHint={<ShortcutHint scope={inboxThreadShortcuts} action="openItems" className="ib-kbd ib-btn-kbd" />}
-                  // The foot's skip chip, moved into the list (approval "reply-bar-pairs"; "inbox-explicit-skip").
-                  skip={waiting && unanswered.length > 0 ? { count: keepOpen ? unanswered.length : skipIds.size, keepOpen, onToggle: toggleKeepOpen } : null}
-                />
-              )}
               {/* 👍 Looks good beside Reply: sent to the agent after the Undo window; hidden while a question waits.
                   Before the checklist: the actions first, the status after. */}
               {/* With its tray of reactions (approval "inbox-reaction-tray"): one click still marks it Looks good. */}
@@ -6762,6 +6739,35 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     Archive
                   </button>
                 </div>
+              )}
+              {/* What is open goes on the right (approval "inbox-reaction-tray", B1): the open questions, then the checklist,
+                  after the actions (Reply, the reaction, an ended session's two). inbox.css starts the right group at
+                  whichever of the two comes first; the order here is the tab order too. */}
+              {/* The thread's open questions (approval "inbox-thread-open-questions"): a list that takes the person to each
+                  card, with Re-ask at its foot (owner, 2026-10-23: the open questions again, in one message per session). */}
+              {openQShown && (
+                <OpenQuestionsButton
+                  questions={openQ.questions}
+                  actions={openActions}
+                  reask={
+                    reaskShown
+                      ? { label: reaskItemLabel(reaskOpen), tooltip: reaskTooltip(reaskList), busy: reasking, onReask: () => void sendReask() }
+                      : null
+                  }
+                  decide={decide}
+                  triggerRef={reaskRef}
+                  phone={phone}
+                  measure={measureOpenQuestions}
+                  onPick={(q) => jumpTo({ kind: 'question', messageId: q.messageId, key: q.key })}
+                  onPickAction={(a) => jumpTo({ kind: 'action', messageId: a.messageId, key: a.key })}
+                  onSetSkipped={setSkippedFromList}
+                  rowForm={rowFit && footStatusShown ? footRowOpenQuestionsForm(rowFit.level, rowFit.max) : null}
+                  openRequest={openItemsRequest}
+                  keyShortcuts={openItemsKeys}
+                  keyHint={<ShortcutHint scope={inboxThreadShortcuts} action="openItems" className="ib-kbd ib-btn-kbd" />}
+                  // The foot's skip chip, moved into the list (approval "reply-bar-pairs"; "inbox-explicit-skip").
+                  skip={waiting && unanswered.length > 0 ? { count: keepOpen ? unanswered.length : skipIds.size, keepOpen, onToggle: toggleKeepOpen } : null}
+                />
               )}
               {/* The agents' steps (approval "inbox-thread-steps", A1): beside the open questions, by their list's rules. */}
               {stepLists.length > 0 && (
