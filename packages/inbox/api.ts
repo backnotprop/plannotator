@@ -8,7 +8,7 @@
 import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
 import type { SystemDrawingAnswer, SystemProjectsAnswer, SystemPullsAnswer } from '@plannotator/core/inbox-system';
-import type { SystemModel } from '@plannotator/system';
+import type { GateResult, SystemModel } from '@plannotator/system';
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
@@ -1282,7 +1282,7 @@ export const inboxApi = {
   /** System (on only): the projects with their drawing's state, one project's drawing, and the open PRs that change it. */
   systemProjects: () => get<SystemProjectsAnswer>(inboxUrl('/system/projects')),
   systemDrawing: (project: string) => get<SystemDrawingAnswer<SystemModel>>(inboxUrl(`/system/drawing?project=${encodeURIComponent(project)}`)),
-  systemPulls: (project: string) => get<SystemPullsAnswer>(inboxUrl(`/system/pulls?project=${encodeURIComponent(project)}`)),
+  systemPulls: (project: string) => get<SystemPullsAnswer<Pick<GateResult, 'touched'>>>(inboxUrl(`/system/pulls?project=${encodeURIComponent(project)}`)),
   /** System's setup dialog (System on only): the projects found on this Mac with a git remote, and one project's save. */
   systemSetup: () => get<SystemSetupAnswer>(inboxUrl('/system/setup')),
   saveSystemSetup: (input: SystemSetupInput) => post<{ setup: SystemSetup }>(inboxUrl('/system/setup'), { ...input }),

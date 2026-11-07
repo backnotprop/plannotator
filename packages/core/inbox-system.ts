@@ -35,16 +35,20 @@ export interface SystemDrawingAnswer<Model = unknown> {
 }
 
 /** One open PR of the project's repo whose changed files touch drawn parts. */
-export interface SystemPullTouch {
+export interface SystemPullTouch<Change = unknown> {
   /** The PR's key in the pulls list (`InboxPull.key`). */
   key: string;
+  /** The PR's number (`InboxPull.number`): the drawing tags its parts "PR <number>". */
+  number: number;
   /** The drawn parts it changes, in the drawing's order. */
   parts: { id: string; name: string }[];
+  /** What the drawing marks for it at rest: the `touched` of the package's gate result for its files (`GateResult` from @plannotator/system). */
+  change: Change;
 }
 
 /** `GET /api/inbox/system/pulls?project=<id>`: the open PRs that change the drawing; `unread` PRs whose files could not be read. */
-export interface SystemPullsAnswer {
-  pulls: SystemPullTouch[];
+export interface SystemPullsAnswer<Change = unknown> {
+  pulls: SystemPullTouch<Change>[];
   unread: number;
 }
 

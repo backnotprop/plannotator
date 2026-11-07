@@ -2,15 +2,17 @@
  * A project's drawing in Reviews (approval "system-inbox", screens 4a and 4b): the pane that says "Pick a pull
  * request" shows the project's drawing (`SystemView` from `@plannotator/system/react`), and under it "Open PRs that
  * change this": each open PR of the project's repo whose changed files touch a drawn part (the package's gate, on
- * the server), with the parts it changes. A row opens today's PR pane. "Open full window" gives the same drawing the
- * whole window, the PRs beside it; "Reviews", top left, or Escape goes back. A phone draws it in the list's place.
+ * the server), with the parts it changes. The drawing marks those parts amber at rest, each tagged with its PRs
+ * (`touches`, "PR 2850"). A row opens today's PR pane. "Open full window" gives the same drawing the whole window,
+ * the PRs beside it; "‹ Reviews", at the start of the drawing's bar (`leading`), or Escape goes back. A phone draws
+ * it in the list's place.
  *
  * The drawing's single-key shortcuts stay off (`keys={false}`, approval "system-navigation"). No shortcut of its own:
  * Escape backs out one layer (App.tsx: the full window, then the pane), as everywhere in the window.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SystemView, type Reading } from '@plannotator/system/react';
-import type { SystemModel } from '@plannotator/system';
+import type { GateResult, SystemModel, Touch } from '@plannotator/system';
 import type { SystemProjectRow, SystemPullsAnswer } from '@plannotator/core/inbox-system';
 import type { InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { plural } from '@plannotator/core/inbox-format';
@@ -43,6 +45,16 @@ export interface SystemPaneProps {
 }
 
 type Drawing = { project: SystemProjectRow; model: SystemModel | null };
+/** The server's answer: each PR's touched parts and lines only (what the drawing marks), not the gate's whole result. */
+type PullTouches = SystemPullsAnswer<Pick<GateResult, 'touched'>>;
+
+/** The drawing's marks at rest: one per open PR that touches it, labelled "PR <number>" with the parts and lines it touches. */
+export function touchesOf(answer: PullTouches | null): Touch[] {
+  return (answer?.pulls ?? []).map((touch) => ({
+    label: `PR ${touch.number}`,
+    change: { touched: touch.change.touched, wake: false, why: [], ignored: [] },
+  }));
+}
 
 /** "Desktop app", "Desktop app and The Inbox", "A, B and 2 more". */
 export function partsWords(names: readonly string[]): string {
@@ -55,7 +67,12 @@ export function SystemPane({ project, sheet, full, phone, pulls, onSheet, onFull
   const read = api ?? { drawing: inboxApi.systemDrawing, pulls: inboxApi.systemPulls };
   const [drawing, setDrawing] = useState<Drawing | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [touches, setTouches] = useState<SystemPullsAnswer | null>(null);
+  // The last answer, with the project it is for: kept while the next read is out, so the marks (and the drawing's
+  // zoom) don't drop each time the Reviews list is read again; another project's answer is not this one's.
+  const [answer, setAnswer] = useState<{ project: string; touches: PullTouches } | null>(null);
+  const touches = answer?.project === project ? answer.touches : null;
+  // One array per answer: the drawing keeps its sheet while the same PRs mark it.
+  const marks = useMemo(() => touchesOf(touches), [touches]);
   const [reading, setReading] = useState<Reading>(lastReading);
   useEffect(() => {
     let live = true;
@@ -63,7 +80,7 @@ export function SystemPane({ project, sheet, full, phone, pulls, onSheet, onFull
     setError(null);
     read
       .drawing(project)
-      .then((answer) => live && setDrawing({ project: answer.project, model: answer.model }))
+      .then((got) => live && setDrawing({ project: got.project, model: got.model }))
       .catch((cause: unknown) => live && setError(cause instanceof Error ? cause.message : 'The drawing could not be read.'));
     return () => {
       live = false;
@@ -74,11 +91,11 @@ export function SystemPane({ project, sheet, full, phone, pulls, onSheet, onFull
   const listedAt = pulls?.fetched_at ?? null;
   useEffect(() => {
     let live = true;
-    setTouches(null);
     read
       .pulls(project)
-      .then((answer) => live && setTouches(answer))
-      .catch(() => live && setTouches({ pulls: [], unread: 0 }));
+      .then((next) => live && setAnswer({ project, touches: next }))
+      // A failed read keeps this project's last answer; with none yet, no PR changes it.
+      .catch(() => live && setAnswer((last) => (last?.project === project ? last : { project, touches: { pulls: [], unread: 0 } })));
     return () => {
       live = false;
     };
@@ -93,6 +110,8 @@ export function SystemPane({ project, sheet, full, phone, pulls, onSheet, onFull
   const back = useRef<HTMLButtonElement>(null);
   const pane = useRef<HTMLElement>(null);
   const wasFull = useRef(full);
+  // The drawing on screen: its bar holds "‹ Reviews" (else a strip of its own above the note does).
+  const viewShown = !error && !!drawing?.model;
   useEffect(() => {
     if (full) back.current?.focus({ preventScroll: true });
     else if (wasFull.current && !phone) {
@@ -102,7 +121,7 @@ export function SystemPane({ project, sheet, full, phone, pulls, onSheet, onFull
       (way ?? el)?.focus({ preventScroll: true });
     }
     wasFull.current = full;
-  }, [full, phone]);
+  }, [full, phone, viewShown]);
   // The full window covers the page: what it covers can't take the focus either (Tab stays in the drawing and its PRs).
   useEffect(() => {
     if (!full || phone || !pane.current) return;
@@ -141,6 +160,8 @@ export function SystemPane({ project, sheet, full, phone, pulls, onSheet, onFull
         keys={false}
         onNavigate={onSheet}
         onReading={pickReading}
+        touches={marks}
+        leading={full || phone ? backButton : undefined}
         onOpenFull={layout === 'pane' && !phone ? () => onFull(true) : undefined}
         // In the pane, the close button and Escape on the landing sheet close the drawing; a full window's Escape
         // goes back to the pane (App.tsx), and its way back is "Reviews".
@@ -148,17 +169,19 @@ export function SystemPane({ project, sheet, full, phone, pulls, onSheet, onFull
       />
     );
   };
+  // "‹ Reviews": the full window's way back to the pane, a phone's back to the list. In the drawing's bar when it shows.
+  const backButton = (
+    <button ref={back} type="button" className="ib-sysfull-back" onClick={() => (phone ? onClose() : onFull(false))} data-system-back="">
+      <Icon name="back" size={15} />
+      Reviews
+    </button>
+  );
   const rows = drawing?.model && drawing.project.repo ? <SystemPulls touches={touches} pulls={pulls} onOpenStack={onOpenStack} /> : null;
 
   if (full || phone) {
     return (
       <section ref={pane} tabIndex={-1} className={`ib-sysfull${phone ? ' ib-sysfull-phone' : ''}`} aria-label={name ? `System: ${name}` : 'System'} data-system-full={phone ? 'phone' : ''} data-system-pane={project}>
-        <div className="ib-sysfull-top">
-          <button ref={back} type="button" className="ib-sysfull-back" onClick={() => (phone ? onClose() : onFull(false))} data-system-back="">
-            <Icon name="back" size={15} />
-            Reviews
-          </button>
-        </div>
+        {!viewShown && <div className="ib-sysfull-top">{backButton}</div>}
         <div className="ib-sysfull-body">
           <div className="ib-sysfull-draw">{body(phone ? 'pane' : 'window')}</div>
           {rows && <aside className="ib-sysfull-aside">{rows}</aside>}
@@ -193,7 +216,7 @@ export function inertAround(el: HTMLElement): () => void {
 }
 
 /** "Open PRs that change this": one row per open PR whose files touch the drawing; a row opens the PR's pane. */
-function SystemPulls({ touches, pulls, onOpenStack }: { touches: SystemPullsAnswer | null; pulls: InboxPullsAnswer | null; onOpenStack: (key: string) => void }) {
+function SystemPulls({ touches, pulls, onOpenStack }: { touches: PullTouches | null; pulls: InboxPullsAnswer | null; onOpenStack: (key: string) => void }) {
   const groups = useMemo(() => (pulls ? pullGroups(pulls, null) : null), [pulls]);
   const rows = (touches?.pulls ?? []).flatMap((touch) => {
     const item = groups ? findStack(groups, touch.key) : null;

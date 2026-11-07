@@ -6,7 +6,8 @@
  * part (or of another repo, or closed), a PR whose patch fails taking the others down, and anything read while
  * System or Code review is off, for a tailnet guest, for another site’s page, or for a project the Inbox lacks; a
  * PR’s patch read again at the same head; the switch: shown with Code review off, flipped by a tailnet guest, a
- * malformed value saved, or every window not told.
+ * malformed value saved, or every window not told; the pulls answer carrying more of the gate's result than the
+ * touched parts the drawing marks, or no PR number to tag them with.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -121,10 +122,15 @@ describe('the open PRs that change the drawing', () => {
       return patches[key]!;
     });
     expect(answer.unread).toBe(0);
-    expect(answer.pulls).toEqual([
+    expect(answer.pulls.map(({ key, parts }) => ({ key, parts }))).toEqual([
       { key: 'github.com/acme/app#3', parts: [{ id: 'app', name: 'The app' }, { id: 'api', name: 'API' }] },
       { key: 'github.com/acme/app#1', parts: [{ id: 'api', name: 'API' }] },
     ]);
+    // Each carries what the drawing marks for it at rest (the gate's touched parts), and its number for the tag.
+    expect(answer.pulls.map((touch) => [...touch.change.touched.parts].sort())).toEqual([['api', 'app'], ['api']]);
+    expect(answer.pulls.map((touch) => touch.number)).toEqual([3, 1]);
+    // Only that: not the gate's reasons or ignored paths, sent again on every read.
+    expect(answer.pulls.map((touch) => Object.keys(touch.change))).toEqual([['touched'], ['touched']]);
     // The merged PR and the other repo's are never read.
     expect(asked.sort()).toEqual(['github.com/acme/app#1', 'github.com/acme/app#2', 'github.com/acme/app#3']);
   });
@@ -150,7 +156,8 @@ describe('the open PRs that change the drawing', () => {
       if (key.endsWith('#2')) throw new Error('too large');
       return patch('src/api/x.ts');
     });
-    expect(answer).toEqual({ pulls: [{ key: 'github.com/acme/app#1', parts: [{ id: 'api', name: 'API' }] }], unread: 1 });
+    expect(answer.unread).toBe(1);
+    expect(answer.pulls.map(({ key, parts }) => ({ key, parts }))).toEqual([{ key: 'github.com/acme/app#1', parts: [{ id: 'api', name: 'API' }] }]);
   });
 });
 
