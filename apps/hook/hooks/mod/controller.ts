@@ -9,7 +9,7 @@
 
 import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeEnd, type BridgeHandle } from './bridge'
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
-import type { Host, HttpResult } from './host'
+import { PromptDropped, type Host, type HttpResult } from './host'
 import { InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder } from './inbox'
 import { inboxCommandBriefing, type InboxToolInfo } from './inbox-contract'
 import {
@@ -343,6 +343,8 @@ export class PlannotatorMod {
   private classicPlanReview = false
   private timer: { cancel: () => void } | null = null
   private delivering: Promise<void> = Promise.resolve()
+  /** Decisions Claude Code dropped (`PromptDropped`), waiting for the next prompt, turn start or dispose to try again. */
+  private inputWaiters: (() => void)[] = []
   private sequence = 0
   private disposed = false
   /** Launch ids this instance settled or dropped: kept out of the store even if another process re-adds them. */
@@ -582,6 +584,7 @@ export class PlannotatorMod {
     this.timer?.cancel()
     this.timer = null
     this.inbox?.dispose()
+    this.inputMoved()
     this.host.status(undefined)
     // Hand the launches this instance watched to any other process on the session at once.
     for (const launch of this.launches.values()) {
@@ -1505,8 +1508,9 @@ export class PlannotatorMod {
       if (launch.kind === 'plan' && (await this.lacksModPlan(launch))) {
         await this.fallBackToClassicPlans(launch)
         this.delivering = this.delivering
-          .then(() => this.host.submit(`Plannotator: ${launch.subject} — not opened.\n\n${CLASSIC_PLAN_RETRY_TEXT}`))
-          .catch(() => undefined)
+          // Dropped (Claude Code holds plugins' input): tried again after the next input, as a decision is.
+          .then(() => this.submitDecision(launch.subject, `Plannotator: ${launch.subject} — not opened.\n\n${CLASSIC_PLAN_RETRY_TEXT}`, { quiet: true }))
+          .then(() => undefined, () => undefined)
         await this.delivering
         return
       }
@@ -1656,6 +1660,7 @@ export class PlannotatorMod {
       ...(launch.target !== undefined ? { target: launch.target } : {}),
     })
     // Several decisions are delivered one by one, in the order they arrived.
+    let delivered = true
     this.delivering = this.delivering.then(async () => {
       if (delivery.action === 'log') {
         this.host.log(delivery.text)
@@ -1664,13 +1669,13 @@ export class PlannotatorMod {
       }
       if (delivery.overflow) await this.host.writeFile(delivery.overflow.path, delivery.overflow.text)
       this.host.toast(`${launch.subject} — feedback received`)
-      await this.host.submit(delivery.text).catch((error: unknown) => {
-        this.host.log(`Could not send the ${launch.subject} decision to Claude (${error instanceof Error ? error.message : String(error)}).`)
-      })
+      delivered = await this.submitDecision(launch.subject, delivery.text)
     }).catch(() => undefined)
     // `$.prompt.submit` resolves once Claude was idle and took the turn: a long
     // turn means a long wait, which this process may not survive (quit, crash).
     await this.delivering
+    // Ended while a dropped decision waited for input: the claim stays undelivered, and a restore reports it.
+    if (!delivered) return
     await this.markDelivered(launch.dir)
     this.awaitingIdle.delete(launch.id)
     await this.persist()
@@ -1678,6 +1683,36 @@ export class PlannotatorMod {
     // The launch's copies of the plan/message and feedback are not kept once
     // delivered (feedback.md stays: Claude reads it after this turn).
     await this.host.run(cleanupArgv(launch.dir), { timeoutMs: 5_000 }).catch(() => undefined)
+  }
+
+  /**
+   * A decision's turn. One Claude Code dropped (`PromptDropped`: the person
+   * stopped the session and nobody has typed since) is tried again after the
+   * next prompt or turn start, so it goes in at the idle after the person's
+   * input. False: the instance was disposed while it waited, nothing went in.
+   * `quiet`: a failure is not logged (the classic-plan retry never logged one).
+   */
+  private async submitDecision(subject: string, text: string, options: { quiet?: boolean } = {}): Promise<boolean> {
+    for (;;) {
+      try {
+        await this.host.submit(text)
+        return true
+      } catch (error) {
+        if (!(error instanceof PromptDropped)) {
+          if (!options.quiet) this.host.log(`Could not send the ${subject} decision to Claude (${error instanceof Error ? error.message : String(error)}).`)
+          return true
+        }
+        if (this.disposed) return false
+        this.host.debug(`decision for ${subject} was not taken (${error.reason}); it waits for the next input`)
+        await new Promise<void>((resolve) => this.inputWaiters.push(resolve))
+        if (this.disposed) return false
+      }
+    }
+  }
+
+  /** Input moved (a prompt entered, a turn started) or the instance ended: dropped decisions try again. */
+  private inputMoved(): void {
+    for (const resolve of this.inputWaiters.splice(0)) resolve()
   }
 
   private async forget(launch: LiveLaunch): Promise<void> {
@@ -1741,6 +1776,7 @@ export class PlannotatorMod {
     const wasOurs = !!turnId && this.turns.ownsTurn(turnId)
     this.turns.onPromptEntered(prompt)
     if (!fromUs) this.inbox?.onForeignPrompt(prompt)
+    if (!fromUs) this.inputMoved()
     if (wasOurs && turnId && this.turns.isTakenOver(turnId)) this.host.debug(`ask turn ${turnId} taken over`)
     // The person typed here: decisions should arrive in this conversation.
     if (originKind === 'composer') void this.touchLaunches()
@@ -1779,6 +1815,8 @@ export class PlannotatorMod {
     // session busy after the main turn ended, and the Inbox's replies waited.
     if (agentId) return
     this.host.debug(`turn.start ${turnId}: ${JSON.stringify(text.slice(0, 160))}`)
+    this.inbox?.onMainTurnStart()
+    this.inputMoved()
     const drop = this.turns.onTurnStart(turnId, text)
     if (drop) await this.host.abortTurn(drop).catch(() => undefined)
     this.pushBridgeStatus()

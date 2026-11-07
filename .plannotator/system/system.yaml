@@ -342,7 +342,7 @@ parts:
       apps/hook/hooks/mod/register.ts: the mod, on by default
   iplugins:
     in: inbox
-    name: Pi, OpenCode, DeepSeek Harness
+    name: Pi, OpenCode, DeepSeek Harness, Cline
     kind: agent plugins
     role: The same tool and reply wake through each agent's own plugin.
     sub: inbox tool off by default
@@ -351,12 +351,13 @@ parts:
       apps/pi-extension/inbox.ts: Pi
       apps/opencode-plugin/inbox.ts: OpenCode 2
       apps/dsh-plugin/inbox.ts: DeepSeek Harness
+      apps/cline-plugin/inbox.ts: Cline
       packages/shared/config.ts: inboxTool default off for these
   imcp:
     in: inbox
     name: MCP-only agents
     kind: agents
-    role: Gemini CLI, Cursor, Windsurf, Amp, Cline, Kiro and the Claude app call the Inbox's tools; they read replies when they next look.
+    role: Gemini CLI, Cursor, Windsurf, Amp, Kiro, the Claude app and Cline without its plugin call the Inbox's tools; they read replies when they next look.
     marks: [ cursor ]
     code:
       packages/server/inbox-agents.ts: the agents it connects
