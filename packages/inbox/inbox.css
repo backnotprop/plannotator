@@ -7632,6 +7632,36 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 .ib-lk-tfirst .ib-nrow .ib-l2-lead .ib-from { flex: 1 1 auto; min-width: 0; }
 .ib-lk-tfirst .ib-nrow .ib-l2-lead .ib-p { font-size: var(--ib-fs-13, 13px); font-weight: 500; line-height: 17px; color: var(--muted-foreground); }
 .ib-lk-tfirst .ib-m1-lead { min-height: 0; }
+/* A notes-list look (the owner's picture, 2026-11-07; approval "inbox-customize-rows", addendum), all off by default,
+   so none of these applies until its class is on the list column. */
+/* Time position "Under the preview" (.ib-lk-tbelow): the time on a line of its own under the preview, at the left, in
+   the muted text; the row's end (pin, badge, words, count or status mark) at its right, so the preview keeps its
+   width. Three-line rows here, phone rows below; a wide row keeps its columns. */
+.ib-nrow .ib-l4 { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; margin-top: 4px; font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-nrow .ib-l4 > .ib-t { flex: none; margin-right: auto; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); line-height: 17px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ib-nrow .ib-l4 > :is(.ib-badge, .ib-c, .ib-pinmark, .ib-stm, .ib-zwhen) { flex: none; }
+.ib-nrow .ib-l4 .ib-c { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; }
+.ib-nrow .ib-l4 .ib-c:has(.ib-b-wait) { display: inline-flex; align-items: center; }
+.ib-m4 { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; min-height: 22px; margin-top: 2px; }
+.ib-m4 > .ib-t { flex: none; margin-right: auto; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); line-height: 17px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ib-m4 > :is(.ib-badge, .ib-c, .ib-pinmark, .ib-stm, .ib-zwhen) { flex: none; }
+.ib-m4 .ib-c { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
+/* Unrendered rows' estimates with the time's line (17 px and its 4 px gap; a phone's 22 px and 2 px). */
+.ib-lk-tbelow .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 105px; }
+.ib-lk-tbelow.ib-lk-pv2 .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 123px; }
+.ib-lk-tbelow .ib-lbody > .ib-group > .ib-mrow { contain-intrinsic-size: auto none auto 90px; }
+.ib-lk-tbelow.ib-lk-pv2 .ib-lbody > .ib-group > .ib-mrow { contain-intrinsic-size: auto none auto 109px; }
+/* Dividers (.ib-lk-div): a hairline in the theme's border colour between two rows, inset to the row's text on both
+   sides. A separator, never a row's outline: it is the next row's background image at its top edge, under the hover
+   and selection pill (3 px inside the row), so it moves nothing and the pill never touches it. */
+.ib-lk-div .ib-rw + .ib-rw > :is(.ib-nrow, .ib-row), .ib-lk-div :is(.ib-mrow + .ib-mrow, .ib-mrow + [hidden] + .ib-mrow) { background-image: linear-gradient(var(--border), var(--border)); background-repeat: no-repeat; background-position: center top; background-size: calc(100% - 24px) 1px; }
+.ib-lk-div :is(.ib-mrow + .ib-mrow, .ib-mrow + [hidden] + .ib-mrow) { background-size: calc(100% - 32px) 1px; }
+/* Show → Status mark (RowStatus.tsx): one 16 px mark in place of the open counts. Waiting on you in the warning hue,
+   done in the success hue, each mixed a little toward the text so a pale theme hue still reads on the page. */
+.ib-stm { display: inline-flex; align-items: center; flex: none; line-height: 0; }
+.ib-stm[data-status="waiting"] { color: color-mix(in oklab, var(--warning) 85%, var(--foreground)); }
+.ib-stm[data-status="done"] { color: color-mix(in oklab, var(--success) 85%, var(--foreground)); }
+.ib-nrow .ib-l3 > .ib-stm, .ib-m3 > .ib-stm { flex: none; }
 
 /* Voice dictation: the microphone in the composer (components/VoiceMic.tsx). The button takes the paperclip's size in
    each host. The status shares the toolbar's row, so starting to listen moves nothing. */

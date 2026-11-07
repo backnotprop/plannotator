@@ -1,0 +1,281 @@
+/**
+ * The notes-list look on the list's rows (the owner's picture, 2026-11-07; approval "inbox-customize-rows", addendum):
+ * Time position "Under the preview" (`timeBelow`), Dividers (`dividers`) and Status mark (`statusMark`), from the Rows
+ * look (config.json `inboxRows`, listLook.ts). All off by default.
+ * What this catches: any of the three changing a row while off (nobody's look may change); the time left on line 1, or
+ * the row's end left beside the preview, with the time under it; a wide row losing its columns to it; the status mark
+ * saying the wrong state (waiting, done, nothing) for a row's section; a row with open questions or action items whose
+ * count is lost (the approved record: they always show) or whose Stopped or Holds up triangle goes; the options
+ * fighting the other options' rivals or surviving a preset; a divider drawn as a border or outline on a row.
+ *
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
+ */
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { inboxRowsCanonical, type InboxListRow, type InboxListSection, type InboxRowsOption } from '@plannotator/core/inbox-types';
+
+const hasDom = typeof document !== 'undefined';
+const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
+const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
+const { ROWS_PRESETS } = (hasDom ? await import('./components/RowsSettings') : {}) as typeof import('./components/RowsSettings');
+const { rowStatus, rowStatusWords } = await import('./components/RowStatus');
+const { LIST_LOOK_DEFAULT, adoptSavedRows, lookFromRows, lookWithChange, resetListLookForTests, rowsFromLook } = await import('./listLook');
+const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
+
+function row(id: string, extra: Partial<InboxListRow> = {}): InboxListRow {
+  return {
+    thread_id: id,
+    project_id: 'prj_billing',
+    subject: `Subject ${id}`,
+    author: { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null },
+    created_at: '2026-10-10T10:00:00.000Z',
+    last_at: '2026-10-10T10:00:00.000Z',
+    last_author: 'agent',
+    message_count: 1,
+    resolved_at: null,
+    questions: { open: 0, picked: 0, stopped: false, holds_up: [], prompt: null },
+    waiting_on_person: false,
+    project: { id: 'prj_billing', name: 'billing-svc' },
+    thread_name: null,
+    section: 'quiet',
+    unread: false,
+    answered_not_sent: false,
+    waiting_since: null,
+    unseen: 0,
+    sent: null,
+    guide: false,
+    ...extra,
+  };
+}
+
+const STOP = row('msg_stop', {
+  thread_name: 'Postgres 17 migration',
+  section: 'stopped',
+  unread: true,
+  waiting_on_person: true,
+  questions: { open: 1, picked: 0, stopped: true, holds_up: [], prompt: null },
+  waits: [{ message_id: 'msg_stop', key: 'q-1', position: 0, prompt: 'Rotate it?', stopped: 'the staging password expired', holds_up: [] }],
+});
+const HOLD = row('msg_hold', {
+  thread_name: 'Fix login redirect',
+  section: 'holding',
+  unread: true,
+  waiting_on_person: true,
+  questions: { open: 1, picked: 0, stopped: false, holds_up: ['the install page'], prompt: null },
+  waits: [{ message_id: 'msg_hold', key: 'q-1', position: 0, prompt: 'Which page?', stopped: null, holds_up: ['the install page'] }],
+});
+const WAIT = row('msg_wait', {
+  thread_name: 'Checkout redesign',
+  section: 'waiting',
+  unread: true,
+  waiting_on_person: true,
+  questions: { open: 3, picked: 0, stopped: false, holds_up: [], prompt: null, actions: 1 },
+});
+const NEWS = row('msg_new', { section: 'new', unread: true, unseen: 1 });
+const SENT = row('msg_sent', { section: 'sent', last_author: 'person', sent: { at: '2026-10-10T10:00:00.000Z', checked_at: null } });
+const QUIET = row('msg_quiet', { thread_name: 'Tests pass on main' });
+const SECTIONS: InboxListSection[] = [
+  { id: 'stopped', label: 'Stopped on you', threads: [STOP] },
+  { id: 'holding', label: 'Holding up work', threads: [HOLD] },
+  { id: 'waiting', label: 'Waiting on you', threads: [WAIT] },
+  { id: 'new', label: 'New since you looked', threads: [NEWS] },
+  { id: 'sent', label: 'Sent', threads: [SENT] },
+  { id: 'quiet', label: 'Quiet', threads: [QUIET] },
+];
+
+const realFetch = globalThis.fetch;
+let root: Root | null = null;
+let host: HTMLElement | null = null;
+
+beforeEach(() => {
+  // Quiet starts closed (listGroups.ts): open it, so its done row draws.
+  const stored = new Map<string, string>([['plannotator-inbox-list-groups', 'quiet:open']]);
+  setStorageBackend({ getItem: (k) => stored.get(k) ?? null, setItem: (k, v) => void stored.set(k, v), removeItem: (k) => void stored.delete(k) });
+  globalThis.fetch = (async (_url: unknown, init?: { body?: string }) =>
+    new Response(JSON.stringify({ rows: (JSON.parse(init?.body ?? '{}') as { rows: unknown[] }).rows }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch;
+  resetListLookForTests();
+});
+
+afterEach(() => {
+  globalThis.fetch = realFetch;
+  resetStorageBackend();
+  if (!hasDom) return;
+  unmount();
+});
+
+function unmount() {
+  act(() => root?.unmount());
+  host?.remove();
+  root = null;
+  host = null;
+}
+
+/** The person's saved look: the defaults (smaller names) plus `on`. */
+function look(...on: InboxRowsOption[]) {
+  act(() => adoptSavedRows(['smallNames', ...on], 1));
+}
+
+function mount(shape: 'wide' | 'narrow' | 'phone'): HTMLElement {
+  host = document.createElement('div');
+  host.className = 'pn-inbox';
+  host.setAttribute('data-pn-tooltip-root', '');
+  document.body.append(host);
+  root = createRoot(host);
+  act(() =>
+    root!.render(
+      <SidebarProvider>
+        <InboxList title="Inbox" path={null} sections={SECTIONS} filtered={false} narrow={shape === 'narrow'} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} phone={shape === 'phone'} />
+      </SidebarProvider>,
+    ),
+  );
+  return host;
+}
+
+const rowOf = (el: HTMLElement, id: string) => el.querySelector<HTMLElement>(`[data-thread-id="${id}"]`)!;
+const SHAPES = ['wide', 'narrow', 'phone'] as const;
+/** Line 1, line 3 and the time's own line of a three-line or phone row. */
+const lines = (r: HTMLElement) => ({ first: r.querySelector(':scope > .ib-l1, :scope > .ib-m1')!, third: r.querySelector(':scope > .ib-l3, :scope > .ib-m3'), foot: r.querySelector(':scope > .ib-l4, :scope > .ib-m4') });
+
+describe('the status mark says waiting, done or nothing', () => {
+  test('waiting while a question or action item is open, in every section that has one; done in Quiet or archived; nothing in New and Sent', () => {
+    expect([STOP, HOLD, WAIT, NEWS, SENT, QUIET].map((r) => rowStatus(r))).toEqual(['waiting', 'waiting', 'waiting', null, null, 'done']);
+    // Archived: done, even with a question still open (the row says "Archived", nothing waits on the person now).
+    expect(rowStatus(row('a', { resolved_at: '2026-10-10T11:00:00.000Z', questions: { open: 1, picked: 0, stopped: false, holds_up: [], prompt: null } }))).toBe('done');
+    // Back from the archive with a question open: waiting again.
+    expect(rowStatus(row('b', { resolved_at: '2026-10-10T11:00:00.000Z', back_from_archive: true, section: 'waiting', questions: { open: 1, picked: 0, stopped: false, holds_up: [], prompt: null } }))).toBe('waiting');
+  });
+
+  test('its words keep the count: one question, several, action items', () => {
+    expect(rowStatusWords(STOP)).toBe('Waiting on you: 1 question');
+    expect(rowStatusWords(WAIT)).toBe('Waiting on you: 2 questions, 1 action item');
+    expect(rowStatusWords(row('c', { section: 'waiting', questions: { open: 1, picked: 0, stopped: false, holds_up: [], prompt: null, actions: 1 } }))).toBe('Waiting on you: 1 action item');
+    expect(rowStatusWords(QUIET)).toBe('Done');
+    expect(rowStatusWords(NEWS)).toBeNull();
+  });
+});
+
+describe('the options in the look', () => {
+  test('all off by default, and a round trip through core keeps each', () => {
+    for (const key of ['timeBelow', 'dividers', 'statusMark'] as const) {
+      expect(LIST_LOOK_DEFAULT[key]).toBe(false);
+      expect(rowsFromLook(lookFromRows(['smallNames', key]))).toEqual(['smallNames', key]);
+    }
+  });
+
+  test('no rival of theirs: the other rivals settle without touching them, and they never turn another option off', () => {
+    const notes = lookWithChange(LIST_LOOK_DEFAULT, { timeBelow: true, dividers: true, statusMark: true, roomy: true, previewTwo: true, titleFirst: true, hideAgents: true, hideProject: true });
+    for (const change of [{ compact: true }, { hidePreview: true }, { unreadDot: true }, { smallNames: false }, { marksThreads: true, markDot: true }] as const) {
+      const next = lookWithChange(notes, change);
+      expect([next.timeBelow, next.dividers, next.statusMark]).toEqual([true, true, true]);
+    }
+    // Turning them on keeps every other option as it was.
+    expect(lookWithChange(notes, { timeBelow: false, dividers: false, statusMark: false })).toEqual({ ...notes, timeBelow: false, dividers: false, statusMark: false });
+    expect(inboxRowsCanonical(['compact', 'timeBelow', 'dividers', 'statusMark'])).toEqual(['compact', 'timeBelow', 'dividers', 'statusMark']);
+  });
+
+  test.if(hasDom)('no preset turns one on (presets come later), so picking a preset turns them off', () => {
+    for (const preset of ROWS_PRESETS) expect([preset.look.timeBelow, preset.look.dividers, preset.look.statusMark]).toEqual([false, false, false]);
+  });
+});
+
+describe.if(hasDom)('the notes-list look on the rows', () => {
+  test('off by default: every shape draws as before (time on line 1, counts beside the preview, no mark, no divider class)', () => {
+    for (const shape of SHAPES) {
+      const el = mount(shape);
+      const column = el.querySelector('.ib-listcol')!;
+      for (const cls of ['ib-lk-tbelow', 'ib-lk-div', 'ib-lk-stm']) expect(column.classList.contains(cls)).toBe(false);
+      expect(el.querySelectorAll('.ib-stm, .ib-l4, .ib-m4').length).toBe(0);
+      // The open counts as today: `?N` and the action pill.
+      expect(rowOf(el, 'msg_wait').querySelector('.ib-qn')!.getAttribute('data-open-count')).toBe('2');
+      expect(rowOf(el, 'msg_wait').querySelector('[data-action-count="1"]')).not.toBeNull();
+      if (shape !== 'wide') {
+        const { first, third } = lines(rowOf(el, 'msg_wait'));
+        expect(first.querySelector('.ib-t')).not.toBeNull();
+        expect(third!.querySelector('.ib-qn')).not.toBeNull();
+      }
+      unmount();
+    }
+  });
+
+  test('Time under the preview: the time leaves line 1 for its own line, first, with the row\'s end at its right; the preview line keeps only the preview', () => {
+    for (const first of [[], ['titleFirst']] as InboxRowsOption[][]) {
+      look('timeBelow', ...first);
+      for (const shape of ['narrow', 'phone'] as const) {
+        const el = mount(shape);
+        expect(el.querySelector('.ib-listcol')!.classList.contains('ib-lk-tbelow')).toBe(true);
+        for (const r of [STOP, WAIT, QUIET]) {
+          const { first: l1, third, foot } = lines(rowOf(el, r.thread_id));
+          expect(l1.querySelector('.ib-t')).toBeNull();
+          expect(foot!.firstElementChild!.classList.contains('ib-t')).toBe(true);
+          expect(third!.querySelector('.ib-badge, .ib-c')).toBeNull();
+        }
+        // The Stopped triangle and the counts moved to the time's line, nothing lost.
+        expect(lines(rowOf(el, 'msg_stop')).foot!.querySelector('[data-row-badge="stopped"]')).not.toBeNull();
+        expect(lines(rowOf(el, 'msg_wait')).foot!.querySelector('.ib-qn')).not.toBeNull();
+        unmount();
+      }
+    }
+  });
+
+  test('Time under the preview leaves a wide row\'s columns alone', () => {
+    look('timeBelow');
+    const el = mount('wide');
+    const wide = rowOf(el, 'msg_wait');
+    expect(wide.querySelector(':scope > .ib-t')).not.toBeNull();
+    expect(wide.querySelector(':scope > .ib-cq .ib-qn')).not.toBeNull();
+    expect(el.querySelectorAll('.ib-l4, .ib-m4').length).toBe(0);
+  });
+
+  test('Status mark on every shape: one mark in place of the counts, waiting / done / nothing by section', () => {
+    look('statusMark');
+    for (const shape of SHAPES) {
+      const el = mount(shape);
+      const mark = (id: string) => rowOf(el, id).querySelector('.ib-stm')?.getAttribute('data-status') ?? null;
+      expect(['msg_stop', 'msg_hold', 'msg_wait', 'msg_new', 'msg_sent', 'msg_quiet'].map(mark)).toEqual(['waiting', 'waiting', 'waiting', null, null, 'done']);
+      // In place of the counts: no `?N`, no action pill, on any row.
+      expect(el.querySelectorAll('.ib-qn, [data-action-count]').length).toBe(0);
+      if (shape === 'wide') expect(rowOf(el, 'msg_wait').querySelector(':scope > .ib-cq .ib-stm')).not.toBeNull();
+      else expect(lines(rowOf(el, 'msg_wait')).third!.querySelector('.ib-stm')).not.toBeNull();
+      unmount();
+    }
+  });
+
+  test('Status mark: questions and action items still show, the count in its name; Stopped and Holds up keep their triangles', () => {
+    look('statusMark', 'timeBelow');
+    for (const shape of SHAPES) {
+      const el = mount(shape);
+      expect(rowOf(el, 'msg_wait').querySelector('.ib-stm .ib-sr')!.textContent!.trim()).toBe('Waiting on you: 2 questions, 1 action item');
+      expect(rowOf(el, 'msg_wait').querySelector('.ib-stm')!.getAttribute('data-status-count')).toBe('3');
+      expect(rowOf(el, 'msg_stop').querySelector('[data-row-badge="stopped"]')).not.toBeNull();
+      expect(rowOf(el, 'msg_hold').querySelector('[data-row-badge="holds"]')!.textContent).toContain('1');
+      // The mark is never hidden from a screen reader: it is the count.
+      expect(rowOf(el, 'msg_wait').querySelector('.ib-stm')!.closest('[aria-hidden="true"]')).toBeNull();
+      // With the time under the preview it sits on the time's line, after the time, and not beside the preview.
+      if (shape !== 'wide') {
+        const { third, foot } = lines(rowOf(el, 'msg_wait'));
+        expect(third?.querySelector('.ib-stm') ?? null).toBeNull();
+        const stm = foot!.querySelector('.ib-stm')!;
+        expect(foot!.querySelector('.ib-t')!.compareDocumentPosition(stm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      }
+      unmount();
+    }
+  });
+
+  test('Dividers: only a class on the list column, and its rules draw a line between rows, never a border or outline on one', () => {
+    look('dividers');
+    for (const shape of SHAPES) {
+      const el = mount(shape);
+      expect(el.querySelector('.ib-listcol')!.classList.contains('ib-lk-div')).toBe(true);
+      unmount();
+    }
+    const css = readFileSync(new URL('./inbox.css', import.meta.url), 'utf8');
+    const rules = [...css.matchAll(/([^{}]*\.ib-lk-div[^{}]*)\{([^}]*)\}/g)];
+    expect(rules.length).toBeGreaterThan(0);
+    for (const [, , body] of rules) {
+      expect(body).not.toMatch(/\b(border|outline|box-shadow)\s*:/);
+      expect(body).toMatch(/background-(image|size)/);
+    }
+  });
+});

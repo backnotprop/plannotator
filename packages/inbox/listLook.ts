@@ -60,6 +60,20 @@ export interface ListLook {
   repoLogo: boolean;
   /** Settings → Rows only: Show → GitHub pictures, the owner's picture for a project on GitHub. Only with project marks. */
   githubPictures: boolean;
+  /**
+   * Settings → Rows only: Look → Time position "Under the preview": on three-line and phone rows the time leaves line 1
+   * for a line of its own under the preview, at the left, with the row's end (pin, badge, words, counts) at its right.
+   * A wide row keeps its columns.
+   */
+  timeBelow: boolean;
+  /** Settings → Rows only: Show → Dividers, a hairline (the theme's border) between rows. Never an outline on a row. */
+  dividers: boolean;
+  /**
+   * Settings → Rows only: Show → Status mark, one mark at the row's end (`StatusMark`, RowStatus.tsx): waiting on you
+   * (an open question or action item) or done (Quiet), in place of the action pill and `?N`, whose words are its name
+   * and tooltip. Stopped and Holds up keep their triangles.
+   */
+  statusMark: boolean;
 }
 
 export type ListLookKey = keyof ListLook;
@@ -85,6 +99,9 @@ export const LIST_LOOK_OFF: ListLook = {
   markDot: false,
   repoLogo: false,
   githubPictures: false,
+  timeBelow: false,
+  dividers: false,
+  statusMark: false,
 };
 
 /** The look for someone who chose none (core `INBOX_ROWS_DEFAULT`): smaller thread names on, every other option off. */
@@ -367,7 +384,7 @@ function adopt(rows: unknown, rev: unknown): void {
 
 /** The list column's classes for the look: none when every option is off. */
 export function listLookClasses(look: ListLook): string {
-  return `${look.highlight ? ' ib-lk-pill' : ''}${look.compact ? ' ib-lk-compact' : ''}${look.hideAgents ? ' ib-lk-noagents' : ''}${look.smallNames ? ' ib-lk-small' : ''}${look.roomy ? ' ib-lk-roomy' : ''}${look.unreadDot ? ' ib-lk-dot' : ''}${look.previewTwo ? ' ib-lk-pv2' : ''}${look.titleFirst ? ' ib-lk-tfirst' : ''}`;
+  return `${look.highlight ? ' ib-lk-pill' : ''}${look.compact ? ' ib-lk-compact' : ''}${look.hideAgents ? ' ib-lk-noagents' : ''}${look.smallNames ? ' ib-lk-small' : ''}${look.roomy ? ' ib-lk-roomy' : ''}${look.unreadDot ? ' ib-lk-dot' : ''}${look.previewTwo ? ' ib-lk-pv2' : ''}${look.titleFirst ? ' ib-lk-tfirst' : ''}${look.timeBelow ? ' ib-lk-tbelow' : ''}${look.dividers ? ' ib-lk-div' : ''}${look.statusMark ? ' ib-lk-stm' : ''}`;
 }
 
 function subscribe(listener: () => void): () => void {

@@ -7,7 +7,9 @@
  * lede (Minimal, Balanced = the defaults, Detailed) as starting points, then beside the narrow picture Look (density,
  * first line, thread names, unread, subject preview, time) and Show (agent icons, project). Letter marks (approval
  * "inbox-letter-marks", 2026-11-07, all off by default): Look → Mark style, and Show → Letter marks with its two
- * picture switches, in the same cards; Detailed turns them on (Both, Avatar, no pictures).
+ * picture switches, in the same cards; Detailed turns them on (Both, Avatar, no pictures). A notes-list look (the
+ * owner's picture, 2026-11-07; approval "inbox-customize-rows", addendum), all off by default and in no preset: Look →
+ * Time position (Top right / Under the preview), and Show → Dividers and Status mark.
  *
  * Every control is the list's look (listLook.ts): a change shows at once and is saved for the person (config.json `inboxRows`), and every list in every window
  * takes it (`useListLook` listens). The pictures follow the person's mode, light or dark.
@@ -84,13 +86,19 @@ function sampleGroups(): { id: InboxSectionId; label: string; rows: InboxListRow
           questions: { open: 2, picked: 0, stopped: false, holds_up: [], prompt: null },
           last_at: ago(4),
         }),
+      ],
+    },
+    {
+      // A thread with nothing left to do, so Show → Status mark has a "done" to draw.
+      id: 'quiet',
+      label: 'Quiet',
+      rows: [
         sample({
           thread_id: 'rows-sample-plain',
           subject: 'Tests pass on main after the retry fix',
           author: { kind: 'agent', host: 'pi', session: 'ses_p', name: null },
-          section: 'waiting',
-          unread: true,
-          questions: { open: 1, picked: 0, stopped: false, holds_up: [], prompt: null },
+          section: 'quiet',
+          waiting_on_person: false,
           last_at: ago(52),
         }),
       ],
@@ -131,6 +139,8 @@ function PreviewList({ look, shape, className }: { look: ListLook; shape: 'narro
                   noPreview={look.hidePreview}
                   relative={look.relativeTime}
                   titleFirst={look.titleFirst}
+                  timeBelow={look.timeBelow}
+                  statusMark={look.statusMark}
                 />
               )),
             )}
@@ -201,11 +211,36 @@ const SHOW: readonly { key: ListLookKey; label: string; desc?: string }[] = [
   { key: 'hideProject', label: 'Project', desc: 'With its machine, when you link machines' },
 ];
 
+/** The notes-list look's switches (all off by default): on is shown, as each one's own `ListLook` key. */
+const NOTES_LOOK: readonly { key: 'dividers' | 'statusMark'; label: string; desc: string }[] = [
+  { key: 'dividers', label: 'Dividers', desc: 'A thin line between rows' },
+  { key: 'statusMark', label: 'Status mark', desc: 'Waiting on you or done, in place of the counts' },
+];
+
 /** A project's picture instead of its letters. Turning one on turns project marks on (listLook.ts `lookWithChange`). */
 const PICTURES: readonly { key: 'repoLogo' | 'githubPictures'; label: string; desc: string }[] = [
   { key: 'repoLogo', label: 'Logo from the repo', desc: "A favicon or logo found in the project's folder. Nothing leaves this computer." },
   { key: 'githubPictures', label: 'GitHub pictures', desc: "A project on GitHub shows its owner's picture. Asks GitHub once a week." },
 ];
+
+/** A Show switch that is on while its option is (the notes-list look's, the picture switches), with its words for a screen reader. */
+function OnSwitch({ id, label, desc, on, onToggle }: { id: ListLookKey; label: string; desc: string; on: boolean; onToggle: () => void }) {
+  return (
+    <div className="ib-prow" data-rows-control={id}>
+      <span className="ib-txt">
+        <span className="ib-l" id={`ib-rows-${id}`}>
+          {label}
+        </span>
+        <span className="ib-desc" id={`ib-rows-${id}-desc`}>
+          {desc}
+        </span>
+      </span>
+      <span className="ib-ctl">
+        <button type="button" role="switch" className="ib-sw" aria-checked={on} aria-labelledby={`ib-rows-${id}`} aria-describedby={`ib-rows-${id}-desc`} onClick={onToggle} />
+      </span>
+    </div>
+  );
+}
 
 export type RowsPreset = 'minimal' | 'balanced' | 'detailed';
 
@@ -336,6 +371,17 @@ export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: 
             ]}
             onChange={(next) => set({ relativeTime: next === 'relative' })}
           />
+          {/* Where the time sits on three-line and phone rows; a full-width row keeps its columns. */}
+          <LookRow
+            id="timeplace"
+            label="Time position"
+            value={look.timeBelow ? 'below' : 'top'}
+            choices={[
+              { id: 'top', label: 'Top right' },
+              { id: 'below', label: 'Under the preview' },
+            ]}
+            onChange={(next) => set({ timeBelow: next === 'below' })}
+          />
         </div>
       </section>
       <section className="ib-sgroup" aria-labelledby="ib-g-rows-show">
@@ -366,6 +412,9 @@ export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: 
               </span>
             </div>
           ))}
+          {NOTES_LOOK.map((item) => (
+            <OnSwitch key={item.key} id={item.key} label={item.label} desc={item.desc} on={look[item.key]} onToggle={() => set({ [item.key]: !look[item.key] })} />
+          ))}
           <LookRow<MarksWhat>
             id="marks"
             label="Letter marks"
@@ -380,27 +429,7 @@ export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: 
             onChange={(what) => set(marksWhatLook(what))}
           />
           {PICTURES.map((item) => (
-            <div className="ib-prow" key={item.key} data-rows-control={item.key}>
-              <span className="ib-txt">
-                <span className="ib-l" id={`ib-rows-${item.key}`}>
-                  {item.label}
-                </span>
-                <span className="ib-desc" id={`ib-rows-${item.key}-desc`}>
-                  {item.desc}
-                </span>
-              </span>
-              <span className="ib-ctl">
-                <button
-                  type="button"
-                  role="switch"
-                  className="ib-sw"
-                  aria-checked={look[item.key]}
-                  aria-labelledby={`ib-rows-${item.key}`}
-                  aria-describedby={`ib-rows-${item.key}-desc`}
-                  onClick={() => set({ [item.key]: !look[item.key] })}
-                />
-              </span>
-            </div>
+            <OnSwitch key={item.key} id={item.key} label={item.label} desc={item.desc} on={look[item.key]} onToggle={() => set({ [item.key]: !look[item.key] })} />
           ))}
         </div>
       </section>
