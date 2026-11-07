@@ -111,7 +111,7 @@ export function useShowMe({
         setTurns(model.conversation?.turns ?? []);
         setRunning(model.running);
         setCanAsk(model.can_ask);
-        setAgentRead(model.agent.name);
+        setAgentRead(model.agent?.name ?? null);
       },
       () => {},
     );
