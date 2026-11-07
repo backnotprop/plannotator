@@ -5,7 +5,7 @@
  * `data-under` while some of the thread is below the view; inbox.css draws the line and its faint
  * shadow from that.
  */
-import { useEffect, useState, type RefObject } from 'react';
+import { useLayoutEffect, useState, type RefObject } from 'react';
 
 /** Under a pixel left below the view counts as the end (a zoomed page scrolls by fractions). */
 export const UNDER_FOOT_PX = 1;
@@ -22,7 +22,8 @@ export function textUnderFoot(body: Pick<HTMLElement, 'scrollTop' | 'scrollHeigh
  */
 export function useTextUnderFoot(bodyRef: RefObject<HTMLElement | null>, key: unknown): boolean {
   const [under, setUnder] = useState(false);
-  useEffect(() => {
+  // Before paint: the pane is not keyed per thread, so another thread never shows the last one's line for a frame.
+  useLayoutEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
     const check = () => setUnder(textUnderFoot(body));

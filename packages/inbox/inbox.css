@@ -8618,10 +8618,11 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-noproj .ib-row:has(.ib-rended) { --ib-words-track: max-content; }
 .ib-rended + .ib-c { margin-left: 8px; }
 
-/* Send to another session and Archive beside Reply when the session ended; a phone gives them their own line. */
+/* Send to another session and Archive beside Reply when the session ended; a phone gives them their own line, last
+   in the row's markup too (Thread.tsx), so the tab order is what is on screen. */
 .ib-footended { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  .pn-inbox .ib-footended { flex: 1 0 100%; order: 1; }
+  .pn-inbox .ib-footended { flex: 1 0 100%; }
 }
 
 /* Show me in the code review (approval "shape-in-code-review", mock ac2; packages/inbox/review-drawing). The box, the

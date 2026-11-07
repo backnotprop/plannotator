@@ -65,7 +65,8 @@ const threadOf = (...messages: InboxMessageWire[]): InboxThread => ({
 
 /** The thread body's scroll sizes, as the test sets them. */
 const view = { scrollHeight: 600, clientHeight: 600, scrollTop: 0 };
-const observers: { fire: () => void }[] = [];
+/** Each stand-in ResizeObserver and what it observes: a size change reaches only the observers of that element. */
+const observers: { fire: () => void; observed: Set<Element> }[] = [];
 const restore: (() => void)[] = [];
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -111,13 +112,19 @@ beforeEach(() => {
     writable: true,
     value: class {
       live = true;
+      observed = new Set<Element>();
       constructor(callback: () => void) {
-        observers.push({ fire: () => this.live && callback() });
+        observers.push({ fire: () => this.live && callback(), observed: this.observed });
       }
-      observe() {}
-      unobserve() {}
+      observe(el: Element) {
+        this.observed.add(el);
+      }
+      unobserve(el: Element) {
+        this.observed.delete(el);
+      }
       disconnect() {
         this.live = false;
+        this.observed.clear();
       }
     },
   });
@@ -177,10 +184,12 @@ function scrollTo(top: number) {
   act(() => void body().dispatchEvent(new Event('scroll')));
 }
 
-/** The body or something in it changed size (no scroll): what the ResizeObserver would report. */
-function resized() {
-  act(() => observers.forEach((o) => o.fire()));
+/** `el` changed size (no scroll): the observers watching it hear of it, and no other. */
+function resized(el: Element) {
+  act(() => observers.filter((o) => o.observed.has(el)).forEach((o) => o.fire()));
 }
+/** What a message landing grows: the body's own box keeps its size, only its content (a child) gets taller. */
+const content = () => body().lastElementChild!;
 
 describe.skipIf(!hasDom)('the bar in the thread pane', () => {
   test('a short thread that all fits: no line', async () => {
@@ -208,13 +217,13 @@ describe.skipIf(!hasDom)('the bar in the thread pane', () => {
     expect(lineShown()).toBe(false);
     // A message lands below the end.
     view.scrollHeight = 3400;
-    resized();
+    resized(content());
     expect(lineShown()).toBe(true);
     scrollTo(2800);
     expect(lineShown()).toBe(false);
-    // The reply box opens: the thread's view gets shorter.
+    // The reply box opens: the thread's view (the body's own box) gets shorter.
     view.clientHeight = 400;
-    resized();
+    resized(body());
     expect(lineShown()).toBe(true);
   });
 
@@ -222,7 +231,18 @@ describe.skipIf(!hasDom)('the bar in the thread pane', () => {
     await render(threadOf(message(ROOT, 1, 'Starting.')));
     expect(lineShown()).toBe(false);
     view.scrollHeight = 900;
-    resized();
+    resized(content());
+    expect(lineShown()).toBe(true);
+  });
+
+  test('a block added to the thread after it opened is watched too: its growing brings the line', async () => {
+    await render(threadOf(message(ROOT, 1, 'Starting.')));
+    const late = document.createElement('div');
+    act(() => void body().appendChild(late));
+    await settle();
+    expect(lineShown()).toBe(false);
+    view.scrollHeight = 900;
+    resized(late);
     expect(lineShown()).toBe(true);
   });
 });

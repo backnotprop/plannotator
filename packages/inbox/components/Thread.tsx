@@ -4866,6 +4866,28 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       pick(q.messageId, q.key, skipToggledAnswer(base));
     }
   };
+  // Send to another session and Archive, when the session that asked has ended (the foot's row, below).
+  const endedActions = showAskerNote ? (
+    <div className="ib-footended" data-foot-ended="">
+      {anyOtherLive && (
+        <button
+          type="button"
+          className="ib-btn"
+          data-ended-send=""
+          onClick={() => {
+            openBox();
+            setRcptOpen(true);
+          }}
+        >
+          <Icon name="forward" size={15} />
+          Send to another session
+        </button>
+      )}
+      <button type="button" className="ib-btn" data-ended-archive="" onClick={() => void resolve(true)}>
+        Archive
+      </button>
+    </div>
+  ) : null;
   // Shown whenever a question is listed (open, or answered in the draft) or an action item waits, or Re-ask or "Decide
   // these" is offered (they live in the list, so never out of reach). Every question answered in the draft: the icon
   // alone, "? ⌄" (approval "reply-bar-pairs": the draft counts those), so the list and its Unskip stay in reach.
@@ -6718,28 +6740,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   onAck={(next, reaction, was) => onAck!(ackTarget!.id, next, agentName(ackTarget!.author), reaction, was)}
                 />
               )}
-              {/* The session ended (the note above says so): what the person can do about it, with Reply. */}
-              {showAskerNote && (
-                <div className="ib-footended" data-foot-ended="">
-                  {anyOtherLive && (
-                    <button
-                      type="button"
-                      className="ib-btn"
-                      data-ended-send=""
-                      onClick={() => {
-                        openBox();
-                        setRcptOpen(true);
-                      }}
-                    >
-                      <Icon name="forward" size={15} />
-                      Send to another session
-                    </button>
-                  )}
-                  <button type="button" className="ib-btn" data-ended-archive="" onClick={() => void resolve(true)}>
-                    Archive
-                  </button>
-                </div>
-              )}
+              {/* The session ended (the note above says so): what the person can do about it, with Reply. A phone draws
+                  the pair on a line of its own under the row, so there it comes after the checklist (the tab order is
+                  what is on screen). */}
+              {!phone && endedActions}
               {/* What is open goes on the right (approval "inbox-reaction-tray", B1): the open questions, then the checklist,
                   after the actions (Reply, the reaction, an ended session's two). inbox.css starts the right group at
                   whichever of the two comes first; the order here is the tab order too. */}
@@ -6782,6 +6786,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   answeredSince={stepsAnswered}
                 />
               )}
+              {phone && endedActions}
               {/* The in-thread New message button is off (approval "inbox-acknowledge", 2026-10-15): Reply and compose cover it.
                   Its route, door row and code stay; turn SHOW_NEW_MESSAGE_BUTTON on to bring it back. */}
               {SHOW_NEW_MESSAGE_BUTTON && !archived && <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />}
