@@ -3,6 +3,8 @@
  * ExitPlanMode and the `classic.PermissionRequest` answer. Pure.
  */
 
+import { isAbsolutePath } from './paths'
+
 /** Claude Code's plan-mode tool. */
 export const PLAN_TOOL = 'ExitPlanMode'
 
@@ -16,7 +18,7 @@ export const MAX_PLAN_FILE_BYTES = 2 * 1024 * 1024
  * The caller also requires a regular file within MAX_PLAN_FILE_BYTES.
  */
 export function isTrustablePlanPath(path: unknown): path is string {
-  return typeof path === 'string' && path.startsWith('/') && /\.md$/i.test(path)
+  return typeof path === 'string' && isAbsolutePath(path) && /\.md$/i.test(path)
 }
 
 /** Hash input: trailing whitespace is not a different plan. */

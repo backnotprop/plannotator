@@ -32,7 +32,7 @@ classic PermissionRequest command hook (the blocking review) exactly as before;
 2.1.288 with modules on runs the mod and never reaches that command hook. The mod
 also stands down by itself (every hook passes through) in `-p` / SDK sessions
 (`isInteractive` false: a later plugin turn would have no session to land in)
-and where `/bin/sh` is missing (Windows), leaving the classic hook and the
+and where it finds no shell for its scripts ("The shell" below), leaving the classic hook and the
 `/plannotator-*` skills in charge. A mods-capable Claude Code whose rollout
 switch is off could not be reproduced locally; the engine only inserts modules
 into the hook chain when they load, so it should behave like 2.1.150.
@@ -43,9 +43,22 @@ closures; `controller.ts` (`PlannotatorMod`) is the per-session state machine;
 `launch.ts` (detached launcher, launch-directory layout, command table, copy),
 `delivery.ts` (turn vs log, 12 KB inline limit), `plan.ts` (ExitPlanMode
 decisions and deny copy), `turns.ts` and `bridge.ts` (Ask this session),
-`shell-words.ts` (argument splitting), `tool.ts` (the `plannotator` tool contract, a copy of `packages/shared/plannotator-tool.ts`), `take-over.ts` (agent-run Bash `plannotator` commands answered through the tool), `inbox.ts` and `inbox-contract.ts` (the Plannotator Inbox connection, below; the contract a copy of `packages/shared/inbox/connection.ts`). The mod is self-contained: a plugin
+`shell-words.ts` (argument splitting), `tool.ts` (the `plannotator` tool contract, a copy of `packages/shared/plannotator-tool.ts`), `take-over.ts` (agent-run Bash `plannotator` commands answered through the tool), `inbox.ts` and `inbox-contract.ts` (the Plannotator Inbox connection, below; the contract a copy of `packages/shared/inbox/connection.ts`), `shell.ts` (the shell the scripts run in, below) and `paths.ts` (absolute paths, Windows' included). The mod is self-contained: a plugin
 installed from the marketplace is only `apps/hook/`, and a hooks module may
 import only its own files.
+
+**The shell.** `$.process.run` runs an argv with no shell, so each file
+operation the engine has no call for (the `mkdir` claims, `rm`, the debug log's
+append, `kill`, the detached launch) is a short script. Every argv builder
+names its script (`ShellScriptId`) and gives its POSIX text, and `shellArgv`
+turns that into the argv of the shell `resolveShell` picked at `session.start`:
+`/bin/sh` on macOS and Linux. Windows has no `/bin/sh`, so there the mod stands
+down. The variables `resolveShell` reads are read in `register.ts`
+(`shellEnvOf`), each named as a literal: Claude Code refuses to load a hooks
+module whose `$.env.get` takes anything else (`env-get-literal.test.ts`).
+Every check for an absolute path goes through `isAbsolutePath`, since Claude
+Code gives a Windows session its folders as `C:\…`, and the home folder is
+`HOME`, else `USERPROFILE`.
 
 **Detached launch.** `$.process.run` is one-shot (10 minutes at most) and a hook
 has a 10 s budget of its own time, so the mod runs a tiny `/bin/sh` wrapper
@@ -410,11 +423,11 @@ classic path, which falls back to the pre-compaction file.
 blocks and gives Ask AI a separate AI. The mod registers a real tool instead:
 `$.tool.register({ name: "plannotator", description, inputSchema })` at
 `session.start`, right after the commands, and only when the mod is on (the
-knob not turned off, an interactive session, `/bin/sh` present) and the agent tool
+knob not turned off, an interactive session, a shell found) and the agent tool
 switch is on (on by default here; `PLANNOTATOR_AGENT_TOOL=0` / `{ "agentTool": false }` turn it off; `resolveAgentToolEnabled`
 in `hooks/mod/enabled.ts`, read with the mod switch at the first `session.start`
-of the process, never re-read); with either switch off, in `-p`/SDK runs and on
-Windows nothing is registered and Claude keeps the CLI through the `plannotator`
+of the process, never re-read); with either switch off, in `-p`/SDK runs and
+where no shell is found nothing is registered and Claude keeps the CLI through the `plannotator`
 skill. With only the agent tool off, the rest of the mod runs: the slash
 commands, non-blocking ExitPlanMode, Ask this session, and the Bash take-over
 below, which stays because it adds nothing to Claude's context (it changes only
@@ -564,7 +577,7 @@ flags, several targets that are not all file paths (prose, which the CLI's
 tolerant resolution reads) or several review targets, environment prefixes, and any compound command
 (`cd x && plannotator ...`, pipes, redirects, substitutions), so scripted
 strict gates keep the real CLI and its exit codes. With the mod off, in `-p`/SDK
-runs and on Windows nothing is taken over. The CLI the mod launches runs in the
+runs and where no shell is found nothing is taken over. The CLI the mod launches runs in the
 session's cwd (`$.process.run`'s default), the same as for the tool. Pi and
 OpenCode do not take over shell runs: there an agent-run `plannotator` command
 still runs the CLI (Pi registers the tool itself; see "Pi: the `plannotator`

@@ -2,7 +2,7 @@
  * Starting the `plannotator` CLI detached, and reading what it leaves behind.
  *
  * `$.process.run` is one shot and ends at ten minutes, so it cannot hold a
- * review open. It runs a tiny `/bin/sh` wrapper instead that starts the CLI in
+ * review open. It runs a tiny shell wrapper instead that starts the CLI in
  * the background with every stream on a file and returns at once. The CLI
  * itself does the rest through files in the launch directory:
  *
@@ -21,6 +21,8 @@
  */
 
 import type { SessionKind } from './delivery'
+import { isAbsolutePath, trimTrailingSeparators } from './paths'
+import { shellArgv } from './shell'
 import { splitShellWords } from './shell-words'
 import { PLAN_APPROVALS_DIR } from './plan'
 import { looksLikeFilePath, plannotatorBundleSubject, plannotatorTargetSubject, type PlannotatorTarget } from './tool'
@@ -75,12 +77,12 @@ export const WAIT_SCRIPT = [
 
 /** `$.process.run` argv that waits for any of `paths` for up to `timeoutMs`. */
 export function waitArgv(paths: readonly string[], timeoutMs: number): string[] {
-  return ['/bin/sh', '-c', WAIT_SCRIPT, 'plannotator-wait', String(Math.max(1, Math.ceil(timeoutMs / 100))), ...paths]
+  return shellArgv('wait', WAIT_SCRIPT, 'plannotator-wait', [String(Math.max(1, Math.ceil(timeoutMs / 100))), ...paths])
 }
 
 /** `$.process.run` argv for a detached launch of `cliArgv` in `dir`. */
 export function launchArgv(dir: string, cliArgv: readonly string[]): string[] {
-  return ['/bin/sh', '-c', LAUNCH_SCRIPT, 'plannotator-launch', dir, ...cliArgv]
+  return shellArgv('launch', LAUNCH_SCRIPT, 'plannotator-launch', [dir, ...cliArgv])
 }
 
 /**
@@ -108,18 +110,18 @@ export function dataDirOf(env: {
   legacyHoldsData?: boolean
   xdgHoldsData?: boolean
 }): string | null {
-  const home = env.home?.replace(/\/+$/, '')
+  const home = env.home?.replace(/[\\/]+$/, '')
   const custom = env.dataDir?.trim()
   if (custom) {
     if (custom === '~') return home ?? null
-    if (custom.startsWith('~/')) return home ? `${home}/${custom.slice(2)}` : null
-    if (custom.startsWith('/')) return custom.replace(/\/+$/, '') || '/'
+    if (custom.startsWith('~/') || custom.startsWith('~\\')) return home ? `${home}/${custom.slice(2)}` : null
+    if (isAbsolutePath(custom)) return trimTrailingSeparators(custom)
     return null
   }
   if (!home) return null
   const legacy = `${home}/.plannotator`
   const xdgHome = env.xdgDataHome?.trim()
-  const xdg = xdgHome && xdgHome.startsWith('/') ? `${xdgHome.replace(/\/+$/, '')}/plannotator` : null
+  const xdg = xdgHome && isAbsolutePath(xdgHome) ? `${xdgHome.replace(/[\\/]+$/, '')}/plannotator` : null
   if (env.legacyExists) return xdg && env.xdgHoldsData && !env.legacyHoldsData ? xdg : legacy
   return xdg ?? legacy
 }
@@ -129,12 +131,12 @@ export async function resolveDataDir(
   env: { home?: string; dataDir?: string; xdgDataHome?: string },
   exists: (path: string) => Promise<boolean>,
 ): Promise<string | null> {
-  const home = env.home?.replace(/\/+$/, '')
+  const home = env.home?.replace(/[\\/]+$/, '')
   if (env.dataDir?.trim() || !home) return dataDirOf(env)
   const legacy = `${home}/.plannotator`
   const legacyExists = await exists(legacy)
   const xdgHome = env.xdgDataHome?.trim()
-  if (!legacyExists || !xdgHome || !xdgHome.startsWith('/')) return dataDirOf({ ...env, legacyExists })
+  if (!legacyExists || !xdgHome || !isAbsolutePath(xdgHome)) return dataDirOf({ ...env, legacyExists })
   const holdsData = async (dir: string) => {
     for (const entry of DATA_DIR_MARKERS) if (await exists(`${dir}/${entry}`)) return true
     return false
@@ -153,24 +155,31 @@ export async function resolveDataDir(
  * resolves relative targets against.
  */
 export function privateDirArgv(dir: string): string[] {
-  return ['/bin/sh', '-c', 'umask 077 && mkdir -p "$1" && chmod 700 "$1" && pwd', 'plannotator-mkdir', dir]
+  return shellArgv('mkdir', 'umask 077 && mkdir -p "$1" && chmod 700 "$1" && pwd', 'plannotator-mkdir', [dir])
 }
 
-/** `/a/b/../c/./d` → `/a/c/d` (no symlinks resolved: nothing is looked up). */
+/**
+ * `/a/b/../c/./d` → `/a/c/d`, `C:\a\..\b` → `C:/b`, `\\srv\share\..\x` →
+ * `//srv/share/x`: a drive or a UNC share stays the root (no symlinks resolved:
+ * nothing is looked up).
+ */
 function normalizeAbsolute(path: string): string {
+  const unc = /^\\\\([^\\/]+)[\\/]+([^\\/]+)/.exec(path)
+  const root = unc ? `//${unc[1]}/${unc[2]}` : /^[A-Za-z]:/.test(path) ? path.slice(0, 2) : ''
   const out: string[] = []
-  for (const segment of path.split('/')) {
+  for (const segment of path.slice(unc ? unc[0].length : root.length).split(/[\\/]/)) {
     if (segment === '' || segment === '.') continue
     if (segment === '..') out.pop()
     else out.push(segment)
   }
-  return `/${out.join('/')}`
+  if (unc) return out.length ? `${root}/${out.join('/')}` : root
+  return `${root}/${out.join('/')}`
 }
 
 /** An absolute path word (`/a/b`, `@/a/b`), normalized; anything else (relative, `~`) is undefined. */
 function absoluteWord(word: string): string | undefined {
   const path = word.replace(/^@/, '')
-  return path.startsWith('/') ? normalizeAbsolute(path) : undefined
+  return isAbsolutePath(path) ? normalizeAbsolute(path) : undefined
 }
 
 /**
@@ -207,7 +216,7 @@ export function modTargetFor(
     case 'review': {
       const pr = words.find((word) => PR_URL.test(word))
       if (pr) return pr
-      if (words.length === 0) return cwd && cwd.startsWith('/') ? normalizeAbsolute(cwd) : undefined
+      if (words.length === 0) return cwd && isAbsolutePath(cwd) ? normalizeAbsolute(cwd) : undefined
       return words.length === 1 ? absoluteWord(words[0] as string) : undefined
     }
     case 'annotate': {
@@ -235,9 +244,8 @@ export function cleanupArgv(dir: string): string[] {
   const names = Object.entries(LAUNCH_FILES)
     .filter(([key]) => key !== 'overflow')
     .map(([, name]) => name)
-  return [
-    '/bin/sh',
-    '-c',
+  return shellArgv(
+    'cleanup',
     [
       'dir=$1; shift',
       'for f in "$@"; do rm -f "$dir/$f"; done',
@@ -245,11 +253,8 @@ export function cleanupArgv(dir: string): string[] {
       'exit 0',
     ].join('\n'),
     'plannotator-cleanup',
-    dir,
-    ...names,
-    'revision.json.ack',
-    'exit.tmp',
-  ]
+    [dir, ...names, 'revision.json.ack', 'exit.tmp'],
+  )
 }
 
 /** Exit codes of `CLAIM_SCRIPT`. */
@@ -280,7 +285,7 @@ export const CLAIM_SCRIPT = [
 ].join('\n')
 
 export function claimArgv(dir: string, claimant: string): string[] {
-  return ['/bin/sh', '-c', CLAIM_SCRIPT, 'plannotator-claim', dir, claimant]
+  return shellArgv('claim', CLAIM_SCRIPT, 'plannotator-claim', [dir, claimant])
 }
 
 /**
@@ -324,18 +329,14 @@ export const PRUNE_SCRIPT = [
 ].join('\n')
 
 export function pruneArgv(groups: { cleaned: readonly string[]; dead: readonly string[]; expired: readonly string[] }): string[] {
-  return [
-    '/bin/sh',
-    '-c',
-    PRUNE_SCRIPT,
-    'plannotator-prune',
+  return shellArgv('prune', PRUNE_SCRIPT, 'plannotator-prune', [
     '--cleaned',
     ...groups.cleaned,
     '--dead',
     ...groups.dead,
     '--expired',
     ...groups.expired,
-  ]
+  ])
 }
 
 /** Above this the debug log is moved to `<file>.1` before the next append. */
@@ -366,12 +367,12 @@ export const DEBUG_APPEND_SCRIPT = [
 ].join('\n')
 
 export function debugAppendArgv(path: string): string[] {
-  return ['/bin/sh', '-c', DEBUG_APPEND_SCRIPT, 'plannotator-debug', path]
+  return shellArgv('debug-append', DEBUG_APPEND_SCRIPT, 'plannotator-debug', [path])
 }
 
 /** Liveness probe through the shell's own `kill` (no /bin/kill on every system). */
 export function aliveArgv(pid: string): string[] {
-  return ['/bin/sh', '-c', 'kill -0 "$1" 2>/dev/null', 'plannotator-alive', pid]
+  return shellArgv('alive', 'kill -0 "$1" 2>/dev/null', 'plannotator-alive', [pid])
 }
 
 /** Exit codes of `STOP_SCRIPT`. */
@@ -397,7 +398,7 @@ export const STOP_SCRIPT = [
 ].join('\n')
 
 export function stopArgv(pid: string, decidedFiles: readonly string[]): string[] {
-  return ['/bin/sh', '-c', STOP_SCRIPT, 'plannotator-stop', pid, ...decidedFiles]
+  return shellArgv('stop', STOP_SCRIPT, 'plannotator-stop', [pid, ...decidedFiles])
 }
 
 /** Where the session's approved ExitPlanMode calls are recorded for the classic hook (plan.ts, #2007). */
@@ -409,7 +410,7 @@ export function planApprovalPathOf(dataDir: string, sessionId: string, toolUseId
 
 /** Removes one file the mod wrote; nothing else. */
 export function removeFileArgv(path: string): string[] {
-  return ['/bin/sh', '-c', 'rm -f "$1"', 'plannotator-rm', path]
+  return shellArgv('rm', 'rm -f "$1"', 'plannotator-rm', [path])
 }
 
 export function launchDirOf(dataDir: string, sessionId: string, launchId: string): string {
@@ -550,8 +551,8 @@ export function cliArgvFor(kind: Exclude<SessionKind, 'plan'>, args: string | re
 const PR_URL = /^https?:\/\/[^\s/]+\/.+\/(?:pull|pull-requests|merge_requests)\/(\d+)\b/i
 
 function baseName(path: string): string {
-  const trimmed = path.replace(/\/+$/, '')
-  return trimmed.slice(trimmed.lastIndexOf('/') + 1) || trimmed
+  const trimmed = path.replace(/[\\/]+$/, '')
+  return trimmed.slice(Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\')) + 1) || trimmed
 }
 
 /**

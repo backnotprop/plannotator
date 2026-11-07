@@ -12,6 +12,7 @@ import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeEnd,
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
 import { PromptDropped, type Host, type HttpResult } from './host'
 import { InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder } from './inbox'
+import { isAbsolutePath } from './paths'
 import { inboxCommandBriefing, type InboxToolInfo } from './inbox-contract'
 import {
   aliveArgv,
@@ -1376,7 +1377,7 @@ export class PlannotatorMod {
   private planHistoryRoot(): Promise<string | null> {
     this.historyRoot ??= (async () => {
       const root = this.session.root ? await this.session.root().catch(() => null) : null
-      return root && root.startsWith('/') ? root : null
+      return root && isAbsolutePath(root) ? root : null
     })()
     return this.historyRoot
   }
