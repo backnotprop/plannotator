@@ -166,7 +166,7 @@ describe('review entry assets', () => {
   });
 
   // The Inbox window's guided review (PLAN step 5) reaches the guide chain and
-  // review-editor's diff renderer through GuidePane's one dynamic import of
+  // review-editor's diff renderer through lazyParts.tsx's one dynamic import of
   // `#guide-reader` (packages/inbox/guide/GuideReader.tsx). That import is
   // where the window's build splits (build/pack-inbox.ts), so the reader's
   // bytes load on the first Open, never at page load (#2593). A static import
