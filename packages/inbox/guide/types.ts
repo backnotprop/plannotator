@@ -62,10 +62,16 @@ export interface GuideReaderProps {
   fileContents?: (path: string, signal: AbortSignal, patch: string) => Promise<InboxFileContents>;
   /**
    * Under a top bar that names the review and lists its chapters (the full-window review): the heading reads like a
-   * thread's (GuideView `threadHeading`), and every open chapter with diffs carries the layout switch as marks, not
-   * only the first card. Absent: as before.
+   * thread's (GuideView `threadHeading`). Absent: as before.
    */
   threadHeading?: boolean;
+  /**
+   * The host's bar draws the diff controls (Split / Unified, Collapse all, the "Diff display" popover: approval
+   * "diff-controls-headers"), so the first card has no Split | Unified tab. Absent: the tab, as before.
+   */
+  hostDiffControls?: boolean;
+  /** Fold or open every file's diff (the bar's Collapse all); a new token applies it again. Not remembered. */
+  collapseAll?: { collapsed: boolean; token: number };
   /** The review's own actions on that heading's title line (the guide host's `renderHeadActions`). */
   renderHeadActions?: () => ReactNode | null;
   /** "Open in" on each file's header (a review while Code review is on). Absent: none, as before. */
@@ -84,7 +90,6 @@ export interface GuideSelection {
 export interface GuideSelectionActions {
   onAsk?: (selection: GuideSelection) => void;
   onShowMe?: (selection: GuideSelection) => void;
-  showMeIcon?: ReactNode;
 }
 
 /** The surface's guide reader (SurfaceGuideReader.tsx): the sections (6.1), then one section per screen (6.2). */

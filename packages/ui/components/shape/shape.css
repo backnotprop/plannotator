@@ -320,6 +320,148 @@
 .shp-root.panel-open:not(.phone) .shp-more { right: calc(var(--pw) + 28px); }
 .shp-root.phone .shp-more { right: 12px; bottom: 66px; }
 
+/*
+ * ── What's changed: the change as a patch (approval "shape-whats-changed", A · Patch) ──
+ * Tints are the theme's own colours mixed into the card (Pierre's diff weights: about 9% light, 15% dark), so
+ * every palette keeps them. Green and red only mean added and removed; amber only marks "Check this".
+ */
+.shp-chg {
+  --chg-t: 15%; --chg-te: 30%; --chg-tm: 7%;
+  --chg-surface: var(--card);
+  --chg-add: color-mix(in oklab, var(--success) var(--chg-t), var(--chg-surface));
+  --chg-add-em: color-mix(in oklab, var(--success) var(--chg-te), var(--chg-surface));
+  --chg-del: color-mix(in oklab, var(--destructive) var(--chg-t), var(--chg-surface));
+  --chg-del-em: color-mix(in oklab, var(--destructive) var(--chg-te), var(--chg-surface));
+  --chg-mod: color-mix(in oklab, var(--foreground) var(--chg-tm), var(--chg-surface));
+  --chg-sep: color-mix(in oklab, var(--foreground) var(--chg-tm), var(--chg-surface));
+  --chg-add-fg: color-mix(in oklab, var(--success) 82%, var(--foreground));
+  --chg-del-fg: color-mix(in oklab, var(--destructive) 80%, var(--foreground));
+  --chg-warn-fg: color-mix(in oklab, var(--warning) 62%, var(--foreground));
+  --chg-soft: color-mix(in oklab, var(--foreground) 82%, var(--chg-surface));
+  --chg-gut: 10.5ch;
+  container-type: inline-size;
+  max-width: 1280px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--foreground);
+}
+:root.light .shp-chg { --chg-t: 9%; --chg-te: 20%; --chg-tm: 4.5%; }
+.shp-chg code { font-family: var(--font-mono); font-size: .93em; font-feature-settings: normal; }
+.shp-chg .plus { color: var(--chg-add-fg); }
+.shp-chg .minus { color: var(--chg-del-fg); }
+
+.shp-chg-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 24px; align-items: start; padding-bottom: 20px; }
+.shp-chg-sum { grid-column: 1; margin: 0; font-size: 16px; font-weight: 500; line-height: 1.45; max-width: 72ch; text-wrap: pretty; }
+.shp-chg-sum code { font-size: .9em; }
+.shp-chg-meta { grid-column: 1; margin: 0; display: flex; flex-wrap: wrap; gap: 0 14px; font: 12.5px/18px var(--font-mono); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.shp-chg-acts { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 8px; }
+.shp-chg-btn { appearance: none; display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--foreground); font: 500 13px/1 var(--font-sans); white-space: nowrap; cursor: pointer; transition: background-color .15s, transform .15s; }
+.shp-chg-btn:hover { background: var(--chg-sep); }
+.shp-chg-btn.primary { border-color: transparent; background: var(--primary); color: var(--primary-foreground); }
+.shp-chg-btn.primary:hover { background: color-mix(in oklab, var(--primary) 88%, var(--foreground)); }
+.shp-chg-btn:active { transform: scale(.96); }
+
+.shp-chg-cols { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.shp-chg.one .shp-chg-cols { grid-template-columns: minmax(0, 1fr); max-width: 860px; }
+.shp-chg-pane { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--chg-surface); }
+.shp-chg-ph { display: flex; align-items: baseline; gap: 10px; padding: 9px 14px; border-bottom: 1px solid var(--border); background: var(--chg-sep); }
+.shp-chg-pt { margin: 0; font-size: 13px; line-height: 20px; font-weight: 600; }
+.shp-chg-ph .c { font: 400 12px/18px var(--font-mono); color: var(--muted-foreground); }
+.shp-chg-ph .key { margin-left: auto; display: flex; gap: 12px; font: 400 12px/18px var(--font-mono); color: var(--muted-foreground); white-space: nowrap; }
+.shp-chg-flows { display: grid; gap: 20px; }
+/* Beside the changes, the paths stay in sight while they fit in the view (ShapeChanged measures; taller ones scroll). */
+.shp-chg-flows.fits { position: sticky; top: 0; }
+
+/* A change: one hunk. */
+.shp-chg-hunk + .shp-chg-hunk { border-top: 1px solid var(--border); }
+.shp-chg-hh { display: grid; grid-template-columns: var(--chg-gut) minmax(0, 1fr) auto; gap: 4px 12px; align-items: baseline; padding: 10px 14px 8px; }
+.shp-chg-kind { font: 12px/20px var(--font-mono); color: var(--muted-foreground); white-space: nowrap; }
+.shp-chg-kind.check { color: var(--chg-warn-fg); }
+.shp-chg-title { margin: 0; font-size: 14px; font-weight: 500; line-height: 20px; text-wrap: pretty; }
+.shp-chg-title code { font-size: 13px; }
+.shp-chg-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 12px; }
+.shp-chg-loc, .shp-chg-step { appearance: none; border: 0; background: none; padding: 0; margin: 0; cursor: pointer; white-space: nowrap; color: var(--chg-soft); font: 12px/18px var(--font-mono); text-decoration: underline dotted color-mix(in oklab, var(--foreground) 35%, transparent); text-underline-offset: 3px; }
+.shp-chg-step { font: 12.5px/18px var(--font-sans); }
+.shp-chg-loc:hover, .shp-chg-step:hover { color: var(--foreground); text-decoration-style: solid; }
+.shp-chg-loc.plain { cursor: inherit; text-decoration: none; }
+.shp-chg-body { padding: 0 0 10px; }
+.shp-chg-ln { display: grid; grid-template-columns: var(--chg-gut) minmax(0, 1fr); column-gap: 12px; padding: 0 14px; font: 13px/20px var(--font-mono); }
+.shp-chg-ln .g { text-align: right; padding-right: 2px; color: var(--muted-foreground); user-select: none; }
+.shp-chg-ln .tx { min-width: 0; overflow-wrap: anywhere; }
+.shp-chg-ln .dim { color: var(--muted-foreground); white-space: pre-wrap; }
+.shp-chg-ln.add { background: var(--chg-add); }
+.shp-chg-ln.add .g { color: var(--chg-add-fg); }
+.shp-chg-ln.del { background: var(--chg-del); }
+.shp-chg-ln.del .g { color: var(--chg-del-fg); }
+.shp-chg-ln.mod { background: var(--chg-mod); }
+.shp-chg-ln code.tok { font-size: inherit; border-radius: 2px; }
+.shp-chg-ln.add code.tok { background: var(--chg-add-em); }
+.shp-chg-ln.del code.tok { background: var(--chg-del-em); }
+.shp-chg-note { display: grid; grid-template-columns: var(--chg-gut) minmax(0, 1fr); column-gap: 12px; padding: 6px 14px 0; font-size: 13px; line-height: 19px; color: var(--muted-foreground); }
+.shp-chg-note p { margin: 0; max-width: 70ch; }
+.shp-chg-note code { color: var(--chg-soft); }
+.shp-chg-also { display: grid; grid-template-columns: var(--chg-gut) minmax(0, 1fr); column-gap: 12px; padding: 10px 14px 12px; border-top: 1px solid var(--border); font-size: 13px; line-height: 19px; color: var(--muted-foreground); }
+.shp-chg-also .k { font: 12px/20px var(--font-mono); }
+.shp-chg-also p { margin: 0; }
+
+/* A call path: a unified diff of it. */
+.shp-chg-rows { padding: 6px 0 8px; }
+.shp-chg-fr { display: grid; grid-template-columns: 6ch 2ch minmax(0, 1fr) auto; column-gap: 8px; align-items: baseline; padding: 0 14px; font: 13px/22px var(--font-mono); }
+.shp-chg-fr .lab { font: 12px/22px var(--font-sans); color: var(--muted-foreground); }
+.shp-chg-fr .g { text-align: center; color: var(--muted-foreground); user-select: none; }
+.shp-chg-fr .call { min-width: 0; overflow-wrap: anywhere; }
+.shp-chg-fr .nt { margin-left: 10px; font: 12.5px/20px var(--font-sans); color: var(--muted-foreground); }
+.shp-chg-fr .nt code { font-size: 12px; }
+.shp-chg-fr .at { justify-self: end; }
+.shp-chg-fr.add { background: var(--chg-add); }
+.shp-chg-fr.add .g { color: var(--chg-add-fg); }
+.shp-chg-fr.del { background: var(--chg-del); }
+.shp-chg-fr.del .g { color: var(--chg-del-fg); }
+.shp-chg-fr.mod { background: var(--chg-mod); }
+.shp-chg-fr.mod .g { color: var(--foreground); font-weight: 600; }
+.shp-chg-fr.start .call, .shp-chg-fr.end .call { font: 13.5px/22px var(--font-sans); }
+.shp-chg-fr.start { padding-top: 4px; padding-bottom: 4px; }
+.shp-chg-fr.fork { margin: 6px 0 2px; background: var(--chg-sep); }
+.shp-chg-fr.fork .lab { font-family: var(--font-mono); }
+.shp-chg-fr.fork .call { font: 500 13px/22px var(--font-sans); }
+
+/* Pointing at a change or a path (Annotate), and a version that redrew one: What to know's marks. */
+.shp-chg .mk { transition: box-shadow .25s, background-color .25s; }
+.shp-stage.pinpointing .shp-chg [data-mark] { cursor: pointer; }
+.shp-chg .mk.noted { box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--primary) 70%, transparent); background-color: color-mix(in oklab, var(--primary) 7%, var(--chg-surface)); }
+.shp-chg .mk.fresh { animation: shp-redraw .55s cubic-bezier(.2,.7,.2,1) both; }
+.shp-chg .mk.erasing { animation: shp-fade-out .3s linear forwards; }
+.shp-view.entering .shp-chg [data-step] { animation-delay: calc(.2s + var(--i, 0) * 60ms); }
+.shp-stage.reduce .shp-view.entering .shp-chg [data-step] { animation-delay: 0s; }
+.shp-stage.reduce .shp-chg .mk.fresh { animation: shp-fade-only .16s linear both; }
+
+/* A narrower board: one column. A phone's: the paths first, each line's kind and place over its words. */
+@container (max-width: 900px) {
+  .shp-chg-cols { grid-template-columns: minmax(0, 1fr); }
+  .shp-chg-flows.fits { position: static; }
+}
+@container (max-width: 600px) {
+  .shp-chg-cols { --chg-gut: 2ch; }
+  .shp-chg-head { grid-template-columns: minmax(0, 1fr); }
+  .shp-chg-sum { font-size: 15.5px; }
+  .shp-chg-acts { grid-column: 1; grid-row: auto; margin-top: 8px; }
+  .shp-chg-cols { gap: 16px; }
+  .shp-chg-flows { order: -1; }
+  .shp-chg-ph .key { display: none; }
+  .shp-chg-hh { grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 10px 12px 8px; }
+  .shp-chg-links { justify-content: flex-start; margin-top: 2px; }
+  .shp-chg-ln, .shp-chg-note, .shp-chg-also { column-gap: 8px; padding-left: 8px; padding-right: 12px; }
+  .shp-chg-also .k { display: none; }
+  .shp-chg-also p { grid-column: 2; }
+  .shp-chg-fr { grid-template-columns: 2ch minmax(0, 1fr); column-gap: 8px; padding: 0 12px 0 8px; }
+  .shp-chg-fr .lab { display: none; }
+  .shp-chg-fr.start .lab, .shp-chg-fr.end .lab:not(:empty) { display: block; grid-column: 1 / -1; line-height: 18px; padding-top: 6px; }
+  .shp-chg-fr.fork .g { display: none; }
+  .shp-chg-fr.fork .call { grid-column: 1 / -1; padding-left: 2ch; }
+  .shp-chg-fr .at { grid-column: 2; justify-self: start; }
+  .shp-chg-fr .at:empty { display: none; }
+  .shp-chg-fr .nt { display: block; margin-left: 0; }
+}
 /* ── Follow an example (approval "trace-it-board", r5; the path on its rail from r7) ── The card sits where the
    board already puts its status, above the dock; the picture makes room for it. App tokens and the dock's own buttons;
    one accent (the board's mark colour); three text roles: title 14/20 500, body 13/20, meta 12/16 (code: mono 12/20).

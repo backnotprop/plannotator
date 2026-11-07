@@ -689,7 +689,7 @@ describe("the window's routes: settings, restart, favicon", () => {
       expect(settings.mcp_url).toBe(`http://127.0.0.1:${server.port}/mcp`);
       expect(settings.port).toBe(server.port);
       // Nothing set: the defaults, on for the Claude Code mod, off on Pi, OpenCode and DeepSeek Harness.
-      expect(settings.inbox_tool).toEqual({ hosts: { "claude-code": true, pi: false, opencode: false, dsh: false }, env: null });
+      expect(settings.inbox_tool).toEqual({ hosts: { "claude-code": true, pi: false, opencode: false, dsh: false, cline: false }, env: null });
 
       const storage = await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings/storage`);
       expect(storage.status).toBe(200);
@@ -738,7 +738,7 @@ describe("the window's routes: settings, restart, favicon", () => {
 
       const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, inbox_tool: { pi: true } });
       expect(saved.status).toBe(200);
-      expect((await saved.json()).inbox_tool.hosts).toEqual({ "claude-code": true, pi: true, opencode: false, dsh: false });
+      expect((await saved.json()).inbox_tool.hosts).toEqual({ "claude-code": true, pi: true, opencode: false, dsh: false, cline: false });
       await post(server, "/api/inbox/settings", { serverSession: server.serverSession, inbox_tool: { "claude-code": false } });
       // Each host keeps its own choice; an unset host keeps its default.
       expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxTool).toEqual({ pi: true, "claude-code": false });
@@ -976,6 +976,86 @@ describe("the window's routes: settings, restart, favicon", () => {
       const other = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, text_size: 13 });
       expect((await other.json()).diff_style).toBe("unified");
       expect(onDisk().diffOptions?.diffStyle).toBe("unified");
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
+  test("diff display settings (`diff_options`) round trip through config.json `diffOptions`, field by field, with `diff_style` as an alias", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      // What code review saved: these read back under the wire's names; Whole file and the font are code review's own.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ diffOptions: { lineDiffType: "char", tabSize: 4, expandUnchanged: true, fontSize: "13", diffIndicators: "sideways" } }));
+      const server = await start(dataDir);
+      const read = async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()) as { diff_options: Record<string, unknown>; diff_style: unknown };
+      const onDisk = () => (JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { diffOptions?: Record<string, unknown> }).diffOptions;
+      const save = (body: Record<string, unknown>) => post(server, "/api/inbox/settings", { serverSession: server.serverSession, ...body });
+      // A value no build writes reads as never chosen.
+      expect((await read()).diff_options).toEqual({ diff_style: null, overflow: null, indicators: null, line_diff_type: "char", line_numbers: null, background: null, background_intensity: null, tab_size: 4 });
+
+      // Every field is checked, and the refusal names it; nothing is written.
+      const refusals: [unknown, string][] = [
+        [[], "diff_options"],
+        ["wrap", "diff_options"],
+        [{}, "diff_options"],
+        [{ font_size: "14" }, "diff_options.font_size"],
+        [{ expand_unchanged: true }, "diff_options.expand_unchanged"],
+        // Names Object.prototype has are not diff options either (a computed key, so `__proto__` is an own key on the wire).
+        [{ toString: "x" }, "diff_options.toString"],
+        [{ ["__proto__"]: "x" }, "diff_options.__proto__"],
+        [{ diff_style: "both" }, "diff_options.diff_style"],
+        [{ overflow: "clip" }, "diff_options.overflow"],
+        [{ indicators: "dots" }, "diff_options.indicators"],
+        [{ line_diff_type: "line" }, "diff_options.line_diff_type"],
+        [{ line_numbers: "yes" }, "diff_options.line_numbers"],
+        [{ background: 1 }, "diff_options.background"],
+        [{ background_intensity: "loud" }, "diff_options.background_intensity"],
+        [{ tab_size: 0 }, "diff_options.tab_size"],
+        [{ tab_size: 9 }, "diff_options.tab_size"],
+        [{ tab_size: 2.5 }, "diff_options.tab_size"],
+        [{ overflow: "wrap", tab_size: "4" }, "diff_options.tab_size"],
+      ];
+      for (const [bad, field] of refusals) {
+        const refused = await save({ diff_options: bad });
+        expect(refused.status).toBe(422);
+        expect((await refused.json()).field).toBe(field);
+      }
+      // The alias may not disagree with the object.
+      const clash = await save({ diff_style: "split", diff_options: { diff_style: "unified" } });
+      expect(clash.status).toBe(422);
+      expect((await clash.json()).field).toBe("diff_style");
+      expect(onDisk()).toEqual({ lineDiffType: "char", tabSize: 4, expandUnchanged: true, fontSize: "13", diffIndicators: "sideways" });
+
+      // A change saves only its fields; the others, code review's included, stay.
+      const saved = await save({ diff_options: { overflow: "wrap", indicators: "classic", line_numbers: false, background_intensity: "strong", tab_size: 8 } });
+      expect(saved.status).toBe(200);
+      const answer = (await saved.json()) as { diff_options: Record<string, unknown> };
+      expect(answer.diff_options).toEqual({ diff_style: null, overflow: "wrap", indicators: "classic", line_diff_type: "char", line_numbers: false, background: null, background_intensity: "strong", tab_size: 8 });
+      expect(onDisk()).toEqual({ lineDiffType: "char", tabSize: 8, expandUnchanged: true, fontSize: "13", diffIndicators: "classic", overflow: "wrap", showLineNumbers: false, lineBgIntensity: "strong" });
+      expect((await read()).diff_options).toEqual(answer.diff_options);
+
+      // `diff_style` alone (pages from before) sets the same field and is answered both ways.
+      const alias = await save({ diff_style: "unified" });
+      expect(alias.status).toBe(200);
+      const aliasAnswer = (await alias.json()) as { diff_style: unknown; diff_options: Record<string, unknown> };
+      expect(aliasAnswer.diff_style).toBe("unified");
+      expect(aliasAnswer.diff_options.diff_style).toBe("unified");
+      expect(onDisk()?.diffStyle).toBe("unified");
+      const both = await save({ diff_style: "split", diff_options: { diff_style: "split", background: true } });
+      expect(both.status).toBe(200);
+      expect(onDisk()?.diffStyle).toBe("split");
+      expect(onDisk()?.showDiffBackground).toBe(true);
+      expect((await read()).diff_style).toBe("split");
+
+      // Another site's page writes nothing.
+      const cross = await post(server, "/api/inbox/settings", { diff_options: { overflow: "scroll" } }, { Origin: "https://evil.example" });
+      expect(cross.status).toBe(403);
+      expect(onDisk()?.overflow).toBe("wrap");
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;

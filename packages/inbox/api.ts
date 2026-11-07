@@ -5,7 +5,8 @@
  * writing into a store it did not read.
  */
 
-import type { InboxReviewDrawing, InboxShowMeTarget } from '@plannotator/core/inbox-review';
+import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
+import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
@@ -56,11 +57,13 @@ import { learnDebugLog, resumeDebugLog } from './debugLog';
 import type { RecipientConnection } from './deliveryLine';
 import { parseRestartAgents } from './restartAgents';
 import type { PatchBlobIds } from '@plannotator/core/diff-files';
-import type { InboxFileContents, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotator/core/inbox-types';
-import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchStatus } from '@plannotator/core/inbox-search';
+import type { InboxFileContents, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullsAnswer, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotator/core/inbox-types';
+import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchSort, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
   InboxAgentId,
   InboxAccountsRead,
+  InboxAccountSwitch,
+  InboxAccountSwitchTarget,
   InboxMachineAccountsRead,
   InboxAgentsModel,
   InboxAnnotationRecord,
@@ -84,7 +87,7 @@ import { newUuid } from './uuid';
  * A dialog of the line of one-time dialogs, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server
  * side): the update-day dialogs, then the offers. A registered dialog (Bro mode, List view) adds its id here.
  */
-export type InboxRevealId = 'sound' | 'list_intro' | 'voice' | 'snooze' | 'board' | 'steps';
+export type InboxRevealId = 'code_review' | 'sound' | 'list_intro' | 'voice' | 'snooze' | 'board' | 'steps' | 'star' | 'list_view';
 /** An offer of the line (not an update-day dialog): only an offer's Not now stamps the four-day gap. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
 /** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, or the agent note. */
@@ -114,7 +117,7 @@ function noteReplySent(words: string): void {
   for (const listener of replyListeners) listener(lastReply);
 }
 
-export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh';
+export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh' | 'cline';
 
 /** The browser notifications as the Inbox keeps them (config.json, so they survive a port change). */
 export interface NotificationSettings {
@@ -398,6 +401,22 @@ export interface TailscaleSettings {
 /** Split (old beside new) or Unified (one column): the diff layout code review and guided reviews share. */
 export type InboxDiffStyle = 'split' | 'unified';
 
+/**
+ * How diffs are drawn (config.json `diffOptions`, shared with code review), by
+ * the wire's names: each null when never chosen. Whole file, Hide whitespace
+ * and the fonts are code review's alone.
+ */
+export interface InboxDiffOptions {
+  diff_style: InboxDiffStyle | null;
+  overflow: 'scroll' | 'wrap' | null;
+  indicators: 'bars' | 'classic' | 'none' | null;
+  line_diff_type: 'word-alt' | 'word' | 'char' | 'none' | null;
+  line_numbers: boolean | null;
+  background: boolean | null;
+  background_intensity: 'subtle' | 'normal' | 'strong' | null;
+  tab_size: number | null;
+}
+
 /** Settings → General's cookie switch (SettingsModel.cookie_host). */
 export interface InboxCookieHost {
   on: boolean;
@@ -434,9 +453,10 @@ export interface SettingsModel {
    * The line of one-time dialogs: the one this page may arm, or null; `ahead`: the offers it may also arm, each going
    * as soon as its own moment comes (List view); `setup`: the agent note may show on this load (absent from an older
    * Inbox: it may); `line`: this Inbox keeps the line (a release build), so the update-day dialogs (sound, list
-   * options, voice) show only when `next` names them. The whole field is absent from an older Inbox.
+   * options, voice) show only when `next` names them; `aside`: the star ask, which this page may arm beside `next` (it
+   * stands outside the line's order). The whole field is absent from an older Inbox.
    */
-  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean };
+  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[] };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
@@ -466,6 +486,8 @@ export interface SettingsModel {
    * shared with code review: null when never chosen. Absent from an older Inbox.
    */
   diff_style?: InboxDiffStyle | null;
+  /** How diffs are drawn (config.json `diffOptions`, shared with code review). Absent from an older Inbox. */
+  diff_options?: InboxDiffOptions;
   /** Experimental features, each off unless switched on (`env`: PLANNOTATOR_EXPERIMENTAL decides). Absent from an older Inbox. */
   experimental?: InboxExperimentalSettings;
   /** The Board (config.json `inboxBoard`): off unless the person turned it on. Absent from an Inbox before the switch (the Board is then always there). */
@@ -476,6 +498,8 @@ export interface SettingsModel {
   code_review?: { on: boolean };
   /** Shape (Settings → Capabilities): the boards agents draw. Absent from an older Inbox. */
   shape?: { on: boolean };
+  /** System (config.json `inboxSystem`, approval "system-inbox"): present only while on. Read through `systemShown()` (system/gate.ts). */
+  system?: { on: boolean };
   /**
    * Settings → General: "Open Plannotator at plannotator.localhost" (#2184): config.json
    * `urlHost: "plannotator.localhost"`. `env` is PLANNOTATOR_URL_HOST and `url_host`
@@ -1046,6 +1070,8 @@ export interface SearchRequest {
   limit?: number;
   /** The project open in the list: a tie boost, never a filter. */
   current?: string | null;
+  /** Newest first instead of best match (sent only for `newest`, so a best-match request is what it was). */
+  sort?: InboxSearchSort | null;
 }
 
 /** GET /api/inbox/sessions: every live session, grouped by project (compose). */
@@ -1080,8 +1106,12 @@ export interface StartThreadInput {
   thread_name?: string;
   /** `thread_name` is compose's suggestion the person left as it was: dropped when it cannot be used, and the agent may rename it. */
   thread_name_auto?: true;
+  /** With `thread_name_auto`, from New review: a suggestion another open thread has gets " (2)", " (3)"… instead of being dropped. */
+  thread_name_numbered?: true;
   /** Compose's Board chip was on: the agent is asked to track the work on the Board (approval "inbox-compose-board-chip"). */
   board_request?: true;
+  /** New review on local changes: what it is of, so its row shows "Curating…" before a review arrives. */
+  review?: { kind: 'local'; changes: InboxReviewChanges; branch: string | null; base: string | null; ask: 'guide' | 'custom' };
   /** Asked from Settings -> Decision data: the agent also receives how to answer it. */
   decision_ask?: true;
 }
@@ -1149,6 +1179,7 @@ export async function searchInbox(request: SearchRequest, signal?: AbortSignal):
   if (request.offset) query.set('offset', String(request.offset));
   if (request.limit) query.set('limit', String(request.limit));
   if (request.current) query.set('current', request.current);
+  if (request.sort === 'newest') query.set('sort', 'newest');
   return readJson<SearchModel>(await fetch(inboxUrl(`/search?${query}`), { headers: { Accept: 'application/json' }, cache: 'no-store', signal }));
 }
 
@@ -1241,6 +1272,9 @@ export const inboxApi = {
   /** Code review on or off (Settings → Capabilities, approval "inbox-code-review-direction"): every window hears `event: capabilities`. */
   saveCodeReview: (on: boolean) => post<{ code_review: { on: boolean } }>(inboxUrl('/settings'), { code_review: { on } }),
   saveShape: (on: boolean) => post<{ shape: { on: boolean } }>(inboxUrl('/settings'), { shape: { on } }),
+  /** System's setup dialog (System on only): the projects found on this Mac with a git remote, and one project's save. */
+  systemSetup: () => get<SystemSetupAnswer>(inboxUrl('/system/setup')),
+  saveSystemSetup: (input: SystemSetupInput) => post<{ setup: SystemSetup }>(inboxUrl('/system/setup'), { ...input }),
   // Shape (packages/server/shape-routes.ts): this computer's boards only, never another machine's.
   shapes: (signal?: AbortSignal) => get<{ shapes: InboxShapeSummary[] }>('/api/shapes?preview=1', signal),
   /** Where a board's kept picture loads from. */
@@ -1461,8 +1495,9 @@ export const inboxApi = {
   saveTextSize: (textSize: InboxTextSize) => post<{ text_size: InboxTextSize }>(inboxUrl('/settings'), { text_size: textSize }),
   /** How the list's rows look, written to config.json `inboxRows`: every window open hears it (`event: rows`). */
   saveRows: (rows: readonly InboxRowsOption[]) => post<{ rows: InboxRowsOption[]; rows_rev: number }>(inboxUrl('/settings'), { rows }),
-  /** The diff layout, written to config.json `diffOptions.diffStyle` (shared with code review). */
-  saveDiffStyle: (diffStyle: InboxDiffStyle) => post<{ diff_style: InboxDiffStyle | null }>(inboxUrl('/settings'), { diff_style: diffStyle }),
+  /** How diffs are drawn, written to config.json `diffOptions` (shared with code review): only the fields given. */
+  saveDiffOptions: (change: Partial<InboxDiffOptions>) =>
+    post<{ diff_style: InboxDiffStyle | null; diff_options: InboxDiffOptions }>(inboxUrl('/settings'), { diff_options: change }),
   saveTailscale: (on: boolean, replaceExposed = false) =>
     post<{ tailscale: TailscaleSettings }>(inboxUrl('/settings'), { tailscale: replaceExposed ? { on, replace_exposed: true } : { on } }),
   // Step 2: attachments (by id only), annotations, deleting.
@@ -1580,11 +1615,20 @@ export const inboxApi = {
     const query = [refresh ? 'refresh=1' : '', others ? 'others=1' : ''].filter(Boolean).join('&');
     return get<InboxPullsAnswer>(inboxUrl(`/pulls${query ? `?${query}` : ''}`), signal);
   },
+  /** The Reviews rows (Code review on only). `others`: the Others view is open, as `pulls` asks. */
+  reviews: (options: { others?: boolean } = {}, signal?: AbortSignal) => {
+    const query = options.others ? 'others=1' : '';
+    return get<InboxReviewsAnswer>(inboxUrl(`/reviews${query ? `?${query}` : ''}`), signal);
+  },
+  /** The rows again from what the forges last answered, with no forge read; `cold`: nothing read since the Inbox started. */
+  reviewsCached: (signal?: AbortSignal) => get<InboxReviewsAnswer | { cold: true }>(inboxUrl('/reviews?cached=1'), signal),
   /** A PR author's profile picture, served by the Inbox from its own origin (only an author the last list returned). */
   pullAvatarUrl: (host: string, login: string) => inboxUrl('/pulls/avatar', `host=${encodeURIComponent(host)}&login=${encodeURIComponent(login)}`),
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
   pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>
     get<InboxPullDiffAnswer>(inboxUrl(`/pulls/diff?key=${encodeURIComponent(key)}&scope=${scope}`), signal),
+  /** New review's change summary for a project's local changes. */
+  reviewChanges: (project: string, changes: InboxReviewChanges, signal?: AbortSignal) => get<InboxReviewChangesAnswer>(inboxUrl(`/reviews/changes?project=${encodeURIComponent(project)}&changes=${changes}`), signal),
   /** One changed file's whole text at both ends of that diff, for its expand arrows, while it is the blobs (`old`, `new`) the patch on screen names. */
   pullFile: (key: string, scope: InboxPullDiffScope, path: string, ids: PatchBlobIds, signal?: AbortSignal) =>
     get<InboxFileContents>(inboxUrl(`/pulls/file?key=${encodeURIComponent(key)}&scope=${scope}&path=${encodeURIComponent(path)}&old=${ids.oldId}&new=${ids.newId}`), signal),
@@ -1619,7 +1663,7 @@ export const inboxApi = {
    * nothing on. `key`: the page's own for this claim, so a retry after a lost answer is shown it again (Board, Checklist).
    */
   claimReveal: (id: InboxRevealClaimId, key?: string, agents?: readonly string[]) =>
-    post<{ show: boolean; reveal: { next: InboxRevealId | null }; board: { on: boolean }; steps?: { on: boolean } }>(inboxUrl('/reveal'), {
+    post<{ show: boolean; reveal: { next: InboxRevealId | null }; board: { on: boolean }; steps?: { on: boolean }; star?: { can_star: boolean } }>(inboxUrl('/reveal'), {
       id,
       ...(key ? { key } : {}),
       // The agent note: the agents it would ask about (it shows once for each).
@@ -1633,6 +1677,17 @@ export const inboxApi = {
     () => undefined,
     () => undefined,
   ),
+  /**
+   * The "Star the repo" ask (packages/shared/star-ask.ts), once claimed through the line (`claimReveal('star')`):
+   * `star` stars it with the person's own gh (only on their click), `answer` records Not now (the line's three-day
+   * wait too) or the GitHub page opened from the link.
+   */
+  starAskStar: () => post<{ starred: boolean }>(inboxUrl('/star-ask'), { action: 'star' }),
+  starAskAnswer: (answer: 'not-now' | 'opened') =>
+    post<{ ok: boolean }>(inboxUrl('/star-ask'), { action: 'answer', answer }).then(
+      () => undefined,
+      () => undefined,
+    ),
   saveVoice: (change: { on?: boolean; phones_only?: boolean; engine?: InboxVoiceEngine }) => post<{ voice: InboxVoiceSettings }>(inboxUrl('/settings'), { voice: change }),
   /** Only on this computer; the answer never holds the key. Null removes it. */
   saveVoiceKey: (key: string | null) => post<{ key: InboxVoiceKeyState }>(inboxUrl('/voice/key'), { key }),
@@ -1716,6 +1771,8 @@ export const inboxApi = {
   /** Settings → Accounts (packages/server/inbox-accounts.ts): this computer's Claude accounts, read through `cswap`. */
   /** `fresh`: skip the answer the Inbox keeps 30 s (Refresh). */
   accounts: (fresh = false) => get<InboxAccountsRead>(inboxUrl('/accounts', fresh ? 'fresh=1' : undefined)),
+  /** Switch this computer's Claude Code account (step 3). The answer has no address; a read after it shows the account in use. */
+  switchAccount: (target: InboxAccountSwitchTarget) => post<InboxAccountSwitch>(inboxUrl('/accounts/switch'), { ...target }),
   /** A linked machine's, through its door. One call per machine, so a slow one holds up only itself. */
   machineAccounts: (machine: string, fresh = false) => get<InboxMachineAccountsRead>(inboxUrl(`/accounts/${encodeURIComponent(machine)}`, fresh ? 'fresh=1' : undefined)),
   /** Settings → Agents and the agent-note dialog (packages/server/inbox-agents.ts, inbox-agent-notes.ts). */
@@ -1731,8 +1788,6 @@ export const inboxApi = {
   askRead: (threadId: string) => get<InboxAskModel>(inboxUrl(`/threads/${threadId}/ask`)),
   askSend: (threadId: string, turnId: string, question: string, showMe?: InboxShowMeAsk) =>
     post<InboxAskPosted>(inboxUrl(`/threads/${threadId}/ask`), { turn_id: turnId, question, ...(showMe ?? {}) }),
-  /** Show me's pictures of one review (code review in the Inbox; packages/server/inbox-review-drawings.ts). */
-  reviewDrawings: (messageId: string) => get<InboxReviewDrawingsRead>(inboxUrl(`/reviews/${encodeURIComponent(messageId)}/drawings`)),
   askSeen: (threadId: string, seenAt: string) => post<unknown>(inboxUrl(`/threads/${threadId}/ask/seen`), { seen_at: seenAt }),
   askStop: (threadId: string, turnId: string) => post<{ stopped: boolean }>(inboxUrl(`/threads/${threadId}/ask/stop`), { turn_id: turnId }),
   deleteProject: (projectId: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/delete`), {}),
@@ -1750,28 +1805,20 @@ export interface InboxAskTurnWire {
   answered_at?: string;
   stopped?: boolean;
   failure?: 'gone' | 'taken_over' | 'failed';
-  /** A Show me (code review in the Inbox): the agent was asked to draw these lines of a review. */
+  /** A Show me (code review in the Inbox): the agent was asked for a Shape of these lines of a review. */
   kind?: 'show_me';
   show_me?: InboxShowMeTarget;
-  /** Show me again: the round of the picture it asked to redraw. */
-  again_of_round?: number;
-  /** The picture the agent sent for this Show me (`plannotator review draw`), by id. */
-  drawing?: string;
+  /** Show me again: the board it asked to bring up to date. */
+  again_shape?: string;
+  /** The board this Show me made, once it has one. */
+  shape?: string;
 }
 
 /** What a Show me sends beside its question on `POST …/ask`. */
 export interface InboxShowMeAsk {
   kind: 'show_me';
   show_me: InboxShowMeTarget;
-  again_of_round?: number;
-}
-
-/** `GET /api/inbox/reviews/:msg/drawings`. */
-export interface InboxReviewDrawingsRead {
-  title?: string;
-  round?: number;
-  overview?: { round: number; codes: string[] } | null;
-  drawings: InboxReviewDrawing[];
+  again_shape?: string;
 }
 
 export interface InboxAskConversationWire {

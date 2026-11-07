@@ -430,7 +430,7 @@ export function Sidebar(props: SidebarProps) {
           aria-current={props.page === 'reviews' ? 'page' : undefined}
           data-pulls-nav=""
         >
-          <Icon name="pullRequest" />
+          <Icon name="reviews" />
           Reviews
           {(props.pullsCount ?? 0) > 0 && (
             <span className="ib-n" aria-label={`${props.pullsCount} on you`}>
