@@ -441,6 +441,34 @@ describe("feedback archive: question answers", () => {
   });
 });
 
+describe("feedback archive: quick labels (#2626)", () => {
+  test("a quick label records its flag and tip; a plain comment stays label-free", () => {
+    // Regression: without the fields a label archived as a plain comment
+    // whose text happened to be "🔍 Verify this", and its tip was lost.
+    const dataDir = useTempDataDir();
+    appendFeedbackRecord({
+      project: PROJECT,
+      origin: "claude-code",
+      surface: "plan",
+      decision: "feedback",
+      feedback: "## 1. [🔍 Verify this] Feedback on",
+      annotations: [
+        { id: "l1", type: "COMMENT", text: "🔍 Verify this", originalText: "three retries", isQuickLabel: true, quickLabelTip: "Verify by reading the code." },
+        { id: "l2", type: "COMMENT", text: "👍 Looks good", originalText: "the plan", isQuickLabel: true },
+        { id: "c1", type: "COMMENT", text: "plain", originalText: "some words", quickLabelTip: "stray tip" },
+      ],
+    });
+    const [label, tipless, plain] = readIndex(dataDir)[0]!.annotations!;
+    expect(label?.isQuickLabel).toBe(true);
+    expect(label?.quickLabelTip).toBe("Verify by reading the code.");
+    expect(label?.text).toBe("🔍 Verify this");
+    expect(tipless?.isQuickLabel).toBe(true);
+    expect(tipless).not.toHaveProperty("quickLabelTip");
+    expect(plain).not.toHaveProperty("isQuickLabel");
+    expect(plain).not.toHaveProperty("quickLabelTip");
+  });
+});
+
 describe("feedback archive: element identity", () => {
   test("a raw-HTML pinpoint records its element identity and route; other annotations stay identity-free", () => {
     // Regression: without these fields a pinpoint archives as the bridge's

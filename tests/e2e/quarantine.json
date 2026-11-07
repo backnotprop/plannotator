@@ -1,0 +1,135 @@
+{
+  "about": "Flaky browser tests that CI leaves out (tests/e2e/quarantine.ts). Each failed on several unrelated PRs, trains or main, and passed on a rerun of the same commit. Run them locally with `bun run test:e2e:quarantine`; remove an entry once its fix passes there.",
+  "tests": [
+    {
+      "spec": "inbox-mobile.spec.ts",
+      "describe": "iPhone 15 (WebKit)",
+      "title": "a file opens over the thread, its comments are a sheet, and Back returns to the thread",
+      "why": "WebKit only (Pixel 7 passes): right after the thread opens, the count of running ib-push slide animations on the pane is not 1 (line 442, `expect(await pane.evaluate(slides)).toBe(1)`).",
+      "firstSeen": "2026-11-04",
+      "evidence": [
+        41748882370,
+        41830824147,
+        42031486637,
+        42089368923,
+        42122898360,
+        42137072382,
+        42151231524,
+        42154700500,
+        42165849664,
+        42168321325,
+        42223127512
+      ]
+    },
+    {
+      "spec": "inbox-show-me.spec.ts",
+      "title": "a busy agent: the box offers the Ask window's choice, never says it draws; interrupt asks now; this round's picture has Show me again",
+      "why": "After Send with the fake agent set busy, the Show me box never turns `busy` within 15 s (line 538, `toHaveAttribute('data-show-me-box', 'busy')`).",
+      "firstSeen": "2026-11-05",
+      "evidence": [
+        42004602635,
+        42122893618,
+        42137072382,
+        42150235389,
+        42156380448,
+        42176139859,
+        42186760384,
+        42223127512
+      ],
+      "dependents": [
+        {
+          "title": "round 2: the redrawn Overview tags its changed parts; a Show me picture stays as asked",
+          "why": "It opens the round-1 picture of lines 7–9, which only the busy-agent test asks for."
+        },
+        {
+          "title": "the picture moves by its header like the window, stays in the pane, keeps its place, and a double-click puts it back",
+          "why": "It opens `round2`, which only the round 2 test sets."
+        },
+        {
+          "title": "a phone at 390 px: the popover and the picture",
+          "why": "It opens `round2`, which only the round 2 test sets."
+        },
+        {
+          "title": "reloaded while it draws, and the agent ends with no words: the box goes back to its words with the Ask window's note",
+          "why": "It opens `round2`, which only the round 2 test sets."
+        },
+        {
+          "title": "the agent gone: a Show me it never answers goes back to the box with the Ask window's problem, never says it draws",
+          "why": "It opens `round2`, which only the round 2 test sets."
+        }
+      ]
+    },
+    {
+      "spec": "inbox-launch-scratch.spec.ts",
+      "title": "Delete removes the scratch folder and runs claude purge for it only",
+      "why": "The second Delete of the same launch must call no CLI, but the fake has one call more than before it (line 289, `expect(fake.calls()).toHaveLength(callsBefore)`: 12, expected 11).",
+      "firstSeen": "2026-11-05",
+      "evidence": [
+        42038876752,
+        42075358318,
+        42082636323,
+        42087760631,
+        42142816538,
+        42168116756,
+        42208402611,
+        42223153321
+      ]
+    },
+    {
+      "spec": "inbox-pull-requests.spec.ts",
+      "title": "Review layer by layer: the layer's own diff, Next layer, Whole stack from the lowest open layer, and Approve into the agent's thread",
+      "why": "The migration's line 5 has no box yet when its height is measured (line 1009, `boundingBox()` returns null: \"Cannot read properties of null (reading 'y')\").",
+      "firstSeen": "2026-11-05",
+      "evidence": [
+        42101469159,
+        42131196700,
+        42160233880,
+        42178736747,
+        42186346120,
+        42186760384,
+        42209719213
+      ],
+      "dependents": [
+        {
+          "title": "Reply at the stack's foot goes into the agent's thread",
+          "why": "It replies on the stack page the layer test leaves open, after the approval it records (`verdictId`)."
+        }
+      ]
+    },
+    {
+      "spec": "inbox-seen-on-sight.spec.ts",
+      "title": "desktop, read with another app in front: the reply on screen leaves the pill, and scrolling up never brings it back",
+      "why": "With another app in front, the new-messages pill does not go off for a reply already in view (line 305, `toHaveAttribute('data-off', '')`).",
+      "firstSeen": "2026-11-06",
+      "evidence": [
+        42151377743,
+        42155908680,
+        42167679727,
+        42170470187,
+        42193885328
+      ]
+    },
+    {
+      "spec": "inbox-code-review.spec.ts",
+      "title": "the top bar holds what the rail held: chapters, the count, files, Overview, and the diff controls, by mouse and by keyboard",
+      "why": "After Enter on the third chapter in the jump menu, the top bar still reads \"1 of 3\" where \"3 of 3\" is expected (line 698, `expect(await jump.textContent()).toBe(place)`).",
+      "firstSeen": "2026-11-05",
+      "evidence": [
+        42119502727,
+        42122455103,
+        42133516139
+      ]
+    },
+    {
+      "spec": "inbox-review-jumps.spec.ts",
+      "title": "a jump to a file nearby lands exactly",
+      "why": "After the first jump, to file 100 from the changed-files menu, the file settles 83 px above the top of the reader instead of 16 px below it (line 228, `expect(await settledPlace(page, body, fixture.paths[100])).toBe(PLACE)`: -83, expected 16).",
+      "firstSeen": "2026-11-06",
+      "evidence": [
+        42255709255,
+        42272056744,
+        42307730886
+      ]
+    }
+  ]
+}

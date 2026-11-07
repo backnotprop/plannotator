@@ -69,6 +69,12 @@ export interface RevealMomentInput {
   holds: (threadId: string) => boolean;
   /** Spend the claim: true only for the first claim ever. */
   claim: () => Promise<boolean>;
+  /**
+   * The moment needs no leave: it is now, while the page is clear (and again each time one lapses). Code review's
+   * day-0 offer (codeReviewOffer.ts): "show up like immediately", still after the settling wait and never over
+   * something typed or open.
+   */
+  atOnce?: boolean;
 }
 
 /** A row's state in the list, for "the list settled": ids, sections and what is unseen. */
@@ -102,6 +108,13 @@ export function useRevealMoment(input: RevealMomentInput) {
     // `watching` is read, not watched: a visit is what changes it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input.thread]);
+
+  // A moment that needs no leave (`atOnce`): now, and again once one lapses or a gate drops it.
+  const atOnce = input.atOnce === true;
+  useEffect(() => {
+    if (!atOnce || !watching || moment) return;
+    setMoment({ threadId: latest.current.thread ?? '', at: Date.now() });
+  }, [atOnce, watching, moment]);
 
   // A moment lasts so long.
   useEffect(() => {
@@ -392,6 +405,8 @@ export interface LineRevealInput {
   mayClaim: (pageAge: number) => boolean;
   /** Still worth showing (its feature not turned on meanwhile). */
   holds: () => boolean;
+  /** Its moment needs no leave: as soon as the page is clear (`RevealMomentInput.atOnce`). */
+  atOnce?: boolean;
 }
 
 /**
@@ -418,5 +433,38 @@ export function useLineReveal(input: LineRevealInput) {
       key.current ??= newUuid();
       return (await claimRevealOnce(latest.current.id, key.current)).show;
     },
+    atOnce: input.atOnce,
   });
+}
+
+/**
+ * List view's moment, as registered with the line (approval "inbox-one-time-dialogs", the change): leaving a thread
+ * for the list itself (not for another thread).
+ */
+export function listViewRevealLeaveCounts(next: string | null): boolean {
+  return next === null;
+}
+
+/** What List view's need reads at a settled moment. */
+export interface ListViewRevealGate {
+  listLoaded: boolean;
+  firstRun: boolean;
+  /** The list draws its groups (Smart groups): the choice is for someone who has not picked Simple list. */
+  grouped: boolean;
+  /** The list on screen is taller than the screen (`listTallerThanScreen`). */
+  taller: boolean;
+}
+
+/**
+ * List view's need (approval "inbox-one-time-dialogs": "once the person's list has grown taller than the screen, on
+ * Grouped, at the next calm moment"): the list loaded and not the first-run screen, the page old enough, on Smart
+ * groups, and taller than the screen. The line decides the day (`reveal.next`, or `reveal.ahead` at its moment).
+ */
+export function listViewRevealMayClaim(gate: ListViewRevealGate, pageAge: number): boolean {
+  return gate.listLoaded && !gate.firstRun && gate.grouped && gate.taller && pageAge >= REVEAL_TIMES.pageAgeMs;
+}
+
+/** The list's scrolling body holds more than it shows: the list is taller than the screen. */
+export function listTallerThanScreen(body: Element | null): boolean {
+  return body !== null && body.scrollHeight > body.clientHeight;
 }

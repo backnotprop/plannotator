@@ -1849,6 +1849,32 @@ describe("the forward takes no write from a tailnet guest", () => {
     }
   }, 60_000);
 
+  test("a tailnet guest can't cancel or dismiss what waits for another machine; the owner cancels from another device", async () => {
+    const w = await linkedPair("plannotator-machines-forward-cancel-", false);
+    try {
+      const { a, b, mini, asked } = w;
+      b.stop();
+      await waitFor("A sees B asleep", async () => {
+        const view = (await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json;
+        return (view.machines as Json[]).find((m) => m.id === mini)?.state === "offline";
+      });
+      const held = await w.throughServe(OWNER, `/api/inbox/m/${mini}/threads/${asked.thread_id}/read`, { idempotency_key: "owner-held-read" });
+      expect(held.status).toBe(202);
+      for (const action of ["cancel", "dismiss"]) {
+        const guest = await w.throughServe(GUEST, `/api/inbox/outbox/owner-held-read/${action}`, {});
+        expect([action, guest.status, ((await guest.json()) as Json).code]).toEqual([action, 403, "owner_only"]);
+      }
+      const waiting = (await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/outbox`)).json()) as Json;
+      expect((waiting.waiting as Json[]).map((e) => e.key)).toEqual(["owner-held-read"]);
+      // The owner's phone browser over the tailnet: Cancel works there too.
+      const owner = await w.throughServe(OWNER, "/api/inbox/outbox/owner-held-read/cancel", {});
+      expect(owner.status).toBe(200);
+      expect(((await owner.json()) as Json).entry.state).toBe("cancelled");
+    } finally {
+      await w.stop();
+    }
+  }, 60_000);
+
   test("on a tagged machine (no Tailscale owner), the login its allowlist names is the owner: it picks, replies, snoozes and uploads through the forward", async () => {
     const w = await linkedPair("plannotator-machines-forward-tagged-", true);
     try {

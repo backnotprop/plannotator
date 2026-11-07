@@ -818,6 +818,26 @@ export class InboxStore {
   private readonly replyDraftListeners = new Set<(threadId: string) => void>();
   /** How many times the store was read again from disk (a deletion): a reader's derived view is stale once it changes. */
   private reloads = 0;
+  /**
+   * Counts every change to what the list rows read (`listRow`): each line applied, a question or annotation put
+   * back, a reply draft saved or dropped, a re-read, the live sessions handed in. `listRows()` keeps its last
+   * answer while this stays the same (`rowsMemo`).
+   */
+  private changes = 0;
+  /**
+   * The last `listRows()` (every thread, no filter), with each answer the live sessions gave while it was built
+   * (`InboxDeliveryPresence`, keyed by the call): it is given again while nothing in the store changed and every
+   * one of those calls still answers the same, so it is exactly what building it again would give.
+   */
+  private rowsMemo: { changes: number; presence: InboxDeliveryPresence | null; calls: Map<string, { ask: () => unknown; answer: string }>; rows: InboxListRow[] } | null = null;
+  /**
+   * Each agent session's latest message id (by its first line's seq), kept as each message is first applied, in
+   * the order the sessions first wrote: `latestAgentMessages` and `lastThreadsBySession` read it instead of every
+   * message. A re-read builds it again.
+   */
+  private readonly latestAgentIds = new Map<string, string>();
+  /** Per thread, how many message lines were applied to it: `threadVersion`. */
+  private readonly threadLines = new Map<string, number>();
   private readonly now: () => Date;
 
   private constructor(dataDir: string, now: () => Date) {
@@ -835,6 +855,7 @@ export class InboxStore {
   // ─────────────────────────── reading ───────────────────────────
 
   private load(): void {
+    this.changes += 1;
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
     try {
       chmodSync(this.dir, 0o700);
@@ -907,6 +928,7 @@ export class InboxStore {
 
   /** Put a question record back in memory (and in the event log's current view) without writing. */
   private restoreQuestion(record: InboxQuestionRecord): void {
+    this.changes += 1;
     this.questions.set(record.id, record);
     const key = `question:${record.id}`;
     const line = this.latest.get(key);
@@ -914,6 +936,7 @@ export class InboxStore {
   }
 
   private apply(line: InboxLine): void {
+    this.changes += 1;
     if (line.seq > this.seq) this.seq = line.seq;
     const id = `${line.kind}:${line.id}`;
     const previous = this.latest.get(id);
@@ -948,10 +971,12 @@ export class InboxStore {
           this.indexName(line.record.project_id, line.record.thread_name, line.record.id);
         }
         this.messages.set(line.record.id, line.record);
+        this.threadLines.set(line.record.thread_id, (this.threadLines.get(line.record.thread_id) ?? 0) + 1);
         if (line.record.wakes === true && line.record.author.kind === "agent" && line.record.author.session) this.wakingSessions.add(line.record.author.session);
         if (line.record.launch !== undefined && line.record.thread_id === line.record.id) this.launchedRootIds.add(line.record.id);
         if (!this.messageSeq.has(line.record.id)) {
           this.messageSeq.set(line.record.id, line.seq);
+          this.noteAgentMessage(line.record, line.seq);
           const members = this.threadMembers.get(line.record.thread_id);
           if (members) members.push(line.record.id);
           else this.threadMembers.set(line.record.thread_id, [line.record.id]);
@@ -1093,6 +1118,14 @@ export class InboxStore {
    */
   reloadCount(): number {
     return this.reloads;
+  }
+
+  /**
+   * Changes whenever one of the thread's messages does (a message line for it, or a re-read): what is derived
+   * from its messages alone (`imageCaptureGaps`) is the same while this is.
+   */
+  threadVersion(threadId: string): string {
+    return `${this.reloads}.${this.threadLines.get(threadId) ?? 0}`;
   }
 
   /** Every thread's root id, in the order the threads began. */
@@ -2085,7 +2118,36 @@ export class InboxStore {
 
   /** The live sessions the rows' delivery reads (the server's); null forgets them. */
   setDeliveryPresence(presence: InboxDeliveryPresence | null): void {
+    this.changes += 1;
     this.deliveryPresence = presence;
+  }
+
+  /**
+   * The live sessions as `listRows()` builds its memo: each answer is noted with the call that gave it, so the
+   * memo can ask again and know the rows would come out the same (`rowsMemo`).
+   */
+  private recordingPresence(presence: InboxDeliveryPresence, calls: Map<string, { ask: () => unknown; answer: string }>): InboxDeliveryPresence {
+    const noted = <A extends unknown[], R>(name: string, fn: ((...args: A) => R) | undefined): ((...args: A) => R) | undefined => {
+      if (!fn) return undefined;
+      return (...args: A): R => {
+        const answer = fn(...args);
+        const key = `${name}\0${args.join("\0")}`;
+        if (!calls.has(key)) calls.set(key, { ask: () => fn(...args), answer: JSON.stringify(answer) ?? "undefined" });
+        return answer;
+      };
+    };
+    const bound = <A extends unknown[], R>(fn: ((...args: A) => R) | undefined) => (fn ? (...args: A) => fn.apply(presence, args) : undefined);
+    calls.set("autoSendAfterMs", { ask: () => presence.autoSendAfterMs, answer: JSON.stringify(presence.autoSendAfterMs) ?? "undefined" });
+    return {
+      connection: noted("connection", bound(presence.connection))!,
+      askerLive: noted("askerLive", bound(presence.askerLive))!,
+      hostOf: noted("hostOf", bound(presence.hostOf)),
+      launchResumes: noted("launchResumes", bound(presence.launchResumes)),
+      uncertain: noted("uncertain", bound(presence.uncertain)),
+      stuck: noted("stuck", bound(presence.stuck)),
+      autoSendAfterMs: presence.autoSendAfterMs,
+      waitOf: noted("waitOf", bound(presence.waitOf)),
+    };
   }
 
   /**
@@ -2261,6 +2323,39 @@ export class InboxStore {
    * (`session`: the threads it started, joined or replied in).
    */
   listRows(filter: { projectId?: string | null; session?: string | null } = {}): InboxListRow[] {
+    if (filter.projectId || filter.session) return this.buildRows(filter);
+    // Every thread: the last answer while nothing it read changed (`rowsMemo`). A copy of the list, the same rows.
+    const memo = this.rowsMemo;
+    if (memo && memo.changes === this.changes && memo.presence === this.deliveryPresence) {
+      let same = true;
+      for (const { ask, answer } of memo.calls.values()) {
+        if ((JSON.stringify(ask()) ?? "undefined") !== answer) {
+          same = false;
+          break;
+        }
+      }
+      if (same) return memo.rows.slice();
+    }
+    const presence = this.deliveryPresence;
+    const calls = new Map<string, { ask: () => unknown; answer: string }>();
+    const changes = this.changes;
+    let rows: InboxListRow[];
+    if (presence) {
+      this.deliveryPresence = this.recordingPresence(presence, calls);
+      try {
+        rows = this.buildRows(filter);
+      } finally {
+        this.deliveryPresence = presence;
+      }
+    } else {
+      rows = this.buildRows(filter);
+    }
+    this.rowsMemo = { changes, presence, calls, rows };
+    return rows.slice();
+  }
+
+  /** `listRows` built from the store, every row worked out again. */
+  private buildRows(filter: { projectId?: string | null; session?: string | null }): InboxListRow[] {
     const out: InboxListRow[] = [];
     for (const [threadId, members] of this.threadMembers) {
       const root = this.messages.get(threadId);
@@ -5194,7 +5289,9 @@ export class InboxStore {
    * of one still waiting; approval "inbox-message-comments", 2026-10-19):
    * Plannotator's text-selection annotation, `originalText` the exact words
    * the person selected, or a comment on a rendered diagram part, with
-   * `diagramAnchor` and the part's label as `originalText`. Only an agent's
+   * `diagramAnchor` and the part's label as `originalText`, or a Delete on
+   * selected words (`type` "DELETION", no words of its own needed; approval
+   * "inbox-toolbar-delete"). Only an agent's
    * message takes one, and only while it can be answered (an archive closes
    * the messages before its line). The
    * record's key is the message: `path` is its id, `version` "current", and
@@ -5212,15 +5309,19 @@ export class InboxStore {
     const fields = annotation as Record<string, unknown>;
     const id = fields.id;
     if (!isInboxAnnotationId(id)) throw new InboxError("validation_error", "annotation.id: a short id.", { field: "annotation.id" });
-    // A comment on selected words (a quick label such as 👍 is a comment too); never a deletion or a general comment.
-    if (fields.type !== "COMMENT") throw new InboxError("validation_error", 'annotation.type: "COMMENT" (a comment on the words selected).', { field: "annotation.type" });
+    // A comment on selected words (a quick label such as 👍 is a comment too), or a Delete on them (approval
+    // "inbox-toolbar-delete": the toolbar's Delete, as in plan review); never a general comment.
+    const deletion = fields.type === "DELETION";
+    if (fields.type !== "COMMENT" && !deletion) throw new InboxError("validation_error", 'annotation.type: "COMMENT" (a comment on the words selected) or "DELETION" (remove them).', { field: "annotation.type" });
     const quote = fields.originalText;
     if (typeof quote !== "string" || quote.trim() === "" || quote.length > INBOX_MESSAGE_COMMENT_QUOTE_MAX) {
       throw new InboxError("validation_error", `annotation.originalText: the words selected (1 to ${INBOX_MESSAGE_COMMENT_QUOTE_MAX} characters).`, { field: "annotation.originalText" });
     }
     // The comment itself: a quick label (👍) carries its label as its text, so every comment has words to send.
+    // A deletion's words are the ones selected; it may carry none of its own.
     const text = fields.text;
-    if (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX) {
+    const noText = text === undefined || text === null || text === "";
+    if (!(deletion && noText) && (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX)) {
       throw new InboxError("validation_error", `annotation.text: the comment (1 to ${INBOX_MESSAGE_COMMENT_TEXT_MAX} characters).`, { field: "annotation.text" });
     }
     // A comment on a message's words is words: no images, no element or page it points at, no reply thread.
@@ -5331,6 +5432,7 @@ export class InboxStore {
 
   /** Every write to `annotations` goes here, so the per-thread unsent count follows it. */
   private setAnnotation(record: InboxAnnotationRecord): void {
+    this.changes += 1;
     const unsent = (r: InboxAnnotationRecord | undefined) => (r && r.sent_reply_id === null && r.removed_at === null ? 1 : 0);
     const before = this.annotations.get(record.id);
     this.annotations.set(record.id, record);
@@ -5469,6 +5571,7 @@ export class InboxStore {
     if (aimed.length > 0) draft.recipients = [...aimed];
     writeInboxReplyDraft(this.dir, draft);
     this.replyDrafts.set(threadId, draft);
+    this.changes += 1;
     this.noteReplyDraftRemovals(threadId, existing, draft);
     this.replyDraftChanged(threadId);
     return draft;
@@ -5541,6 +5644,7 @@ export class InboxStore {
     // Gone whole: a draft made again later starts with no removals (a save against no draft adds every file it names).
     this.replyDraftRemovals.delete(threadId);
     const had = this.replyDrafts.delete(threadId);
+    this.changes += 1;
     const removed = removeInboxReplyDraft(this.dir, threadId) || had;
     if (removed) this.replyDraftChanged(threadId);
     return removed;
@@ -5624,6 +5728,9 @@ export class InboxStore {
    */
   private reload(deletedMarkups: ReadonlySet<string> = new Set()): void {
     this.reloads += 1;
+    this.changes += 1;
+    this.latestAgentIds.clear();
+    this.threadLines.clear();
     this.latest.clear();
     this.projectsById.clear();
     this.projectsByRoot.clear();
@@ -5668,6 +5775,7 @@ export class InboxStore {
       removeInboxReplyDraft(this.dir, threadId);
       this.replyDrafts.delete(threadId);
       this.replyDraftRemovals.delete(threadId);
+      this.changes += 1;
     }
     // So does its Ask AI conversation.
     pruneInboxAsks(this.dir, (threadId) => this.messages.get(threadId)?.thread_id === threadId);
@@ -6465,6 +6573,18 @@ export class InboxStore {
    * it last wrote. Tagging lists the agents that read the Inbox only from it.
    */
   latestAgentMessages(): Map<string, InboxMessage> {
+    const out = new Map<string, InboxMessage>();
+    for (const [session, id] of this.latestAgentIds) {
+      const message = this.messages.get(id);
+      // Kept as each message is first applied; a message whose author reads otherwise now is read the long way.
+      if (!message || message.author.kind !== "agent" || message.author.session !== session) return this.scanLatestAgentMessages();
+      out.set(session, message);
+    }
+    return out;
+  }
+
+  /** `latestAgentMessages` from every message: the index's check. */
+  private scanLatestAgentMessages(): Map<string, InboxMessage> {
     const latest = new Map<string, { message: InboxMessage; seq: number }>();
     for (const message of this.messages.values()) {
       if (message.author.kind !== "agent" || !message.author.session) continue;
@@ -6473,6 +6593,14 @@ export class InboxStore {
       if (!known || known.seq < seq) latest.set(message.author.session, { message, seq });
     }
     return new Map([...latest].map(([session, { message }]) => [session, message]));
+  }
+
+  /** A message first applied at `seq`: its session's latest, when it is an agent's and the newest of that session's. */
+  private noteAgentMessage(message: InboxMessage, seq: number): void {
+    if (message.author.kind !== "agent" || !message.author.session) return;
+    const session = message.author.session;
+    const known = this.latestAgentIds.get(session);
+    if (known === undefined || (this.messageSeq.get(known) ?? 0) < seq) this.latestAgentIds.set(session, message.id);
   }
 
   /**
@@ -6505,15 +6633,8 @@ export class InboxStore {
 
   /** The thread each agent session last wrote in (any project): compose's "Last: <subject>". */
   lastThreadsBySession(): Map<string, { id: string; subject: string | null; at: string; project_id: string }> {
-    const latest = new Map<string, { message: InboxMessage; seq: number }>();
-    for (const message of this.messages.values()) {
-      if (message.author.kind !== "agent" || !message.author.session) continue;
-      const seq = this.messageSeq.get(message.id) ?? 0;
-      const known = latest.get(message.author.session);
-      if (!known || known.seq < seq) latest.set(message.author.session, { message, seq });
-    }
     const out = new Map<string, { id: string; subject: string | null; at: string; project_id: string }>();
-    for (const [session, { message }] of latest) {
+    for (const [session, message] of this.latestAgentMessages()) {
       out.set(session, { id: message.thread_id, subject: this.threadSubject(message.thread_id), at: message.created_at, project_id: message.project_id });
     }
     return out;

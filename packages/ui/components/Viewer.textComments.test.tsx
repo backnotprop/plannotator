@@ -100,7 +100,7 @@ afterEach(async () => {
 
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 20)); });
 
-async function mount({ markdown = MARKDOWN, ...props }: { markdown?: string; textComments?: boolean; readOnly?: boolean; onAddAnnotation?: (annotation: Annotation) => void; renderDirectiveBlock?: (block: { directiveKind?: string }) => React.ReactNode | undefined }): Promise<HTMLElement> {
+async function mount({ markdown = MARKDOWN, ...props }: { markdown?: string; textComments?: boolean; textDeletions?: boolean; readOnly?: boolean; onAddAnnotation?: (annotation: Annotation) => void; renderDirectiveBlock?: (block: { directiveKind?: string }) => React.ReactNode | undefined }): Promise<HTMLElement> {
   const Viewer = viewerModule!.Viewer;
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -216,6 +216,27 @@ test.skipIf(!hasDom)('with textComments: the comment-only toolbar (Comment and ð
   const card = el.querySelector<HTMLElement>('[data-question-key]')!;
   expect(card.closest('.annotation-exclude')).not.toBeNull();
   await select(card, 'Which rounding');
+  expect(toolbarNames()).toEqual([]);
+});
+
+test.skipIf(!hasDom)('with textDeletions too: Delete comes back before Comment, as plan review orders it, still no label picker; Delete hands the host a DELETION on the words', async () => {
+  const added: Annotation[] = [];
+  const el = await mount({ textComments: true, textDeletions: true, onAddAnnotation: (annotation) => added.push(annotation) });
+  await select(el, 'two, four and eight');
+  expect(toolbarNames()).toEqual(['Delete', 'Comment', 'Looks good', 'Cancel']);
+
+  await act(async () => document.querySelector<HTMLButtonElement>('.annotation-toolbar button[aria-label="Delete"], .annotation-toolbar button[title="Delete"]')!.click());
+  await settle();
+  expect(added).toHaveLength(1);
+  expect(added[0]).toMatchObject({ type: 'DELETION', originalText: 'two, four and eight' });
+  expect(toolbarNames()).toEqual([]);
+  // Struck through as plan review draws a deletion.
+  expect(el.querySelector('mark.annotation-highlight.deletion')?.textContent).toBe('two, four and eight');
+});
+
+test.skipIf(!hasDom)('textDeletions without textComments brings no toolbar to an answer-only document', async () => {
+  const el = await mount({ textDeletions: true });
+  await select(el, 'two, four and eight');
   expect(toolbarNames()).toEqual([]);
 });
 

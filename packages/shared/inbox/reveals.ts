@@ -5,12 +5,13 @@
  * `revealNext` to the page (`GET /api/inbox/settings` `reveal.next`, and `reveal.setup` for the agent note) and spends
  * every claim against it.
  *
- * In the line, in this order: the update-day dialogs (the sound, list options, voice), then the offers (Snooze, the
- * Board, the Checklist). The agent note is a setup dialog: never in the queue, but it keeps the day and the page-load
+ * In the line, in this order: Code review's day-0 offer (`CODE_REVIEW_OFFER`), the update-day dialogs (the sound, list
+ * options, voice), then the offers (Snooze, the Board, the Checklist). The agent note is a setup dialog: never in the queue, but it keeps the day and the page-load
  * rules (`revealLineFree("setup")`). The tour and the notification ask are not in the line: day 0 is theirs.
  *
  * The rules:
- *  - Day 0 is setup only: every offer needs tenure (two days or more since first use).
+ *  - Day 0 is setup only: every offer needs tenure (two days or more since first use), but Code review's
+ *    (`CODE_REVIEW_OFFER`, the owner, 2026-11-06: "show up like immediately"), which takes day 0's one dialog.
  *  - One due at a time: the first entry, in table order, whose "who" holds (a release build, tenure since first use,
  *    enough threads, heavy use where it asks for it, its own conditions).
  *  - Ahead at its moment: an offer marked `ahead` (List view: approval "inbox-one-time-dialogs", "the change") may also
@@ -40,7 +41,7 @@
  */
 
 /** Every dialog the queue orders. A registered dialog adds its id here. */
-export type RevealId = "sound" | "list_intro" | "voice" | "snooze" | "board" | "steps";
+export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "snooze" | "board" | "steps" | "list_view";
 /** Every dialog that keeps the line's day: the queue's, and the agent note (setup). */
 export type LineDialogId = RevealId | "agent_note";
 
@@ -70,8 +71,19 @@ export interface RevealEntry {
   enabled: boolean;
 }
 
+/**
+ * Code review's offer (approval "code-review-offer-card", 2026-11-06; the owner: "this one needs to show up like
+ * immediately"): its slot in the line. First in the queue with no tenure, so it is next on day 0 (first use not known
+ * yet is fine: no tenure to count), and the page opens it at once (`atOnce`, packages/inbox/codeReviewOffer.ts) once
+ * the tour's entry screen is gone, before the agent note, which then keeps the one-a-day rule and waits for the next
+ * free day. Only while Code review was never decided (config.json `inboxCodeReview` unset). To move the slot, change
+ * this entry (its `tenureMs`) or its place in `INBOX_REVEALS`.
+ */
+export const CODE_REVIEW_OFFER: RevealEntry = { id: "code_review", kind: "offer", tenureMs: 0, minThreads: 0, enabled: true };
+
 /** The queue, in order. */
 export const INBOX_REVEALS: readonly RevealEntry[] = [
+  CODE_REVIEW_OFFER,
   // The update-day dialogs (who: config.json `inboxSound`, `inboxListIntro`, `inboxVoiceIntro`), one a day (the line's
   // one-day spacing): the sound on the update day, then list options and voice on later days, each at its moment.
   { id: "sound", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
@@ -87,9 +99,10 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // Board's 5 threads; the Board need not be on. Opt-in, as the Board: the claim only stamps it, `ChecklistIntro` opens,
   // and only its "Turn it on" writes inboxSteps (unset -> true). Until then no word of it reaches an agent.
   { id: "steps", kind: "offer", tenureMs: 5 * DAY_MS, minThreads: 5, enabled: true },
-  // List view (#2716) goes here, last in order but ahead at its moment (`ahead`; approval "inbox-one-time-dialogs": once
-  // the list is taller than the screen, at the next calm moment). `minThreads: 15` is the server's stand-in for "taller
-  // than the screen": { id: "list_view", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 15, ahead: true, enabled: true }.
+  // List view's choice (approval "inbox-list-view-dialog"): last in order but ahead at its moment (`ahead`; approval
+  // "inbox-one-time-dialogs": once the list is taller than the screen, on Grouped, at the next calm moment; the page
+  // checks the screen). `minThreads: 15` is the server's stand-in for "taller than the screen".
+  { id: "list_view", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 15, ahead: true, enabled: true },
 ];
 
 /**
@@ -182,7 +195,9 @@ export function revealQualifies(entry: RevealEntry, state: RevealState, now: Dat
   if (revealRetired(entry, state, now)) return false;
   const first = time(state.firstUseAt);
   if (first === null) {
-    if (entry.kind !== "update") return false;
+    // First use not known yet (a fresh install, nothing in the store): only what needs no tenure (an update-day
+    // dialog, Code review's day-0 offer).
+    if (entry.kind !== "update" && entry.tenureMs > 0) return false;
   } else if (now.getTime() - first < entry.tenureMs) return false;
   return state.threads >= entry.minThreads;
 }
