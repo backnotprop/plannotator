@@ -82,6 +82,7 @@ export function SystemView(p: {
   revision?: Revision | GateResult; // the change drawn on the sheet; with no sheet, opens on the sheet it touches most
   view?: 'before' | 'after' | 'steps'; // default after; Before and Steps need a revision (Steps, its steps)
   mode?: 'review' | 'plan';       // plan: added and changed parts dashed, "As built" and "As planned"
+  touches?: { label: string; change: GateResult }[]; // several open PRs at rest: amber, each part labelled; ignored with a revision
   files?: ChangeFile[];           // the PR's files with their counts: they name each part's files
   pr?: { number?: number; title?: string; state?: 'open' | 'merged' | 'closed' }; // the PR chip in the bar
   keys?: boolean;                 // default true: + - F, 1 to 9 and N act with the drawing in focus (see Moving)
@@ -92,6 +93,7 @@ export function SystemView(p: {
   onOpenDetails?(): void;         // the PR chip becomes a button that opens the PR's details
   onOpenFull?(): void;            // shows Open full window, in the pane
   onClose?(): void;               // shows the close button
+  leading?: ReactNode;            // the host's control at the start of the top bar ("‹ Reviews"), pane or window
 }): JSX.Element;
 
 export function SystemChangePicture(p: { model: SystemModel; change: Revision | GateResult; files?: ChangeFile[];
@@ -141,6 +143,9 @@ export function fontsReady(): Promise<void>; // forgets widths measured before t
 - The card picture crops to the marked parts and their bands. When more than 16 lines cross that crop it draws the
   Simple reading.
 - A plan (a revision with no `pr`) is drawn dashed, new parts washed green, with no numbers and no diff links.
+- Several open PRs at rest (`touches`, each the gate's result with a label such as "PR 2848"): the parts they touch
+  are amber, with no numbers and no tally; each part's second line names the PRs that touch it ("PR 2848 · PR 2851",
+  past two "PR 2848 +2"), and its hover names every one. With a `revision` given, `touches` is ignored.
 
 ### Moving
 

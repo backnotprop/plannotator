@@ -98,6 +98,7 @@ import {
   INBOX_HOST_NAMES,
   INBOX_MCP_WAKING_HOSTS,
   INBOX_TAGS_MAX,
+  INBOX_THREAD_NAME_MAX,
   INBOX_SESSION_ID_PATTERN,
   type InboxParticipant,
   type InboxSentRecipient,
@@ -6356,6 +6357,11 @@ export class InboxStore {
      */
     thread_name_auto?: unknown;
     /**
+     * `true` with `thread_name_auto` (New review's box): a suggestion another open thread already has is numbered,
+     * "Review web-app: uncommitted on main (2)", rather than dropped, so a second review of the same changes is named.
+     */
+    thread_name_numbered?: unknown;
+    /**
      * Compose's Board chip was on (approval "inbox-compose-board-chip"): the
      * root carries `board_request`, and what the agent receives for it asks it
      * to track the work on the Board. Only `true` sets it; a replay keeps the
@@ -6389,7 +6395,7 @@ export class InboxStore {
     // Words or files: a message of attached files alone (a long paste) is the person's too, as a reply of files is.
     if (!body && !(input.attachments && input.attachments.length > 0)) throw new InboxError("validation_error", "body: write a message.", { field: "body" });
     if (!this.projectsById.has(input.project_id)) throw new InboxError("project_not_found", `No project ${input.project_id}.`);
-    threadName = this.freeThreadName(input.project_id, threadName, auto);
+    threadName = this.freeThreadName(input.project_id, threadName, auto, input.thread_name_numbered === true);
     const at = this.stamp();
     const id = inboxId("msg");
     const message: InboxMessage = {
@@ -6426,17 +6432,32 @@ export class InboxStore {
     return null;
   }
 
-  /** The name a thread would get in this project: a suggestion another open thread has is dropped; a typed one is refused. */
-  private freeThreadName(projectId: string, name: string | null, auto: boolean): string | null {
+  /**
+   * The name a thread would get in this project: a suggestion another open thread has is dropped, or with `numbered`
+   * given the first free " (2)", " (3)"…; a typed one is refused.
+   */
+  private freeThreadName(projectId: string, name: string | null, auto: boolean, numbered = false): string | null {
     if (!name || !this.threadNameTaken(projectId, name, null)) return name;
+    if (auto && numbered) return this.numberedThreadName(projectId, name);
     if (auto) return null;
     throw new InboxError("thread_name_taken", `Another open thread in this project is already named "${name}". Pick another name, or leave it empty.`, { field: "thread_name" });
   }
 
+  /** `name (n)` for the first n from 2 no open thread in the project has, cut to fit the name limit; null past 99. */
+  private numberedThreadName(projectId: string, name: string): string | null {
+    for (let n = 2; n < 100; n++) {
+      const suffix = ` (${n})`;
+      const base = [...name].slice(0, INBOX_THREAD_NAME_MAX - suffix.length).join("").trimEnd();
+      const checked = checkInboxThreadName(`${base}${suffix}`);
+      if (checked.ok && !this.threadNameTaken(projectId, checked.name, null)) return checked.name;
+    }
+    return null;
+  }
+
   /** What `startPersonThread` would refuse about a thread's name, with nothing written: for a Send with work to do before the write. */
-  checkPersonThreadName(input: { project_id: string; thread_name?: unknown; thread_name_auto?: unknown }): void {
+  checkPersonThreadName(input: { project_id: string; thread_name?: unknown; thread_name_auto?: unknown; thread_name_numbered?: unknown }): void {
     const auto = input.thread_name_auto === true;
-    this.freeThreadName(input.project_id, this.sentThreadName(input.thread_name, auto), auto);
+    this.freeThreadName(input.project_id, this.sentThreadName(input.thread_name, auto), auto, input.thread_name_numbered === true);
   }
 
   /** The thread the person started with this idempotency key, for a replayed Send. */

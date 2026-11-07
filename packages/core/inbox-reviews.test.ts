@@ -22,7 +22,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { inboxPullMove, inboxPullStacks, type InboxPull, type InboxPullLink } from "./inbox-pulls";
-import { INBOX_REVIEW_SOURCE_FIELD_MAX, inboxReviewGroups, inboxReviewIsOf, inboxReviewLandingChanges, inboxReviewLandingOf, inboxReviewMove, inboxReviewRows, inboxReviewSourceOf, type InboxReviewLanding, type InboxReviewThread } from "./inbox-reviews";
+import { INBOX_REVIEW_SOURCE_FIELD_MAX, inboxReviewPatchSize, inboxReviewStartOf, inboxReviewGroups, inboxReviewIsOf, inboxReviewLandingChanges, inboxReviewLandingOf, inboxReviewMove, inboxReviewRows, inboxReviewSourceOf, type InboxReviewLanding, type InboxReviewThread } from "./inbox-reviews";
 
 function pr(fields: Partial<InboxPull> & { number: number }): InboxPull {
   const repo = "northwind/billing-svc";
@@ -441,3 +441,33 @@ describe("landed PRs", () => {
   });
 });
 
+
+describe("New review on local changes", () => {
+  const start = { host: "claude-code", project_id: "prj_1", at: "2026-11-04T10:00:00.000Z" };
+
+  test("a Send's review field is taken only when it says what it reviews; refs that aren't short strings are dropped, the ask defaults to a guided review", () => {
+    expect(inboxReviewStartOf({ kind: "local", changes: "last", branch: "main", base: "main", ask: "custom" }, start)).toMatchObject({ changes: "last", branch: "main", ask: "custom", project_id: "prj_1" });
+    expect(inboxReviewStartOf({ kind: "local", changes: "branch", branch: 7, base: "x".repeat(201) }, start)).toMatchObject({ branch: null, base: null, ask: "guide" });
+    for (const bad of [null, "local", {}, { kind: "pr", changes: "last" }, { kind: "local", changes: "everything" }]) expect(inboxReviewStartOf(bad, start)).toBeNull();
+  });
+
+  test("its thread has a row, With your agents and curating, before any review; once the review arrives it is that one row, On you, still knowing what was asked", () => {
+    const begun = inboxReviewStartOf({ kind: "local", changes: "uncommitted", branch: "main", base: "main" }, start)!;
+    const started = new Map([["t_new", begun]]);
+    const before = inboxReviewRows({ threads: [], stacks: [], links: {}, started });
+    expect(before).toHaveLength(1);
+    expect(before[0]).toMatchObject({ id: "t_new", thread_id: "t_new", reviewed: true, review: null, move: "agents", reason: "curating", started: begun, updated_at: begun.at });
+    // Its agent ended before any card: curated by no one, so no row. A card that did arrive keeps its row.
+    expect(inboxReviewRows({ threads: [], stacks: [], links: {}, started, ended: () => true })).toEqual([]);
+    expect(inboxReviewRows({ threads: [review({ thread_id: "t_new" })], stacks: [], links: {}, started, ended: () => true })).toHaveLength(1);
+    const after = inboxReviewRows({ threads: [review({ thread_id: "t_new" })], stacks: [], links: {}, started });
+    expect(after).toHaveLength(1);
+    expect(after[0]).toMatchObject({ move: "on_you", reason: "review_ready", started: begun });
+  });
+
+  test("a patch's size counts files and the lines in its hunks, never a file's own --- and +++ lines, and a changed line that looks like one", () => {
+    const patch = ["diff --git a/x b/x", "--- a/x", "+++ b/x", "@@ -1,2 +1,2 @@", " same", "-old", "+new", "--- looks like a header", "diff --git a/new b/new", "new file mode 100644", "--- /dev/null", "+++ b/new", "@@ -0,0 +1 @@", "+only"].join("\n");
+    expect(inboxReviewPatchSize(patch)).toEqual({ files: 2, additions: 2, deletions: 2 });
+    expect(inboxReviewPatchSize("")).toEqual({ files: 0, additions: 0, deletions: 0 });
+  });
+});

@@ -475,12 +475,13 @@ function SheetImpl({ layout: L, model, lod = 2, live = false, onNavigate, onEnte
                 data-part={id}
                 data-status={box.status ?? undefined}
                 data-opens={opens ? '' : undefined}
-                title={p.name}
+                // several open PRs at rest: the hover names every one (the part's line shows two at most)
+                title={box.who ? `${p.name}: changed by ${box.who.join(', ')}` : p.name}
                 style={{ left: box.x, top: box.y, width: box.w, height: box.h, opacity: dim < 1 ? dim : undefined }}
                 // a live sheet's parts take the keyboard: Tab walks them in reading
                 // order, the view moves between them with the arrows and dives on Enter
                 tabIndex={live ? 0 : undefined}
-                aria-label={live ? [box.n ? `${box.n}. ${p.name}, ${box.status}` : p.name, p.role, box.lines ?? '', opens ? `${plural(box.cw!, 'sheet')} inside, Enter opens it` : ''].filter(Boolean).join('. ') : undefined}
+                aria-label={live ? [box.n ? `${box.n}. ${p.name}, ${box.status}` : p.name, p.role, box.who ? `changed by ${box.who.join(', ')}` : box.lines ?? '', opens ? `${plural(box.cw!, 'sheet')} inside, Enter opens it` : ''].filter(Boolean).join('. ') : undefined}
                 onPointerEnter={() => onHover(id)}
                 onPointerLeave={() => onHover(null)}
                 onFocus={live ? () => onHover(id) : undefined}

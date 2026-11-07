@@ -67,6 +67,10 @@
 .sys-view { display: flex; flex-direction: column; min-height: 0; height: 100%; background: var(--sys-paper); }
 .sys-bar { height: 46px; flex: none; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px; padding: 0 10px 0 16px; border-bottom: 1px solid var(--ib-hair, var(--border)); }
 .sys-crumbs { display: flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; font-size: var(--ib-fs-13-5, 13.5px); color: var(--ib-quiet-fg, var(--muted-foreground)); }
+/* the host's own control before the crumbs ("‹ Reviews"), set off by a hairline; the crumbs keep the rest of the first column */
+.sys-start { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.sys-start > .sys-crumbs { flex: 1 1 auto; }
+.sys-lead { flex: none; display: flex; align-items: center; height: 22px; padding-right: 12px; border-right: 1px solid var(--ib-hair, var(--border)); }
 .sys-crumb-w { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
 .sys-crumb { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .sys-crumb.sys-here { color: var(--foreground); }
