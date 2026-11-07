@@ -1,6 +1,6 @@
 /**
  * The change on the drawing (step A5): a revision or the gate's result applied
- * to plannotator's own committed drawing, over the two committed revisions
+ * to plannotator's own drawing (the fixture), over its two revisions
  * (PR 2543 and PR 2563) and their real files from git history.
  *
  * What is proved, without a DOM: After marks the parts and lines a PR adds

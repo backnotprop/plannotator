@@ -1,6 +1,6 @@
 /**
  * The drawing at rest, rendered: SystemView and SystemThumb over plannotator's
- * own committed drawing and the worst-case fixtures, in a real React tree
+ * own drawing (the fixture) and the worst-case fixtures, in a real React tree
  * (happy-dom). What is proved: every sheet draws in each reading it has, with
  * a box for every part the layout placed; Simple draws no lines and no
  * letters; Full draws the lines; a window's "N sheets inside" cue dives into
@@ -92,7 +92,7 @@ async function render(node: React.ReactNode): Promise<HTMLElement> {
 
 const noop = () => {};
 
-test.skipIf(!hasDom)('the committed drawing and the worst-case fixtures load with no errors', () => {
+test.skipIf(!hasDom)('the plannotator fixture and the worst-case fixtures load with no errors', () => {
   expect(loadErrors).toEqual({ plannotator: [], 'worst-case': [], 'worst-one': [] });
   expect(Object.keys(models)).toEqual(['plannotator', 'worst-case', 'worst-one']);
 });
