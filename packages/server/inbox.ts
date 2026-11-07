@@ -3152,10 +3152,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     };
     // Ask AI: said on every answer until the client connects, so an answer that no one read loses nothing.
     const askWaits = () => (ask.waits(session) ? { [INBOX_ASK_WAITS_FIELD]: true } : {});
+    // Auto reload (owner approval "cc-auto-reload"): a Claude Code connection that reloads itself is told,
+    // on every answer, the version a /reload-plugins loads while the session is outdated (fix `restart`).
+    const reloadOffer = () => live.reloadAnswerFor(session, body);
     const now = commands();
     if (now.length > 0 || waitMs === 0 || ask.waits(session)) {
       answered();
-      return json({ commands: now, ...askWaits() });
+      return json({ commands: now, ...askWaits(), ...reloadOffer() });
     }
     return new Promise<Response>((resolve) => {
       let done = false;
@@ -3167,7 +3170,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         stopAskWaits();
         req.signal.removeEventListener("abort", finish);
         answered();
-        resolve(json({ commands: commands(), ...askWaits() }));
+        resolve(json({ commands: commands(), ...askWaits(), ...reloadOffer() }));
       };
       const timer = setTimeout(finish, waitMs);
       const unsubscribe = store.subscribe((line) => {
