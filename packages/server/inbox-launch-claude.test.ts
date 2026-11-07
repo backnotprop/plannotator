@@ -6,7 +6,7 @@ import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { resolveInboxLaunch } from "@plannotator/shared/config";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import type { LaunchHostContext } from "./inbox-launch-host";
-import { agentByShort, claudeAttachCommand, createClaudeHost, createClaudeLaunchHost, parseAgentsJson, parseBackgrounded, refusedForMode, startFailureOf, versionAtLeast, type ClaudeLaunchMode } from "./inbox-launch-claude";
+import { agentByShort, CLAUDE_AUTH_SIGNED_OUT_TTL_MS, CLAUDE_OTHER_SIGN_IN_ENV, claudeAttachCommand, claudeAuthState, createClaudeHost, createClaudeLaunchHost, parseAgentsJson, parseBackgrounded, refusedForMode, startFailureOf, versionAtLeast, type ClaudeLaunchMode } from "./inbox-launch-claude";
 
 describe("parseBackgrounded", () => {
   test("reads the short id and name from the line Claude Code 2.1.314 prints (bg-test RESULTS)", () => {
@@ -202,6 +202,8 @@ describe("Claude Code as a launch host", () => {
         '  --version) echo "2.1.316 (Claude Code)" ;;',
         '  --bg) echo "backgrounded · 844d238d · Inbox" ;;',
         `  agents) echo '[{"id":"844d238d","sessionId":"844d238d-0000-4000-8000-000000000001"}]' ;;`,
+        // `auth status`: what the test wrote in auth.out (nothing: an answer it can't read), its exit in auth.exit.
+        `  auth) cat ${JSON.stringify(join(root, "auth.out"))} 2>/dev/null; exit $(cat ${JSON.stringify(join(root, "auth.exit"))} 2>/dev/null || echo 0) ;;`,
         "esac",
       ].join("\n"),
       { mode: 0o755 },
@@ -214,7 +216,12 @@ describe("Claude Code as a launch host", () => {
       selfCommand: ["plannotator"],
       ownEnv: () => ({ HOME: home, PATH: "" }),
       environment: async () => createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: { HOME: home, PATH: `/usr/bin:/bin:${bin}` } }),
-      shell: () => (login.CLAUDE_CONFIG_DIR ? { CLAUDE_CONFIG_DIR: login.CLAUDE_CONFIG_DIR } : null),
+      // As the engine keeps a shell read: CLAUDE_CONFIG_DIR's value, and only "1" for a host's flags.
+      shell: () => {
+        const kept: Record<string, string> = login.CLAUDE_CONFIG_DIR ? { CLAUDE_CONFIG_DIR: login.CLAUDE_CONFIG_DIR } : {};
+        for (const name of CLAUDE_OTHER_SIGN_IN_ENV) if ((login as Record<string, string | undefined>)[name]) kept[name] = "1";
+        return Object.keys(kept).length > 0 ? kept : null;
+      },
       loginEnv: async () => login,
       config: () => resolveInboxLaunch({}),
       launchDir: (id) => join(dataDir, "inbox", "launch", id),
@@ -228,8 +235,54 @@ describe("Claude Code as a launch host", () => {
       mkdirSync(configDir, { recursive: true });
       writeFileSync(join(configDir, "settings.json"), JSON.stringify({ enabledPlugins: { "plannotator@plannotator": true } }));
     };
-    return { root, home, bin, dataDir, login, launch, pluginOn, host: createClaudeLaunchHost(context), calls: () => readFileSync(calls, "utf8").trim().split("\n") };
+    const auth = (out: string, exit: number) => {
+      writeFileSync(join(root, "auth.out"), out);
+      writeFileSync(join(root, "auth.exit"), String(exit));
+    };
+    return { root, home, bin, dataDir, login, launch, pluginOn, auth, host: createClaudeLaunchHost(context), calls: () => readFileSync(calls, "utf8").trim().split("\n") };
   }
+
+  test("why it can't start comes with a code a linked machine's window words with this machine's name", async () => {
+    const w = world();
+    expect(await w.host.available()).toMatchObject({ ok: false, code: "plugin_off" });
+    w.pluginOn(join(w.home, ".claude"));
+    w.auth(JSON.stringify({ loggedIn: false, authMethod: "none" }), 1);
+    expect(await w.host.available()).toMatchObject({ ok: false, missing: false, code: "signed_out" });
+    // Signed in since: a signed-out answer is kept only a few seconds, so the next look after that says so.
+    w.auth(JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }), 0);
+    expect(await w.host.available()).toMatchObject({ code: "signed_out" });
+    await Bun.sleep(CLAUDE_AUTH_SIGNED_OUT_TTL_MS + 100);
+    expect(await w.host.available()).toMatchObject({ ok: true });
+    // A signed-in answer is kept for a while: no `auth status` per Send.
+    const asked = w.calls().filter((line) => line.startsWith("auth ")).length;
+    await w.host.available();
+    expect(w.calls().filter((line) => line.startsWith("auth ")).length).toBe(asked);
+  }, 20_000);
+
+  test("signed out to the check, but the login shell signs Claude Code in another way (a token, a key, a cloud provider): never refused", async () => {
+    for (const name of ["CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK"]) {
+      const w = world({ login: { [name]: "set-in-zshrc" } });
+      w.pluginOn(join(w.home, ".claude"));
+      w.auth(JSON.stringify({ loggedIn: false }), 1);
+      expect(await w.host.available()).toMatchObject({ ok: true });
+    }
+  });
+
+  test("checks asked at once share one `claude auth status`", async () => {
+    const w = world();
+    w.pluginOn(join(w.home, ".claude"));
+    w.auth(JSON.stringify({ loggedIn: false }), 1);
+    const answers = await Promise.all([w.host.available(), w.host.available(), w.host.available()]);
+    expect(answers.every((a) => !a.ok && a.code === "signed_out")).toBe(true);
+    expect(w.calls().filter((line) => line.startsWith("auth ")).length).toBe(1);
+  });
+
+  test("a sign-in answer it can't read never takes launch away", async () => {
+    const w = world();
+    w.pluginOn(join(w.home, ".claude"));
+    w.auth("error: unknown command 'auth'\n", 1);
+    expect(await w.host.available()).toMatchObject({ ok: true });
+  });
 
   test("a computer with the binary but no plugin is refused first, with the reason: a session there could never reach the Inbox", async () => {
     const w = world();
@@ -331,5 +384,23 @@ describe("the start's permission mode", () => {
     const result = await bypass.host.start({ folder: "/p", shownFolder: "~/p", name: "Smoke", settingsPath: "/s.json", mode: "bypassPermissions", allowBypass: true, environment: bypass.env });
     expect(result).toMatchObject({ ok: false, text: "Error: bypassPermissions mode is disabled by your organization." });
     expect(bypass.starts).toHaveLength(1);
+  });
+});
+
+describe("`claude auth status`: signed out only when it says so plainly", () => {
+  const ran = (stdout: string, exitCode = 0, extra: { timedOut?: boolean; stderr?: string } = {}) => ({ exitCode, stdout, stderr: extra.stderr ?? "", timedOut: extra.timedOut ?? false });
+  test.each([
+    ["JSON, signed in", ran('{"loggedIn":true,"authMethod":"claude.ai"}'), "signed_in"],
+    ["JSON, signed out", ran('{"loggedIn":false,"authMethod":"none"}', 1), "signed_out"],
+    ["text, signed out", ran("Not logged in. Run claude to sign in.", 1), "signed_out"],
+    ["words on stderr only", ran("", 1, { stderr: "You are not signed in." }), "unknown"],
+    ["signed-out words with exit 0", ran("Not logged in."), "unknown"],
+    ["text, signed in", ran("Logged in as someone@example.com"), "signed_in"],
+    ["a CLI without the command", ran("", 1, { stderr: "error: unknown command 'auth'" }), "unknown"],
+    ["not there", ran("", 127), "unknown"],
+    ["timed out", ran("", 1, { timedOut: true }), "unknown"],
+    ["nothing", ran(""), "unknown"],
+  ] as const)("%s", (_, result, state) => {
+    expect(claudeAuthState(result)).toBe(state);
   });
 });
