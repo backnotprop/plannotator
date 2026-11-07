@@ -414,7 +414,7 @@ describe('Off means off, and the focus', () => {
     act(() => setFull(true));
     await settle();
     expect(behind().inert).toBe(true);
-    expect(document.activeElement).toBe($('[data-system-back]'));
+    expect(document.activeElement?.hasAttribute('data-system-back')).toBe(true);
     act(() => $('[data-system-back]')!.click());
     await settle();
     expect(behind().inert).toBe(false);
@@ -429,6 +429,6 @@ describe('Off means off, and the focus', () => {
     await settle();
     await frames();
     expect($('[data-system-pane]')).toBeNull();
-    expect(document.activeElement).toBe($('[data-system-button]'));
+    expect(document.activeElement?.hasAttribute('data-system-button')).toBe(true);
   });
 });

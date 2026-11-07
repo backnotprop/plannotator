@@ -4,7 +4,9 @@
  * What regresses: a project listed that can't be set up and has no drawing (or one dropped that has a drawing), a
  * drawing read from anywhere but `<data dir>/system/<key>/drawing/`, an open PR row for a PR that touches no drawn
  * part (or of another repo, or closed), a PR whose patch fails taking the others down, and anything read while
- * System or Code review is off, for a tailnet guest, for another site's page, or for a project the Inbox lacks.
+ * System or Code review is off, for a tailnet guest, for another site’s page, or for a project the Inbox lacks; a
+ * PR’s patch read again at the same head; the switch: shown with Code review off, flipped by a tailnet guest, a
+ * malformed value saved, or every window not told.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
