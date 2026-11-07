@@ -75,13 +75,22 @@ describe.skipIf(!hasDom)('the step player', () => {
     expect(el.querySelector('[aria-live=polite]')!.textContent).toBe(`Step 3 of 6, line 3: ${SORT_STEPS.frames[2]!.say}`);
   });
 
-  test('Back stops at the first step and Next at the last', async () => {
+  test('Back stops at the first step and Next at the last, and neither drops the focus', async () => {
     const el = await mount();
-    expect(button(el, 'Back one step').disabled).toBe(true);
-    for (let i = 0; i < 8; i++) await act(async () => button(el, 'Next step').click());
+    const back = button(el, 'Back one step');
+    expect(back.getAttribute('aria-disabled')).toBe('true');
+    back.focus();
+    await act(async () => back.click());
+    expect(said(el)).toStartWith('1/6');
+    const next = button(el, 'Next step');
+    next.focus();
+    for (let i = 0; i < 8; i++) await act(async () => next.click());
     expect(said(el)).toStartWith('6/6');
-    expect(button(el, 'Next step').disabled).toBe(true);
-    expect(button(el, 'Back one step').disabled).toBe(false);
+    expect(next.getAttribute('aria-disabled')).toBe('true');
+    // A disabled button would lose the focus to the page; this one keeps it.
+    expect(next.disabled).toBe(false);
+    expect(document.activeElement).toBe(next);
+    expect(button(el, 'Back one step').getAttribute('aria-disabled')).toBe('false');
   });
 
   test('the scrubber reaches every step and says which one it is on', async () => {
@@ -113,5 +122,22 @@ describe.skipIf(!hasDom)('the step player', () => {
     expect(chain!.querySelectorAll('.join')).toHaveLength(2);
     expect(map!.querySelectorAll('.join')).toHaveLength(0);
     expect(chain!.querySelector('.box.filled')!.textContent).toBe('B');
+  });
+
+  test('a node named like an object method has no tag unless the frame gives it one', async () => {
+    const g: ShapeSteps = {
+      steps: 1,
+      title: 'names',
+      code: { lines: ['visit(n)'] },
+      show: 'graph',
+      graph: { nodes: [{ id: 'A', x: 10, y: 50 }, { id: 'constructor', x: 50, y: 50, small: true }, { id: 'toString', x: 90, y: 50 }], edges: [{ from: 'A', to: 'toString' }] },
+      frames: [{ line: 1, say: 'A is 0.', tags: { A: 0 } }],
+    };
+    const el = await mount(g);
+    const words = [...el.querySelectorAll('svg text')].map((t) => t.textContent);
+    expect(words).toContain('constructor');
+    expect(words).toContain('toString');
+    expect(words.join(' ')).not.toContain('function');
+    expect(words.filter((w) => w === '0')).toHaveLength(1);
   });
 });

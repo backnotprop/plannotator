@@ -51,11 +51,11 @@ printf '// @generated — DO NOT EDIT. Source: packages/core/shape.ts\n' | cat -
   | sed -e "s|from ['\"]\./guide['\"]|from '../guide.ts'|g" -e "s|from ['\"]\./ulid['\"]|from '../ulid.ts'|g" \
     -e "s|from ['\"]\./shape-run['\"]|from './shape-run.ts'|g" -e "s|from ['\"]\./shape-steps['\"]|from './shape-steps.ts'|g" \
   > generated/shape/core.ts
-# A board's runs and step-throughs (core/shape imports both; each imports only core/shape's types).
+# A board's runs and step-throughs (core/shape imports both; each imports core/shape's types, and steps reads one helper of run).
 printf '// @generated — DO NOT EDIT. Source: packages/core/shape-run.ts\n' | cat - ../../packages/core/shape-run.ts \
   | sed "s|from ['\"]\./shape['\"]|from './core.ts'|g" > generated/shape/shape-run.ts
 printf '// @generated — DO NOT EDIT. Source: packages/core/shape-steps.ts\n' | cat - ../../packages/core/shape-steps.ts \
-  | sed "s|from ['\"]\./shape['\"]|from './core.ts'|g" > generated/shape/shape-steps.ts
+  | sed -e "s|from ['\"]\./shape['\"]|from './core.ts'|g" -e "s|from ['\"]\./shape-run['\"]|from './shape-run.ts'|g" > generated/shape/shape-steps.ts
 printf '// @generated — DO NOT EDIT. Source: packages/shared/shape/format.ts\n' | cat - ../../packages/shared/shape/format.ts \
   | sed "s|from ['\"]@plannotator/core/shape['\"]|from './core.ts'|g" > generated/shape/format.ts
 # One line each (not a loop): tests/parity/vendor-parity.test.ts reads these paths to match Pi's imports.

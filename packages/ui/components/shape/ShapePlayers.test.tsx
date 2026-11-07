@@ -5,7 +5,9 @@
  *   gets a player, or anything in a `data-run` slot, where it got nothing;
  * - a board's `<div data-run>` / `<div data-steps>` stops playing its part,
  *   or plays one the board does not have;
- * - one player that cannot draw takes the board (or the other player) down.
+ * - one player that cannot draw takes the board (or the other player) down;
+ * - a player drawn in the drawing's own tree, where the board's frame CSS
+ *   (`svg text { fill: var(--ink) }`) and the agent's CSS repaint its words.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -44,7 +46,10 @@ async function draw(props: Partial<React.ComponentProps<NonNullable<typeof drawn
   // The players load lazily: let their chunks resolve.
   for (let i = 0; i < 20; i++) await act(async () => new Promise((r) => setTimeout(r, 5)));
   const board = container.querySelector('.shp-drawn-host')!.shadowRoot!.querySelector('.board') as HTMLElement;
-  return { board, slot: (sel: string) => board.querySelector<HTMLElement>(sel)! };
+  const slot = (sel: string) => board.querySelector<HTMLElement>(sel)!;
+  /** The player's own shadow root inside a slot. */
+  const player = (sel: string) => slot(sel).querySelector<HTMLElement>('[data-shape-player]')?.shadowRoot ?? null;
+  return { board, slot, player };
 }
 
 describe.skipIf(!hasDom)('players in a drawn view', () => {
@@ -56,10 +61,22 @@ describe.skipIf(!hasDom)('players in a drawn view', () => {
   });
 
   test('each slot plays the part the board has under its id, and a slot for one it lacks stays empty', async () => {
-    const { slot } = await draw({ runs: { pool: POOL_RUN }, steps: { sort: SORT_STEPS } });
-    expect(slot('[data-run="pool"]').querySelector('[role=group]')!.getAttribute('aria-label')).toBe(`Run: ${POOL_RUN.title}`);
-    expect(slot('[data-steps="sort"]').querySelector('[role=group]')!.getAttribute('aria-label')).toBe(`Step-through: ${SORT_STEPS.title}`);
+    const { slot, player } = await draw({ runs: { pool: POOL_RUN }, steps: { sort: SORT_STEPS } });
+    expect(player('[data-run="pool"]')!.querySelector('[role=group]')!.getAttribute('aria-label')).toBe(`Run: ${POOL_RUN.title}`);
+    expect(player('[data-steps="sort"]')!.querySelector('[role=group]')!.getAttribute('aria-label')).toBe(`Step-through: ${SORT_STEPS.title}`);
     expect(slot('[data-run="other"]').childNodes).toHaveLength(0);
+  });
+
+  test('each player draws in a shadow root of its own, out of reach of the drawing\'s CSS', async () => {
+    const { board, player } = await draw({ runs: { pool: POOL_RUN }, steps: { sort: SORT_STEPS } });
+    // Nothing of a player is in the drawing's tree, where `svg text` and an agent's `.node` would match it.
+    expect(board.querySelector('.srp, .ssp, svg, button')).toBeNull();
+    for (const sel of ['[data-run="pool"]', '[data-steps="sort"]']) {
+      const shadow = player(sel)!;
+      expect(shadow).not.toBeNull();
+      expect(shadow.querySelector('style')!.textContent).toContain(sel.includes('run') ? '.srp' : '.ssp');
+      expect(shadow.querySelector('[role=group] button')).not.toBeNull();
+    }
   });
 
   test('a run that cannot be drawn leaves its slot empty and the rest of the board playing', async () => {
@@ -73,9 +90,9 @@ describe.skipIf(!hasDom)('players in a drawn view', () => {
     } finally {
       console.error = error;
     }
-    const { board, slot } = drawn;
+    const { board, player } = drawn;
     expect(board.querySelector('h2')!.textContent).toBe('Played');
-    expect(slot('[data-run="pool"]').childNodes).toHaveLength(0);
-    expect(slot('[data-steps="sort"]').querySelector('[role=group]')).not.toBeNull();
+    expect(player('[data-run="pool"]')!.childNodes).toHaveLength(0);
+    expect(player('[data-steps="sort"]')!.querySelector('[role=group]')).not.toBeNull();
   });
 });

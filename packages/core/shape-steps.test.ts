@@ -109,4 +109,55 @@ describe('a board plays its step-throughs', () => {
     expect(errorsOf({ ...graph(), rowsJoin: 'arrow' })).toContain('steps.rowsJoin');
   });
 
+  test('a name that would set the prototype is refused; one every object has is an ordinary id', () => {
+    const proto = JSON.parse(JSON.stringify(graph()));
+    proto.graph.nodes.push({ id: '__proto__', x: 50, y: 0 });
+    expect(errorsOf(proto)).toContain('steps.graph.nodes[2].id');
+    // Written as JSON, the way an agent's file arrives: a "__proto__" key is an own key of the parsed object.
+    const tags = JSON.parse('{"A":0,"__proto__":3}');
+    expect(errorsOf({ ...graph(), frames: [{ ...graph().frames[0], tags }] })).toContain('steps.frames[0].tags.__proto__');
+    const vars = JSON.parse('{"__proto__":1}');
+    expect(errorsOf({ ...sort(), frames: [{ ...sort().frames[0], vars }] })).toContain('steps.frames[0].vars.__proto__');
+    const named = graph();
+    named.graph!.nodes.push({ id: 'constructor', x: 50, y: 0 });
+    named.frames[0]!.tags = { constructor: 7 };
+    const r = checkShapeSteps(named);
+    expect(r.ok && Object.hasOwn(r.value.frames[0]!.tags!, 'constructor') && r.value.frames[0]!.tags!.constructor).toBe(7);
+  });
+
+  test('a typo below a frame is named, and a part of another drawing is not dropped silently', () => {
+    const g = graph() as any;
+    g.graph.nodes[0].lable = 'A';
+    g.graph.edges[0].weight = 3;
+    g.frames[0].array = [1, 2];
+    const all = errorsOf(g);
+    expect(all).toContain('steps.graph.nodes[0].lable: is not part of a node');
+    expect(all).toContain('steps.graph.edges[0].weight: is not part of an edge');
+    expect(all).toContain('steps.frames[0].array: is for show "array"');
+    expect(errorsOf({ ...sort(), graph: graph().graph })).toContain('steps.graph: is for show "graph"');
+  });
+
+  test('both ends of a bad edge are named, and a lit edge must be two node ids', () => {
+    const g = graph() as any;
+    g.graph.edges.push({ from: 'X', to: 'Y' });
+    const all = errorsOf(g);
+    expect(all).toContain('steps.graph.edges[1].from');
+    expect(all).toContain('steps.graph.edges[1].to');
+    const lit = graph() as any;
+    lit.frames[0].edges = { look: [[['A'], 'B']] };
+    expect(errorsOf(lit)).toContain('steps.frames[0].edges.look[0]');
+  });
+});
+
+describe('what a drawing plays', () => {
+  const board = (html: string, steps?: unknown) => ({ title: 't', claim: 'c', views: { how: { html } }, ...(steps ? { steps } : {}) });
+  test('data-steps on a board with no steps says what it found', () => {
+    const r = checkShapeBoard(board('<div data-steps="1"></div>'));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.join('\n')).toContain('has data-steps="1", but the board has no steps');
+  });
+  test('the attribute shown in a comment or in text is not a player', () => {
+    const html = '<!-- <div data-steps="a"></div> --><pre><code>&lt;div data-steps="b"&gt;</code></pre><p> data-steps="c" in words</p>';
+    expect(checkShapeBoard(board(html)).ok).toBe(true);
+  });
 });

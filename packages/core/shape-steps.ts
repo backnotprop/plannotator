@@ -21,6 +21,7 @@
  * Browser-safe, no DOM.
  */
 import type { ShapeCheck } from './shape';
+import { shapeHtmlAttr } from './shape-run';
 
 export const SHAPE_STEPS_VERSION = 1;
 
@@ -103,6 +104,15 @@ export const SHAPE_STEPS_LIMITS = { frames: 400, lines: 60, lineChars: 110, say:
 const ID_RE = /^[A-Za-z0-9_.:-]+$/;
 const STEPS_KEYS = ['steps', 'title', 'source', 'code', 'show', 'graph', 'rowsJoin', 'queueLabel', 'frames'];
 const FRAME_KEYS = ['line', 'say', 'array', 'cells', 'ptr', 'nodes', 'edges', 'tags', 'queue', 'rows', 'vars'];
+/** The frame keys that belong to one drawing; the rest (line, say, queue, vars) belong to all. */
+const FRAME_KEYS_OF: Record<ShapeSteps['show'], readonly string[]> = { array: ['array', 'cells', 'ptr'], graph: ['nodes', 'edges', 'tags'], rows: ['rows'] };
+const CODE_KEYS = ['lang', 'lines'];
+const GRAPH_KEYS = ['nodes', 'edges', 'directed', 'ring'];
+const NODE_KEYS = ['id', 'label', 'x', 'y', 'small'];
+const EDGE_KEYS = ['from', 'to', 'w'];
+const ROW_KEYS = ['label', 'items', 'role', 'roles', 'join'];
+/** A name that would set an object's prototype instead of a key of it. */
+const RESERVED = '__proto__';
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
@@ -114,7 +124,11 @@ export function checkShapeSteps(input: unknown, field = 'steps'): ShapeCheck<Sha
   };
   if (!isRecord(input)) return { ok: false, errors: [`${field}: must be an object { steps: 1, title, code, show, frames }`] };
   if (input.steps !== 1) fail(`${field}.steps`, 'must be 1 (the format version)');
-  for (const key of Object.keys(input)) if (!STEPS_KEYS.includes(key)) fail(`${field}.${key}`, `is not part of a step-through (${STEPS_KEYS.join(', ')})`);
+  // A key the format does not know is named, at every level: a typo would otherwise be dropped without a word.
+  const only = (v: Record<string, unknown>, keys: readonly string[], at: string, what: string) => {
+    for (const key of Object.keys(v)) if (!keys.includes(key)) fail(`${at}.${key}`, `is not part of ${what} (${keys.join(', ')})`);
+  };
+  only(input, STEPS_KEYS, field, 'a step-through');
   const text = (v: unknown, at: string, max: number, required: boolean): string | undefined => {
     if (v === undefined || v === null) {
       if (required) fail(at, 'is required');
@@ -135,9 +149,10 @@ export function checkShapeSteps(input: unknown, field = 'steps'): ShapeCheck<Sha
   let lang: string | undefined;
   if (!isRecord(input.code) || !Array.isArray(input.code.lines)) fail(`${field}.code`, 'must be { lang?, lines: ["…", …] }');
   else {
+    only(input.code, CODE_KEYS, `${field}.code`, 'code');
     lang = text(input.code.lang, `${field}.code.lang`, 20, false);
     if (!input.code.lines.length) fail(`${field}.code.lines`, 'is empty');
-    if (input.code.lines.length > SHAPE_STEPS_LIMITS.lines) fail(`${field}.code.lines`, `has ${input.code.lines.length} lines; at most ${SHAPE_STEPS_LIMITS.lines}: show the function, not the file`);
+    if (input.code.lines.length > SHAPE_STEPS_LIMITS.lines) fail(`${field}.code.lines`, `has ${input.code.lines.length} lines; at most ${SHAPE_STEPS_LIMITS.lines}`);
     lines = input.code.lines.slice(0, SHAPE_STEPS_LIMITS.lines).map((l, i) => {
       if (typeof l !== 'string') return fail(`${field}.code.lines[${i}]`, 'must be text'), '';
       if (l.length > SHAPE_STEPS_LIMITS.lineChars) fail(`${field}.code.lines[${i}]`, `is ${l.length} characters; at most ${SHAPE_STEPS_LIMITS.lineChars}`);
@@ -157,10 +172,12 @@ export function checkShapeSteps(input: unknown, field = 'steps'): ShapeCheck<Sha
   let graph: ShapeSteps['graph'];
   const nodeIds = new Set<string>();
   const edgeKeys = new Set<string>();
+  if (show !== 'graph' && input.graph !== undefined) fail(`${field}.graph`, `is for show "graph"; this step-through shows ${JSON.stringify(show)}`);
   if (show === 'graph') {
     const g = input.graph;
     if (!isRecord(g) || !Array.isArray(g.nodes) || !Array.isArray(g.edges)) fail(`${field}.graph`, 'must be { nodes: [{ id, x, y }], edges: [{ from, to, w? }] }');
     else {
+      only(g, GRAPH_KEYS, `${field}.graph`, 'a graph');
       const directed = g.directed === true;
       if (g.nodes.length > SHAPE_STEPS_LIMITS.nodes) fail(`${field}.graph.nodes`, `has ${g.nodes.length}; at most ${SHAPE_STEPS_LIMITS.nodes}`);
       if (g.edges.length > SHAPE_STEPS_LIMITS.edges) fail(`${field}.graph.edges`, `has ${g.edges.length}; at most ${SHAPE_STEPS_LIMITS.edges}`);
@@ -168,8 +185,10 @@ export function checkShapeSteps(input: unknown, field = 'steps'): ShapeCheck<Sha
       g.nodes.slice(0, SHAPE_STEPS_LIMITS.nodes).forEach((n, i) => {
         const at = `${field}.graph.nodes[${i}]`;
         if (!isRecord(n)) return fail(at, 'must be { id, x, y }');
+        only(n, NODE_KEYS, at, 'a node');
         const id = typeof n.id === 'string' ? n.id.trim() : '';
         if (!id || id.length > SHAPE_STEPS_LIMITS.id || !ID_RE.test(id)) return fail(`${at}.id`, `must be a short id (letters, digits, _ . : -; at most ${SHAPE_STEPS_LIMITS.id})`);
+        if (id === RESERVED) return fail(`${at}.id`, `"${RESERVED}" is a reserved name`);
         if (nodeIds.has(id)) return fail(`${at}.id`, `"${id}" is used twice`);
         if (!isNum(n.x) || n.x < 0 || n.x > 100) fail(`${at}.x`, 'must be a number from 0 to 100');
         if (!isNum(n.y) || n.y < 0 || n.y > 100) fail(`${at}.y`, 'must be a number from 0 to 100');
@@ -181,8 +200,11 @@ export function checkShapeSteps(input: unknown, field = 'steps'): ShapeCheck<Sha
       g.edges.slice(0, SHAPE_STEPS_LIMITS.edges).forEach((e, i) => {
         const at = `${field}.graph.edges[${i}]`;
         if (!isRecord(e)) return fail(at, 'must be { from, to, w? }');
+        only(e, EDGE_KEYS, at, 'an edge');
         const ok = (v: unknown, k: string) => (typeof v === 'string' && nodeIds.has(v) ? true : (fail(`${at}.${k}`, `must be a node id (${[...nodeIds].slice(0, 4).join(', ')}${nodeIds.size > 4 ? ', …' : ''})`), false));
-        if (!ok(e.from, 'from') || !ok(e.to, 'to')) return;
+        // Both ends are checked, so a bad "to" is named even when "from" is bad too.
+        const fromOk = ok(e.from, 'from'), toOk = ok(e.to, 'to');
+        if (!fromOk || !toOk) return;
         if (e.w !== undefined && !isNum(e.w)) fail(`${at}.w`, 'must be a number');
         edgeKeys.add(`${e.from}>${e.to}`);
         if (!directed) edgeKeys.add(`${e.to}>${e.from}`);
@@ -196,11 +218,18 @@ export function checkShapeSteps(input: unknown, field = 'steps'): ShapeCheck<Sha
   const frames: ShapeStepFrame[] = [];
   if (!Array.isArray(input.frames) || !input.frames.length) fail(`${field}.frames`, 'must be a list of states, at least one');
   else {
-    if (input.frames.length > SHAPE_STEPS_LIMITS.frames) fail(`${field}.frames`, `has ${input.frames.length}; at most ${SHAPE_STEPS_LIMITS.frames}: keep the steps that teach`);
+    if (input.frames.length > SHAPE_STEPS_LIMITS.frames) fail(`${field}.frames`, `has ${input.frames.length}; at most ${SHAPE_STEPS_LIMITS.frames}`);
     input.frames.slice(0, SHAPE_STEPS_LIMITS.frames).forEach((f, i) => {
       const at = `${field}.frames[${i}]`;
       if (!isRecord(f)) return fail(at, 'must be { line, say, … }');
-      for (const key of Object.keys(f)) if (!FRAME_KEYS.includes(key)) fail(`${at}.${key}`, `is not part of a frame (${FRAME_KEYS.join(', ')})`);
+      for (const key of Object.keys(f)) {
+        if (!FRAME_KEYS.includes(key)) fail(`${at}.${key}`, `is not part of a frame (${FRAME_KEYS.join(', ')})`);
+        else if (show === 'array' || show === 'graph' || show === 'rows') {
+          // A part of another drawing (an array in a graph's frame) would be dropped without a word.
+          const owner = (Object.keys(FRAME_KEYS_OF) as ShapeSteps['show'][]).find((k) => FRAME_KEYS_OF[k].includes(key));
+          if (owner && owner !== show) fail(`${at}.${key}`, `is for show "${owner}"; this step-through shows "${show}"`);
+        }
+      }
       if (!Number.isInteger(f.line) || (f.line as number) < 1 || (f.line as number) > Math.max(1, lines.length)) fail(`${at}.line`, `must be a code line from 1 to ${lines.length}`);
       const say = text(f.say, `${at}.say`, SHAPE_STEPS_LIMITS.say, true) ?? '';
       const out: ShapeStepFrame = { line: Number.isInteger(f.line) ? (f.line as number) : 1, say };
@@ -241,6 +270,7 @@ export function checkShapeSteps(input: unknown, field = 'steps'): ShapeCheck<Sha
               out.ptr = {};
               for (const [name, v] of Object.entries(f.ptr)) {
                 if (name.length > 8) fail(`${at}.ptr.${name}`, 'a pointer name is at most 8 characters');
+                else if (name === RESERVED) fail(`${at}.ptr.${name}`, `"${RESERVED}" is a reserved name`);
                 // A pointer may sit one past either end (j = -1 when insertion sort runs off the front).
                 else if (!Number.isInteger(v) || (v as number) < -1 || (v as number) > n) fail(`${at}.ptr.${name}`, `must be an index from -1 to ${n}`);
                 else out.ptr[name] = v as number;
@@ -251,7 +281,7 @@ export function checkShapeSteps(input: unknown, field = 'steps'): ShapeCheck<Sha
       } else if (show === 'graph') {
         const node = (x: unknown, a: string) => (typeof x === 'string' && nodeIds.has(x) ? x : (fail(a, `"${String(x)}" is not a node id`), undefined));
         const edge = (x: unknown, a: string): [string, string] | undefined =>
-          Array.isArray(x) && x.length === 2 && edgeKeys.has(`${x[0]}>${x[1]}`) ? [x[0] as string, x[1] as string] : (fail(a, `${JSON.stringify(x)} is not an edge of the graph`), undefined);
+          Array.isArray(x) && x.length === 2 && typeof x[0] === 'string' && typeof x[1] === 'string' && edgeKeys.has(`${x[0]}>${x[1]}`) ? [x[0], x[1]] : (fail(a, `${JSON.stringify(x)} is not an edge of the graph`), undefined);
         const nodes = roles(f.nodes, 'nodes', node);
         if (nodes) out.nodes = nodes;
         const edges = roles(f.edges, 'edges', edge);
@@ -277,6 +307,7 @@ export function checkShapeSteps(input: unknown, field = 'steps'): ShapeCheck<Sha
           rows.forEach((r, j) => {
             const ra = `${at}.rows[${j}]`;
             if (!isRecord(r) || !Array.isArray(r.items)) return fail(ra, 'must be { label, items: [ … ], role?, roles? }');
+            only(r, ROW_KEYS, ra, 'a row');
             const label = typeof r.label === 'string' || isNum(r.label) ? String(r.label) : (fail(`${ra}.label`, 'must be a short word'), '');
             if (label.length > SHAPE_STEPS_LIMITS.cell) fail(`${ra}.label`, `is ${label.length} characters; at most ${SHAPE_STEPS_LIMITS.cell}`);
             if (r.items.length > SHAPE_STEPS_LIMITS.rowItems) return fail(`${ra}.items`, `has ${r.items.length}; at most ${SHAPE_STEPS_LIMITS.rowItems}`);
@@ -314,6 +345,7 @@ export function checkShapeSteps(input: unknown, field = 'steps'): ShapeCheck<Sha
           out.vars = {};
           for (const [k, v] of Object.entries(f.vars)) {
             if (k.length > 16) fail(`${at}.vars.${k}`, 'a name is at most 16 characters');
+            else if (k === RESERVED) fail(`${at}.vars.${k}`, `"${RESERVED}" is a reserved name`);
             else if (v !== null && !isNum(v) && typeof v !== 'boolean' && !(typeof v === 'string' && v.length <= 24)) fail(`${at}.vars.${k}`, 'must be a number, a boolean, null or a short word');
             else out.vars[k] = v as number | string | boolean | null;
           }
@@ -342,7 +374,5 @@ export function checkShapeSteps(input: unknown, field = 'steps'): ShapeCheck<Sha
 
 /** The step-through ids a drawn view's HTML plays (`data-steps="id"`). No DOM. */
 export function shapeHtmlSteps(html: string): string[] {
-  const out: string[] = [];
-  for (const m of html.matchAll(/\sdata-steps\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) out.push((m[1] ?? m[2] ?? m[3] ?? '').trim());
-  return out;
+  return shapeHtmlAttr(html, 'data-steps');
 }

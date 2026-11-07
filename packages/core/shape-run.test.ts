@@ -53,6 +53,31 @@ describe('checkShapeRun', () => {
     expect(bad.ok).toBe(false);
     if (!bad.ok) expect(bad.errors.join('\n')).toContain('run.events: is not part of a run');
   });
+
+  test('a typo inside a span, a msg, a mark, a limit or a row is named too', () => {
+    const bad = checkShapeRun({
+      ...run(),
+      lanes: [{ id: 'b1', label: 'batch 1', color: 'red' }, { id: 'merge', label: 'merge' }],
+      spans: [{ lane: 'b1', from: 0, to: 9, ends: 'error' }],
+      msgs: [{ from: 'b1', to: 'merge', at: 1, arrives: 2 }],
+      marks: [{ at: 1, label: 'x', lanes: 'b1' }],
+      limits: [{ at: 120, label: 'deadline', colour: 'alert' }],
+    });
+    expect(bad.ok).toBe(false);
+    if (bad.ok) return;
+    const all = bad.errors.join('\n');
+    for (const f of ['run.lanes[0].color', 'run.spans[0].ends: is not part of a span', 'run.msgs[0].arrives', 'run.marks[0].lanes', 'run.limits[0].colour']) expect(all).toContain(f);
+  });
+
+  test('an empty optional word is the same as none; an empty title is still refused', () => {
+    const ok = checkShapeRun({ ...run(), lanes: [{ id: 'b1', label: '' }, { id: 'merge', label: 'merge' }], spans: [{ lane: 'b1', on: 'r0', from: 0, to: 30, label: '' }], source: '' });
+    expect(ok.ok).toBe(true);
+    if (ok.ok) {
+      expect(ok.value.lanes[0]!.label).toBe('b1');
+      expect(ok.value.spans[0]!.label).toBeUndefined();
+    }
+    expect(checkShapeRun({ ...run(), title: ' ' }).ok).toBe(false);
+  });
 });
 
 describe('a board plays its runs', () => {
@@ -98,5 +123,10 @@ describe('a board plays its runs', () => {
     const r = checkShapeBoard(board('<div data-run="constructor"></div>', { pool: run() }));
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.errors.join('\n')).toContain('runs has no "constructor"');
+  });
+
+  test('the attribute in a comment or a code sample is not a player', () => {
+    const html = '<!-- <div data-run="a"></div> --><pre><code>&lt;div data-run="b"&gt;&lt;/div&gt;</code></pre>';
+    expect(checkShapeBoard(board(html)).ok).toBe(true);
   });
 });

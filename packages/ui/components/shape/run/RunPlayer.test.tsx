@@ -6,7 +6,9 @@
  * - "By goroutine" / "By channel" no longer regroups the rows, or a run with
  *   nothing to group by offers the control anyway;
  * - a scenario stops saying, on the picture, that it is not a recorded trace;
- * - a failed call loses its red end, or a span past the playhead is drawn early.
+ * - a failed call loses its red end, or a span past the playhead is drawn early;
+ * - the time slider needs hundreds of key presses to cross the run;
+ * - it stops playing once by itself when first seen, or plays under reduced motion.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -134,5 +136,51 @@ describe.skipIf(!hasDom)('the run player', () => {
     await scrubTo(el, 15);
     // The red last stretch and the cross.
     expect(failedEnd().length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('the time slider crosses the run in steps a keyboard can count', async () => {
+    const el = await mount({ reduce: true });
+    const input = el.querySelector<HTMLInputElement>('input[type=range]')!;
+    const press = (key: string) => act(async () => void input.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
+    await press('Home');
+    expect(caption(el)).toStartWith('0 ms');
+    // 40 presses cross the 30 ms run: four are 3 ms, a Page key is ten of them.
+    for (let i = 0; i < 4; i++) await press('ArrowRight');
+    expect(caption(el)).toStartWith('3 ms');
+    await press('PageUp');
+    expect(caption(el)).toStartWith('6 ms');
+    await press('End');
+    expect(caption(el)).toStartWith('30 ms');
+  });
+
+  test('it plays once by itself when first seen, and never under reduced motion', async () => {
+    const was = globalThis.IntersectionObserver;
+    let seen: (() => void) | null = null;
+    globalThis.IntersectionObserver = class {
+      constructor(cb: (entries: { isIntersecting: boolean }[]) => void) {
+        seen = () => cb([{ isIntersecting: true }]);
+      }
+      observe() {}
+      disconnect() {}
+    } as unknown as typeof IntersectionObserver;
+    try {
+      const still = await mount({ reduce: true });
+      await act(async () => seen?.());
+      expect(still.querySelector('button.play')!.getAttribute('aria-label')).toBe('Play');
+      act(() => root?.unmount());
+      seen = null;
+      await act(async () => {
+        root = createRoot(slot!);
+        root.render(<RunPlayer run={POOL_RUN} />);
+      });
+      expect(seen).not.toBeNull();
+      // Synchronous: an awaited act would wait out the whole playback.
+      act(() => seen!());
+      expect(slot!.querySelector('button.play')!.getAttribute('aria-label')).toBe('Pause');
+      act(() => root?.unmount());
+      root = null;
+    } finally {
+      globalThis.IntersectionObserver = was;
+    }
   });
 });

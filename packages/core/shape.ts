@@ -1689,12 +1689,17 @@ export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
     const view = views[v];
     if (!view) continue;
     // A run or step-through with its own problems is named by them; only one that is not there at all is named here.
-    const played = (ids: string[], have: unknown, attr: string, part: string) => {
-      for (const id of new Set(ids)) if (!(isRecord(have) && Object.hasOwn(have, id))) c.fail(`views.${v}.html`, `plays ${attr}="${id}" but ${part} has no "${id}"`);
+    // It says what it found, so a typo is plain: `data-steps="1"` on a board with no steps reads as the reveal order's `data-step` with an s.
+    const played = (ids: string[], have: unknown, attr: string, part: string, near?: string) => {
+      for (const id of new Set(ids)) {
+        if (isRecord(have) && Object.hasOwn(have, id)) continue;
+        const why = isRecord(have) ? `${part} has no "${id}"` : `the board has no ${part}`;
+        c.fail(`views.${v}.html`, `has ${attr}="${id}", but ${why}${near && !isRecord(have) ? ` (${near} is a different attribute)` : ''}`);
+      }
     };
     const html = [view.html, view.tall?.html ?? '', view.more?.html ?? ''];
     played(html.flatMap(shapeHtmlRuns), input.runs, 'data-run', 'runs');
-    played(html.flatMap(shapeHtmlSteps), input.steps, 'data-steps', 'steps');
+    played(html.flatMap(shapeHtmlSteps), input.steps, 'data-steps', 'steps', 'data-step, the reveal order,');
   }
   if (c.errors.length || !title || !claim) return { ok: false, errors: c.errors.length ? c.errors : ['title and claim are required'] };
   const board: ShapeBoard = { title, claim, ...(asOf ? { asOf } : {}), ...(note ? { note } : {}), views, ...(refs?.length ? { refs } : {}), ...(runs ? { runs } : {}), ...(steps ? { steps } : {}) };

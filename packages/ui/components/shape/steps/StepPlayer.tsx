@@ -46,13 +46,13 @@ const CSS = `
 .ssp-cap b { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink2); margin-right: .5em; }
 .ssp-bar { grid-column: 1 / -1; grid-row: 4; display: flex; align-items: center; gap: calc(8px * var(--u)); padding-top: calc(8px * var(--u)); flex-wrap: wrap; }
 .ssp button { appearance: none; font: inherit; color: var(--ink); background: transparent; border: 0; border-radius: calc(7px * var(--u)); padding: calc(5px * var(--u)) calc(9px * var(--u)); cursor: pointer; line-height: 1.2; min-height: calc(28px * var(--u)); }
-.ssp button:hover:not(:disabled) { background: var(--sunk); }
-.ssp button:disabled { opacity: .4; cursor: default; }
+.ssp button:hover:not([aria-disabled=true]) { background: var(--sunk); }
+.ssp button[aria-disabled=true] { opacity: .4; cursor: default; }
 .ssp button:focus-visible, .ssp input:focus-visible, .ssp-code:focus-visible { outline: calc(2px * var(--u)) solid var(--mark); outline-offset: calc(2px * var(--u)); }
 .ssp .icon { width: calc(32px * var(--u)); height: calc(32px * var(--u)); padding: 0; display: grid; place-items: center; flex: none; }
 .ssp .icon svg { width: calc(14px * var(--u)); height: calc(14px * var(--u)); }
 .ssp .play { background: var(--mark); color: var(--primary-foreground, #fff); border-radius: 999px; }
-.ssp .play:hover:not(:disabled) { background: color-mix(in oklab, var(--mark) 85%, var(--ink)); }
+.ssp .play:hover:not([aria-disabled=true]) { background: color-mix(in oklab, var(--mark) 85%, var(--ink)); }
 .ssp input[type=range] { flex: 1 1 calc(140px * var(--u)); min-width: calc(90px * var(--u)); accent-color: var(--mark); height: calc(24px * var(--u)); margin: 0; }
 .ssp .n { font-variant-numeric: tabular-nums; color: var(--ink2); font-family: var(--font-mono, ui-monospace, monospace); font-size: .92em; min-width: 4.2em; }
 .ssp .seg { display: inline-flex; padding: calc(2px * var(--u)); border-radius: calc(9px * var(--u)); background: var(--sunk); gap: calc(2px * var(--u)); }
@@ -73,6 +73,13 @@ const CSS = `
 `;
 
 const SPEEDS = [0.5, 1, 2] as const;
+
+/** The element a player sits in: its parent, or the drawing's slot around the shadow host it was given. */
+function slotOf(root: HTMLElement): HTMLElement | null {
+  if (root.parentElement) return root.parentElement;
+  const host = (root.getRootNode() as ShadowRoot).host as HTMLElement | undefined;
+  return host?.parentElement ?? host ?? null;
+}
 /** At 1×, a step lasts this long. */
 const STEP_MS = 1100;
 
@@ -136,7 +143,7 @@ export default function StepPlayer({ steps, reduce = false, at }: StepPlayerProp
   useLayoutEffect(() => {
     const root = rootRef.current, stage = stageRef.current;
     if (!root || !stage) return;
-    const slot = root.parentElement;
+    const slot = slotOf(root);
     if (slot) {
       root.style.display = 'none';
       setFill(slot.clientHeight >= 200);
@@ -157,7 +164,7 @@ export default function StepPlayer({ steps, reduce = false, at }: StepPlayerProp
   const narrow = size.rw > 0 && size.rw / u < 640;
   // A narrow player is as tall as it needs.
   useLayoutEffect(() => {
-    const slot = rootRef.current?.parentElement;
+    const slot = rootRef.current ? slotOf(rootRef.current) : null;
     if (!slot || !narrow || !fill) return;
     const was = slot.style.height;
     slot.style.height = 'auto';
@@ -271,7 +278,8 @@ export default function StepPlayer({ steps, reduce = false, at }: StepPlayerProp
         {frame.say}
       </p>
       <div className="ssp-bar">
-        <button type="button" className="icon" onClick={() => (setPlaying(false), go(idx - 1))} disabled={idx === 0} aria-label="Back one step">
+        {/* At an end the button stays focusable (aria-disabled), so a keyboard user's focus is not dropped to the page. */}
+        <button type="button" className="icon" onClick={() => idx > 0 && (setPlaying(false), go(idx - 1))} aria-disabled={idx === 0} aria-label="Back one step">
           <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 2v10M11.5 2.6v8.8a.5.5 0 0 1-.8.4L5 7.4a.5.5 0 0 1 0-.8l5.7-4.4a.5.5 0 0 1 .8.4Z" fill="currentColor" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
         </button>
         <button type="button" className="icon play" onClick={() => play(!playing)} aria-label={playing ? 'Pause' : 'Play'}>
@@ -281,7 +289,7 @@ export default function StepPlayer({ steps, reduce = false, at }: StepPlayerProp
             <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M4 2.2v9.6a.6.6 0 0 0 .9.5l7.6-4.8a.6.6 0 0 0 0-1L4.9 1.7a.6.6 0 0 0-.9.5Z" fill="currentColor" /></svg>
           )}
         </button>
-        <button type="button" className="icon" onClick={() => (setPlaying(false), go(idx + 1))} disabled={idx === last} aria-label="Next step">
+        <button type="button" className="icon" onClick={() => idx < last && (setPlaying(false), go(idx + 1))} aria-disabled={idx === last} aria-label="Next step">
           <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M11 2v10M2.5 2.6v8.8a.5.5 0 0 0 .8.4L9 7.4a.5.5 0 0 0 0-.8L3.3 2.2a.5.5 0 0 0-.8.4Z" fill="currentColor" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
         </button>
         <input type="range" min={0} max={last} step={1} value={idx} aria-label="Step" aria-valuetext={say(idx)} onChange={(e) => (setPlaying(false), go(Number(e.target.value)))} />
@@ -331,7 +339,8 @@ function ArrayView({ steps, frame, W, H, u }: { steps: ShapeSteps; frame: ShapeS
         const fill = role ? ROLE_FILL[role] : BASE_FILL;
         return (
           <g key={i} opacity={role === 'off' ? 0.45 : 1}>
-            <rect className="bar" x={x} width={bw * 0.8} style={{ y: bottom - h, height: h, fill } as React.CSSProperties} rx={3 * u} stroke={role === 'wait' ? 'var(--amber)' : 'none'} strokeWidth={2 * u} />
+            {/* Attributes draw it everywhere; the same values as CSS let browsers that animate geometry tween it. */}
+            <rect className="bar" x={x} y={bottom - h} width={bw * 0.8} height={h} fill={fill} style={{ y: bottom - h, height: h, fill } as React.CSSProperties} rx={3 * u} stroke={role === 'wait' ? 'var(--amber)' : 'none'} strokeWidth={2 * u} />
             <text x={x + bw * 0.4} y={bottom - h - 6 * u} fontSize={fs} textAnchor="middle" fill="var(--ink)" fontWeight={role && role !== 'off' ? 700 : 500} className="mono" style={{ transition: 'y .22s' }}>
               {v}
             </text>
@@ -368,6 +377,8 @@ function groupBy(ptr: Record<string, number>): Record<string, string[]> {
 
 // ───────────────────────── graph: nodes and edges ─────────────────────────
 
+const EDGE_ROLES = ['base', ...ROLE_ORDER] as const;
+
 function GraphView({ steps, frame, W, H, u, narrow }: { steps: ShapeSteps; frame: ShapeStepFrame; W: number; H: number; u: number; narrow: boolean }) {
   const g = steps.graph!;
   const r = (narrow ? 13 : 16) * u;
@@ -389,17 +400,22 @@ function GraphView({ steps, frame, W, H, u, narrow }: { steps: ShapeSteps; frame
   const fs = 12.5 * u;
   return (
     <svg className="draw" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Graph. ${frame.say}`}>
-      <defs>
-        <marker id="ssp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-          <path d="M0,0L10,5L0,10z" fill="context-stroke" />
-        </marker>
-      </defs>
+      {g.directed && (
+        <defs>
+          {/* One arrowhead per edge colour, painted with it (not context-stroke, which some webviews draw black). */}
+          {EDGE_ROLES.map((role) => (
+            <marker key={role} id={`ssp-arrow-${role}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0L10,5L0,10z" fill={edgeStyle(role === 'base' ? undefined : role).stroke} />
+            </marker>
+          ))}
+        </defs>
+      )}
       {g.ring && <circle cx={ringC.x} cy={ringC.y} r={ringR} fill="none" stroke="color-mix(in oklab, var(--ink) 28%, var(--paper))" strokeWidth={2 * u} />}
       {/* Plain edges first, lit edges on top. */}
       {[...g.edges]
         .map((e) => ({ e, role: roleOf(frame.edges, [e.from, e.to] as [string, string], sameEdge) }))
         .sort((x, y) => (x.role ? 1 : 0) - (y.role ? 1 : 0))
-        .map(({ e, role }) => {
+        .map(({ e, role }, ei) => {
           const p = pos.get(e.from)!, q = pos.get(e.to)!;
           const st = edgeStyle(role);
           const len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
@@ -407,8 +423,8 @@ function GraphView({ steps, frame, W, H, u, narrow }: { steps: ShapeSteps; frame
           const a = { x: p.x + ux * r, y: p.y + uy * r }, b = { x: q.x - ux * (r + (g.directed ? 3 * u : 0)), y: q.y - uy * (r + (g.directed ? 3 * u : 0)) };
           const mx = (p.x + q.x) / 2 - uy * 11 * u, my = (p.y + q.y) / 2 + ux * 11 * u;
           return (
-            <g key={`${e.from}-${e.to}`} opacity={role === 'off' ? 0.3 : 1}>
-              <line className="edge" x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={st.stroke} strokeWidth={st.w * u} strokeLinecap="round" markerEnd={g.directed ? 'url(#ssp-arrow)' : undefined} />
+            <g key={ei} opacity={role === 'off' ? 0.3 : 1}>
+              <line className="edge" x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={st.stroke} strokeWidth={st.w * u} strokeLinecap="round" markerEnd={g.directed ? `url(#ssp-arrow-${role ?? 'base'})` : undefined} />
               {e.w !== undefined && (
                 <text x={mx} y={my + 4 * u} fontSize={fs * 0.92} textAnchor="middle" fill={role && role !== 'off' ? st.stroke : 'var(--ink2)'} fontWeight={role && role !== 'off' ? 700 : 500} className="halo mono">
                   {e.w}
@@ -421,7 +437,8 @@ function GraphView({ steps, frame, W, H, u, narrow }: { steps: ShapeSteps; frame
         const p = pos.get(n.id)!;
         const role = roleOf(frame.nodes, n.id);
         const filled = role && role !== 'wait' && role !== 'off';
-        const tag = frame.tags && n.id in frame.tags ? frame.tags[n.id] : undefined;
+        // Own keys only: a node called "constructor" or "toString" has no tag unless the frame gives it one.
+        const tag = frame.tags && Object.hasOwn(frame.tags, n.id) ? frame.tags[n.id] : undefined;
         if (n.small) {
           // A small dot: its words sit beside it, pushed away from the ring's centre (or to the right).
           const dx = g.ring ? p.x - ringC.x : 1, dy = g.ring ? p.y - ringC.y : 0;

@@ -37,7 +37,7 @@ describe('the run scene', () => {
   });
 
   test("a resource's own state gets its own row by lane, and is no call in flight", () => {
-    expect(scene.rowsL.some((r) => r.key === 'res:r1')).toBe(true);
+    expect(scene.rowsL.some((r) => r.key === 'res|r1')).toBe(true);
     expect(inFlight(run, 65).map((s) => `${s.lane}@${s.on}`).sort()).toEqual(['b1@r1', 'b1@r2', 'b3@r2']);
   });
 

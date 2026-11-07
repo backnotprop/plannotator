@@ -50,7 +50,11 @@ export interface Scene {
 
 export const SUB_STEP = 0.4;
 const ROW_GAP = 0.62;
-export const HOME = '__home';
+// Row keys that no lane or resource id can be: ids are letters, digits and _ . : - only, never "|".
+export const HOME = '|home';
+/** The key of a resource's own state row, in the by-lane layout. */
+export const stateKey = (res: string) => `res|${res}`;
+export const isStateKey = (key: string) => key.startsWith('res|');
 
 /** Side-by-side spans of one row get their own sub-rows (greedy, by start). */
 function subRows(spans: { from: number; to: number; i: number }[]): Map<number, number> {
@@ -94,7 +98,7 @@ export function buildScene(run: ShapeRun): Scene {
   const stateRes = [...new Set(run.spans.filter((s) => !s.lane && s.on).map((s) => s.on!))];
   const byLane = flatRows([
     ...run.lanes.map((l) => ({ key: l.id, label: l.label, spans: indexed.filter((x) => x.s.lane === l.id) })),
-    ...stateRes.map((r) => ({ key: `res:${r}`, label: resLabel.get(r) ?? r, spans: indexed.filter((x) => !x.s.lane && x.s.on === r) })),
+    ...stateRes.map((r) => ({ key: stateKey(r), label: resLabel.get(r) ?? r, spans: indexed.filter((x) => !x.s.lane && x.s.on === r) })),
   ]);
   // By resource: home (the lanes' own process), then each resource. A state of the resource shares its row (a band, drawn under).
   const byRes = flatRows(
@@ -114,22 +118,76 @@ export function buildScene(run: ShapeRun): Scene {
   return { run, end, rowsL: byLane.rows, rowsR: byRes.rows, spans, extentL: byLane.extent, extentR: byRes.extent };
 }
 
-/** Where a lane (and the resource it runs on at that moment) is, for a message's end or a mark, in scene units. */
-export function anchorOf(scene: Scene, at: { lane?: string; on?: string; t: number }, w: Weights, prefer: 'end' | 'start' = 'end'): { t: number; y: number } {
+/** A point's y in each layout; at weights w it is `w.lanes * yL + w.res * yR`. */
+export interface Anchor {
+  t: number;
+  yL: number;
+  yR: number;
+}
+
+/** Each lane's spans, and each resource's own states, so finding the span under a point reads one row, not the run. */
+const rowIndex = new WeakMap<Scene, Map<string, SceneSpan[]>>();
+function spansOfRow(scene: Scene, key: string): SceneSpan[] {
+  let index = rowIndex.get(scene);
+  if (!index) {
+    index = new Map();
+    for (const s of scene.spans) {
+      const k = s.span.lane ?? stateKey(s.span.on ?? '');
+      const list = index.get(k);
+      if (list) list.push(s);
+      else index.set(k, [s]);
+    }
+    rowIndex.set(scene, index);
+  }
+  return index.get(key) ?? [];
+}
+
+/** Where a lane (and the resource it runs on at that moment) is, for a message's end or a mark, in both layouts. */
+export function anchorYs(scene: Scene, at: { lane?: string; on?: string; t: number }, prefer: 'end' | 'start' = 'end'): Anchor {
   const { lane, on, t } = at;
   // The span this point is on: the lane's span at t (the one ending at t first, for a message out), or the resource's own state.
-  const cands = scene.spans.filter((s) => (lane ? s.span.lane === lane : !s.span.lane && s.span.on === on) && s.span.from <= t + 1e-6 && s.span.to >= t - 1e-6);
+  const cands = spansOfRow(scene, lane ?? stateKey(on ?? '')).filter((s) => s.span.from <= t + 1e-6 && s.span.to >= t - 1e-6);
   const pick =
     (lane && on ? cands.find((s) => s.span.on === on) : undefined) ??
     (prefer === 'start' ? cands.find((s) => Math.abs(s.span.from - t) < 1e-6) : undefined) ??
     (prefer === 'end' ? cands.find((s) => Math.abs(s.span.to - t) < 1e-6 && s.span.end !== 'cancelled') : undefined) ??
     cands.find((s) => s.span.end !== 'cancelled' && s.span.end !== 'timeout') ??
     cands[0];
-  const rowL = scene.rowsL.find((r) => r.key === (lane ?? `res:${on}`));
+  const rowL = scene.rowsL.find((r) => r.key === (lane ?? stateKey(on ?? '')));
   const rowR = scene.rowsR.find((r) => r.key === (pick?.span.on ?? on ?? HOME));
-  const yL = pick?.yL ?? rowL?.y ?? 0;
-  const yR = pick?.yR ?? rowR?.y ?? 0;
-  return { t, y: w.lanes * yL + w.res * yR };
+  return { t, yL: pick?.yL ?? rowL?.y ?? 0, yR: pick?.yR ?? rowR?.y ?? 0 };
+}
+
+/** The same point at weights w, in scene units. */
+export function anchorOf(scene: Scene, at: { lane?: string; on?: string; t: number }, w: Weights, prefer: 'end' | 'start' = 'end'): { t: number; y: number } {
+  const a = anchorYs(scene, at, prefer);
+  return { t: a.t, y: mixY(a, w) };
+}
+export const mixY = (a: { yL: number; yR: number }, w: Weights) => w.lanes * a.yL + w.res * a.yR;
+
+/** What a frame needs that does not change while the run plays or regroups: worked out once per run. */
+export interface SceneGeometry {
+  msgs: { a0: Anchor; a1: Anchor; fromLabel: string; toLabel: string }[];
+  marks: Anchor[];
+  /** Has a mark at its start (which then says its words instead), by span index. */
+  marked: boolean[];
+}
+export function sceneGeometry(scene: Scene): SceneGeometry {
+  const run = scene.run;
+  const name = new Map(run.lanes.map((l) => [l.id, l.label]));
+  const marks = run.marks ?? [];
+  const markAt = new Map<string, number[]>();
+  for (const m of marks) if (m.lane) (markAt.get(m.lane) ?? markAt.set(m.lane, []).get(m.lane)!).push(m.at);
+  return {
+    msgs: (run.msgs ?? []).map((m) => ({
+      a0: anchorYs(scene, { lane: m.from, t: m.at }, 'end'),
+      a1: anchorYs(scene, { lane: m.to, t: m.arrive ?? m.at }, 'start'),
+      fromLabel: name.get(m.from) ?? m.from,
+      toLabel: name.get(m.to) ?? m.to,
+    })),
+    marks: marks.map((mk) => anchorYs(scene, { lane: mk.lane, on: mk.lane ? undefined : mk.on, t: mk.at }, 'start')),
+    marked: scene.spans.map((s) => !!s.span.lane && (markAt.get(s.span.lane) ?? []).some((at) => Math.abs(at - s.span.from) <= scene.end * 0.03)),
+  };
 }
 
 export const spanY = (s: SceneSpan, w: Weights) => w.lanes * s.yL + w.res * s.yR;

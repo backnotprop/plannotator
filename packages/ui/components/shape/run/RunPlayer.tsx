@@ -6,16 +6,17 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ShapeRun } from '@plannotator/core/shape-run';
 import {
-  anchorOf,
   buildScene,
   ease,
   failsAtEnd,
   fitProjector,
   fmtTime,
-  inFlight,
+  isStateKey,
   mixWeights,
+  mixY,
   momentText,
   niceStep,
+  sceneGeometry,
   spanTone,
   spanY,
   SUB_STEP,
@@ -58,6 +59,17 @@ const CSS = `
 `;
 
 const SPEEDS = [0.5, 1, 2] as const;
+/** Arrow keys cross the run in this many presses; Page Up and Page Down in a tenth of it. */
+const KEY_STEPS = 40;
+/** Words on spans and messages, at most, so a run of thousands still plays smoothly (each keeps its <title>). */
+const OPTIONAL_WORDS = 240;
+
+/** The element a player sits in: its parent, or the drawing's slot around the shadow host it was given. */
+export function slotOf(root: HTMLElement): HTMLElement | null {
+  if (root.parentElement) return root.parentElement;
+  const host = (root.getRootNode() as ShadowRoot).host as HTMLElement | undefined;
+  return host?.parentElement ?? host ?? null;
+}
 /** At 1×, the whole run plays in this many seconds, whatever its unit. */
 const PLAY_SECONDS = 9;
 
@@ -90,6 +102,7 @@ export interface RunPlayerProps {
 
 export default function RunPlayer({ run, reduce = false, mode: firstMode, at }: RunPlayerProps) {
   const scene = useMemo(() => buildScene(run), [run]);
+  const geo = useMemo(() => sceneGeometry(scene), [scene]);
   const unit = run.unit ?? 'ms';
   const rootRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -121,7 +134,7 @@ export default function RunPlayer({ run, reduce = false, mode: firstMode, at }: 
   useLayoutEffect(() => {
     const root = rootRef.current, stage = stageRef.current;
     if (!root || !stage) return;
-    const slot = root.parentElement;
+    const slot = slotOf(root);
     if (slot) {
       root.style.display = 'none';
       setFill(slot.clientHeight >= 200);
@@ -187,6 +200,12 @@ export default function RunPlayer({ run, reduce = false, mode: firstMode, at }: 
     a.t0 = performance.now();
     kick();
   };
+  // Scrubbing: the slider's value text says the moment, so the live line stays for pausing only (never said twice).
+  const scrub = (t: number) => {
+    playingRef.current = false;
+    setPlaying(false);
+    setNow(t);
+  };
   const play = (on: boolean) => {
     if (on && now >= scene.end - 1e-6) setNow(0);
     playingRef.current = on;
@@ -243,7 +262,7 @@ export default function RunPlayer({ run, reduce = false, mode: firstMode, at }: 
       for (const r of rows) {
         const y = P.y(r.y - ((r.subs - 1) * SUB_STEP) / 2);
         items.push(<path key={`gr${kind}${r.key}`} d={line(X0, y, X1, y)} stroke="var(--rule)" strokeWidth={u} opacity={wt * 0.9} />);
-        labels.push({ key: `rl${kind}${r.key}`, x: X0 - 12 * u, y: y + fs * 0.35, text: r.label, size: fs, anchor: 'end', fill: r.key.startsWith('res:') ? 'var(--alert)' : 'var(--ink2)', opacity: wt, weight: 400, pin: true });
+        labels.push({ key: `rl${kind}${r.key}`, x: X0 - 12 * u, y: y + fs * 0.35, text: r.label, size: fs, anchor: 'end', fill: isStateKey(r.key) ? 'var(--alert)' : 'var(--ink2)', opacity: wt, weight: 400, pin: true });
       }
     }
 
@@ -262,11 +281,11 @@ export default function RunPlayer({ run, reduce = false, mode: firstMode, at }: 
     }
 
     // Limits: a dashed line across every row, named at its top.
-    for (const lim of run.limits ?? []) {
+    for (const [li, lim] of (run.limits ?? []).entries()) {
       const x = P.x(lim.at);
       const col = toneVar(lim.tone ?? 'grey');
-      items.push(<path key={`lim${lim.at}${lim.label}`} d={line(x, P.top - 6 * u, x, P.bottom)} stroke={col} strokeOpacity={0.75} strokeWidth={1.2 * u} strokeDasharray={`${5 * u} ${4 * u}`} />);
-      labels.push({ key: `liml${lim.at}${lim.label}`, x, y: P.top - 12 * u, text: lim.label, size: fs * 0.92, anchor: 'middle', fill: col, opacity: 1, weight: 500, pin: false, upOnly: true });
+      items.push(<path key={`lim${li}`} d={line(x, P.top - 6 * u, x, P.bottom)} stroke={col} strokeOpacity={0.75} strokeWidth={1.2 * u} strokeDasharray={`${5 * u} ${4 * u}`} />);
+      labels.push({ key: `liml${li}`, x, y: P.top - 12 * u, text: lim.label, size: fs * 0.92, anchor: 'middle', fill: col, opacity: 1, weight: 500, pin: false, upOnly: true });
     }
 
     // Spans: the part of each that has happened by now.
@@ -302,7 +321,7 @@ export default function RunPlayer({ run, reduce = false, mode: firstMode, at }: 
         </g>,
       );
       // Its words: what the row does not already say. A mark at its start says it instead.
-      const marked = (run.marks ?? []).some((m) => m.lane === sp.lane && Math.abs(m.at - sp.from) <= scene.end * 0.03);
+      const marked = geo.marked[s.i];
       const words = state ? sp.label : marked ? undefined : [wts.res > 0.5 ? s.laneLabel : sp.on ? s.resLabel : undefined, sp.label].filter(Boolean).join(' · ');
       // A state's words that do not fit in its band are left out (its neighbours' words stay readable).
       const fits = !state || !words || words.length * fs * 0.86 * 0.56 <= x1 - x0 - 6 * u;
@@ -329,20 +348,18 @@ export default function RunPlayer({ run, reduce = false, mode: firstMode, at }: 
     // over its wait; while it is on its way the arrow grows and carries a dot.
     for (const [i, m] of (run.msgs ?? []).entries()) {
       if (now < m.at) continue;
-      const a0 = anchorOf(scene, { lane: m.from, t: m.at }, wts, 'end');
+      const g = geo.msgs[i]!;
       const arrive = m.arrive ?? m.at;
-      const a1 = anchorOf(scene, { lane: m.to, t: arrive }, wts, 'start');
-      const p = { x: P.x(a0.t), y: P.y(a0.y) }, qEnd = { x: P.x(a1.t), y: P.y(a1.y) };
+      const p = { x: P.x(g.a0.t), y: P.y(mixY(g.a0, wts)) }, qEnd = { x: P.x(g.a1.t), y: P.y(mixY(g.a1, wts)) };
       const k = arrive > m.at ? Math.min(1, (now - m.at) / (arrive - m.at)) : 1;
       const q = { x: p.x + (qEnd.x - p.x) * k, y: p.y + (qEnd.y - p.y) * k };
       const col = m.tone ? toneVar(m.tone) : 'var(--grey)';
       const ang = Math.atan2(qEnd.y - p.y, qEnd.x - p.x);
       const hl = 7 * u;
       const head = `M${q.x - hl * Math.cos(ang - 0.45)},${q.y - hl * Math.sin(ang - 0.45)}L${q.x},${q.y}L${q.x - hl * Math.cos(ang + 0.45)},${q.y - hl * Math.sin(ang + 0.45)}`;
-      const name = (id: string) => run.lanes.find((l) => l.id === id)?.label ?? id;
       items.push(
         <g key={`m${i}`} opacity={m.tone ? 0.95 : 0.6}>
-          <title>{`${name(m.from)} → ${name(m.to)}${m.label ? `: ${m.label}` : ''}, sent at ${m.at}${arrive > m.at ? `, taken at ${arrive} (waited ${+(arrive - m.at).toFixed(2)} ${unit})` : ''}`}</title>
+          <title>{`${g.fromLabel} → ${g.toLabel}${m.label ? `: ${m.label}` : ''}, sent at ${m.at}${arrive > m.at ? `, taken at ${arrive} (waited ${+(arrive - m.at).toFixed(2)} ${unit})` : ''}`}</title>
           <path d={line(p.x, p.y, q.x, q.y)} stroke={col} strokeWidth={1.3 * u} strokeDasharray={m.tone === 'alert' ? `${3 * u} ${3 * u}` : undefined} fill="none" />
           {k < 1 ? <circle cx={q.x} cy={q.y} r={3.2 * u} fill={col} /> : <path d={head} stroke={col} strokeWidth={1.3 * u} fill="none" strokeLinecap="round" strokeLinejoin="round" />}
         </g>,
@@ -355,8 +372,8 @@ export default function RunPlayer({ run, reduce = false, mode: firstMode, at }: 
     // Marks: a dot where it happened, and its words (a number with a key below, on a narrow stage).
     for (const [i, mk] of (run.marks ?? []).entries()) {
       if (now < mk.at) continue;
-      const a = anchorOf(scene, { lane: mk.lane, on: mk.lane ? undefined : mk.on, t: mk.at }, wts, 'start');
-      const p = { x: P.x(a.t), y: P.y(a.y) };
+      const a = geo.marks[i]!;
+      const p = { x: P.x(a.t), y: P.y(mixY(a, wts)) };
       const col = toneVar(mk.tone ?? 'ink');
       const fresh = playing && !reduce && now - mk.at < scene.end * 0.05 ? 1 + (1 - (now - mk.at) / (scene.end * 0.05)) * 0.8 : 1;
       if (narrow) {
@@ -385,9 +402,17 @@ export default function RunPlayer({ run, reduce = false, mode: firstMode, at }: 
   }
 
   // Words never sit on words: pinned words first where they belong, then each label takes the nearest free line, inside the stage.
-  const placed: { x0: number; x1: number; y0: number; y1: number }[] = [];
+  // Placed boxes are kept in bands of height `band`, so each test reads the bands it overlaps, not every word.
+  type Box = { x0: number; x1: number; y0: number; y1: number };
+  const band = Math.max(1, fs * 2);
+  const bands = new Map<number, Box[]>();
+  const place = (b: Box) => {
+    for (let k = Math.floor(b.y0 / band); k <= Math.floor(b.y1 / band); k++) (bands.get(k) ?? bands.set(k, []).get(k)!).push(b);
+  };
+  let optionalLeft = OPTIONAL_WORDS;
   const order = (l: Label) => (l.pin ? 0 : 1000 - l.weight);
   for (const l of [...labels].filter((l) => l.opacity > 0.02).sort((a, b) => order(a) - order(b))) {
+    if (l.optional && optionalLeft <= 0) continue;
     const wdt = l.text.length * l.size * 0.56;
     let x = l.x, anchor = l.anchor;
     if (!l.pin) {
@@ -396,7 +421,11 @@ export default function RunPlayer({ run, reduce = false, mode: firstMode, at }: 
       else if (anchor === 'middle') x = Math.min(Math.max(x, wdt / 2 + 4 * u), W - wdt / 2 - 4 * u);
     }
     const x0 = anchor === 'end' ? x - wdt : anchor === 'middle' ? x - wdt / 2 : x;
-    const hit = (y: number) => placed.some((b) => x0 < b.x1 && x0 + wdt > b.x0 && y - l.size < b.y1 && y + l.size * 0.25 > b.y0);
+    const hit = (y: number) => {
+      const y0 = y - l.size, y1 = y + l.size * 0.25;
+      for (let k = Math.floor(y0 / band); k <= Math.floor(y1 / band); k++) for (const b of bands.get(k) ?? []) if (x0 < b.x1 && x0 + wdt > b.x0 && y0 < b.y1 && y1 > b.y0) return true;
+      return false;
+    };
     let y = l.y;
     if (!l.pin) {
       // An optional word never drops below its line: there it would sit on its own bar.
@@ -410,7 +439,8 @@ export default function RunPlayer({ run, reduce = false, mode: firstMode, at }: 
         }
       if (!found && l.optional) continue;
     }
-    placed.push({ x0, x1: x0 + wdt, y0: y - l.size, y1: y + l.size * 0.25 });
+    place({ x0, x1: x0 + wdt, y0: y - l.size, y1: y + l.size * 0.25 });
+    if (l.optional) optionalLeft--;
     top.push(
       <text key={l.key} x={x} y={y} fontSize={l.size} fontWeight={l.weight} textAnchor={anchor} fill={l.fill} opacity={l.opacity} className="halo">
         {l.text}
@@ -429,7 +459,7 @@ export default function RunPlayer({ run, reduce = false, mode: firstMode, at }: 
     <div className={`srp${fill ? ' fill' : ''}${reduce ? ' reduce' : ''}`} ref={rootRef} style={{ ['--u' as string]: String(u) }} role="group" aria-label={`Run: ${run.title}`}>
       <style>{CSS}</style>
       <div ref={stageRef} className="srp-stage" style={stageHeight ? { flex: 'none', height: stageHeight } : undefined}>
-        <svg viewBox={`0 0 ${Math.max(1, W)} ${Math.max(1, H)}`} role="img" aria-label={`${run.title}. ${caption}`}>
+        <svg viewBox={`0 0 ${Math.max(1, W)} ${Math.max(1, H)}`} role="img" aria-label={run.title}>
           {items}
           {top}
         </svg>
@@ -453,17 +483,19 @@ export default function RunPlayer({ run, reduce = false, mode: firstMode, at }: 
             type="range"
             min={0}
             max={scene.end}
-            step={scene.end / 520}
+            step={scene.end / 1000}
             value={now}
             aria-label="Time"
             aria-valuetext={caption}
-            onChange={(e) => {
-              playingRef.current = false;
-              setPlaying(false);
-              setNow(Number(e.target.value));
+            onChange={(e) => scrub(Number(e.target.value))}
+            onKeyDown={(e) => {
+              // The keys a slider has, in steps a person can count: about 40 presses across the run, 10 with Page keys.
+              const by = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1, PageDown: -4, PageUp: 4 }[e.key];
+              const to = e.key === 'Home' ? 0 : e.key === 'End' ? scene.end : by !== undefined ? now + (by * scene.end) / KEY_STEPS : undefined;
+              if (to === undefined) return;
+              e.preventDefault();
+              scrub(Math.max(0, Math.min(scene.end, to)));
             }}
-            onPointerUp={() => setSrLine(momentText(run, now, unit))}
-            onKeyUp={() => setSrLine(momentText(run, now, unit))}
           />
           <span className="t" aria-hidden="true">
             {fmtTime(now, unit)}

@@ -92,6 +92,12 @@ export const SHAPE_RUN_LIMITS = { lanes: 48, resources: 24, spans: 2000, msgs: 2
 
 const ID_RE = /^[A-Za-z0-9_.:-]+$/;
 const RUN_KEYS = ['run', 'title', 'unit', 'source', 'end', 'laneLabel', 'view', 'lanes', 'resources', 'spans', 'msgs', 'marks', 'limits'];
+const ROW_KEYS = ['id', 'label'];
+const RESOURCES_KEYS = ['label', 'home', 'items'];
+const SPAN_KEYS = ['lane', 'on', 'from', 'to', 'label', 'end', 'tone'];
+const MSG_KEYS = ['from', 'to', 'at', 'arrive', 'label', 'tone'];
+const MARK_KEYS = ['at', 'lane', 'on', 'label', 'tone'];
+const LIMIT_KEYS = ['at', 'label', 'tone'];
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /** Validate a run. Every problem names its field, the way `checkShapeBoard` does. */
@@ -102,14 +108,19 @@ export function checkShapeRun(input: unknown, field = 'run'): ShapeCheck<ShapeRu
   };
   if (!isRecord(input)) return { ok: false, errors: [`${field}: must be an object { run: 1, title, lanes, spans }`] };
   if (input.run !== SHAPE_RUN_VERSION) fail(`${field}.run`, `must be ${SHAPE_RUN_VERSION} (the format version)`);
-  for (const key of Object.keys(input)) if (!RUN_KEYS.includes(key)) fail(`${field}.${key}`, `is not part of a run (${RUN_KEYS.join(', ')})`);
+  // A key the format does not know is named, at every level: a typo ("ends" for "end") would otherwise be dropped without a word.
+  const only = (v: Record<string, unknown>, keys: readonly string[], at: string, what: string) => {
+    for (const key of Object.keys(v)) if (!keys.includes(key)) fail(`${at}.${key}`, `is not part of ${what} (${keys.join(', ')})`);
+  };
+  only(input, RUN_KEYS, field, 'a run');
   const text = (v: unknown, at: string, max: number, required: boolean): string | undefined => {
     if (v === undefined || v === null) {
       if (required) fail(at, 'is required');
       return undefined;
     }
     if (typeof v !== 'string') return fail(at, 'must be a string'), undefined;
-    if (!v.trim()) return fail(at, 'is empty'), undefined;
+    // An empty optional word is the same as none (a converter that writes "" for no label).
+    if (!v.trim()) return required ? (fail(at, 'is empty'), undefined) : undefined;
     if (v.trim().length > max) fail(at, `is ${v.trim().length} characters; at most ${max}`);
     return v.trim();
   };
@@ -134,6 +145,7 @@ export function checkShapeRun(input: unknown, field = 'run'): ShapeCheck<ShapeRu
     const out: ShapeRunRow[] = [];
     list(v, at, max, true).forEach((r, i) => {
       if (!isRecord(r)) return fail(`${at}[${i}]`, 'must be { id, label }');
+      only(r, ROW_KEYS, `${at}[${i}]`, 'a row');
       const id = typeof r.id === 'string' && ID_RE.test(r.id) && r.id.length <= SHAPE_RUN_LIMITS.id ? r.id : undefined;
       if (!id) return fail(`${at}[${i}].id`, 'must be a short id (letters, digits, _ . : -)');
       if (seen.has(id)) return fail(`${at}[${i}].id`, `"${id}" is used twice`);
@@ -159,6 +171,7 @@ export function checkShapeRun(input: unknown, field = 'run'): ShapeCheck<ShapeRu
     if (!isRecord(input.resources)) fail(`${field}.resources`, 'must be { label, home?, items }');
     else {
       const r = input.resources;
+      only(r, RESOURCES_KEYS, `${field}.resources`, 'resources');
       resources = {
         label: text(r.label, `${field}.resources.label`, SHAPE_RUN_LIMITS.label, true) ?? '',
         ...(r.home !== undefined ? { home: text(r.home, `${field}.resources.home`, SHAPE_RUN_LIMITS.label, false) } : {}),
@@ -183,6 +196,7 @@ export function checkShapeRun(input: unknown, field = 'run'): ShapeCheck<ShapeRu
   list(input.spans, `${field}.spans`, SHAPE_RUN_LIMITS.spans, true).forEach((s, i) => {
     const at = `${field}.spans[${i}]`;
     if (!isRecord(s)) return fail(at, 'must be { lane, on?, from, to, label?, end? }');
+    only(s, SPAN_KEYS, at, 'a span');
     const lane = laneRef(s.lane, `${at}.lane`, false);
     const on = resRef(s.on, `${at}.on`);
     if (s.lane === undefined && s.on === undefined) fail(at, 'needs a lane, or an on (a state of a resource)');
@@ -200,6 +214,7 @@ export function checkShapeRun(input: unknown, field = 'run'): ShapeCheck<ShapeRu
   list(input.msgs, `${field}.msgs`, SHAPE_RUN_LIMITS.msgs, false).forEach((m, i) => {
     const at = `${field}.msgs[${i}]`;
     if (!isRecord(m)) return fail(at, 'must be { from, to, at, arrive?, label? }');
+    only(m, MSG_KEYS, at, 'a msg');
     const from = laneRef(m.from, `${at}.from`, true);
     const to = laneRef(m.to, `${at}.to`, true);
     const t = num(m.at, `${at}.at`);
@@ -215,6 +230,7 @@ export function checkShapeRun(input: unknown, field = 'run'): ShapeCheck<ShapeRu
   list(input.marks, `${field}.marks`, SHAPE_RUN_LIMITS.marks, false).forEach((m, i) => {
     const at = `${field}.marks[${i}]`;
     if (!isRecord(m)) return fail(at, 'must be { at, lane? or on?, label }');
+    only(m, MARK_KEYS, at, 'a mark');
     const t = num(m.at, `${at}.at`);
     const lane = laneRef(m.lane, `${at}.lane`, false);
     const on = resRef(m.on, `${at}.on`);
@@ -228,6 +244,7 @@ export function checkShapeRun(input: unknown, field = 'run'): ShapeCheck<ShapeRu
   list(input.limits, `${field}.limits`, SHAPE_RUN_LIMITS.limits, false).forEach((m, i) => {
     const at = `${field}.limits[${i}]`;
     if (!isRecord(m)) return fail(at, 'must be { at, label }');
+    only(m, LIMIT_KEYS, at, 'a limit');
     const t = num(m.at, `${at}.at`);
     const label = text(m.label, `${at}.label`, SHAPE_RUN_LIMITS.label, true);
     const tn = tone(m.tone, `${at}.tone`);
@@ -265,7 +282,13 @@ export function checkShapeRun(input: unknown, field = 'run'): ShapeCheck<ShapeRu
 
 /** The run ids a drawn view's HTML plays (`data-run="id"`). No DOM. */
 export function shapeHtmlRuns(html: string): string[] {
+  return shapeHtmlAttr(html, 'data-run');
+}
+
+/** The values of one attribute on the tags of some HTML: inside a tag only, never in a comment or in text (a code sample that shows the attribute). */
+export function shapeHtmlAttr(html: string, attr: string): string[] {
   const out: string[] = [];
-  for (const m of html.matchAll(/\sdata-run\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) out.push((m[1] ?? m[2] ?? m[3] ?? '').trim());
+  const re = new RegExp(`<[A-Za-z][^>]*?\\s${attr}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'gi');
+  for (const m of html.replace(/<!--[\s\S]*?-->/g, '').matchAll(re)) out.push((m[1] ?? m[2] ?? m[3] ?? '').trim());
   return out;
 }
