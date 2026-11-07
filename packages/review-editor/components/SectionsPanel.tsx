@@ -22,6 +22,7 @@ import { SearchFileGroup } from './FileTree';
 import type { ReviewSearchFileGroup, ReviewSearchMatch } from '../utils/reviewSearch';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import type { DiffFile } from '../types';
+import { useHiddenViewedFiles } from '../hooks/useHiddenViewedFiles';
 
 /**
  * The three-stack "All changes" (since-base) panel — the default view of a code review.
@@ -256,6 +257,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
   const [collapsed, setCollapsed] = useState<Set<SectionGroup>>(new Set());
   const [committedExpanded, setCommittedExpanded] = useState(false);
   const asideRef = useRef<HTMLElement | null>(null);
+  const { hiddenFiles, panelPointerProps } = useHiddenViewedFiles(viewedFiles, hideViewedFiles ?? false);
   const isSearchVisible = !!onSearchChange && (isSearchOpen || !!searchQuery.trim());
 
   const items = useMemo<Record<SectionGroup, SectionItem[]>>(() => {
@@ -265,7 +267,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
       untracked: [],
     };
     files.forEach((file, index) => {
-      if (hideViewedFiles && viewedFiles.has(file.path) && index !== activeFileIndex) return;
+      if (hideViewedFiles && hiddenFiles.has(file.path) && index !== activeFileIndex) return;
       const entry = sections.files[file.path];
       // A file in the composite patch with no status entry has a clean
       // working tree — it is committed branch work.
@@ -292,7 +294,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
     // Staged work floats to the top of Changes.
     grouped.changes.sort((a, b) => Number(b.staged) - Number(a.staged));
     return grouped;
-  }, [files, sections, hideViewedFiles, viewedFiles, activeFileIndex, stagedFiles]);
+  }, [files, sections, hideViewedFiles, hiddenFiles, activeFileIndex, stagedFiles]);
 
   const annotationCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -523,6 +525,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
       ref={asideRef}
       data-review-sidebar=""
       {...compactRowsProps(panelWidth)}
+      {...panelPointerProps}
       className="review-sidebar border-r flex flex-col flex-shrink-0 overflow-hidden"
       style={{ width: panelWidth }}
     >
