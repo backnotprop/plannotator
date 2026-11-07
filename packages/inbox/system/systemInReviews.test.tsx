@@ -9,6 +9,8 @@
  *  - the pane: the drawing not drawn, "Open PRs that change this" missing a PR that touches it or naming the wrong
  *    parts, a row not opening that PR's pane, Open full window not asking for the window, the window's "Reviews" not
  *    going back to the pane, a project not drawn yet showing no way to set it up;
+ *  - the drawing at rest: the parts open PRs touch not amber, or not tagged with their PRs ("PR 11");
+ *  - the full window: a strip of its own above the drawing's bar, or "‹ Reviews" not in that bar;
  *  - off means off: the projects read while System does not show;
  *  - focus: the full window leaving what it covers reachable by Tab, closing it (or the drawing) dropping the focus on
  *    the page instead of the way back in.
@@ -30,7 +32,7 @@ const { PullsPage } = (hasDom ? await import('../pulls/PullsPage') : {}) as type
 const { SystemPane } = (hasDom ? await import('./SystemPane') : {}) as typeof import('./SystemPane');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 const { closeSystemSetup, useSystemSetupRequest } = (hasDom ? await import('./opener') : {}) as typeof import('./opener');
-const { loadFiles } = (hasDom ? await import('@plannotator/system') : {}) as typeof import('@plannotator/system');
+const { gate, loadFiles } = (hasDom ? await import('@plannotator/system') : {}) as typeof import('@plannotator/system');
 const { useSystemProjects } = (hasDom ? await import('./projects') : {}) as typeof import('./projects');
 const { useState } = (hasDom ? await import('react') : {}) as typeof import('react');
 
@@ -289,6 +291,9 @@ const DRAWING = {
   'sheets/C-001.yaml': 'sheet: C-001\nscope: root\nkind: conceptual\ntitle: App\nbands:\n  - { id: all, row: [person, api, web] }\n',
 };
 
+/** The package's gate on the test drawing, as the server answers it for one PR. */
+const gateOf = (paths: string[]) => gate({ files: paths.map((path) => ({ path, status: 'M' as const })), model: loadFiles(DRAWING).model! });
+
 function drawPane(over: Partial<SystemPaneProps> & { model?: unknown; state?: SystemProjectRow['state'] } = {}) {
   const asked: { stack: string[]; full: boolean[]; closed: number } = { stack: [], full: [], closed: 0 };
   const model = over.model === undefined ? loadFiles(DRAWING).model : over.model;
@@ -305,7 +310,10 @@ function drawPane(over: Partial<SystemPaneProps> & { model?: unknown; state?: Sy
       onOpenStack={(key) => asked.stack.push(key)}
       api={{
         drawing: async () => ({ project: { ...APP, state: over.state ?? APP.state }, model: model as never }),
-        pulls: async () => ({ pulls: [{ key: 'github.com/acme/app#11', parts: [{ id: 'api', name: 'The API' }, { id: 'web', name: 'The web app' }] }], unread: 1 }),
+        pulls: async () => ({
+          pulls: [{ key: 'github.com/acme/app#11', parts: [{ id: 'api', name: 'The API' }, { id: 'web', name: 'The web app' }], change: gateOf(['src/api/routes.ts', 'src/web/home.tsx']) }],
+          unread: 1,
+        }),
       }}
       {...over}
     />,
@@ -325,6 +333,34 @@ describe('A project\'s drawing in the pane', () => {
     expect($('[data-system-pulls-unread]')?.textContent).toBe('1 pull request could not be read.');
     act(() => rows[0]!.click());
     expect(asked.stack).toEqual(['github.com/acme/app#11']);
+  });
+
+  test.if(hasDom)('the parts the open PRs touch are amber on the drawing at rest, tagged with their PR', async () => {
+    // The drawing lays its parts out only on a stage with a size (happy-dom measures none): measured here, then given back.
+    const saved = Object.getOwnPropertyDescriptor(Element.prototype, 'getBoundingClientRect');
+    Object.defineProperty(Element.prototype, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ x: 0, y: 0, left: 0, top: 0, right: 1100, bottom: 800, width: 1100, height: 800, toJSON: () => ({}) }),
+    });
+    try {
+      drawPane();
+      await settle();
+    } finally {
+      if (saved) Object.defineProperty(Element.prototype, 'getBoundingClientRect', saved);
+    }
+    const touched = $$('[data-system-pane] .sys-parts > .sys-part[data-status]').map((part) => [part.getAttribute('data-part'), part.getAttribute('data-status')]);
+    expect(Object.fromEntries(touched)).toEqual({ api: 'changed', web: 'changed' });
+    expect($('[data-system-pane] .sys-parts > [data-part="api"]')!.getAttribute('title')).toContain('PR 11');
+    // The rows keep naming them too.
+    expect($('[data-system-pull-parts]')?.textContent).toBe('The API and The web app');
+  });
+
+  test.if(hasDom)('the full window: "‹ Reviews" at the start of the drawing\'s bar, no strip above it', async () => {
+    drawPane({ full: true });
+    await settle();
+    expect($('.ib-sysfull-top')).toBeNull();
+    expect($('.sys-bar .sys-lead [data-system-back]')).not.toBeNull();
+    expect(document.activeElement?.hasAttribute('data-system-back')).toBe(true);
   });
 
   test.if(hasDom)('Open full window asks for the window; its "Reviews" goes back to the pane', async () => {

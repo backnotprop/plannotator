@@ -9,7 +9,7 @@
  */
 
 import { statSync } from "node:fs";
-import { drawingStatus, gate, type ChangedFile, type LoadResult, type SystemModel } from "@plannotator/system";
+import { drawingStatus, gate, type ChangedFile, type GateResult, type LoadResult, type SystemModel } from "@plannotator/system";
 import { load, systemPaths } from "@plannotator/system/node";
 import { parseDiffToFiles, type DiffFile } from "@plannotator/core/diff-files";
 import type { InboxProject, InboxProjectRepo, InboxPull } from "@plannotator/core/inbox-types";
@@ -124,9 +124,9 @@ export function changedFilesOf(files: readonly DiffFile[]): ChangedFile[] {
   );
 }
 
-/** The drawn parts a PR's files touch, in the drawing's order (the gate's touched parts). */
-export function touchedParts(model: SystemModel, files: readonly ChangedFile[]): { id: string; name: string }[] {
-  const touched = new Set(gate({ files: [...files], model }).touched.parts);
+/** The drawn parts a gate result touches, in the drawing's order. */
+export function touchedParts(model: SystemModel, change: GateResult): { id: string; name: string }[] {
+  const touched = new Set(change.touched.parts);
   return Object.keys(model.parts)
     .filter((id) => touched.has(id))
     .map((id) => ({ id, name: model.parts[id]!.name }));
@@ -171,13 +171,13 @@ export async function systemPullTouches(
   pulls: readonly InboxPull[],
   patchOf: (key: string) => Promise<string>,
   cache: SystemFilesCache = systemFilesCache(),
-): Promise<SystemPullsAnswer> {
+): Promise<SystemPullsAnswer<GateResult>> {
   const wanted = repo.toLowerCase();
   const open = pulls
     .filter((pull) => (pull.state === "open" || pull.state === "draft") && `${pull.host}/${pull.repo}`.toLowerCase() === wanted)
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
     .slice(0, SYSTEM_PULLS_READ_MAX);
-  const found: (SystemPullTouch | null)[] = new Array(open.length).fill(null);
+  const found: (SystemPullTouch<GateResult> | null)[] = new Array(open.length).fill(null);
   let unread = 0;
   let next = 0;
   const worker = async () => {
@@ -191,15 +191,16 @@ export async function systemPullTouches(
           files = changedFilesOf(parseDiffToFiles(await patchOf(pull.key)));
           cache.set(at, files);
         }
-        const parts = touchedParts(model, files);
-        if (parts.length > 0) found[i] = { key: pull.key, parts };
+        const change = gate({ files: [...files], model });
+        const parts = touchedParts(model, change);
+        if (parts.length > 0) found[i] = { key: pull.key, parts, change };
       } catch {
         unread += 1;
       }
     }
   };
   await Promise.all(Array.from({ length: Math.min(READ_AT_ONCE, open.length) }, worker));
-  return { pulls: found.filter((touch): touch is SystemPullTouch => touch !== null), unread };
+  return { pulls: found.filter((touch): touch is SystemPullTouch<GateResult> => touch !== null), unread };
 }
 
 /** What the System read routes need from the running Inbox (inbox.ts passes its own). */
