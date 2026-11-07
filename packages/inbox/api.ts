@@ -87,7 +87,7 @@ import { newUuid } from './uuid';
  * A dialog of the line of one-time dialogs, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server
  * side): the update-day dialogs, then the offers. A registered dialog (Bro mode, List view) adds its id here.
  */
-export type InboxRevealId = 'sound' | 'list_intro' | 'voice' | 'snooze' | 'board' | 'steps' | 'star';
+export type InboxRevealId = 'code_review' | 'sound' | 'list_intro' | 'voice' | 'snooze' | 'board' | 'steps' | 'star';
 /** An offer of the line (not an update-day dialog): only an offer's Not now stamps the four-day gap. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
 /** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, or the agent note. */

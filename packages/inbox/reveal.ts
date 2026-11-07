@@ -69,6 +69,12 @@ export interface RevealMomentInput {
   holds: (threadId: string) => boolean;
   /** Spend the claim: true only for the first claim ever. */
   claim: () => Promise<boolean>;
+  /**
+   * The moment needs no leave: it is now, while the page is clear (and again each time one lapses). Code review's
+   * day-0 offer (codeReviewOffer.ts): "show up like immediately", still after the settling wait and never over
+   * something typed or open.
+   */
+  atOnce?: boolean;
 }
 
 /** A row's state in the list, for "the list settled": ids, sections and what is unseen. */
@@ -115,6 +121,13 @@ export function useRevealMoment(input: RevealMomentInput) {
     // `watching` is read, not watched: a visit is what changes it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input.thread]);
+
+  // A moment that needs no leave (`atOnce`): now, and again once one lapses or a gate drops it.
+  const atOnce = input.atOnce === true;
+  useEffect(() => {
+    if (!atOnce || !watching || moment) return;
+    setMoment({ threadId: latest.current.thread ?? '', at: Date.now() });
+  }, [atOnce, watching, moment]);
 
   // A moment lasts so long.
   useEffect(() => {
@@ -407,6 +420,8 @@ export interface LineRevealInput {
   mayClaim: (pageAge: number) => boolean;
   /** Still worth showing (its feature not turned on meanwhile). */
   holds: () => boolean;
+  /** Its moment needs no leave: as soon as the page is clear (`RevealMomentInput.atOnce`). */
+  atOnce?: boolean;
 }
 
 /**
@@ -433,6 +448,7 @@ export function useLineReveal(input: LineRevealInput) {
       key.current ??= newUuid();
       return (await claimRevealOnce(latest.current.id, key.current)).show;
     },
+    atOnce: input.atOnce,
   });
 }
 

@@ -43,7 +43,7 @@ const WASH_ENDS_MS = 2300;
 export type VoicePhase = 'idle' | 'opening' | 'listening' | 'sending';
 
 /** Every reason a press can end without words; the debug log's filter must keep each (voiceDebugLog.test.ts). */
-export const VOICE_TROUBLE_CODES = ['notheard', 'blocked', 'micfailed', 'nothing', 'badclip', 'expired', 'refused', 'keyrefused', 'offline', 'inboxgone', 'codexfailed', 'notready', 'voiceoff'] as const;
+export const VOICE_TROUBLE_CODES = ['notheard', 'blocked', 'micfailed', 'nothing', 'badclip', 'expired', 'refused', 'keyrefused', 'offline', 'inboxgone', 'codexfailed', 'notready', 'voiceoff', 'failed'] as const;
 
 /** Why the last press ended without words. Kept in `VoiceView` until the next press, a Discard or, for those with no clip, typing. */
 export type VoiceTrouble = (typeof VOICE_TROUBLE_CODES)[number];
@@ -144,6 +144,7 @@ const TROUBLE: Record<InboxVoiceFailure, { trouble: VoiceTrouble; keeps: boolean
   voice_empty: { trouble: 'nothing', keeps: false },
   voice_bad_clip: { trouble: 'badclip', keeps: false },
 };
+const UNKNOWN_FAILURE = { trouble: 'failed', keeps: true } as const;
 
 /** The one recording in this window. */
 let recording: { drop(): void } | null = null;
@@ -452,8 +453,9 @@ export function createVoiceSession(deps: VoiceDeps, late?: (outcome: VoiceLate) 
       ];
       return;
     }
-    // Not one of this route's codes: the answer came from something other than a working Inbox, a restarted one among them.
-    const known = answer.code ? TROUBLE[answer.code] : { trouble: 'inboxgone' as const, keeps: true };
+    // No code: the answer came from something other than a working Inbox, a restarted one among them. A `voice_` code
+    // this page does not know (a newer Inbox's): a plain failure that keeps the clip, so nothing is lost.
+    const known = answer.code ? (Object.hasOwn(TROUBLE, answer.code) ? TROUBLE[answer.code] : UNKNOWN_FAILURE) : { trouble: 'inboxgone' as const, keeps: true };
     if (answer.code === 'voice_not_ready' && answer.reason) deps.notReady(answer.reason);
     if (failedUnseen(known.keeps)) return;
     if (!known.keeps) clip = null;
