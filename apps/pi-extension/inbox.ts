@@ -89,6 +89,29 @@ type InboxPi = Pick<ExtensionAPI, "registerTool" | "sendUserMessage" | "getActiv
 export interface PiInboxOptions {
 	/** An "Ask this session" question is running (the session bridge hub). */
 	isAskActive: () => boolean;
+	/**
+	 * Whether the "Plannotator was updated" note may be shown for `version` now
+	 * (auto-reload.ts: once per version, and never while Pi will reload by itself).
+	 */
+	claimUpdateNotice?: (version: string) => boolean;
+}
+
+/**
+ * The Inbox poll's "Plannotator was updated … Type /reload" note for the session, or null to stay quiet:
+ * the files on disk are a version this process did not load and the session was not told about yet,
+ * and `claim` (auto-reload.ts claimNotice) allows it. It does not while Pi will reload by itself, so
+ * the note never shows right before the reload; and each version is announced once per process.
+ */
+export function inboxUpdateNotice(
+	loaded: string | null,
+	onDisk: string | null,
+	alreadyTold: string | null,
+	claim: ((version: string) => boolean) | undefined,
+	host: "pi" | "oh-my-pi",
+): string | null {
+	if (!loaded || !onDisk || onDisk === loaded || onDisk === alreadyTold) return null;
+	if (claim && !claim(onDisk)) return null;
+	return packageUpdatedMessage(loaded, onDisk, host);
 }
 
 /**
@@ -343,10 +366,11 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 			const version = loadedPackageVersion();
 			if (!version) return null;
 			const onDisk = readOnDiskVersion();
-			if (onDisk && onDisk !== version && notifiedOnDisk !== onDisk) {
+			const note = inboxUpdateNotice(version, onDisk, notifiedOnDisk, options.claimUpdateNotice, ohMyPi ? "oh-my-pi" : "pi");
+			if (note) {
 				notifiedOnDisk = onDisk;
 				try {
-					ctx?.ui.notify(packageUpdatedMessage(version, onDisk, ohMyPi ? "oh-my-pi" : "pi"), "warning");
+					ctx?.ui.notify(note, "warning");
 				} catch {
 					// No UI: the Inbox still says it.
 				}

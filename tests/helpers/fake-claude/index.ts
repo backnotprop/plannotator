@@ -37,6 +37,8 @@ export interface FakeClaudeConfig {
   workMs?: number;
   /** Keep the turn running until cleared. */
   hold?: boolean;
+  /** `auth status` says not logged in (JSON `loggedIn: false`, exit 1), as over SSH when macOS keeps the login locked. */
+  signedOut?: boolean;
   /** List busy sessions as waiting on a permission prompt (and keep the turn running). */
   waiting?: boolean;
   /** The answer's first word. */
