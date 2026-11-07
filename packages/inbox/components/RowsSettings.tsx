@@ -218,9 +218,21 @@ export type RowsPreset = 'minimal' | 'balanced' | 'detailed';
 // Letter marks (approval "inbox-letter-marks"): Minimal and Balanced keep them off (Balanced is the defaults); Detailed
 // turns them on, both kinds as Avatar (no style option on), with the picture switches off.
 export const ROWS_PRESETS: readonly { id: RowsPreset; label: string; look: ListLook }[] = [
-  { id: 'minimal', label: 'Minimal', look: { ...LIST_LOOK_OFF, compact: true, hideAgents: true, hidePreview: true, smallNames: true, unreadDot: true, relativeTime: true } },
+  // Minimal (approval "inbox-rows-dialog", round 7b): the two-line title-first row, no preview, no dot, clock times.
+  { id: 'minimal', label: 'Minimal', look: { ...LIST_LOOK_OFF, titleFirst: true, hidePreview: true, smallNames: true } },
   { id: 'balanced', label: 'Balanced', look: LIST_LOOK_DEFAULT },
-  { id: 'detailed', label: 'Detailed', look: { ...LIST_LOOK_OFF, roomy: true, highlight: true, previewTwo: true, marksThreads: true, marksProjects: true } },
+  {
+    id: 'detailed',
+    label: 'Detailed',
+    look: {
+      ...LIST_LOOK_OFF,
+      roomy: true,
+      highlight: true,
+      previewTwo: true,
+      marksThreads: true,
+      marksProjects: true,
+    },
+  },
 ];
 
 export function rowsPreset(look: ListLook): RowsPreset | null {
