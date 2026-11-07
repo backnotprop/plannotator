@@ -35,7 +35,7 @@
       "name": "@plannotator/feedback-service",
       "version": "0.1.0",
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20241218.0",
+        "@cloudflare/workers-types": "^5.20261026.1",
         "wrangler": "^4.151.2",
       },
     },
@@ -52,7 +52,7 @@
         "react-dom": "^19.3.1",
       },
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20241218.0",
+        "@cloudflare/workers-types": "^5.20261026.1",
         "@tailwindcss/vite": "^4.3.3",
         "@types/react": "^19.3.0",
         "@types/react-dom": "^19.3.0",
@@ -145,7 +145,7 @@
       "name": "@plannotator/paste-service",
       "version": "0.1.0",
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20241218.0",
+        "@cloudflare/workers-types": "^5.20261026.1",
         "wrangler": "^4.151.2",
       },
     },
@@ -194,7 +194,7 @@
       "name": "@plannotator/relay",
       "version": "0.0.1",
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20241218.0",
+        "@cloudflare/workers-types": "^5.20261026.1",
         "@plannotator/core": "workspace:*",
         "typescript": "~5.8.2",
         "wrangler": "^4.151.2",
@@ -266,7 +266,7 @@
       "name": "@plannotator/waitlist-service",
       "version": "0.1.0",
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20241218.0",
+        "@cloudflare/workers-types": "^5.20261026.1",
         "wrangler": "^4.151.2",
       },
     },
@@ -772,7 +772,7 @@
 
     "@cloudflare/workerd-windows-64": ["@cloudflare/workerd-windows-64@1.20261019.1", "", { "os": "win32", "cpu": "x64" }, "sha512-z49fvKTETMCnG6wnMcQwxx9CpryFceiKz04FRjq26EkhCyzRNJ6c3UXhyZz3r5f1CXnnBZc5DcU8ZouPkUJCqw=="],
 
-    "@cloudflare/workers-types": ["@cloudflare/workers-types@4.20260702.1", "", {}, "sha512-mOhf5TUEB1m2vPrxtqoIGfz0fUC9xyxRDx5gWHy5s+OCo6dcV+g7wI1R7gYCMFohhqF/2y2xeKVwMwCJjfn/WA=="],
+    "@cloudflare/workers-types": ["@cloudflare/workers-types@5.20261026.1", "", {}, "sha512-E+KMLXOMip7uzfkFYoSjAF0n0+VFkK2KFU0Md/PM3JkPpC9Km0/YAoDttkmxAoZLGbK1wQRAFg2IJtyZkTBCHg=="],
 
     "@codemirror/autocomplete": ["@codemirror/autocomplete@6.20.3", "", { "dependencies": { "@codemirror/language": "^6.0.0", "@codemirror/state": "^6.0.0", "@codemirror/view": "^6.17.0", "@lezer/common": "^1.0.0" } }, "sha512-tlosUqb+3BbxCxZdu4tKeRghPFC+QM7q4X5YhKV2eCmPG+1r2F3f4AaSz5sCrFqUtX4Jh20VFTKecl16MgiV9g=="],
 

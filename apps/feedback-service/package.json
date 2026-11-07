@@ -13,7 +13,7 @@
     "db:read": "wrangler d1 execute plannotator-feedback --remote --json --command=\"SELECT id, created_at, category, surface, agents, version, os, contact, message FROM feedback ORDER BY id DESC LIMIT 100\""
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241218.0",
+    "@cloudflare/workers-types": "^5.20261026.1",
     "wrangler": "^4.151.2"
   }
 }
