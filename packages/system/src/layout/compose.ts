@@ -2,8 +2,8 @@
 // with every coordinate computed (layout/types.ts). Nothing here knows about
 // any one system; the same code draws any drawing in format 1. Ported from
 // entry G's compose.js with G's rulings on (`?g=off` and `?ports=off` are not
-// ported), the change inks left to step A5 (every status is null here), and
-// band and side labels in sentence case, measured as written.
+// ported), and band and side labels in sentence case, measured as written. A
+// change's marks (change/marks.ts) are put on the finished layout.
 import type { Band, Cell, Part, SideSection, Sheet, SystemModel } from '../format/types.ts';
 import { hasMark, WIDE_MARKS } from '../draw/mark-ids.ts';
 import { lineOfFlow, lineOfMany } from '../draw/grammar.ts';
@@ -12,6 +12,7 @@ import { FIELD_TOP, FOOT_H, M, outerTest, portText, W } from './common.ts';
 import { KINDS } from './kinds.ts';
 import { placeLabels, placeLetters } from './labels.ts';
 import { currentText, measureEpoch, fitName, FONTS, lh, longestWord, textWidth, wrap } from './measure.ts';
+import { marksOf } from '../change/marks.ts';
 import { routeAll, type RouteRect, type Strip, type Riser, type BandBox } from './route.ts';
 import type { CalloutBox, Edge, LineClass, PartBox, Pt, Rect, SheetLayout, Split, Variant, Zone } from './types.ts';
 
@@ -369,8 +370,31 @@ export function layoutSheet(model: SystemModel, code: string, opts: LayoutOpts =
       }
     }
   }
+  L = marked(model, L);
   m.set(k, L);
   return L;
+}
+
+/** A change's marks on a finished layout: each part's and line's status, a part's number and line counts, a hop's ink. */
+function marked(model: SystemModel, L: SheetLayout): SheetLayout {
+  const mk = marksOf(model);
+  if (!mk) return L;
+  const parts: SheetLayout['parts'] = {};
+  for (const [id, b] of Object.entries(L.parts)) {
+    const p = Object.hasOwn(mk.parts, id) ? mk.parts[id]! : null;
+    parts[id] = p ? { ...b, status: p.is, n: p.n, lines: p.lines, ...(p.who ? { who: p.who } : {}) } : b;
+  }
+  const flowIs = (id: string | null | undefined) => (id && Object.hasOwn(mk.flows, id) ? mk.flows[id]! : null);
+  const hopIs = (id: string) => (Object.hasOwn(mk.hops, id) ? mk.hops[id]! : null);
+  const edges = L.edges.map((e) => {
+    const st = e.style === 'aud' ? null : hopIs(e.id) ?? flowIs(e.flow ?? e.id) ?? (e.fan?.some((f) => flowIs(f.id)) ? 'changed' : null);
+    return st ? { ...e, status: st } : e;
+  });
+  const figures = L.figures.map((f) => {
+    const st = hopIs(f.id) ?? (f.edge ? hopIs(f.edge) : null);
+    return st ? { ...f, status: st } : f;
+  });
+  return { ...L, parts, edges, figures };
 }
 
 /** True when a sheet has two readings, Simple and Full: it is drawn in bands, with a band left to draw. */
