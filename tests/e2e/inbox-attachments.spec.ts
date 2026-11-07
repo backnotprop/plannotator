@@ -426,11 +426,15 @@ test('a selection comment on the plan is saved and listed in the reply box chip'
   await pane.getByRole('button', { name: 'Side by side' }).click();
   await expect(pane).not.toHaveClass(/ib-full/);
 
-  // The chip inside the reply box lists each annotation with its file, quote and comment.
+  // The reply box lists each annotation with its file, quote and comment. Beside the file (the 440 px thread column)
+  // the two open questions and "2 comments" do not fit beside Send and its tools as chips, so they are the one summary
+  // line (approval "inbox-reply-box", D4), and with questions too its sheet's Review opens the list.
   await page.getByRole('button', { name: 'Reply', exact: true }).click();
-  const chip = page.locator('[data-annotations-chip]');
-  await expect(chip).toHaveText('2 comments');
-  await chip.click();
+  const line = page.locator('section.ib-pane .ib-rbox [data-foot-summary]');
+  await expect(line).toContainText('2 comments');
+  await expect(page.locator('section.ib-pane .ib-rbox [data-annotations-chip]')).toHaveCount(0);
+  await line.click();
+  await page.getByRole('dialog', { name: 'Goes with this reply' }).getByRole('button', { name: 'Review comments' }).click();
   const pop = page.getByRole('dialog', { name: '2 comments' });
   await expect(pop.locator('[data-annotation-row]')).toHaveCount(2);
   await expect(pop.locator('[data-annotation-row]').first()).toContainText('retry-plan.md');

@@ -1583,11 +1583,14 @@ test.describe('New message dictates as the reply box does', () => {
     });
   }
 
-  test('a desktop: the mic on the same side, with room for the level, and Send still last', async () => {
+  test('a desktop: the mic at the right, with room for the level, and Send still last', async () => {
     const w = await mainWorld();
     const { context, page } = await open(speech, w);
     await openReply(page, w, w.threads[0]!);
-    onTheRight(await readRow(pane(page)), 'reply');
+    // The reply box on a computer has the mic at the left, after Send, the paperclip and Skills (approval
+    // "inbox-reply-box", T6; inbox-reply-foot-phone.spec.ts checks the order). New message keeps it at the right, by Send.
+    const reply = await readRow(pane(page));
+    expect(reply.mic.right, 'reply: the mic is in the row’s left half').toBeLessThan((reply.row.left + reply.row.right) / 2);
     await openCompose(page, w);
     await field(page).fill('Words already here');
     // Past the dialog's opening scale, so the place read is where it stays.
