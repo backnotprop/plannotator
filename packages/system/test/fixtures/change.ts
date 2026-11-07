@@ -11,9 +11,13 @@
 //   two changed. Its words are invented; its parts and files are the drawing's.
 // - REMOVES: a change that removes the relay client and its line, for the
 //   grey ink. Invented: neither real PR removed a part.
+// - TOUCHES: three open PRs at once, for the drawing at rest (`touches`).
+//   Invented labels and edits; every path is one the drawing cites. On the
+//   landing sheet PR 101 touches the ping, PR 102 the Inbox, PR 103 the Inbox
+//   and sharing, so the Inbox is touched by two.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ChangeFile, SystemFiles } from '../../src/index.ts';
+import type { ChangedFile, ChangeFile, SystemFiles } from '../../src/index.ts';
 
 const dir = join(import.meta.dir, 'prs');
 
@@ -147,3 +151,10 @@ change:
 remove:
   irelayc: "Phones never shipped; the client goes."
 `;
+
+/** Three open PRs' changed files, each to be run through the gate and drawn at rest together. */
+export const TOUCHES: { label: string; files: ChangedFile[] }[] = [
+  { label: 'PR 101', files: [{ path: 'packages/shared/daily-ping.ts', status: 'M' }] },
+  { label: 'PR 102', files: [{ path: 'packages/server/inbox.ts', status: 'M' }] },
+  { label: 'PR 103', files: [{ path: 'packages/server/inbox.ts', status: 'M' }, { path: 'packages/ui/utils/sharing.ts', status: 'M' }] },
+];

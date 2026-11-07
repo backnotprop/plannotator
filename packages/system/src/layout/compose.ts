@@ -382,7 +382,7 @@ function marked(model: SystemModel, L: SheetLayout): SheetLayout {
   const parts: SheetLayout['parts'] = {};
   for (const [id, b] of Object.entries(L.parts)) {
     const p = Object.hasOwn(mk.parts, id) ? mk.parts[id]! : null;
-    parts[id] = p ? { ...b, status: p.is, n: p.n, lines: p.lines } : b;
+    parts[id] = p ? { ...b, status: p.is, n: p.n, lines: p.lines, ...(p.who ? { who: p.who } : {}) } : b;
   }
   const flowIs = (id: string | null | undefined) => (id && Object.hasOwn(mk.flows, id) ? mk.flows[id]! : null);
   const hopIs = (id: string) => (Object.hasOwn(mk.hops, id) ? mk.hops[id]! : null);
