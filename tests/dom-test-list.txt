@@ -532,7 +532,10 @@ packages/inbox/guideGlobalComment.test.tsx
 packages/inbox/guideExpandContext.test.tsx
 packages/inbox/guideScrollsWithPage.test.tsx
 packages/inbox/pulls/pullReview.test.tsx
+packages/inbox/pulls/pullAllFiles.test.tsx
+packages/inbox/pulls/railTree.test.tsx
 packages/inbox/pulls/usePulls.test.tsx
+packages/inbox/shortcuts/useSheetEscape.test.tsx
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/inbox/pulls/pullReviewKept.test.tsx
 packages/ui/components/shape/ShapeDrawn.test.tsx

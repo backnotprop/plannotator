@@ -194,6 +194,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
       ref={headerRef}
       data-file-header=""
       className={`flex-shrink-0 border-b border-border/50 flex items-center justify-between gap-2 transition-colors duration-150 hover:bg-muted/30 ${isCompactTouchLayout ? 'pr-3' : 'px-3'}`}
+      data-file-header=""
       style={{ height: isCompactTouchLayout ? '44px' : 'var(--panel-header-h)' }}
     >
       <div className="min-w-0 flex flex-1 items-center" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>

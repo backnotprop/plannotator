@@ -36,10 +36,11 @@ function estimateDiffHeight(patch: string): number {
  * renderer measures it: the rows the diff draws (its hunks' lines, not git's header lines; in Split a run of removed
  * lines and the added lines after it share rows), a separator before each hunk that does not start the file, the
  * file's header and the list's padding (AllFilesCodeView's metrics: 20 px rows, one more for a "\ No newline", a
- * 33 px header, a 40 px separator above the first hunk and 48 px between hunks, 8 px above and below the list, 8 px
- * in the code block, a 1 px border). With a reader of whole files the viewer also draws an arrow row after the last
- * hunk (`trailingRow`), whose 24 px its margins leave out. A patch with no hunk (a binary file, a rename) keeps the old
- * estimate.
+ * 33 px header, a 32 px separator above the first hunk and between hunks, with no gaps around them (the renderer's
+ * files scroll with the page and draw no spacing there, so a host whose files sit flush, `flushFiles`, counts the
+ * same), 8 px above and below the list, a 1 px border). With a reader of whole files the viewer also draws an arrow
+ * row after the last hunk (`trailingRow`), whose 24 px its margins leave out. A patch with no hunk (a binary file, a
+ * rename) keeps the old estimate.
  */
 function estimateFitDiffHeight(patch: string, diffStyle: 'split' | 'unified' = 'unified', trailingRow = false): number {
   let rows = 0;

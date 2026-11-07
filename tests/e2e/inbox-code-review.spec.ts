@@ -343,6 +343,8 @@ test('the review card, the full-window review with a comment and a Viewed tick, 
   const added = (line: number) => retry.locator(`[data-line-type="change-addition"][data-column-number="${line}"]`);
   await expect(added(12)).toBeVisible({ timeout: 30_000 });
   await shot(page, '4-review-mode');
+  // Its file head is 33 px, as in every reader.
+  expect((await retry.locator('[data-file-header]').first().boundingBox())!.height).toBe(33);
 
   await retry.hover();
   await added(12).click();
@@ -1339,6 +1341,7 @@ test('each file\'s name sits on the page above its code box: no fill at rest, un
 
 test('Code review off: the same review opens in the guide pane, with no top bar of chapters and the Split | Unified tab on its card', async () => {
   const { page, claude } = world;
+  await setCodeReview(true);
   const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'off-after', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
   await setCodeReview(false);
   try {
@@ -1349,6 +1352,23 @@ test('Code review off: the same review opens in the guide pane, with no top bar 
     await expect(page.locator('[data-guide-heading]')).toHaveCount(0);
     await expect(page.locator('[data-guide-section-tab] [data-diff-style-switch]')).toBeVisible();
     await expect(page.locator('h1').filter({ hasText: 'Retry failed payouts' })).toBeVisible();
+    // The 33 px file head is every reader's, this one's too.
+    const shell = page.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
+    await expect(shell.locator('[data-line-type="change-addition"]').first()).toBeVisible({ timeout: 30_000 });
+    expect((await shell.locator('[data-file-header]').first().boundingBox())!.height).toBe(33);
+
+    // A comment here reads as on main: no name line, on the card or in the comments.
+    const added = shell.locator('[data-line-type="change-addition"][data-column-number="12"]');
+    await shell.scrollIntoViewIfNeeded();
+    await shell.hover();
+    await added.click();
+    const composer = page.getByPlaceholder('Leave feedback...');
+    await expect(composer).toBeVisible();
+    await composer.fill('Unsigned while Code review is off.');
+    await page.getByRole('button', { name: 'Add Comment' }).click();
+    await expect(page.getByText('Unsigned while Code review is off.').first()).toBeVisible();
+    await expect(page.getByText(/\(me\)/)).toHaveCount(0);
+
   } finally {
     await setCodeReview(true);
   }
