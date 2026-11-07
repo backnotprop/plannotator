@@ -3231,7 +3231,7 @@ function Inbox() {
    *
    * `reaction` (approval "inbox-reaction-tray"): the emoji picked in the 👍's
    * tray, null for 👍 Looks good, undefined for the plain button (today's call).
-   * It reaches the agent as 👍 Looks good does. A reaction draws no toast: the
+   * The agent gets the one the Undo window closes on. A reaction draws no toast: the
    * emoji flies to the message; the toast is kept unseen, so `Z` still undoes it
    * and the live region still says it. Taking one back, `reaction` is the one
    * taken back, for the words only.

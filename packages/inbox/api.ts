@@ -1318,7 +1318,7 @@ export const inboxApi = {
   markUnread: (threadId: string) => post<{ thread: InboxListRow; wrote: boolean; through_seq: number }>(threadUrl(threadId, '/mark-unread'), {}),
   /**
    * 👍 Looks good on the agent's latest message (the thread is marked read; sent to the agent after the Undo window), or its Undo.
-   * `reaction`: the emoji picked in the 👍's tray, shown on the message (null: 👍 Looks good); the agent hears 👍 Looks good either way.
+   * `reaction`: the emoji picked in the 👍's tray, shown on the message (null: 👍 Looks good); the agent gets the one it ends on when the Undo window closes, and it never changes after that (`409 ack_sent`).
    */
   ack: (messageId: string, on: boolean, reaction?: InboxReaction | null) =>
     post<{ message: InboxMessageWire; thread: InboxListRow }>(messageUrl(messageId, `/ack`), on && reaction !== undefined ? { ack: on, reaction } : { ack: on }),

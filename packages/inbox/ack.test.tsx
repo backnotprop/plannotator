@@ -324,6 +324,11 @@ test.skipIf(!hasDom)('after the Undo window the 👍 is sent: saved for the agen
   host?.remove();
   const again = await renderApp(`#thread=${thread}`);
   await until(() => again.querySelector('[data-ack-pill]')?.getAttribute('data-ack-pill') === 'saved', 'the saved line');
+  // Sent: the reaction control leaves the message (no button, no tray to reach by keyboard); the line under it stays
+  // (owner, 2026-11-07, approval "inbox-reaction-tray"). The store refuses a change too (store-ack-delivery.test.ts).
+  expect(ackButton(again)).toBeNull();
+  expect(again.querySelector('section.ib-pane [data-react-more]')).toBeNull();
+  expect(again.querySelector('[data-ack-pill]')!.textContent).toMatch(/^👍 Looks good/);
   // Its session's connection takes it, as the bridge's `delivered` records.
   const session = (await serverMessages(thread)).at(-1)!.author as { session: string };
   (child!.stdin as import('bun').FileSink).write(`${JSON.stringify({ deliver: { session: session.session } })}\n`);

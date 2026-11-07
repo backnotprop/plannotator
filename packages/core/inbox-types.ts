@@ -473,6 +473,13 @@ export interface InboxMessage {
    */
   ack_of?: string;
   /**
+   * With `ack_of`: the tray reaction the ack had when its Undo window closed
+   * (approval "inbox-reaction-tray"), so the wake says the emoji the person
+   * ended on (`inboxAckLine`); it never changes after that. Absent for
+   * 👍 Looks good and on notes written before.
+   */
+  ack_reaction?: InboxReaction;
+  /**
    * On the person's Re-ask note (approval "inbox-reask"): the open questions
    * (`<message id>/<key>`) it asked the agent to ask again, together in one
    * new message, with `Replaces:` lines for those still needed. It is the
@@ -889,9 +896,10 @@ export interface InboxAck {
   /**
    * The emoji the person reacted with from the 👍's tray (approval
    * "inbox-reaction-tray"): one of their saved emoji (with its name, when it
-   * has one) or any emoji picked once. Absent or null: 👍 Looks good. For the
-   * window only: it reaches the agent exactly as 👍 Looks good does (`label`,
-   * the note's `inboxAckLine`), and read_thread never shows it.
+   * has one) or any emoji picked once. Absent or null: 👍 Looks good. It can
+   * change only inside the Undo window; the agent gets the one the person
+   * ended on (the note's `ack_reaction` and `inboxAckLine`), and read_thread
+   * shows it (`ack.reaction`).
    */
   reaction?: InboxReaction | null;
   /** The Mark read this ack stands on (the root's `person_read_seq`): Move back on that read withdraws the ack. */

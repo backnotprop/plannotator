@@ -1547,7 +1547,10 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   const questionWaits = agentMessages.some((m) => [...(m.questions ?? []), ...(m.actions ?? [])].some((q) => q.state === 'open' || q.state === 'picked'));
   // Nor once the person wrote back after it (their reply is the answer; its Sent / Delivered line stays).
   const personWroteLast = lastNonNote(thread.messages)?.author.kind === 'person';
-  const ackOffered = onAck !== undefined && ackTarget !== null && !archived && !questionWaits && !personWroteLast;
+  // Nor once it was sent (its Undo window closed): the reaction stays shown under the message with no button, and the
+  // agent's next message takes a new one (owner, 2026-11-07, approval "inbox-reaction-tray"; the store refuses a change).
+  const ackSent = ackTarget?.ack?.settled_seq != null;
+  const ackOffered = onAck !== undefined && ackTarget !== null && !archived && !questionWaits && !personWroteLast && !ackSent;
   const ackOn = ackTarget?.ack != null;
 
   // Action items: Done / Can't do it into the reply draft, or taken back, through the window or, without it, straight to the server.

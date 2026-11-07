@@ -880,6 +880,13 @@ export interface InboxReplyCommand {
    */
   ack_of?: string
   /**
+   * With `ack_of`: the emoji the person reacted with from the 👍's tray
+   * (approval "inbox-reaction-tray"), the one they ended on when the Undo
+   * window closed, with their name for it when it has one. The wake is
+   * `inboxAckLine` with it. Absent for 👍 Looks good.
+   */
+  ack_reaction?: { emoji: string; label?: string }
+  /**
    * On a reply handed to a session the person tagged with `@` that does not
    * own the thread (approval "inbox-tag-agents"): the owning session's agent,
    * named from its host (`Claude Code`). The wake takes
@@ -1252,11 +1259,32 @@ export function inboxRedirectedLine(asker: string, id: string): string {
 }
 
 /**
+ * The emoji and name of a tray reaction as a wake says them (approval
+ * "inbox-reaction-tray"): one short emoji (pictographic, a flag or a keycap)
+ * with no spaces or controls, and a name with controls made spaces and
+ * invisible format characters taken out (the joiner emoji use stays), at most
+ * 24 characters. Null when it is no reaction, or 👍 with no name (that is
+ * 👍 Looks good).
+ */
+export function inboxAckReaction(value: unknown): { emoji: string; label: string } | null {
+  if (!value || typeof value !== 'object') return null
+  const { emoji, label } = value as { emoji?: unknown; label?: unknown }
+  if (typeof emoji !== 'string' || emoji.length === 0 || emoji.length > 16 || !/\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20e3/u.test(emoji) || /[\s\p{Cc}\p{Cf}]/u.test(emoji.replace(/[\u200d\ufe0f\u{e0020}-\u{e007f}]/gu, ''))) return null
+  const text = typeof label === 'string' ? label.replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, ' ').replace(/(?!\u200d)\p{Cf}/gu, '').replace(/\s+/g, ' ').trim() : ''
+  const name = [...text].slice(0, 24).join('').trim()
+  if (!name && emoji === '👍') return null
+  return { emoji, label: name }
+}
+
+/**
  * The whole of a 👍 Looks good wake under its first line, and the body of
  * the note the Inbox stores for it: the person read the message and needs
- * nothing more.
+ * nothing more. With a tray reaction (`inboxAckReaction`), the reaction they
+ * ended on, with its name when it has one.
  */
-export function inboxAckLine(messageId: string): string {
+export function inboxAckLine(messageId: string, reaction?: unknown): string {
+  const picked = inboxAckReaction(reaction)
+  if (picked) return `The person reacted ${picked.emoji}${picked.label ? ` ${picked.label}` : ''} to your message (${messageId}). No reply needed unless the reaction asks for one.`
   return `The person marked your message 👍 Looks good (${messageId}). No reply needed unless you have a question.`
 }
 
@@ -1392,6 +1420,7 @@ export function inboxWakeText(
     continues_thread?: boolean
     name_thread?: boolean
     ack_of?: string
+    ack_reaction?: unknown
     tagged?: { owner?: unknown } | null
     also_tagged?: unknown
     added?: unknown
@@ -1414,7 +1443,7 @@ export function inboxWakeText(
   if (typeof command.ack_of === 'string' && command.ack_of !== '') {
     const ackSubject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || 'a message'
     const thread = wakeThreadId(command.thread_id)
-    return `Plannotator Inbox: ${ackSubject} (${command.id})\n${inboxAckLine(command.ack_of)}${thread ? `\n\n[thread ${thread}]` : ''}`
+    return `Plannotator Inbox: ${ackSubject} (${command.id})\n${inboxAckLine(command.ack_of, command.ack_reaction)}${thread ? `\n\n[thread ${thread}]` : ''}`
   }
   // The session's steps in this thread (approval "inbox-thread-steps"), its own paragraph before the closing line.
   const steps = wakeSteps(command.steps)

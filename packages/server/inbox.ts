@@ -675,6 +675,7 @@ const ERROR_STATUS: Record<string, number> = {
   ack_not_allowed: 422,
   ack_stale: 409,
   ack_after_reply: 409,
+  ack_sent: 409,
   question_open: 409,
   idempotency_key_reused: 409,
   // Action items (approval "inbox-next-actions"): a Done already sent (no Undo), an action item no longer open, an agent's `done` that names no open action item.
@@ -3128,8 +3129,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       ...(reply.deliver_now_at && sendNow ? { now: true } : {}),
       // A thread the person started with no name yet, handed to a session that may name it: the wake asks it to.
       ...(!reply.ack_of && store.canNameThread(reply.thread_id, reply.to?.session ?? recipientOf(reply)) ? { name_thread: true } : {}),
-      // The person's 👍 Looks good (amended 2026-10-16): the wake is the one ack line.
-      ...(reply.ack_of ? { ack_of: reply.ack_of } : {}),
+      // The person's 👍 Looks good (amended 2026-10-16): the wake is the one ack line,
+      // with the tray reaction the ack had when its window closed (approval "inbox-reaction-tray").
+      ...(reply.ack_of ? { ack_of: reply.ack_of, ...(reply.ack_reaction ? { ack_reaction: reply.ack_reaction } : {}) } : {}),
       // The person's Re-ask (approval "inbox-reask"): the wake takes INBOX_REASK_INSTRUCTION.
       ...((reply.reask?.length ?? 0) > 0 ? { reask: true } : {}),
       // What the note lists (#2059): the wake names action items only when it lists some.
@@ -4945,7 +4947,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         if (body.ack !== undefined && typeof body.ack !== "boolean") throw new InboxError("validation_error", "ack: must be a boolean.", { field: "ack" });
         const on = body.ack !== false;
-        // The tray's emoji (approval "inbox-reaction-tray"): for the window only; the agent hears 👍 Looks good, as before.
+        // The tray's emoji (approval "inbox-reaction-tray"): the agent gets the one the window closes on; after that it never changes (`409 ack_sent`).
         let reaction: InboxReaction | null | undefined;
         if (body.reaction !== undefined && body.reaction !== null) {
           const emoji = (body.reaction as { emoji?: unknown } | null)?.emoji;

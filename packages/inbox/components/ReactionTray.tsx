@@ -10,9 +10,10 @@
  * the arrow keys reach at the tray's end, edits it (its name, another emoji, Remove).
  *
  * No words on the tray (a name is a tooltip) and no toast: the picked emoji flies from where it was pressed
- * to the line under the message. Reduced motion: no flight, the line just appears. Whatever the emoji, the
- * reaction reaches the agent as 👍 Looks good does (POST /api/inbox/messages/:id/ack, its Undo window); the
- * emoji is shown on the message (the ack's `reaction`).
+ * to the line under the message. Reduced motion: no flight, the line just appears. The reaction is the 👍's
+ * ack (POST /api/inbox/messages/:id/ack, its Undo window); the agent gets the emoji it ends on, with its name,
+ * and the emoji is shown on the message (the ack's `reaction`). Once sent the tray leaves the message (Thread.tsx
+ * `ackSent`); the emoji stays shown under it.
  *
  * Keyboard (standard menu behaviour, no new Inbox shortcut): Tab reaches "More reactions" after the 👍;
  * Enter opens the tray; Left and Right move along it; Enter picks; Escape closes the tray, the picker and the
