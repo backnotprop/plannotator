@@ -516,10 +516,11 @@ export const SHAPE_LIMITS = {
   exampleCode: 600,
   /** A box's picture, as a data: URL. */
   notePicture: 6_000_000,
-  /** A stack's pull requests, its part changes, and the files of one change. */
+  /** A stack's pull requests, its part changes, the files of one change, and one file's line ranges. */
   stackPulls: 20,
   stackChanges: 200,
   stackFiles: 30,
+  stackLines: 50,
 } as const;
 
 const PART_ID_RE = /^[A-Za-z][\w.-]{0,63}$/;
@@ -1708,7 +1709,7 @@ function checkStack(c: Checker, value: unknown, views: ShapeBoard['views']): Sha
       const additions = c.int(file.additions, `${ff}.additions`, 0, 10_000_000, false);
       const deletions = c.int(file.deletions, `${ff}.deletions`, 0, 10_000_000, false);
       let lines: [number, number][] | undefined;
-      const ranges = c.list(file.lines, `${ff}.lines`, 50);
+      const ranges = c.list(file.lines, `${ff}.lines`, SHAPE_LIMITS.stackLines);
       if (ranges) {
         lines = [];
         ranges.forEach((r, k) => {
@@ -1743,33 +1744,25 @@ export function shapeStackBadges(stack: ShapeStack | undefined): Map<string, num
 }
 
 /**
- * The PRs' hues (OKLCH degrees), by place in a stack of `count` (owner, 2026-11-07: "Dude why limit."): every PR its
- * own. Up to three keep the first look: teal, amber, rose. More are spread evenly from 330 (rose) through red, amber,
- * green and teal to 235 (blue), so the board's purple (about 280) stays out, and handed out a few steps apart so PRs
- * next to each other in the stack never get neighbouring hues. The UI turns a hue into a colour at one lightness and
- * chroma (`--shp-h`, shape.css), so every hue holds the same contrast.
+ * The PRs' hues (OKLCH degrees), by place in the stack (owner, 2026-11-07: "Dude why limit."): every PR its own, and
+ * fixed by its place, so a stack that grows never recolours the PRs already on the board. #1 to #3 keep the first look:
+ * teal, amber, rose. Each next one is the hue that looks farthest from all before it (the most distant by eye, OKLab
+ * distance of the colours as drawn, light and dark), picked once and written here; hues between 235 and 330 are never
+ * picked, so the board's purple (about 280) stays out. PRs next to each other in the stack are at least 24° apart.
+ * The UI turns a hue into a colour at one lightness and chroma (`--shp-h`, shape.css), so every hue holds the same
+ * contrast. One per allowed pull (`SHAPE_LIMITS.stackPulls`).
  */
+const STACK_HUES = [186, 72, 357, 125, 235, 33, 155, 330, 99, 209, 15, 51, 171, 140, 344, 112, 86, 221, 197, 24] as const;
+
+/** The hues of a stack of `count` PRs, in landing order (`STACK_HUES`): the first `count` of one fixed sequence. */
 export function shapeStackHues(count: number): number[] {
-  const first = [186, 72, 357];
-  if (count <= first.length) return first.slice(0, Math.max(0, count));
-  const from = 330;
-  const arc = 265;
-  const hues = Array.from({ length: count }, (_, k) => Math.round((from + ((k + 0.5) * arc) / count) % 360));
-  const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
-  let stride = 1;
-  for (let s = 1; s < count; s++) if (gcd(s, count) === 1 && Math.abs(s - count * 0.382) < Math.abs(stride - count * 0.382)) stride = s;
-  const away = (h: number) => Math.min(Math.abs(h - first[0]!), 360 - Math.abs(h - first[0]!));
-  let start = 0;
-  hues.forEach((h, k) => {
-    if (away(h) < away(hues[start]!)) start = k;
-  });
-  return hues.map((_, k) => hues[(start + k * stride) % count]!);
+  return Array.from({ length: Math.max(0, count) }, (_, i) => STACK_HUES[i % STACK_HUES.length]!);
 }
 
 /** A PR's hue on the board (`shapeStackHues`, by its place in the stack); null when it is not in it. */
 export function shapeStackHue(stack: ShapeStack, n: number): number | null {
   const i = stack.pulls.findIndex((p) => p.n === n);
-  return i < 0 ? null : shapeStackHues(stack.pulls.length)[i]!;
+  return i < 0 ? null : STACK_HUES[i % STACK_HUES.length]!;
 }
 
 /** Validate what an agent writes. Every problem is named by its field. */

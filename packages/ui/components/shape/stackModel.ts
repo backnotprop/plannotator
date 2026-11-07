@@ -5,6 +5,13 @@
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import type { ShapeStack, ShapeStackChange, ShapeStackFile, ShapeStackPull } from '@plannotator/core/shape';
 
+/** The review's patch split into files, once: a card asks for each of its rows, and the patch is the same each time. */
+let parsed: { patch: string; files: ReturnType<typeof parseDiffToFiles> } | null = null;
+function patchFiles(patch: string): ReturnType<typeof parseDiffToFiles> {
+  if (parsed?.patch !== patch) parsed = { patch, files: parseDiffToFiles(patch) };
+  return parsed.files;
+}
+
 const HUNK = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
 
 /**
@@ -12,7 +19,7 @@ const HUNK = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
  * none is given or none touches them. Null when the patch does not change the file.
  */
 export function stackFilePatch(patch: string, path: string, lines?: readonly (readonly [number, number])[]): string | null {
-  const file = parseDiffToFiles(patch).find((f) => f.path === path || f.oldPath === path);
+  const file = patchFiles(patch).find((f) => f.path === path || f.oldPath === path);
   if (!file) return null;
   if (!lines?.length) return file.patch;
   const rows = file.patch.split('\n');

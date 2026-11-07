@@ -81,7 +81,7 @@ test('badges come part by part in landing order, and a board of one PR has none'
   expect(shapeStackBadges(undefined).size).toBe(0);
 });
 
-test('a PR has one colour, by its place in the stack: teal, amber, rose for three, then one hue each however many', () => {
+test('a PR has one colour, by its place in the stack: teal, amber, rose, then one hue each however many', () => {
   const s = stack();
   expect([11, 12, 13].map((n) => shapeStackHue(s, n))).toEqual([186, 72, 357]);
   expect(shapeStackHue(s, 99)).toBeNull();
@@ -91,11 +91,17 @@ test('a PR has one colour, by its place in the stack: teal, amber, rose for thre
     expect(hues.length).toBe(count);
     expect(new Set(hues).size).toBe(count);
     // Off the board's purple (the default theme's primary is hue 280).
-    for (const h of hues) expect(apart(h, 280)).toBeGreaterThanOrEqual(40);
-    // Evenly spread: no two closer than the arc shared out, less rounding.
-    const sorted = [...hues].sort((a, b) => a - b);
-    if (count >= 4) for (let i = 1; i < count; i++) expect(sorted[i]! - sorted[i - 1]!).toBeGreaterThanOrEqual(Math.floor(265 / count) - 1);
-    // PRs next to each other in the stack never take neighbouring hues where the count allows a wider step (not 4 or 6).
-    if (count >= 5 && count !== 6) for (let i = 1; i < count; i++) expect(apart(hues[i]!, hues[i - 1]!)).toBeGreaterThanOrEqual(Math.floor((2 * 265) / count) - 2);
+    for (const h of hues) expect(apart(h, 280)).toBeGreaterThanOrEqual(45);
+    // PRs next to each other in the stack never take hues close enough to mistake.
+    for (let i = 1; i < count; i++) expect(apart(hues[i]!, hues[i - 1]!)).toBeGreaterThanOrEqual(24);
+  }
+});
+
+test('a stack that grows never recolours the PRs already in it', () => {
+  const pulls = Array.from({ length: 20 }, (_, i) => ({ n: 500 + i, title: `PR ${i + 1}` }));
+  for (let count = 2; count < 20; count++) {
+    const before = { pulls: pulls.slice(0, count), changes: [] };
+    const after = { pulls: pulls.slice(0, count + 1), changes: [] };
+    for (const p of before.pulls) expect(shapeStackHue(after, p.n)).toBe(shapeStackHue(before, p.n));
   }
 });

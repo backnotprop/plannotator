@@ -40,7 +40,8 @@ export const STACK_DRAWN_CSS = `
 .shp-stk-b.off { opacity: .25; }
 .shp-stk-b svg { flex: none; }
 .board .mk.shp-stk-out { opacity: .25; transition: opacity .25s ease; }
-@media (pointer: coarse) { .shp-stk-b { height: 24px; padding: 0 8px 0 7px; } }
+/* A finger gets 40 px of height without the tag growing: a clear area above and below it (not beside: tags sit 4 px apart). */
+@media (pointer: coarse) { .shp-stk-b { position: relative; height: 24px; padding: 0 8px 0 7px; } .shp-stk-b::after { content: ""; position: absolute; left: 0; right: 0; top: -8px; bottom: -8px; } }
 @media (prefers-reduced-motion: reduce) { .shp-stk-g, .shp-stk-b, .board .mk.shp-stk-out { transition-duration: .01s; } }
 `;
 

@@ -73,6 +73,14 @@ test("a stack badge's narrowing survives the address with its place, and a forge
   const badLink = shapeReviewAtOf(new URLSearchParams({ step: '3', narrow: JSON.stringify({ ...narrow, url: 'javascript:alert(1)' }) }));
   expect(badLink?.narrow?.pr).toBe(2547);
   expect(badLink?.narrow?.url).toBeUndefined();
+  // The hue becomes a CSS value: only a number of degrees from 0 up to 360 is kept, as a whole number below 360.
+  for (const hue of ['0;background:url(x)', '72', 999, -1, 360, null, Number.NaN]) {
+    const at = shapeReviewAtOf(new URLSearchParams({ step: '3', narrow: JSON.stringify({ ...narrow, hue }) }));
+    expect(at?.narrow?.pr).toBe(2547);
+    expect(at?.narrow?.hue).toBeUndefined();
+  }
+  const almost = shapeReviewAtOf(new URLSearchParams({ step: '3', narrow: JSON.stringify({ ...narrow, hue: 359.6 }) }));
+  expect(almost?.narrow?.hue).toBe(0);
 });
 
 test("a stack badge's file reads the review's patch once", async () => {

@@ -278,6 +278,10 @@ test.skipIf(!hasDom)("a stack badge's \"Read it in the review\" shows the PR's c
   expect(bar?.textContent).toContain('Back to the board');
   expect(bar?.textContent).toContain('The timer');
   expect(bar?.textContent).toContain('1 of the 2 files in this chapter');
+  // The PR's number keeps its board colour: the chip carries the hue it came with.
+  const pr = bar?.querySelector<HTMLElement>('.ib-rv-narrow-pr');
+  expect(pr?.hasAttribute('data-hue')).toBe(true);
+  expect(pr?.style.getPropertyValue('--shp-h')).toBe('72');
   // The jump to the chapter's narrowed file holds (the reader drew first), and focus starts on the way back.
   for (let i = 0; i < 20 && reader?.reveal?.path !== 'src/timer.ts'; i++) await act(async () => new Promise((r) => setTimeout(r, 20)));
   expect(reader?.reveal?.path).toBe('src/timer.ts');

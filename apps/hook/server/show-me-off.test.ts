@@ -89,9 +89,10 @@ async function agentTexts(codeReview: boolean): Promise<Record<string, string>> 
 /**
  * Shape's own agent text, as it is on main without Show me, by SHA-256: Show me's agent words go in its request,
  * never here, because someone with Shape on and Code review off reads these. A change to Shape's text on purpose
- * pins the new hash here; one that names the code review belongs in the request.
+ * pins the new hash here; one that names the code review belongs in the request. Last pinned for the stack paragraph
+ * ("A stack of PRs", approval "stack-show-me" q-c24e5d2c, after its clean-room test), which names no code review.
  */
-const SHAPE_TEXT_SHA256 = { "shape --help": "bcdec3588504812aacbcd9c5d7c11e762b971b69ab93a066ddc0a45d26cb9ea5", "/shape skill": "8003b59c8b957d7caf58b6d178c2e929aed430db90fd08480c7140a30dec12fd" };
+const SHAPE_TEXT_SHA256 = { "shape --help": "87426f53e346709a75f7bc24a9711fa1238323c023d7a239c3143ab033ac0842", "/shape skill": "69c968da448e4b9ef083bbd06cf5c0806067bbaf8c54bd3be84a106a4383050a" };
 
 test("Code review off: Shape's own agent text is byte for byte what it was", () => {
   const sha = (text: string) => createHash("sha256").update(text).digest("hex");
