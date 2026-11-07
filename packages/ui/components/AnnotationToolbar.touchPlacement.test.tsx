@@ -110,32 +110,34 @@ async function mount(opts: {
 }
 
 describe.if(hasDom)('AnnotationToolbar touch placement', () => {
-  test('opted in on a touch screen: below the selection, inside the left edge, marked for thumb-sized buttons', async () => {
+  test('opted in on a touch screen: docked to the bottom edge, centered, marked for thumb-sized buttons', async () => {
+    phoneScreen(276);
     const toolbar = await mount({ optIn: true, coarse: true, rect: { left: 2, top: 300, width: 24, height: 22 } });
-    expect(toolbar.dataset.pnAnnotationToolbarTouch).toBe('below');
+    expect(toolbar.dataset.pnAnnotationToolbarTouch).toBe('dock-bottom');
     expect(toolbar.dataset.pnAnnotationToolbarCentered).toBeUndefined();
     expect(toolbar.style.transform).toBe('');
-    expect(parseFloat(toolbar.style.top)).toBeGreaterThan(322);
-    expect(parseFloat(toolbar.style.left)).toBeGreaterThanOrEqual(8);
+    expect(parseFloat(toolbar.style.top)).toBe(844 - 8 - 54);
+    expect(parseFloat(toolbar.style.left)).toBe((390 - 276) / 2);
   });
 
-  test('a two-piece selection: the toolbar goes below the last piece, not the first (element)', async () => {
+  test('a selection whose last piece reaches the bottom band docks it to the top (whole selection, not element)', async () => {
     phoneScreen(276);
     const toolbar = await mount({
       optIn: true,
       coarse: true,
-      // `element` is the first mark, at the end of one line; the selection ends on the next line.
-      rect: { left: 300, top: 300, width: 70, height: 22 },
-      touchAnchorRect: () => ({ left: 16, right: 370, top: 300, bottom: 352 }),
+      // `element` is the first mark, high up; the selection ends near the bottom.
+      rect: { left: 300, top: 400, width: 70, height: 22 },
+      touchAnchorRect: () => ({ left: 16, right: 370, top: 400, bottom: 790 }),
     });
-    expect(parseFloat(toolbar.style.top)).toBeGreaterThanOrEqual(352 + 28);
+    expect(toolbar.dataset.pnAnnotationToolbarTouch).toBe('dock-top');
+    expect(parseFloat(toolbar.style.top)).toBe(8);
   });
 
-  test('placed from its measured size: a 300px toolbar at the right edge ends 8px from it', async () => {
+  test('placed from its measured size: a 300px toolbar is centered by its real width', async () => {
     // Wider than the first estimate, so only the measure-and-re-place pass gets this right.
     phoneScreen(300);
     const toolbar = await mount({ optIn: true, coarse: true, rect: { left: 350, top: 300, width: 30, height: 22 } });
-    expect(parseFloat(toolbar.style.left)).toBe(390 - 8 - 300);
+    expect(parseFloat(toolbar.style.left)).toBe((390 - 300) / 2);
     expect(parseFloat(toolbar.style.maxWidth)).toBe(390 - 16);
   });
 
@@ -159,8 +161,7 @@ describe.if(hasDom)('AnnotationToolbar touch placement', () => {
       touchAnchorRect: () => ({ left: 16, right: 370, top: -100, bottom: 400 }),
     });
     expect(closes).toBe(0);
-    expect(toolbar.dataset.pnAnnotationToolbarTouch).toBe('below');
-    expect(parseFloat(toolbar.style.top)).toBeGreaterThanOrEqual(400 + 28);
+    expect(toolbar.dataset.pnAnnotationToolbarTouch).toBe('dock-bottom');
   });
 
   test('while hidden its keys act on nothing; shown, a typed letter starts a comment', async () => {

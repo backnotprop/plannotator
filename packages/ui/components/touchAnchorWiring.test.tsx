@@ -1,5 +1,6 @@
 /**
- * The touch toolbar goes below the WHOLE selection, which only the surfaces
+ * The docked touch toolbar moves to the top edge when the WHOLE selection
+ * reaches the bottom of the screen, which only the surfaces
  * know: the markdown Viewer (a selection split into several marks; the
  * toolbar's `element` is the first) and HtmlViewer (a 1px anchor over the
  * frame; the bridge reports the selection's rect). These drive the real
@@ -75,20 +76,19 @@ afterEach(async () => {
 
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 30)); });
 
-function toolbarTop(): number {
+function dock(): string | undefined {
   const toolbar = document.querySelector<HTMLElement>('.annotation-toolbar');
   if (!toolbar) throw new Error('annotation toolbar did not render');
-  expect(toolbar.dataset.pnAnnotationToolbarTouch).toBeDefined();
-  return parseFloat(toolbar.style.top);
+  return toolbar.dataset.pnAnnotationToolbarTouch;
 }
 
-test.skipIf(!hasDom)('Viewer: a selection across two paragraphs puts the toolbar under the second, not the first mark', async () => {
+test.skipIf(!hasDom)('Viewer: a selection whose second paragraph reaches the bottom docks the toolbar to the top', async () => {
   touchPhone();
-  // Each highlight mark draws on its paragraph's line: the first at 100..120, the second at 200..220.
+  // Each highlight mark draws on its paragraph's line: the first at 100..120, the second at 780..800 (bottom band).
   const markRect = function (this: HTMLElement) {
     const blocks = Array.from(document.querySelectorAll('[data-block-id]'));
     const index = blocks.findIndex((b) => b.contains(this));
-    return index <= 0 ? rect(150, 100, 200, 20) : rect(16, 200, 120, 20);
+    return index <= 0 ? rect(150, 100, 200, 20) : rect(16, 780, 120, 20);
   };
   const originalRects = HTMLElement.prototype.getClientRects;
   const originalBox = HTMLElement.prototype.getBoundingClientRect;
@@ -142,10 +142,10 @@ test.skipIf(!hasDom)('Viewer: a selection across two paragraphs puts the toolbar
   await settle();
 
   expect(document.querySelectorAll('mark').length).toBeGreaterThan(1);
-  expect(toolbarTop()).toBeGreaterThanOrEqual(220 + 28);
+  expect(dock()).toBe('dock-top');
 });
 
-test.skipIf(!hasDom)('HtmlViewer: the toolbar goes under the bridge\'s whole selection rect, offset by the frame, and follows it', async () => {
+test.skipIf(!hasDom)('HtmlViewer: the dock follows the bridge\'s whole selection rect, offset by the frame', async () => {
   touchPhone();
   stubProperty(HTMLIFrameElement.prototype, 'getBoundingClientRect', { value: () => rect(0, 100, 390, 700), writable: true });
   const HtmlViewer = htmlViewerModule!.HtmlViewer;
@@ -171,17 +171,14 @@ test.skipIf(!hasDom)('HtmlViewer: the toolbar goes under the bridge\'s whole sel
     window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow, data }));
   });
 
-  // Two lines, 10..58 inside the frame: the frame starts at 100, so the selection ends at 158.
-  await post({ type: 'plannotator-bridge-selection', text: 'Two lines of selected words', rect: { top: 10, left: 20, width: 300, height: 48 } });
+  // Two lines from 560 to 640 inside the frame; the frame starts at 100, so the selection ends at 740,
+  // in the bottom band (844 - 120 = 724): only the frame offset puts it there.
+  await post({ type: 'plannotator-bridge-selection', text: 'Two lines of selected words', rect: { top: 560, left: 20, width: 300, height: 80 } });
   await settle();
-  const first = toolbarTop();
-  expect(first).toBeGreaterThanOrEqual(100 + 10 + 48 + 28);
-  expect(first).toBeLessThan(100 + 10 + 48 + 60);
+  expect(dock()).toBe('dock-top');
 
-  // The page inside the frame scrolled: the bridge reports the new rect.
+  // The page inside the frame scrolled the selection up: the bridge reports the new rect.
   await post({ type: 'plannotator-bridge-selection-rect', rect: { top: 300, left: 20, width: 300, height: 24 } });
   await settle();
-  const moved = toolbarTop();
-  expect(moved).toBeGreaterThanOrEqual(100 + 300 + 24 + 28);
-  expect(moved).toBeLessThan(100 + 300 + 24 + 60);
+  expect(dock()).toBe('dock-bottom');
 });

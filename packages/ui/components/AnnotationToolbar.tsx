@@ -114,7 +114,8 @@ interface AnnotationToolbarProps {
    * The whole selection's rect, in viewport coordinates, when `element` is
    * only its start (the first of several marks; a 1px anchor over an HTML
    * frame). Read only by the touch placement (`touchSelectionToolbar`), which
-   * puts the toolbar below the selection's bottom; desktop placement uses
+   * docks the toolbar to the top edge when the selection reaches the bottom
+   * of the screen; desktop placement uses
    * `element` as before. Absent or null: `element`'s rect.
    */
   touchAnchorRect?: () => ToolbarRect | null;
@@ -239,8 +240,8 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       }
 
       if (touchToolbar) {
-        // Below the selection, where iOS's own edit menu does not go, and
-        // kept inside the visible screen.
+        // Docked to the visible screen's edge, never beside the selection,
+        // where iOS's own edit menu goes.
         const placed = placeTouchToolbar({
           anchor,
           toolbar: measuredSizeRef.current ?? TOUCH_TOOLBAR_SIZE_ESTIMATE,
