@@ -693,9 +693,13 @@ describe("the device door, on the binary", () => {
     const again = await door(route, { body: { idempotency_key: key, annotation: comment({ text: "changed" }) } });
     expect(again.headers.get("idempotent-replayed")).toBe("true");
     expect(((await again.json()) as Json).annotation.annotation.text).toBe("Say which retries.");
-    // The window's refusals, unchanged: a deletion is not a comment.
-    const deletion = await door(route, { body: { idempotency_key: keys(), annotation: comment({ id: "ann-message-x", type: "DELETION" }) } });
-    expect([deletion.status, ((await deletion.json()) as Json).field]).toEqual([422, "annotation.type"]);
+    // A Delete on the words goes through as in the window (approval "inbox-toolbar-delete"), no text of its own needed.
+    const deletion = await door(route, { body: { idempotency_key: keys(), annotation: comment({ id: "ann-message-x", type: "DELETION", text: undefined }) } });
+    expect(deletion.status).toBe(200);
+    expect(((await deletion.json()) as Json).annotation.annotation).toMatchObject({ type: "DELETION", originalText: "Retry" });
+    // The window's refusals, unchanged: a general comment is not on words.
+    const general = await door(route, { body: { idempotency_key: keys(), annotation: comment({ id: "ann-message-y", type: "GLOBAL_COMMENT" }) } });
+    expect([general.status, ((await general.json()) as Json).field]).toEqual([422, "annotation.type"]);
     // Removed through the attachments' remove route (7.18); then closed to edits.
     expect((await door("annotations/ann-message-phone/remove", { body: { idempotency_key: keys() } })).status).toBe(200);
     const closed = await door(route, { body: { idempotency_key: keys(), annotation: comment() } });

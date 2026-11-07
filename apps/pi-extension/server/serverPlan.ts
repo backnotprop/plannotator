@@ -35,6 +35,7 @@ import {
 	handleDraftRequest,
 	handleFavicon,
 	handleImageRequest,
+	handleStarAskRequest,
 	handleReferenceSkillsRequest,
 	handleReferenceSkillContentRequest,
 	readDraftGenerationFromBody,
@@ -505,6 +506,9 @@ export async function startPlanReviewServer(options: {
 			} catch {
 				json(res, { error: "Invalid request" }, 400);
 			}
+		} else if (url.pathname.startsWith("/api/star-ask/")) {
+			// The "Star the repo" ask on the done screen (generated/star-ask.ts).
+			if (!(await handleStarAskRequest(req, res, url, "plan", isRemoteSession()))) handleApiNotFound(res, url.pathname);
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);
 		} else if (url.pathname === "/api/upload" && req.method === "POST") {

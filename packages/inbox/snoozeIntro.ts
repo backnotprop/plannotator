@@ -26,14 +26,9 @@ import { REVEAL_TIMES, useRevealMoment, type RevealStage, type RevealVisit } fro
 /** The page's thresholds, ms: the reveals' (reveal.ts), one object. A test shrinks them (and puts them back). */
 export const SNOOZE_INTRO_TIMES = REVEAL_TIMES;
 
-/** Another one-time dialog showed on this load somewhere App does not see (the Board's first visit). */
-let otherOneTimeDialog = false;
-export function noteOneTimeDialogShown(): void {
-  otherOneTimeDialog = true;
-}
-export function oneTimeDialogShownThisLoad(): boolean {
-  return otherOneTimeDialog;
-}
+// Another one-time dialog showed on this load (the Board's first visit, the star ask's card): kept in reveal.ts, which
+// the reveals' hooks share, and re-exported here for the callers that always read it from here.
+export { noteOneTimeDialogShown, oneTimeDialogShownThisLoad } from './reveal';
 
 /**
  * What else this load showed or has due (App's state; a stage holds it back unless it is 'none'). Every field is

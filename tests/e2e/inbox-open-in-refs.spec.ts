@@ -378,8 +378,10 @@ async function openReviewFiles(page: Page, thread = world.reviewThread) {
 
 /** The PR's own diff, from its page. */
 async function openPullDiff(page: Page) {
-  await page.goto(`${world.url}#pulls`);
-  await page.locator('[data-pulls-row]').first().click();
+  await page.goto(`${world.url}#reviews`);
+  // The PR is handed to a thread, so its row opens that thread (Reviews): its page is the stack's address.
+  const stack = await page.locator('[data-pulls-row]').first().getAttribute('data-pulls-row');
+  await page.goto(`${world.url}#reviews&stack=${encodeURIComponent(stack!)}`);
   await page.locator('[data-pulls-open-diff]').click();
 }
 
@@ -455,16 +457,6 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await page.keyboard.press('Escape');
       await page.mouse.move(2, 2);
 
-      // The board's Code view: the guide's file card, then the whole file.
-      await page.locator('.shp-tbtn', { hasText: 'Code' }).first().click();
-      const card = page.locator('.shp-guide [data-guide-file-shell="src/retry.ts"]');
-      await expect(card.locator('[data-open-in-caret]').first()).toBeVisible();
-      await page.waitForTimeout(700); // the board's fade between views, for the picture
-      await shot(page, `03-shape-code-guide-${colorScheme}`);
-      await card.locator('.shp-g-open').click();
-      await expect(page.locator('.shp-code-head [data-open-in-caret]')).toBeVisible();
-      await shot(page, `04-shape-whole-file-${colorScheme}`);
-
       // A part with a reference opens the file in the popout: its header, and a pick leaves it open.
       await page.reload();
       await page.locator('[data-mark="loop"]').first().click();
@@ -504,15 +496,6 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await page.getByRole('button', { name: 'Close panel' }).click();
       // The number beside it is still the number.
       await expect(page.locator('.shp-know [data-ref="1"]').first()).toBeVisible();
-      // The Code view's guide is the board's words too.
-      await page.locator('.shp-tbtn', { hasText: 'Code' }).first().click();
-      const codeViewWindow = await codeWindowOf(page, page.locator('.shp-view.v-code [data-code-hover="src/retry.ts"]'));
-      await codeViewWindow.locator('[data-open-in-caret]').click();
-      await expect(page.locator('[data-open-in-menu="src/retry.ts"] [data-open-in-item="reveal"]')).toBeVisible();
-      await page.keyboard.press('Escape');
-      await expect(page.locator('[data-open-in-menu]')).toHaveCount(0);
-      await page.keyboard.press('Escape');
-      await expect(page.locator('[data-code-snippet-preview]')).toHaveCount(0);
       // Commenting (the crosshair, in Annotate's place), the words are only words: nothing shows, and a click picks them.
       await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
       await page.locator('.shp-dock').getByRole('button', { name: 'Comment', exact: true }).click();

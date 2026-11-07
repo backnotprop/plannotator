@@ -8,6 +8,7 @@
 import type { ComposeAction } from '../compose/model';
 import {
   INBOX_SEARCH_GROUPS,
+  inboxSearchRanges,
   type InboxSearchFrom,
   type InboxSearchGroupId,
   type InboxSearchRow,
@@ -139,9 +140,9 @@ export const FROM_OPTIONS: readonly { value: InboxSearchFrom | null; label: stri
   { value: 'me', label: 'Me' },
 ];
 
-/** What a set chip reads: "in plannotator", "Archived", "From me". */
+/** What a set chip reads: "Only in plannotator" (a picked project says so), "Archived", "From me". */
 export function chipText(kind: keyof SearchFilters, filters: SearchFilters, projectName: (id: string) => string): string {
-  if (kind === 'project') return filters.project ? `in ${projectName(filters.project)}` : 'All projects';
+  if (kind === 'project') return filters.project ? `Only in ${projectName(filters.project)}` : 'All projects';
   if (kind === 'status') return STATUS_OPTIONS.find((o) => o.value === filters.status)?.label ?? 'Any status';
   return filters.from === 'me' ? 'From me' : filters.from === 'agent' ? 'From agents' : 'From anyone';
 }
@@ -229,6 +230,33 @@ export function markedRuns(text: string, marks: readonly [number, number][]): { 
   }
   if (at < text.length) out.push({ text: text.slice(at), mark: false });
   return out;
+}
+
+/**
+ * The query's words in a field the answer carries no marks for, as
+ * [start, length]: the server's own rule for `title_marks`
+ * (@plannotator/core/inbox-search, the last term as a prefix), over the
+ * answer's `terms`. The window calls it only for a field the row's own
+ * document indexes (a thread row's name and project, a message row's agent, a
+ * file row's folder, a project row's folder), so it marks what the index
+ * matched, never a word the row was not found by.
+ */
+export function termMarks(text: string, terms: readonly string[]): [number, number][] {
+  return inboxSearchRanges(text, terms).map(([start, end]) => [start, end - start]);
+}
+
+/**
+ * A thread row's project marks: the words of the name the index holds
+ * (`indexed`, the row's `project.name`), placed on the name this window shows
+ * (`shown`: a renamed project's own name, or "api · work") only where the shown
+ * name holds the indexed one. A project shown as "Cloud app" but found as
+ * "plannotator" gets no mark; "api · work" marks "api", never "work".
+ */
+export function projectMarks(shown: string, indexed: string, terms: readonly string[]): [number, number][] {
+  if (terms.length === 0 || !indexed) return [];
+  const at = shown.indexOf(indexed);
+  if (at < 0) return [];
+  return termMarks(indexed, terms).map(([start, length]) => [at + start, length]);
 }
 
 /** Text as compared for "the row already shows it": a cut's "…" dropped, whitespace as one space, case folded. */
