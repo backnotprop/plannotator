@@ -1,8 +1,6 @@
 /**
- * Plannotator Inbox: Ask AI's routes. Off unless PLANNOTATOR_INBOX_ASK_AI is
- * set when the Inbox starts, or Code review is on (Settings → Capabilities;
- * it brings Ask, and Show me with it): off, every path here falls through to
- * the unknown-route 404, as if it did not exist.
+ * Plannotator Inbox: Ask AI's routes, on in every Inbox (approval
+ * "inbox-ask-ai-flow", addendum 2026-11-07: no switch).
  *
  * Show me (code review in the Inbox, approval "shape-in-code-review"): a POST
  * with `kind: "show_me"` and `show_me: { review, file, lines, round, words? }`
@@ -81,11 +79,6 @@ export interface InboxAskReview {
 }
 
 export function createInboxAsk(options: {
-  /**
-   * Whether Ask is on now: PLANNOTATOR_INBOX_ASK_AI (read once at start), or
-   * Code review on (it brings Ask, and so Show me). Read on every request.
-   */
-  on: () => boolean;
   /** Code review (Settings → Capabilities): Show me exists only while it is on. Absent: off. */
   codeReviewOn?: () => boolean;
   /** A review message (`guide.review`) by id, or null when the message is not one. Absent: none. */
@@ -105,7 +98,7 @@ export function createInboxAsk(options: {
   hostOf: (session: string) => string | null;
   times?: InboxAskTimes;
 }) {
-  const { on, store, serverSession, json } = options;
+  const { store, serverSession, json } = options;
   const live = createInboxAskLive({ token: options.token, dir: store.dir, hostOf: options.hostOf, onChange: options.onChange, times: options.times });
   const stopDeletions = store.onDeletion(() => live.sweep((threadId) => store.thread(threadId) !== null));
 
@@ -118,8 +111,8 @@ export function createInboxAsk(options: {
 
   const fromWindow = (req: Request): boolean => req.headers.get("sec-fetch-site")?.trim().toLowerCase() === "same-origin";
 
-  /** Whether this request may ask or read: the setting is on, and it is the owner's own window. */
-  const allowed = (req: Request, via: "local" | "tailnet"): boolean => on() && fromWindow(req) && !options.isGuest(req, via);
+  /** Whether this request may ask or read: the owner's own window. */
+  const allowed = (req: Request, via: "local" | "tailnet"): boolean => fromWindow(req) && !options.isGuest(req, via);
 
   const refuse = (req: Request, via: "local" | "tailnet"): void => {
     if (options.isGuest(req, via)) throw new InboxError("owner_only", "Only this computer's owner can use Ask AI from this Inbox.");
@@ -158,7 +151,6 @@ export function createInboxAsk(options: {
   };
 
   const route = async (req: Request, url: URL, via: "local" | "tailnet"): Promise<Response | null> => {
-    if (!on()) return null;
     if (url.pathname === INBOX_ASK_LIST_PATH) {
       refuse(req, via);
       return req.method === "GET" ? json({ chats: chats() }) : json({ error: "Use GET." }, 405);
@@ -306,7 +298,7 @@ export function createInboxAsk(options: {
 
   /** Everything `/api/ai` does for Ask AI, behind the same gate: only the owner's own window. */
   const aiRoute = async (req: Request, path: string, via: "local" | "tailnet"): Promise<Response | null> => {
-    if (!on() || !isAIEndpointPath(path) || path.startsWith("/api/ai/bridge/")) return null;
+    if (!isAIEndpointPath(path) || path.startsWith("/api/ai/bridge/")) return null;
     refuse(req, via);
     const endpoint = live.endpoints[path] as (request: Request) => Promise<Response> | Response;
     if (req.method !== "POST") return endpoint(req);

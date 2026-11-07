@@ -39,6 +39,7 @@ import {
   setPageSession,
   subscribeInboxEvents,
   tailnetGuest,
+  inboxAskOn,
   type AgentToolHost,
   type InboxEvent,
   type ListModel,
@@ -4796,8 +4797,8 @@ function Inbox() {
   // first-run screen. The person's Inbox stays loaded underneath
   // and comes back as it was.
   const tourOn = route.page === 'tour';
-  // Ask AI (PLANNOTATOR_INBOX_ASK_AI, and always while Code review is on: approval "shape-in-code-review"): off, this
-  // reads nothing and draws nothing. A linked machine's thread has no chat here.
+  // Ask AI, on in every Inbox but the tour's and a tailnet guest's (off, this reads nothing and draws nothing), and
+  // only once the settings say which this page is. A linked machine's thread has no chat here.
   const [askReply, setAskReply] = useState<{ threadId: string; words: string } | null>(null);
   // A board's Add to reply: its words and picture, on their way to the reply of the thread the board hangs off.
   const [shapeReply, setShapeReply] = useState<(ShapeReplyPart & { threadId: string }) | null>(null);
@@ -4809,7 +4810,7 @@ function Inbox() {
     if (threadId) void shapeReplyPart(selection, text).then((part) => setShapeReply({ ...part, threadId }));
   }, []);
   const ask = useInboxAsk({
-    on: (settings?.ask_ai === true || settings?.code_review?.on === true) && !tourOn,
+    on: inboxAskOn(settings, tourOn),
     codeReview: settings?.code_review?.on === true,
     threadId: route.thread && !machineOf(route.thread) ? route.thread : null,
     phone,

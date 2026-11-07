@@ -1,6 +1,6 @@
 /**
  * Ask AI's window (approval "inbox-ask-ai-flow", Header 2026-11-02), proved in a
- * real browser against the compiled binary with the setting on. The agents are
+ * real browser against the compiled binary (Ask has no switch). The agents are
  * scripted (tests/helpers/inbox-ask-agent.ts: a real connection and the real
  * pull client, never a real agent CLI). Chats from other agents and days are
  * saved conversations, in the format the Inbox writes.
@@ -130,7 +130,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     PLANNOTATOR_INBOX_PHONES: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
     PLANNOTATOR_INBOX_NOTES: '0',
-    PLANNOTATOR_INBOX_ASK_AI: '1',
   };
   const started = spawnSync(builtBinary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
