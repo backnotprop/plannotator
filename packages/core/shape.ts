@@ -318,6 +318,44 @@ export interface ShapeBoard {
     code?: ShapeCodeView;
   };
   refs?: ShapeRef[];
+  /**
+   * A stack review's pull requests (approval "stack-show-me", addendum 2026-11-06): which PR changed each drawn part,
+   * and in the agent's words what it did there. Only a board with two or more `pulls` shows them (`shapeStackBadges`).
+   */
+  stack?: ShapeStack;
+}
+
+/** One pull request of a stack, in landing order. */
+export interface ShapeStackPull {
+  n: number;
+  title: string;
+  /** Its page on the forge (http or https). */
+  url?: string;
+  /** The review's chapter (a guide step, from 1) that walks this PR: "Read it in the review" lands there. */
+  step?: number;
+}
+
+/** A file a PR changed in a part, with its own counts. */
+export interface ShapeStackFile {
+  path: string;
+  additions?: number;
+  deletions?: number;
+  /** New-side line ranges this PR changed (`[from, to]`, inclusive): the code popup shows only the hunks they touch. */
+  lines?: [number, number][];
+}
+
+/** What one PR did to one drawn part (a `data-mark` on Picture or How it works). */
+export interface ShapeStackChange {
+  part: string;
+  pr: number;
+  /** One or two plain sentences: what this PR did there. */
+  said: string;
+  files: ShapeStackFile[];
+}
+
+export interface ShapeStack {
+  pulls: ShapeStackPull[];
+  changes: ShapeStackChange[];
 }
 
 // ───────────────────────────── what the store keeps ─────────────────────────────
@@ -478,6 +516,10 @@ export const SHAPE_LIMITS = {
   exampleCode: 600,
   /** A box's picture, as a data: URL. */
   notePicture: 6_000_000,
+  /** A stack's pull requests, its part changes, and the files of one change. */
+  stackPulls: 20,
+  stackChanges: 200,
+  stackFiles: 30,
 } as const;
 
 const PART_ID_RE = /^[A-Za-z][\w.-]{0,63}$/;
@@ -1602,6 +1644,110 @@ function checkRefs(c: Checker, value: unknown): ShapeRef[] | undefined {
   return out.sort((a, b) => a.n - b.n);
 }
 
+/** Every `data-mark` the Picture (and its Show more and tall drawings) and How it works draw: where a stack badge may sit. */
+function drawnMarks(views: ShapeBoard['views']): Set<string> {
+  const marks = new Set<string>();
+  for (const v of [views.picture, views.how]) {
+    if (!v) continue;
+    for (const html of [v.html, v.tall?.html, v.more?.html]) if (html) for (const m of shapeHtmlMarks(html)) marks.add(m.id);
+  }
+  return marks;
+}
+
+function checkStack(c: Checker, value: unknown, views: ShapeBoard['views']): ShapeStack | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isRecord(value)) {
+    c.fail('stack', 'must be { pulls, changes }');
+    return undefined;
+  }
+  const pullList = c.list(value.pulls, 'stack.pulls', SHAPE_LIMITS.stackPulls);
+  if (!pullList) {
+    if (value.pulls === undefined || value.pulls === null) c.fail('stack.pulls', 'is required: the stack\'s pull requests, in landing order');
+    return undefined;
+  }
+  const pulls: ShapeStackPull[] = [];
+  const numbers = new Set<number>();
+  pullList.forEach((p, i) => {
+    const f = `stack.pulls[${i}]`;
+    if (!isRecord(p)) return c.fail(f, 'must be { n, title, url?, step? }');
+    const n = c.int(p.n, `${f}.n`, 1, Number.MAX_SAFE_INTEGER);
+    if (n !== undefined && numbers.has(n)) c.fail(`${f}.n`, `#${n} is listed twice`);
+    const title = c.text(p.title, `${f}.title`, SHAPE_LIMITS.title);
+    const url = c.text(p.url, `${f}.url`, SHAPE_LIMITS.target, false);
+    if (url && !shapeLinkUrl(url)) c.fail(`${f}.url`, 'must be an http(s) URL');
+    const step = c.int(p.step, `${f}.step`, 1, SHAPE_LIMITS.sections, false);
+    if (n === undefined || !title || numbers.has(n)) return;
+    numbers.add(n);
+    pulls.push({ n, title, ...(url && shapeLinkUrl(url) ? { url } : {}), ...(step ? { step } : {}) });
+  });
+  const marks = drawnMarks(views);
+  const changeList = c.list(value.changes, 'stack.changes', SHAPE_LIMITS.stackChanges) ?? [];
+  const changes: ShapeStackChange[] = [];
+  const pairs = new Set<string>();
+  changeList.forEach((ch, i) => {
+    const f = `stack.changes[${i}]`;
+    if (!isRecord(ch)) return c.fail(f, 'must be { part, pr, said, files }');
+    const part = c.id(ch.part, `${f}.part`);
+    if (part && !marks.has(part)) c.fail(`${f}.part`, `"${part}" is not a data-mark on the Picture or How it works`);
+    const pr = c.int(ch.pr, `${f}.pr`, 1, Number.MAX_SAFE_INTEGER);
+    if (pr !== undefined && !numbers.has(pr)) c.fail(`${f}.pr`, `#${pr} is not in stack.pulls`);
+    const pair = `${part}#${pr}`;
+    if (part && pr !== undefined && pairs.has(pair)) c.fail(f, `#${pr} on "${part}" is written twice; one entry per PR and part`);
+    const said = plainText(c, c.text(ch.said, `${f}.said`, SHAPE_LIMITS.line), `${f}.said`);
+    const fileList = c.list(ch.files, `${f}.files`, SHAPE_LIMITS.stackFiles);
+    if (!fileList) {
+      if (ch.files === undefined || ch.files === null) c.fail(`${f}.files`, 'is required: the files this PR changed in this part');
+      return;
+    }
+    if (!fileList.length) return c.fail(`${f}.files`, 'needs at least one file');
+    const files: ShapeStackFile[] = [];
+    fileList.forEach((file, j) => {
+      const ff = `${f}.files[${j}]`;
+      if (!isRecord(file)) return c.fail(ff, 'must be { path, additions?, deletions?, lines? }');
+      const path = c.path(file.path, `${ff}.path`);
+      const additions = c.int(file.additions, `${ff}.additions`, 0, 10_000_000, false);
+      const deletions = c.int(file.deletions, `${ff}.deletions`, 0, 10_000_000, false);
+      let lines: [number, number][] | undefined;
+      const ranges = c.list(file.lines, `${ff}.lines`, 50);
+      if (ranges) {
+        lines = [];
+        ranges.forEach((r, k) => {
+          const ok = Array.isArray(r) && r.length === 2 && r.every((v) => Number.isInteger(v) && v >= 1 && v <= 10_000_000) && r[0] <= r[1];
+          if (!ok) c.fail(`${ff}.lines[${k}]`, 'must be [from, to]: whole line numbers, from <= to');
+          else lines!.push([r[0], r[1]]);
+        });
+      }
+      if (path) files.push({ path, ...(additions !== undefined ? { additions } : {}), ...(deletions !== undefined ? { deletions } : {}), ...(lines?.length ? { lines } : {}) });
+    });
+    if (!part || pr === undefined || !said || !marks.has(part) || !numbers.has(pr) || pairs.has(pair) || files.length !== fileList.length) return;
+    pairs.add(pair);
+    changes.push({ part, pr, said, files });
+  });
+  if (!pulls.length) return undefined;
+  return { pulls, changes };
+}
+
+/** A stack's badges, part by part: the PRs that changed it, in landing order. None for a board of one PR or none. */
+export function shapeStackBadges(stack: ShapeStack | undefined): Map<string, number[]> {
+  const badges = new Map<string, number[]>();
+  if (!stack || stack.pulls.length < 2) return badges;
+  const order = new Map(stack.pulls.map((p, i) => [p.n, i]));
+  for (const ch of stack.changes) {
+    if (!order.has(ch.pr)) continue;
+    const list = badges.get(ch.part) ?? [];
+    if (!list.includes(ch.pr)) list.push(ch.pr);
+    badges.set(ch.part, list);
+  }
+  for (const list of badges.values()) list.sort((a, b) => order.get(a)! - order.get(b)!);
+  return badges;
+}
+
+/** A PR's colour on the board, 1 to 3 (teal, amber, rose) by its place in the stack; 0 when it is not in it. */
+export function shapeStackColour(stack: ShapeStack, n: number): 0 | 1 | 2 | 3 {
+  const i = stack.pulls.findIndex((p) => p.n === n);
+  return i < 0 ? 0 : (((i % 3) + 1) as 1 | 2 | 3);
+}
+
 /** Validate what an agent writes. Every problem is named by its field. */
 /**
  * One drawn view on its own, as another surface takes it (code review's
@@ -1647,8 +1793,9 @@ export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
     if (!input.views.picture && !input.views.how && !input.views.changed && !input.views.know && !input.views.reqs && !input.views.code) c.fail('views', 'needs at least one view');
   }
   const refs = checkRefs(c, input.refs);
+  const stack = checkStack(c, input.stack, views);
   if (c.errors.length || !title || !claim) return { ok: false, errors: c.errors.length ? c.errors : ['title and claim are required'] };
-  const board: ShapeBoard = { title, claim, ...(asOf ? { asOf } : {}), ...(note ? { note } : {}), views, ...(refs?.length ? { refs } : {}) };
+  const board: ShapeBoard = { title, claim, ...(asOf ? { asOf } : {}), ...(note ? { note } : {}), views, ...(refs?.length ? { refs } : {}), ...(stack ? { stack } : {}) };
   // Every cited reference must exist.
   const known = new Set((refs ?? []).map((r) => r.n));
   const cited = shapeCitedRefs(board);

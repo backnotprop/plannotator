@@ -8033,6 +8033,27 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rv-dir { color: var(--muted-foreground); }
 .ib-rv-route { margin: 0 0 12px; }
 .ib-rv-route .ib-sessnote { margin: 0; }
+/* A stack badge's "Read it in the review" (ReviewPane `narrow`): the bar over the narrowed chapter, kept in view. */
+.ib-rv-narrow { position: sticky; top: 0; z-index: 6; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 12px; padding: 8px 12px 8px 8px; border-radius: 12px;
+  background: color-mix(in oklab, var(--foreground) 6%, var(--background)); font-size: var(--ib-fs-14, 14px);
+  --ib-pr1: color-mix(in oklab, #0f8a80 78%, var(--foreground)); --ib-pr1-soft: color-mix(in oklab, #0f8a80 15%, var(--background));
+  --ib-pr2: color-mix(in oklab, #b87a12 78%, var(--foreground)); --ib-pr2-soft: color-mix(in oklab, #d9971f 18%, var(--background));
+  --ib-pr3: color-mix(in oklab, #b23a6e 76%, var(--foreground)); --ib-pr3-soft: color-mix(in oklab, #b23a6e 13%, var(--background)); }
+.ib-rv-narrow-back { appearance: none; border: 0; margin: 0; display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 10px 0 6px; border-radius: 8px;
+  background: var(--background); color: var(--foreground); font: inherit; font-weight: 600; cursor: pointer; transition: background-color .15s ease; }
+@media (hover: hover) { .ib-rv-narrow-back:hover { background: color-mix(in oklab, var(--foreground) 8%, var(--background)); } }
+.ib-rv-narrow-back:active { transform: scale(.97); }
+.ib-rv-narrow-what { flex: 1; min-width: 0; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ib-rv-narrow-pr { display: inline-flex; align-items: center; gap: 6px; color: var(--foreground); text-decoration: none; }
+a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-offset: 3px; }
+.ib-rv-narrow-n { display: inline-flex; align-items: center; height: 22px; padding: 0 6px; border-radius: 6px; font: 600 var(--ib-fs-13, 13px)/1 var(--font-mono, ui-monospace, monospace);
+  background: color-mix(in oklab, var(--foreground) 8%, transparent); color: var(--foreground); }
+.ib-rv-narrow-pr[data-c="1"] .ib-rv-narrow-n { background: var(--ib-pr1-soft); color: var(--ib-pr1); }
+.ib-rv-narrow-pr[data-c="2"] .ib-rv-narrow-n { background: var(--ib-pr2-soft); color: var(--ib-pr2); }
+.ib-rv-narrow-pr[data-c="3"] .ib-rv-narrow-n { background: var(--ib-pr3-soft); color: var(--ib-pr3); }
+.ib-rv-narrow-all { appearance: none; border: 0; margin: 0; padding: 4px 4px; background: none; color: var(--primary); font: inherit; font-weight: 500; cursor: pointer; }
+@media (hover: hover) { .ib-rv-narrow-all:hover { text-decoration: underline; text-underline-offset: 3px; } }
+@media (prefers-reduced-motion: reduce) { .ib-rv-narrow-back:active { transform: none; } }
 .ib-rv-n { flex: none; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ib-rv-progress { margin-top: auto; padding: 8px 8px 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-rv-phonebar { display: none; }

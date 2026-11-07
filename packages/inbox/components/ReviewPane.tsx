@@ -49,7 +49,7 @@ import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 import { parseGuideSnapshot } from '@plannotator/core/guide-format';
 import { inboxDrawnViewOf, inboxReviewLines, inboxReviewRound } from '@plannotator/core/inbox-review';
 import type { ShapeCodeTarget, ShapeVersion } from '@plannotator/core/shape';
-import type { ShapeHost, ShapeReviewAt } from '@plannotator/ui/components/shape';
+import type { ShapeHost, ShapeReviewAt, ShapeReviewNarrow } from '@plannotator/ui/components/shape';
 import { OverviewFigure, ShowMeButton } from '../review-drawing/OverviewFigure';
 import { ShowMeBox, ShowMeCorner } from '../review-drawing/ShowMeLayer';
 import { partLanding, reviewDrawnOn, overviewPicture, baseName, changedMarks, chapterOf, markOf, partName, targetLines } from '../review-drawing/showMeModel';
@@ -385,8 +385,22 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     setLanded({ part: { name: partName(el), mark: markOf(el), file: target.path, lines: landing === 'changed' ? null : landing } });
     return true;
   };
+  /**
+   * A stack badge's "Read it in the review" (`narrow`): that PR's chapter shows only the part's files, under a bar with
+   * the way back to the board ("Back to the board") and "Show the whole stack". The chapter is the PR's step, else the
+   * one that holds the part's first file. Null: the review as it is.
+   */
+  const [narrow, setNarrow] = useState<(ShapeReviewNarrow & { chapter: number }) | null>(null);
   /** A place in the review (a Shape board's link): a file at a line, a file, a chapter, or All files. */
   const goTo = (to: ShapeReviewAt) => {
+    if (to.narrow) {
+      const chapter = to.step && to.step <= chapters.length ? to.step - 1 : chapterOf(chapters, to.narrow.files[0]!);
+      setNarrow(chapter === null ? null : { ...to.narrow, chapter });
+      if (!to.step && chapter !== null) {
+        showFile(to.narrow.files.find((f) => files.some((file) => file.path === f)) ?? to.narrow.files[0]!);
+        return;
+      }
+    } else setNarrow(null);
     if (to.path && to.line) openCode({ path: to.path, line: to.line });
     else if (to.path && files.some((file) => file.path === to.path)) toFile(to.path);
     else if (to.step && to.step <= chapters.length) {
@@ -462,6 +476,23 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   // The Overview's picture, drawn as a Shape picture (overviewPicture: version 3 only); any other diagram keeps the
   // guide viewer's own. In a later round, which of its parts the agent redrew.
   const overviewHtml = useMemo(() => overviewPicture(snapshot?.guide.overview?.diagram), [snapshot]);
+  // Narrowed (a stack badge): the PR's chapter with only the part's files, when it has any of them.
+  const narrowed = useMemo(() => {
+    if (!snapshot || !narrow) return null;
+    const section = snapshot.guide.sections[narrow.chapter];
+    if (!section) return null;
+    const total = new Set(section.diffs.map((d) => d.file)).size;
+    const kept = section.diffs.filter((d) => narrow.files.includes(d.file));
+    if (!kept.length) return null;
+    const sections = snapshot.guide.sections.map((s, i) => (i === narrow.chapter ? { ...s, diffs: kept } : s));
+    return { snapshot: { ...snapshot, guide: { ...snapshot.guide, sections } }, shown: new Set(kept.map((d) => d.file)).size, total };
+  }, [snapshot, narrow]);
+  const readerSnapshot = narrowed?.snapshot ?? snapshot;
+  const backToBoard = () => {
+    setNarrow(null);
+    if (board) setLanded(null);
+    else if (threadBoard) onBoard(threadBoard.id);
+  };
   const earlierReview = earlierReviews.at(-1) ?? null;
   const [earlierOverview, setEarlierOverview] = useState<GuideOverviewDiagram | null>(null);
   useEffect(() => {
@@ -852,10 +883,32 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
           ) : snapshot ? (
             // The reader is a chunk loaded on first use: one that cannot arrive says so here (GuidePane).
             <div ref={contentRef}>
+            {narrow && narrowed && (
+              <div className="ib-rv-narrow" role="region" aria-label="Opened from the board" data-review-narrow={narrow.pr}>
+                <button type="button" className="ib-rv-narrow-back" onClick={backToBoard} data-review-narrow-back="">
+                  <Icon name="chevL" size={15} />
+                  Back to the board
+                </button>
+                <span className="ib-rv-narrow-what">
+                  <b>{narrow.part}</b>
+                  <span className="ib-mut">in</span>
+                  <a className="ib-rv-narrow-pr" data-c={narrow.colour ?? 0} {...(narrow.url ? { href: narrow.url, target: '_blank', rel: 'noreferrer noopener' } : {})}>
+                    <span className="ib-rv-narrow-n">#{narrow.pr}</span>
+                    {narrow.title && <b>{narrow.title}</b>}
+                  </a>
+                  <span className="ib-mut">
+                    · {narrowed.shown} of the {narrowed.total} files in this chapter
+                  </span>
+                </span>
+                <button type="button" className="ib-rv-narrow-all" onClick={() => setNarrow(null)} data-review-narrow-all="">
+                  Show the whole stack
+                </button>
+              </div>
+            )}
             <ReaderPart diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on>
               <GuideReader
-                snapshot={snapshot}
+                snapshot={readerSnapshot!}
                 reviewed={reviewed}
                 onReviewedChange={changeReviewed}
                 comments={readerComments}
