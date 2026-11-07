@@ -8,7 +8,7 @@
  * them, and the box's behavior stays the same.
  */
 import type { DraftFileUploader, ReplyDraftSaveInput, ReplyDraftStore } from '@plannotator/core/inbox-reply-draft';
-import { inboxApi, pageServerSession, replyDraftSaveBody, uploadFile } from './api';
+import { inboxApi, pageServerSession, replyDraftSaveBody, reuseAttachment, uploadFile } from './api';
 import { inboxUrl } from './inboxUrl';
 
 /**
@@ -58,5 +58,6 @@ export function httpDraftFileUploader(machine: () => string | null): DraftFileUp
   return {
     upload: (file, options) => uploadFile(file, { machine: machine(), signal: options.signal, onProgress: options.onProgress }),
     readText: async (uploadId) => (await inboxApi.uploadText(uploadId, machine())).text,
+    reuse: (attachmentId, version, options) => reuseAttachment(attachmentId, version, options),
   };
 }

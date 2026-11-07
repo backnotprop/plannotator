@@ -14,8 +14,12 @@ import type { TailscaleRunResult } from "@plannotator/shared/tailscale";
 import {
   announceTailscaleSession,
   disableTailscaleServe,
+  enableServeSteps,
   enableTailscaleServe,
   resetTailscaleServeForTests,
+  runTailscaleSteps,
+  runTailscaleStepsAsync,
+  takeDownOwnServeSteps,
 } from "./tailscale-serve";
 import { createRequestHostGuard } from "./request-host-guard";
 
@@ -285,5 +289,78 @@ describe("announceTailscaleSession", () => {
     expect(output).toContain(`\n  Plannotator session ready: ${url}\n`);
     expect(output.indexOf("Plannotator session ready: ")).toBeLessThan(output.indexOf("Served over your tailnet"));
     expect(output).not.toContain("Could not open a browser");
+  });
+});
+
+describe("the same calls, at once or without blocking", () => {
+  const outcome = async <T>(run: () => T | Promise<T>) => {
+    try {
+      return { ok: true, value: await run() };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) };
+    }
+  };
+
+  test("every sequence makes the same calls and answers the same, a runner that throws included", async () => {
+    const mapped = JSON.stringify({ TCP: { "8443": { HTTPS: true } }, Web: { "vps-1.tail1234.ts.net:8443": { Handlers: { "/": { Proxy: "http://127.0.0.1:4321" } } } } });
+    const worlds: { name: string; responses: Parameters<typeof makeRunner>[0]; throwOnOff?: number }[] = [
+      { name: "free port", responses: {} },
+      { name: "status fails", responses: { status: { status: 1, stdout: "", stderr: "Tailscale is stopped." } } },
+      { name: "someone else's mapping", responses: { status: { status: 0, stdout: mapped, stderr: "" } } },
+      { name: "serve answers no url, off fails once", responses: { serve: { status: 0, stdout: "ok", stderr: "" }, off: (i) => ({ status: i === 0 ? 1 : 0, stdout: "", stderr: "" }) } },
+      { name: "own mapping taken down, the off throwing once", responses: { status: { status: 0, stdout: mapped, stderr: "" } }, throwOnOff: 0 },
+    ];
+    const sequences = [
+      { name: "enable", steps: () => enableServeSteps(4321, { httpsPort: 8443, ownTargets: [], persist: true }) },
+      { name: "take down own", steps: () => takeDownOwnServeSteps(8443, ["http://127.0.0.1:4321"]) },
+    ];
+    const stderr = captureStderr();
+    try {
+      for (const world of worlds) {
+        for (const sequence of sequences) {
+          const runner = () => {
+            const made = makeRunner(world.responses);
+            let offs = 0;
+            const run = (args: string[]) => {
+              if (args.includes("off") && world.throwOnOff === offs++) {
+                made.calls.push(args);
+                throw new Error("spawn failed");
+              }
+              return made.runner(args);
+            };
+            return { run, calls: made.calls };
+          };
+          const atOnce = runner();
+          const later = runner();
+          const syncAnswer = await outcome(() => runTailscaleSteps(sequence.steps(), atOnce.run));
+          const asyncAnswer = await outcome(() =>
+            runTailscaleStepsAsync(sequence.steps(), (args) => new Promise((resolve, reject) => setTimeout(() => {
+              try {
+                resolve(later.run(args));
+              } catch (error) {
+                reject(error);
+              }
+            }, 1))),
+          );
+          const label = `${world.name} / ${sequence.name}`;
+          expect({ label, answer: asyncAnswer, calls: later.calls }).toEqual({ label, answer: syncAnswer, calls: atOnce.calls });
+        }
+      }
+    } finally {
+      stderr.restore();
+    }
+  });
+
+  test("while a call waits, the event loop keeps turning", async () => {
+    let ticks = 0;
+    const timer = setInterval(() => (ticks += 1), 5);
+    try {
+      const { runner } = makeRunner({});
+      const answer = await runTailscaleStepsAsync(enableServeSteps(4321, { persist: true }), (args) => new Promise((resolve) => setTimeout(() => resolve(runner(args)), 60)));
+      expect(answer.url).toBe("https://vps-1.tail1234.ts.net:4321");
+      expect(ticks).toBeGreaterThan(5);
+    } finally {
+      clearInterval(timer);
+    }
   });
 });

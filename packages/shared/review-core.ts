@@ -2520,6 +2520,37 @@ function isPathInside(root: string, child: string): boolean {
 }
 
 /**
+ * One blob's bytes by any spec git takes (`<rev>:<path>`, or a blob id, whole
+ * or abbreviated), capped at `maxBytes`: the size is read first, and the blob
+ * stream stops at the cap. The spec goes on stdin, never argv.
+ */
+export async function readGitObjectBytes(
+  runtime: ReviewGitRuntime,
+  spec: string,
+  maxBytes: number,
+  cwd?: string,
+): Promise<FileBytesRead> {
+  if (!runtime.runGitBytes) return { kind: "unavailable" };
+  if (/[\r\n]/.test(spec)) return { kind: "missing" };
+  const check = await runtime.runGit(
+    ["cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)"],
+    { cwd, stdin: `${spec}\n` },
+  );
+  if (check.exitCode !== 0) return { kind: "missing" };
+  const match = check.stdout.trim().match(/^([0-9a-f]{40,64}) (\S+) (\d+)$/);
+  if (!match || match[2] !== "blob") return { kind: "missing" };
+  const size = Number(match[3]);
+  if (size > maxBytes) return { kind: "too-large", size };
+  const blob = await runtime.runGitBytes(["cat-file", "blob", match[1]], {
+    cwd,
+    maxOutputBytes: maxBytes,
+  });
+  if (blob.truncated) return { kind: "too-large", size };
+  if (blob.exitCode !== 0) return { kind: "missing" };
+  return { kind: "ok", bytes: blob.stdout, etag: `"${match[1]}"` };
+}
+
+/**
  * Read one side as raw bytes for the image preview, capped at `maxBytes`.
  *
  * Objects: `cat-file --batch-check` names the blob id, type and size in one
@@ -2539,25 +2570,7 @@ export async function readDiffSideBytes(
   cwd?: string,
 ): Promise<FileBytesRead> {
   if (source.kind === "object") {
-    if (!runtime.runGitBytes) return { kind: "unavailable" };
-    const spec = `${source.rev}:${source.path}`;
-    if (/[\r\n]/.test(spec)) return { kind: "missing" };
-    const check = await runtime.runGit(
-      ["cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)"],
-      { cwd, stdin: `${spec}\n` },
-    );
-    if (check.exitCode !== 0) return { kind: "missing" };
-    const match = check.stdout.trim().match(/^([0-9a-f]{40,64}) (\S+) (\d+)$/);
-    if (!match || match[2] !== "blob") return { kind: "missing" };
-    const size = Number(match[3]);
-    if (size > maxBytes) return { kind: "too-large", size };
-    const blob = await runtime.runGitBytes(["cat-file", "blob", match[1]], {
-      cwd,
-      maxOutputBytes: maxBytes,
-    });
-    if (blob.truncated) return { kind: "too-large", size };
-    if (blob.exitCode !== 0) return { kind: "missing" };
-    return { kind: "ok", bytes: blob.stdout, etag: `"${match[1]}"` };
+    return readGitObjectBytes(runtime, `${source.rev}:${source.path}`, maxBytes, cwd);
   }
 
   if (!runtime.readFileBytes || !runtime.realPath) return { kind: "unavailable" };

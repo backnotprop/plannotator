@@ -72,6 +72,10 @@ const IMAGE_TYPES: Record<string, string> = {
   ".jpeg": "image/jpeg",
   ".gif": "image/gif",
   ".webp": "image/webp",
+  // Served with `sandbox` and nosniff (both runtimes), so an SVG opened directly runs no script.
+  ".svg": "image/svg+xml",
+  ".avif": "image/avif",
+  ".ico": "image/x-icon",
 };
 
 const AGENT_NAMES: Record<string, string> = {

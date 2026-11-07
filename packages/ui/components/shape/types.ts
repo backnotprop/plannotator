@@ -6,8 +6,9 @@
  * standalone Shapes page each pass an adapter over the same routes
  * (SPEC.md §3, "Host seam"); the dev harness passes an in-memory one.
  */
+import type { ShapeBoxSelection, ShapeReadAsset } from './boxSelect';
 import type { ComponentType, ReactNode } from 'react';
-import type { ShapeNote, ShapeNoteInput, ShapeRecord, ShapeVersion, ShapeViewId } from '@plannotator/core/shape';
+import type { ShapeCodeTarget, ShapeNote, ShapeNoteInput, ShapeRecord, ShapeVersion, ShapeViewId } from '@plannotator/core/shape';
 
 export type { ShapeBoard, ShapeNote, ShapeNoteInput, ShapeRecord, ShapeRef, ShapeVersion, ShapeViewId } from '@plannotator/core/shape';
 
@@ -55,6 +56,8 @@ export interface ShapeHost {
 
   /** "Bring it up to date": a quiet request to the agent. Absent: no button. */
   refresh?(id: string): Promise<void>;
+  /** The refresh button's words, when a host has its own. Absent: "Bring it up to date". */
+  refreshLabel?: string;
   /** The URL of a file the shape keeps (`files/…`). Absent: the src as written. */
   assetUrl?(id: string, src: string): string;
   /** A file's text, for a file reference and the Code view's whole-file viewer. */
@@ -78,6 +81,19 @@ export interface ShapeHost {
    * session ended. Absent: the line shows the session's state, as always.
    */
   sessionless?: boolean;
+}
+
+/** A board that takes a dragged box (`boxSelect` on ShapeSurface). */
+export interface ShapeBoxOptions {
+  /** A same-site image or font as a data: URL, for the box's picture. Absent: the picture has no images and the system's font. */
+  readAsset?: ShapeReadAsset;
+  /** The box's Show me: the same object a comment is made from, and whatever was typed. Absent: no Show me. */
+  onShowMe?: (selection: ShapeBoxSelection, text: string) => void;
+  /**
+   * The box's Add to reply: the same object and whatever was typed, for the host's reply to the board's thread (the
+   * Inbox: the picture as a file, the label and words as text). Absent: no Add to reply.
+   */
+  onAddToReply?: (selection: ShapeBoxSelection, text: string) => void;
 }
 
 export interface ShapeCodeHoverRequest {
@@ -109,6 +125,36 @@ export interface ShapeCodeHoverCardProps {
 
 export type ShapePanelTab = 'ask' | 'thread' | 'refs';
 
+/** A place in a review's guided review: a file and line, a guide step (from 1), every file, or (empty) its start. */
+export interface ShapeReviewAt {
+  path?: string;
+  line?: number;
+  step?: number;
+  files?: boolean;
+}
+
+/**
+ * The review a board is part of (the host found it: the Inbox, a review's thread). What's changed shows its facts,
+ * Guided review, Full review and its guide-step links, and with no Code view the board's `file:line` links open it.
+ */
+export interface ShapeSurfaceReview {
+  /** What names it on the facts line (a pull request's "#2661"). */
+  label?: string;
+  files?: number;
+  additions?: number;
+  deletions?: number;
+  /**
+   * How many guide steps the review has. A change's "Guide step N" past it is not drawn. Absent: every step link
+   * shows, and one the review answers false to opens the review at its start.
+   */
+  steps?: number;
+  /**
+   * Open the review's guided review there. False (or a promise of false) when it cannot show that place, such as a
+   * file the review does not change: the board opens the file in its own viewer instead.
+   */
+  open(at: ShapeReviewAt): boolean | Promise<boolean>;
+}
+
 export interface ShapeSurfaceProps {
   host: ShapeHost;
   id: string;
@@ -118,6 +164,12 @@ export interface ShapeSurfaceProps {
   CodeGuide?: ComponentType<ShapeCodeGuideProps>;
   /** The hover card for code tokens in the whole-file viewer. Absent: no hover insights. */
   CodeHoverCard?: ComponentType<ShapeCodeHoverCardProps>;
+  /**
+   * A drawn part with `data-code` was clicked: a host that shows this code itself (code review's diff) takes it and
+   * returns true. False: the Code view, else the board's own viewer opens it (never `review`). Absent: as any code
+   * link (the Code view, `review`, the viewer).
+   */
+  onCode?: (target: ShapeCodeTarget, el: HTMLElement, version?: ShapeVersion | null) => boolean;
   /** The Thread tab's body (an Inbox shape). Absent: no Thread tab. Mark each message `data-shape-message="<id>"`. */
   renderThread?: (options: { flash: string | null }) => ReactNode;
   /**
@@ -134,4 +186,23 @@ export interface ShapeSurfaceProps {
   onNavigate?: (state: { view: ShapeViewId; panel: ShapePanelTab | null }) => void;
   /** Before the title, on its line (the Inbox: its sidebar toggle). Absent: the title comes first. */
   headStart?: ReactNode;
+  /**
+   * False: no Code view in the dock, even on a board that has one (Plannotator's board: a review's guided review is
+   * its own place). A part's `file:line` then opens the review there (`review`), else the file viewer. Absent: true.
+   */
+  codeView?: boolean;
+  /** The review this board is part of. Absent: What's changed shows no review facts, buttons or guide-step links. */
+  review?: ShapeSurfaceReview | null;
+  /**
+   * While annotating with the pointer, a mouse drag draws a box and comments on what is inside it (the Inbox, by
+   * ShapeBoard). Absent: pointing and clicking only, as always.
+   */
+  boxSelect?: ShapeBoxOptions;
+  /**
+   * On a dark board only (Plannotator, by ShapeBoard): box borders and zone edges at 3:1 against what they sit on, a
+   * box's fill distinct from its zone, words kept at least as readable as they were (up to 7:1), and each picture the
+   * board keeps (`files/…`) on a light tile so a dark logo holds. A light board is drawn exactly as without it. Absent:
+   * the board is drawn as written in both themes, as before. See `darkContrast.ts`.
+   */
+  darkContrast?: boolean;
 }

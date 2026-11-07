@@ -20,7 +20,7 @@ import {
   type InboxAttachmentState,
 } from '@plannotator/core/inbox-types';
 import { AnnotationType, type Annotation, type Block, type CodeAnnotation, type ImageAttachment } from '@plannotator/ui/types';
-import { diagramDocumentBlocks, exportLinkedDocAnnotations, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
+import { diagramDocumentBlocks, exportLinkedDocAnnotations, parseMarkdownToBlocks, quickLabelTipLine } from '@plannotator/ui/utils/parser';
 import { whenTime } from './format';
 
 /** Plannotator's blocks for a file: one diagram block for a diagram source, one code block for code, the markdown pipeline for text, none for HTML or a binary kind. */
@@ -380,7 +380,7 @@ export function recordTag(record: InboxAnnotationRecord): string | null {
 export function recordQuote(record: InboxAnnotationRecord): string {
   const comment = guideCommentOf(record);
   if (!comment) return annotationQuote(annotationOf(record));
-  const lines = (comment.selectedText ?? comment.originalCode ?? '').split('\n');
+  const lines = (comment.selectedText ?? comment.anchorText ?? comment.originalCode ?? '').split('\n');
   const first = lines.find((line) => line.trim() !== '')?.trim() ?? '';
   return `${cutText(first, 120)}${lines.length > 1 && first ? ' …' : ''}`;
 }
@@ -405,6 +405,15 @@ function conventionalPrefix(comment: CodeAnnotation): string {
   return `**${label}${decorations.length ? ` (${decorations.join(', ')})` : ''}:** `;
 }
 
+/** Heading suffix of a comment on lines outside the diff, as the review app's export writes it. */
+/** The lines an expand arrow opened, as a comment on them quotes: its own side's text, since the two sides number apart. */
+export function openedLinesQuote(contents: { oldContent: string | null; newContent: string | null }, side: 'old' | 'new', lineStart: number, lineEnd: number): string {
+  const text = side === 'new' ? contents.newContent : contents.oldContent;
+  return text ? text.split('\n').slice(lineStart - 1, lineEnd).join('\n') : '';
+}
+
+const OUTSIDE_DIFF_LABEL = '(not in the diff)';
+
 /**
  * One comment as the review app's export writes it (exportReviewFeedback in
  * packages/review-editor/utils/exportFeedback.ts, line scope): the line range
@@ -417,11 +426,15 @@ function guideCommentEntry(comment: CodeAnnotation, heading: string): string {
     ? ` — \`\`${comment.tokenText.replace(/`/g, '\\`')}\`\`${comment.charStart != null ? ` (chars ${comment.charStart}-${comment.charEnd})` : ''}`
     : '';
   const prefix = conventionalPrefix(comment);
-  let output = `${heading} ${range} (${comment.side})${token}\n`;
+  let output = `${heading} ${range} (${comment.side})${token}${comment.outsideDiff ? ` ${OUTSIDE_DIFF_LABEL}` : ''}\n`;
   if (comment.outdated) output += '[Outdated — the code changed after this comment]\n';
   if (comment.text) output += `${prefix}${comment.text}\n`;
   else if (prefix) output += `${prefix.trimEnd()}\n`;
   if (comment.selectedText) output += `\n**Highlighted text:**\n${fenced(comment.selectedText)}`;
+  const opened = comment.outsideDiff ? (comment.anchorText ?? comment.originalCode) : '';
+  if (opened) output += `\n**Code:**\n${fenced(opened)}`;
+  // The code block already quotes the lines; a suggestion still shows what it replaces.
+  if (comment.outsideDiff && !comment.suggestedCode) return `${output}\n`;
   if ((comment.suggestedCode || comment.text) && comment.originalCode) output += `\n**Replaces:**\n${fenced(comment.originalCode)}`;
   if (comment.suggestedCode) output += `\n**Suggested code:**\n${fenced(comment.suggestedCode)}`;
   return `${output}\n`;
@@ -554,6 +567,12 @@ export const MESSAGE_FEEDBACK_HEADING = {
   diagrams: 'A quote with a "Diagram" line under it is a part of a diagram in the message; its lines count from the top of the message.',
 };
 
+/** A Delete on a message's words, as plan review's export words one ("Remove this", "I don't want this in the plan."). */
+export const MESSAGE_DELETION = {
+  heading: 'Remove this',
+  line: "I don't want this in your message.",
+};
+
 /** The location a comment on a diagram part prints: core's line on one line, as ui's export writes it. A malformed anchor prints none. */
 function messageDiagramLocation(annotation: Annotation): string | null {
   const anchor = annotation.diagramAnchor === undefined ? null : parseDiagramAnchor(annotation.diagramAnchor);
@@ -579,16 +598,21 @@ export function messageFeedbackLabel(record: Pick<InboxAnnotationRecord, 'messag
  */
 function messageCommentEntry(annotation: Annotation, number: number): string {
   const words = annotation.originalText ?? '';
+  // A Delete on the words (approval "inbox-toolbar-delete"): plan review's "Remove this", and its "I don't want this" line.
+  const deletion = annotation.type === AnnotationType.DELETION;
   const label = annotation.isQuickLabel && annotation.text ? `[${annotation.text}] ` : '';
   const multiline = /[\r\n]/.test(words);
-  let out = `### ${number}. ${label}Feedback on${multiline ? ':' : `: "${words}"`}\n`;
+  let out = `### ${number}. ${label}${deletion ? MESSAGE_DELETION.heading : 'Feedback on'}${multiline ? ':' : `: "${words}"`}\n`;
   if (multiline) {
     const fence = codeFenceFor(words);
     out += `${fence}\n${words.replace(/\r\n?/g, '\n')}\n${fence}\n`;
   }
   const location = messageDiagramLocation(annotation);
   if (location !== null) out += `${location}\n\n`;
-  if (!annotation.isQuickLabel && annotation.text) out += `${annotation.text.split(/\r\n|\r|\n/).map((line) => `> ${line}`).join('\n')}\n`;
+  // A label's words are its heading; its tip is quoted under it, as the main export writes it (#2626).
+  if (annotation.isQuickLabel) out += quickLabelTipLine(annotation);
+  else if (annotation.text) out += `${annotation.text.split(/\r\n|\r|\n/).map((line) => `> ${line}`).join('\n')}\n`;
+  else if (deletion) out += `> ${MESSAGE_DELETION.line}\n`;
   return `${out}\n`;
 }
 

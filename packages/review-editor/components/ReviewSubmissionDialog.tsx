@@ -138,8 +138,10 @@ function buildOutsideDiffSection(annotations: CodeAnnotation[], permalink?: Revi
   const entries = annotations
     .filter((a) => a.outsideDiff && (a.scope ?? 'line') === 'line' && (a.text || a.suggestedCode))
     .map((a) => {
-      const lines = a.lineStart === a.lineEnd ? `L${a.lineStart}` : `L${a.lineStart}-L${a.lineEnd}`;
-      const link = permalink?.(a.filePath, a.lineStart, a.lineEnd, a);
+      // The link opens the head commit: an old side's line number is not that line there, so it goes unlinked and says its side.
+      const oldSide = a.side === 'old';
+      const lines = `${a.lineStart === a.lineEnd ? `L${a.lineStart}` : `L${a.lineStart}-L${a.lineEnd}`}${oldSide ? ', old side' : ''}`;
+      const link = oldSide ? undefined : permalink?.(a.filePath, a.lineStart, a.lineEnd, a);
       const where = link ? `[${a.filePath} (${lines})](${link})` : `${a.filePath} (${lines})`;
       const code = a.anchorText ?? a.originalCode;
       // Capped (GitHub refuses a review body over 65,536 characters); the

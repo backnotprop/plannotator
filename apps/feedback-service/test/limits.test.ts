@@ -14,6 +14,8 @@ test("the client's limits and choices are the Worker's", () => {
   expect(client.FEEDBACK_CONTACT_MAX).toBe(worker.FEEDBACK_CONTACT_MAX);
   expect([...client.FEEDBACK_CATEGORIES]).toEqual([...worker.FEEDBACK_CATEGORIES]);
   expect([...client.FEEDBACK_SURFACES]).toEqual([...worker.FEEDBACK_SURFACES]);
+  expect(client.FEEDBACK_AGENTS_MAX).toBe(worker.FEEDBACK_AGENTS_MAX);
+  expect(client.FEEDBACK_AGENT_NAME_MAX).toBe(worker.FEEDBACK_AGENT_NAME_MAX);
 });
 
 test("every payload the client builds is one the Worker accepts", () => {
@@ -21,9 +23,17 @@ test("every payload the client builds is one the Worker accepts", () => {
     { message: "  works  ", category: "bug", contact: "  @me  " },
     { version: "0.28.33", os: client.feedbackOsName("darwin"), surface: "cli" },
   );
-  expect(worker.normalizeFeedback(payload)).toEqual({ message: "works", category: "bug", contact: "@me", version: "0.28.33", os: "macOS", surface: "cli" });
+  expect(worker.normalizeFeedback(payload)).toEqual({ message: "works", category: "bug", contact: "@me", version: "0.28.33", os: "macOS", surface: "cli", agents: null });
   // A source run's version and an unknown platform are labels too.
   const dev = client.productFeedbackPayload({ message: "x" }, { version: "dev", os: client.feedbackOsName("sunos"), surface: "inbox" });
   expect(() => worker.normalizeFeedback(dev)).not.toThrow();
   expect(Object.keys(dev).sort()).toEqual(["message", "os", "surface", "version"]);
+});
+
+test("the client's agent names are ones the Worker keeps as they are", () => {
+  const names = ["Claude Code", "Codex", "Pi", "OpenCode", "Qwen Code", "DeepSeek Harness", "T3 Code", "Windsurf / Devin", "Gemini CLI"];
+  const payload = client.productFeedbackPayload({ message: "x" }, { version: "dev", os: "macOS", surface: "inbox", agents: names });
+  // The client caps at the Worker's limit, so the Worker drops nothing the client sent.
+  expect(payload.agents).toEqual(names.slice(0, client.FEEDBACK_AGENTS_MAX));
+  expect(worker.normalizeFeedback(payload).agents).toBe(payload.agents!.join(", "));
 });

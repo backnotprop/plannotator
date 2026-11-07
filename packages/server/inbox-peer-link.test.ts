@@ -26,6 +26,8 @@ interface DoorScript {
   /** The event stream: hello's cursor, the records to replay, then what happens. */
   cursor?: number;
   records?: (since: number | null) => number[];
+  /** Frames sent right after hello and the records. */
+  frames?: string[];
   /** Keep the stream open with heartbeats (default), or go silent after hello. */
   silent?: boolean;
   /** The stream's answer never comes (the machine slept between health and events). */
@@ -35,7 +37,7 @@ interface DoorScript {
 }
 
 function door(script: DoorScript) {
-  const stats = { events: 0, threads: 0, posts: [] as string[], lastEventId: [] as (string | null)[] };
+  const stats = { events: 0, threads: 0, posts: [] as string[], windowMarks: [] as (string | null)[], lastEventId: [] as (string | null)[] };
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -62,6 +64,7 @@ function door(script: DoorScript) {
             for (const seq of script.records?.(since === null ? null : Number(since)) ?? []) {
               controller.enqueue(encoder.encode(`id: ${seq}\nevent: record\ndata: ${JSON.stringify({ seq, kind: "message" })}\n\n`));
             }
+            for (const frame of script.frames ?? []) controller.enqueue(encoder.encode(frame));
             if (!script.silent) timer = setInterval(() => controller.enqueue(encoder.encode(": ping\n\n")), 50);
           },
           cancel() {
@@ -72,6 +75,7 @@ function door(script: DoorScript) {
       }
       if (req.method === "POST") {
         stats.posts.push(route);
+        stats.windowMarks.push(req.headers.get("x-plannotator-window"));
         return script.post ? script.post(route, await req.json()) : Response.json({ ok: true });
       }
       return Response.json({ code: "device_route_not_found" }, { status: 404 });
@@ -94,7 +98,7 @@ function link(url: string, extra: Partial<ConstructorParameters<typeof PeerLink>
     onRecord: (record) => records.push(record),
     onChange: () => {},
     onRevoked: () => void revoked++,
-    timings: { silenceMs: 400, backoffMinMs: 50, backoffMaxMs: 200, requestMs: 2000, sendMs: 2000 },
+    timings: { silenceMs: 400, backoffMinMs: 50, backoffMaxMs: 200, requestMs: 2000, sendMs: 2000, deliveriesMs: 30 },
     ...extra,
   });
   cleanups.push(() => peer.stop());
@@ -188,6 +192,43 @@ describe("the line", () => {
 });
 
 describe("the list (rule 5)", () => {
+  test("that machine's live sessions moved its rows (no record, no cursor): the list is read again, then the windows are told", async () => {
+    let told = 0;
+    let rowsAtTold = -1;
+    const d = door({
+      cursor: 3,
+      frames: ['event: deliveries\ndata: {"sessions":true}\n\n'],
+      threads: () => Response.json({ cursor: 3, sections: [{ threads: [{ thread_id: "msg_a", session_ended: d.stats.threads > 1 }] }] }),
+    });
+    const { peer } = link(d.url, {
+      onDeliveries: (change) => {
+        expect(change.sessions).toBe(true);
+        told += 1;
+        rowsAtTold = d.stats.threads;
+      },
+    });
+    peer.start();
+    await until("told", () => told === 1);
+    expect(rowsAtTold).toBeGreaterThanOrEqual(2);
+    expect(peer.list!.rows[0]).toMatchObject({ thread_id: "msg_a", session_ended: true });
+  });
+
+  test("many of those frames read the list once, after they stopped; the windows hear of a session that moved in any of them", async () => {
+    const told: boolean[] = [];
+    const d = door({
+      cursor: 3,
+      frames: ['event: deliveries\ndata: {"sessions":true}\n\n', ...Array.from({ length: 5 }, () => "event: deliveries\ndata: {}\n\n")],
+      threads: () => Response.json({ cursor: 3, sections: [{ threads: [{ thread_id: "msg_a" }] }] }),
+    });
+    const { peer } = link(d.url, { onDeliveries: (change) => void told.push(change.sessions) });
+    peer.start();
+    await until("told", () => told.length >= 1);
+    await Bun.sleep(100);
+    expect(told).toEqual([true]);
+    // The first read of the list, then one for all six frames.
+    expect(d.stats.threads).toBe(2);
+  });
+
   test("a list older than the one held is dropped", () => {
     const { peer } = link("http://127.0.0.1:9");
     expect(peer.acceptList({ cursor: 10, sections: [{ threads: [{ thread_id: "new" }] }] })).toBe(true);
@@ -233,6 +274,17 @@ describe("the outbox goes when the machine is there (rule 15)", () => {
     peer.start();
     await until("delivered", () => outbox.get("k1")!.state === "delivered");
     expect(d.stats.posts).toEqual(["messages/msg_x/reply"]);
+  });
+
+  test("a write the person pressed in a window says so to the other machine; any other write does not (remote launch)", async () => {
+    const d = door({});
+    const { peer, outbox } = link(d.url);
+    outbox.submit(B, "messages", { idempotency_key: "k-window", body: "Start it", to: { launch: { agent: "claude-code", project_id: "prj_a" } } }, null, true);
+    outbox.submit(B, "messages/msg_x/reply", { idempotency_key: "k-script", words: "yes", seen_through_seq: 1 });
+    peer.start();
+    await until("both delivered", () => outbox.get("k-script")!.state === "delivered");
+    expect(d.stats.posts).toEqual(["messages", "messages/msg_x/reply"]);
+    expect(d.stats.windowMarks).toEqual(["1", null]);
   });
 
   test("a 401 device_revoked while sending drops the queue with notices", async () => {

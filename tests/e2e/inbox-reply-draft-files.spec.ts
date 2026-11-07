@@ -47,6 +47,7 @@ test.beforeAll(async () => {
   markTourDecided(dataDir);
   const env = {
     PATH: process.env.PATH ?? '',
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     CLAUDE_CONFIG_DIR: join(root, 'claude'),
     PLANNOTATOR_BROWSER: NO_BROWSER,
