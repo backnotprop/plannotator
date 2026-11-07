@@ -1395,10 +1395,13 @@ test('Escape closes an open sheet wherever focus is; what used the key keeps it,
     await panel.locator('.ib-sheet-h b').click();
     await closes();
 
-    // A click on the diff beside it leaves the sheet open, and Escape still closes it.
-    const body = (await review.locator('.ib-gbody').boundingBox())!;
+    // A click on the diff beside it leaves the sheet open, and Escape still closes it. On a line's code, not its number:
+    // a number opens that line's composer, which would take the Escape (below). Found by its row, never a fixed point.
+    const code = review.locator('[data-guide-file-shell="aaa.ts"] [data-line][data-line-type="context"]').first();
     await comments.click();
-    await page.mouse.click(body.x + 12, 500);
+    await code.click({ position: { x: 4, y: 4 } });
+    await expect(comments).not.toBeFocused();
+    await expect(page.getByPlaceholder('Leave feedback...')).toHaveCount(0);
     await expect(panel).toBeVisible();
     await closes();
 
