@@ -37,8 +37,8 @@ function permalinkOf(pull: PlatformPostPull) {
 
 /**
  * The comments as the review app's builder takes them. `diff`: written on this PR's own diff at the commit posted to,
- * so each goes inline where the platform takes it. `guide`: written on an agent's guided review, whose diff the Inbox
- * cannot vouch is this PR's, so each line comment rides the review body with the code it was written on. `stack`: the
+ * so each goes inline where the platform takes it. `guide`: written on an agent's guided review: inline when its lines
+ * read the same on this PR's own diff (`onPullDiff`), else in the review body with the code it was written on. `stack`: the
  * whole stack's diff, whose lines map to no single PR (the dialog offers them to copy, as the review app does). A
  * global comment is on no line, so on any diff it rides the review body (the review app's general comment).
  *
@@ -58,7 +58,7 @@ function asSubmitted(comments: readonly KeptComment[], pull: PlatformPostPull, a
       prRepo: older ? '' : pull.repo,
       ...(c.postAt && gone.has(c.postAt) && !c.postHere ? { outdated: true } : {}),
       ...(anchor === 'stack' && (c.scope ?? 'line') !== 'general' ? { diffScope: 'full-stack' as const } : { diffScope: 'layer' as const }),
-      ...(anchor === 'guide' && (c.scope ?? 'line') === 'line' ? { anchorSnapshot: 'guide' } : {}),
+      ...(anchor === 'guide' && (c.scope ?? 'line') === 'line' ? { anchorSnapshot: c.onPullDiff ? 'diff' : 'guide' } : {}),
     };
   });
 }
@@ -236,7 +236,7 @@ export default function PlatformPost({ pull, open, comments, readComments, ancho
     const left = planned.current.filter((c) => !took.current.has(postedSignature(c)));
     const current = left.flatMap((c) => {
       const stands = now.get(c.id);
-      return stands ? [{ ...stands, postAt: c.postAt, postHere: c.postHere, outdated: c.outdated }] : [];
+      return stands ? [{ ...stands, postAt: c.postAt, postHere: c.postHere, outdated: c.outdated, onPullDiff: c.onPullDiff }] : [];
     });
     const same = current.length === left.length && current.every((c, i) => postedSignature(c) === postedSignature(left[i]!));
     const plan = same ? shown : planOver(shown, current);

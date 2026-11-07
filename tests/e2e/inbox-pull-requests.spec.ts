@@ -1526,6 +1526,74 @@ test('the walkthrough video (20 s or less): Review with an agent starts a review
   renameSync(join(dir, recorded!), join(proofDir, 'walkthrough.webm'));
 });
 
+test("A guided review of a PR's own diff posts its comment inline, and what posted isn't sent to the agent", async () => {
+  const { page, claude } = world;
+  const words = 'Should this fall back further?';
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#pulls`);
+  await page.locator(`[data-pulls-row="${LOCALE}"]`).click();
+  const threadId = String(await page.locator('[data-pulls-stack] [data-pulls-thread]').first().getAttribute('data-pulls-thread'));
+  await claude.submitGuide({
+    project_path: world.projects.web,
+    reply_to: threadId,
+    patch: world.patches.locale,
+    body: 'Another look.',
+    review: true,
+    guide: {
+      title: 'Locale fallback, to post',
+      intent: 'Read the fallback.',
+      sections: [{ title: 'The change', overview: 'Read the new lines.', diffs: [{ file: 'src/i18n/fallback.ts', summary: 'The change.' }] }],
+      generator: { engine: 'claude-code', model: 'claude-opus-5' },
+    },
+  } as never);
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#thread=${encodeURIComponent(threadId)}`);
+  await page.locator('[data-review-card]', { hasText: 'Locale fallback, to post' }).locator('[data-review-start]').click();
+
+  const shell = page.locator('[data-guide-file-shell="src/i18n/fallback.ts"]').first();
+  const added = shell.locator('[data-line-type="change-addition"][data-column-number="1"]');
+  await expect(added).toBeVisible({ timeout: 30_000 });
+  await shell.hover();
+  await added.click();
+  await page.getByPlaceholder('Leave feedback...').fill(words);
+  await page.getByRole('button', { name: 'Add Comment' }).click();
+
+  await page.waitForTimeout(800);
+  await shot(page, 'post-inline-commented');
+  await page.locator('[data-review-destination-choice="forge"]').click();
+  await shot(page, 'post-inline-ending');
+  const before = readFileSync(join(world.forge, 'gh-posts.jsonl'), 'utf8').split('\n').filter(Boolean).length;
+  await page.locator('[data-review-posts] [data-decision-primary]').click();
+  const dialog = page.getByRole('dialog');
+  await shot(page, 'post-inline-dialog');
+  await dialog.getByRole('button', { name: 'Post Comments', exact: true }).click();
+  await expect(page.locator('[data-review-posted], [data-pull-review-posted]').first()).toContainText('on GitHub');
+  await shot(page, 'post-inline-posted');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(600);
+  await shot(page, 'post-inline-posted-390');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const sent = readFileSync(join(world.forge, 'gh-posts.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as { body: string; comments?: unknown[] });
+  expect(sent.length).toBe(before + 1);
+  expect(sent.at(-1)!.comments).toEqual([expect.objectContaining({ path: 'src/i18n/fallback.ts', line: 1, side: 'RIGHT', body: words })]);
+  expect(sent.at(-1)!.body).not.toContain(words);
+
+  // It's on GitHub now: the agent's ending sends the verdict, without it.
+  await page.locator('[data-review-destination-choice="agent"]').click();
+  await page.locator('[data-review-decision] [data-decision-primary]').click();
+  await expect.poll(() => page.evaluate(async (id) => {
+    const { thread } = (await (await fetch(`/api/inbox/threads/${encodeURIComponent(id)}`)).json()) as { thread: { messages: { author: { kind: string } }[] } };
+    return thread.messages.at(-1)!.author.kind;
+  }, threadId)).not.toBe('agent');
+  const last = await page.evaluate(async (id) => {
+    const { thread } = (await (await fetch(`/api/inbox/threads/${encodeURIComponent(id)}`)).json()) as { thread: { messages: unknown[] } };
+    return JSON.stringify(thread.messages.at(-1));
+  }, threadId);
+  expect(last).not.toContain(words);
+  expect(world.errors).toEqual([]);
+});
+
 test('Reviews: a review from an ordinary thread is a local row, opens at its card with what was read left out, and is the same thread', async () => {
   const { page, claude } = world;
   await setCodeReview(true);

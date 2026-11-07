@@ -84,6 +84,7 @@
  * logic lives behind `Host` in controller.ts.
  */
 
+import { AUTO_RELOAD_ARGS, AUTO_RELOAD_COMMAND, hidesReloadOutput } from './auto-reload'
 import { PlannotatorMod } from './controller'
 import { resolveAgentToolEnabled, resolveClaudeModEnabled, resolveInboxReminderCustom, resolveInboxReminderEnabled, resolveInboxToolEnabled, resolvePlanReviewEnabled } from './enabled'
 import { submitOrThrow, type Host, type LoadedPluginInfo } from './host'
@@ -226,6 +227,12 @@ function hostOf($: Engine, debugPath: string | null): Host {
     },
     loadedPlugin: () => readLoadedPlugin($),
     engineVersion: () => readEngineVersion($),
+    readPrompt: async () => {
+      const box = await $.prompt.read()
+      return box && typeof box.text === 'string' ? box.text : ''
+    },
+    // From the Inbox tick's timer only (auto-reload.ts): never from a hook a turn waits on, never --force.
+    runReload: () => $.command.run({ command: AUTO_RELOAD_COMMAND, args: AUTO_RELOAD_ARGS }),
     suggest: async (text) => {
       await $.prompt.suggest({ text })
     },
@@ -286,6 +293,8 @@ interface Allowed {
 
 // One plugin instance per Claude Code process.
 let allowed: Allowed | null = null
+/** session.start has decided whether the mod runs (`allowed`) in this module. */
+let modDecided = false
 /**
  * The Inbox tools registered as `plannotator_inbox` at the first session.start
  * (fixed for the process: the tool list is part of Claude's prompt); null: no
@@ -720,6 +729,7 @@ export function register(on: On) {
     if (allowed) return result
     try {
       allowed = await resolveAllowed($, e)
+      modDecided = true
       if (!allowed) return result
       // Before the instance exists: it owns the Inbox link when the tool is registered.
       if (allowed.inboxTool) await registerInboxTool($, allowed)
@@ -736,10 +746,17 @@ export function register(on: On) {
     }
     const instance = await currentMod($)
     if (!instance) return result
+    // A module the auto reload loaded says so first (auto-reload.ts); off the hook's path.
+    const checkedIn = instance.checkInAfterReload()
     await registerCommands($)
     // Decided once per process, here: the tool list is part of Claude's
     // prompt, so it never changes under a running session.
     if (allowed.agentTool) await registerTool($)
+    void checkedIn.then((reloaded) => {
+      if (!reloaded || !allowed) return
+      const registered = (!allowed.agentTool || toolName !== null) && (!allowed.inboxTool || inboxToolName !== null)
+      return instance.autoReload?.noteTools(registered)
+    }).catch(() => undefined)
     // After the commands and the tool, and never holding them: a safety net only (a
     // refusal leaves no timer, and the next turn's end tries again).
     void startSelfHeal($).catch(() => undefined)
@@ -847,6 +864,15 @@ export function register(on: On) {
   // nothing, and `/clear` has moved the session id by then. Before session.start
   // has decided too, since a first `/rename` can beat it; once it said no (the mod
   // off, `-p`) nothing polls, so nothing is written.
+  // Auto reload (auto-reload.ts): our own `/reload-plugins plannotator` run's plain "Reloaded: …" row
+  // draws as nothing. The echo above it stays: Claude Code never asks a plugin's render hook about a row
+  // its own code raised (seen live on 2.1.319: "ui.render skipped: re-entry"). A warning, an error or a
+  // reload the person typed draws as always. The row is drawn by the module the reload loaded, often
+  // before its session.start has decided, so it is hidden until a decision says the mod is off.
+  on('ui.render', { component: 'CommandOutput', props: { command: 'reload-plugins' } }, ($: Engine, e: any, next: Next) =>
+    (allowed || !modDecided) && hidesReloadOutput(e?.props ?? {}) ? { type: 'Box' } : next(e),
+  )
+
   on('command.run', { command: [...INBOX_SESSION_NAME_COMMANDS] }, async ($: Engine, e: any, next: Next) => {
     const before = await Promise.resolve()
       .then(() => $.session.id())
