@@ -139,9 +139,13 @@ describe("the return", () => {
     expect(inboxRowAsOf(row("msg_c", { last_at: "2026-11-04T14:00:00.000Z", snoozed: { until, at } }), new Date("2026-11-04T15:00:00Z")).last_at).toBe("2026-11-04T14:00:00.000Z");
   });
 
-  test("an archived thread stays archived", () => {
+  test("an archived thread stays archived: no return, and no longer snoozed once its time has passed", () => {
     const r = row("msg_a", { resolved_at: at, snoozed: { until, at } });
-    expect(inboxRowAsOf(r, new Date("2026-11-05T00:00:00Z"))).toBe(r);
+    const after = inboxRowAsOf(r, new Date("2026-11-05T00:00:00Z"));
+    expect(after).toMatchObject({ resolved_at: at, section: r.section, unread: r.unread, last_at: r.last_at, snoozed: null });
+    expect(after.snooze_back ?? null).toBeNull();
+    // Still running (an agent archived it): it stays snoozed, and Unsnooze stays offered.
+    expect(inboxRowAsOf(r, new Date("2026-11-04T12:00:00Z"))).toBe(r);
   });
 
   test("the window's clock moves a returned row from the band to the top of its section", () => {

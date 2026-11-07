@@ -217,8 +217,11 @@ export function useComposeFiles(
     return key;
   };
 
-  const add = useCallback((list: Iterable<File>) => {
-    for (const file of list) addOne(file);
+  /** Each file to its upload; their keys, in order (for a host that may take them out again: an Undo). */
+  const add = useCallback((list: Iterable<File>): string[] => {
+    const keys: string[] = [];
+    for (const file of list) keys.push(addOne(file));
+    return keys;
   }, []);
 
   /** The tile holding these bytes, whichever way they came. */

@@ -9,7 +9,7 @@
  * a reply being typed or another dialog. A page that
  * may show it claims it (POST /api/inbox/list-intro); only the first claim ever gets `show: true`.
  */
-import type { ListLookKey } from './listLook';
+import { LIST_LOOK_OPTIONS, type ListLook, type MenuLookKey } from './listLook';
 
 /** A list shorter than this has too little to show the options on: the dialog waits for a later load. */
 export const LIST_INTRO_MIN_ROWS = 3;
@@ -87,17 +87,16 @@ export function listIntroMayAsk(load: ListIntroLoad, now: { modal: boolean; repl
 }
 
 /**
- * The preview as the dialog opens (the owner's r4): the switches turn on one at a time, 500 ms apart, then after a
- * 700 ms hold all off together, back to the defaults. `at` is ms after the dialog opens; `key` null is "all off". Not
- * under reduced motion. Smaller thread names (the fourth option) joined it last, so the end moved from 2000 ms.
+ * The preview as the dialog opens (the owner's r4): the options that are off turn on one at a time, in the ⋮ menu's
+ * order, 500 ms apart from 300 ms, then after a 700 ms hold all go back together to the look the dialog opened at.
+ * An option already on (smaller thread names, on by default since 2026-11-05) is not shown turning on: it is on
+ * already. `at` is ms after the dialog opens; `key` null is "back to the look it opened at". Not under reduced motion.
  */
-export const LIST_INTRO_PREVIEW: readonly { at: number; key: ListLookKey | null }[] = [
-  { at: 300, key: 'highlight' },
-  { at: 800, key: 'compact' },
-  { at: 1300, key: 'hideAgents' },
-  { at: 1800, key: 'smallNames' },
-  { at: 2500, key: null },
-];
+export function listIntroPreview(opened: Pick<ListLook, MenuLookKey>): { at: number; key: MenuLookKey | null }[] {
+  const steps: { at: number; key: MenuLookKey | null }[] = LIST_LOOK_OPTIONS.filter(({ key }) => !opened[key]).map(({ key }, i) => ({ at: 300 + i * 500, key }));
+  steps.push({ at: steps.length ? steps[steps.length - 1]!.at + 700 : 300, key: null });
+  return steps;
+}
 
 /** The rows' crossfade on each change of look, ms (none under reduced motion). */
 export const LIST_INTRO_SWAP_MS = 150;

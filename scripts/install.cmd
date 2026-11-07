@@ -787,9 +787,30 @@ REM don't collide and a same-user pre-placed symlink at a predictable
 REM path can't redirect where curl writes the downloaded executable.
 REM The SHA256 check would pass regardless (content is authentic), but
 REM the install destination would be corrupted.
+REM
+REM The download retries a dropped connection (#2788). --retry-all-errors
+REM (curl 7.71+) also retries what plain --retry treats as final, such as an
+REM HTTP/2 stream error (curl 92); the curl.exe of an older Windows rejects
+REM it, so it gets --retry alone. The probe puts the option before --version,
+REM which ends curl's option parsing. Each attempt must connect within 30 s,
+REM gives up after a minute below 1 byte/s and after six hours (the binary
+REM is about 200 MB, so a link at about 0.08 Mbit/s still finishes; a retry
+REM starts again from zero, so it never helps a slow link), no retry starts
+REM after an hour, and when curl still ends in an HTTP/2 error, one more run
+REM goes over HTTP/1.1.
+set "CURL_RETRY=--retry 3 --retry-delay 2"
+curl --retry-all-errors --version >nul 2>&1
+if !ERRORLEVEL! equ 0 set "CURL_RETRY=!CURL_RETRY! --retry-all-errors"
+set "CURL_LIMITS=--connect-timeout 30 --max-time 21600 --retry-max-time 3600 --speed-limit 1 --speed-time 60"
 set "TEMP_FILE=%TEMP%\plannotator-%RANDOM%.exe"
-curl -fsSL "!BINARY_URL!" -o "!TEMP_FILE!"
-if !ERRORLEVEL! neq 0 (
+curl -fsSL !CURL_RETRY! !CURL_LIMITS! "!BINARY_URL!" -o "!TEMP_FILE!"
+set "DL_STATUS=!ERRORLEVEL!"
+if "!DL_STATUS!"=="92" (
+    echo The download hit an HTTP/2 error; trying again over HTTP/1.1... >&2
+    curl -fsSL --http1.1 !CURL_RETRY! !CURL_LIMITS! "!BINARY_URL!" -o "!TEMP_FILE!"
+    set "DL_STATUS=!ERRORLEVEL!"
+)
+if !DL_STATUS! neq 0 (
     echo Failed to download binary >&2
     if exist "!TEMP_FILE!" del "!TEMP_FILE!"
     exit /b 1
@@ -798,8 +819,15 @@ if !ERRORLEVEL! neq 0 (
 REM Download checksum to a randomized temp path for the same reason as
 REM the binary download above (concurrent collision + symlink pre-placement).
 set "CHECKSUM_FILE=%TEMP%\plannotator-checksum-%RANDOM%.txt"
-curl -fsSL "!CHECKSUM_URL!" -o "!CHECKSUM_FILE!"
-if !ERRORLEVEL! neq 0 (
+set "CURL_SUM_LIMITS=--connect-timeout 30 --max-time 120 --retry-max-time 120"
+curl -fsSL !CURL_RETRY! !CURL_SUM_LIMITS! "!CHECKSUM_URL!" -o "!CHECKSUM_FILE!"
+set "DL_STATUS=!ERRORLEVEL!"
+if "!DL_STATUS!"=="92" (
+    echo The checksum download hit an HTTP/2 error; trying again over HTTP/1.1... >&2
+    curl -fsSL --http1.1 !CURL_RETRY! !CURL_SUM_LIMITS! "!CHECKSUM_URL!" -o "!CHECKSUM_FILE!"
+    set "DL_STATUS=!ERRORLEVEL!"
+)
+if !DL_STATUS! neq 0 (
     echo Failed to download checksum >&2
     REM curl -o creates the output file before receiving data, so a
     REM network failure or HTTP error leaves a 0-byte/partial file
@@ -810,10 +838,30 @@ if !ERRORLEVEL! neq 0 (
     exit /b 1
 )
 
-REM Extract expected checksum (first field)
+REM Extract expected checksum (first field). Cleared first: set /p keeps
+REM the old value when the file is empty.
+set "EXPECTED_CHECKSUM="
 set /p EXPECTED_CHECKSUM=<"!CHECKSUM_FILE!"
 for /f "tokens=1" %%i in ("!EXPECTED_CHECKSUM!") do set "EXPECTED_CHECKSUM=%%i"
 del "!CHECKSUM_FILE!"
+
+REM The value must be 64 hex characters, as install.sh checks: an empty or
+REM garbled .sha256 (a proxy's page, a cut-off file) never gets as far as the
+REM compare. The leading x keeps both variables defined: the loop removes
+REM every hex digit (substitution ignores case), so only the x may be left,
+REM and x plus 64 characters is 65 long.
+set "CHECKSUM_SHAPE=x!EXPECTED_CHECKSUM!"
+set "CHECKSUM_REST=!CHECKSUM_SHAPE!"
+for %%c in (0 1 2 3 4 5 6 7 8 9 a b c d e f) do set "CHECKSUM_REST=!CHECKSUM_REST:%%c=!"
+set "CHECKSUM_OK=1"
+if not "!CHECKSUM_REST!"=="x" set "CHECKSUM_OK="
+if "!CHECKSUM_SHAPE:~64,1!"=="" set "CHECKSUM_OK="
+if not "!CHECKSUM_SHAPE:~65!"=="" set "CHECKSUM_OK="
+if not defined CHECKSUM_OK (
+    echo The checksum file for !BINARY_NAME! !TAG! is not a SHA-256 checksum. Nothing was changed; try again later. >&2
+    del "!TEMP_FILE!"
+    exit /b 1
+)
 
 REM Verify checksum using certutil
 set "ACTUAL_CHECKSUM="

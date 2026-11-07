@@ -1,15 +1,22 @@
 import { inboxUrl } from '../inboxUrl';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type HTMLAttributes, type MouseEvent as ReactMouseEvent, type ReactElement, type ReactNode, type Ref } from 'react';
 import { readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { AppIcon } from '@plannotator/ui/components/icons/AppIcon';
+import { CodeSnippetPreview } from '@plannotator/ui/components/CodeSnippetPreview';
+import { HostTitle, tooltipContainerOf } from '@plannotator/ui/components/HostTitle';
+import { CodeSpanContext } from '@plannotator/ui/components/LocalLinkContext';
+import { Tooltip } from '@plannotator/ui/components/Tooltip';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@plannotator/ui/components/ui/dropdown-menu';
+import { useHoverPreview } from '@plannotator/ui/hooks/useHoverPreview';
 import { useOpenInApps, useRememberedOpenInApp } from '@plannotator/ui/hooks/useOpenInApps';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
-import { InboxApiError, inboxApi } from '../api';
+import { InboxApiError, inboxApi, type OpenInFileCode, type OpenInFileScope } from '../api';
 import { Icon } from '../icons';
-import { newTabUrl, openInMenu, remembersOpenInItem, type OpenInItem, type OpenInMenu } from '../openIn';
+import { newTabUrl, openInMenu, openInMenuFor, remembersOpenInItem, type OpenInItem, type OpenInMenu } from '../openIn';
 import { attachmentDownloadUrl } from '../attachments';
+import { projectFileOfLink } from '../links';
 import { useInboxFileSource } from '../fileSource';
+import { usePhone, useTouchScreen } from '../phone';
 import { Tip } from './Tip';
 
 /**
@@ -29,11 +36,8 @@ export const INBOX_OPEN_IN_APPS_URL = inboxUrl('/open-in/apps');
 
 const ERROR_MS = 4000;
 
-/** Everything a control needs: the menu, and picking from it. */
-function useOpenIn(attachment: InboxAttachmentState, version: 'current' | 'sent') {
-  // A read that did not answer (a restarting Inbox) is asked again for the next file.
-  const answer = useOpenInApps(INBOX_OPEN_IN_APPS_URL, true, attachment.id);
-  const [remembered, remember] = useRememberedOpenInApp();
+/** Picking from a menu: the launch, what it says while it runs, and Copy path. */
+function useOpenInActions(path: string | null, open: (id: string) => Promise<{ ok: boolean; error?: string }>, remember: (id: string) => void) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -47,15 +51,13 @@ function useOpenIn(attachment: InboxAttachmentState, version: 'current' | 'sent'
     timer.current = setTimeout(() => setStatus(null), ERROR_MS);
   };
 
-  const menu: OpenInMenu | null = answer?.available ? openInMenu(attachment, answer.apps, answer.platform ?? 'linux', remembered, version) : null;
-
   const launch = async (item: OpenInItem) => {
     if (item.kind === 'browser' || busy) return;
     if (remembersOpenInItem(item)) remember(item.id);
     setBusy(true);
     setStatus(null);
     try {
-      const result = await inboxApi.openIn(attachment.id, item.id);
+      const result = await open(item.id);
       if (!result.ok) flash(result.error || `Could not open ${item.label}`, true);
     } catch (cause) {
       flash(cause instanceof InboxApiError ? cause.message : `Could not open ${item.label}`, true);
@@ -65,16 +67,26 @@ function useOpenIn(attachment: InboxAttachmentState, version: 'current' | 'sent'
   };
 
   const copyPath = async () => {
-    const ok = await copyTextToClipboard(attachment.path);
+    const ok = path !== null && (await copyTextToClipboard(path));
     flash(ok ? 'Path copied' : 'Could not copy the path', !ok);
   };
 
-  return { answer, menu, busy, status, launch, copyPath };
+  return { busy, status, launch, copyPath };
 }
 
-function ItemIcon({ item, attachment }: { item: OpenInItem; attachment: InboxAttachmentState }) {
+/** Everything an attachment's control needs: the menu, and picking from it. */
+function useOpenIn(attachment: InboxAttachmentState, version: 'current' | 'sent') {
+  // A read that did not answer (a restarting Inbox) is asked again for the next file.
+  const answer = useOpenInApps(INBOX_OPEN_IN_APPS_URL, true, attachment.id);
+  const [remembered, remember] = useRememberedOpenInApp();
+  const menu: OpenInMenu | null = answer?.available ? openInMenu(attachment, answer.apps, answer.platform ?? 'linux', remembered, version) : null;
+  const actions = useOpenInActions(attachment.path, (id) => inboxApi.openIn(attachment.id, id), remember);
+  return { answer, menu, ...actions };
+}
+
+function ItemIcon({ item, kind }: { item: OpenInItem; kind: unknown }) {
   if (item.kind === 'browser') return <Icon name="globe" size={15} className="ib-appi ib-glyph" />;
-  if (item.kind === 'default') return <Icon name={readInboxAttachmentKind(attachment.kind) === 'image' ? 'photo' : 'doc'} size={15} className="ib-appi ib-glyph" />;
+  if (item.kind === 'default') return <Icon name={readInboxAttachmentKind(kind) === 'image' ? 'photo' : 'doc'} size={15} className="ib-appi ib-glyph" />;
   return <AppIcon id={item.icon} className="ib-appi" />;
 }
 
@@ -83,7 +95,7 @@ function missingLabel(attachment: InboxAttachmentState): string {
 }
 
 /** The list both menus show: the apps, then Copy path. */
-function OpenInMenuItems({ attachment, menu, onLaunch, onCopyPath }: { attachment: InboxAttachmentState; menu: OpenInMenu; onLaunch: (item: OpenInItem) => void; onCopyPath: () => void }) {
+function OpenInMenuItems({ kind, missingWord, menu, onLaunch, onCopyPath }: { kind: unknown; missingWord: string; menu: OpenInMenu; onLaunch: (item: OpenInItem) => void; onCopyPath: () => void }) {
   return (
     <>
       {menu.items.map((item) =>
@@ -94,7 +106,7 @@ function OpenInMenuItems({ attachment, menu, onLaunch, onCopyPath }: { attachmen
             render={<a href={item.href} target="_blank" rel="noopener noreferrer" />}
             data-open-in-item={item.id}
           >
-            <ItemIcon item={item} attachment={attachment} />
+            <ItemIcon item={item} kind={kind} />
             <span className="flex-1 truncate">{item.label}</span>
             {item === menu.primary && <Icon name="check" size={14} className="ib-openin-check" />}
           </DropdownMenuItem>
@@ -106,10 +118,10 @@ function OpenInMenuItems({ attachment, menu, onLaunch, onCopyPath }: { attachmen
             onClick={() => onLaunch(item)}
             data-open-in-item={item.id}
           >
-            <ItemIcon item={item} attachment={attachment} />
+            <ItemIcon item={item} kind={kind} />
             <span className="flex-1 truncate">{item.label}</span>
             {/* The file is gone or changed type: the apps are disabled and say so. */}
-            {menu.missing && <span className="ib-openin-miss">{missingLabel(attachment)}</span>}
+            {menu.missing && <span className="ib-openin-miss">{missingWord}</span>}
             {item === menu.primary && <Icon name="check" size={14} className="ib-openin-check" />}
           </DropdownMenuItem>
         ),
@@ -169,21 +181,55 @@ function NewTabButton({ attachment, version, big }: { attachment: InboxAttachmen
 
 function OpenInSplit({ attachment, version, label }: { attachment: InboxAttachmentState; version: 'current' | 'sent'; label: boolean }) {
   const { answer, menu, busy, status, launch, copyPath } = useOpenIn(attachment, version);
-  const [open, setOpen] = useState(false);
   if (!answer) return null;
   // A server without the local app list (an older Inbox): a new tab is all there is.
   if (!menu) return <NewTabButton attachment={attachment} version={version} big={false} />;
+  return <SplitButton id={attachment.id} kind={attachment.kind} missingWord={missingLabel(attachment)} menu={menu} label={label} busy={busy} status={status} launch={launch} copyPath={copyPath} />;
+}
+
+/** The split button: the app's icon (and "Open"), and a caret for the list. */
+function SplitButton({
+  id,
+  kind,
+  missingWord,
+  menu,
+  label,
+  busy,
+  status,
+  launch,
+  copyPath,
+  onOpenChange,
+  note,
+}: {
+  id: string;
+  kind: unknown;
+  missingWord: string;
+  menu: OpenInMenu;
+  label: boolean;
+  busy: boolean;
+  status: { text: string; error: boolean } | null;
+  launch: (item: OpenInItem) => Promise<void>;
+  copyPath: () => Promise<void>;
+  onOpenChange?: (open: boolean) => void;
+  /** Added to the button's hover words. */
+  note?: string;
+}) {
+  const [open, setOpenState] = useState(false);
+  const setOpen = (next: boolean) => {
+    setOpenState(next);
+    onOpenChange?.(next);
+  };
   const primary = menu.primary;
   const disabled = !primary || busy || (menu.missing && primary.kind !== 'browser');
-  const title = !primary ? 'Open in…' : menu.missing && primary.kind !== 'browser' ? missingLabel(attachment) : primary.label;
+  const title = !primary ? 'Open in…' : menu.missing && primary.kind !== 'browser' ? missingWord : primary.label;
   const face = (
     <>
-      {primary && <ItemIcon item={primary} attachment={attachment} />}
+      {primary && <ItemIcon item={primary} kind={kind} />}
       {label && <span>Open</span>}
     </>
   );
   return (
-    <span className="ib-openin" data-open-in={attachment.id}>
+    <span className="ib-openin" data-open-in={id}>
       <span className={`ib-split${open ? ' ib-on' : ''}${menu.missing ? ' ib-dis' : ''}`}>
         {primary?.kind === 'browser' ? (
           <Tip content={title}>
@@ -192,7 +238,7 @@ function OpenInSplit({ attachment, version, label }: { attachment: InboxAttachme
             </a>
           </Tip>
         ) : (
-          <Tip content={title}>
+          <Tip content={note ? `${title}: ${note}` : title}>
             <button
               type="button"
               className="ib-sa"
@@ -211,13 +257,414 @@ function OpenInSplit({ attachment, version, label }: { attachment: InboxAttachme
               <Icon name="chevD" size={12} />
             </DropdownMenuTrigger>
           </Tip>
-          <DropdownMenuContent align="end" sideOffset={6} className="min-w-[12rem]" finalFocus={false} data-open-in-menu={attachment.id}>
-            <OpenInMenuItems attachment={attachment} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
+          <DropdownMenuContent align="end" sideOffset={6} className="min-w-[12rem]" finalFocus={false} data-open-in-menu={id}>
+            <OpenInMenuItems kind={kind} missingWord={missingWord} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
           </DropdownMenuContent>
         </DropdownMenu>
       </span>
       <Status status={status} />
     </span>
+  );
+}
+
+/** The last answer for each referenced file: a header drawn again (a diff scrolled back) shows its control at once while it asks again. */
+const knownFiles = new Map<string, { path: string; kind: string } | null>();
+
+/**
+ * "Open in" for a file something references, by its project-relative path (Shape's references and Code view, a review's
+ * diff headers). The split button, without "Open". Nothing at all when the file is not on this computer, through the
+ * tailnet (the apps route refuses it) or on a phone, as for an attachment there is no app to launch. `line` goes along
+ * when the app's launcher takes one. `label`: the word "Open" on the button (the code window's header). `note`: added to the button's hover words.
+ */
+export function OpenInFile({ scope, path, line, label = false, onListOpenChange, note }: { scope: OpenInFileScope; path: string; line?: number; label?: boolean; onListOpenChange?: (open: boolean) => void; note?: string }) {
+  const phone = usePhone();
+  const { writes } = useInboxFileSource();
+  if (phone || !writes) return null;
+  return <OpenInFileSplit scope={scope} path={path} line={line} label={label} onListOpenChange={onListOpenChange} note={note} />;
+}
+
+/** Whether a referenced file is here and what kind, remembered for the next control drawn for it. */
+async function checkOpenInFile(scope: OpenInFileScope, path: string): Promise<{ path: string; kind: string } | null> {
+  const key = JSON.stringify([scope, path]);
+  try {
+    const found = await inboxApi.openInFileCheck(scope, path);
+    const next = found.found && found.path && found.kind ? { path: found.path, kind: found.kind } : null;
+    knownFiles.set(key, next);
+    return next;
+  } catch {
+    knownFiles.delete(key);
+    return null;
+  }
+}
+
+function OpenInFileSplit({ scope, path, line, label, onListOpenChange, note }: { scope: OpenInFileScope; path: string; line?: number; label: boolean; onListOpenChange?: (open: boolean) => void; note?: string }) {
+  const answer = useOpenInApps(INBOX_OPEN_IN_APPS_URL, true, path);
+  const [remembered, remember] = useRememberedOpenInApp();
+  const key = JSON.stringify([scope, path]);
+  const [file, setFile] = useState(() => knownFiles.get(key) ?? null);
+  const available = answer?.available === true;
+  useEffect(() => {
+    setFile(knownFiles.get(key) ?? null);
+    if (!available) return;
+    let live = true;
+    void checkOpenInFile(scope, path).then((next) => {
+      if (live) setFile(next);
+    });
+    return () => {
+      live = false;
+    };
+    // `key` names the scope and the path.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, available]);
+  const { busy, status, launch, copyPath } = useOpenInActions(file?.path ?? null, (id) => inboxApi.openInFile(scope, path, id, line), remember);
+  if (!answer?.available || !file) return null;
+  const menu = openInMenuFor(file, answer.apps, answer.platform ?? 'linux', remembered, null, false);
+  return <SplitButton id={path} kind={file.kind} missingWord="" menu={menu} label={label} busy={busy} status={status} launch={launch} copyPath={copyPath} onOpenChange={onListOpenChange} note={note} />;
+}
+
+/**
+ * A code span that names a file (`src/retry.ts:12`) in a message: it looks as it does without this, and resting on it
+ * shows the code (`OpenInCodeHover`).
+ */
+export function OpenInCodeSpan({ scope, text, children }: { scope: OpenInFileScope; text: string; children: ReactNode }) {
+  const named = projectFileOfLink(text);
+  if (!named) return <>{children}</>;
+  return <OpenInCodeHover scope={scope} path={named.path} line={named.line} lineEnd={named.lineEnd}>{children}</OpenInCodeHover>;
+}
+
+/**
+ * Code spans in what `children` draws (a message, a board, and a guide through its reader): each that names a file
+ * shows its code. `on` is Code review.
+ */
+export function OpenInCodeSpans({ scope, on, children }: { scope: OpenInFileScope; on: boolean; children: ReactNode }) {
+  const key = JSON.stringify(scope);
+  const render = useMemo(
+    () => (on ? (text: string, code: ReactNode) => <OpenInCodeSpan scope={scope} text={text}>{code}</OpenInCodeSpan> : null),
+    // `key` names the scope.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [key, on],
+  );
+  return <CodeSpanContext.Provider value={render}>{children}</CodeSpanContext.Provider>;
+}
+
+/** A file named with no line shows this much of its top. */
+const FILE_TOP_LINES = 40;
+/** Lines kept around a named line or range. */
+const CONTEXT_LINES = 6;
+
+/**
+ * Words that name a file, in a line of text: they stay as they are, and hovering them shows the code in ui's code
+ * window (the one plan review's and annotate's code links use), with Open and its editor list in the window's header.
+ * Nothing is asked until the pointer rests. A name that is no file here or in the PR shows nothing, then `title` if given.
+ *
+ * With no hover (a touch screen), a tap shows the same window as a sheet from the bottom edge. A phone has no editor
+ * to open, so its sheet has the code, and the forge's link for a PR's file. By keyboard, focus shows the window, Tab or
+ * Enter goes into it and Escape closes it.
+ */
+export function OpenInCodeHover({ scope, path, line, lineEnd, title, children }: { scope: OpenInFileScope; path: string; line?: number; lineEnd?: number; title?: string; children: ReactNode }) {
+  const { writes } = useInboxFileSource();
+  if (!writes) return <>{title ? <HostTitle title={title}>{children as ReactElement}</HostTitle> : children}</>;
+  return <CodeHoverWindow scope={scope} path={path} line={line} lineEnd={lineEnd} title={title}>{children}</CodeHoverWindow>;
+}
+
+interface CodeHoverWords {
+  scope: OpenInFileScope;
+  path: string;
+  line?: number;
+  lineEnd?: number;
+}
+
+/** What words that name a file do, wherever they are drawn: the file's read, the window, and how it stays and closes. */
+function useCodeHover({ scope, path, line, lineEnd }: CodeHoverWords, raised = false) {
+  const phone = usePhone();
+  const touch = useTouchScreen();
+  const [missing, setMissing] = useState(false);
+  const [told, setTold] = useState(false);
+  const hover = useHoverPreview<Extract<OpenInFileCode, { found: true }>>(async () => {
+    // Open's own answer comes with the code, so the window opens whole.
+    const [answer] = await Promise.all([inboxApi.openInFileCode(scope, path).catch(() => null), phone ? null : checkOpenInFile(scope, path)]);
+    setMissing(!answer?.found);
+    // Still resting on the words: they say so now, with no second rest.
+    if (!answer?.found && (pointerIn.current || document.activeElement === hover.anchorRef.current)) setTold(true);
+    return answer?.found ? answer : null;
+  });
+  const { preview, anchorRef, dismiss: close } = hover;
+  const windowEl = useRef<HTMLDivElement | null>(null);
+  // The editor list portals away from the window: while it is open, leaving the window closes nothing.
+  const listOpen = useRef(false);
+  const pointerIn = useRef(false);
+  const dismiss = useCallback(() => {
+    if (!listOpen.current) close();
+  }, [close]);
+  const enter = (event?: { buttons: number }) => {
+    pointerIn.current = true;
+    // Not during a drag: the person is selecting words.
+    if (!event?.buttons) hover.onEnter();
+  };
+  const leave = () => {
+    pointerIn.current = false;
+    setTold(false);
+    if (!listOpen.current) hover.onLeave();
+  };
+  const controls = () => Array.from(windowEl.current?.querySelectorAll<HTMLElement>('a[href], button:not(:disabled)') ?? []);
+
+  // While open, Escape closes it, focus back on the words when it was inside. Used: the window's own Escape skips it.
+  const open = !!preview;
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || listOpen.current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (windowEl.current?.contains(document.activeElement)) anchorRef.current?.focus();
+      close();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [open, close, anchorRef]);
+
+  const element = (
+    // Always drawn: a comment's marks move the text beside the words, so nothing may be inserted among them later.
+    // A portal's events still reach the page's own handlers through React: not a click in here.
+    <span
+      style={{ display: 'contents' }}
+      onClick={(event) => event.stopPropagation()}
+      onBlur={(event) => {
+        const to = event.relatedTarget;
+        if (touch || pointerIn.current || (to instanceof Node && (windowEl.current?.contains(to) || anchorRef.current?.contains(to)))) return;
+        leave();
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Tab') return;
+        const list = controls();
+        const atEdge = document.activeElement === (event.shiftKey ? list[0] : list.at(-1));
+        if (!atEdge) return;
+        // Back to the words: from there, Tab goes on through the page.
+        if (event.shiftKey) event.preventDefault();
+        anchorRef.current?.focus();
+      }}
+    >
+      {preview && (
+        <CodeHoverPreview
+          anchorEl={anchorRef.current}
+          contents={preview.contents}
+          path={path}
+          line={line}
+          lineEnd={lineEnd}
+          pull={preview.pull}
+          sheet={touch}
+          windowRef={(el) => {
+          windowEl.current = el;
+          if (el && raised) el.dataset.codeHoverRaised = '';
+        }}
+          onDismiss={dismiss}
+          onMouseEnter={() => {
+            pointerIn.current = true;
+            hover.previewHandlers.onMouseEnter();
+          }}
+          onMouseLeave={leave}
+          actions={
+            <>
+              {preview.pull && (
+                <a className="ib-code-hover-forge" href={withLines(preview.pull, line, lineEnd)} target="_blank" rel="noopener noreferrer" data-code-hover-forge="">
+                  Open on {preview.pull.platform === 'gitlab' ? 'GitLab' : 'GitHub'}
+                </a>
+              )}
+              <OpenInFile
+                scope={scope}
+                path={path}
+                line={line}
+                label
+                note={preview.pull ? "opens this computer's copy" : undefined}
+                onListOpenChange={(next) => {
+                  listOpen.current = next;
+                  // Closed with the pointer gone: the window goes too.
+                  if (!next && !pointerIn.current && !touch) hover.onLeave();
+                }}
+              />
+              {touch && (
+                <button type="button" className="ib-code-hover-close" onClick={() => hover.dismiss()} data-code-hover-close="">
+                  Close
+                </button>
+              )}
+            </>
+          }
+        />
+      )}
+    </span>
+  );
+  return { hover, touch, open, missing, told, enter, leave, controls, windowEl, pointerIn, element };
+}
+
+function CodeHoverWindow({ title, children, ...words }: CodeHoverWords & { title?: string; children: ReactNode }) {
+  const { hover, touch, open, missing, told, enter, leave, controls, windowEl, pointerIn, element } = useCodeHover(words);
+  const anchor = (
+    <span
+      ref={(el) => {
+        hover.anchorRef.current = el;
+      }}
+      className="ib-code-hover"
+      role="button"
+      tabIndex={0}
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      aria-description={title && missing ? title : undefined}
+      data-code-hover={words.path}
+      onMouseEnter={touch ? undefined : enter}
+      onMouseLeave={touch ? undefined : leave}
+      onFocus={(event) => {
+        if (!touch && event.target.matches(':focus-visible')) hover.onEnter();
+      }}
+      onBlur={(event) => {
+        if (touch || (event.relatedTarget instanceof Node && windowEl.current?.contains(event.relatedTarget))) return;
+        if (!pointerIn.current) leave();
+      }}
+      onClick={(event) => {
+        if (!touch) return;
+        event.stopPropagation();
+        if (window.getSelection()?.isCollapsed !== false) hover.onEnter();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          if (open) controls()[0]?.focus();
+          else hover.onEnter();
+        } else if (event.key === 'Tab' && !event.shiftKey && open) {
+          const first = controls()[0];
+          if (first) {
+            event.preventDefault();
+            first.focus();
+          }
+        }
+      }}
+    >
+      {children}
+    </span>
+  );
+
+  return (
+    <>
+      {/* Always this tooltip, closed until the file is known to be missing: redrawing the words would lose a comment's highlight on them. */}
+      {title ? (
+        <Tooltip
+          content={title}
+          wide
+          escapePassesThrough
+          forceOpen={told}
+          shouldOpen={() => missing && !touch}
+          container={hover.anchorRef.current ? tooltipContainerOf(hover.anchorRef.current) : null}
+        >
+          {anchor}
+        </Tooltip>
+      ) : (
+        anchor
+      )}
+      {element}
+    </>
+  );
+}
+
+/**
+ * The same window for code spans a host draws as HTML, which has no spans to wrap (Ask AI's answers, `ChatMarkdown`):
+ * handlers for the host's own element, so nothing is added around what it draws, and the window to draw beside it. One
+ * window at a time. `on` is Code review: off, there are no handlers and no window.
+ */
+export function useOpenInCodeRegion(scope: OpenInFileScope, on: boolean): { handlers?: Pick<HTMLAttributes<HTMLElement>, 'onMouseOver' | 'onClick'>; window: ReactNode } {
+  const touch = useTouchScreen();
+  const { writes } = useInboxFileSource();
+  const [at, setAt] = useState<{ el: HTMLElement; turn: number; path: string; line?: number; lineEnd?: number } | null>(null);
+  const turns = useRef(0);
+  if (!on || !writes) return { window: null };
+  /** The file a code span or a link with no scheme names. */
+  const namedBy = (target: EventTarget) => {
+    const el = target instanceof Element ? target.closest<HTMLElement>('code, a') : null;
+    if (!el || el.closest('pre, [data-code-snippet-preview]')) return null;
+    const words = el.tagName === 'A' ? el.getAttribute('href') ?? '' : el.textContent ?? '';
+    if (el.tagName === 'A' && /^[a-z][a-z0-9+.-]*:|^\/\//i.test(words)) return null;
+    const named = projectFileOfLink(words);
+    return named && { el, ...named };
+  };
+  const show = (event: ReactMouseEvent<HTMLElement>) => {
+    // Not during a drag: the person is selecting words.
+    if (event.buttons) return;
+    const named = namedBy(event.target);
+    if (!named) return;
+    // A tap on a link stays here: its address means nothing to a browser.
+    if (touch && named.el.tagName === 'A') event.preventDefault();
+    if (named.el === at?.el) return;
+    if (touch && window.getSelection()?.isCollapsed === false) return;
+    setAt({ ...named, turn: (turns.current += 1) });
+  };
+  return {
+    handlers: {
+      onMouseOver: touch ? undefined : show,
+      onClick: (event) => {
+        if (touch) show(event);
+        else if (namedBy(event.target)?.el.tagName === 'A') event.preventDefault();
+      },
+    },
+    window: at && <CodeRegionWindow key={at.turn} scope={scope} anchor={at.el} path={at.path} line={at.line} lineEnd={at.lineEnd} />,
+  };
+}
+
+function CodeRegionWindow({ anchor, ...words }: CodeHoverWords & { anchor: HTMLElement }) {
+  // Over a floating window (Ask AI's), so drawn above it.
+  const { hover, touch, enter, leave, element } = useCodeHover(words, true);
+  useEffect(() => {
+    hover.anchorRef.current = anchor;
+    const open = touch ? () => hover.onEnter() : enter;
+    // It came on the pointer's arrival or the tap, which started this.
+    open();
+    const type = touch ? 'click' : 'mouseenter';
+    anchor.addEventListener(type, open);
+    if (!touch) anchor.addEventListener('mouseleave', leave);
+    return () => {
+      anchor.removeEventListener(type, open);
+      anchor.removeEventListener('mouseleave', leave);
+    };
+    // One span for this window's life (`key` in OpenInCodeRegion); its handlers read only refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchor]);
+  return <>{element}</>;
+}
+
+/** A file's address on its forge, at the lines the words name. */
+function withLines(pull: { platform: 'github' | 'gitlab'; url: string }, line?: number, lineEnd?: number): string {
+  if (!line) return pull.url;
+  if (!lineEnd || lineEnd === line) return `${pull.url}#L${line}`;
+  return `${pull.url}#L${line}-${pull.platform === 'gitlab' ? '' : 'L'}${lineEnd}`;
+}
+
+/** The lines the code window shows for the words: around what they name, or the file's top when they name no line (or one past its end). */
+function CodeHoverPreview({ contents, path, line, lineEnd, pull, ...window }: {
+  contents: string;
+  path: string;
+  line?: number;
+  lineEnd?: number;
+  pull?: { label: string };
+  anchorEl: HTMLElement | null;
+  sheet: boolean;
+  windowRef: Ref<HTMLDivElement>;
+  onDismiss: () => void;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+  actions: ReactNode;
+}) {
+  // A file's last newline ends its last line: no empty row after it.
+  const text = useMemo(() => contents.replace(/\r?\n$/, ''), [contents]);
+  const count = useMemo(() => text.split('\n').length, [text]);
+  const named = line && line <= count ? line : null;
+  return (
+    <CodeSnippetPreview
+      {...window}
+      container={window.anchorEl ? tooltipContainerOf(window.anchorEl) : null}
+      contents={text}
+      filepath={path}
+      title={pull ? `${path} · ${pull.label}` : path}
+      line={named ?? 1}
+      lineEnd={named ? (lineEnd && lineEnd > named ? Math.min(lineEnd, count) : undefined) : Math.min(FILE_TOP_LINES, count)}
+      contextLines={named ? CONTEXT_LINES : 0}
+    />
   );
 }
 
@@ -252,7 +699,7 @@ export function OpenInTileMenu({ attachment, version, onOpenAs }: { attachment: 
               <DropdownMenuSeparator />
             </>
           )}
-          <OpenInMenuItems attachment={attachment} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
+          <OpenInMenuItems kind={attachment.kind} missingWord={missingLabel(attachment)} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
         </DropdownMenuContent>
       </DropdownMenu>
       <Status status={status} />
@@ -296,7 +743,7 @@ function FullScreenMoreApps(props: FullScreenMoreProps) {
           menu ? (
             <DropdownMenuGroup>
               <DropdownMenuLabel className="text-[11px] text-muted-foreground">Open in</DropdownMenuLabel>
-              <OpenInMenuItems attachment={props.attachment} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
+              <OpenInMenuItems kind={props.attachment.kind} missingWord={missingLabel(props.attachment)} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
             </DropdownMenuGroup>
           ) : null
         }
