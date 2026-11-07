@@ -118,6 +118,17 @@ describe('check', () => {
     expect(r.errors).toEqual([{ file: 'system.yaml', field: 'flows.use.code', message: 'src/api/index.ts is a symlink; cite the file it points to' }]);
   });
 
+  test('a sheet still under wanted: is a warning naming it: a finished draw lists none', async () => {
+    const r = smallRepo();
+    writeTree(r.dir, { 'system.yaml': `${smallDrawing()['system.yaml']}wanted:\n  - { code: F-201, kind: flow, question: "How a request runs." }\n` });
+    const c = await check({ dir: r.dir, root: r.root, at: r.sha });
+    expect(c.errors).toEqual([]);
+    expect(c.warnings).toEqual([expect.objectContaining({ file: 'system.yaml', field: 'wanted', message: expect.stringContaining('Sheet F-201') })]);
+    // it asks for the sheet to be drawn, never for it to be dropped to make the check pass
+    expect(c.warnings[0]!.message).toBe('Sheet F-201 is listed under wanted, but no file draws it yet. Draw it, then remove it from wanted.');
+    expect(c.warnings[0]!.message).not.toMatch(/take it out|leave it out|drop|instead|decided/i);
+  });
+
   test('a folder with no drawing is an error, not a clean check', async () => {
     const root = temp();
     const dir = join(root, '.plannotator', 'system');

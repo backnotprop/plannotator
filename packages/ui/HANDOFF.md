@@ -2835,6 +2835,12 @@ New classes: `.shp-title-row`, `.shp-head-side`, `.shp-drawing`, `.shp-finished`
 - **`@plannotator/ui/shape.css`**: the board's styles (`shp-` classes, theme variables only, light and dark, reduced motion). Plain CSS: import it next to your theme.
 - **Seams it needed, all opt-in (absent = unchanged):** `CommentPopover` `submitLabel`, `askAILabel`; `CodeFileView` `onAskAnnotation`, `commentSubmitLabel`, `commentAskLabel`.
 
+## Delete on an answer-only document's words: `Viewer` `textDeletions`, `AnnotationToolbar` `showDelete` (unreleased; additive, opt-in, no core change)
+
+- **`Viewer` `textDeletions?: boolean`**, with `textComments` (and `answerOnly`, not `readOnly`): the comment-only selection toolbar also offers Delete, in its usual place before Comment. Delete hands `onAddAnnotation` the same `DELETION` row plan review makes (the words selected as `originalText`, no `text`), drawn struck through. The label picker and the Alt+digit label keys stay off. Without `textComments` it does nothing. The Plannotator Inbox passes it on agent messages (approval `inbox-toolbar-delete`).
+- **`AnnotationToolbar` `showDelete?: boolean`**: shows Delete on a `commentOnly` toolbar. Absent: Delete follows `commentOnly` as before.
+- A host that passes neither sees no change.
+
 ## Shape: dark contrast (unreleased; additive)
 
 Shape boards can now show any picture: a file on this computer or a web picture, which `plannotator shape update` copies into the board's `files/` (#2756). The board itself still names only `files/<name>`. Nothing changes in the allowlist or in how `resolveSrc` / `assetUrl` resolve a picture.

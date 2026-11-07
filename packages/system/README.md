@@ -40,6 +40,20 @@ export type GateResult = {
 };
 export function gate(input: { files: ChangedFile[]; model: SystemModel; repo?: string /* alias, default 'self' */ }): GateResult;
 
+// the change on the drawing (step A5)
+export type ChangeFile = { path: string; status?: 'A' | 'M' | 'D' | 'R'; from?: string; additions?: number; deletions?: number };
+export function applyChange(model: SystemModel, change: Revision | GateResult, view: 'before' | 'after' | 'steps',
+  files?: ChangeFile[]): SystemModel; // a new model with the change's marks; memoized per (model, change, view, files)
+export function changeSummary(model: SystemModel, change: Revision | GateResult, files?: ChangeFile[]): ChangeSummary;
+export type ChangeSummary = { sheet: string; added: number; changed: number; removed: number;
+  parts: { id: string; name: string; is: 'added' | 'changed' | 'removed'; files: string[]; lines?: string }[];
+  flows: { id: string; says: string; is: 'added' | 'changed' | 'removed' }[] };
+export function changeWords(s: ChangeSummary): string; // '1 part added, 7 changed, 1 line removed'
+export function hasSteps(change: Revision | GateResult | null): boolean;
+export function isRevision(change: Revision | GateResult): change is Revision;
+export function linesOf(files: ChangeFile[]): string | undefined; // 'inbox.ts and 2 more · +21 −1'
+export const STEPS_CODE = '~steps'; // the sheet applyChange(..., 'steps') adds
+
 // @plannotator/system/node: Bun or Node; reads disk and git, never the network
 export function load(dir: string): Promise<LoadResult>;
 export function readCommitted(o: { root: string; ref: string }): Promise<SystemFiles>; // the drawing's files at a commit
@@ -57,7 +71,7 @@ import '@plannotator/system/system.css'; // once: plain CSS, sys- classes, the I
 export function SystemThumb(p: {
   model: SystemModel;
   sheet?: string;                 // default: the landing sheet
-  revision?: Revision | GateResult; // drawn from step A5 on; ignored at rest
+  revision?: Revision | GateResult; // drawn as After, on the sheet the change touches most when no sheet is given
   width: number;                  // px; the height follows the sheet
 }): JSX.Element;                  // a still picture (role img), no controls
 
@@ -67,14 +81,28 @@ export function SystemView(p: {
   project?: string;               // the first crumb, the host's project name
   reading?: 'simple' | 'full';    // default full; a sheet with one reading draws it
   layout: 'pane' | 'window';      // pane: fits the width and grows down; window: fits the window
-  revision?: Revision | GateResult; view?: 'before' | 'after' | 'steps'; mode?: 'review' | 'plan'; // step A5
+  revision?: Revision | GateResult; // the change drawn on the sheet; with no sheet, opens on the sheet it touches most
+  view?: 'before' | 'after' | 'steps'; // default after; Before and Steps need a revision (Steps, its steps)
+  mode?: 'review' | 'plan';       // plan: added and changed parts dashed, "As built" and "As planned"
+  files?: ChangeFile[];           // the PR's files with their counts: they name each part's files
+  pr?: { number?: number; title?: string; state?: 'open' | 'merged' | 'closed' }; // the PR chip in the bar
   keys?: boolean;                 // default true: + - F, 1 to 9 and N act with the drawing in focus (see Moving)
   onNavigate(sheet: string): void; // the sheet on screen changed: a dive landed, Esc or a crumb climbed, a chip turned
   onReading?(r: 'simple' | 'full'): void; // shows the Simple / Full switch on a sheet with both
-  onView?(v: 'before' | 'after' | 'steps'): void; onOpenFile?(path: string, part: string): void; // step A5
+  onView?(v: 'before' | 'after' | 'steps'): void; // shows Before / After / Steps; Esc in Steps asks for after
+  onOpenFile?(path: string, part: string): void;   // in a window, shows the parts list with its diff links
+  onOpenDetails?(): void;         // the PR chip becomes a button that opens the PR's details
   onOpenFull?(): void;            // shows Open full window, in the pane
   onClose?(): void;               // shows the close button
 }): JSX.Element;
+
+export function SystemChangePicture(p: { model: SystemModel; change: Revision | GateResult; files?: ChangeFile[];
+  onOpen(): void }): JSX.Element; // the review card's picture: one button, the change's crop and its line
+export function PartsList(p: { model: SystemModel; revision: Revision | GateResult; files?: ChangeFile[];
+  onOpenFile(path: string, part: string): void; selected?: string | null; onSelect?(part: string): void;
+  onHover?(part: string | null): void; summary?: ChangeSummary }): JSX.Element; // what SystemView draws beside the sheet
+export function ChangeLine(p: { summary: ChangeSummary }): JSX.Element; // the change's line, each clause in its ink
+export function changeCrop(L: SheetLayout): Rect; // the marked parts, their bands and the marked lines' labels
 
 export function Sheet(p: { layout: SheetLayout; model: SystemModel; lod?: 0 | 1 | 2 | 3; live?: boolean;
   onNavigate?(sheet: string): void;  // a window's cue, when onEnter is not given: the first sheet inside
@@ -92,12 +120,31 @@ export function fontsReady(): Promise<void>; // forgets widths measured before t
   sheet is `var(--ib-fs-N, Npx)`.
 - At rest a sheet fits its pane or window, never past 1:1. Below 0.95 the quiet lines lose their words; below 0.3 every
   line does.
-- A part that opens a scope with sheets is drawn as a plate with a "N sheets inside" cue. A change drawn on the sheet
-  is step A5.
+- A part that opens a scope with sheets is drawn as a plate with a "N sheets inside" cue.
 - CI fetches the drawing's pinned commit (`sources.repos.self.at`) one commit deep before the tests, so the cited paths
   are checked offline. That fetch costs more as the pinned commit ages; a redraw that refreshes `at` keeps it cheap.
 - `bun run --cwd packages/system demo` serves a page that draws this repo's drawing, for screenshots only:
-  `?shot=thumb`, or `?shot=view&sheet=C-001&reading=simple&layout=window|pane`, with `&mode=light`.
+  `?shot=thumb`, or `?shot=view&sheet=C-001&reading=simple&layout=window|pane`, with `&mode=light`. The change view:
+  `?shot=card|change&pr=2543|2563` (with `&open=1` for PR 2563 as an open PR, `&gate=1` for the gate's result alone,
+  `&removes=1` for an invented removal, `&view=before|after|steps`), and `?shot=plan`. `node scripts/shots-change.mjs`
+  takes them all at 1440x900, light and dark; `CONTRAST=1` prints each ink's measured contrast.
+
+### The change
+
+- After: what the change adds is green, what it changes amber, what it removes grey, dashed and struck. Each marked
+  part carries its number (the order of the parts list: added, changed, removed) and its line counts in mono. A line
+  into or out of a removed part is removed with it.
+- Before: the drawing without what the change added; nothing is marked. A merged PR's `~` entries are hidden; an open
+  PR's full entries are not drawn. Steps: the revision's one sequence as its own sheet, each step in its ink.
+- The gate's result alone (no revision yet, or one for an older head) marks the touched parts and lines amber, and has
+  no Before and no Steps.
+- A part's files are the PR's files its own cited paths in this repo cover; a test or doc counts only when cited by
+  name. Its counts are those files' counts, so the list and the sheet never disagree. Without `files`, a part keeps
+  the cited files its written counts name.
+- The sheet a change opens on is the one that draws most of its parts (outer parts not counted), a banded sheet first.
+- The card picture crops to the marked parts and their bands. When more than 16 lines cross that crop it draws the
+  Simple reading.
+- A plan (a revision with no `pr`) is drawn dashed, new parts washed green, with no numbers and no diff links.
 
 ### Moving
 
@@ -143,7 +190,8 @@ the model, or send the files and let the window call `loadFiles()`.
   one commit), so an untracked, ignored or symlinked file does not count. Outside git it reads the disk, and a symlink
   anywhere on the path does not count. Paths are matched with their exact case, so a check on macOS agrees with one
   on Linux. Paths in another repo alias are checked only when `roots` gives a checkout of it, else a warning names the
-  alias. Spans are a preference: a band whose written spans add up to more than 12 columns is clean, and the
+  alias. A sheet still under `wanted:` that no file draws is a warning naming it: a check is the end of a draw, and
+  a drawing that still wants a sheet is never redrawn (see the tick, step 2). Spans are a preference: a band whose written spans add up to more than 12 columns is clean, and the
   renderer narrows every part in it to fit.
 - Limits: a drawing file is at most 1 MiB and a drawing at most 8 MiB; a file over either is an error, not read. A
   drawing file must be a plain file (not a symlink), UTF-8, and end in `.yaml` (a `.yml` file is an error that names
@@ -315,11 +363,19 @@ Replaced 2026-11-06 by the owner's ruling (row 7689, q-122e6577). Everything is 
 - `source/`: Plannotator's clone of the project for the agent to read main's code (`prepareSource`). Made with
   `git clone --reference <the repo's git folder> <its origin URL>`: the objects the person already has are borrowed,
   not copied, and each tick fetches the default branch from origin into it, so the tick sees what merged even when
-  the person has not fetched. Toward the person's repo it only reads: the origin URL, the git folder and its objects.
+  the person has not fetched. Toward the person's repo it only reads: the origin URL as configured, its
+  remote-access config, the git folder and its objects. Every git call System makes runs with `--no-optional-locks`
+  and `GIT_OPTIONAL_LOCKS=0`, so no read refreshes the person's index or takes `index.lock`. The remote-access config
+  (`core.sshCommand`, `core.askPass`, `core.gitProxy`, `ssh.variant`, `credential.*`, `url.*`, `http.*`, as git reads them in the
+  person's repo, repo-local and `includeIf` files included) goes to the clone at clone time and into
+  `source/.git/plannotator-remote.config`, which the clone's config includes and every tick rewrites, so a private
+  repo is fetched with the person's own account. Checkouts run with `GIT_LFS_SKIP_SMUDGE=1`: Git LFS files stay
+  pointer files. Submodules are not cloned.
   A plain `git clone --shared` from the person's repo would see only what they last fetched. Borrowed objects can go
   away (a `git gc`, a moved or deleted repo, a lost object file): a clone whose alternates folder is gone, or that
-  cannot read the tip or the drawing's `at` whole, is moved to `failed/source-<time>/` and cloned again, once per tick,
-  and with its own copy of every object when the person's repo lacks them too. The move is named in `set_aside`.
+  cannot read the tip, the drawing's `at` or the commits between them whole, is moved to `failed/source-<time>/` and
+  cloned again, once per tick, and with its own copy of every object when the person's repo lacks them too. The move
+  is named in `set_aside`; the newest two old clones are kept and older ones removed.
 - `redraw/`: a redraw in progress, a copy of `drawing/` the agent edits. `previous/`: the drawing before the last
   redraw. `redraw-summary.txt`: the agent's sentences, read and deleted by the tick.
 - `reviews/`: revisions of open pull requests (written by `plannotator system revision`). `changed/<commit>/`: files a
@@ -331,8 +387,28 @@ Replaced 2026-11-06 by the owner's ruling (row 7689, q-122e6577). Everything is 
 `tick({ root, dataDir, key })` is one run of `plannotator system tick --project <root> --key <key>`. It never throws.
 Replaced 2026-11-06 by the owner's ruling (row 7689, q-122e6577): no branch, commit, push or pull request.
 
-1. No setup.json: `nothing`. A live tick holds `tick.lock`: `nothing` (a dead pid's lock is taken over).
-2. No drawing in `drawing/` yet: `nothing` (the first drawing is not done).
+1. No setup.json: `nothing`. Someone else holds `tick.lock`: `nothing`. A lock that cannot be taken at all is
+   `failed`, recorded in `state.json`'s `last_error`. The lock is `{ token, pid }`, made whole in one step (a temp
+   file linked to its name, or an exclusive create when the link fails for any reason but EEXIST, as on a file system
+   with no hard links: FAT, exFAT, many SMB mounts), its mtime a heartbeat the holder touches every 10 seconds. A taker breaks it only when the holder's pid
+   is dead or the heartbeat is over a minute old, and only when a second look shows the same holder that way (1 second
+   later for a dead pid, 25 seconds, two and a half beats, for a stale heartbeat, so a holder made late by a sleep or
+   a clock jump has touched it), under a second lock (`tick.lock.break`) so two takers never both run. A release
+   deletes the lock only while it holds its own token. A holder whose lock was broken anyway is told: the lock's
+   `lost` turns true and its `signal` aborts (only when the lock is gone or names another holder; a read that fails
+   otherwise keeps it until the next beat). The tick checks before it sets a cut-off redraw aside, as soon as its
+   agent returns, before the swap and before each `state.json` save, and stops there (`failed`, "lost tick.lock"), leaving the folders to the new
+   holder.
+   **The Inbox's first draw holds `tick.lock` for its whole run** (`takeLock` from `@plannotator/system/node`):
+   DRAW.md step 6 fixes files in `drawing/` after `wanted:` is empty, and a tick must not redraw or swap the drawing
+   then. The holder is the process that runs the drawing agent: it takes the lock before it starts the agent, stops
+   the agent when the lock's `signal` aborts (pass it as the spawn's `signal`), and lets the lock go when the agent
+   ends. A longer-lived process (the Inbox server) must not hold it for the agent, because a restart mid-draw would
+   leave the agent running with no lock.
+2. A tick stopped between the swap's two renames (step 9) left no `drawing/`, with `previous/` and `redraw/`: put
+   `previous/` back as `drawing/` (step 6 then sets `redraw/` aside). No drawing in `drawing/` yet: `nothing`. A
+   drawing that still wants a sheet no file draws is still being drawn, read as `drawingStatus` reads it
+   (`stillWanted`): `nothing`, and nothing is fetched.
 3. `prepareSource`: make the source clone when missing, then `git fetch origin <default>` into it with the person's
    own credentials; the default branch is the clone's `origin/HEAD`, else `main` or `master`.
 4. From: the newer of `sources.repos.self.at` and `state.json`'s `gated`. If main has not moved past it: `nothing`.
@@ -348,11 +424,12 @@ Replaced 2026-11-06 by the owner's ruling (row 7689, q-122e6577): no branch, com
    requests, the summary file and the allowed doc sites.
 8. Files the agent changed in the source clone, its own commits included, are kept under `changed/<commit>/` and the
    clone is put back at the tip. Refuse the redraw (`failed`, the copy kept under `failed/<commit>/drawing/`, the
-   drawing as it was) when the agent failed, threw or hit its time bound, or the copy does not check clean. If the
-   copy is the drawing unchanged: `gated`. A failure before the agent ran (no network, no origin) marks nothing, so
+   drawing as it was) when the agent failed, threw or hit its time bound, or the copy does not check clean (a sheet
+   still wanted is a check warning). If the copy is the drawing unchanged: `gated`. A failure before the agent ran (no network, no origin) marks nothing, so
    the next tick tries again.
-9. Set `sources.repos.self.at` to the tip (only that value's text), move `drawing/` to `previous/` and the checked copy
-   to `drawing/`, and send one note through `<plannotator> inbox call send_message` (`plannotatorProgram()` unless
+9. Set `sources.repos.self.at` to the tip (only that value's text), fsync the copy's files, move `drawing/` to
+   `previous/` and the checked copy to `drawing/` (when that second rename fails, `previous/` is moved back first),
+   fsync the project folder, and send one note through `<plannotator> inbox call send_message` (`plannotatorProgram()` unless
    `deps.plannotator` names the program), as a reply to setup.json's `thread_message` ("Main moved to 9c41e07. PR 1335
    landed: <the agent's sentences> 1 part changed. This redraw also changed: src/main.ts."). `redrew`.
 

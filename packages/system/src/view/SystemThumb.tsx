@@ -6,6 +6,8 @@ import type { SystemModel } from '../format/types.ts';
 import type { GateResult } from '../gate/gate.ts';
 import type { Revision } from '../format/types.ts';
 import { Sheet } from '../draw/Sheet.tsx';
+import { applyChange } from '../change/apply.ts';
+import { changeSummary } from '../change/summary.ts';
 import { layoutAtRest, lodAt, sheetOr } from './rest.ts';
 import { useText } from './text.ts';
 
@@ -13,16 +15,17 @@ export type SystemThumbProps = {
   model: SystemModel;
   /** The sheet to draw; the landing sheet when left out. */
   sheet?: string;
-  /** A change to draw on the sheet (step A5; drawn at rest without it until then). */
+  /** A change to draw on the sheet, After: its inks, numbers and line counts. Without `sheet`, the sheet it touches most. */
   revision?: Revision | GateResult;
   /** The picture's width in px; its height follows the sheet. */
   width: number;
 };
 
-export function SystemThumb({ model, sheet, width }: SystemThumbProps) {
+export function SystemThumb({ model: base, sheet, revision, width }: SystemThumbProps) {
   const ref = useRef<HTMLDivElement>(null);
   useText(ref);
-  const code = sheetOr(model, sheet);
+  const model = revision ? applyChange(base, revision, 'after') : base;
+  const code = sheetOr(model, sheet ?? (revision ? changeSummary(base, revision).sheet : undefined));
   const L = code ? layoutAtRest(model, code, false) : null;
   if (!L) return <div ref={ref} className="sys sys-thumb" style={{ width }} />;
   const k = width / L.w;

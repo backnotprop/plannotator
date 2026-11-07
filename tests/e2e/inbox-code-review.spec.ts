@@ -327,7 +327,7 @@ test('the review card, the full-window review with a comment and a Viewed tick, 
   await expect(card).toBeVisible();
   await expect(card).toHaveAttribute('data-review-outcome', 'waiting');
   await expect(card).toContainText('Waiting on you');
-  await expect(card).toContainText('Retry only what Stripe calls retryable');
+  await expect(card.locator('.ib-rvc-meta')).toHaveText('4 files +27 -5 · 3 chapters');
   await card.scrollIntoViewIfNeeded();
   await shot(page, '3-review-card');
 

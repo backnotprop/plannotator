@@ -1,20 +1,8 @@
 /**
- * Pull requests (approval "inbox-code-review-direction", items 4 and 5;
- * concept B, take 1; the agent flow: approval "pr-page-review-with-agent",
- * the Inline take): a sidebar row, shown only while Settings → Capabilities →
- * Code review is on. It needs no Board.
+ * Reviews (approval "inbox-reviews-page", on approvals "inbox-code-review-direction", items 4 and 5, and
+ * "pr-page-review-with-agent", the Inline take): a sidebar row, shown only while Settings → Capabilities →
+ * Code review is on. It needs no Board. The list is ReviewsList.tsx; beside a thread, the pane is the Inbox's own.
  *
- * - The head: "Reviews", and on its right the filter mark (approval
- *   "pr-list-filters", round 7 take B; PullFilter.tsx): the view (All, Mine,
- *   To review, Others) and the project, kept in the address (`&view=`,
- *   `&project=`) and named once in a quiet line over the list.
- * - The list, in the Inbox list's own rows and bands, grouped by whose move
- *   it is: On you (a teammate asked for the person's review, or the
- *   person's agent opened a PR that waits on them), Ready to land, and a
- *   folded "N waiting on others". A stack is one row: its third line is a
- *   small chain of PR marks in landing order. Top left, always the author's
- *   picture (the owner on #2608); the agent of its review thread is on the
- *   third line, with its mark ("#48201 · Review thread with Claude Code").
  * - The stack view beside it (a phone: in its place): the title, then one
  *   review thread per PR or stack and one button for it, under the title:
  *   "Review with an agent" (the picker: a running agent of this project, or a
@@ -29,10 +17,10 @@
  * Read only while the page is open (usePulls). No new keyboard shortcuts.
  */
 import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { inboxPullRepoKey, type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
+import { type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { InboxApiError, inboxApi, type ProjectFolder } from '../api';
-import { HostMark, Icon } from '../icons';
+import { Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
 import { RowAgentTiles } from '../components/RowAgents';
 import { Tip } from '../components/Tip';
@@ -51,24 +39,23 @@ import {
   ladderHeading,
   layerPill,
   linkAgentName,
-  pullFilterEmptyWords,
   pullGroups,
   pullHandoffAskLine,
   pullHandoffThreadName,
   handoffStack,
   openLayers,
   pullNounWord,
-  pullRows,
-  rowMeta,
   stackProjects,
   stackTitle,
   type PullFilter,
 } from './model';
 import { PullFilterControl, PullScopeLine, useFilterTrigger } from './PullFilter';
-import { forgeName, initials, repoLabels, repoName } from './labels';
-import { answeredClis, pullsEmptyWords, pullsNotices } from './notices';
+import { ReviewsList } from './ReviewsList';
+import { reviewRowProjects, reviewRowsIn } from './reviewsModel';
+import { forgeName } from './labels';
+import { answeredClis } from './notices';
 import { ReviewPicker } from './ReviewPicker';
-import { chainMarks, landsNextLayer, layerBaseWords, stackLink, startLayer } from './topology';
+import { landsNextLayer, layerBaseWords, stackLink, startLayer } from './topology';
 import type { PullsState } from './usePulls';
 
 export interface PullsPageProps {
@@ -81,6 +68,10 @@ export interface PullsPageProps {
   projects: readonly ProjectFolder[];
   projectNames: ReadonlyMap<string, string>;
   phone: boolean;
+  /** Reviews' thread open beside the list: the page draws only the list, and the window the thread (the Inbox's own pane). */
+  threadId?: string | null;
+  /** The header's +, the empty state's New review. */
+  onNew: () => void;
   onOpenStack: (id: string | null) => void;
   /** A new view and project from the filter, in one step. */
   onScope: (next: { filter: PullFilter; project: string | null }) => void;
@@ -98,18 +89,14 @@ export interface PullsPageProps {
   onStarted: (session: string) => void;
 }
 
-/** A layer's state as the Board's mark draws it. */
-function markState(pull: InboxPull): 'open' | 'draft' | 'merged' | 'closed' {
-  return pull.state;
-}
-
 export function PullsPage(given: PullsPageProps) {
   const model = given.state.model;
-  // The filter offers the projects that have a GitHub or GitLab remote here.
+  const answer = given.state.reviews;
+  // The filter offers the projects with a review here, or a GitHub or GitLab remote.
   const offered = useMemo(() => {
-    const ids = new Set(Object.values(model?.projects ?? {}).flat());
+    const ids = answer ? reviewRowProjects(answer) : new Set(Object.values(model?.projects ?? {}).flat());
     return given.projects.filter((p) => ids.has(p.id));
-  }, [model, given.projects]);
+  }, [answer, model, given.projects]);
   // A project gone from the list (removed, its remote changed, a stale link) is no filter, as an unknown view is All:
   // never a line naming no project over an empty list. Before the projects and the first answer, it stands.
   const gone = !!given.project && !!model && given.projects.length > 0 && !offered.some((p) => p.id === given.project);
@@ -121,6 +108,7 @@ export function PullsPage(given: PullsPageProps) {
     if (!groups || !model || !props.stackId) return null;
     return findStack(groups, props.stackId) ?? (props.filter === 'all' ? null : findStack(pullGroups(model, props.project), props.stackId));
   }, [groups, model, props.stackId, props.filter, props.project]);
+  const rows = useMemo(() => (answer ? reviewRowsIn(answer, props.project, props.filter) : null), [answer, props.project, props.filter]);
   const trigger = useFilterTrigger();
   const projectName = props.project ? (props.projectNames.get(props.project) ?? offered.find((p) => p.id === props.project)?.name ?? null) : null;
 
@@ -135,7 +123,7 @@ export function PullsPage(given: PullsPageProps) {
         {model && (
           <span className="ib-pf-slot">
             <PullFilterControl
-              model={model}
+              count={(project, filter) => (answer ? reviewRowsIn(answer, project, filter).length : 0)}
               filter={props.filter}
               project={props.project}
               projects={offered}
@@ -146,6 +134,11 @@ export function PullsPage(given: PullsPageProps) {
             />
           </span>
         )}
+        <Tip content="New review">
+          <button type="button" className="ib-iconbtn ib-pr-new" onClick={props.onNew} aria-label="New review" data-reviews-new="head">
+            <Icon name="plus" size={18} />
+          </button>
+        </Tip>
       </div>
       {model && <PullScopeLine filter={props.filter} projectName={projectName} triggerRef={trigger} onClear={() => props.onScope({ filter: 'all', project: null })} />}
       <div className="ib-lbody" aria-busy={state.loading && !model ? true : undefined}>
@@ -155,13 +148,26 @@ export function PullsPage(given: PullsPageProps) {
           </div>
         )}
         {!model && !state.error && <p className="ib-pr-empty">Reading your pull requests…</p>}
-        {model && groups && <PullList model={model} groups={groups} filter={props.filter} selected={open?.stack.id ?? null} phone={phone} onOpen={(id) => props.onOpenStack(id)} />}
+        {model && answer && rows && (
+          <ReviewsList
+            answer={answer}
+            model={model}
+            rows={rows}
+            filter={props.filter}
+            projectNames={props.projectNames}
+            selected={props.threadId ?? open?.stack.id ?? null}
+            phone={phone}
+            onOpen={(row) => (row.reviewed && row.thread_id ? props.onOpenThread(row.thread_id) : props.onOpenStack(row.stacks[0]?.id ?? null))}
+            onNew={props.onNew}
+          />
+        )}
       </div>
       <PullsFoot model={model} loading={state.loading} error={model ? state.error : null} onRefresh={state.refresh} />
       {!phone && <ListColumnEdge />}
     </section>
   );
 
+  if (props.threadId) return list;
   if (phone && open && model) {
     return <StackView key={open.stack.id} {...props} item={open} model={model} phone onClose={() => props.onOpenStack(null)} />;
   }
@@ -173,7 +179,7 @@ export function PullsPage(given: PullsPageProps) {
           <StackView key={open.stack.id} {...props} item={open} model={model} phone={false} onClose={() => props.onOpenStack(null)} />
         ) : (
           <div className="ib-pane ib-pempty" data-pulls-pane-empty="">
-            {model && groups && groups.on_you.length + groups.ready.length + groups.waiting.length > 0 ? 'Pick a pull request to see its layers.' : null}
+            {rows && rows.length > 0 ? 'Pick a review to open it.' : null}
           </div>
         ))}
     </>
@@ -204,296 +210,6 @@ export function ReviewsOff({ phone, onSettings }: { phone: boolean; onSettings: 
       </section>
       {!phone && <div className="ib-pane ib-pempty" />}
     </>
-  );
-}
-
-function PullList({
-  model,
-  groups,
-  filter,
-  selected,
-  phone,
-  onOpen,
-}: {
-  model: InboxPullsAnswer;
-  groups: ReturnType<typeof pullGroups>;
-  filter: PullFilter;
-  selected: string | null;
-  phone: boolean;
-  onOpen: (id: string) => void;
-}) {
-  const [waitingOpen, setWaitingOpen] = useState(false);
-  const now = useRelativeClock(true);
-  const total = groups.on_you.length + groups.ready.length + groups.waiting.length;
-  // A stack opened from the folded group keeps it open.
-  useEffect(() => {
-    if (selected && groups.waiting.some((i) => i.stack.id === selected)) setWaitingOpen(true);
-  }, [selected, groups.waiting]);
-  // The notices this view needs: Mine and To review are the person's own lists, whole whatever Others did.
-  const notices = pullsNotices(model, filter);
-  // Others is on its way (read in the background) and nothing shows yet: never "Nothing open" before it answers.
-  // A host whose own read failed says so at once instead: the wait never hides a failure.
-  if (total === 0 && (filter === 'all' || filter === 'others') && model.hosts.some((h) => h.others_pending) && !model.hosts.some((h) => h.error)) {
-    return (
-      <p className="ib-pr-empty" data-pulls-empty="reading">
-        Reading your pull requests…
-      </p>
-    );
-  }
-  // A view with nothing in it, while the read was whole: what the view holds. Never while a host failed or was cut.
-  if (total === 0 && filter !== 'all' && notices.every((n) => n.key.startsWith('unsigned:'))) {
-    const empty = pullFilterEmptyWords(filter);
-    return (
-      <div className="ib-pr-empty" data-pulls-empty={`view-${filter}`}>
-        <p className="ib-pr-empty-h">{empty.head}</p>
-        {[empty.line, ...notices.map((n) => n.line)].map((line) => (
-          <p key={line}>{line}</p>
-        ))}
-      </div>
-    );
-  }
-  if (total === 0) {
-    const empty = pullsEmptyWords(model, notices);
-    return (
-      <div className="ib-pr-empty" data-pulls-empty={empty.kind}>
-        <p className="ib-pr-empty-h">{empty.head}</p>
-        {empty.lines.map((line) => (
-          <p key={line}>{line}</p>
-        ))}
-      </div>
-    );
-  }
-  const labels = repoLabels(pullRows(groups).map((item) => item.stack));
-  const row = (item: InboxPullItem) => (
-    <PullRow
-      key={item.stack.id}
-      item={item}
-      link={stackLink(item.stack, model.links)}
-      links={model.links}
-      repoLabel={labels.get(inboxPullRepoKey(item.stack.host, item.stack.repo)) ?? repoName(item.stack.repo)}
-      selected={item.stack.id === selected}
-      phone={phone}
-      now={now}
-      onOpen={() => onOpen(item.stack.id)}
-    />
-  );
-  return (
-    <>
-      {notices.length > 0 && (
-        <div className="ib-pr-notices" role="status" data-pulls-notices="">
-          {notices.map((n) => (
-            <p key={n.key} className="ib-pr-notice" data-pulls-notice={n.key}>
-              <Icon name="info" size={14} />
-              <span>
-                {n.line}
-                {n.link && (
-                  <>
-                    {' · '}
-                    <a href={n.link.href} target="_blank" rel="noreferrer noopener" data-pulls-notice-link="">
-                      {n.link.label}
-                    </a>
-                  </>
-                )}
-              </span>
-            </p>
-          ))}
-        </div>
-      )}
-      {groups.on_you.length > 0 && (
-        <div className="ib-group" role="group" aria-label="On you" data-pulls-group="on_you">
-          <div className="ib-band">
-            On you <span className="ib-n">{formatCount(groups.on_you.length)}</span>
-          </div>
-          {groups.on_you.map(row)}
-        </div>
-      )}
-      {groups.ready.length > 0 && (
-        <div className="ib-group" role="group" aria-label="Ready to land" data-pulls-group="ready">
-          <div className="ib-band">
-            Ready to land <span className="ib-n">{formatCount(groups.ready.length)}</span>
-          </div>
-          {groups.ready.map(row)}
-        </div>
-      )}
-      {groups.waiting.length > 0 && (
-        <div className="ib-group ib-pr-fold" role="group" aria-label="Waiting on others" data-pulls-group="waiting">
-          <button type="button" className="ib-pr-foldbtn" onClick={() => setWaitingOpen((v) => !v)} aria-expanded={waitingOpen} data-pulls-waiting-toggle="">
-            <Icon name={waitingOpen ? 'chevD' : 'chevR'} size={14} />
-            {waitingOpen ? (
-              <>
-                Waiting on others <span className="ib-n">{formatCount(groups.waiting.length)}</span>
-              </>
-            ) : (
-              `${formatCount(groups.waiting.length)} waiting on others`
-            )}
-          </button>
-          {waitingOpen && groups.waiting.map(row)}
-        </div>
-      )}
-    </>
-  );
-}
-
-/**
- * Who the row is from: the agent's tile when one is tied to it, else the author's initials (a teammate), an empty tile
- * for a teammate's PR whose account is gone (the column stays even), else nothing (the person's own).
- */
-/** Pictures that failed or drew nothing in this window, so a row drawn again never asks twice. */
-const failedAvatars = new Set<string>();
-
-/**
- * The row's top-left spot: always the PR author's profile picture (the person's own PRs too; a stack's bottom layer's
- * author), read through the Inbox's own route (`GET /api/inbox/pulls/avatar`): the window's CSP never loads a remote
- * image. The initials show while it loads and stay when it cannot; a deleted account is a grey person.
- */
-function RowLead({ item }: { item: InboxPullItem }) {
-  const bottom = item.stack.layers[0]!;
-  const author = bottom.author;
-  const src = author ? inboxApi.pullAvatarUrl(bottom.host, author) : null;
-  const [shown, setShown] = useState(false);
-  const [failed, setFailed] = useState(() => (src ? failedAvatars.has(src) : false));
-  useEffect(() => {
-    setShown(false);
-    setFailed(src ? failedAvatars.has(src) : false);
-  }, [src]);
-  if (!author || !src) {
-    return (
-      <Tip content="A deleted account">
-        <span className="ib-pr-av ib-pr-av-ghost" role="img" aria-label="A deleted account" data-pulls-ghost="">
-          <Icon name="user" size={13} />
-        </span>
-      </Tip>
-    );
-  }
-  const fail = () => {
-    failedAvatars.add(src);
-    setFailed(true);
-  };
-  return (
-    <Tip content={author}>
-      <span className="ib-pr-av" role="img" aria-label={author} data-pulls-author={author} data-pulls-avatar={failed ? 'none' : shown ? 'shown' : 'loading'}>
-        {!shown && <span aria-hidden="true">{initials(author)}</span>}
-        {!failed && (
-          <img
-            src={src}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            referrerPolicy="no-referrer"
-            draggable={false}
-            data-shown={shown ? '' : undefined}
-            onLoad={(event) => {
-              const img = event.currentTarget;
-              if (img.naturalWidth > 1 && img.naturalHeight > 1) setShown(true);
-              else fail();
-            }}
-            onError={fail}
-          />
-        )}
-      </span>
-    </Tip>
-  );
-}
-
-/** The chain of PR marks, bottom (lands first) to top: past five layers, the first two, "+N" and the last two. */
-function Chain({ stack }: { stack: InboxPullStack }) {
-  return (
-    <span className="ib-pr-chain" aria-hidden="true" data-pulls-chain={stack.layers.length}>
-      {chainMarks(stack.layers).map((mark, i) => (
-        <span key={'more' in mark ? 'more' : mark.key} className="ib-pr-link">
-          {i > 0 && <span className="ib-pr-dash" />}
-          {'more' in mark ? (
-            <span className="ib-pr-more" data-pulls-chain-more={mark.more}>
-              +{mark.more}
-            </span>
-          ) : (
-            <span className="ib-bc-mark" data-card-mark={markState(mark)} data-card-mark-kind="pr">
-              <RefMarkIcon kind="pr" state={markState(mark)} size={13} />
-            </span>
-          )}
-        </span>
-      ))}
-    </span>
-  );
-}
-
-function PullRow({
-  item,
-  link,
-  links,
-  repoLabel,
-  selected,
-  phone,
-  now,
-  onOpen,
-}: {
-  item: InboxPullItem;
-  link: InboxPullLink | null;
-  links: InboxPullsAnswer['links'];
-  repoLabel: string;
-  selected: boolean;
-  phone: boolean;
-  now: number;
-  onOpen: () => void;
-}) {
-  const title = stackTitle(item.stack, links);
-  const meta = rowMeta(item, link);
-  const layers = item.stack.layers.length;
-  return (
-    <button
-      type="button"
-      className={`${phone ? 'ib-mrow' : 'ib-nrow'} ib-prrow${item.move === 'on_you' ? ' ib-u' : ''}${selected ? ' ib-sel' : ''}`}
-      onClick={onOpen}
-      aria-current={selected ? 'true' : undefined}
-      data-pulls-row={item.stack.id}
-      data-pulls-move={item.move}
-      data-pulls-layers={layers}
-    >
-      <div className="ib-l1">
-        <span className="ib-from ib-lead">
-          <RowLead item={item} />
-          <span className="ib-p" dir="auto" data-pulls-repo="">
-            {repoLabel}
-          </span>
-        </span>
-        <span className="ib-t">
-          <span aria-hidden="true">{relativeTime(item.updated_at, now)}</span>
-          <span className="ib-sr">{relativeWords(item.updated_at, now)}</span>
-        </span>
-      </div>
-      <div className="ib-l2">
-        <span className="ib-title" dir="auto">
-          {title}
-        </span>
-      </div>
-      <div className="ib-l3 ib-pr-l3">
-        {layers > 1 ? (
-          <Chain stack={item.stack} />
-        ) : (
-          <span className="ib-bc-mark" data-card-mark={markState(item.focus)} data-card-mark-kind="pr" aria-hidden="true">
-            <RefMarkIcon kind="pr" state={markState(item.focus)} size={13} />
-          </span>
-        )}
-        <span className="ib-pv" dir="auto">
-          {layers > 1 && (
-            <span className="ib-sr">
-              A stack of {layers} {pullNounWord(item.stack.platform)}s:{' '}
-            </span>
-          )}
-          {meta.lead}
-          {meta.agent && (
-            <>
-              {' · '}
-              <span className="ib-pr-magent" data-pulls-row-agent={meta.agent.host ?? ''}>
-                <HostMark host={meta.agent.host} />
-                {meta.agent.words}
-              </span>
-            </>
-          )}
-          {meta.rest && ` · ${meta.rest}`}
-        </span>
-      </div>
-    </button>
   );
 }
 
