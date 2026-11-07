@@ -28,7 +28,8 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import type { InboxMessage, InboxPullHost, InboxReviewLanding, InboxReviewRow, InboxReviewsAnswer, InboxReviewThread } from "@plannotator/core/inbox-types";
+import { inboxReviewStartOf } from "@plannotator/core/inbox-types";
+import type { InboxMessage, InboxPullHost, InboxReviewLanding, InboxReviewLinkAnswer, InboxReviewRow, InboxReviewsAnswer, InboxReviewThread } from "@plannotator/core/inbox-types";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxBlobPath } from "@plannotator/shared/inbox/attachments";
 import { INBOX_BRIDGE_POLL_PATH, INBOX_SESSION_LIVE_MS } from "@plannotator/shared/inbox/connection";
@@ -421,6 +422,66 @@ describe("the read that follows the store (?cached=1)", () => {
     for (const answer of answers) expect(answer.rows.some((row) => row.stacks.length > 0)).toBe(true);
     const cached = (await (await fetch(`${w.base}/api/inbox/reviews?cached=1`)).json()) as InboxReviewsAnswer;
     expect(cached.rows.some((row) => row.stacks.length > 0)).toBe(true);
+  });
+});
+
+describe("a pull request link", () => {
+  test("a started link's row survives a restart: the store reads back what it wrote", () => {
+    const dir = mkdtempSync(join(tmpdir(), "inbox-links-"));
+    const start = inboxReviewStartOf({ kind: "link", url: "https://github.com/northwind/payments/pull/231", title: "Idempotent refunds", mine: false, ask: "guide" }, { host: "claude-code", project_id: "prj_1", at: "2026-11-05T10:00:00.000Z" })!;
+    createInboxPullLinks(dir).start("msg_1", start);
+    expect(createInboxPullLinks(dir).started().get("msg_1")?.pull?.number).toBe(231);
+  });
+
+  const LINK = "https://github.com/northwind/payments/pull/231";
+  const read = async (w: Awaited<ReturnType<typeof world>>, ref: string) => {
+    const res = await fetch(`${w.base}/api/inbox/reviews/link?ref=${encodeURIComponent(ref)}`);
+    return { status: res.status, body: (await res.json()) as InboxReviewLinkAnswer & { code?: string } };
+  };
+  const payments = { state: "open", title: "Idempotent refunds", html_url: LINK, head: { ref: "refunds" }, base: { ref: "main" }, user: { login: "tomas" } };
+
+  test("reads that one PR, and who the person is when no list has said, and says what it found and where it could go", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    w.forge.prState.answer = payments;
+    const before = w.forge.calls.length;
+    const { body } = await read(w, "northwind/payments#231");
+    expect(body).toMatchObject({ ok: true, cli: "gh", pull: { number: 231, title: "Idempotent refunds", repo: "northwind/payments", author: "tomas", mine: false, base: "main", head: "refunds", state: "open" }, projects: [], thread_id: null });
+    expect(w.forge.calls.slice(before).filter((call) => call.args[0] === "api").map((call) => call.args.join(" "))).toEqual(["api --hostname github.com repos/northwind/payments/pulls/231", "api --hostname github.com user"]);
+  });
+
+  test("Bitbucket and not-a-link make no call; a PR the forge won't answer for names the tool and the host", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    const before = w.forge.calls.length;
+    expect((await read(w, "https://bitbucket.org/acme/mobile/pull-requests/88")).body).toMatchObject({ ok: false, reason: "bitbucket" });
+    expect((await read(w, "retries")).body).toMatchObject({ ok: false, reason: "not_a_link" });
+    expect(w.forge.calls.length).toBe(before);
+    expect((await read(w, "https://gitlab.example.com/g/app/-/merge_requests/9")).body).toMatchObject({ ok: false, reason: "unreadable", cli: "glab", host: "gitlab.example.com" });
+  });
+
+  test("a PR of one of the person's projects says so, one on the list needs no call, and one in review names its thread", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    const r1 = await w.sendReview("retries", "r1");
+    await w.reviews();
+    const before = w.forge.calls.length;
+    const listed = (await read(w, PULL_URL)).body as Extract<InboxReviewLinkAnswer, { ok: true }>;
+    expect(listed.projects.length).toBe(1);
+    expect(listed.pull.number).toBe(412);
+    expect(listed.thread_id).toBeNull();
+    expect(w.forge.calls.length).toBe(before);
+    expect((await w.post("/api/inbox/pulls/owner", { keys: [listed.pull.key], thread_id: r1.thread_id })).status).toBe(200);
+    expect(((await read(w, PULL_URL)).body as { thread_id: string | null }).thread_id).toBe(r1.thread_id);
+  });
+
+  test("Code review off refuses it and calls nothing", async () => {
+    const w = await world();
+    const before = w.forge.calls.length;
+    const { status, body } = await read(w, LINK);
+    expect(status).toBe(409);
+    expect(body.code).toBe("code_review_off");
+    expect(w.forge.calls.length).toBe(before);
   });
 });
 

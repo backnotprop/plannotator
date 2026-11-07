@@ -21,6 +21,7 @@ import {
 } from '@plannotator/review-editor/components/ReviewSubmissionDialog';
 import { submitPlatformReviewTargets } from '@plannotator/review-editor/utils/platformReviewSubmission';
 import { closePendingTab, openPendingTab, settlePendingTab, type TabOpener } from '@plannotator/review-editor/utils/pendingExternalTab';
+import { inboxPullLabel } from '@plannotator/core/inbox-types';
 import { platformRules, postedSignature } from '../pulls/postRules';
 import type { KeptComment, PlatformAction, PlatformPostProps, PlatformPostPull } from './platform-post-types';
 
@@ -359,6 +360,7 @@ export default function PlatformPost({ pull, open, comments, readComments, ancho
         recoveryPersistsRefresh={false}
         mrLabel={rules.mrLabel}
         platformLabel={rules.label}
+        postingTo={`${pull.repo}${inboxPullLabel(pull)}`}
       />
     </div>
   );

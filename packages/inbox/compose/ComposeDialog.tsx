@@ -29,7 +29,7 @@
  */
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxDraft, type InboxDraftTo, type InboxReviewChanges } from '@plannotator/core/inbox-types';
+import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxDraft, type InboxDraftTo, type InboxReviewChanges, type InboxReviewLinkAnswer } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi, type DraftView, type StartThreadInput } from '../api';
 import { tildePath, whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
@@ -77,9 +77,11 @@ import {
 } from './model';
 import { newUuid } from '../uuid';
 import { handoffKeys, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk } from '../pulls/model';
-import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewDefaultTo, reviewToWithChanges, unsentReview, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
+import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewDefaultTo, reviewLinkListed, reviewLinkStack, reviewToWithChanges, unsentReview, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
 import { ReviewRows } from './ReviewRows';
 
+/** How long after the last keystroke a pasted link is read. */
+const REVIEW_LINK_PAUSE_MS = 300;
 /** A phone's picker shows at most 4½ rows of 44 px (the reply box's rule, inbox.css). */
 const PHONE_SKILL_LIST_HEIGHT = 198;
 
@@ -209,6 +211,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const card = request.card ?? request.draft?.card ?? null;
   // The pull requests this thread is for (Launch an agent), kept on its draft: To offers only their projects' agents.
   const [reviewKind, setReviewKind] = useState<ReviewKind>(box?.pick ? 'pr' : typed.kind);
+  // A pull request link: what the picker's search holds while it looks like one, or the one chosen from it.
+  const [reviewLink, setReviewLink] = useState(() => (box ? typed.link : ''));
+  const [linkChosen, setLinkChosen] = useState(() => !!box && !!typed.link);
+  const linkKept = useRef(typed.link ?? '');
+  const [linkRead, setLinkRead] = useState<InboxReviewLinkAnswer | null>(null);
   const [reviewChanges, setReviewChanges] = useState<InboxReviewChanges>('uncommitted');
   const [reviewPick, setReviewPick] = useState<ReviewBoxPull | null>(box?.pick ?? typed.pick);
   const [reviewMenu, setReviewMenu] = useState(false);
@@ -218,7 +225,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!box, reviewPick?.id, props.reviewPulls]);
   const [reviewSummary, setReviewSummary] = useState<ReviewSummary>(null);
-  const boxPull = box && reviewKind === 'pr' ? reviewPick : null;
+  // A link: the picker's own way when the list has that PR, else a PR the Inbox knows only from this link.
+  const linkFound = box && reviewKind === 'pr' && linkChosen && linkRead?.ok ? linkRead : null;
+  const linkListed = linkFound ? reviewLinkListed(linkFound, props.reviewPulls ?? []) : null;
+  // Its review thread, chosen or not: the search's row says so, and choosing it opens the thread.
+  const linkThreadOf = (read: InboxReviewLinkAnswer | null) => (read?.ok ? (reviewLinkListed(read, props.reviewPulls ?? [])?.thread?.id ?? read.thread_id ?? null) : null);
+  const linkThread = linkFound ? linkThreadOf(linkFound) : null;
+  const linkOnly = linkFound && !linkListed && !linkThread ? linkFound : null;
+  const boxPull = !box || reviewKind !== 'pr' ? null : linkChosen ? (linkListed && !linkThread ? linkListed : null) : reviewPick;
   const pulls = request.pulls ?? request.draft?.pulls ?? (boxPull ? { keys: handoffKeys(boxPull.stack), projects: [...boxPull.projects], ask_line: pullHandoffAskLine(boxPull.stack, { kind: 'guide' }) } : null);
   // The Board chip: a draft's own choice, else this browser's last one. Never in Create thread (the card is the Board's
   // already), and shown only while the Board is on; a draft keeps its choice while the Board is off.
@@ -245,7 +259,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [startPick, setStartPick] = useState<{ agent: string; projectId: string } | null>(null);
   const { model, load } = useComposeSessions(true, transport?.sessions, startPick ? { agent: startPick.agent, project: startPick.projectId } : null);
   const voice = useVoiceSession();
-  const projects = useMemo(() => (model?.projects ?? []).filter((g) => !pulls || (g.project.id !== null && pulls.projects.includes(g.project.id))), [model, pulls]);
+  const onlyProjects = pulls?.projects ?? (linkOnly && linkOnly.projects.length > 0 ? linkOnly.projects : null);
+  // A link's PR in no project: nowhere is wrong, and a new scratch folder is the default where launching can.
+  const linkScratch = !!linkOnly && linkOnly.projects.length === 0;
+  const projects = useMemo(() => (model?.projects ?? []).filter((g) => !onlyProjects || (g.project.id !== null && onlyProjects.includes(g.project.id))), [model, onlyProjects?.join()]);
   const target = findTarget(projects, chosen);
   const anyLive = composeTargets(projects).length > 0;
   const groups = useMemo(() => composeGroups(projects, current, lastSent), [projects, current, lastSent]);
@@ -253,10 +270,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // For a pull request (`pulls`): only its projects and no scratch folder, so the default start is where its agent works and nothing else is offered.
   const launch = useMemo(() => {
     const offered = model?.launch;
-    if (!offered || (!pulls && !box)) return offered;
+    if (!offered || (!onlyProjects && !box) || linkScratch) return offered;
     // New review reviews a project's changes, which a new scratch folder has none of.
-    return { agents: offered.agents, projects: pulls ? offered.projects.filter((p) => pulls.projects.includes(p.id)) : offered.projects };
-  }, [model?.launch, pulls?.projects.join(), box]);
+    return { agents: offered.agents, projects: onlyProjects ? offered.projects.filter((p) => onlyProjects.includes(p.id)) : offered.projects };
+  }, [model?.launch, onlyProjects?.join(), box, linkScratch]);
   const canStart = !!launch && launch.agents.length > 0 && launch.projects.length > 0;
   const start: ComposeStart | null = useMemo(() => {
     const agent = startPick && launch?.agents.find((a) => a.agent === startPick.agent);
@@ -293,7 +310,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [toFilled, setToFilled] = useState(false);
   useEffect(() => {
     if (!box || !model || chosen || startPick) return;
-    const to = reviewDefaultTo(composeTargets(projects), launch, current?.id ?? null, lastSent);
+    const to = reviewDefaultTo(composeTargets(projects), launch, current?.id ?? null, lastSent, linkScratch && launch?.scratch ? SCRATCH_PICK : undefined);
     if (!to) return;
     setToFilled(true);
     if ('session' in to) setChosen(to.session);
@@ -307,6 +324,25 @@ export function ComposeDialog(props: ComposeDialogProps) {
     setError(null);
   };
   const reviewProject = target?.project ?? start?.project ?? null;
+  // What a pasted link is, a moment after the typing stops.
+  useEffect(() => {
+    setLinkRead(null);
+    if (!box || reviewKind !== 'pr' || !reviewLink.trim()) return;
+    const read = new AbortController();
+    const pause = setTimeout(() => {
+      inboxApi.reviewLink(reviewLink.trim(), read.signal).then(
+        setLinkRead,
+        () => {
+          if (!read.signal.aborted) setLinkRead({ ok: false, reason: 'failed' });
+        },
+      );
+    }, REVIEW_LINK_PAUSE_MS);
+    return () => {
+      clearTimeout(pause);
+      read.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!box, reviewKind, reviewLink]);
   useEffect(() => {
     if (!box || reviewKind !== 'local' || !reviewProject?.id) {
       setReviewSummary(null);
@@ -387,16 +423,16 @@ export function ComposeDialog(props: ComposeDialogProps) {
     return () => clearTimeout(timer);
   }, [body, fileNames]);
   // New review names its thread from what it reviews, not from the words.
-  const reviewName = !box ? null : boxPull ? pullHandoffThreadName(boxPull.stack, null) : reviewKind === 'pr' ? null : localReviewName(reviewChanges, reviewProject?.name ?? null, reviewSummary?.branch ?? null, reviewSummary?.base ?? null);
+  const reviewName = !box ? null : boxPull ? pullHandoffThreadName(boxPull.stack, null) : linkOnly ? pullHandoffThreadName(reviewLinkStack(linkOnly.pull), null) : reviewKind !== 'local' ? null : localReviewName(reviewChanges, reviewProject?.name ?? null, reviewSummary?.branch ?? null, reviewSummary?.base ?? null);
   const threadName = draftThreadName(nameState);
   // Kept from the first change: opening the box on another PR doesn't wipe the words kept for this one.
   const keptAny = useRef(false);
   useEffect(() => {
     if (!box) return;
-    if (keptAny.current) keepUnsentReview({ body, threadName: threadName || null, kind: reviewKind, pick: reviewKind === 'pr' ? reviewPick : null });
+    if (keptAny.current) keepUnsentReview({ body, threadName: threadName || null, kind: reviewKind, pick: reviewKind === 'pr' && !linkChosen ? reviewPick : null, link: reviewKind === 'pr' && linkChosen ? reviewLink : '' });
     keptAny.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [!!box, body, nameState, reviewKind, reviewPick]);
+  }, [!!box, body, nameState, reviewKind, reviewPick, reviewLink, linkChosen]);
   useEffect(() => {
     sendKey.current = newUuid();
   }, [body, chosen, start?.agent, start?.project.id, threadName, nameState.edited ? '' : suggested, uploadIds.join(','), boardChip && boardRequest, reviewKind, reviewChanges, boxPull?.id]);
@@ -477,12 +513,17 @@ export function ComposeDialog(props: ComposeDialogProps) {
       setError("Nothing sent: the pull request's agent works in its own project.");
       return;
     }
+    if (linkThread) {
+      props.onClose();
+      props.onOpenReviewThread?.(linkThread);
+      return;
+    }
     if (!target && !start) {
       // The error is an alert, which says it: no second announcement.
       setError(anyLive || canStart ? 'Nothing sent: choose a live agent first.' : box ? 'Nothing sent: no live agent is chosen.' : NOTHING_SENT_NO_AGENT);
       return;
     }
-    if (box && reviewKind === 'pr' && !boxPull) {
+    if (box && reviewKind === 'pr' && !boxPull && !linkOnly) {
       setError('Nothing sent: choose a pull request first.');
       return;
     }
@@ -513,8 +554,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
       // The skills the words reference go with the message as one block at its end, as New message's do (skills.ts).
       const words = !box
         ? body
-        : boxPull
-          ? pullHandoffMessage(boxPull.stack, body.trim() ? { kind: 'custom', words: body } : { kind: 'guide' })
+        : boxPull || linkOnly
+          ? pullHandoffMessage(boxPull?.stack ?? reviewLinkStack(linkOnly!.pull), body.trim() ? { kind: 'custom', words: body } : { kind: 'guide' })
           : localReviewMessage({ changes: reviewChanges, project: reviewProject?.name ?? null, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, words: body });
       // Checked first: a PR the Inbox can't keep for that agent is never sent to it.
       if (boxPull && sendProject) await inboxApi.pullOwnerCheck(pulls!.keys, sendProject);
@@ -531,7 +572,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
           : { host: target!.host, session: target!.session },
         body: skills ? withSkillsBlock(words, skills) : words,
         idempotency_key: sendKey.current,
-        ...(box && !boxPull ? { review: { kind: 'local' as const, changes: reviewChanges, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, ask: body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
+        ...(linkOnly ? { review: { kind: 'link' as const, url: linkOnly.pull.url, title: linkOnly.pull.title, mine: linkOnly.pull.mine, ask: body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
+        ...(box && !boxPull && !linkOnly ? { review: { kind: 'local' as const, changes: reviewChanges, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, ask: body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
         uploads: uploadIds,
         ...named,
         // A second review of the same changes is named too: "… (2)" rather than the request's first line.
@@ -696,7 +738,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     if (event.repeat && (event.key === 'Enter' || event.key === ' ') && (event.target as Element).closest('[data-compose-send]')) event.preventDefault();
   };
 
-  const sendable = (!!target || (!!start && start.project.exists)) && !(box && reviewKind === 'pr' && !boxPull) && !noChanges;
+  const sendable = !!linkThread || ((!!target || (!!start && start.project.exists)) && !(box && reviewKind === 'pr' && !boxPull && !linkOnly) && !noChanges);
   const attached = files.files.filter((file) => file.state !== 'refused').length;
   const sendKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'send' });
   // While the sessions are read, neither Save draft nor a dead To: a neutral "Looking…" state.
@@ -799,7 +841,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           </button>
         </span>
       )}
-      {boxPull && (target || start) && !phone && <span className="ib-cp-rvfrompull">· from the pull request</span>}
+      {(boxPull || (linkOnly && !linkScratch)) && (target || start) && !phone && <span className="ib-cp-rvfrompull">· from the pull request</span>}
       {draft && !phone && <span className="ib-cp-dsaved">Draft · saved {whenTime(draft.updated_at)}</span>}
     </div>
   );
@@ -826,15 +868,41 @@ export function ComposeDialog(props: ComposeDialogProps) {
           return;
         }
         setReviewPick(pull);
+        linkKept.current = '';
+        toFollowsReview();
+        textRef.current?.focus();
+      }}
+      linkChosen={linkChosen}
+      onUseLink={() => {
+        setReviewMenu(false);
+        if (linkThreadOf(linkRead)) {
+          props.onClose();
+          props.onOpenReviewThread?.(linkThreadOf(linkRead)!);
+          return;
+        }
+        setLinkChosen(true);
+        linkKept.current = reviewLink;
         toFollowsReview();
         textRef.current?.focus();
       }}
       phone={phone}
       menu={reviewMenu}
+      link={reviewLink}
+      onLink={(text) => {
+        setReviewLink(text);
+        setLinkChosen(false);
+      }}
+      linkRead={linkRead}
+      linkInReview={!!linkThreadOf(linkRead)}
       onMenu={(open) => {
         setPicker(false);
         setFolderMenu(false);
         setReviewMenu(open);
+        // Closed without choosing: the link already chosen stays, as a list pick does.
+        if (!open && !linkChosen && linkKept.current) {
+          setReviewLink(linkKept.current);
+          setLinkChosen(true);
+        }
       }}
     />
   );
