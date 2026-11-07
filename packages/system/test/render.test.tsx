@@ -30,26 +30,31 @@ const R = (hasDom ? await import('../src/react.ts') : {}) as typeof import('../s
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
+
+// Loaded while the file is collected, so each sheet and reading below gets its own test.
 const models: Record<string, SystemModel> = {};
-
-let savedRect: PropertyDescriptor | undefined;
-
-beforeAll(async () => {
-  if (!hasDom) return;
-  savedRect = Object.getOwnPropertyDescriptor(Element.prototype, 'getBoundingClientRect');
-  Object.defineProperty(Element.prototype, 'getBoundingClientRect', {
-    configurable: true,
-    value: () => ({ x: 0, y: 0, left: 0, top: 0, right: 1400, bottom: 900, width: 1400, height: 900, toJSON: () => ({}) }),
-  });
+const loadErrors: Record<string, unknown[]> = {};
+if (hasDom) {
   for (const [name, dir] of [
     ['plannotator', drawingDir],
     ['worst-case', join(fixturesDir, 'worst-case')],
     ['worst-one', join(fixturesDir, 'worst-one')],
   ] as const) {
     const { model, errors } = loadFiles((await readFiles(dir)).files);
-    expect(errors).toEqual([]);
-    models[name] = model!;
+    loadErrors[name] = errors;
+    if (model) models[name] = model;
   }
+}
+
+let savedRect: PropertyDescriptor | undefined;
+
+beforeAll(() => {
+  if (!hasDom) return;
+  savedRect = Object.getOwnPropertyDescriptor(Element.prototype, 'getBoundingClientRect');
+  Object.defineProperty(Element.prototype, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => ({ x: 0, y: 0, left: 0, top: 0, right: 1400, bottom: 900, width: 1400, height: 900, toJSON: () => ({}) }),
+  });
 });
 
 afterAll(() => {
@@ -87,23 +92,28 @@ async function render(node: React.ReactNode): Promise<HTMLElement> {
 
 const noop = () => {};
 
-test.skipIf(!hasDom)('every sheet draws in each reading it has, a box for every part the layout placed', async () => {
-  for (const [name, model] of Object.entries(models)) {
-    for (const code of Object.keys(model.sheets)) {
-      const readings = R.hasSimple(model, code) ? (['full', 'simple'] as const) : (['full'] as const);
-      for (const reading of readings) {
+test.skipIf(!hasDom)('the committed drawing and the worst-case fixtures load with no errors', () => {
+  expect(loadErrors).toEqual({ plannotator: [], 'worst-case': [], 'worst-one': [] });
+  expect(Object.keys(models)).toEqual(['plannotator', 'worst-case', 'worst-one']);
+});
+
+// One test per drawing, sheet and reading, so each fails on its own.
+// The heaviest, plannotator L-101 full, takes about 1 s locally and CI's DOM runner is about 3x slower, so 10 s keeps 3x headroom.
+const CASE_TIMEOUT_MS = 10_000;
+for (const [name, model] of Object.entries(models)) {
+  for (const code of Object.keys(model.sheets)) {
+    const readings = R.hasSimple(model, code) ? (['full', 'simple'] as const) : (['full'] as const);
+    for (const reading of readings) {
+      test(`every sheet draws in each reading it has, a box for every part the layout placed: ${name} ${code} ${reading}`, async () => {
         const el = await render(<R.SystemView model={model} sheet={code} reading={reading} layout="window" onNavigate={noop} />);
         const L = R.restLayout(model, code, { simple: reading === 'simple' });
         const view = el.querySelector('.sys-view')!;
         expect([name, code, view.getAttribute('data-sheet')]).toEqual([name, code, code]);
         expect([name, code, reading, el.querySelectorAll('.sys-parts > .sys-part').length]).toEqual([name, code, reading, Object.keys(L.parts).length]);
-        act(() => root!.unmount());
-        host!.remove();
-        root = null;
-      }
+      }, CASE_TIMEOUT_MS);
     }
   }
-});
+}
 
 test.skipIf(!hasDom)('Simple draws no lines and no letters; Full draws the lines and the letters', async () => {
   const model = models.plannotator!;
