@@ -941,6 +941,8 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
           onPickMark={(el, text) => pickMark(el, v, text)}
           onCode={phase === 'leaving' ? undefined : openCodeTarget}
           onBoard={phase === 'leaving' ? undefined : v === 'how' ? (stackBadges ? (b) => { setHowBoard(b); stack.boardFor('how')(b); } : setHowBoard) : stackBadges ? stack.boardFor('picture') : undefined}
+          scenes={version.scenes}
+          sceneLook="technical"
         />
       );
     }

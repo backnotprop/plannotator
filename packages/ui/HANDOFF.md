@@ -2870,3 +2870,13 @@ How it runs:
 - The pass reruns when the html element's `class`, `style` or `data-theme` changes and a theme token really changed, and when the system's light/dark changes. It runs in the next frame, after any other pass on the same mutation.
 - It sets inline variables on `.board` and puts back any inline value it replaced when it is taken back.
 - With #2721 (palette contrast, `holdShapeContrast`): that pass fixes zone colours, `--grey`, `--ink2`, `--mark`, `--alert` and the `-soft` fills against the ink. This pass reads the result as its starting point and adds what #2721 does not cover: `--rule`, `--surface`, zone edges and picture tiles. #2721 lifts `--grey` to 4.5:1, and this pass only lifts it further, so the two never pull a value in opposite directions.
+
+## Shape: scenes the agent draws (unreleased; needs the core with `./shape-scene`; additive)
+
+A board may carry `scenes`; a drawn view plays one where its HTML holds `<div data-scene="id">` around the agent's own SVG, whose moving pieces carry `data-part`. A host that passes no `scenes` sees no change: no player renders, no player code loads, and the drawing stays as drawn.
+
+- Core: new subpaths `@plannotator/core/shape-scene` (`ShapeScene`, `checkShapeScene`, `shapeHtmlScenes`, `shapeHtmlSceneSlots`, `shapeHtmlParts`, `SHAPE_SCENE_LIMITS`) and `@plannotator/core/shape-animate` (the agent text). `ShapeBoard` gains `scenes?` (at most 8, `SHAPE_LIMITS.scenes`); `checkShapeBoard` checks each one against the drawings.
+- `ShapeDrawnProps.scenes?` mounts `ScenePlayers` (`components/shape/scene/`), which portals a lazily loaded `ScenePlayer` into a shadow root of its own inside each slot; the frame CSS and the agent's CSS stop there. `ShapeDrawnProps.sceneLook?: 'technical'` applies the technical look (`scene/look.ts`) to the scene's drawing and controls, and puts every style back when the player goes. Absent: scenes play as drawn.
+- `ShapeSurface` passes `version.scenes` and `sceneLook="technical"`: a board with scenes plays them in the technical look in every host that shows `ShapeSurface`; a board without scenes is untouched.
+- New export `@plannotator/ui/components/shape/scene/frame` (`setSceneFrame`, `sceneFrame`, `sceneFrameFromHash`): a module seam, null by default. Plannotator's standalone Shape page sets it from its address for `plannotator shape frame`. Another host never needs it.
+- `ShapeDiagram` does not pass `scenes`.
