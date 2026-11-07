@@ -181,9 +181,19 @@ interface FoldState {
   folded: Set<string>;
   /** The middle of each long read run ("N earlier messages"), by run. */
   hidden: string[][];
-  /** The runs whose "N earlier messages" was opened. */
-  revealed: Set<number>;
+  /**
+   * How many of each run's messages show, counted from its newest end: a step of "Show 20 earlier" adds
+   * FOLD_STEP, "Show all" the rest (approval "inbox-thread-fold-steps").
+   */
+  shown: number[];
+  /** The messages the last step brought in: they fade in once (`data-fold-new`). */
+  stepped: ReadonlySet<string>;
 }
+
+/** Messages one step of the middle fold brings in, just above the newer ones (approval "inbox-thread-fold-steps"). */
+const FOLD_STEP = 20;
+/** The part of a run still behind its fold: its oldest messages, all but the `shown` newest. */
+const stillHidden = (ids: readonly string[], shown = 0): readonly string[] => (shown >= ids.length ? [] : ids.slice(0, ids.length - shown));
 
 /** "Today, 9:12 AM": a moment in the thread's meta line. */
 function momentWords(iso: string): string {
@@ -1865,7 +1875,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   let fold = foldState;
   if (!fold || fold.threadId !== thread.thread_id) {
     const plan = planFolds(thread.messages, fresh, boundary);
-    fold = { threadId: thread.thread_id, folded: plan.folded, hidden: plan.hidden, revealed: new Set() };
+    fold = { threadId: thread.thread_id, folded: plan.folded, hidden: plan.hidden, shown: plan.hidden.map(() => 0), stepped: NO_IDS };
     setFoldState(fold);
   }
   // Opened from Reviews: decided once too, on the Inbox's fold (`reviewOpenPlan`). A reply sent or a Done ticked here never
@@ -1879,7 +1889,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const plan = inReviews && reviewView ? reviewOpenPlan({ messages: thread.messages, firstReviewId: boundary === null ? null : reviewView.firstReviewId, latestReviewId: reviewView.latestReviewId, fresh, folds }) : null;
     reviewPlan.current = { key: reviewPlanKey, left: new Set(plan?.left ?? []) };
     if (plan || wasReviews) {
-      fold = { threadId: thread.thread_id, folded: plan?.folded ?? folds.folded, hidden: plan?.hidden ?? folds.hidden.map((run) => [...run]), revealed: new Set() };
+      const hidden = plan?.hidden ?? folds.hidden.map((run) => [...run]);
+      fold = { threadId: thread.thread_id, folded: plan?.folded ?? folds.folded, hidden, shown: hidden.map(() => 0), stepped: NO_IDS };
       setFoldState(fold);
     }
   }
@@ -1892,13 +1903,33 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const [earlierShownIn, setEarlierShownIn] = useState<string | null>(null);
   const hiddenEarlier = earlierShownIn !== thread.thread_id ? reviewPlan.current.left : NO_IDS;
   if (landing && hiddenEarlier.has(landing.messageId)) setEarlierShownIn(thread.thread_id);
-  const hiddenNow = new Set([...fold.hidden.flatMap((ids, index) => (fold.revealed.has(index) ? [] : ids)), ...hiddenEarlier]);
+  const hiddenNow = new Set([...fold.hidden.flatMap((ids, index) => stillHidden(ids, fold.shown[index])), ...hiddenEarlier]);
   const allOpen = thread.messages.every((m) => !fold.folded.has(m.id)) && hiddenNow.size === 0;
   const sectionRef = useRef<HTMLElement>(null);
   const replyKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'reply' });
   const openItemsKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'openItems' });
   /** After a fold changes: keep the message the person acted on in place, then move focus. */
-  const anchorRef = useRef<{ id: string | null; top: number; focus: string | null; folding: boolean } | null>(null);
+  const anchorRef = useRef<{ id: string | null; top: number; focus: string | null; folding: boolean; room?: boolean } | null>(null);
+  /**
+   * The room a step of the middle fold borrowed below the thread (`[data-fold-room]`): when the thread below
+   * the fold is too short to scroll as far as the step needs, the step adds this empty end so the newest
+   * messages stay put. It is only ever the blank part of the view below the last message, and it shrinks to
+   * the part still in view (`shrinkRoom`) on every scroll and after every change to the thread, so it never
+   * shows as an empty end, nothing moves when it goes, and an arrival or a send's scroll to the end never
+   * lands in it.
+   */
+  const roomRef = useRef<HTMLDivElement>(null);
+  const shrinkRoom = useCallback(() => {
+    const body = bodyRef.current;
+    const room = roomRef.current;
+    if (!body || !room) return;
+    const height = room.offsetHeight;
+    if (height === 0) return;
+    // The view's padding under the room is scrollable too: only what is above it counts as in view.
+    const pad = parseFloat(getComputedStyle(body).paddingBottom) || 0;
+    const seen = Math.max(0, Math.ceil(body.getBoundingClientRect().bottom - pad - room.getBoundingClientRect().top));
+    if (seen < height) room.style.height = `${seen}px`;
+  }, []);
   /** Stops holding the place put back after a file (threadPlace.ts `holdPlace`); everything that scrolls the thread calls it first. */
   const holdRef = useRef<(() => void) | null>(null);
   const stopHold = () => {
@@ -1948,7 +1979,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       const folded = new Set(current.folded);
       if (folding) folded.add(id);
       else folded.delete(id);
-      return { ...current, folded };
+      // Only a step's own lines fade in, once: a line folded again later draws still.
+      return { ...current, folded, stepped: NO_IDS };
     });
   };
   /** The first message whose top is in view: what is above it may grow, it stays put. */
@@ -1968,31 +2000,82 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       const last = thread.messages[thread.messages.length - 1]!;
       // The last real message stays open with it when notes trail it (it carries the reply's line).
       const lastReal = lastNonNote(thread.messages);
-      setFoldState((current) => (current ? { ...current, folded: new Set(thread.messages.filter((m) => m !== last && m !== lastReal).map((m) => m.id)), revealed: new Set() } : current));
+      setFoldState((current) => (current ? { ...current, folded: new Set(thread.messages.filter((m) => m !== last && m !== lastReal).map((m) => m.id)), shown: current.hidden.map(() => 0), stepped: NO_IDS } : current));
       setHeaderFiles({ threadId: thread.thread_id, open: new Set([...headerOpen].filter((id) => id === last.id)) });
       announce('Earlier messages folded');
     } else {
-      setFoldState((current) => (current ? { ...current, folded: new Set(), revealed: new Set(current.hidden.map((_, index) => index)) } : current));
+      setFoldState((current) => (current ? { ...current, folded: new Set(), shown: current.hidden.map((ids) => ids.length), stepped: NO_IDS } : current));
       setEarlierShownIn(thread.thread_id);
       announce(`All ${thread.messages.length} messages open`);
     }
   };
-  const revealRun = (index: number) => {
-    const first = fold.hidden[index]?.[0] ?? null;
-    anchorRef.current = { id: null, top: 0, focus: first, folding: false };
-    setFoldState((current) => (current ? { ...current, revealed: new Set(current.revealed).add(index) } : current));
-    announce(`${plural(fold.hidden[index]?.length ?? 0, 'earlier message')} shown`);
+  /**
+   * One step of a run's middle fold: "Show 20 earlier" brings in the FOLD_STEP messages just above the
+   * ones below the fold, "Show all" (`all`) the rest. The message below the fold stays exactly where it
+   * was on screen, so the newest messages never move: what comes in fills the place of the fold, and the
+   * fold moves up. Focus goes to the message that came in nearest (where the fold was, so on screen); a
+   * keyboard gets back to the fold with Shift+K through what it just showed, which is the reading order
+   * up the page. A screen reader hears how many came in and how many are still folded.
+   */
+  const stepRun = (index: number, all: boolean) => {
+    const ids = fold.hidden[index];
+    if (!ids) return;
+    const shown = fold.shown[index] ?? 0;
+    const rest = stillHidden(ids, shown);
+    if (rest.length === 0) return;
+    const n = all ? rest.length : Math.min(FOLD_STEP, rest.length);
+    const coming = rest.slice(rest.length - n);
+    // The message just below the fold: the newest one shown of the run, else the one after the run.
+    const at = thread.messages.findIndex((m) => m.id === ids[ids.length - 1]);
+    const keep = shown > 0 ? ids[ids.length - shown]! : (thread.messages[at + 1]?.id ?? null);
+    stopHold();
+    anchorRef.current = { id: keep, top: keep ? (articleOf(keep)?.getBoundingClientRect().top ?? 0) : 0, focus: coming[coming.length - 1]!, folding: false, room: true };
+    setFoldState((current) => (current ? { ...current, shown: current.shown.map((s, i) => (i === index ? s + n : s)), stepped: all ? NO_IDS : new Set(coming) } : current));
+    const left = rest.length - n;
+    announce(`${plural(n, 'earlier message')} shown${left > 0 ? `, ${formatCount(left)} still folded` : ''}`);
+  };
+  /**
+   * The middle fold: "↑ Show 20 earlier · N hidden" and a quiet "Show all" (only while more than a step is
+   * left). The step is the fold's head, so Shift+J / Shift+K reach it as they reach a message's; Tab reaches
+   * Show all. Each is a 44 px target on a phone. No key of its own.
+   */
+  const foldBand = (run: number): React.ReactNode => {
+    const rest = stillHidden(fold.hidden[run]!, fold.shown[run]);
+    const total = rest.length;
+    const n = Math.min(FOLD_STEP, total);
+    return (
+      <div className="ib-mfold ib-mfold-steps" key={`fold-${run}`} data-middle-fold="" role="group" aria-label={`${plural(total, 'earlier message')} folded`}>
+        <div className="ib-mfold-row">
+          <button type="button" className="ib-mfold-b ib-mfold-step" data-fold-head="" data-fold-step="" onClick={() => stepRun(run, false)} aria-label={`Show ${plural(n, 'earlier message')}`}>
+            <span>
+              <Icon name="arrowUp" size={14} />
+              {`Show ${formatCount(n)} earlier`}
+              {n < total && <span className="ib-mfold-when"> · {formatCount(total)} hidden</span>}
+            </span>
+          </button>
+          {n < total && (
+            <button type="button" className="ib-mfold-all" onClick={() => stepRun(run, true)} aria-label={`Show all ${plural(total, 'earlier message')}`} data-fold-all="">
+              Show all
+            </button>
+          )}
+        </div>
+      </div>
+    );
   };
   /** Open a message that is folded or hidden in the middle fold; true when it was. */
   const unfold = useCallback((messageId: string): boolean => {
     const current = foldRef.current;
-    const run = current.hidden.findIndex((ids, index) => !current.revealed.has(index) && ids.includes(messageId));
+    const run = current.hidden.findIndex((ids, index) => stillHidden(ids, current.shown[index]).includes(messageId));
     if (!current.folded.has(messageId) && run < 0) return false;
     setFoldState((state) => {
       if (!state) return state;
       const folded = new Set(state.folded);
       folded.delete(messageId);
-      return { ...state, folded, revealed: run < 0 ? state.revealed : new Set(state.revealed).add(run) };
+      if (run < 0) return { ...state, folded };
+      // The run opens from its newest side down to the message, no further: the rest stays folded above it.
+      const ids = state.hidden[run]!;
+      const reach = Math.max(state.shown[run] ?? 0, ids.length - ids.indexOf(messageId));
+      return { ...state, folded, shown: state.shown.map((s, i) => (i === run ? reach : s)), stepped: NO_IDS };
     });
     return true;
   }, []);
@@ -3007,6 +3090,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     announce(
       added.length === 1 ? `New message from ${agentName(first.author)}${asks ? ', with a question' : ''}` : `${added.length} new messages${asks ? ', with a question' : ''}`,
     );
+    // Room a fold step borrowed keeps only its part still in view under the arrival, so following it ends on the thread, not in blank.
+    shrinkRoom();
     const body = bodyRef.current;
     if (!body || !atEndRef.current) return;
     const article = articleOf(first.id);
@@ -3027,23 +3112,38 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       atEndRef.current = atEnd(body);
     };
     trackEnd();
+    // A shorter view (the reply box opening, a smaller window) trims a fold step's borrowed room to what is
+    // still in view, so the person can never scroll down into it.
+    const resize = () => {
+      shrinkRoom();
+      updateChrome();
+    };
     body.addEventListener('scroll', trackEnd, { passive: true });
     body.addEventListener('scroll', updateChrome, { passive: true });
-    window.addEventListener('resize', updateChrome);
+    window.addEventListener('resize', resize);
     document.addEventListener('visibilitychange', updateChrome);
     // The thread's own box changes without a scroll or a window resize when
     // the foot grows (the reply box, the stale guard, the New-message
     // composer) or a file opens beside it.
-    const resized = typeof ResizeObserver === 'function' ? new ResizeObserver(() => updateChrome()) : null;
+    const resized = typeof ResizeObserver === 'function' ? new ResizeObserver(() => resize()) : null;
     resized?.observe(body);
     return () => {
       body.removeEventListener('scroll', trackEnd);
       body.removeEventListener('scroll', updateChrome);
-      window.removeEventListener('resize', updateChrome);
+      window.removeEventListener('resize', resize);
       document.removeEventListener('visibilitychange', updateChrome);
       resized?.disconnect();
     };
-  }, [updateChrome]);
+  }, [updateChrome, shrinkRoom]);
+
+  // The room a step borrowed shrinks on every scroll; a new thread starts without it.
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (roomRef.current) roomRef.current.style.height = '0px';
+    if (!body) return;
+    body.addEventListener('scroll', shrinkRoom, { passive: true });
+    return () => body.removeEventListener('scroll', shrinkRoom);
+  }, [thread.thread_id, shrinkRoom]);
 
   // Where the thread opens: at the "New since you looked" or "Back from snooze"
   // line with the last read line just above it, or at the top when neither shows. Once per thread.
@@ -3071,6 +3171,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       const article = anchor.id ? articleOf(anchor.id) : null;
       if (article) {
         body.scrollTop += article.getBoundingClientRect().top - anchor.top;
+        // A step of the middle fold: when the thread below is too short to scroll that far, borrow the room it lacks.
+        const room = roomRef.current;
+        const short = Math.ceil(article.getBoundingClientRect().top - anchor.top);
+        if (anchor.room && room && short > 1) {
+          room.style.height = `${room.offsetHeight + short}px`;
+          body.scrollTop += article.getBoundingClientRect().top - anchor.top;
+        }
         // A long message folded from below its top: bring its line into view.
         if (anchor.folding && article.getBoundingClientRect().top < body.getBoundingClientRect().top) article.scrollIntoView?.({ block: 'start' });
       }
@@ -3079,11 +3186,16 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         focus.focus({ preventScroll: true });
         const r = focus.getBoundingClientRect();
         const b = body.getBoundingClientRect();
-        if (r.top < b.top + 8 || r.bottom > b.bottom - 8) focus.scrollIntoView?.({ block: 'nearest' });
+        // A fold step keeps the newest messages still: its focus (where the fold was) is brought into view only
+        // when it is wholly out of it, never nudged because it sits at the view's edge.
+        const out = anchor.room ? r.bottom <= b.top || r.top >= b.bottom : r.top < b.top + 8 || r.bottom > b.bottom - 8;
+        if (out) focus.scrollIntoView?.({ block: 'nearest' });
       }
     }
+    // Whatever changed (an arrival, a send, a fold), borrowed room keeps only its part in view.
+    if (!anchor?.room) shrinkRoom();
     updateChrome();
-  }, [foldState, thread, file?.id, updateChrome, sighted, paneCovered]);
+  }, [foldState, thread, file?.id, updateChrome, sighted, paneCovered, shrinkRoom]);
 
   /**
    * n goes to the first new message (at the divider); the pill to what it
@@ -4853,7 +4965,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const places = new Map<string, OpenQuestionPlace>();
     const body = bodyRef.current;
     const current = foldRef.current;
-    const hidden = new Set(current.hidden.flatMap((ids, index) => (current.revealed.has(index) ? [] : ids)));
+    const hidden = new Set(current.hidden.flatMap((ids, index) => stillHidden(ids, current.shown[index])));
     const view = body?.getBoundingClientRect() ?? { top: 0, bottom: 0 };
     for (const q of openQ.questions) {
       if (current.folded.has(q.messageId) || hidden.has(q.messageId)) {
@@ -5828,21 +5940,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         )}
         {thread.messages.flatMap((message, index) => {
           const before: React.ReactNode[] = [];
-          // The middle of a long read run: one "N earlier messages" in place of its messages.
-          const run = fold.hidden.findIndex((ids, i) => !fold.revealed.has(i) && ids[0] === message.id);
-          if (run >= 0) {
-            const n = fold.hidden[run]!.length;
-            before.push(
-              <div className="ib-mfold" key={`fold-${run}`} data-middle-fold="">
-                <button type="button" className="ib-mfold-b" data-fold-head="" onClick={() => revealRun(run)} aria-label={`Show ${plural(n, 'earlier message')}`}>
-                  <span>
-                    <Icon name="stack" size={14} />
-                    {plural(n, 'earlier message')}
-                  </span>
-                </button>
-              </div>,
-            );
-          }
+          // The middle of a long read run: one fold ("Show 20 earlier · N hidden") in place of the part still hidden.
+          // What is still hidden always starts at the run's first message, so no slice is needed here.
+          const run = fold.hidden.findIndex((ids, i) => (fold.shown[i] ?? 0) < ids.length && ids[0] === message.id);
+          if (run >= 0) before.push(foldBand(run));
           if (hiddenNow.has(message.id)) return before;
           const isNew = showNew && fresh.has(message.id);
           // "New since you looked", above the first new message (not above the first message of the thread).
@@ -5955,6 +6056,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 data-author={message.author.kind}
                 data-message-article={message.id}
                 data-folded=""
+                data-fold-new={fold.stepped.has(message.id) ? '' : undefined}
                 data-new={isNew ? '' : undefined}
                 data-sighted={sightedIds.has(message.id) ? '' : undefined}
                 data-arrival={arrivalIds.has(message.id) ? '' : undefined}
@@ -6369,6 +6471,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         <div className="ib-sr" aria-live="polite" data-fold-live="">
           {announced}
         </div>
+        {/* The room a step of the middle fold borrows (roomRef, shrinkRoom). */}
+        <div className="ib-fold-room" ref={roomRef} aria-hidden="true" data-fold-room="" />
       </div>
       {artifactsOn && (
         <div className="ib-pbody ib-artbody" ref={artifactsBodyRef}>

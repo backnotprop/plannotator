@@ -283,8 +283,8 @@ test('S1: deep work in one thread, a detour, and back', async () => {
   await arrowTo(rollout);
   await press('Enter');
   await at('Rollout open', { focus: row(rollout), address: addr(rollout), view: 'thread' });
-  // The six read messages are folded: the first and the last as lines, the middle ones behind "N earlier messages".
-  await expect(earlier()).toHaveText(/^\d+ earlier messages$/);
+  // The six read messages are folded: the first and the last as lines, the middle ones behind "Show N earlier".
+  await expect(earlier()).toHaveText(/^Show \d+ earlier$/);
   expect(await foldedCount()).toBeGreaterThanOrEqual(2);
 
   // N carries from the list into the thread: the first new message (7).

@@ -2888,6 +2888,20 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .ib-mfold-b::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px solid var(--ib-hair); }
 .ib-mfold-b > span { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--muted-foreground); }
 .pn-inbox .ib-mfold-b:hover > span { color: var(--foreground); border-color: color-mix(in oklch, var(--primary) 45%, var(--border)); }
+/* The middle fold opens in steps (approval "inbox-thread-fold-steps"): its pill is the step, "Show all" quiet text beside it. */
+.ib-mfold-row { position: relative; display: flex; align-items: center; justify-content: center; gap: 4px; }
+.ib-mfold-row::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px solid var(--ib-sep-s, var(--ib-hair)); }
+.pn-inbox .ib-mfold-steps .ib-mfold-step { width: auto; padding: 0 2px; }
+.ib-mfold-steps .ib-mfold-step::before { content: none; }
+.ib-mfold-when { color: var(--muted-foreground); font-weight: 400; font-variant-numeric: tabular-nums; }
+.pn-inbox .ib-mfold-b:hover .ib-mfold-when { color: inherit; }
+.pn-inbox .ib-mfold-all { position: relative; height: 34px; padding: 0 10px; border-radius: 999px; background: var(--card); color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; }
+.pn-inbox .ib-mfold-all:hover { color: var(--foreground); text-decoration: underline; text-underline-offset: 3px; }
+.pn-inbox .ib-mfold-all:focus-visible { outline-offset: -2px; }
+/* The messages a step brought in fade in where the fold was, once; nothing moves. "Show all" does not animate. */
+.ib-message[data-fold-new] { animation: ib-fold-in 180ms ease-out both; }
+@keyframes ib-fold-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ib-message[data-fold-new] { animation: none; } }
 /* the divider at the first new message */
 .ib-newdiv { display: flex; align-items: center; gap: 10px; height: 30px; margin-top: 4px; color: var(--primary); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 650; scroll-margin-top: 8px; }
 .ib-newdiv::before, .ib-newdiv::after { content: ""; height: 1px; background: color-mix(in oklch, var(--primary) 45%, transparent); }
@@ -3238,6 +3252,7 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-fline.ib-is-open + .ib-msg { padding-top: 6px; }
   .pn-inbox .ib-fl-tm > button.ib-mut { width: 44px; height: 44px; margin: -12px -10px -12px -6px; }
   .pn-inbox .ib-mfold-b { height: 44px; }
+  .pn-inbox .ib-mfold-all { height: 44px; }
   .ib-tmeta { margin-top: -6px; }
   /* A diagram's comment composer, inline or in the popout (which portals to body): buttons a thumb can hit. */
   body:has(.pn-inbox) [data-diagram-composer] button { min-height: 44px; }
