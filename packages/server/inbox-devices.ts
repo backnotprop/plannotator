@@ -74,6 +74,7 @@ import {
   type PairingProbes,
   type PairingTailscaleRunner,
 } from "./inbox-pairing-checks";
+import { syncSection } from "./inbox-perf";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { enableTailscaleServe, TailscaleServeError, takeDownOwnServeMapping } from "./tailscale-serve";
 import {
@@ -508,7 +509,9 @@ class DoorPortError extends Error {
 
 export function createInboxDevices(context: InboxDevicesContext) {
   const now = () => (context.now ? context.now() : new Date());
-  const tailscale = context.tailscale ?? runTailscale;
+  const runTailscaleAtOnce = context.tailscale ?? runTailscale;
+  // The door's publish still waits on the CLI (Pair a phone, Link a machine): named for the loop watch.
+  const tailscale: TailscaleRunner = (args, timeoutMs) => syncSection(`tailscale:${args.slice(0, 2).join(" ")}`, () => runTailscaleAtOnce(args, timeoutMs));
   const devices = InboxDevices.open(context.dataDir);
   const commandLog = new JsonLines<CommandLine>(join(inboxDir(context.dataDir), INBOX_DEVICE_COMMANDS_FILE));
   const commands = new Map<string, CommandLine>();
