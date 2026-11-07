@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { useAutoClose } from '../hooks/useAutoClose';
 
 // ---------------------------------------------------------------------------
@@ -38,9 +39,15 @@ interface CompletionOverlayProps {
    * a platform review was just posted to. Omitted or empty renders nothing.
    */
   links?: ReadonlyArray<{ href: string; label: string }>;
+  /**
+   * Optional content in place under the done message (Plannotator's "Star the repo" card, `useStarAskDoneScreen`).
+   * With it, the done block moves to the top of the screen (480 px wide) to make room, and the screen scrolls. Omitted
+   * or null: the done screen is exactly as before.
+   */
+  footer?: ReactNode;
 }
 
-export function CompletionOverlay({ submitted, title, subtitle, agentLabel, links }: CompletionOverlayProps) {
+export function CompletionOverlay({ submitted, title, subtitle, agentLabel, links, footer }: CompletionOverlayProps) {
   const { state, enableAndStart } = useAutoClose(!!submitted);
 
   if (!submitted) return null;
@@ -48,10 +55,16 @@ export function CompletionOverlay({ submitted, title, subtitle, agentLabel, link
   const isApproved = submitted === 'approved';
   const isDone = submitted === 'done';
   const sentNothing = isDone || submitted === 'exited';
+  const hasFooter = footer !== undefined && footer !== null && footer !== false;
 
   return (
-    <div className="fixed inset-0 z-[100] bg-background flex items-center justify-center" data-completion-state={submitted}>
-      <div className="text-center space-y-6 max-w-md px-8">
+    <div
+      className={hasFooter
+        ? 'fixed inset-0 z-[100] bg-background flex items-start justify-center overflow-y-auto pt-10 pb-8 sm:pt-[72px] sm:pb-12'
+        : 'fixed inset-0 z-[100] bg-background flex items-center justify-center'}
+      data-completion-state={submitted}
+    >
+      <div className={hasFooter ? 'text-center space-y-6 w-full max-w-[480px] px-8' : 'text-center space-y-6 max-w-md px-8'}>
         <div
           className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center ${
             isApproved ? 'bg-success/20 text-success'
@@ -122,6 +135,7 @@ export function CompletionOverlay({ submitted, title, subtitle, agentLabel, link
             </>
           )}
         </div>
+        {hasFooter && footer}
       </div>
     </div>
   );

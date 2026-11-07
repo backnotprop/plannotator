@@ -412,6 +412,24 @@ const rawArgs = process.argv.slice(2);
     );
   }
 }
+// `plannotator system …`: System's drawing of a project (system-command.ts;
+// unreleased, HIDDEN_SUBCOMMANDS), for the agents that draw it and the launchd
+// job that keeps it current. Before the strict-annotate parse: it takes its own
+// flags and its own --help. Loaded only when asked for, as t3 is.
+{
+  const args = rawArgs;
+  if (args[0] === "system") {
+    const { runSystemCommand } = await import("./system-command");
+    process.exit(
+      await runSystemCommand(args.slice(1), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        dataDir: getPlannotatorDataDir(),
+        env: process.env,
+        self: inboxSelfCommand(),
+      }),
+    );
+  }
+}
 // `plannotator inbox call …`: the Inbox tool from a script (inbox-call-command.ts).
 // Here, like the card command: it takes its own flags, and JSON is not ours to scan.
 {
