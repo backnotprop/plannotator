@@ -19,12 +19,12 @@ import type { Revision, SystemModel } from '../format/types.ts';
 import type { GateResult } from '../gate/gate.ts';
 import { kindLabel } from '../draw/format.ts';
 import { Sheet } from '../draw/Sheet.tsx';
-import { hasSimple, WIN_HEAD } from '../layout/compose.ts';
+import { hasSimple } from '../layout/compose.ts';
 import type { SheetLayout } from '../layout/types.ts';
 import { layoutAtRest, lodAt, scopeLabel, scopePath, sheetOr } from './rest.ts';
 import { useSize, useText } from './text.ts';
 import {
-  CAM_MS, camAt, clamp, DIVE_MS, diveInk, doorOf, doorT, type DoorWindow, GLIDE_DECAY, LAND, lerp, paneH, reduced, restCam, spring, springStep, STEP_MS, SW_CALM, SW_EXIT, SW_LEAD,
+  CAM_MS, camAt, clamp, DIVE_MS, diveInk, diveReading, doorOf, doorT, type DoorWindow, GLIDE_DECAY, LAND, lerp, paneH, reduced, restCam, spring, springStep, STEP_MS, SW_CALM, SW_EXIT, SW_LEAD,
   toSheet, WHEEL_TAU, WHEEL_TAU_PINCH, wOf, xf, ZOOM_STEP, zoomAbout, fitRect, type Cam, type Rect, type SpringState, type Stage,
 } from './camera.ts';
 import { all, born, clearFlip, easeOut, FULL_LINES, FULL_WORDS, placesOf, startFlip, type Flip } from './flip.ts';
@@ -66,7 +66,7 @@ export type SystemViewProps = {
 
 /** A window being entered or left: the part, the sheet inside, the box its inside opens from, and how far (0 outside, 1 inside). */
 type Dive = { part: string; code: string; r: Rect; s: number; t: number };
-type DiveRun = Dive & { t0: number; S: SpringState; A: Cam; B: Cam; done: boolean; then?: () => void; onIn: () => void; onOut: () => void; restIn: () => Cam };
+type DiveRun = Dive & { t0: number; from: 0 | 1; S: SpringState; A: Cam; B: Cam; done: boolean; then?: () => void; onIn: () => void; onOut: () => void; restIn: () => Cam };
 type Door = DoorWindow & { id: string; code: string; r: Rect; s: number };
 
 
@@ -165,6 +165,15 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
   };
 
   // ---------------------------------------------------------------- windows and doors
+  /**
+   * Where a window's inside is drawn during a dive: over the box itself, at its
+   * width, from its top. The box at rest is a plain box (name, line, "N sheets
+   * inside"), not G's opened window with a WIN_HEAD plate over its inside, so
+   * the inside takes over from the box at the box's own place and size and
+   * unrolls down from its height; starting it WIN_HEAD lower drew it smaller
+   * than the box it replaced.
+   */
+  const insideOf = (b: Rect): Rect => ({ x: b.x, y: b.y, w: b.w, h: b.h });
   /** The window parts of a layout: the box, the scope it opens, the sheet inside and where its inside opens from. */
   const windowOf = (Lc: SheetLayout, id: string) => {
     const b = Lc.parts[id];
@@ -174,7 +183,7 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
     if (!c) return null;
     const C = restOf(c);
     const sc2 = b.w / C.w;
-    return { id, code: c, C, s: sc2, r: { x: b.x, y: b.y + WIN_HEAD, w: b.w, h: Math.max(0, b.h - WIN_HEAD) } };
+    return { id, code: c, C, s: sc2, r: insideOf(b) };
   };
   /** The window under a stage point, with how close its inside is to its own rest scale (1 = at the door). */
   const windowAt = (c: Cam, px: number, py: number, Lc = LRef.current): Door | null => {
@@ -227,7 +236,7 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
     for (const p of cands) {
       const PL = restOf(p);
       const b = PL.parts[part];
-      if (b?.cw) return { pcode: p, part, PL, r: { x: b.x, y: b.y + WIN_HEAD, w: b.w, h: Math.max(0, b.h - WIN_HEAD) }, s: b.w / restOf(c).w };
+      if (b?.cw) return { pcode: p, part, PL, r: insideOf(b), s: b.w / restOf(c).w };
     }
     return { pcode: cands[0], part, PL: cands[0] ? restOf(cands[0]) : null, r: null, s: 1 };
   };
@@ -291,7 +300,7 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
     const d = doorNow(camRef.current);
     const t0 = d && d.id === part ? doorT(d, r0Of(w)) : 0;
     const D: DiveRun = {
-      part, code: w.code, r: w.r, s: w.s, t: t0, t0, A: camRef.current, B, then, done: false, S: { x: 0, v: 0, to: 0 },
+      part, code: w.code, r: w.r, s: w.s, t: t0, t0, from: 0, A: camRef.current, B, then, done: false, S: { x: 0, v: 0, to: 0 },
       restIn: () => ({ ...B, k: B.k * w.s, cx: (B.cx - w.r.x) / w.s, cy: (B.cy - w.r.y) / w.s }),
       onIn: () => { landIn(part, w.code, w.r, w.s, from); if (D.then) setTimeout(D.then, 40); },
       onOut: () => { putDive(null); draw(false); },
@@ -328,7 +337,7 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
     near.current = null;
     // t = 1 is this sheet where it was (c2), t = 0 the sheet around at rest
     const D: DiveRun = {
-      part: P.part, code: c1, r, s: sc, t: 1, t0: 0, A: Bout, B: c2, then, done: false, S: { x: 1, v: 0, to: 1 },
+      part: P.part, code: c1, r, s: sc, t: 1, t0: 0, from: 1, A: Bout, B: c2, then, done: false, S: { x: 1, v: 0, to: 1 },
       restIn: () => c,
       onIn: () => landIn(P.part, c1, r, sc, P.pcode!), // turned back in
       onOut: () => { putDive(null); name(P.pcode!, `Out to ${scopeLabel(model, model.sheets[P.pcode!]!.scope)}`); draw(false); if (D.then) setTimeout(D.then, 40); },
@@ -658,6 +667,7 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
   // ---------------------------------------------------------------- the keyboard
   const [keyOpen, setKeyOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
+  const notesBtn = useRef<HTMLButtonElement>(null);
   const codes = model.byScope[scope] ?? [code];
   /** Keeps a part in view when the keyboard reaches it off the glass. */
   const keepInView = (id: string) => {
@@ -748,18 +758,22 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
   const shownSheet = model.sheets[shownCode];
   const shownCodes = model.byScope[shownSheet?.scope ?? scope] ?? [];
   const two = !!s && hasSimple(model, code);
-  const pct = cam ? Math.round(cam.k * (mini && t >= 0.5 ? mini.s : 1) * 100) : 100;
+  const run = dv as DiveRun | null;
+  const pct = !cam ? 100 : Math.round((run ? diveReading(cam.k, run.s, run.S.x, run.from, run.t0 >= 0.5) : cam.k * (mini && t >= 0.5 ? mini.s : 1)) * 100);
+  // the project's name leads the crumbs unless the drawing is named the same
+  // ("plannotator / Plannotator / ..." said one name twice)
+  const projectCrumb = project && project.trim().toLowerCase() !== scopeLabel(model, 'root').trim().toLowerCase() ? project : '';
 
   return (
     <div ref={root} className={'sys sys-view sys-' + layout} data-sheet={code} data-reading={two ? reading : 'full'} onKeyDown={onKeyDown}>
       <div className="sys-bar">
         <nav className="sys-crumbs" aria-label="Where this sheet is">
-          {project && <span className="sys-crumb">{project}</span>}
+          {projectCrumb && <span className="sys-crumb">{projectCrumb}</span>}
           {path.map(([id, label], i) => {
             const here = i === path.length - 1;
             return (
               <span key={id} className="sys-crumb-w">
-                {(project || i > 0) && <span className="sys-crumb-sep" aria-hidden="true">/</span>}
+                {(projectCrumb || i > 0) && <span className="sys-crumb-sep" aria-hidden="true">/</span>}
                 {here ? (
                   <span className="sys-crumb sys-here" aria-current="location">{label}</span>
                 ) : (
@@ -866,10 +880,13 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
             </button>
             <span className="sys-zsep" aria-hidden="true" />
             <button type="button" aria-expanded={keyOpen} onClick={() => { setKeyOpen((v) => !v); setNotesOpen(false); }} title="Symbols and keys">Key</button>
+            {!!L?.notes.length && (
+              <button ref={notesBtn} type="button" aria-expanded={notesOpen} onClick={() => { setNotesOpen((v) => !v); setKeyOpen(false); }} title={keys ? 'Every note of this sheet (N)' : 'Every note of this sheet'}>Notes</button>
+            )}
           </div>
         )}
         {keyOpen && <KeyCard notes={!!L?.notes.length} sheets={codes.length > 1} keys={keys} pane={layout === 'pane'} />}
-        {notesOpen && L && <NotesCard notes={L.notes} />}
+        {notesOpen && L && L.notes.length > 0 && <NotesCard notes={L.notes} onClose={() => { setNotesOpen(false); notesBtn.current?.focus({ preventScroll: true }); }} />}
         <div className="sys-sr" aria-live="polite">{said}</div>
       </div>
     </div>

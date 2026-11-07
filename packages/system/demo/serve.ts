@@ -5,6 +5,7 @@
 //   ?shot=thumb                       the card picture in a message card
 //   ?shot=view&sheet=C-001&reading=simple&layout=window|pane
 //   &mode=light|dark                  the theme mode (dark by default)
+//   &keys=off                         the single-key shortcuts off, as the Inbox passes them
 //
 // The drawing is read from disk here and handed to the page as files; the page
 // loads them with the browser entry's loadFiles. The sheets are served as they

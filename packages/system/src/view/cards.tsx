@@ -42,9 +42,15 @@ export function KeyCard({ notes, sheets, keys, pane }: { notes: boolean; sheets:
   );
 }
 
-export function NotesCard({ notes }: { notes: SheetLayout['notes'] }) {
+export function NotesCard({ notes, onClose }: { notes: SheetLayout['notes']; onClose: () => void }) {
   return (
     <div className="sys-card-pop sys-notescard" role="dialog" aria-label="Notes on this sheet">
+      <div className="sys-kc-h">
+        <span>Notes</span>
+        <button type="button" className="sys-card-x" aria-label="Close the notes" title="Close" onClick={onClose}>
+          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
+        </button>
+      </div>
       {notes.map((n) => (
         <Fragment key={n.l}>
           <div className="sys-note-row"><span className="sys-letter">{n.l}</span><span>{n.text}</span></div>

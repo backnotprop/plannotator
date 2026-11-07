@@ -43,6 +43,7 @@ function View({ model }: { model: SystemModel }) {
         project="plannotator"
         reading={reading}
         layout={layout}
+        keys={q.get('keys') !== 'off'}
         onNavigate={setSheet}
         onReading={setReading}
         onOpenFull={layout === 'pane' ? () => {} : undefined}

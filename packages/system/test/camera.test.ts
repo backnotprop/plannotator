@@ -10,7 +10,7 @@
  * once the inside has ink.
  */
 import { expect, test } from 'bun:test';
-import { camAt, CAM_MS, diveInk, DIVE_MS, doorOf, doorT, fitRect, PAD, springStep, STEP_MS, toSheet, wOf, zoomAbout, type Cam } from '../src/view/camera.ts';
+import { camAt, CAM_MS, diveInk, diveReading, DIVE_MS, doorOf, doorT, fitRect, LAND, PAD, springStep, STEP_MS, toSheet, wOf, zoomAbout, type Cam } from '../src/view/camera.ts';
 
 /** A move as the view launches it: from rest at 0 toward 1, kicked by the input (half the rate), stepped at 60 Hz. */
 function run(ms90: number, frames: number, kick = true) {
@@ -106,4 +106,38 @@ test("a window's door lowers the sheet around before it crosses, and the dive hi
   }
   expect(diveInk(0)).toEqual({ around: 1, box: 1, ink: 0, paper: 0, unroll: 0 });
   expect(diveInk(1)).toEqual({ around: 0, box: 0, ink: 1, paper: 1, unroll: 1 });
+});
+
+test('the zoom readout of a dive or a climb never jumps: it reads the sheet around at one landing, the inside at the other, and goes one way between', () => {
+  const st = { w: 1440, h: 860, layout: 'window' as const };
+  // a box 300 wide on a sheet at rest, opening a sheet 2000 wide: the inside is drawn at s = 300 / 2000
+  const A = fitRect({ x: 0, y: 0, w: 1800, h: 1000 }, st);
+  const r = { x: 600, y: 400, w: 300, h: 140 };
+  const s = r.w / 2000;
+  const B = fitRect({ x: r.x, y: r.y, w: r.w, h: 1100 * s }, st, 1 / s);
+  for (const from of [0, 1] as const) {
+    const at = (x: number) => diveReading(camAt(A, B, x).k, s, x, from);
+    // a dive leaves at the sheet around's scale and lands (re-roots) on the inside's own;
+    // a climb leaves at the inside's scale and lands out on the sheet around's
+    if (from === 0) {
+      expect(at(0)).toBeCloseTo(A.k, 9);
+      expect(at(1 - LAND)).toBeCloseTo(camAt(A, B, 1 - LAND).k * s, 9);
+    } else {
+      expect(at(1)).toBeCloseTo(B.k * s, 9);
+      expect(at(LAND)).toBeCloseTo(camAt(A, B, LAND).k, 9);
+    }
+    let prev = at(from === 0 ? 0 : 1), dir = 0;
+    for (let i = 1; i <= 100; i++) {
+      const x = from === 0 ? (i / 100) * (1 - LAND) : 1 - (i / 100) * (1 - LAND);
+      const v = at(x);
+      // no step bigger than a frame's worth (a jump by s would be a factor of about 7)
+      expect(Math.abs(Math.log(v / prev))).toBeLessThan(0.05);
+      const d = Math.sign(v - prev);
+      if (d && dir) expect(d).toBe(dir);
+      if (d) dir = d;
+      prev = v;
+    }
+  }
+  // a wheel already past half way into the window has named the inside: the readout stays on it
+  expect(diveReading(2, s, 0.3, 0, true)).toBeCloseTo(2 * s, 9);
 });

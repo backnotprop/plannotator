@@ -179,13 +179,22 @@ test.skipIf(!hasDom)('the crumbs name the project, the drawing, then the part th
   const model = models.plannotator!;
   const deep = Object.keys(model.sheets).find((c) => model.sheets[c]!.scope !== 'root')!;
   const scope = model.sheets[deep]!.scope;
-  const el = await render(<R.SystemView model={model} sheet={deep} project="plannotator" layout="window" onNavigate={noop} />);
+  const el = await render(<R.SystemView model={model} sheet={deep} project="acme" layout="window" onNavigate={noop} />);
   const crumbs = [...el.querySelectorAll('.sys-crumb')].map((c) => c.textContent);
-  expect(crumbs[0]).toBe('plannotator');
+  expect(crumbs[0]).toBe('acme');
   expect(crumbs[1]).toBe(model.name);
   expect(crumbs.at(-1)).toBe(model.parts[model.owner[scope]!]!.name);
   expect(el.querySelector('.sys-crumb.sys-here')!.textContent).toBe(crumbs.at(-1)!);
   expect(el.querySelector('.sys-code')!.textContent).toBe(deep);
+});
+
+test.skipIf(!hasDom)('a project named like the drawing is not said twice: "plannotator / Plannotator" is one crumb', async () => {
+  const model = models.plannotator!;
+  expect(model.name.toLowerCase()).toBe('plannotator');
+  const el = await render(<R.SystemView model={model} sheet="L-201" project="plannotator" layout="window" onNavigate={noop} />);
+  const crumbs = [...el.querySelectorAll('.sys-crumb')].map((c) => c.textContent);
+  expect(crumbs).toEqual([model.name, model.parts[model.owner[model.sheets['L-201']!.scope]!]!.name]);
+  expect(el.querySelectorAll('.sys-crumb-sep').length).toBe(1);
 });
 
 test.skipIf(!hasDom)('a sheet the drawing does not have falls back to the landing sheet', async () => {
@@ -319,6 +328,53 @@ test.skipIf(!hasDom)('with keys off, only Tab, the arrows, Enter and Esc act; th
   expect(el.querySelector('.sys-zoom .sys-pct')!.textContent).toBe(pct);
   expect(el.querySelector('.sys-view')!.getAttribute('data-sheet')).toBe('C-001');
   expect(el.querySelector('.sys-notescard')).toBeNull();
+});
+
+test.skipIf(!hasDom)('with keys off, the Notes button beside Key opens the notes card, which has a title and a close; Key and Notes show one card at a time', async () => {
+  const model = models.plannotator!;
+  reduce();
+  const code = Object.keys(model.sheets).find((c) => R.restLayout(model, c, {}).notes.length > 0)!;
+  expect(code).toBeDefined();
+  const notes = R.restLayout(model, code, {}).notes;
+  const el = await render(<R.SystemView model={model} sheet={code} layout="window" keys={false} onNavigate={noop} />);
+  const buttons = () => [...el.querySelectorAll<HTMLButtonElement>('.sys-zoom button[aria-expanded]')];
+  expect(buttons().map((b) => b.textContent)).toEqual(['Key', 'Notes']);
+  const [key, btn] = buttons() as [HTMLButtonElement, HTMLButtonElement];
+  const card = () => el.querySelector('[role="dialog"][aria-label="Notes on this sheet"]');
+  act(() => btn.click());
+  expect(btn.getAttribute('aria-expanded')).toBe('true');
+  expect(card()!.querySelector('.sys-kc-h')!.textContent).toBe('Notes');
+  expect([...card()!.querySelectorAll('.sys-note-row .sys-letter')].map((x) => x.textContent)).toEqual(notes.map((n) => n.l));
+  // the button toggles it shut, as Key toggles its card
+  act(() => btn.click());
+  expect(card()).toBeNull();
+  expect(btn.getAttribute('aria-expanded')).toBe('false');
+  // one card at a time: Key closes the notes, Notes closes the Key
+  act(() => btn.click());
+  act(() => key.click());
+  expect(card()).toBeNull();
+  expect(el.querySelector('[aria-label="Symbols and keys"]')).not.toBeNull();
+  act(() => btn.click());
+  expect(el.querySelector('[aria-label="Symbols and keys"]')).toBeNull();
+  expect(key.getAttribute('aria-expanded')).toBe('false');
+  // the card's own close shuts it and gives the focus back to the button
+  const x = card()!.querySelector<HTMLButtonElement>('button[aria-label="Close the notes"]')!;
+  expect(x).not.toBeNull();
+  act(() => x.click());
+  expect(card()).toBeNull();
+  expect(document.activeElement).toBe(btn);
+  // Esc with the focus inside the card still closes it
+  act(() => btn.click());
+  press(card()!.querySelector('button')!, 'Escape');
+  expect(card()).toBeNull();
+});
+
+test.skipIf(!hasDom)('a sheet with no notes has no Notes button', async () => {
+  const model = models.plannotator!;
+  const code = Object.keys(model.sheets).find((c) => R.restLayout(model, c, {}).notes.length === 0);
+  if (!code) return;
+  const el = await render(<R.SystemView model={model} sheet={code} layout="window" onNavigate={noop} />);
+  expect([...el.querySelectorAll('.sys-zoom button[aria-expanded]')].map((b) => b.textContent)).toEqual(['Key']);
 });
 
 test.skipIf(!hasDom)('a part with sheets inside is a stop for Tab, says so, and Enter on it dives in', async () => {

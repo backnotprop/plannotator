@@ -163,6 +163,21 @@ export const doorT = (d: DoorWindow, r0: number) => {
   const t = 0.1 + (0.5 * (d.ratio - d.lo)) / (d.hi - d.lo);
   return clamp(d.ratio < d.lo ? Math.min(t, 0.1 * clamp((d.ratio - r0) / (d.lo - r0), 0, 1)) : t, 0, 1);
 };
+/**
+ * The zoom readout while a dive or a climb moves through a window, at the
+ * camera's way x (0 the sheet around at rest, 1 the inside at rest). k is the
+ * camera's scale in the sheet around, s the inside's scale in it. The readout
+ * passes from the sheet around's scale to the inside's in log space, as the
+ * drawing passes from the one sheet to the other, and reaches the far one's
+ * true scale where the move lands there (re-roots, at LAND from that end): it
+ * never jumps by s (a step at half way read 160% then 39%). It starts moving
+ * from the end the move left (`from`, 0 a dive, 1 a climb), so the number only
+ * goes one way until the landing, then settles with the camera. A move that
+ * starts with the inside already named (a wheel past half way into the
+ * window) reads the inside's scale throughout (`inside`).
+ */
+export const diveReading = (k: number, s: number, x: number, from: 0 | 1, inside = false) =>
+  k * Math.pow(s, inside ? 1 : clamp(from === 1 ? (x - LAND) / (1 - LAND) : x / (1 - LAND), 0, 1));
 /** What a dive at t draws: the sheet around, the entered box's own words, the inside's ink and paper, and how far it has unrolled. */
 export const diveInk = (t: number) => ({
   around: 1 - smooth(0.1, 0.6, t),
