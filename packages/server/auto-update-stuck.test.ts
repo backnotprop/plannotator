@@ -205,6 +205,8 @@ describe.skipIf(!posix)("the detached wrapper names its process group and machin
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         PATH: process.env.PATH ?? "/usr/bin:/bin",
+        // The preload's scratch home: with no HOME, os.homedir() in the child is the account's.
+        HOME: process.env.HOME!,
         TMPDIR: dataDir,
         PLANNOTATOR_UPDATE_DETACHED: "1",
         PLANNOTATOR_UPDATE_VERSION: "v0.28.32",
