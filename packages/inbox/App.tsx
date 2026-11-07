@@ -128,7 +128,6 @@ import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './r
 import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
-import { GuidePane } from './components/GuidePane';
 import { ReviewPane } from './components/ReviewPane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
@@ -2501,9 +2500,8 @@ function Inbox() {
       // (approval "inbox-thread-artifacts": one more rung before Escape closes the thread).
       // A thread in full screen leaves it before it closes (the sidebar and the list come back, the thread stays).
       const now = routeRef.current;
-      // A review a board opened over itself (the guide pane) closes first, back to the board; then the board, back to
-      // the thread. The full-window review holds the board itself (over it, or as its corner card): Escape closes the
-      // board and the review stays.
+      // The full-window review holds the board itself (over it, or as its corner card): Escape closes the board and the
+      // review stays. A review not drawn yet (its thread still reading) closes first, back to the board.
       if (now.shape && now.guide && !reviewPaneOpenRef.current) {
         closeTo({ ...now, guide: null, guideAt: null });
         return;
@@ -5347,8 +5345,8 @@ function Inbox() {
   const shapeLayerId = boardsOn && route.shape && (route.page === 'shapes' || (route.page === 'inbox' && !!route.thread)) ? route.shape : null;
   const guideMessage =
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
-  // A review, while Code review is on: the full-window review (ReviewPane).
-  const reviewPaneOpen = codeReviewOn && !!guideMessage?.guide?.review;
+  // Every guide or review opens the full-window review (ReviewPane, approval "inbox-one-review-screen").
+  const reviewPaneOpen = !!guideMessage;
   reviewPaneOpenRef.current = reviewPaneOpen;
   // The review is at the place a board's link named: the address lets it go, so a reload opens it at the top.
   const landGuide = () => {
@@ -6353,8 +6351,7 @@ function Inbox() {
               id={shapeLayerId}
               thread={route.page === 'inbox' && thread && thread.thread_id === route.thread ? thread : null}
               onClose={() => close({ ...routeRef.current, shape: null })}
-              // Its review opens at the place a link names. With Code review on the code shows and the board is its
-              // corner card (ReviewPane); otherwise the guide pane opens over the board, and Back or Esc comes back to it.
+              // Its review opens at the place a link names: the full-window review (ReviewPane), the board its corner card.
               onOpenReview={(messageId, at) => {
                 setBoardLink(messageId);
                 boardPlaces.leave(shapeLayerId);
@@ -6763,53 +6760,48 @@ function Inbox() {
       <div className="ib-sr" aria-live="polite" data-inbox-live="">
         {said}
       </div>
-      {guideMessage &&
-        thread &&
-        // A review, while Code review is on: the full-window review (its own header's verdict). Otherwise the guide pane, as always.
-        (reviewPaneOpen ? (
-          <ReviewPane
-            key={guideMessage.id}
-            thread={thread}
-            message={guideMessage}
-            guest={tailnetGuest(settings)}
-            // From the route as it is now (a verdict lands after the person moved on): only while it still shows this review.
-            onBack={() => {
-              const now = routeRef.current;
-              if (now.guide === guideMessage.id) close({ ...now, guide: null, shape: null });
-            }}
-            onClose={() => close({ ...route, thread: null, guide: null, shape: null })}
-            onSent={afterWrite}
-            onPosted={pullsReloadRows}
-            onAsk={ask.askWith}
-            shapeHost={shapeHost}
-            shapes={shapes}
-            board={shapeLayerId}
-            onBoard={(id) => {
-              const now = routeRef.current;
-              if (now.guide !== guideMessage.id) return;
-              if (id) go({ ...now, shape: id });
-              else close({ ...now, shape: null });
-            }}
-            boardShrunk={boardLink === guideMessage.id}
-            boardPlace={shapeLayerId ? boardPlaces.placeOf(shapeLayerId) : null}
-            onBoardNavigate={(place) => {
-              if (shapeLayerId) boardPlaces.moved(shapeLayerId, place);
-            }}
-            at={route.guideAt ?? null}
-            onLanded={landGuide}
-          />
-        ) : (
-          <GuidePane
-            thread={thread}
-            message={guideMessage}
-            guest={tailnetGuest(settings)}
-            codeReview={settings?.code_review?.on === true}
-            at={route.guideAt ?? null}
-            onLanded={landGuide}
-            onBack={() => close({ ...route, guide: null })}
-            onClose={() => close({ ...route, thread: null, guide: null })}
-          />
-        ))}
+      {guideMessage && thread && (
+        // Every guide or review an agent sends opens the full-window review (approval "inbox-one-review-screen");
+        // what Code review brings shows only while it is on.
+        <ReviewPane
+          key={guideMessage.id}
+          thread={thread}
+          message={guideMessage}
+          guest={tailnetGuest(settings)}
+          codeReview={codeReviewOn}
+          // From the route as it is now (a verdict lands after the person moved on): only while it still shows this review.
+          onBack={() => {
+            const now = routeRef.current;
+            if (now.guide === guideMessage.id) close({ ...now, guide: null, shape: null });
+          }}
+          onClose={() => close({ ...route, thread: null, guide: null, shape: null })}
+          onSent={afterWrite}
+          onPosted={pullsReloadRows}
+          onAsk={ask.askWith}
+          // No verdict: back to the thread, its reply box open (the comments ride its Send).
+          onWriteReply={() => {
+            const now = routeRef.current;
+            if (now.guide === guideMessage.id) close({ ...now, guide: null, shape: null });
+            setReplyFor(thread.thread_id);
+          }}
+          shapeHost={shapeHost}
+          shapes={shapes}
+          board={shapeLayerId}
+          onBoard={(id) => {
+            const now = routeRef.current;
+            if (now.guide !== guideMessage.id) return;
+            if (id) go({ ...now, shape: id });
+            else close({ ...now, shape: null });
+          }}
+          boardShrunk={boardLink === guideMessage.id}
+          boardPlace={shapeLayerId ? boardPlaces.placeOf(shapeLayerId) : null}
+          onBoardNavigate={(place) => {
+            if (shapeLayerId) boardPlaces.moved(shapeLayerId, place);
+          }}
+          at={route.guideAt ?? null}
+          onLanded={landGuide}
+        />
+      )}
     </div>
     </InitiativeTagsContext.Provider>
   );
