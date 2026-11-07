@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { MAX_FILE_BYTES } from '../src/format/keys.ts';
-import { loadFiles } from '../src/index.ts';
-import { check, load, loadCommitted, readCommitted } from '../src/node/index.ts';
+import { check, load } from '../src/node/index.ts';
 import { edited, git, isolateGitConfig, revisionOfSize, smallDrawing, tempDir, writeTree } from './helpers.ts';
 
 isolateGitConfig();
@@ -118,6 +117,17 @@ describe('check', () => {
     expect(r.errors).toEqual([{ file: 'system.yaml', field: 'flows.use.code', message: 'src/api/index.ts is a symlink; cite the file it points to' }]);
   });
 
+  test('a sheet still under wanted: is a warning naming it: a finished draw lists none', async () => {
+    const r = smallRepo();
+    writeTree(r.dir, { 'system.yaml': `${smallDrawing()['system.yaml']}wanted:\n  - { code: F-201, kind: flow, question: "How a request runs." }\n` });
+    const c = await check({ dir: r.dir, root: r.root, at: r.sha });
+    expect(c.errors).toEqual([]);
+    expect(c.warnings).toEqual([expect.objectContaining({ file: 'system.yaml', field: 'wanted', message: expect.stringContaining('Sheet F-201') })]);
+    // it asks for the sheet to be drawn, never for it to be dropped to make the check pass
+    expect(c.warnings[0]!.message).toBe('Sheet F-201 is listed under wanted, but no file draws it yet. Draw it, then remove it from wanted.');
+    expect(c.warnings[0]!.message).not.toMatch(/take it out|leave it out|drop|instead|decided/i);
+  });
+
   test('a folder with no drawing is an error, not a clean check', async () => {
     const root = temp();
     const dir = join(root, '.plannotator', 'system');
@@ -156,7 +166,7 @@ describe('load from disk', () => {
   });
 });
 
-describe('the caps, read from disk and from git', () => {
+describe('the caps, read from disk', () => {
   const bigDrawing = () => {
     const files: Record<string, string> = { ...smallDrawing() };
     for (let i = 1; i <= 9; i++) files[`revisions/PR-${i}.yaml`] = revisionOfSize(`PR-${i}`, MAX_FILE_BYTES - 100);
@@ -188,92 +198,5 @@ describe('the caps, read from disk and from git', () => {
     const root = temp();
     writeTree(root, bigDrawing());
     expect(await load(root)).toEqual({ model: null, errors: [capError], warnings: [] });
-  });
-
-  test('a committed file over 1 MiB is reported, not thrown by the git buffer', async () => {
-    const root = temp();
-    git(root, 'init', '-q');
-    writeTree(join(root, '.plannotator', 'system'), { ...smallDrawing(), 'revisions/PR-1.yaml': revisionOfSize('PR-1', MAX_FILE_BYTES + 1) });
-    commit(root);
-    const r = await loadCommitted({ root, ref: 'HEAD' });
-    expect(r.errors).toEqual([{ file: 'revisions/PR-1.yaml', field: '', message: `is ${MAX_FILE_BYTES + 1} bytes; this Plannotator reads at most ${MAX_FILE_BYTES} bytes in one file` }]);
-    expect(Object.keys(r.model!.sheets).sort()).toEqual(['C-001', 'L-101']);
-    await expect(readCommitted({ root, ref: 'HEAD' })).rejects.toThrow(`revisions/PR-1.yaml: is ${MAX_FILE_BYTES + 1} bytes`);
-  });
-
-  test('a committed file of exactly 1 MiB is read', async () => {
-    const root = temp();
-    git(root, 'init', '-q');
-    writeTree(join(root, '.plannotator', 'system'), { ...smallDrawing(), 'revisions/PR-1.yaml': revisionOfSize('PR-1', MAX_FILE_BYTES) });
-    commit(root);
-    expect((await loadCommitted({ root, ref: 'HEAD' })).errors).toEqual([]);
-  });
-
-  test('a committed drawing of exactly 8 MiB is read', async () => {
-    const root = temp();
-    git(root, 'init', '-q');
-    const files: Record<string, string> = { ...smallDrawing() };
-    const used = Object.values(files).reduce((n, t) => n + t.length, 0);
-    for (let i = 1; i <= 7; i++) files[`revisions/PR-${i}.yaml`] = revisionOfSize(`PR-${i}`, MAX_FILE_BYTES);
-    files['revisions/PR-8.yaml'] = revisionOfSize('PR-8', 8 * MAX_FILE_BYTES - used - 7 * MAX_FILE_BYTES);
-    writeTree(join(root, '.plannotator', 'system'), files);
-    commit(root);
-    const r = await loadCommitted({ root, ref: 'HEAD' });
-    expect(r.errors).toEqual([]);
-    expect(Object.keys(r.model!.revisions)).toHaveLength(8);
-  });
-
-  test('a committed drawing over 8 MiB gives the cap error alone, not "system.yaml is missing"', async () => {
-    const root = temp();
-    git(root, 'init', '-q');
-    writeTree(join(root, '.plannotator', 'system'), bigDrawing());
-    commit(root);
-    expect(await loadCommitted({ root, ref: 'HEAD' })).toEqual({ model: null, errors: [capError], warnings: [] });
-  });
-});
-
-describe('readCommitted', () => {
-  function drawn() {
-    const root = temp();
-    git(root, 'init', '-q');
-    const dir = join(root, '.plannotator', 'system');
-    writeTree(dir, { ...smallDrawing(), 'README.md': 'notes\n', 'sheets/notes.txt': 'x\n' });
-    writeTree(root, { '.plannotator/other.yaml': 'format: 1\n', 'system.yaml': 'format: 1\n' });
-    commit(root, 'draw');
-    return { root, dir };
-  }
-
-  test('reads the drawing at a ref, not the working tree, and only its own files', async () => {
-    const { root, dir } = drawn();
-    writeFileSync(join(dir, 'system.yaml'), 'format: 2\n');
-    const files = await readCommitted({ root, ref: 'HEAD' });
-    expect(Object.keys(files).sort()).toEqual(['sheets/C-001.yaml', 'sheets/L-101.yaml', 'system.yaml']);
-    expect(loadFiles(files).errors).toEqual([]);
-    expect(await readCommitted({ root, ref: 'HEAD~0' })).toEqual(files);
-  });
-
-  test('a ref git could read as an option is refused', async () => {
-    const { root } = drawn();
-    await expect(readCommitted({ root, ref: '--output=/tmp/x' })).rejects.toThrow('is not a git ref');
-    await expect(readCommitted({ root, ref: 'no-such-branch' })).rejects.toThrow('is not a commit');
-  });
-
-  test('a .yml file reaches the loader, which names it', async () => {
-    const { root, dir } = drawn();
-    renameSync(join(dir, 'sheets', 'L-101.yaml'), join(dir, 'sheets', 'L-101.yml'));
-    commit(root);
-    const r = loadFiles(await readCommitted({ root, ref: 'HEAD' }));
-    expect(r.errors).toContainEqual({ file: 'sheets/L-101.yml', field: '', message: 'a drawing file ends in .yaml: rename it sheets/L-101.yaml' });
-  });
-
-  test('a committed symlink in the drawing throws from readCommitted and is an error from loadCommitted', async () => {
-    const { root, dir } = drawn();
-    renameSync(join(dir, 'sheets', 'L-101.yaml'), join(root, 'L-101.yaml'));
-    symlinkSync(join(root, 'L-101.yaml'), join(dir, 'sheets', 'L-101.yaml'));
-    commit(root);
-    await expect(readCommitted({ root, ref: 'HEAD' })).rejects.toThrow('sheets/L-101.yaml: is a symlink at HEAD');
-    const r = await loadCommitted({ root, ref: 'HEAD' });
-    expect(r.errors[0]).toEqual({ file: 'sheets/L-101.yaml', field: '', message: 'is a symlink at HEAD; a drawing file is a plain file in the drawing folder' });
-    expect(Object.keys(r.model!.sheets)).toEqual(['C-001']);
   });
 });

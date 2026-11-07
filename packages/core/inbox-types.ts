@@ -1000,6 +1000,14 @@ export interface InboxLaunchRecord {
   error?: InboxLaunchError | null;
   /** The ⋯ menu's Delete removed the session and its files; the thread stays, with no run line. */
   deleted_at?: string;
+  /** Started from a linked machine's window (remote launch): which one. Where the click came from, never a credential. Absent: this computer. */
+  from?: InboxLaunchFrom;
+}
+
+/** The linked machine a launch was started from: its Inbox id (`ibx_…`) and its name as this Inbox knows it. */
+export interface InboxLaunchFrom {
+  machine: string;
+  name: string;
 }
 
 /** The run line's state (`packages/core/inbox-run-line.ts`). Absent: no line (the agent is resting). */
@@ -1735,6 +1743,8 @@ export interface InboxThread {
    * the owner's direction, "a teammate's PR shows its diff with no verdict". Absent otherwise.
    */
   pull_theirs?: true;
+  /** A New review on local changes started this thread: its first message is the box's words, not the person's own. */
+  review_started?: true;
   /**
    * The window's read only, with Code review on: the pull requests the person handed to this thread (their list
    * keys). Its review can be posted to one of them on GitHub/GitLab (`POST /api/inbox/pulls/review`). Absent otherwise.

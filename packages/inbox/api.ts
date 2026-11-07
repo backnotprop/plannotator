@@ -57,7 +57,7 @@ import { learnDebugLog, resumeDebugLog } from './debugLog';
 import type { RecipientConnection } from './deliveryLine';
 import { parseRestartAgents } from './restartAgents';
 import type { PatchBlobIds } from '@plannotator/core/diff-files';
-import type { InboxFileContents, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotator/core/inbox-types';
+import type { InboxFileContents, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullsAnswer, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotator/core/inbox-types';
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchSort, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
   InboxAgentId,
@@ -1106,8 +1106,12 @@ export interface StartThreadInput {
   thread_name?: string;
   /** `thread_name` is compose's suggestion the person left as it was: dropped when it cannot be used, and the agent may rename it. */
   thread_name_auto?: true;
+  /** With `thread_name_auto`, from New review: a suggestion another open thread has gets " (2)", " (3)"… instead of being dropped. */
+  thread_name_numbered?: true;
   /** Compose's Board chip was on: the agent is asked to track the work on the Board (approval "inbox-compose-board-chip"). */
   board_request?: true;
+  /** New review on local changes: what it is of, so its row shows "Curating…" before a review arrives. */
+  review?: { kind: 'local'; changes: InboxReviewChanges; branch: string | null; base: string | null; ask: 'guide' | 'custom' };
   /** Asked from Settings -> Decision data: the agent also receives how to answer it. */
   decision_ask?: true;
 }
@@ -1611,11 +1615,20 @@ export const inboxApi = {
     const query = [refresh ? 'refresh=1' : '', others ? 'others=1' : ''].filter(Boolean).join('&');
     return get<InboxPullsAnswer>(inboxUrl(`/pulls${query ? `?${query}` : ''}`), signal);
   },
+  /** The Reviews rows (Code review on only). `others`: the Others view is open, as `pulls` asks. */
+  reviews: (options: { others?: boolean } = {}, signal?: AbortSignal) => {
+    const query = options.others ? 'others=1' : '';
+    return get<InboxReviewsAnswer>(inboxUrl(`/reviews${query ? `?${query}` : ''}`), signal);
+  },
+  /** The rows again from what the forges last answered, with no forge read; `cold`: nothing read since the Inbox started. */
+  reviewsCached: (signal?: AbortSignal) => get<InboxReviewsAnswer | { cold: true }>(inboxUrl('/reviews?cached=1'), signal),
   /** A PR author's profile picture, served by the Inbox from its own origin (only an author the last list returned). */
   pullAvatarUrl: (host: string, login: string) => inboxUrl('/pulls/avatar', `host=${encodeURIComponent(host)}&login=${encodeURIComponent(login)}`),
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
   pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>
     get<InboxPullDiffAnswer>(inboxUrl(`/pulls/diff?key=${encodeURIComponent(key)}&scope=${scope}`), signal),
+  /** New review's change summary for a project's local changes. */
+  reviewChanges: (project: string, changes: InboxReviewChanges, signal?: AbortSignal) => get<InboxReviewChangesAnswer>(inboxUrl(`/reviews/changes?project=${encodeURIComponent(project)}&changes=${changes}`), signal),
   /** One changed file's whole text at both ends of that diff, for its expand arrows, while it is the blobs (`old`, `new`) the patch on screen names. */
   pullFile: (key: string, scope: InboxPullDiffScope, path: string, ids: PatchBlobIds, signal?: AbortSignal) =>
     get<InboxFileContents>(inboxUrl(`/pulls/file?key=${encodeURIComponent(key)}&scope=${scope}&path=${encodeURIComponent(path)}&old=${ids.oldId}&new=${ids.newId}`), signal),

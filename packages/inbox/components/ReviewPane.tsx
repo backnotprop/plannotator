@@ -100,6 +100,8 @@ export interface ReviewPaneProps {
   onClose: () => void;
   /** The verdict went: the thread reads again (the card shows the outcome). */
   onSent: () => void | Promise<void>;
+  /** A review went to the PR on the forge: Reviews reads its rows again. */
+  onPosted?: () => void;
   /** Plain Ask on selected lines: the Inbox's Ask window opens with these words in its box. Absent: no Ask. */
   onAsk?: (words: string) => void;
   /**
@@ -118,7 +120,7 @@ const NO_ANNOTATIONS: never[] = [];
 
 type RailMode = 'walkthrough' | 'files';
 
-export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onAsk, at = null, onLanded }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onPosted, onAsk, at = null, onLanded }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = state;
   // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
@@ -696,6 +698,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
             onPosted={(result) => {
               setMoved(null);
               setPosted({ label: result.label, url: result.url, action: result.action });
+              onPosted?.();
             }}
             onMoved={() => {
               setMoved('reading');
