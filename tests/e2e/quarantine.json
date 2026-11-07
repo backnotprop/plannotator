@@ -111,13 +111,35 @@
     },
     {
       "spec": "inbox-code-review.spec.ts",
-      "title": "the top bar holds what the rail held: chapters, the count, files, Overview, Split | Unified, by mouse and by keyboard",
-      "why": "After Enter on the third chapter in the jump menu, the top bar still reads \"1 of 3\" where \"3 of 3\" is expected (line 735, `expect(await jump.textContent()).toBe(place)`).",
+      "title": "the top bar holds what the rail held: chapters, the count, files, Overview, and the diff controls, by mouse and by keyboard",
+      "why": "After Enter on the third chapter in the jump menu, the top bar still reads \"1 of 3\" where \"3 of 3\" is expected (line 698, `expect(await jump.textContent()).toBe(place)`).",
       "firstSeen": "2026-11-05",
       "evidence": [
         42119502727,
         42122455103,
         42133516139
+      ]
+    },
+    {
+      "spec": "inbox-review-jumps.spec.ts",
+      "title": "a jump to a file nearby lands exactly",
+      "why": "After the first jump, to file 100 from the changed-files menu, the file settles 83 px above the top of the reader instead of 16 px below it (line 228, `expect(await settledPlace(page, body, fixture.paths[100])).toBe(PLACE)`: -83, expected 16).",
+      "firstSeen": "2026-11-06",
+      "evidence": [
+        42255709255,
+        42272056744,
+        42307730886
+      ]
+    },
+    {
+      "spec": "inbox-guides.spec.ts",
+      "title": "a thread's guided review with Code review off: arrows open a long file in place, the page scrolls with no box limit, the file header sticks, and a comment on an opened line saves",
+      "why": "The middle scroll check misses by a few hundred px (line 689, `expect(await scrollTop()).toBe(middle)`, e.g. 10932 vs 10512), and the runner was then killed (exit 137) on one run. Failed on three unrelated PRs (#2721 shape kit contrast, #2842 Shape run player, #2847 checklist line) that do not touch guided review.",
+      "firstSeen": "2026-11-07",
+      "evidence": [
+        42346233742,
+        42347213074,
+        42348560192
       ]
     }
   ]

@@ -327,7 +327,7 @@ test('the review card, the full-window review with a comment and a Viewed tick, 
   await expect(card).toBeVisible();
   await expect(card).toHaveAttribute('data-review-outcome', 'waiting');
   await expect(card).toContainText('Waiting on you');
-  await expect(card).toContainText('Retry only what Stripe calls retryable');
+  await expect(card.locator('.ib-rvc-meta')).toHaveText('4 files +27 -5 · 3 chapters');
   await card.scrollIntoViewIfNeeded();
   await shot(page, '3-review-card');
 
@@ -479,7 +479,7 @@ test('a phone at 390 px: the switch, the "/" list, the card, the review with a c
     const retry = pane.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
     const added = retry.locator('[data-line-type="change-addition"][data-column-number="12"]');
     await expect(added).toBeVisible({ timeout: 30_000 });
-    await added.scrollIntoViewIfNeeded();
+    // click() scrolls and retries if the diff redraws the line; a separate scroll can catch it detached.
     await added.click();
     const composer = page.getByPlaceholder('Leave feedback...');
     await expect(composer).toBeVisible();
@@ -537,8 +537,8 @@ async function expectBarFits(page: Page): Promise<void> {
 }
 
 /** The tooltip showing now does not sit on the verdict's buttons. */
-async function expectTipClearOfDecision(page: Page): Promise<void> {
-  const tip = page.getByText('Unified: old and new in one column. Also code review.');
+async function expectTipClearOfDecision(page: Page, words = 'Split view. Click for Unified'): Promise<void> {
+  const tip = page.getByText(words);
   await expect(tip).toBeVisible();
   const box = (await tip.boundingBox())!;
   const decide = (await page.locator('[data-review-message] [data-review-decision]').boundingBox())!;
@@ -553,7 +553,7 @@ async function expectOverviewWhole(page: Page): Promise<void> {
   expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 }
 
-test('the top bar holds what the rail held: chapters, the count, files, Overview, Split | Unified, by mouse and by keyboard', async () => {
+test('the top bar holds what the rail held: chapters, the count, files, Overview, and the diff controls, by mouse and by keyboard', async () => {
   const { page, claude } = world;
   const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'top-bar', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
   await page.setViewportSize({ width: 1440, height: 700 });
@@ -575,20 +575,17 @@ test('the top bar holds what the rail held: chapters, the count, files, Overview
   await pane.locator('[data-review-title]').hover();
   await expect(page.locator('[data-review-source]')).toBeVisible();
   await page.mouse.move(700, 500);
-  // Split | Unified is a tab above each chapter's card, as marks; not in the bar while one is in view.
-  await expect(bar.locator('[data-diff-style-switch]')).toHaveCount(0);
-  const tabs = pane.locator('[data-guide-section-tab] [data-diff-style-switch]');
-  // Three chapters and the card of files no chapter placed.
-  await expect(tabs).toHaveCount(4);
-  const tab = tabs.first();
-  await expect(tab).toBeVisible();
-  await expect(tab).toHaveText('');
-  await expect(tab.getByRole('radio', { name: 'Unified' })).toBeAttached();
-  // Words cut from the screen stay in a tooltip: the arrow says Thread, a mark says what it does.
+  // The diff controls are the bar's, after the title (approval "diff-controls-headers"); no chapter has a tab.
+  await expect(pane.locator('[data-guide-section-tab]')).toHaveCount(0);
+  const controls = bar.locator('[data-diff-controls]');
+  const toggle = controls.locator('[data-diff-layout-toggle]');
+  await expect(toggle).toHaveAttribute('data-diff-layout-toggle', 'split');
+  expect(await bar.evaluate((head) => !!(head.querySelector('[data-review-title]')!.compareDocumentPosition(head.querySelector('[data-diff-controls]')!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
+  // Words cut from the screen stay in a tooltip: the arrow says Thread, the mark says what it is and does.
   await pane.locator('.ib-back').hover();
   await expect(page.getByText('Thread', { exact: true })).toBeVisible();
-  await tab.locator('[data-diff-style="unified"]').hover();
-  await expect(page.getByText('Unified: old and new in one column. Also code review.')).toBeVisible();
+  await toggle.hover();
+  await expectTipClearOfDecision(page);
   await page.mouse.move(700, 500);
 
   // The menu: Overview, every chapter, the count.
@@ -605,10 +602,6 @@ test('the top bar holds what the rail held: chapters, the count, files, Overview
   await expect(pane.locator('[data-guide-file-shell="src/payouts/ledger.ts"]')).toBeInViewport();
   const body = pane.locator('.ib-gbody');
   await settled(body);
-  // It lands with that chapter's tab attached above it, whole; so nothing docks.
-  await expect(pane.locator('[data-guide-section-tabbed]:has([data-guide-section="1"]) [data-guide-section-tab] [data-diff-style-switch]')).toBeInViewport({ ratio: 1 });
-  const docked = bar.locator('[data-review-diff-style-docked] [data-diff-style-switch]');
-  await expect(docked).toHaveCount(0);
   await body.hover();
   await page.mouse.wheel(0, -100000);
   await expect(jump).toContainText('Overview');
@@ -618,64 +611,28 @@ test('the top bar holds what the rail held: chapters, the count, files, Overview
   await expect(jump).toContainText('Overview');
   await settled(body);
 
-  // No tab in view: the switch sits in the top bar, left of the other controls, which stay where they were; it covers
-  // nothing of the page (the bar ends where the scroll starts), and it works.
+  // The one button switches every diff, and switches back; the controls stay where they are, off the page.
   const approve = pane.locator('[data-review-decision] [data-decision-primary]');
   const approveAt = (await approve.boundingBox())!.x;
-  await page.setViewportSize({ width: 1440, height: 300 });
-  // The first place down the page where no tab shows.
-  const clearOfTabs = await body.evaluate((scroll) => {
-    for (let top = 0; top < scroll.scrollHeight; top += 10) {
-      scroll.scrollTop = top;
-      const view = scroll.getBoundingClientRect();
-      const tabRects = [...scroll.querySelectorAll('[data-guide-section-tab] [data-diff-style-switch]')].map((t) => t.getBoundingClientRect());
-      if (!tabRects.some((t) => t.bottom > view.top && t.top < view.bottom)) return top;
-    }
-    return null;
-  });
-  expect(clearOfTabs).not.toBeNull();
-  await expect(docked).toBeVisible();
-  const dockBox = (await docked.boundingBox())!;
-  expect(dockBox.x + dockBox.width).toBeLessThanOrEqual(approveAt);
+  // Each file's layout as drawn. A new file has no old side, so Split draws it in one column too (the diff library's way).
+  const drawnTypes = () => pane.locator('pre[data-diff]').evaluateAll((pres) => pres.map((p) => p.getAttribute('data-diff-type')));
+  const asSplit = await drawnTypes();
+  expect(asSplit).toContain('split');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('data-diff-layout-toggle', 'unified');
+  await expect.poll(async () => [...new Set(await drawnTypes())]).toEqual(['single']);
+  await toggle.click();
+  await expect.poll(drawnTypes).toEqual(asSplit);
   expect((await approve.boundingBox())!.x).toBe(approveAt);
-  expect(dockBox.y + dockBox.height).toBeLessThanOrEqual((await body.boundingBox())!.y);
-  // Its tooltip is clear of Approve, and so is a tab's with the tab just under the bar. Each group on the page has its own name.
-  await docked.locator('[data-diff-style="unified"]').hover();
-  await expectTipClearOfDecision(page);
-  await page.mouse.move(700, 150);
-  const groupNames = await pane.locator('[data-diff-style-switch]').evaluateAll((groups) => groups.map((group) => group.getAttribute('aria-label')));
-  expect(new Set(groupNames).size).toBe(groupNames.length);
-  await docked.locator('[data-diff-style="unified"]').click();
-  await expect(docked).toHaveAttribute('data-diff-style-switch', 'unified');
-  await expect.poll(() => pane.locator('pre[data-diff]').evaluateAll((pres) => [...new Set(pres.map((p) => p.getAttribute('data-diff-type')))])).toEqual(['single']);
-  // Back at the top the tab is the one, holding the same choice.
-  await page.setViewportSize({ width: 1440, height: 700 });
-  await body.evaluate((scroll) => {
-    scroll.scrollTop = 0;
-  });
-  await expect(docked).toHaveCount(0);
-  await expect(tab).toHaveAttribute('data-diff-style-switch', 'unified');
-  // Focus in the docked switch moved to the tab that took over, not to the page.
-  await expect(tabs.locator('input:focus')).toHaveCount(1);
-  await tab.locator('[data-diff-style="split"]').click();
-  // The window alone can change which tab shows: at the same scroll a short window docks it, a tall one has a tab.
-  await body.evaluate((scroll, top) => {
-    scroll.scrollTop = top ?? 0;
-  }, clearOfTabs);
-  await expect(docked).toHaveCount(0);
-  await page.setViewportSize({ width: 1440, height: 300 });
-  await expect(docked).toBeVisible();
-  await page.setViewportSize({ width: 1440, height: 700 });
-  await expect(docked).toHaveCount(0);
-  await body.evaluate((scroll) => {
-    scroll.scrollTop = 0;
-  });
-
-  // A folded chapter has no diffs to lay out, so no tab; opened, it has it back.
-  await pane.locator('[data-guide-section="1"]').getByRole('button', { name: 'Reviewed' }).click();
-  await expect(tabs).toHaveCount(3);
-  await pane.locator('[data-guide-section="1"]').getByRole('button', { name: 'Un-mark as reviewed' }).click();
-  await expect(tabs).toHaveCount(4);
+  const controlsBox = (await controls.boundingBox())!;
+  expect(controlsBox.x + controlsBox.width).toBeLessThanOrEqual(approveAt);
+  expect(controlsBox.y + controlsBox.height).toBeLessThanOrEqual((await body.boundingBox())!.y);
+  // The gear: code review's popover, without Whole file and Hide whitespace.
+  await controls.getByRole('button', { name: 'Diff display options' }).click();
+  await expect(page.locator('[data-diff-display-popup]').getByRole('switch')).toHaveText(['Wrap long lines', 'Line numbers', 'Backgrounds']);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-diff-display-popup]')).toHaveCount(0);
+  await expect(pane).toBeVisible();
 
   // Reviewed: the tick shows in the menu, the count moves, and the rows are still there.
   await page.mouse.wheel(0, -100000);
@@ -747,7 +704,7 @@ test('the top bar holds what the rail held: chapters, the count, files, Overview
   expect(world.errors).toEqual([]);
 });
 
-test('narrow windows, long titles and many chapters: nothing overlaps or leaves the window, and Split | Unified docks in the bar', async () => {
+test('narrow windows, long titles and many chapters: nothing overlaps or leaves the window, the diff controls in the bar included', async () => {
   const { page, claude } = world;
   const long = 'Retry every failed payout with a jittered backoff, then remove the row and send exactly one email, whatever the worker crashed on halfway through its run';
   const unbroken = 'reconcile_failed_payouts_against_the_ledger_before_the_morning_report_runs_and_never_twice_for_the_same_invoice';
@@ -786,7 +743,7 @@ test('narrow windows, long titles and many chapters: nothing overlaps or leaves 
     await expect(page.locator('[data-pn-tooltip]')).toContainText(long);
     await page.mouse.move(width / 2, 500);
     await settled(pane.locator('.ib-gbody'));
-    await expect(pane.locator('.ib-vhead [data-review-diff-style-docked] [data-diff-style-switch]')).toBeVisible();
+    await expect(pane.locator('.ib-vhead [data-diff-controls]')).toBeVisible();
     await expectBarFits(page);
     await pane.locator('.ib-gbody').hover();
     await page.mouse.wheel(0, -1000000);
@@ -815,18 +772,18 @@ test('narrow windows, long titles and many chapters: nothing overlaps or leaves 
     await expectBarFits(page);
     await expectOverviewWhole(page);
   }
-  // With the switch docked too, a long chapter name gives way, after the title: the close button stays on screen.
+  // With the diff controls in the bar too, a long chapter name gives way, after the title: the close button stays on screen.
   await page.setViewportSize({ width: 1440, height: 800 });
   await jump.click();
   await menu.locator('[data-review-jump-row="5"]').click();
   await settled(pane.locator('.ib-gbody'));
-  await expect(pane.locator('.ib-vhead [data-review-diff-style-docked] [data-diff-style-switch]')).toBeVisible();
+  await expect(pane.locator('.ib-vhead [data-diff-controls]')).toBeVisible();
   const nameWide = (await jump.boundingBox())!.width;
   await page.setViewportSize({ width: 1300, height: 800 });
   await expect.poll(async () => (await jump.boundingBox())!.width).toBe(nameWide);
   for (const width of [1300, 1100, 1000, 996, 995, 990, 975, 960]) {
     await page.setViewportSize({ width, height: 800 });
-    await expect(pane.locator('.ib-vhead [data-review-diff-style-docked] [data-diff-style-switch]')).toBeVisible();
+    await expect(pane.locator('.ib-vhead [data-diff-controls]')).toBeVisible();
     await expect(pane.getByRole('button', { name: 'Close the review' })).toBeInViewport({ ratio: 1 });
     await expectBarFits(page);
   }
@@ -857,6 +814,7 @@ test('a phone at 390 px: one row of one height, and the same menu as a desktop h
     await expect(pane.locator('[data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
     // A phone reads Unified only: no layout to choose, in the bar or on a card.
     await expect(pane.locator('[data-diff-style-switch]')).toHaveCount(0);
+    await expect(pane.locator('[data-diff-controls]')).toHaveCount(0);
     await expect(pane.locator('select')).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 
@@ -915,7 +873,7 @@ test('a phone at 390 px: one row of one height, and the same menu as a desktop h
   }
 });
 
-test('Viewed takes its click at every scroll: one Split | Unified shows at a time, and neither sits on a file header', async () => {
+test('Viewed takes its click at every scroll: nothing sits on a file header, and no chapter carries a tab', async () => {
   const { page, claude } = world;
   const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'viewed-click', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
   await page.setViewportSize({ width: 1440, height: 700 });
@@ -926,7 +884,7 @@ test('Viewed takes its click at every scroll: one Split | Unified shows at a tim
   const jump = pane.locator('[data-review-jump]');
   const menu = page.locator('[data-review-jump-menu]');
   const frames = () => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
-  /** What shows with the page at this scroll: the switches, and any Viewed whose centre is under something else. */
+  /** What shows with the page at this scroll: any tab, and any Viewed whose centre is under something else. */
   const look = (top: number) =>
     body.evaluate((scroll, at) => {
       scroll.scrollTop = at;
@@ -941,7 +899,7 @@ test('Viewed takes its click at every scroll: one Split | Unified shows at a tim
         return { x: box.x + box.width / 2, y: box.y + box.height / 2, button };
       }).filter((spot) => spot.y > view.top + 1 && spot.y < view.bottom - 1);
       return {
-        tabs: [...scroll.querySelectorAll('[data-guide-section-tab] [data-diff-style-switch]')].filter(showing).length,
+        tabs: [...scroll.querySelectorAll('[data-guide-section-tab]')].filter(showing).length,
         covered: spots.filter((spot) => !spot.button.contains(document.elementFromPoint(spot.x, spot.y))).length,
         spots: spots.map((spot) => ({ x: spot.x, y: spot.y })),
         height: scroll.scrollHeight - scroll.clientHeight,
@@ -954,9 +912,9 @@ test('Viewed takes its click at every scroll: one Split | Unified shows at a tim
       await look(top);
       await frames();
       const seen = await look(top);
-      const docked = await pane.locator('.ib-vhead [data-review-diff-style-docked]').count();
       expect(`${top}: ${seen.covered}`).toBe(`${top}: 0`);
-      expect(`${top}: ${seen.tabs > 0 ? 'tab' : 'dock'} ${docked}`).toBe(`${top}: ${seen.tabs > 0 ? 'tab 0' : 'dock 1'}`);
+      // The diff controls are the bar's (approval "diff-controls-headers").
+      expect(`${top}: ${seen.tabs}`).toBe(`${top}: 0`);
       const box = (await body.boundingBox())!;
       const spot = seen.spots.find((at) => at.y - box.y < 40);
       if (spot && !nearTop) nearTop = { ...spot, top };
@@ -984,7 +942,7 @@ test('Viewed takes its click at every scroll: one Split | Unified shows at a tim
   await frames();
   await page.mouse.click(spot!.x, spot!.y);
   await expect.poll(viewedCount).toBe('1 of 4 files viewed');
-  expect(await pane.locator('.ib-vhead [data-diff-style-switch]').count()).toBeLessThanOrEqual(1);
+  await expect(pane.locator('.ib-vhead [data-diff-controls]')).toHaveCount(1);
   await page.mouse.move(0, 400);
   expect(world.errors).toEqual([]);
 });
@@ -1003,105 +961,28 @@ async function shortReview(thread: string, height = 420, guide: object = REVIEW_
   return { page, pane, body: pane.locator('.ib-gbody') };
 }
 
-/** Scrolls so this chapter's tab sits `below` px under the view's bottom edge (negative: inside the view), and the chapter before's tab is above the view. */
-async function placeTab(body: Locator, index: number, below: number): Promise<void> {
-  // Diffs draw as they come into view and change the page's height: place it again until it holds.
-  await expect(async () => {
-    const seen = await body.evaluate(async (scroll, [at, gap]) => {
-      const tab = (i: number) => scroll.querySelectorAll('[data-guide-section-tab] [data-diff-style-switch]')[i]!.getBoundingClientRect();
-      scroll.scrollTop += tab(at!).top - scroll.getBoundingClientRect().bottom - gap!;
-      await new Promise((done) => setTimeout(done, 400));
-      const view = scroll.getBoundingClientRect();
-      return { placed: Math.abs(tab(at!).top - view.bottom - gap!) < 1, beforeIsAbove: tab(at! - 1).bottom <= view.top };
-    }, [index, below]);
-    expect(seen).toEqual({ placed: true, beforeIsAbove: true });
-  }).toPass({ intervals: [100] });
-}
-
-/**
- * Scrolls so the first tab has just left the top and the next is under the view. The first file's header is still in
- * its own place: folding a file whose header is stuck scrolls the page back to it, which would hide what these test.
- */
-async function placeFirstTabJustAbove(body: Locator): Promise<void> {
-  await expect(async () => {
-    const seen = await body.evaluate(async (scroll) => {
-      const tab = (i: number) => scroll.querySelectorAll('[data-guide-section-tab] [data-diff-style-switch]')[i]!.getBoundingClientRect();
-      scroll.scrollTop += tab(0).bottom - scroll.getBoundingClientRect().top + 1;
-      await new Promise((done) => setTimeout(done, 400));
-      const view = scroll.getBoundingClientRect();
-      return { justAbove: Math.abs(tab(0).bottom - view.top + 1) < 1, nextBelow: tab(1).top >= view.bottom };
-    });
-    expect(seen).toEqual({ justAbove: true, nextBelow: true });
-  }).toPass({ intervals: [100] });
-}
-
-/** Exactly one Split | Unified shows, and it is the one named. */
-async function expectOneSwitch(pane: Locator, showing: 'tab' | 'dock'): Promise<void> {
-  const seen = () =>
-    pane.locator('.ib-gbody').evaluate((scroll) => {
-      const view = scroll.getBoundingClientRect();
-      const tabs = [...scroll.querySelectorAll('[data-guide-section-tab] [data-diff-style-switch]')].filter((tab) => {
-        const box = tab.getBoundingClientRect();
-        return box.bottom > view.top && box.top < view.bottom;
-      }).length;
-      return { tabs, dock: document.querySelectorAll('[data-review-message] .ib-vhead [data-review-diff-style-docked]').length };
-    });
-  await expect.poll(async () => {
-    const { tabs, dock } = await seen();
-    return { tab: tabs > 0, dock: dock > 0 };
-  }).toEqual({ tab: showing === 'tab', dock: showing === 'dock' });
-}
-
-test('a tick that folds a file brings the next tab up: the docked switch goes, with no scroll', async () => {
-  const { page, pane, body } = await shortReview('fold-viewed');
-  await placeFirstTabJustAbove(body);
-  await expectOneSwitch(pane, 'dock');
-  const top = await body.evaluate((scroll) => scroll.scrollTop);
-  await pane.locator('[data-guide-section="0"] [data-guide-file-shell]').getByRole('button', { name: /viewed/i }).first().click();
-  await expectOneSwitch(pane, 'tab');
-  expect(await body.evaluate((scroll) => scroll.scrollTop)).toBe(top);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  expect(world.errors).toEqual([]);
-});
-
-test('folding a file by its chevron brings the next tab up: the docked switch goes, with no scroll', async () => {
-  const { page, pane, body } = await shortReview('fold-chevron');
-  await placeFirstTabJustAbove(body);
-  await expectOneSwitch(pane, 'dock');
-  const top = await body.evaluate((scroll) => scroll.scrollTop);
-  await pane.locator('[data-guide-section="0"] [data-guide-file-shell]').getByRole('button', { name: FILE_FOLD }).first().click();
-  await expectOneSwitch(pane, 'tab');
-  expect(await body.evaluate((scroll) => scroll.scrollTop)).toBe(top);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  expect(world.errors).toEqual([]);
-});
-
-test('folding a chapter with Reviewed takes the next tab above the view: the switch docks, with no scroll', async () => {
-  // The next chapter is taller than the window and than what the fold takes away, so no other tab comes into view.
-  const [first, second, third] = REVIEW_GUIDE.sections;
-  const guide = { ...REVIEW_GUIDE, sections: [first, { ...second, diffs: [...second!.diffs, ...third!.diffs] }] };
-  const { page, pane, body } = await shortReview('fold-reviewed', 240, guide);
-  await placeTab(body, 1, -40);
-  await expectOneSwitch(pane, 'tab');
-  const top = await body.evaluate((scroll) => scroll.scrollTop);
-  await pane.locator('[data-guide-section="0"]').getByRole('button', { name: 'Reviewed' }).click();
-  await expectOneSwitch(pane, 'dock');
-  expect(await body.evaluate((scroll) => scroll.scrollTop)).toBe(top);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  expect(world.errors).toEqual([]);
-});
-
-test('a tab just under the bar: its tooltip stays off Approve', async () => {
-  const { page, pane, body } = await shortReview('tab-tip');
-  await page.setViewportSize({ width: 1440, height: 700 });
-  await body.evaluate((scroll) => {
-    const tab = scroll.querySelector('[data-guide-section-tab] [data-diff-style-switch]')!.getBoundingClientRect();
-    scroll.scrollTop += tab.top - scroll.getBoundingClientRect().top - 20;
-  });
-  await expectOneSwitch(pane, 'tab');
-  await pane.locator('[data-guide-section-tab] [data-diff-style="unified"]').first().hover();
-  await expectTipClearOfDecision(page);
+test('Collapse all in the bar folds every file and opens them again; its tooltip stays off Approve', async () => {
+  const { page, pane, body } = await shortReview('collapse-all', 700);
+  const button = pane.locator('.ib-vhead [data-diff-collapse-all]');
+  /** Files whose diff draws lines (a folded file draws only its header). */
+  const open = () => pane.locator('[data-guide-file-shell]').evaluateAll((shells) => shells.filter((shell) => shell.querySelector('diffs-container')?.shadowRoot?.querySelector('pre[data-diff] [data-line]')).length);
+  await expect.poll(open).toBeGreaterThan(0);
+  await button.hover();
+  await expectTipClearOfDecision(page, 'Collapse all files');
   await page.mouse.move(700, 400);
+  await body.evaluate((scroll) => {
+    scroll.scrollTop = scroll.scrollHeight / 3;
+  });
+  await button.click();
+  await expect(button).toHaveAccessibleName('Expand all files');
+  await expect.poll(open).toBe(0);
+  await button.click();
+  await expect(button).toHaveAccessibleName('Collapse all files');
+  await expect.poll(open).toBeGreaterThan(0);
+  // A file folded by hand afterwards folds alone.
+  const before = await open();
+  await pane.locator('[data-guide-file-shell]').first().getByRole('button', { name: FILE_FOLD }).first().click();
+  await expect.poll(open).toBe(before - 1);
   await page.setViewportSize({ width: 1440, height: 900 });
   expect(world.errors).toEqual([]);
 });
@@ -1337,7 +1218,7 @@ test('each file\'s name sits on the page above its code box: no fill at rest, un
   expect(world.errors).toEqual([]);
 });
 
-test('Code review off: the same review opens in the guide pane, with no top bar of chapters and the Split | Unified tab on its card', async () => {
+test('Code review off: the same review opens in the guide pane, with no top bar of chapters and the diff controls before Close', async () => {
   const { page, claude } = world;
   const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'off-after', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
   await setCodeReview(false);
@@ -1347,7 +1228,8 @@ test('Code review off: the same review opens in the guide pane, with no top bar 
     await expect(page.locator('[data-review-message]')).toHaveCount(0);
     await expect(page.locator('[data-review-nav]')).toHaveCount(0);
     await expect(page.locator('[data-guide-heading]')).toHaveCount(0);
-    await expect(page.locator('[data-guide-section-tab] [data-diff-style-switch]')).toBeVisible();
+    await expect(page.locator('[data-guide-section-tab]')).toHaveCount(0);
+    await expect(page.locator('[data-guide-message] .ib-vhead [data-diff-controls] [data-diff-layout-toggle]')).toBeVisible();
     await expect(page.locator('h1').filter({ hasText: 'Retry failed payouts' })).toBeVisible();
   } finally {
     await setCodeReview(true);

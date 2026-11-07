@@ -141,6 +141,8 @@ export interface ModalProps {
    * closes it without reaching the page's own Escape (which closes a thread).
    */
   ownKeys?: boolean;
+  /** What takes focus as it opens (a selector inside the dialog); the first enabled primary button by default. */
+  initialFocus?: string;
   /** Where focus goes on close when nothing focusable opened the dialog (the page heading). */
   fallbackFocus?: () => HTMLElement | null;
   /** A class beside `ib-dlg` (the agent-note dialog is wider, with a pinned footer). */
@@ -148,7 +150,7 @@ export interface ModalProps {
 }
 
 /** A native modal dialog: focus stays inside, Escape closes, focus returns to what opened it. */
-export function Modal({ label, labelledBy, describedBy, onClose, children, testId, ownKeys, fallbackFocus, className }: ModalProps) {
+export function Modal({ label, labelledBy, describedBy, onClose, children, testId, ownKeys, initialFocus, fallbackFocus, className }: ModalProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const opener = useRef<Element | null>(null);
   const fallback = useRef(fallbackFocus);
@@ -164,7 +166,7 @@ export function Modal({ label, labelledBy, describedBy, onClose, children, testI
         dialog.setAttribute('open', '');
       }
     } else dialog.setAttribute('open', '');
-    (dialog.querySelector('.ib-btn.ib-pri:not([disabled])') as HTMLElement | null)?.focus();
+    (dialog.querySelector(initialFocus ?? '.ib-btn.ib-pri:not([disabled])') as HTMLElement | null)?.focus();
     return () => {
       if (opener.current instanceof HTMLElement && opener.current !== document.body && document.contains(opener.current)) opener.current.focus();
       else fallback.current?.()?.focus();

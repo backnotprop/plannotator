@@ -24,12 +24,16 @@ export type GateResult = {
   ignored: string[];
 };
 
-const TEST = [/(^|\/)(test|tests|__tests__|e2e|fixtures|test-fixtures|__snapshots__)\//, /\.(test|spec)\.[cm]?[jt]sx?$/];
-const DOC = [/\.mdx?$/i, /(^|\/)docs\//];
-const LOCKFILES = new Set([
+/** A folder with one of these names, anywhere in a path, holds tests (the command's help lists them). */
+export const TEST_FOLDERS = ['test', 'tests', '__tests__', 'e2e', 'fixtures', 'test-fixtures', '__snapshots__'] as const;
+/** File names the gate reads as lockfiles, in any folder. */
+export const LOCKFILE_NAMES = [
   'bun.lock', 'bun.lockb', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'Cargo.lock',
   'go.sum', 'Gemfile.lock', 'poetry.lock', 'uv.lock', 'composer.lock',
-]);
+] as const;
+const TEST = [new RegExp(`(^|/)(${TEST_FOLDERS.join('|')})/`), /\.(test|spec)\.[cm]?[jt]sx?$/];
+const DOC = [/\.mdx?$/i, /(^|\/)docs\//];
+const LOCKFILES: ReadonlySet<string> = new Set(LOCKFILE_NAMES);
 
 /**
  * A path the gate never counts unless the drawing cites it: a test, a doc, a
