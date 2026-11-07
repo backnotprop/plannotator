@@ -1,7 +1,7 @@
 // The screenshot page. See serve.ts for the addresses.
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { bySheetOrder, formatIssue, gate, loadFiles, parseRevision, type ChangeFile, type GateResult, type Revision, type SystemFiles, type SystemModel } from '../src/index.ts';
+import { bySheetOrder, formatIssue, gate, loadFiles, parseRevision, type ChangedFile, type ChangeFile, type GateResult, type Revision, type SystemFiles, type SystemModel, type Touch } from '../src/index.ts';
 import { fontsReady, SystemChangePicture, SystemThumb, SystemView, type Reading } from '../src/react.ts';
 
 const q = new URLSearchParams(location.search);
@@ -53,7 +53,7 @@ function View({ model }: { model: SystemModel }) {
   );
 }
 
-type Fixtures = { prs: Record<string, ChangeFile[]>; before2563: SystemFiles; open2563: string; plan: string; removes: string };
+type Fixtures = { prs: Record<string, ChangeFile[]>; before2563: SystemFiles; open2563: string; plan: string; removes: string; touches: { label: string; files: ChangedFile[] }[] };
 type Change = { model: SystemModel; change: Revision | GateResult; files: ChangeFile[]; pr: number; title: string; state: 'open' | 'merged' };
 
 /** The change a shot asks for: a merged PR's committed review, PR 2563 as it was while open, or the gate alone. */
@@ -129,6 +129,22 @@ function PlanView({ model, plan }: { model: SystemModel; plan: Revision }) {
   );
 }
 
+/** The project pane (4a) or its full window (4b): several open PRs on the drawing at rest, each the gate's touched parts. */
+function TouchesView({ model, touches }: { model: SystemModel; touches: Touch[] }) {
+  const [sheet, setSheet] = useState<string | undefined>(q.get('sheet') ?? undefined);
+  const [reading, setReading] = useState<Reading>('full');
+  const layout = q.get('layout') === 'pane' ? 'pane' : 'window';
+  const lead = q.get('lead') ? <button type="button" className="demo-back">‹ Reviews</button> : undefined;
+  return (
+    <div className="demo-window">
+      <SystemView
+        model={model} touches={touches} leading={lead} sheet={sheet} project="plannotator" reading={reading} layout={layout}
+        onNavigate={setSheet} onReading={setReading} onOpenFull={layout === 'pane' ? () => {} : undefined}
+      />
+    </div>
+  );
+}
+
 /** The faces, the default theme, the Inbox's tokens, the drawing's sheet, then the page's frame. */
 const SHEETS = ['/css/inter/index.css', '/css/geist-mono/index.css', '/css/themes/plannotator.css', '/css/inbox/inbox.css', '/css/system/system.css', '/css/demo/demo.css'];
 const linked = () =>
@@ -156,9 +172,11 @@ async function main() {
   }
   const shot = q.get('shot');
   let node = shot === 'thumb' ? <Thumb model={model} /> : <View model={model} />;
-  if (shot === 'card' || shot === 'change' || shot === 'plan') {
+  if (shot === 'card' || shot === 'change' || shot === 'plan' || shot === 'touches') {
     const fx = (await (await fetch('/change.json')).json()) as Fixtures;
-    if (shot === 'plan') {
+    if (shot === 'touches') {
+      node = <TouchesView model={model} touches={fx.touches.map((t) => ({ label: t.label, change: gate({ files: t.files, model }) }))} />;
+    } else if (shot === 'plan') {
       const { revision, errors: pe } = parseRevision(model, fx.plan);
       if (!revision) throw new Error(pe.map(formatIssue).join('\n'));
       node = <PlanView model={model} plan={revision} />;

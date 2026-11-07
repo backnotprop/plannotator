@@ -11,11 +11,14 @@
  * are placed into the sheet; the gate's result marks touched parts amber only;
  * a plan has no PR; the summary credits a part only with PR files its own
  * cited paths cover, and its counts are those files' counts.
+ * Several open PRs at rest (`touches`): each touched part amber and labelled
+ * with every PR that touches it, past two the first and how many more.
  *
  * With a DOM (DOM_TESTS=1, happy-dom, from tests/dom-test-list.txt): the view
  * draws those marks, its tally says what changeSummary says, the parts list's
  * "diff" opens a credited file only, Steps and Esc, the plan's dashed class,
- * and the card picture's one control.
+ * and the card picture's one control; the touches' labels and hover, a
+ * revision beating them, and the leading slot first in the bar.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -23,7 +26,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { applyChange, changeSummary, changeWords, gate, hasSteps, loadFiles, parseRevision, STEPS_CODE, type ChangeFile, type GateResult, type Revision, type SystemFiles, type SystemModel } from '../src/index.ts';
 import { readFiles } from '../src/node/index.ts';
 import { layoutSheet } from '../src/layout/compose.ts';
-import { before2563, OPEN_2563, PLAN, prFiles, REMOVES } from './fixtures/change.ts';
+import { before2563, OPEN_2563, PLAN, prFiles, REMOVES, TOUCHES } from './fixtures/change.ts';
+import { applyTouches, touchWords } from '../src/change/apply.ts';
 import { drawingDir } from './helpers.ts';
 
 const hasDom = typeof document !== 'undefined';
@@ -37,6 +41,8 @@ const rev = (src: string, m = model): Revision => {
   expect(errors).toEqual([]);
   return revision!;
 };
+/** The three invented open PRs (fixtures/change.ts TOUCHES), each run through the gate. */
+const touchesOf = () => TOUCHES.map((t) => ({ label: t.label, change: gate({ files: t.files, model }) }));
 const gateOf = (n: number): GateResult => gate({ files: pr[n]!.map((f) => ({ ...f, status: f.status ?? 'M' })), model });
 
 beforeAll(async () => {
@@ -192,6 +198,26 @@ test('a plan has no PR and marks what it adds and changes', () => {
 
 // ---- rendered ----
 
+describe('several open PRs at rest (touches)', () => {
+  test('each touched part is amber and labelled with the PRs that touch it, in the order given; the Inbox carries two', () => {
+    const { L, parts, nums } = marks(applyTouches(model, touchesOf()), 'C-001');
+    expect(parts).toEqual({ ping: 'changed', inbox: 'changed', share: 'changed' });
+    expect(nums).toEqual({});
+    expect([L.parts.ping!.lines, L.parts.inbox!.lines, L.parts.share!.lines]).toEqual(['PR 101', 'PR 102 · PR 103', 'PR 103']);
+    expect(L.parts.inbox!.who).toEqual(['PR 102', 'PR 103']);
+  });
+
+  test('the same touches in a new array are the same model; none, or nothing touched, is the drawing itself', () => {
+    expect(applyTouches(model, touchesOf())).toBe(applyTouches(model, touchesOf()));
+    expect(applyTouches(model, [])).toBe(model);
+    expect(applyTouches(model, [{ label: 'PR 104', change: gate({ files: [{ path: 'nowhere/cited.ts', status: 'M' }], model }) }])).toBe(model);
+  });
+
+  test('a part touched by more than two PRs shows the first and how many more', () => {
+    expect([touchWords(['PR 101']), touchWords(['PR 101', 'PR 102']), touchWords(['PR 101', 'PR 102', 'PR 103'])]).toEqual(['PR 101', 'PR 101 · PR 102', 'PR 101 +2']);
+  });
+});
+
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedRect: PropertyDescriptor | undefined;
@@ -314,3 +340,62 @@ test.skipIf(!hasDom)('the card picture is one control that says the change and a
   act(() => btn[0]!.click());
   expect(opened).toBe(1);
 });
+
+const lineOf = (el: HTMLElement, id: string) => el.querySelector(`.sys-parts > [data-part="${id}"] .sys-lines`)?.textContent ?? null;
+
+test.skipIf(!hasDom)('with no touches and no leading slot the view is what it was: touches={[]} renders the same markup as neither prop', async () => {
+  const plain = (await render(<R.SystemView model={model} layout="pane" onNavigate={noop} onOpenFull={noop} />)).innerHTML;
+  expect(plain).not.toContain('sys-start');
+  expect(plain).not.toContain('data-status');
+  act(() => root!.unmount());
+  const empty = (await render(<R.SystemView model={model} layout="pane" touches={[]} leading={null} onNavigate={noop} onOpenFull={noop} />)).innerHTML;
+  expect(empty).toBe(plain);
+});
+
+test.skipIf(!hasDom)('several touches at rest: each touched part amber with its PR labels, a part two PRs touch shows both, the hover names them, no numbers and no tally', async () => {
+  const el = await render(<R.SystemView model={model} layout="pane" touches={touchesOf()} onNavigate={noop} />);
+  expect(el.querySelector('.sys-view')!.getAttribute('data-view')).toBe(null);
+  expect(status(el)).toEqual({ ping: 'changed', inbox: 'changed', share: 'changed' });
+  expect([lineOf(el, 'ping'), lineOf(el, 'inbox'), lineOf(el, 'share')]).toEqual(['PR 101', 'PR 102 · PR 103', 'PR 103']);
+  const inbox = el.querySelector('.sys-parts > [data-part="inbox"]')!;
+  expect(inbox.getAttribute('title')).toBe('The Inbox: changed by PR 102, PR 103');
+  expect(inbox.getAttribute('aria-label')).toContain('changed by PR 102, PR 103');
+  expect(el.querySelectorAll('.sys-num').length).toBe(0);
+  expect(el.querySelector('.sys-tally')).toBe(null);
+  // the Key says what the amber means
+  act(() => [...el.querySelectorAll<HTMLButtonElement>('.sys-zoom button')].find((b) => b.textContent === 'Key')!.click());
+  expect(el.querySelector('.sys-keycard')!.textContent).toContain('Open pull requests');
+});
+
+test.skipIf(!hasDom)('a part three PRs touch reads "PR 101 +2" and its hover names all three', async () => {
+  const t = TOUCHES.map((x) => ({ label: x.label, change: gate({ files: [...x.files, { path: 'packages/server/inbox.ts', status: 'M' as const }], model }) }));
+  const el = await render(<R.SystemView model={model} layout="window" touches={t} onNavigate={noop} />);
+  expect(lineOf(el, 'inbox')).toBe('PR 101 +2');
+  expect(el.querySelector('.sys-parts > [data-part="inbox"]')!.getAttribute('title')).toBe('The Inbox: changed by PR 101, PR 102, PR 103');
+});
+
+test.skipIf(!hasDom)('a revision beats touches: with both given the revision is drawn and the touches are ignored', async () => {
+  const r = model.revisions['PR-2563']!;
+  const el = await render(<R.SystemView model={model} revision={r} files={pr[2563]} touches={touchesOf()} layout="window" onNavigate={noop} onView={noop} />);
+  expect(el.querySelector('.sys-view')!.getAttribute('data-sheet')).toBe('L-201');
+  expect(status(el)).toEqual({ it3: 'added', shim: 'changed', iserver: 'changed' });
+  expect(el.textContent).not.toContain('PR 101');
+  expect(el.textContent).not.toContain('PR 102');
+});
+
+for (const layout of ['pane', 'window'] as const) {
+  test.skipIf(!hasDom)(`the leading slot comes first in the top bar, before the crumbs: ${layout}`, async () => {
+    let back = 0;
+    const el = await render(<R.SystemView model={model} layout={layout} project="plannotator" leading={<button type="button" className="host-back" onClick={() => back++}>‹ Reviews</button>} onNavigate={noop} onClose={noop} />);
+    const bar = el.querySelector('.sys-bar')!;
+    const first = bar.firstElementChild!;
+    expect(first.className).toBe('sys-start');
+    expect(first.firstElementChild!.className).toBe('sys-lead');
+    expect(first.firstElementChild!.firstElementChild!.textContent).toBe('‹ Reviews');
+    expect(first.children[1]!.className).toBe('sys-crumbs');
+    // the first control in the bar, in tab order
+    expect(bar.querySelector('button')!.textContent).toBe('‹ Reviews');
+    act(() => bar.querySelector<HTMLButtonElement>('.host-back')!.click());
+    expect(back).toBe(1);
+  });
+}
