@@ -8,7 +8,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxPullRiskJudgment } from '@plannotator/core/inbox-types';
-import { askRiskPlaces, guideNotes, pictureNotes, riskNotes, staleWords, takeRiskPlaces, threadNotes, type NoteFile, type NoteMessage } from './model';
+import { askRiskPlaces, guideNotes, noteHolds, noteReviews, pictureNotes, RISK_PLACES_ASK_MS, riskNotes, staleWords, takeRiskPlaces, threadNotes, type NoteFile, type NoteMessage } from './model';
 
 const patch = (...body: string[]) => `diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1,3 +1,${body.length} @@\n${body.join('\n')}\n`;
 /** Round 1: new lines 1 one, 2 two, 3 three, 4 four. */
@@ -97,8 +97,40 @@ describe('the other writers', () => {
 
   test('the PR page’s ask for the places is taken once, by that PR only', () => {
     askRiskPlaces('github.com/a/b#1');
-    expect(takeRiskPlaces('github.com/a/b#2')).toBe(false);
     expect(takeRiskPlaces('github.com/a/b#1')).toBe(true);
     expect(takeRiskPlaces('github.com/a/b#1')).toBe(false);
+  });
+
+  test('an ask no diff took never moves a diff opened later: another PR’s diff drops it, and it runs out', () => {
+    askRiskPlaces('github.com/a/b#1', 1_000);
+    expect(takeRiskPlaces('github.com/a/b#2', 1_100)).toBe(false);
+    expect(takeRiskPlaces('github.com/a/b#1', 1_200)).toBe(false);
+    askRiskPlaces('github.com/a/b#1', 1_000);
+    expect(takeRiskPlaces('github.com/a/b#1', 1_000 + RISK_PLACES_ASK_MS + 1)).toBe(false);
+  });
+});
+
+describe('the thread’s chips', () => {
+  test('a note before the thread’s first review is drawn on none: its chip has no review to open', () => {
+    const messages: NoteMessage[] = [
+      agent('a0', ':::note a.ts#L2\nEarly.\n:::', { created_at: '2026-11-07T10:00:00Z' }),
+      { ...review('r1'), created_at: '2026-11-07T10:05:00Z' },
+      agent('a1', ':::note a.ts#L2\nAfter.\n:::', { created_at: '2026-11-07T10:06:00Z' }),
+      agent('a2', 'No note here.', { created_at: '2026-11-07T10:07:00Z' }),
+    ];
+    const reviews = noteReviews(messages);
+    expect(reviews.get('a0')).toBeNull();
+    expect(reviews.get('a1')).toBe('r1');
+    expect(reviews.has('a2')).toBe(false);
+    expect(noteReviews([agent('a0', ':::note a.ts#L2\nNo review yet.\n:::')]).size).toBe(0);
+  });
+
+  test('a removed-side place opens the removed-side note on those lines, never a new-side one on the same numbers', () => {
+    const oldNote = { file: 'a.ts', side: 'old' as const, lineStart: 3, lineEnd: 4 };
+    const newNote = { ...oldNote, side: 'new' as const };
+    expect(noteHolds(oldNote, { path: 'a.ts', line: 3, side: 'old' })).toBe(true);
+    expect(noteHolds(newNote, { path: 'a.ts', line: 3, side: 'old' })).toBe(false);
+    expect(noteHolds(newNote, { path: 'a.ts', line: 4, side: 'new' })).toBe(true);
+    expect(noteHolds(newNote, { path: 'a.ts', line: 5, side: 'new' })).toBe(false);
   });
 });

@@ -45,7 +45,7 @@ const settled = async () => {
 };
 
 /** An engine with a scripted agent and a scripted diff read; every run is kept in `runs`. */
-function engine(options: { answer?: RiskRunner; agents?: { id: string; label: string }[]; on?: () => boolean; now?: () => number; head?: (key: string) => string | null; patch?: string; diffFails?: boolean | string; diffGate?: Promise<void> } = {}) {
+function engine(options: { answer?: RiskRunner; agents?: { id: string; label: string }[]; on?: () => boolean; now?: () => number; head?: (key: string) => string | null; patch?: string; diffFails?: boolean | string; diffGate?: Promise<void>; read?: { per_file?: true; partial?: boolean; held_back?: string } } = {}) {
   const runs: RiskRun[] = [];
   const reads: string[] = [];
   const risk = createPullRisk({
@@ -59,7 +59,7 @@ function engine(options: { answer?: RiskRunner; agents?: { id: string; label: st
         await options.diffGate;
         if (options.diffFails) throw Object.assign(new Error("gh failed"), typeof options.diffFails === "string" ? { code: options.diffFails } : {});
         const number = key.split("#")[1];
-        return { patch: options.patch ?? "diff --git a/x b/x\n", partial: false, head_sha: options.head ? options.head(key) : `head-${number}` };
+        return { patch: options.patch ?? "diff --git a/x b/x\n", partial: false, head_sha: options.head ? options.head(key) : `head-${number}`, ...options.read };
       },
     },
     run: async (run) => {
@@ -206,6 +206,21 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
     expect(prompt).not.toMatch(/too large/i);
     expect(risk.answer().judgments[key]?.level).toBe("high");
     expect(risk.answer().failed).toEqual({});
+  });
+
+  const PAY_PLACE = JSON.stringify({ risk: "high", why: "It charges twice.", where: [{ file: "src/pay.ts", side: "new", lines: [1, 1], why: "Charges twice." }] });
+  test("a high judgment from the forge's one document, the diff the PR page draws, keeps its places", async () => {
+    setRules();
+    const { risk, judge, key } = await reading("github", { whole: { stdout: "diff --git a/src/pay.ts b/src/pay.ts\n--- a/src/pay.ts\n+++ b/src/pay.ts\n@@ -1 +1 @@\n-old\n+charge twice\n" } }, { answer: PAY_PLACE });
+    await judge();
+    expect(risk.answer().judgments[key]?.where).toHaveLength(1);
+  });
+
+  test("one from the per-file read keeps none: the PR page draws no diff then, so a count would promise nothing", async () => {
+    setRules();
+    const { risk, judge, key } = await reading("github", { whole: { stderr: "gh: (HTTP 406)", exitCode: 1 }, paged: { stdout: FILES_PAGE_1 } }, { answer: PAY_PLACE });
+    await judge();
+    expect(risk.answer().judgments[key]).toEqual({ level: "high", why: "It charges twice." });
   });
 
   describe("an answer of Low from a read known to be incomplete", () => {
@@ -1460,5 +1475,33 @@ describe("a high judgment's places (context notes)", () => {
     risk.assess([pull(7)]);
     await settled();
     expect(risk.answer().judgments["github.com/n/b#7"]?.where).toEqual([{ file: "src/billing.ts", side: "new", lines: [11, 13], rule: "Anything in billing.", why: "Charges now retry." }]);
+  });
+
+  test("the places are read back from pull-risk.json after a restart, with no new run, and the rule's words are stored there", async () => {
+    setRules(RULES);
+    const first = engine({ patch: PATCH, answer: async () => ({ text: answer("high", [place]) }) });
+    first.risk.assess([pull(7)]);
+    await settled();
+    const stored = JSON.parse(readFileSync(join(dataDir, "inbox", INBOX_PULL_RISK_FILE), "utf8")) as { judgments: Record<string, { where?: unknown }> };
+    expect(stored.judgments["github.com/n/b#7"]?.where).toEqual([{ file: "src/billing.ts", side: "new", lines: [11, 13], rule: "Anything in billing.", why: "Charges now retry." }]);
+    const restarted = engine({ patch: PATCH });
+    restarted.risk.assess([pull(7)]);
+    await settled();
+    expect(restarted.runs).toEqual([]);
+    expect(restarted.risk.answer().judgments["github.com/n/b#7"]?.where).toEqual([{ file: "src/billing.ts", side: "new", lines: [11, 13], rule: "Anything in billing.", why: "Charges now retry." }]);
+  });
+
+  test("a judgment made from a diff the PR page can't draw keeps no places, so no count promises places it can't show", async () => {
+    setRules(RULES);
+    // The forge would not serve one document (its per-file read, or a clone, gave the diff): the PR's diff shows none of it.
+    const perFile = engine({ patch: PATCH, read: { per_file: true }, answer: async () => ({ text: answer("high", [place]) }) });
+    perFile.risk.assess([pull(7)]);
+    await settled();
+    expect(perFile.risk.answer().judgments["github.com/n/b#7"]).toEqual({ level: "high", why: "It changes billing." });
+    // Known to be less than the whole (held-back files): High stays High, without places.
+    const partial = engine({ patch: PATCH, read: { partial: true }, answer: async () => ({ text: answer("high", [place]) }) });
+    partial.risk.assess([pull(8)]);
+    await settled();
+    expect(partial.risk.answer().judgments["github.com/n/b#8"]).toEqual({ level: "high", why: "It changes billing." });
   });
 });

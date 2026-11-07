@@ -534,10 +534,27 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     places.show(note.id);
   };
   const nextPlace = () => goToPlace((placeAt.current + 1) % placeNotes.length);
-  // The PR page's "See the N places": the first place, once this diff has its places.
+  // The PR page's "See the N places": taken as this layer's diff mounts (the ask is gone after that, whatever it
+  // named), and the first place opens once the diff draws its places. Once the diff settles with none to draw (it
+  // could not be read, the judged head's diff draws none, the whole stack is on screen) or another layer opens, the
+  // ask is dropped: no later diff moves by itself.
+  const placesTaken = useRef<string | null>(null);
+  const placesWanted = useRef(false);
   useEffect(() => {
-    if (layer && placeNotes.length > 0 && takeRiskPlaces(layer.key)) goToPlace(0);
-  }, [placeNotes.length, layer?.key]); // eslint-disable-line react-hooks/exhaustive-deps
+    // StrictMode runs this twice on the same layer: the second run keeps what the first took.
+    if (placesTaken.current === layerKey) return;
+    placesTaken.current = layerKey;
+    placesWanted.current = takeRiskPlaces(layerKey);
+  }, [layerKey]);
+  useEffect(() => {
+    if (!placesWanted.current) return;
+    if (placeNotes.length > 0) {
+      placesWanted.current = false;
+      goToPlace(0);
+      return;
+    }
+    if (scope !== 'layer' || diffError || (judged && layer && diff?.head_sha && diff.head_sha === layer.head_sha)) placesWanted.current = false;
+  }, [placeNotes.length, layerKey, scope, diffError, judged, diff?.head_sha, layer?.head_sha]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The verdict: one reply to the agent's last message in its thread.
   const [sending, setSending] = useState(false);

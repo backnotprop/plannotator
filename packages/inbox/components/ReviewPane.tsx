@@ -49,17 +49,18 @@ import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 import { parseGuideSnapshot } from '@plannotator/core/guide-format';
 import { inboxDrawnViewOf, inboxReviewLines, inboxReviewRound } from '@plannotator/core/inbox-review';
 import type { ShapeCodeTarget, ShapeVersion } from '@plannotator/core/shape';
-import type { ShapeHost, ShapeReviewAt } from '@plannotator/ui/components/shape';
+import type { ShapeHost } from '@plannotator/ui/components/shape';
 import { OverviewFigure, ShowMeButton } from '../review-drawing/OverviewFigure';
 import { ShowMeBox, ShowMeCorner } from '../review-drawing/ShowMeLayer';
 import { partLanding, reviewDrawnOn, overviewPicture, baseName, changedMarks, chapterOf, markOf, partName, targetLines } from '../review-drawing/showMeModel';
 import { useShowMe } from '../review-drawing/useShowMe';
 import { ContextNotesProvider, useContextNotes } from '../contextNotes/ContextNotes';
-import { askAgainWords } from '../contextNotes/model';
+import { askAgainWords, noteHolds } from '../contextNotes/model';
 import { useReviewNotes } from '../contextNotes/useReviewNotes';
 import { ShapeBoardLayer, ShapePebbleButton } from '../shape/ShapeParts';
 import type { ShapeBoardPlace } from '../shape/types';
 import { useLineInView } from './reviewLineInView';
+import type { ReviewAt } from '../shape/review';
 import { shapeReview } from '../shape/review';
 import type { InboxShapes } from '../shape/useInboxShapes';
 import type { GuideSelectionActions } from '../guide/types';
@@ -126,9 +127,10 @@ export interface ReviewPaneProps {
   onBoardNavigate?: (place: ShapeBoardPlace) => void;
   /**
    * Where to open (a Shape board's link, `&code=`, `&step=`, `&files`): a file at a line, a chapter, or All files.
-   * Once there, `onLanded` (the window drops it from the address, so a reload starts at the top).
+   * Once there, `onLanded` (the window drops it from the address, so a reload starts at the top). A context note's
+   * "Open in the review" names its side: `side: 'old'` is a removed line's number.
    */
-  at?: ShapeReviewAt | null;
+  at?: ReviewAt | null;
   onLanded?: () => void;
 }
 
@@ -343,11 +345,11 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     },
   });
   /** A place opened from the thread (a note's "Open in the review"): its note opens once it is drawn. */
-  const noteAt = useRef<{ path: string; line: number } | null>(null);
+  const noteAt = useRef<{ path: string; line: number; side: 'new' | 'old' } | null>(null);
   useEffect(() => {
     const want = noteAt.current;
     if (!want) return;
-    const hit = contextNotes.find((note) => note.file === want.path && want.line >= note.lineStart && want.line <= note.lineEnd);
+    const hit = contextNotes.find((note) => noteHolds(note, want));
     if (!hit) return;
     noteAt.current = null;
     noteRows.show(hit.id);
@@ -371,7 +373,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
         : shapeHost,
     [shapeHost, showMe.state.canAsk],
   );
-  const [highlight, setHighlight] = useState<{ path: string; start: number; end: number; token: number } | null>(null);
+  const [highlight, setHighlight] = useState<{ path: string; start: number; end: number; token: number; side?: 'old' } | null>(null);
   // Painted lines come into view, clear of the corner card.
   useLineInView(bodyRef, highlight);
   /** The chapter that holds the file (else All files), and the review moves to it. */
@@ -388,11 +390,12 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     move(path);
   };
   /** A part of a picture opens its code: its file, the lines painted. */
-  const openCode = (target: ShapeCodeTarget): boolean => {
+  /** `side: 'old'`: the lines are removed lines' numbers (a context note on them). */
+  const openCode = (target: ShapeCodeTarget, side?: 'old'): boolean => {
     if (!files.some((file) => file.path === target.path)) return false;
     showFile(target.path);
     const [start, end] = targetLines(target);
-    setHighlight((was) => ({ path: target.path, start, end, token: (was?.token ?? 0) + 1 }));
+    setHighlight((was) => ({ path: target.path, start, end, token: (was?.token ?? 0) + 1, ...(side ? { side } : {}) }));
     return true;
   };
   /**
@@ -419,8 +422,8 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     return true;
   };
   /** A place in the review (a Shape board's link): a file at a line, a file, a chapter, or All files. */
-  const goTo = (to: ShapeReviewAt) => {
-    if (to.path && to.line) openCode({ path: to.path, line: to.line });
+  const goTo = (to: ReviewAt) => {
+    if (to.path && to.line) openCode({ path: to.path, line: to.line }, to.side);
     else if (to.path && files.some((file) => file.path === to.path)) toFile(to.path);
     else if (to.step && to.step <= chapters.length) {
       // A chapter with no diff has only its heading to scroll to: wait for the reader to draw it.
@@ -447,9 +450,10 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     if (placed.current === key) return;
     placed.current = key;
     if (at.path && at.line) {
-      const hit = contextNotes.find((note) => note.file === at.path && at.line! >= note.lineStart && at.line! <= note.lineEnd);
+      const want = { path: at.path, line: at.line, side: at.side ?? ('new' as const) };
+      const hit = contextNotes.find((note) => noteHolds(note, want));
       if (hit) noteRows.show(hit.id);
-      else noteAt.current = { path: at.path, line: at.line };
+      else noteAt.current = want;
     }
     goTo(at);
     onLanded?.();

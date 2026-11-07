@@ -1,6 +1,6 @@
 /**
  * Context notes, take Line (approval "inbox-context-notes"): each note is one
- * row under its lines, Show me's Pebble, the writer in words and the first
+ * row under its lines, the writer in words (a Picture also Show me's Pebble) and the first
  * words; a click (or Enter / Space: it is a button) opens it in place. A note
  * has no reply, edit, count or Post. A stale one is grey and says the code
  * changed, with Ask again, as Show me's corner card does.
@@ -84,38 +84,54 @@ function Quote({ children }: { children: ReactNode }) {
   return <span className="ib-ctxn-q">“{children}”</span>;
 }
 
-/** Who wrote the note and why it is there, in words: what the open note says after the writer. */
+/**
+ * Who wrote the note and why it is there, in words: what the open note says after the writer. Only the approved
+ * words: a risk place with no rule of the person's, or an answer to nothing the person said, says nothing more
+ * (an answer still says when it came); nothing at all draws no line.
+ */
 function NoteBy({ note }: { note: ContextNote }) {
-  const time = noteTime(note.at);
-  return (
-    <span className="ib-ctxn-by" dir="auto">
-      {note.writer === 'guide' && <>· {note.agent ?? 'The agent'}, in its review</>}
-      {note.writer === 'risk' && (note.rule ? <>· your rule <Quote>{note.rule}</Quote></> : <>· risk ranking</>)}
-      {note.writer === 'thread' && (
+  const time = note.writer === 'thread' ? noteTime(note.at) : null;
+  const words =
+    note.writer === 'guide' ? (
+      <>· {note.agent ?? 'The agent'}, in its review</>
+    ) : note.writer === 'risk' ? (
+      note.rule ? (
         <>
-          {note.asked ? (
+          · your rule <Quote>{note.rule}</Quote>
+        </>
+      ) : null
+    ) : note.writer === 'thread' ? (
+      note.asked || time ? (
+        <>
+          {note.asked && (
             <>
               · you asked <Quote>{note.asked}</Quote>
             </>
-          ) : (
-            <>· {note.agent ?? 'The agent'}, in the thread</>
           )}
-          {time ? ` · ${time}` : ''}
+          {time ? `${note.asked ? ' ' : ''}· ${time}` : ''}
         </>
-      )}
-      {note.writer === 'picture' && note.picture && (
-        <>
-          · <Quote>{note.picture.title}</Quote>, {note.picture.part}
-        </>
-      )}
+      ) : null
+    ) : note.picture ? (
+      <>
+        · <Quote>{note.picture.title}</Quote>, {note.picture.part}
+      </>
+    ) : null;
+  if (!words) return null;
+  return (
+    <span className="ib-ctxn-by" dir="auto">
+      {words}
     </span>
   );
 }
 
+/**
+ * The writer's name starts the row (the owner, q-9ad31b4e: no mark, only the writer's name). Only a Picture keeps
+ * Show me's mark: it comes from a board, and that mark is drawing's and the board's. Risk has no mark yet.
+ */
 function NoteHead({ note }: { note: ContextNote }) {
   return (
     <span className="ib-ctxn-h">
-      <Pebble alive={false} size={12} className="ib-sm-peb ib-ctxn-peb" />
+      {note.writer === 'picture' && <Pebble alive={false} size={12} className="ib-sm-peb ib-ctxn-peb" />}
       <b>{writerWord(note)}</b>
       {note.writer === 'risk' && (
         <span className="ib-risk ib-ctxn-risk" data-risk="high">
@@ -204,9 +220,9 @@ export function ContextNoteRow({ id }: { id: string }) {
 /** The thread's chip for a `:::note` block: where it is pinned, and the way to it. */
 export function ContextNoteChip({ file, lines, onOpen }: { file: string; lines: string; onOpen?: () => void }) {
   const name = file.slice(file.lastIndexOf('/') + 1);
+  // An answer's chip: no mark, as its row has none (q-9ad31b4e).
   const body = (
     <>
-      <Pebble alive={false} size={12} className="ib-sm-peb ib-ctxn-peb" />
       <span>
         On <span className="ib-ctxn-chip-f">{name}</span> {lines}
       </span>

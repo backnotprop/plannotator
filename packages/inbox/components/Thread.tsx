@@ -14,8 +14,7 @@ import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import { InlineMarkdown, SoftLineBreaksContext } from '@plannotator/ui/components/InlineMarkdown';
 import { inboxNoteBlocks, type InboxNoteBlock } from '@plannotator/core/inbox-context-notes';
 import { ContextNoteChip } from '../contextNotes/ContextNotes';
-import { rangeWord } from '../contextNotes/model';
-import { reviewDrawnOn } from '../review-drawing/showMeModel';
+import { noteReviews, rangeWord } from '../contextNotes/model';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
@@ -1110,9 +1109,8 @@ export interface ThreadPaneProps {
   fullFromSide?: boolean;
   /** The file × and Escape go back to when it is not the one on screen (fullScreenOrigin.ts `fullExitFile`), or null. */
   fullExitFile?: string | null;
-  /** Open the guided review a message carries (the record's 4.2). */
-  /** Open a guided review (`at`: a place in it, a context note's "Open in the review"). */
-  onOpenGuide: (messageId: string, at?: { path: string; line: number }) => void;
+  /** Open the guided review a message carries (the record's 4.2; `at`: a place in it, a context note's "Open in the review"; `side: 'old'` for removed lines). */
+  onOpenGuide: (messageId: string, at?: { path: string; line: number; side?: 'old' }) => void;
   /**
    * Where "new since you looked" starts (folding.ts `lookBoundary`), read
    * from the thread BEFORE the window recorded this look and kept until the
@@ -3705,11 +3703,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
 
   // Context notes (approval "inbox-context-notes"): in a thread with a review, an agent's `:::note` block is a chip
   // that opens the review it is drawn on (the newest at or before its message) at its lines.
+  // A note written before the thread's first review is drawn on none: its chip names the lines, with no way to them.
   const hasReview = useMemo(() => thread.messages.some((m) => m.guide?.review), [thread.messages]);
-  const openNote = (messageId: string, note: InboxNoteBlock) => {
-    const at = thread.messages.find((m) => m.id === messageId);
-    const review = reviewDrawnOn(messageId, thread.messages, undefined, at?.created_at);
-    if (review) onOpenGuide(review, { path: note.file, line: note.lineStart });
+  const reviewOfNote = useMemo(() => noteReviews(thread.messages), [thread.messages]);
+  const noteChips = (messageId: string): { onOpen?: (note: InboxNoteBlock) => void } => {
+    const review = reviewOfNote.get(messageId);
+    return review ? { onOpen: (note) => onOpenGuide(review, { path: note.file, line: note.lineStart, ...(note.side === 'old' ? { side: 'old' as const } : {}) }) } : {};
   };
 
   // The action items each of the person's messages carried (its reply, or the report the timed path sent):
@@ -6216,7 +6215,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   onJumpQuestion={jumpTo}
                   projectRoot={thread.project.root}
                   openInFiles={codeReview}
-                  {...(codeReview && isAgent && hasReview ? { contextNotes: { onOpen: (note: InboxNoteBlock) => openNote(message.id, note) } } : {})}
+                  {...(codeReview && isAgent && hasReview ? { contextNotes: noteChips(message.id) } : {})}
                   repo={thread.project.repo ?? null}
                   onOpenAttachment={openFromMessage}
                   onOpenInlineImage={(image) => openFromMessage(image)}

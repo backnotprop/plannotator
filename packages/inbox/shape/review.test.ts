@@ -8,7 +8,7 @@ import { expect, test } from 'bun:test';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import type { ShapeReviewAt } from '@plannotator/ui/components/shape/types';
-import { shapeReview, shapeReviewAtOf, shapeReviewMessage, writeShapeReviewAt } from './review';
+import { shapeReview, shapeReviewAtOf, shapeReviewMessage, writeShapeReviewAt, type ReviewAt } from './review';
 
 const snapshot = buildGuideSnapshot({
   guide: { title: 'Kettle', intent: 'One whistle.', sections: [{ title: 'The whistle', overview: '', diffs: [{ file: 'src/kettle.ts', summary: '' }] }, { title: 'The setting', overview: '', diffs: [{ file: 'src/settings.ts', summary: '' }] }] },
@@ -27,7 +27,8 @@ test("the board's review is its thread's newest review, never a plain guide", ()
 });
 
 test('a place in the review survives the address', () => {
-  const places: ShapeReviewAt[] = [{ path: 'src/a b.ts', line: 42 }, { path: 'src/kettle.ts' }, { step: 3 }, { files: true }];
+  // A context note's removed lines (`side: 'old'`) keep their side: their numbers are the old side's.
+  const places: ReviewAt[] = [{ path: 'src/a b.ts', line: 42 }, { path: 'src/a.ts', line: 3, side: 'old' }, { path: 'src/kettle.ts' }, { step: 3 }, { files: true }];
   for (const at of places) {
     const params = new URLSearchParams('thread=msg_1&guide=msg_2');
     writeShapeReviewAt(params, at);

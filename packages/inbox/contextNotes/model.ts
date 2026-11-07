@@ -92,6 +92,11 @@ function inDiff(files: readonly NoteFile[], file: string, side: InboxNoteSide, s
   return patch !== undefined && isLineRangeInPatch(patch, start, end, side);
 }
 
+/** Whether a note is on a place the review was opened at: its file, its side, and that line inside its lines. */
+export function noteHolds(note: Pick<ContextNote, 'file' | 'side' | 'lineStart' | 'lineEnd'>, at: { path: string; line: number; side: InboxNoteSide }): boolean {
+  return note.file === at.path && note.side === at.side && at.line >= note.lineStart && at.line <= note.lineEnd;
+}
+
 /** The guided review's author's notes, from its snapshot (version 4). A note outside the diff is left out. */
 export function guideNotes(snapshot: Pick<GuideSnapshot, 'guide'>, files: readonly NoteFile[], agent: string): ContextNote[] {
   const out: ContextNote[] = [];
@@ -209,6 +214,19 @@ export function threadNotes(input: {
   return out;
 }
 
+/**
+ * The review each agent message's `:::note` blocks are drawn on (the newest at or before it, as `threadNotes` draws
+ * them), by message: null for a message before the thread's first review, whose chip then has no way into a review.
+ */
+export function noteReviews(messages: readonly NoteMessage[]): Map<string, string | null> {
+  const out = new Map<string, string | null>();
+  if (!messages.some((m) => m.guide?.review)) return out;
+  for (const m of messages) {
+    if (m.author.kind === 'agent' && m.body?.includes(':::note')) out.set(m.id, reviewDrawnOn(m.id, messages, undefined, m.created_at));
+  }
+  return out;
+}
+
 /** One part of a board that points at code, as the window reads it off the drawing. */
 export interface PicturePart {
   board: string;
@@ -290,16 +308,21 @@ export function placesWord(count: number): string {
   return `${count} ${count === 1 ? 'place' : 'places'}`;
 }
 
+/** How long a "See the N places" ask waits for the PR's diff to mount and take it. */
+export const RISK_PLACES_ASK_MS = 10_000;
+
 /**
  * The PR page's "See the N places" asks the PR's diff to open at its first place. The diff is another view that
- * mounts after the click, so the ask waits here, named by the PR, until that diff takes it.
+ * mounts after the click, so the ask waits here, named by the PR, for a moment. The next PR diff to mount takes it
+ * away, whichever PR it shows, so an ask never lingers to move a diff opened some other way later.
  */
-let placesAsked: string | null = null;
-export function askRiskPlaces(pullKey: string): void {
-  placesAsked = pullKey;
+let placesAsked: { key: string; at: number } | null = null;
+export function askRiskPlaces(pullKey: string, now = Date.now()): void {
+  placesAsked = { key: pullKey, at: now };
 }
-export function takeRiskPlaces(pullKey: string): boolean {
-  if (placesAsked !== pullKey) return false;
+/** Whether the PR diff now mounting (`pullKey`) was asked to open at its first place. The ask is gone after this. */
+export function takeRiskPlaces(pullKey: string, now = Date.now()): boolean {
+  const asked = placesAsked;
   placesAsked = null;
-  return true;
+  return !!asked && asked.key === pullKey && now - asked.at >= 0 && now - asked.at <= RISK_PLACES_ASK_MS;
 }

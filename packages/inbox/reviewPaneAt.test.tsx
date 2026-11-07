@@ -14,13 +14,13 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
-import type { ShapeReviewAt } from '@plannotator/ui/components/shape/types';
+import type { ReviewAt } from './shape/review';
 import type { ShapeHost } from '@plannotator/ui/components/shape';
 import type { InboxShapes } from './shape/useInboxShapes';
 
 const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
-type ReaderProps = { mode?: string; reveal?: { path: string } | null; highlight?: { path: string; start: number; end: number } | null };
+type ReaderProps = { mode?: string; reveal?: { path: string } | null; highlight?: { path: string; start: number; end: number; side?: 'old' } | null };
 let reader: ReaderProps | null = null;
 const hasDom = typeof document !== 'undefined';
 if (hasDom) {
@@ -98,7 +98,7 @@ afterEach(() => {
   globalThis.fetch = savedFetch;
 });
 
-async function open(at: ShapeReviewAt | null, pane: 'review' | 'guide' = 'review'): Promise<{ landed: () => number }> {
+async function open(at: ReviewAt | null, pane: 'review' | 'guide' = 'review'): Promise<{ landed: () => number }> {
   let landed = 0;
   el = document.createElement('div');
   document.body.appendChild(el);
@@ -126,6 +126,16 @@ test.skipIf(!hasDom)("a board's file:line opens the review at that file's chapte
   expect(reader?.highlight).toMatchObject({ path: 'src/settings.ts', start: 2, end: 2 });
   expect(chapterName()).toContain('The setting');
   expect(landed()).toBe(1);
+});
+
+test.skipIf(!hasDom)("a context note's removed lines open on the removed side: their numbers are the old side's", async () => {
+  await open({ path: 'src/settings.ts', line: 2, side: 'old' });
+  expect(reader?.highlight).toMatchObject({ path: 'src/settings.ts', start: 2, end: 2, side: 'old' });
+  act(() => root?.unmount());
+  root = null;
+  el?.remove();
+  await open({ path: 'src/settings.ts', line: 2 });
+  expect(reader?.highlight?.side).toBeUndefined();
 });
 
 test.skipIf(!hasDom)('a file no chapter holds opens in All files', async () => {

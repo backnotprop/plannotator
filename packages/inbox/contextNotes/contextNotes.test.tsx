@@ -4,15 +4,22 @@
  * nothing it controls), a note that grows a reply, edit or Post, a stale answer
  * without its words or its Ask again, a picture's note that can't open its board.
  *
+ * In the thread, an agent's `:::note` block is a chip naming its file and lines (removed lines said so) with its
+ * words, never its raw anchor line; "Open in the review" opens those lines on their side, and a note the thread has
+ * no review for yet is a chip with no way in.
+ *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import type { InboxNoteBlock } from '@plannotator/core/inbox-context-notes';
+import type { InboxMessageWire } from '@plannotator/core/inbox-types';
 import type { ContextNote } from './model';
 
 const hasDom = typeof document !== 'undefined';
 const { ContextNotesProvider, useContextNotes } = (hasDom ? await import('./ContextNotes') : {}) as typeof import('./ContextNotes');
+const { MessageBody } = (hasDom ? await import('../components/Thread') : { MessageBody: null }) as typeof import('../components/Thread');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -44,6 +51,8 @@ test.skipIf(!hasDom)('a row is a button that opens its note in place, and nothin
   const body = el.querySelector(`#${CSS.escape(button.getAttribute('aria-controls')!)}`) as HTMLElement;
   expect(body.hidden).toBe(true);
   expect(button.textContent).toContain('Answer');
+  expect(button.querySelector('.ib-ctxn-peb')).toBeNull();
+  expect(button.querySelector('.ib-ctxn-h')!.firstElementChild!.textContent).toBe('Answer');
   act(() => button.click());
   expect(button.getAttribute('aria-expanded')).toBe('true');
   expect(body.hidden).toBe(false);
@@ -79,9 +88,78 @@ test.skipIf(!hasDom)('a risk shows High and the person’s rule; a picture opens
   const [riskRow, pictureRow] = Array.from(el.querySelectorAll<HTMLButtonElement>('button.ib-ctxn-row'));
   expect(riskRow!.textContent).toContain('Risk');
   expect(riskRow!.textContent).toContain('High');
+  // Only a Picture carries Show me's mark (it comes from a board); the other writers start with their name (q-9ad31b4e).
+  expect(riskRow!.querySelector('.ib-ctxn-peb')).toBeNull();
+  expect(pictureRow!.querySelector('.ib-ctxn-peb')).not.toBeNull();
   act(() => riskRow!.click());
   expect(el.querySelector('[data-context-note-row="r-0"]')!.textContent).toContain('your rule “Anything in billing.”');
   act(() => pictureRow!.click());
   act(() => el.querySelector<HTMLButtonElement>('[data-context-note-open-picture]')!.click());
   expect(opened).toEqual(['b1']);
+});
+
+test.skipIf(!hasDom)('a risk place with no rule of the person’s, and an answer to nothing they said, add no words of their own', () => {
+  const risk: ContextNote = { id: 'r-0', writer: 'risk', file: 'src/a.ts', side: 'new', lineStart: 1, lineEnd: 2, text: 'Charges retry.', level: 'high' };
+  const unasked: ContextNote = { ...answer, id: 't2', asked: undefined };
+  const timed: ContextNote = { ...answer, id: 't3', asked: undefined, at: new Date().toISOString() };
+  const el = mount([risk, unasked, timed], {});
+  for (const row of el.querySelectorAll<HTMLButtonElement>('button.ib-ctxn-row')) act(() => row.click());
+  // No line saying who wrote it or why: the writer's word and the note's own words only.
+  expect(el.querySelector('[data-context-note-row="r-0"] .ib-ctxn-by')).toBeNull();
+  expect(el.querySelector('[data-context-note-row="t2"] .ib-ctxn-by')).toBeNull();
+  expect(el.querySelector('[data-context-note-row="r-0"] .ib-ctxn-t')!.textContent).toBe('Charges retry.');
+  // An answer still says when it came, and nothing else.
+  const by = el.querySelector('[data-context-note-row="t3"] .ib-ctxn-by')!.textContent!;
+  expect(by.startsWith('· ')).toBe(true);
+  expect(by).not.toContain('Claude');
+  expect(by).not.toContain('you asked');
+});
+
+async function renderMessage(body: string, contextNotes?: { onOpen?: (note: InboxNoteBlock) => void }) {
+  const message = {
+    id: 'msg_01K7ZZZZZZZZZZZZZZZZZZZZZZ',
+    thread_id: 'msg_01K7ZZZZZZZZZZZZZZZZZZZZZZ',
+    project_id: 'prj_01K7ZZZZZZZZZZZZZZZZZZZZZZ',
+    author: { kind: 'agent', host: 'claude-code', session: 'ses_1', name: 'Claude Code' },
+    body,
+    attachments: [],
+    questions: [],
+  } as unknown as InboxMessageWire;
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  await act(async () => {
+    root = createRoot(host!);
+    root.render(<MessageBody message={message} projectRoot="/work/widgets" onOpenAttachment={() => {}} readOnly answers={new Map()} onPick={() => {}} footerFor={() => null} {...(contextNotes ? { contextNotes } : {})} />);
+  });
+  return host;
+}
+
+const NOTE_MESSAGE = 'Here is why.\n\n:::note src/jobs/retry.ts#L3-L4 old\nNothing removes the **row**.\n:::\n\nThe rest stays.';
+
+test.skipIf(!hasDom)('a `:::note` block is a chip with its words, never its anchor line, and opens its lines on their side', async () => {
+  const opened: InboxNoteBlock[] = [];
+  const el = await renderMessage(NOTE_MESSAGE, { onOpen: (note) => opened.push(note) });
+  const block = el.querySelector('[data-context-note-block]')!;
+  expect(block).not.toBeNull();
+  expect(el.textContent).not.toContain('#L3-L4');
+  expect(el.textContent).not.toContain(':::');
+  expect(el.textContent).toContain('Here is why.');
+  expect(el.textContent).toContain('The rest stays.');
+  // The note's words keep their Markdown, as the message's do.
+  expect(block.querySelector('strong')?.textContent).toBe('row');
+  const chip = block.querySelector<HTMLElement>('[data-context-note-chip]')!;
+  expect(chip.tagName).toBe('BUTTON');
+  expect(chip.getAttribute('title')).toBe('src/jobs/retry.ts');
+  expect(chip.textContent).toContain('retry.ts');
+  expect(chip.textContent).toContain('removed 3–4');
+  act(() => chip.click());
+  expect(opened.map((n) => [n.file, n.side, n.lineStart, n.lineEnd])).toEqual([['src/jobs/retry.ts', 'old', 3, 4]]);
+});
+
+test.skipIf(!hasDom)('a note with no review to open (written before the thread’s first one) is a chip with no way in', async () => {
+  const el = await renderMessage(NOTE_MESSAGE, {});
+  const chip = el.querySelector<HTMLElement>('[data-context-note-chip]')!;
+  expect(chip.tagName).toBe('SPAN');
+  expect(chip.querySelector('.ib-ctxn-chip-go')).toBeNull();
+  expect(el.querySelector('[data-context-note-block] strong')?.textContent).toBe('row');
 });

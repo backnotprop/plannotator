@@ -54,8 +54,8 @@ export interface GuideReaderProps {
   renderOverviewDiagram?: (diagram: GuideOverviewDiagram) => ReactNode | null;
   /** A picture slot when the overview has no diagram (the guide host's `renderOverviewFigure`). Absent: none. */
   renderOverviewFigure?: () => ReactNode | null;
-  /** Paint these lines (new side) and bring them into view; a new token moves again. */
-  highlight?: { path: string; start: number; end: number; token: number } | null;
+  /** Paint these lines (new side; `side: 'old'`: removed lines' numbers) and bring them into view; a new token moves again. */
+  highlight?: { path: string; start: number; end: number; token: number; side?: 'old' } | null;
   /** Under the host's own title (the PR review): no heading block of the reader's own, the host's page margins. */
   bare?: boolean;
   /** Reads one changed file's whole text, for the "N unmodified lines" arrows. Absent: the diffs show as they came. */

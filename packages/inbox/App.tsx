@@ -198,8 +198,7 @@ import { shapeReplyPart, type ShapeReplyPart } from './shape/addToReply';
 import type { ShapeBoxSelection } from '@plannotator/ui/components/shape';
 import { useBoardPlaces } from './shape/boardPlace';
 import { useInboxShapes } from './shape/useInboxShapes';
-import { shapeReviewAtOf, writeShapeReviewAt } from './shape/review';
-import type { ShapeReviewAt } from '@plannotator/ui/components/shape/types';
+import { shapeReviewAtOf, writeShapeReviewAt, type ReviewAt } from './shape/review';
 import { filterShapeItems, shapeAgo } from '@plannotator/ui/components/shape/ShapeGrid';
 import type { SearchShape } from './search/model';
 import { connectCommand } from './connectPrompt';
@@ -374,9 +373,9 @@ interface Route {
   guide?: string | null;
   /**
    * Where that review opens (a Shape board's link, approval "shape-whats-changed"): `&code=path:line`, `&step=N`
-   * or `&files`. Dropped from the address once the review is there.
+   * or `&files` (a context note's lines on the removed side add `&side=old`). Dropped from the address once the review is there.
    */
-  guideAt?: ShapeReviewAt | null;
+  guideAt?: ReviewAt | null;
   /**
    * The thread's Artifacts view (`#thread=…&artifacts`, approval "inbox-thread-artifacts"): the grid of every
    * artifact in place of the messages. A file or a guided review opened from it keeps it, so their Back returns to it.

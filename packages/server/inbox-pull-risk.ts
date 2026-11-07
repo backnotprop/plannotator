@@ -9,7 +9,9 @@
  *
  * - A high judgment may name its places in the diff (`where`, context notes,
  *   approval "inbox-context-notes"): checked against the diff that was judged
- *   when it is made, kept beside it, and shown on the PR's diff.
+ *   when it is made, kept beside it, and shown on the PR's diff. Kept only when
+ *   the diff judged is the one the PR's diff draws (the forge's one document):
+ *   a per-file read, a clone's diff or a too-large one draws none of them.
  *
  * - Runs only while Code review is on and rules exist, and only from the owner's
  *   window's list read (the routes in inbox.ts guard those). Open and draft PRs only.
@@ -44,7 +46,7 @@ import { childPath } from "@plannotator/shared/child-env";
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { buildRiskPrompt, parseRiskAnswer, riskFailureLine, riskFence, RISK_SYSTEM_PROMPT } from "./inbox-pull-risk-prompt";
-import type { InboxPulls } from "./inbox-pulls";
+import { INBOX_PULL_DIFF_MAX_BYTES, type InboxPulls } from "./inbox-pulls";
 
 export const INBOX_PULL_RISK_FILE = "pull-risk.json";
 /** A few at a time. */
@@ -376,6 +378,9 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     let patch: string | null;
     let partial: boolean;
     let heldBack: string | null;
+    // Whether the diff judged is the one the PR's diff on screen draws (the forge's one document, within its size):
+    // only then are a high judgment's places kept, so "See the N places" counts places the diff can show.
+    let onScreen: boolean;
     try {
       const roots = options.roots ? await options.roots(pull.key).catch(() => []) : [];
       const diff = await options.pulls.wholeDiff(pull.key, stopping.signal, roots);
@@ -387,6 +392,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       patch = diff.patch;
       partial = diff.partial;
       heldBack = diff.held_back ?? null;
+      onScreen = !diff.per_file && !diff.partial && Buffer.byteLength(diff.patch, "utf8") <= INBOX_PULL_DIFF_MAX_BYTES;
     } catch (cause) {
       const { code, message } = cause as { code?: string; message?: string };
       waits.set(job, now() + RISK_RETRY_MS);
@@ -423,6 +429,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       judgment = "text" in result ? parseRiskAnswer(result.text, { rules: current.rules, patch: heldBack }) : null;
       heldBack = null;
       partial = true;
+      onScreen = false;
       if (stopping.signal.aborted) return;
     }
     if (!judgment) {
@@ -442,7 +449,8 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     waits.delete(job);
     // Part of a diff can't show that nothing is touched: Low from it is the rules' "maybe".
     const level = partial && judgment.level === "low" ? "medium" : judgment.level;
-    keep(pull.key, { ...judgment, level, head: pull.head_sha, base: pull.base, rules });
+    const { where, ...ranked } = judgment;
+    keep(pull.key, { ...ranked, level, ...(where && onScreen ? { where } : {}), head: pull.head_sha, base: pull.base, rules });
   };
 
   const pump = () => {

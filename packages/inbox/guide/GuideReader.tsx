@@ -263,7 +263,7 @@ function Reader({
     }
     setFocusedFile(highlight.path);
     setSelectionFile(highlight.path);
-    setPendingSelection({ start: highlight.start, end: highlight.end, side: 'additions' });
+    setPendingSelection({ start: highlight.start, end: highlight.end, side: highlight.side === 'old' ? 'deletions' : 'additions' });
   }, [highlight?.token]); // eslint-disable-line react-hooks/exhaustive-deps
   const commentsRef = useRef(comments);
   commentsRef.current = comments;

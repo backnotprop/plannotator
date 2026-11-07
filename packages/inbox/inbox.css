@@ -8975,7 +8975,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-ctxn-places:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 60%, transparent); outline-offset: 2px; border-radius: 3px; }
 /* The thread: a `:::note` block's chip and words. */
 .ib-ctxn-msg { margin: 10px 0 14px; }
-.ib-ctxn-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 24px; padding: 0 9px 0 7px; border: 0; border-radius: 999px; background: color-mix(in oklch, var(--primary) 8%, var(--card)); color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-12, 12px); text-align: left; }
+.ib-ctxn-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 24px; padding: 0 9px; border: 0; border-radius: 999px; background: color-mix(in oklch, var(--primary) 8%, var(--card)); color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-12, 12px); text-align: left; }
 button.ib-ctxn-chip { cursor: pointer; }
 button.ib-ctxn-chip:hover { color: var(--foreground); }
 button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 60%, transparent); outline-offset: 1px; }

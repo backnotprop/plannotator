@@ -126,8 +126,13 @@ const OFF_SNAPSHOT_VERSIONS = [GUIDE_SNAPSHOT_VERSION, GUIDE_SNAPSHOT_OVERVIEW_V
  * A guide as an agent sent it, checked by Plannotator's own code. `cwd` is the
  * project root, where `buildAuthoredGuideSnapshot` reads provenance (origin,
  * branch, head) for a guide that does not name its `source`.
+ *
+ * Context notes (approval "inbox-context-notes") are kept only on a review (`review`, Code review on): only the
+ * review draws them, so a plain guided review's notes are left out, unread, and its snapshot keeps the version it
+ * has without them.
  */
-export function checkInboxGuide(input: { snapshot?: unknown; guide?: unknown; patch?: string }, cwd: string, options: { codeReview?: boolean } = {}): InboxGuideCheck {
+export function checkInboxGuide(input: { snapshot?: unknown; guide?: unknown; patch?: string }, cwd: string, options: { codeReview?: boolean; review?: boolean } = {}): InboxGuideCheck {
+  const keepNotes = options.codeReview === true && options.review === true;
   const hasSnapshot = input.snapshot !== undefined;
   if (hasSnapshot === (input.guide !== undefined || input.patch !== undefined)) {
     return { ok: false, error: "Send either `snapshot`, or `guide` with `patch`." };
@@ -138,7 +143,8 @@ export function checkInboxGuide(input: { snapshot?: unknown; guide?: unknown; pa
     const parseOptions = options.codeReview ? {} : { versions: OFF_SNAPSHOT_VERSIONS };
     const parsed = typeof input.snapshot === "string" ? parseGuideSnapshotJson(input.snapshot, parseOptions) : parseGuideSnapshot(input.snapshot, parseOptions);
     if (!parsed.ok) return { ok: false, error: `Invalid guide snapshot (${parsed.error.path}): ${parsed.error.message}` };
-    const snapshot = parsed.value;
+    const snapshot = keepNotes ? parsed.value : snapshotWithoutNotes(parsed.value);
+    if (!snapshot) return { ok: false, error: "Invalid guide snapshot: it could not be read without its notes." };
     // A drawn picture (version 3, read only while Code review is on): Shape's rules and the patch's files. A version-2
     // document is taken as it always was; the review pane draws its html picture only if it keeps Shape's rules.
     const drawnProblem = overviewDiagramProblem(snapshot.guide.overview?.diagram, snapshot.review.rawPatch);
@@ -176,7 +182,15 @@ export function checkInboxGuide(input: { snapshot?: unknown; guide?: unknown; pa
   const overview = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>).overview : undefined;
   const withOverview = overview === undefined ? ({ ok: true, snapshot: built.snapshot } as const) : withAuthoredOverview(built.snapshot, overview);
   if (!withOverview.ok) return withOverview;
-  return withAuthoredNotes(withOverview.snapshot, raw);
+  return keepNotes ? withAuthoredNotes(withOverview.snapshot, raw) : withOverview;
+}
+
+/** A snapshot with its notes left out, at the version it has without them (unchanged when it has none); null if that fails its parse. */
+function snapshotWithoutNotes(snapshot: GuideSnapshot): GuideSnapshot | null {
+  if (!snapshot.guide.sections.some((section) => section.diffs.some((ref) => ref.notes !== undefined))) return snapshot;
+  const guide = { ...snapshot.guide, sections: snapshot.guide.sections.map((section) => ({ ...section, diffs: section.diffs.map(({ notes: _notes, ...ref }) => ref) })) };
+  const parsed = parseGuideSnapshot({ ...snapshot, version: guideSnapshotVersionFor(guide), guide });
+  return parsed.ok ? parsed.value : null;
 }
 
 /**
@@ -577,11 +591,12 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
     async (input, ctx) =>
       guarded(async () => {
         const project = await sendProject(context, input);
-        const checked = checkInboxGuide(input, project.root, { codeReview: context.codeReviewOn?.() ?? false });
+        const review = (input as { review?: boolean }).review === true;
+        // Notes ride only a review: a plain guided review's are left out (only the review draws them).
+        const checked = checkInboxGuide(input, project.root, { codeReview: context.codeReviewOn?.() ?? false, review });
         if (!checked.ok) throw new InboxError("invalid_guide", checked.error);
         // `review` exists only while Code review is on (the schema above); a session that listed it before the
         // switch went off is refused here rather than sending a review the window would not draw.
-        const review = (input as { review?: boolean }).review === true;
         if (review && !context.codeReviewOn?.()) throw new InboxError("code_review_off", "Code review is off in this Inbox (Settings → Capabilities): send the guide without `review`.");
         const described = describeInboxGuide(checked.snapshot, inboxGuideInputHash(input), review);
         const body = input.body?.trim() ? input.body : checked.snapshot.guide.intent;
