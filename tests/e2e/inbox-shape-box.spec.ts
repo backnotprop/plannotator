@@ -420,6 +420,12 @@ for (const [look, options, thread] of [
     await clearOfDock(page, toast.last());
     await page.screenshot({ path: join(replyShots, `02-added-toast-${look}.png`) });
     expect(waiting(id)).toEqual([]);
+    // A phone's toast floats over the board (above the thread's reply under it), where the omnibox sits once the
+    // words are under the drawing: a press there swipes the toast, not a box. Dismissed first, as a person would.
+    if (await page.locator('.ib-toast-phone').count()) {
+      await toast.last().locator('[data-toast-dismiss]').click();
+      await expect(toast).toHaveCount(0);
+    }
 
     // A second box, then its Undo: only the second goes, and its toast with it.
     await drag(page, await at(page, 'omnibox', 0.05, 0.2), await at(page, 'omnibox', 0.4, 0.8));
