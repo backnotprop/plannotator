@@ -12,7 +12,9 @@
  * spacing or its stamp of the spacing clock; a stuck Snooze holding the Board back. The Checklist reveal (approval
  * "inbox-checklist-reveal", 2026-11-04): its claim writing `inboxSteps` or touching a Checklist the person set; agent
  * text after Not now not byte-equal to a Checklist off, or not the steps text after Turn it on; a guest claiming it; its
- * 5 days or 5 threads moving; it needing the Board on.
+ * 5 days or 5 threads moving; it needing the Board on. Code review's day-0 offer (approval "code-review-offer-card"):
+ * not next on day 0 of a fresh install while Code review is undecided; offered without PLANNOTATOR_INBOX_PREVIEW (the
+ * 0.29 hold), or to someone who switched Code review off or on; its claim turning anything on or not taking the day.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -602,6 +604,59 @@ describe("the queue with Snooze", () => {
     expect(((await (await w.post("/api/inbox/list-intro")).json()) as Json).show).toBe(true);
     expect(w.saved().inboxReveals.lastShownAt).toBe(w.saved().inboxListIntro.shownAt);
     expect(await w.next()).toBeNull();
+  });
+});
+
+describe("Code review's day-0 offer (approval code-review-offer-card)", () => {
+  const KEY = "page-key-aaaa";
+  /** A fresh install on day 0: first use not known yet, no threads in the store. */
+  const freshDay0 = (config: Record<string, unknown> = {}) => world({ days: 0, threads: 0, config: { inboxSnoozeIntro: {}, ...config } });
+
+  test("next on day 0 of a fresh install while Code review was never decided; the claim stamps it, turns nothing on and takes the day", async () => {
+    setEnv("PLANNOTATOR_INBOX_PREVIEW", "1");
+    const w = await freshDay0();
+    const before = await w.settings();
+    expect(before.reveal.next).toBe("code_review");
+    expect(before.reveal.setup).toBe(true);
+    expect(before.code_review).toEqual({ on: false });
+    expect((await w.claim("code_review", KEY)).show).toBe(true);
+    const config = w.saved();
+    expect(config.inboxCodeReview).toBeUndefined();
+    expect(config.inboxReveals.code_review).toEqual({ shownAt: config.inboxReveals.lastShownAt, key: KEY });
+    // The day is taken: the agent note waits for the next free day; nothing else is next.
+    const after = await w.settings();
+    expect(after.reveal.setup).toBe(false);
+    expect(after.reveal.next).toBeNull();
+    // The same page's retry is shown it again; another tab, window or device never.
+    expect((await w.claim("code_review", KEY)).show).toBe(true);
+    expect((await w.claim("code_review", "page-key-bbbb")).show).toBe(false);
+    expect((await w.claim("code_review")).show).toBe(false);
+    // Not now: the next offer waits three days; Code review stays unset.
+    expect((await w.post("/api/inbox/reveal", { id: "code_review", answer: "not_now" })).ok).toBe(true);
+    expect(typeof w.saved().inboxReveals.notNowAt).toBe("string");
+    expect(w.saved().inboxCodeReview).toBeUndefined();
+  });
+
+  test("held (no PLANNOTATOR_INBOX_PREVIEW): never next, never claimed, nothing written", async () => {
+    setEnv("PLANNOTATOR_INBOX_PREVIEW", undefined);
+    const w = await freshDay0();
+    const read = await w.settings();
+    expect(read.reveal.next).toBeNull();
+    expect(read.code_review).toBeUndefined();
+    const config = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    expect((await w.claim("code_review", KEY)).show).toBe(false);
+    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(config);
+  });
+
+  test("decided by the person (switched off, or on): never asked, and the switch is never touched", async () => {
+    setEnv("PLANNOTATOR_INBOX_PREVIEW", "1");
+    for (const decided of [false, true]) {
+      const w = await freshDay0({ inboxCodeReview: decided });
+      expect(await w.next()).toBeNull();
+      expect((await w.claim("code_review", KEY)).show).toBe(false);
+      expect(w.saved().inboxCodeReview).toBe(decided);
+      expect(w.saved().inboxReveals?.code_review).toBeUndefined();
+    }
   });
 });
 
