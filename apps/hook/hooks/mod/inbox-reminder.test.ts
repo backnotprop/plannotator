@@ -89,6 +89,8 @@ describe("hooks.json's SessionStart compact hook", () => {
   /** The command as a hook process runs it: a clean environment, plus the variable when given. */
   function run(shell: string, args: string[], value?: string) {
     const env: Record<string, string> = { PATH: process.env.PATH ?? '/usr/bin:/bin' }
+    // PowerShell needs the Windows folder to start.
+    for (const name of ['SystemRoot', 'windir']) if (process.env[name]) env[name] = process.env[name] as string
     if (value !== undefined) env[INBOX_REMINDER_ENV] = value
     return spawnSync(shell, [...args, command], { env, encoding: 'utf8', timeout: 10_000 })
   }
@@ -119,14 +121,28 @@ describe("hooks.json's SessionStart compact hook", () => {
     })
   }
 
-  // Claude Code runs a Windows hook in Git Bash, else PowerShell (-NoProfile);
-  // there `$PLANNOTATOR_INBOX_REMINDER` is a PowerShell variable, always empty
-  // (the mod never runs on Windows anyway). The line must parse and exit 0.
-  // One test per value: each cold-starts pwsh once, so three starts no longer share one 5 s budget.
-  const pwsh = spawnSync('pwsh', ['-NoProfile', '-Command', 'exit 0'], { encoding: 'utf8' })
-  for (const [label, value] of [['unset', undefined], ['set to the text', text], ['set to the hostile text', HOSTILE]] as const) {
-    test.skipIf(pwsh.status !== 0)(`PowerShell: prints only whitespace and exits 0, ${label}`, () => {
-      const result = run('pwsh', ['-NoProfile', '-NonInteractive', '-Command'], value)
+  // Without Git Bash, Claude Code runs a Windows hook in PowerShell 7 where it is
+  // installed, else Windows PowerShell, with these arguments. The line prints the
+  // reminder there too, since the mod runs on Windows through PowerShell. One
+  // test per value: each cold-starts PowerShell, so the starts don't share one
+  // 5 s budget.
+  const POWERSHELL_HOOK_ARGS = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command']
+  const windowsPowerShell = process.platform === 'win32' && process.env.SystemRoot ? `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe` : ''
+  const pwsh = spawnSync('pwsh', ['-NoProfile', '-Command', 'exit 0'], { encoding: 'utf8' }).status === 0 ? 'pwsh' : ''
+  const powerShells = [windowsPowerShell && existsSync(windowsPowerShell) ? windowsPowerShell : '', pwsh].filter(Boolean)
+  for (const shell of powerShells) {
+    for (const [label, value] of [['the text', text], ['the hostile text', HOSTILE]] as const) {
+      test(`${shell}: set to ${label}, prints it byte for byte and one newline, and nothing in it runs; exit 0`, () => {
+        const result = run(shell, POWERSHELL_HOOK_ARGS, value)
+        expect(result.status).toBe(0)
+        expect(result.stdout).toBe(`${value}\n`)
+        expect(result.stderr).toBe('')
+        expect(existsSync(`${MARKER}-1`)).toBe(false)
+        expect(existsSync(`${MARKER}-2`)).toBe(false)
+      })
+    }
+    test(`${shell}: unset, prints only whitespace; exit 0`, () => {
+      const result = run(shell, POWERSHELL_HOOK_ARGS)
       expect(result.status).toBe(0)
       expect(result.stdout.trim()).toBe('')
       expect(result.stderr).toBe('')

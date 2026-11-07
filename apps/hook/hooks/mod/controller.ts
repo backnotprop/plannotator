@@ -37,7 +37,7 @@ import {
   pickerFile,
   planApprovalPathOf,
   privateDirArgv,
-  pruneArgv,
+  pruneArgvs,
   RECENT_MESSAGES_SUBJECT,
   removeFileArgv,
   recentAssistantTexts,
@@ -712,9 +712,12 @@ export class PlannotatorMod {
       dead: old.filter((record) => !mine(record) && age(record) <= LAUNCH_EXPIRED_MS).map((record) => record.dir),
       expired: old.filter((record) => !mine(record) && age(record) > LAUNCH_EXPIRED_MS).map((record) => record.dir),
     }
-    const probe = await this.host.run(pruneArgv(groups), { timeoutMs: 5_000 }).catch(() => null)
-    if (!probe || probe.exitCode !== 0) return
-    const gone = new Set(probe.stdout.split('\n').map((line) => line.trim()).filter(Boolean))
+    const gone = new Set<string>()
+    for (const argv of pruneArgvs(groups)) {
+      const result = await this.host.run(argv, { timeoutMs: 5_000 }).catch(() => null)
+      if (!result || result.exitCode !== 0) continue
+      for (const line of result.stdout.split('\n')) if (line.trim()) gone.add(line.trim())
+    }
     if (gone.size === 0) return
     const current = await this.host.storeGet(STORE_LAUNCHES)
     const all = Array.isArray(current) ? (current as LaunchRecord[]) : []

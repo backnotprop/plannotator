@@ -36,7 +36,7 @@ const MSYS_SCRIPTS: Partial<Record<ShellScriptId, string>> = {
 
 /** Runs each script in the bash at `bash`, with the MSYS variant where one is needed. */
 export function gitBashShell(bash: string): ModShell {
-  return { argv: (id, posix, tag, args) => [bash, '-c', MSYS_SCRIPTS[id] ?? posix, tag, ...args], windows: true }
+  return { argv: (id, posix, tag, args) => [bash, '-c', MSYS_SCRIPTS[id] ?? posix, tag, ...args], windows: true, name: 'sh' }
 }
 
 /**

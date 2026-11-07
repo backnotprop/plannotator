@@ -83,7 +83,7 @@ describe.skipIf(!GIT_BASH)("Git Bash's own variants of the scripts", () => {
   function launchStandIn(name: string): { dir: string; pid: string } {
     const dir = scratch()
     const exe = join(dir, `${name}.exe`)
-    copyFileSync(join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'PING.EXE'), exe)
+    copyFileSync(join(process.env.SystemRoot ?? process.env.windir ?? '', 'System32', 'PING.EXE'), exe)
     writeFileSync(join(dir, 'stdin'), '')
     useShell(gitBashShell(GIT_BASH as string))
     run(launchArgv(dir.replaceAll('\\', '/'), [exe, '-n', '30', '127.0.0.1']))

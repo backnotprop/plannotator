@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "set \\' ; printf \"%s\\n\" \"$PLANNOTATOR_INBOX_REMINDER\" ; : ' #'",
+            "command": "set \\' ; printf \"%s\\n\" \"$PLANNOTATOR_INBOX_REMINDER\" ; : ' ; [Console]::OutputEncoding = New-Object Text.UTF8Encoding $false ; [Console]::Out.Write($env:PLANNOTATOR_INBOX_REMINDER + [char]10) #'",
             "timeout": 5
           }
         ]

@@ -110,10 +110,10 @@ import {
 } from './inbox'
 import { inboxAgentTool, inboxReminderFor, type InboxToolInfo } from './inbox-contract'
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
-import { COMMANDS, debugAppendArgv, INBOX_COMMAND, isModCommand, resolveDataDir, waitArgv } from './launch'
+import { COMMANDS, debugAppendArgv, INBOX_COMMAND, isModCommand, privateDirArgv, resolveDataDir, waitArgv } from './launch'
 import { isAbsolutePath } from './paths'
 import { PLAN_TOOL } from './plan'
-import { resolveShell, useShell } from './shell'
+import { pickShell, useShell, type ModShell } from './shell'
 import { disposesOnSessionEnd, healAction, MOD_HEAL_EVERY_MS } from './self-heal'
 import { answerRemovalPrompt, isEnvOn, removalAskKey, RemovalAsks } from './skip-rm-prompts'
 import { answerShellCall, SHELL_TOOL, shellTakeOver } from './take-over'
@@ -641,12 +641,40 @@ async function shellEnvOf($: Engine): Promise<Record<string, string | undefined>
   const text = (value: unknown) => (typeof value === 'string' && value ? value : undefined)
   return {
     OS: text(await $.env.get('OS')),
-    // Where findGitBash looks. Windows matches variable names in any case, so PROGRAMFILES reads ProgramFiles.
+    // Which Windows shell: PLANNOTATOR_MOD_SHELL, then where findGitBash looks, then where powershell.exe is.
+    // Windows matches variable names in any case, so PROGRAMFILES reads ProgramFiles.
+    PLANNOTATOR_MOD_SHELL: text(await $.env.get('PLANNOTATOR_MOD_SHELL')),
     CLAUDE_CODE_GIT_BASH_PATH: text(await $.env.get('CLAUDE_CODE_GIT_BASH_PATH')),
     PATH: text(await $.env.get('PATH')),
     PROGRAMFILES: text(await $.env.get('PROGRAMFILES')),
     LOCALAPPDATA: text(await $.env.get('LOCALAPPDATA')),
+    SYSTEMROOT: text(await $.env.get('SYSTEMROOT')),
+    WINDIR: text(await $.env.get('WINDIR')),
   }
+}
+
+/** The session's shell (shell.ts `pickShell`), with its pin in the session's folder. */
+async function pickShellOf($: Engine, dataDir: string): Promise<ModShell | null> {
+  const env = await shellEnvOf($)
+  const sessionDir = `${dataDir}/claude-code-mod/${String(await $.session.id()).replace(/[^A-Za-z0-9._-]/g, '_')}`
+  const pinPath = `${sessionDir}/shell`
+  return pickShell(
+    { exists: async (path) => Boolean(await $.fs.exists(path)), env: async (name) => env[name] },
+    {
+      readPin: async () => {
+        const text = await $.fs.read(pinPath).catch(() => null)
+        return typeof text === 'string' ? text : null
+      },
+      writePin: async (shell) => {
+        if (!(await $.fs.exists(sessionDir))) {
+          useShell(shell)
+          await $.process.run(privateDirArgv(sessionDir), { timeoutMs: 5_000 })
+        }
+        await $.fs.write(pinPath, `${shell.name}\n`)
+      },
+      run: (argv) => $.process.run(argv, { timeoutMs: 5_000 }),
+    },
+  )
 }
 
 /** Whether the mod runs here (on unless the user turned it off) and where its data dir is; null: stay inert. */
@@ -656,10 +684,6 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
   if (!e.isInteractive) return null
   // A `claude` Plannotator's Ask AI started (`isAskAiChild` in packages/shared/child-env.ts).
   if ((await $.env.get('PLANNOTATOR_ASK_AI_CHILD')) === '1') return null
-  const env = await shellEnvOf($)
-  const shell = await resolveShell({ exists: async (path) => Boolean(await $.fs.exists(path)), env: async (name) => env[name] })
-  if (!shell) return null
-  useShell(shell)
   const dataDir = await resolveDataDir(
     {
       home: await homeOf($),
@@ -675,6 +699,9 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
   if (!resolveClaudeModEnabled(await $.env.get('PLANNOTATOR_CLAUDE_MOD'), configText)) {
     return null
   }
+  const shell = await pickShellOf($, dataDir)
+  if (!shell) return null
+  useShell(shell)
   const debug = await $.env.get('PLANNOTATOR_MOD_DEBUG')
   return {
     dataDir,

@@ -339,6 +339,45 @@ export function pruneArgv(groups: { cleaned: readonly string[]; dead: readonly s
   ])
 }
 
+type PruneGroups = { cleaned: readonly string[]; dead: readonly string[]; expired: readonly string[] }
+
+/** Room under Windows' 32,767-character command line for one prune call, the program's path aside. */
+export const PRUNE_ARGV_BUDGET = 28_000
+
+/**
+ * The prune calls for `groups`: one when everything fits in `budget`
+ * characters of command line, else several, each folder keeping its group.
+ * Under PowerShell a folder costs about 800 characters (its base64 sits inside
+ * the base64 script), so a few dozen records already fill one call.
+ */
+export function pruneArgvs(groups: PruneGroups, budget = PRUNE_ARGV_BUDGET): string[][] {
+  const size = (argv: readonly string[]) => argv.reduce((sum, word) => sum + word.length + 1, 0)
+  const empty = (): { cleaned: string[]; dead: string[]; expired: string[] } => ({ cleaned: [], dead: [], expired: [] })
+  const base = size(pruneArgv(empty()))
+  const batches: Array<ReturnType<typeof empty>> = []
+  let batch = empty()
+  let used = base
+  let count = 0
+  for (const mode of ['cleaned', 'dead', 'expired'] as const) {
+    for (const dir of groups[mode]) {
+      const one = empty()
+      one[mode].push(dir)
+      const cost = size(pruneArgv(one)) - base
+      if (count > 0 && used + cost > budget) {
+        batches.push(batch)
+        batch = empty()
+        used = base
+        count = 0
+      }
+      batch[mode].push(dir)
+      used += cost
+      count += 1
+    }
+  }
+  if (count > 0) batches.push(batch)
+  return batches.map((each) => pruneArgv(each))
+}
+
 /** Above this the debug log is moved to `<file>.1` before the next append. */
 export const DEBUG_LOG_MAX_BYTES = 1_048_576
 
