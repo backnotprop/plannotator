@@ -8598,7 +8598,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-pfoot .ib-rscroll :is(.ib-rtext, .ib-rmirror) { padding: 14px 48px 8px 16px; min-height: 64px; }
 .pn-inbox .ib-pfoot .ib-rscroll .ib-vnote { position: sticky; bottom: 0; z-index: 1; padding: 4px 16px; background: var(--card); overflow: hidden; transition: height 160ms ease-out, opacity 160ms ease-out; }
 :root.dark .pn-inbox .ib-pfoot .ib-rscroll .ib-vnote, .dark .pn-inbox .ib-pfoot .ib-rscroll .ib-vnote { background: color-mix(in oklch, var(--card) 94%, var(--foreground)); }
-@starting-style { .pn-inbox .ib-pfoot .ib-rscroll .ib-vnote { height: 0; opacity: 0; } }
+/* It glides in when it comes (a keyframe, not @starting-style: the thread CSS ui ships for host pages takes no @starting-style). */
+.pn-inbox .ib-pfoot .ib-rscroll .ib-vnote { animation: ib-rnote-in 160ms ease-out; }
+@keyframes ib-rnote-in { from { height: 0; opacity: 0; padding-top: 0; padding-bottom: 0; } }
 .pn-inbox .ib-pfoot .ib-rscroll .ib-vnote-leaving { animation: ib-rnote-out 160ms ease-out forwards; pointer-events: none; }
 @keyframes ib-rnote-out { to { height: 0; opacity: 0; padding-top: 0; padding-bottom: 0; } }
 /* Each paragraph of the words, and each answer, runs in its own direction (Arabic reads right to left, its full stop
@@ -8626,7 +8628,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-rclose:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 /* "Not saved …" on its own line over the row, in full, wrapping inside the box (a computer). */
 .ib-rnote { padding: 2px 16px 0; font-size: var(--ib-fs-12-5, 12.5px); overflow-wrap: anywhere; transition: opacity 160ms ease-out; }
-@starting-style { .ib-rnote { opacity: 0; } }
+/* Fades in when it comes. */
+.ib-rnote { animation: ib-rfade-in 160ms ease-out; }
 .ib-rnote .ib-draft-stamp { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; white-space: normal; color: var(--muted-foreground); }
 .ib-rnote .ib-draft-stamp .ib-draft-saved { overflow: visible; }
 
@@ -8664,7 +8667,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* Voice running (D5): what was in the cell steps back in place (and can't be pressed). */
 .ib-rmid:has(> .ib-vline) > .ib-rlayer { visibility: hidden; opacity: 0; transition: opacity 120ms ease-out, visibility 0s linear 120ms; }
 .pn-inbox .ib-pfoot .ib-rmid > .ib-vline { display: flex; align-items: center; gap: 10px; height: 100%; padding: 0 2px 0 8px; overflow: hidden; white-space: nowrap; transition: opacity 120ms ease-out; }
-@starting-style { .pn-inbox .ib-pfoot .ib-rmid > .ib-vline { opacity: 0; } }
+.pn-inbox .ib-pfoot .ib-rmid > .ib-vline { animation: ib-rfade-in 120ms ease-out; }
 /* The status's word gives way before Cancel ever does; with no room for it, the lit mic says it. */
 .ib-rmid > .ib-vline b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-rmid > .ib-vline [data-voice-cancel] { flex: none; }
@@ -8722,7 +8725,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 }
 :root[data-ib-keyboard-pin] .ib-rscroll { max-height: max(96px, calc(var(--ib-vvh, 100dvh) * 0.34)); }
 @media (prefers-reduced-motion: reduce) {
-  .pn-inbox .ib-pfoot :is(.ib-rlayer, .ib-rmid > .ib-vline, .ib-rscroll .ib-vnote, .ib-rnote, .ib-rclose, .ib-ricon) { transition: none; }
+  .pn-inbox .ib-pfoot :is(.ib-rlayer, .ib-rmid > .ib-vline, .ib-rscroll .ib-vnote, .ib-rnote, .ib-rclose, .ib-ricon) { transition: none; animation: none; }
   .pn-inbox .ib-pfoot .ib-rscroll .ib-vnote-leaving { animation: none; display: none; }
   .pn-inbox .ib-rrow .ib-vmic .ib-spin { animation: ib-rfade-in 1ms 150ms backwards; }
 }
