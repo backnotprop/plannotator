@@ -376,16 +376,40 @@ test('the bottom of a card: under the file\'s last line, on screen, nothing clip
   }
 });
 
+/**
+ * Puts a line's bottom on the window's bottom: scrolled there (the page may still be laying the file out, so it is
+ * measured again), else, at the top of the page where nothing scrolls it lower, the window ends at it.
+ */
+async function lineAtBottom(page: Page, file: string, n: number): Promise<void> {
+  const gap = () => line(page, file, n).evaluate((el) => window.innerHeight - el.getBoundingClientRect().bottom);
+  await page.mouse.move(700, 450);
+  for (let i = 0; i < 6; i++) {
+    const g = await gap();
+    if (Math.abs(g) < 4) return;
+    await page.mouse.wheel(0, -g);
+    await page.waitForTimeout(250);
+  }
+  const g = await gap();
+  if (g < 4) return;
+  const size = page.viewportSize()!;
+  await page.setViewportSize({ width: size.width, height: Math.floor(size.height - g) });
+  await page.waitForTimeout(300);
+}
+
 test('the bottom of the viewport: above the first selected line, not on them, in Split and Unified', async () => {
   const { page } = world;
+  const size = page.viewportSize()!;
   await openReview(page);
   await expect(line(page, LONG, 1)).toBeVisible({ timeout: 30_000 });
+  try {
   for (const style of ['split', 'unified'] as const) {
+    await page.setViewportSize(size);
     await setStyle(page, style);
     await line(page, LONG, 25).scrollIntoViewIfNeeded();
     // The last selected line is the last on screen.
     await line(page, LONG, 27).evaluate((el) => el.scrollIntoView({ block: 'end' }));
     await page.waitForTimeout(300);
+    await lineAtBottom(page, LONG, 27);
     await select(page, LONG, 25, 27);
     const g = await geometry(page);
     const box = clearOfLines(g);
@@ -395,6 +419,9 @@ test('the bottom of the viewport: above the first selected line, not on them, in
     await page.mouse.move(700, 150);
     if (style === 'split') await pictures(page, 'viewport-bottom', box);
     await closeBar(page);
+  }
+  } finally {
+    await page.setViewportSize(size);
   }
 });
 
