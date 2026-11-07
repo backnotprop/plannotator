@@ -21,6 +21,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { join } from 'node:path';
 import { loadFiles, type SystemModel } from '../src/index.ts';
+import { kindLabel } from '../src/draw/format.ts';
 import { readFiles } from '../src/node/index.ts';
 import { drawingDir, fixturesDir } from './helpers.ts';
 
@@ -248,6 +249,8 @@ test.skipIf(!hasDom)('the chips name the sheets of this scope and turn to one; k
   const el = await render(<R.SystemView model={model} sheet="C-001" layout="window" onNavigate={(s) => asked.push(s)} />);
   const chips = () => [...el.querySelectorAll<HTMLButtonElement>('.sys-chips button.sys-chip-b')];
   expect(chips().length).toBe(codes.length);
+  // every chip says its sheet's kind in words, not a code's first letter
+  expect(chips().map((c) => c.textContent)).toEqual(codes.map((c) => kindLabel(model.sheets[c]!.kind)));
   expect(chips().filter((c) => c.getAttribute('aria-current') === 'page').length).toBe(1);
   const other = codes.find((c) => c !== 'C-001')!;
   act(() => chips()[codes.indexOf(other)]!.click());

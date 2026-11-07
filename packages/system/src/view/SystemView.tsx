@@ -770,6 +770,8 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
           })}
           {shownSheet && <span className="sys-code">{shownCode}</span>}
         </nav>
+        {/* every chip says its sheet's kind in words: a code's first letter alone ("F" beside "Logical") named nothing,
+            and F is also the fit key; two sheets of one kind add their codes; the current one takes the selected fill */}
         {shownSheet && shownCodes.length > 1 ? (
           <div className="sys-chips" role="group" aria-label="Sheets here">
             {shownCodes.map((c, i) => {
@@ -777,7 +779,7 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
               const on = c === shownCode;
               return (
                 <button key={c} type="button" className="sys-chip-b" aria-current={on ? 'page' : undefined} title={`${kindLabel(sh.kind)} (${i + 1}): ${sh.question ?? sh.title}`} aria-label={`${kindLabel(sh.kind)}: ${sh.title}`} onClick={() => !on && turnTo(c)}>
-                  {on ? kindLabel(sh.kind) : <span className="sys-chip-k">{c[0]}</span>}
+                  {kindLabel(sh.kind)}{shownCodes.filter((x) => model.sheets[x]!.kind === sh.kind).length > 1 && <span className="sys-chip-k"> {c}</span>}
                 </button>
               );
             })}

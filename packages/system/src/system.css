@@ -31,6 +31,8 @@
   --sys-lane-fg: var(--sys-paper);
   --sys-lane-sub: color-mix(in oklab, var(--sys-paper) 72%, var(--foreground));
   --sys-label-bg: color-mix(in oklab, var(--sys-paper) 92%, transparent);
+  /* hover and focus light a box with a fill, the Inbox way: no border colour, no outline */
+  --sys-lit-fill: color-mix(in oklab, var(--foreground) 7%, transparent);
   /* the hue of a line says what it carries: data is graphite */
   --sys-l-data: var(--sys-line);
   --sys-l-people: color-mix(in oklab, color-mix(in oklab, var(--secondary) 60%, var(--primary)) 78%, var(--foreground));
@@ -241,7 +243,9 @@
 .sys-tile.sys-for .sys-tile-mk { height: 50px; }
 .sys-tile.sys-for .sys-rl { font-size: var(--ib-fs-11-5, 11.5px); line-height: calc(14.5px * var(--sys-k)); color: var(--sys-ink2); margin-top: 4px; max-height: calc(29px * var(--sys-k)); overflow: hidden; padding: 0 4px; }
 
-.sys-part.sys-lit .sys-pv { border-color: var(--sys-ink); }
+/* a lit part (hovered or focused, and the far ends of its lines) takes a fill, never a border colour:
+   the fill rides as a background-image so the box keeps its own background underneath */
+.sys-part.sys-lit .sys-pv { background-image: linear-gradient(var(--sys-lit-fill), var(--sys-lit-fill)); }
 .sys-part .sys-ov-tint { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
 .sys-part .sys-ov-mark { position: absolute; top: 4px; right: 6px; font-size: var(--ib-fs-11, 11px); color: var(--sys-ink2); pointer-events: none; }
 
@@ -303,7 +307,7 @@
 .sys-ld-when { font-weight: 600; }
 .sys-fig-letter { position: absolute; right: -9px; top: -9px; }
 .sys-fig-pl { position: absolute; background: var(--sys-box); border: 1px solid var(--sys-line-soft); border-radius: 2px; padding: 6px 10px; overflow: hidden; }
-.sys-fig-pl.sys-lit { border-color: var(--sys-ink); }
+.sys-fig-pl.sys-lit { background-image: linear-gradient(var(--sys-lit-fill), var(--sys-lit-fill)); }
 .sys-fig-pl.sys-schema { border-color: var(--sys-line); padding: 8px 12px; }
 .sys-pl-h { font-size: var(--ib-fs-10-5, 10.5px); line-height: calc(13px * var(--sys-k)); color: var(--sys-ink3); margin-bottom: 4px; font-weight: 500; }
 .sys-pl-b { font-size: var(--ib-fs-11-5, 11.5px); line-height: calc(15.5px * var(--sys-k)); color: var(--sys-ink); white-space: pre; }

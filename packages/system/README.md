@@ -103,7 +103,7 @@ the same scope.
 - A window's cue, a double click on it, or Enter on it dives in: the camera flies into the box while the inside unrolls
   out of it, and lands on the inside sheet at rest. Zooming into a window does the same through its door. Esc, the
   wheel out, or a crumb above climbs. A second input during a dive turns it round from where it is.
-- The chips name the sheets of the scope (the current one shows its kind); a chip or keys 1 to 9 turn to one. The
+- The chips name the sheets of the scope by kind ("Logical", "Data flow"); a chip or keys 1 to 9 turn to one. The
   parts both sheets draw travel to their new places, the rest fades.
 - The Simple / Full switch moves the parts to the other reading's places: into Simple the lines and words fade first,
   into Full they come back after the parts land.
