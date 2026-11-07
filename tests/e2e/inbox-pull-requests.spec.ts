@@ -1598,7 +1598,6 @@ test('Reviews: a review from an ordinary thread is a local row, opens at its car
   await expect(page.getByText('Thundering herd confirmed')).toBeVisible();
   await page.goto(`${world.url}#reviews`);
   await expect(page.locator('[data-pulls-nav] .ib-n')).toBeVisible();
-  const before = Number(await page.locator('[data-pulls-nav] .ib-n').textContent());
   await claude.submitGuide({
     project_path: world.projects.web,
     thread: 'jitter',
@@ -1613,11 +1612,15 @@ test('Reviews: a review from an ordinary thread is a local row, opens at its car
     },
     review: true,
   } as never);
-  // The list follows a review that arrives, with no reload: the new row, and the sidebar's count.
-  await expect(page.locator('[data-pulls-nav] .ib-n')).toHaveText(String(before + 1), { timeout: 15_000 });
+  // The list follows a review that arrives, with no reload: the new row, and the sidebar's count. The count is
+  // checked against the server's rows (its cached answer: no forge read), not a number read before the review: the
+  // tests before this one leave rows whose move can still settle on the page's next read, so that number may be stale.
   const row = page.locator(`[data-reviews-kind="reviewed"][data-row="${first.thread_id}"]`);
-  await expect(row).toContainText('Add jitter to retries');
+  await expect(row).toContainText('Add jitter to retries', { timeout: 15_000 });
   await expect(row).toContainText('Review ready');
+  const onYou = () => page.evaluate(async () => ((await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: { thread_id: string | null; move: string }[] }).rows.filter((r) => r.move === 'on_you'));
+  await expect.poll(async () => (await onYou()).some((r) => r.thread_id === first.thread_id), { message: 'the review is on the person' }).toBe(true);
+  await expect.poll(async () => (await page.locator('[data-pulls-nav] .ib-n').textContent()) === String((await onYou()).length), { message: "the sidebar's count is the rows on the person", timeout: 15_000 }).toBe(true);
   await expect(row).not.toHaveAttribute('data-pulls-row');
   await page.reload();
   await expect(row).toBeVisible();

@@ -361,8 +361,9 @@ test('the bottom of a card: under the file\'s last line, on screen, nothing clip
     const box = clearOfLines(g);
     const shell = (await page.locator(`[data-guide-file-shell="${TAIL}"]`).first().boundingBox())!;
     expect(box.top, 'below the last line').toBeGreaterThan(g.bottom);
-    // It reaches past the file's box, and every word is still there to press.
-    expect(box.bottom).toBeGreaterThan(shell.y + shell.height);
+    // It starts inside the file's box and may reach past it (the box now keeps room under its last line, so it
+    // need not): every word is still there to press.
+    expect(box.top, 'starts inside the file').toBeLessThan(shell.y + shell.height);
     for (const word of ['comment', 'ask', 'show-me']) {
       const button = bar(page).locator(`[data-selection-action="${word}"]`);
       const b = (await button.boundingBox())!;
