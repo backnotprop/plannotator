@@ -415,18 +415,21 @@ function LeadLine({ row, project, filtered, tip = true }: { row: InboxListRow; p
  * name; a wide row draws `long`, the full words (the owner, 2026-10-29: full words in full-width mode). Open action
  * items are no longer words here (approval "inbox-row-action-icon", 2026-10-29): they are the action pill beside `?N`.
  */
-function countWords(row: InboxListRow, now: number): { short: ReactNode; long: ReactNode; full: string } | null {
+function countWords(row: InboxListRow, now: number, tickAlone = false): { short: ReactNode; long: ReactNode; full: string } | null {
   const same = (words: string) => ({ short: words, long: words, full: words });
   // A reply waiting on a busy agent (approval "inbox-busy-agent-reply"): how long, in place of the count.
   const wait = rowWait(row.delivery);
   if (wait) return { short: <UndeliveredBadge wait={wait} now={now} />, long: <UndeliveredBadge wait={wait} now={now} full />, full: undeliveredLabel(wait.since, now) };
+  // Settings → Rows' Status mark on a done row (the owner, 2026-11-07, q-8e0e9490): the tick alone says it, so none of
+  // the words saying why a row is Quiet (Archived, Read, 👍 Looks good). Any other words stay.
+  const why = !(tickAlone && rowStatus(row) === 'done');
   // A Quiet row says why it is there: archived (resolved), or marked read.
-  if (inboxRowArchived(row)) return same('Archived');
+  if (why && inboxRowArchived(row)) return same('Archived');
   // What the person has not sent (approval "inbox-reply-drafts"): "Draft", and "Draft · Your reply, 2 picks" in full.
   if (row.unsent && inboxHasUnsent(row.unsent)) return { short: <DraftLabel unsent={row.unsent} short />, long: <DraftLabel unsent={row.unsent} />, full: `Draft · ${unsentWords(rowUnsent(row.unsent))}` };
   // Marked read with 👍 Looks good: the row says so in place of "Read".
-  if (row.section === 'quiet' && (row.read_at ?? null) !== null && row.ack) return same(`👍 ${row.ack.label}`);
-  if (row.section === 'quiet' && (row.read_at ?? null) !== null) return same('Read');
+  if (why && row.section === 'quiet' && (row.read_at ?? null) !== null && row.ack) return same(`👍 ${row.ack.label}`);
+  if (why && row.section === 'quiet' && (row.read_at ?? null) !== null) return same('Read');
   // An older Inbox (no `unsent`): its own words.
   if (row.answered_not_sent) return { short: 'Answered', long: 'Answered, not sent', full: 'Answered, not sent' };
   // An agent the person started from New message (launch): one muted word while it starts or works.
@@ -474,9 +477,9 @@ function HeldNoticeLine({ count, project, onShow }: { count: number; project: st
  * the short form, its full words for a screen reader and, with `tip`, in the tooltip. A wide row (`wide`) draws the
  * full words in its words column; cut there, they are the tooltip too.
  */
-function CountWords({ row, tip = false, wide = false }: { row: InboxListRow; tip?: boolean; wide?: boolean }) {
+function CountWords({ row, tip = false, wide = false, status = false }: { row: InboxListRow; tip?: boolean; wide?: boolean; status?: boolean }) {
   const now = useMinuteClock(rowWait(row.delivery) !== null);
-  const words = countWords(row, now);
+  const words = countWords(row, now, status);
   if (!words) return null;
   const quiet = row.section === 'quiet' ? ' ib-qlabel' : '';
   if (wide) {
@@ -517,7 +520,7 @@ function LineCount({ row, tip = false, status = false }: { row: InboxListRow; ti
   return (
     <>
       <EndedMark row={row} />
-      <CountWords row={row} tip={tip} />
+      <CountWords row={row} tip={tip} status={status} />
       {/* Settings → Rows' Status mark: one mark in place of the open counts, their words its name and tooltip. */}
       {status ? <StatusMark row={row} tip={tip} /> : <OpenCounts row={row} tip={tip} />}
     </>
@@ -747,6 +750,14 @@ function useDevicePixelRatio(): number {
  * list. In one project's list (`filtered`) the first column holds the marks alone.
  * A list with a pinned row adds the pin's column just left of the open counts.
  */
+/**
+ * A name-first row's second line (the agents and the project) draws nothing: no project on it (Project off, or one
+ * project's list) and Agent icons off. Only then is it folded away; with either shown the row is as it always was.
+ */
+function leadEmpty(filtered: boolean, noAgents: boolean): boolean {
+  return filtered && noAgents;
+}
+
 /** Settings → Rows' choices a row reads beyond the list column's classes (listLook.ts). */
 interface RowLook {
   noPreview: boolean;
@@ -756,9 +767,11 @@ interface RowLook {
   timeBelow: boolean;
   /** Show → Status mark (listLook.ts `statusMark`): one mark in place of the open counts, on every shape. */
   statusMark: boolean;
+  /** Show → Agent icons off (listLook.ts `hideAgents`): with no project either, a name-first row's second line is empty. */
+  noAgents: boolean;
 }
 
-function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColumn, keys, full, pill, noPreview, relative, statusMark, onOpen, onUnstar }: { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; pinColumn: boolean; keys?: string; full: boolean; pill: boolean; onOpen: () => void } & Omit<RowLook, 'titleFirst' | 'timeBelow'>) {
+function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColumn, keys, full, pill, noPreview, relative, statusMark, onOpen, onUnstar }: { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; pinColumn: boolean; keys?: string; full: boolean; pill: boolean; onOpen: () => void } & Omit<RowLook, 'titleFirst' | 'timeBelow' | 'noAgents'>) {
   const [kbd, focus] = useKeyboardFocus(rowHasBadge(row));
   const wordsId = useId();
   const badgeEl = badgeOf(row, kbd, full);
@@ -788,7 +801,7 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColum
           Undelivered, Read …) take the width they need, between the title cell and the badge. */}
       <span className="ib-cw">
         <EndedMark row={row} />
-        {row.snoozed ? <SnoozedUntil row={row} /> : <CountWords row={row} wide={full} tip={!full} />}
+        {row.snoozed ? <SnoozedUntil row={row} /> : <CountWords row={row} wide={full} tip={!full} status={statusMark} />}
       </span>
       <span className="ib-bcol">{badgeEl}</span>
       {/* The pin's column, in a list with a pinned row only (`pinColumn`), so a list without pins keeps its columns. */}
@@ -926,7 +939,7 @@ function RowWithAction({
   );
 }
 
-function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, pill, compact, noPreview, relative, titleFirst, timeBelow, statusMark, onOpen, onUnstar }: { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
+function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, pill, compact, noPreview, relative, titleFirst, timeBelow, statusMark, noAgents, onOpen, onUnstar }: { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
   const [kbd, focus] = useKeyboardFocus(rowHasBadge(row));
   const wordsId = useId();
   const badge = badgeOf(row, kbd);
@@ -978,7 +991,13 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
             {compact && lead}
             {!timeBelow && time}
           </div>
-          {!compact && <div className="ib-l2 ib-l2-lead">{lead}</div>}
+          {/* Nothing shows on it with Agent icons and Project both off (`leadEmpty`): it stays for a screen reader (the
+              agents' names), but takes no room, so the preview sits under the name (the owner, 2026-11-07, q-dbe4dc80). */}
+          {!compact && (
+            <div className="ib-l2 ib-l2-lead" data-lead-empty={leadEmpty(filtered, noAgents) ? '' : undefined}>
+              {lead}
+            </div>
+          )}
         </>
       ) : (
         <>
@@ -1024,7 +1043,7 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
  * at the right end of line 3. A pin with nothing else for line 3 stays at the
  * right end of line 1, before the time.
  */
-function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill, compact, noPreview, relative, titleFirst, timeBelow, statusMark, onOpen, onUnstar }: { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; filtered: boolean; lit: boolean; menu: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
+function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill, compact, noPreview, relative, titleFirst, timeBelow, statusMark, noAgents, onOpen, onUnstar }: { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; filtered: boolean; lit: boolean; menu: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
   const wordsId = useId();
   // A phone: the icons only, no card (the thread shows the details).
   const badge = rowHasBadge(row) ? <RowBadge row={row} /> : null;
@@ -1034,7 +1053,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
   // row never grows a line for the pin alone.
   const avatarRow = useAvatarRow();
   // With the time under the preview the pin goes with the row's end, on the time's line.
-  const pinOnLine1 = !timeBelow && pinned && !preview && !guide && !badge && !row.snoozed && countWords(row, 0) === null && row.questions.open < 1 && !(statusMark && rowStatus(row));
+  const pinOnLine1 = !timeBelow && pinned && !preview && !guide && !badge && !row.snoozed && countWords(row, 0, statusMark) === null && row.questions.open < 1 && !(statusMark && rowStatus(row));
   const time = (
     <span className="ib-t">
       <RowTime row={row} relative={relative} />
@@ -1076,7 +1095,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
             {!timeBelow && time}
           </span>
           {!compact && (
-            <span className="ib-m1 ib-m1-lead">
+            <span className="ib-m1 ib-m1-lead" data-lead-empty={leadEmpty(filtered, noAgents) ? '' : undefined}>
               <LeadLine row={row} project={project} filtered={filtered} tip={false} />
             </span>
           )}
@@ -1378,6 +1397,7 @@ export function InboxList(props: InboxListProps) {
       titleFirst={look.titleFirst}
       timeBelow={look.timeBelow}
       statusMark={look.statusMark}
+      noAgents={look.hideAgents}
     />
   );
   return (
@@ -1597,6 +1617,8 @@ interface ListRowProps {
   timeBelow?: boolean;
   /** Settings → Rows' Show → Status mark (listLook.ts `statusMark`): every shape. */
   statusMark?: boolean;
+  /** Settings → Rows' Show → Agent icons off (listLook.ts `hideAgents`); the list column's class hides the tiles. */
+  noAgents?: boolean;
 }
 
 /**
@@ -1605,10 +1627,10 @@ interface ListRowProps {
  * list update renders only the rows that changed.
  */
 export const ListRow = memo(
-  function ListRow({ row, project, away, drawn, shape, full, filtered, selected, lit, onOpen, onMarkRead, onMarkUnread, onSendNow, onUnstar, menu, pinned, pinColumn, keys, pill, compact, noPreview = false, relative = false, titleFirst = false, timeBelow = false, statusMark = false }: ListRowProps) {
+  function ListRow({ row, project, away, drawn, shape, full, filtered, selected, lit, onOpen, onMarkRead, onMarkUnread, onSendNow, onUnstar, menu, pinned, pinColumn, keys, pill, compact, noPreview = false, relative = false, titleFirst = false, timeBelow = false, statusMark = false, noAgents = false }: ListRowProps) {
     const open = () => onOpen(row);
     const unstarRow = onUnstar && pinned ? () => onUnstar(row) : undefined;
-    const rowLook: RowLook = { noPreview, relative, titleFirst, timeBelow, statusMark };
+    const rowLook: RowLook = { noPreview, relative, titleFirst, timeBelow, statusMark, noAgents };
     if (shape === 'phone') return <PhoneRow row={row} project={project} away={away} filtered={filtered} lit={lit} menu={menu} pinned={pinned} keys={keys} pill={pill} compact={compact} {...rowLook} onOpen={open} onUnstar={unstarRow} />;
     return (
       <RowWithAction row={row} drawn={drawn} menu={menu} onMarkRead={onMarkRead} onMarkUnread={onMarkUnread} onSendNow={onSendNow}>
@@ -1641,6 +1663,7 @@ export const ListRow = memo(
     a.titleFirst === b.titleFirst &&
     a.timeBelow === b.timeBelow &&
     a.statusMark === b.statusMark &&
+    a.noAgents === b.noAgents &&
     a.onOpen === b.onOpen &&
     a.onMarkRead === b.onMarkRead &&
     a.onMarkUnread === b.onMarkUnread &&

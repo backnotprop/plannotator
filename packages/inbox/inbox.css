@@ -7662,6 +7662,12 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 .ib-stm[data-status="waiting"] { color: color-mix(in oklab, var(--warning) 85%, var(--foreground)); }
 .ib-stm[data-status="done"] { color: color-mix(in oklab, var(--success) 85%, var(--foreground)); }
 .ib-nrow .ib-l3 > .ib-stm, .ib-m3 > .ib-stm { flex: none; }
+/* A name-first row whose second line draws nothing (Agent icons and Project both off, `data-lead-empty`): the line
+   leaves the flow, so the preview sits under the name, and stays in the row for a screen reader (the agents' names),
+   as .ib-sr. A row with the agents or the project shown never has the attribute. */
+:is(.ib-nrow > .ib-l2-lead, .ib-mrow > .ib-m1-lead)[data-lead-empty] { position: absolute; width: 1px; height: 1px; min-height: 0; margin: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* Show → Bold thread names (.ib-lk-bold): every row's name in bold, read or not; Sent and Quiet keep their colour. */
+.ib-lk-bold :is(.ib-row, .ib-nrow) .ib-title, .ib-lk-bold .ib-mrow .ib-m2 { font-weight: 600; }
 
 /* Voice dictation: the microphone in the composer (components/VoiceMic.tsx). The button takes the paperclip's size in
    each host. The status shares the toolbar's row, so starting to listen moves nothing. */

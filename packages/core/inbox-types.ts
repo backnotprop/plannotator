@@ -1970,6 +1970,9 @@ export const INBOX_ROWS_OPTIONS = [
   "timeBelow",
   "dividers",
   "statusMark",
+  // Bold thread names (the owner, 2026-11-07: "we should have an option to bold the thread name"), off by default:
+  // every thread name in bold, read or not.
+  "boldNames",
 ] as const;
 export type InboxRowsOption = (typeof INBOX_ROWS_OPTIONS)[number];
 

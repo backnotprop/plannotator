@@ -75,14 +75,16 @@ const WAIT = row('msg_wait', {
 });
 const NEWS = row('msg_new', { section: 'new', unread: true, unseen: 1 });
 const SENT = row('msg_sent', { section: 'sent', last_author: 'person', sent: { at: '2026-10-10T10:00:00.000Z', checked_at: null } });
-const QUIET = row('msg_quiet', { thread_name: 'Tests pass on main' });
+const QUIET = row('msg_quiet', { thread_name: 'Tests pass on main', read_at: '2026-10-10T10:05:00.000Z' });
+const ACKED = row('msg_acked', { thread_name: 'Docs typo', read_at: '2026-10-10T10:05:00.000Z', ack: { label: 'Looks good', at: '2026-10-10T10:05:00.000Z' } });
+const WORKING = row('msg_working', { thread_name: 'Nightly build', run: 'working' });
 const SECTIONS: InboxListSection[] = [
   { id: 'stopped', label: 'Stopped on you', threads: [STOP] },
   { id: 'holding', label: 'Holding up work', threads: [HOLD] },
   { id: 'waiting', label: 'Waiting on you', threads: [WAIT] },
   { id: 'new', label: 'New since you looked', threads: [NEWS] },
   { id: 'sent', label: 'Sent', threads: [SENT] },
-  { id: 'quiet', label: 'Quiet', threads: [QUIET] },
+  { id: 'quiet', label: 'Quiet', threads: [QUIET, ACKED, WORKING] },
 ];
 
 const realFetch = globalThis.fetch;
@@ -158,25 +160,25 @@ describe('the status mark says waiting, done or nothing', () => {
 
 describe('the options in the look', () => {
   test('all off by default, and a round trip through core keeps each', () => {
-    for (const key of ['timeBelow', 'dividers', 'statusMark'] as const) {
+    for (const key of ['timeBelow', 'dividers', 'statusMark', 'boldNames'] as const) {
       expect(LIST_LOOK_DEFAULT[key]).toBe(false);
       expect(rowsFromLook(lookFromRows(['smallNames', key]))).toEqual(['smallNames', key]);
     }
   });
 
   test('no rival of theirs: the other rivals settle without touching them, and they never turn another option off', () => {
-    const notes = lookWithChange(LIST_LOOK_DEFAULT, { timeBelow: true, dividers: true, statusMark: true, roomy: true, previewTwo: true, titleFirst: true, hideAgents: true, hideProject: true });
+    const notes = lookWithChange(LIST_LOOK_DEFAULT, { timeBelow: true, dividers: true, statusMark: true, boldNames: true, roomy: true, previewTwo: true, titleFirst: true, hideAgents: true, hideProject: true });
     for (const change of [{ compact: true }, { hidePreview: true }, { unreadDot: true }, { smallNames: false }, { marksThreads: true, markDot: true }] as const) {
       const next = lookWithChange(notes, change);
-      expect([next.timeBelow, next.dividers, next.statusMark]).toEqual([true, true, true]);
+      expect([next.timeBelow, next.dividers, next.statusMark, next.boldNames]).toEqual([true, true, true, true]);
     }
     // Turning them on keeps every other option as it was.
-    expect(lookWithChange(notes, { timeBelow: false, dividers: false, statusMark: false })).toEqual({ ...notes, timeBelow: false, dividers: false, statusMark: false });
-    expect(inboxRowsCanonical(['compact', 'timeBelow', 'dividers', 'statusMark'])).toEqual(['compact', 'timeBelow', 'dividers', 'statusMark']);
+    expect(lookWithChange(notes, { timeBelow: false, dividers: false, statusMark: false, boldNames: false })).toEqual({ ...notes, timeBelow: false, dividers: false, statusMark: false, boldNames: false });
+    expect(inboxRowsCanonical(['compact', 'timeBelow', 'dividers', 'statusMark', 'boldNames'])).toEqual(['compact', 'timeBelow', 'dividers', 'statusMark', 'boldNames']);
   });
 
   test.if(hasDom)('no preset turns one on (presets come later), so picking a preset turns them off', () => {
-    for (const preset of ROWS_PRESETS) expect([preset.look.timeBelow, preset.look.dividers, preset.look.statusMark]).toEqual([false, false, false]);
+    for (const preset of ROWS_PRESETS) expect([preset.look.timeBelow, preset.look.dividers, preset.look.statusMark, preset.look.boldNames]).toEqual([false, false, false, false]);
   });
 });
 
@@ -185,7 +187,7 @@ describe.if(hasDom)('the notes-list look on the rows', () => {
     for (const shape of SHAPES) {
       const el = mount(shape);
       const column = el.querySelector('.ib-listcol')!;
-      for (const cls of ['ib-lk-tbelow', 'ib-lk-div', 'ib-lk-stm']) expect(column.classList.contains(cls)).toBe(false);
+      for (const cls of ['ib-lk-tbelow', 'ib-lk-div', 'ib-lk-stm', 'ib-lk-bold']) expect(column.classList.contains(cls)).toBe(false);
       expect(el.querySelectorAll('.ib-stm, .ib-l4, .ib-m4').length).toBe(0);
       // The open counts as today: `?N` and the action pill.
       expect(rowOf(el, 'msg_wait').querySelector('.ib-qn')!.getAttribute('data-open-count')).toBe('2');
@@ -233,7 +235,7 @@ describe.if(hasDom)('the notes-list look on the rows', () => {
     for (const shape of SHAPES) {
       const el = mount(shape);
       const mark = (id: string) => rowOf(el, id).querySelector('.ib-stm')?.getAttribute('data-status') ?? null;
-      expect(['msg_stop', 'msg_hold', 'msg_wait', 'msg_new', 'msg_sent', 'msg_quiet'].map(mark)).toEqual(['waiting', 'waiting', 'waiting', null, null, 'done']);
+      expect(['msg_stop', 'msg_hold', 'msg_wait', 'msg_new', 'msg_sent', 'msg_quiet', 'msg_acked', 'msg_working'].map(mark)).toEqual(['waiting', 'waiting', 'waiting', null, null, 'done', 'done', 'done']);
       // In place of the counts: no `?N`, no action pill, on any row.
       expect(el.querySelectorAll('.ib-qn, [data-action-count]').length).toBe(0);
       if (shape === 'wide') expect(rowOf(el, 'msg_wait').querySelector(':scope > .ib-cq .ib-stm')).not.toBeNull();
@@ -276,6 +278,76 @@ describe.if(hasDom)('the notes-list look on the rows', () => {
     for (const [, , body] of rules) {
       expect(body).not.toMatch(/\b(border|outline|box-shadow)\s*:/);
       expect(body).toMatch(/background-(image|size)/);
+    }
+  });
+  test('Status mark on a done row: the tick alone, no "Read" or "👍 Looks good"; other words stay; off, the words are back', () => {
+    const words = (el: HTMLElement, id: string) => [...rowOf(el, id).querySelectorAll('[data-count-words]')].map((w) => w.getAttribute('data-count-words'));
+    for (const shape of SHAPES) {
+      look();
+      let el = mount(shape);
+      expect([words(el, 'msg_quiet'), words(el, 'msg_acked'), words(el, 'msg_working')]).toEqual([['Read'], ['👍 Looks good'], ['Working']]);
+      unmount();
+      look('statusMark');
+      el = mount(shape);
+      expect([words(el, 'msg_quiet'), words(el, 'msg_acked'), words(el, 'msg_working')]).toEqual([[], [], ['Working']]);
+      expect(rowOf(el, 'msg_acked').querySelector('.ib-stm')!.getAttribute('data-status')).toBe('done');
+      unmount();
+      resetListLookForTests();
+    }
+  });
+
+  test('Bold names: only a class on the list column, off by default', () => {
+    let el = mount('narrow');
+    expect(el.querySelector('.ib-listcol')!.classList.contains('ib-lk-bold')).toBe(false);
+    unmount();
+    look('boldNames');
+    el = mount('narrow');
+    expect(el.querySelector('.ib-listcol')!.classList.contains('ib-lk-bold')).toBe(true);
+  });
+});
+
+/**
+ * The owner (2026-11-07): folding the empty second line "shouldn't change how I work today, hopefully not at all". A row
+ * with the agents or the project shown keeps its exact lines, in the default look, every preset and name first; only a
+ * name-first row with both off folds the line, and it keeps the agents' names for a screen reader.
+ */
+describe.if(hasDom)('the empty second line folds only when nothing shows on it', () => {
+  /** A three-line or phone row's lines: each direct child's class, with where the time is. */
+  const shapeOf = (r: HTMLElement) => [...r.children].filter((c) => !c.classList.contains('ib-sr') && !c.classList.contains('ib-lm-av')).map((c) => `${c.className}${c.querySelector('.ib-t') ? ' +time' : ''}${c.hasAttribute('data-lead-empty') ? ' +folded' : ''}`);
+  const NARROW_PROJECT_FIRST = ['ib-l1 +time', 'ib-l2', 'ib-l3'];
+  const NARROW_NAME_FIRST = ['ib-l1 +time', 'ib-l2 ib-l2-lead', 'ib-l3'];
+  const PHONE_PROJECT_FIRST = ['ib-m1 +time', 'ib-m2', 'ib-m3'];
+  const PHONE_NAME_FIRST = ['ib-m1 +time', 'ib-m1 ib-m1-lead', 'ib-m3'];
+  const looks: [string, InboxRowsOption[], string[], string[]][] = [
+    // The owner's own look (rows-bold-1357.png): the defaults, the agents and the project on line 1.
+    ['the defaults', [], NARROW_PROJECT_FIRST, PHONE_PROJECT_FIRST],
+    // Detailed's names in their pill: a phone's line 2 is the pill.
+    ['Detailed', rowsFromLook(ROWS_PRESETS.find((p) => p.id === 'detailed')!.look), NARROW_PROJECT_FIRST, ['ib-m1 +time', 'ib-key ib-rowkey', 'ib-m3']],
+    ['Minimal (compact, agents off)', rowsFromLook(ROWS_PRESETS.find((p) => p.id === 'minimal')!.look), ['ib-l1 +time', 'ib-l3'], ['ib-m1 +time', 'ib-m3']],
+    ['name first', ['titleFirst'], NARROW_NAME_FIRST, PHONE_NAME_FIRST],
+    ['name first, agents off', ['titleFirst', 'hideAgents'], NARROW_NAME_FIRST, PHONE_NAME_FIRST],
+    ['name first, project off', ['titleFirst', 'hideProject'], NARROW_NAME_FIRST, PHONE_NAME_FIRST],
+  ];
+  for (const [name, on, narrow, phone] of looks) {
+    test(`${name}: every row keeps its lines, nothing folded`, () => {
+      act(() => adoptSavedRows(on.length ? on : ['smallNames'], 1));
+      for (const [shape, expected] of [['narrow', narrow], ['phone', phone]] as const) {
+        const el = mount(shape);
+        for (const r of [STOP, WAIT, NEWS]) expect(shapeOf(rowOf(el, r.thread_id))).toEqual(expected);
+        expect(el.querySelectorAll('[data-lead-empty]').length).toBe(0);
+        unmount();
+      }
+    });
+  }
+
+  test('name first with agents and project both off: the second line is folded, and still names the agents', () => {
+    look('titleFirst', 'hideAgents', 'hideProject');
+    for (const shape of ['narrow', 'phone'] as const) {
+      const el = mount(shape);
+      const lead = rowOf(el, 'msg_wait').querySelector('[data-lead-empty]')!;
+      expect(lead.classList.contains(shape === 'narrow' ? 'ib-l2-lead' : 'ib-m1-lead')).toBe(true);
+      expect(lead.querySelector('[aria-label]')!.getAttribute('aria-label')).toContain('Claude Code');
+      unmount();
     }
   });
 });

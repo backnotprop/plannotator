@@ -255,15 +255,14 @@ describe.if(hasDom)('Settings → Rows', () => {
     }
   });
 
-  test('the notes-list look: off by default; Time position, Dividers and Status mark each one save of their own name', async () => {
+  test('the notes-list look: off by default; Time position, Dividers, Status mark and Bold names each one save of their own name', async () => {
     const el = render();
     const sw = (key: string) => el.querySelector<HTMLElement>(`[data-rows-control="${key}"] [role="switch"]`)!;
     expect(chosen(el, 'timeplace')).toEqual(['Top right']);
-    for (const key of ['dividers', 'statusMark']) {
-      expect(sw(key).getAttribute('aria-checked')).toBe('false');
-      // Its words describe the switch to a screen reader.
-      expect(el.querySelector(`#${sw(key).getAttribute('aria-describedby')}`)!.textContent!.length).toBeGreaterThan(0);
-    }
+    for (const key of ['dividers', 'statusMark', 'boldNames']) expect(sw(key).getAttribute('aria-checked')).toBe('false');
+    // Only Status mark has words (what it replaces), and they describe its switch to a screen reader.
+    expect(el.querySelector(`#${sw('statusMark').getAttribute('aria-describedby')}`)!.textContent).toBe('Instead of counts');
+    for (const key of ['dividers', 'boldNames']) expect(sw(key).hasAttribute('aria-describedby')).toBe(false);
     await pick(el, 'timeplace', 'Under the preview');
     act(() => sw('dividers').click());
     await settle();
@@ -280,6 +279,10 @@ describe.if(hasDom)('Settings → Rows', () => {
     expect(chosen(el, 'preset')).toEqual([]);
     await pick(el, 'timeplace', 'Top right');
     expect(readListLook()).toEqual(lookOf({ dividers: true, statusMark: true }));
+    act(() => sw('boldNames').click());
+    await settle();
+    expect(saves.at(-1)).toEqual(['smallNames', 'dividers', 'statusMark', 'boldNames']);
+    for (const picture of el.querySelectorAll('[data-rows-preview] .ib-listcol')) expect(picture.className).toContain('ib-lk-bold');
   });
 
   test("the pictures show the notes-list look at once, the phone's too; a preset turns it off", async () => {

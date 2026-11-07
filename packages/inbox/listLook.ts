@@ -74,6 +74,8 @@ export interface ListLook {
    * and tooltip. Stopped and Holds up keep their triangles.
    */
   statusMark: boolean;
+  /** Settings → Rows only: Show → Bold thread names, every row's name in bold, read or not (Sent and Quiet included). */
+  boldNames: boolean;
 }
 
 export type ListLookKey = keyof ListLook;
@@ -102,6 +104,7 @@ export const LIST_LOOK_OFF: ListLook = {
   timeBelow: false,
   dividers: false,
   statusMark: false,
+  boldNames: false,
 };
 
 /** The look for someone who chose none (core `INBOX_ROWS_DEFAULT`): smaller thread names on, every other option off. */
@@ -384,7 +387,7 @@ function adopt(rows: unknown, rev: unknown): void {
 
 /** The list column's classes for the look: none when every option is off. */
 export function listLookClasses(look: ListLook): string {
-  return `${look.highlight ? ' ib-lk-pill' : ''}${look.compact ? ' ib-lk-compact' : ''}${look.hideAgents ? ' ib-lk-noagents' : ''}${look.smallNames ? ' ib-lk-small' : ''}${look.roomy ? ' ib-lk-roomy' : ''}${look.unreadDot ? ' ib-lk-dot' : ''}${look.previewTwo ? ' ib-lk-pv2' : ''}${look.titleFirst ? ' ib-lk-tfirst' : ''}${look.timeBelow ? ' ib-lk-tbelow' : ''}${look.dividers ? ' ib-lk-div' : ''}${look.statusMark ? ' ib-lk-stm' : ''}`;
+  return `${look.highlight ? ' ib-lk-pill' : ''}${look.compact ? ' ib-lk-compact' : ''}${look.hideAgents ? ' ib-lk-noagents' : ''}${look.smallNames ? ' ib-lk-small' : ''}${look.roomy ? ' ib-lk-roomy' : ''}${look.unreadDot ? ' ib-lk-dot' : ''}${look.previewTwo ? ' ib-lk-pv2' : ''}${look.titleFirst ? ' ib-lk-tfirst' : ''}${look.timeBelow ? ' ib-lk-tbelow' : ''}${look.dividers ? ' ib-lk-div' : ''}${look.statusMark ? ' ib-lk-stm' : ''}${look.boldNames ? ' ib-lk-bold' : ''}`;
 }
 
 function subscribe(listener: () => void): () => void {

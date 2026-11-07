@@ -9,7 +9,7 @@
  * "inbox-letter-marks", 2026-11-07, all off by default): Look → Mark style, and Show → Letter marks with its two
  * picture switches, in the same cards; Detailed turns them on (Both, Avatar, no pictures). A notes-list look (the
  * owner's picture, 2026-11-07; approval "inbox-customize-rows", addendum), all off by default and in no preset: Look →
- * Time position (Top right / Under the preview), and Show → Dividers and Status mark.
+ * Time position (Top right / Under the preview), and Show → Dividers, Status mark and Bold thread names.
  *
  * Every control is the list's look (listLook.ts): a change shows at once and is saved for the person (config.json `inboxRows`), and every list in every window
  * takes it (`useListLook` listens). The pictures follow the person's mode, light or dark.
@@ -141,6 +141,7 @@ function PreviewList({ look, shape, className }: { look: ListLook; shape: 'narro
                   titleFirst={look.titleFirst}
                   timeBelow={look.timeBelow}
                   statusMark={look.statusMark}
+                  noAgents={look.hideAgents}
                 />
               )),
             )}
@@ -212,9 +213,12 @@ const SHOW: readonly { key: ListLookKey; label: string; desc?: string }[] = [
 ];
 
 /** The notes-list look's switches (all off by default): on is shown, as each one's own `ListLook` key. */
-const NOTES_LOOK: readonly { key: 'dividers' | 'statusMark'; label: string; desc: string }[] = [
-  { key: 'dividers', label: 'Dividers', desc: 'A thin line between rows' },
-  { key: 'statusMark', label: 'Status mark', desc: 'Waiting on you or done, in place of the counts' },
+// Words as few as the owner asked (2026-11-07: "only necessary labels or words for things that are not intuitive"):
+// the pictures show Dividers and Bold names, so only Status mark says what it replaces.
+const NOTES_LOOK: readonly { key: 'dividers' | 'statusMark' | 'boldNames'; label: string; desc?: string }[] = [
+  { key: 'dividers', label: 'Dividers' },
+  { key: 'statusMark', label: 'Status mark', desc: 'Instead of counts' },
+  { key: 'boldNames', label: 'Bold names' },
 ];
 
 /** A project's picture instead of its letters. Turning one on turns project marks on (listLook.ts `lookWithChange`). */
@@ -223,20 +227,22 @@ const PICTURES: readonly { key: 'repoLogo' | 'githubPictures'; label: string; de
   { key: 'githubPictures', label: 'GitHub pictures', desc: "A project on GitHub shows its owner's picture. Asks GitHub once a week." },
 ];
 
-/** A Show switch that is on while its option is (the notes-list look's, the picture switches), with its words for a screen reader. */
-function OnSwitch({ id, label, desc, on, onToggle }: { id: ListLookKey; label: string; desc: string; on: boolean; onToggle: () => void }) {
+/** A Show switch that is on while its option is (the notes-list look's, the picture switches), with its words, if any, for a screen reader. */
+function OnSwitch({ id, label, desc, on, onToggle }: { id: ListLookKey; label: string; desc?: string; on: boolean; onToggle: () => void }) {
   return (
     <div className="ib-prow" data-rows-control={id}>
       <span className="ib-txt">
         <span className="ib-l" id={`ib-rows-${id}`}>
           {label}
         </span>
-        <span className="ib-desc" id={`ib-rows-${id}-desc`}>
-          {desc}
-        </span>
+        {desc && (
+          <span className="ib-desc" id={`ib-rows-${id}-desc`}>
+            {desc}
+          </span>
+        )}
       </span>
       <span className="ib-ctl">
-        <button type="button" role="switch" className="ib-sw" aria-checked={on} aria-labelledby={`ib-rows-${id}`} aria-describedby={`ib-rows-${id}-desc`} onClick={onToggle} />
+        <button type="button" role="switch" className="ib-sw" aria-checked={on} aria-labelledby={`ib-rows-${id}`} aria-describedby={desc ? `ib-rows-${id}-desc` : undefined} onClick={onToggle} />
       </span>
     </div>
   );
