@@ -230,9 +230,9 @@ async function openQuestionsOf(el: HTMLElement, threadId: string): Promise<HTMLE
     });
   }
   const trigger = () => el.querySelector<HTMLElement>('section.ib-pane [data-open-questions]');
-  // A thread with a reply draft opens with its reply box, which takes the foot: Cancel keeps the draft and
-  // brings the foot's buttons back, as the person would.
-  const cancel = () => [...el.querySelectorAll<HTMLButtonElement>('section.ib-pane .ib-pfoot button')].find((b) => b.textContent?.trim() === 'Cancel') ?? null;
+  // A thread with a reply draft opens with its reply box, which takes the foot: its close chevron keeps the draft
+  // and brings the foot's buttons back, as the person would.
+  const cancel = () => el.querySelector<HTMLButtonElement>('section.ib-pane .ib-pfoot [data-reply-close]');
   await until(() => window.location.hash.includes(`thread=${threadId}`) && (trigger() !== null || cancel() !== null), 'the thread foot');
   await settle();
   if (cancel()) act(() => cancel()!.click());

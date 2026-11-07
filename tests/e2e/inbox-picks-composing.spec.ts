@@ -189,7 +189,7 @@ test('desktop: answers clicked while writing the reply save, and the box lists t
 
   // Send: the words once, every answer once, no summary line in the words.
   await pane.locator('.ib-rbox').scrollIntoViewIfNeeded();
-  await pane.locator('.ib-acts').getByRole('button', { name: 'Send', exact: true }).last().click();
+  await pane.locator('.ib-rbox [data-reply-send]').click();
   await expect.poll(async () => (await messages(threadId)).filter((m) => m.author.kind === 'person').length).toBe(1);
   const reply = (await messages(threadId)).find((m) => m.author.kind === 'person')!.body;
   expect(reply.split('Cards: the list is short').length).toBe(2);

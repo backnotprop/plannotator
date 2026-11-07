@@ -410,8 +410,19 @@ for (const phone of PHONES) {
       await page.locator('[data-full-view-foot]').getByRole('button', { name: 'Write the reply' }).tap();
       const box = page.locator('section.ib-pane textarea.ib-rtext');
       await expect(box).toBeFocused();
-      await expect.poll(() => box.evaluate((el: HTMLTextAreaElement) => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThanOrEqual(2);
-      await expect.poll(() => box.evaluate((el: HTMLTextAreaElement) => el.scrollHeight > el.clientHeight)).toBe(true);
+      // The words scroll in the box's capped region (approval "inbox-reply-box", D1), not in the field: the region
+      // scrolls, and the field's end (the caret's line) is inside what it shows.
+      const region = page.locator('section.ib-pane [data-reply-scroll]');
+      await expect.poll(() => region.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+      await expect
+        .poll(() =>
+          region.evaluate((el) => {
+            const shown = el.getBoundingClientRect();
+            const end = el.querySelector('textarea')!.getBoundingClientRect().bottom;
+            return end <= shown.bottom + 2 && end > shown.top + 20;
+          }),
+        )
+        .toBe(true);
     });
 
     test('Keep writing, and a refused Save it, from under the sheet: the sheet closes and the words have focus', async () => {

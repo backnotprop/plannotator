@@ -363,7 +363,7 @@ test.describe('WebKit as an iPhone 15 (iOS 26 keyboard)', () => {
     const field = await openReply(page, world.reply);
     // A phone's box draws no "1 pick" chip: the answers list says it (approval "inbox-reply-foot-phone").
     await expect(pane.locator('.ib-rbox [data-reply-answers]')).toBeVisible();
-    const attach = pane.locator('.ib-rbox .ib-rfoot [data-reply-attach]');
+    const attach = pane.locator('.ib-rbox [data-reply-row] [data-reply-attach]');
     await attach.setInputFiles({ name: 'image.png', mimeType: 'image/png', buffer: PNG });
     await expect(pane.locator('.ib-rbox [data-compose-file="done"]')).toHaveCount(1);
     await attach.setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('The header on my phone.\n') });

@@ -301,8 +301,8 @@ test('the reply box: files dropped on the thread open the reply holding them; th
   const box = pane.locator('.ib-rbox');
   await expect(box.locator('[data-compose-file="done"][data-compose-file-name="ledger-q3-export.png"]')).toHaveCount(1);
 
-  // The paperclip, first in the box's toolbar: any file, its own name kept.
-  const clip = box.locator('.ib-rfoot > label:first-child');
+  // The paperclip, beside Send in the box's row: any file, its own name kept.
+  const clip = box.locator('[data-reply-row] label.ib-rclip');
   await expect(clip).toHaveAccessibleName('Attach files');
   await box.locator('[data-reply-attach]').setInputFiles({ name: 'currency-notes.md', mimeType: 'text/markdown', buffer: Buffer.from('# Currency\n\nEUR rows lose the column.\n') });
   await expect(box.locator('[data-compose-file="done"][data-compose-file-name="currency-notes.md"]')).toHaveCount(1);
