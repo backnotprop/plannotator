@@ -33,8 +33,6 @@ export interface OptionSet {
   id: string;
   messageId: string;
   questionKey: string;
-  /** The question's prompt, for the caption's second line. */
-  prompt: string;
   choices: OptionSetChoice[];
   /** The thread's steps for those choices, in choice order: what the viewer steps through. */
   steps: AttachmentStep[];
@@ -58,22 +56,43 @@ export function choiceLetter(index: number): string {
   return index < 26 ? String.fromCharCode(65 + index) : String(index + 1);
 }
 
-/**
- * Whether a label already starts with its own letter as a token ("B · Total
- * pinned", "B) Tabs", "B"). A word that only starts with the letter ("A great
- * idea", "Bold") does not.
- */
-export function labelHasLetter(label: string, letter: string): boolean {
-  const trimmed = label.trim();
-  if (!trimmed.startsWith(letter)) return false;
-  const rest = trimmed.slice(letter.length);
-  return rest === '' || /^\s*[·.:)\-–—]/.test(rest);
+/** A label's leading single capital as a token: "C · x", "C: x", "C) x", "B. Total", "A — x", "A - x", "C". Not "X-axis", "U.S.", "A.I.", "A great idea". */
+const LEADING_LETTER = /^\s*([A-Z])(?=\s*(?:[·:)]|[.\-–—](?=\s|$))|\s*$)/;
+
+/** The letter a label leads with, when it is one of the first `count` letters (so "I. Intro" on 3 choices has none); null otherwise. */
+export function labelOwnLetter(label: string, count = 26): string | null {
+  const letter = LEADING_LETTER.exec(label)?.[1] ?? null;
+  return letter !== null && letter.charCodeAt(0) - 65 < count ? letter : null;
 }
 
-/** A picture choice's name in a viewer: "B · Quiet hover menu" ("B · Total pinned" when the label already leads with its letter). */
-export function choiceName(label: string, index: number): string {
-  const letter = choiceLetter(index);
-  return labelHasLetter(label, letter) ? label.trim() : `${letter} · ${label}`;
+/** Whether a label already starts with the given letter as a token ("B · Total pinned", "B) Tabs", "B"). */
+export function labelHasLetter(label: string, letter: string): boolean {
+  return labelOwnLetter(label) === letter;
+}
+
+/**
+ * Each choice's letter, given every label of the question in order. A label
+ * that leads with a letter keeps it wherever the author put it ("C", "A", "B"
+ * out of order); an unlabeled choice takes its position's letter. When the
+ * letters would not be unique (two labels both "A", or an unlabeled choice
+ * whose position letter another label owns), the whole question falls back to
+ * positions, so a caption never names two choices alike.
+ */
+export function choiceLetters(labels: readonly string[]): { letter: string; lettered: boolean }[] {
+  const own = labels.map((label) => labelOwnLetter(label, labels.length));
+  const letters = own.map((l, i) => l ?? choiceLetter(i));
+  if (new Set(letters).size === letters.length) return letters.map((letter, i) => ({ letter, lettered: own[i] !== null }));
+  return labels.map((label, i) => ({ letter: choiceLetter(i), lettered: labelHasLetter(label, choiceLetter(i)) }));
+}
+
+/**
+ * A picture choice's name in a viewer: "B · Quiet hover menu" (the label as it
+ * is when it leads with its letter). `labels`: every label of the question, so
+ * the name agrees with the caption.
+ */
+export function choiceName(label: string, index: number, labels: readonly string[]): string {
+  const { letter, lettered } = choiceLetters(labels)[index] ?? { letter: choiceLetter(index), lettered: false };
+  return lettered ? label.trim() : `${letter} · ${label}`;
 }
 
 /**
@@ -90,17 +109,17 @@ export function optionSetOf(messages: readonly InboxMessageWire[], steps: readon
   const question = message?.questions?.find((q) => q.key === at.questionKey);
   if (!message || !question) return null;
   const choices: OptionSetChoice[] = [];
+  const named = choiceLetters(question.choices.map((c) => c.label));
   const setSteps: AttachmentStep[] = [];
   question.choices.forEach((choice, index) => {
     if (!choice.image) return;
     const step = steps.find((s) => s.messageId === message.id && s.inline && s.attachment.ref === choice.image!.src);
     if (!step || setSteps.includes(step)) return;
-    const letter = choiceLetter(index);
     setSteps.push(step);
-    choices.push({ label: choice.label, letter, lettered: labelHasLetter(choice.label, letter), recommended: choice.recommended, attachmentId: step.attachment.id });
+    choices.push({ label: choice.label, ...named[index]!, recommended: choice.recommended, attachmentId: step.attachment.id });
   });
   if (setSteps.length < 2) return null;
-  return { id: optionSetId(message.id, question.key), messageId: message.id, questionKey: question.key, prompt: question.prompt, choices, steps: setSteps };
+  return { id: optionSetId(message.id, question.key), messageId: message.id, questionKey: question.key, choices, steps: setSteps };
 }
 
 /** The choice a file is in the set (by its own id or the twin record folded into its step); null when it is not one of them. */
@@ -112,22 +131,17 @@ export function optionOf(set: OptionSet, attachmentId: string): { choice: Option
 export const LAST_OPTION_NOTE = 'Last option';
 export const FIRST_OPTION_NOTE = 'First option';
 
-/** "Option B of 4: Quiet hover menu, recommended": what a step inside a set says to a screen reader. */
-export function optionAnnouncement(set: OptionSet, index: number): string {
+/**
+ * "Option B of 4: Quiet hover menu, recommended": what a step inside a set
+ * says to a screen reader. Given `otherFiles`, the step onto the last option
+ * says the end note too (the card no longer shows it): "Option D of 4: Header menu only. Last option. 2 other files under the
+ * 4/4 button".
+ */
+export function optionAnnouncement(set: OptionSet, index: number, otherFiles?: number): string {
   const choice = set.choices[index];
   if (!choice) return '';
-  return `Option ${choice.letter} of ${set.choices.length}: ${choice.label}${choice.recommended ? ', recommended' : ''}`;
-}
-
-/**
- * The caption's last line at an end of the set: the end note, and at the
- * last option where the thread's other files are ("Last option · the
- * thread's 7 other files are under 4/4 ⌄"). Null in between, or at the first
- * option until a swipe past it says so.
- */
-export function optionEndLine(set: OptionSet, index: number, otherFiles: number, note: string | null): { note: string; others: number } | null {
-  const last = index === set.steps.length - 1;
-  if (last) return { note: LAST_OPTION_NOTE, others: otherFiles };
-  if (index === 0 && note === FIRST_OPTION_NOTE) return { note: FIRST_OPTION_NOTE, others: 0 };
-  return null;
+  const said = `Option ${choice.letter} of ${set.choices.length}: ${choice.label}${choice.recommended ? ', recommended' : ''}`;
+  if (otherFiles === undefined || index !== set.steps.length - 1) return said;
+  if (otherFiles === 0) return `${said}. ${LAST_OPTION_NOTE}`;
+  return `${said}. ${LAST_OPTION_NOTE}. ${otherFiles} other ${otherFiles === 1 ? 'file' : 'files'} under the ${index + 1}/${set.steps.length} button`;
 }

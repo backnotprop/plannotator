@@ -32,6 +32,16 @@ export interface ZoomInset {
   readonly y: number;
 }
 
+/**
+ * Rows of a stage that things float over: Fit and the pan's limits work in the
+ * stage between them, while a zoomed image still slides under them and every
+ * row of the stage still takes the fingers.
+ */
+export interface ZoomClear {
+  readonly top: number;
+  readonly bottom: number;
+}
+
 /** 800%: an image pixel is then 8 screen pixels, enough to read any screenshot. */
 export const LIGHTBOX_ZOOM_MAX = 8;
 /** Wheel zoom: factor = exp(-deltaY * sensitivity), with deltaY capped so a
@@ -111,6 +121,11 @@ export function fitViewport(image: ZoomSize, stage: ZoomSize, inset: ZoomInset =
  * stage starts at its top or left edge (a tall screenshot is read from the
  * top); an axis on which it is smaller is centred.
  */
+/** Whether two viewports are the same on screen (a half pixel, a thousandth of scale): a picture still resting where Fit put it. */
+export function sameViewport(a: ZoomViewport, b: ZoomViewport): boolean {
+  return Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.scale - b.scale) < 0.001;
+}
+
 export function actualViewport(image: ZoomSize, stage: ZoomSize, inset: ZoomInset = FULL): ZoomViewport {
   const limits = zoomLimits(image, stage, inset);
   return clampViewport({ x: 0, y: 0, scale: 1 }, image, stage, limits);

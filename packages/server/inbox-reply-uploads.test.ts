@@ -2,8 +2,7 @@
  * Files pasted into the reply box, through the server's real doors: the
  * reply route takes `uploads` as compose's thread does. The uploads become
  * ordinary attachments on the person's reply; the agent reads them as
- * `Attached:` lines on its wake and from `wait_for_reply`, and as attachment
- * records in `read_thread`; a reply of files alone is a reply (words-only:
+ * `Attached:` lines on its wake, and as attachment records in `read_thread`; a reply of files alone is a reply (words-only:
  * nothing answered, the still-open line); a replay copies nothing; an id
  * that is gone, a bad list and an archived thread are refused with nothing
  * written and nothing left behind. Every test uses its own temp data dir; the
@@ -85,7 +84,7 @@ async function setup() {
 }
 
 describe("a reply carrying pasted files", () => {
-  test("the uploads become the reply's attachments; the agent reads them on its wake, from wait_for_reply and in read_thread", async () => {
+  test("the uploads become the reply's attachments; the agent reads them on its wake and in read_thread", async () => {
     const { client, ask, upload, reply, poll, thread, inboxDir, pending } = await setup();
     const asked = await ask(QUESTION);
     const shot = await upload("pasted-image-2026-10-16-0912.png", PNG);
@@ -117,14 +116,7 @@ describe("a reply carrying pasted files", () => {
     expect(sent.reply.body.startsWith("The legend overlaps.")).toBe(true);
     expect(command!.body).toBe(`${sent.reply.body}\n\n${attached}`);
 
-    const waited = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: asked.thread_id, agent_session: "ses-pi" } })) as {
-      structuredContent: { status: string; reply: { body: string } };
-    };
-    expect(waited.structuredContent.status).toBe("replied");
-    expect(waited.structuredContent.reply.body).toContain("The legend overlaps.");
-    expect(waited.structuredContent.reply.body.endsWith(attached)).toBe(true);
-
-    const read = (await client.callTool({ name: "read_thread", arguments: { thread_id: asked.thread_id, agent_session: "ses-pi" } })) as {
+    const read =(await client.callTool({ name: "read_thread", arguments: { thread_id: asked.thread_id, agent_session: "ses-pi" } })) as {
       structuredContent: { thread: InboxThread };
     };
     const inThread = read.structuredContent.thread.messages.find((m) => m.id === sent.reply.id)!;

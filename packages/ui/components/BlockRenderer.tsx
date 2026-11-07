@@ -76,7 +76,9 @@ export const BlockRenderer: React.FC<{
   questionPictureBadge?: QuestionBlockProps['pictureBadge'];
   /** A picture tile's zoom, with its question and choice (see `QuestionBlock` `onZoomChoice`). */
   onQuestionPictureZoom?: QuestionBlockProps['onZoomChoice'];
-}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion, onSaveQuestionAnswer, saveQuestionAnswerLabel, renderQuestionFooter, questionDecisionRecording, questionDecisionScope, onToggleQuestionDecisionRecording, onOpenQuestionDecision, questionStatusTag, questionStatusLabel, renderQuestionBelowPrompt, questionContractLines = false, questionPictureChoices, questionPictureBadge, onQuestionPictureZoom }) => {
+  /** A picture choice's size before it loads (see `QuestionBlock` `pictureSize`). */
+  questionPictureSize?: QuestionBlockProps['pictureSize'];
+}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion, onSaveQuestionAnswer, saveQuestionAnswerLabel, renderQuestionFooter, questionDecisionRecording, questionDecisionScope, onToggleQuestionDecisionRecording, onOpenQuestionDecision, questionStatusTag, questionStatusLabel, renderQuestionBelowPrompt, questionContractLines = false, questionPictureChoices, questionPictureBadge, onQuestionPictureZoom, questionPictureSize }) => {
   switch (block.type) {
     case 'heading': {
       const Tag = `h${block.level || 1}` as React.ElementType;
@@ -216,6 +218,7 @@ export const BlockRenderer: React.FC<{
               pictureChoices={questionPictureChoices}
               pictureBadge={questionPictureBadge}
               onZoomChoice={onQuestionPictureZoom}
+              pictureSize={questionPictureSize}
               onOpenLinkedDoc={onOpenLinkedDoc}
               onOpenCodeFile={onOpenCodeFile}
               imageBaseDir={imageBaseDir}
@@ -251,6 +254,10 @@ export const BlockRenderer: React.FC<{
         <p
           className="mb-4 leading-relaxed text-foreground/90 text-[15px]"
           data-block-id={block.id}
+          // Blank lines the person typed (parse option keepBlankLines): N lines in all. This margin collapses with the
+          // previous block's bottom margin (mb-4), so the gap is max(the two), i.e. N lines, not N lines plus 1rem.
+          style={block.blankLinesBefore ? { marginTop: `${block.blankLinesBefore}lh` } : undefined}
+          data-blank-lines={block.blankLinesBefore}
         >
           <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} githubRepo={githubRepo} repoHost={repoHost} onNavigateAnchor={onNavigateAnchor} />
         </p>

@@ -50,6 +50,7 @@ import {
 	resolveWindowsCommandShim,
 } from "./command-path.ts";
 import { guardChildStreams, toChildError, writeChildLine } from "./child-io.ts";
+import { askAiChildEnv } from "./ask-ai-env.ts";
 import { mapQwenLine, newQwenAskAISessionId } from "./qwen-events.ts";
 
 export { mapQwenLine, QWEN_ASK_AI_SESSION_PREFIX } from "./qwen-events.ts";
@@ -212,7 +213,10 @@ export class QwenProcess {
 		try {
 			proc = spawn(file!, rest, {
 				cwd,
-				env: { ...process.env },
+				// Plannotator's integration off in this Qwen (ask-ai-env.ts):
+				// the Inbox MCP server Plannotator adds to Qwen's settings.json
+				// inherits the env, and so lists no tools.
+				env: askAiChildEnv(),
 				stdio: ["pipe", "pipe", "pipe"],
 				windowsHide: true,
 			});

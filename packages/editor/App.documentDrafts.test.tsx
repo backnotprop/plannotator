@@ -94,6 +94,9 @@ let documentCopy: { status: number; body: unknown } = {
   body: { found: true, annotations: [SAVED_COMMENT], globalAttachments: [] },
 };
 
+/** Other documents' copies the session draft offers (the server's index). */
+let offeredDocuments: { path: string; annotations: unknown[]; globalAttachments: unknown[] }[] = [];
+
 const fakeFetch: typeof fetch = async (input, init) => {
   const rawUrl = input instanceof Request ? input.url : String(input);
   if (rawUrl.startsWith("https://api.github.com/")) return new Response(null, { status: 404 });
@@ -118,7 +121,13 @@ const fakeFetch: typeof fetch = async (input, init) => {
     return Response.json(documentCopy.body, { status: documentCopy.status });
   }
   if (url.pathname === "/api/draft" && method === "GET") {
-    return Response.json({ annotations: [ROOT_COMMENT], globalAttachments: [], draftGeneration: 1, ts: 1 });
+    return Response.json({
+      annotations: [ROOT_COMMENT],
+      globalAttachments: [],
+      ...(offeredDocuments.length > 0 ? { documents: offeredDocuments } : {}),
+      draftGeneration: 1,
+      ts: 1,
+    });
   }
   if (url.pathname === "/api/archive/plans") return Response.json({ plans: [] });
   if (url.pathname === "/api/ai/capabilities") return Response.json({ available: false, providers: [] });
@@ -157,6 +166,7 @@ afterEach(async () => {
   if (hasDom) document.body.replaceChildren();
   memory.clear();
   requests.length = 0;
+  offeredDocuments = [];
   resetStorageBackend();
 });
 
@@ -226,6 +236,47 @@ describe.if(hasDom)("per-document draft copies", () => {
     const writes = documentWrites(before).flatMap((w) => w.documents).filter((d) => d.path === LINKED_PATH);
     expect(writes.length).toBeGreaterThan(0);
     expect(writes.at(-1)?.annotations).toEqual([]);
+  });
+
+  // The server clears, on a decision, only the copies the deciding page
+  // named itself on (`?client=`). A page that reads or writes copies under
+  // one id and decides under none (or another) makes the server fall back
+  // to clearing every copy the session covered, which includes the copies an
+  // earlier, crashed page wrote and this page never saw.
+  test("the document copies and the decision name the same page", async () => {
+    documentCopy = { status: 200, body: { found: true, annotations: [SAVED_COMMENT], globalAttachments: [] } };
+    await restoreRootThenOpenLinked();
+    const read = requests.find((r) => r.path === "/api/draft/document" && r.method === "GET");
+    const page = new URLSearchParams(read?.search ?? "").get("client");
+    expect(page).toMatch(/^[a-zA-Z0-9_-]{1,128}$/);
+
+    const primary = document.querySelector<HTMLButtonElement>("[data-decision-primary]");
+    if (!primary) throw new Error("decision control did not render");
+    await act(async () => { primary.click(); });
+    for (let attempt = 0; attempt < 10; attempt += 1) await settle(20);
+    const decision = requests.find((r) => r.path === "/api/feedback" && r.method === "POST");
+    if (!decision) throw new Error("no feedback was sent");
+    expect(new URLSearchParams(decision.search).get("client")).toBe(page);
+  });
+
+  // Restore brings a copy back from the session draft's offer, which names no
+  // page. Unless the page then reads each copy under its own id, its decision
+  // leaves the copies it sent on disk, and they are offered again next time.
+  test("Restore reads every restored copy under the page's id", async () => {
+    offeredDocuments = [{ path: LINKED_PATH, annotations: [SAVED_COMMENT], globalAttachments: [] }];
+    await mount();
+    const restore = findButton("Restore");
+    if (!restore) throw new Error("Draft recovery dialog did not offer Restore");
+    await act(async () => { restore.click(); });
+    for (let attempt = 0; attempt < 6; attempt += 1) await settle(60);
+
+    const claim = requests.find((r) => r.path === "/api/draft/document" && r.method === "GET");
+    if (!claim) throw new Error("the restored copy was not read under the page's id");
+    const params = new URLSearchParams(claim.search);
+    expect(params.get("path")).toBe(LINKED_PATH);
+    expect(params.get("client")).toMatch(/^[a-zA-Z0-9_-]{1,128}$/);
+    // The restored comment is not written back: it is unchanged.
+    expect(documentWrites()).toEqual([]);
   });
 
   test("comments on a document the server keeps no copy for ride the session draft", async () => {

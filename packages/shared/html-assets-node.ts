@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve as resolvePath, posix as pathPosix, sep } from "node:path";
 import {
+  HTML_ASSET_DOCUMENT_CSP,
   htmlAssetContentType,
   refusesHiddenHtmlAssetPath,
   rewriteCssAssetReferences,
@@ -8,6 +9,29 @@ import {
 } from "./html-assets";
 
 export const MAX_HTML_ASSET_BYTES = 50 * 1024 * 1024;
+
+/**
+ * The CSP of an HTML document served from an asset root outside the session's
+ * roots (#2291): no network, so a page opened from anywhere cannot send what
+ * its scripts load (the Inbox's INBOX_HTML_DOCUMENT_CSP is the same rule).
+ */
+export const OUTSIDE_ROOT_HTML_DOCUMENT_CSP = `${HTML_ASSET_DOCUMENT_CSP}; connect-src 'none'`;
+
+/**
+ * Whether an asset file may be read: a regular file by its real path (a FIFO
+ * or device would block the read) within `maxBytes`. "missing", "not-file" or
+ * "too-large" otherwise.
+ */
+export function htmlAssetFileState(path: string, maxBytes: number): "ok" | "missing" | "not-file" | "too-large" {
+  let stat;
+  try {
+    stat = statSync(path);
+  } catch {
+    return "missing";
+  }
+  if (!stat.isFile()) return "not-file";
+  return stat.size > maxBytes ? "too-large" : "ok";
+}
 
 /**
  * Where an HTML document's relative assets are served from. Normally the
@@ -31,6 +55,29 @@ export function htmlAssetContext(
   const basePath = relative(root, documentDirectory).split(sep).join("/");
   if (basePath.split("/").some((segment) => segment.startsWith("."))) return ownFolder;
   return { root, basePath, docDir: documentDirectory };
+}
+
+/** What an HTML page needs to render: images, media, styles, fonts, scripts and nested pages. */
+const RENDER_ASSET_RE = /\.(?:apng|avif|bmp|css|gif|ico|jpe?g|js|mjs|mp3|mp4|ogg|otf|png|svg|ttf|wav|webm|webp|woff2?|html?)$/i;
+
+/**
+ * The rule for an asset root outside the session's roots: an HTML document a
+ * tab on this machine opened from anywhere (#2291). Its folder may be a home
+ * folder, so it serves only render types, never a hidden path, the dotenv
+ * family or a data/config file (`.json`, `.xml`, `.webmanifest`).
+ */
+export function refusesOutsideRootHtmlAsset(relativePath: string): boolean {
+  return refusesHiddenHtmlAssetPath(relativePath) || !RENDER_ASSET_RE.test(relativePath);
+}
+
+/**
+ * Whether an asset response from a root outside the session's roots carries
+ * `Access-Control-Allow-Origin: *`: fonts only, which the browser loads in CORS
+ * mode. Everything else stays readable by the page (`<img>`, `<link>`,
+ * `<script>`) but not by its scripts (`fetch`).
+ */
+export function outsideRootAssetAllowsCors(relativePath: string): boolean {
+  return /\.(?:otf|ttf|woff2?)$/i.test(relativePath);
 }
 
 /**
@@ -70,7 +117,12 @@ export function htmlAssetPathRefused(
   return refuse(relative(realRoot, real).split(sep).join("/"));
 }
 
-export function inlineHtmlLocalAssets(html: string, htmlFilePath: string, folderPath?: string): string {
+export function inlineHtmlLocalAssets(
+  html: string,
+  htmlFilePath: string,
+  folderPath?: string,
+  refuseAssetPath?: (relativePath: string) => boolean,
+): string {
   if (/^https?:\/\//i.test(htmlFilePath)) return html;
 
   try {
@@ -85,6 +137,7 @@ export function inlineHtmlLocalAssets(html: string, htmlFilePath: string, folder
         const resolved = resolvePath(root, assetPath);
         if (!isWithinDirectory(resolved, root)) return null;
         if (docDir && !folderSessionAssetAllowed(root, docDir, assetPath)) return null;
+        if (refuseAssetPath && htmlAssetPathRefused(root, assetPath, refuseAssetPath)) return null;
         if (!existsSync(resolved)) return null;
 
         const stat = statSync(resolved);

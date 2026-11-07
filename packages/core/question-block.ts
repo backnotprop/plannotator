@@ -264,6 +264,11 @@ const CHOICE_IMAGE_RE = /!\[([^\]\n]*)\]\(([^)\n]+)\)/;
 // What may follow a recommendation that names the start of a choice label
 // (`Recommended: Unpin it` for `Unpin it: the toast says…`).
 const LABEL_HEAD_SEP_RE = /^(?:\s*[:—–(]|\s+-\s)/;
+// A recommendation that is only a label's leading token, a letter or a
+// number (`Recommended: A` for `A · Yes`), names the label when the token is
+// followed by a middle dot.
+const LABEL_TOKEN_RE = /^(?:[a-z]|\d+)$/;
+const LABEL_TOKEN_SEP_RE = /^ · /;
 // At the start of the line (no indentation), so an indented line under a
 // choice stays that choice's continuation.
 const DECISION_RE = /^decision\s*:\s*(.*?)\s*$/i;
@@ -484,7 +489,9 @@ const QUESTION_KEY_RE = /^q-[0-9a-f]{8}(?:-\d{1,3})?$/;
  * The one choice a recommendation names by the start of its label: the
  * choice whose label (or any of its other names, such as a task list's full
  * text) begins with the text and then a separator (`:` `—` `–` ` - ` `(`),
- * compared case-insensitively with emphasis and spacing folded
+ * or whose leading letter or number the text is, followed by ` · `
+ * (`Recommended: A` names `A · Yes`), compared case-insensitively with
+ * emphasis and spacing folded
  * (`Recommended: Unpin it` names `Unpin it: the toast says…`). -1 when no
  * choice or several do. `names` holds each choice's names, label first.
  */
@@ -497,7 +504,9 @@ export const recommendationHeadChoice = (
   const begins = (value: string | undefined): boolean => {
     if (!value) return false;
     const folded = value.replace(/[*_`]+/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-    return folded.startsWith(target) && LABEL_HEAD_SEP_RE.test(folded.slice(target.length));
+    if (!folded.startsWith(target)) return false;
+    const rest = folded.slice(target.length);
+    return LABEL_HEAD_SEP_RE.test(rest) || (LABEL_TOKEN_RE.test(target) && LABEL_TOKEN_SEP_RE.test(rest));
   };
   const hits = names.flatMap((entry, i) => ((typeof entry === 'string' ? [entry] : entry).some(begins) ? [i] : []));
   return hits.length === 1 ? hits[0] : -1;
@@ -1335,14 +1344,47 @@ export const findDirectiveBlocks = (
   markdown: string,
   options: { frontmatter?: boolean } = {},
 ): DirectiveBlockLocation[] => {
-  if (typeof markdown !== 'string') return [];
+  const out: DirectiveBlockLocation[] = [];
+  walkTopLevelLines(markdown, options, { directive: (block) => out.push(block) });
+  return out;
+};
+
+/**
+ * Every top-level line of a markdown document that the block splitter reads
+ * as an ordinary line: not inside a code fence, display math, a directive's
+ * body or a raw HTML block, and not a directive's opener (the walk
+ * `findDirectiveBlocks` makes, so the two cannot differ). `lineNumber` is
+ * the line's 1-based line in `markdown`. For a host that checks lines the
+ * parser leaves as text (the Plannotator Inbox's `:::question {#x}` warning).
+ *
+ * `line` is the parser's processed text, not the source line: link
+ * references are resolved, and after a display math block that closes
+ * mid-line it is only the text after the close. Read the source line by
+ * `lineNumber` when the exact text matters.
+ *
+ * @internal Not part of the published grammar; it may change with the walk.
+ */
+export const forEachTopLevelLine = (
+  markdown: string,
+  options: { frontmatter?: boolean } = {},
+  visit: (line: string, lineNumber: number) => void,
+): void => {
+  walkTopLevelLines(markdown, options, { line: visit });
+};
+
+/** The block splitter's top-level walk: directives to `directive`, every other line it reads as one line to `line`. */
+function walkTopLevelLines(
+  markdown: string,
+  options: { frontmatter?: boolean },
+  on: { directive?: (block: DirectiveBlockLocation) => void; line?: (line: string, lineNumber: number) => void },
+): void {
+  if (typeof markdown !== 'string') return;
   const { content, contentStartLine } = options.frontmatter === false
     ? { content: markdown, contentStartLine: 1 }
     : splitFrontmatter(markdown);
   const source = markdown.split('\n');
   const lines = resolveReferenceLinks(content).split('\n');
   const closeCache = new Map<string, TagCloseIndex>();
-  const out: DirectiveBlockLocation[] = [];
 
   // The block splitter's multi-line constructs, in its order. Every other
   // construct it knows (headings, rules, list items, quotes, tables,
@@ -1370,7 +1412,7 @@ export const findDirectiveBlocks = (
       const close = directiveCloseIndex(lines, i);
       const startLine = i + contentStartLine;
       const endLine = Math.min(close, lines.length - 1) + contentStartLine;
-      out.push({
+      on.directive?.({
         directiveKind: directiveOpen[1].toLowerCase(),
         startLine,
         endLine,
@@ -1381,10 +1423,13 @@ export const findDirectiveBlocks = (
       continue;
     }
     const htmlEnd = htmlBlockEndAt(lines, i, closeCache);
-    if (htmlEnd !== -1) i = htmlEnd;
+    if (htmlEnd !== -1) {
+      i = htmlEnd;
+      continue;
+    }
+    on.line?.(lines[i], i + contentStartLine);
   }
-  return out;
-};
+}
 
 // ─────────────────────────────── Answers ───────────────────────────────
 
@@ -1872,11 +1917,11 @@ Ask what only the reviewer can decide as a question block. Answers come back at 
 :::question
 Where should we keep the edit that loses a sync conflict?
 
-When two devices edit one note offline, the later save wins and the other edit is lost. Local storage keeps it with no server work.
+When two devices edit one note offline, the later save wins and the other is lost. Local storage keeps it with no server work.
 
-- [ ] Local only, purged after 30 days — cheap, no server change
+- [ ] Nowhere — silent loss, as today
+- [ ] Local only, purged after 30 days — cheap
 - [ ] Server-side per user — survives reinstall, needs a retention policy
-- [ ] Nowhere — accept silent loss for v1
 
 Recommended: Local only, purged after 30 days
 :::
@@ -1888,9 +1933,9 @@ Recommended: Local only, purged after 30 days
   - Be terse: one to three short sentences, plain words, no jargon or internal names.
   - Add a screenshot (\`![alt](path)\`) for anything visual.
   - Link a file that shows it better (a plan, a mock): \`[the mock](mock.html)\`. In the Inbox, attach it too; the link opens it beside the thread.
-- Choices: \`- [ ] label\`, optionally \`- [ ] label — why\`. The reviewer can also answer "Other", add a note, or skip.
-- \`Recommended: <label>\` marks yours (\`A, B and C\` on \`:::question-multi\`); other text shows as one more answer, tagged Recommended.
-- Ask only what you cannot decide alone, about 8 a round at most. Do not ask rhetorical questions or questions the codebase answers.
+- Choices: \`- [ ] label\`, optionally \`- [ ] label — why\`, in natural order. The reviewer can also answer "Other", add a note, or skip.
+- \`Recommended: <label>\` marks yours (\`A, B and C\` on \`:::question-multi\`); other text is one more answer, tagged Recommended. Never move yours first.
+- Ask only what you cannot decide alone, about 8 a round. Do not ask rhetorical questions or questions the codebase answers.
 - \`- [x]\` marks a settled choice. On resubmit, check the chosen answer, or drop the block and state the decision in prose.
 - Leave blank lines between the parts so the block reads well on GitHub.
 - Each answer comes back under its question (\`### Q2. <question> (line N)\`) as \`Answer: <choice>\`, marked \`(your recommendation)\` when the reviewer took yours, or as \`Other: …\`, free text in a quote, or \`Skipped\`, plus any \`Note:\`. A question you marked \`- [x]\` is settled and only comes back if the reviewer changed it or added a note.

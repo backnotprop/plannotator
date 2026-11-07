@@ -167,15 +167,21 @@ test('a drag widens it; the rows switch to the wide shape once, as it crosses 90
   const x0 = LIST_X + LIST_MIN + 4;
   const target = 1000;
   // Every frame of the drag: the list's width and which row shape is drawn.
+  // Sampling runs until the drag has finished (mouse.up resolved, flagged below)
+  // and two more frames have been drawn, not for a fixed time: a slow runner
+  // stretches the drag past any fixed window.
   const sampling = page.evaluate(
     () =>
       new Promise<Array<[number, boolean]>>((done) => {
+        const w = window as unknown as { dragSettled?: boolean };
+        w.dragSettled = false;
         const out: Array<[number, boolean]> = [];
-        const t0 = performance.now();
+        let framesAfter = 0;
         const tick = () => {
           const el = document.querySelector('.ib-listcol');
           if (el) out.push([el.getBoundingClientRect().width, el.querySelector('.ib-lbody .ib-row') !== null]);
-          if (performance.now() - t0 < 2500) requestAnimationFrame(tick);
+          if (w.dragSettled) framesAfter++;
+          if (framesAfter < 2) requestAnimationFrame(tick);
           else done(out);
         };
         requestAnimationFrame(tick);
@@ -185,6 +191,9 @@ test('a drag widens it; the rows switch to the wide shape once, as it crosses 90
   await page.mouse.down();
   await page.mouse.move(LIST_X + target + 4, 500, { steps: 60 });
   await page.mouse.up();
+  await page.evaluate(() => {
+    (window as unknown as { dragSettled?: boolean }).dragSettled = true;
+  });
   const samples = await sampling;
   const flips = samples.filter((s, i) => i > 0 && s[1] !== samples[i - 1]![1]).length;
   expect(flips).toBe(1);

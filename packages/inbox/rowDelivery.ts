@@ -23,6 +23,7 @@ export function rowDeliveryLine(d: InboxRowDelivery, time: (iso: string) => stri
   const text = deliveryText(d.reason, {
     name,
     at: d.at,
+    readBy: d.read_by ? inboxAgentName({ kind: 'agent', host: d.read_by, name: null }) : null,
     time,
     undeliveredHost: name,
     endedName,
@@ -59,7 +60,17 @@ export function rowDeliverySpoken(d: InboxRowDelivery): string {
 
 /** The row's time: when it was delivered, once it was; else the thread's latest activity. */
 export function rowTimeIso(row: InboxListRow): string {
+  // A thread back from a snooze shows its return (a later message, when one came after it).
+  if (row.snooze_back) return row.last_at;
   return row.delivery?.state === 'delivered' && row.delivery.at ? row.delivery.at : row.last_at;
+}
+
+/**
+ * Whether an `event: deliveries` reads the list again: a session's label changed, a session ended or came back (a
+ * row's "Session ended", on a row with no reply too), or some row's delivery can still move.
+ */
+export function deliveriesReadList(change: { labels: boolean; sessions: boolean } | undefined, sections: readonly InboxListSection[] | null): boolean {
+  return !!change?.labels || !!change?.sessions || hasMovingDelivery(sections);
 }
 
 /**
@@ -70,5 +81,6 @@ export function rowTimeIso(row: InboxListRow): string {
  */
 export function hasMovingDelivery(sections: readonly InboxListSection[] | null): boolean {
   const moves = (d: InboxRowDelivery | null | undefined) => !!d && d.state !== 'delivered' && !(d.state === 'saved' && d.reason === 'reads');
-  return !!sections?.some((section) => section.threads.some((row) => moves(row.delivery)));
+  // A launched thread's row (`run` present, launch only) moves with its agent: Starting, Working, Stopped on you.
+  return !!sections?.some((section) => section.threads.some((row) => moves(row.delivery) || row.run !== undefined));
 }

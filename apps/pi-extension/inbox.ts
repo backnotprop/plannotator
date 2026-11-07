@@ -8,7 +8,8 @@
  * switch allows it for Pi (`PLANNOTATOR_INBOX_TOOL` / `inboxTool`, off by
  * default here: Pi sends every tool's full definition with each request) AND
  * `inbox/inbox.json` exists (the person ran the Inbox once). Otherwise nothing
- * is registered, nothing listens, nothing polls, and nothing is said.
+ * is registered, nothing polls, and nothing is said; only the session claim
+ * (`claimPiSessions`) is kept wherever `inbox/inbox.json` exists.
  *
  * The tool is registered at load with the actions the Inbox's `/mcp` offers
  * (discovery bounded at 2 s; the factory awaits it), inactive on registration
@@ -37,6 +38,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { loadConfig, resolveInboxReminder, resolveInboxReminderText, resolveInboxTool } from "./generated/config.ts";
 import { getPlannotatorDataDir } from "./generated/data-dir.ts";
@@ -47,6 +49,7 @@ import {
 	InboxWake,
 } from "./generated/inbox/agent-link.ts";
 import { inboxAgentTool, type InboxReplyCommand } from "./generated/inbox/connection.ts";
+import { releasePiSessionClaim, writePiSessionClaim } from "./generated/inbox/pi-session-claim.ts";
 import { isCtxAlive, resolveIdleDeliveryOptions } from "./current-pi-session.ts";
 import { loadedPackageVersion, packageUpdatedMessage, readPackageVersion } from "./package-version.ts";
 import { detectPiHost } from "./pi-host.ts";
@@ -125,10 +128,12 @@ function takeOutOfEditor(current: ExtensionContext, text: string): void {
  * Inbox connection applies to this Pi; undefined (and nothing done) otherwise.
  */
 export function setupPiInbox(pi: InboxPi, options: PiInboxOptions): Promise<void> | undefined {
-	const config = loadConfig();
-	if (!resolveInboxTool(config, process.env, "pi")) return undefined;
 	const dataDir = getPlannotatorDataDir();
 	if (!existsSync(inboxRegistryFileOf(dataDir))) return undefined;
+	// With the Inbox tool on or off: the Inbox must never start a second Pi on a session this one runs.
+	claimPiSessions(pi, dataDir);
+	const config = loadConfig();
+	if (!resolveInboxTool(config, process.env, "pi")) return undefined;
 	// Decided with the tool, once per extension instance (each session, /reload):
 	// the line (the person's own from config.json prompts.inbox, else
 	// INBOX_REMINDER_TEXT), or null when the reminder is off.
@@ -141,6 +146,36 @@ export function setupPiInbox(pi: InboxPi, options: PiInboxOptions): Promise<void
 			{ ...options, reminder },
 		);
 	});
+}
+
+/**
+ * This process says which session it runs (`inbox/pi-sessions/`, pi-session-claim.ts): Pi sets
+ * `process.title = "pi"`, so the Inbox's process list never shows its `--session-id`. Claimed as a session
+ * starts, released as it ends (`/new`, `/resume`, `/reload`, exit); a claim left by a killed Pi is stale once
+ * its pid is gone.
+ */
+function claimPiSessions(pi: InboxPi, dataDir: string): void {
+	const owner = randomUUID();
+	// `pi --mode rpc`, or Pi's `pi-rpc` entry (its title; it passes the mode to main, not on argv).
+	const at = process.argv.indexOf("--mode");
+	const rpc = (at >= 0 && process.argv[at + 1] === "rpc") || /-rpc$/.test(process.title);
+	let claimed: string | null = null;
+	const release = () => {
+		if (claimed) releasePiSessionClaim(dataDir, claimed, process.pid, owner);
+		claimed = null;
+	};
+	pi.on("session_start", (_event, startCtx: ExtensionContext) => {
+		let session: string;
+		try {
+			session = startCtx.sessionManager.getSessionId();
+		} catch {
+			return;
+		}
+		if (claimed && claimed !== session) release();
+		claimed = session;
+		writePiSessionClaim(dataDir, { session, pid: process.pid, rpc, title: process.title, owner });
+	});
+	pi.on("session_shutdown", release);
 }
 
 type BranchEntry = { id?: string; type?: string; customType?: string; firstKeptEntryId?: string };
@@ -189,6 +224,23 @@ function userText(message: { content?: unknown } | undefined): string {
 	return content
 		.map((part: { type?: string; text?: unknown } | null) => (part?.type === "text" && typeof part.text === "string" ? part.text : ""))
 		.join("");
+}
+
+/**
+ * PLANNOTATOR_SESSION_PROJECT (apps/hook/server/inbox-mcp-shim.ts,
+ * `inboxSessionProjectFromEnv`): `pi:<session id>:<ctx.cwd>`, the folder this
+ * session's `plannotator_inbox` tool files under. Pi gives each bash call this
+ * process's environment plus PI_SESSION_ID, so a `cd sub && plannotator inbox
+ * call …` or `plannotator card …` lands in the tool's project too. Set before
+ * every bash call, so a new or resumed session's id is the one named. A stale
+ * ctx names nothing new.
+ */
+export function exportPiSessionProject(env: Record<string, string | undefined>, ctx: Pick<ExtensionContext, "cwd" | "sessionManager">): void {
+	try {
+		env.PLANNOTATOR_SESSION_PROJECT = `${PI_INBOX_HOST}:${ctx.sessionManager.getSessionId()}:${ctx.cwd}`;
+	} catch {
+		// A stale ctx: the last value stands, and it names its own session.
+	}
 }
 
 function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options: PiInboxOptions & { reminder: string | null }): void {
@@ -316,7 +368,23 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 				return null;
 			}
 		},
+		// The session's name, only if someone named it. Asked on every poll, so a later name replaces it.
+		// "" says it has none; null says Pi cannot tell now (a stale ctx, a throw), and the last word stands.
+		label: () => {
+			const current = ctx;
+			if (!current || !isCtxAlive(current)) return null;
+			try {
+				return current.sessionManager.getSessionName() ?? "";
+			} catch {
+				return null;
+			}
+		},
 	};
+
+	// Before each bash call: the session's project for the commands it runs (exportPiSessionProject).
+	pi.on("tool_call", (event: { toolName?: unknown } | undefined, callCtx: ExtensionContext) => {
+		if (event?.toolName === "bash") exportPiSessionProject(process.env, callCtx);
+	});
 
 	pi.on("session_start", (_event, startCtx: ExtensionContext) => {
 		ctx = startCtx;

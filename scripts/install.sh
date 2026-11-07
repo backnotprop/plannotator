@@ -11,7 +11,7 @@ INSTALL_DIR="$HOME/.local/bin"
 # `actions/attest-build-provenance` step, so `gh attestation verify` will
 # fail with "no attestations found" for them regardless of authenticity.
 # When provenance verification is enabled (via flag, env var, or
-# ~/.plannotator/config.json), the installer compares the resolved tag
+# config.json in the Plannotator data folder), the installer compares the resolved tag
 # against this constant and fails fast with a clear message instead of
 # downloading a binary, running SHA256, and then hitting a cryptic gh
 # failure. Bumped once at the first attested release via the release skill.
@@ -50,7 +50,7 @@ VERSION="latest"
 # which would otherwise silently overwrite the earlier value and 404.
 VERSION_EXPLICIT=0
 # Three-layer opt-in for SLSA build-provenance verification.
-# Precedence: CLI flag > env var > ~/.plannotator/config.json > default (off).
+# Precedence: CLI flag > env var > config.json in the data folder > default (off).
 # -1 = flag not set yet (fall through to lower layers); 0 = disable; 1 = enable.
 VERIFY_ATTESTATION_FLAG=-1
 # Three-layer opt-in for the CallDiff call-flow runtime (large on-disk
@@ -119,9 +119,10 @@ Options:
                          `gh attestation verify`. Fails the install if gh is
                          not available or the check does not pass.
   --skip-attestation     Force-skip provenance verification even if enabled
-                         via env var or ~/.plannotator/config.json.
+                         via env var or config.json in your Plannotator
+                         data folder (`plannotator data-dir`).
   --with-call-flow       Also install the optional pruned CallDiff core
-                         (about 5 MB on macOS arm64, needs Node.js 22+).
+                         (about 5 MB on macOS arm64, needs Node.js 22.18+).
                          By default it is NOT installed; the review UI offers
                          a one-click install when Call flow is enabled. Also
                          enabled by PLANNOTATOR_INSTALL_CALLDIFF=1 or
@@ -154,7 +155,8 @@ Options:
                          detected. Never removes an existing integration.
                          Also enabled by PLANNOTATOR_SKIP_CODEX_INSTALL=1 or
                          { "skipInstall": { "codex": true } } in
-                         ~/.plannotator/config.json (flag > env var > config).
+                         config.json in your Plannotator data folder
+                         (`plannotator data-dir`) (flag > env var > config).
   --skip-gemini          Same opt-out for the Gemini CLI integration
                          (~/.gemini policy, settings hook, commands). Env var:
                          PLANNOTATOR_SKIP_GEMINI_INSTALL; config key:
@@ -215,7 +217,7 @@ keep the defaults.
 Provenance verification is off by default. Enable it by any of:
   - passing --verify-attestation
   - exporting PLANNOTATOR_VERIFY_ATTESTATION=1
-  - setting { "verifyAttestation": true } in ~/.plannotator/config.json
+  - setting { "verifyAttestation": true } in config.json in your Plannotator data folder (`plannotator data-dir`)
 When enabled, the attestation bundle is fetched from GitHub's public
 attestations API and verified with `gh attestation verify --bundle`, so no
 gh login is required. The credential-free path needs one JSON tool on PATH
@@ -534,30 +536,48 @@ echo "Installing plannotator ${latest_tag}..."
 # provenance support. The three layers (config file, env var, CLI flag) are
 # all cheap to check — no reason to defer this past the arg parse.
 #
-# Precedence: CLI flag > env var > ~/.plannotator/config.json > default (off).
+# Precedence: CLI flag > env var > config.json in the data folder > default (off).
 verify_attestation=0
 
 # Layer 3: config file (lowest precedence of the opt-in sources).
 # Crude grep against a flat boolean — PlannotatorConfig has no nested
 # verifyAttestation, so false positives are not a concern.
-# Resolve the data directory, expanding ~ the same way the runtime does.
-# Unset: an existing ~/.plannotator (legacy default) always wins; otherwise
-# an explicitly-set absolute XDG_DATA_HOME places it at
+# Resolve the data directory, expanding ~ the same way the runtime does
+# (packages/shared/data-dir.ts). Unset: an existing ~/.plannotator (legacy
+# default) wins, unless it holds none of Plannotator's data while
+# $XDG_DATA_HOME/plannotator does (a stray folder, #2305); otherwise an
+# explicitly-set absolute XDG_DATA_HOME places it at
 # $XDG_DATA_HOME/plannotator; otherwise ~/.plannotator.
+# BEGIN data-dir resolution (tests/data-dir-mirrors.test.ts runs this block)
+_holds_plannotator_data() {
+    for _marker in history sessions drafts inbox claude-code-mod install-flags.json; do
+        [ -e "$1/$_marker" ] && return 0
+    done
+    return 1
+}
 _raw_dir="${PLANNOTATOR_DATA_DIR:-}"
 case "$_raw_dir" in
     "")
         _config_dir="$HOME/.plannotator"
-        if [ ! -d "$_config_dir" ]; then
-            case "${XDG_DATA_HOME:-}" in
-                /*) _config_dir="$XDG_DATA_HOME/plannotator" ;;
-            esac
+        _xdg_dir=""
+        # Trimmed like the runtime's XDG_DATA_HOME?.trim().
+        _xdg_home=$(printf '%s' "${XDG_DATA_HOME:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        case "$_xdg_home" in
+            /*) _xdg_dir="$_xdg_home/plannotator" ;;
+        esac
+        if [ -e "$_config_dir" ]; then
+            if [ -n "$_xdg_dir" ] && [ -e "$_xdg_dir" ] && _holds_plannotator_data "$_xdg_dir" && ! _holds_plannotator_data "$_config_dir"; then
+                _config_dir="$_xdg_dir"
+            fi
+        elif [ -n "$_xdg_dir" ]; then
+            _config_dir="$_xdg_dir"
         fi
         ;;
     "~")     _config_dir="$HOME" ;;
     "~/"*)   _config_dir="$HOME/${_raw_dir#\~/}" ;;
     *)       _config_dir="$_raw_dir" ;;
 esac
+# END data-dir resolution
 if [ -f "$_config_dir/config.json" ]; then
     if grep -q '"verifyAttestation"[[:space:]]*:[[:space:]]*true' "$_config_dir/config.json" 2>/dev/null; then
         verify_attestation=1
@@ -820,7 +840,7 @@ if [ "$verify_attestation" -eq 1 ]; then
         echo "  - Pin to ${MIN_ATTESTED_VERSION} or later: --version ${MIN_ATTESTED_VERSION}" >&2
         echo "  - Install without provenance verification: --skip-attestation" >&2
         echo "  - Or unset PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation" >&2
-        echo "    from ~/.plannotator/config.json" >&2
+        echo "    from config.json in your Plannotator data folder (\`plannotator data-dir\`)" >&2
         exit 1
     fi
 fi
@@ -830,9 +850,50 @@ checksum_url="${binary_url}.sha256"
 
 mkdir -p "$INSTALL_DIR"
 
+# Release downloads retry a dropped connection (#2788): the binary is about
+# 200 MB, and one HTTP/2 reset or timeout used to fail the whole install or
+# update. --retry-all-errors (curl 7.71+) also retries the errors plain
+# --retry treats as final, such as an HTTP/2 stream error (curl 92); an older
+# curl rejects the option, so it gets --retry alone. The probe puts the
+# option before --version, which ends curl's option parsing.
+curl_retry_args=(--retry 3 --retry-delay 2)
+if curl --retry-all-errors --version >/dev/null 2>&1; then
+    curl_retry_args+=(--retry-all-errors)
+fi
+
+# download_release_file <url> <file> <max seconds> [<retry seconds>]: each
+# attempt must connect within 30 s, gives up after a minute below 1 byte/s (an
+# update holds its lock while it runs) and after <max seconds>, and no retry
+# starts after <retry seconds> (default: <max seconds>). When curl still ends
+# in an HTTP/2 error (92), one more run goes over HTTP/1.1. Returns curl's
+# exit status.
+download_release_file() {
+    _dl_status=0
+    curl -fsSL "${curl_retry_args[@]}" --connect-timeout 30 --max-time "$3" --retry-max-time "${4:-$3}" \
+        --speed-limit 1 --speed-time 60 -o "$2" "$1" || _dl_status=$?
+    if [ "$_dl_status" -eq 92 ]; then
+        echo "The download hit an HTTP/2 error; trying again over HTTP/1.1..." >&2
+        _dl_status=0
+        curl -fsSL --http1.1 "${curl_retry_args[@]}" --connect-timeout 30 --max-time "$3" --retry-max-time "${4:-$3}" \
+            --speed-limit 1 --speed-time 60 -o "$2" "$1" || _dl_status=$?
+    fi
+    return "$_dl_status"
+}
+
 tmp_file=$(mktemp)
-# A stalled download gives up after a minute (an update holds its lock while it runs).
-curl -fsSL -o "$tmp_file" --speed-limit 1 --speed-time 60 "$binary_url"
+# Six hours per attempt, and no retry starts after an hour: a link at about
+# 0.08 Mbit/s (10 KB/s) still finishes the ~200 MB binary (a slow update must
+# still succeed; a retry starts again from zero, so it never helps a slow
+# link), and a connection that only trickles stops instead of holding the
+# update without end. Exit 1, not curl's code: the updater gives some codes a
+# meaning.
+binary_status=0
+download_release_file "$binary_url" "$tmp_file" 21600 3600 || binary_status=$?
+if [ "$binary_status" -ne 0 ]; then
+    rm -f "$tmp_file"
+    echo "Could not download ${binary_name} ${latest_tag} (curl exit ${binary_status}). Nothing was changed; try again later." >&2
+    exit 1
+fi
 
 # Safe updates (step 1): `plannotator update`, Update now and auto-update run
 # this script after the running Plannotator downloaded it, and the .sha256 of
@@ -864,7 +925,26 @@ else
         # Plannotator, never the network): check as before rather than block.
         echo "Note: the update carried no checksum for ${binary_name}; checking the release's .sha256 instead."
     fi
-    expected_checksum=$(curl -fsSL "$checksum_url" | cut -d' ' -f1)
+    checksum_file=$(mktemp)
+    checksum_status=0
+    download_release_file "$checksum_url" "$checksum_file" 120 || checksum_status=$?
+    if [ "$checksum_status" -ne 0 ]; then
+        rm -f "$checksum_file" "$tmp_file"
+        echo "Could not download the checksum for ${binary_name} ${latest_tag} (curl exit ${checksum_status}). Nothing was changed; try again later." >&2
+        exit 1
+    fi
+    expected_checksum=$(cut -d' ' -f1 < "$checksum_file" | tr -d '\r' | tr 'ABCDEF' 'abcdef')
+    rm -f "$checksum_file"
+    # The same shape check as the pinned value: an empty or garbled .sha256
+    # (a proxy's page, a cut-off file) never gets as far as the compare.
+    case "$expected_checksum" in
+        *[!0123456789abcdef]*) expected_checksum="" ;;
+    esac
+    if [ "${#expected_checksum}" -ne 64 ]; then
+        rm -f "$tmp_file"
+        echo "The checksum file for ${binary_name} ${latest_tag} is not a SHA-256 checksum. Nothing was changed; try again later." >&2
+        exit 1
+    fi
 fi
 
 if [ "$(uname -s)" = "Darwin" ]; then
@@ -1070,7 +1150,7 @@ sys.stdout.write("\n".join(lines) + "\n")
         echo "Install https://cli.github.com (no login is needed when the public" >&2
         echo "attestation bundle fetch succeeds), or unset" >&2
         echo "PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation from" >&2
-        echo "~/.plannotator/config.json / pass --skip-attestation." >&2
+        echo "config.json in your Plannotator data folder (\`plannotator data-dir\`) / pass --skip-attestation." >&2
         rm -f "$tmp_file"
         exit 1
     fi

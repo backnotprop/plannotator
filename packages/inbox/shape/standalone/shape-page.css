@@ -1,0 +1,51 @@
+/* The standalone Shape page (ShapePage.tsx; approval "shape-landing-grid": the
+   grid "standalone, under a small Plannotator header"). The window is the
+   Inbox's Soft look without its sidebar: one rounded pane on the ground, an
+   8 px gutter; the grid and the board are the Inbox's own (shape.css).
+   The phone rule spells the Inbox's one phone query (phone.ts PHONE_QUERY). */
+html, body, #root { height: 100%; margin: 0; }
+body { background: var(--background); color: var(--foreground); font-family: var(--font-sans); font-size: 14px; line-height: 1.45; }
+
+.shp-page { height: 100dvh; display: flex; padding: 8px; box-sizing: border-box; background: var(--background); }
+.shp-page-pane {
+  position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--card); border-radius: 10px;
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 55%, transparent), 0 1px 2px color-mix(in oklch, var(--foreground) 5%, transparent), 0 6px 18px -8px color-mix(in oklch, var(--foreground) 12%, transparent);
+}
+.dark .shp-page-pane { box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 6%, transparent), inset 0 1px 0 color-mix(in oklch, var(--foreground) 4%, transparent); }
+
+.shp-page-grid { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.shp-page-head { flex: none; display: flex; align-items: center; gap: 12px; height: 64px; padding: 0 16px 0 18px; }
+.shp-page-brand { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; margin-right: 6px; color: var(--primary); }
+.shp-page-brand span { color: var(--muted-foreground); font-weight: 500; }
+.shp-page-head h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -0.015em; outline: none; }
+.shp-page-sum { color: var(--muted-foreground); font-size: 14px; white-space: nowrap; }
+.shp-page-sp { flex: 1; }
+.shp-page-find { display: flex; align-items: center; gap: 8px; height: 36px; width: 300px; max-width: 40vw; padding: 0 12px; box-sizing: border-box; border-radius: 10px; border: 1px solid var(--border); color: var(--muted-foreground); background: transparent; }
+.shp-page-find:focus-within { border-color: color-mix(in oklch, var(--primary) 55%, var(--border)); }
+.shp-page-find input { all: unset; flex: 1; min-width: 0; font-size: 14px; color: var(--foreground); }
+.shp-page-find input::placeholder { color: var(--muted-foreground); }
+.shp-page-find input::-webkit-search-cancel-button { display: none; }
+.shp-page-body { flex: 1; min-height: 0; overflow: auto; }
+
+/* No boards, and Shape off: the Pebble and a few words, centred. */
+.shp-page-note { display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 440px; margin: 12vh auto 0; padding: 0 20px; text-align: center; color: var(--primary); }
+.shp-page-note h2 { margin: 6px 0 0; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; color: var(--foreground); }
+.shp-page-note p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--muted-foreground); }
+
+/* The board, over the grid, edge to edge in the pane. */
+.shp-page-board { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; background: var(--background); border-radius: inherit; overflow: hidden; }
+.shp-page-board > * { flex: 1; min-height: 0; }
+.shp-page-loading { flex: 1; }
+
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* A phone has no gutter around the pane, and the header keeps only Shape and Find. */
+  .shp-page { padding: 0; }
+  .shp-page-pane { border-radius: 0; box-shadow: none; }
+  .shp-page-head { height: 56px; padding: 0 12px 0 14px; gap: 8px; }
+  .shp-page-brand span, .shp-page-sum { display: none; }
+  .shp-page-brand { margin-right: 0; }
+  .shp-page-find { width: 46vw; max-width: none; }
+  /* 16 px: iOS zooms into a smaller field. */
+  .shp-page-find input { font-size: 16px; }
+}

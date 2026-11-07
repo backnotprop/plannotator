@@ -130,6 +130,26 @@ test("a message from a linked worktree lands in the main repository's project an
   expect(server.store.message(fromMain.message_id)?.base_path).toBeUndefined();
 });
 
+test("a linked worktree of another repository replying into a thread keeps the worktree as its base, on a host that sends no folder", async () => {
+  const { root, main, dataDir } = world();
+  const other = join(root, "other");
+  mkdirSync(other);
+  writeFileSync(join(other, "README.md"), "# other\n");
+  git(root, "init", "-q", other);
+  git(other, "add", ".");
+  git(other, "commit", "-qm", "init");
+  const otherTree = join(root, "other-wt");
+  git(other, "worktree", "add", "-q", otherTree, "-b", "feature");
+  const server = await start(dataDir);
+  const client = await agent(server);
+  const asked = await send(client, { project_path: main, body: "Which one?", agent_session: "ses_main" });
+  const fromTree = await send(client, { project_path: otherTree, reply_to: asked.message_id, body: "From my worktree.", agent_session: "ses_wt" });
+  const fromItsMain = await send(client, { project_path: other, reply_to: asked.message_id, body: "From its main checkout.", agent_session: "ses_other" });
+  expect(server.store.message(fromTree.message_id)?.base_path).toBe(otherTree);
+  expect(server.store.message(fromTree.message_id)?.from_project?.root).toBe(other);
+  expect(server.store.message(fromItsMain.message_id)?.base_path).toBeUndefined();
+});
+
 test("images relative to the worktree resolve there, and from anywhere else on this computer", async () => {
   const { main, worktree, dataDir } = world();
   const server = await start(dataDir);
@@ -258,7 +278,7 @@ test("a store from before the fold replays and routes as it did; only new sends 
   expect(after.sendMessage({ project_id: folded.project.id, author, body: "Main project, replayed." }).message.thread_id).toBe(folded.thread_id);
 });
 
-test("an agent that asked from a worktree before the fold still gets the reply: wait_for_reply and read_thread cover the worktree's earlier project", async () => {
+test("an agent that asked from a worktree before the fold still gets the reply: read_thread covers the worktree's earlier project", async () => {
   const { main, worktree, dataDir } = world();
   // An older Inbox: the question in a project keyed by the worktree, and the person's reply to it.
   const before = InboxStore.open(dataDir);
@@ -274,22 +294,18 @@ test("an agent that asked from a worktree before the fold still gets the reply: 
   const server = await start(dataDir);
   const client = await agent(server);
   // What the stdio shim sends: its working folder as project_path, and the session.
-  const waited = (await client.callTool({
-    name: "wait_for_reply",
-    arguments: { project_path: worktree, agent_session: "ses_codex_wt", timeout_seconds: 1 },
-  })) as { isError?: boolean; structuredContent: Record<string, any> };
-  expect(waited.isError).toBeFalsy();
-  expect(waited.structuredContent.status).toBe("replied");
-  expect(waited.structuredContent.thread_id).toBe(asked.id);
-  expect(waited.structuredContent.reply.body).toContain("Use Postgres.");
-
   const listed = (await client.callTool({
     name: "read_thread",
     arguments: { project_path: worktree, agent_session: "ses_codex_wt", include_resolved: true },
   })) as { isError?: boolean; structuredContent: Record<string, any> };
   expect(listed.isError).toBeFalsy();
-  expect(listed.structuredContent.project.root).toBe(main);
   expect(listed.structuredContent.threads.map((t: { thread_id: string }) => t.thread_id)).toContain(asked.id);
+  const read = (await client.callTool({
+    name: "read_thread",
+    arguments: { thread_id: asked.id, project_path: worktree, agent_session: "ses_codex_wt" },
+  })) as { isError?: boolean; structuredContent: Record<string, any> };
+  expect(read.isError).toBeFalsy();
+  expect(read.structuredContent.thread.messages.at(-1).body).toContain("Use Postgres.");
 
   // From the main checkout, the worktree's earlier project is not in the read: the scope is that worktree's alone.
   const fromMain = (await client.callTool({
@@ -366,4 +382,122 @@ test("a folder project holding the worktree (a project at ~) never takes a guess
   expect(refused.content[0]!.text).toStartWith("project_unresolved:");
   expect(server.store.listRows({ projectId: home.project.id }).map((row) => row.thread_id)).toEqual([home.thread_id]);
   expect(server.store.listProjects().map((p) => p.root)).toEqual([root]);
+});
+
+test("read_thread's list from a worktree an older Inbox kept a project for lists that project's threads and makes no main-repository project", async () => {
+  const { worktree, dataDir } = world();
+  const before = InboxStore.open(dataDir);
+  const old = before.ensureProject({ name: "api-wt", root: worktree });
+  const author = { kind: "agent" as const, host: "codex", session: "ses_codex_wt", name: "Codex" };
+  const asked = before.sendMessage({ project_id: old.id, author, body: "Asked before the fold." }).message;
+
+  const server = await start(dataDir);
+  const client = await agent(server);
+  const listed = (await client.callTool({
+    name: "read_thread",
+    arguments: { project_path: worktree, agent_session: "ses_codex_wt" },
+  })) as { isError?: boolean; structuredContent: Record<string, any> };
+  expect(listed.isError).toBeFalsy();
+  expect(listed.structuredContent.project.id).toBe(old.id);
+  expect(listed.structuredContent.threads.map((t: { thread_id: string }) => t.thread_id)).toEqual([asked.id]);
+  // A read is not a write: the main repository has no project until something is sent from it.
+  expect(server.store.listProjects().map((p) => p.root)).toEqual([worktree]);
+});
+
+test("read_thread's list when git does not answer in time: project_unresolved and nothing made; once git answers, the same call lists", async () => {
+  const { main, dataDir } = world();
+  const real = inboxGitRunner();
+  let slow = true;
+  const git: InboxGitRunner = async (args, cwd) => {
+    if (!slow) return real(args, cwd);
+    await Bun.sleep(20);
+    return null;
+  };
+  const server = await start(dataDir, git);
+  const client = await agent(server);
+  const refused = (await client.callTool({
+    name: "read_thread",
+    arguments: { project_path: main, agent_session: "ses_main" },
+  })) as { isError?: boolean; content: { text: string }[] };
+  expect(refused.isError).toBe(true);
+  expect(refused.content[0]!.text).toStartWith("project_unresolved:");
+  expect(refused.content[0]!.text).toContain("try the same call again");
+  expect(server.store.listProjects()).toEqual([]);
+
+  slow = false;
+  const listed = (await client.callTool({
+    name: "read_thread",
+    arguments: { project_path: main, agent_session: "ses_main" },
+  })) as { isError?: boolean; structuredContent: Record<string, any> };
+  expect(listed.isError).toBeFalsy();
+  expect(listed.structuredContent.threads).toEqual([]);
+  expect(server.store.listProjects()).toEqual([]);
+});
+
+test("a session started in a plain folder holding one repository's checkouts files into that repository's project, and still reads the folder's old threads", async () => {
+  // The owner's layout (2026-11-02): `appnotes` is a folder of notes; `appnotes/worktrees/main` is the
+  // repository's main checkout and `appnotes/worktrees/agent-pr-plan-box` a linked worktree of it.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-container-")));
+  scratch.push(root);
+  const folder = join(root, "workspaces", "projects", "appnotes");
+  mkdirSync(join(folder, "worktrees"), { recursive: true });
+  mkdirSync(join(folder, "shots"));
+  writeFileSync(join(folder, "shots", "notes.png"), png());
+  const main = join(folder, "worktrees", "main");
+  git(root, "init", "-q", main);
+  writeFileSync(join(main, "README.md"), "appnotes\n");
+  git(main, "add", ".");
+  git(main, "commit", "-qm", "init");
+  const branch = join(folder, "worktrees", "agent-pr-plan-box");
+  git(main, "worktree", "add", "-q", branch, "-b", "agent-pr-plan-box");
+  const dataDir = join(root, "data");
+
+  // What this Inbox made before: a folder project for `appnotes`, with a question the person answered.
+  const before = InboxStore.open(dataDir);
+  const old = before.ensureProject({ name: "appnotes", root: folder });
+  const author = { kind: "agent" as const, host: "claude-code", session: "ses_folder", name: "Claude Code" };
+  const asked = before.sendMessage({ project_id: old.id, author, body: "Ship the notes page?\n\n:::question\nShip the notes page?\n- Yes\n- No\n:::" }).message;
+  before.sendReply(asked.id, { words: "Yes.", idempotency_key: "reply-folder" });
+
+  const server = await start(dataDir);
+  const client = await agent(server);
+  const fromBranch = await send(client, { project_path: branch, body: "From a checkout.", agent_session: "ses_branch" });
+  expect(fromBranch.project.root).toBe(main);
+  // Agents read the repository's name, as the window shows it, not the checkout's folder ("main"); the old
+  // folder project still stands beside it until the next start folds it, so the checkout is named.
+  expect(fromBranch.project.name).toBe("appnotes · main");
+  const fromFolder = await send(client, { project_path: folder, body: "![notes](shots/notes.png)", agent_session: "ses_folder_new" });
+  // The same project as the checkouts', not the folder's; the folder stays the base its relative paths start at.
+  expect(fromFolder.project.id).toBe(fromBranch.project.id);
+  expect(server.store.message(fromFolder.message_id)?.base_path).toBe(folder);
+  expect((await image(server, fromFolder.message_id, "shots/notes.png")).status).toBe(200);
+  // Nothing was moved: the folder project keeps its thread (the person can Combine it), and a read from the folder finds it.
+  expect(server.store.message(asked.id)?.project_id).toBe(old.id);
+  const listed = (await client.callTool({ name: "read_thread", arguments: { project_path: folder, agent_session: "ses_folder", include_resolved: true } })) as {
+    isError?: boolean;
+    structuredContent: Record<string, any>;
+  };
+  expect(listed.isError).toBeFalsy();
+  expect(listed.structuredContent.threads.map((t: { thread_id: string }) => t.thread_id)).toContain(asked.id);
+  const reply = await send(client, { project_path: folder, reply_to: asked.id, body: "Shipped.", agent_session: "ses_folder" });
+  expect(reply.project.id).toBe(old.id);
+});
+
+test("a fresh session in a checkouts folder whose checkout's git runs past the time limit still sends: it files into the repository read from disk", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-container-slow-")));
+  scratch.push(root);
+  const folder = join(root, "appnotes");
+  mkdirSync(join(folder, "worktrees"), { recursive: true });
+  const main = join(folder, "worktrees", "main");
+  git(root, "init", "-q", main);
+  writeFileSync(join(main, "README.md"), "appnotes\n");
+  git(main, "add", ".");
+  git(main, "commit", "-qm", "init");
+  const real = inboxGitRunner();
+  // The folder's own git answers (not a work tree); the checkout's gives no answer.
+  const slow: InboxGitRunner = async (args, cwd) => (cwd === main ? null : real(args, cwd));
+  const server = await start(join(root, "data"), slow);
+  const sent = await send(await agent(server), { project_path: folder, body: "From the folder, git slow.", agent_session: "ses_slow" });
+  expect(sent.project.root).toBe(main);
+  expect(sent.project.name).toBe("appnotes");
 });

@@ -107,6 +107,77 @@ describe.if(hasDom)('RenderedMarkdown host seams (DOM)', () => {
     expect(inert?.getAttribute('title')).toBe('From the outer host');
   });
 
+  test('an unavailable link\'s `after` (deprecated) is still drawn right after the inert link, with its tooltip', async () => {
+    const el = await render(
+      <LocalLinkContext.Provider value={() => ({ kind: 'unavailable', title: 'Not here', after: <button data-after-control="">Open</button> })}>
+        <RenderedMarkdown markdown={DOC} />
+      </LocalLinkContext.Provider>,
+    );
+    const inert = Array.from(el.querySelectorAll('[data-local-link="unavailable"]')).find((n) => n.textContent === 'local doc')!;
+    expect(inert.getAttribute('title')).toBe('Not here');
+    expect(inert.nextElementSibling?.hasAttribute('data-after-control')).toBe(true);
+  });
+
+  test('`wrap` draws the inert link\'s text through the host, with no default tooltip', async () => {
+    const el = await render(
+      <LocalLinkContext.Provider value={() => ({ kind: 'unavailable', title: 'Not here', wrap: (text) => <span data-host-wrap="">{text}</span> })}>
+        <RenderedMarkdown markdown={DOC} />
+      </LocalLinkContext.Provider>,
+    );
+    const inert = Array.from(el.querySelectorAll('[data-local-link="unavailable"]')).find((n) => n.textContent === 'local doc')!;
+    expect(inert.parentElement?.hasAttribute('data-host-wrap')).toBe(true);
+    expect(inert.hasAttribute('title')).toBe(false);
+  });
+
+  // A README-style themed image (#2328): with a resolver, `responsiveImages`
+  // keeps the dark-mode `<source>`, its candidate resolved like the `<img>`.
+  // Without it the resolver host gets today's behavior (sources dropped), and
+  // a candidate the resolver refuses never reaches the browser.
+  test('responsiveImages keeps <picture> sources with each srcset candidate resolved', async () => {
+    const themed = [
+      '<picture>',
+      '<source media="(prefers-color-scheme: dark)" srcset="https://cdn.test/dark.png 1x, https://cdn.test/dark@2x.png 2x">',
+      '<img src="https://cdn.test/light.png" srcset="https://cdn.test/light@2x.png 2x" alt="themed">',
+      '</picture>',
+    ].join('');
+    const resolveImage = (src: string) => ({ kind: 'src' as const, src: `/proxy?u=${encodeURIComponent(src)}` });
+
+    const kept = await render(<RenderedMarkdown markdown={themed} resolveImage={resolveImage} responsiveImages />);
+    const source = kept.querySelector('picture source');
+    expect(source?.getAttribute('media')).toBe('(prefers-color-scheme: dark)');
+    expect(source?.getAttribute('srcset')).toBe(
+      `/proxy?u=${encodeURIComponent('https://cdn.test/dark.png')} 1x, /proxy?u=${encodeURIComponent('https://cdn.test/dark@2x.png')} 2x`,
+    );
+    expect(kept.querySelector('img')?.getAttribute('srcset')).toBe(`/proxy?u=${encodeURIComponent('https://cdn.test/light@2x.png')} 2x`);
+
+    const dropped = await render(<RenderedMarkdown markdown={themed} resolveImage={resolveImage} />);
+    expect(dropped.querySelector('picture source')).toBeNull();
+    expect(dropped.querySelector('img')?.hasAttribute('srcset')).toBe(false);
+
+    const refuseDark = (src: string) => (src.includes('dark') ? { kind: 'unavailable' as const, title: 'no' } : null);
+    const refused = await render(<RenderedMarkdown markdown={themed} resolveImage={refuseDark} responsiveImages />);
+    expect(refused.querySelector('picture source')).toBeNull();
+    expect(refused.innerHTML).not.toContain('dark');
+  });
+
+  // A `data:` candidate's comma is part of its URL. Split there, the tail
+  // (`AAAA`) became a relative candidate and an `/api/image?path=AAAA` fetch.
+  test('responsiveImages keeps a data: srcset candidate whole', async () => {
+    const inline = 'data:image/png;base64,AAAA';
+    const html = `<p><img src="https://cdn.test/light.png" srcset="${inline} 2x, https://cdn.test/light@3x.png 3x" alt="inline"></p>`;
+    const asked: string[] = [];
+    const resolveImage = (src: string) => {
+      asked.push(src);
+      return src.startsWith('https:') ? { kind: 'src' as const, src: `/proxy?u=${encodeURIComponent(src)}` } : null;
+    };
+    const el = await render(<RenderedMarkdown markdown={html} resolveImage={resolveImage} responsiveImages />);
+    expect(el.querySelector('img')?.getAttribute('srcset')).toBe(
+      `${inline} 2x, /proxy?u=${encodeURIComponent('https://cdn.test/light@3x.png')} 3x`,
+    );
+    expect(asked).not.toContain('AAAA');
+    expect(el.innerHTML).not.toContain('/api/image');
+  });
+
   test('headingAnchors gives headings deduplicated slug ids', async () => {
     const el = await render(<RenderedMarkdown markdown={DOC} headingAnchors />);
     expect(Array.from(el.querySelectorAll('h1, h2')).map((h) => h.id)).toEqual(['title', 'title-1']);

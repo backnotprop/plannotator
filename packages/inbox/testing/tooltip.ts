@@ -27,6 +27,19 @@ export function unhover(target: Element) {
   });
 }
 
+/**
+ * A list row's tooltip mounts when the pointer first enters its trigger, and the trigger is drawn again then
+ * in the task after (RowTip.tsx). A test that gives the trigger sizes (`sized`) arms it first: the pointer enters and
+ * leaves once, and this returns the trigger as it is drawn now, still under `find`.
+ */
+export async function armTip<T extends Element>(find: () => T): Promise<T> {
+  hover(find());
+  await settle(0);
+  const node = find();
+  unhover(node);
+  return node;
+}
+
 export async function settle(ms = 400) {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, ms));

@@ -1,9 +1,9 @@
 /**
  * The Inbox's hover text is ui's Tooltip component, never the browser's
  * native `title` (the owner, 2026-10-17: "I want an actual component
- * tooltip"). A cut project label in a list row, a sidebar project and a
- * thread chip open the component tooltip quickly on hover; a label that fits
- * opens nothing; and none of them carries a native title. A chip cut by a
+ * tooltip"). A cut project label in a wide list row, a sidebar project and a
+ * row's cut preview open the component tooltip quickly on hover; a label that
+ * fits opens nothing; and none of them carries a native title. Text cut by a
  * fraction of a pixel (its ellipsis painted while scrollWidth equals
  * clientWidth, seen on a two-line row at a device scale of 2) counts as cut.
  * happy-dom has no layout, so each test gives an element the sizes a real
@@ -15,7 +15,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { openTooltips, sized, tooltipOf, unhover } from './testing/tooltip';
+import { armTip, openTooltips, sized, tooltipOf, unhover } from './testing/tooltip';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
@@ -82,30 +82,46 @@ const label = (el: HTMLElement, id: string) => el.querySelector<HTMLElement>(`[d
 /** Every element under `el` with a native title. */
 const nativeTitles = (el: HTMLElement) => [...el.querySelectorAll('[title]')].map((node) => node.getAttribute('title'));
 
-test.skipIf(!hasDom)('a cut project label in a list row opens the component tooltip; one that fits opens none; neither has a native title', async () => {
-  for (const narrow of [false, true]) {
-    const el = list(narrow);
-    expect(nativeTitles(el)).toEqual([]);
-    const fits = label(el, SHORT.thread_id);
-    sized(fits, 30, 30);
-    expect(await tooltipOf(fits)).toBeNull();
-    unhover(fits);
-    const cut = label(el, LONG.thread_id);
-    sized(cut, 260, 120);
-    expect(await tooltipOf(cut)).toBe(LONG_PROJECT);
-    expect(cut.hasAttribute('title')).toBe(false);
-    // The label is no focus stop of its own: the row's button is.
-    expect(cut.tabIndex).toBe(-1);
-    unhover(cut);
-    act(() => root?.unmount());
-    host?.remove();
-  }
+test.skipIf(!hasDom)('a cut project label in a wide row opens the component tooltip; one that fits opens none; neither has a native title', async () => {
+  const el = list(false);
+  expect(nativeTitles(el)).toEqual([]);
+  const fits = await armTip(() => label(el, SHORT.thread_id));
+  sized(fits, 30, 30);
+  expect(await tooltipOf(fits)).toBeNull();
+  unhover(fits);
+  const cut = await armTip(() => label(el, LONG.thread_id));
+  sized(cut, 260, 120);
+  expect(await tooltipOf(cut)).toBe(LONG_PROJECT);
+  expect(cut.hasAttribute('title')).toBe(false);
+  // The label is no focus stop of its own: the row's button is.
+  expect(cut.tabIndex).toBe(-1);
+  unhover(cut);
+  act(() => root?.unmount());
+  host?.remove();
+
+  // Beside a thread the project never wraps (approval "inbox-list-row-v2"): cut, it opens the tooltip with the whole
+  // name; one that fits opens none.
+  const narrow = list(true);
+  const short = await armTip(() => label(narrow, SHORT.thread_id));
+  sized(short, 30, 30);
+  expect(await tooltipOf(short)).toBeNull();
+  unhover(short);
+  const long = await armTip(() => label(narrow, LONG.thread_id));
+  expect(long.textContent).toBe(LONG_PROJECT);
+  sized(long, 260, 120);
+  expect(await tooltipOf(long)).toBe(LONG_PROJECT);
+  expect(long.hasAttribute('title')).toBe(false);
+  unhover(long);
+  // The agents' tiles before it say who in the tooltip.
+  const tiles = narrow.querySelector<HTMLElement>(`[data-thread-id="${LONG.thread_id}"] .ib-atiles`)!;
+  expect(await tooltipOf(tiles)).toBe('Claude Code');
+  unhover(tiles);
 });
 
-test.skipIf(!hasDom)('a chip cut by a fraction of a pixel counts as cut: two-line row, scrollWidth equal to clientWidth, the ellipsis painted', async () => {
+test.skipIf(!hasDom)('a preview cut by a fraction of a pixel counts as cut: three-line row, scrollWidth equal to clientWidth, the ellipsis painted', async () => {
   const el = list(true);
-  const chip = el.querySelector<HTMLElement>(`[data-thread-id="${LONG.thread_id}"] .ib-keyt`)!;
-  expect(chip.textContent).toBe('reconciliation-run');
+  const chip = await armTip(() => el.querySelector<HTMLElement>(`[data-thread-id="${LONG.thread_id}"] .ib-pv`)!);
+  expect(chip.textContent).toBe(LONG.subject!);
   // What Chromium measured at a device scale of 2 beside an open thread: the box 97.546875 px, the text 97.61 px,
   // and both integer widths 98.
   sized(chip, 98, 98);
@@ -119,7 +135,7 @@ test.skipIf(!hasDom)('a chip cut by a fraction of a pixel counts as cut: two-lin
   };
   try {
     expect(isTextCut(chip)).toBe(true);
-    expect(await tooltipOf(chip)).toBe('reconciliation-run');
+    expect(await tooltipOf(chip)).toBe(LONG.subject);
     expect(chip.hasAttribute('title')).toBe(false);
   } finally {
     document.createRange = realRange;

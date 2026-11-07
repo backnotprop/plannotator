@@ -61,7 +61,7 @@ import { appendFeedbackRecord, type FeedbackDecision } from "@plannotator/shared
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
-import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, type OpencodeClient } from "./shared-handlers";
+import { handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft, loadDraft } from "./draft";
 import { handleDoc, handleDocExists, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, handleFileBrowserFiles } from "./reference-handlers";
 import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
@@ -74,7 +74,9 @@ import { handleHostControl, resolveHostControlToken, type HostControl } from "./
 import { countUnsentDraftComments } from "@plannotator/shared/host-control";
 import { isAIEndpointPath, isLongLivedAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
 import { isArchiveDocumentMutation } from "@plannotator/shared/archive-mode";
-import { getAllowedRootPaths, isPathAllowed, isPlanLinkedDocPath, readPlanFile } from "@plannotator/shared/doc-resolve";
+import { isThisMachineRequest } from "./this-machine";
+import { getAllowedRootPaths, isDocServeAllowed, isPlanLinkedDocPath, readPlanFile } from "@plannotator/shared/doc-resolve";
+import { isReferenceReadPath, referenceReadRefusal } from "@plannotator/shared/reference-reader";
 import { createDocumentDraftStore, documentDraftIndexKey, loadSessionDraftWithDocuments } from "@plannotator/shared/annotate-draft";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 
@@ -309,7 +311,7 @@ export async function startPlannotatorServer(
   // project, or a file the plan links beside its own plan file.
   const planDocumentDrafts = mode !== "archive"
     ? createDocumentDraftStore({
-        isAllowed: (path) => isPathAllowed(path, getAllowedRootPaths()) || isPlanLinkedDocPath(path, planFile),
+        isAllowed: (path, anyPath) => isDocServeAllowed(path, null, getAllowedRootPaths(), anyPath) || isPlanLinkedDocPath(path, planFile),
         indexKey: documentDraftIndexKey(draftKey),
       })
     : null;
@@ -547,7 +549,12 @@ export async function startPlannotatorServer(
 
           // API: Serve a linked markdown document
           if (url.pathname === "/api/doc" && req.method === "GET") {
-            return handleDoc(req, { planFile });
+            // A tab on this machine reads any path (#2291), so no other site may.
+            if (!isSameOriginRequest(req)) return Response.json(crossOriginRefusalBody(), { status: 403 });
+            return handleDoc(req, {
+              planFile,
+              anyPath: isThisMachineRequest(req),
+            });
           }
 
           // API: Batch existence check for code-file paths the renderer detected
@@ -621,6 +628,11 @@ export async function startPlannotatorServer(
             }
           }
 
+          // The "Star the repo" ask on the done screen (packages/shared/star-ask.ts).
+          if (url.pathname.startsWith("/api/star-ask/")) {
+            return (await handleStarAsk(req, url, "plan", { remote: isRemote })) ?? handleApiNotFound(url.pathname);
+          }
+
           // API: Serve images (local paths or temp uploads)
           if (url.pathname === "/api/image") {
             return handleImage(req);
@@ -663,6 +675,14 @@ export async function startPlannotatorServer(
             }
           }
 
+          // The Files sidebar and Obsidian routes: never for another site, and
+          // a reader off this machine keeps the roots and Obsidian's own vaults.
+          if (isReferenceReadPath(url.pathname)) {
+            if (!isSameOriginRequest(req)) return Response.json(crossOriginRefusalBody(), { status: 403 });
+            const refusal = referenceReadRefusal(url, { thisMachine: isThisMachineRequest(req), roots: getAllowedRootPaths() });
+            if (refusal) return Response.json({ error: refusal.error }, { status: refusal.status });
+          }
+
           // API: Detect Obsidian vaults
           if (url.pathname === "/api/obsidian/vaults") {
             return handleObsidianVaults();
@@ -685,7 +705,7 @@ export async function startPlannotatorServer(
 
           // API: Read an Obsidian vault document
           if (url.pathname === "/api/reference/obsidian/doc" && req.method === "GET") {
-            return handleObsidianDoc(req);
+            return handleObsidianDoc(req, isThisMachineRequest(req));
           }
 
           // API: List markdown files in a directory as a tree
@@ -731,7 +751,7 @@ export async function startPlannotatorServer(
               if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) {
                 return Response.json(crossOriginRefusalBody(), { status: 403 });
               }
-              const result = planDocumentDrafts.loadDocument(url.searchParams.get("path"));
+              const result = planDocumentDrafts.loadDocument(url.searchParams.get("path"), url.searchParams.get("client"), isThisMachineRequest(req));
               return Response.json(result.body, { status: result.status });
             }
             if (req.method === "POST") {
@@ -741,7 +761,7 @@ export async function startPlannotatorServer(
               } catch {
                 return Response.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
               }
-              const result = planDocumentDrafts.saveDocuments(body);
+              const result = planDocumentDrafts.saveDocuments(body, url.searchParams.get("client"), isThisMachineRequest(req));
               return Response.json(result.body, { status: result.status });
             }
             return Response.json({ error: "Method not allowed" }, { status: 405 });
@@ -876,7 +896,7 @@ export async function startPlannotatorServer(
 
             // Clean up draft on successful submit
             deleteDraft(draftKey, draftGeneration);
-            planDocumentDrafts?.settle();
+            planDocumentDrafts?.settle(url.searchParams.get("client"));
 
             // Use permission mode from client request if provided, otherwise fall back to hook input
             const effectivePermissionMode = requestedPermissionMode || permissionMode;
@@ -927,7 +947,7 @@ export async function startPlannotatorServer(
             archivePlanDecision("denied", feedback);
 
             deleteDraft(draftKey, draftGeneration);
-            planDocumentDrafts?.settle();
+            planDocumentDrafts?.settle(url.searchParams.get("client"));
             decisionSettled = true;
             resolveDecision({ approved: false, feedback, savedPath, ...(answersOnly ? { answersOnly: true } : {}) });
             return Response.json({ ok: true, savedPath });

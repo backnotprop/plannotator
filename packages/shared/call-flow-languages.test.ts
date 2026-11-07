@@ -28,6 +28,18 @@ describe("Call flow language preflight", () => {
     ]);
   });
 
+  test("CUDA sources use the C++ pack", () => {
+    for (const path of ["kernels/add.cu", "include/add.cuh", "src/Kernel.CU"]) {
+      expect(getCallFlowLanguageForPath(path)?.id).toBe("cpp");
+    }
+  });
+
+  test("Perl stays unsupported, so a Perl change never asks for a pack that needs a compiler", () => {
+    for (const path of ["lib/Thing.pm", "script.pl", "t/basic.t"]) {
+      expect(getCallFlowLanguageForPath(path)).toBeNull();
+    }
+  });
+
   test("matches extensions case-insensitively and ignores unsupported files", () => {
     expect(getCallFlowLanguageForPath("src/Thing.CS")?.id).toBe("csharp");
     expect(getCallFlowLanguageForPath("README.md")).toBeNull();

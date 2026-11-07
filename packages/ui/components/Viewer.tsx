@@ -86,9 +86,10 @@ import { type QuickLabel } from '../utils/quickLabels';
 import type { SelectionAction } from '../utils/selectionActions';
 import type { MentionSource } from '../utils/mentions';
 import { DocBadges, type DocBadgesProps, type LinkedDocBadgeInfo } from './DocBadges';
+import { legacyBadgesMaxWidth } from './docBadgesWidth';
 import { PinpointOverlay } from './PinpointOverlay';
 import { usePinpoint } from '../hooks/usePinpoint';
-import { useAnnotationHighlighter, type AnnotationRestoreReport } from '../hooks/useAnnotationHighlighter';
+import { rangeInsideExcluded, useAnnotationHighlighter, type AnnotationRestoreReport } from '../hooks/useAnnotationHighlighter';
 import { useVimSelection } from '../hooks/useVimSelection';
 import {
   getScrollViewportIntersectionRoot,
@@ -324,6 +325,10 @@ export interface ViewerProps {
    *  `QuestionBlock` `onZoomChoice`). Absent: the zoom opens the picture
    *  through `onImageClick`, as before. */
   onQuestionPictureZoom?: (key: string, index: number, url: string, alt: string) => void;
+  /** A picture choice's size in pixels, given the URL its picture loads from,
+   *  when the host knows it before the picture loads (see `QuestionBlock`
+   *  `pictureSize`). Absent: unknown, and nothing changes. */
+  questionPictureSize?: (url: string) => { width: number; height: number } | null;
   /** Makes a question's "Records a decision" tag a toggle button
    *  (`aria-pressed`); a click calls this with the question's key and the
    *  next state, which the host stores and returns from
@@ -403,14 +408,22 @@ export interface ViewerProps {
    * Opt-in host capability, with `answerOnly`: the reader may comment on the
    * text. A text selection opens the selection toolbar, comment-only
    * (Comment and the one-click 👍; no Delete, no label picker), and its
-   * comment composer; `annotations` are drawn as highlights. Question cards
-   * are left out of selection (their text is not commented on), and nothing
-   * else of authoring comes back (no pinpoint, code-block toolbar, Global
-   * comment or Copy, no Vim). For a host that shows a message whose words
-   * can be commented on (the Plannotator Inbox's agent messages). Ignored
-   * without `answerOnly` and under `readOnly`. Absent → unchanged.
+   * comment composer; `annotations` are drawn as highlights. A rendered
+   * diagram takes comments on its parts the same way (`onAddAnnotation` gets
+   * a row with `diagramAnchor`). Question cards are left out of selection
+   * (their text is not commented on), and nothing else of authoring comes
+   * back (no pinpoint, code-block toolbar, Global comment or Copy, no Vim).
+   * For a host that shows a message whose words can be commented on (the
+   * Plannotator Inbox's agent messages). Ignored without `answerOnly` and
+   * under `readOnly`. Absent → unchanged.
    */
   textComments?: boolean;
+  /**
+   * Opt-in, with `textComments`: the comment-only selection toolbar also
+   * offers Delete (a DELETION on the words selected, as everywhere else).
+   * The label picker stays off. Absent → unchanged.
+   */
+  textDeletions?: boolean;
   /**
    * Opt-in: words a text-selection comment box opens with, for the selected
    * text (a host's suggested comment, kept with one press or written over).
@@ -466,13 +479,18 @@ export interface ViewerHandle {
   /** Markdown `Viewer` only: scroll a heading anchor (`#id`) into view.
    *  Returns false when it is not in this document. */
   scrollToAnchor?: (hash: string) => boolean;
+  /** Raw-HTML `HtmlViewer` only: print the document itself so its page breaks
+   *  paginate instead of being flattened inside the host's iframe. */
+  print?: () => void;
   /** `HtmlViewer` only: move a pinned draft to the element around it
    *  (`'parent'`) or back in (`'child'`), for a host that composes
    *  (`onHostDraft`). The markdown `Viewer` does not implement it. */
   stepPin?: (direction: 'parent' | 'child') => void;
   /** `HtmlViewer` only: scroll the pinned draft into the middle of the
-   *  frame, for a host whose panel covers part of it. */
-  revealPin?: () => void;
+   *  frame, for a host whose panel covers part of it. `clearBottom`: the
+   *  panel floats over the frame's last pixels instead of shrinking it, so the
+   *  pin goes into the part left, and stays put if it is already there. */
+  revealPin?: (options?: { clearBottom?: number }) => void;
   /** Markdown `Viewer` only, for a host that composes (`onHostDraft`) on a
    *  touch screen: make the page's text selection a draft now (the host's own
    *  Comment action), reported through `onHostDraft` as `'selection'`.
@@ -647,6 +665,7 @@ const StickyActionsLane: React.FC<{ className: string; children: React.ReactNode
       {/* After the lane: the lane is a flex box, so a float placed before it would narrow it. */}
       <div
         data-print-hide
+        data-sticky-actions-spacer
         aria-hidden="true"
         className="float-right"
         style={box ? { width: box.width, height: box.height, marginTop: box.marginTop, marginRight: box.marginRight } : undefined}
@@ -838,6 +857,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   questionPictureChoices = true,
   questionPictureBadge,
   onQuestionPictureZoom,
+  questionPictureSize,
   onToggleQuestionDecisionRecording,
   onOpenQuestionDecision,
   questionDecisionLocked,
@@ -853,6 +873,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   answerOnly = false,
   htmlEmbeds,
   textComments = false,
+  textDeletions = false,
   suggestComment,
   vimModeEnabled = false,
   vimHudEnabled = false,
@@ -920,27 +941,41 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // card's top padding. One row fits; a second row (diff badge) or mobile
   // wrapping outgrows the padding and lands on the document's first heading.
   // Measure the cluster and insert exactly the clearance it needs (0 when it fits).
+  // The cluster also stops where the action cluster starts on the same row, so
+  // a long file name truncates at the buttons instead of running under them;
+  // with no buttons on its row (the phone layout) it stops inside the card.
   const docBadgesRef = useRef<HTMLDivElement | null>(null);
   const [badgeClearance, setBadgeClearance] = useState(0);
+  const [badgeMaxWidth, setBadgeMaxWidth] = useState<number | null>(null);
   useEffect(() => {
     if (hasViewerAnnotationHeader) {
       setBadgeClearance(0);
+      setBadgeMaxWidth(null);
       return;
     }
     const el = docBadgesRef.current;
     const article = containerRef.current;
-    if (!el || !article) { setBadgeClearance(0); return; }
+    if (!el || !article) { setBadgeClearance(0); setBadgeMaxWidth(null); return; }
+    // The static float that holds the actions' place: the sticky lane's spacer
+    // (the lane itself moves while stuck), or the plain float without one.
+    const actions = article.querySelector<HTMLElement>('[data-sticky-actions-spacer]')
+      ?? article.querySelector<HTMLElement>('[data-sticky-actions]');
     const measure = () => {
       const pad = parseFloat(getComputedStyle(article).paddingTop) || 0;
       const overflow = el.offsetTop + el.offsetHeight - pad;
       setBadgeClearance(overflow > 1 ? overflow + 4 : 0);
+      setBadgeMaxWidth(legacyBadgesMaxWidth(el.getBoundingClientRect(), actions?.getBoundingClientRect() ?? null, article.getBoundingClientRect()));
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
+    // The card too: when it narrows (the sidebar opens, the layout settles after
+    // first paint) the actions float moves without changing size.
+    ro.observe(article);
+    if (actions) ro.observe(actions);
     window.addEventListener('resize', measure);
     return () => { ro.disconnect(); window.removeEventListener('resize', measure); };
-  }, [hasViewerAnnotationHeader, repoInfo, hasPreviousVersion, showDemoBadge, linkedDocInfo, archiveInfo, sourceInfo, planDiffStats, openInAppPath]);
+  }, [hasViewerAnnotationHeader, stickyActions, repoInfo, hasPreviousVersion, showDemoBadge, linkedDocInfo, archiveInfo, sourceInfo, planDiffStats, openInAppPath]);
 
   // Per-doc heading slug map with dedup — computed once per blocks array so
   // anchor ids stay stable across re-renders and duplicate heading texts get
@@ -1380,6 +1415,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     const handleCopy = (e: ClipboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      // A live selection where nothing is annotated (an Inbox action item's text) is
+      // the person's own: the browser copies it, never an older toolbar's text.
+      const live = window.getSelection();
+      if (live && !live.isCollapsed && live.rangeCount > 0 && containerRef.current && rangeInsideExcluded(containerRef.current, live.getRangeAt(0))) return;
 
       if (toolbarState?.selectionText) {
         e.preventDefault();
@@ -1731,9 +1770,13 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           ...(vimModeActive ? { outline: 'none' } : {}),
         } as React.CSSProperties}
       >
-        {/* Legacy badge placement remains byte-for-byte opt-out behavior. */}
         {!viewerAnnotationHeader && (repoInfo || hasPreviousVersion || showDemoBadge || linkedDocInfo || archiveInfo || sourceInfo || openInAppPath) && (
-          <div ref={docBadgesRef} data-print-hide className={`absolute top-3 md:top-4 ${gridEnabled ? 'left-3 md:left-5' : 'left-0'}`}>
+          <div
+            ref={docBadgesRef}
+            data-print-hide
+            className={`absolute top-3 md:top-4 ${gridEnabled ? 'left-3 md:left-5' : 'left-0'}`}
+            style={badgeMaxWidth !== null ? { maxWidth: badgeMaxWidth } : undefined}
+          >
             <DocBadges
               layout="column"
               repoInfo={repoInfo}
@@ -1840,10 +1883,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   annotations={annotations}
                   selectedAnnotationId={selectedAnnotationId}
                   onSelectAnnotation={onSelectAnnotation}
-                  onAddAnnotation={authoringOff ? undefined : onAddAnnotation}
-                  readOnly={authoringOff}
+                  onAddAnnotation={selectionCommentsOn ? onAddAnnotation : undefined}
+                  readOnly={!selectionCommentsOn}
                   onRestoreReport={onRestoreReport}
-                  onAskAI={authoringOff ? undefined : onAskAI}
+                  onAskAI={selectionCommentsOn ? onAskAI : undefined}
                   askAISourcePath={linkedDocInfo?.filepath ?? sourceInfo}
                 />
               </Suspense>
@@ -1856,10 +1899,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   annotations={annotations}
                   selectedAnnotationId={selectedAnnotationId}
                   onSelectAnnotation={onSelectAnnotation}
-                  onAddAnnotation={authoringOff ? undefined : onAddAnnotation}
-                  readOnly={authoringOff}
+                  onAddAnnotation={selectionCommentsOn ? onAddAnnotation : undefined}
+                  readOnly={!selectionCommentsOn}
                   onRestoreReport={onRestoreReport}
-                  onAskAI={authoringOff ? undefined : onAskAI}
+                  onAskAI={selectionCommentsOn ? onAskAI : undefined}
                   askAISourcePath={linkedDocInfo?.filepath ?? sourceInfo}
                 />
               </Suspense>
@@ -1986,6 +2029,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   questionPictureChoices={questionPictureChoices}
                   questionPictureBadge={questionPictureBadge}
                   onQuestionPictureZoom={onQuestionPictureZoom}
+                  questionPictureSize={questionPictureSize}
                 />
               );
               // `textComments`: a question card's words are not commented on
@@ -2010,6 +2054,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               element={toolbarState.element}
               positionMode="center-above"
               commentOnly={textCommentsOnly || undefined}
+              showDelete={textCommentsOnly && textDeletions ? true : undefined}
               onAnnotate={handleAnnotate}
               onClose={handleToolbarClose}
               onRequestComment={handleRequestComment}
@@ -2163,7 +2208,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 label: 'Selected text',
                 text: hookCommentPopover.selectedText ?? hookCommentPopover.contextText,
                 sourcePath: linkedDocInfo?.filepath ?? sourceInfo,
-                ...selectionSourceLines(blocks, hookCommentPopover.blockIds ?? []),
+                ...selectionSourceLines(
+                  blocks,
+                  hookCommentPopover.blockIds ?? [],
+                  hookCommentPopover.selectedText,
+                  hookCommentPopover.startOffset,
+                ),
               }}
             />
           )}

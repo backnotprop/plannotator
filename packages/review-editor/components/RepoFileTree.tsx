@@ -183,9 +183,14 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
     const listTop = list.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
     const top = listTop + rowIndex * REPO_TREE_ROW_HEIGHT;
     const bottom = top + REPO_TREE_ROW_HEIGHT;
-    // Out of view: center it, so the files around it show too.
-    if (top < scroller.scrollTop || bottom > scroller.scrollTop + scroller.clientHeight) {
-      scroller.scrollTop = Math.max(0, top - (scroller.clientHeight - REPO_TREE_ROW_HEIGHT) / 2);
+    // The panel's sticky tools block covers the top of the scroller: a row
+    // under it is not in view.
+    const covered = scroller.querySelector<HTMLElement>('[data-review-sticky-tools]')?.offsetHeight ?? 0;
+    const viewTop = scroller.scrollTop + covered;
+    const viewHeight = scroller.clientHeight - covered;
+    // Out of view: center it in what shows, so the files around it show too.
+    if (top < viewTop || bottom > scroller.scrollTop + scroller.clientHeight) {
+      scroller.scrollTop = Math.max(0, top - covered - (viewHeight - REPO_TREE_ROW_HEIGHT) / 2);
     }
     measure();
   }, [activePath, rows, getScrollElement, measure]);
@@ -262,7 +267,7 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
             markdownPreviewedPaths={markdownPreviewedPaths}
           />
           {onDisk && (
-            <span className="absolute right-[3.25rem] top-1/2 -translate-y-1/2 pointer-events-none">
+            <span className="review-on-disk-dot absolute top-1/2 -translate-y-1/2 pointer-events-none">
               <OnDiskDot change={onDisk} />
             </span>
           )}

@@ -5,8 +5,8 @@
  * (scripts/inbox-sim.ts):
  *
  *  - an agent's `:::action` block with `Stopped:` puts its thread under
- *    Stopped on you, and the row reads "1 action item" ("1 question, 1 action item" beside
- *    a question): no new section, page or strip;
+ *    Stopped on you, and the row counts it in the box pill ("1 action to do", and the
+ *    question count beside it): no new section, page or strip;
  *  - the thread draws the checklist card in place of the block (approval
  *    "action-items-checklist", option A): adjacent blocks are one card, blocks
  *    separated by prose are two; one row open at a time; the open row shows
@@ -16,7 +16,7 @@
  *    option A): the row is struck with its note field and "in your draft", no
  *    toast, the foot reads "Draft · 1 done" beside Send, the thread stays in
  *    Stopped on you, a reload keeps it, and nothing reaches the agent until
- *    Send; then wait_for_reply returns ONE reply whose first line joins the
+ *    Send; then read_thread returns ONE reply whose first line joins the
  *    answers' ("Answered 1 question, did 1 action item."), with "Action items
  *    you asked for" and the note, and the sent message reads "You did 1
  *    action item";
@@ -197,14 +197,19 @@ test.afterAll(async () => {
   }
 });
 
-test('the list: no new section; the action item sits in Stopped on you and its row says "1 action item"', async () => {
+test('the list: no new section; the action item sits in Stopped on you and its row counts it in the box pill', async () => {
   const { page, threads } = world;
   await page.goto(world.url);
   const stopped = page.locator('section[aria-label="Stopped on you"], .ib-group').filter({ hasText: 'Stopped on you' }).first();
   await expect(stopped).toContainText('Approve the production deploy on Vercel');
-  await expect(row(page, threads.vercel)).toContainText('1 action item');
-  await expect(row(page, threads.npm)).toContainText('1 question, 1 action item');
-  await expect(row(page, threads.staging)).toContainText('3 action items');
+  // The open action items' pill and the open questions' count (approval "inbox-row-action-icon"), named in words.
+  for (const [id, actions, questions] of [[threads.vercel, 1, 0], [threads.npm, 1, 1], [threads.staging, 3, 0]] as const) {
+    await expect(row(page, id).locator('[data-action-count]')).toHaveAttribute('data-action-count', String(actions));
+    await expect(row(page, id).locator('.ib-qn')).toHaveCount(questions);
+  }
+  await expect(row(page, threads.vercel)).toHaveAccessibleName(/1 action to do/);
+  await expect(row(page, threads.npm)).toHaveAccessibleName(/1 action to do 1 question/);
+  await expect(row(page, threads.staging)).toHaveAccessibleName(/3 actions to do/);
   // No "Action item" section band, page or strip.
   await expect(page.getByText('Action item', { exact: true })).toHaveCount(0);
   await shot(page, '01-list');
@@ -322,9 +327,8 @@ test('Send carries the Done and its note with the answer: one first line, the se
   await expect(going.locator('.ib-ranswer-a')).toHaveText('Done · Note: Signed in with the YubiKey; the token is good for 30 days.');
   await shot(page, '05b-reply-box');
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const answer = await claude.waitForReply(threads.npm, 40);
-  expect(answer.status).toBe('replied');
-  const body = (answer.reply as { body: string }).body;
+  const answer = await claude.nextReply(threads.npm, 40);
+  const body = answer.body as string;
   expect(body.startsWith('Answered 1 question, did 1 action item.\n\n')).toBe(true);
   const section = body.slice(body.indexOf('## Action items you asked for'));
   expect(section.startsWith('## Action items you asked for\n\n1 of 1 done.\n\n### A1. Sign in to npm in your terminal\nDone, ')).toBe(true);
@@ -380,8 +384,8 @@ test("Can't do it: the reason, with the Send, word for word", async () => {
   await shot(page, '08b-cant-in-draft');
   expect(await personMessages(threads.vercel)).toBe(0);
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const answer = await claude.waitForReply(threads.vercel, 40);
-  const body = (answer.reply as { body: string }).body;
+  const answer = await claude.nextReply(threads.vercel, 40);
+  const body = answer.body as string;
   expect(body.startsWith("Couldn't do 1 action item.\n\n## Action items you asked for")).toBe(true);
   expect(body).toContain("### A1. Approve the production deploy on Vercel\nCan't do it: Only Dana can promote to production; I asked her.");
   await expect(card).toHaveAttribute('data-action-state', 'cant', { timeout: 20_000 });
@@ -415,8 +419,8 @@ test("the agent marks its own action item done while the person's Done waits in 
   // Nothing from the person yet: the agent's two messages only.
   expect(await personMessages(threads.merge)).toBe(0);
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const answer = await claude.waitForReply(threads.merge, 40);
-  const body = (answer.reply as { body: string }).body;
+  const answer = await claude.nextReply(threads.merge, 40);
+  const body = answer.body as string;
   expect(body).toContain('### A1. Merge PR #1937 on GitHub\nYou saw it done, ');
   expect(body).toContain('\nNote: Merged with a squash; kept the changelog line.');
   await expect(card.locator('[data-action-draft-note]')).toHaveCount(0, { timeout: 20_000 });
@@ -449,7 +453,10 @@ test('phone (WebKit, iPhone 15): the checklist, 44 px targets', async () => {
     await expect(note).toBeVisible();
     expect((await note.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     expect(await note.evaluate((el) => getComputedStyle(el).fontSize)).toBe('16px');
-    await expect(page.locator('section.ib-pane [data-foot-status] [data-draft-foot]')).toContainText('1 done');
+    // A phone's foot draws no status (approval "reply-bar-pairs"): Edit draft counts it and names it.
+    const draft = page.locator('section.ib-pane .ib-pfoot [data-edit-draft]');
+    await expect(draft).toHaveAccessibleName(/^Draft 1: 1 done\. Edit draft$/);
+    await expect(draft.locator('[data-draft-count]')).toHaveText('1');
     await shot(page, '10b-phone-in-draft');
     await context.close();
   } finally {

@@ -21,6 +21,9 @@
  *                                   only once the pid is proven to be it
  *   plannotator inbox restart       stop it, then start it detached; print
  *                                   the URL
+ *   plannotator inbox link …        link this Inbox with another machine's,
+ *   plannotator inbox unlink …      or remove the link (inbox-link-command.ts)
+ *   plannotator inbox projects …    list, combine and undo (inbox-projects-command.ts)
  *
  * The status, stop and restart commands follow rmohta's port
  * (rmohta/plannotator, branch feat/plan-library), rebuilt on today's stop
@@ -36,6 +39,7 @@ import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync, utimesSyn
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { isAskAiChild } from "@plannotator/shared/child-env";
 import { isNewerStableVersion } from "@plannotator/shared/update-check";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import {
@@ -54,12 +58,18 @@ import { handleInboxServerReady, startInboxServer } from "@plannotator/server/in
 import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
 import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { isRemoteSession } from "@plannotator/server/remote";
+import { assertTestHome } from "@plannotator/server/test-home-guard";
 import { agentSpec, createAgentEnvironment, formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
 import { addInboxNote, INBOX_NOTE_BODY, inboxNotesDisabled, markNotesAsked } from "@plannotator/server/inbox-agent-notes";
 import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { writeUrlQr } from "@plannotator/server/qr";
+import { shellLine } from "@plannotator/inbox/harnesses";
 import { getCliVersion } from "./cli";
-import { inboxHostSessionFromEnv, inboxQwenShimContext, runInboxMcpShim } from "./inbox-mcp-shim";
+import { inboxHostSessionFromEnv, inboxQwenShimContext, inboxSessionProjectFromEnv, inboxT3EntryIdle, runInboxMcpShim } from "./inbox-mcp-shim";
+import { runPermissionHook } from "./inbox-permission-hook";
+import { runInboxLinkCommand } from "./inbox-link-command";
+import { runInboxProjectsCommand } from "./inbox-projects-command";
+import { writeWholeToStdout } from "./write-whole-stdout";
 
 export const INBOX_LOG_FILE = "inbox.log";
 /** Set by a starter that holds the start lock for the detached Inbox it spawns. */
@@ -100,10 +110,28 @@ function spawnDetachedInbox(dataDir: string, tailscale: boolean): void {
     cwd: dir,
     windowsHide: true,
     stdio: ["ignore", log, log],
-    env: { ...process.env, PLANNOTATOR_DATA_DIR: dataDir, [LOCK_HELD_ENV]: "1", [DETACHED_ENV]: "1" },
+    env: detachedInboxEnv(process.env, dataDir),
   });
   child.unref();
   closeSync(log);
+}
+
+/**
+ * The detached Inbox's env. Started from inside an agent Ask AI started
+ * (`isAskAiChild`: a shell that agent ran), it drops that agent's switches:
+ * the marker and the `PLANNOTATOR_INBOX_TOOL=0` / `PLANNOTATOR_AGENT_TOOL=0`
+ * that came with it. The Inbox outlives the agent, and its restarts, "Open
+ * in" terminals and Codex wakes would otherwise hand them to the person's
+ * real sessions. Without the marker, both switches pass through as before.
+ */
+export function detachedInboxEnv(env: Readonly<Record<string, string | undefined>>, dataDir: string): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = { ...env, PLANNOTATOR_DATA_DIR: dataDir, [LOCK_HELD_ENV]: "1", [DETACHED_ENV]: "1" };
+  if (isAskAiChild(env)) {
+    delete out.PLANNOTATOR_ASK_AI_CHILD;
+    delete out.PLANNOTATOR_INBOX_TOOL;
+    delete out.PLANNOTATOR_AGENT_TOOL;
+  }
+  return out;
 }
 
 /** Wait for the Inbox to answer as running; null on timeout. */
@@ -249,6 +277,14 @@ async function connectRunningInbox(entry: InboxRegistryEntry): Promise<void> {
   } catch {
     // The agents are connected at the next run.
   }
+}
+
+/** The debug log is decided at start, so the variable cannot reach an Inbox that is already up: say so, on stderr. */
+async function reportDebugNeedsStart(dataDir: string): Promise<void> {
+  if (process.env.PLANNOTATOR_INBOX_DEBUG !== "1") return;
+  const status = await inboxStatus(dataDir);
+  if (status.state !== "running" && status.state !== "busy") return;
+  process.stderr.write("PLANNOTATOR_INBOX_DEBUG is read at start, so it does nothing for the Inbox already running. Run plannotator inbox stop first, or set inboxDebug: true in config.json and Restart.\n");
 }
 
 /** Run the Inbox server in this process until a signal or the stop route ends it. */
@@ -414,10 +450,11 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
       record: inboxRegistryPath(dataDir),
       cli_version: cliVersion,
     };
-    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    await writeWholeToStdout(`${JSON.stringify(report, null, 2)}\n`);
     return code;
   }
-  const out = (line: string) => process.stdout.write(`${line}\n`);
+  let lines = "";
+  const out = (line: string) => void (lines += `${line}\n`);
   if (status.state === "missing") {
     out("Plannotator Inbox: not running (it has never run with this data dir)");
   } else if (status.state === "stopped") {
@@ -442,6 +479,7 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
         : `This plannotator is ${cliVersion}; the Inbox runs ${status.health.version}.`,
     );
   }
+  await writeWholeToStdout(lines);
   return code;
 }
 
@@ -577,14 +615,22 @@ function usageError(message: string): never {
 }
 
 export interface InboxCommandAssets {
-  /** The built window (`apps/hook/dist/inbox.html`), embedded by the binary. */
-  htmlContent?: string;
+  /**
+   * Reads the built window (`apps/hook/dist/inbox.html`), embedded by the binary. A function because
+   * only serving needs the page, and every agent session keeps an `inbox mcp` process running.
+   */
+  htmlContent?: () => string;
   /** The global `--json` flag (index.ts takes it out of the arguments first); `status` reads it, `stop` and `restart` refuse it. */
   json?: boolean;
 }
 
 export async function runInboxCommand(args: readonly string[], assets: InboxCommandAssets = {}): Promise<never> {
   const dataDir = getPlannotatorDataDir();
+  // A launched Claude Code session's PermissionRequest hook (inbox-permission-hook.ts): never starts or connects anything.
+  if (args[0] === "permission-hook") {
+    if (args.length > 1) usageError(`Unknown inbox permission-hook option: ${args[1]}`);
+    return runPermissionHook(dataDir);
+  }
   // Only a person's `plannotator inbox` connects agents, never a detached start.
   // An Inbox older than DETACHED_ENV (0.28.17 and before) spawns its detached
   // starts (its Restart into an updated binary, --background, a connection)
@@ -596,13 +642,19 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   const connect = !detached && !inboxConnectDisabled(process.env);
 
   if (args[0] === "mcp") {
-    if (args.length > 1) usageError(`Unknown inbox mcp option: ${args[1]}`);
+    // `--t3`: the entry the T3 Code setup adds (`plannotator t3 --help`). It lists its tools only inside a T3 thread.
+    const unknown = args.slice(1).find((arg) => arg !== "--t3");
+    if (unknown !== undefined) usageError(`Unknown inbox mcp option: ${unknown}`);
+    assertTestHome();
     await runInboxMcpShim({
       dataDir,
       cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
       ensureRunning: () => ensureInboxRunning(dataDir),
       hostSession: inboxHostSessionFromEnv(process.env),
+      sessionProject: inboxSessionProjectFromEnv(process.env),
       qwen: inboxQwenShimContext(process.env, homedir(), process.cwd(), process.ppid),
+      askAiChild: isAskAiChild(process.env),
+      t3EntryIdle: inboxT3EntryIdle(args.includes("--t3"), process.env),
     });
     process.exit(0);
   }
@@ -629,6 +681,14 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     process.exit(await restartCommand(dataDir, rest.includes("--tailscale")));
   }
 
+  if (args[0] === "projects") {
+    process.exit(await runInboxProjectsCommand(args.slice(1), { json: assets.json === true, self: shellLine(selfCommand()), ensureRunning: () => ensureInboxRunning(dataDir) }));
+  }
+
+  if (args[0] === "link" || args[0] === "unlink") {
+    process.exit(await runInboxLinkCommand(args, () => ensureInboxRunning(dataDir)));
+  }
+
   if (args[0] === "--notes") {
     if (args.length !== 2) usageError("--notes takes one list of agents, e.g. --notes codex,gemini, and no other option.");
     process.exit(await writeNotes(dataDir, args[1]!));
@@ -650,6 +710,8 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   if (open && (background || noOpen)) {
     usageError(`--open does not go with ${background ? "--background" : "--no-open"}: it starts the Inbox in the background itself and opens it.`);
   }
+
+  await reportDebugNeedsStart(dataDir);
 
   if (background || open) {
     try {
@@ -687,7 +749,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     if (connect) await connectRunningInbox(entry);
     process.exit(0);
   }
-  return serveInbox(dataDir, !noOpen, assets.htmlContent, tailscale, connect);
+  return serveInbox(dataDir, !noOpen, assets.htmlContent?.(), tailscale, connect);
 }
 
 /**

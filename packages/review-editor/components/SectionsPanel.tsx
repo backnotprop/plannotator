@@ -1,15 +1,17 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CodeAnnotation } from '@plannotator/ui/types';
 import type { SinceBaseSections } from '@plannotator/shared/types';
-import { ReviewPanelHeader, type ReviewPanelHeaderModel } from './ReviewPanelHeader';
+import { ReviewPanelHeader, ScopeSwitch, reviewPanelBodyProps, type ReviewPanelHeaderModel } from './ReviewPanelHeader';
 import { SemanticDiffRow, CallFlowRow, AllChangesRow } from './PanelNavRows';
-import { PanelControlsRow, PanelSearchField } from './PanelChrome';
+import { PanelControlsRow, PanelSearchField, TOOLS_ONE_ROW_WIDTH } from './PanelChrome';
 import {
   ViewedControl,
   ChangeTypeLetter,
   StageControl,
   AnnotationBadge,
-  DiffCounts,
+  CountColumns,
+  countColumnVars,
+  compactRowsProps,
   CommittedDot,
   TruncatedPath,
   PanelSectionHeader,
@@ -20,6 +22,7 @@ import { SearchFileGroup } from './FileTree';
 import type { ReviewSearchFileGroup, ReviewSearchMatch } from '../utils/reviewSearch';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import type { DiffFile } from '../types';
+import { useHiddenViewedFiles } from '../hooks/useHiddenViewedFiles';
 
 /**
  * The three-stack "All changes" (since-base) panel — the default view of a code review.
@@ -175,7 +178,7 @@ const SectionRow: React.FC<{
           or when the row is active; add (stage) and the change-type letter
           are always shown. Fixed-width slots keep the rail aligned. Path
           inherits the row font; only the letter/counts are the small size. */}
-      <div className="flex items-center gap-1.5 flex-1 min-w-0">
+      <div className="review-file-row-main">
         {showViewedControl && <ViewedControl isViewed={isViewed} onToggle={onToggleViewed} forceVisible={isActive} />}
         {showStageControl &&
           (showStageButton || isStaged ? (
@@ -185,12 +188,14 @@ const SectionRow: React.FC<{
           ) : reserveStageSlot ? (
             <span className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
           ) : null)}
-        <ChangeTypeLetter status={file.status} oldPath={file.oldPath} untracked={item.group === 'untracked'} />
+        <span className="review-change-letter">
+          <ChangeTypeLetter status={file.status} oldPath={file.oldPath} untracked={item.group === 'untracked'} />
+        </span>
         <TruncatedPath path={file.path} />
         {isTest && <FileKindIcon kind="test" size={11} title="Test file" />}
         <AnnotationBadge count={annotationCount} />
       </div>
-      <DiffCounts additions={file.additions} deletions={file.deletions} />
+      <CountColumns additions={file.additions} deletions={file.deletions} />
     </button>
   );
 };
@@ -252,6 +257,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
   const [collapsed, setCollapsed] = useState<Set<SectionGroup>>(new Set());
   const [committedExpanded, setCommittedExpanded] = useState(false);
   const asideRef = useRef<HTMLElement | null>(null);
+  const { hiddenFiles, panelPointerProps } = useHiddenViewedFiles(viewedFiles, hideViewedFiles ?? false);
   const isSearchVisible = !!onSearchChange && (isSearchOpen || !!searchQuery.trim());
 
   const items = useMemo<Record<SectionGroup, SectionItem[]>>(() => {
@@ -261,7 +267,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
       untracked: [],
     };
     files.forEach((file, index) => {
-      if (hideViewedFiles && viewedFiles.has(file.path) && index !== activeFileIndex) return;
+      if (hideViewedFiles && hiddenFiles.has(file.path) && index !== activeFileIndex) return;
       const entry = sections.files[file.path];
       // A file in the composite patch with no status entry has a clean
       // working tree — it is committed branch work.
@@ -288,7 +294,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
     // Staged work floats to the top of Changes.
     grouped.changes.sort((a, b) => Number(b.staged) - Number(a.staged));
     return grouped;
-  }, [files, sections, hideViewedFiles, viewedFiles, activeFileIndex, stagedFiles]);
+  }, [files, sections, hideViewedFiles, hiddenFiles, activeFileIndex, stagedFiles]);
 
   const annotationCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -458,11 +464,15 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
     />
   );
 
+  const panelWidth = width ?? 256;
   const panelControls = (
     <PanelControlsRow
+      scope={<ScopeSwitch model={header} width={panelWidth} />}
       stagedCount={stagedCount}
       isSearchVisible={isSearchVisible}
       onOpenSearch={onOpenSearch}
+      onCloseSearch={searchQuery.trim() ? onSearchClear : onSearchClose}
+      oneRow={panelWidth >= TOOLS_ONE_ROW_WIDTH}
       onToggleHideViewed={onToggleHideViewed}
       hideViewedFiles={hideViewedFiles}
       viewedCount={viewedFiles.size}
@@ -513,19 +523,40 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
   return (
     <aside
       ref={asideRef}
-      className="border-r border-border/50 bg-card/30 flex flex-col flex-shrink-0 overflow-hidden"
-      style={{ width: width ?? 256 }}
+      data-review-sidebar=""
+      {...compactRowsProps(panelWidth)}
+      {...panelPointerProps}
+      className="review-sidebar border-r flex flex-col flex-shrink-0 overflow-hidden"
+      style={{ width: panelWidth }}
     >
       {/* The shared header. The base is the only comparison control in this
           view: Git status IS the since-base comparison; other diff types live
           in the tree view's menu, and the view tabs are the path between them. */}
-      <ReviewPanelHeader model={header} width={width ?? 256} />
+      <ReviewPanelHeader model={header} width={panelWidth} />
 
-      {/* Sections (or search results — same swap the tree view does) */}
+      {/* Sections (or search results — same swap the tree view does). The
+          nav rows scroll with the list; the tools and progress rows stick. */}
       <div ref={scrollportRef} className="flex-1 min-h-0">
         <OverlayScrollArea className="h-full">
-          <div ref={contentRef} className="px-1 py-1">
+          <div
+            ref={contentRef}
+            {...reviewPanelBodyProps(header)}
+            className="px-2 pb-2"
+            style={countColumnVars(totalAdditions, totalDeletions)}
+          >
             {/* Nav rows — shared with the tree view, same order. */}
+            <nav aria-label="Review views" className="pb-3 flex flex-col empty:hidden" data-review-views-nav="">
+            {onSelectAllFiles && (
+              <AllChangesRow
+                active={isAllFilesActive ?? false}
+                onClick={onSelectAllFiles}
+                additions={totalAdditions}
+                deletions={totalDeletions}
+              />
+            )}
+            {semanticDiffAvailable && onSelectSemanticDiff && (
+              <SemanticDiffRow active={isSemanticDiffActive ?? false} onClick={onSelectSemanticDiff} />
+            )}
             {callFlowEnabled && onSelectCallFlow && (
               <CallFlowRow
                 active={isCallFlowActive ?? false}
@@ -535,17 +566,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
                 error={callFlowError}
               />
             )}
-            {semanticDiffAvailable && onSelectSemanticDiff && (
-              <SemanticDiffRow active={isSemanticDiffActive ?? false} onClick={onSelectSemanticDiff} />
-            )}
-            {onSelectAllFiles && (
-              <AllChangesRow
-                active={isAllFilesActive ?? false}
-                onClick={onSelectAllFiles}
-                additions={totalAdditions}
-                deletions={totalDeletions}
-              />
-            )}
+            </nav>
             {panelControls}
             {searchField}
 
@@ -569,7 +590,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
               <>
                 {/* Committed — viewport-adaptive (measured; see remeasureCommittedFit) */}
                 {items.committed.length > 0 && (
-                  <div className="mb-1">
+                  <div className="review-panel-group">
                     {sectionHeader('committed')}
                     {!collapsed.has('committed') && (
                       <div ref={committedBlockRef}>
@@ -596,7 +617,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
                 )}
 
                 {/* Changes — always fully rendered, staged first */}
-                <div className="mb-1">
+                <div className="review-panel-group">
                   {sectionHeader('changes')}
                   {!collapsed.has('changes') &&
                     (items.changes.length > 0 ? (
@@ -608,7 +629,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
 
                 {/* Untracked — always fully rendered */}
                 {items.untracked.length > 0 && (
-                  <div className="mb-1">
+                  <div className="review-panel-group">
                     {sectionHeader('untracked')}
                     {!collapsed.has('untracked') && renderRows(items.untracked)}
                   </div>

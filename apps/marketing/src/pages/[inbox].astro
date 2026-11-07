@@ -17,7 +17,7 @@ export function getStaticPaths() {
 // folder's landing/index.html. No motion on this page (owner, round 2).
 const title = 'Plannotator Inbox';
 const description =
-  'An async surface for long-running coding agents. Questions and blockers and reviews from every agent arrive in one inbox while they work. Answer and annotate there with Plannotator.';
+  "Your agents' questions, blockers and finished work, with what needs you first.";
 const github = 'https://github.com/backnotprop/plannotator';
 const install = 'curl -fsSL https://plannotator.ai/install.sh | bash';
 const copyIcon =
@@ -47,7 +47,7 @@ const opencodeConfigs = [
   { label: 'opencode.json (OpenCode 2)', config: '{ "plugins": [{ "package": "@plannotator/opencode@latest" }] }' },
   { label: 'opencode.json (OpenCode 1)', config: '{ "plugin": ["@plannotator/opencode@latest"] }' },
 ];const cursorConfig = '{ "mcpServers": { "plannotator-inbox": { "command": "plannotator", "args": ["inbox", "mcp"] } } }';
-const testRequest = 'Send me a test question in the Plannotator Inbox, then wait for my answer.';
+const testRequest = 'Send me a test question in the Plannotator Inbox, and read my answer when I tell you I sent it.';
 const steps = [
   {
     title: 'An agent writes to the Inbox while it works.',
@@ -72,16 +72,15 @@ const steps = [
     <main class="max-w-6xl mx-auto px-6 md:px-8">
       <!-- ── 1. Hero ── -->
       <header class="ib-hero">
+        <!-- Laid out like the share image (apps/marketing/inbox-og.html): the
+             wordmark at the top right, its cap top on the headline's first line
+             and its right edge on the frames below. -->
+        <div class="ib-hero-head">
+          <p class="font-display ib-wordmark"><span>Plannotator</span> <span class="ib-wordmark-muted">Inbox</span></p>
+          <h1 class="font-display ib-heading">An inbox to stay <em>on&nbsp;top&nbsp;of your&nbsp;agents</em></h1>
+        </div>
+
         <div class="ib-hero-inner">
-          <div class="ib-cmd-row">
-            <p class="ib-cmd">plannotator inbox</p>
-            <a href={github} target="_blank" rel="noopener noreferrer" class="ib-gh" aria-label="Plannotator on GitHub">
-              <svg class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8C0 11.54 2.29 14.53 5.47 15.59C5.87 15.66 6.02 15.42 6.02 15.21C6.02 15.02 6.01 14.39 6.01 13.72C4 14.09 3.48 13.23 3.32 12.78C3.23 12.55 2.84 11.84 2.5 11.65C2.22 11.5 1.82 11.13 2.49 11.12C3.12 11.11 3.57 11.7 3.72 11.94C4.44 13.15 5.59 12.81 6.05 12.6C6.12 12.08 6.33 11.73 6.56 11.53C4.78 11.33 2.92 10.64 2.92 7.58C2.92 6.71 3.23 5.99 3.74 5.43C3.66 5.23 3.38 4.41 3.82 3.31C3.82 3.31 4.49 3.1 6.02 4.13C6.66 3.95 7.34 3.86 8.02 3.86C8.7 3.86 9.38 3.95 10.02 4.13C11.55 3.09 12.22 3.31 12.22 3.31C12.66 4.41 12.38 5.23 12.3 5.43C12.81 5.99 13.12 6.7 13.12 7.58C13.12 10.65 11.25 11.33 9.47 11.53C9.76 11.78 10.01 12.26 10.01 13.01C10.01 14.08 10 14.94 10 15.21C10 15.42 10.15 15.67 10.55 15.59C13.71 14.53 16 11.53 16 8C16 3.58 12.42 0 8 0Z"/></svg>
-            </a>
-          </div>
-
-          <h1 class="font-display ib-heading">An async surface for your <em>long&#8209;running agents</em></h1>
-
           <p class="ib-overview">
             Coding agents now work for hours. Over a run they have questions. They hit blockers. They produce plans and
             prototypes and diffs you need to review. The Inbox is where all of that arrives while they keep working. You
@@ -209,7 +208,7 @@ const steps = [
                       <code>{codexCommand}</code>
                       <button type="button" class="copy-btn" data-copy={codexCommand} aria-label="Copy the command" set:html={copyIcon} />
                     </div>
-                    <p>Then restart Codex. Codex reads your reply when it calls <code>wait_for_reply</code>.</p>
+                    <p>Then restart Codex. With Codex 0.149 or later your reply arrives in the thread that asked as a new turn; otherwise Codex reads it when it calls <code>read_thread</code>.</p>
                     <p class="ib-step-note">If it can't find plannotator, use the full path from <code>command -v plannotator</code>.</p>
                   </div>
                   <div class="ib-panel" role="tabpanel" id="ib-p-cu" aria-labelledby="ib-t-cu" hidden>
@@ -218,7 +217,7 @@ const steps = [
                       <code>{cursorConfig}</code>
                       <button type="button" class="copy-btn" data-copy={cursorConfig} aria-label="Copy the config" set:html={copyIcon} />
                     </div>
-                    <p>Cursor reads your reply when it calls <code>wait_for_reply</code>.</p>
+                    <p>Cursor reads your reply when it calls <code>read_thread</code>.</p>
                     <p class="ib-step-note">If it can't find plannotator, use the full path from <code>command -v plannotator</code>.</p>
                   </div>
                   <div class="ib-panel" role="tabpanel" id="ib-p-ot" aria-labelledby="ib-t-ot" hidden>
@@ -663,51 +662,74 @@ const steps = [
     gap: 1.25rem;
   }
 
-  .ib-cmd-row {
+  /* The share image's type (inbox-og.html): the headline in Instrument Sans
+     700 at line-height 1.02, the wordmark in Instrument Sans 600 at 24/76 of
+     the headline's size, "Plannotator" in the text colour and "Inbox" in the
+     muted grey. No mono. */
+  .ib-hero-head {
+    --ib-h1: clamp(2.5rem, 7vw, 4rem);
+    /* The body's Inter stylistic sets (theme.css) are not in the share image. */
+    font-feature-settings: normal;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 1rem;
+    margin-bottom: 1.25rem;
+  }
+
+  /* The share image's line break, after "stay": below 360 px the first line
+     needs the smaller size to fit. */
+  @media (max-width: 359px) {
+    .ib-hero-head { --ib-h1: 2.25rem; }
+  }
+
+  .ib-wordmark {
+    justify-self: end;
+    align-self: start;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    width: 100%;
-  }
-
-  .ib-cmd {
-    font-family: var(--font-mono);
-    font-size: 0.8125rem;
+    gap: 0.3333em;
+    white-space: nowrap;
+    font-size: 1.125rem;
     font-weight: 600;
-    color: var(--primary);
-    letter-spacing: 0.01em;
-  }
-
-  .ib-gh {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.75rem;
     line-height: 1;
-    padding: 0.5rem 0.875rem;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    color: var(--ib-dim);
-    transition: color 0.15s, border-color 0.15s;
+    letter-spacing: 0;
+    color: var(--foreground);
   }
 
-  .ib-gh:hover,
-  .ib-gh:focus-visible {
-    color: var(--foreground);
-    border-color: var(--ib-subtle);
+  .ib-wordmark-muted {
+    color: var(--muted-foreground);
+  }
+
+  /* Side by side once both fit. Instrument Sans: ascent 0.97em, descent
+     0.25em, cap height 0.72em, so the cap top sits 0.15em into a 1.02 line
+     and 0.14em into a 1.0 line; the margin puts the two cap tops level. */
+  @media (min-width: 56rem) {
+    .ib-hero-head {
+      grid-template-columns: minmax(0, 1fr) auto;
+      column-gap: 2rem;
+    }
+    .ib-wordmark {
+      grid-column: 2;
+      grid-row: 1;
+      font-size: calc(var(--ib-h1) * 24 / 76);
+      margin-top: calc(var(--ib-h1) * (0.15 - 0.14 * 24 / 76));
+    }
+    .ib-heading {
+      grid-column: 1;
+      grid-row: 1;
+    }
   }
 
   .ib-heading {
-    font-size: clamp(2.5rem, 7vw, 4rem);
-    line-height: 1.04;
+    max-width: 46rem;
+    font-size: var(--ib-h1);
+    line-height: 1.02;
     font-weight: 700;
     letter-spacing: -0.04em;
     text-wrap: balance;
   }
 
   .ib-heading em {
+    display: block;
     font-style: normal;
     color: var(--primary);
   }

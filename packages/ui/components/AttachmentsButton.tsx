@@ -189,7 +189,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
     const trimmed = manualPath.trim();
     if (trimmed) {
       const name = deriveImageName(
-        trimmed.split('/').pop() || 'image',
+        trimmed.replace(/\\/g, '/').split('/').pop() || 'image',
         images.map(i => i.name)
       );
       onAdd({ path: trimmed, name });

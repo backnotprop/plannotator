@@ -165,6 +165,12 @@ decision arrives as a T3 message. It uses T3's existing MCP API as a client
 (no T3 change, no provider-side MCP server, no skill change). Nothing of it
 runs for anyone who did not opt in.
 
+The same grant (`plannotator t3 login`) also lets the Plannotator Inbox put a
+reply into a T3 Claude thread as a turn, with a `plannotator inbox mcp --t3`
+entry: see "T3 Code" in `inbox-notifications-and-agents.md`. That is why
+`plannotator t3` is listed (`plannotator --help` points at it, the skill
+documents it); its help leads with that setup.
+
 - **Opt in / out:** `install.sh --with-t3` writes one `PreToolUse` `Bash` hook
   into `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json` (`t3-hook install`,
   `packages/t3-code/install-hook.ts`: other hooks and settings kept, a
@@ -174,8 +180,8 @@ runs for anyone who did not opt in.
   `--minimal`; a failing step warns and never aborts the install. Without a
   flag the installer touches nothing T3. `plannotator t3 login --url <T3 MCP
   URL>` authorizes once (OAuth, PKCE); `plannotator t3 logout --url …` stops
-  that endpoint's workers and deletes the saved grant. `t3` and `t3-hook` are
-  in `HIDDEN_SUBCOMMANDS`.
+  that endpoint's workers and deletes the saved grant. `t3-hook` is in
+  `HIDDEN_SUBCOMMANDS`; `t3` is not.
 - **The gate (per Bash call cost):** the hook runs on every Bash call of every
   Claude session that loads the settings file. The command is
   `case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) PLANNOTATOR_DATA_DIR=… '<binary>' t3-hook;; esac`

@@ -555,6 +555,32 @@ test.skipIf(!hasDom)("Done from the open row's button moves focus to the next ro
   expect(document.activeElement).toBe(toggleOf(rowOf(el, 1)));
 });
 
+test.skipIf(!hasDom)('a field the person went to while Done saved keeps focus; the toggle does not take it', async () => {
+  let release: (ok: boolean) => void = () => {};
+  const onMark = () => new Promise<boolean>((resolve) => (release = resolve));
+  const el = mount(<ActionChecklist actions={[record(0), record(1)]} agent="Claude Code" onMark={onMark} />);
+  const note = document.createElement('textarea');
+  el.appendChild(note);
+  click(panelOf(rowOf(el, 0)).querySelector('[data-action-done]')!);
+  act(() => note.focus());
+  await act(async () => {
+    release(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(document.activeElement).toBe(note);
+});
+
+test.skipIf(!hasDom)('what held focus at the press still holds it after Done (WebKit: the message, on a click): focus still moves to the toggle', async () => {
+  const el = mount(<ActionChecklist actions={[record(0), record(1)]} agent="Claude Code" onMark={async () => true} />);
+  const message = document.createElement('div');
+  message.tabIndex = -1;
+  el.appendChild(message);
+  act(() => message.focus());
+  click(panelOf(rowOf(el, 0)).querySelector('[data-action-done]')!);
+  await settle();
+  expect(document.activeElement).toBe(toggleOf(rowOf(el, 1)));
+});
+
 test.skipIf(!hasDom)("Can't do it asks for the reason; nothing goes without one", async () => {
   const marks: unknown[] = [];
   const el = mount(<ActionChecklist actions={[record(0)]} agent="Claude Code" onMark={async (_a, mark) => (marks.push(mark), true)} />);
@@ -575,6 +601,30 @@ test.skipIf(!hasDom)("Can't do it asks for the reason; nothing goes without one"
   click(panel.querySelector('[data-action-cant-send]')!);
   await settle();
   expect(marks).toEqual([{ outcome: 'cant', note: "I'm not an org owner; ask Dana." }]);
+});
+
+test.skipIf(!hasDom)("Escape or Cancel in Can't do it's note puts focus back on Can't do it…, never on the page", async () => {
+  const el = mount(<ActionChecklist actions={[record(0)]} agent="Claude Code" onMark={async () => true} />);
+  const panel = panelOf(rowOf(el, 0));
+  const cant = () => panel.querySelector<HTMLButtonElement>('[data-action-cant]')!;
+  act(() => cant().focus());
+  click(cant());
+  const area = panel.querySelector<HTMLTextAreaElement>('textarea')!;
+  expect(document.activeElement).toBe(area);
+  const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  act(() => {
+    area.dispatchEvent(escape);
+  });
+  // One rung: the note closes and the key stops there.
+  expect(escape.defaultPrevented).toBe(true);
+  expect(panel.querySelector('textarea')).toBeNull();
+  expect(document.activeElement).toBe(cant());
+  // Cancel does the same.
+  click(cant());
+  expect(document.activeElement).toBe(panel.querySelector('textarea'));
+  click(panel.querySelector('[data-action-cant-cancel]')!);
+  expect(panel.querySelector('textarea')).toBeNull();
+  expect(document.activeElement).toBe(cant());
 });
 
 test.skipIf(!hasDom)('settled rows: sent, can\'t do it with its reason, the agent saw it done, set aside; none offers Done', () => {
@@ -681,7 +731,7 @@ test.skipIf(!hasDom)("Copy is named by its visible words, and its result is said
   expect(['Command copied.', "Couldn't copy the command."]).toContain(status.textContent!);
 });
 
-test.skipIf(!hasDom)('the row says "1 action", or "1 action ?1" beside a question; "1 action item", "1 question, 1 action item" in full', () => {
+test.skipIf(!hasDom)('the row draws open action items as the box pill and open questions as the speech bubble, wide, beside a thread and on a phone; none draws nothing', () => {
   expect(waitCount(1, 1)).toBe('1 action item');
   expect(waitCount(2, 1)).toBe('1 question, 1 action item');
   expect(waitCount(3, 1)).toBe('2 questions, 1 action item');
@@ -709,28 +759,68 @@ test.skipIf(!hasDom)('the row says "1 action", or "1 action ?1" beside a questio
     sent: null,
     guide: false,
   });
-  const sections: InboxListSection[] = [{ id: 'stopped', label: 'Stopped on you', threads: [row('msg_a', 1, 1), row('msg_b', 2, 1)] }];
-  const el = mount(
+  const answered = { ...row('msg_e', 2, 1), answered_not_sent: true };
+  const sections: InboxListSection[] = [{ id: 'stopped', label: 'Stopped on you', threads: [row('msg_a', 1, 1), row('msg_b', 3, 1), row('msg_c', 2, 0), row('msg_d', 14, 12), row('msg_f', 256, 128), answered] }];
+  const list = (narrow: boolean, phone: boolean) => (
     <SidebarProvider>
-      <InboxList title="Inbox" path={null} sections={sections} filtered={false} narrow={false} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} phone={false} />
-    </SidebarProvider>,
+      <InboxList title="Inbox" path={null} sections={sections} filtered={false} narrow={narrow} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} phone={phone} />
+    </SidebarProvider>
   );
-  // A wide row draws the full words (the owner, 2026-10-29), read as they are: no hidden copy.
-  const wide = (id: string) => {
-    const cell = el.querySelector(`.ib-row[data-thread-id="${id}"] .ib-cw > .ib-c`)!;
-    return { drawn: cell.querySelector('.ib-cs')!.textContent, hidden: cell.querySelector('[aria-hidden="true"]') !== null, sr: cell.querySelector('.ib-sr') !== null };
+  const el = mount(list(false, false));
+  // What a row draws for its open counts (approval "inbox-row-action-icon", 2026-10-29): the action pill (the
+  // drawn number, its accessible words, its icon the checklist's box with no tick) and `?N` (the drawn number,
+  // its words, its icon). Read off the row's open counts only, in the order they sit.
+  const box = 'M6.75 3.75h10.5a3 3 0 0 1 3 3v10.5a3 3 0 0 1-3 3H6.75a3 3 0 0 1-3-3V6.75a3 3 0 0 1 3-3Z';
+  // Pinned on purpose: the owner's pick for the question count is Q3, Lucide's message-circle-question-mark.
+  const bubble = 'M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01';
+  const counts = (scope: Element) =>
+    [...scope.querySelectorAll('[data-action-count], .ib-qn')].map((c) => ({
+      kind: c.matches('[data-action-count]') ? 'action' : 'question',
+      pill: c.classList.contains('ib-badge'),
+      drawn: c.querySelector('[aria-hidden="true"]:not(svg)')!.textContent,
+      name: c.querySelector('.ib-sr')!.textContent!.trim(),
+      icon: c.querySelector('svg path')!.getAttribute('d') === (c.matches('[data-action-count]') ? box : bubble),
+    }));
+  const pill = (n: string, name: string) => ({ kind: 'action', pill: true, drawn: n, name, icon: true });
+  const q = (n: string, name: string) => ({ kind: 'question', pill: false, drawn: n, name, icon: true });
+  const expected: Record<string, unknown[]> = {
+    msg_a: [pill('1', '1 action to do')],
+    msg_b: [pill('1', '1 action to do'), q('2', '2 questions')],
+    msg_c: [q('2', '2 questions')],
+    msg_d: [pill('12', '12 actions to do'), q('2', '2 questions')],
+    // Past 99 the drawn number is "99+" (both at full length would run over a wide row's badge); the words keep it exact.
+    msg_f: [pill('99+', '128 actions to do'), q('99+', '128 questions')],
+    msg_e: [],
   };
-  expect(wide('msg_a')).toEqual({ drawn: '1 action item', hidden: false, sr: false });
-  expect(wide('msg_b')).toEqual({ drawn: '1 question, 1 action item', hidden: false, sr: false });
-  // Beside a thread (approval "inbox-row-byline", option A): the short form drawn, the full words for a screen
-  // reader; an action item keeps its words at line 2's end, never `?N`.
-  const words = (cell: Element | null) => ({ short: cell!.querySelector('.ib-cst')!.textContent, questions: cell!.querySelector('.ib-qn')?.textContent ?? null, full: cell!.querySelector('.ib-sr')!.textContent, hidden: cell!.querySelector('.ib-cs')!.getAttribute('aria-hidden') });
-  rerender(
-    <SidebarProvider>
-      <InboxList title="Inbox" path={null} sections={sections} filtered={false} narrow selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} phone={false} />
-    </SidebarProvider>,
-  );
-  expect(words(el.querySelector('.ib-nrow[data-thread-id="msg_a"] .ib-l2 > .ib-c'))).toEqual({ short: '1 action', questions: null, full: '1 action item', hidden: 'true' });
-  expect(words(el.querySelector('.ib-nrow[data-thread-id="msg_b"] .ib-l2 > .ib-c'))).toEqual({ short: '1 action', questions: '1', full: '1 question, 1 action item', hidden: 'true' });
-  expect(el.querySelector('.ib-nrow .ib-c.ib-qn')).toBeNull();
+  const rowOf = (shape: string, id: string) => el.querySelector(`${shape}[data-thread-id="${id}"]`)!;
+  // A wide row: both sit in the open counts' column before the time; the words column says nothing for them.
+  for (const [id, want] of Object.entries(expected)) {
+    expect(counts(rowOf('.ib-row', id).querySelector('.ib-cq')!)).toEqual(want as never);
+    if (id !== 'msg_e') expect(rowOf('.ib-row', id).querySelector('.ib-cw')!.textContent).toBe('');
+  }
+  // Words of their own (here an older Inbox's "Answered") still take the place of the counts.
+  expect(rowOf('.ib-row', 'msg_e').querySelector('.ib-cw [data-count-words]')!.getAttribute('data-count-words')).toBe('Answered, not sent');
+  // The row's accessible name (its text less what is hidden from a screen reader) carries the counts' words apart.
+  const named = rowOf('.ib-row', 'msg_b').cloneNode(true) as Element;
+  named.querySelectorAll('[aria-hidden="true"]').forEach((n) => n.remove());
+  expect(named.textContent).toContain(' 1 action to do 2 questions');
+  // Beside a thread and on a phone: at line 3's end, the action pill then `?N`, after the badge.
+  for (const [narrow, phone, shape, line] of [[true, false, '.ib-nrow', '.ib-l3'], [false, true, '.ib-mrow', '.ib-m3']] as const) {
+    rerender(list(narrow, phone));
+    for (const [id, want] of Object.entries(expected)) expect(counts(rowOf(shape, id))).toEqual(want as never);
+    const tail = [...rowOf(shape, 'msg_b').querySelector(line)!.children].slice(-3).map((c) => (c.matches('[data-row-badge]') ? 'badge' : c.matches('[data-action-count]') ? 'action' : c.classList.contains('ib-qn') ? 'question' : c.className));
+    expect(tail).toEqual(['badge', 'action', 'question']);
+  }
+});
+
+test.skipIf(!hasDom)('a message stored before the reader dropped a task box from the first line still draws its card (matched by its place)', () => {
+  const body = ":::action\n- [ ] Let this MacBook's key into the Mac mini\n\n  ```\n  ssh-copy-id user@host\n  ```\n:::";
+  const [parsed] = parseInboxActionBlocks(body);
+  expect(parsed!.prompt).toBe("Let this MacBook's key into the Mac mini");
+  // The record kept the key its first line had then ("[ ] Let this…").
+  const stored = { ...record(0), key: 'a-0badc0de', position: 0, prompt: "[ ] Let this MacBook's key into the Mac mini" };
+  expect(actionForBlock(body, [stored], { startLine: parsed!.startLine, content: '' })?.key).toBe('a-0badc0de');
+  // A record with its own key wins over one at the same place.
+  const fresh = { ...record(0), key: parsed!.key, position: 0 };
+  expect(actionForBlock(body, [stored, fresh], { startLine: parsed!.startLine, content: '' })?.key).toBe(parsed!.key);
 });

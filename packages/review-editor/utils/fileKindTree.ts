@@ -27,6 +27,13 @@ export function kindFolderPath(kind: FileKind, path: string): string {
   return `${kind}:${path}`;
 }
 
+/** The repository path of a folder, without the kind scope `kindFolderPath`
+ *  adds (what a person reads in a tooltip). */
+export function folderDisplayPath(path: string): string {
+  const match = /^(code|test|generated):/.exec(path);
+  return match ? path.slice(match[0].length) : path;
+}
+
 function remap(nodes: FileTreeNode[], kind: FileKind, indexes: number[]): FileTreeNode[] {
   return nodes.map((node) =>
     node.type === 'file'

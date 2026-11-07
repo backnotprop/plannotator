@@ -40,7 +40,9 @@ export interface CallFlowLanguageDefinition {
 const MB = 1024 * 1024;
 
 /**
- * CallDiff 0.4.1's supported extensions and pinned grammar packages.
+ * CallDiff 0.6.0's supported extensions and pinned grammar packages. Perl,
+ * new upstream in 0.6.0, is left out: tree-sitter-perl ships no prebuilt
+ * binaries, so a pack would need a C compiler on every machine.
  *
  * Size estimates describe Plannotator's pruned managed artifacts, not the
  * much larger npm tarball expansion. They are deliberately rounded up and
@@ -54,7 +56,7 @@ export const CALL_FLOW_LANGUAGES = [
   { id: "java", label: "Java", extensions: [".java"], kind: "pack", packageName: "tree-sitter-java", packageVersion: "0.23.5", installSizeBytes: 1 * MB },
   { id: "ruby", label: "Ruby", extensions: [".rb"], kind: "pack", packageName: "tree-sitter-ruby", packageVersion: "0.23.1", installSizeBytes: 3 * MB },
   { id: "c", label: "C", extensions: [".c", ".h"], kind: "pack", packageName: "tree-sitter-c", packageVersion: "0.24.1", installSizeBytes: 1 * MB },
-  { id: "cpp", label: "C++", extensions: [".cc", ".cpp", ".cxx", ".hpp", ".hh"], kind: "pack", packageName: "tree-sitter-cpp", packageVersion: "0.23.4", installSizeBytes: 4 * MB },
+  { id: "cpp", label: "C++", extensions: [".cc", ".cpp", ".cu", ".cuh", ".cxx", ".hpp", ".hh"], kind: "pack", packageName: "tree-sitter-cpp", packageVersion: "0.23.4", installSizeBytes: 4 * MB },
   { id: "csharp", label: "C#", extensions: [".cs"], kind: "pack", packageName: "tree-sitter-c-sharp", packageVersion: "0.23.1", installSizeBytes: 6 * MB },
   { id: "php", label: "PHP", extensions: [".php"], kind: "pack", packageName: "tree-sitter-php", packageVersion: "0.24.2", installSizeBytes: 17 * MB },
   { id: "kotlin", label: "Kotlin", extensions: [".kt", ".kts"], kind: "pack", packageName: "tree-sitter-kotlin", packageVersion: "0.3.8", installSizeBytes: 4 * MB },

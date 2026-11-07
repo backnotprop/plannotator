@@ -2,7 +2,7 @@
 
 - Status: implemented (experimental, off by default)
 - Date: 2026-08-11
-- External engine: CallDiff 0.4.1 at commit `a3194d20ca91ef6a314273d634e9b9c0db1c2707`
+- External engine: CallDiff 0.6.0 at commit `2086f6e4e9ed3c410bba7c94ca3dde77791b1956` (re-pinned 2026-10-29 from 0.4.1 at `a3194d20ca91ef6a314273d634e9b9c0db1c2707`)
 - User-facing name: **Call flow**
 
 ## Decision
@@ -25,13 +25,13 @@ CallDiff compares complete source trees at two Git commits. It uses Tree-sitter 
 
 CallDiff is syntactic evidence, not a runtime trace. It does not provide type or import resolution, dataflow, side effects, severity, confidence, test coverage, or a proof of dynamic dispatch. Duplicate bare symbol names can be ambiguous, and moves or reorderings can appear as remove/add pairs. Product copy therefore says “inferred entry paths” and “changed call-flow steps.”
 
-CallDiff currently advertises 22 extractor modes. JavaScript/JSX and TypeScript/TSX share a core grammar family; the other modes map to 19 independently installable grammar packs.
+CallDiff 0.6.0 advertises 23 extractor modes. Plannotator uses 22 of them: JavaScript/JSX and TypeScript/TSX share a core grammar family, and the others map to 19 independently installable grammar packs (C++ includes CUDA `.cu`/`.cuh`). Perl, new in 0.6.0, is left out because `tree-sitter-perl` ships no prebuilt binaries, so its pack would need a C compiler.
 
 ## Runtime boundary
 
-The published npm package named `calldiff@0.4.1` predates source-location output and the current language set. Plannotator therefore installs the exact upstream source archive at the commit above, verifies its SHA-512 integrity, and compiles it once at install time.
+The npm package lags upstream (the first pin's `calldiff@0.4.1` predated source-location output; 0.6.0 is not on npm). Plannotator therefore installs the exact upstream source archive at the commit above, verifies its SHA-512 integrity, and compiles it once at install time.
 
-Installation is strictly consented and selective. Nothing installs Call flow by default. The Call flow toggle is the consent: its intro-dialog and Settings copy name the current patch's language families, total repository-owned size estimate, Node.js 22+ requirement, and automatic as-needed language installation. Turning it on maps the changed extensions to language families and starts one background install containing the pruned core (CallDiff, Tree-sitter, JavaScript, and TypeScript) plus exactly the missing grammar packs needed by that review. The Dock becomes a non-blocking staged-progress surface and hands off to analysis in the same session; there is no second install confirmation in the primary path.
+Installation is strictly consented and selective. Nothing installs Call flow by default. The Call flow toggle is the consent: its intro-dialog and Settings copy name the current patch's language families, total repository-owned size estimate, Node.js 22.18+ requirement, and automatic as-needed language installation. Turning it on maps the changed extensions to language families and starts one background install containing the pruned core (CallDiff, Tree-sitter, JavaScript, and TypeScript) plus exactly the missing grammar packs needed by that review. The Dock becomes a non-blocking staged-progress surface and hands off to analysis in the same session; there is no second install confirmation in the primary path.
 
 A later review analyzes installed languages immediately while returning explicit skipped-file metadata for missing languages. The same consent starts those packs automatically, the quiet inline notice reports progress, and completion reruns the same snapshot. Each target gets one automatic attempt per review session (one page load): a failed preflight, download, verification, or build does not auto-loop within that session. The panel and sidebar surface the failure quietly, and an explicit Retry can start that target again. The Dock's detail area lists every supported language, cumulative estimated installed size, and install-ahead-of-need controls. Packs are not individually removable in v1; uninstall removes the whole managed Call flow tree.
 
@@ -40,12 +40,12 @@ The other entry points are the headless core install (`plannotator install-runti
 The managed runtime lives at:
 
 ```text
-~/.plannotator/vendor/call-flow/calldiff-0.4.1
+~/.plannotator/vendor/call-flow/calldiff-0.6.0
 ```
 
 Its contract is:
 
-- Node.js 22 or newer;
+- Node.js 22.18 or newer (CallDiff's `engines` floor);
 - exact CallDiff source commit and archive integrity;
 - a small core containing exact direct versions for Tree-sitter and the JavaScript/TypeScript grammars;
 - one repository-committed `package-lock.json` per optional grammar pack, with exact package versions and registry integrity hashes;
@@ -99,7 +99,7 @@ Bun and Pi expose the same endpoints and response shapes.
 - `GET /api/call-flow?snapshot=<snapshotId>` analyzes only the active snapshot.
 - A mismatched snapshot or a repository change during execution returns the structured `stale` state with HTTP 409 and `Cache-Control: no-store`.
 - Disabled, unsupported, unavailable, stale, error, and successful results remain distinct domain states.
-- `POST /api/call-flow/install` accepts `{ languageIds?: CallFlowLanguageId[] }`. The consent-driven client submits the server-authored current-review target ids; omitting the list still resolves the authoritative current-review plan, and the manual language list supplies explicit install-ahead ids. Core is prepended when needed. One coordinator deduplicates targets, queues new targets onto the active single flight, and reports the current pack. A Node.js 22+ preflight runs before any download; a missing or too-old Node is a distinct, immediate `{ state: "error", reason: "node-unavailable" | "node-version" }`. The same-origin guard remains mandatory.
+- `POST /api/call-flow/install` accepts `{ languageIds?: CallFlowLanguageId[] }`. The consent-driven client submits the server-authored current-review target ids; omitting the list still resolves the authoritative current-review plan, and the manual language list supplies explicit install-ahead ids. Core is prepended when needed. One coordinator deduplicates targets, queues new targets onto the active single flight, and reports the current pack. A Node.js 22.18+ preflight runs before any download; a missing or too-old Node is a distinct, immediate `{ state: "error", reason: "node-unavailable" | "node-version" }`. The same-origin guard remains mandatory.
 - `GET /api/call-flow/install-status` reports `{ state: "idle" | "running" | "done" | "error", stage?, languageIds?, currentLanguageId?, error?, reason? }` with `stage` advancing through `downloading`, `verifying`, `installing-deps`, `building`. `error` persists until the next install POST retries. Completion cancels old work and invalidates the runtime probe plus successful/failure result caches in both runtimes, so the same snapshot immediately reruns with the new language set.
 
 Each review server permits one CallDiff execution at a time. Requests for the same snapshot share an in-flight promise. Successful results are kept in a bounded session cache, repeated failures have a 30 second cooldown, and every committed diff/base/PR/scope/whitespace change cancels work for the prior snapshot. Server shutdown and disabling the feature also cancel all workers.

@@ -44,7 +44,7 @@ import { installInertDiagramSvgParser } from '../../test-setup/diagramSvg';
 import type { DiagramAnchor, DiagramTarget } from '../../utils/diagram-anchor';
 import { projectElement } from '../../utils/diagram-projection';
 import { __setMermaidRuntimeLoaderForTests, setMermaidRuntime } from '../../utils/mermaid';
-import { DiagramViewer, type DiagramViewerProps } from './DiagramViewer';
+import { DiagramViewer, type DiagramHostDraft, type DiagramViewerProps } from './DiagramViewer';
 import type { DiagramComment } from './useDiagramComments';
 import { PREVIEW_DEBOUNCE_MS, type SaveResult } from './useDiagramSourceDraft';
 
@@ -199,11 +199,29 @@ function pointer(type: string, target: Element, init: { x: number; y: number; sh
   target.dispatchEvent(event);
 }
 
+/** A finger on node D (or on `on`): the first one down is the primary pointer, as in a browser. */
+function touch(type: string, x: number, { pointerId = 7, isPrimary = true, y = 10, on = undefined as Element | undefined } = {}): void {
+  const Ctor = (globalThis as { PointerEvent?: typeof MouseEvent }).PointerEvent ?? MouseEvent;
+  const event = new Ctor(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, ...(Ctor !== MouseEvent ? { pointerId, pointerType: 'touch', isPrimary } : {}) } as MouseEventInit);
+  if ((event as PointerEvent).pointerType !== 'touch') Object.defineProperty(event, 'pointerType', { value: 'touch' });
+  if ((event as PointerEvent).isPrimary !== isPrimary) Object.defineProperty(event, 'isPrimary', { value: isPrimary });
+  (on ?? host!.querySelector('[id$="-flowchart-D-1"]')!).dispatchEvent(event);
+}
+
 async function clickPart(target: Element, shift = false): Promise<void> {
   await act(async () => {
     pointer('pointerdown', target, { x: 10, y: 10, shift });
     pointer('pointerup', target, { x: 10, y: 10, shift });
   });
+}
+
+/** The canvas transform's translate and scale, to a thousandth (a pinch's steps multiply in floating point). */
+function expectView(wrapper: HTMLElement, x: number, y: number, scale: number): void {
+  const match = /translate\((-?[\d.e-]+)px, (-?[\d.e-]+)px\) scale\(([\d.e-]+)\)/.exec(wrapper.style.transform);
+  expect(match).not.toBeNull();
+  expect(Number(match![1])).toBeCloseTo(x, 3);
+  expect(Number(match![2])).toBeCloseTo(y, 3);
+  expect(Number(match![3])).toBeCloseTo(scale, 3);
 }
 
 function viewer(props: Partial<DiagramViewerProps> & { comments?: readonly DiagramComment[] }): React.ReactElement {
@@ -709,17 +727,159 @@ describe.if(hasDom)('the canvas as a citizen of the page', () => {
   test('a finger gets a wider click threshold than a mouse: an 8 px wobble is still a tap', async () => {
     await mount(viewer({ onCreateComment: noop }));
     await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
-    const touch = (type: string, x: number) => {
-      const Ctor = (globalThis as { PointerEvent?: typeof MouseEvent }).PointerEvent ?? MouseEvent;
-      const event = new Ctor(type, { bubbles: true, cancelable: true, clientX: x, clientY: 10, button: 0, ...(Ctor !== MouseEvent ? { pointerId: 7, pointerType: 'touch' } : {}) } as MouseEventInit);
-      if ((event as PointerEvent).pointerType !== 'touch') Object.defineProperty(event, 'pointerType', { value: 'touch' });
-      nodeD().dispatchEvent(event);
-    };
     await act(async () => {
       touch('pointerdown', 10);
       touch('pointermove', 18);
       touch('pointerup', 18);
     });
     await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
+  });
+
+  test('a second finger makes it a pinch: neither finger opens the composer, and the next tap does', async () => {
+    await mount(viewer({ onCreateComment: noop }));
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    await act(async () => {
+      touch('pointerdown', 10);
+      touch('pointerdown', 40, { pointerId: 8, isPrimary: false });
+      touch('pointerup', 10);
+      touch('pointerup', 40, { pointerId: 8, isPrimary: false });
+    });
+    expect(host!.querySelector('[data-diagram-composer]')).toBeNull();
+    await act(async () => {
+      touch('pointerdown', 10);
+      touch('pointerup', 10);
+    });
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
+  });
+
+  test('two fingers pinch-zoom about their midpoint and pan with it; the finger left behind pans on, never taps', async () => {
+    await mount(viewer({ onCreateComment: noop }));
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    const wrapper = q<HTMLElement>('[data-diagram-svg]');
+    expect(wrapper.style.transform).toBe('translate(0px, 0px) scale(1)');
+    // Fingers 30 px apart spread to 90 px about the same midpoint (25, 10): three times the scale, the midpoint's part stays put.
+    await act(async () => {
+      touch('pointerdown', 10);
+      touch('pointerdown', 40, { pointerId: 8, isPrimary: false });
+      touch('pointermove', -20);
+      touch('pointermove', 70, { pointerId: 8, isPrimary: false });
+    });
+    expectView(wrapper, -50, -20, 3);
+    // Both fingers move down 30 px together: the diagram follows, the scale holds.
+    await act(async () => {
+      touch('pointermove', -20, { y: 40 });
+      touch('pointermove', 70, { pointerId: 8, isPrimary: false, y: 40 });
+    });
+    expectView(wrapper, -50, 10, 3);
+    // One finger lifts: the other drags the diagram on, and lifting it opens nothing.
+    await act(async () => {
+      touch('pointerup', 70, { pointerId: 8, isPrimary: false, y: 40 });
+      touch('pointermove', -10, { y: 40 });
+      touch('pointerup', -10, { y: 40 });
+    });
+    expectView(wrapper, -40, 10, 3);
+    await settle(400);
+    expect(host!.querySelector('[data-diagram-composer]')).toBeNull();
+  });
+
+  test('a tap on a part hands the host its draft inside the touch itself (iOS raises the keyboard only there); a double tap on a part does too, and never zooms', async () => {
+    const drafts: (DiagramHostDraft | null)[] = [];
+    await mount(viewer({ onHostDraft: (draft) => drafts.push(draft) }));
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    const wrapper = q<HTMLElement>('[data-diagram-svg]');
+    const lastId = () => (drafts.at(-1)?.anchor as { id?: string } | undefined)?.id;
+    // A synchronous act runs no timer: what it shows is what the pointer events themselves did.
+    act(() => {
+      touch('pointerdown', 10);
+      touch('pointerup', 10);
+    });
+    expect(lastId()).toBe('D');
+    act(() => drafts.at(-1)!.cancel());
+    expect(drafts.at(-1)).toBeNull();
+    act(() => {
+      touch('pointerdown', 10);
+      touch('pointerup', 10);
+      touch('pointerdown', 12, { pointerId: 9 });
+      touch('pointerup', 12, { pointerId: 9 });
+    });
+    expect(lastId()).toBe('D');
+    expectView(wrapper, 0, 0, 1);
+  });
+
+  test('a waiting tap on empty space is dropped when a pan, a pinch, a control or a press outside the canvas comes first', async () => {
+    await mount(viewer({ onCreateComment: noop }));
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    const canvas = q('[data-diagram-canvas]');
+    const emptyTap = () => {
+      touch('pointerdown', 100, { on: canvas });
+      touch('pointerup', 100, { on: canvas });
+    };
+    const press = (target: Element) => {
+      const Ctor = (globalThis as { PointerEvent?: typeof MouseEvent }).PointerEvent ?? MouseEvent;
+      target.dispatchEvent(new Ctor('pointerdown', { bubbles: true, cancelable: true, clientX: 0, clientY: 0, button: 0 } as MouseEventInit));
+    };
+    const composerAfterTheWindow = async () => {
+      await settle(400);
+      return host!.querySelector('[data-diagram-composer]');
+    };
+    // Alone, it comments on the whole diagram once the window has passed.
+    act(emptyTap);
+    expect(host!.querySelector('[data-diagram-composer]')).toBeNull();
+    expect(await composerAfterTheWindow()).not.toBeNull();
+    await act(async () => {
+      canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).toBeNull());
+    // A pan.
+    act(() => {
+      emptyTap();
+      touch('pointerdown', 100, { on: canvas, pointerId: 9 });
+      touch('pointermove', 140, { on: canvas, pointerId: 9 });
+      touch('pointerup', 140, { on: canvas, pointerId: 9 });
+    });
+    expect(await composerAfterTheWindow()).toBeNull();
+    // A pinch.
+    act(() => {
+      emptyTap();
+      touch('pointerdown', 100, { on: canvas, pointerId: 9 });
+      touch('pointerdown', 160, { on: canvas, pointerId: 10, isPrimary: false });
+    });
+    expect(await composerAfterTheWindow()).toBeNull();
+    act(() => {
+      touch('pointerup', 100, { on: canvas, pointerId: 9 });
+      touch('pointerup', 160, { on: canvas, pointerId: 10, isPrimary: false });
+    });
+    // A control on the canvas (the zoom strip), and a press outside it (an expand button, a badge's host page).
+    act(() => {
+      emptyTap();
+      press(q('[aria-label="Zoom in"]'));
+    });
+    expect(await composerAfterTheWindow()).toBeNull();
+    act(() => {
+      emptyTap();
+      press(document.body);
+    });
+    expect(await composerAfterTheWindow()).toBeNull();
+  });
+
+  test('a double tap on empty space zooms in about the finger from Fit and back to Fit from anywhere else, and opens nothing', async () => {
+    await mount(viewer({ onCreateComment: noop }));
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    const wrapper = q<HTMLElement>('[data-diagram-svg]');
+    const canvas = q('[data-diagram-canvas]');
+    const doubleTap = async (x: number) => {
+      await act(async () => {
+        touch('pointerdown', x, { on: canvas });
+        touch('pointerup', x, { on: canvas });
+        touch('pointerdown', x + 3, { pointerId: 9, on: canvas });
+        touch('pointerup', x + 3, { pointerId: 9, on: canvas });
+      });
+    };
+    await doubleTap(20);
+    expectView(wrapper, -23, -10, 2);
+    await doubleTap(60);
+    expectView(wrapper, 0, 0, 1);
+    await settle(400);
+    expect(host!.querySelector('[data-diagram-composer]')).toBeNull();
   });
 });

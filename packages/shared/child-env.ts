@@ -37,6 +37,18 @@ export function childEnv(extra?: Readonly<ChildEnv>): ChildEnv {
 }
 
 /**
+ * Whether this process runs inside an agent Plannotator's Ask AI started:
+ * `PLANNOTATOR_ASK_AI_CHILD` is exactly "1" (set by `askAiChildEnv` in
+ * packages/ai/providers/ask-ai-env.ts). There, Plannotator's own integration
+ * stands down: the Inbox MCP shim lists no tools, the plan-review hook exits
+ * 0, and the OpenCode plugin registers nothing. Any other value, or none, is
+ * a person's session and changes nothing.
+ */
+export function isAskAiChild(env: Readonly<ChildEnv> = process.env): boolean {
+  return env.PLANNOTATOR_ASK_AI_CHILD === "1";
+}
+
+/**
  * The live PATH, for `Bun.which(command, { PATH: childPath() })`: without the
  * option Bun.which searches the startup PATH.
  */

@@ -26,6 +26,8 @@ import { optionSetId, optionSetOf, type OptionSet } from './optionSets';
 
 const hasDom = typeof document !== 'undefined';
 const { AttachmentPane } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');
+const { OptionCaption } = (hasDom ? await import('./components/OptionCaption') : {}) as typeof import('./components/OptionCaption');
+const { peekFit } = (hasDom ? await import('./components/ImageSwipePeek') : {}) as typeof import('./components/ImageSwipePeek');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -103,11 +105,11 @@ function stubViews() {
 }
 
 /** The pane as the thread drives it on a phone; `set`: the thread opened it over the question's choices. */
-function Pane({ start, opened, closed, set, only }: { start: InboxAttachmentState; opened: string[]; closed: () => void; set: boolean; only?: boolean }) {
+function Pane({ start, opened, closed, set, only, setOf = SET }: { start: InboxAttachmentState; opened: string[]; closed: () => void; set: boolean; only?: boolean; setOf?: OptionSet }) {
   const [open, setOpen] = useState(start);
   const noop = () => {};
-  const inSet = set && SET.steps.some((s) => s.attachment.id === open.id);
-  const steps = only ? ALL_STEPS.filter((s) => s.attachment.id === start.id) : inSet ? SET.steps : ALL_STEPS;
+  const inSet = set && setOf.steps.some((s) => s.attachment.id === open.id);
+  const steps = only ? ALL_STEPS.filter((s) => s.attachment.id === start.id) : inSet ? setOf.steps : ALL_STEPS;
   return (
     <AttachmentPane
       attachment={open}
@@ -130,7 +132,7 @@ function Pane({ start, opened, closed, set, only }: { start: InboxAttachmentStat
       strip={{ picks: 0, annotations: 0, onWriteReply: noop }}
       steps={steps}
       allSteps={ALL_STEPS}
-      optionSet={inSet ? SET : null}
+      optionSet={inSet ? setOf : null}
       phone
       onStep={(id) => {
         opened.push(id);
@@ -146,7 +148,7 @@ async function settle(ms = 60) {
   });
 }
 
-async function render(start: InboxAttachmentState, { set = true, only = false } = {}) {
+async function render(start: InboxAttachmentState, { set = true, only = false, setOf = SET } = {}) {
   const opened: string[] = [];
   const closes = { count: 0 };
   host = document.createElement('div');
@@ -154,7 +156,7 @@ async function render(start: InboxAttachmentState, { set = true, only = false } 
   document.body.appendChild(host);
   await act(async () => {
     root = createRoot(host!);
-    root.render(<Pane start={start} opened={opened} closed={() => closes.count++} set={set} only={only} />);
+    root.render(<Pane start={start} opened={opened} closed={() => closes.count++} set={set} only={only} setOf={setOf} />);
   });
   await settle();
   sized(area());
@@ -229,9 +231,8 @@ test.skipIf(!hasDom)('a picture choice opens its question\'s choices: the captio
   const { opened } = await render(optB);
   expect(caption()!.getAttribute('data-option-caption')).toBe('B');
   expect(caption()!.querySelector('.ib-optcap-label')!.textContent).toBe('Option B: Quiet hover menu');
-  expect(caption()!.querySelector('.ib-optcap-prompt')!.textContent).toBe('Which copy-message design should ship?');
-  expect(caption()!.querySelector('[data-option-dots]')!.getAttribute('data-option-dots')).toBe('2/4');
-  expect(caption()!.querySelectorAll('.ib-optcap-dots i')).toHaveLength(4);
+  // One row: no question, dots, end note or arrows (a phone swipes).
+  for (const gone of ['.ib-optcap-prompt', '[data-option-dots]', '[data-option-end]', '[data-option-step]']) expect(caption()!.querySelector(gone)).toBeNull();
   expect(caption()!.querySelector('[data-option-recommended]')).toBeNull();
   expect(caption()!.querySelector('[data-option-end]')).toBeNull();
   expect(pill().textContent).toContain('2/4');
@@ -249,8 +250,8 @@ test.skipIf(!hasDom)('a picture choice opens its question\'s choices: the captio
   await drag(-200);
   await settle(40);
   expect(opened).toEqual([optC.id, optD.id]);
-  // The last choice: the caption says where the thread's other files are.
-  expect(caption()!.querySelector('[data-option-end]')!.textContent).toBe("Last option · the thread's 2 other files are under 4/4");
+  // The last choice: the live region says where the thread's other files are (the card does not).
+  expect(live()).toBe('Option D of 4: Header menu only. Last option. 2 other files under the 4/4 button');
   await drag(-200);
   await settle(40);
   expect(opened).toEqual([optC.id, optD.id]);
@@ -266,7 +267,72 @@ test.skipIf(!hasDom)('a picture choice opens its question\'s choices: the captio
   await drag(200);
   await settle(40);
   expect(opened).toHaveLength(5);
-  expect(caption()!.querySelector('[data-option-end]')!.textContent).toBe('First option');
+  expect(live()).toBe('First option');
+});
+
+/** The card on its own: `steps` collects what its arrows ask for. */
+async function captionAlone(at: number, phone: boolean) {
+  const steps: number[] = [];
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  await act(async () => {
+    root = createRoot(host!);
+    root.render(<OptionCaption set={SET} index={at} phone={phone} onStep={(dir) => steps.push(dir)} />);
+  });
+  return steps;
+}
+
+test.skipIf(!hasDom)('off a phone the card has ‹ Previous and Next › that step like [ and ], marked disabled at the ends', async () => {
+  for (const [at, prevOff, nextOff] of [[0, true, false], [1, false, false], [3, false, true]] as const) {
+    const steps = await captionAlone(at, false);
+    const prev = caption()!.querySelector<HTMLButtonElement>('[data-option-step="prev"]')!;
+    const next = caption()!.querySelector<HTMLButtonElement>('[data-option-step="next"]')!;
+    expect(prev.getAttribute('aria-disabled') === 'true').toBe(prevOff);
+    expect(next.getAttribute('aria-disabled') === 'true').toBe(nextOff);
+    expect(prev.getAttribute('aria-label')).toMatch(prevOff ? /this is the first$/ : /^Previous option: \S/);
+    expect(next.getAttribute('aria-label')).toMatch(nextOff ? /this is the last$/ : /^Next option: \S/);
+    await act(async () => {
+      prev.click();
+      next.click();
+    });
+    expect(steps).toEqual([...(prevOff ? [] : [-1]), ...(nextOff ? [] : [1])]);
+    await act(async () => root!.unmount());
+    host!.remove();
+    host = null;
+    root = null;
+  }
+});
+
+test.skipIf(!hasDom)('one row on a phone too: the letter, the name, no arrows, no question, dots or end note', async () => {
+  await captionAlone(3, true);
+  expect(caption()!.querySelector('.ib-optcap-label')).not.toBeNull();
+  for (const gone of ['[data-option-step]', '.ib-optcap-q', '.ib-optcap-dots', '[data-option-end]']) expect(caption()!.querySelector(gone)).toBeNull();
+});
+
+test.skipIf(!hasDom)('a neighbour is drawn at the Fit its image will have, between the rows the image keeps clear', () => {
+  const stage = { left: 0, top: 0, width: 400, height: 660, pad: 12 };
+  // No rows: as the stage fits it. Rows: the same width, moved below the top row.
+  expect(peekFit({ width: 1600, height: 1000 }, stage)).toEqual({ left: 12, top: 212.5, width: 376, height: 235 });
+  expect(peekFit({ width: 1600, height: 1000 }, stage, { top: 62, bottom: 248 })).toEqual({ left: 12, top: 62 + 57.5, width: 376, height: 235 });
+  // A picture that has to shrink to fit between them.
+  const portrait = peekFit({ width: 1000, height: 1600 }, stage, { top: 62, bottom: 248 });
+  expect(portrait.height).toBe(350 - 24);
+  expect(portrait.top).toBe(62 + 12);
+  expect(portrait.top + portrait.height).toBe(660 - 248 - 12);
+});
+
+test.skipIf(!hasDom)('choices labeled with their own letters out of order (C, A, B) are captioned by that letter, with no chip of a position letter', async () => {
+  stubViews();
+  reducedMotion(true);
+  const cab = message(M2, '2026-10-10T11:06:00.000Z', {
+    questions: [{ key: 'q-design', prompt: 'Which?', choices: [choice('C · The section is the folder', 'C'), choice('A · A tab', 'A'), choice('B · Header menu', 'B')] }],
+  });
+  const steps = attachmentSequence([MESSAGES[0]!, cab], ALL).map((s) => (s.attachment.kind === 'image' ? { ...s, inline: true } : s));
+  const cabSet = optionSetOf([MESSAGES[0]!, cab], steps, optionSetId(M2, 'q-design'))!;
+  await render(optC, { setOf: cabSet });
+  expect(caption()!.getAttribute('data-option-caption')).toBe('C');
+  expect(caption()!.querySelector('.ib-optcap-letter')).toBeNull();
+  expect(caption()!.querySelector('.ib-optcap-label')!.textContent).toBe('C · The section is the folder');
 });
 
 test.skipIf(!hasDom)('the pill\'s sheet still lists every file of the thread; its ‹ Previous and Next › step inside the set; a pick outside leaves it', async () => {
@@ -416,4 +482,30 @@ test.skipIf(!hasDom)('under reduced motion nothing follows the finger: the step 
   await release();
   await settle(20);
   expect(closes.count).toBe(1);
+});
+
+test.skipIf(!hasDom)('the card holds every name of the set (unseen) so it is one width on every step, and a wheel over an arrow goes to the picture', async () => {
+  await captionAlone(1, false);
+  const sizers = [...caption()!.querySelectorAll('.ib-optcap-size')].map((el) => el.textContent);
+  expect(sizers).toHaveLength(4);
+  expect(sizers.join('|')).toContain(SET.choices[3]!.label);
+  for (const el of caption()!.querySelectorAll('.ib-optcap-size')) expect(el.getAttribute('aria-hidden')).toBe('true');
+  // The name read aloud is the visible row's only (not four names).
+  expect(caption()!.querySelector('.ib-optcap-main .ib-optcap-label')!.textContent).toContain(SET.choices[1]!.label);
+  expect(caption()!.querySelectorAll('.ib-optcap-main .sr-only')).toHaveLength(1);
+
+  // A pinch (Ctrl + wheel) over an arrow: held off the page and handed to the picture's stage.
+  host!.className = 'ib-view';
+  const stage = document.createElement('div');
+  stage.setAttribute('data-image-zoom-stage', 'fit');
+  host!.appendChild(stage);
+  const received: WheelEvent[] = [];
+  stage.addEventListener('wheel', (e) => received.push(e as WheelEvent));
+  const wheel = new WheelEvent('wheel', { deltaY: -120, ctrlKey: true, clientX: 10, clientY: 20, bubbles: true, cancelable: true });
+  await act(async () => {
+    caption()!.querySelector('[data-option-step="next"]')!.dispatchEvent(wheel);
+  });
+  expect(wheel.defaultPrevented).toBe(true);
+  expect(received).toHaveLength(1);
+  expect(received[0]!.deltaY).toBe(-120);
 });

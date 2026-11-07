@@ -18,6 +18,7 @@ import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import { FIXTURE_V1_LOCAL, FIXTURE_PATCH_TS_JSON } from '../../packages/core/guide-format-fixtures';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
+import { NO_BROWSER } from '../helpers/no-browser';
 import { inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
@@ -65,7 +66,17 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   mkdirSync(home);
-  const env = { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir };
+  const env = {
+    PATH: process.env.PATH ?? '',
+    HOME: home,
+    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_INBOX_CONNECT: '0',
+    PLANNOTATOR_UPDATE_CHECK: '0',
+    PLANNOTATOR_BROWSER: NO_BROWSER,
+    NO_ANON_PING: '1',
+    PLANNOTATOR_INBOX_NOTES: '0',
+    PLANNOTATOR_TEST_SANDBOX: '1',
+  };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -320,6 +331,13 @@ test('a comment on the guide\'s diffs: a line and a range, listed beside the gui
   const auth = viewer.locator('[data-guide-file-shell="src/auth.ts"]');
   const added = (line: number) => auth.locator(`[data-line-type="change-addition"][data-column-number="${line}"]`);
   await expect(added(2)).toBeVisible({ timeout: 30_000 });
+  // The file's box is as tall as its lines and the arrow row after them (32 px): no empty band (the guided review in a
+  // thread, as on the PR page).
+  await expect.poll(async () => {
+    const box = (await auth.locator('[data-guide-code-view-mounted]').boundingBox())!;
+    const rows = await auth.locator('[data-line-type][data-column-number]').evaluateAll((els) => Math.max(...els.map((el) => el.getBoundingClientRect().bottom)));
+    return box.y + box.height - rows;
+  }).toBeLessThan(24 + 32);
 
   // A range: drag across the new side's line numbers 2 to 3, as in the review app.
   const from = (await added(2).boundingBox())!;
@@ -349,6 +367,10 @@ test('a comment on the guide\'s diffs: a line and a range, listed beside the gui
   await expect(panel).toContainText('package.json · line 3');
   await expect(viewer.locator('[data-strip-chip]')).toHaveText('2 comments');
   await shot('4.3-guide-comments-in-the-panel');
+  // A short list keeps its own height: the foot stays right under it, not at the bottom of the column.
+  const foot = (await viewer.locator('.ib-gstrip').boundingBox())!;
+  const lastCard = (await panel.locator('[data-annotation-id]').last().boundingBox())!;
+  expect(foot.y - (lastCard.y + lastCard.height)).toBeLessThan(80);
 
   // Kept in the store with the thread's annotations, keyed to the message and the file.
   const model = (await (await page.request.get(`${world.url}api/inbox/threads/${sent.thread_id}/attachments`)).json()) as { annotations: { message_id: string; path: string; guide: { side: string; line_start: number; line_end: number } }[] };
@@ -382,9 +404,9 @@ test('a comment on the guide\'s diffs: a line and a range, listed beside the gui
   await expect(filePane).toHaveCount(0);
   await page.getByRole('button', { name: 'Reply', exact: true }).last().click();
   const chip = page.locator('[data-annotations-chip]');
-  await expect(chip).toHaveText('2 annotations');
+  await expect(chip).toHaveText('2 comments');
   await chip.click();
-  const pop = page.getByRole('dialog', { name: '2 annotations ride this reply' });
+  const pop = page.getByRole('dialog', { name: '2 comments' });
   await expect(pop.locator('[data-annotation-row]').first()).toContainText('src/auth.ts (guided review)');
   await expect(pop.locator('[data-annotation-row]').first()).toContainText('lines 2-3');
   await pop.locator('[data-annotation-row]').nth(1).getByRole('button', { name: 'Edit' }).click();
@@ -394,13 +416,11 @@ test('a comment on the guide\'s diffs: a line and a range, listed beside the gui
   await shot('4.3-guide-comments-in-the-reply');
   await page.keyboard.press('Escape');
 
-  // Send: the agent's wait_for_reply returns the comments as the review app's export.
-  const waiting = claude.waitForReply(sent.thread_id, 40);
+  // Send: the agent's read_thread returns the comments as the review app's export.
   await page.getByRole('textbox', { name: 'Reply to Claude Code' }).fill('Two notes on the diff.');
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const reply = await waiting;
-  expect(reply.status).toBe('replied');
-  const body = reply.reply.body as string;
+  const reply = await claude.nextReply(sent.thread_id, 40);
+  const body = reply.body as string;
   expect(body.indexOf('Two notes on the diff.')).toBeLessThan(body.indexOf('# Feedback on the guided review'));
   for (const part of [
     '"Comment on the diffs"',
@@ -442,17 +462,18 @@ test('a long thread name plus the Guided review mark never pushes a row out of s
   const projects = (await (await page.request.get(`${world.url}api/inbox/projects`)).json()).projects as { id: string; name: string }[];
   const ledger = projects.find((p) => p.name === 'ledger')!;
   for (const [i, name] of names.entries()) {
-    // Every project below 900px of list draws the two-line row; one project
-    // keeps the wide row. The wide row's subject cell holds the chip, the
-    // subject and the mark. The two-line row and, below 768px (a phone,
-    // packages/inbox/phone.ts), the mail row put the chip on line 1 before the
-    // time and the subject and the mark on line 2 (approval "inbox-row-byline").
+    // Every project below 900px of list draws the three-line row; one project
+    // keeps the wide row. The wide row's title cell holds the name (one line,
+    // cut with "…"), the subject and the mark. The three-line row and, below
+    // 768px (a phone, packages/inbox/phone.ts), the mail row put the name on
+    // line 2, whole (it wraps), and the subject and the mark on line 3
+    // (approval "list-rows-mail-icons").
     const row = page.locator(`.ib-lbody [data-thread-id="${threads[i]}"]`);
     for (const route of ['', `#project=${ledger.id}`]) {
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto(`${world.url}${route}`);
       await expect(row).toBeVisible();
-      await expect(row.locator('.ib-key')).toHaveText(name);
+      await expect(row.locator('.ib-title, .ib-m2').first()).toHaveText(name);
       await expect(row.locator('[data-guide-mark]')).toHaveCount(1);
       // One project keeps the wide row down to a phone's width, then the mail row: also 360, 500 and 520px there.
       for (const width of route ? [360, 500, 520, 556, 656, 820] : [556, 656, 820]) {
@@ -474,50 +495,55 @@ test('a long thread name plus the Guided review mark never pushes a row out of s
         const measured = await row.evaluate((el) => {
           const body = el.closest('.ib-lbody')!;
           const wideRow = el.querySelector('.ib-subj') !== null;
-          const line = (el.querySelector('.ib-subj') ?? el.querySelector('.ib-l2') ?? el.querySelector('.ib-ml2'))!.getBoundingClientRect();
+          // The line with the mark: the wide row's title cell, else line 3.
+          const line = el.querySelector(':is(.ib-subj, .ib-l3, .ib-m3)')!.getBoundingClientRect();
           const box = (sel: string) => el.querySelector(sel)!.getBoundingClientRect();
-          const subject = box(el.querySelector('.ib-s') ? '.ib-s' : '.ib-m2');
-          const nameEl = el.querySelector<HTMLElement>('.ib-keyt') ?? el.querySelector<HTMLElement>('.ib-key')!;
+          const title = el.querySelector<HTMLElement>(':is(.ib-title, .ib-m2)')!;
+          const t = title.getBoundingClientRect();
           return {
+            wideRow,
             listOverflow: body.scrollWidth - body.clientWidth,
             rowOverflow: el.scrollWidth - el.clientWidth,
             lineRight: line.right,
-            // What the subject line must end before: the count words' column, or the row's own edge.
+            // What the mark's line must end before: the count words' column, or the row's own edge.
             limit: wideRow ? box('.ib-cw').left : el.getBoundingClientRect().right,
-            // What the chip must end before: its own line's end (the wide row's subject cell), or line 1's time.
-            keyLimit: wideRow ? line.right : box('.ib-t').left,
-            keyRight: box('.ib-key').right,
-            keyWidth: box('.ib-key').width,
-            keyTruncated: nameEl.scrollWidth > nameEl.clientWidth + 1,
-            keyLines: Math.round(nameEl.getBoundingClientRect().height / parseFloat(getComputedStyle(nameEl).lineHeight)),
+            titleShown: Math.min(t.right, line.right) - t.left,
+            titleRight: t.right,
+            rowRight: el.getBoundingClientRect().right,
+            titleCut: title.scrollWidth > title.clientWidth + 1,
+            titleLines: Math.round(t.height / parseFloat(getComputedStyle(title).lineHeight)),
             markRight: box('[data-guide-mark]').right,
-            subjectShown: Math.min(subject.right, line.right) - subject.left,
           };
         });
         const where = `(${name.length}-character name, ${route ? 'one project' : 'every project'}, ${width}px)`;
-        expect(measured.subjectShown, `the subject is squeezed out ${where}`).toBeGreaterThan(20);
+        expect(measured.titleShown, `the name is squeezed out ${where}`).toBeGreaterThan(20);
         expect(measured.markRight, `the Guided review mark is clipped ${where}`).toBeLessThanOrEqual(measured.lineRight + 0.5);
-        expect(measured.keyRight, `the thread chip leaves its line ${where}`).toBeLessThanOrEqual(measured.keyLimit + 0.5);
         expect(measured.listOverflow, `the list scrolls sideways ${where}`).toBe(0);
         expect(measured.rowOverflow, `the row spills ${where}`).toBe(0);
-        expect(measured.lineRight, `the subject line runs into the count ${where}`).toBeLessThanOrEqual(measured.limit);
-        // The chip is shown with some of its name, or left out: never a bare border.
-        expect(measured.keyWidth === 0 || measured.keyWidth >= 24, `the thread chip is squeezed to its border (${measured.keyWidth}px) ${where}`).toBe(true);
-        // Every row's chip, a phone's too, cuts a long name with "…" on one line.
-        if (name.length === 120 && measured.keyWidth > 0) expect(measured.keyTruncated, `the thread chip keeps its ellipsis ${where}`).toBe(true);
-        expect(measured.keyWidth === 0 || measured.keyLines <= 1, `the thread chip's name runs past its line ${where}`).toBe(true);
+        expect(measured.lineRight, `the title cell runs into the count ${where}`).toBeLessThanOrEqual(measured.limit);
+        if (measured.wideRow) {
+          // The wide row is one line: the long name ends in "…" (its tooltip shows it whole).
+          expect(measured.titleLines, `the wide row's name runs past its line ${where}`).toBe(1);
+          if (name.length === 120) expect(measured.titleCut, `the wide row's name keeps its ellipsis ${where}`).toBe(true);
+        } else {
+          // Beside a thread and on a phone the name is never cut: it wraps inside the row.
+          expect(measured.titleCut, `the name is cut ${where}`).toBe(false);
+          expect(measured.titleRight, `the name leaves the row ${where}`).toBeLessThanOrEqual(measured.rowRight + 0.5);
+          if (name.length === 120) expect(measured.titleLines, `the long name wraps ${where}`).toBeGreaterThan(1);
+        }
       }
     }
   }
   await page.setViewportSize({ width: 1440, height: 900 });
 });
 
-test('Split | Unified sits in a tab on the first section card only, switches every diff, is kept where code review reads it, and a phone draws Unified with no tab', async () => {
+test('the guided review\'s bar holds one Split / Unified button and the Diff display gear before Close: it switches every diff, is kept where code review reads it, and a phone draws Unified with no controls', async () => {
   const { claude, page } = world;
   const guide = { ...FIXTURE_V1_LOCAL, guide: { ...FIXTURE_V1_LOCAL.guide, title: 'Diff layout', reviewed: [false, false] } };
   const sent = await claude.submitGuide({ project_path: world.ledger, snapshot: guide, thread: 'diff-layout', subject: 'A guided review to read in one column.' });
   const configPath = join(world.dataDir, 'config.json');
-  const styleOnDisk = () => (existsSync(configPath) ? (JSON.parse(readFileSync(configPath, 'utf8')) as { diffOptions?: { diffStyle?: string } }).diffOptions?.diffStyle : undefined);
+  const optionsOnDisk = () => (existsSync(configPath) ? (JSON.parse(readFileSync(configPath, 'utf8')) as { diffOptions?: Record<string, unknown> }).diffOptions ?? {} : {});
+  const styleOnDisk = () => optionsOnDisk().diffStyle;
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`${world.url}#thread=${sent.thread_id}&guide=${sent.message_id}`);
   const viewer = page.getByRole('region', { name: 'Guided review', exact: true });
@@ -526,42 +552,34 @@ test('Split | Unified sits in a tab on the first section card only, switches eve
   const auth = viewer.locator('[data-guide-file-shell="src/auth.ts"]');
   await expect(auth.locator('[data-line-type="change-addition"]').first()).toBeVisible({ timeout: 30_000 });
 
-  // One tab, on the first card: right above it, and the second card has none.
-  const tabs = viewer.locator('[data-guide-section-tab]');
-  await expect(tabs).toHaveCount(1);
-  await expect(viewer.locator('[data-guide-section-tabbed] > [data-guide-section="0"]')).toHaveCount(1);
-  await expect(viewer.locator('[data-guide-section-tabbed] > [data-guide-section="1"]')).toHaveCount(0);
-  const group = tabs.getByRole('radiogroup', { name: 'Diff layout' });
-  const split = group.getByRole('radio', { name: 'Split' });
-  const unified = group.getByRole('radio', { name: 'Unified' });
-  await expect(split).toBeChecked();
+  // No card has a tab; the bar has the controls, right before Close.
+  await expect(viewer.locator('[data-guide-section-tab]')).toHaveCount(0);
+  const bar = viewer.locator('.ib-vhead');
+  const controls = bar.locator('[data-diff-controls]');
+  await expect(controls).toBeVisible();
+  expect(await controls.evaluate((el) => el.nextElementSibling?.querySelector('[aria-label="Close the guided review"]') !== null || el.nextElementSibling?.getAttribute('aria-label') === 'Close the guided review')).toBe(true);
+  const toggle = controls.locator('[data-diff-layout-toggle]');
+  await expect(toggle).toHaveAttribute('data-diff-layout-toggle', 'split');
   await expect.poll(layouts).toEqual(['split', 'split']);
-  // The tab's right edge is the card's: its border runs straight up into the tab.
-  const edges = await viewer.locator('[data-guide-section-tabbed]').evaluate((wrap) => {
-    const tab = wrap.querySelector('[data-guide-section-tab] svg')!.getBoundingClientRect();
-    const card = wrap.querySelector('[data-guide-section="0"]')!.getBoundingClientRect();
-    return { tabRight: tab.right, cardRight: card.right, tabBottom: tab.bottom, cardTop: card.top };
-  });
-  expect(Math.abs(edges.tabRight - edges.cardRight)).toBeLessThan(0.5);
-  expect(edges.tabBottom - edges.cardTop).toBeGreaterThanOrEqual(0);
-  expect(edges.tabBottom - edges.cardTop).toBeLessThanOrEqual(1.5);
   await shot('4.4-guide-diff-layout-split');
 
-  await unified.check();
+  await toggle.click();
   await expect.poll(layouts).toEqual(['single', 'single']);
+  await expect(toggle).toHaveAccessibleName('Switch to Split view');
   // Kept where code review reads it: the cookie, and config.json `diffOptions.diffStyle`.
   await expect.poll(styleOnDisk).toBe('unified');
   expect((await world.context.cookies()).find((c) => c.name === 'plannotator-diff-style')?.value).toBe('unified');
   await shot('4.4-guide-diff-layout-unified');
 
-  // A radio group: the arrows choose.
-  await unified.focus();
-  await page.keyboard.press('ArrowLeft');
-  await expect(split).toBeChecked();
-  await expect.poll(layouts).toEqual(['split', 'split']);
-  await page.keyboard.press('ArrowRight');
-  await expect(unified).toBeChecked();
-  await expect.poll(layouts).toEqual(['single', 'single']);
+  // The gear: code review's popover without the two rows that need the repository; Wrap reaches config.json.
+  await controls.getByRole('button', { name: 'Diff display options' }).click();
+  const popup = page.locator('[data-diff-display-popup]');
+  await expect(popup.getByRole('switch')).toHaveText(['Wrap long lines', 'Line numbers', 'Backgrounds']);
+  await popup.getByRole('switch', { name: 'Wrap long lines' }).click();
+  await expect.poll(() => optionsOnDisk().overflow).toBe('wrap');
+  await shot('4.4-guide-diff-display-popover');
+  await page.keyboard.press('Escape');
+  await expect(popup).toHaveCount(0);
 
   // A comment on a line in Unified: the review app's selection, kept by file, side and line.
   const panel = viewer.locator('[data-guide-comments]');
@@ -576,60 +594,155 @@ test('Split | Unified sits in a tab on the first section card only, switches eve
   expect(model.annotations.map((r) => [r.path, r.guide.side, r.guide.line_start, r.guide.line_end])).toEqual([['src/auth.ts', 'new', 3, 3]]);
   await shot('4.4-guide-diff-layout-unified-comment');
 
-  // Back to Split, then a phone: no tab, every diff in one column, the saved layout left as it is.
-  await split.check();
+  // Back to Split, then a phone: no controls, every diff in one column, the saved layout left as it is.
+  await toggle.click();
   await expect.poll(styleOnDisk).toBe('split');
   await page.setViewportSize({ width: 390, height: 844 });
+  await expect(viewer.locator('[data-diff-controls]')).toHaveCount(0);
   await expect(viewer.locator('[data-guide-section-tab]')).toHaveCount(0);
   await expect.poll(layouts).toEqual(['single', 'single']);
   await page.waitForTimeout(500);
   expect(styleOnDisk()).toBe('split');
   await shot('4.4-guide-diff-layout-phone');
-
-  // The owner's review pictures (PLANNOTATOR_GUIDE_DIFF_TAB_SHOTS): 1440 and 1100, Split and Unified, light and dark, a phone, and the tab close up.
-  const extra = process.env.PLANNOTATOR_GUIDE_DIFF_TAB_SHOTS;
-  if (extra) {
-    mkdirSync(extra, { recursive: true });
-    for (const scheme of ['light', 'dark'] as const) {
-      await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
-      for (const width of [1440, 1100]) {
-        await page.setViewportSize({ width, height: 900 });
-        await expect(viewer.locator('[data-guide-section-tab]')).toHaveCount(1);
-        for (const style of ['split', 'unified'] as const) {
-          await viewer.getByRole('radio', { name: style === 'split' ? 'Split' : 'Unified' }).check();
-          await expect.poll(layouts).toEqual(style === 'split' ? ['split', 'split'] : ['single', 'single']);
-          await viewer.locator('.ib-gbody').evaluate((el) => el.scrollTo(0, 0));
-          await page.mouse.move(0, 0);
-          await page.waitForTimeout(400);
-          await page.screenshot({ path: join(extra, `tab-${width}-${style}-${scheme}.png`) });
-        }
-      }
-      await page.setViewportSize({ width: 390, height: 844 });
-      await expect(viewer.locator('[data-guide-section-tab]')).toHaveCount(0);
-      await viewer.locator('.ib-gbody').evaluate((el) => el.scrollTo(0, 0));
-      await page.waitForTimeout(400);
-      await page.screenshot({ path: join(extra, `phone-unified-${scheme}.png`) });
-      await viewer.locator('[data-guide-file-shell="src/auth.ts"]').scrollIntoViewIfNeeded();
-      await page.waitForTimeout(300);
-      await page.screenshot({ path: join(extra, `phone-unified-scrolled-${scheme}.png`) });
-    }
-    // The tab close up, 3x, light and dark.
-    const close = await world.context.browser()!.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 3, colorScheme: 'light' });
-    await close.addCookies((await world.context.cookies()).filter((c) => c.name === 'plannotator-diff-style'));
-    const zoomed = await close.newPage();
-    await zoomed.goto(`${world.url}#thread=${sent.thread_id}&guide=${sent.message_id}`);
-    const zTab = zoomed.locator('[data-guide-section-tab]');
-    await expect(zTab).toHaveCount(1, { timeout: 30_000 });
-    for (const scheme of ['light', 'dark'] as const) {
-      await zoomed.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
-      await zoomed.waitForTimeout(400);
-      const box = (await zTab.boundingBox())!;
-      await zoomed.screenshot({ path: join(extra, `tab-detail-${scheme}.png`), clip: { x: box.x + box.width - 260, y: box.y - 16, width: 290, height: box.height + 60 } });
-    }
-    await close.close();
-    await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
-  }
   await page.setViewportSize({ width: 1440, height: 900 });
+  await page.keyboard.press('Escape');
+});
+
+test('a thread\'s guided review with Code review off: arrows open a long file in place, the page scrolls with no box limit, the file header sticks, and a comment on an opened line saves', async () => {
+  const { page, claude } = world;
+  const path = 'src/long.ts';
+  const number = (i: number) => `export const LINE_${i + 1} = ${i + 1};`;
+  const before = Array.from({ length: 900 }, (_, i) => number(i));
+  const after = before.map((line, i) => (i === 40 || i === 700 ? `${line} // edited` : line));
+  const allChanged = before.map((line) => `${line} // changed`);
+  const git = (...args: string[]) => {
+    const run = spawnSync('git', args, { cwd: world.ledger, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com' } });
+    expect(run.status, run.stderr).toBe(0);
+    return run.stdout;
+  };
+  mkdirSync(join(world.ledger, 'src'), { recursive: true });
+  const text = (lines: string[]) => `${lines.join('\n')}\n`;
+  writeFileSync(join(world.ledger, path), text(before));
+  writeFileSync(join(world.ledger, 'src/changed.ts'), text(before));
+  git('add', '-A');
+  git('commit', '-q', '-m', 'long files');
+  writeFileSync(join(world.ledger, path), text(after));
+  writeFileSync(join(world.ledger, 'src/changed.ts'), text(allChanged));
+  const sent = await claude.submitGuide({
+    project_path: world.ledger,
+    thread: 'long-file',
+    subject: 'A long file',
+    patch: git('diff'),
+    body: 'Two edits in a long file, and a file changed through and through.',
+    guide: { title: 'Long', intent: 'Long files.', sections: [{ title: 'Files', overview: 'Both.', diffs: [{ file: path, summary: 'Two edits.' }, { file: 'src/changed.ts', summary: 'Every line.' }] }] },
+  } as never);
+  await page.goto(`${world.url}#thread=${sent.thread_id}&guide=${sent.message_id}`);
+  const shell = page.locator(`[data-guide-file-shell="${path}"]`);
+  const box = shell.locator('[data-guide-code-view-mounted]');
+  // Read from the project's own git: Code review is off in this world.
+  const arrow = shell.locator('[data-expand-button][data-expand-down]').first();
+  await expect(arrow).toBeVisible({ timeout: 30_000 });
+
+  const pane = page.locator('.ib-gbody');
+  const scrollTop = () => pane.evaluate((el) => el.scrollTop);
+  const height = async () => (await box.boundingBox())!.height;
+  const closed = await height();
+  const place = await scrollTop();
+  // A box is its content: no band of empty space above the header (the box's 8 px and its border) or under the last
+  // row (those, and the 4 px under a last arrow row).
+  const slack = await box.evaluate((el) => {
+    const outer = el.getBoundingClientRect();
+    const code = el.querySelector('diffs-container')!.getBoundingClientRect();
+    const header = el.querySelector('diffs-container')!.shadowRoot!.querySelector('[data-diffs-header]')!;
+    return { above: code.top - outer.top, below: outer.bottom - code.bottom, line: getComputedStyle(header, '::after').content };
+  });
+  expect(slack.above).toBeLessThanOrEqual(9);
+  expect(slack.below).toBeLessThanOrEqual(13);
+  // The line under a file header shows only while the header is stuck.
+  expect(slack.line).toBe('none');
+  await arrow.click();
+  await expect.poll(height).toBeGreaterThan(closed);
+  expect(await scrollTop()).toBe(place);
+
+  // A comment on a line no hunk has: posted through the store, listed, and no alert.
+  const opened = shell.locator('[data-column-number="20"]').last();
+  await expect(opened).toBeVisible({ timeout: 10_000 });
+  await shell.hover();
+  await opened.click();
+  await page.getByPlaceholder('Leave feedback...').fill('Why this name?');
+  const saved = page.waitForResponse((response) => response.url().includes('/guide/annotations') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Add Comment' }).click();
+  expect((await saved).status()).toBe(200);
+
+  // The whole long file is one box, far taller than any screen: the page scrolls, nothing inside it does.
+  const longShell = page.locator('[data-guide-file-shell="src/changed.ts"]');
+  await longShell.scrollIntoViewIfNeeded();
+  const longBox = longShell.locator('[data-guide-code-view-mounted]');
+  await expect(longBox).toHaveAttribute('data-guide-code-view-mounted', 'true');
+  await expect.poll(async () => (await longBox.boundingBox())!.height).toBeGreaterThan(900 * 20);
+  const middle = await longShell.evaluate((el) => {
+    const page = document.querySelector('.ib-gbody')!;
+    page.scrollTop += el.getBoundingClientRect().top - page.getBoundingClientRect().top + 9000;
+    return page.scrollTop;
+  });
+  await page.waitForTimeout(400);
+  expect(await scrollTop()).toBe(middle);
+  const seen = await longShell.evaluate((el) => {
+    const paneTop = document.querySelector('.ib-gbody')!.getBoundingClientRect().top;
+    const within: Element[] = [];
+    const walk = (node: Element | ShadowRoot) => {
+      for (const kid of Array.from(node.children)) {
+        within.push(kid);
+        if (kid.shadowRoot) walk(kid.shadowRoot);
+        walk(kid);
+      }
+    };
+    walk(el);
+    const scrollers = within.filter((kid) => /auto|scroll/.test(getComputedStyle(kid).overflowY) && kid.scrollHeight > kid.clientHeight + 1);
+    const headerEl = within.find((kid) => kid.hasAttribute('data-diffs-header'))!;
+    const header = headerEl.getBoundingClientRect();
+    const rows = within.filter((kid) => kid.hasAttribute('data-column-number')).map((kid) => kid.getBoundingClientRect());
+    return { scrollers: scrollers.length, headerFromTop: Math.round(header.top - paneTop), headerLine: getComputedStyle(headerEl, '::after').height, rows: rows.length, onScreen: rows.filter((r) => r.top >= paneTop && r.bottom <= window.innerHeight).length };
+  });
+  expect(seen.scrollers).toBe(0);
+  expect(seen.headerFromTop).toBe(0);
+  expect(seen.headerLine).toBe('1px');
+  expect(seen.onScreen).toBeGreaterThan(10);
+  // Pierre's own window: only rows near the viewport are drawn.
+  expect(seen.rows).toBeLessThan(900);
+  await page.keyboard.press('Escape');
+});
+
+test('a guided review whose blobs are nowhere: the first click takes the arrows away, and nothing logged', async () => {
+  const { page, claude } = world;
+  const patch = [
+    'diff --git a/src/gone.ts b/src/gone.ts',
+    `index ${'1'.repeat(10)}..${'2'.repeat(10)} 100644`,
+    '--- a/src/gone.ts',
+    '+++ b/src/gone.ts',
+    '@@ -10,3 +10,3 @@',
+    ' keep',
+    '-old',
+    '+new',
+    ' keep',
+    '',
+  ].join('\n');
+  const sent = await claude.submitGuide({
+    project_path: world.ledger,
+    thread: 'gone-blobs',
+    subject: 'Gone blobs',
+    patch,
+    body: 'A file whose blobs this clone does not have.',
+    guide: { title: 'Gone', intent: 'Gone.', sections: [{ title: 'One', overview: 'One.', diffs: [{ file: 'src/gone.ts', summary: 'One edit.' }] }] },
+  } as never);
+  await page.goto(`${world.url}#thread=${sent.thread_id}&guide=${sent.message_id}`);
+  const shell = page.locator('[data-guide-file-shell="src/gone.ts"]');
+  await expect(shell.locator('[data-column-number]').first()).toBeVisible({ timeout: 30_000 });
+  // Whether a blob is there is known only by asking, and nobody asks before an arrow is opened.
+  const answered = page.waitForResponse((response) => response.url().includes('/guide/file'));
+  await shell.locator('[data-expand-button]').first().click();
+  expect((await answered).status()).toBe(200);
+  await expect(shell.locator('[data-expand-button]')).toHaveCount(0);
   await page.keyboard.press('Escape');
 });
 

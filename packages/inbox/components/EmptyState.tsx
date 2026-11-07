@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { InboxAgentId, InboxAgentsModel } from '@plannotator/core/inbox-types';
 import { inboxApi, type ComposeSessionsModel } from '../api';
-import { OTHER_HARNESSES, harnessPanel, hostMcpSnippet, type ConnectContext } from '../harnesses';
+import { CLINE_APPLIES, DSH_APPLIES, OTHER_HARNESSES, harnessPanel, hostMcpSnippet, type ConnectContext } from '../harnesses';
 import { HostMark, Icon } from '../icons';
 import {
   CLAUDE_PLUGIN_INSTALL,
@@ -178,11 +178,11 @@ const APPLIES: Record<PluginHost, string> = {
 export interface EmptyStateProps {
   /** The CLI's command and address, for the MCP lines and the picker. */
   context: ConnectContext | null;
-  /** GET /api/inbox/agents; null while it loads or where it is refused (a page opened over the tailnet). */
+  /** GET /api/inbox/agents; null while it loads or where it is refused (a tailnet guest's page). */
   agents: InboxAgentsModel | null;
   /**
-   * The agents could not be read: `tailnet`, a page opened over the tailnet
-   * (the agents route is local only); `failed`, a read on this computer that
+   * The agents could not be read: `tailnet`, a tailnet guest's page
+   * (the agents route refuses it); `failed`, a read on this computer that
    * did not answer. The screen then offers the commands without this
    * computer's state.
    */
@@ -266,6 +266,11 @@ export function EmptyState({ context, agents, agentsUnavailable, onRetry, sessio
       if (isPluginHost(row.id)) {
         setTurnedOn((current) => new Set([...current, row.id]));
         setSaid(`${row.label}'s Inbox tool is on. ${APPLIES[row.id]}`);
+      } else if (row.id === 'dsh') {
+        setSaid(`${row.label}'s Inbox tool is on. ${DSH_APPLIES}`);
+      } else if (row.id === 'cline') {
+        setTurnedOn((current) => new Set([...current, row.id]));
+        setSaid(`${row.label}'s Inbox tool is on. ${CLINE_APPLIES}`);
       } else {
         setSaid(`${row.label} is connected. Its next session reaches the Inbox.`);
       }

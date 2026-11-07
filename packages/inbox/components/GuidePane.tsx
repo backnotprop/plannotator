@@ -2,8 +2,10 @@
  * A guided review open in the Inbox (the record's 4.2): it takes the window
  * the way an attachment does, under a header naming who sent it, with
  * Plannotator's guide viewer below. The viewer mounts through a dynamic import
- * (React.lazy): in the single-file build its code is inline and its modules
- * run at page load, but nothing of the guide renders until Open. Reviewed
+ * (React.lazy): its code is a chunk the Inbox serves (build/pack-inbox.ts),
+ * loaded on the first Open; when it cannot arrive (the Inbox stopped, or
+ * restarted onto a new release under this page) the pane says so with Reload
+ * (ReaderPart) and the window stays as it is. Reviewed
  * ticks are kept with the thread, on the message in the store, so they
  * survive a reload, another browser and the Inbox moving to another port.
  *
@@ -13,30 +15,46 @@
  * and in the reply's "N annotations", and rides the next Send as the review
  * app's export under "Feedback on the guided review". A resolved thread
  * shows the guide read-only.
+ *
+ * The header carries the diff controls before Close (DiffControls, approval
+ * "diff-controls-headers"): one Split / Unified button, Collapse all and the
+ * "Diff display" gear, shared with code review.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import { parseGuideSnapshot, type GuideSnapshot } from '@plannotator/core/guide-format';
+import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import type { InboxAnnotationRecord, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import type { CodeAnnotation } from '@plannotator/ui/types';
+import type { ShapeReviewAt } from '@plannotator/ui/components/shape/types';
 import { InboxApiError, inboxApi } from '../api';
 import { guideCommentOf } from '../attachments';
 import { agentName, whenTime, plural } from '../format';
 import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
+import { OpenInCodeSpans, OpenInFile } from './OpenIn';
 import { Tip } from './Tip';
+import { DiffControls, nextCollapseAll, type CollapseAllState } from './DiffControls';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
-const GuideReader = lazy(() => import('#guide-reader'));
+const GuideReader = GuideReaderPart.Part;
 
 export interface GuidePaneProps {
   thread: InboxThread;
   message: InboxMessageWire;
+  /** A tailnet guest's page: the expand arrows' route refuses it, so nothing is asked. */
+  guest?: boolean;
   /** Back to the thread. */
   onBack: () => void;
   /** Close the guide and the thread. */
   onClose: () => void;
+  /** Settings → Capabilities → Code review: each diff header offers Open in. */
+  codeReview?: boolean;
+  /** Where to open (a Shape board's link): a file at a line, or a chapter's first file. Then `onLanded`. */
+  at?: ShapeReviewAt | null;
+  onLanded?: () => void;
 }
 
 /**
@@ -50,7 +68,11 @@ export const GUIDE_FOLD_PANEL_BELOW = 1200;
 const NO_BLOCKS: never[] = [];
 const NO_ANNOTATIONS: never[] = [];
 
-export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) {
+/**
+ * A guided review's state in the window, shared by the guide pane and the review (code review in the Inbox): the
+ * snapshot, the reviewed ticks, and the person's comments on its diffs as the store keeps them until a Send.
+ */
+export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
   const [snapshot, setSnapshot] = useState<GuideSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reviewed, setReviewed] = useState<boolean[]>(() => message.guide_reviewed ?? []);
@@ -68,26 +90,6 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
    * back a comment just removed or drop one just saved.
    */
   const localWrites = useRef(0);
-  const [paneRef, folded] = useNarrowerThan<HTMLElement>(GUIDE_FOLD_PANEL_BELOW, false);
-  /** The folded panel, open over the guide. */
-  const [sheet, setSheet] = useState(false);
-  useEffect(() => {
-    if (!folded) setSheet(false);
-  }, [folded]);
-  const sheetButtonRef = useRef<HTMLButtonElement>(null);
-  const sheetId = useId();
-  /** Close the sheet from inside it (its close, Escape): focus goes back to the button that opened it. */
-  const closeSheet = () => {
-    setSheet(false);
-    sheetButtonRef.current?.focus({ preventScroll: true });
-  };
-  // Escape closes the open sheet before it closes the guide (App's handler skips a used Escape).
-  const onSheetKey = (event: React.KeyboardEvent) => {
-    if (event.key === 'Escape' && folded && sheet && !event.defaultPrevented) {
-      event.preventDefault();
-      closeSheet();
-    }
-  };
 
   useEffect(() => {
     let cancelled = false;
@@ -144,16 +146,20 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
   const comments = useMemo(() => records.map(guideCommentOf).filter((c): c is CodeAnnotation => c !== null), [records]);
 
   const save = useCallback(
-    (annotation: CodeAnnotation) => {
+    (annotation: CodeAnnotation): Promise<boolean> => {
       setSaveError(null);
       localWrites.current += 1;
-      inboxApi.saveGuideAnnotation(message.id, annotation).then(
+      return inboxApi.saveGuideAnnotation(message.id, annotation).then(
         (saved) => {
           // Again on the answer: a read that started while the write was in flight may not hold it.
           localWrites.current += 1;
           setRecords((list) => [...list.filter((r) => r.id !== saved.annotation.id), saved.annotation]);
+          return true;
         },
-        (cause: unknown) => setSaveError(cause instanceof InboxApiError ? cause.message : 'The comment was not saved.'),
+        (cause: unknown) => {
+          setSaveError(cause instanceof InboxApiError ? cause.message : 'The comment was not saved.');
+          return false;
+        },
       );
     },
     [message.id],
@@ -179,14 +185,73 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
   };
 
   const readerComments = useMemo(
-    () => (readOnly ? undefined : { annotations: comments, selectedId, onSelect: setSelectedId, onSave: save, onDelete: remove, scrollTarget }),
-    [readOnly, comments, selectedId, save, remove, scrollTarget],
+    () => (readOnly ? undefined : { annotations: comments, selectedId, onSelect: setSelectedId, onSave: save, onDelete: remove, scrollTarget, draftScope: message.id }),
+    [readOnly, comments, selectedId, save, remove, scrollTarget, message.id],
   );
+
+  // The expand arrows' whole files, as the guide's patch names them.
+  const fileContents = useCallback((path: string, signal: AbortSignal) => inboxApi.guideFile(message.id, path, signal), [message.id]);
+  return { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, scrollTarget, readOnly, changeReviewed, save, remove, edit, showComment, readerComments, localWrites, fileContents };
+}
+
+export function GuidePane({ thread, message, onBack, onClose, guest = false, codeReview = false, at = null, onLanded }: GuidePaneProps) {
+  const { snapshot, error, reviewed, saveError, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = useGuideState(thread, message);
+  // A place to open at (a Shape board's link): the file's card, its lines painted; a chapter, at its first file.
+  const [reveal, setReveal] = useState<{ path: string; token: number } | null>(null);
+  const [highlight, setHighlight] = useState<{ path: string; start: number; end: number; token: number } | null>(null);
+  const landed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!at || !snapshot) return;
+    const key = JSON.stringify(at);
+    if (landed.current === key) return;
+    landed.current = key;
+    const path = at.path ?? (at.step ? snapshot.guide.sections[at.step - 1]?.diffs[0]?.file : undefined);
+    if (path) setReveal((was) => ({ path, token: (was?.token ?? 0) + 1 }));
+    if (at.path && at.line) setHighlight((was) => ({ path: at.path!, start: at.line!, end: at.line!, token: (was?.token ?? 0) + 1 }));
+    onLanded?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [at, snapshot]);
+  const fileOpenIn = useCallback((path: string) => <OpenInFile scope={{ thread: thread.thread_id, message: message.id, from: 'root' }} path={path} />, [thread.thread_id, message.id]);
+  const [paneRef, folded] = useNarrowerThan<HTMLElement>(GUIDE_FOLD_PANEL_BELOW, false);
+  /** The folded panel, open over the guide. */
+  const [sheet, setSheet] = useState(false);
+  // The bar's diff controls (DiffControls): Collapse all shows with more than one file, and is this view's only.
+  const fileCount = useMemo(() => (snapshot ? parseDiffToFiles(snapshot.review.rawPatch).length : 0), [snapshot]);
+  const [collapseAll, setCollapseAll] = useState<CollapseAllState | null>(null);
+  useEffect(() => {
+    if (!folded) setSheet(false);
+  }, [folded]);
+  // A global comment chosen in the guide: selected in the panel, and the folded panel opens on it.
+  const readerComments = useMemo(
+    () =>
+      stateComments && {
+        ...stateComments,
+        onShowGlobalComment: (id: string) => {
+          setSelectedId(id);
+          if (folded) setSheet(true);
+        },
+      },
+    [stateComments, setSelectedId, folded],
+  );
+  const sheetButtonRef = useRef<HTMLButtonElement>(null);
+  const sheetId = useId();
+  /** Close the sheet from inside it (its close, Escape): focus goes back to the button that opened it. */
+  const closeSheet = () => {
+    setSheet(false);
+    sheetButtonRef.current?.focus({ preventScroll: true });
+  };
+  // Escape closes the open sheet before it closes the guide (App's handler skips a used Escape).
+  const onSheetKey = (event: React.KeyboardEvent) => {
+    if (event.key === 'Escape' && folded && sheet && !event.defaultPrevented) {
+      event.preventDefault();
+      closeSheet();
+    }
+  };
 
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
+      className={`ib-viewer ib-wlayer${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
       aria-label="Guided review"
       data-guide-message={message.id}
     >
@@ -217,6 +282,7 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
             {comments.length}
           </button>
         )}
+        {snapshot && <DiffControls files={fileCount} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
         <Tip content="Close">
           <button type="button" className="ib-iconbtn" onClick={onClose} aria-label="Close the guided review">
             <Icon name="x" />
@@ -235,9 +301,22 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
               {error}
             </div>
           ) : snapshot ? (
-            <Suspense fallback={null}>
-              <GuideReader snapshot={snapshot} reviewed={reviewed} onReviewedChange={changeReviewed} comments={readerComments} />
-            </Suspense>
+            <ReaderPart diff={snapshot.review.rawPatch}>
+              <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on={codeReview === true}>
+                <GuideReader
+                  snapshot={snapshot}
+                  reviewed={reviewed}
+                  onReviewedChange={changeReviewed}
+                  comments={readerComments}
+                  fileOpenIn={codeReview ? fileOpenIn : undefined}
+                  reveal={reveal}
+                  highlight={highlight}
+                  {...(guest ? {} : { fileContents })}
+                  hostDiffControls
+                  {...(collapseAll ? { collapseAll } : {})}
+                />
+              </OpenInCodeSpans>
+            </ReaderPart>
           ) : null}
         </div>
         <div

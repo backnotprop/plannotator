@@ -1,7 +1,7 @@
 /**
  * Stub pages for apps/hook/dist, for tests that run the CLI from source.
  *
- * The CLI imports apps/hook/dist/{index,review,inbox}.html at module load; a
+ * The CLI imports apps/hook/dist/{index,review,inbox,shape}.html at module load; a
  * checkout that never ran `build:hook` (CI's test job) has none of them. A
  * test writes a stub for each one missing and removes exactly those stubs
  * afterwards: each stub carries a marker, so a real page a build wrote
@@ -10,13 +10,21 @@
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { gunzipSync, gzipSync } from "node:zlib";
 
 export const HOOK_DIST_DIR = resolve(import.meta.dirname, "..", "..", "apps", "hook", "dist");
 
 /** What a stub page holds, marked so `removeStubbedHtml` can tell it from a real build. */
 export const STUB_HTML = "<!doctype html><title>test</title><!-- plannotator test stub: tests/helpers/hook-dist-stub.ts -->";
 
-const PAGES = ["index.html", "review.html", "inbox.html"] as const;
+// shape.html.gz: the Shape page is embedded gzipped (its stub is the stub page, gzipped).
+const PAGES = ["index.html", "review.html", "inbox.html", "shape.html.gz"] as const;
+
+const stubBytes = (path: string): string | Buffer => (path.endsWith(".gz") ? gzipSync(STUB_HTML) : STUB_HTML);
+const isStub = (path: string): boolean => {
+  const bytes = readFileSync(path);
+  return (path.endsWith(".gz") ? gunzipSync(bytes) : bytes).toString("utf8") === STUB_HTML;
+};
 
 /** Write a marked stub for each built page that is missing. Returns what to pass to `removeStubbedHtml`. */
 export function stubHookDistHtml(): string[] {
@@ -26,7 +34,7 @@ export function stubHookDistHtml(): string[] {
     if (existsSync(path)) continue;
     try {
       // `wx`: never over a page that appeared since the check.
-      writeFileSync(path, STUB_HTML, { flag: "wx" });
+      writeFileSync(path, stubBytes(path), { flag: "wx" });
       made.push(path);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
@@ -42,7 +50,7 @@ export function stubHookDistHtml(): string[] {
 export function removeStubbedHtml(paths: readonly string[]): void {
   for (const path of paths) {
     try {
-      if (readFileSync(path, "utf8") === STUB_HTML) rmSync(path, { force: true });
+      if (isStub(path)) rmSync(path, { force: true });
     } catch {
       // Already gone.
     }

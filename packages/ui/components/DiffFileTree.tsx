@@ -11,12 +11,13 @@ export type { DiffFileTreeFile, DiffFileTreeNode, DiffFileTreeStatus } from '../
 export type { DiffFileTreeDefaultExpanded } from '../hooks/useDiffFileTreeExpansion';
 
 /*
- * The diff file tree's presentational parts. Plannotator's code review renders
- * its tree rows from the atoms below (folder row, file-row content, change
- * letter, +/- counts, indentation), adding its review-only decorations
- * (viewed/stage controls, annotation badge, context menu) around them; the
- * `DiffFileTree` component at the bottom is the read-only, embeddable tree a
- * host drops beside its own diff list.
+ * The diff file tree's presentational parts: the atoms below (folder row,
+ * file-row content, change letter, +/- counts, indentation) for a host's own
+ * rows, and the `DiffFileTree` component at the bottom, the read-only,
+ * embeddable tree a host drops beside its own diff list. Plannotator's code
+ * review shares `ChangeTypeLetter` and `diffFileTreeIndent` (its All files
+ * tree) but draws its own Changes rows since its aligned sidebar (see
+ * HANDOFF.md § "Diff file tree").
  */
 
 /** Left padding of a row at `depth` (px). */

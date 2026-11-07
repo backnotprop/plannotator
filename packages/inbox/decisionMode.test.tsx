@@ -83,7 +83,7 @@ async function agentSends(send: Record<string, unknown>): Promise<string> {
 }
 
 /** One seeded world per test (and one to spare): raise it with each test added. */
-const TESTS = 33;
+const TESTS = 34;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -376,6 +376,28 @@ test.skipIf(!hasDom)('walks the queue: Stopped first, a pick saves at once, the 
   expect(replies[0]!.body.words).toBe('');
   expect((await questionsOf(world.decide.b))[0]!.state).toBe('open');
   await until(() => prompt() === 'Ship the new flag off by default?', "Codex's card");
+}, 30_000);
+
+test.skipIf(!hasDom)('words typed in "Your own answer" stay on the card until Answer: one save, however many changes, so no backlog of saves can build here', async () => {
+  const el = await renderApp();
+  await openDecide(el);
+  act(() => (dialog()!.querySelector('[data-decision-other]') as HTMLButtonElement).click());
+  await settle();
+  const field = dialog()!.querySelector('.ib-dm-field textarea') as HTMLTextAreaElement;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  for (let i = 1; i <= 40; i += 1) {
+    act(() => {
+      setter.call(field, `step ${i}`);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+  await settle();
+  const picks = () => posted.filter((p) => p.path.endsWith('/picks'));
+  expect(picks()).toHaveLength(0);
+  act(() => (dialog()!.querySelector('[data-decision-other-answer]') as HTMLButtonElement).click());
+  await until(() => picks().length === 1, 'the save');
+  await until(async () => (await questionsOf(world.decide.a))[0]?.answer?.other === 'step 40', 'the answer saved');
+  expect(picks()).toHaveLength(1);
 }, 30_000);
 
 test.skipIf(!hasDom)('Undo puts the last pick back and returns to its card; Previous goes back a card', async () => {

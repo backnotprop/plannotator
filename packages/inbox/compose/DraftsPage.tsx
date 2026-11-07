@@ -42,17 +42,12 @@ export function DraftsPage({
       <div className="ib-dh">
         <SidebarTrigger />
         <h1 tabIndex={-1}>Drafts</h1>
-        {list.length + replies.length > 0 && <span className="ib-drafts-n">{list.length + replies.length} not sent</span>}
         {phone && (
           <button type="button" className="ib-lhead-compose" aria-label="New message" aria-haspopup="dialog" onClick={(event) => onCompose(event.currentTarget)}>
             <Icon name="compose" size={20} />
           </button>
         )}
       </div>
-      <p className="ib-dsub">
-        {replies.length > 0 ? 'Replies and messages you started but did not send. ' : 'Messages you started but did not send. '}
-        A draft never sends itself: open one{replies.length > 0 ? '' : ', pick a live agent,'} and send it.
-      </p>
       {error && <div className="ib-error">{error}</div>}
       {replies.length > 0 && onOpenReply && (
         <>

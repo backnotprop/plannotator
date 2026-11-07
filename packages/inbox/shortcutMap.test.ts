@@ -4,7 +4,7 @@
  * fails here, and so does a map row naming an action the registry lacks.
  */
 import { expect, test } from 'bun:test';
-import { inboxShortcutRegistry } from './shortcuts';
+import { inboxShortcutRegistry, inboxThreadShortcuts } from './shortcuts';
 import { MAP_COLUMNS } from './shortcuts/map';
 
 const listed = new Set(MAP_COLUMNS.flat().flatMap((group) => group.rows.flatMap((row) => [...row.keys, ...(row.also ?? [])])).map((ref) => `${ref.scope.id}.${ref.action}`));
@@ -21,4 +21,10 @@ test('every map row names an action the registry has, the held ones aside', () =
   expect([...listed].filter((id) => !known.has(id) && !HELD.has(id))).toEqual([]);
   // A held action that lands in the registry comes out of HELD.
   expect([...HELD].filter((id) => known.has(id))).toEqual([]);
+});
+
+test('the legend lists Q (open questions and action items) in the Thread group', () => {
+  const thread = MAP_COLUMNS.flat().find((group) => group.title === 'Thread')!;
+  expect(thread.rows.some((r) => r.keys.some((ref) => ref.action === 'openItems'))).toBe(true);
+  expect(inboxThreadShortcuts.shortcuts.openItems.bindings).toEqual(['Q']);
 });

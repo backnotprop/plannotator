@@ -155,8 +155,8 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 
 function panelSegment(label: string): HTMLButtonElement | undefined {
-  const group = document.querySelector<HTMLElement>('[role="group"][aria-label="Panel view"]');
-  return Array.from(group?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+  const group = document.querySelector<HTMLElement>('[role="tablist"][aria-label="Panel view"]');
+  return Array.from(group?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [])
     .find((el) => el.textContent?.trim() === label);
 }
 

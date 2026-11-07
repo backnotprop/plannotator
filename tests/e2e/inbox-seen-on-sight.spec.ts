@@ -415,8 +415,10 @@ test('phone (WebKit, iPhone 15): an arrival under the annotations sheet is not s
     // At the end of the thread, then the sheet over it.
     const body = page.locator('section.ib-pane .ib-pbody');
     await body.evaluate((b) => (b.scrollTop = b.scrollHeight));
-    await page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ }).tap();
-    await page.locator('section.ib-pane [data-annotations-chip]').tap();
+    await page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).tap();
+    // A phone's foot line ("1 question open · 1 comment") opens its sheet; Review opens the comments (approval "inbox-reply-foot-phone").
+    await page.locator('section.ib-pane [data-foot-summary]').tap();
+    await page.getByRole('dialog', { name: 'Goes with this reply' }).getByRole('button', { name: 'Review comments' }).tap();
     const sheet = page.locator('.ib-annpop');
     await expect(sheet).toBeVisible();
     // Back at the end of the thread, the sheet over it. The window learns it is at the end from the scroll

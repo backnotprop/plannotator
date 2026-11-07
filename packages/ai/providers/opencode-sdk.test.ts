@@ -31,6 +31,8 @@ interface FakeSpawn {
 	port?: number;
 	timeout?: number;
 	closed: boolean;
+	/** The switches process.env held when the SDK was called (it copies process.env into the spawn there). */
+	env: Record<string, string | undefined>;
 }
 
 let spawned: FakeSpawn[] = [];
@@ -45,7 +47,15 @@ mock.module("@opencode-ai/sdk", () => ({
 		timeout?: number;
 	}) => {
 		if (serverError) throw serverError;
-		const record: FakeSpawn = { ...opts, closed: false };
+		const record: FakeSpawn = {
+			...opts,
+			closed: false,
+			env: {
+				PLANNOTATOR_ASK_AI_CHILD: process.env.PLANNOTATOR_ASK_AI_CHILD,
+				PLANNOTATOR_INBOX_TOOL: process.env.PLANNOTATOR_INBOX_TOOL,
+				PLANNOTATOR_AGENT_TOOL: process.env.PLANNOTATOR_AGENT_TOOL,
+			},
+		};
 		spawned.push(record);
 		if (spawnGate) await spawnGate;
 		return {
@@ -105,6 +115,23 @@ describe("OpenCodeProvider server lifecycle", () => {
 		expect(spawned[0]!.closed).toBe(true);
 
 		provider.dispose();
+	});
+
+	test("`opencode serve` starts with Plannotator's integration off, and the host's own env is untouched", async () => {
+		const saved = process.env.PLANNOTATOR_INBOX_TOOL;
+		// The person turned the Inbox tool on for their own sessions.
+		process.env.PLANNOTATOR_INBOX_TOOL = "1";
+		try {
+			const provider = makeProvider();
+			await provider.ensureServer();
+			expect(spawned[0]!.env).toEqual({ PLANNOTATOR_ASK_AI_CHILD: "1", PLANNOTATOR_INBOX_TOOL: "0", PLANNOTATOR_AGENT_TOOL: "0" });
+			expect(process.env.PLANNOTATOR_INBOX_TOOL).toBe("1");
+			expect(process.env.PLANNOTATOR_ASK_AI_CHILD).toBeUndefined();
+			provider.dispose();
+		} finally {
+			if (saved === undefined) delete process.env.PLANNOTATOR_INBOX_TOOL;
+			else process.env.PLANNOTATOR_INBOX_TOOL = saved;
+		}
 	});
 
 	test("honors an explicitly configured port verbatim", async () => {

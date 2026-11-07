@@ -548,7 +548,7 @@ test.skipIf(!hasDom)('the meta line says one time when the thread began and ende
   const thread = seven();
   const at = thread.messages[0]!.created_at;
   const el = await render({ ...thread, messages: thread.messages.map((m) => ({ ...m, created_at: at })) });
-  const span = el.querySelectorAll('[data-thread-meta] > span')[2]!.textContent!;
+  const span = el.querySelectorAll('[data-thread-meta-rest] > span')[2]!.textContent!;
   expect(span).not.toContain(' to ');
   expect(span).toMatch(/\d{1,2}:\d{2} [AP]M$/);
   expect(el.querySelectorAll('button div').length).toBe(0);

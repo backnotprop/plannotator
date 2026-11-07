@@ -33,14 +33,18 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+  INBOX_AGENT_RULES,
+  INBOX_ATTACHMENTS_PICTURES_LINE,
   INBOX_BRIEFING_FROM_NOW_ON,
   INBOX_CHANNEL_RULE,
   INBOX_COMMAND_BRIEFING,
   INBOX_FOLLOW_THROUGH_RULE,
+  INBOX_PICTURES_RULE,
   INBOX_REMINDER_TEXT,
   INBOX_REMINDER_TEXT_NO_WAKE,
   INBOX_REPLY_TO_CHECK,
   INBOX_SUBAGENT_RULE,
+  INBOX_THREAD_RULE,
   INBOX_TOOL_WAKE_NOTE,
   INBOX_USE_RULE,
   inboxAgentTool,
@@ -114,6 +118,7 @@ const SURFACES: Record<string, string> = {
 const SENTENCES = {
   "follow through": INBOX_FOLLOW_THROUGH_RULE,
   "when to use it": INBOX_USE_RULE,
+  "one thread per work stream": INBOX_THREAD_RULE,
   "chat or Inbox": INBOX_CHANNEL_RULE,
   "subagent reports to its agent": INBOX_SUBAGENT_RULE,
   "reply_to check": INBOX_REPLY_TO_CHECK,
@@ -127,6 +132,8 @@ const prose = ["note (opt-in)", "plannotator inbox --help", "plannotator skill"]
 const EXCEPTIONS: Record<Sentence, Record<string, string>> = {
   // No exceptions: every harness and every surface carries the one wording.
   "follow through": {},
+  // The owner's sentence word for word (2026-10-29): every surface, no exceptions.
+  "one thread per work stream": {},
   "when to use it": Object.fromEntries([
     ...reminders.map((s) => [s, "one line in the chat: words it as 'when you finish long work, or need a decision'"]),
     ...prose.map((s) => [s, "prose guide: expands it"]),
@@ -161,12 +168,14 @@ describe("Inbox guidance parity across harnesses", () => {
     });
   }
 
-  test("the follow-through rule appears once per surface (never stated twice)", () => {
-    for (const [surface, text] of Object.entries(SURFACES)) expect([surface, text.split(INBOX_FOLLOW_THROUGH_RULE).length - 1]).toEqual([surface, 1]);
+  test("the follow-through and work-stream rules appear once per surface (never stated twice)", () => {
+    for (const rule of [INBOX_FOLLOW_THROUGH_RULE, INBOX_THREAD_RULE]) {
+      for (const [surface, text] of Object.entries(SURFACES)) expect([surface, text.split(rule).length - 1]).toEqual([surface, 1]);
+    }
   });
 
   test("the agent tool and the MCP instructions carry the same rules in the same order", () => {
-    const rules = `${INBOX_USE_RULE} ${INBOX_CHANNEL_RULE} ${INBOX_FOLLOW_THROUGH_RULE} ${INBOX_SUBAGENT_RULE}`;
+    const rules = `${INBOX_USE_RULE} ${INBOX_THREAD_RULE} ${INBOX_CHANNEL_RULE} ${INBOX_FOLLOW_THROUGH_RULE} ${INBOX_SUBAGENT_RULE}`;
     expect(SURFACES["tool: Pi, OpenCode 2 (wake)"]).toContain(rules);
     expect(SURFACES["MCP instructions: Codex, Gemini, Cursor, Grok, MCP clients"]).toContain(rules);
   });
@@ -180,7 +189,7 @@ describe("Inbox guidance parity across harnesses", () => {
     // The tool: OpenCode 1 lacks only the wake note.
     expect(SURFACES["tool: OpenCode 1 (no wake)"]).toBe(SURFACES["tool: Pi, OpenCode 2 (wake)"].replace(`\n\n${INBOX_TOOL_WAKE_NOTE}`, ""));
     // The reminder: one sentence each.
-    expect(INBOX_REMINDER_TEXT_NO_WAKE).toBe(INBOX_REMINDER_TEXT.replace("Their reply comes back here.", "Call wait_for_reply when you need their answer."));
+    expect(INBOX_REMINDER_TEXT_NO_WAKE).toBe(INBOX_REMINDER_TEXT.replace("Their reply comes back here.", "Their reply does not come back here by itself: read the thread later with read_thread."));
   });
 
   test("the reminder's shortened chat-or-Inbox sentence is the channel rule's first sentence, said in the chat", () => {
@@ -191,9 +200,34 @@ describe("Inbox guidance parity across harnesses", () => {
   test("in the reminder, the follow-through rule follows the send, before anything about the chat", () => {
     for (const surface of reminders) {
       const text = SURFACES[surface]!;
-      expect(text).toContain(`send_message and keep going. ${INBOX_FOLLOW_THROUGH_RULE}`);
+      expect(text).toContain(`and keep going. ${INBOX_FOLLOW_THROUGH_RULE}`);
+      // Decisions reach the Inbox as question blocks, so every surface's reminder names the block.
+      expect(text.slice(0, text.indexOf("and keep going."))).toContain("`:::question` block");
       expect(text.indexOf(INBOX_FOLLOW_THROUGH_RULE)).toBeLessThan(text.indexOf("when the person writes here"));
     }
+  });
+
+  test("the texts Claude Code cuts at 2,048 characters fit whole with every rule in them", () => {
+    // Fitting by dropping a rule would pass a bare length check: each must carry INBOX_AGENT_RULES and still fit.
+    const capped = {
+      "tool: Claude Code (mod copy, bundled list)": modAgentTool(INBOX_DEFAULT_TOOLS)!.description,
+      "tool: Pi, OpenCode 2 (wake)": inboxAgentTool(INBOX_DEFAULT_TOOLS)!.description,
+      "tool: OpenCode 1 (no wake)": inboxAgentTool(INBOX_DEFAULT_TOOLS, { wakes: false })!.description,
+      "MCP instructions": INBOX_MCP_INSTRUCTIONS,
+    };
+    for (const [surface, text] of Object.entries(capped)) {
+      expect([surface, text.includes(INBOX_AGENT_RULES)]).toEqual([surface, true]);
+      expect([surface, text.length < 2048]).toEqual([surface, true]);
+    }
+  });
+
+  test("snooze_thread adds no word to the tool's description: its name in `action` and its field carry it", () => {
+    const tool = inboxAgentTool(INBOX_DEFAULT_TOOLS)!;
+    expect(tool.description).not.toMatch(/snooz/i);
+    const properties = tool.inputSchema.properties as Record<string, { enum?: string[]; description?: string }>;
+    expect(properties.action!.enum).toContain("snooze_thread");
+    expect(properties.until!.description).toStartWith("(snooze_thread) Only if the person asks");
+    expect(properties.thread_id!.description).toContain("snooze_thread");
   });
 
   test("no surface bans progress: the follow-through rule asks for updates the person would want", () => {
@@ -229,6 +263,27 @@ describe("Inbox guidance parity across harnesses", () => {
     expect(readFileSync(join(root, "apps/droid-plugin/commands/plannotator-inbox.js"), "utf8")).toContain('runPlannotator(["inbox", "--open"]');
     for (const surface of inboxCommandTurns) {
       expect([surface, INBOX_COMMANDS[surface]!.includes("This command starts no new work and resumes none: do anything else the person asked in the same message, otherwise stop there.")]).toEqual([surface, true]);
+    }
+  });
+
+  test("pictures sit where they are discussed: every body and attachments description says so, and none still sends pictures to attachments", () => {
+    // The owner, 2026-11-02: option pictures sent as attachments sat at the bottom, away from the words about them.
+    const send = INBOX_DEFAULT_TOOLS.find((tool) => tool.name === "send_message")!;
+    const mcpFields = send.inputSchema.properties as Record<string, { description?: string }>;
+    const fields: Record<string, { body: string; attachments: string }> = {
+      "tool: Claude Code, Pi, OpenCode": (() => {
+        const fields = (inboxAgentTool(INBOX_DEFAULT_TOOLS)!.inputSchema.properties ?? {}) as Record<string, { description?: string }>;
+        return { body: fields.body!.description!, attachments: fields.attachments!.description! };
+      })(),
+      "MCP send_message (Codex, Gemini, Cursor, MCP clients)": { body: mcpFields.body!.description!, attachments: mcpFields.attachments!.description! },
+      "plannotator inbox --help": { body: SURFACES["plannotator inbox --help"]!, attachments: SURFACES["plannotator inbox --help"]! },
+    };
+    for (const [surface, { body, attachments }] of Object.entries(fields)) {
+      expect([surface, body.includes(INBOX_PICTURES_RULE)]).toEqual([surface, true]);
+      expect([surface, attachments.includes(INBOX_ATTACHMENTS_PICTURES_LINE)]).toEqual([surface, true]);
+    }
+    for (const [surface, text] of Object.entries(SURFACES)) {
+      expect([surface, /screenshot or image usually reads fastest|short summary, files in `attachments`|put the files to read in `attachments`/.test(text)]).toEqual([surface, false]);
     }
   });
 

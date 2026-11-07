@@ -119,12 +119,18 @@ async function newWorld(browser: Browser, options: { updatedFrom?: string } = {}
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(home);
   // An Inbox that ran before on an older version: this run is an update.
-  if (options.updatedFrom) writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ inboxVersion: options.updatedFrom }));
+  if (options.updatedFrom) {
+    writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ inboxVersion: options.updatedFrom }));
+    // Due on a used Inbox, and its check would run the `codex` on this PATH.
+    writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxVoiceIntro: { shownAt: '2026-10-01T10:00:00.000Z' } }));
+  }
   const env = {
     PATH: `${trapDir}:${process.env.PATH ?? ''}`,
     HOME: home,
     TMPDIR: tmpdir(),
     PLANNOTATOR_DATA_DIR: dataDir,
+    // A release version: never the live daily ping (packages/shared/daily-ping.ts).
+    NO_ANON_PING: '1',
     PLANNOTATOR_UPDATE_CHECK: '0',
     PLANNOTATOR_UPDATE_API_URL: 'http://127.0.0.1:9/releases/latest',
     PLANNOTATOR_FEEDBACK_URL: 'http://127.0.0.1:9/feedback',

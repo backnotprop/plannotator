@@ -39,6 +39,13 @@ export interface InboxDevice {
   revoked_at: string | null;
   /** The relay carries this phone's items and pushes (section 4); true at pairing. */
   carriage: boolean;
+  /**
+   * A linked machine unlinked here while it could not be told
+   * (docs/agent-guides/inbox-machines.md): until this time, or until its
+   * revoked token has been refused once, the tailnet door stays published so
+   * its next contact hears `device_revoked`. Absent otherwise.
+   */
+  refusal_owed_until?: string;
 }
 
 /** A device as the routes answer it: everything but the token's hash. */
@@ -195,6 +202,25 @@ export class InboxDevices {
     rmSync(join(this.secretsDir, id), { force: true });
     if (device.revoked_at !== null) return device;
     return this.write({ ...device, revoked_at: at }, at);
+  }
+
+  /**
+   * Keep (an ISO time) or settle (null) the refusal a revoked machine is
+   * owed (`refusal_owed_until`). Setting what is already there writes nothing.
+   */
+  oweRefusal(id: string, until: string | null, at: string): InboxDevice | null {
+    const device = this.devices.get(id);
+    if (!device) return null;
+    if ((device.refusal_owed_until ?? null) === until) return device;
+    const { refusal_owed_until: _settled, ...rest } = device;
+    return this.write(until ? { ...rest, refusal_owed_until: until } : rest, at);
+  }
+
+  /** Revoked devices still owed their refusal at `nowMs`, the soonest limit first. */
+  owedRefusals(nowMs: number): InboxDevice[] {
+    return [...this.devices.values()]
+      .filter((d) => d.revoked_at !== null && typeof d.refusal_owed_until === "string" && Date.parse(d.refusal_owed_until) > nowMs)
+      .sort((a, b) => Date.parse(a.refusal_owed_until!) - Date.parse(b.refusal_owed_until!));
   }
 
   /** The device's pairing secret (base64url), for its relay keys; null once revoked. */

@@ -4,10 +4,10 @@
  * row, and the link it copies. Pure.
  */
 
-import type { InboxListRow, InboxSectionId } from '@plannotator/core/inbox-types';
-import { canToggleRead, offersRowMarkRead } from './markRead';
+import { inboxRowArchived, type InboxListGroupId, type InboxListRow } from '@plannotator/core/inbox-types';
+import { canMarkUnread, canToggleRead, offersRowMarkRead } from './markRead';
 
-export type RowMenuAction = 'pin' | 'unpin' | 'copy-thread' | 'copy-link' | 'copy-id' | 'read' | 'unread' | 'archive';
+export type RowMenuAction = 'pin' | 'unpin' | 'copy-thread' | 'copy-link' | 'copy-id' | 'snooze' | 'unsnooze' | 'read' | 'mark-unread' | 'unread' | 'archive';
 
 /**
  * The thread's address: the Inbox's one address on this computer
@@ -30,20 +30,25 @@ export function threadLink(threadId: string, base: { url?: string | null; via?: 
  * What the menu offers for a row, in order. Pin thread (Unpin thread on a
  * pinned row) first, in its own group, when the Inbox keeps pins (`pinned`
  * is null on an older one: no item); then Copy thread (its Markdown,
- * copyMarkdown.ts), Copy link and Copy thread ID always; then Mark read where the row's hover action offers it, or Move
- * back on a row marked read; then Archive on a row not archived already (a
+ * copyMarkdown.ts), Copy link and Copy thread ID always; then Mark read where the row's hover action offers it,
+ * and Mark unread on a read row an agent wrote last in (`canMarkUnread`), and Move back whenever a Mark read stands,
+ * next to Mark unread, since only Move back reopens what that Mark read closed; then Archive on a row not archived already (a
  * row shown archived in place, or one that came back from the archive,
  * which Mark read sends back there). `drawn`: the group the row sits in on
  * screen (a seen update the list still holds in New keeps Mark read).
+ * `canSnooze` (an Inbox that keeps snoozes, approval "inbox-snooze"): Snooze
+ * leads the writes on a thread not archived, with Unsnooze on a snoozed one.
  */
-export function rowMenuActions(row: InboxListRow, canMarkRead: boolean, pinned: boolean | null = null, drawn: InboxSectionId | null = null): RowMenuAction[] {
+export function rowMenuActions(row: InboxListRow, canMarkRead: boolean, pinned: boolean | null = null, drawn: InboxListGroupId | null = null, canSnooze = false): RowMenuAction[] {
   const actions: RowMenuAction[] = [];
   if (pinned !== null) actions.push(pinned ? 'unpin' : 'pin');
   actions.push('copy-thread', 'copy-link', 'copy-id');
+  if (canSnooze && !inboxRowArchived(row)) actions.push(...(row.snoozed ? (['snooze', 'unsnooze'] as const) : (['snooze'] as const)));
   if (canMarkRead) {
-    const read = (row.read_at ?? null) !== null;
-    if (read && canToggleRead(row)) actions.push('unread');
-    else if (!read && offersRowMarkRead(row, drawn)) actions.push('read');
+    if (offersRowMarkRead(row, drawn)) actions.push('read');
+    // A seen update the list still holds in New takes both: Mark read moves it to Quiet, Mark unread bolds it again.
+    if (canMarkUnread(row)) actions.push('mark-unread');
+    if ((row.read_at ?? null) !== null && canToggleRead(row)) actions.push('unread');
   }
   if (row.resolved_at === null) actions.push('archive');
   return actions;

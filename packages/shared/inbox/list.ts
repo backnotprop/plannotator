@@ -86,6 +86,8 @@ export { inboxHasUnsent };
 export function inboxSectionOf(row: InboxSectionFacts): InboxSectionId {
   if (row.resolved_at !== null && row.back_from_archive !== true) return "quiet";
   const unsent = inboxHasUnsent(row.unsent);
+  // Mark unread took the look back from a Mark read that still stands (store.markUnread): its news is new again.
+  if (row.read_at != null && row.unseen > 0) return "new";
   // Re-ask first: while its note waits on the agent, unsent work never moves the row (approval "inbox-reask").
   if (row.read_at != null) return unsent && row.reask_pending !== true ? "new" : "quiet";
   // The person's Re-ask note is the last message: it waits on the agent (approval "inbox-reask").

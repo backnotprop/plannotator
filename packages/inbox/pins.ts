@@ -10,6 +10,7 @@
 
 import { INBOX_SECTIONS, inboxRowArchived, type InboxListRow } from '@plannotator/core/inbox-types';
 import { waitCount } from './format';
+import { threadChipName } from './threadChip';
 
 /** What a pinned row's state signal is (Count): a pill, a count, a dot, or nothing. */
 export type PinnedStateKind = 'stop' | 'hold' | 'wait' | 'new' | 'sent' | 'quiet' | 'archived';
@@ -48,9 +49,26 @@ export function pinnedState(row: InboxListRow): PinnedState {
   }
 }
 
-/** A pinned row's name: "subject, project, state" ("Board step 2: names, plannotator, 3 questions"). */
-export function pinnedRowName(row: InboxListRow): string {
-  return `${row.subject ?? '(no subject)'}, ${row.project.name}, ${pinnedState(row).words}`;
+/**
+ * What a pinned row calls its thread: the thread's name when it has one (by the
+ * list's own rule, `threadChipName`: not when the subject already starts with
+ * it), else the subject.
+ */
+export function pinnedLabel(row: InboxListRow): string {
+  const subject = row.subject ?? '(no subject)';
+  return (row.thread_name?.trim() ? threadChipName(row.thread_name, subject) : null) ?? subject;
+}
+
+/**
+ * A pinned row's name: "label, project, state" ("Board names, plannotator, 3 questions"),
+ * or "label, subject, project, state" when the label is the thread's name and
+ * the subject says something else. `project`: the sidebar's name for it
+ * (shortProjectNames); absent, the server's.
+ */
+export function pinnedRowName(row: InboxListRow, project: string = row.project.name): string {
+  const label = pinnedLabel(row);
+  const subject = row.subject ?? '(no subject)';
+  return `${label}, ${label === subject ? '' : `${subject}, `}${project}, ${pinnedState(row).words}`;
 }
 
 /** The pins' order after moving one up (-1) or down (+1); unchanged at an end or for a thread not pinned. */

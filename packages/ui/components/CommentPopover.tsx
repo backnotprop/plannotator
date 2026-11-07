@@ -96,6 +96,13 @@ interface CommentPopoverProps {
   onAskAI?: CommentAskAIHandler;
   askAIContext?: CommentAskAIContext;
   askAIDisabled?: boolean;
+  /** Opt-in: the primary action's label (Shape: "Change it"). Absent → "Add" / "Save", as always. */
+  submitLabel?: string;
+  /** Opt-in: the Ask AI action's label (Shape: "Ask"). Absent → "Ask AI", as always. */
+  askAILabel?: string;
+  /** Opt-in: more actions, drawn after the main one in this order (the right end; Tab reaches them last), each taking
+   *  whatever is typed (Shape's box: "Show me", "Add to reply"). Absent or empty → nothing drawn. */
+  extraActions?: readonly { label: string; onSelect: (text: string) => void; /** It takes the words for good: the `draftKey` draft is cleared, as a submit clears it. */ spends?: boolean }[];
   /** Opt-in: `/` and `$` skill-reference autocomplete (document UI surfaces). Off by default. */
   skillReferences?: boolean;
   /**
@@ -124,6 +131,9 @@ interface CommentPopoverProps {
   /** Opt-in: the header's text in place of the quoted `contextText` (an image
    *  region's "Region 3 · 356 × 486 px"). Absent → the quote, as always. */
   headerText?: string;
+  /** Opt-in: why the last submit failed (Shape: a Change it that did not reach the server), shown under the
+   *  header with `role="alert"` while the person's words stay in the box. Absent → nothing, as always. */
+  errorText?: string;
   /** Opt-in: `side` opens the popover beside the anchor (right, else left),
    *  falling back to below/above when neither side has room (an image region
    *  in the image viewer). Absent → below/above, as always. */
@@ -142,6 +152,15 @@ const GAP = 8;
 
 // Module-level draft store: survives popover unmount so reopening the same key restores in-progress text.
 const draftStore = new Map<string, { text: string; images: ImageAttachment[] }>();
+
+/**
+ * Put words back as the `draftKey` draft after their save failed (the
+ * popover clears the draft on submit), so the next open of that composer
+ * shows them. A draft typed since is newer and is kept.
+ */
+export function restoreCommentDraft(draftKey: string, text: string): void {
+  if (!draftStore.has(draftKey) && text.trim() !== '') draftStore.set(draftKey, { text, images: [] });
+}
 
 /** Mirrors the latest text + images into `draftStore[draftKey]` so they outlive popover unmount. No-op without a key. */
 function useCommentDraftSync(draftKey: string | undefined, text: string, images: ImageAttachment[]) {
@@ -219,6 +238,9 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   onAskAI,
   askAIContext,
   askAIDisabled = false,
+  submitLabel,
+  askAILabel,
+  extraActions,
   skillReferences = false,
   mentionSource,
   targetChips,
@@ -228,6 +250,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   captureStrayKeys = false,
   yieldState,
   headerText,
+  errorText,
   placement = 'below',
   zIndex,
   autoFocus = true,
@@ -530,6 +553,11 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     [mentionSource, mentionChipPeople, mentionTokenClassName],
   );
 
+  const runExtraAction = (action: NonNullable<CommentPopoverProps['extraActions']>[number]) => {
+    if (action.spends && draftKey) draftStore.delete(draftKey);
+    action.onSelect(text.trim());
+  };
+
   const handleSubmit = useCallback(() => {
     const canSubmitEmpty = allowEmptySubmit && initialText.trim().length > 0;
     if (hasUnsavedContent || canSubmitEmpty) {
@@ -621,6 +649,13 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     : contextText
       ? `"${contextText.length > 50 ? contextText.slice(0, 50) + '...' : contextText}"`
       : 'Comment');
+
+  // Inline colour: no new utility class reaches the guides.show viewer CSS this file is scanned into.
+  const errorRow = errorText ? (
+    <p role="alert" data-comment-popover-error="true" className="px-3 pt-2 text-xs" style={{ color: 'var(--destructive)' }}>
+      {errorText}
+    </p>
+  ) : null;
 
   const canSubmit =
     hasUnsavedContent ||
@@ -730,6 +765,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             </div>
           </div>
 
+          {errorRow}
           {chipsRow}
 
           {/* Textarea */}
@@ -776,7 +812,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
                 disabled={!canSubmit}
                 className="px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
               >
-                {isGlobal ? 'Add' : 'Save'}
+                {submitLabel ?? (isGlobal ? 'Add' : 'Save')}
               </button>
               {quickLookGoodButton}
               {onAskAI && (
@@ -787,9 +823,19 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
                   title={canAskAI ? 'Ask AI this question' : 'Type a question to ask AI'}
                 >
                   <SparklesIcon className="w-3 h-3" />
-                  Ask AI
+                  {askAILabel ?? 'Ask AI'}
                 </button>
               )}
+              {extraActions?.map((action, i) => (
+                <button
+                  key={action.label}
+                  onClick={() => runExtraAction(action)}
+                  style={{ order: -1 - i }}
+                  className="px-2 py-1.5 text-xs font-medium rounded-md text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
+                >
+                  {action.label}
+                </button>
+              ))}
             </div>
             <div className="flex items-center gap-2">
               {allowImages && (
@@ -888,6 +934,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
         </div>
       </div>
 
+      {errorRow}
       {chipsRow}
 
       {/* Textarea */}
@@ -932,7 +979,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             disabled={!canSubmit}
             className="px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
           >
-            {isGlobal ? 'Add' : 'Save'}
+            {submitLabel ?? (isGlobal ? 'Add' : 'Save')}
           </button>
           {quickLookGoodButton}
           {onAskAI && (
@@ -943,9 +990,19 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
               title={canAskAI ? 'Ask AI this question' : 'Type a question to ask AI'}
             >
               <SparklesIcon className="w-3 h-3" />
-              Ask AI
+              {askAILabel ?? 'Ask AI'}
             </button>
           )}
+          {extraActions?.map((action, i) => (
+            <button
+              key={action.label}
+              onClick={() => runExtraAction(action)}
+              style={{ order: -1 - i }}
+              className="px-2 py-1.5 text-xs font-medium rounded-md text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
+            >
+              {action.label}
+            </button>
+          ))}
         </div>
         <div className="flex items-center gap-2">
           {allowImages && (

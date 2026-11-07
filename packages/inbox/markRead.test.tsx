@@ -22,6 +22,7 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { InboxListSection, InboxQuestion } from '@plannotator/core/inbox-types';
+import { resetListGroupsForTests } from './listGroups';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
@@ -144,6 +145,8 @@ afterEach(() => {
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
+  // Which groups are closed is kept for the page (listGroups.ts): each test starts with Quiet and Snoozed closed.
+  resetListGroupsForTests();
   root = null;
   host = null;
   globalThis.fetch = savedFetch;
@@ -283,13 +286,13 @@ test.skipIf(!hasDom)('E marks the open thread read; a stopped thread warns with 
   const head = () => el.querySelector('[data-mark-read]') as HTMLButtonElement;
   expect(head().getAttribute('aria-pressed')).toBe('false');
   expect(head().disabled).toBe(false);
-  expect(head().textContent).toContain('Mark read');
+  expect(head().getAttribute('aria-label')).toBe('Mark read');
 
   press('e');
   await until(() => head().getAttribute('aria-pressed') === 'true', 'the pressed button');
   expect(posted.at(-1)!.path).toBe(`/api/inbox/threads/${ids.stopped}/read`);
   expect(head().getAttribute('aria-pressed')).toBe('true');
-  expect(head().textContent).toContain('Read');
+  expect(head().getAttribute('aria-label')).toBe('Read');
   expect(el.querySelector('[data-read-line]')?.textContent).toContain('2 questions were closed unanswered');
   const toast = document.querySelector('[data-inbox-toast]') as HTMLElement;
   expect(toast.querySelector('.ib-tlead')?.textContent).toBe('Marked read');
@@ -319,7 +322,7 @@ test.skipIf(!hasDom)('E marks the open thread read; a stopped thread warns with 
   expect((await questionStates(ids.stopped)).map((q) => q.state)).toEqual(['open', 'open']);
 });
 
-test.skipIf(!hasDom)('the header leads with Mark read; Archive, then ⋯ More, sit beside the close at the right, only the hairline before it', async () => {
+test.skipIf(!hasDom)('the header leads with full screen, then Mark read; ⋯ More (which holds Archive) sits beside the close at the right, only the hairline before it', async () => {
   // Owner, 2026-10-16: "the archive button needs to move next to the close button. Mark read should be the furthest."
   // The hairline is approval "inbox-thread-artifacts" (2026-10-23): icons at the right, then | and the close.
   // ⋯ More (the copy menu) after Archive is design record "inbox-copy-message", option B (2026-10-28).
@@ -328,22 +331,24 @@ test.skipIf(!hasDom)('the header leads with Mark read; Archive, then ⋯ More, s
   const head = el.querySelector('section.ib-pane .ib-phead')!;
   const buttons = [...head.querySelectorAll('button')];
   const markRead = head.querySelector('[data-mark-read]')!;
-  const archive = head.querySelector('[data-archive]')!;
   const more = head.querySelector('[data-thread-more]')!;
   const close = head.querySelector('button[aria-label="Close the thread"]');
-  // DOM order is the tab order: Mark read first, Archive, ⋯ More, then the close last.
-  expect(buttons[0]).toBe(markRead as HTMLButtonElement);
-  expect(archive.nextElementSibling === more).toBe(true);
-  if (close) {
-    expect(buttons.at(-1) === close).toBe(true);
-    expect(more.nextElementSibling?.className).toBe('ib-vsep');
-    expect(more.nextElementSibling?.nextElementSibling === close).toBe(true);
-    expect(head.querySelectorAll('.ib-vsep').length).toBe(1);
-  } else {
-    expect(buttons.at(-1) === more).toBe(true);
-    expect(head.querySelectorAll('.ib-vsep').length).toBe(0);
-  }
-  expect(archive.getAttribute('aria-label')).toBe('Archive the thread');
+  // DOM order is the tab order. A desktop beside the list: the thread's full-screen button leads (approval
+  // "inbox-files-tabs", amendment 2026-10-30, B), then its hairline and Mark read; Archive, ⋯ More, the hairline, then
+  // the close last. Node identity as a boolean: a failing toBe on happy-dom nodes runs out of memory.
+  const full = head.querySelector('[data-full-in]');
+  expect(full !== null).toBe(true);
+  expect(buttons[0] === full).toBe(true);
+  expect(full!.getAttribute('aria-label')).toBe('Hide the sidebar and the list');
+  expect(full!.nextElementSibling?.className).toBe('ib-vsep');
+  expect(buttons[1] === markRead).toBe(true);
+  expect(head.querySelector('[data-archive]')).toBeNull();
+  expect(more.previousElementSibling?.getAttribute('aria-label')).not.toBe('Archive the thread');
+  expect(close !== null).toBe(true);
+  expect(buttons.at(-1) === close).toBe(true);
+  expect(more.nextElementSibling?.className).toBe('ib-vsep');
+  expect(more.nextElementSibling?.nextElementSibling === close).toBe(true);
+  expect(head.querySelectorAll('.ib-vsep').length).toBe(2);
 });
 
 test.skipIf(!hasDom)('the pressed button moves it back; the toast Undo does the same', async () => {
@@ -384,20 +389,29 @@ test.skipIf(!hasDom)("the toast's × closes it early and drops its Undo: Z no lo
   expect(await serverSection(ids.stopped)).toBe('quiet');
 });
 
-test.skipIf(!hasDom)('the row hover action marks read without opening the thread; the Quiet row says Read', async () => {
+test.skipIf(!hasDom)('the row hover action marks read without opening the thread, in place; after a tidy the Quiet row says Read', async () => {
   const el = await renderApp(`#project=${ids.project}`);
   const action = el.querySelector(`[data-row="${ids.waiting}"] [data-row-mark-read]`) as HTMLButtonElement;
   expect(action.textContent).toContain('Mark read');
+  const subject = action.getAttribute('aria-label')!.replace(/^Mark read: /, '');
   act(() => action.click());
   await until(() => document.querySelector('[data-inbox-toast]') !== null, 'the toast');
   expect(window.location.hash).toBe(`#project=${ids.project}`);
-  // The row left Waiting for Quiet, which is folded.
-  expect(sectionOfRow(el, ids.waiting)).toBeNull();
-  expect(el.querySelector('[data-section-id="quiet"] .ib-n')?.textContent).toBe('1');
-  // A plain toast: no warning, no Reply.
+  // The list holds still (approval "inbox-list-view", R7): the row stays in Waiting, not bold, Quiet as it was.
+  await until(() => el.querySelector(`[data-row="${ids.waiting}"] [data-row-mark-unread]`) !== null || el.querySelector(`[data-row="${ids.waiting}"] [data-thread-id]:not(.ib-u)`) !== null, 'the row read in place');
+  expect(sectionOfRow(el, ids.waiting)).toBe('waiting');
+  expect(el.querySelector(`[data-row="${ids.waiting}"] [data-thread-id]`)!.classList.contains('ib-u')).toBe(false);
+  expect(el.querySelector('[data-section-id="quiet"]')).toBeNull();
+  // A plain toast that names the row, which has not moved: no warning, no Reply.
   const toast = document.querySelector('[data-inbox-toast]') as HTMLElement;
-  expect(toast.textContent).toContain('Moved to Quiet');
+  expect(toast.querySelector('.ib-tlead')?.textContent).toBe('Marked read');
+  expect(toast.textContent).toContain(subject);
+  expect(toast.textContent).not.toContain('Moved to Quiet');
   expect(toast.querySelector('[data-toast-reply]')).toBeNull();
+  // The tidy (the list's title refreshes it): the row takes its place in folded Quiet.
+  act(() => (el.querySelector('[data-list-refresh]') as HTMLButtonElement).click());
+  await until(() => el.querySelector('[data-section-id="quiet"] .ib-n')?.textContent === '1', 'the row in Quiet');
+  expect(sectionOfRow(el, ids.waiting)).toBeNull();
   // Quiet is folded: open it, and the row says why it is there, with no action of its own.
   act(() => (el.querySelector('[data-section-id="quiet"] .ib-band') as HTMLButtonElement).click());
   expect(el.querySelector(`[data-row="${ids.waiting}"] .ib-c .ib-cs`)?.textContent).toBe('Read');

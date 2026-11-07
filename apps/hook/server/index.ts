@@ -83,7 +83,7 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
-import { childEnv } from "@plannotator/shared/child-env";
+import { childEnv, isAskAiChild } from "@plannotator/shared/child-env";
 import {
   startPlannotatorServer as startPlannotatorServerUnguarded,
   handleServerReady,
@@ -98,6 +98,7 @@ import { runGuideCli } from "@plannotator/server/guide-cli";
 import { runUpdateCommand } from "./update-command";
 import { runUpdatePrepareCommand } from "@plannotator/server/update-prepare";
 import { takeUpdateHint } from "@plannotator/shared/update-check";
+import { cliDailyPingTool, scheduleDailyPing } from "@plannotator/shared/daily-ping";
 import {
   startAnnotateServer as startAnnotateServerUnguarded,
   handleAnnotateServerReady,
@@ -108,7 +109,7 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, resolveAIEnabled, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
+import { loadConfig, resolveAIEnabled, resolvePlanReview, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
 import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
@@ -135,7 +136,7 @@ import { parsePRUrl, checkPRAuth, fetchPR, type PRAuthResult, getCliName, getCli
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
 import { announceTailscaleSession, enableTailscaleServe } from "@plannotator/server/tailscale-serve";
 import { takeEnvPullSessionBridgeConfig } from "@plannotator/server/ai-runtime";
-import { readTailnetOwner, setSessionTailnetOwner, setSessionTailnetServedUrl } from "@plannotator/server/session-tailnet";
+import { readTailnetOwners, setSessionTailnetOwners, setSessionTailnetServedUrl } from "@plannotator/server/session-tailnet";
 import { scrubModSessionEnv } from "./mod-session-env";
 import { resolveAnnotateTarget } from "./annotate-resolution";
 import { annotateDecisionTarget, reviewDecisionTarget, takeHostReviewId, targetText } from "./decision-target";
@@ -171,7 +172,7 @@ import {
 import { buildReviewOutput, supportsReviewApprovalNotes } from "./review-output";
 import { registerSession, unregisterSession, listSessions, listInProcessSessions, type SessionInfo } from "@plannotator/server/sessions";
 import { enableAutoUpdateNotice, isManagedBinary, scheduleAutoUpdateCheck } from "@plannotator/server/auto-update";
-import { openBrowser } from "@plannotator/server/browser";
+import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { inlineHtmlLocalAssets } from "@plannotator/server/html-assets";
 import { installAgentTerminalRuntime } from "@plannotator/server/agent-terminal-runtime";
 import { installCallFlowRuntime } from "@plannotator/shared/call-flow";
@@ -220,6 +221,7 @@ import { isQwenPlanPermissionRequest, qwenPlanFromEvent, qwenPlanHookOutput } fr
 import { resolveClaudePlan } from "./claude-plan";
 import { takeModPlanApproval } from "./mod-plan-approval";
 import {
+  DATA_DIR_COMMAND_USAGE,
   formatInteractiveNoArgClarification,
   formatSubcommandHelp,
   formatTopLevelHelp,
@@ -230,17 +232,29 @@ import {
   isTopLevelHelpInvocation,
   isVersionInvocation,
   parseStrictAnnotateOptions,
+  parseTitleOption,
   isUninstallConfirmationAccepted,
   parseUninstallOptions,
+  hasHelpFlag,
 } from "./cli";
 import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
 import { ensureInboxRunning, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
 import { runCardCommand } from "./card-command";
+import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT } from "./shape-command";
+// @ts-expect-error a text import of the optional helper file
+import SHAPE_KIT from "@plannotator/core/shape-kit.mjs" with { type: "text" };
+import { shapeBoardsOn } from "@plannotator/shared/shape/switch";
+import { isReviewDrawCommand } from "./review-draw-command";
+import { INBOX_REVIEW_DRAW_GONE } from "@plannotator/core/inbox-review";
+import { runShapeOpen, runShapeServe } from "./shape-open";
+import { runInboxCallCommand } from "./inbox-call-command";
+import { runInboxStepsCommand } from "./inbox-steps-command";
 import { runFeedbackCommand } from "./feedback-command";
 import { formatInboxHelp } from "./inbox-help";
+import { writeWholeToStdout } from "./write-whole-stdout";
 import { INBOX_CARD_ACTION_ON } from "@plannotator/core/inbox-types";
-import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { getPlannotatorDataDir, getUnusedPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { isAgentSdkEntrypoint } from "@plannotator/shared/t3-hook-command";
 import {
   annotateStartupFailureExitCode,
@@ -273,6 +287,10 @@ import planHtmlPath from "../dist/index.html" with { type: "file" };
 import reviewHtmlPath from "../dist/review.html" with { type: "file" };
 // @ts-ignore - Bun import attribute for file
 import inboxHtmlPath from "../dist/inbox.html" with { type: "file" };
+// The Shape page is embedded gzipped (about 3 MB instead of 13 MB; scripts/gzip-page.ts at build): the Shapes
+// server sends these bytes as they are to a browser that takes gzip, and unzips them once for one that does not.
+// @ts-ignore - Bun import attribute for file
+import shapeHtmlGzPath from "../dist/shape.html.gz" with { type: "file" };
 
 function embeddedPage(path: unknown): () => string {
   let html: string | undefined;
@@ -281,6 +299,8 @@ function embeddedPage(path: unknown): () => string {
 const planHtmlContent = embeddedPage(planHtmlPath);
 const reviewHtmlContent = embeddedPage(reviewHtmlPath);
 const inboxHtmlContent = embeddedPage(inboxHtmlPath);
+let shapeHtmlGz: Buffer | undefined;
+const shapeHtmlGzip = () => (shapeHtmlGz ??= readFileSync(shapeHtmlGzPath as unknown as string));
 
 // Code review's diagram engine: embedded too, read on first need.
 import { loadEmbeddedDiagramEngine } from "./diagram-engine";
@@ -325,6 +345,107 @@ const rawArgs = process.argv.slice(2);
         cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
         env: process.env,
         ensureRunning: () => ensureInboxRunning(cardDataDir),
+      }),
+    );
+  }
+}
+// `plannotator review draw …` / `plannotator review drawings <msg_id>`: Show me makes a Shape now, so an older
+// agent that still calls them is told where to go. Before the review parse, which would take `draw` for a ref. Only
+// while the person has Code review on, and only arguments of the old command's own shape: otherwise (off included)
+// the review parse takes them. Read quietly: a broken config.json is Code review off, and the parse warns once.
+if (isReviewDrawCommand(rawArgs, () => loadConfig({ quiet: true }).inboxCodeReview === true)) {
+  process.stderr.write(`${INBOX_REVIEW_DRAW_GONE}\n`);
+  process.exit(1);
+}
+// `plannotator shape …`: an agent's side of Shape (shape-command.ts; unreleased,
+// HIDDEN_SUBCOMMANDS). It reads and writes the Shape store directly. Before the
+// strict-annotate parse, which takes `--file`-style flags for itself.
+{
+  const args = rawArgs;
+  // Off unless the person turned Shape on, or Code review, whose Show me makes a board (Settings → Capabilities):
+  // no command and no help, so an agent learns nothing of it (the same switches hide the Pebble and the routes).
+  // `shape on|off` is the switch itself, so it runs either way (`on --help` still gets the off line).
+  if (args[0] === "shape" && (args[1] === "on" || args[1] === "off") && !hasHelpFlag(args.slice(2))) {
+    process.exit(runShapeSwitch(args.slice(1)));
+  }
+  if (args[0] === "shape" && !shapeBoardsOn({ quiet: false })) {
+    process.stderr.write(`${SHAPE_OFF_TEXT}\n`);
+    process.exit(1);
+  }
+  if (args[0] === "shape" && args[1] === "kit") {
+    await writeWholeToStdout(SHAPE_KIT);
+    process.exit(0);
+  }
+  // `shape open`: the Shape page without the Inbox (shape-open.ts); `shape serve` is its detached server.
+  // Bare `plannotator shape` is `shape open` with no id (every board), as bare `plannotator inbox` opens the Inbox.
+  if (args[0] === "shape" && (args.length === 1 || (args[1] === "open" && !hasHelpFlag(args.slice(2))))) {
+    process.exit(
+      await runShapeOpen(args.slice(2), {
+        dataDir: getPlannotatorDataDir(),
+        openUrl: (url) => openBrowserDetached(url, { isRemote: isRemoteSession() }),
+        // Bare: the page already open, if there is one; `shape open` always opens a tab.
+        reuseOpenPage: args.length === 1,
+      }),
+    );
+  }
+  if (args[0] === "shape" && args[1] === "serve" && args.length === 2) {
+    process.exit(await runShapeServe({ dataDir: getPlannotatorDataDir(), pageGzip: shapeHtmlGzip, version: getCliVersion() ?? "dev" }));
+  }
+  if (args[0] === "shape" && !hasHelpFlag(args.slice(1))) {
+    process.exit(
+      await runShapeCommand(args.slice(1), {
+        dataDir: getPlannotatorDataDir(),
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+      }),
+    );
+  }
+}
+// `plannotator system …`: System's drawing of a project (system-command.ts;
+// unreleased, HIDDEN_SUBCOMMANDS), for the agents that draw it and the launchd
+// job that keeps it current. Before the strict-annotate parse: it takes its own
+// flags and its own --help. Loaded only when asked for, as t3 is.
+{
+  const args = rawArgs;
+  if (args[0] === "system") {
+    const { runSystemCommand } = await import("./system-command");
+    process.exit(
+      await runSystemCommand(args.slice(1), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        dataDir: getPlannotatorDataDir(),
+        env: process.env,
+        self: inboxSelfCommand(),
+      }),
+    );
+  }
+}
+// `plannotator inbox call …`: the Inbox tool from a script (inbox-call-command.ts).
+// Here, like the card command: it takes its own flags, and JSON is not ours to scan.
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "call") {
+    const callDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxCallCommand(args.slice(2), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(callDataDir),
+      }),
+    );
+  }
+}
+// `plannotator inbox steps <thread> --json '<list>'`: an agent's thread steps, sugar over `inbox call steps` (inbox-steps-command.ts).
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "steps") {
+    const stepsDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxStepsCommand(args.slice(2), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(stepsDataDir),
       }),
     );
   }
@@ -399,6 +520,19 @@ if (browserIdx !== -1 && args[browserIdx + 1]) {
   args.splice(browserIdx, 2);
 }
 
+// Session flag: --title <text> (review / annotate / annotate-last) — the whole
+// tab title, and the annotate header's name, chosen by the caller (#2289).
+// Before the boolean flags, so a title can never be read as one of them.
+let sessionTitle: string | undefined;
+try {
+  const parsedTitle = parseTitleOption(args);
+  sessionTitle = parsedTitle.title;
+  args.splice(0, args.length, ...parsedTitle.remainingArgs);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(annotateStartupFailureExitCode({ requireApproval: requireApprovalFlag, resultFile }));
+}
+
 // Transport flag: --tailscale (review / annotate / annotate-last) — publish
 // the session over the user's tailnet via `tailscale serve`. The server stays
 // LOOPBACK-bound: serve provides reachability plus TLS, so remote mode's wide
@@ -410,14 +544,28 @@ const TAILSCALE_COMMANDS = new Set(["review", "annotate", "annotate-last", "last
 // `plannotator inbox --tailscale` is the Inbox's own flag (inbox-command.ts):
 // a long-lived, owner-only publication, never this per-session transport.
 const tailscaleIdx = args[0] === "inbox" ? -1 : args.indexOf("--tailscale");
-const tailscaleFlag = tailscaleIdx !== -1;
-if (tailscaleFlag) {
+if (tailscaleIdx !== -1) {
   args.splice(tailscaleIdx, 1);
   if (!TAILSCALE_COMMANDS.has(args[0] ?? "")) {
     console.error(
       "--tailscale is only supported with: plannotator review, annotate, annotate-last (last)",
     );
     process.exit(1);
+  }
+}
+// PLANNOTATOR_TAILSCALE / config.json "tailscale" make the flag the default
+// for the same subcommands (every other subcommand ignores them), so a host
+// or agent need not pass it on every call.
+const tailscaleResolved = TAILSCALE_COMMANDS.has(args[0] ?? "")
+  ? resolveSessionTailscale(loadConfig(), process.env, tailscaleIdx !== -1)
+  : { on: false, source: "default" as const };
+const tailscaleFlag = tailscaleResolved.on;
+const tailscaleOptOut = sessionTailscaleOptOut(tailscaleResolved.source);
+if (tailscaleFlag) {
+  if (tailscaleResolved.source !== "flag") {
+    process.stderr.write(
+      `[plannotator] Publishing over your tailnet (${tailscaleResolved.source === "env" ? "PLANNOTATOR_TAILSCALE" : 'config.json "tailscale"'}).\n`,
+    );
   }
   if (isRemoteSession()) {
     process.stderr.write(
@@ -433,8 +581,9 @@ if (tailscaleFlag) {
   process.env.PLANNOTATOR_PUBLIC_URL = "";
   // "Ask this session" stays ON (#2166): the host's bridge config is kept
   // (taken at the top of this file), and the servers answer it only for a tab
-  // on this machine and for the Tailscale login that owns it
-  // (packages/server/session-tailnet.ts). Everyone else on the tailnet gets
+  // on this machine and for the Tailscale login that owns it (or, where
+  // Tailscale names no owner, an inboxTailscaleAllow login;
+  // packages/server/session-tailnet.ts). Everyone else on the tailnet gets
   // the review and Ask AI through the SDKs, as before. Remote mode is
   // unchanged: it still turns the bridge off.
 }
@@ -458,19 +607,21 @@ if (tailscaleFlag) {
  * annotate subcommand, so review sessions always take the exit-1 leg).
  */
 async function handleTailscaleReady(port: number): Promise<void> {
-  // A host handed this CLI an "Ask this session" bridge: say who may use it
-  // over the tailnet (the owner of this machine) before the address exists.
-  // A plain `--tailscale` run (no bridge) asks Tailscale nothing more.
+  // Who counts as the owner over the tailnet (the owner of this machine, or
+  // the inboxTailscaleAllow logins when Tailscale names no owner), read before
+  // the address exists. Every --tailscale session needs it: hover cards
+  // (ref-cards.ts) answer the owner's tab with or without a bridge. With a
+  // host's "Ask this session" bridge, the owner may also ask it; say so.
+  const owners = readTailnetOwners();
+  setSessionTailnetOwners(owners.logins);
   const bridged = resolveAIEnabled() && takeEnvPullSessionBridgeConfig() !== undefined;
   let askOverTailnet = false;
   if (bridged) {
-    const owner = readTailnetOwner();
-    setSessionTailnetOwner(owner.login);
-    askOverTailnet = owner.login !== null;
+    askOverTailnet = owners.logins.length > 0;
     process.stderr.write(
-      owner.login !== null
-        ? `[plannotator] Ask this session: on here, and over your tailnet for ${owner.login} only.\n`
-        : `[plannotator] Ask this session: on this computer only (${owner.reason}); other devices get Ask AI without it.\n`,
+      "reason" in owners
+        ? `[plannotator] Ask this session: on this computer only (${owners.reason}); other devices get Ask AI without it.\n`
+        : `[plannotator] Ask this session: on here, and over your tailnet for ${owners.logins.join(", ")} only${owners.source === "allowlist" ? " (inboxTailscaleAllow: Tailscale names no owner for this machine)" : ""}.\n`,
     );
   }
   let url: string;
@@ -478,7 +629,7 @@ async function handleTailscaleReady(port: number): Promise<void> {
     ({ url } = enableTailscaleServe(port));
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.stderr.write("To keep working on this computer, run the same command without --tailscale.\n");
+    process.stderr.write(`To keep working on this computer, ${tailscaleOptOut}.\n`);
     process.exit(
       annotateStartupFailureExitCode({
         requireApproval: requireApprovalFlag,
@@ -637,6 +788,10 @@ if (isVersionInvocation(args)) {
 
 /** The person turned the Inbox's Board on (config.json `inboxBoard`): only then does either help mention cards. */
 const boardOnForHelp = () => INBOX_CARD_ACTION_ON && loadConfig().inboxBoard === true;
+// Thread steps (approval "inbox-thread-steps"): the guide says nothing of them while the person has them off.
+const stepsOnForHelp = () => loadConfig().inboxSteps === true;
+/** The person turned code review on (config.json `inboxCodeReview`): only then does the guide name submit_guide's `review`. */
+const codeReviewOnForHelp = () => loadConfig().inboxCodeReview === true;
 
 if (isTopLevelHelpInvocation(args)) {
   console.log(formatTopLevelHelp({ board: boardOnForHelp() }));
@@ -650,15 +805,34 @@ if (isTopLevelHelpInvocation(args)) {
 const helpSubcommand = isSubcommandHelpInvocation(args);
 if (helpSubcommand) {
   // `inbox --help` is the Plannotator Inbox guide for agents (inbox-help.ts).
-  console.log(
+  const help =
     helpSubcommand === "inbox"
-      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp() })
-      : formatSubcommandHelp(helpSubcommand),
-  );
+      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp(), steps: stepsOnForHelp(), codeReview: codeReviewOnForHelp() })
+      : formatSubcommandHelp(helpSubcommand);
+  await writeWholeToStdout(`${help}\n`);
   process.exit(0);
 }
 
 exitOnUnknownSubcommand(args);
+
+// `plannotator data-dir`: print the data directory and exit, creating
+// nothing. Skills ask this instead of naming ~/.plannotator (#2305).
+if (args[0] === "data-dir") {
+  if (args.length > 1) {
+    console.error(`plannotator data-dir takes no arguments.\n\n${DATA_DIR_COMMAND_USAGE}`);
+    process.exit(2);
+  }
+  console.log(getPlannotatorDataDir());
+  const unused = getUnusedPlannotatorDataDir();
+  // Worded so no agent reads it as a folder to clean up: it may hold the
+  // person's older plans and history.
+  if (unused) {
+    console.error(
+      `Note: ${unused} also exists. It may hold older Plannotator data, so leave it alone: do not delete, move or write to it. Plannotator uses the folder above.`,
+    );
+  }
+  process.exit(0);
+}
 
 // Read a caller-supplied unified diff for static patch mode (`--patch-file`).
 /**
@@ -795,7 +969,7 @@ if (args[0] === "install-runtime") {
 // (inbox/inbox.json). Dispatched before the session registry and the
 // auto-update trigger below, which belong to review sessions.
 if (args[0] === "inbox") {
-  await runInboxCommand(args.slice(1), { htmlContent: inboxHtmlContent(), json: jsonFlag });
+  await runInboxCommand(args.slice(1), { htmlContent: inboxHtmlContent, json: jsonFlag });
 }
 
 if (isInteractiveNoArgInvocation(args, process.stdin.isTTY)) {
@@ -843,6 +1017,11 @@ function registerCliSession(info: SessionInfo): void {
     ...(hostReviewId ? { reviewId: hostReviewId } : {}),
   });
   scheduleAutoUpdateCheck(getCliVersion());
+  // The daily ping (packages/shared/daily-ping.ts): one per tool per UTC day,
+  // in the background, never delaying the session. Archive and goal setup are
+  // not counted.
+  const pingTool = cliDailyPingTool(info.mode, args[0]);
+  if (pingTool) scheduleDailyPing({ version: getCliVersion(), tool: pingTool });
 }
 
 // Route fatal signals through process.exit() so "exit" handlers run — by
@@ -1476,6 +1655,8 @@ if (args[0] === "sessions") {
     error: diffError,
     origin: detectedOrigin,
     project: reviewProject,
+    // `--title`: the tab names what the caller chose (#2289).
+    title: sessionTitle,
     includeReviewDirectory: !!reviewDirectory,
     diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : initialDiffType,
     gitContext,
@@ -1745,7 +1926,7 @@ if (args[0] === "sessions") {
   // terminal treats tailnet publication; the server throw backstops this.
   if (liveAppResolved && tailscaleFlag) {
     exitAnnotateStartupFailure(
-      "Live app annotation is unavailable with --tailscale (the session is reachable across your tailnet). Run without --tailscale, or use --static to annotate a converted snapshot of the page.",
+      `Live app annotation is unavailable with --tailscale (the session is reachable across your tailnet). To annotate it live, ${tailscaleOptOut}; or use --static to annotate a converted snapshot of the page.`,
     );
   }
 
@@ -1773,6 +1954,8 @@ if (args[0] === "sessions") {
     bundleFiles,
     sourceInfo,
     sourceConverted,
+    // `--title`: the tab and the header name what the caller chose (#2289).
+    title: sessionTitle,
     sharingEnabled,
     shareBaseUrl,
     pasteApiUrl,
@@ -2100,6 +2283,7 @@ if (args[0] === "sessions") {
     filePath: "last-message",
     origin: copilotDetected ? "copilot-cli" : detectedOrigin,
     mode: "annotate-last",
+    title: sessionTitle,
     sharingEnabled,
     shareBaseUrl,
     pasteApiUrl,
@@ -2158,7 +2342,8 @@ if (args[0] === "sessions") {
   // had the annotate gate flags (`--json` included) stripped above, so hand
   // it everything after "guide" from the raw argv instead.
   const result = await runGuideCli(rawArgs.slice(rawArgs.indexOf("guide") + 1), process.env, process.env.PLANNOTATOR_CWD || process.cwd());
-  if (result.stdout) process.stdout.write(result.stdout);
+  // `guide export --out -` prints the whole Guided Review as HTML.
+  if (result.stdout) await writeWholeToStdout(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   process.exit(result.code);
 
@@ -2982,6 +3167,14 @@ if (args[0] === "sessions") {
     process.exit(0);
   }
 
+  // An agent Plannotator's Ask AI started (PLANNOTATOR_ASK_AI_CHILD=1): no one
+  // is there to review a plan. Every plan hook (Claude Code's ExitPlanMode,
+  // the Codex Stop hook, Qwen Code, Gemini, Mistral Vibe) passes through with
+  // no answer: no server, no browser, no Inbox.
+  if (isAskAiChild(process.env)) {
+    process.exit(0);
+  }
+
   let event: Record<string, any>;
   try {
     event = JSON.parse(eventJson);
@@ -3161,6 +3354,15 @@ if (args[0] === "sessions") {
     console.log(
       JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: modApproval } })
     );
+    process.exit(0);
+  }
+
+  // Plan review turned off for Claude Code: no decision, so Claude Code shows its own dialog.
+  if (
+    event.hook_event_name === "PermissionRequest" &&
+    event.tool_name === "ExitPlanMode" &&
+    !resolvePlanReview(loadConfig(), process.env)
+  ) {
     process.exit(0);
   }
 

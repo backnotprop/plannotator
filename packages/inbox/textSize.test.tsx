@@ -136,7 +136,7 @@ function px(value: string): number {
 /** What the window draws now: a list row's subject and a message body's paragraph, in px. */
 function drawn(el: HTMLElement) {
   const cascade = loadCascade(CSS);
-  const subject = el.querySelector<HTMLElement>(`[data-thread-id="${thread}"] .ib-s`);
+  const subject = el.querySelector<HTMLElement>(`[data-thread-id="${thread}"] .ib-title`);
   const body = el.querySelector<HTMLElement>('.ib-body p[data-block-id]');
   if (!subject || !body) throw new Error('the list row or the message body is not drawn');
   // The cascade leaves a property the stylesheet never declares as written; the page sets this one on the
@@ -235,7 +235,7 @@ async function renderApp(hash: string) {
 }
 
 const threadShown = (el: HTMLElement) => () =>
-  el.querySelector(`[data-thread-id="${thread}"] .ib-s`) !== null && el.querySelector('.ib-body p[data-block-id]') !== null;
+  el.querySelector(`[data-thread-id="${thread}"] .ib-title`) !== null && el.querySelector('.ib-body p[data-block-id]') !== null;
 const property = () => document.documentElement.style.getPropertyValue(TEXT_SIZE_PROPERTY);
 
 async function pick(el: HTMLElement, size: number) {
