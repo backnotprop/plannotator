@@ -40,13 +40,23 @@ async function isTheSheet(page: Page, count: number): Promise<void> {
   expect(box.y + box.height).toBeCloseTo(view.height, 0);
 }
 
-test('the foot count is a button a finger can press: the list opens as the sheet, with Edit, and the box stays closed', async ({ browser }) => {
+test('the closed foot\'s Draft carries the comment count; from the reply box\'s foot line, Review comments opens the list as the sheet, with Edit', async ({ browser }) => {
   const page = await phone(browser);
   const t = await seededThread(world);
   await openThread(page, world, t);
-  await pane(page).locator('[data-foot-status] [data-comments-link]:visible').tap();
+  // On a phone the closed foot draws no status (approval "reply-bar-pairs"): Edit draft counts the comments ("Draft 2").
+  const draft = pane(page).locator('.ib-pfoot [data-edit-draft]');
+  await expect(draft.locator('[data-draft-count]')).toHaveText(String(t.count));
+  await expect(pane(page).locator('[data-foot-status]')).toHaveCount(0);
+  await draft.tap();
+  // With a question open beside the comments, the box's foot line opens what goes with the reply; Review comments opens
+  // their list (approval "inbox-reply-foot-phone").
+  const line = pane(page).locator('.ib-rfoot [data-foot-summary]');
+  await expect(line).toHaveText(/2 comments/);
+  expect((await line.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await line.tap();
+  await page.getByRole('dialog', { name: 'Goes with this reply' }).getByRole('button', { name: 'Review comments' }).tap();
   await isTheSheet(page, t.count);
-  await expect(pane(page).locator('.ib-rfoot')).toHaveCount(0);
   await rowOf(page, t.onMessage).getByRole('button', { name: 'Edit' }).tap();
   await page.getByRole('textbox', { name: 'Edit the comment' }).fill('Say what happens on a timeout.');
   await rowOf(page, t.onMessage).getByRole('button', { name: 'Save' }).tap();
@@ -63,6 +73,10 @@ test('a tap on a highlight opens the sheet at that comment, with its header stil
   await expect(rowOf(page, t.onMessage)).toHaveClass(/ib-at/);
   await expect(rowOf(page, t.onMessage)).toBeInViewport();
   await expect(theList(page, t.count).getByRole('button', { name: 'Close the list' })).toBeInViewport();
+  // A phone's foot has no count to go back to (approval "reply-bar-pairs"): closing puts focus back on the highlight.
+  await page.keyboard.press('Escape');
+  await expect(theList(page, t.count)).toHaveCount(0);
+  await expect(highlight(page, t)).toBeFocused();
   await page.context().close();
 });
 
