@@ -277,7 +277,7 @@ test('a words-only reply left as it is: the questions stay open, and the agent g
   await expect(pane).toHaveCount(0);
 });
 
-test('the foot after a pick: the buttons on the left, the draft status at the row\'s right end; too narrow, the status on its own line above the buttons', async () => {
+test('the foot after a pick: the buttons on the left, the draft status at the row\'s right end; on a phone no status, the draft\'s count on Edit draft', async () => {
   const { page, agents, project } = world;
   const asked = await agents.pi.send({ project_path: project, subject: 'Refunds page: a few calls', thread: 'refunds', body: INVOICES.replace('invoice list', 'refunds page') });
   await page.goto(`${world.url}#thread=${asked.thread_id as string}`);
@@ -287,7 +287,9 @@ test('the foot after a pick: the buttons on the left, the draft status at the ro
   const row = page.locator('.ib-pfoot [data-foot-row]');
   const status = row.locator('[data-foot-status]');
   await expect(status.locator('[data-draft-foot]')).toContainText('1 pick');
-  await expect(status.locator('[data-skip-chip]')).toContainText('2 questions stay open');
+  // One count per thing (approval "reply-bar-pairs"): no skip chip; the open questions count the 2 unanswered.
+  await expect(row.locator('[data-skip-chip]')).toHaveCount(0);
+  await expect(row.locator('[data-open-questions]')).toHaveAccessibleName('2 open questions');
   const box = async (sel: string) => (await page.locator(sel).first().boundingBox())!;
   const send = async () => box('.ib-pfoot [data-foot-buttons] .ib-btn.ib-pri');
   const reask = async () => box('.ib-pfoot [data-foot-buttons] [data-open-questions]');
@@ -300,18 +302,18 @@ test('the foot after a pick: the buttons on the left, the draft status at the ro
   expect(wide.status.x).toBeGreaterThan(wide.reask.x + wide.reask.width);
   expect(Math.abs(wide.status.x + wide.status.width - (wide.row.x + wide.row.width))).toBeLessThan(2);
   await shot('04d-foot-status-right');
-  // A phone: the row shortens to its last step (Edit draft as its pencil) and keeps one line: the buttons, then the status.
+  // A phone: no status; Send, then Edit draft carrying the draft's count ("Draft 1"), then the open questions, on one line.
   await page.setViewportSize({ width: 390, height: 844 });
   // Read in one frame (the layout moves while the window settles into the phone's).
   const narrow = () =>
     page.evaluate(() => {
       const r = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
-      const [status, send, reask] = ['[data-foot-status]', '[data-foot-buttons] .ib-btn.ib-pri', '[data-foot-buttons] [data-open-questions]'].map((s) => r(`.ib-pfoot ${s}`));
-      const mid = (b: DOMRect) => b.top + b.height / 2;
-      return { besideButtons: Math.abs(mid(status!) - mid(send!)) < 4 && status!.left >= reask!.right, oneLine: Math.abs(reask!.top - send!.top) < 2 };
+      const [send, draft, reask] = ['[data-foot-buttons] .ib-btn.ib-pri', '[data-foot-buttons] [data-edit-draft]', '[data-foot-buttons] [data-open-questions]'].map((s) => r(`.ib-pfoot ${s}`));
+      return { status: !!document.querySelector('.ib-pfoot [data-foot-status]'), order: send!.right <= draft!.left && draft!.right <= reask!.left, oneLine: Math.abs(reask!.top - send!.top) < 2 && Math.abs(draft!.top - send!.top) < 2 };
     });
-  await expect.poll(narrow).toEqual({ besideButtons: true, oneLine: true });
-  await expect(page.locator('.ib-pfoot [data-foot-buttons]').getByRole('button', { name: 'Edit draft' })).toBeVisible();
+  await expect.poll(narrow).toEqual({ status: false, order: true, oneLine: true });
+  await expect(page.locator('.ib-pfoot [data-foot-buttons]').getByRole('button', { name: 'Draft 1: 1 pick. Edit draft' })).toBeVisible();
+  await expect(page.locator('.ib-pfoot [data-edit-draft] [data-draft-count]')).toHaveText('1');
   await shot('04e-foot-status-phone');
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(world.url);
@@ -565,7 +567,7 @@ test('the toast closes early: the × (focus back, Z no longer undoes), a mouse s
   await expect.poll(() => sectionOf(page, threads.worker)).toBe('stopped');
 });
 
-test('the row hover action marks read without opening the thread; its Undo puts the row back; no page errors', async () => {
+test('the row hover action marks read without opening the thread, in place; its Undo makes it bold again; no page errors', async () => {
   const { page, threads } = world;
   const row = page.locator(`.ib-lbody [data-row="${threads.news}"]`);
   await row.hover();
@@ -574,16 +576,21 @@ test('the row hover action marks read without opening the thread; its Undo puts 
   await shot('08-row-hover-action', ['light']);
   await action.click();
   await expect(page.locator('section.ib-pane')).toHaveCount(0);
-  await expect.poll(() => sectionOf(page, threads.news)).toBe('quiet');
+  // The list holds still (approval "inbox-list-view", R7): the row stays in New, not bold, until the list settles.
+  const button = row.locator('[data-thread-id]');
+  await expect(button).not.toHaveClass(/\bib-u\b/);
+  expect(await sectionOf(page, threads.news)).toBe('new');
   // No thread open: the same place, centered on the window, 16 px from its bottom edge.
   const toast = page.locator('[data-inbox-toast]');
-  await expect(toast).toContainText('Moved to Quiet');
+  await expect(toast).toContainText('Marked read');
+  await expect(toast).not.toContainText('Moved to Quiet');
   await toast.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)).then(() => undefined));
   const toastBox = await toast.boundingBox();
   const viewport = page.viewportSize()!;
   expect(Math.abs(toastBox!.x + toastBox!.width / 2 - viewport.width / 2)).toBeLessThanOrEqual(1);
   expect(Math.abs(viewport.height - (toastBox!.y + toastBox!.height) - 16)).toBeLessThanOrEqual(1);
   await toast.getByRole('button', { name: /Undo/ }).click();
-  await expect.poll(() => sectionOf(page, threads.news)).toBe('new');
+  await expect(button).toHaveClass(/\bib-u\b/);
+  expect(await sectionOf(page, threads.news)).toBe('new');
   expect(world.errors).toEqual([]);
 });

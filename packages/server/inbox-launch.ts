@@ -62,8 +62,8 @@
 
 import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
-import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
-import { inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
+import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
+import { inboxLaunchedSession, inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { derivePersonThreadSubject } from "@plannotator/core/inbox-questions";
 import { INBOX_SCRATCH_PICK, inboxScratchCandidate, inboxScratchSlug } from "@plannotator/core/inbox-scratch";
@@ -73,10 +73,11 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { createClaudeLaunchHost } from "./inbox-launch-claude";
+import { createPiLaunchHost } from "./inbox-launch-pi";
 import { launchPlainEnv, type LaunchEnv } from "./inbox-launch-env";
 import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchTrustOffer } from "./inbox-launch-host";
 import { openPermissionSince } from "./inbox-launch-permission";
-import { INBOX_CROSS_SITE_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
+import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { samePlace } from "./agent-files";
 
 const AVAILABLE_TTL_MS = 30_000;
@@ -368,6 +369,7 @@ export function createInboxLaunch(options: {
   /** The agents the Inbox can start, one per line. */
   const ownHosts: LaunchHost[] = [
     claude,
+    createPiLaunchHost(context),
   ];
   /** By each host's own `agent`, so the key a record is looked up by is the agent the host writes. */
   const hosts: Record<string, LaunchHost> = Object.fromEntries([...ownHosts, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));
@@ -489,6 +491,14 @@ export function createInboxLaunch(options: {
     return last?.author.kind === "person" && (!last.to || last.to.session === root.to?.session);
   };
 
+  /** The root of a launched thread whose launch started this session, with launch on and the launch not deleted. */
+  const launchedRootOf = (threadId: string, session: string | null | undefined): InboxMessage | null => {
+    if (!enabled() || !session) return null;
+    const root = store.message(threadId);
+    if (!root?.launch || root.launch.deleted_at || inboxLaunchedSession(root) !== session) return null;
+    return root;
+  };
+
   /** The run line of a launched root; null for an agent with no host here. */
   const runOfRoot = (root: InboxMessage): InboxRun | null => {
     const launch = root.launch!;
@@ -520,6 +530,7 @@ export function createInboxLaunch(options: {
       respawnUntrusted: respawnUntrustedOf(memo),
       stoppedByPersonAt: memo.stoppedAt,
       stoppedNote: host.stoppedNote?.(launch) ?? null,
+      connector: host.connector,
       attachCommand: host.attach(launch),
       permissionSince: openPermissionSince(store, root.thread_id),
     });
@@ -674,8 +685,10 @@ export function createInboxLaunch(options: {
   const maybeRespawn = (root: InboxMessage) => {
     const launch = root.launch!;
     const host = hostOf(launch);
+    if (!host || launch.deleted_at || launch.error || !launch.session_ref || !root.to || respawning.has(launch.id) || starting.has(launch.id)) return;
     // Only a session that connected once: one that never did is "not connected", and respawning it would not help.
-    if (!host || launch.deleted_at || launch.error || !launch.session_ref || !root.to || !root.delivery || respawning.has(launch.id) || starting.has(launch.id)) return;
+    // A host that owns the process is the exception once that process ended (its line says a reply continues it).
+    if (!root.delivery && host.processEnded?.(launch.session_ref) !== true) return;
     // A Stop or a Delete under way: the session is going, never started again meanwhile (a host's `live` may
     // read null as soon as its stop begins).
     if (stopping.has(launch.id) || deleting.has(launch.id)) return;
@@ -709,8 +722,18 @@ export function createInboxLaunch(options: {
     scratch_dir: scratchRoot(),
     scratch_dir_shown: options.displayFolder(scratchRoot()),
   });
-  /** `owner`: the machine's owner, here or over the tailnet (a guest the allow list let in is not). */
-  const route = async (req: Request, path: string, via: "local" | "tailnet" | string, owner: boolean = via === "local"): Promise<Response | null> => {
+  /**
+   * `owner`: the machine's owner, here or over the tailnet (a guest the allow list let in is not). `door`: the request
+   * came through the device door (a linked machine's Stop, Try again, Trust folder or Delete; remote launch). A
+   * machine is the owner's, and acts only for a press in a window there (`window`), never for an agent's bare call.
+   */
+  const route = async (
+    req: Request,
+    path: string,
+    via: "local" | "tailnet" | string,
+    owner: boolean = via === "local",
+    door: { platform: string; window: boolean } | null = null,
+  ): Promise<Response | null> => {
     const match = /^\/api\/inbox\/launch\/(settings|lch_[0-9A-HJKMNP-TV-Z]{26})(?:\/(stop|open|delete|retry|trust))?$/.exec(path);
     if (!match) return null;
     if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
@@ -759,6 +782,8 @@ export function createInboxLaunch(options: {
     const { root, host } = launchById(match[1]!);
     const launch = root.launch!;
     const state = stateOf(host);
+    // From another machine: only what a person pressed in a window there (its Inbox checked; this door trusts its token).
+    if (door && !door.window) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
     switch (match[2]) {
       case "stop": {
         // Stop ends the owner's agent: never a guest's to do, as starting one isn't.
@@ -798,6 +823,7 @@ export function createInboxLaunch(options: {
         // `on run argv`: the command is an argument, never part of the script's text.
         const script = ["on run argv", 'tell application "Terminal"', "activate", "do script (item 1 of argv)", "end tell", "end run"];
         const result = await e.run([osascript, ...script.flatMap((line) => ["-e", line]), command], { timeoutMs: 15_000 });
+        if (result.exitCode !== 0) host.terminalFailed?.(launch, command);
         if (result.exitCode !== 0) throw new InboxError("open_unavailable", `Terminal did not open: ${(result.stderr || result.stdout).trim().slice(0, 200)}`);
         return json({ ok: true, command });
       }
@@ -845,7 +871,7 @@ export function createInboxLaunch(options: {
       }
       case "trust": {
         if (!owner) throw new InboxError("owner_only", "Only this computer's owner can trust a folder.");
-        if (!isWindowRequest(req, body, options.serverSession)) return json(INBOX_WINDOW_ONLY_BODY, 403);
+        if (!door?.window && !isWindowRequest(req, body, options.serverSession)) return json(INBOX_WINDOW_ONLY_BODY, 403);
         // A click under way (a double click): the same answer, once it is done.
         const under = trusting.get(launch.id);
         if (under) return json(await under);
@@ -993,7 +1019,7 @@ export function createInboxLaunch(options: {
      */
     async prepare(
       target: InboxLaunchTarget,
-      input: { name: string | null; body: string; resolveProject: (path: string) => Promise<InboxProject> },
+      input: { name: string | null; body: string; resolveProject: (path: string) => Promise<InboxProject>; from?: InboxLaunchFrom | null },
     ): Promise<{ project: InboxProject; to: { host: string; session: string }; launch: InboxLaunchRecord; trust: LaunchTrustOffer | null }> {
       const host = Object.hasOwn(hosts, target.agent) ? hosts[target.agent]! : null;
       if (!host) throw new InboxError("agent_unavailable", `${target.agent} can't be started here. Nothing was sent.`);
@@ -1035,6 +1061,7 @@ export function createInboxLaunch(options: {
         ...(start.full ? { full_permissions: true } : {}),
         ...(start.ownMode ? { own_mode: true } : {}),
         ...(start.bypass ? { bypass_available: true } : {}),
+        ...(input.from ? { from: { machine: input.from.machine, name: input.from.name } } : {}),
       };
       return { project, to: { host: host.agent, session: `launch:${id}` }, launch, trust };
     },
@@ -1122,10 +1149,27 @@ export function createInboxLaunch(options: {
       if (state.lastAvailable === null) state.lastAvailable = await available(host);
       if (hostStale(host) && needsHost(host, root)) await refreshHost(host);
       const runLine = runOfRoot(store.message(threadId)!);
-      // The home folder is never trusted: the how-to then says to start in a folder inside it.
-      const line = runLine?.untrusted && samePlace(root.launch.folder, options.homeDir) ? { ...runLine, home_folder: true as const } : runLine;
+      // Trust that would cover home, or `/`: the how-to says to start in a project with its own repository.
+      // The home folder is never trusted: the how-to says to start in a folder inside it. Home in a repository rooted
+      // there carries both: this window reads the first, and a window from before it, which knows only the second, keeps
+      // that sentence rather than "run it here".
+      const line = !runLine?.untrusted
+        ? runLine
+        : {
+            ...runLine,
+            ...(host.trustCoversHome?.(root.launch) ? { trust_covers_home: true as const } : {}),
+            ...(samePlace(root.launch.folder, options.homeDir) ? { home_folder: true as const } : {}),
+          };
       const offer = owner && line?.untrusted ? host.trustOffer?.(root.launch) : null;
       return offer ? { ...line!, trust: { warning: offer.read().warning } } : line;
+    },
+
+    /** The launch ended before its agent wrote: it failed, its CLI is gone, or it was stopped or went away (the thread's own line says which). */
+    didNotStart(threadId: string): boolean {
+      const root = store.message(threadId);
+      if (!enabled() || !root?.launch || root.thread_id !== root.id) return false;
+      const state = runOfRoot(root)?.state;
+      return state === "failed" || state === "missing" || state === "stopped";
     },
 
     /** A launched thread's attach command (the ⋯ menu's Copy, also while the agent rests and has no line), or null. */
@@ -1138,6 +1182,23 @@ export function createInboxLaunch(options: {
     /** The list's row decorator, resolved once per list (one config read): the identity while launch is off. */
     rowDecorator(): <T extends InboxListRow>(row: T) => T {
       return enabled() ? (row) => this.decorateLaunched(row) : (row) => row;
+    },
+
+    /**
+     * Whether a reply to this session starts it again: the session this thread's launch started, and an agent that is
+     * neither gone nor without a host here. It has not ended, whatever its liveness says (the window's `launchResumes`).
+     */
+    resumes(threadId: string, session: string | null | undefined): boolean {
+      const root = launchedRootOf(threadId, session);
+      if (!root || !hostOf(root.launch!)) return false;
+      const state = runOfRoot(root)?.state;
+      return state !== "missing" && state !== "failed";
+    },
+
+    /** Whether the session this thread's launch started is gone (the line's "missing"), however recently it was heard from. */
+    gone(threadId: string, session: string | null | undefined): boolean {
+      const root = launchedRootOf(threadId, session);
+      return !!root && runOfRoot(root)?.state === "missing";
     },
 
     /** A launched row with its run word, and a session blocked on a prompt placed in Stopped on you (through `rowDecorator`). */

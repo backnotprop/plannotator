@@ -24,8 +24,7 @@ import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { InboxStore } from '../../packages/shared/inbox/store';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
-import { NO_BROWSER } from '../helpers/no-browser';
+import { inboxScratch, rememberInboxOf, removeInboxScratch, scratchEnv } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -60,14 +59,14 @@ test.beforeAll(async () => {
   const stubs = join(root, 'bin');
   mkdirSync(stubs, { recursive: true });
   for (const name of ['claude', 'codex', 'opencode', 'pi', 'gemini', 'cursor-agent', 'amp']) writeFileSync(join(stubs, name), '#!/bin/sh\necho "this stub never runs" >&2\nexit 1\n', { mode: 0o755 });
-  const dataDir = join(root, 'data');
+  // HOME is this world's temp folder (the owner's `~/src/…` layout sits under it): the sandbox keeps this Inbox out of any real skill folder.
+  const scratch = scratchEnv(root, { home: root });
+  const dataDir = scratch.PLANNOTATOR_DATA_DIR;
   const env = {
+    ...scratch,
     PATH: `${stubs}:${process.env.PATH ?? ''}`,
-    PLANNOTATOR_DATA_DIR: dataDir,
-    PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
-    // HOME stays the runner's: the sandbox keeps this Inbox out of its skill folders.
     PLANNOTATOR_TEST_SANDBOX: root,
     CLAUDE_CONFIG_DIR: join(root, 'claude-config'),
   };

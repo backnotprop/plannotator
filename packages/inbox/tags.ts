@@ -217,6 +217,8 @@ export function activeHandoff(thread: InboxThread): InboxMessageWire | null {
   for (let index = thread.messages.length - 1; index >= 0; index--) {
     const message = thread.messages[index]!;
     if (message.author.kind === 'person' && message.handoff && !message.handoff.undone_at && message.to) return message;
+    // A later reply took over from the session that ended: the thread is no longer that hand-off's.
+    if (message.took_over) return null;
   }
   return null;
 }

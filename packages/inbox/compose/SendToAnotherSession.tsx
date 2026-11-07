@@ -36,14 +36,20 @@ function focusAfterMove(messageId: string): void {
  */
 export function SendToAnotherSession({
   messageId,
+  stuck = false,
   ended,
+  taken = [],
   project,
   live,
   onReload,
   onMoved,
 }: {
   messageId: string;
+  /** That session's connection took it and stopped while delivering it: a resumed session does not get it either. */
+  stuck?: boolean;
   ended: { host: string; session: string };
+  /** The sessions that already took this message through a tag: moving it to one would deliver it twice. */
+  taken?: readonly string[];
   project: string;
   live: LiveSessionsModel | null;
   onReload: () => Promise<unknown>;
@@ -56,7 +62,8 @@ export function SendToAnotherSession({
   const openRef = useRef<HTMLButtonElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const name = `ib-readdress-${useId().replace(/[^A-Za-z0-9_-]/g, '')}`;
-  const others = (live?.sessions ?? []).filter((s) => s.session !== ended.session);
+  const running = (live?.sessions ?? []).filter((s) => s.session !== ended.session);
+  const others = running.filter((s) => !taken.includes(s.session));
   // The selection stays on its session across re-reads; one that left falls back to the first.
   const chosen = others.find((s) => s.session === selected) ?? others[0] ?? null;
   // Two sessions with one label (a label is display only, and a session can name itself like another): each of
@@ -99,12 +106,22 @@ export function SendToAnotherSession({
       // The choice goes with the move: focus goes to the message's delivery line, else the thread's heading.
       focusAfterMove(messageId);
     } catch (cause) {
+      // The session came back as the person moved it: nothing to move, and the thread's line says where it is now.
+      if (cause instanceof InboxApiError && cause.code === 'session_still_live') {
+        setOpen(false);
+        await onMoved();
+        focusAfterMove(messageId);
+        return;
+      }
       setError(cause instanceof InboxApiError ? cause.message : 'It was not moved; try again.');
       void onReload();
     } finally {
       setBusy(false);
     }
   };
+
+  // Every live session already has it: there is nowhere to move it, and "no other session is running" would be false.
+  if (!open && running.length > 0 && others.length === 0) return null;
 
   return (
     <div className="ib-readdress" data-readdress="">
@@ -133,7 +150,11 @@ export function SendToAnotherSession({
           <fieldset className="ib-route">
             <legend>Send it to another session</legend>
             {others.length === 0 ? (
-              <p className="ib-why">No other session is running in {project}. It waits here; a resumed session still gets it.</p>
+              <p className="ib-why">
+                {stuck
+                  ? `No other session is running in ${project}. It waits here until you send it to one.`
+                  : `No other session is running in ${project}. It waits here; a resumed session still gets it.`}
+              </p>
             ) : (
               <div className="ib-gl">Live sessions in {project}</div>
             )}

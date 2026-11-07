@@ -2,6 +2,7 @@ import React from 'react';
 import type { IDockviewHeaderActionsProps } from 'dockview-react';
 import { configStore, useConfigValue } from '@plannotator/ui/config';
 import { DiffOptionsPopover } from '../components/DiffOptionsPopover';
+import { DiffLayoutToggle } from '@plannotator/ui/components/DiffLayoutToggle';
 import { useReviewStateOptional } from './ReviewStateContext';
 import { REVIEW_ALL_FILES_PANEL_ID, REVIEW_CODE_NAV_PANEL_ID } from './reviewPanelTypes';
 import { formatShortcutBindingText, getShortcutPlatform, resolveShortcutBindings, reviewExplorerShortcuts } from '@plannotator/ui/shortcuts';
@@ -12,7 +13,7 @@ const keyHint = (action: 'navigateBack' | 'navigateForward') => {
 };
 
 /**
- * Split/Unified diff toggle + options, pinned to the right of the dock tab strip
+ * Split/Unified (one button, approval "diff-controls-headers") + the Diff display gear, pinned to the right of the dock tab strip
  * (dockview's `rightHeaderActionsComponent`). Stays visible while the tabs
  * scroll. Desktop reads/writes the global `configStore`; compact-touch review
  * shells provide a session-only style through review state so opening a review
@@ -103,31 +104,13 @@ export const ReviewDockRightActions: React.FC<IDockviewHeaderActionsProps> = (pr
         </button>
       )}
       <div className="flex items-center gap-1 bg-muted rounded-lg p-0.5">
-        <button
-          onClick={() => setDiffStyle('split')}
-          className={`px-2 py-1 text-xs rounded-md transition-colors ${
-            diffStyle === 'split'
-              ? 'bg-background text-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          Split
-        </button>
-        <button
-          onClick={() => setDiffStyle('unified')}
-          className={`px-2 py-1 text-xs rounded-md transition-colors ${
-            diffStyle === 'unified'
-              ? 'bg-background text-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          Unified
-        </button>
-        <div className="w-px h-4 bg-border/60 mx-0.5" />
-        <DiffOptionsPopover
-          diffStyle={diffStyle}
-          onDiffStyleChange={setDiffStyle}
+        <DiffLayoutToggle
+          value={diffStyle}
+          onChange={setDiffStyle}
+          className="px-1.5 py-1 rounded-md text-foreground transition-colors hover:bg-background flex items-center"
         />
+        <div className="w-px h-4 bg-border/60 mx-0.5" />
+        <DiffOptionsPopover />
       </div>
     </div>
   );

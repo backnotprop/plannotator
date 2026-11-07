@@ -49,6 +49,7 @@ import {
   INBOX_PULLS_OTHERS_FRESH_MS,
   INBOX_PULLS_RATE_FLOOR,
   linkInboxPulls,
+  threadAgent,
   parseGithubPulls,
   parseGitlabPulls,
   previewOf,
@@ -1006,6 +1007,23 @@ describe("the worst case (break-ui on #2590)", () => {
     expect(previewOf("snake_case_name and 2*3*4")).toBe("snake_case_name and 2*3*4");
   });
 
+  test("a hand-off not yet answered: a session gone is ended, one the Inbox launched is still starting", () => {
+    const messages = new Map<string, unknown>([
+      ["t_gone", { id: "t_gone", thread_id: "t_gone", author: { kind: "person" }, to: { host: "pi", session: "ses_gone" } }],
+      ["t_launched", { id: "t_launched", thread_id: "t_launched", author: { kind: "person" }, to: { host: "claude-code", session: "ses_new" }, launch: { id: "l" } }],
+    ]);
+    const store = {
+      threadsOf: () => [],
+      threadMessageIds: (thread: string) => [thread],
+      message: (id: string) => (messages.get(id) as never) ?? null,
+      threadSubject: () => "Subject",
+      threadProject: () => "prj_1",
+      sessionLive: () => false,
+    };
+    expect(threadAgent(store, "t_gone")?.ended).toBe(true);
+    expect(threadAgent(store, "t_launched")?.ended).toBeUndefined();
+  });
+
   test("an agent that sent with a wake and polls no more is marked ended; a live one and an MCP-only one are not", () => {
     const pull = parseGithubPulls(JSON.stringify(answerOf([ghPull(1), ghPull(2), ghPull(3)])), "github.com")!.pulls;
     const message = (id: string, thread: string, n: number, session: string, wakes: boolean) => ({
@@ -1681,6 +1699,10 @@ describe("who may read it", () => {
       const guest = await through(GUEST);
       expect(guest.status).toBe(403);
       expect(((await guest.json()) as { code: string }).code).toBe("local_only");
+      // Nor read a project's files through a guide's expand arrows.
+      const guestFile = await fetch(`http://127.0.0.1:${listener}/api/inbox/messages/msg_any/guide/file?path=a.ts`, { headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST } });
+      expect(guestFile.status).toBe(403);
+      expect(((await guestFile.json()) as { code: string }).code).toBe("local_only");
       // Nor may a guest hand a PR to an agent.
       const handGuest = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/owner`, {
         method: "POST",

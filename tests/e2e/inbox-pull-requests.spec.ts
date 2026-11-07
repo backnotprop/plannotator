@@ -4,7 +4,7 @@
  * the compiled binary. The binary runs `plannotator inbox --background` under
  * a temp PLANNOTATOR_DATA_DIR; simulated agents write through `plannotator
  * inbox mcp` (scripts/inbox-sim.ts); Chromium drives the window. HOME is
- * never changed. `gh` and `glab` are sh fakes first on PATH: nothing reaches
+ * the scratch folder. `gh` and `glab` are sh fakes first on PATH: nothing reaches
  * GitHub or GitLab, and the real CLIs never run. The diffs they answer are
  * real `git diff`s of scratch repositories with invented names.
  *
@@ -21,9 +21,8 @@
  *     the agent's own message) and Open review thread, no Board UI, no merge
  *     button.
  *  4. A PR with no review thread (approval "pr-page-review-with-agent"): one
- *     button, Review with an agent, opens the picker inline: Ask for, the
- *     project's running agents as one radio list, Start a new agent; Start
- *     review thread sends the first message to the picked one, and the PR is
+ *     button, Review with an agent, opens the New review box filled in; Start
+ *     review sends the first message to the agent in To, and the PR is
  *     that thread's from then on ("Review thread with Claude Code", Open
  *     review thread, also once the guided review arrived). "Open the diff"
  *     sits beside the button in every state, and each row opens its diff.
@@ -60,6 +59,7 @@ import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { INBOX_BRIDGE_POLL_PATH } from '../../packages/shared/inbox/connection';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { expectNoBlankFiles } from './on-screen-files';
 import { markTourDecided } from '../helpers/tour-decided';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { startFakeAvatars, type FakeAvatars } from '../helpers/fake-avatars';
@@ -143,6 +143,14 @@ function repoWith(parent: string, name: string, origin: string, base: Record<str
 const lines = (...parts: string[]) => `${parts.join('\n')}\n`;
 
 /** The fake gh / glab: canned answers by endpoint; each call one line in `calls` (`gh pulls`, `gh diff <endpoint>`, `glab pulls`, …). */
+/** The commit the fake forge's compare says a head left its base at. */
+const MERGE_BASE = 'b'.repeat(40);
+/** A file with lines far from its one change, in the teammate's PR: the expand arrows have somewhere to open. */
+const TOKENS_PATH = 'src/settings/tokens.ts';
+const TOKENS = Array.from({ length: 60 }, (_, i) => `export const SPACE_${i + 1} = ${i + 1};`);
+// Past the change the two sides number far apart: new line 75 is old line 45.
+const TOKENS_CHANGED = TOKENS.flatMap((line, i) => (i === 29 ? ['export const SPACE_30 = 32;', ...Array.from({ length: 30 }, (_, n) => `export const EXTRA_${n} = ${n};`)] : [line]));
+
 function writeForge(dir: string) {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'calls'), '');
@@ -172,6 +180,10 @@ function writeForge(dir: string) {
     '  echo >> "$dir/gh-posts.jsonl"',
     '  if [ -f "$dir/gh-post-fail" ]; then cat "$dir/gh-post-fail" >&2; exit 1; fi',
     '  echo \'{"id":1}\'; exit 0',
+    'fi',
+    // Where a head left its base, for the expand arrows' old side.
+    'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$6" = .merge_base_commit.sha ]; then',
+    `  echo "gh merge-base $4" >> "$calls"; echo ${MERGE_BASE}; exit 0`,
     'fi',
     // A layer's head commit, read around its patch (`--jq .head.sha`): the list's `headRefOid` for that number.
     'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then',
@@ -412,9 +424,9 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     src,
     'web-app',
     'https://github.com/northwind/web-app.git',
-    { 'src/settings/Layout.tsx': lines('export function Layout({ children }) {', '  return <div className="settings ml-6">{children}</div>;', '}'), 'package.json': lines('{', '  "devDependencies": { "vite": "7.2.0" }', '}') },
+    { 'src/settings/Layout.tsx': lines('export function Layout({ children }) {', '  return <div className="settings ml-6">{children}</div>;', '}'), 'package.json': lines('{', '  "devDependencies": { "vite": "7.2.0" }', '}'), [TOKENS_PATH]: lines(...TOKENS) },
     [
-      { name: 'tomas/rtl-settings', from: 'main', files: { 'src/settings/Layout.tsx': lines('export function Layout({ children }) {', '  // Logical margins, so the sidebar sits on the right in Arabic and Hebrew.', '  return <div className="settings ms-6" dir="auto">{children}</div>;', '}') } },
+      { name: 'tomas/rtl-settings', from: 'main', files: { [TOKENS_PATH]: lines(...TOKENS_CHANGED), 'src/settings/Layout.tsx': lines('export function Layout({ children }) {', '  // Logical margins, so the sidebar sits on the right in Arabic and Hebrew.', '  return <div className="settings ms-6" dir="auto">{children}</div>;', '}') } },
       { name: 'codex/vite-8', from: 'main', files: { 'package.json': lines('{', '  "devDependencies": { "vite": "8.0.1" }', '}') } },
       { name: 'locale-fallback', from: 'main', files: { 'src/i18n/fallback.ts': lines("export const FALLBACK = 'en';") } },
     ],
@@ -444,6 +456,9 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const vite = web.diff('main', 'codex/vite-8');
   const locale = web.diff('main', 'locale-fallback');
   forge.gh('repos/northwind/web-app/pulls/880', rtl);
+  // The teammate's head and base, on the forge only: this clone never fetched them.
+  forge.gh(`repos/northwind/web-app/contents/${TOKENS_PATH}?ref=${'880'.padStart(40, '0')}`, lines(...TOKENS_CHANGED));
+  forge.gh(`repos/northwind/web-app/contents/${TOKENS_PATH}?ref=${MERGE_BASE}`, lines(...TOKENS));
   forge.gh('repos/northwind/web-app/pulls/872', vite);
   forge.gh('repos/northwind/web-app/pulls/869', locale);
   const csvPatch = ledger.diff('main', 'csv-export');
@@ -516,7 +531,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 
   const env: Record<string, string> = {
     PATH: `${forgeDir}:${process.env.PATH ?? ''}`,
-    ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
@@ -600,6 +615,8 @@ const LOCALE = 'github.com/northwind/web-app#869';
 
 test('off (the default): no row, a #pulls link says Code review is off, and no gh or glab query runs', async () => {
   const { page } = world;
+  // New review's summary runs git: refused too.
+  expect((await page.request.get(`${world.url}api/inbox/reviews/changes?project=prj_x&changes=uncommitted`)).status()).toBe(409);
   const reads: string[] = [];
   const watch = (request: import('@playwright/test').Request) => {
     if (new URL(request.url()).pathname.startsWith('/api/inbox/pulls')) reads.push(request.url());
@@ -640,13 +657,14 @@ test('an old #pulls link opened fresh, in a new window, becomes #reviews', async
   }
 });
 
-test("#reviews&new with Code review off: the off page, and no box", async () => {
+test("#reviews&new with Code review off: the off page, no box, and the address forgets it", async () => {
   const { page } = world;
   await setCodeReview(false);
   await page.goto(`${world.url}#reviews&new`);
   await expect(page.locator('[data-reviews-off]')).toBeVisible();
   await page.waitForTimeout(400);
   await expect(page.locator('dialog[data-compose]')).toHaveCount(0);
+  await expect(page).not.toHaveURL(/&new/);
 });
 
 test('a #reviews link on a tailnet guest\'s page: the Inbox, and Back goes where the person was', async () => {
@@ -717,21 +735,18 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   await expect(list.locator('[data-pulls-row]').first()).toBeVisible();
   expect(forgeCalls().filter((c) => c.endsWith(' pulls')).sort()).toEqual(['gh pulls', 'glab pulls']);
 
+  // A teammate's review request stays On you; a PR nobody has reviewed waits, folded, under Open, not reviewed.
   const onYou = list.locator('[data-pulls-group="on_you"] [data-pulls-row]');
-  await expect(onYou).toHaveCount(3);
-  await expect(list.locator(`[data-pulls-group="on_you"] [data-pulls-row="${STACK_ID}"]`)).toBeVisible();
+  await expect(onYou).toHaveCount(2);
   await expect(list.locator('[data-pulls-group="on_you"] [data-pulls-row="github.com/northwind/web-app#880"]')).toContainText('tomas asked for your review');
-  await expect(list.locator('[data-pulls-group="ready"] [data-pulls-row]')).toHaveCount(1);
-  await expect(list.locator('[data-pulls-group="ready"]')).toContainText('Upgrade to Vite 8');
-  const fold = list.locator('[data-pulls-waiting-toggle]');
-  await expect(fold).toHaveText(/2 waiting on others/);
-  await expect(list.locator('[data-pulls-group="waiting"] [data-pulls-row]')).toHaveCount(0);
-  const stackRow = list.locator(`[data-pulls-row="${STACK_ID}"]`);
+  const fold = list.locator('[data-reviews-fold="not_reviewed"]');
+  await expect(fold).toHaveAttribute('aria-expanded', 'false');
+  await expect(list.locator('[data-pulls-group="not_reviewed"] [data-pulls-row]')).toHaveCount(0);
+  await fold.click();
+  const stackRow = list.locator(`[data-pulls-group="not_reviewed"] [data-pulls-row="${STACK_ID}"]`);
   await expect(stackRow).toHaveAttribute('data-pulls-layers', '4');
   await expect(stackRow.locator('[data-pulls-chain] .ib-bc-mark')).toHaveCount(4);
-  // The agent on the third line, its mark before its name; top left, the author's picture (her own stack too).
-  await expect(stackRow).toContainText('3 open, 1 merged · Review thread with Claude Code · start at #412');
-  await expect(stackRow.locator('.ib-pv [data-pulls-row-agent="claude-code"]')).toBeVisible();
+  await expect(stackRow).toContainText('3 open, 1 merged');
   await expect(stackRow.locator('.ib-lead .ib-atiles')).toHaveCount(0);
   for (const [row, login] of [[STACK_ID, 'dana'], ['github.com/northwind/web-app#880', 'tomas'], ['gitlab.com/northwind/ledger#58:pull', 'priya']] as const) {
     const av = list.locator(`[data-pulls-row="${row}"] .ib-lead [data-pulls-author="${login}"]`);
@@ -743,15 +758,15 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   expect(world.avatars.served).toEqual(expect.arrayContaining(['/dana.png', '/tomas.png', '/priya.png']));
   expect(world.outside).toEqual([]);
   await expect(stackRow).toContainText('Retry failed charges');
-  // The head is "Reviews" and the filter mark (inbox-pull-filters.spec.ts); the On you band carries the count.
+  // The head is "Reviews", the filter mark and + (inbox-pull-filters.spec.ts); the On you band carries the count.
   expect(await list.locator('[data-pulls-heading]').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   await expect(list.locator('[data-pulls-heading]')).toHaveText('Reviews');
   await expect(list.locator('[data-pulls-filter-trigger]')).toHaveAccessibleName('Filter');
-  await expect(page.locator('[data-pulls-nav] .ib-n')).toHaveText('3');
+  await expect(page.locator('[data-pulls-nav] .ib-n')).toHaveText('2');
   await shot(page, '2-list');
-  await fold.click();
-  await expect(list.locator('[data-pulls-group="waiting"] [data-pulls-row]')).toHaveCount(2);
-  await fold.click();
+  // Remembered: a new read of the page finds it as the person left it (open for the rest of this spec).
+  await page.reload();
+  await expect(list.locator('[data-reviews-fold="not_reviewed"]')).toHaveAttribute('aria-expanded', 'true');
 });
 
 test('the stack view with the Board off: layers from main up, Lands next, its review thread, no Board UI, no merge button', async () => {
@@ -773,18 +788,19 @@ test('the stack view with the Board off: layers from main up, Lands next, its re
   await expect(pane.locator(`[data-pulls-layer="${STACK_ID}"]`)).toContainText('Draft');
   await expect(pane.locator('[data-pulls-layer="github.com/northwind/billing-svc#411"]')).toContainText('Merged');
   await expect(pane.locator('.ib-pr-base')).toContainText('main');
-  // Its review thread: the agent's line under the title (its last words under it), one button that opens the thread.
+  // Its agent's thread named the PR but holds no review of it: the agent's line under the title (its last words under
+  // it), the thread a button away, and a review can start.
   const line = pane.locator('[data-pulls-thread-line="live"]');
   await expect(line).toBeVisible();
-  await expect(line.locator('.ib-pr-thread-h')).toContainText('Review thread with Claude Code');
-  await expect(pane.locator('[data-pulls-primary]')).toHaveText('Open review thread');
+  await expect(line.locator('.ib-pr-thread-h')).toContainText('Thread with Claude Code');
+  await expect(pane.locator('[data-pulls-primary]')).toHaveText('Review with an agent');
+  await expect(pane.locator('[data-pulls-open-thread]')).toBeVisible();
   await expect(pane).not.toContainText(/\bhand/i);
   // The Board is off: no card chip, no Board words.
   await expect(pane.locator('[data-pulls-card]')).toHaveCount(0);
   await expect(pane).not.toContainText('Board');
   await expect(pane.getByRole('button', { name: /merge/i })).toHaveCount(0);
-  // It has a review thread: no picker, and no way to add a second agent; the diff is one button away.
-  await expect(pane.locator('[data-pulls-primary="review"], [data-pulls-picker]')).toHaveCount(0);
+  // The diff is one button away.
   await expect(pane.getByRole('button', { name: 'Open the diff', exact: true })).toBeVisible();
   // The whole stack is the review's own switch: one Open the diff here.
   await expect(pane.getByRole('button', { name: 'Whole stack' })).toHaveCount(0);
@@ -792,6 +808,13 @@ test('the stack view with the Board off: layers from main up, Lands next, its re
 });
 
 /** The agent's guided review of a one-file PR, sent as phase 1's review (`review: true`), in reply to the review thread's first message. */
+/** Open, not reviewed starts folded in a new window; the row a test opens is under it. */
+async function openNotReviewed(page: Page): Promise<void> {
+  const fold = page.locator('[data-reviews-fold="not_reviewed"]');
+  await fold.waitFor();
+  if ((await fold.getAttribute('aria-expanded')) === 'false') await fold.click();
+}
+
 async function sendReview(agent: SimAgent, projectPath: string, replyTo: string, patch: string, file: string, title: string): Promise<void> {
   await agent.submitGuide({
     project_path: projectPath,
@@ -815,14 +838,11 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
   const page = await context.newPage();
   try {
     await offerLaunch(page);
-    await page.goto(`${world.url}#pulls`);
-    const toggle = page.locator('[data-pulls-waiting-toggle][aria-expanded="false"]');
-    if (await toggle.count()) await toggle.click();
-    await page.locator(`[data-pulls-row="${row}"]`).click();
+    await page.goto(`${world.url}#reviews&stack=${encodeURIComponent(row)}`);
     await expect(page.locator('[data-pulls-stack]')).toBeVisible();
     if (openPicker) {
       await page.locator('[data-pulls-stack] [data-pulls-primary]').click();
-      await expect(page.locator('[data-pulls-picker-session]').first()).toBeVisible();
+      await expect(page.locator('[data-review-box]')).toBeVisible();
     }
     // Nothing scrolls sideways, and each control is a full touch target.
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
@@ -837,81 +857,73 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
   }
 }
 
-/** The stack view's controls a phone must make full touch targets: the one button, Open the diff, the picker's Ask for options, its rows and Start. */
-const PHONE_TARGETS = '[data-pulls-primary], [data-pulls-open-diff], [data-pulls-picker-session], [data-pulls-picker-new], [data-pulls-start], [data-pulls-picker-cancel], [data-pulls-ask-option]';
+/** The stack view's controls a phone must make full touch targets: the one button, Open the diff, and in New review the choices and Start. */
+const PHONE_TARGETS = '[data-pulls-primary], [data-pulls-open-diff], .ib-cp-choice, [data-compose-send]';
 
-test('a PR with no review thread: Review with an agent, the picker (Ask for, the running agents, Start a new agent), "on the way", the guided review arriving, Open review thread, and Open the diff in each', async ({ browser }) => {
+test('a PR with no review thread: Review with an agent, the New review box, "on the way", the guided review arriving, Open review thread, and Open the diff in each', async ({ browser }) => {
   const { page } = world;
   await offerLaunch(page);
   await page.goto(`${world.url}#pulls`);
   const list = page.locator('[data-pulls-list]');
-  await list.locator('[data-pulls-waiting-toggle]').click();
+  await expect(list.locator('[data-reviews-fold="not_reviewed"]')).toHaveAttribute('aria-expanded', 'true');
   await list.locator(`[data-pulls-row="${LOCALE}"]`).click();
   const pane = page.locator('[data-pulls-stack]');
   // One button under the title, Open the diff beside it; no picker until it is asked for, no thread, no Reply.
   const primary = pane.locator('[data-pulls-primary]');
   await expect(primary).toHaveText('Review with an agent');
   await expect(primary).toHaveClass(/ib-pri/);
-  await expect(primary).toHaveAttribute('aria-expanded', 'false');
   expect((await pane.locator('[data-pulls-open-diff]').boundingBox())!.y).toBe((await primary.boundingBox())!.y);
-  await expect(pane.locator('[data-pulls-picker]')).toHaveCount(0);
   await expect(pane.locator('[data-pulls-thread]')).toHaveCount(0);
   await expect(pane.locator('[data-pulls-reply]')).toHaveCount(0);
   await expect(pane).not.toContainText(/\bhand/i);
   await shot(page, '4-no-thread');
-  await primary.click();
-  // Inline under the button, no menu: Ask for, then one radio list of web-app's running agents and Start a new agent.
-  const picker = pane.locator('[data-pulls-picker]');
-  await expect(primary).toHaveAttribute('aria-expanded', 'true');
-  await expect(picker).toContainText('Ask for');
-  await expect(picker).toContainText('Running in web-app');
-  await expect(pane.locator('[role="menu"]')).toHaveCount(0);
-  expect((await picker.boundingBox())!.y).toBeGreaterThan((await primary.boundingBox())!.y);
-  const agents = picker.getByRole('radiogroup', { name: 'Agent, running in web-app' });
-  await expect(agents.getByRole('radio')).toHaveCount(3);
-  await expect(picker.locator('[data-pulls-picker-session]')).toHaveCount(2);
-  await expect(picker.locator('[data-pulls-picker-session="ses-billing-claude"]')).toHaveCount(0);
-  await expect(picker.locator('[data-pulls-picker-session] input:checked')).toHaveCount(1);
-  await expect(picker.locator('[data-pulls-picker-new]')).toContainText('Start a new agent');
-  await expect(picker.locator('[data-pulls-ask-choice]')).toHaveAttribute('data-pulls-ask-choice', 'guide');
-  // A row only picks: nothing is sent until Start review thread.
-  await picker.locator('[data-pulls-picker-session="ses-web-claude"]').click();
-  await expect(picker.locator('[data-pulls-picker-session="ses-web-claude"] input')).toBeChecked();
-  await expect(picker.locator('[data-pulls-start]')).toHaveText('Start review thread');
-  await expect(picker.locator('[data-pulls-start]')).toHaveAttribute('data-pulls-start', 'ses-web-claude');
-  await expect(pane.locator('[data-pulls-thread]')).toHaveCount(0);
-  await shot(page, '4a-picker');
   // The row opens the diff too: "Open diff ›" at its end, under the pointer.
   const row = pane.locator(`[data-pulls-layer="${LOCALE}"] button`);
   await row.hover();
   await expect(row.locator('.ib-pr-lgo')).toHaveText('Open diff');
   await shot(page, '4b-row-hover', ['light']);
   await page.mouse.move(0, 0);
-  await picker.locator('[data-pulls-ask-option="custom"]').click();
-  await picker.locator('[data-pulls-ask-words]').fill('Check the fallback chain, and a test for a missing locale');
+  await primary.click();
+  // The New review box, filled in: this PR, an agent of its project in To, nothing asked of the person but Start.
+  const box = page.locator('[data-review-box]');
+  await expect(box.locator('[data-review-pick]')).toContainText('Fall back to English for missing strings');
+  await expect(box.locator('[data-review-choice="pr"]')).toBeChecked();
+  await expect(box.locator('[data-compose-to]')).toHaveAttribute('data-compose-to', /^ses-web-/);
+  await expect(box).toContainText('from the pull request');
+  await expect(box.locator('[data-compose-thread-name] input, [data-compose-thread-name]').first()).toBeVisible();
+  // To offers only the PR's project.
+  await box.locator('[data-compose-to]').click();
+  await expect(box.locator('[data-compose-session]')).toHaveCount(2);
+  await expect(box.locator('[data-compose-session="ses-billing-claude"]')).toHaveCount(0);
+  await box.locator('[data-compose-session="ses-web-claude"]').click();
+  await expect(box.locator('[data-compose-to]')).toHaveAttribute('data-compose-to', 'ses-web-claude');
+  await shot(page, '4a-box');
+  const boxWords = box.locator('[data-compose-text] textarea');
+  await boxWords.fill('Check the fallback chain, and a test for a missing locale');
   await shot(page, '5-ask-custom');
-  await picker.locator('[data-pulls-ask-option="guide"]').click();
-  await picker.locator('[data-pulls-start]').click();
-  await expect(picker).toHaveCount(0);
-  // Focus lands on the line that names the review thread's agent.
-  const line = pane.locator('[data-pulls-thread-line]');
-  await expect(line).toBeFocused();
-  await expect(line).toHaveText(/^Review thread with Claude Code\s*Guided review on the way$/);
-  const threadId = String(await line.getAttribute('data-pulls-thread'));
+  await boxWords.fill('');
+  await box.locator('[data-compose-send]').click();
+  await expect(box).toHaveCount(0);
+  // The thread opens beside the list, Curating, the request labelled and its big title the thread's name.
+  await expect(page).toHaveURL(/#reviews.*thread=/);
+  const threadId = decodeURIComponent(/thread=([^&]+)/.exec(page.url())![1]!);
+  await expect(page.locator('.ib-subject')).toHaveText('Review #869: Fall back to English for missing strings');
+  await expect(page.locator('[data-review-curating]')).toHaveText('Curating the review…');
+  await expect(page.locator('[data-review-asked]')).toHaveText('New review · Guided review');
   const opening = await world.claude.nextReply(threadId);
   const words = String(opening.body);
-  expect(words.startsWith("You're being asked to help me review and understand a pull request. Don't change any code unless I explicitly tell you to.\n")).toBe(true);
+  expect(words.startsWith("You're being asked to help me review and understand a pull request.\n")).toBe(true);
   expect(words).toContain('\n- Title: Fall back to English for missing strings\n- Number: #869\n');
   expect(words).toContain('\n- Link: https://github.com/northwind/web-app/pull/869\n');
   expect(words).toContain('\n1. Send me a guided review of its diff against main, using /review-curate (its instructions are at the end of this message).\n');
   expect(words).toContain('BEGIN SKILL INSTRUCTIONS: review-curate');
   // Kept: a fresh read still ties it to that thread, and says what was asked; the one button opens the thread.
+  await page.goto(`${world.url}#reviews&stack=${encodeURIComponent(LOCALE)}`);
   await page.reload();
   await expect(page.locator('[data-pulls-stack] [data-pulls-thread]')).toHaveAttribute('data-pulls-thread', threadId);
-  await expect(page.locator(`[data-pulls-row="${LOCALE}"]`)).toContainText('#869 · Review thread with Claude Code · your review');
+  await expect(page.locator(`[data-pulls-row="${LOCALE}"]`)).toContainText('#869 · Curating…');
   await expect(page.locator('[data-pulls-stack] [data-pulls-thread-line="asked"]')).toContainText('Guided review on the way');
   await expect(page.locator('[data-pulls-stack] [data-pulls-primary]')).toHaveText('Open review thread');
-  await expect(page.locator('[data-pulls-stack] [data-pulls-picker]')).toHaveCount(0);
   await expect(page.locator('[data-pulls-stack] [data-pulls-open-diff]')).toBeVisible();
   await expect(page.locator('[data-pulls-stack]')).not.toContainText(/\bhand/i);
   await shot(page, '6-on-the-way');
@@ -930,13 +942,16 @@ test('a PR with no review thread: Review with an agent, the picker (Ask for, the
   await page.goto(world.url);
   await expect(page.locator(`[data-row="${threadId}"]`)).toContainText('Review #869: Fall back to English for missing strings');
   await shot(page, '6t-thread-name', ['light']);
+  // Reviewed, the row opens the same thread, in Reviews; the line over its title leads to the PR's own page.
   await page.goto(`${world.url}#pulls`);
   await page.locator(`[data-pulls-row="${LOCALE}"]`).click();
+  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe(`#reviews&thread=${threadId}`);
+  await expect(page.locator('[data-review-context]')).toContainText('#869');
+  await page.locator('[data-review-open-pull]').click();
   await expect(stackPane.locator('[data-pulls-thread-line="live"]')).toBeVisible();
   await stackPane.locator('[data-pulls-open-diff]').click();
   await expect(page.locator('[data-pull-review]')).toHaveAttribute('data-pull-review', LOCALE);
-  await page.goto(`${world.url}#pulls`);
-  await page.locator(`[data-pulls-row="${LOCALE}"]`).click();
+  await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(LOCALE)}`);
   await page.locator('[data-pulls-stack] [data-pulls-primary="open"]').click();
   await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toContain(threadId);
   await page.unroute('**/api/inbox/sessions*');
@@ -954,7 +969,7 @@ test('the Board on, a card linking the stack: a quiet Board chip, its review thr
   await page.locator(`[data-pulls-row="${STACK_ID}"]`).click();
   const pane = page.locator('[data-pulls-stack]');
   await expect(pane.locator('[data-pulls-card]')).toHaveText(/^Board\s*Retry failed charges$/);
-  await expect(pane.locator('[data-pulls-thread-line]')).toContainText('Review thread with Claude Code');
+  await expect(pane.locator('[data-pulls-thread-line]')).toContainText('Thread with Claude Code');
   await shot(page, '6b-stack-board-on');
 });
 
@@ -989,6 +1004,8 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   // Each file's box is as tall as its lines (the empty band under a short file, #2615): the 5-line migration's
   // last row ends within one row of its box's bottom.
   const sqlShell = review.locator('[data-guide-file-shell="migrations/0042_retry_schedule.sql"]');
+  // boundingBox() does not wait: the view can be mounted before its lines are drawn on a busy runner.
+  await expect(sqlShell.locator('[data-line="5"]').first()).toBeVisible();
   const sqlBox = (await sqlShell.locator('[data-guide-code-view-mounted]').boundingBox())!;
   const sqlLast = (await sqlShell.locator('[data-line="5"]').first().boundingBox())!;
   expect(sqlBox.y + sqlBox.height - (sqlLast.y + sqlLast.height)).toBeLessThan(24);
@@ -1083,6 +1100,7 @@ test('a phone at 390 px: the list, a stack, a layer review; and off, no row', as
     const list = page.locator('[data-pulls-list]');
     await expect(list.locator('[data-pulls-row]').first()).toBeVisible();
     await shot(page, 'phone-1-list');
+    await openNotReviewed(page);
     await list.locator(`[data-pulls-row="${STACK_ID}"]`).click();
     const pane = page.locator('[data-pulls-stack]');
     await expect(pane).toBeVisible();
@@ -1092,23 +1110,34 @@ test('a phone at 390 px: the list, a stack, a layer review; and off, no row', as
     const review = page.locator('[data-pull-review]');
     await expect(review.locator('[data-guide-file-shell="src/charges/schedule.ts"]')).toBeVisible({ timeout: 30_000 });
     await shot(page, 'phone-3-layer-review');
-    // A teammate's PR with no review thread: Review with an agent, the picker inline, every row a touch target.
+    // A teammate's PR with no review thread: Review with an agent, the box as a sheet, every choice a touch target.
     await offerLaunch(page);
     await page.goto(`${world.url}#pulls`);
     await page.locator('[data-pulls-row="github.com/northwind/web-app#880"]').click();
     await shot(page, 'phone-4-no-thread');
     await page.locator('[data-pulls-stack] [data-pulls-primary]').click();
-    const picker = page.locator('[data-pulls-stack] [data-pulls-picker]');
-    await expect(picker.locator('[data-pulls-picker-session]')).toHaveCount(2);
+    const box = page.locator('[data-review-box]');
+    await expect(box.locator('[data-review-pick]')).toContainText('RTL layout');
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    for (const box of await page.locator(PHONE_TARGETS).evaluateAll((els) => els.map((el) => el.getBoundingClientRect()))) {
-      expect(box.right).toBeLessThanOrEqual(390);
-      expect(box.height).toBeGreaterThanOrEqual(44);
+    for (const target of await page.locator(PHONE_TARGETS).evaluateAll((els) => els.map((el) => el.getBoundingClientRect()))) {
+      expect(target.right).toBeLessThanOrEqual(390);
+      expect(target.height).toBeGreaterThanOrEqual(44);
     }
-    await shot(page, 'phone-4a-picker');
-    await picker.locator('[data-pulls-ask-option="custom"]').click();
-    await picker.locator('[data-pulls-ask-words]').fill('what changes for Arabic and Hebrew');
+    await shot(page, 'phone-4a-box');
+    // The picker is the whole screen on a phone: something can be found and picked there.
+    await box.locator('[data-review-pick]').click();
+    const phonePicker = box.locator('[data-review-pulls]');
+    const onScreen = await phonePicker.boundingBox();
+    expect(onScreen).toMatchObject({ x: 0, y: 0, width: 390 });
+    expect(onScreen!.height).toBeGreaterThan(700);
+    await expect(phonePicker.getByRole('combobox')).toBeInViewport();
+    await shot(page, 'phone-4b-picker', ['light']);
+    await phonePicker.locator('.ib-cp-rvopt').first().click();
+    await expect(phonePicker).toHaveCount(0);
+    await box.locator('[data-compose-text] textarea').fill('what changes for Arabic and Hebrew');
     await shot(page, 'phone-5-ask-custom');
+    await box.locator('[data-compose-cancel]').click();
+    await expect(box).toHaveCount(0);
     // Every control in the review's strip and foot is a 44 px target or more on a phone.
     for (const box of await review.locator('.ib-prr-foot button, .ib-prr-scope .ib-seg-o').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height))) expect(box).toBeGreaterThanOrEqual(36);
     const width = await page.evaluate(() => document.documentElement.scrollWidth);
@@ -1160,6 +1189,26 @@ test("Post to GitHub (the owner's answer C): the choice beside the decision, a t
   await review.locator('[data-review-destination-choice="forge"]').click();
   await expect(review.locator('[data-review-posts="github"]')).toBeVisible();
   await expect(review.locator('[data-pull-review-foot]')).toContainText('your review goes on the GitHub PR');
+  // GitHub refuses an approval of your own PR, so Approve rests while its caret stays live: one control, one fill.
+  const ownApprove = review.locator('[data-review-posts] [data-decision-primary]');
+  await expect(ownApprove).toHaveAttribute('aria-disabled', 'true');
+  const look = (el: Element) => { const css = getComputedStyle(el); return [css.backgroundColor, css.opacity]; };
+  const ownCaret = review.locator('[data-review-posts] [data-decision-caret]');
+  const atRest = await ownApprove.evaluate(look);
+  expect(atRest).toEqual(await ownCaret.evaluate(look));
+  // Under the pointer: Approve does not change, and the caret lightens its own fill. Neither shows the enabled green.
+  await ownApprove.hover();
+  await expect.poll(() => ownApprove.evaluate(look)).toEqual(atRest);
+  await page.waitForTimeout(250);
+  expect(await ownApprove.evaluate(look)).toEqual(atRest);
+  await ownCaret.hover();
+  await page.waitForTimeout(250);
+  const caretHover = await ownCaret.evaluate(look);
+  expect(caretHover[0]).not.toBe(atRest[0]);
+  // The grey's own hue: an oklab colour with next to no chroma, where the enabled green has plenty.
+  const [, greenRed, blueYellow] = caretHover[0].match(/-?[\d.]+/g)!.map(Number);
+  expect(Math.hypot(greenRed, blueYellow)).toBeLessThan(0.03);
+  await page.mouse.move(2, 2);
   await shot(page, '10-ending-choice');
   {
     const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'light', deviceScaleFactor: 2 });
@@ -1240,6 +1289,96 @@ test("Post to GitHub (the owner's answer C): the choice beside the decision, a t
   expect(world.errors).toEqual([]);
 });
 
+test('a PR of 21 small files on a tall window: every file on screen draws, all the way down', async ({ browser }) => {
+  const patch = Array.from({ length: 21 }, (_, i) => {
+    const path = `src/small/f${String(i).padStart(2, '0')}.ts`;
+    return `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1,2 +1,2 @@\n export const a = 1;\n-export const b = ${i};\n+export const b = ${i + 1};\n`;
+  }).join('');
+  const context = await browser.newContext({ viewport: { width: 1920, height: 1200 }, colorScheme: 'light' });
+  const page = await context.newPage();
+  await page.route('**/api/inbox/pulls/diff*', async (route) => {
+    const real = await route.fetch();
+    await route.fulfill({ response: real, json: { ...(await real.json()), patch } });
+  });
+  try {
+    await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(TEAMMATE)}&layer=${encodeURIComponent(TEAMMATE)}&scope=layer`);
+    const body = page.locator('[data-pull-review] .ib-gbody');
+    await expect(body.locator('[data-guide-file-shell]')).toHaveCount(21, { timeout: 30_000 });
+    await expectNoBlankFiles(body);
+  } finally {
+    await context.close();
+  }
+});
+
+test('the expand arrows on the PR page: read from the forge, opening a gap grows the box; a comment on an opened line posts in the main comment', async () => {
+  const { page } = world;
+  // A page with no diff holds no workers.
+  await page.goto(`${world.url}#pulls`);
+  await page.reload();
+  await expect(page.locator(`[data-pulls-row="${TEAMMATE}"]`)).toBeVisible({ timeout: 30_000 });
+  expect(page.workers()).toEqual([]);
+  await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(TEAMMATE)}&layer=${encodeURIComponent(TEAMMATE)}&scope=layer`);
+  const review = page.locator('[data-pull-review]');
+  const shell = review.locator(`[data-guide-file-shell="${TOKENS_PATH}"]`);
+  const arrow = shell.locator('[data-expand-button]').first();
+  await expect(arrow).toBeVisible({ timeout: 30_000 });
+  // Highlighting happens off the page's thread: a long file must not freeze it.
+  await expect.poll(() => page.workers().length).toBeGreaterThan(0);
+  // Arrows, and no read: a whole file is read and highlighted only when someone opens one.
+  expect(forgeCalls()).not.toContain(`gh diff repos/northwind/web-app/contents/${TOKENS_PATH}?ref=${MERGE_BASE}`);
+  // The forge has no whole text of Layout.tsx: its first click takes its arrows away, and nothing is logged.
+  const noText = review.locator('[data-guide-file-shell="src/settings/Layout.tsx"] [data-expand-button]');
+  await noText.first().click();
+  await expect(noText).toHaveCount(0);
+  const box = shell.locator('[data-guide-code-view-mounted]');
+  const height = async () => (await box.boundingBox())!.height;
+  const before = await height();
+  // The gap above the hunk: its arrow opens down from the file's first line.
+  await shell.locator('[data-expand-button][data-expand-down]').first().click();
+  await expect.poll(height).toBeGreaterThan(before);
+  expect(forgeCalls()).toContain(`gh diff repos/northwind/web-app/contents/${TOKENS_PATH}?ref=${MERGE_BASE}`);
+  // Line 20 was in no hunk: GitHub takes no inline comment on it, so it goes in the review's main comment, quoted.
+  const opened = shell.locator('[data-column-number="20"]').last();
+  await expect(opened).toBeVisible({ timeout: 10_000 });
+  await shell.hover();
+  await opened.click();
+  await page.getByPlaceholder('Leave feedback...').fill('Why 20 and not a named step?');
+  await page.getByRole('button', { name: 'Add Comment' }).click();
+  await expect(review.locator('[data-review-posts] [data-decision-primary]')).toContainText('Post Comments');
+  // The old side's line 45 quotes the old text, not the new file's line 45.
+  await box.evaluate((el) => el.scrollIntoView({ block: 'end' }));
+  await shell.locator('[data-expand-up]:visible').last().click();
+  const oldSide = shell.locator('[data-column-number="45"]').first();
+  await expect(oldSide).toBeVisible({ timeout: 10_000 });
+  await oldSide.click();
+  await page.getByPlaceholder('Leave feedback...').fill('Why is this one kept?');
+  await page.getByRole('button', { name: 'Add Comment' }).click();
+  // After a reload the gap is closed again: going to the comment opens it first.
+  await page.reload();
+  await expect(shell.locator('[data-expand-button]').first()).toBeVisible({ timeout: 30_000 });
+  await expect(shell.locator('[data-column-number="20"]')).toHaveCount(0);
+  await review.getByRole('button', { name: 'Comments, 2' }).click();
+  await review.locator('.ib-gpanel').getByText('Why 20 and not a named step?').first().click();
+  await expect(shell.locator('[data-column-number="20"]').last()).toBeInViewport({ timeout: 10_000 });
+  // The old side numbers apart from the new: its comment opens the line it was written on.
+  await review.locator('.ib-gpanel').getByText('Why is this one kept?').first().click();
+  await expect(shell.locator('[data-column-number="45"]').first()).toBeInViewport({ timeout: 10_000 });
+  await expect(shell.getByText(TOKENS[44]!).first()).toBeInViewport();
+  await review.locator('[data-review-posts] [data-decision-primary]').click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.locator('[data-outside-diff-note]')).toContainText('outside the diff');
+  await dialog.getByRole('button', { name: /Post/ }).last().click();
+  await expect(review.locator('[data-pull-review-posted]')).toBeVisible();
+  const sent = JSON.parse(readFileSync(join(world.forge, 'gh-posted.json'), 'utf8')) as { body: string; comments?: unknown[] };
+  expect(sent.comments ?? []).toEqual([]);
+  expect(sent.body).toContain('Why 20 and not a named step?');
+  expect(sent.body).toContain(TOKENS[19]!);
+  expect(sent.body).toContain(TOKENS[44]!);
+  expect(sent.body).not.toContain(TOKENS[43]!);
+  expect(world.errors).toEqual([]);
+});
+
+
 test('a saved line comment over a push: labelled, posted at the commit read, the typed words at the new head', async () => {
   const { page } = world;
   const endpoint = 'repos/northwind/web-app/pulls/880';
@@ -1294,7 +1433,6 @@ test('a saved line comment over a push: labelled, posted at the commit read, the
     rmSync(named(`${endpoint}/commits?per_page=100`), { force: true });
   }
 });
-
 test('the posting video (25 s or less): a teammate\'s PR reviewed with a comment, approved on GitHub; the choice on the person\'s own', async ({ browser }) => {
   test.skip(!video, 'PLANNOTATOR_E2E_VIDEO=1 records it');
   const dir = join(proofDir, 'posting-video');
@@ -1303,6 +1441,7 @@ test('the posting video (25 s or less): a teammate\'s PR reviewed with a comment
   const pause = (ms: number) => page.waitForTimeout(ms);
   try {
     await page.goto(`${world.url}#pulls`);
+    await openNotReviewed(page);
     await page.locator(`[data-pulls-row="${STACK_ID}"]`).click();
     await page.locator('[data-pulls-stack] [data-pulls-open-diff]').click();
     const review = page.locator('[data-pull-review]');
@@ -1354,19 +1493,14 @@ test('the walkthrough video (20 s or less): Review with an agent starts a review
     await pause(1300);
     await pane.locator('[data-pulls-primary]').click();
     await pause(900);
-    await pane.locator('[data-pulls-picker-session="ses-web-pi"]').hover();
-    await pause(300);
-    await pane.locator('[data-pulls-picker-session="ses-web-claude"]').click();
+    const box = page.locator('[data-review-box]');
+    await box.locator('[data-compose-to]').click();
+    await box.locator('[data-compose-session="ses-web-claude"]').click();
     await pause(900);
-    await pane.locator('[data-pulls-start]').hover();
-    await pause(500);
-    await pane.locator('[data-pulls-start]').click();
-    const chip = pane.locator('[data-pulls-thread]');
-    await expect(chip).toBeVisible();
-    await expect(pane.locator('[data-pulls-thread-line]')).toContainText('Guided review on the way');
-    await pane.locator('[data-pulls-open-diff]').hover();
+    await box.locator('[data-compose-send]').click();
+    await expect(box).toHaveCount(0);
     await pause(2500);
-    const threadId = String(await chip.getAttribute('data-pulls-thread'));
+    const threadId = decodeURIComponent(/thread=([^&]+)/.exec(page.url())![1]!);
     const opening = await world.claude.nextReply(threadId);
     await sendReview(world.claude, world.projects.web, String(opening.id), world.patches.rtl, 'src/settings/Layout.tsx', 'RTL layout for the settings pages');
     await page.reload();
@@ -1449,4 +1583,511 @@ test("A guided review of a PR's own diff posts its comment inline, and what post
   }, threadId);
   expect(last).not.toContain(words);
   expect(world.errors).toEqual([]);
+});
+
+test('Reviews: a review from an ordinary thread is a local row, opens at its card with what was read left out, and is the same thread', async () => {
+  const { page, claude } = world;
+  await setCodeReview(true);
+  // An ordinary thread the person has read: the agent then sends a review of local changes.
+  const first = await claude.send({ project_path: world.projects.web, thread: 'jitter', subject: 'Add jitter to the retries', body: 'I looked at the retries.' });
+  const herd = await claude.send({ project_path: world.projects.web, thread: 'jitter', body: 'Thundering herd confirmed; I will add jitter.' });
+  await page.goto(`${world.url}#thread=${first.thread_id}`);
+  await expect(page.getByText('Thundering herd confirmed')).toBeVisible();
+  await page.goto(`${world.url}#reviews`);
+  await expect(page.locator('[data-pulls-nav] .ib-n')).toBeVisible();
+  const before = Number(await page.locator('[data-pulls-nav] .ib-n').textContent());
+  await claude.submitGuide({
+    project_path: world.projects.web,
+    thread: 'jitter',
+    patch: world.patches.locale,
+    body: 'Ready for you.',
+    guide: {
+      title: 'Add jitter to retries',
+      intent: 'Spread retries out.',
+      sections: [{ title: 'The change', overview: 'Read the new lines.', diffs: [{ file: 'src/i18n/fallback.ts', summary: 'The change.' }] }],
+      review: { gitRef: 'working-tree', base: 'main', branch: 'retry-jitter' },
+      generator: { engine: 'claude-code', model: 'claude-opus-5' },
+    },
+    review: true,
+  } as never);
+  // The list follows a review that arrives, with no reload: the new row, and the sidebar's count.
+  await expect(page.locator('[data-pulls-nav] .ib-n')).toHaveText(String(before + 1), { timeout: 15_000 });
+  const row = page.locator(`[data-reviews-kind="reviewed"][data-row="${first.thread_id}"]`);
+  await expect(row).toContainText('Add jitter to retries');
+  await expect(row).toContainText('Review ready');
+  await expect(row).not.toHaveAttribute('data-pulls-row');
+  await page.reload();
+  await expect(row).toBeVisible();
+  await shot(page, 'r-page');
+
+  // Opened from Reviews: the list stays, the thread opens at its review, and what was read before it is left out.
+  await row.click();
+  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe(`#reviews&thread=${first.thread_id}`);
+  await expect(page.locator('[data-pulls-list]')).toBeVisible();
+  await expect(page.locator('[data-pulls-nav]')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('h2.ib-subject')).toHaveText('Add jitter to retries');
+  await expect(page.locator('[data-review-context]')).toContainText('Local changes');
+  await expect(page.locator('[data-review-from]')).toHaveText('Review from thread jitter');
+  await expect(page.getByText('Thundering herd confirmed')).toHaveCount(0);
+  const card = page.locator('[data-review-card]');
+  await expect(card.locator('.ib-rvc-kind')).toHaveText('Review');
+  await expect(card.locator('.ib-rvc-meta')).toHaveText('1 file +1 -0 · 1 chapter');
+  await shot(page, 'r-thread');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shot(page, 'r-thread-phone');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // The link is the same thread, in the Inbox, with everything in it; its card links back.
+  await page.locator('[data-review-from-link]').click();
+  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe(`#thread=${first.thread_id}`);
+  await expect(page.getByText('Thundering herd confirmed')).toBeVisible();
+  await expect(page.getByText('I looked at the retries.')).toBeVisible();
+  await page.locator('[data-review-in-reviews]').click();
+  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe(`#reviews&thread=${first.thread_id}`);
+  await expect(page.locator('[data-pulls-list]')).toBeVisible();
+  // A link to a message left out shows it here: nothing is out of reach.
+  await page.goto(`${world.url}#reviews&thread=${first.thread_id}&msg=${herd.id ?? herd.message_id}`);
+  await expect(page.getByText('Thundering herd confirmed')).toBeVisible();
+  await page.goto(`${world.url}#reviews`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('[data-pulls-list]')).toBeVisible();
+  await shot(page, 'r-page-phone');
+  await page.setViewportSize({ width: 1440, height: 900 });
+});
+
+test('New review, local changes: the + opens the box, the summary follows the changes and the project, Start opens it Curating, and the card moves it to On you', async () => {
+  const { page, claude } = world;
+  const file = join(world.projects.web, 'src/review-box.ts');
+  writeFileSync(file, 'export const one = 1;\nexport const two = 2;\n');
+  try {
+    await page.goto(`${world.url}#reviews`);
+    await page.reload();
+    await page.locator('[data-reviews-new]').first().click();
+    const box = page.locator('[data-review-box]');
+    await expect(box.locator('[data-review-choice="local"]')).toBeChecked();
+    await expect(box.locator('[data-review-choice="uncommitted"]')).toBeChecked();
+    // To is filled in, and the summary is that project's.
+    await box.locator('[data-compose-to]').click();
+    await box.locator('[data-compose-session="ses-web-claude"]').click();
+    await expect(box.locator('[data-review-size]')).toContainText('1 file');
+    await expect(box.locator('[data-review-size]')).toContainText('+2');
+    await expect(box.locator('[data-compose-thread-name] input')).toHaveValue(/^Review web-app: uncommitted on /);
+    await expect(box.locator('[data-compose-send]')).toContainText('Start review');
+    await shot(page, 'n-box-local');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await shot(page, 'n-box-local-phone');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // Another choice, another size: the working copy's new file is not in the last commit.
+    await box.locator('[data-review-choice="last"]').check({ force: true });
+    await expect(box.locator('[data-compose-thread-name] input')).toHaveValue(/^Review web-app: last commit on /);
+    await expect(box.locator('[data-review-size]')).not.toHaveText(/^1 file \+2 -0$/);
+    await box.locator('[data-review-choice="uncommitted"]').check({ force: true });
+    await expect(box.locator('[data-review-size]')).toContainText('+2');
+    // Open pull request: the picker lists what Reviews lists, not reviewed first.
+    await box.locator('[data-review-choice="pr"]').check({ force: true });
+    await expect(box.locator('[data-compose-send]')).toHaveClass(/ib-dis/);
+    await box.locator('[data-review-pick]').click();
+    await expect(box.locator('.ib-cp-rvpulls .ib-cp-cap').first()).toHaveText('Not reviewed yet');
+    await shot(page, 'n-box-pr');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await shot(page, 'n-box-pr-phone');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.keyboard.press('Escape');
+    await expect(box).toBeVisible();
+    await box.locator('[data-review-choice="local"]').check({ force: true });
+    await box.locator('[data-compose-to]').click();
+    await box.locator('[data-compose-session="ses-web-claude"]').click();
+    await expect(box.locator('[data-review-size]')).toContainText('+2');
+    await box.locator('[data-compose-send]').click();
+    await expect(box).toHaveCount(0);
+    await expect(page).toHaveURL(/#reviews.*thread=/);
+    const threadId = decodeURIComponent(/thread=([^&]+)/.exec(page.url())![1]!);
+    const row = page.locator(`[data-pulls-row="${threadId}"], [data-reviews-row="${threadId}"]`).first();
+    await expect(row).toContainText('Review web-app: uncommitted on');
+    await expect(row).toContainText('Curating…');
+    // The row sits in its project, by name, before any review says so; so does the line over the title.
+    await expect(row.locator('[data-pulls-repo]')).toHaveText('web-app');
+    await expect(page.locator('[data-review-context], .ib-rvctx').first()).toContainText('web-app · Uncommitted changes on');
+    await expect(page.locator('.ib-subject')).toContainText('Review web-app: uncommitted on');
+    await expect(page.locator('[data-review-curating]')).toHaveText('Curating the review…');
+    await expect(page.locator('[data-review-asked]')).toHaveText('New review · Guided review');
+    await shot(page, 'n-curating');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await shot(page, 'n-curating-phone');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const opening = await claude.nextReply(threadId);
+    const words = String(opening.body);
+    expect(words).toMatch(/^Please send me a guided review of the uncommitted changes in web-app \(on [^)]+\), using \/review-curate\.\n\nIf I ask for changes, make them and send me the updated review in this thread\./);
+    expect(words).toContain('BEGIN SKILL INSTRUCTIONS: review-curate');
+    // A reload keeps it: the row comes from the server's record, not this window's memory.
+    await page.reload();
+    await expect(page.locator('[data-review-curating]')).toBeVisible();
+    await sendReview(claude, world.projects.web, String(opening.id), world.patches.locale, 'src/i18n/fallback.ts', 'The local one');
+    await expect(row).toContainText('Review ready');
+    await expect(page.locator('[data-review-curating]')).toHaveCount(0);
+    await expect(page.locator('.ib-subject')).toHaveText('The local one');
+  } finally {
+    rmSync(file, { force: true });
+  }
+});
+
+test('New review: a local review with no card yet leaves the page when its thread is archived, and a thread started with Code review off gets no row', async () => {
+  const { page } = world;
+  const rows = async () => ((await (await page.request.get(`${world.url}api/inbox/reviews?cached=1`)).json()) as { rows: { thread_id: string | null }[] }).rows.map((row) => row.thread_id);
+  const start = async (key: string) => {
+    const sent = await page.request.post(`${world.url}api/inbox/messages`, {
+      data: { to: { host: 'claude-code', session: 'ses-web-claude' }, body: `Please review ${key}`, idempotency_key: key, review: { kind: 'local', changes: 'uncommitted', branch: 'main', base: 'main' } },
+    });
+    expect(sent.status()).toBe(200);
+    return (await sent.json()) as { thread_id: string; message: { id: string } };
+  };
+  await page.request.get(`${world.url}api/inbox/reviews`);
+  const on = await start('archive-me');
+  expect(await rows()).toContain(on.thread_id);
+  expect((await page.request.post(`${world.url}api/inbox/messages/${on.message.id}/resolve`, { data: { resolved: true } })).status()).toBe(200);
+  expect(await rows()).not.toContain(on.thread_id);
+  await setCodeReview(false);
+  const off = await start('off-start');
+  await setCodeReview(true);
+  expect(await rows()).not.toContain(off.thread_id);
+});
+
+test('New review: Code review turned off with the box open: it closes and says so, nothing is sent, and the words wait', async () => {
+  const { page } = world;
+  await page.goto(`${world.url}#reviews`);
+  await page.reload();
+  await page.locator('[data-reviews-new]').first().click();
+  const box = page.locator('[data-review-box]');
+  await expect(box).toBeVisible();
+  await box.locator('[data-compose-text] textarea').fill('Words for later.');
+  const sends: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/api/inbox/messages')) sends.push(request.url());
+  });
+  await setCodeReview(false);
+  await expect(box).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByText('Code review is off').first()).toBeVisible();
+  expect(sends).toEqual([]);
+  await setCodeReview(true);
+  await page.goto(`${world.url}#reviews`);
+  await page.locator('[data-reviews-new]').first().click({ timeout: 15_000 });
+  await expect(box.locator('[data-compose-text] textarea')).toHaveValue('Words for later.');
+  await box.locator('[data-compose-text] textarea').fill('');
+  await box.locator('[data-compose-cancel]').click();
+});
+
+test('New review: the picker says what it knows, and the summary never shows the last choice while the next is read', async () => {
+  const { page } = world;
+  const openPicker = async () => {
+    await page.goto('about:blank');
+    await page.goto(`${world.url}#reviews`);
+    await page.locator('[data-reviews-new]').first().click();
+    const box = page.locator('[data-review-box]');
+    await box.locator('[data-review-choice="pr"]').check({ force: true });
+    await box.locator('[data-review-pick]').click();
+    return box;
+  };
+  let letGo = () => {};
+  const held = new Promise<void>((resolve) => (letGo = resolve));
+  await page.route('**/api/inbox/reviews*', async (route) => {
+    await held;
+    await route.continue().catch(() => {});
+  });
+  const reading = await openPicker();
+  await expect(reading.locator('[data-review-pulls-none="reading"]')).toBeVisible();
+  await expect(reading.locator('[data-review-pulls-none="reading"]')).toContainText('Reading your pull requests');
+  await shot(page, 'n-picker-reading');
+  letGo();
+  await page.waitForTimeout(100);
+  await page.unroute('**/api/inbox/reviews*');
+  await page.route('**/api/inbox/reviews*', (route) => route.abort());
+  await page.route('**/api/inbox/pulls?*', (route) => route.abort());
+  const failed = await openPicker();
+  await expect(failed.locator('[data-review-pulls-none="failed"]')).toBeVisible();
+  await shot(page, 'n-picker-failed');
+  await page.unroute('**/api/inbox/reviews*');
+  await page.unroute('**/api/inbox/pulls?*');
+
+  // Fresh, off the failed read: the box's summary, then the next choice with its read held back.
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#reviews`);
+  await page.locator('[data-reviews-new]').first().click();
+  const box = page.locator('[data-review-box]');
+  await expect(box.locator('[data-review-size]')).toBeVisible();
+  let again = () => {};
+  const slow = new Promise<void>((resolve) => (again = resolve));
+  await page.route('**/api/inbox/reviews/changes*', async (route) => {
+    await slow;
+    await route.continue().catch(() => {});
+  });
+  await box.locator('[data-review-choice="last"]').check({ force: true });
+  await expect(box.locator('[data-review-size]')).toHaveCount(0);
+  again();
+  await expect(box.locator('[data-review-size]')).toBeVisible();
+  await page.unroute('**/api/inbox/reviews/changes*');
+  await box.locator('[data-compose-cancel]').click();
+});
+
+test('New review, its other doors: #reviews&new, ⌘K from the Inbox, and a PR already in review opens its thread instead of a second one', async () => {
+  const { page } = world;
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#reviews&new`);
+  const box = page.locator('[data-review-box]');
+  await expect(box).toBeVisible();
+  await expect(page).toHaveURL(/#reviews$/);
+  await box.locator('[data-compose-cancel]').click();
+  await expect(box).toHaveCount(0);
+
+  await page.goto(`${world.url}#`);
+  await page.reload();
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.keyboard.type('new review');
+  await page.locator('[data-compose-action="review"]').click();
+  await expect(box).toBeVisible();
+  await expect(page).toHaveURL(/#reviews$/);
+
+  await box.locator('[data-review-choice="pr"]').check({ force: true });
+  await box.locator('[data-review-pick]').click();
+  const reviewed = box.locator('[data-review-pull][data-in-review]').first();
+  const threads = await page.evaluate(async () => {
+    const answer = (await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: { thread_id: string | null; stacks: { id: string }[] }[] };
+    return answer.rows;
+  });
+  const stackId = await reviewed.getAttribute('data-review-pull');
+  const threadId = threads.find((row) => row.stacks.some((stack) => stack.id === stackId))!.thread_id!;
+  await reviewed.click();
+  await expect(box).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`#reviews.*thread=${threadId}`));
+  const threadCount = await page.evaluate(async () => ((await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: unknown[] }).rows.length);
+  expect(threadCount).toBe(threads.length);
+});
+
+test('Reviews: an open question from before the review never stays out of the view, and a card says its chapters on one line', async () => {
+  const { page, claude } = world;
+  const first = await claude.send({ project_path: world.projects.web, thread: 'asking', subject: 'Which retry cap?', body: 'A plain note from earlier.' });
+  await claude.send({ project_path: world.projects.web, thread: 'asking', body: 'Before I go on.\n\n:::question\nWhich retry cap do you want?\n- [ ] Three\n- [ ] Five\n:::' });
+  await page.goto(`${world.url}#thread=${first.thread_id}`);
+  await expect(page.getByText('Which retry cap do you want?').first()).toBeVisible();
+  await claude.submitGuide({
+    project_path: world.projects.web,
+    thread: 'asking',
+    patch: world.patches.locale,
+    body: 'Three parts.',
+    guide: {
+      title: 'The retry cap',
+      intent: 'Cap the retries.',
+      sections: [
+        { title: 'The fallback', overview: 'Read this first.', diffs: [{ file: 'src/i18n/fallback.ts', summary: 'The change.' }] },
+        { title: 'Why it stays small', overview: 'Nothing else moves.', diffs: [] },
+        { title: 'What to check', overview: 'Check the strings.', diffs: [] },
+      ],
+      review: { gitRef: 'working-tree', base: 'main', branch: 'retry-cap' },
+      generator: { engine: 'claude-code', model: 'claude-opus-5' },
+    },
+    review: true,
+  } as never);
+  await page.goto(`${world.url}#reviews&thread=${first.thread_id}`);
+  await page.reload();
+  await expect(page.locator('[data-review-card] .ib-rvc-meta')).toHaveText('1 file +1 -0 · 3 chapters');
+  await expect(page.locator('[data-review-card] ol, [data-review-card] li')).toHaveCount(0);
+  await expect(page.getByText('Which retry cap do you want?').first()).toBeVisible();
+  await expect(page.getByText('A plain note from earlier.')).toHaveCount(0);
+  // The person answers it here, like anywhere: the first option is a pick away.
+  await expect(page.getByText('Three', { exact: true }).first()).toBeVisible();
+  await shot(page, 'r-card-chapters');
+  // A review read long ago, with messages after it: the view still opens with the card open.
+  await claude.send({ project_path: world.projects.web, thread: 'asking', body: 'One more thing after the review.' });
+  await page.goto(`${world.url}#thread=${first.thread_id}`);
+  await expect(page.getByText('One more thing after the review.')).toBeVisible();
+  await page.goto(`${world.url}#reviews&thread=${first.thread_id}`);
+  await page.reload();
+  await expect(page.locator('[data-review-card] [data-review-start]')).toBeVisible();
+  await page.goto(`${world.url}#reviews&thread=${first.thread_id}`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shot(page, 'r-card-chapters-phone');
+  await page.setViewportSize({ width: 1440, height: 900 });
+});
+
+test('Reviews: what waits on the person is never hidden, every row shows what it says, and nothing leaves while the person is in the thread', async () => {
+  const { page, claude } = world;
+  await setCodeReview(true);
+  const reviewFor = (thread: string, title: string) =>
+    claude.submitGuide({
+      project_path: world.projects.web,
+      thread,
+      patch: world.patches.locale,
+      body: 'Ready for you.',
+      guide: {
+        title,
+        intent: 'The change.',
+        sections: [{ title: 'The change', overview: 'Read the new lines.', diffs: [{ file: 'src/i18n/fallback.ts', summary: 'The change.' }] }],
+        review: { gitRef: 'working-tree', base: 'main', branch: 'waits' },
+        generator: { engine: 'claude-code', model: 'claude-opus-5' },
+      },
+      review: true,
+    } as never);
+  const read = async (threadId: string, last: string) => {
+    await page.goto(`${world.url}#thread=${threadId}`);
+    await expect(page.getByText(last)).toBeVisible();
+  };
+  const fresh = async (threadId: string) => {
+    await page.goto(`${world.url}#reviews&thread=${threadId}`);
+    await page.reload();
+    await expect(page.locator('[data-review-card]')).toHaveCount(1);
+  };
+
+  // Six read messages with a question and an action item among them, then a review.
+  const first = await claude.send({ project_path: world.projects.web, thread: 'waits', subject: 'What waits', body: 'Plain note one.' });
+  await claude.send({ project_path: world.projects.web, thread: 'waits', body: 'Plain note two.' });
+  await claude.send({ project_path: world.projects.web, thread: 'waits', body: 'Before I go on.\n\n:::question\nWhich way do you want it?\n- [ ] Left\n- [ ] Right\n:::' });
+  await claude.send({ project_path: world.projects.web, thread: 'waits', body: 'Something for you.\n\n:::action\n- [ ] Rotate the staging key\n:::' });
+  await claude.send({ project_path: world.projects.web, thread: 'waits', body: 'Plain note three.' });
+  await claude.send({ project_path: world.projects.web, thread: 'waits', body: 'Plain note four.' });
+  await read(first.thread_id, 'Plain note four.');
+  await reviewFor('waits', 'What waits review');
+  await fresh(first.thread_id);
+  await expect(page.getByText('Which way do you want it?').first()).toBeVisible();
+  await expect(page.getByText('Rotate the staging key').first()).toBeVisible();
+  await expect(page.getByText('Plain note one.')).toHaveCount(0);
+  await expect(page.getByText(/\d+ earlier messages?/)).toHaveCount(0);
+  await shot(page, 'r-waits');
+
+  // Ticking Done keeps the message and its way to undo, then and after a reload.
+  const tick = page.locator('[data-action-tick]').first();
+  await tick.click();
+  await expect(tick).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByPlaceholder(/^Add a note for /).first()).toBeVisible();
+  await page.reload();
+  await expect(page.locator('[data-review-card]')).toHaveCount(1);
+  await expect(page.getByText('Rotate the staging key').first()).toBeVisible();
+  await expect(page.locator('[data-action-tick]').first()).toHaveAttribute('aria-pressed', 'true');
+
+  // J and K walk the Reviews rows' threads like the Inbox's list.
+  const other = await claude.send({ project_path: world.projects.web, thread: 'walks', subject: 'Walks', body: 'A note.' });
+  await reviewFor('walks', 'Walks review');
+  await page.goto(`${world.url}#reviews&thread=${first.thread_id}`);
+  await page.reload();
+  await expect(page.locator(`[data-reviews-kind="reviewed"][data-row="${other.thread_id}"]`)).toBeVisible();
+  await expect(page.locator('[data-review-card]')).toHaveCount(1);
+  const threadOf = () => page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get('thread'));
+  const here = await threadOf();
+  await page.keyboard.press('k');
+  await expect.poll(threadOf).toBe(other.thread_id);
+  await page.keyboard.press('j');
+  await expect.poll(threadOf).toBe(here);
+
+  // Three messages, a review, five more, all read: the card is drawn, and a run's row shows as many as it says.
+  const long = await claude.send({ project_path: world.projects.web, thread: 'longer', subject: 'Longer', body: 'Before one.' });
+  await claude.send({ project_path: world.projects.web, thread: 'longer', body: 'Before two.' });
+  await claude.send({ project_path: world.projects.web, thread: 'longer', body: 'Before three.' });
+  await reviewFor('longer', 'Longer review');
+  for (const word of ['one', 'two', 'three', 'four', 'five']) await claude.send({ project_path: world.projects.web, thread: 'longer', body: `After ${word}.` });
+  await read(long.thread_id, 'After five.');
+  await fresh(long.thread_id);
+  await expect(page.locator('[data-review-card] [data-review-start]')).toBeVisible();
+  await expect(page.getByText('Before one.')).toHaveCount(0);
+  const row = page.getByRole('button', { name: /^Show 2 earlier messages/ });
+  await expect(page.getByText('After two.')).toHaveCount(0);
+  await row.click();
+  await expect(page.getByText('After two.')).toBeVisible();
+  await expect(page.getByText('After three.')).toBeVisible();
+  await expect(row).toHaveCount(0);
+
+  // A reply sent from the view takes nothing off the screen, even a message that was new when it opened.
+  const replying = await claude.send({ project_path: world.projects.web, thread: 'replying', subject: 'Replying', body: 'New before the review.' });
+  await reviewFor('replying', 'Replying review');
+  // Straight in, with no reload: a reload after the first open could land after that open marked it read.
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#reviews&thread=${replying.thread_id}`);
+  await expect(page.getByText('New before the review.')).toBeVisible();
+  await page.getByRole('button', { name: 'Reply', exact: true }).last().click();
+  const reply = page.getByRole('textbox', { name: 'Reply to Claude Code' });
+  await reply.fill('Thanks, on it.');
+  await reply.press('ControlOrMeta+Enter');
+  await expect(page.getByText('Thanks, on it.').first()).toBeVisible();
+  await page.waitForTimeout(1500);
+  await expect(page.getByText('New before the review.')).toBeVisible();
+
+  // A deep link waits for the rows, so the thread never shows whole and then folds.
+  let letGo = () => {};
+  const held = new Promise<void>((resolve) => (letGo = resolve));
+  await page.route('**/api/inbox/reviews*', async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#reviews&thread=${long.thread_id}`);
+  await expect(page.locator('[data-pulls-nav]')).toBeVisible();
+  await expect(page.locator('[data-thread-wait="loading"]')).toBeVisible();
+  await shot(page, 'r-pending');
+  await page.waitForTimeout(400);
+  await expect(page.getByText('Before one.')).toHaveCount(0);
+  // A phone has no pane beside the list: it keeps the list, saying it is reading, never a white page.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#reviews&thread=${long.thread_id}`);
+  await expect(page.locator('[data-pulls-list]').getByText('Reading your pull requests')).toBeVisible();
+  await expect(page.locator('[data-thread-wait]')).toHaveCount(0);
+  await shot(page, 'r-pending-phone');
+  letGo();
+  await expect(page.locator('[data-review-card]')).toHaveCount(1);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(page.getByText('Before one.')).toHaveCount(0);
+  await page.unroute('**/api/inbox/reviews*');
+
+  // The row goes while the person is in the thread (archived from another window): the link to what was left out went
+  // with it, so the thread shows whole, and stays whole if the row comes back.
+  const archive = (threadId: string, resolved: boolean) => page.request.post(`${world.url}api/inbox/messages/${threadId}/resolve`, { data: { resolved } });
+  await fresh(long.thread_id);
+  await expect(page.getByText('Before one.')).toHaveCount(0);
+  await archive(long.thread_id, true);
+  await expect(page.getByText('Before one.')).toBeVisible({ timeout: 15_000 });
+  await archive(long.thread_id, false);
+  await expect(page.locator('[data-review-context]')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Before one.')).toBeVisible();
+
+  // A thread handed a PR and archived before its review: the PR is back to Review with an agent, not "on the way".
+  const handed = await claude.send({ project_path: world.projects.web, thread: 'handed-off', subject: 'Handed', body: 'On it.' });
+  expect((await page.request.post(`${world.url}api/inbox/pulls/owner`, { data: { keys: [LOCALE], thread_id: handed.thread_id, ask: 'guide' } })).status()).toBe(200);
+  await archive(handed.thread_id, true);
+  await page.goto(`${world.url}#reviews`);
+  await page.reload();
+  await page.locator(`[data-pulls-row="${LOCALE}"], [data-pulls-row]`).filter({ hasText: '#869' }).first().click();
+  await expect(page.locator('[data-pulls-stack] [data-pulls-primary]')).toHaveText('Review with an agent');
+
+  // Code review off: the thread's view is the off page on a fresh link, and the thread itself loses nothing.
+  await setCodeReview(false);
+  await page.goto(`${world.url}#reviews&thread=${long.thread_id}`);
+  await page.reload();
+  await expect(page.getByText('Code review is off')).toBeVisible();
+  await expect(page.locator('[data-review-context]')).toHaveCount(0);
+  await page.goto(`${world.url}#thread=${long.thread_id}`);
+  await expect(page.getByText('Before one.')).toBeVisible();
+  await setCodeReview(true);
+});
+
+test('Reviews with nothing in it: says so, and offers a new review', async () => {
+  const { page } = world;
+  await page.route('**/api/inbox/reviews*', async (route) => {
+    const answer = await route.fetch();
+    await route.fulfill({ response: answer, json: { ...(await answer.json()), rows: [] } });
+  });
+  await page.route('**/api/inbox/pulls?*', async (route) => {
+    const answer = await route.fetch();
+    await route.fulfill({ response: answer, json: { ...(await answer.json()), pulls: [] } });
+  });
+  try {
+    await page.goto(`${world.url}#reviews`);
+    await page.reload();
+    await expect(page.locator('[data-reviews-new="empty"]')).toBeVisible();
+    await shot(page, 'r-empty');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await shot(page, 'r-empty-phone');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.locator('[data-reviews-new="empty"]').click();
+    await expect(page.locator('dialog[data-compose]')).toBeVisible();
+    await page.keyboard.press('Escape');
+  } finally {
+    await page.unroute('**/api/inbox/reviews*');
+    await page.unroute('**/api/inbox/pulls?*');
+  }
 });
