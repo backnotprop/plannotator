@@ -7,9 +7,10 @@
  * - The agent's walkthrough is the spine. There is no left rail (approval
  *   "review-deslop", r7): the top bar holds the "Walkthrough | All files"
  *   switch, the menu of chapters or changed files (ReviewJump) and the review's
- *   title in quiet grey. Split | Unified is a tab on each chapter, and sits in
- *   the bar while no tab is in view. A phone's bar is one row: the same menu
- *   holds its title and switch.
+ *   title in quiet grey. The diff controls (one Split / Unified button,
+ *   Collapse all, the "Diff display" gear: DiffControls, approval
+ *   "diff-controls-headers") sit in the bar only, never on the chapters. A
+ *   phone's bar is one row: the same menu holds its title and switch.
  * - The diff is Plannotator's own (`GuideReader` over review-editor's
  *   `AllFilesCodeView`): line comments as in code review, and a Viewed tick on
  *   each file's header, kept on the message.
@@ -46,6 +47,7 @@ import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 import { parseGuideSnapshot } from '@plannotator/core/guide-format';
 import { inboxDrawnViewOf, inboxReviewLines, inboxReviewRound } from '@plannotator/core/inbox-review';
 import type { ShapeCodeTarget } from '@plannotator/core/shape';
+import type { ShapeReviewAt } from '@plannotator/ui/components/shape/types';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import { OverviewFigure, ShowMeButton } from '../review-drawing/OverviewFigure';
 import { ShowMeBox, ShowMeCorner, ShowMeSheet } from '../review-drawing/ShowMeLayer';
@@ -78,7 +80,7 @@ import {
   type AskingSession,
   type RouteState,
 } from './ReplyRoute';
-import { DiffStyleSwitch } from './DiffStyleSwitch';
+import { DiffControls, nextCollapseAll, type CollapseAllState } from './DiffControls';
 import { DropdownMenuRadioGroup, DropdownMenuRadioItem } from '@plannotator/ui/components/ui/dropdown-menu';
 import { chapterInView, fileInView, ReviewJump } from './ReviewJump';
 import { OpenInCodeSpans, OpenInFile } from './OpenIn';
@@ -100,6 +102,12 @@ export interface ReviewPaneProps {
   onSent: () => void | Promise<void>;
   /** Plain Ask on selected lines: the Inbox's Ask window opens with these words in its box. Absent: no Ask. */
   onAsk?: (words: string) => void;
+  /**
+   * Where to open (a Shape board's link, `&code=`, `&step=`, `&files`): a file at a line, a chapter, or All files.
+   * Once there, `onLanded` (the window drops it from the address, so a reload starts at the top).
+   */
+  at?: ShapeReviewAt | null;
+  onLanded?: () => void;
 }
 
 /** Below this width the comments panel folds into the header's Comments button: the rail and the diff keep the room. */
@@ -110,7 +118,7 @@ const NO_ANNOTATIONS: never[] = [];
 
 type RailMode = 'walkthrough' | 'files';
 
-export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onAsk }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onAsk, at = null, onLanded }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = state;
   // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
@@ -193,9 +201,8 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   // last chapter too short to reach the top of the scroll keeps its name.
   const [fileSpot, setFileSpot] = useState<string | null>(null);
   const jumped = useRef(false);
-  // No chapter's tab is in view: Split | Unified docks in the top bar, where it covers nothing (a phone has neither).
-  const [docked, setDocked] = useState(false);
-  const dockRef = useRef<HTMLSpanElement>(null);
+  // The top bar's Collapse all (DiffControls): every file's diff, this view only.
+  const [collapseAll, setCollapseAll] = useState<CollapseAllState | null>(null);
   useEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
@@ -203,15 +210,6 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     const read = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        const box = body.getBoundingClientRect();
-        const tabs = [...body.querySelectorAll('[data-guide-section-tab] [data-diff-style-switch]')];
-        const inView = tabs.find((tab) => {
-          const at = tab.getBoundingClientRect();
-          return at.bottom > box.top && at.top < box.bottom;
-        });
-        // One at a time. Focus in the docked one goes with it, to the tab that takes over.
-        if (inView && dockRef.current?.contains(document.activeElement)) inView.querySelector<HTMLElement>('input:checked')?.focus({ preventScroll: true });
-        setDocked(tabs.length > 0 && !inView);
         if (jumped.current) return;
         if (mode === 'walkthrough') setCurrent(chapterInView(body, chapters.length));
         else setFileSpot(fileInView(body));
@@ -224,7 +222,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     read();
     body.addEventListener('scroll', read, { passive: true });
     for (const kind of HAND) body.addEventListener(kind, release, { passive: true });
-    // Which tabs are in view changes with no scroll too: a taller or shorter window, and a file or chapter that folds.
+    // Where the person is changes with no scroll too: a taller or shorter window, and a file or chapter that folds.
     const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(read);
     resized?.observe(body);
     if (contentRef.current) resized?.observe(contentRef.current);
@@ -318,6 +316,35 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     setHighlight((was) => ({ path: target.path, start, end, token: (was?.token ?? 0) + 1 }));
     return true;
   };
+  // A place to open at (a Shape board's link): once the review is read, then the address lets it go.
+  const landed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!at || !snapshot) return;
+    const key = JSON.stringify(at);
+    if (landed.current === key) return;
+    landed.current = key;
+    if (at.path && at.line) openCode({ path: at.path, line: at.line });
+    else if (at.path && files.some((file) => file.path === at.path)) toFile(at.path);
+    else if (at.step && at.step <= chapters.length) {
+      // A chapter with no diff has only its heading to scroll to: wait for the reader to draw it.
+      const index = at.step - 1;
+      if (chapters[index]?.diffs.some((ref) => files.some((file) => file.path === ref.file))) toChapter(index);
+      else {
+        jumped.current = true;
+        setCurrent(index);
+        let tries = 0;
+        const look = () => {
+          const heading = bodyRef.current?.querySelector(`[data-guide-section="${index}"]`);
+          if (heading) heading.scrollIntoView({ block: 'start' });
+          else if (tries++ < 120) requestAnimationFrame(look);
+        };
+        look();
+      }
+    } else if (at.files) flip('files');
+    onLanded?.();
+    // The place is read once per review; the jumps read the latest render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [at, snapshot]);
   // The actions are made once per switch (a new object each render would re-render every diff); Show me reads
   // the latest render's open through this ref, so it sees the drawings and turns read since.
   const showMeOpen = useRef(showMe.open);
@@ -628,11 +655,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
           </Tip>
         )}
         <span className="ib-sp" />
-        {docked && !phone && (
-          <span ref={dockRef} className="ib-rv-docked" data-review-diff-style-docked="">
-            <DiffStyleSwitch icons name="ib-diff-style-docked" label="Diff layout, top bar" />
-          </span>
-        )}
+        {snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
         {folded && (
           <button
             type="button"
@@ -767,6 +790,8 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
                 renderHeadActions={renderHeadActions}
                 highlight={highlight}
                 threadHeading
+                hostDiffControls
+                {...(collapseAll ? { collapseAll } : {})}
               />
               </OpenInCodeSpans>
             </ReaderPart>

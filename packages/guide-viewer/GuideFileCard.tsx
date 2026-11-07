@@ -116,10 +116,22 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   onActivate,
   fitContent = false,
 }) => {
-  const { DiffRenderer, getDiffRendererProps, renderFileActions, diffStyle, opensWholeFiles } = useGuideHost();
+  const { DiffRenderer, getDiffRendererProps, renderFileActions, diffStyle, opensWholeFiles, collapseAll } = useGuideHost();
   const actions = renderFileActions?.(file) ?? null;
   const scrollPositionRef = useRef(0);
-  const [collapsed, setCollapsed] = useState(kind === 'generated');
+  const [collapsed, setCollapsed] = useState(collapseAll && collapseAll.token > 0 ? collapseAll.collapsed : kind === 'generated');
+  // The host's Collapse all: a new token folds or opens this card too. The renderer reads `mountCollapsed` once, so it
+  // mounts again (`key` below), but only when this card's state changes: a file already that way keeps its opened
+  // context gaps and an open comment.
+  const [collapseToken, setCollapseToken] = useState(collapseAll?.token ?? 0);
+  const [mountKey, setMountKey] = useState(0);
+  if (collapseAll && collapseAll.token !== collapseToken) {
+    setCollapseToken(collapseAll.token);
+    if (collapseAll.collapsed !== collapsed) {
+      setCollapsed(collapseAll.collapsed);
+      setMountKey((key) => key + 1);
+    }
+  }
   const fileList = useMemo(() => [file], [file]);
   // A file whose gap was opened stays mounted: the viewer holds the opened lines, and leaving the outer window would
   // close them, shrink the box under the reader and read the file again. A mounted viewer draws only rows near the viewport.
@@ -226,16 +238,19 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
 
   // Folded from its sticky header, the box is gone from under the reader: bring the file to the top of the page, not
   // whatever now sits where they were reading. Before paint, and before the box's new height reaches the observer above.
+  // Not for Collapse all: every box folds then, and the host's bar keeps the place.
   const wasCollapsed = useRef(collapsed);
+  const foldedToken = useRef(collapseToken);
   useLayoutEffect(() => {
-    const folded = collapsed && !wasCollapsed.current;
+    const folded = collapsed && !wasCollapsed.current && foldedToken.current === collapseToken;
     wasCollapsed.current = collapsed;
+    foldedToken.current = collapseToken;
     const box = boxRef.current;
     if (!folded || !fitContent || !box) return;
     const page = pageOf(box);
     const above = pageTopOf(page) - box.getBoundingClientRect().top;
     if (above > 0) page.scrollTop -= above;
-  }, [collapsed, fitContent]);
+  }, [collapsed, fitContent, collapseToken]);
 
   return (
     <div
@@ -279,6 +294,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
       >
         {mounted ? (
           <DiffRenderer
+            key={mountKey}
             {...getDiffRendererProps({ file, focused })}
             files={fileList}
             fileScrollTarget={target}

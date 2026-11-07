@@ -879,11 +879,15 @@ for (const narrow of [
         // Full screen is all the window can do here, so there is no Exit full screen: Back to the thread leads instead.
         await expect(view.getByRole('button', { name: /full screen/i })).toHaveCount(0);
         await expect(view.locator('[data-full-view-bar]')).toBeVisible();
-        // The comments drawer docks beside the page (not a phone): the page narrows.
+        // The comments panel floats over the page's right side (not a phone's sheet): the page keeps its width, and the
+        // panel sits inside the window, under the toolbar.
         await view.locator('[data-full-view-comments]').click();
         await expect(view.locator('.ib-apanel')).toBeVisible();
-        const [drawerBox, docBox] = await Promise.all([view.locator('.ib-apanel').boundingBox(), view.locator('.ib-docarea').boundingBox()]);
-        expect(docBox!.x + docBox!.width).toBeLessThanOrEqual(drawerBox!.x + 1);
+        const [drawerBox, docBox, barBox] = await Promise.all([view.locator('.ib-apanel').boundingBox(), view.locator('.ib-docarea').boundingBox(), view.locator('[data-full-view-bar]').boundingBox()]);
+        expect(docBox!.width).toBeGreaterThan(page.viewportSize()!.width - 2);
+        expect(drawerBox!.x).toBeGreaterThan(0);
+        expect(drawerBox!.x + drawerBox!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+        expect(drawerBox!.y).toBeGreaterThanOrEqual(barBox!.y + barBox!.height);
         await page.screenshot({ path: join(proofDir, `${tag}-3-file.png`) });
         expect(await sideways(page)).toEqual([]);
         expect(await overlaps(page, '[data-full-view-bar]', '.ib-fvb')).toEqual([]);
