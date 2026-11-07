@@ -167,17 +167,26 @@ export const doorT = (d: DoorWindow, r0: number) => {
  * The zoom readout while a dive or a climb moves through a window, at the
  * camera's way x (0 the sheet around at rest, 1 the inside at rest). k is the
  * camera's scale in the sheet around, s the inside's scale in it. The readout
- * passes from the sheet around's scale to the inside's in log space, as the
- * drawing passes from the one sheet to the other, and reaches the far one's
- * true scale where the move lands there (re-roots, at LAND from that end): it
- * never jumps by s (a step at half way read 160% then 39%). It starts moving
- * from the end the move left (`from`, 0 a dive, 1 a climb), so the number only
- * goes one way until the landing, then settles with the camera. A move that
- * starts with the inside already named (a wheel past half way into the
- * window) reads the inside's scale throughout (`inside`).
+ * is k * s^w: the sheet around's scale at w = 0, the inside's at w = 1. It
+ * never jumps by s (a step at half way read 160% then 39%).
+ *
+ * w runs in a straight line over one leg of the move: from where the leg
+ * started (x0, with the w it had there) to where the leg lands (re-roots, at
+ * LAND from its end), where w is that end's exactly. A dive's first leg is
+ * { x0: 0, w0: 0, to: 1 } and a climb's { x0: 1, w0: 1, to: 0 }, so the number
+ * goes one way until the landing, then settles with the camera. A move turned
+ * round starts a new leg where it is (`turnLeg`), so it neither steps at the
+ * turn nor at the landing it turns to.
  */
-export const diveReading = (k: number, s: number, x: number, from: 0 | 1, inside = false) =>
-  k * Math.pow(s, inside ? 1 : clamp(from === 1 ? (x - LAND) / (1 - LAND) : x / (1 - LAND), 0, 1));
+export type ReadingLeg = { x0: number; w0: number; to: 0 | 1 };
+export const readingWeight = (x: number, leg: ReadingLeg) => {
+  const x1 = leg.to === 1 ? 1 - LAND : LAND, d = x1 - leg.x0;
+  return clamp(Math.abs(d) < 1e-6 ? leg.to : leg.w0 + ((leg.to - leg.w0) * (x - leg.x0)) / d, 0, 1);
+};
+/** The leg a move takes on when it is sent toward `to` from x; the same leg when it already goes there. */
+export const turnLeg = (leg: ReadingLeg, x: number, to: 0 | 1): ReadingLeg => (leg.to === to ? leg : { x0: x, w0: readingWeight(x, leg), to });
+/** A move that starts with the inside already named (a wheel past half way into the window) reads the inside's scale throughout (`inside`). */
+export const diveReading = (k: number, s: number, x: number, leg: ReadingLeg, inside = false) => k * Math.pow(s, inside ? 1 : readingWeight(x, leg));
 /** What a dive at t draws: the sheet around, the entered box's own words, the inside's ink and paper, and how far it has unrolled. */
 export const diveInk = (t: number) => ({
   around: 1 - smooth(0.1, 0.6, t),

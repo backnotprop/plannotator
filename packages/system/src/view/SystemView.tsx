@@ -24,7 +24,7 @@ import type { SheetLayout } from '../layout/types.ts';
 import { layoutAtRest, lodAt, scopeLabel, scopePath, sheetOr } from './rest.ts';
 import { useSize, useText } from './text.ts';
 import {
-  CAM_MS, camAt, clamp, DIVE_MS, diveInk, diveReading, doorOf, doorT, type DoorWindow, GLIDE_DECAY, LAND, lerp, paneH, reduced, restCam, spring, springStep, STEP_MS, SW_CALM, SW_EXIT, SW_LEAD,
+  CAM_MS, camAt, clamp, DIVE_MS, diveInk, diveReading, turnLeg, type ReadingLeg, doorOf, doorT, type DoorWindow, GLIDE_DECAY, LAND, lerp, paneH, reduced, restCam, spring, springStep, STEP_MS, SW_CALM, SW_EXIT, SW_LEAD,
   toSheet, WHEEL_TAU, WHEEL_TAU_PINCH, wOf, xf, ZOOM_STEP, zoomAbout, fitRect, type Cam, type Rect, type SpringState, type Stage,
 } from './camera.ts';
 import { all, born, clearFlip, easeOut, FULL_LINES, FULL_WORDS, placesOf, startFlip, type Flip } from './flip.ts';
@@ -66,7 +66,7 @@ export type SystemViewProps = {
 
 /** A window being entered or left: the part, the sheet inside, the box its inside opens from, and how far (0 outside, 1 inside). */
 type Dive = { part: string; code: string; r: Rect; s: number; t: number };
-type DiveRun = Dive & { t0: number; from: 0 | 1; S: SpringState; A: Cam; B: Cam; done: boolean; then?: () => void; onIn: () => void; onOut: () => void; restIn: () => Cam };
+type DiveRun = Dive & { t0: number; leg: ReadingLeg; S: SpringState; A: Cam; B: Cam; done: boolean; then?: () => void; onIn: () => void; onOut: () => void; restIn: () => Cam };
 type Door = DoorWindow & { id: string; code: string; r: Rect; s: number };
 
 
@@ -242,7 +242,8 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
   };
 
   // ---------------------------------------------------------------- the dive
-  const diveTo = (D: DiveRun, to: number) => {
+  const diveTo = (D: DiveRun, to: 0 | 1) => {
+    D.leg = turnLeg(D.leg, D.S.x, to); // a turn round starts the readout's new leg from where it is
     D.S.v += (to - D.S.x) * (wOf(DIVE_MS) / 2); // the input's push toward where it now goes
     D.S.to = to;
   };
@@ -300,7 +301,7 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
     const d = doorNow(camRef.current);
     const t0 = d && d.id === part ? doorT(d, r0Of(w)) : 0;
     const D: DiveRun = {
-      part, code: w.code, r: w.r, s: w.s, t: t0, t0, from: 0, A: camRef.current, B, then, done: false, S: { x: 0, v: 0, to: 0 },
+      part, code: w.code, r: w.r, s: w.s, t: t0, t0, leg: { x0: 0, w0: 0, to: 1 }, A: camRef.current, B, then, done: false, S: { x: 0, v: 0, to: 0 },
       restIn: () => ({ ...B, k: B.k * w.s, cx: (B.cx - w.r.x) / w.s, cy: (B.cy - w.r.y) / w.s }),
       onIn: () => { landIn(part, w.code, w.r, w.s, from); if (D.then) setTimeout(D.then, 40); },
       onOut: () => { putDive(null); draw(false); },
@@ -337,7 +338,7 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
     near.current = null;
     // t = 1 is this sheet where it was (c2), t = 0 the sheet around at rest
     const D: DiveRun = {
-      part: P.part, code: c1, r, s: sc, t: 1, t0: 0, from: 1, A: Bout, B: c2, then, done: false, S: { x: 1, v: 0, to: 1 },
+      part: P.part, code: c1, r, s: sc, t: 1, t0: 0, leg: { x0: 1, w0: 1, to: 0 }, A: Bout, B: c2, then, done: false, S: { x: 1, v: 0, to: 1 },
       restIn: () => c,
       onIn: () => landIn(P.part, c1, r, sc, P.pcode!), // turned back in
       onOut: () => { putDive(null); name(P.pcode!, `Out to ${scopeLabel(model, model.sheets[P.pcode!]!.scope)}`); draw(false); if (D.then) setTimeout(D.then, 40); },
@@ -668,6 +669,9 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
   const [keyOpen, setKeyOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
   const notesBtn = useRef<HTMLButtonElement>(null);
+  // a sheet with no notes has no card: it is shut, not hidden, so Esc goes up a level and it does not come back by itself
+  const noNotes = !L?.notes.length;
+  useEffect(() => { if (noNotes) setNotesOpen(false); }, [noNotes]);
   const codes = model.byScope[scope] ?? [code];
   /** Keeps a part in view when the keyboard reaches it off the glass. */
   const keepInView = (id: string) => {
@@ -704,7 +708,12 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
     const k = e.key;
     let did = true;
     if (k === 'Escape') {
-      if (keyOpen || notesOpen) { setKeyOpen(false); setNotesOpen(false); }
+      if (keyOpen || notesOpen) {
+        // Esc from inside the notes card gives the focus back to its button, as its close does
+        if (notesOpen && t.closest('.sys-notescard')) notesBtn.current?.focus({ preventScroll: true });
+        setKeyOpen(false);
+        setNotesOpen(false);
+      }
       else if (A.current.dive || scopePath(model, curNow.current).length > 1) surface();
       else if (onClose) onClose();
       else did = false;
@@ -759,7 +768,7 @@ export function SystemView({ model, sheet, project, reading = 'full', layout, ke
   const shownCodes = model.byScope[shownSheet?.scope ?? scope] ?? [];
   const two = !!s && hasSimple(model, code);
   const run = dv as DiveRun | null;
-  const pct = !cam ? 100 : Math.round((run ? diveReading(cam.k, run.s, run.S.x, run.from, run.t0 >= 0.5) : cam.k * (mini && t >= 0.5 ? mini.s : 1)) * 100);
+  const pct = !cam ? 100 : Math.round((run ? diveReading(cam.k, run.s, run.S.x, run.leg, run.t0 >= 0.5) : cam.k * (mini && t >= 0.5 ? mini.s : 1)) * 100);
   // the project's name leads the crumbs unless the drawing is named the same
   // ("plannotator / Plannotator / ..." said one name twice)
   const projectCrumb = project && project.trim().toLowerCase() !== scopeLabel(model, 'root').trim().toLowerCase() ? project : '';

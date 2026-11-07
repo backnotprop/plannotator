@@ -363,9 +363,36 @@ test.skipIf(!hasDom)('with keys off, the Notes button beside Key opens the notes
   act(() => x.click());
   expect(card()).toBeNull();
   expect(document.activeElement).toBe(btn);
-  // Esc with the focus inside the card still closes it
+  // Esc with the focus inside the card still closes it, and gives the focus back to the button as the close does
   act(() => btn.click());
-  press(card()!.querySelector('button')!, 'Escape');
+  const inCard = card()!.querySelector<HTMLButtonElement>('button')!;
+  act(() => inCard.focus());
+  press(inCard, 'Escape');
+  expect(card()).toBeNull();
+  expect(document.activeElement).toBe(btn);
+});
+
+test.skipIf(!hasDom)('a turn to a sheet with no notes shuts the notes card: the next Esc goes up (or closes), and the card does not come back by itself', async () => {
+  const model = models.plannotator!;
+  reduce();
+  const codes = model.byScope.root!;
+  const withNotes = codes.find((c) => R.restLayout(model, c, {}).notes.length > 0)!;
+  const without = codes.find((c) => R.restLayout(model, c, {}).notes.length === 0)!;
+  expect(withNotes && without).toBeTruthy();
+  let closed = 0;
+  const el = await render(<R.SystemView model={model} sheet={withNotes} layout="window" keys={false} onNavigate={noop} onClose={() => closed++} />);
+  const card = () => el.querySelector('[aria-label="Notes on this sheet"]');
+  act(() => el.querySelector<HTMLButtonElement>('.sys-zoom button[aria-expanded]:last-of-type')!.click());
+  expect(card()).not.toBeNull();
+  const chip = (c: string) => el.querySelectorAll<HTMLButtonElement>('.sys-chips button.sys-chip-b')[codes.indexOf(c)]!;
+  act(() => chip(without).click());
+  expect(el.querySelector('.sys-view')!.getAttribute('data-sheet')).toBe(without);
+  expect(card()).toBeNull();
+  // Esc is not spent on a card nobody sees: on the landing scope it closes the view
+  press(el.querySelector('.sys-stage')!, 'Escape');
+  expect(closed).toBe(1);
+  act(() => chip(withNotes).click());
+  expect(el.querySelector('.sys-view')!.getAttribute('data-sheet')).toBe(withNotes);
   expect(card()).toBeNull();
 });
 
