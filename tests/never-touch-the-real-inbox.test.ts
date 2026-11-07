@@ -276,7 +276,35 @@ describe("the import-time sandbox works with no bunfig", () => {
     expect(isScratchDataDir("/opt/plannotator-relocated-data-probe")).toBe(false);
     expect(() => refuseRealDataDir("/opt/plannotator-relocated-data-probe", "probe")).toThrow(/not a scratch folder/);
     expect(isScratchDataDir(join(tmpdir(), "x", "data"))).toBe(true);
-    expect(isScratchDataDir(tmpdir())).toBe(false); // The temp root itself is not a sandbox.
+    const savedMarker = process.env.PLANNOTATOR_TEST_SANDBOX;
+    try {
+      delete process.env.PLANNOTATOR_TEST_SANDBOX;
+      expect(isScratchDataDir(tmpdir())).toBe(false);
+    } finally {
+      if (savedMarker === undefined) delete process.env.PLANNOTATOR_TEST_SANDBOX;
+      else process.env.PLANNOTATOR_TEST_SANDBOX = savedMarker;
+    }
+  });
+
+  test("a temporary root is refused unless explicitly marked as a sandbox", () => {
+    const root = scratch("plannotator-temp-root-");
+    const savedTmp = process.env.TMPDIR;
+    const savedMarker = process.env.PLANNOTATOR_TEST_SANDBOX;
+    try {
+      process.env.TMPDIR = root;
+      const marker = join(root, "marked");
+      process.env.PLANNOTATOR_TEST_SANDBOX = marker;
+      expect(isScratchDataDir(root)).toBe(false);
+      expect(isScratchDataDir(join(root, "data"))).toBe(true);
+      expect(isScratchDataDir(marker)).toBe(true);
+      process.env.PLANNOTATOR_TEST_SANDBOX = root;
+      expect(isScratchDataDir(root)).toBe(true);
+    } finally {
+      if (savedTmp === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = savedTmp;
+      if (savedMarker === undefined) delete process.env.PLANNOTATOR_TEST_SANDBOX;
+      else process.env.PLANNOTATOR_TEST_SANDBOX = savedMarker;
+    }
   });
 
   test("the Inbox dev scripts refuse the default data dir, and DAST refuses none", async () => {
