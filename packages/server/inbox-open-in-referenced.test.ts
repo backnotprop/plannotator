@@ -5,7 +5,7 @@
  * fixture under a temp folder (never the real home).
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxStore } from "@plannotator/shared/inbox/store";
@@ -37,7 +37,11 @@ const launcher: InboxOpenInLauncher = {
 
 const SESSION = "srv-session";
 
-function world(pulls: { threadPulls?: () => string[]; pullFile?: (pull: string, path: string) => Promise<any> } = {}) {
+/**
+ * `linkedHome`: the Inbox is given the home folder through a symlink (`/home` -> `/var/home`), and `~/.plannotator` is
+ * made only after it starts.
+ */
+function world(pulls: { threadPulls?: () => string[]; pullFile?: (pull: string, path: string) => Promise<any>; linkedHome?: boolean } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-refs-")));
   roots.push(root);
   const home = join(root, "home");
@@ -68,6 +72,11 @@ function world(pulls: { threadPulls?: () => string[]; pullFile?: (pull: string, 
   writeFileSync(join(project, "src", "keychains", "index.ts"), "export const keychains = [];\n");
   writeFileSync(join(home, "Library", "Keychains", "login.txt"), "secret\n");
 
+  const givenHome = pulls.linkedHome ? join(root, "home-link") : home;
+  if (pulls.linkedHome) {
+    symlinkSync(home, givenHome);
+    renameSync(join(home, ".plannotator"), join(root, "plannotator-later"));
+  }
   const store = InboxStore.open(join(root, "data"));
   const prj = store.ensureProject({ name: "project", root: project });
   const sent = store.sendMessage({ project_id: prj.id, author: { kind: "agent", host: "claude-code", session: "ses_a", name: "Claude Code" }, body: "See docs/plan.md and /tmp/x." });
@@ -86,8 +95,9 @@ function world(pulls: { threadPulls?: () => string[]; pullFile?: (pull: string, 
     threadPulls: pulls.threadPulls ?? (() => []),
     pullFile: pulls.pullFile ?? (async () => null),
     ownerOrLocal: (_req, via) => via === "local",
-    home,
+    home: givenHome,
   });
+  if (pulls.linkedHome) renameSync(join(root, "plannotator-later"), join(home, ".plannotator"));
   const call = async (req: Request, via: "local" | "tailnet" = "local"): Promise<Response> => {
     const path = new URL(req.url).pathname;
     try {
@@ -153,6 +163,14 @@ describe("a file a message names: the view", () => {
     }
     expect((await w.view(join(data, "plans", "saved.md"))).body).toMatchObject({ found: true, contents: "# Saved plan\n" });
     expect((await w.attach(join(data, "inbox", "machines.json"))).body.code).toBe("attachment_missing");
+  });
+
+  test("~/.plannotator made after the Inbox starts, under a home folder that is a symlink, is refused by either spelling", async () => {
+    const w = world({ linkedHome: true });
+    for (const path of [join(w.home, ".plannotator", "inbox", "machines.json"), join(w.root, "home-link", ".plannotator", "inbox", "machines.json"), "~/.plannotator/inbox/machines.json"]) {
+      expect([path, (await w.view(path)).body.found]).toEqual([path, false]);
+    }
+    expect((await w.view("~/notes/todo.md")).body).toMatchObject({ found: true, contents: "- one\n" });
   });
 
   test("a folder named keychains in a project opens; the real Keychains folder does not", async () => {

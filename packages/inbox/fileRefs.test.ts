@@ -48,4 +48,13 @@ describe('what names a file (approval inbox-file-refs-open-viewer)', () => {
     expect(found('See example.com/docs/page.html and docs.github.com/en/a.md')).toEqual([]);
     expect(found('But src/next.js and docs/plan.md stay files.')).toEqual(['src/next.js', 'docs/plan.md']);
   });
+
+  test('a path with a heading anchor stays a file, even one that starts like a sha', () => {
+    expect(found('Details in docs/setup.md#configuration.')).toEqual(['docs/setup.md']);
+    expect(found('See docs/guide.md#deploy and docs/faq.md#faq')).toEqual(['docs/guide.md', 'docs/faq.md']);
+    expect(found('Lines docs/guide.md#L12 too')).toEqual(['docs/guide.md']);
+    expect(found('Pinned to owner/repo.js@3f2a9c1e8b and vercel/next.js#42')).toEqual([]);
+    // Too short to be a commit: an `@` that is not one leaves the file a file.
+    expect(found('Ask docs/plan.md@abc')).toEqual(['docs/plan.md']);
+  });
 });

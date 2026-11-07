@@ -30,7 +30,7 @@ import { constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync,
 import { lstat, open, realpath, type FileHandle } from "node:fs/promises";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { isShapeProjectPath } from "@plannotator/core/shape";
-import { isNetworkPath, networkMountPoints } from "./network-paths";
+import { isNetworkPath } from "./network-paths";
 import {
   INBOX_VIEW_MAX_BYTES,
   inboxAttachmentId,
@@ -538,8 +538,8 @@ export type InboxReadableFile =
  * A file a message names, wherever it is on this computer (approval "inbox-file-refs-open-viewer": no project
  * boundary). Each candidate is an absolute path, tried in order; the first regular file wins.
  *
- * - A path on another computer (`isNetworkPath`: UNC, a macOS mount-on-touch folder, a network mount) is refused as
- *   written, before anything touches it, and the realpath is never a blocking call.
+ * - A path that reaches another computer when touched (`isNetworkPath`: UNC, a macOS mount-on-touch folder) is
+ *   refused as written, before anything touches it, and the realpath is never a blocking call.
  * - A dotenv-family name, or a path `refused` takes (a secret: SSH keys, credential stores), is refused as named and
  *   again at its realpath, before anything is read, so a symlink to a secret is refused too.
  * - Once open, the realpath is asked again and must name the same file (`dev` and `ino`): a folder swapped for a link
@@ -551,15 +551,13 @@ export type InboxReadableFile =
 export async function checkInboxReadableFile(
   candidates: readonly string[],
   refused: (path: string) => boolean,
-  options: { keep?: boolean; platform?: NodeJS.Platform; mounts?: readonly string[] } = {},
+  options: { keep?: boolean; platform?: NodeJS.Platform } = {},
 ): Promise<InboxReadableFile> {
   const platform = options.platform ?? process.platform;
   let refusedAny = false;
-  let mounts = options.mounts ?? null;
   for (const named of candidates) {
     if (!isAbsolute(named) || /[\u0000-\u001f\u007f]/.test(named)) continue;
-    mounts ??= await networkMountPoints(platform);
-    if (isNetworkPath(named, platform, mounts) || inboxAttachmentNameRefusal(named) || refused(named)) {
+    if (isNetworkPath(named, platform) || inboxAttachmentNameRefusal(named) || refused(named)) {
       refusedAny = true;
       continue;
     }
@@ -569,7 +567,7 @@ export async function checkInboxReadableFile(
     } catch {
       continue;
     }
-    if (isNetworkPath(real, platform, mounts) || inboxAttachmentNameRefusal(real) || refused(real)) {
+    if (isNetworkPath(real, platform) || inboxAttachmentNameRefusal(real) || refused(real)) {
       refusedAny = true;
       continue;
     }

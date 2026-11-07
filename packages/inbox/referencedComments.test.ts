@@ -70,4 +70,45 @@ describe('comments on a file a message names, before it is attached', () => {
     expect(t.failures.at(-1)!.unsaved).toEqual([{ text: 'a' }]);
     expect(saved).toEqual([]);
   });
+
+  test('a comment made while the attachment opens (done) is kept too, and the attachment opens again with it', async () => {
+    const saved: string[] = [];
+    let opened: () => void = () => {};
+    const opening = new Promise<void>((resolve) => (opened = resolve));
+    let dones = 0;
+    const t = steps({
+      attach: async () => 'att_1',
+      save: async (_id, annotation) => {
+        saved.push((annotation as { text: string }).text);
+        return `rec_${saved.length}`;
+      },
+      done: async (id, first) => {
+        t.log.push(`done ${id} ${first}`);
+        if (++dones === 1) await opening;
+      },
+    });
+    const queue = referencedCommentQueue(t.steps);
+    const one = queue.add({ text: 'one' });
+    while (dones === 0) await Promise.resolve();
+    const two = queue.add({ text: 'two' });
+    opened();
+    expect(await Promise.all([one, two])).toEqual([true, true]);
+    expect(saved).toEqual(['one', 'two']);
+    expect(t.log).toEqual(['done att_1 rec_1', 'done att_1 rec_1']);
+  });
+
+  test('a comment already kept still reads as kept when a later one fails, so its composer does not keep it twice', async () => {
+    const t = steps({
+      attach: async () => 'att_1',
+      save: async (_id, annotation) => {
+        if ((annotation as { text: string }).text === 'bad') throw new Error('session changed');
+        return 'rec_1';
+      },
+    });
+    const queue = referencedCommentQueue(t.steps);
+    const one = queue.add({ text: 'good' });
+    const two = queue.add({ text: 'bad' });
+    expect(await Promise.all([one, two])).toEqual([true, false]);
+    expect(t.failures.at(-1)!.unsaved).toEqual([{ text: 'bad' }]);
+  });
 });

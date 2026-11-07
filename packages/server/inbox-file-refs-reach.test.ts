@@ -8,7 +8,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkInboxReadableFile } from "@plannotator/shared/inbox/attachments";
-import { isNetworkPath, networkMountPointsOf } from "@plannotator/shared/inbox/network-paths";
+import { isNetworkPath } from "@plannotator/shared/inbox/network-paths";
 import { doorRouteOf } from "./inbox-devices";
 import { forwardedFileReadRefusal } from "./inbox-machines";
 import { isPlannotatorState } from "./inbox-open-in";
@@ -49,40 +49,26 @@ describe("a file read forwarded to a linked machine", () => {
 
 describe("paths on another computer", () => {
   test("UNC paths, in either slash, and macOS's mount-on-touch folders", () => {
-    for (const path of ["//host/share/x.md", "\\\\host\\share\\x.md", "\\\\?\\C:\\x.md", "\\\\.\\pipe\\x"]) expect([path, isNetworkPath(path, "win32", [])]).toEqual([path, true]);
-    expect(isNetworkPath("//host/share/x.md", "linux", [])).toBe(true);
-    expect(isNetworkPath("/net/10.255.255.1/x.md", "darwin", [])).toBe(true);
-    expect(isNetworkPath("/Network/Servers/nas/x.md", "darwin", [])).toBe(true);
-    expect(isNetworkPath("/Users/me/notes.md", "darwin", [])).toBe(false);
-    expect(isNetworkPath("/home/me/notes.md", "linux", [])).toBe(false);
+    for (const path of ["//host/share/x.md", "\\\\host\\share\\x.md", "\\\\?\\C:\\x.md", "\\\\.\\pipe\\x"]) expect([path, isNetworkPath(path, "win32")]).toEqual([path, true]);
+    expect(isNetworkPath("//host/share/x.md", "linux")).toBe(true);
+    expect(isNetworkPath("/net/10.255.255.1/x.md", "darwin")).toBe(true);
+    expect(isNetworkPath("/Network/Servers/nas/x.md", "darwin")).toBe(true);
+    expect(isNetworkPath("/Users/me/notes.md", "darwin")).toBe(false);
   });
 
-  test("a mounted share, from the mount table; a local disk under /Volumes stays readable", () => {
-    const darwin = networkMountPointsOf(
-      [
-        "/dev/disk3s1s1 on / (apfs, sealed, local, read-only, journaled)",
-        "//guest@nas._smb._tcp.local/Team%20Files on /Volumes/Team Files (smbfs, nodev, nosuid, mounted by me)",
-        "/dev/disk4s1 on /Volumes/USB (msdos, local, nodev, nosuid)",
-        "nfs.example:/export on /private/nfs (nfs, nodev)",
-      ].join("\n"),
-      "darwin",
-    );
-    expect(darwin).toEqual(["/Volumes/Team Files", "/private/nfs"]);
-    expect(isNetworkPath("/Volumes/Team Files/plan.md", "darwin", darwin)).toBe(true);
-    expect(isNetworkPath("/volumes/team files/plan.md", "darwin", darwin)).toBe(true);
-    expect(isNetworkPath("/Volumes/USB/plan.md", "darwin", darwin)).toBe(false);
-    const linux = networkMountPointsOf("/dev/sda1 / ext4 rw 0 0\nnas:/x /mnt/nas\\040share nfs4 rw 0 0\n//nas/s /mnt/smb cifs rw 0 0\n", "linux");
-    expect(linux).toEqual(["/mnt/nas share", "/mnt/smb"]);
-    expect(isNetworkPath("/mnt/smb/a.md", "linux", linux)).toBe(true);
-    expect(isNetworkPath("/mnt/smbx/a.md", "linux", linux)).toBe(false);
+  test("a share the person already mounted reads like any folder: a Mac's SMB volume, WSL's Windows drive, an NFS home", () => {
+    expect(isNetworkPath("/Volumes/Team Files/plan.md", "darwin")).toBe(false);
+    expect(isNetworkPath("/mnt/c/Users/me/plan.md", "linux")).toBe(false);
+    expect(isNetworkPath("/home/me/plan.md", "linux")).toBe(false);
   });
 
-  test("checkInboxReadableFile refuses one before it is touched", async () => {
+  test("checkInboxReadableFile refuses one before it is touched, and reads a local file", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-reach-")));
     roots.push(root);
     writeFileSync(join(root, "a.md"), "# A\n");
-    expect(await checkInboxReadableFile([join(root, "a.md")], () => false, { platform: "linux", mounts: [root] })).toEqual({ ok: false, code: "refused" });
-    expect(await checkInboxReadableFile([join(root, "a.md")], () => false, { platform: "linux", mounts: [] })).toMatchObject({ ok: true, kind: "markdown" });
+    expect(await checkInboxReadableFile(["//host/share/a.md"], () => false, { platform: "linux" })).toEqual({ ok: false, code: "refused" });
+    expect(await checkInboxReadableFile(["/net/10.255.255.1/a.md"], () => false, { platform: "darwin" })).toEqual({ ok: false, code: "refused" });
+    expect(await checkInboxReadableFile([join(root, "a.md")], () => false, { platform: "linux" })).toMatchObject({ ok: true, kind: "markdown" });
   });
 });
 
@@ -93,17 +79,17 @@ describe("devices, pipes and live system files", () => {
     roots.push(root);
     const fifo = join(root, "pipe.log");
     expect(Bun.spawnSync(["mkfifo", fifo]).exitCode).toBe(0);
-    expect(await checkInboxReadableFile([fifo], () => false, { mounts: [] })).toEqual({ ok: false, code: "missing" });
+    expect(await checkInboxReadableFile([fifo], () => false)).toEqual({ ok: false, code: "missing" });
     const system = (path: string) => /^\/(?:proc|sys|dev)(?:\/|$)/.test(path);
-    expect(await checkInboxReadableFile(["/dev/null"], system, { mounts: [] })).toEqual({ ok: false, code: "refused" });
-    expect(await checkInboxReadableFile(["/dev/zero"], () => false, { mounts: [] })).toEqual({ ok: false, code: "missing" });
+    expect(await checkInboxReadableFile(["/dev/null"], system)).toEqual({ ok: false, code: "refused" });
+    expect(await checkInboxReadableFile(["/dev/zero"], () => false)).toEqual({ ok: false, code: "missing" });
   });
 
   test("a kept handle reads the file that was checked", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-reach-")));
     roots.push(root);
     writeFileSync(join(root, "a.log"), "one\ntwo\n");
-    const file = await checkInboxReadableFile([join(root, "a.log")], () => false, { keep: true, mounts: [] });
+    const file = await checkInboxReadableFile([join(root, "a.log")], () => false, { keep: true });
     if (!file.ok) throw new Error("expected a file");
     try {
       expect((await file.handle!.readFile("utf8"))).toBe("one\ntwo\n");

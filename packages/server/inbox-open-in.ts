@@ -266,7 +266,9 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
   const { store, serverSession, readBody, json, localOnly, launcher, codeReviewOn, shapeRoot, repoRoots, threadPulls, pullFile, ownerOrLocal } = context;
   const givenHome = context.home ?? homedir();
   const home = realpathOrNull(givenHome) ?? givenHome;
-  const dataDirs = [...new Set([dirname(store.dir), join(givenHome, ".plannotator")].flatMap((dir) => [dir, realpathOrNull(dir) ?? dir]))];
+  // The home folder as given and at its realpath (`/home` -> `/var/home`), so either spelling of `~/.plannotator` is
+  // refused, also when that folder is made after the Inbox starts.
+  const dataDirs = [...new Set([dirname(store.dir), join(givenHome, ".plannotator"), join(home, ".plannotator")].flatMap((dir) => [dir, realpathOrNull(dir) ?? dir]))];
   /** What a referenced file's view, raw read and attach refuse: a secret, a live system file, Plannotator's own state. */
   const refusedHere = (path: string): boolean => secretOrSystem(path) || isPlannotatorState(path, dataDirs);
 
