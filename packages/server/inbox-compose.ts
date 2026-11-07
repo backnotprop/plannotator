@@ -12,7 +12,7 @@
  *   GET  /api/inbox/sessions                 every live session, grouped by project;
  *                                            `?session=<id>` adds `session: { session, live }`
  *                                            (with the asker grace) for a thread's delivery line
- *   POST /api/inbox/messages                 `{ to, body, idempotency_key, uploads?, draft_id?, thread_name?, thread_name_auto?, review?, board_request?, decision_ask? }`:
+ *   POST /api/inbox/messages                 `{ to, body, idempotency_key, uploads?, draft_id?, thread_name?, thread_name_auto?, thread_name_numbered?, review?, board_request?, decision_ask? }`:
  *                                            a new thread (409 `session_not_live`, nothing written). With
  *                                            `to.launch.trust` (Trust and start) only the owner's window: the
  *                                            Send saves the folder's trust, so this form alone is never a plain write
@@ -200,7 +200,7 @@ export function createInboxCompose(options: {
       // Trust and start: every check first, the trust next, and only then the thread. A name the thread would be
       // refused must not leave the folder trusted, and `trust_failed` sends nothing.
       if (prepared?.trust) {
-        const name = { project_id: project.id, thread_name: body.thread_name, thread_name_auto: body.thread_name_auto };
+        const name = { project_id: project.id, thread_name: body.thread_name, thread_name_auto: body.thread_name_auto, thread_name_numbered: body.thread_name_numbered };
         store.checkPersonThreadName(name);
         // Again under the agent's lock, whose wait can run to 12 s: a name taken meanwhile saves nothing, and the write
         // below refuses the thread as usual.
@@ -221,6 +221,7 @@ export function createInboxCompose(options: {
         attachments,
         thread_name: body.thread_name,
         thread_name_auto: body.thread_name_auto,
+        thread_name_numbered: body.thread_name_numbered,
         // The Board chip (approval "inbox-compose-board-chip"): kept only while the Board is on, so an agent is
         // never asked for cards the Board would refuse (`board_off`).
         board_request: body.board_request === true && boardOn(),

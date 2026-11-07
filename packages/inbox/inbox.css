@@ -8258,6 +8258,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-cp-rvpulls .ib-cp-list { display: block; }
 .ib-cp-rvopt { display: flex; gap: 8px; }
 .ib-cp-rvrow .ib-cp-tobtn .ib-cp-tod { flex: none; }
+/* A long PR title is cut with an ellipsis, so the ▾ stays in the button (a phone's row is the screen's width). */
+.ib-cp-rvrow [data-review-pick] b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-cp-rvlabel { flex: none; color: var(--muted-foreground); }
 .ib-cp-rvopt .ib-cp-op { flex: 1; }
 .ib-cp-rvwhere { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }

@@ -77,7 +77,7 @@ import {
 } from './model';
 import { newUuid } from '../uuid';
 import { handoffKeys, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk } from '../pulls/model';
-import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewDefaultTo, unsentReview, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
+import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewDefaultTo, reviewToWithChanges, unsentReview, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
 import { ReviewRows } from './ReviewRows';
 
 /** A phone's picker shows at most 4½ rows of 44 px (the reply box's rule, inbox.css). */
@@ -289,10 +289,13 @@ export function ComposeDialog(props: ComposeDialogProps) {
   }, [trustInfoOpen]);
 
   // New review opens with To filled in (a plain New message never does): the choice above it already says what it is for.
+  // `toFilled`: To is the box's own choice, not the person's, so it may move to an agent with changes to review (below).
+  const [toFilled, setToFilled] = useState(false);
   useEffect(() => {
     if (!box || !model || chosen || startPick) return;
     const to = reviewDefaultTo(composeTargets(projects), launch, current?.id ?? null, lastSent);
     if (!to) return;
+    setToFilled(true);
     if ('session' in to) setChosen(to.session);
     else setStartPick(to);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -316,6 +319,22 @@ export function ComposeDialog(props: ComposeDialogProps) {
     return () => read.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!box, reviewKind, reviewProject?.id, reviewChanges]);
+  // The project To was filled in with has no changes of this kind: another live agent's project that has some, if any.
+  const noChanges = !!box && reviewKind === 'local' && !!reviewSummary?.git && reviewSummary.files === 0;
+  useEffect(() => {
+    if (!noChanges || !toFilled || !target?.project.id) return;
+    const others = composeTargets(projects).filter((t) => t.project.id && t.project.id !== target.project.id);
+    const ids = [...new Set(others.map((t) => t.project.id!))];
+    if (ids.length === 0) return;
+    const read = new AbortController();
+    void Promise.all(ids.map((id) => inboxApi.reviewChanges(id, reviewChanges, read.signal).then((a) => [id, a.git ? a.files : 0] as const, () => [id, 0] as const))).then((files) => {
+      if (read.signal.aborted) return;
+      const session = reviewToWithChanges(others, new Map(files), lastSent);
+      if (session) setChosen(session);
+    });
+    return () => read.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noChanges, toFilled, target?.project.id, reviewChanges]);
 
   // To is never filled by itself. Focus that started on To moves to the message when the
   // first read finds no live agent (To is then a line of text, not a button).
@@ -467,6 +486,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
       setError('Nothing sent: choose a pull request first.');
       return;
     }
+    // "No changes" beside the choice says why: nothing for an agent to review.
+    if (noChanges) return;
     if (boxPull && pulls && pulls.keys.length > INBOX_PULL_OWNER_KEYS_MAX) {
       setError(`A stack of more than ${INBOX_PULL_OWNER_KEYS_MAX} open pull requests can't go to one review thread.`);
       return;
@@ -513,6 +534,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
         ...(box && !boxPull ? { review: { kind: 'local' as const, changes: reviewChanges, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, ask: body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
         uploads: uploadIds,
         ...named,
+        // A second review of the same changes is named too: "… (2)" rather than the request's first line.
+        ...(box && 'thread_name_auto' in named ? { thread_name_numbered: true as const } : {}),
         ...(draft ? { draft_id: draft.id } : {}),
         ...(boardChip && boardRequest ? { board_request: true as const } : {}),
       });
@@ -673,7 +696,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     if (event.repeat && (event.key === 'Enter' || event.key === ' ') && (event.target as Element).closest('[data-compose-send]')) event.preventDefault();
   };
 
-  const sendable = (!!target || (!!start && start.project.exists)) && !(box && reviewKind === 'pr' && !boxPull);
+  const sendable = (!!target || (!!start && start.project.exists)) && !(box && reviewKind === 'pr' && !boxPull) && !noChanges;
   const attached = files.files.filter((file) => file.state !== 'refused').length;
   const sendKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'send' });
   // While the sessions are read, neither Save draft nor a dead To: a neutral "Looking…" state.
@@ -885,6 +908,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           phone={phone}
           start={launch && canStart ? { launch, current: start && !start.scratch ? { id: start.project.id, root: start.project.root } : current } : null}
           onStart={(picked) => {
+            setToFilled(false);
             setStartPick({ agent: picked.agent, projectId: picked.project.id });
             // Reads the login shell ahead, so the Send need not wait on it (answer unused; a phone is refused).
             void inboxApi.launchSettingsRead(true).catch(() => {});
@@ -894,6 +918,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
             textRef.current?.focus();
           }}
           onPick={(picked) => {
+            setToFilled(false);
             setChosen(picked.session);
             setStartPick(null);
             setPicker(false);

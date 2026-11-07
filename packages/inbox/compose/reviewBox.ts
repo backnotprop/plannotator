@@ -135,5 +135,15 @@ export function reviewDefaultTo(
   return agent && project ? { agent: agent.agent, projectId: project.id } : null;
 }
 
+/**
+ * Local changes, when the agent To was filled in with has none to review: another live agent whose project has some,
+ * the one last sent to first, else in list order. `files`: each project's changed files for the chosen kind (a project
+ * missing from it was not read). Null when no other project has changes.
+ */
+export function reviewToWithChanges(targets: readonly { session: string; project: { id: string | null } }[], files: ReadonlyMap<string, number>, lastSent: string | null): string | null {
+  const has = (t: { project: { id: string | null } }) => !!t.project.id && (files.get(t.project.id) ?? 0) > 0;
+  return (targets.find((t) => t.session === lastSent && has(t)) ?? targets.find(has))?.session ?? null;
+}
+
 /** The change summary, once read. */
 export type ReviewSummary = InboxReviewChangesAnswer | null;

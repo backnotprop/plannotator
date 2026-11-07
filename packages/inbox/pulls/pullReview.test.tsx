@@ -137,6 +137,8 @@ let fileAsks: string[] = [];
 let refuse: Record<string, { status: number; body: Record<string, unknown> }> = {};
 /** Thread names another open thread already has: starting a thread with one answers 409 thread_name_taken. */
 let takenNames: string[] = [];
+/** Local changes per project (`/reviews/changes`), changed files by project id; a project not here answers `{}`. */
+let changedFiles: Record<string, number> = {};
 let sessionReads = 0;
 /** While set, starting a thread waits for it: a send still on its way. */
 let holdSend: Promise<void> | null = null;
@@ -164,6 +166,7 @@ beforeEach(() => {
   fileAsks = [];
   refuse = {};
   takenNames = [];
+  changedFiles = {};
   sessionReads = 0;
   holdSend = null;
   window.localStorage.clear();
@@ -182,6 +185,10 @@ beforeEach(() => {
       if (url.pathname.endsWith('/pulls/owner')) return Response.json({ ok: true });
       if (url.pathname.endsWith('/pulls/review')) return Response.json(reviewAnswer.body, { status: reviewAnswer.status });
       return Response.json({ reply: {}, questions: [], replayed: false });
+    }
+    if (url.pathname.endsWith('/reviews/changes')) {
+      const files = changedFiles[url.searchParams.get('project')!];
+      return Response.json(files === undefined ? {} : { git: true, files, additions: files, deletions: 0, branch: 'main', base: 'main' });
     }
     if (url.pathname.endsWith('/api/inbox/sessions')) {
       sessionReads += 1;
@@ -969,7 +976,37 @@ test.skipIf(!hasDom)('the box on local changes: no PR choice needed, a session i
   expect(started[0]!.review).toMatchObject({ kind: 'local', changes: 'branch', ask: 'guide' });
   expect(started[0]!.body).toContain('the whole branch in other');
   expect(started[0]!.thread_name_auto).toBe(true);
+  // A second review of the same changes is named "… (2)" by the server, not left unnamed.
+  expect(started[0]!.thread_name_numbered).toBe(true);
   expect(posted).toEqual([]);
+});
+
+test.skipIf(!hasDom)('the box on local changes: To filled in on a project with no changes moves to an agent with some; with none anywhere, Start stays off and sends nothing', async () => {
+  const started: StartThreadInput[] = [];
+  changedFiles = { prj_9: 0, prj_2: 3 };
+  mount(<ComposeDialog request={{ review: {} }} phone={false} current={{ id: 'prj_9', root: '/home/dana/other', name: 'other' }} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  await settle();
+  expect(el('[data-compose-to]').getAttribute('data-compose-to')).toBe('ses_web');
+  expect(el('[data-review-size]').textContent).toContain('3 files');
+  expect(el('[data-compose-send]').classList.contains('ib-dis')).toBe(false);
+  act(() => root!.unmount());
+  root = null;
+
+  // The person's own pick of an agent with nothing to review stays: Start is off, as before a PR is picked.
+  changedFiles = { prj_9: 0, prj_2: 0 };
+  mount(<ComposeDialog request={{ review: {} }} phone={false} current={{ id: 'prj_9', root: '/home/dana/other', name: 'other' }} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  await settle();
+  expect(el('[data-compose-to]').getAttribute('data-compose-to')).toBe('ses_other');
+  expect(el('[data-review-size]').textContent).toBe('No changes');
+  expect(el('[data-compose-send]').classList.contains('ib-dis')).toBe(true);
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  expect(started).toEqual([]);
+  // Another kind with changes turns Start on again.
+  changedFiles = { prj_9: 1, prj_2: 0 };
+  await act(async () => el('[data-review-choice="last"]').click());
+  await settle();
+  expect(el('[data-compose-send]').classList.contains('ib-dis')).toBe(false);
 });
 
 test.skipIf(!hasDom)("Start a new agent's compose opens with the review thread's name as the person's own, and its Send carries it", async () => {
