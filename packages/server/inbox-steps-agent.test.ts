@@ -42,12 +42,12 @@ import { INBOX_DEFAULT_TOOLS } from "../../apps/hook/hooks/mod/inbox-default-too
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_MCP_INSTRUCTIONS } from "./inbox-mcp";
 
-/** The approved agent text, exact (approval "inbox-thread-steps", item 7). Pinned on purpose. */
+/** The approved agent text, exact (approval "inbox-thread-steps", item 7, amended 2026-11-07). Pinned on purpose. */
 const APPROVED =
-  "steps: your plan for the work in this thread, as the person should see it: 3 to 8 short steps, the whole list each call (it replaces the last one). status: todo, doing, done, waiting (on the person), dropped (say why in note). Call it when a step starts or ends; it sends nothing and notifies no one. Skip it for work that ends in this reply.";
-/** The action's line in the agent tool (the owner, 2026-11-03), so the description stays under Claude Code's 2,048. */
-const ACTION_LINE = "steps: keep the person's checklist for this thread current (details on the steps field).";
-const APPROVED_WAKE = "Your steps here: 2 of 5 done; doing: Replay the failures in staging. Update them if that changed.";
+  "steps: The person's checklist for this thread, only for multi-step work you're both aligned on. High-level steps, a few plain words each; never your own to-do list. The whole list each call. status: todo, doing, done, waiting (on the person), dropped (say why in note). Update each step as it starts and ends; notifies no one.";
+/** The action's line in the agent tool (the owner, 2026-11-07), so the description stays under Claude Code's 2,048. */
+const ACTION_LINE = "steps: person's checklist for multi-step work you're aligned on (see the steps field).";
+const APPROVED_WAKE = "Your checklist here: 2 of 5 done; doing: Replay the failures in staging. If you're still working on this, keep it current.";
 
 /** The word as an agent would read it: `steps` alone, not inside `diff_steps`. */
 const STEPS_WORD = /(?<![A-Za-z_])steps(?![A-Za-z_])/i;
