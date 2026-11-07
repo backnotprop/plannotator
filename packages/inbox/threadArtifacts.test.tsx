@@ -253,19 +253,19 @@ test.skipIf(!hasDom)('a tile opens its file in a tab beside the thread; the imag
 });
 
 const headOrder = (el: ParentNode) =>
-  [...el.querySelectorAll('section.ib-pane .ib-phead :is([data-artifacts-button], [data-expand-all], [data-archive], .ib-vsep, [aria-label="Close the thread"])')].map((n) =>
-    n.hasAttribute('data-artifacts-button') ? 'folder' : n.hasAttribute('data-expand-all') ? 'expand' : n.hasAttribute('data-archive') ? 'archive' : n.classList.contains('ib-vsep') ? '|' : 'close',
+  [...el.querySelectorAll('section.ib-pane .ib-phead :is([data-artifacts-button], [data-expand-all], [data-thread-more], .ib-vsep, [aria-label="Close the thread"])')].map((n) =>
+    n.hasAttribute('data-artifacts-button') ? 'folder' : n.hasAttribute('data-expand-all') ? 'expand' : n.hasAttribute('data-thread-more') ? 'more' : n.classList.contains('ib-vsep') ? '|' : 'close',
   );
 
 test.skipIf(!hasDom)("the folder is the pane's toggle: lit in the ×'s place while open, with no count; the pane's × brings the thread's × back", async () => {
   const el = await openThread();
   // Closed: the folder with the header's icons, the thread's × at the end.
-  expect(headOrder(el).slice(-5)).toEqual(['folder', 'expand', 'archive', '|', 'close']);
+  expect(headOrder(el).slice(-5)).toEqual(['folder', 'expand', 'more', '|', 'close']);
   expect(button(el)!.querySelector('[data-files-count]')?.textContent).toBe('7');
   act(() => button(el)!.click());
   await until(() => tiles(el).length === 7, 'the grid');
   // Open: the folder ends the header where the × was, lit and expanded, its name unchanged, no count; it controls the pane.
-  expect(headOrder(el).slice(-4)).toEqual(['expand', 'archive', '|', 'folder']);
+  expect(headOrder(el).slice(-4)).toEqual(['expand', 'more', '|', 'folder']);
   expect(headOrder(el)).not.toContain('close');
   const lit = button(el)!;
   expect(lit.hasAttribute('aria-pressed')).toBe(false);

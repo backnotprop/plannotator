@@ -460,7 +460,7 @@ test('a thread with no artifact: the button opens its project folder; none for t
 
   // The agent works in the home folder: no folder, so no button (nothing in it is listed).
   await page.goto(`${world.url}#thread=${world.homeThread}`);
-  await expect(page.locator('section.ib-pane [data-archive]')).toBeVisible();
+  await expect(page.locator('section.ib-pane [data-thread-more]')).toBeVisible();
   await page.waitForTimeout(500);
   await expect(page.locator('[data-artifacts-button]')).toHaveCount(0);
   const answer = await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}/files/folder`)).json(), world.homeThread);
