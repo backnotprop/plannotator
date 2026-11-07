@@ -90,6 +90,7 @@ afterEach(async () => {
     window.getSelection()?.removeAllRanges();
   }
   clearFileDrafts();
+  onSaveRequest = noop;
   for (const id of Object.keys(servedVersion)) delete servedVersion[id];
 });
 
@@ -128,6 +129,9 @@ const TEXT: Record<string, { text: string; html: string | null }> = {
   [flow.id]: { text: FLOW, html: null },
 };
 
+/** Called as an annotation save reaches the server, before it answers (a host that closes the file on a save). */
+let onSaveRequest: () => void = noop;
+
 interface Server {
   /** The bodies of every annotation save. */
   saved: { attachment_id: string; annotation: { id: string; text?: string; htmlAnchor?: unknown; diagramAnchor?: unknown } }[];
@@ -147,7 +151,8 @@ function serve(): Server {
     if (url.endsWith('/api/inbox/annotations')) {
       const body = JSON.parse(String(init?.body ?? '{}'));
       server.saved.push(body);
-      const owner = [scope, page, flow, policy].find((a) => a.id === body.attachment_id)!;
+      onSaveRequest();
+      const owner = [scope, page, flow, policy, shot].find((a) => a.id === body.attachment_id)!;
       const record: Partial<InboxAnnotationRecord> = { id: body.annotation.id, attachment_id: owner.id, path: owner.path, version: 'current', annotation: body.annotation, message_id: M1 };
       return new Response(JSON.stringify({ annotation: record }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
@@ -781,7 +786,8 @@ test.skipIf(!hasDom)('a comment popover that is not the pane\'s is neither submi
 });
 
 // What would regress (F4): a kept line comment reopened on whatever those lines hold now.
-test('a kept line comment goes back where its lines are now, and nowhere when they changed', async () => {
+// DOM-gated: AttachmentPane loads the highlighter, which needs a window.
+test.skipIf(!hasDom)('a kept line comment goes back where its lines are now, and nowhere when they changed', async () => {
   const { relocateCodeRange } = await import('./components/AttachmentPane');
   const { codeCommentAnnotation, codeRangeOf } = await import('./attachments');
   const range = codeRangeOf(codeCommentAnnotation({ id: 'k', lineStart: 2, lineEnd: 3, text: 'x', code: 'const b = 2;\nconst c = 3;' }))!;
@@ -871,4 +877,54 @@ test.skipIf(!hasDom)('a comment being put back never claims another surface\'s p
   expect(closed).toBe(1);
   expect(elsewhere).toEqual([]);
   expect(foreign.value).toBe('Words of another surface.');
+});
+
+// What would regress: a host that closes the file in the same moment a comment is saved (the tour's file step does)
+// kept the saved words as the file's draft too, so the file opened again with them in a box over the saved comment.
+test.skipIf(!hasDom)('a comment saved as its file closes is a comment, never also a draft', async () => {
+  const server = serve();
+  const steps: { id: string }[] = [];
+  await render(
+    <Shown>
+      <Pane start={scope} steps={steps} />
+    </Shown>,
+  );
+  await commentOnPhrase('Partial refunds stay out of v1.');
+  await type(popoverBox()!, 'Partial refunds are in for v1.');
+  onSaveRequest = () => showPane(false);
+  const save = [...document.querySelectorAll<HTMLButtonElement>('[data-comment-popover] button')].find((b) => b.textContent?.trim() === 'Save')!;
+  await act(async () => save.click());
+  await settle(50);
+  expect(server.saved.map((s) => s.annotation.text)).toEqual(['Partial refunds are in for v1.']);
+  expect(peekFileDrafts(fileDraftKey(scope.id, 'current'))).toEqual([]);
+  onSaveRequest = noop;
+  await act(async () => showPane(true));
+  await waitFor(() => expect(pane().querySelector('.ib-docscroll')?.textContent).toContain('Partial refunds'));
+  await settle(300);
+  expect(popoverBox()).toBeNull();
+});
+
+// What would regress: the same for an image's own comment row, whose words clear only once the save answers.
+test.skipIf(!hasDom)('an image comment saved as its file closes is a comment, never also a draft', async () => {
+  const server = serve();
+  const steps: { id: string }[] = [];
+  const list = attachmentSequence([message], [shot, scope]);
+  await render(
+    <Shown>
+      <Pane start={shot} steps={steps} list={list} />
+    </Shown>,
+  );
+  const row = () => pane().querySelector<HTMLTextAreaElement>('[data-image-composer] textarea');
+  await waitFor(() => expect(row()).not.toBeNull());
+  await type(row()!, 'Too much padding.');
+  onSaveRequest = () => showPane(false);
+  const comment = [...pane().querySelectorAll<HTMLButtonElement>('[data-image-composer] button')].find((b) => b.textContent?.trim() === 'Comment')!;
+  await act(async () => comment.click());
+  await settle(50);
+  expect(server.saved.map((s) => s.annotation.text)).toEqual(['Too much padding.']);
+  expect(peekFileDrafts(fileDraftKey(shot.id, 'current'))).toEqual([]);
+  onSaveRequest = noop;
+  await act(async () => showPane(true));
+  await waitFor(() => expect(row()).not.toBeNull());
+  expect(row()!.value).toBe('');
 });

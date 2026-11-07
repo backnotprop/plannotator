@@ -713,6 +713,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const waitingKey = useRef('');
   /** This file's drafts were kept since it opened: leaving and the pane going never keep them twice. */
   const kept = useRef(false);
+  /**
+   * The comments saved from this file since it opened (what each is on, its id, its words). A box still showing
+   * saved words as the file closes (a host that closes the file on the save, as the tour does) holds no draft.
+   */
+  const savedHere = useRef<{ at: string; id: string; text: string }[]>([]);
   const recordsRef = useRef(props.records);
   // Whether the file holds a comment not saved yet, for the window's link listener (App.tsx): an edit not changed is not unsaved.
   useEffect(() => {
@@ -1527,6 +1532,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         caught.push(recordsRef.current.some((r) => r.id === annotation.id) ? { kind: 'edit', id: annotation.id, text: annotation.text ?? '' } : { kind: 'comment', annotation });
         return Promise.resolve(true);
       }
+      savedHere.current.push({ at: anchorKeyOf(annotation), id: annotation.id, text: (annotation.text ?? '').trim() });
       // Written again on what a set-aside draft was on: that draft is spent.
       if (waiting.current.length > 0 || reopening.current.length > 0) {
         const at = anchorKeyOf(annotation);
@@ -1768,8 +1774,16 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     if (kept.current) return;
     kept.current = true;
     stopReopenWatch();
-    const taken = takeComposers();
-    const read = tearing && !taken.some((d) => d.kind !== 'row') ? readComposers() : [];
+    // Words just saved (the box may still show them as the file closes) are a comment, not a draft too.
+    const saved = savedHere.current;
+    const unsaved = (d: FileCommentDraft) =>
+      d.kind === 'comment'
+        ? !saved.some((s) => s.at === anchorKeyOf(d.annotation) && s.text === (d.annotation.text ?? '').trim())
+        : d.kind === 'edit'
+          ? !saved.some((s) => s.id === d.id && s.text === d.text.trim())
+          : true;
+    const taken = takeComposers().filter(unsaved);
+    const read = tearing && !taken.some((d) => d.kind !== 'row') ? readComposers().filter(unsaved) : [];
     // A kept comment not back in its box yet (the pane was still moving, or the text still loading) waits on, and so
     // does anything put back whose box has not shown yet.
     const notShown: FileCommentDraft[] = reopenNext.current ? [{ kind: 'comment', annotation: reopenNext.current }] : [];
@@ -1979,6 +1993,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // Each file (and version) as it opens: what waited for it is its own again, back in its boxes.
   useLayoutEffect(() => {
     kept.current = false;
+    savedHere.current = [];
     waiting.current = [];
     waitingKey.current = draftKey;
     reopenNext.current = null;

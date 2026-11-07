@@ -145,9 +145,17 @@ export function ImageAttachmentView({
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const [failed, setFailed] = useState(false);
   // Words (and a drawing) the box held when this file last closed: back in it, and read again as it closes.
-  const waiting = useRowDraft(() => (readOnly ? null : { kind: 'row', text, markup }));
+  const waiting = useRowDraft(() => (readOnly || sentWords.current === text ? null : { kind: 'row', text, markup }));
   const [text, setText] = useState(waiting?.text ?? suggestion ?? '');
   const [markup, setMarkup] = useState<ImageAttachment | null>(waiting?.markup ?? null);
+  /** The row's words as a save took them: the file closing before the save answers (and the row clears) keeps no draft of them. */
+  const sentWords = useRef<string | null>(null);
+  const sendRow = async (annotation: Annotation) => {
+    sentWords.current = text;
+    const ok = await onSave(annotation);
+    if (!ok) sentWords.current = null;
+    return ok;
+  };
   // The drawing the ✓ just added to the reply: its comment's id, for a note, a redraw or ×.
   const [kept, setKept] = useState<{ id: string; image: ImageAttachment } | null>(null);
   // One drawing per opening of the drawing screen: set as it opens, taken by the first ✓ or Enter. ui calls
@@ -270,7 +278,7 @@ export function ImageAttachmentView({
       // (A redraw whose save failed waits as `markup`: it goes with the note.)
       if (!words && !markup) return;
       setSaving(true);
-      const ok = await onSave({ ...keptNow, text: noteOnto(keptNow, words), ...(markup ? { images: [markup] } : {}) });
+      const ok = await sendRow({ ...keptNow, text: noteOnto(keptNow, words), ...(markup ? { images: [markup] } : {}) });
       setSaving(false);
       if (ok) {
         setText('');
@@ -281,7 +289,7 @@ export function ImageAttachmentView({
     }
     if (!words && !markup) return;
     setSaving(true);
-    const ok = await onSave(
+    const ok = await sendRow(
       imageCommentAnnotation({
         id: newId(),
         name: attachment.name,
@@ -313,7 +321,7 @@ export function ImageAttachmentView({
     // A redraw: the comment as it reads now, its picture replaced (and any words typed, as a note).
     const redraw = kept && keptNow ? keptNow : null;
     const id = redraw?.id ?? newId();
-    const ok = await onSave(
+    const ok = await sendRow(
       redraw
         ? { ...redraw, text: noteOnto(redraw, words), images: [image] }
         : imageCommentAnnotation({ id, name: attachment.name, text: markupWords(words, true), markup: image }),

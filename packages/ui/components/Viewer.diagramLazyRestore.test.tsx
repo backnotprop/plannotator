@@ -27,6 +27,7 @@ import { join } from 'node:path';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { AnnotationRestoreReport } from '../hooks/useAnnotationHighlighter';
+import type { ViewerHandle } from './Viewer';
 import { installInertDiagramSvgParser } from '../test-setup/diagramSvg';
 import { AnnotationType, type Annotation } from '../types';
 import { parseMarkdownToBlocks } from '../utils/parser';
@@ -213,7 +214,7 @@ describe.if(hasDom)('Viewer.reopenComment on a diagram part', () => {
     const engine = gatedRuntime();
     setLoader(engine.loader as never);
     const added: Annotation[] = [];
-    const ref = React.createRef<import('./Viewer').ViewerHandle>();
+    const ref = React.createRef<ViewerHandle>();
     host = document.createElement('div');
     document.body.appendChild(host);
     await act(async () => {
@@ -253,7 +254,7 @@ describe.if(hasDom)('Viewer.reopenComment on a diagram part', () => {
   });
 
   test('a fence no longer in the document: onMissing', async () => {
-    const ref = React.createRef<import('./Viewer').ViewerHandle>();
+    const ref = React.createRef<ViewerHandle>();
     host = document.createElement('div');
     document.body.appendChild(host);
     await act(async () => {
