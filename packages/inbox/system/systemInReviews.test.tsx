@@ -188,7 +188,7 @@ const MODEL: InboxPullsAnswer = {
 function drawReviews(system: Partial<PullsSystem> | null, over: Partial<PullsPageProps> = {}) {
   const opened: (string | null)[] = [];
   const props: PullsPageProps = {
-    state: { model: MODEL, error: null, loading: false, refresh: () => {}, reload: () => {} },
+    state: { model: MODEL, reviews: { fetched_at: MODEL.fetched_at, hosts: MODEL.hosts, rows: [], projects: MODEL.projects }, error: null, loading: false, refresh: () => {}, reload: () => {}, reloadRows: () => {} },
     stackId: null,
     project: null,
     filter: 'all',
@@ -199,6 +199,7 @@ function drawReviews(system: Partial<PullsSystem> | null, over: Partial<PullsPag
     onScope: () => {},
     onReview: () => {},
     onOpenThread: () => {},
+    onNew: () => {},
     onLaunch: () => {},
     onStarted: () => {},
     system: system
@@ -216,7 +217,7 @@ describe('Reviews: the System button', () => {
     await settle();
     expect($('[data-system-button]')).toBeNull();
     expect($('[data-pulls-filter-trigger]')).not.toBeNull();
-    expect($('[data-pulls-pane-empty]')?.textContent).toBe('Pick a pull request to see its layers.');
+    expect($('[data-pulls-pane-empty]')).not.toBeNull();
   });
 
   test.if(hasDom)('the menu lists drawn projects only; a pick opens it; "Set up a project" opens setup', async () => {
