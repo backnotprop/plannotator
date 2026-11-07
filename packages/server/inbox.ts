@@ -136,7 +136,7 @@ import { combineSuggestions, type InboxAgentWork } from "./inbox-combine-suggest
 import { createInboxTidy } from "./inbox-tidy";
 import { createInboxListVersions } from "./inbox-list-delta";
 import { debugRoute, INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
-import { perfPhase, retainPerfPhases, watchLoopStalls, withServerTiming } from "./inbox-perf";
+import { perfPhase, retainPerfPhases, syncSection, watchLoopStalls, withServerTiming } from "./inbox-perf";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
 import { InboxStore } from "@plannotator/shared/inbox/store";
@@ -923,7 +923,16 @@ export function inboxUsedBefore(dataDir: string): boolean {
  * In that release, write `[key]: { on }` at each caller again and drop the `changed` argument of `capabilityListeners`.
  */
 function heldSwitch<K extends "code_review" | "shape">(key: K, on: boolean, told = false): { [P in K]?: { on: boolean } } {
-  return on || told || process.env.PLANNOTATOR_INBOX_PREVIEW === "1" ? ({ [key]: { on } } as { [P in K]: { on: boolean } }) : {};
+  return on || told || !switchesHeld() ? ({ [key]: { on } } as { [P in K]: { on: boolean } }) : {};
+}
+
+/**
+ * HELD UNTIL THE NEXT BIG RELEASE (0.29), with `heldSwitch`: the switches are held back from people who have them off
+ * (no PLANNOTATOR_INBOX_PREVIEW=1), so nothing offers them either: Code review's one-time offer (approval
+ * "code-review-offer-card") is never in the line while this says true. Delete it with `heldSwitch`.
+ */
+function switchesHeld(): boolean {
+  return process.env.PLANNOTATOR_INBOX_PREVIEW !== "1";
 }
 
 /** Start the Inbox server and write the registry. */
@@ -2369,11 +2378,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** The Checklist can be revealed only while config.json `inboxSteps` is unset, as the Board. */
   const stepsUndecided = () => options.steps === undefined && loadConfig().inboxSteps === undefined;
   /**
+   * Code review's day-0 offer (approval "code-review-offer-card", 2026-11-06; its slot: `CODE_REVIEW_OFFER` in
+   * shared/inbox/reveals.ts): only while config.json `inboxCodeReview` is unset (nobody decided; `false` is the
+   * person's own off), and never while the switch is held back from this person (`switchesHeld`).
+   */
+  const codeReviewUndecided = () => options.codeReview === undefined && loadConfig().inboxCodeReview === undefined && !switchesHeld();
+  /**
    * The offers the line claims for itself (approval "inbox-one-time-dialogs"): each one's "undecided" (the person never
    * set its switch). The claim stamps `inboxReveals[id]` with the page's key and turns nothing on; its dialog's "Turn it
    * on" writes the switch. A registered offer (Bro mode, List view) adds its own here, and its id to `INBOX_REVEALS`.
    */
-  const lineOffers: Partial<Record<RevealId, () => boolean>> = { board: boardUndecided, steps: stepsUndecided };
+  const lineOffers: Partial<Record<RevealId, () => boolean>> = { code_review: codeReviewUndecided, board: boardUndecided, steps: stepsUndecided };
   type LineOfferSaved = { shownAt?: string; key?: string };
   const lineOfferSaved = (id: RevealId): LineOfferSaved | undefined => (loadConfig().inboxReveals as Record<string, LineOfferSaved | undefined> | undefined)?.[id];
   /** The agent messages the person has looked at (up to each thread's `person_seen_seq`): heavy use reads their dates. */
@@ -3331,10 +3346,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       process.stderr.write(`Inbox: a reply did not go in by itself: ${error instanceof Error ? error.message : String(error)}\n`);
     }
   };
-  const autoSendSweep = () => {
-    live.trackWaits();
-    for (const { session, tags } of live.steerableSessions()) autoSendFor(session, tags);
-  };
+  const autoSendSweep = () =>
+    syncSection("timer:auto-send", () => {
+      live.trackWaits();
+      for (const { session, tags } of live.steerableSessions()) autoSendFor(session, tags);
+    });
   // A person's item written while its session is already busy starts its clock at once, not at the next sweep.
   let waitsQueued = false;
   const unsubscribeWaits = store.subscribe((line) => {
@@ -3349,12 +3365,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   (autoSendWatch as { unref?: () => void }).unref?.();
   // The sidebar's "Reload Claude Code N" is pushed as it changes (a session restarts, goes away, or an update lands).
   let lastRestartCount = "";
-  const restartWatch = setInterval(() => {
+  const restartWatch = setInterval(() => syncSection("timer:restart", () => {
     const count = JSON.stringify(live.restartAgents());
     if (count === lastRestartCount) return;
     lastRestartCount = count;
     for (const listener of statusListeners) listener();
-  }, INBOX_RESTART_WATCH_MS);
+  }), INBOX_RESTART_WATCH_MS);
   (restartWatch as { unref?: () => void }).unref?.();
 
   // The list rows' delivery (approval "inbox-row-delivery"): the store reads the live sessions for it.
@@ -3381,7 +3397,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let lastDeliverySignature = "";
   let lastPresenceSignature = live.presenceSignature();
   let lastLabelVersion = live.labelVersion();
-  const deliveryWatch = setInterval(() => {
+  const deliveryWatch = setInterval(() => syncSection("timer:delivery", () => {
     // Launched threads: respawn a stopped session someone wrote to; read the CLI only while a window watches.
     launch.sweep(deliveryListeners.size > 0);
     if (deliveryListeners.size === 0) return;
@@ -3395,7 +3411,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     lastPresenceSignature = presence;
     lastLabelVersion = live.labelVersion();
     for (const listener of deliveryListeners) listener(labels, moved, sessions);
-  }, INBOX_DELIVERY_WATCH_MS);
+  }), INBOX_DELIVERY_WATCH_MS);
   (deliveryWatch as { unref?: () => void }).unref?.();
 
   const tagsRoute = createInboxTagsRoute({ store, serverSession, live, json });
@@ -3526,7 +3542,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const stopPinEvents = store.onPinsChange(() => {
     for (const listener of pinListeners) listener();
   });
-  const uploadSweep = setInterval(() => compose.sweep(), INBOX_UPLOAD_SWEEP_MS);
+  const uploadSweep = setInterval(() => syncSection("timer:upload-sweep", () => compose.sweep()), INBOX_UPLOAD_SWEEP_MS);
   (uploadSweep as { unref?: () => void }).unref?.();
 
   let stopRequested = false;
@@ -3824,7 +3840,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // `plannotator inbox --tailscale` while this Inbox runs: publish for this run.
       if (path === "/api/inbox/control/tailscale") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-        return json({ tailscale: tailscale.enableForRun() });
+        return json({ tailscale: await tailscale.enableForRun() });
       }
       // `plannotator inbox` while this Inbox runs (an agent started it with
       // --background): connect the agents on this computer, as a start does.
@@ -4396,7 +4412,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.shape !== undefined) saveShape(body.shape, true);
         if (body.cookie_host !== undefined) saveCookieHostSwitch(body.cookie_host, true);
         if (body.voice !== undefined) voice.save(body.voice, true);
-        const tailnet = tailscaleChange === undefined ? tailscale.state() : tailscale.set(tailscaleChange.on, { via, replaceExposed: tailscaleChange.replaceExposed });
+        const tailnet = tailscaleChange === undefined ? tailscale.state() : await tailscale.set(tailscaleChange.on, { via, replaceExposed: tailscaleChange.replaceExposed });
         // After the tailnet change, so a tailnet refusal saves nothing; the cookie switch can be
         // refused too (the env var, another urlHost), so it comes before the other saves.
         const cookieHost = body.cookie_host === undefined ? undefined : saveCookieHostSwitch(body.cookie_host);
@@ -5290,7 +5306,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const logged = debugLog
     ? debugLog.wrap(async (req: Request, via: RequestVia) => {
         if (!stopLoopWatch && isLoggedApiPath(req)) {
-          stopLoopWatch = watchLoopStalls((ms) => debugLog.note("loop_stall", { ms }));
+          stopLoopWatch = watchLoopStalls((ms, cause) => debugLog.note("loop_stall", { ms, ...cause }));
           let messages = 0;
           const threadIds = store.threadIds();
           for (const id of threadIds) messages += store.threadMessageIds(id).length;
@@ -5424,7 +5440,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let dataMisses = 0;
   const dataCheck = setInterval(() => {
     if (stopped) return;
-    const probe = probeInboxData(dataDir, serverSession);
+    const probe = syncSection("timer:data-check", () => probeInboxData(dataDir, serverSession));
     if (probe.state === "unknown") return;
     dataMisses = probe.state === "gone" ? dataMisses + 1 : 0;
     if (probe.state !== "gone" || dataMisses < 2) return;
@@ -5478,6 +5494,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     stopped = true;
     stopLoopWatch?.();
     releasePerfPhases?.();
+    // The debug log's kept lines go in now (it keeps lines in memory for a moment).
+    debugLog?.close();
     clearInterval(dataCheck);
     windows.stop();
     for (const timer of setAsideTimers) clearTimeout(timer);

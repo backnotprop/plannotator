@@ -86,7 +86,7 @@
 
 import { PlannotatorMod } from './controller'
 import { resolveAgentToolEnabled, resolveClaudeModEnabled, resolveInboxReminderCustom, resolveInboxReminderEnabled, resolveInboxToolEnabled, resolvePlanReviewEnabled } from './enabled'
-import type { Host, LoadedPluginInfo } from './host'
+import { submitOrThrow, type Host, type LoadedPluginInfo } from './host'
 import {
   claudeTranscriptPaths,
   conversationResumed,
@@ -199,9 +199,8 @@ function hostOf($: Engine, debugPath: string | null): Host {
     },
     storeGet: (key) => $.store.get(key),
     storeSet: (key, value) => $.store.set(key, value),
-    submit: async (text) => {
-      await $.prompt.submit({ text })
-    },
+    // The engine resolves `{ drop }` for a prompt it refused (Host.submit): that rejects, never reads as a turn.
+    submit: (text) => submitOrThrow(() => $.prompt.submit({ text })),
     // Called only where `sessionAppendAvailable` said the engine has it; a refusal stops Send now here (inbox.ts).
     appendUserRow: async (text) => {
       const stored = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })

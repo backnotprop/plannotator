@@ -29,7 +29,7 @@
 
 import { chromium, expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
@@ -212,6 +212,11 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const root = inboxScratch('plannotator-inbox-code-review-e2e-');
   const dataDir = join(root, 'data');
   markTourDecided(dataDir);
+  // Code review's one-time offer (approval "code-review-offer-card") was already answered: with PREVIEW on a release
+  // build it would open on the first page, over this spec's flow. Its own test is packages/inbox/codeReviewOffer.test.tsx.
+  const configFile = join(dataDir, 'config.json');
+  const config = JSON.parse(readFileSync(configFile, 'utf8')) as Record<string, unknown>;
+  writeFileSync(configFile, JSON.stringify({ ...config, inboxReveals: { code_review: { shownAt: '2026-10-24T00:00:00.000Z' } } }));
   // The skill roots (review-skill-loader.ts) in scratch folders, like HOME.
   for (const dir of ['claude', 'codex', 'xdg']) mkdirSync(join(root, dir), { recursive: true });
   const env: Record<string, string> = {

@@ -1009,6 +1009,8 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   // Each file's box is as tall as its lines (the empty band under a short file, #2615): the 5-line migration's
   // last row ends within one row of its box's bottom.
   const sqlShell = review.locator('[data-guide-file-shell="migrations/0042_retry_schedule.sql"]');
+  // boundingBox() does not wait: the view can be mounted before its lines are drawn on a busy runner.
+  await expect(sqlShell.locator('[data-line="5"]').first()).toBeVisible();
   const sqlBox = (await sqlShell.locator('[data-guide-code-view-mounted]').boundingBox())!;
   const sqlLast = (await sqlShell.locator('[data-line="5"]').first().boundingBox())!;
   expect(sqlBox.y + sqlBox.height - (sqlLast.y + sqlLast.height)).toBeLessThan(24);
