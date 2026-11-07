@@ -35,7 +35,7 @@ const BOX_SELECT: ShapeBoxOptions = {
   },
 };
 
-export default function ShapeBoard({ host, id, onClose, renderThread, initialView, initialPanel, onNavigate, headStart, review, crosshair = false, onAddToReply }: ShapeBoardProps) {
+export default function ShapeBoard({ host, id, onClose, onCode, renderThread, initialView, initialPanel, onNavigate, headStart, review, crosshair = false, onAddToReply }: ShapeBoardProps) {
   // The crosshair is the Inbox's (its ShapeLayer asks for it): the standalone page keeps Annotate.
   const boxSelect = useMemo<ShapeBoxOptions | undefined>(() => (!crosshair ? undefined : onAddToReply ? { ...BOX_SELECT, onAddToReply } : BOX_SELECT), [crosshair, onAddToReply]);
   return (
@@ -45,6 +45,7 @@ export default function ShapeBoard({ host, id, onClose, renderThread, initialVie
       host={host}
       id={id}
       onClose={onClose}
+      onCode={onCode}
       codeView={false}
       review={review}
       renderThread={renderThread}

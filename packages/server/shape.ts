@@ -7,7 +7,7 @@
  * starts it, or reuses the one `shapes/server.json` names.
  *
  * Who may reach it:
- *  - Shape on only (config.json `inboxShape`, read on every request): off,
+ *  - Shape or Code review on (config.json, read on every request): both off,
  *    every `/api/shapes` path answers 404, as in the Inbox;
  *  - this computer only: it binds loopback, and the Host check refuses any
  *    other name (a DNS-rebinding page). There is no tailnet listener, so every
@@ -30,7 +30,7 @@ import { acceptsGzip } from "@plannotator/shared/app-html";
 import { gunzipSync } from "node:zlib";
 import { shapesDirOf } from "@plannotator/shared/shape/store";
 import { SHAPE_EVENTS_PATH } from "@plannotator/shared/shape/routes";
-import { shapeSwitchOn } from "@plannotator/shared/shape/switch";
+import { shapeBoardsOn } from "@plannotator/shared/shape/switch";
 import { createRequestHostGuard } from "./request-host-guard";
 import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { createBunShapeRoutes } from "./shape-routes";
@@ -61,7 +61,7 @@ export interface ShapeServerInfo {
   shape_server: 1;
   version: string;
   serverSession: string;
-  /** Shape is on (config.json `inboxShape`). */
+  /** The boards work: Shape or Code review is on. */
   on: boolean;
   /** Pages open on this server now (each holds the event stream). Bare `plannotator shape` opens no second tab while one is. */
   pages: number;
@@ -220,7 +220,7 @@ export async function startShapeServer(options: ShapeServerOptions): Promise<Sha
   const { dataDir } = options;
   const version = options.version ?? "";
   const serverSession = createServerSessionNonce();
-  const shapeOn = () => options.shape ?? shapeSwitchOn();
+  const shapeOn = () => options.shape ?? shapeBoardsOn();
   const hostGuard = createRequestHostGuard({ localOnly: true });
   const shapes = createBunShapeRoutes({ dataDir, heartbeatMs: options.heartbeatMs, watchMs: options.watchMs });
   const idleMs = options.idleMs ?? SHAPE_SERVER_IDLE_MS;
