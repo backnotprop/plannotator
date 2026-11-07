@@ -7944,10 +7944,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rvc-state[data-verdict="approved"] { color: var(--success); }
 .ib-rvc-title { margin-top: 8px; font-size: var(--ib-fs-15, 15px); font-weight: 600; overflow-wrap: anywhere; }
 .ib-rvc-meta { margin-top: 4px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
-.ib-rvc-chapters { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 4px; }
-.ib-rvc-chapters li { display: flex; gap: 10px; font-size: var(--ib-fs-13-5, 13.5px); min-width: 0; }
-.ib-rvc-n { width: 14px; flex: none; text-align: right; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
-.ib-rvc-ct { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .ib-rvc-foot { margin-top: 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .ib-rvc-note { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 
@@ -8235,8 +8231,22 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-pr-empty { padding: 18px 14px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; }
 .ib-pr-empty p { margin: 0 0 4px; }
 .ib-pr-empty-h { color: var(--foreground); font-weight: 600; }
-/* A centred word in the list column, with its one button: Code review off. */
-.ib-pr-off { display: flex; align-items: center; justify-content: center; text-align: center; }
+/* Reviews (ReviewsList.tsx, and a thread opened from it). */
+.ib-prlist .ib-lhead .ib-pr-new { flex: none; margin-right: -6px; }
+.ib-prlist .ib-lhead .ib-pf-slot { margin-right: 0; }
+.ib-pr-mstatus[data-tone='warn'] { color: var(--destructive); }
+.ib-pr-mstatus[data-tone='ok'] { color: var(--success, #16803c); }
+.ib-pr-magent { margin-right: 5px; }
+.ib-rvctx { margin-bottom: 8px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-rvctx svg { display: inline; margin-right: 6px; vertical-align: -2px; }
+.ib-rvctx .ib-rvctx-link { margin-left: 8px; }
+.ib-rvctx-link { color: var(--foreground); text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
+.ib-rvctx-link:hover { text-decoration-color: currentColor; }
+.ib-rvfrom { margin: -6px 0 14px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
+.pn-inbox .ib-rvc-link { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
+.pn-inbox .ib-rvc-link:hover { color: var(--foreground); }
+/* A centred word in the list column, with its one button: Code review off, no reviews yet. */
+.ib-pr-off { display: flex; flex: 1; align-items: center; justify-content: center; text-align: center; }
 .ib-pr-off .ib-btn { margin-top: 14px; }
 .ib-prrow .ib-l3.ib-pr-l3 { justify-content: flex-start; gap: 7px; }
 .ib-prrow .ib-l3.ib-pr-l3 > .ib-pv { margin-right: 0; }

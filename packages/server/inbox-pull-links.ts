@@ -2,7 +2,7 @@
  * Pull requests in the Inbox: which agent thread owns a PR, as the person
  * chose it (Hand to an agent, Launch an agent). The one place that choice lives.
  *
- *   inbox/pull-links.json   { v: 1, links: { [pull key]: { thread_id, at, ask?, theirs? } }, landed?: { [thread and pull key]: InboxReviewLanding } }
+ *   inbox/pull-links.json   { v: 1, links: { [pull key]: { thread_id, at, ask?, theirs? } }, landed?: { [thread and pull key]: InboxReviewLanding }, posted?: { [pull key]: { at, head } } }
  *
  * `ask`: what the hand-off asked the agent for first, a guided review (`guide`) or the person's own curation
  * (`custom`); the stack view says it until the review arrives. `theirs`: every PR of that hand-off was a teammate's
@@ -15,10 +15,13 @@
  *
  * `landed`: a review thread's PR once it merged or closed (core's `InboxReviewLanding`), so Reviews still knows after
  * the forge's list stopped carrying it.
+ *
+ * `posted`: the person's last review posted on a PR from here, when and on which commit. The forge's list doesn't say,
+ * and an assignment stays on the forge afterwards, so Reviews counts it as their answer. An older record is a bare time.
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { inboxReviewLandingId, type InboxReviewLanding } from "@plannotator/core/inbox-types";
+import { inboxReviewLandingId, type InboxReviewLanding, type InboxReviewPosted } from "@plannotator/core/inbox-types";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 
 export const INBOX_PULL_LINKS_FILE = "pull-links.json";
@@ -50,6 +53,10 @@ export interface InboxPullLinks {
    * nothing, and one that cannot write (a read-only folder) keeps it in memory: a read of the list never fails for this.
    */
   land(record: readonly InboxReviewLanding[], forget?: readonly string[]): void;
+  /** Pull key → the person's last review posted on it from here. */
+  posted(): ReadonlyMap<string, InboxReviewPosted>;
+  /** The review went, on commit `head`: never fails the post that already happened (a read-only folder keeps it in memory). */
+  markPosted(key: string, head: string, at?: string): void;
 }
 
 export function createInboxPullLinks(dataDir: string): InboxPullLinks {
@@ -57,13 +64,14 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
   const file = join(dir, INBOX_PULL_LINKS_FILE);
   let links: Map<string, InboxPullOwner> | null = null;
   const landed = new Map<string, InboxReviewLanding>();
+  const posted = new Map<string, InboxReviewPosted>();
 
   const load = (): Map<string, InboxPullOwner> => {
     if (links) return links;
     links = new Map();
     if (!existsSync(file)) return links;
     try {
-      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; links?: Record<string, unknown>; landed?: Record<string, InboxReviewLanding> };
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; links?: Record<string, unknown>; landed?: Record<string, InboxReviewLanding>; posted?: Record<string, unknown> };
       if (parsed.v !== 1 || !parsed.links || typeof parsed.links !== "object") throw new Error("not a pull links file");
       for (const [key, value] of Object.entries(parsed.links)) {
         const owner = value as Partial<InboxPullOwner>;
@@ -79,6 +87,11 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
       for (const [key, landing] of Object.entries(parsed.landed ?? {})) {
         if (typeof landing?.thread_id === "string" && typeof landing.key === "string" && (landing.state === "merged" || landing.state === "closed") && typeof landing.url === "string" && typeof landing.number === "number") landed.set(key, landing);
       }
+      for (const [key, value] of Object.entries(parsed.posted ?? {})) {
+        const review = value as Partial<InboxReviewPosted> | string | null;
+        if (typeof review === "string") posted.set(key, { at: review, head: null });
+        else if (typeof review?.at === "string") posted.set(key, { at: review.at, head: typeof review.head === "string" ? review.head : null });
+      }
     } catch {
       try {
         renameSync(file, `${file}.unreadable-${Date.now()}`);
@@ -93,7 +106,7 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
   const save = (map: Map<string, InboxPullOwner>) => {
     mkdirSync(dir, { recursive: true });
     const temp = `${file}.${process.pid}.tmp`;
-    writeFileSync(temp, `${JSON.stringify({ v: 1, links: Object.fromEntries(map), ...(landed.size > 0 ? { landed: Object.fromEntries(landed) } : {}) })}\n`, { mode: 0o600 });
+    writeFileSync(temp, `${JSON.stringify({ v: 1, links: Object.fromEntries(map), ...(landed.size > 0 ? { landed: Object.fromEntries(landed) } : {}), ...(posted.size > 0 ? { posted: Object.fromEntries(posted) } : {}) })}\n`, { mode: 0o600 });
     renameSync(temp, file);
   };
 
@@ -131,6 +144,21 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
         save(map);
       } catch (cause) {
         console.error(`inbox: could not save the landed pull requests: ${cause instanceof Error ? cause.message : String(cause)}`);
+      }
+    },
+    posted() {
+      load();
+      return posted;
+    },
+    markPosted(key, head, at = new Date().toISOString()) {
+      const map = load();
+      posted.delete(key);
+      posted.set(key, { at, head });
+      while (posted.size > INBOX_PULL_LINKS_MAX) posted.delete(posted.keys().next().value!);
+      try {
+        save(map);
+      } catch (cause) {
+        console.error(`inbox: could not save the posted review: ${cause instanceof Error ? cause.message : String(cause)}`);
       }
     },
     keys(threadId) {

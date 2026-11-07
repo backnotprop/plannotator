@@ -1096,6 +1096,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Pull requests (inbox-pulls.ts): read only while the page is open and Code review is on; the route refuses first otherwise.
   // The project roots whose origin the Pull requests list has waited for once.
   const pullRepoRead = new Set<string>();
+  const pullRepoReading = new Map<string, Promise<InboxProjectRepo | null>>();
   const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
   // The PR authors' pictures (inbox-pull-avatars.ts): only for logins the last list showed, served from this origin.
   const pullAvatars = createPullAvatars({ ...options.pullAvatars, dir: options.pullAvatars?.dir ?? join(inboxDir(dataDir), "pull-avatars") });
@@ -1105,7 +1106,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pullOwners = createInboxPullLinks(dataDir);
   // Reviews (inbox-reviews.ts): every thread with a review card, derived from the store's messages on read.
   const reviewIndex = createInboxReviewIndex(store);
+  let lastReviewsRead: { projectsByRepo: Awaited<ReturnType<typeof pullProjects>>["projectsByRepo"]; wanted: Awaited<ReturnType<typeof pullProjects>>["wanted"]; listed: Awaited<ReturnType<typeof pulls.list>> } | null = null;
   // A review thread's PR that left the list: one read of its state, so a closed PR, or one merged long ago, is recorded.
+  // A PR's owner as the lists use it. A thread archived before any review came is no one's to curate: its PR is
+  // listed again and a new review can start. Unarchived, it owns the PR again, unless the PR was handed on since.
+  const pullOwnersNow = () => {
+    const reviewed = new Set(reviewIndex.threads().map((thread) => thread.thread_id));
+    return new Map(
+      [...pullOwners.all()].filter(([, owner]) => {
+        if (reviewed.has(owner.thread_id)) return true;
+        const row = store.listRow(owner.thread_id);
+        return !row || !inboxRowArchived(row);
+      }),
+    );
+  };
   const pullStates = createInboxPullStates({ run: options.refRunner, onLand: (record, forget) => pullOwners.land(record, forget) });
   const pullLinkStore: InboxPullLinkStore = {
     threadsOf: (id) => store.threadsOf(id),
@@ -1150,9 +1164,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const reposNow = await Promise.all(
       projectsNow.map(async (project) => {
         const repo = repos.get(project.root);
-        if (repo || pullRepoRead.has(project.root)) return repo;
+        // A second list read while the first waits on git waits too: it must not answer "no project is on a forge".
+        if (repo || pullRepoRead.has(project.root)) return repo ?? pullRepoReading.get(project.root);
         pullRepoRead.add(project.root);
-        return repos.refresh(project.root);
+        const reading = repos.refresh(project.root).finally(() => pullRepoReading.delete(project.root));
+        pullRepoReading.set(project.root, reading);
+        return reading;
       }),
     );
     for (const [i, project] of projectsNow.entries()) {
@@ -4022,7 +4039,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1", others: url.searchParams.get("others") === "1" });
         // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
         pullAvatars.allowOnly(listed.hosts.map(({ host }) => ({ host, avatars: pulls.avatarUrls(host) })));
-        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwners.all());
+        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwnersNow());
         // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
         const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};
         return json({ serverSession, ...listed, links, projects: Object.fromEntries(projectsByRepo), cards });
@@ -4038,16 +4055,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
-        const { projectsByRepo, wanted } = await pullProjects();
-        const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1" });
-        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwners.all());
+        // `cached`: the store changed, not the forge: the rows again from what the forges last answered.
+        // Never a forge call: nothing read yet answers `cold`, and the next real read brings the rows.
+        const cached = url.searchParams.get("cached") === "1";
+        if (cached && !lastReviewsRead) return json({ serverSession, cold: true });
+        const last = cached ? lastReviewsRead : null;
+        const { projectsByRepo, wanted } = last ?? (await pullProjects());
+        const listed = last?.listed ?? (await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1", others: url.searchParams.get("others") === "1" }));
+        lastReviewsRead = { projectsByRepo, wanted, listed };
+        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwnersNow());
         const stacks = inboxPullStacks(listed.pulls);
         const pullReasons = new Map<string, InboxPullReason>(inboxPullItems(stacks, (pull) => !!links[pull.key]).map((item) => [item.stack.id, item.reason]));
         const threads = reviewIndex.threads();
         const changes = inboxReviewLandingChanges({ threads, pulls: listed.pulls, links, landed: pullOwners.landings() });
         pullOwners.land(changes.record, changes.forget);
-        pullStates.look({ threads, pulls: listed.pulls, hosts: listed.hosts, owners: pullOwners.all(), landed: pullOwners.landings() });
-        const rows = inboxReviewRows({ threads, stacks, links, pulls: listed.pulls, pullReasons, landed: pullOwners.landings(), owners: pullOwners.all() });
+        if (!cached) pullStates.look({ threads, pulls: listed.pulls, hosts: listed.hosts, owners: pullOwners.all(), landed: pullOwners.landings() });
+        const rows = inboxReviewRows({ threads, stacks, links, pulls: listed.pulls, pullReasons, landed: pullOwners.landings(), owners: pullOwners.all(), posted: pullOwners.posted() });
         return json({ serverSession, fetched_at: listed.fetched_at, hosts: listed.hosts, rows, projects: Object.fromEntries(projectsByRepo) });
       }
       // System's project setup (inbox-system-setup.ts): the projects found on this Mac with a git remote, and the
@@ -4175,6 +4198,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           const submission = await submitForgeReview(options.prRuntime ?? prCommandRuntime, ref, headSha, action, text, fileComments, fileLevelComments);
           if (submission.status === "complete") {
             postedReviews.add(fingerprint);
+            pullOwners.markPosted(pull.key, headSha);
             while (postedReviews.size > PULL_REVIEW_POSTED_MAX) postedReviews.delete(postedReviews.values().next().value!);
           }
           // The list reads the forge again on its next look: the review moved the PR's state there.
