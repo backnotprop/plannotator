@@ -378,8 +378,10 @@ async function openReviewFiles(page: Page, thread = world.reviewThread) {
 
 /** The PR's own diff, from its page. */
 async function openPullDiff(page: Page) {
-  await page.goto(`${world.url}#pulls`);
-  await page.locator('[data-pulls-row]').first().click();
+  await page.goto(`${world.url}#reviews`);
+  // The PR is handed to a thread, so its row opens that thread (Reviews): its page is the stack's address.
+  const stack = await page.locator('[data-pulls-row]').first().getAttribute('data-pulls-row');
+  await page.goto(`${world.url}#reviews&stack=${encodeURIComponent(stack!)}`);
   await page.locator('[data-pulls-open-diff]').click();
 }
 
