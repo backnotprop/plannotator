@@ -25,8 +25,11 @@ export const PAGE_SIZE_KEY = 'plannotator-inbox-page-size';
 /** How many files keep a remembered size; the oldest choice goes first. */
 export const PAGE_SIZE_KEPT = 200;
 
-/** How much wider than its frame a page must lay out to count as made for a wider screen. */
-export const PAGE_WIDE_RATIO = 1.2;
+/**
+ * How much wider than its frame a page must lay out to count as made for a wider screen. Desktop layouts are 768 px
+ * or wider (about 2x a phone); one long hash or URL in a phone-friendly page is about 500 px (1.28x on 390).
+ */
+export const PAGE_WIDE_RATIO = 1.5;
 
 /**
  * A page lays out clearly wider than its frame (at least PAGE_WIDE_RATIO times):
