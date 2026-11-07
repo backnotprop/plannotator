@@ -3890,6 +3890,9 @@ details.ib-wn-skipped[open] > summary { margin-bottom: 6px; }
   --ib-sp-ring: color-mix(in oklch, var(--foreground) 13%, transparent);
   --ib-sp-line: color-mix(in oklch, var(--foreground) 10%, transparent);
   --ib-sp-quiet: color-mix(in oklch, var(--muted-foreground) 55%, var(--foreground));
+  /* Soft fill (approval "inbox-search-calm"): a matched word's tint, and the fill under a set filter and the chosen order. */
+  --ib-sp-wash: color-mix(in oklch, var(--primary) 24%, transparent);
+  --ib-sp-fill: color-mix(in oklch, var(--foreground) 9%, transparent);
   --popover: var(--ib-sp-panel);
   position: fixed; inset: auto 0; top: max(16px, 12vh); margin: 0 auto; width: min(680px, calc(100vw - 32px)); max-width: none; max-height: none; padding: 0; border: 0;
   /* Visible, so a chip's menu may reach past a short list. */
@@ -3899,7 +3902,7 @@ details.ib-wn-skipped[open] > summary { margin-bottom: 6px; }
 /* A literal colour: an older engine's ::backdrop inherits no custom property. */
 dialog.ib-sp::backdrop { background: oklch(0.1 0.012 260 / 0.72); }
 :root.light dialog.ib-sp::backdrop { background: oklch(0.22 0.02 260 / 0.42); }
-:root.light dialog.ib-sp { --ib-sp-panel: var(--card); }
+:root.light dialog.ib-sp { --ib-sp-panel: var(--card); --ib-sp-wash: color-mix(in oklch, var(--primary) 15%, transparent); --ib-sp-fill: color-mix(in oklch, var(--foreground) 7%, transparent); }
 @media (prefers-reduced-motion: no-preference) {
   dialog.ib-sp[open] { animation: ib-sp-in 150ms cubic-bezier(0.2, 0.8, 0.2, 1); }
   dialog.ib-sp[open]::backdrop { animation: ib-sp-fade 150ms ease-out; }
@@ -3912,31 +3915,43 @@ dialog.ib-sp::backdrop { background: oklch(0.1 0.012 260 / 0.72); }
 .pn-inbox .ib-sp-input:focus-visible { outline: none; }
 .ib-sp-input::placeholder { color: color-mix(in oklch, var(--muted-foreground) 80%, transparent); }
 .pn-inbox .ib-sp-cancel { display: none; color: var(--primary); font-weight: 550; font-size: var(--ib-fs-15, 15px); height: 44px; padding: 0 2px 0 8px; background: none; border: 0; }
-/* On a desktop the row wraps: with words and every filter set (a type, a long project, a status, From, Clear filters and
-   the Best match | Newest switch) the chips and the switch do not fit one line, so what does not fit goes to a second
-   line, Clear filters and the switch still at its end (.ib-sp-end). A phone's row scrolls sideways instead (the switch has its own row there). */
-.ib-sp-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--ib-sp-line); position: relative; }
+/* The filter row (approval "inbox-search-calm", filter row "Up"): the four filters and Clear filters, always one line.
+   On a desktop it never wraps: with every filter set and a long project name, the project gives way first (cut with
+   "…", whole in its tooltip); Best match | Newest is not in it but at the search box's end. A phone's filters scroll
+   sideways, the order pinned at the line's end (.ib-sp-pin).
+   The look (approval "inbox-search-calm", Soft fill): only what is set looks set. An unset filter is quiet words and a
+   chevron with no outline; a set filter is its words in the text colour and a quiet × on a light grey fill (no chevron,
+   never the primary colour; a click still opens its menu); the switch has no box, its chosen order on the same fill. */
+.ib-sp-fbar { display: flex; align-items: center; min-width: 0; }
+.ib-sp-fbar > .ib-sp-filters { flex: 1; min-width: 0; }
+.ib-sp-filters { display: flex; flex-wrap: nowrap; align-items: center; gap: 2px; padding: 8px 12px; border-bottom: 1px solid var(--ib-sp-line); position: relative; }
 .ib-sp-fcell { display: inline-flex; flex: none; min-width: 0; }
-/* A project name too long for a line by itself is cut. */
+/* The project gives way first: cut with "…" (never below 96 px), its whole name in the tooltip. */
 dialog.ib-sp:not([data-phone]) .ib-sp-fcell[data-cell="project"] { flex: 0 1 auto; min-width: 96px; }
-.pn-inbox .ib-sp-fchip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border-radius: 6px; border: 1px solid color-mix(in oklch, var(--foreground) 14%, transparent); background: none; font-size: var(--ib-fs-12-5, 12.5px); color: var(--ib-sp-quiet); white-space: nowrap; max-width: 220px; }
-.pn-inbox .ib-sp-fchip:hover { color: var(--foreground); border-color: var(--border); }
-.pn-inbox .ib-sp-fchip svg.ib-ic { width: 12px; height: 12px; flex: none; }
+.pn-inbox .ib-sp-fchip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 5px; border-radius: 6px; border: 1px solid transparent; background: none; font-size: var(--ib-fs-12-5, 12.5px); color: var(--ib-sp-quiet); white-space: nowrap; max-width: 220px; }
+.pn-inbox .ib-sp-fchip:hover { color: var(--foreground); background: color-mix(in oklch, var(--foreground) 6%, transparent); }
+.pn-inbox .ib-sp-fchip svg.ib-ic { width: 11px; height: 11px; flex: none; opacity: 0.8; }
 .ib-sp-fchip .ib-sp-fl { overflow: hidden; text-overflow: ellipsis; }
-.pn-inbox .ib-sp-fwrap { align-items: center; border-radius: 6px; border: 1px solid color-mix(in oklch, var(--primary) 40%, transparent); background: color-mix(in oklch, var(--primary) 10%, transparent); max-width: 240px; }
-.pn-inbox .ib-sp-fwrap .ib-sp-fchip { border: 0; background: none; padding-right: 2px; min-width: 0; color: var(--primary); }
-.pn-inbox .ib-sp-fx { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; color: var(--primary); margin-right: 1px; background: none; border: 0; }
-.pn-inbox .ib-sp-fx:hover { background: color-mix(in oklch, var(--primary) 16%, transparent); }
-.pn-inbox .ib-sp-fx svg.ib-ic { width: 12px; height: 12px; }
-/* Clear filters and the switch, at the row's end; when they do not fit after the chips, at the end of a second line. */
-.ib-sp-end { display: inline-flex; align-items: center; gap: 8px; flex: none; margin-left: auto; }
+.pn-inbox .ib-sp-fwrap { align-items: center; border-radius: 6px; border: 0; background: var(--ib-sp-fill); padding-left: 2px; max-width: 240px; }
+.pn-inbox .ib-sp-fwrap .ib-sp-fchip { border: 0; background: none; padding-right: 0; min-width: 0; color: var(--foreground); }
+.pn-inbox .ib-sp-fx { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; color: var(--muted-foreground); margin-right: 1px; background: none; border: 0; }
+.pn-inbox .ib-sp-fx:hover { color: var(--foreground); background: color-mix(in oklch, var(--foreground) 8%, transparent); }
+.pn-inbox .ib-sp-fx svg.ib-ic { width: 11px; height: 11px; }
+/* Forced colours drop the fill: a set filter keeps an outline there. */
+@media (forced-colors: active) { .pn-inbox .ib-sp-fwrap { outline: 1px solid CanvasText; outline-offset: -1px; } }
+/* Clear filters, at the row's end. */
+.ib-sp-end { display: inline-flex; align-items: center; gap: 2px; flex: none; margin-left: auto; }
+dialog.ib-sp:not([data-phone]) .ib-sp-filters > .ib-sp-end { padding-left: 10px; }
 .pn-inbox .ib-sp-clear { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); padding: 0 4px; height: 24px; white-space: nowrap; background: none; border: 0; }
 .pn-inbox .ib-sp-clear:hover { color: var(--foreground); }
-/* "Best match | Newest" (approval "inbox-search-sort"): the Inbox's segmented control (.ib-seg), as tall as the chips
-   beside it, at the row's end (.ib-sp-end); after "Clear filters" when that shows. */
-.pn-inbox .ib-sp-sort { flex: none; padding: 1px; gap: 1px; }
-.pn-inbox .ib-sp-sort .ib-seg-o { height: 20px; padding: 0 8px; border-radius: 5px; font-size: var(--ib-fs-12-5, 12.5px); }
-.pn-inbox .ib-sp-sortrow { display: flex; padding: 8px 12px; border-bottom: 1px solid var(--ib-sep-s, var(--ib-sp-line)); }
+/* "Best match | Newest" (approval "inbox-search-sort"): the Inbox's segmented control (.ib-seg), at the search box's
+   end on a desktop (filter row "Up"), pinned at the filter line's end on a phone. No box around it: two quiet words,
+   the chosen one in the text colour on the set filters' fill. */
+.pn-inbox .ib-sp-sort { flex: none; padding: 1px; gap: 1px; background: none; border-color: transparent; box-shadow: none; }
+.pn-inbox .ib-sp-sort .ib-seg-o { height: 20px; padding: 0 7px; border-radius: 5px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); background: none; box-shadow: none; font-weight: 450; }
+.pn-inbox .ib-sp-sort .ib-seg-o:hover { color: var(--foreground); }
+.pn-inbox .ib-sp-sort .ib-seg-o[data-on] { color: var(--foreground); background: var(--ib-sp-fill); font-weight: 500; }
+.ib-sp-inrow > .ib-sp-sort { margin-left: auto; }
 .ib-sp-menu { position: absolute; top: calc(100% - 2px); z-index: 5; min-width: 200px; max-width: 300px; max-height: 300px; overflow-y: auto; padding: 4px; border-radius: 8px; background: var(--popover); box-shadow: 0 0 0 1px var(--border), 0 12px 30px -12px oklch(0 0 0 / 0.5); }
 .ib-sp-mi { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: var(--ib-fs-13, 13px); cursor: default; white-space: nowrap; }
 .ib-sp-mi .ib-sp-ml { overflow: hidden; text-overflow: ellipsis; }
@@ -3956,7 +3971,9 @@ dialog.ib-sp:not([data-phone]) .ib-sp-fcell[data-cell="project"] { flex: 0 1 aut
 .ib-sp-fade.ib-sp-bot { bottom: 0; height: 40px; background: linear-gradient(transparent, var(--popover)); }
 .ib-sp-fade[data-on] { opacity: 1; }
 .ib-sp-group { padding-bottom: 4px; }
-.ib-sp-gh { font-size: var(--ib-fs-11, 11px); font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ib-sp-quiet); padding: 10px 10px 4px; display: flex; align-items: center; gap: 6px; }
+/* The list's quiet label, not a heading. */
+.ib-sp-group + .ib-sp-group { margin-top: 4px; }
+.ib-sp-gh { font-size: var(--ib-fs-11, 11px); font-weight: 500; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted-foreground); padding: 12px 10px 4px; display: flex; align-items: center; gap: 6px; }
 .ib-sp-gh .ib-sp-gn { font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--muted-foreground); }
 .pn-inbox .ib-sp-gclear { margin-left: auto; font-size: var(--ib-fs-12, 12px); font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--muted-foreground); background: none; border: 0; padding: 0 2px; }
 .pn-inbox .ib-sp-gclear:hover { color: var(--foreground); }
@@ -3982,25 +3999,39 @@ dialog.ib-sp:not([data-phone]) .ib-sp-fcell[data-cell="project"] { flex: 0 1 aut
 .ib-sp-s { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Each user-written part of a composed line truncates by itself, so a right-to-left part loses its end, not its start. */
 .ib-sp-s bdi { display: inline-block; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
-.ib-sp-p .ib-sp-m, .ib-sp-s .ib-sp-m { font-weight: 650; color: var(--foreground); }
-/* The matched words in the first line: semibold and underlined in the primary colour (the whole line is bright, so weight alone no longer stands out). */
-.ib-sp-p .ib-sp-m { font-weight: 600; text-decoration: underline 2px var(--primary); text-underline-offset: 3px; text-decoration-skip-ink: none; }
+/* The matched words (approval "inbox-search-calm", Soft fill): on a light primary tint, a touch heavier, in the text
+   colour, in either line; a match that wraps keeps its tint and rounding on each line. Forced colours: Mark. */
+.ib-sp-p .ib-sp-m, .ib-sp-s .ib-sp-m { font-weight: 550; color: var(--foreground); background: var(--ib-sp-wash); border-radius: 3px; padding: 0 2px; margin: 0 -1px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+@media (forced-colors: active) { .ib-sp-p .ib-sp-m, .ib-sp-s .ib-sp-m { background: Mark; color: MarkText; } }
+/* A result's first line shows its words whole: a thread's subject, a project's name and a message's sentence around
+   the match wrap instead of ending in "…" (the owner, "search improvements": he could not see why a result matched). */
+.ib-sp-row[data-result] .ib-sp-p { white-space: normal; overflow-wrap: anywhere; }
+/* A project row's second line ("Project · /Users/…/backnotprop/plannotator"): the folder is searched, so it wraps
+   whole instead of ending in "…", and its matched words show. */
+.ib-sp-row[data-result="project"] .ib-sp-s { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.ib-sp-row[data-result="project"] .ib-sp-s bdi { display: inline; max-width: none; white-space: normal; }
 /* A result's second line (MetaLine): the thread chip first, the list's own chip (.ib-key), then what the result
-   is · project · section · time on one line. The project and the chip give way together; the rest keep their place.
-   Every part cuts at its own end (a right-to-left part included). */
-.ib-sp-s.ib-sp-tl { position: relative; display: flex; align-items: center; min-width: 0; }
-.ib-sp-tl > span:not(.ib-key) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ib-sp-tl .ib-sp-lead, .ib-sp-tl .ib-sp-sec, .ib-sp-tl .ib-sp-at { flex: none; }
-.ib-sp-tl bdi { display: inline; max-width: none; }
+   is · project · section · time. Nothing is cut: the chip and the project show their whole words and the line wraps
+   (after a "·", never before one, or inside the chip or the project when one alone is wider than the row). The section
+   and the time never break inside; the lead (an agent's name, a folder) wraps like the project. */
+.ib-sp-s.ib-sp-tl { position: relative; display: block; min-width: 0; white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.6; }
+.ib-sp-tl > span:not(.ib-key) { white-space: normal; }
+/* Each part holds the "·" after it and never breaks before it, so no line starts with a "·" (it breaks at the <wbr>
+   after the "·"). The section and the time never break inside; the lead and the project wrap inside their <bdi>. */
+.ib-sp-tl > span:is(.ib-sp-lead, .ib-sp-pj, .ib-sp-sec, .ib-sp-at) { white-space: nowrap; }
+.ib-sp-tl > span:is(.ib-sp-lead, .ib-sp-pj) > bdi { white-space: normal; }
+/* The project moves to the next line whole ("workspaces-desktop-app", never "workspaces-desktop-" / "app"); it breaks
+   inside only when it alone is wider than the row. The box is the project with its "·", so a name as wide as the row
+   breaks inside its last word to keep the "·" in the row, never past the row's edge. */
+.ib-sp-tl > span.ib-sp-pj { display: inline-block; max-width: 100%; vertical-align: bottom; }
+.ib-sp-tl bdi { display: inline; max-width: none; white-space: inherit; }
+.ib-sp-tl > span.ib-sp-pj > bdi { overflow-wrap: anywhere; }
 .ib-sp-tl .ib-sp-sep { padding: 0 5px; color: var(--muted-foreground); }
-.ib-sp-tl .ib-sp-lead { max-width: 30%; }
-.ib-sp-tl > span.ib-sp-pj { flex: 0 1 auto; min-width: 2.5em; }
-.ib-sp-tl .ib-key.ib-sp-key { flex: 0 1 auto; min-width: 4.5em; max-width: min(55%, 24em); margin-right: 10px; }
-.ib-sp-key > .ib-keyt { display: block; min-width: 0; max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* A thread with no name: its subject in the chip, in the row's face (the monospace face is for names). */
-.ib-sp-key.ib-sp-key-subj { font-family: inherit; }
-/* Arabic, Hebrew: the monospace face has no joined letter forms; such a name keeps the row's face. */
-.ib-sp-key > .ib-keyt:dir(rtl) { font-family: var(--font-sans), system-ui, sans-serif; }
+/* The thread's name: plain words in the line (no chip box, the row's face), then a "·" as between the line's other parts
+   (a "·" a screen reader skips). */
+.ib-sp-tl .ib-key.ib-sp-key { display: inline-block; max-width: 100%; white-space: normal; overflow-wrap: anywhere; margin: 0; line-height: inherit; border: 0; border-radius: 0; background: none; padding: 0; font-family: inherit; font-size: inherit; font-weight: inherit; color: color-mix(in oklch, var(--muted-foreground) 55%, var(--foreground)); }
+.ib-sp-tl .ib-key.ib-sp-key::after { content: "·" / ""; padding: 0 5px; color: var(--muted-foreground); }
+.ib-sp-key > .ib-keyt { display: inline; min-width: 0; max-width: none; overflow: visible; text-overflow: clip; white-space: normal; }
 .ib-sp-snip { color: var(--foreground); }
 .ib-sp-chip { flex: none; align-self: flex-start; margin-top: 1px; border-radius: 4px; background: none; border: 1px solid color-mix(in oklch, var(--foreground) 16%, transparent); color: var(--ib-sp-quiet); font-size: var(--ib-fs-11, 11px); line-height: 1.3; padding: 1px 6px; white-space: nowrap; }
 .ib-sp-chip.ib-sp-kind { font-family: var(--font-mono); text-transform: uppercase; font-size: var(--ib-fs-10-5, 10.5px); }
@@ -4014,6 +4045,11 @@ dialog.ib-sp:not([data-phone]) .ib-sp-fcell[data-cell="project"] { flex: 0 1 aut
 .ib-sp-skel { height: 46px; padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; justify-content: center; }
 .ib-sp-skel i { display: block; height: 10px; border-radius: 4px; background: color-mix(in oklch, var(--muted) 90%, var(--foreground) 6%); }
 .ib-sp-skel i + i { width: 40%; height: 8px; opacity: 0.7; }
+/* Results found inside a filter (a search opened from a project starts in it): what was left out, and the one click
+   that searches everything. Under the list, so it shows however many results there are. */
+.ib-sp-scope { padding: 8px 16px; border-top: 1px solid var(--ib-sep-s, var(--ib-sp-line)); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.pn-inbox .ib-sp-scope button { color: var(--primary); background: none; border: 0; padding: 0; font: inherit; font-weight: 500; cursor: pointer; }
+.pn-inbox .ib-sp-scope button:hover { text-decoration: underline; }
 .ib-sp-indexing { padding: 2px 8px 6px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-sp-foot { display: flex; align-items: center; gap: 18px; height: 40px; padding: 0 16px; border-top: 1px solid var(--ib-sp-line); font-size: var(--ib-fs-12-5, 12.5px); color: var(--ib-sp-quiet); white-space: nowrap; overflow: hidden; }
 .ib-sp-foot > span { display: inline-flex; align-items: center; gap: 6px; }
@@ -4040,20 +4076,25 @@ dialog.ib-sp:not([data-phone]) .ib-sp-fcell[data-cell="project"] { flex: 0 1 aut
   dialog.ib-sp[data-phone] .ib-sp-inrow { padding: 4px 8px 4px 14px; }
   .pn-inbox dialog.ib-sp[data-phone] .ib-sp-input { height: 44px; font-size: var(--ib-fs-16-in, 16px); }
   .pn-inbox dialog.ib-sp[data-phone] .ib-sp-cancel { display: inline-flex; align-items: center; }
-  dialog.ib-sp[data-phone] .ib-sp-filters { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 8px 12px; position: static; }
+  dialog.ib-sp[data-phone] .ib-sp-filters { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 8px 12px 2px; position: static; border-bottom: 0; }
   dialog.ib-sp[data-phone] .ib-sp-filters::-webkit-scrollbar { display: none; }
-  .pn-inbox dialog.ib-sp[data-phone] .ib-sp-fchip { height: 32px; padding: 0 11px; font-size: var(--ib-fs-13-5, 13.5px); flex: none; }
+  .pn-inbox dialog.ib-sp[data-phone] .ib-sp-fchip { height: 32px; padding: 0 9px; font-size: var(--ib-fs-13-5, 13.5px); flex: none; }
   .pn-inbox dialog.ib-sp[data-phone] .ib-sp-fx { width: 32px; height: 32px; }
   .pn-inbox dialog.ib-sp[data-phone] .ib-sp-clear { height: 32px; }
-  dialog.ib-sp[data-phone] .ib-sp-frame { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  dialog.ib-sp[data-phone] .ib-sp-frame { flex: 1; display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--ib-sep-s, var(--ib-sp-line)); }
   dialog.ib-sp[data-phone] .ib-sp-list { max-height: none; flex: 1; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
   /* A phone keeps its 56 px rows, a comfortable tap like the Inbox's other phone lists; only the desktop rows got denser (approval "inbox-search-sort": 64 -> 54 px, shown at 1440). */
   dialog.ib-sp[data-phone] .ib-sp-row { min-height: 56px; padding: 7px 8px; gap: 10px; }
   dialog.ib-sp[data-phone] .ib-sp-p { font-size: var(--ib-fs-14-5, 14.5px); }
-  /* Under the sideways chips: the order, at a thumb's height, the two halves sharing the row. */
-  .pn-inbox dialog.ib-sp[data-phone] .ib-sp-sort { flex: 1; flex-wrap: nowrap; margin-left: 0; padding: 2px; gap: 2px; }
-  .pn-inbox dialog.ib-sp[data-phone] .ib-sp-sort .ib-seg-o { flex: 1; justify-content: center; height: 32px; font-size: var(--ib-fs-13-5, 13.5px); border-radius: 6px; }
+  /* The order, pinned at the filter line's end (the filters scroll beside it), at a thumb's height. Tight, so the
+     filters keep what room a 320 px phone has; a soft edge where they slide under it. */
+  .ib-sp-fbar > .ib-sp-pin { flex: none; padding: 6px 4px 0 2px; box-shadow: -8px 0 8px -6px color-mix(in oklch, var(--foreground) 14%, transparent); }
+  dialog.ib-sp[data-phone] .ib-sp-fbar:has(> .ib-sp-pin) > .ib-sp-filters { padding-right: 2px; }
+  .pn-inbox dialog.ib-sp[data-phone] .ib-sp-sort { flex: none; flex-wrap: nowrap; margin-left: 0; padding: 0; gap: 0; }
+  .pn-inbox dialog.ib-sp[data-phone] .ib-sp-sort .ib-seg-o { flex: none; justify-content: center; height: 36px; padding: 0 7px; font-size: var(--ib-fs-13-5, 13.5px); border-radius: 6px; }
   dialog.ib-sp[data-phone] .ib-sp-s { font-size: var(--ib-fs-12-5, 12.5px); }
+  dialog.ib-sp[data-phone] .ib-sp-scope { padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); font-size: var(--ib-fs-13-5, 13.5px); }
+  .pn-inbox dialog.ib-sp[data-phone] .ib-sp-scope button { min-height: 32px; }
   dialog.ib-sp[data-phone] .ib-sp-menu { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); top: auto; max-width: none; max-height: 60vh; padding: 6px; border-radius: var(--ib-sheet-corner, 12px); }
   dialog.ib-sp[data-phone] .ib-sp-mi { height: 44px; font-size: var(--ib-fs-15, 15px); }
 }
