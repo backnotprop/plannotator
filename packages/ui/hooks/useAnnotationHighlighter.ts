@@ -21,6 +21,7 @@ import { annotationOwnsHighlight } from '../utils/annotationOwnsHighlight';
 import { transformPlainText } from '../utils/inlineTransforms';
 import { richCopySourceFromRange, type RichCopySource } from '../utils/richClipboard';
 import { TOUCH_PRIMARY_QUERY, TOUCH_SELECTION_SETTLE_MS } from '../utils/touchSelection';
+import { unionToolbarRect, type ToolbarRect } from '../utils/touchToolbarPlacement';
 
 // --- Exported state types ---
 
@@ -31,6 +32,10 @@ export interface ToolbarState {
   /** Builds the selection's rich-text copy when the toolbar button is pressed
    *  (synchronous in the markdown Viewer, a bridge round trip on HTML surfaces). */
   getRichCopy?: () => RichCopySource | Promise<RichCopySource>;
+  /** The whole selection's rect when `element` is only its start (several
+   *  marks; a 1px anchor over an HTML frame). The touch toolbar goes below it
+   *  (`AnnotationToolbar` `touchAnchorRect`). Absent: `element`'s rect. */
+  getAnchorRect?: () => ToolbarRect | null;
 }
 
 export interface CommentPopoverState {
@@ -1681,6 +1686,11 @@ export function useAnnotationHighlighter({
                 range.setEndAfter(last);
                 return richCopySourceFromRange(range, selectionText);
               },
+              // The marks split at every text node: the touch toolbar goes
+              // below all of them, not under the first.
+              getAnchorRect: () => unionToolbarRect(
+                marks.filter((m) => m.isConnected).flatMap((m) => Array.from(m.getClientRects())),
+              ),
             });
           }
         }

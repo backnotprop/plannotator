@@ -17,6 +17,29 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let anchor: HTMLElement | null = null;
 let originalMatchMedia: typeof window.matchMedia | undefined;
+const restorers: Array<() => void> = [];
+
+/** Replace a property for one test; afterEach puts the original back. */
+function stubProperty(target: object, key: string, descriptor: PropertyDescriptor) {
+  const own = Object.getOwnPropertyDescriptor(target, key);
+  Object.defineProperty(target, key, { configurable: true, ...descriptor });
+  restorers.push(() => {
+    if (own) Object.defineProperty(target, key, own);
+    else delete (target as Record<string, unknown>)[key];
+  });
+}
+
+/** A 390x844 phone screen with no visual viewport object, and a toolbar that measures `width` x 54. */
+function phoneScreen(width: number) {
+  stubProperty(window, 'innerWidth', { value: 390 });
+  stubProperty(window, 'innerHeight', { value: 844 });
+  stubProperty(window, 'visualViewport', { value: null });
+  const measured = (size: number) => function (this: HTMLElement) {
+    return this.classList?.contains('annotation-toolbar') ? size : 0;
+  };
+  stubProperty(HTMLElement.prototype, 'offsetWidth', { get: measured(width) });
+  stubProperty(HTMLElement.prototype, 'offsetHeight', { get: measured(54) });
+}
 
 function pointerMatchMedia(coarse: boolean) {
   return (query: string): MediaQueryList => ({
@@ -39,12 +62,18 @@ afterEach(async () => {
   anchor?.remove();
   anchor = null;
   resetTouchSelectionToolbar();
+  while (restorers.length) restorers.pop()!();
   if (originalMatchMedia) window.matchMedia = originalMatchMedia;
   originalMatchMedia = undefined;
   if (hasDom) document.body.replaceChildren();
 });
 
-async function mount(opts: { optIn: boolean; coarse: boolean; rect: { left: number; top: number; width: number; height: number } }) {
+async function mount(opts: {
+  optIn: boolean;
+  coarse: boolean;
+  rect: { left: number; top: number; width: number; height: number };
+  touchAnchorRect?: () => { top: number; bottom: number; left: number; right: number } | null;
+}) {
   originalMatchMedia = window.matchMedia;
   window.matchMedia = pointerMatchMedia(opts.coarse) as typeof window.matchMedia;
   if (opts.optIn) setTouchSelectionToolbar(true);
@@ -67,6 +96,7 @@ async function mount(opts: { optIn: boolean; coarse: boolean; rect: { left: numb
         onClose={() => {}}
         onRequestComment={() => {}}
         onQuickLabel={() => {}}
+        touchAnchorRect={opts.touchAnchorRect}
       />,
     );
   });
@@ -85,6 +115,33 @@ describe.if(hasDom)('AnnotationToolbar touch placement', () => {
     expect(parseFloat(toolbar.style.left)).toBeGreaterThanOrEqual(8);
   });
 
+  test('a two-piece selection: the toolbar goes below the last piece, not the first (element)', async () => {
+    phoneScreen(276);
+    const toolbar = await mount({
+      optIn: true,
+      coarse: true,
+      // `element` is the first mark, at the end of one line; the selection ends on the next line.
+      rect: { left: 300, top: 300, width: 70, height: 22 },
+      touchAnchorRect: () => ({ left: 16, right: 370, top: 300, bottom: 352 }),
+    });
+    expect(parseFloat(toolbar.style.top)).toBeGreaterThanOrEqual(352 + 28);
+  });
+
+  test('placed from its measured size: a 300px toolbar at the right edge ends 8px from it', async () => {
+    // Wider than the first estimate, so only the measure-and-re-place pass gets this right.
+    phoneScreen(300);
+    const toolbar = await mount({ optIn: true, coarse: true, rect: { left: 350, top: 300, width: 30, height: 22 } });
+    expect(parseFloat(toolbar.style.left)).toBe(390 - 8 - 300);
+    expect(parseFloat(toolbar.style.maxWidth)).toBe(390 - 16);
+  });
+
+  test('a selection scrolled out of sight hides the toolbar instead of pinning it to an edge', async () => {
+    phoneScreen(276);
+    const toolbar = await mount({ optIn: true, coarse: true, rect: { left: 100, top: -300, width: 30, height: 22 } });
+    expect(toolbar.dataset.pnAnnotationToolbarTouch).toBe('hidden');
+    expect(toolbar.style.visibility).toBe('hidden');
+  });
+
   test('opted in with a mouse: the desktop toolbar, centered above', async () => {
     const toolbar = await mount({ optIn: true, coarse: false, rect: { left: 200, top: 300, width: 40, height: 22 } });
     expect(toolbar.dataset.pnAnnotationToolbarTouch).toBeUndefined();
@@ -92,6 +149,7 @@ describe.if(hasDom)('AnnotationToolbar touch placement', () => {
     expect(toolbar.style.top).toBe('252px');
     expect(toolbar.style.left).toBe('220px');
     expect(toolbar.style.transform).toBe('translateX(-50%)');
+    expect(toolbar.style.maxWidth).toBe('');
   });
 
   test('a host that did not opt in keeps the desktop toolbar on a touch screen', async () => {

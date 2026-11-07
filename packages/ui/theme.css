@@ -1048,7 +1048,10 @@ html:has([data-pn-compact-touch-layout='true'])
  * that wraps rather than run off a narrow screen. AnnotationToolbar places it
  * from its measured size (utils/touchToolbarPlacement). */
 .annotation-toolbar[data-pn-annotation-toolbar-touch] {
-  max-width: calc(100vw - 16px);
+  /* Its width never depends on where it sits, so one measurement places it.
+   * The inline max-width (the visible screen less margins and safe areas)
+   * makes the row wrap only when the buttons cannot fit at all. */
+  width: max-content;
 }
 
 .annotation-toolbar[data-pn-annotation-toolbar-touch] [data-pn-annotation-toolbar-row] {
@@ -1087,6 +1090,14 @@ html:has([data-pn-compact-touch-layout='true'])
   [data-pn-touch-target]:not(:disabled):not([aria-disabled='true']):active {
   filter: brightness(0.92);
   transition: filter 100ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .annotation-toolbar[data-pn-annotation-toolbar-touch]
+    [data-pn-touch-target]:not(:disabled):not([aria-disabled='true']):active {
+    filter: brightness(0.9);
+    transition: none;
+  }
 }
 
 html:has([data-pn-compact-touch-layout='true'])

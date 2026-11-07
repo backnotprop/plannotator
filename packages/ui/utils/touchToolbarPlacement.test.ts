@@ -5,6 +5,8 @@ import {
   resetTouchSelectionToolbar,
   setTouchSelectionToolbar,
   TOUCH_TOOLBAR_EDGE_MARGIN,
+  IOS_MENU_CLEARANCE,
+  unionToolbarRect,
   type ToolbarRect,
 } from './touchToolbarPlacement';
 import { configurePlannotatorUI } from '../configure';
@@ -78,9 +80,65 @@ describe('placeTouchToolbar', () => {
     expect(pos.top + toolbar.height).toBe(phone.height - TOUCH_TOOLBAR_EDGE_MARGIN);
   });
 
-  test('a selection scrolled above the screen keeps the toolbar inside the top edge', () => {
-    const pos = placeTouchToolbar({ anchor: word(100, -120), toolbar, viewport: phone, mode: 'center-above' });
-    expect(pos.top).toBe(TOUCH_TOOLBAR_EDGE_MARGIN);
+  test('a selection scrolled out of sight hides the toolbar instead of sticking it to an edge', () => {
+    expect(placeTouchToolbar({ anchor: word(100, -120), toolbar, viewport: phone, mode: 'center-above' }).placement).toBe('hidden');
+    expect(placeTouchToolbar({ anchor: word(100, 900), toolbar, viewport: phone, mode: 'center-above' }).placement).toBe('hidden');
+    const block = { left: 16, right: 374, top: -400, bottom: -10 };
+    expect(placeTouchToolbar({ anchor: block, toolbar, viewport: phone, mode: 'top-right' }).placement).toBe('hidden');
+  });
+
+  test('a selection running above the top edge still gets the toolbar under its visible end', () => {
+    const anchor = { left: 20, right: 300, top: -120, bottom: 40 };
+    const pos = placeTouchToolbar({ anchor, toolbar, viewport: phone, mode: 'center-above' });
+    expect(pos.placement).toBe('below');
+    expect(pos.top).toBeGreaterThan(anchor.bottom);
+  });
+
+  test('a two-piece selection puts the toolbar below its last piece, not its first', () => {
+    // From the end of one line to the start of the next: the first piece is on top.
+    const first = word(300, 300, 70);
+    const last = word(16, 330, 60);
+    const anchor = unionToolbarRect([first, last])!;
+    const pos = placeTouchToolbar({ anchor, toolbar, viewport: phone, mode: 'center-above' });
+    expect(pos.top).toBeGreaterThanOrEqual(last.bottom + 28);
+  });
+
+  test('the gap below clears the end selection handle', () => {
+    const anchor = word(100, 300);
+    const pos = placeTouchToolbar({ anchor, toolbar, viewport: phone, mode: 'center-above' });
+    expect(pos.top - anchor.bottom).toBeGreaterThanOrEqual(28);
+  });
+
+  test('a selection near the top leaves room for iOS\'s menu, which then goes below it', () => {
+    const nearTop = word(100, 20);
+    const pos = placeTouchToolbar({ anchor: nearTop, toolbar, viewport: phone, mode: 'center-above' });
+    expect(pos.placement).toBe('below');
+    expect(pos.top - nearTop.bottom).toBeGreaterThanOrEqual(28 + IOS_MENU_CLEARANCE);
+    // Further down there is room above for iOS's menu: the plain gap.
+    const lower = word(100, 200);
+    const plain = placeTouchToolbar({ anchor: lower, toolbar, viewport: phone, mode: 'center-above' });
+    expect(plain.top - lower.bottom).toBeLessThan(28 + IOS_MENU_CLEARANCE);
+  });
+
+  test('near the top of a short screen without room for both, the toolbar still goes below', () => {
+    const short = { left: 0, top: 0, width: 390, height: 150 };
+    const anchor = word(100, 20);
+    const pos = placeTouchToolbar({ anchor, toolbar, viewport: short, mode: 'center-above' });
+    expect(pos.placement).toBe('below');
+    expect(pos.top + toolbar.height).toBeLessThanOrEqual(short.height - TOUCH_TOOLBAR_EDGE_MARGIN);
+  });
+
+  test('keeps clear of the notch and the home indicator (safe-area insets)', () => {
+    const landscape = { left: 0, top: 0, width: 844, height: 390 };
+    const insets = { left: 47, right: 47, bottom: 21, top: 0 };
+    const atLeft = placeTouchToolbar({ anchor: word(50, 150), toolbar, viewport: landscape, mode: 'center-above', insets });
+    expect(atLeft.left).toBe(47 + TOUCH_TOOLBAR_EDGE_MARGIN);
+    const atRight = placeTouchToolbar({ anchor: word(780, 150), toolbar, viewport: landscape, mode: 'center-above', insets });
+    expect(atRight.left + toolbar.width).toBe(844 - 47 - TOUCH_TOOLBAR_EDGE_MARGIN);
+    const tall = { left: 100, right: 700, top: -100, bottom: 1000 };
+    const pinned = placeTouchToolbar({ anchor: tall, toolbar, viewport: landscape, mode: 'center-above', insets });
+    expect(pinned.top + toolbar.height).toBe(390 - 21 - TOUCH_TOOLBAR_EDGE_MARGIN);
+    expect(atLeft.maxWidth).toBe(844 - 2 * 47 - 2 * TOUCH_TOOLBAR_EDGE_MARGIN);
   });
 
   test('follows the visible viewport when the page is zoomed or panned', () => {
@@ -96,6 +154,14 @@ describe('placeTouchToolbar', () => {
     const pos = placeTouchToolbar({ anchor: block, toolbar, viewport: phone, mode: 'top-right' });
     expect(pos.top + toolbar.height).toBeLessThanOrEqual(block.top);
     expect(pos.left + toolbar.width).toBe(block.right);
+  });
+});
+
+describe('unionToolbarRect', () => {
+  test('spans every piece and skips empty ones', () => {
+    const empty = { left: 50, right: 50, top: 900, bottom: 900 };
+    expect(unionToolbarRect([word(300, 300, 70), empty, word(16, 330, 60)])).toEqual({ left: 16, right: 370, top: 300, bottom: 352 });
+    expect(unionToolbarRect([])).toBeNull();
   });
 });
 

@@ -150,8 +150,9 @@ export interface PlannotatorUIConfig {
   /**
    * On a touch screen (main pointer a finger), put the selection toolbar
    * (`AnnotationToolbar`) below the selection, where iOS Safari's own edit
-   * menu does not go, keep it inside the visible screen with an 8px margin,
-   * and give its buttons 44px targets (`utils/touchToolbarPlacement`).
+   * menu does not go, keep it inside the visible screen with an 8px margin
+   * and the safe-area insets, and give its buttons 44px targets
+   * (`utils/touchToolbarPlacement`).
    * Default: false, the toolbar placed and sized exactly as before. With it
    * on, nothing changes with a mouse or trackpad. Plannotator's plan review,
    * annotate, code review and Inbox pass true.

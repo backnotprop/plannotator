@@ -14,8 +14,10 @@ import { TOUCH_PRIMARY_QUERY } from "../utils/touchSelection";
 import {
   getTouchSelectionToolbar,
   placeTouchToolbar,
+  readSafeAreaInsets,
   readVisibleViewport,
   TOUCH_TOOLBAR_SIZE_ESTIMATE,
+  type ToolbarRect,
   type TouchToolbarPlacement,
 } from "../utils/touchToolbarPlacement";
 
@@ -108,6 +110,14 @@ interface AnnotationToolbarProps {
   quickLabels?: boolean;
   /** Hide the plain copy button (set when a keyboard copy handler exists) */
   hideCopyButton?: boolean;
+  /**
+   * The whole selection's rect, in viewport coordinates, when `element` is
+   * only its start (the first of several marks; a 1px anchor over an HTML
+   * frame). Read only by the touch placement (`touchSelectionToolbar`), which
+   * puts the toolbar below the selection's bottom; desktop placement uses
+   * `element` as before. Absent or null: `element`'s rect.
+   */
+  touchAnchorRect?: () => ToolbarRect | null;
   /** Close toolbar when element scrolls out of viewport */
   closeOnScrollOut?: boolean;
   /** Exit animation state */
@@ -132,12 +142,13 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   commentOnly = false,
   showDelete,
   hideCopyButton = false,
+  touchAnchorRect,
   closeOnScrollOut = false,
   isExiting = false,
   onMouseEnter,
   onMouseLeave,
 }) => {
-  const [position, setPosition] = useState<{ top: number; left?: number; right?: number; touch?: TouchToolbarPlacement } | null>(null);
+  const [position, setPosition] = useState<{ top: number; left?: number; right?: number; touch?: TouchToolbarPlacement; maxWidth?: number } | null>(null);
   const touchToolbar = useTouchToolbar();
   const [copied, setCopied] = useState(false);
   const [richCopied, setRichCopied] = useState<RichCopyOutcome | false>(false);
@@ -207,6 +218,8 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   };
 
   const updatePositionRef = useRef<() => void>(() => {});
+  const touchAnchorRectRef = useRef(touchAnchorRect);
+  touchAnchorRectRef.current = touchAnchorRect;
   const measuredSizeRef = useRef<{ width: number; height: number } | null>(null);
 
   // Update position on scroll/resize
@@ -222,17 +235,16 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       if (touchToolbar) {
         // Touch screens (host opt-in): below the selection, where iOS's own
         // edit menu does not go, and kept inside the visible screen.
-        const el = toolbarRef.current;
-        const size = el && el.offsetWidth > 0
-          ? { width: el.offsetWidth, height: el.offsetHeight }
-          : TOUCH_TOOLBAR_SIZE_ESTIMATE;
+        // Below the WHOLE selection, not its first piece.
+        const anchor = touchAnchorRectRef.current?.() ?? rect;
         const placed = placeTouchToolbar({
-          anchor: rect,
-          toolbar: size,
+          anchor,
+          toolbar: measuredSizeRef.current ?? TOUCH_TOOLBAR_SIZE_ESTIMATE,
           viewport: readVisibleViewport(),
+          insets: readSafeAreaInsets(),
           mode: positionMode,
         });
-        setPosition({ top: placed.top, left: placed.left, touch: placed.placement });
+        setPosition({ top: placed.top, left: placed.left, touch: placed.placement, maxWidth: placed.maxWidth });
         return;
       }
 
@@ -269,18 +281,32 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   }, [element, positionMode, closeOnScrollOut, onClose, touchToolbar]);
 
   // Touch placement needs the toolbar's real size to keep it inside the
-  // screen: once it has rendered (and whenever its size changes), place it
-  // again before the browser paints.
+  // screen. Its width does not depend on where it sits (width: max-content in
+  // theme.css), so one measurement after the first render, before paint, is
+  // enough; a ResizeObserver catches later changes (Copy turning into
+  // Copied!). Scrolling re-places from the stored size, never re-measuring.
+  const hasPosition = position !== null;
   useLayoutEffect(() => {
-    if (!touchToolbar) return;
+    if (!touchToolbar || measuredSizeRef.current) return;
     const el = toolbarRef.current;
     if (!el || el.offsetWidth === 0) return;
-    const size = { width: el.offsetWidth, height: el.offsetHeight };
-    const last = measuredSizeRef.current;
-    if (last && last.width === size.width && last.height === size.height) return;
-    measuredSizeRef.current = size;
+    measuredSizeRef.current = { width: el.offsetWidth, height: el.offsetHeight };
     updatePositionRef.current();
   });
+  useEffect(() => {
+    const el = toolbarRef.current;
+    if (!touchToolbar || !hasPosition || !el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      const last = measuredSizeRef.current;
+      const width = el.offsetWidth;
+      const height = el.offsetHeight;
+      if (width === 0 || (last && last.width === width && last.height === height)) return;
+      measuredSizeRef.current = { width, height };
+      updatePositionRef.current();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [touchToolbar, hasPosition]);
 
   // Type-to-comment + Alt+N / bare digit quick label shortcuts
   useEffect(() => {
@@ -352,7 +378,12 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     top: position.top,
     '--pn-annotation-toolbar-anchor-x': isCentered ? `${position.left}px` : undefined,
     ...(position.touch
-      ? { left: position.left }
+      ? {
+          left: position.left,
+          maxWidth: position.maxWidth,
+          // Its selection is scrolled out of sight: hidden until it is back.
+          ...(position.touch === 'hidden' ? { visibility: 'hidden' as const } : {}),
+        }
       : isCentered
       ? { left: position.left, transform: 'translateX(-50%)' }
       : { right: position.right }),

@@ -1509,6 +1509,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               element={hook.toolbarState.element}
               copyText={hook.toolbarState.selectionText}
               getRichCopy={getRichCopyEnabled() ? hook.toolbarState.getRichCopy : undefined}
+              touchAnchorRect={hook.toolbarState.getAnchorRect}
               // HTML/live surfaces are comment-only: no Delete, no label
               // picker, no Alt+digit labels (commentOnly). Exactly ONE label
               // affordance is restored: the hardcoded 👍 "Looks good". The
