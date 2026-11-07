@@ -43,10 +43,17 @@ export const LocalLinkContext = createContext<LocalLinkResolver | null>(null);
 export type CodeSpanRenderer = (text: string, code: ReactNode) => ReactNode;
 export const CodeSpanContext = createContext<CodeSpanRenderer | null>(null);
 
-/** An inline code span as drawn (`children`), through the host's wrap when it names a code file. */
+/**
+ * Opt-in: which code spans a host's wrap is asked about. Absent, a span that names a code file (`isCodeFilePath`), as
+ * always; a host that opens any file (a picture, a page, a document) gives its own test.
+ */
+export const CodeSpanMatchContext = createContext<((text: string) => boolean) | null>(null);
+
+/** An inline code span as drawn (`children`), through the host's wrap when it names a code file (or what the host's test takes). */
 export function CodeSpan({ text, children }: { text: string; children: ReactNode }) {
   const wrap = useContext(CodeSpanContext);
-  return <>{wrap && isCodeFilePath(text) ? wrap(text, children) : children}</>;
+  const match = useContext(CodeSpanMatchContext) ?? isCodeFilePath;
+  return <>{wrap && match(text) ? wrap(text, children) : children}</>;
 }
 
 export function useLocalLinkResolver(): LocalLinkResolver | null {

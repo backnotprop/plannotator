@@ -937,6 +937,23 @@ export type OpenInFileScope = { thread: string; message?: string; from?: 'root' 
 /** A referenced file's text for its hover: this computer's, or a pull request's at its head commit (`pull`). */
 export type OpenInFileCode = { found: false } | { found: true; contents: string; pull?: { label: string; platform: 'github' | 'gitlab'; url: string } };
 
+/**
+ * A referenced file for the pane (design prototype "file-refs-open-pane"): text whole, an image or a film by the raw
+ * route's address, any other kind by name only. `reason`: not on this computer, or a path the Inbox does not open.
+ */
+export type ReferencedFileView =
+  | { found: false; name: string; path: string; reason: 'missing' | 'refused' }
+  | {
+      found: true;
+      name: string;
+      path: string;
+      kind: string;
+      contents?: string;
+      raw?: string;
+      tooLarge?: boolean;
+      pull?: { label: string; platform: 'github' | 'gitlab'; url: string };
+    };
+
 async function post<T>(path: string, body: Record<string, unknown>): Promise<T> {
   refuseContested(path);
   const machine = forwardedTo(path);
@@ -1517,6 +1534,8 @@ export const inboxApi = {
   /** A referenced file in its scope: whether it is on this computer, its real path and kind. 403 through the tailnet. */
   openInFileCheck: (scope: OpenInFileScope, path: string) =>
     get<{ found: boolean; path?: string; kind?: string }>(inboxUrl(`/open-in/file?${new URLSearchParams({ ...scope, path })}`)),
+  referencedFile: (scope: { thread: string; message?: string }, path: string) =>
+    get<ReferencedFileView>(inboxUrl(`/open-in/file/view?${new URLSearchParams({ ...scope, path })}`)),
   openInFileCode: (scope: OpenInFileScope, path: string) => get<OpenInFileCode>(inboxUrl(`/open-in/file/code?${new URLSearchParams({ ...scope, path })}`)),
   openInFile: (scope: OpenInFileScope, path: string, appId: string, line?: number) =>
     post<{ ok: boolean; error?: string }>(inboxUrl('/open-in/file'), { ...scope, path, app_id: appId, ...(line ? { line } : {}) }),

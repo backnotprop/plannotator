@@ -33,6 +33,9 @@ import { replyViewingOf } from '../replyViewing';
 import { AttachmentTiles, AttachmentsCount, changedCount } from './AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import { OpenInCodeHover, OpenInCodeSpans, type OpenInSurface } from './OpenIn';
+import { FileRefCodeSpans } from './FileRefSpan';
+import { paintBarePaths, type FileRef } from '../fileRefs';
+import { ReferencedFilePane, type OpenFileRef } from './ReferencedFilePane';
 import { stepsOf } from '../stepping';
 import { optionOf, optionSetId, optionSetOf } from '../optionSets';
 import { artifactKey, artifactOfFile, newestViewableFile, threadArtifacts } from '../artifacts';
@@ -387,7 +390,13 @@ export function MessageBody({
   pictureBadge,
   inlineRefOf,
   replyFiles,
+  onOpenFileRef,
 }: {
+  /**
+   * Design prototype "file-refs-open-pane": a file this agent message names (a link that is not attached, a code span
+   * that is a path, a bare path, a picture that did not load) opens beside the thread. Absent: as before.
+   */
+  onOpenFileRef?: (ref: FileRef) => void;
   /**
    * The action items this person's message carried (approval
    * "inbox-action-items-in-reply"): listed as "You did 1 action item", and the
@@ -608,7 +617,12 @@ export function MessageBody({
     (src: string | null, alt: string): boolean => {
       if (!src || refOf(src) === null) return false;
       // An image that failed to load (outside the project, gone) opens nothing: an empty lightbox helps no one.
-      if ([...(bodyRef.current?.querySelectorAll<HTMLImageElement>('img[data-ib-broken]') ?? [])].some((img) => img.getAttribute('src') === src)) return true;
+      if ([...(bodyRef.current?.querySelectorAll<HTMLImageElement>('img[data-ib-broken]') ?? [])].some((img) => img.getAttribute('src') === src)) {
+        // Design prototype: the pane says why it is not here.
+        const named = openFileRefRef.current ? refOf(src) : null;
+        if (named) openFileRefRef.current?.({ path: named });
+        return true;
+      }
       const image = imageOf(src);
       if (image && openImageRef.current) openImageRef.current(image);
       else setFallback({ src, alt });
@@ -717,6 +731,10 @@ export function MessageBody({
   openRef.current = onOpenAttachment;
   const openReplyFileRef = useRef(replyFiles?.onOpen);
   openReplyFileRef.current = replyFiles?.onOpen;
+  // The person's own words keep their links as they are: only an agent's message opens what it names.
+  const refsOn = !!onOpenFileRef && message.author.kind === 'agent';
+  const openFileRefRef = useRef(refsOn ? onOpenFileRef : undefined);
+  openFileRefRef.current = refsOn ? onOpenFileRef : undefined;
   const resolveLocalLink = useCallback<LocalLinkResolver>(
     (href) => {
       // A file the person's reply commented on (its feedback heading), or a drawing it carried.
@@ -736,6 +754,10 @@ export function MessageBody({
         return { kind: 'open', title: 'Show the drawing', href: src, open: () => setFallback({ src, alt: 'Your drawing' }) };
       }
       const attachment = attachmentForLink(href, { attachments: message.attachments ?? [], root: projectRoot, base: message.base_path ?? null });
+      const named = !attachment && openFileRefRef.current ? projectFileOfLink(href) : null;
+      if (named) {
+        return { kind: 'open', title: openAttachmentTitle(named.path), open: () => openFileRefRef.current?.(named) };
+      }
       if (!attachment) {
         // Not attached, but a file of the project: its code on hover, with Open in (nothing when there is no such file).
         const projectFile = openInFiles ? projectFileOfLink(href) : null;
@@ -760,8 +782,14 @@ export function MessageBody({
         open: () => openRef.current(attachment),
       };
     },
-    [message.attachments, message.base_path, message.thread_id, message.id, projectRoot, replyFileList, openInFiles],
+    [message.attachments, message.base_path, message.thread_id, message.id, projectRoot, replyFileList, openInFiles, refsOn],
   );
+  // Bare paths in the text (fileRefs.ts): painted, and a click opens the file beside the thread.
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || !refsOn) return;
+    return paintBarePaths(`${message.id}:paths`, body, (ref) => openFileRefRef.current?.(ref));
+  }, [message.id, refsOn]);
   const renderFooter = useCallback(
     (question: IndexedQuestion) => {
       const text = footerFor(question.question.key);
@@ -943,6 +971,7 @@ export function MessageBody({
     <ImageResolverContext.Provider value={resolveImage}>
     <SoftLineBreaksContext.Provider value={ownReply}>
     <OpenInCodeSpans scope={{ thread: message.thread_id, message: message.id }} on={openInFiles}>
+    <FileRefCodeSpans on={refsOn} hover={openInFiles} scope={{ thread: message.thread_id, message: message.id }} openRef={openFileRefRef}>
     <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef} onMouseUpCapture={comments?.onOpen ? readPress : undefined} onClickCapture={openHashtag} onClick={comments?.onOpen ? openHighlight : undefined}>
       {refCard}
       {tagPeek.node}
@@ -1008,6 +1037,7 @@ export function MessageBody({
       <InlineReuseLayer bodyRef={bodyRef} />
       {fallback && createPortal(<ImageLightbox src={fallback.src} alt={fallback.alt} onClose={() => setFallback(null)} />, document.body)}
     </div>
+    </FileRefCodeSpans>
     </OpenInCodeSpans>
     </SoftLineBreaksContext.Provider>
     </ImageResolverContext.Provider>
@@ -1189,6 +1219,10 @@ export interface ThreadPaneProps {
   stacked?: boolean;
   /** A window too narrow for a file beside the thread (stack.ts): an open file takes the whole window. */
   fileStacked?: boolean;
+  /** Design prototype "file-refs-open-pane": the file a message names, open beside the thread (the route's `ref=`). */
+  namedFile?: OpenFileRef | null;
+  /** Open (or, with null, close) a file a message names beside the thread. Absent: references stay as before. */
+  onOpenNamedFile?: (ref: OpenFileRef | null) => void;
   /**
    * This page came through the tailnet ("Over your tailnet"): "Open in" is a
    * new tab only, never an app on the computer. Null until the settings say
@@ -1473,7 +1507,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, namedFile = null, onOpenNamedFile, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   // Thread steps (approval "inbox-thread-steps"): the lists with steps, newest first; none while the switch is off.
@@ -2591,6 +2625,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     };
     const pane = paneRef.current;
     if (pane && file && file.id !== attachment.id) pane.leave(attachment.name ?? allFiles.find((a) => a.id === attachment.id)?.name ?? 'that file', go);
+    else go();
+  };
+  /** Design prototype: a file a message names, beside the thread; an open file with a comment not saved yet asks first. */
+  const openRefFromMessage = (ref: OpenFileRef) => {
+    const go = () => onOpenNamedFile?.(ref);
+    const pane = paneRef.current;
+    if (pane && file) pane.leave(ref.path.split('/').pop() ?? ref.path, go);
     else go();
   };
   /** A file the person's sent reply names (its feedback heading): beside the thread, at the version the comments were on. */
@@ -5271,10 +5312,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
 
   const openAttachment = file ? allFiles.find((a) => a.id === file.id) ?? null : null;
-  const fileOpen = openAttachment !== null;
+  const fileOpen = openAttachment !== null || (namedFile !== null && file === null);
   // A file beside the thread hides the list (App.tsx `fileOpen`, from the route, so before the
   // attachments load too): the way back to it leads the header, as on an iPad (approved 2026-10-12).
-  const backBesideFile = file !== null && !phone && !stacked && !fileStacked && onBackToList !== undefined;
+  const backBesideFile = (file !== null || namedFile !== null) && !phone && !stacked && !fileStacked && onBackToList !== undefined;
   // The thread's full screen: the button pressed goes away (the other one takes its place), so focus follows to it
   // when it was on the one pressed or nowhere. A change only, never on the first draw. Leaving can stack the thread
   // (the window too narrow for the list beside it): the window measures that after this pane's effects, in the same
@@ -6174,6 +6215,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   repo={thread.project.repo ?? null}
                   onOpenAttachment={openFromMessage}
                   onOpenInlineImage={(image) => openFromMessage(image)}
+                  onOpenFileRef={onOpenNamedFile ? (ref) => openRefFromMessage({ ...ref, messageId: message.id }) : undefined}
                   onOpenOptionSet={(key, image) => openOptionSet(message.id, key, image)}
                   readOnly={!isAgent || !liveMessage(message) || questions.length === 0 || allSent}
                   answers={answersOf(message)}
@@ -6885,6 +6927,17 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           onWriteReply: writeReplyFromFile,
         }}
         composer={composer}
+      />
+    )}
+    {!openAttachment && file === null && namedFile && (
+      <ReferencedFilePane
+        threadId={thread.thread_id}
+        fileRef={namedFile}
+        agent={asker}
+        phone={phone}
+        full={phone || fileStacked}
+        onOpen={(ref) => onOpenNamedFile?.(ref)}
+        onClose={() => onOpenNamedFile?.(null)}
       />
     )}
     </>

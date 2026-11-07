@@ -42,6 +42,9 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, posix, relative, sep } from "node:path";
 import { checkInboxAttachmentForLaunch, checkInboxProjectFile, type InboxProjectFilePlace } from "@plannotator/shared/inbox/attachments";
 import { readFileCapped } from "@plannotator/shared/repo-file";
+import { sniffImageContentType } from "@plannotator/shared/review-image";
+import { sniffInboxVideo } from "@plannotator/shared/inbox/video";
+import { open as openFile } from "node:fs/promises";
 import { inboxAttachmentNameRefusal, isInboxTextKind } from "@plannotator/core/inbox-types";
 import { isShapeProjectPath } from "@plannotator/core/shape";
 import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
@@ -63,6 +66,14 @@ export const INBOX_OPEN_IN_PATH = "/api/inbox/open-in";
 export const INBOX_OPEN_IN_APPS_PATH = "/api/inbox/open-in/apps";
 export const INBOX_OPEN_IN_FILE_PATH = "/api/inbox/open-in/file";
 export const INBOX_OPEN_IN_CODE_PATH = "/api/inbox/open-in/file/code";
+/** Design prototype (file-refs-open-pane): a referenced file for the pane, and an image's or a film's bytes. */
+export const INBOX_OPEN_IN_VIEW_PATH = "/api/inbox/open-in/file/view";
+export const INBOX_OPEN_IN_RAW_PATH = "/api/inbox/open-in/file/raw";
+/**
+ * Whether the pane's read of a referenced file sits behind Code review, as the hover's does. Off in the prototype (an
+ * owner call): the roots, the path rule and the credential refusals are the same either way.
+ */
+const VIEW_NEEDS_CODE_REVIEW = false;
 
 /** How the Inbox launches: the host's real launcher, or a test's stub. */
 export interface InboxOpenInLauncher {
@@ -184,6 +195,15 @@ function holdsCredentials(path: string): boolean {
   );
 }
 
+/** A PR file's kind by its name (its bytes are text: the forge's read is text only). */
+function kindOfName(name: string): string {
+  const ext = name.toLowerCase().split(".").pop() ?? "";
+  if (ext === "md" || ext === "markdown" || ext === "mdx") return "markdown";
+  if (ext === "html" || ext === "htm") return "html";
+  if (ext === "txt" || ext === "log") return "text";
+  return "code";
+}
+
 export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
   const { store, serverSession, readBody, json, localOnly, launcher, codeReviewOn, shapeRoot, repoRoots, threadPulls, pullFile, ownerOrLocal } = context;
   const givenHome = context.home ?? homedir();
@@ -287,6 +307,91 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     return json(read.ok && !read.content.includes("\0") ? { found: true, contents: read.content } : { found: false });
   };
 
+  const scopeOf = (params: URLSearchParams): FileScope => ({ thread: params.get("thread"), message: params.get("message"), pull: params.get("pull") });
+
+  /** The first bytes of a file, to say what type its bytes are (never its name alone). */
+  const headOf = async (path: string): Promise<Uint8Array | null> => {
+    try {
+      const handle = await openFile(path, "r");
+      try {
+        const buffer = new Uint8Array(4096);
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        return buffer.subarray(0, bytesRead);
+      } finally {
+        await handle.close().catch(() => {});
+      }
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * A referenced file for the pane (design prototype): the hover's read, every kind. A PR's text first where the scope
+   * has one; else the file here under `checkInboxProjectFile` and the credential refusals. Text comes back whole (under
+   * the read cap); an image or a film comes back as the raw route's address, which checks it all again.
+   */
+  const viewRoute = async (req: Request): Promise<Response> => {
+    if (VIEW_NEEDS_CODE_REVIEW && !codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+    if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+    const url = new URL(req.url);
+    if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) return json(crossOriginRefusalBody(), 403);
+    const params = url.searchParams;
+    const scope = scopeOf(params);
+    const named = params.get("path") ?? "";
+    const clean = posix.normalize(named.replace(/\\/g, "/")).replace(/^\.\//, "");
+    const name = clean.split("/").pop() || clean;
+    const places = placesOf(scope, named);
+    const pulls = typeof scope.pull === "string" ? [scope.pull] : typeof scope.thread === "string" ? threadPulls(scope.thread) : [];
+    if (pulls.length > 0) {
+      const paths = [...new Set([...places.map((place) => place.relative), clean])].filter((path) => isShapeProjectPath(path) && !inboxAttachmentNameRefusal(path) && !holdsCredentials(path));
+      for (const pull of pulls) {
+        for (const path of paths) {
+          const file = await pullFile(pull, path);
+          if (file) return json({ found: true, name, path: clean, kind: kindOfName(name), contents: file.contents, pull: { label: file.label, platform: file.platform, url: file.url } });
+        }
+      }
+    }
+    const file = await checkInboxProjectFile(places);
+    if (!file.ok) return json({ found: false, name, path: clean, reason: file.code });
+    if (holdsCredentials(file.path)) return json({ found: false, name, path: clean, reason: "missing" });
+    if (isInboxTextKind(file.kind)) {
+      const read = await readFileCapped(file.path);
+      if (!read.ok) return json({ found: true, name, path: clean, kind: file.kind, tooLarge: true });
+      if (read.content.includes("\0")) return json({ found: true, name, path: clean, kind: "file" });
+      return json({ found: true, name, path: clean, kind: file.kind, contents: read.content });
+    }
+    if (file.kind === "image" || file.kind === "video") {
+      const raw = new URLSearchParams();
+      for (const key of ["thread", "message", "path"]) {
+        const value = params.get(key);
+        if (value) raw.set(key, value);
+      }
+      return json({ found: true, name, path: clean, kind: file.kind, raw: `${INBOX_OPEN_IN_RAW_PATH}?${raw}` });
+    }
+    return json({ found: true, name, path: clean, kind: file.kind });
+  };
+
+  /**
+   * An image's or a film's bytes, for the pane (design prototype). The same scope, roots and path rule as the view, and
+   * the type is the one its first bytes say (an image by its signature, a film by its container); anything else is
+   * refused. Sandboxed and never sniffed, so the address opened on its own runs nothing.
+   */
+  const rawRoute = async (req: Request): Promise<Response> => {
+    if (VIEW_NEEDS_CODE_REVIEW && !codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+    if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Use GET." }, 405);
+    const url = new URL(req.url);
+    if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) return json(crossOriginRefusalBody(), 403);
+    const params = url.searchParams;
+    const file = await checkInboxProjectFile(placesOf(scopeOf(params), params.get("path") ?? ""));
+    if (!file.ok || holdsCredentials(file.path) || (file.kind !== "image" && file.kind !== "video")) return json({ found: false }, 404);
+    const head = await headOf(file.path);
+    const type = head ? (file.kind === "image" ? sniffImageContentType(head) : sniffInboxVideo(head)) : null;
+    if (!type) return json({ found: false }, 415);
+    return new Response(Bun.file(file.path), {
+      headers: { "Content-Type": type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox; default-src 'none'" },
+    });
+  };
+
   /** Launch what the per-kind policy allows and this computer has: the app first, nothing is opened for a refusal. */
   const launch = async (appId: string, target: { name: string; kind: unknown; path: string }, line?: number, check?: () => Promise<void>): Promise<Response> => {
     const policy = inboxOpenInPolicy(target, launcher.platform);
@@ -310,6 +415,8 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
 
   return async function handle(req: Request, path: string, via: "local" | "tailnet"): Promise<Response | null> {
     if (path === INBOX_OPEN_IN_CODE_PATH) return ownerOrLocal(req, via) ? codeRoute(req) : localOnly();
+    if (path === INBOX_OPEN_IN_VIEW_PATH) return ownerOrLocal(req, via) ? viewRoute(req) : localOnly();
+    if (path === INBOX_OPEN_IN_RAW_PATH) return ownerOrLocal(req, via) ? rawRoute(req) : localOnly();
     if (path !== INBOX_OPEN_IN_PATH && path !== INBOX_OPEN_IN_APPS_PATH && path !== INBOX_OPEN_IN_FILE_PATH) return null;
     // Launching an app changes this computer: never through the tailnet.
     if (via === "tailnet") return localOnly();

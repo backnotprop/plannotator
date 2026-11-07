@@ -370,6 +370,11 @@ interface Route {
    * `set=<message id>:<question key>` a question's picture choices the viewer steps through (optionSets.ts; absent: every file of the thread).
    */
   file?: { id: string; version: 'current' | 'sent'; focus: string | null; linked?: string | null; view?: 'full' | 'side' | null; set?: string | null } | null;
+  /**
+   * Design prototype "file-refs-open-pane": a file a message names, beside the thread, read only. `ref=` its path as
+   * written, `in=` the message, `line=` / `to=` its lines. Never with `file`.
+   */
+  ref?: { path: string; messageId: string; line?: number; lineEnd?: number } | null;
   /** The message whose guided review is open over the window (`#thread=…&guide=msg_…`). */
   guide?: string | null;
   /**
@@ -434,6 +439,7 @@ function routeOf(fullHash: string): Route {
     project: fromReviews ? null : params.get('project'),
     machine: params.get('machine'),
     thread,
+    ref: thread && !fileId && params.get('ref') && params.get('in') ? { path: params.get('ref')!, messageId: params.get('in')!, ...(Number(params.get('line')) > 0 ? { line: Number(params.get('line')) } : {}), ...(Number(params.get('to')) > 0 ? { lineEnd: Number(params.get('to')) } : {}) } : null,
     file: fileId ? { id: fileId, version: params.get('v') === 'sent' ? 'sent' : 'current', focus: params.get('at'), linked: params.get('linked'), view: parseFileView(params.get('view')), set: params.get('set') } : null,
     guide: thread ? params.get('guide') : null,
     guideAt: thread && params.get('guide') ? shapeReviewAtOf(params) : null,
@@ -489,6 +495,12 @@ function hashOf(route: Route): string {
       if (route.file.view) params.set('view', route.file.view);
       // A question's picture choices (optionSets.ts): a reload and Back keep stepping through them.
       if (route.file.set) params.set('set', route.file.set);
+    }
+    if (route.thread && route.ref && !route.file) {
+      params.set('ref', route.ref.path);
+      params.set('in', route.ref.messageId);
+      if (route.ref.line) params.set('line', String(route.ref.line));
+      if (route.ref.lineEnd) params.set('to', String(route.ref.lineEnd));
     }
     if (route.thread && route.guide) params.set('guide', route.guide);
     if (route.thread && route.guide) writeShapeReviewAt(params, route.guideAt);
@@ -5264,7 +5276,7 @@ function Inbox() {
   }, [settingsMissing, refreshSettings]);
 
   // A file beside the thread takes the list's and the sidebar's room (record 2.2).
-  const fileOpen = route.page === 'inbox' && !!route.thread && !!route.file;
+  const fileOpen = route.page === 'inbox' && !!route.thread && (!!route.file || !!route.ref);
   // A thread opened from a Board card (`#thread=…&card=crd_…`): it takes the list's place, led by
   // "‹ Board" and a chip naming the card; both go back to the opened card.
   const fromCard = route.page === 'inbox' && route.thread && route.card ? route.card : null;
@@ -6077,11 +6089,13 @@ function Inbox() {
             onChanged={afterWrite}
             onClose={fromCard ? backToCard : () => close({ ...route, thread: null, file: null })}
             file={route.file ?? null}
+            namedFile={route.ref ?? null}
+            onOpenNamedFile={(ref) => (ref ? go({ ...routeRef.current, file: null, ref }) : close({ ...routeRef.current, ref: null }))}
             onOpenFile={(file, options) => {
               if (!file) return closeTo({ ...routeRef.current, file });
               // A call that names no view keeps the one in the address (the pane names it for a step, a version, a linked page).
               const keepView = file.view === undefined ? (routeRef.current.file?.view ?? null) : file.view;
-              const next = { ...routeRef.current, file: { ...file, view: keepView } };
+              const next = { ...routeRef.current, ref: null, file: { ...file, view: keepView } };
               /** Show `next` the way fullScreenOrigin.ts names (the history is the stack of frames). */
               const show = (request: { move?: FrameMove; replace?: boolean }) => {
                 const op = fileEntryOp({ hash: currentHash(), state: window.history.state }, hashOf(next), request);

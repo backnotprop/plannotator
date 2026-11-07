@@ -8909,3 +8909,26 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-sys-phone .ib-sys-x, .pn-inbox .ib-sys-phone .ib-sys-x { width: 32px; height: 32px; }
   .ib-sys-phone .ib-sys-acts .ib-btn { height: 44px; }
 }
+
+/* Design prototype "file-refs-open-pane": a file a message names, read only beside the thread (ReferencedFilePane.tsx). */
+.ib-refnote { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 18px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); background: var(--card); border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
+.ib-refnote b { color: var(--foreground); font-weight: 600; }
+.ib-refnote span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-refmissing { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 24px; text-align: center; }
+.ib-refmissing-ic { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 6px; border-radius: 12px; color: var(--muted-foreground); background: color-mix(in oklch, var(--muted) 80%, transparent); }
+.ib-refmissing-name { max-width: 46ch; font-family: var(--font-mono); font-size: var(--ib-fs-13, 13px); color: var(--foreground); overflow-wrap: anywhere; }
+.ib-refmissing-t { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-refmedia { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; overflow: auto; }
+.ib-refmedia img, .ib-refmedia video { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; }
+.ib-refview.ib-phone .ib-vhead { padding-left: 6px; gap: 8px; }
+/* The words that name a file: a code span, and a bare path (painted, never wrapped: fileRefs.ts). */
+.ib-fileref { cursor: pointer; border-radius: 4px; }
+.ib-fileref code { text-decoration: underline dotted color-mix(in oklch, var(--primary) 55%, transparent); text-underline-offset: 3px; }
+.ib-fileref:hover code { color: var(--primary); }
+.ib-fileref:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+::highlight(ib-file-ref) { color: var(--primary); text-decoration: underline dotted; text-underline-offset: 3px; }
+.ib-body[data-file-ref-over] { cursor: pointer; }
+/* A narrow window hides the attachment header's sender line; a referenced file keeps its path and line there. */
+.ib-refview .ib-vhead .ib-from { display: block; min-width: 0; flex: 0 1 auto; }
+.ib-refview.ib-phone .ib-vhead .ib-fn { flex: 0 1 auto; }
+.ib-refview.ib-phone .ib-vhead .ib-from { flex: 1 1 auto; }
