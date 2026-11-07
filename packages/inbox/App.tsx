@@ -169,6 +169,8 @@ import { reviewsAlias } from './reviewsRoute';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
+import { CodeReviewOffer } from './components/CodeReviewOffer';
+import { useCodeReviewOffer } from './codeReviewOffer';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
@@ -4440,7 +4442,17 @@ function Inbox() {
   /** A reveal's "Turn it on" (revealTurnOn.ts): Settings' own save; not saved, the switch goes back off and a toast says so. */
   const turnOnFromReveal = (feature: RevealFeature, close: () => void) =>
     void turnOnRevealFeature(feature, close, {
-      save: feature === 'board' ? () => inboxApi.saveBoard(true).then((saved) => saved.board) : () => inboxApi.saveSteps(true).then((saved) => saved.steps),
+      save:
+        feature === 'board'
+          ? () => inboxApi.saveBoard(true).then((saved) => saved.board)
+          : feature === 'steps'
+            ? () => inboxApi.saveSteps(true).then((saved) => saved.steps)
+            : () =>
+                inboxApi.saveCodeReview(true).then((saved) => {
+                  // As Settings' switch: the "/" list gains the review skills.
+                  reloadSkillCatalog();
+                  return saved.code_review;
+                }),
       setSettings,
       showToast,
       dismissToast,
@@ -4932,6 +4944,21 @@ function Inbox() {
       gone = true;
     };
   }, [showTourEntry]);
+  // Code review's one-time offer (approval "code-review-offer-card"; codeReviewOffer.ts): the line's day-0 slot, armed
+  // from `reveal.next`, at once once the tour's screens are gone and the page is clear; the agent note waits for it.
+  const codeReviewOffer = useCodeReviewOffer({
+    due: snoozeIntroLatch.current?.next === 'code_review',
+    blocked: updatingThisLoad.current || soundDialog !== 'none' || agentNote !== 'none' || oneTimeDialogShownThisLoad(),
+    tourScreen: showTourEntry || tourIntroShown || tourOn,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    rows: snoozeIntroRows,
+    clear: listIntroClear && updateDialog === null && !restarting,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    toast: toast !== null,
+    on: settings?.code_review?.on === true,
+  });
+  const offerLinesFree = linesFree && codeReviewOffer.stage !== 'open' && codeReviewOffer.stage !== 'claimed';
   // The agent-note dialog's moment (approval "inbox-one-time-dialogs": day 0 is setup, one after another): once the
   // tour's screens are gone (the entry screen, its intro, the tour itself), and only when the Inbox's line says this
   // load may (`reveal.setup`: never on a day that had another dialog, nor on the load right after one). Then the
@@ -4947,7 +4974,9 @@ function Inbox() {
     route.page !== 'settings' &&
     route.page !== 'tour' &&
     !showTourEntry &&
-    !tourIntroShown;
+    !tourIntroShown &&
+    // Code review's day-0 offer goes first (its claim then keeps the day, so the note waits for the next free one).
+    codeReviewOffer.settled;
   useEffect(() => {
     if (!agentNoteReady || agentNoteDecided.current) return;
     let cancelled = false;
@@ -5645,7 +5674,7 @@ function Inbox() {
           stale={staleNotice}
           ask={
             // The first real thread's inline ask (the tour's, once) stands in for this line while it shows.
-            notifications.ask && linesFree && !(notifyAgain && notifyAgainThread !== null) ? (
+            notifications.ask && offerLinesFree && !(notifyAgain && notifyAgainThread !== null) ? (
               <NotificationAsk
                 kind={notifications.ask}
                 soundOn={sound.settings.enabled}
@@ -5654,7 +5683,7 @@ function Inbox() {
                 onNotNow={notifications.notNow}
                 onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'general' })}
               />
-            ) : notifications.slept && notifications.permission === 'granted' && linesFree ? (
+            ) : notifications.slept && notifications.permission === 'granted' && offerLinesFree ? (
               <TabSleptLine slept={notifications.slept} onDismiss={notifications.dismissSlept} />
             ) : null
           }
@@ -6128,6 +6157,17 @@ function Inbox() {
             boardReveal.close();
           }}
           onTurnOn={() => turnOnFromReveal('board', boardReveal.close)}
+        />
+      )}
+      {codeReviewOffer.stage === 'open' && (
+        <CodeReviewOffer
+          phone={phone}
+          onClose={() => {
+            // Not now (Escape, a click outside): final, and the line's next offer waits three days.
+            void inboxApi.revealNotNow('code_review');
+            codeReviewOffer.close();
+          }}
+          onTurnOn={() => turnOnFromReveal('code_review', codeReviewOffer.close)}
         />
       )}
       {stepsReveal.stage === 'open' && (
