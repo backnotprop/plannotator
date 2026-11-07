@@ -102,16 +102,20 @@ export function attachmentForLink<T extends LinkableAttachment>(
 }
 
 /**
- * The file a link or a code span names, for "Open in": the path as the agent wrote it, and the line (`#L12`, `:12`,
- * `:12-20`, `:12:4`). The server decides where it starts (the message's folder and checkout) and whether it is a file.
+ * The file a link or a code span names, for its hover and "Open in": the path as the agent wrote it, and the lines
+ * (`#L12`, `#L12-L20`, `:12`, `:12-20`, `:12:4`). The server decides where it starts (the message's folder and checkout)
+ * and whether it is a file.
  */
-export function projectFileOfLink(href: string): { path: string; line?: number } | null {
+export function projectFileOfLink(href: string): { path: string; line?: number; lineEnd?: number } | null {
   const candidate = linkCandidates(href).at(-1);
   if (!candidate) return null;
-  const line = /^#L(\d+)/.exec(href.trim().replace(/^[^#]*/, ''))?.[1] ?? /:(\d+)(?:-\d+|:\d+)?$/.exec(candidate)?.[1];
+  const fragment = /^#L(\d+)(?:-L?(\d+))?/.exec(href.trim().replace(/^[^#]*/, ''));
+  const written = /:(\d+)(?:-(\d+)|:\d+)?$/.exec(candidate);
+  const line = fragment?.[1] ?? written?.[1];
+  const lineEnd = fragment ? fragment[2] : written?.[2];
   const path = candidate.replace(/:\d+(?:-\d+|:\d+)?$/, '').replace(/\\/g, '/');
   if (!path || path.endsWith('/')) return null;
-  return { path, ...(line ? { line: Number(line) } : {}) };
+  return { path, ...(line ? { line: Number(line) } : {}), ...(line && lineEnd ? { lineEnd: Number(lineEnd) } : {}) };
 }
 
 /**

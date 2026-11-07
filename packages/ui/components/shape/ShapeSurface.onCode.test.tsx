@@ -2,8 +2,9 @@
  * The seams a host reuses the board through (DOM-gated, tests/dom-test-list.txt).
  * What regresses: a code review's click on a part not reaching its diff, the
  * board's own viewer opening over a diff that took the click, a host that says
- * no (a file its diff lacks) leaving the click dead, or the refresh button
- * losing the host's words.
+ * no (a file its diff lacks) leaving the click dead, a host's no handed on to
+ * the board's review (a code review's own lines it can't show landing in the
+ * review anyway), or the refresh button losing the host's words.
  */
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -96,6 +97,22 @@ test.skipIf(!hasDom)("a host that says no: the board's own viewer opens the file
   await mount({ onCode: () => false });
   await clickPart();
   expect(reads).toEqual(['src/kettle.ts']);
+});
+
+test.skipIf(!hasDom)("a host that says no, on a board with a review: the board's own viewer, never the review", async () => {
+  const opened: unknown[] = [];
+  await mount({ onCode: () => false, codeView: false, review: { open: (at) => (opened.push(at), true) } });
+  await clickPart();
+  expect(opened).toEqual([]);
+  expect(reads).toEqual(['src/kettle.ts']);
+});
+
+test.skipIf(!hasDom)('no host seam, on a board with a review: the review opens there', async () => {
+  const opened: unknown[] = [];
+  await mount({ codeView: false, review: { open: (at) => (opened.push(at), true) } });
+  await clickPart();
+  expect(opened).toEqual([{ path: 'src/kettle.ts', line: 3 }]);
+  expect(reads).toEqual([]);
 });
 
 test.skipIf(!hasDom)('no host seam: the board opens the file, as it does on its own', async () => {

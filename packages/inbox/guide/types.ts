@@ -1,5 +1,6 @@
 import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
+import type { InboxFileContents } from '@plannotator/core/inbox-types';
 import type { ReactNode } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 
@@ -57,6 +58,22 @@ export interface GuideReaderProps {
   highlight?: { path: string; start: number; end: number; token: number } | null;
   /** Under the host's own title (the PR review): no heading block of the reader's own, the host's page margins. */
   bare?: boolean;
+  /** Reads one changed file's whole text, for the "N unmodified lines" arrows. Absent: the diffs show as they came. */
+  fileContents?: (path: string, signal: AbortSignal, patch: string) => Promise<InboxFileContents>;
+  /**
+   * Under a top bar that names the review and lists its chapters (the full-window review): the heading reads like a
+   * thread's (GuideView `threadHeading`). Absent: as before.
+   */
+  threadHeading?: boolean;
+  /**
+   * The host's bar draws the diff controls (Split / Unified, Collapse all, the "Diff display" popover: approval
+   * "diff-controls-headers"), so the first card has no Split | Unified tab. Absent: the tab, as before.
+   */
+  hostDiffControls?: boolean;
+  /** Fold or open every file's diff (the bar's Collapse all); a new token applies it again. Not remembered. */
+  collapseAll?: { collapsed: boolean; token: number };
+  /** The review's own actions on that heading's title line (the guide host's `renderHeadActions`). */
+  renderHeadActions?: () => ReactNode | null;
   /** "Open in" on each file's header (a review while Code review is on). Absent: none, as before. */
   fileOpenIn?: (path: string) => ReactNode;
 }

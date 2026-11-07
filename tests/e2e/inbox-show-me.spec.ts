@@ -15,8 +15,8 @@
  *     it was. Show me on the same lines opens it again, from any window, and asks
  *     nothing. Plain Ask opens the Ask window with the lines named.
  *  3. The thread works with the board as Shape does on its own: the Chat's Ask
- *     reaches the session and its answer shows; Annotate's and Global comment's
- *     Change it wake it and a new version draws in; the thread's own header has
+ *     reaches the session and its answer shows; the crosshair's (Comment, in
+ *     Annotate's place on the Inbox's board) and Global comment's Change it wake it and a new version draws in; the thread's own header has
  *     the Pebble; the board's Thread tab reads the thread.
  *  4. Show me again is a new turn and a new version of the same board.
  *  5. A busy agent gets the Ask window's choice, never "drawing".
@@ -33,7 +33,11 @@
  *     the board's own viewer; a deleted file and a rename's old name: the file and the
  *     note, never a dead click; leaving the review closes the board.
  *
- * 11. A Change it while the session answers another thread: quiet, then through, once.
+ * 11. A link on a board over the thread (What's changed's `file:line`) shows the code:
+ *     the review at that line, painted, with the board as the corner card naming no
+ *     part (the owner, approval "review-show-me", addendum 2026-11-07); the card brings
+ *     the board back over the review, its links land the same way, and Esc closes it.
+ * 12. A Change it while the session answers another thread: quiet, then through, once.
  *
  * HOME is a scratch folder and the sandbox env keeps the binary off the person's agents.
  * gh and glab are traps. Build the binary first (see inbox.spec.ts), then
@@ -337,6 +341,13 @@ async function selectLines(page: Page, file: string, from: number, to: number): 
   if (to !== from) await line(to).click({ modifiers: ['Shift'] });
 }
 
+/** The review's chapter menu in its top bar: go to a chapter, or to the Overview. */
+async function pickChapter(page: Page, row: number | 'overview'): Promise<void> {
+  await page.locator('[data-review-message] [data-review-jump]').click();
+  await page.locator(`[data-review-jump-menu] [data-review-jump-row="${row}"]`).click();
+  await expect(page.locator('[data-review-jump-menu]')).toHaveCount(0);
+}
+
 /** A real crop of a diff's lines, from the first added line down, for the scripted agent's board. */
 async function cropLines(page: Page, shell: Locator, path: string): Promise<void> {
   await shell.scrollIntoViewIfNeeded();
@@ -476,17 +487,17 @@ test('Show me on selected lines: the popover, the box, the agent makes a Shape, 
   round1 = await call('submit_guide', { project_path: world.project, guide: guide(1), patch: world.round1, review: true, subject: 'Retry failed charges', body: 'Ready for review.' });
   await openReview(page, round1.thread_id);
   const pane = page.locator('[data-review-message]');
-  await pane.locator('[data-review-chapters] li').nth(3).click();
+  await pickChapter(page, 2);
 
   // Real crops of this review's diff, for the scripted agent's board.
   const workerShell = page.locator(`[data-guide-file-shell="${WORKER}"]`).first();
   await expect(workerShell.locator('[data-line-type="change-addition"]').first()).toBeVisible({ timeout: 30_000 });
   await cropLines(page, workerShell, join(world.boardDir, 'crop-worker.png'));
-  await pane.locator('[data-review-chapters] li').nth(2).click();
+  await pickChapter(page, 1);
   const scheduleShell = page.locator(`[data-guide-file-shell="${SCHEDULE}"]`).first();
   await expect(scheduleShell.locator('[data-line-type="change-addition"]').first()).toBeVisible({ timeout: 30_000 });
   await cropLines(page, scheduleShell, join(world.boardDir, 'crop-schedule.png'));
-  await pane.locator('[data-review-chapters] li').nth(3).click();
+  await pickChapter(page, 2);
 
   await selectLines(page, WORKER, 16, 18);
   await expect(chooser(page)).toBeVisible();
@@ -526,7 +537,7 @@ test('Show me on selected lines: the popover, the box, the agent makes a Shape, 
   await expect(page.locator('[data-review-card]').getByRole('button', { name: /review/ }).or(reopened).first()).toBeVisible();
   if (!(await reopened.isVisible())) await page.locator('[data-review-card]').getByRole('button', { name: /review/ }).click();
   await expect(reopened).toBeVisible();
-  await reopened.locator('[data-review-chapters] li').nth(3).click();
+  await pickChapter(page, 2);
   await selectLines(page, WORKER, 17, 17);
   await chooser(page).getByRole('button', { name: 'Show me' }).click();
   await expect(box).toHaveAttribute('data-show-me-box', 'drawing');
@@ -543,7 +554,7 @@ test('Show me on selected lines: the popover, the box, the agent makes a Shape, 
   await expect(page).toHaveURL(new RegExp(`guide=${round1.message_id}.*shape=${shapeId}`));
   await expect(board(page).getByRole('heading', { name: 'After the third failure' })).toBeVisible();
   await expect(part(board(page), 'stays')).toBeVisible();
-  for (const name of ['Picture', 'How it works', 'What to know', 'Annotate', 'References', 'Chat']) {
+  for (const name of ['Picture', 'How it works', 'What to know', 'Comment', 'References', 'Chat']) {
     await expect(board(page).getByRole('toolbar').getByRole('button', { name, exact: false }).first()).toBeVisible();
   }
   await expect(board(page).getByRole('button', { name: 'Global comment' })).toBeVisible();
@@ -601,7 +612,7 @@ test('a part lands on its line and the board shrinks to the corner card; it grow
   const other = await world.context.newPage();
   try {
     await openReview(other, round1.thread_id);
-    await other.locator('[data-review-message] [data-review-chapters] li').nth(3).click();
+    await pickChapter(other, 2);
     await selectLines(other, WORKER, 16, 16);
     await chooser(other).getByRole('button', { name: 'Show me' }).click();
     await expect(board(other)).toBeVisible();
@@ -644,8 +655,9 @@ test("the thread works with the board as Shape does on its own: Chat's Ask, Anno
   await shot(page, '06-chat', ['light', 'dark']);
   await board(page).getByRole('button', { name: 'Close panel' }).click();
 
-  // Annotate: point at a part, Change it: the session is woken, reads the note and draws v2.
-  await toolbar.getByRole('button', { name: 'Annotate' }).click();
+  // The crosshair (Annotate's place on the Inbox's board): point at a part, Change it: the session is woken, reads
+  // the note and draws v2.
+  await toolbar.getByRole('button', { name: 'Comment', exact: true }).click();
   await part(board(page), 'stays').click();
   const popover = page.getByRole('dialog').filter({ hasText: 'Change it' }).or(page.locator('[data-comment-popover]')).first();
   const words = page.locator('textarea:visible').last();
@@ -657,7 +669,7 @@ test("the thread works with the board as Shape does on its own: Chat's Ask, Anno
   await expect(part(board(page), 'stays')).toContainText('The row is removed');
   // It stays on the board, not in the review's own comments: no second comment system.
   await expect(page.locator('.ib-gpanel')).not.toContainText('Remove the row before the email.');
-  await toolbar.getByRole('button', { name: 'Annotate' }).click();
+  await toolbar.getByRole('button', { name: 'Comment', exact: true }).click();
   await shot(page, '08-redrawn', ['light', 'dark']);
 
   // Global comment: the same path, for the whole board.
@@ -707,7 +719,7 @@ test("a busy agent: the box offers the Ask window's choice, never says it draws"
     .poll(() => page.evaluate(async (thread) => ((await (await fetch(`/api/inbox/threads/${thread}/ask`)).json()) as { running: string | null }).running, round1.thread_id))
     .toBeNull();
   world.agent.setBusy(true);
-  await page.locator('[data-review-message] [data-review-chapters] li').nth(3).click();
+  await pickChapter(page, 2);
   await selectLines(page, WORKER, 8, 9);
   await chooser(page).getByRole('button', { name: 'Show me' }).click();
   const box = page.locator('[data-show-me-box]');
@@ -726,7 +738,7 @@ test("the Overview's picture opens its code; with no picture, the Overview's Sho
   const { page } = world;
   await openReview(page, round1.thread_id);
   const pane = page.locator('[data-review-message]');
-  await pane.locator('[data-review-chapters] li').first().click();
+  await pickChapter(page, 'overview');
   const fig = page.locator('[data-overview-figure]');
   await expect(fig).toBeVisible();
   await part(fig, 'next').click();
@@ -737,7 +749,9 @@ test("the Overview's picture opens its code; with no picture, the Overview's Sho
   const ask = page.locator('[data-overview-show-me]');
   await expect(ask).toBeVisible();
   await shot(page, '11-overview-show-me', ['light', 'dark']);
-  await ask.getByRole('button', { name: 'Show me' }).click();
+  // Beside Global comment, on the heading's line (approval "review-deslop").
+  await expect(page.locator('[data-guide-heading] .gv-tools button')).toHaveText(['Show me', 'Global comment']);
+  await ask.click();
   await expect(page.locator('[data-show-me-place]')).toHaveText('The whole review');
   await page.locator('[data-show-me-send]').click();
   await expect(board(page)).toBeVisible({ timeout: 30_000 });
@@ -798,7 +812,7 @@ test('a board drawn on an earlier review lands where its code is now, or says it
   const first = await call('submit_guide', { project_path: world.project, guide: guide(1, false), patch: world.round1, review: true, thread: 'two-reviews', subject: 'Two reviews', body: 'Ready for review.' });
   await openReview(page, first.thread_id);
   const pane = page.locator('[data-review-message]');
-  await pane.locator('[data-review-chapters] li').nth(3).click();
+  await pickChapter(page, 2);
 
   // A real Show me here, for the same-lines check below.
   await selectLines(page, WORKER, 16, 18);
@@ -850,7 +864,7 @@ test('a board drawn on an earlier review lands where its code is now, or says it
   await page.goto(`${world.url}#thread=${first.thread_id}&guide=${second.message_id}`);
   await page.reload();
   await expect(pane).toBeVisible();
-  await pane.locator('[data-review-chapters] li').nth(3).click();
+  await pickChapter(page, 2);
   await open();
   await part(board(page), 'moved').click();
   await expect(corner(page).locator('.ib-sm-pip-f')).toHaveText(/retry-worker\.ts lines 17–20/);
@@ -908,7 +922,7 @@ test('a board drawn on an earlier review lands where its code is now, or says it
   await expect(again).toHaveCount(0);
 
   // Show me here: the earlier review's lines where they are now reopen its board; its old numbers are other code, so they ask.
-  await pane.locator('[data-review-chapters] li').nth(3).click();
+  await pickChapter(page, 2);
   const asked = world.agent.asked.length;
   await selectLines(page, WORKER, 17, 20);
   await chooser(page).getByRole('button', { name: 'Show me' }).click();
@@ -947,7 +961,7 @@ test("a plain board on its only review: stored after it, through nothing or an e
   await page.reload();
   const pane = page.locator('[data-review-message]');
   await expect(pane).toBeVisible();
-  await pane.locator('[data-review-chapters] li').nth(3).click();
+  await pickChapter(page, 2);
   const openBoard = async (id: string, name: string) => {
     await page.evaluate((shape) => { location.hash = `${location.hash.replace(/&shape=[^&]*/, '')}&shape=${encodeURIComponent(shape)}`; }, id);
     await expect(board(page)).toContainText(`The board ${name}.`);
@@ -1005,6 +1019,65 @@ test("a part on a deleted file or a rename's old name: the file and the note, ne
   await board(page).getByRole('button', { name: 'Close Shape' }).click();
 });
 
+test("a link on a board over the thread (What's changed): the code shows and the board shrinks to the corner card; the card brings it back", async () => {
+  test.setTimeout(120_000);
+  const { page } = world;
+  const asked = await call('send_message', { project_path: world.project, body: 'What changed in the retry?', thread: 'board-links', subject: 'Board links' });
+  const review = await call('submit_guide', { project_path: world.project, guide: guide(1, false), patch: world.round1, review: true, reply_to: asked.message_id, body: 'The review.' });
+  expect(review.thread_id).toBe(asked.thread_id);
+  const path = join(world.boardDir, 'board-links.json');
+  writeFileSync(
+    path,
+    JSON.stringify({
+      title: 'Board links',
+      claim: 'The retry stops after the third failure.',
+      views: {
+        picture: { width: 800, height: 300, html: '<div data-mark="it" style="padding:16px">it</div>' },
+        changed: { summary: 'The third failure stops the retry.', items: [{ id: 'stop', kind: 'behaviour', title: 'The retry stops after three', now: 'stop after the third failure', code: [`${WORKER}:17`] }] },
+      },
+    }),
+  );
+  const run = world.shape(['update', '--file', path, '--thread', asked.thread_id]);
+  expect(run.status, run.stderr).toBe(0);
+  const id = (JSON.parse(run.stdout) as { id: string }).id;
+  const link = (scope: Locator) => scope.getByRole('button', { name: `retry-worker.ts:17, open ${WORKER} at line 17` });
+  const pane = page.locator(`[data-review-message="${review.message_id}"]`);
+  const shell = page.locator(`[data-guide-file-shell="${WORKER}"]`).first();
+
+  // The board over the thread, no review open: its What's changed link.
+  await page.goto(`${world.url}#thread=${asked.thread_id}&shape=${encodeURIComponent(id)}`);
+  await page.reload();
+  await expect(board(page)).toContainText('The retry stops after the third failure.');
+  await expect(pane).toHaveCount(0);
+  await board(page).getByRole('toolbar').getByRole('button', { name: "What's changed" }).click();
+  await link(board(page)).click();
+
+  // The code shows: the review at that line, painted; the board is the corner card, naming no part.
+  await expect(pane).toBeVisible();
+  await expect(shell).toBeInViewport();
+  await expect(shell.locator('[data-line][data-selected-line]')).toHaveCount(1);
+  await expect(corner(page)).toHaveAttribute('data-show-me-corner', id);
+  await expect(corner(page).locator('.ib-sm-pip-f')).toHaveCount(0);
+  await expect(board(page)).toBeHidden();
+  await shot(page, '13-board-link', ['light', 'dark']);
+
+  // The card brings the board back, over the review; its link lands the same way.
+  await corner(page).getByRole('button', { name: 'Grow the board' }).click();
+  await expect(corner(page)).toHaveCount(0);
+  await expect(board(page)).toBeVisible();
+  await board(page).getByRole('toolbar').getByRole('button', { name: "What's changed" }).click();
+  await link(board(page)).click();
+  await expect(corner(page)).toBeVisible();
+  await expect(board(page)).toBeHidden();
+  await expect(shell).toBeInViewport();
+
+  // Esc closes the board, as after a part lands on its line; the review stays.
+  await page.keyboard.press('Escape');
+  await expect(corner(page)).toHaveCount(0);
+  await expect(board(page)).toHaveCount(0);
+  await expect(pane).toBeVisible();
+});
+
 test('a Change it while the session answers another thread: no storm of requests, and it goes through once that turn ends, once', async () => {
   test.setTimeout(120_000);
   const { page } = world;
@@ -1013,7 +1086,7 @@ test('a Change it while the session answers another thread: no storm of requests
     .poll(() => page.evaluate(async (thread) => ((await (await fetch(`/api/inbox/threads/${thread}/ask`)).json()) as { running: string | null }).running, round1.thread_id))
     .toBeNull();
   await openReview(page, round1.thread_id);
-  await page.locator('[data-review-message] [data-review-chapters] li').nth(3).click();
+  await pickChapter(page, 2);
   world.hold = gate();
   const hold = world.hold;
   await selectLines(page, DUNNING, 2, 3);
@@ -1069,7 +1142,7 @@ test("reloaded while it draws, and the agent ends with no words: the box goes ba
   const { page } = world;
   await openReview(page, round1.thread_id);
   const pane = page.locator('[data-review-message]');
-  await pane.locator('[data-review-chapters] li').nth(3).click();
+  await pickChapter(page, 2);
   await selectLines(page, WORKER, 2, 3);
   await chooser(page).getByRole('button', { name: 'Show me' }).click();
   const box = page.locator('[data-show-me-box]');
@@ -1085,7 +1158,7 @@ test("reloaded while it draws, and the agent ends with no words: the box goes ba
   await expect(start.or(pane).first()).toBeVisible();
   if (!(await pane.isVisible())) await start.click();
   await expect(pane).toBeVisible();
-  await pane.locator('[data-review-chapters] li').nth(3).click();
+  await pickChapter(page, 2);
   await selectLines(page, WORKER, 2, 2);
   await chooser(page).getByRole('button', { name: 'Show me' }).click();
   await expect(box).toHaveAttribute('data-show-me-box', 'drawing');
@@ -1104,7 +1177,7 @@ test("the agent gone: a Show me it never answers goes back to the box with the A
   test.setTimeout(150_000);
   const { page } = world;
   await openReview(page, round1.thread_id);
-  await page.locator('[data-review-message] [data-review-chapters] li').nth(3).click();
+  await pickChapter(page, 2);
   await selectLines(page, WORKER, 5, 5);
   await chooser(page).getByRole('button', { name: 'Show me' }).click();
   const box = page.locator('[data-show-me-box]');

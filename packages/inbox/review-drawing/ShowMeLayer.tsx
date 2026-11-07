@@ -5,7 +5,8 @@
  *   person's optional words and Show me; then "Claude Code is drawing it." and
  *   Stop while the agent draws;
  * - the corner card: a click on a part of the board lands on its line and the
- *   board shrinks to it; a click on the card grows it back.
+ *   board shrinks to it (a link on the board too, with no part named); a click
+ *   on the card grows it back.
  *
  * Each wears `data-popover-layer` and `data-chat-window`, like Ask's window,
  * so the Inbox's keys (Mod+Enter, the Escape ladder) never act from inside
@@ -163,8 +164,8 @@ export function ShowMeCorner({
   title: string;
   /** The board's Picture, drawn small. */
   picture: ShapeDrawnView | null;
-  /** `lines` null: the code this part was drawn from changed, and the review shows its file. */
-  part: { name: string; mark: string | null; file: string; lines: [number, number] | null };
+  /** `lines` null: the code this part was drawn from changed, and the review shows its file. Null: no part (a link). */
+  part: { name: string; mark: string | null; file: string; lines: [number, number] | null } | null;
   /** Where the board's own pictures (its `files/`) are served from. */
   resolveSrc: (src: string) => string;
   onGrow: () => void;
@@ -172,7 +173,7 @@ export function ShowMeCorner({
   /** Show me again, when the agent can take one. */
   onAgain?: () => void;
 }) {
-  const marks: MarkState = { fresh: EMPTY, erasing: EMPTY, noted: part.mark ? new Set([part.mark]) : EMPTY };
+  const marks: MarkState = { fresh: EMPTY, erasing: EMPTY, noted: part?.mark ? new Set([part.mark]) : EMPTY };
   // The whole picture, small: drawn at about the board's width, then scaled to fit the card.
   const box = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
@@ -219,19 +220,21 @@ export function ShowMeCorner({
           </div>
         )}
       </div>
-      <div className="ib-sm-pip-f">
-        <b>{part.name}</b> <span>· {baseName(part.file)}{part.lines ? ` ${linesWord(part.lines)}` : ''}</span>
-        {!part.lines && (
-          <div className="ib-sm-pip-n" data-show-me-changed="">
-            This code changed after the picture was drawn.
-            {onAgain && (
-              <button type="button" className="ib-btn" onClick={onAgain} data-show-me-again="">
-                Show me again
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+      {part && (
+        <div className="ib-sm-pip-f">
+          <b>{part.name}</b> <span>· {baseName(part.file)}{part.lines ? ` ${linesWord(part.lines)}` : ''}</span>
+          {!part.lines && (
+            <div className="ib-sm-pip-n" data-show-me-changed="">
+              This code changed after the picture was drawn.
+              {onAgain && (
+                <button type="button" className="ib-btn" onClick={onAgain} data-show-me-again="">
+                  Show me again
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

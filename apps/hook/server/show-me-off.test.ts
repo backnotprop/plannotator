@@ -145,6 +145,7 @@ test("Code review off with a broken config.json: --version, --help, review --hel
   const stubbed = stubHookDistHtml();
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "",
+    HOME: process.env.HOME!,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER: "1",

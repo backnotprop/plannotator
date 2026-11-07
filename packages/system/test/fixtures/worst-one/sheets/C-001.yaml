@@ -1,0 +1,9 @@
+sheet: C-001
+scope: root
+kind: conceptual
+title: Jo
+question: What it is.
+bands:
+  - id: only
+    row: [ jo ]
+show: all

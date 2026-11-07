@@ -1,0 +1,8 @@
+sheet: Q-101
+scope: core
+kind: sequence
+title: Dispatch and billing core
+question: One booking, in order.
+bands:
+  - { id: s, row: [ web, gateway, dispatch, notify ] }
+show: [ g1, assign, tell ]

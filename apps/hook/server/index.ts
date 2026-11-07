@@ -109,7 +109,7 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, resolveAIEnabled, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
+import { loadConfig, resolveAIEnabled, resolvePlanReview, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
 import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
@@ -397,6 +397,24 @@ if (isReviewDrawCommand(rawArgs, () => loadConfig({ quiet: true }).inboxCodeRevi
         dataDir: getPlannotatorDataDir(),
         cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
         env: process.env,
+      }),
+    );
+  }
+}
+// `plannotator system …`: System's drawing of a project (system-command.ts;
+// unreleased, HIDDEN_SUBCOMMANDS), for the agents that draw it and the launchd
+// job that keeps it current. Before the strict-annotate parse: it takes its own
+// flags and its own --help. Loaded only when asked for, as t3 is.
+{
+  const args = rawArgs;
+  if (args[0] === "system") {
+    const { runSystemCommand } = await import("./system-command");
+    process.exit(
+      await runSystemCommand(args.slice(1), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        dataDir: getPlannotatorDataDir(),
+        env: process.env,
+        self: inboxSelfCommand(),
       }),
     );
   }
@@ -951,7 +969,7 @@ if (args[0] === "install-runtime") {
 // (inbox/inbox.json). Dispatched before the session registry and the
 // auto-update trigger below, which belong to review sessions.
 if (args[0] === "inbox") {
-  await runInboxCommand(args.slice(1), { htmlContent: inboxHtmlContent(), json: jsonFlag });
+  await runInboxCommand(args.slice(1), { htmlContent: inboxHtmlContent, json: jsonFlag });
 }
 
 if (isInteractiveNoArgInvocation(args, process.stdin.isTTY)) {
@@ -3336,6 +3354,15 @@ if (args[0] === "sessions") {
     console.log(
       JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: modApproval } })
     );
+    process.exit(0);
+  }
+
+  // Plan review turned off for Claude Code: no decision, so Claude Code shows its own dialog.
+  if (
+    event.hook_event_name === "PermissionRequest" &&
+    event.tool_name === "ExitPlanMode" &&
+    !resolvePlanReview(loadConfig(), process.env)
+  ) {
     process.exit(0);
   }
 

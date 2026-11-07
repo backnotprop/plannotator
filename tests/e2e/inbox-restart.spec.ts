@@ -348,7 +348,7 @@ test('a phone at 390 px: the line, its fold, and Settings → Agents; nothing ov
 test('the installed plugin behind this Inbox: the update command leads, then /reload-plugins', async () => {
   // "Behind this Inbox" needs a release build (CI compiles 0.0.0-dev, which never judges a plugin behind);
   // the DOM test restartWarning.test.tsx covers this variant on an Inbox at 0.28.25 either way.
-  const version = spawnSync(binary, ['--version'], { encoding: 'utf8' }).stdout.trim().split(' ').pop() ?? '';
+  const version = spawnSync(binary, ['--version'], { env: { ...process.env, HOME: world.root }, encoding: 'utf8' }).stdout.trim().split(' ').pop() ?? '';
   test.skip(!/^\d+\.\d+\.\d+$/.test(version), `the binary is ${version || 'unknown'}, not a release`);
   const { page } = world;
   writePluginRegistry(world.root, world.pluginFolder('0.28.24'), '0.28.24');
