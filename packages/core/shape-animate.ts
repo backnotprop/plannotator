@@ -37,7 +37,7 @@ ${TOTALS}
 
 ## The format
 
-A scene is two halves. **The drawing:** your own SVG, in the Picture or How it works, inside \`<div data-scene="id">…</div>\`. Put \`data-part="name"\` on each piece that moves or changes (a \`<g>\` is fine). **The motion:** \`scenes.<id>\` on the board, keyframes for those pieces. The player draws its caption and controls under your drawing, so leave the view's \`height\` off.
+A scene is two halves. **The drawing:** your own SVG, in the Picture or How it works, inside \`<div data-scene="id">…</div>\`. Put \`data-part="name"\` on each piece that moves or changes (a \`<g>\` is fine). **The motion:** \`scenes.<id>\` on the board, keyframes for those pieces. The player draws its caption and controls under your drawing, so leave the view's \`width\` and \`height\` off.
 
 \`\`\`json
 {

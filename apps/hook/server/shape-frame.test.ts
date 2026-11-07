@@ -85,7 +85,9 @@ describe("shape frame arguments", () => {
 
   test("an id, --scene, --phone and --out are read; an unknown flag or a second id is refused", () => {
     const r = parseShapeFrame(["shp_1", "--scene", "lamp", "--phone", "--out", "a.png", "--at", "beat", "2"]);
-    expect(r.ok && r.command).toEqual({ id: "shp_1", scene: "lamp", at: { kind: "beat", n: 2 }, phone: true, out: "a.png", project: null });
+    expect(r.ok && r.command).toEqual({ id: "shp_1", view: null, scene: "lamp", at: { kind: "beat", n: 2 }, phone: true, out: "a.png", project: null });
+    expect(parseShapeFrame(["--view", "how"])).toMatchObject({ ok: true, command: { view: "how" } });
+    expect(parseShapeFrame(["--view", "know"])).toEqual({ ok: false, error: "--view takes picture or how." });
     expect(parseShapeFrame(["--width", "9"])).toEqual({ ok: false, error: "shape frame does not take --width." });
     expect(parseShapeFrame(["a", "b"])).toEqual({ ok: false, error: "shape frame takes one shape id at most." });
     expect(parseShapeFrame(["--at"])).toEqual({ ok: false, error: "--at takes a value." });
@@ -190,5 +192,23 @@ describe("shape frame", () => {
     expect(await runShapeFrame([id, "--at", "end", "--out", join(scratch(), "s.png")], d)).toBe(0);
     expect(hash).toBe(`#shape=${id}`);
     expect(err[0]).toContain("This board does not move");
+  });
+
+  test("--view how pictures How it works; on a board that moves, the view's own scene, or the view as it stands", async () => {
+    const { dataDir, id } = stored();
+    const hashes: string[] = [];
+    const { d } = deps(dataDir, {
+      runChrome: async (_p, shot) => {
+        hashes.push(new URL(shot.url).hash);
+        writeFileSync(shot.out, "png");
+        return "saved";
+      },
+    });
+    expect(await runShapeFrame([id, "--view", "how", "--out", join(scratch(), "h.png")], d)).toBe(0);
+    expect(await runShapeFrame([id, "--view", "picture", "--out", join(scratch(), "p.png")], d)).toBe(0);
+    expect(hashes).toEqual([`#shape=${id}&view=how&frame=lamp&at=10`, `#shape=${id}`]);
+    const wrong = deps(dataDir);
+    expect(await runShapeFrame([id, "--view", "picture", "--scene", "lamp"], wrong.d)).toBe(2);
+    expect(wrong.err[0]).toBe("--scene lamp plays in How it works, not --view picture.");
   });
 });

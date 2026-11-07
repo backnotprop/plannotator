@@ -1,5 +1,5 @@
 /**
- * `plannotator shape frame [<shp_id>] [--scene <id>] [--at <time|end|beat N>] [--phone] [--out <file.png>]`
+ * `plannotator shape frame [<shp_id>] [--view picture|how] [--scene <id>] [--at <time|end|beat N>] [--phone] [--out <file.png>]`
  * (approval "shape-animated-scenes", addendum): a picture of a board as the person sees it, so an agent
  * that cannot watch its scene can still look at it. On a board that moves, `--at` picks the moment
  * (default: the scene's end); a still board is pictured as it stands.
@@ -34,6 +34,8 @@ export type FrameMoment = { kind: "end" } | { kind: "time"; t: number } | { kind
 
 export interface ParsedShapeFrame {
   id: string | null;
+  /** The view to picture (default: the scene's, else the Picture). */
+  view: "picture" | "how" | null;
   scene: string | null;
   at: FrameMoment | null;
   phone: boolean;
@@ -41,7 +43,7 @@ export interface ParsedShapeFrame {
   project: string | null;
 }
 
-const VALUE_FLAGS = new Set(["--scene", "--at", "--out", "--project"]);
+const VALUE_FLAGS = new Set(["--view", "--scene", "--at", "--out", "--project"]);
 
 /** `--at` words: `end`, a time in the scene's own clock (`12.5`), or `beat 3` / `beat3` (counting from 1). */
 export function parseFrameMoment(text: string): FrameMoment | null {
@@ -54,7 +56,7 @@ export function parseFrameMoment(text: string): FrameMoment | null {
 }
 
 export function parseShapeFrame(argv: readonly string[]): { ok: true; command: ParsedShapeFrame } | { ok: false; error: string } {
-  const out: ParsedShapeFrame = { id: null, scene: null, at: null, phone: false, out: null, project: null };
+  const out: ParsedShapeFrame = { id: null, view: null, scene: null, at: null, phone: false, out: null, project: null };
   const positional: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -76,6 +78,9 @@ export function parseShapeFrame(argv: readonly string[]): { ok: true; command: P
       const at = parseFrameMoment(value);
       if (!at) return { ok: false, error: "--at takes a time in the scene's clock (12.5), end, or beat N (counting from 1)." };
       out.at = at;
+    } else if (arg === "--view") {
+      if (value !== "picture" && value !== "how") return { ok: false, error: "--view takes picture or how." };
+      out.view = value;
     } else if (arg === "--scene") out.scene = value;
     else if (arg === "--out") out.out = value;
     else if (arg === "--project") out.project = value;
@@ -115,20 +120,24 @@ export interface FramePlan {
 }
 
 /** What to picture: the board's scene (or its Picture) at the moment asked for. */
-export function planFrame(version: ShapeVersion, id: string, c: Pick<ParsedShapeFrame, "scene" | "at">): { ok: true; plan: FramePlan; note?: string } | { ok: false; error: string } {
+export function planFrame(version: ShapeVersion, id: string, c: Pick<ParsedShapeFrame, "view" | "scene" | "at">): { ok: true; plan: FramePlan; note?: string } | { ok: false; error: string } {
   const scenes = version.scenes ?? {};
   const ids = Object.keys(scenes);
   const hash = new URLSearchParams({ shape: id });
-  if (!ids.length) {
-    if (c.scene) return { ok: false, error: `--scene ${c.scene}: this board has no scenes.` };
-    if (!version.views.picture && version.views.how) hash.set("view", "how");
-    return { ok: true, plan: { id, hash: `#${hash}`, label: version.views.picture || !version.views.how ? "picture" : "how" }, ...(c.at ? { note: "This board does not move, so --at changes nothing: the picture is the board as it stands." } : {}) };
+  if (c.view && !version.views[c.view]) return { ok: false, error: `--view ${c.view}: this board has no ${c.view === "how" ? "How it works" : "Picture"}.` };
+  // The scene asked for, else the first one the view asked for plays, else (no view asked) the first one a drawing plays.
+  const inView = c.view ? ids.find((s) => viewOf(version, s) === c.view) : ids.find((s) => viewOf(version, s) === "picture") ?? ids.find((s) => viewOf(version, s));
+  if (!c.scene && !inView) {
+    if (c.scene === null && ids.length && !c.view) return { ok: false, error: "no drawing on the board plays its scenes (no <div data-scene=\"…\">)." };
+    const view = c.view ?? (!version.views.picture && version.views.how ? "how" : "picture");
+    if (view === "how") hash.set("view", "how");
+    return { ok: true, plan: { id, hash: `#${hash}`, label: view }, ...(c.at ? { note: `This ${c.view ? "view" : "board"} does not move, so --at changes nothing: the picture is the ${c.view ? "view" : "board"} as it stands.` } : {}) };
   }
-  // The scene asked for, else the first one a drawing plays (the Picture before How it works).
-  const scene = c.scene ?? ids.find((s) => viewOf(version, s) === "picture") ?? ids.find((s) => viewOf(version, s)) ?? ids[0]!;
+  const scene = c.scene ?? inView!;
   if (!Object.hasOwn(scenes, scene)) return { ok: false, error: `--scene ${scene}: the board's scenes are ${ids.join(", ")}.` };
   const view = viewOf(version, scene);
   if (!view) return { ok: false, error: `--scene ${scene}: no drawing on the board plays it (no <div data-scene="${scene}">).` };
+  if (c.view && c.view !== view) return { ok: false, error: `--scene ${scene} plays in ${view === "how" ? "How it works" : "the Picture"}, not --view ${c.view}.` };
   const at = c.at ?? { kind: "end" as const };
   const time = frameTime(scenes[scene]!, at);
   if (!time.ok) return time;
@@ -307,7 +316,7 @@ export async function runShapeFrame(argv: readonly string[], deps: ShapeFrameDep
   const err = deps.stderr ?? ((text: string) => process.stderr.write(`${text}\n`));
   const parsed = parseShapeFrame(argv);
   if (!parsed.ok) {
-    err(`${parsed.error}\nUsage: plannotator shape frame [<shp_id>] [--scene <id>] [--at <time|end|beat N>] [--phone] [--out <file.png>]`);
+    err(`${parsed.error}\nUsage: plannotator shape frame [<shp_id>] [--view picture|how] [--scene <id>] [--at <time|end|beat N>] [--phone] [--out <file.png>]`);
     return 2;
   }
   const c = parsed.command;
