@@ -11,8 +11,8 @@ This package holds the format, its loader, the check of cited paths, the gate, t
 scheduled check that wakes an agent to redraw, and the drawing at rest as React components
 (`@plannotator/system/react`). It has no Inbox wiring yet; the `plannotator system` command is its one door from a
 shell.
-This repo also keeps a drawing of Plannotator itself at [`.plannotator/system/`](../../.plannotator/system/), for its
-own tests and CI; that copy is a developer file, not where System keeps a person's drawing.
+The package's tests keep a drawing of Plannotator itself at [`test/fixtures/plannotator/`](test/fixtures/plannotator/).
+It is test data: it does not track the repo, and its `sources.repos.self.at` is only fixture data.
 
 ## API
 
@@ -56,8 +56,6 @@ export const STEPS_CODE = '~steps'; // the sheet applyChange(..., 'steps') adds
 
 // @plannotator/system/node: Bun or Node; reads disk and git, never the network
 export function load(dir: string): Promise<LoadResult>;
-export function readCommitted(o: { root: string; ref: string }): Promise<SystemFiles>; // the drawing's files at a commit
-export function loadCommitted(o: { root: string; ref: string }): Promise<LoadResult>;  // the same, loaded
 export function check(o: { dir: string; root: string; roots?: Record<string, string>; at?: string }):
   Promise<{ errors: LoadIssue[]; warnings: LoadIssue[]; missing: string[] }>;
 export function gateRepo(o: { root: string; from: string; to: string; model: SystemModel }): Promise<GateResult>;
@@ -121,9 +119,7 @@ export function fontsReady(): Promise<void>; // forgets widths measured before t
 - At rest a sheet fits its pane or window, never past 1:1. Below 0.95 the quiet lines lose their words; below 0.3 every
   line does.
 - A part that opens a scope with sheets is drawn as a plate with a "N sheets inside" cue.
-- CI fetches the drawing's pinned commit (`sources.repos.self.at`) one commit deep before the tests, so the cited paths
-  are checked offline. That fetch costs more as the pinned commit ages; a redraw that refreshes `at` keeps it cheap.
-- `bun run --cwd packages/system demo` serves a page that draws this repo's drawing, for screenshots only:
+- `bun run --cwd packages/system demo` serves a page that draws the plannotator fixture, for screenshots only:
   `?shot=thumb`, or `?shot=view&sheet=C-001&reading=simple&layout=window|pane`, with `&mode=light`. The change view:
   `?shot=card|change&pr=2543|2563` (with `&open=1` for PR 2563 as an open PR, `&gate=1` for the gate's result alone,
   `&removes=1` for an invented removal, `&view=before|after|steps`), and `?shot=plan`. `node scripts/shots-change.mjs`
@@ -257,13 +253,12 @@ plannotator system schedule install --project <repo folder> --key <project key> 
 - The command is unreleased (`HIDDEN_SUBCOMMANDS`): it runs and has its help, but `plannotator --help` and the
   plannotator skill leave it out until the Inbox's System surfaces ship.
 
-From a checkout, for this repo's own drawing:
+From a checkout:
 
 ```sh
-bun run --cwd packages/system check              # the drawing of this repo: loader, then every cited path
-bun run --cwd packages/system check -- --json    # one JSON value: { ok, errors, warnings, missing }
-bun run --cwd packages/system check -- --at HEAD # cited paths at HEAD, not at sources.repos.self.at
-bun src/node/check-cli.ts --dir <drawing> --root <repo>
+bun run --cwd packages/system check -- --dir <drawing> --root <repo>   # loader, then every cited path
+bun run --cwd packages/system check -- --dir <drawing> --root <repo> --json    # one JSON value: { ok, errors, warnings, missing }
+bun run --cwd packages/system check -- --dir <drawing> --root <repo> --at HEAD # cited paths at HEAD, not at sources.repos.self.at
 bun run --cwd packages/system recipes            # write src/recipe/text.ts from recipe/*.md after an edit
 bun test packages/system                         # the package's tests (sandboxed: temp folders, no network, no gh)
 ```
