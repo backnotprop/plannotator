@@ -136,6 +136,7 @@ import { reloadOntoInbox, useStalePage } from './stalePage';
 import { StalePageNotice } from './components/StalePageNotice';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
 import { errorToast } from './toastError';
+import { pictureFromFile } from './projectPictures';
 import { canToggleRead, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, seenHeldInNew } from './markRead';
 import { threadLink, type RowMenuAction } from './rowMenu';
 import { movePin, unpinnedWhere } from './pins';
@@ -3733,6 +3734,26 @@ function Inbox() {
   };
 
   /**
+   * The project menu's Set picture… (approval "inbox-letter-marks"): the picture kept by the Inbox, then the list read
+   * again, so every project mark shows it. A refused picture (not an image, too big) says why in the toast.
+   */
+  const setProjectPicture = async (projectId: string, file: File | null): Promise<boolean> => {
+    try {
+      const read = file ? await pictureFromFile(file) : { picture: null };
+      if ('refused' in read) {
+        showToast({ icon: 'warn', lead: read.refused, wrap: true });
+        return false;
+      }
+      await inboxApi.setProjectPicture(projectId, read.picture);
+    } catch (cause) {
+      showToast(errorToast(cause, 'The picture did not change.'));
+      return false;
+    }
+    await refreshList(false);
+    return true;
+  };
+
+  /**
    * Combine projects (approval "project-combine"): each `from` goes into its
    * `into`. One toast with one Undo for the whole step (the button and `Z`),
    * whichever of the rename warning or Tidy took it. Pairs that went through
@@ -6272,6 +6293,7 @@ function Inbox() {
             projectsReadable={projectsReadable}
             onProjectAction={(projectId, action) => void projectAction(projectId, action)}
             onProjectRename={renameProject}
+            onProjectPicture={setProjectPicture}
             onProjectCombine={async (pair) => (await combineProjects([pair])) === null}
             announce={say}
             // Not on a tailnet guest's page: the update routes answer it 403 local_only.

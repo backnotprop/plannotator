@@ -14,6 +14,7 @@ import {
   type RefRunner,
 } from "@plannotator/shared/ref-cards";
 
+import { childEnv } from "@plannotator/shared/child-env";
 import { sessionTailnetAskAllowed } from "./session-tailnet";
 
 export * from "@plannotator/shared/ref-cards";
@@ -23,7 +24,7 @@ export const refCliRunner: RefRunner = async (cli, args, env) => {
   let proc: ReturnType<typeof Bun.spawn>;
   try {
     proc = Bun.spawn([cli, ...args], {
-      env: { ...process.env, GH_PROMPT_DISABLED: "1", NO_COLOR: "1", NO_PROMPT: "1", ...env },
+      env: childEnv({ GH_PROMPT_DISABLED: "1", NO_COLOR: "1", NO_PROMPT: "1", ...env }),
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",

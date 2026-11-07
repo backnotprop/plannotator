@@ -166,3 +166,18 @@ test("What's changed comes back from Pi as from Bun, as the agent wrote it, and 
 	expect(answers[0]![1]).toStartWith('200 {"note":{');
 	expect(answers[0]![1]).toContain('"view":"changed","part":"whistle"');
 });
+
+test("a board's scene comes back from Pi as from Bun, as the agent wrote it", async () => {
+	const { sceneBoard } = await import("../../../tests/fixtures/shape-scene-board.ts");
+	const answers: string[] = [];
+	for (const start of [startPi, async (d: string) => startBun(d)]) {
+		const dataDir = scratch();
+		const made = createShapeStore({ dataDir }).update({ board: sceneBoard(), project: { name: "lamp", root: scratch() } });
+		if (!made.ok) throw new Error(JSON.stringify(made));
+		const base = await start(dataDir);
+		const read = await fetch(`${base}/api/shapes/${made.id}`).then((r) => r.json() as Promise<{ version: { scenes?: Record<string, unknown> } }>);
+		expect(read.version.scenes).toEqual(sceneBoard().scenes);
+		answers.push(await call(base, "GET", `/api/shapes/${made.id}`));
+	}
+	expect(answers[0]).toEqual(answers[1]!);
+});
