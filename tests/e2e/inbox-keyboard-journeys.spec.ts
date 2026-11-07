@@ -876,7 +876,9 @@ test('J3: answer a question and send a reply; letters typed are words', async ()
   await load(`#thread=${stopped}`);
   await expect(page.locator('section.ib-pane')).toBeVisible();
   await press('n');
-  await tabTo(questionChoice(0));
+  // N does nothing in a one-message thread, so the Tab walk starts at the top of the page: Skip to the
+  // list (approval "inbox-keyboard-keys-2026-11-07", item 6), the sidebar, the list, then the thread.
+  await tabTo(questionChoice(0), { max: 60 });
   await press('ArrowDown');
   await press('Space');
   await expect(questionChoice(1)).toBeChecked();
