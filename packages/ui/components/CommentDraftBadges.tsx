@@ -38,6 +38,8 @@ export function CommentDraftBadges({
   const [placed, setPlaced] = useState<Placed[]>([]);
   const widthRef = useRef<number>(FALLBACK_WIDTH);
   const layerRef = useRef<HTMLSpanElement | null>(null);
+  /** The badge that opened the comment now open: when it closes again with its words, focus comes back to it. */
+  const openedFrom = useRef<string | null>(null);
 
   const place = useCallback(() => {
     const container = containerRef.current;
@@ -88,10 +90,20 @@ export function CommentDraftBadges({
     const measured = layerRef.current?.querySelector<HTMLElement>('[data-comment-draft-badge]')?.offsetWidth;
     if (measured && measured !== widthRef.current) place();
   }, [placed, place]);
+  // Back from the comment a badge opened (Escape, the chevron): its badge is drawn anew, and focus, left on the page
+  // as the box went, goes to it. Focus the person put somewhere else stays there.
+  useLayoutEffect(() => {
+    const id = openedFrom.current;
+    if (!id || !placed.some((p) => p.id === id)) return;
+    openedFrom.current = null;
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    layerRef.current?.querySelector<HTMLElement>(`[data-comment-draft-badge="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
+  }, [placed]);
 
   if (placed.length === 0) return null;
   return (
-    <span ref={layerRef} className="pn-cdraft-layer" data-comment-draft-layer="">
+    <span ref={layerRef} className="pn-cdraft-layer" data-comment-draft-layer="" data-print-hide="">
       {placed.map((p) => (
         <button
           key={p.id}
@@ -107,6 +119,7 @@ export function CommentDraftBadges({
           onMouseUp={(event) => event.stopPropagation()}
           onClick={(event) => {
             event.stopPropagation();
+            openedFrom.current = p.id;
             onOpen(p.id);
           }}
         >

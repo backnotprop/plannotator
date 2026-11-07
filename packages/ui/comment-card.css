@@ -5,7 +5,9 @@
  * The card (CommentPopover, `.pn-cbox`): one opaque card with a light shadow, words first, a chevron at the top right
  * that closes it and keeps the words, one row with the tools at the left, the bin, and a solid "Comment" at the right
  * end. No header line, no blurred page behind, no transitions, and no fill that changes on hover (hover only darkens a
- * tool's icon, and the Comment button's fill). Font sizes follow a host's `--ib-fs-*` scale where it has one.
+ * tool's icon, and the Comment button's fill). Font sizes are written as `var(--ib-fs-N, Npx)`: the card is portaled to
+ * the body, outside a host's root, so it takes the px values unless the host defines that scale on `:root`; the badge
+ * sits in the document and follows the host's scale where it has one.
  */
 .pn-cbox {
   --pn-cbox-line: color-mix(in oklch, var(--foreground) 12%, transparent);
@@ -16,7 +18,7 @@
   font-size: var(--ib-fs-14, 14px); line-height: 1.45; text-align: start;
   animation: pn-cbox-in 120ms ease-out;
 }
-:root.light .pn-cbox {
+.light .pn-cbox {
   --pn-cbox-line: color-mix(in oklch, var(--foreground) 11%, transparent);
   box-shadow: 0 1px 2px rgb(20 20 30 / 0.06), 0 10px 28px -12px rgb(20 20 30 / 0.22);
 }
@@ -101,7 +103,7 @@
  * here, so the document gains no text.
  */
 mark.annotation-highlight.comment-draft { background: color-mix(in oklab, var(--primary) 16%, transparent); color: inherit; cursor: pointer; }
-:root.light mark.annotation-highlight.comment-draft { background: color-mix(in oklab, var(--primary) 12%, transparent); }
+.light mark.annotation-highlight.comment-draft { background: color-mix(in oklab, var(--primary) 12%, transparent); }
 .pn-cdraft-layer { display: contents; }
 .pn-cdraft {
   position: absolute; z-index: 3; box-sizing: border-box; display: inline-flex; align-items: center; gap: 2px;
@@ -117,3 +119,9 @@ mark.annotation-highlight.comment-draft { background: color-mix(in oklab, var(--
 @media (pointer: coarse) { .pn-cdraft::before { inset: -15px -8px; } }
 .pn-cdraft:hover { background: color-mix(in oklch, var(--primary) 88%, black); }
 .pn-cdraft:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+/* On paper a draft is nothing yet: no badge, no tint. */
+@media print {
+  mark.annotation-highlight.comment-draft { background: none; }
+  .pn-cdraft-layer { display: none; }
+}

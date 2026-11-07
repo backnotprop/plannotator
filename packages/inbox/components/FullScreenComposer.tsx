@@ -332,7 +332,7 @@ export function FullScreenComposer({
     focusNext.current = null;
     if (target === 'pill') pillRef.current?.focus({ preventScroll: true });
     else {
-      const field = cardRef.current?.querySelector<HTMLTextAreaElement>('.ib-fcomp-body > :not([hidden]) textarea');
+      const field = cardRef.current?.querySelector<HTMLTextAreaElement>('[data-fcomp-body] > :not([hidden]) textarea');
       if (!field) return;
       field.focus({ preventScroll: true });
       field.setSelectionRange(field.value.length, field.value.length);
@@ -601,7 +601,7 @@ export function FullScreenComposer({
           />
         </div>
       )}
-      <div className="ib-fcomp-body">
+      <div className="ib-fcomp-body" data-fcomp-body="">
         {keptComment(mode === 'comment')}
         {mode === 'comment' && takesComments && (
           // The comment's bin, just left of the file's own Comment button (inbox.css places both in the row).

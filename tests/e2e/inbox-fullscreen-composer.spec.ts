@@ -324,8 +324,9 @@ test('Hide (») gathers the card and the size bar with the toolbar; one press br
 
 test('the paperclip attaches to the reply; Send goes from full screen with the file: it stays, the card says it went, the reply is in the thread and the draft is gone', async () => {
   const page = world.page;
-  // The reply box's paperclip, first in the card's toolbar (the card's 30 px button).
-  const clip = card().locator('[data-fcomp-foot] > :first-child');
+  // Round 3: Send first in the reply's row, then the reply box's paperclip (the card's 30 px button).
+  await expect(card().locator('[data-fcomp-foot] > :first-child')).toHaveAttribute('data-fcomp-send', '');
+  const clip = card().locator('[data-fcomp-foot] .ib-fcomp-clip');
   await expect(clip).toHaveAccessibleName('Attach files');
   const clipBox = (await clip.boundingBox())!;
   expect(Math.round(clipBox.width)).toBe(30);
@@ -416,10 +417,11 @@ test('a phone (390 px): the card spans the width under the toolbar, Comment and 
     expect(barBox.y + barBox.height).toBeLessThanOrEqual(cardBox.y + 1);
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await shot(page, '2A-phone-open');
-    // The phone's paperclip: the card's 36 px button, first in its toolbar; a chosen picture is a tile in the card.
-    const clip = card(page).locator('[data-fcomp-foot] > :first-child');
+    // The phone's paperclip: a 44 px button in the reply's row (Send is at the row's right end); a chosen picture is
+    // a tile in the card.
+    const clip = card(page).locator('[data-fcomp-foot] .ib-fcomp-clip');
     await expect(clip).toHaveAccessibleName('Attach files');
-    expect(Math.round((await clip.boundingBox())!.width)).toBe(36);
+    expect(Math.round((await clip.boundingBox())!.width)).toBe(44);
     const crop = await page.screenshot({ clip: { x: 0, y: 120, width: 390, height: 260 } });
     await card(page).locator('input[type="file"][data-fcomp-attach]').setInputFiles({ name: 'IMG_0412.png', mimeType: 'image/png', buffer: crop });
     await expect(card(page).locator('[data-fcomp-files] [data-compose-file="done"]')).toHaveCount(1);

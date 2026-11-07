@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { diagramTargetName, diagramTargetText } from '@plannotator/core/diagram-anchor';
 import { cn } from '../../lib/utils';
 import type { ScreenRect } from '../../utils/diagram-projection';
@@ -8,9 +8,11 @@ import { isCommentSubmitKey } from '../../utils/commentSubmitKey';
 import type { DiagramComposerDraft } from './useDiagramComments';
 import { getCommentCardEnabled } from '../../utils/commentCardPolicy';
 import { Icon } from '../inbox-thread/icons';
+import { CommentDraftScopeContext } from '../commentDraftScope';
 
-// The comment card (opt-in): the words typed on a part outlive a close, one draft per part, as the text box's draft
-// store keeps them; the bin is the one way to drop them.
+// The comment card (opt-in): the words typed on a part outlive a close, one draft per part of one document (the
+// Viewer's draft scope, the part's id and ends, and the diagram's line), as the text box's draft store keeps them.
+// The bin, a Comment that went, and a question Ask AI took drop them.
 const cardDrafts = new Map<string, string>();
 
 /**
@@ -66,7 +68,9 @@ export function DiagramComposer({
 }) {
   // The comment card (opt-in, `configurePlannotatorUI({ commentCard })`): read once, so a box never changes look open.
   const [card] = useState(getCommentCardEnabled);
-  const cardKey = `${draft.primary.target.kind ?? ''}:${diagramTargetText(draft.primary.target)}`;
+  const scope = useContext(CommentDraftScopeContext);
+  const part = draft.primary.target;
+  const cardKey = [scope, draft.sourceLine?.[0] ?? '', part.id ?? '', part.from ?? '', part.to ?? '', part.kind ?? '', diagramTargetText(part)].join('\u0000');
   const [text, setTextState] = useState(() => (card ? cardDrafts.get(cardKey) ?? '' : ''));
   const setText = (value: string) => {
     setTextState(value);
@@ -117,6 +121,7 @@ export function DiagramComposer({
       setAsking(false);
     }
     if (!accepted) setRefocus((n) => n + 1);
+    else if (card) cardDrafts.delete(cardKey);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -136,10 +141,21 @@ export function DiagramComposer({
       if (canWrite && !asking && text.trim() !== '') submit();
     }
   };
+  // A Comment drops the draft only once it went (the host unmounts the box with no error); a refused save keeps the
+  // words, so the chevron still keeps them.
+  const sent = useRef(false);
   const submit = () => {
-    if (card) cardDrafts.delete(cardKey);
+    if (card) sent.current = true;
     onSubmit(text);
   };
+  useEffect(() => {
+    if (error !== null) sent.current = false;
+  }, [error]);
+  const keyRef = useRef(cardKey);
+  keyRef.current = cardKey;
+  useEffect(() => () => {
+    if (sent.current) cardDrafts.delete(keyRef.current);
+  }, []);
 
   if (card && disabledReason === undefined) {
     // The comment card by the ring: the part it is on, the words, then the row (Ask AI at the left, the bin, and a
@@ -163,7 +179,7 @@ export function DiagramComposer({
           <Icon name="chevD" size={16} />
         </button>
         <div className="pn-cbox-quote">
-          On {on}{draft.sourceLine !== null && ` · line ${draft.sourceLine[0]}`}{draft.additional.length > 0 && ` · +${draft.additional.length} more`}
+          On {on} ({diagramTargetName(target)}){draft.sourceLine !== null && ` · line ${draft.sourceLine[0]}`}{draft.additional.length > 0 && ` · +${draft.additional.length} more`}
         </div>
         {unsavedPart && <p className="pn-cbox-note">This part is only in your unsaved draft. Save the diagram to comment on it.</p>}
         <div className="pn-cbox-field">

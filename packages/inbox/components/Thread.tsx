@@ -4434,7 +4434,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
           sendingFromComposer.current = false;
           const active = document.activeElement;
           if (active && active !== document.body && active.isConnected && !active.closest('[data-fcomp]')) return;
-          document.querySelector<HTMLElement>('[data-fcomp] .ib-fcomp-row > :not([hidden]) textarea, [data-fcomp-pill]')?.focus({ preventScroll: true });
+          document.querySelector<HTMLElement>('[data-fcomp] [data-fcomp-body] > :not([hidden]) textarea, [data-fcomp-pill]')?.focus({ preventScroll: true });
         });
       }
     }

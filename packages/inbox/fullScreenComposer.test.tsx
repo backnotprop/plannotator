@@ -500,7 +500,10 @@ test.skipIf(!hasDom)('the paperclip: none on the Comment tab, first in the Reply
   const label = input.closest('label')!;
   expect(label.getAttribute('aria-label')).toBe('Attach files');
   expect(label.classList.contains('ib-fvb')).toBe(true);
-  expect(card()!.querySelector('[data-fcomp-foot]')!.firstElementChild!.contains(label)).toBe(true);
+  // Round 3: Send first in the reply's row, the paperclip after it.
+  const foot = card()!.querySelector('[data-fcomp-foot]')!;
+  expect(foot.firstElementChild!.hasAttribute('data-fcomp-send')).toBe(true);
+  expect(foot.contains(label)).toBe(true);
   // Nothing written yet: Send is dimmed.
   expect(card()!.querySelector<HTMLButtonElement>('[data-fcomp-send]')!.disabled).toBe(true);
 

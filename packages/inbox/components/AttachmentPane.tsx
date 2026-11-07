@@ -1680,7 +1680,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     gatheredFrom.current = 'bar';
     if (from !== 'composer') return null;
     const card = sectionRef.current?.querySelector<HTMLElement>('[data-fcomp]');
-    return card?.querySelector<HTMLElement>('.ib-fcomp-row > :not([hidden]) textarea') ?? sectionRef.current?.querySelector<HTMLElement>('[data-fcomp-pill]') ?? card ?? null;
+    return card?.querySelector<HTMLElement>('[data-fcomp-body] > :not([hidden]) textarea') ?? sectionRef.current?.querySelector<HTMLElement>('[data-fcomp-pill]') ?? card ?? null;
   };
 
   const remove = async (id: string) => {

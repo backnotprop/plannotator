@@ -21,6 +21,7 @@ import { annotationOwnsHighlight } from '../utils/annotationOwnsHighlight';
 import { transformPlainText } from '../utils/inlineTransforms';
 import { richCopySourceFromRange, type RichCopySource } from '../utils/richClipboard';
 import { TOUCH_PRIMARY_QUERY, TOUCH_SELECTION_SETTLE_MS } from '../utils/touchSelection';
+import type { ShelvedCommentDraft } from '../utils/commentDraftShelf';
 
 // --- Exported state types ---
 
@@ -782,12 +783,26 @@ export interface UseAnnotationHighlighterOptions {
    */
   onHostDraft?: (draft: HostDraft | null) => void;
   /**
-   * Opt-in (visible comment drafts): asked when the composer closes; true keeps
-   * the selection's highlight as a draft mark (class `comment-draft`, listed in
-   * `commentDrafts`) instead of removing it, so the words can be found again.
-   * Absent: a close removes the highlight, as always.
+   * Opt-in (visible comment drafts): where a composer's words are kept. With a
+   * shelf, a composer closed with words keeps the selection's highlight as a
+   * draft mark (class `comment-draft`, listed in `commentDrafts`) instead of
+   * removing it, and so does one left open as other words are selected. Each
+   * composer opened on a selection is put on the shelf, and the drafts on it
+   * whose words still wait are painted again as the highlighter starts (the
+   * same document mounted again). Absent: a close removes the highlight, as
+   * always.
    */
-  keepsCommentDraft?: (popover: CommentPopoverState) => boolean;
+  commentDraftShelf?: CommentDraftShelf;
+}
+
+/** Visible comment drafts' store, as the hook uses it (the Viewer builds one over `utils/commentDraftShelf`). */
+export interface CommentDraftShelf {
+  /** Whether this composer's words wait (its draft store holds them). */
+  keeps: (popover: CommentPopoverState) => boolean;
+  /** Remember what a composer is on, so another mount can paint it again. */
+  put: (draft: ShelvedCommentDraft) => void;
+  /** The drafts whose words still wait, oldest first. */
+  list: () => ShelvedCommentDraft[];
 }
 
 /** The outcome of one `applyAnnotations` pass. */
@@ -857,13 +872,13 @@ export interface UseAnnotationHighlighterReturn {
   applyAnnotations: (annotations: Annotation[]) => void;
   /** For a host that composes on a touch screen: the page selection as a draft now (see `ViewerHandle.takeSelection`). */
   takeSelection?: () => boolean;
-  /** Closed composers kept as draft marks (`keepsCommentDraft`), oldest first. Empty without that option. */
+  /** Composers kept as draft marks (`commentDraftShelf`), oldest first. Empty without that option. */
   commentDrafts: CommentPopoverState[];
   /** Open the composer of a draft mark again (by its highlight id); an open composer closes first, as a close. */
   reopenCommentDraft: (id: string) => void;
 }
 
-/** The class a draft mark's highlight carries (`keepsCommentDraft`). */
+/** The class a draft mark's highlight carries (`commentDraftShelf`). */
 export const COMMENT_DRAFT_CLASS = 'comment-draft';
 
 /**
@@ -884,7 +899,7 @@ export function useAnnotationHighlighter({
   onRestoreMismatch,
   onRestoreReport,
   onHostDraft,
-  keepsCommentDraft,
+  commentDraftShelf,
 }: UseAnnotationHighlighterOptions): UseAnnotationHighlighterReturn {
   const highlighterRef = useRef<Highlighter | null>(null);
   const modeRef = useRef<EditorMode>(mode);
@@ -904,13 +919,18 @@ export function useAnnotationHighlighter({
 
   const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
   const [commentPopover, setCommentPopover] = useState<CommentPopoverState | null>(null);
-  const commentPopoverRef = useRef(commentPopover);
-  commentPopoverRef.current = commentPopover;
-  const keepsCommentDraftRef = useRef(keepsCommentDraft);
-  keepsCommentDraftRef.current = keepsCommentDraft;
+  // Visible drafts (`commentDraftShelf`). The open composer is read through its own ref name, apart from any other.
+  const openDraftComposerRef = useRef(commentPopover);
+  openDraftComposerRef.current = commentPopover;
+  const commentDraftShelfRef = useRef(commentDraftShelf);
+  commentDraftShelfRef.current = commentDraftShelf;
   const [commentDrafts, setCommentDrafts] = useState<CommentPopoverState[]>([]);
   const commentDraftsRef = useRef(commentDrafts);
   commentDraftsRef.current = commentDrafts;
+  /** Keep the open composer on highlight `id` as a draft mark when its words wait; false: nothing was kept. */
+  const keepAsDraftMarkRef = useRef<(id: string) => boolean>(() => false);
+  /** Paint the shelf's waiting drafts as draft marks (the highlighter has just started). */
+  const paintShelvedDraftsRef = useRef<() => void>(() => {});
   const [quickLabelPicker, setQuickLabelPicker] = useState<QuickLabelPickerState | null>(null);
 
   // Keep refs in sync
@@ -1649,8 +1669,9 @@ export function useAnnotationHighlighter({
             window.getSelection()?.removeAllRanges();
             return;
           }
-          // Clean up previous pending
-          if (pendingSourceRef.current) {
+          // Clean up previous pending. Visible drafts: a composer with words left open as other words are
+          // selected stays, as a draft mark with its badge.
+          if (pendingSourceRef.current && !keepAsDraftMarkRef.current(pendingSourceRef.current.id)) {
             highlighter.remove(pendingSourceRef.current.id);
           }
           clearPendingSelection();
@@ -1917,6 +1938,9 @@ export function useAnnotationHighlighter({
     if (handleSelectionChange) {
       document.addEventListener('selectionchange', handleSelectionChange);
     }
+
+    // Visible drafts waiting from another mount of this document come back as draft marks.
+    paintShelvedDraftsRef.current();
 
     return () => {
       if (handleSelectionChange) {
@@ -2193,8 +2217,7 @@ export function useAnnotationHighlighter({
   };
 
   const handleCommentClose = useCallback(() => {
-    const keeps = keepsCommentDraftRef.current;
-    if (!keeps) {
+    if (!commentDraftShelfRef.current) {
       setCommentPopover(prev => {
         if (prev?.source && highlighterRef.current && !isMathAnnotationSource(prev.source)) {
           highlighterRef.current.remove(prev.source.id);
@@ -2206,14 +2229,11 @@ export function useAnnotationHighlighter({
       return;
     }
     // Visible drafts: words left in the composer keep their highlight, as a draft mark, so they can be found again.
-    const prev = commentPopoverRef.current;
+    const prev = openDraftComposerRef.current;
     const highlighter = highlighterRef.current;
     if (prev?.source && highlighter && !isMathAnnotationSource(prev.source)) {
       const id: string = prev.source.id;
-      if (keeps(prev)) {
-        highlighter.addClass(COMMENT_DRAFT_CLASS, id);
-        setCommentDrafts((list) => [...list.filter((d) => d.source?.id !== id), prev]);
-      } else {
+      if (!keepAsDraftMarkRef.current(id)) {
         highlighter.remove(id);
         setCommentDrafts((list) => list.filter((d) => d.source?.id !== id));
       }
@@ -2223,11 +2243,77 @@ export function useAnnotationHighlighter({
     window.getSelection()?.removeAllRanges();
   }, [clearPendingSelection]);
 
+  keepAsDraftMarkRef.current = (id: string) => {
+    const shelf = commentDraftShelfRef.current;
+    const open = openDraftComposerRef.current;
+    const highlighter = highlighterRef.current;
+    if (!shelf || !highlighter || !open?.source || open.source.id !== id || isMathAnnotationSource(open.source)) return false;
+    if (!shelf.keeps(open)) return false;
+    highlighter.addClass(COMMENT_DRAFT_CLASS, id);
+    setCommentDrafts((list) => [...list.filter((d) => d.source?.id !== id), open]);
+    return true;
+  };
+
+  // Visible drafts: each composer opened on a selection goes on the shelf (what it is on), so its words come back
+  // as a draft mark on another mount; a draft mark on the same words (picked again by hand) gives way to it.
+  useEffect(() => {
+    const shelf = commentDraftShelfRef.current;
+    const open = commentPopover;
+    if (!shelf || !open?.source || isMathAnnotationSource(open.source)) return;
+    const { startMeta, endMeta } = open.source;
+    if (startMeta && endMeta) shelf.put({ draftKey: open.draftKey, startMeta, endMeta, text: open.source.text ?? open.selectedText });
+    const twins = commentDraftsRef.current.filter((d) => d.draftKey === open.draftKey && d.source?.id !== open.source.id);
+    if (twins.length === 0) return;
+    for (const twin of twins) {
+      try { highlighterRef.current?.remove(twin.source.id); } catch (error) {
+        warnHighlighterFailure('removal of a draft mark picked again', error);
+      }
+    }
+    setCommentDrafts((list) => list.filter((d) => !twins.includes(d)));
+  }, [commentPopover]);
+
+  paintShelvedDraftsRef.current = () => {
+    const shelf = commentDraftShelfRef.current;
+    const highlighter = highlighterRef.current;
+    const root = containerRef.current;
+    if (!shelf || !highlighter || !root) return;
+    const openKey = openDraftComposerRef.current?.draftKey;
+    const painted: CommentPopoverState[] = [];
+    for (const draft of shelf.list()) {
+      if (draft.draftKey === openKey) continue;
+      const id = annotationId();
+      let doms: HTMLElement[] = [];
+      try {
+        highlighter.fromStore(metaWithBelowTitle(root, draft.startMeta), metaWithBelowTitle(root, draft.endMeta), draft.text, id);
+        doms = (highlighter.getDoms(id) ?? []) as HTMLElement[];
+      } catch {}
+      // The words moved or are gone (the document changed): no mark; the words still wait for the same selection.
+      if (doms.length === 0 || compactText(paintedTextOf(doms)) !== compactText(draft.text)) {
+        if (doms.length > 0) {
+          try { highlighter.remove(id); } catch {}
+        }
+        continue;
+      }
+      highlighter.addClass(COMMENT_DRAFT_CLASS, id);
+      const source = { id, startMeta: draft.startMeta, endMeta: draft.endMeta, text: draft.text };
+      painted.push({
+        anchorEl: doms[0],
+        contextText: draft.text.slice(0, 80),
+        selectedText: draft.text,
+        source,
+        draftKey: draft.draftKey,
+        blockIds: selectionBlockIds(highlighter, source),
+        ...withStartOffset(selectionSourceOffset(highlighter, source)),
+      });
+    }
+    if (painted.length > 0 || commentDraftsRef.current.length > 0) setCommentDrafts(painted);
+  };
+
   const reopenCommentDraft = useCallback((id: string) => {
     const draft = commentDraftsRef.current.find((d) => d.source?.id === id);
     const highlighter = highlighterRef.current;
     if (!draft || !highlighter) return;
-    if (commentPopoverRef.current) handleCommentClose();
+    if (openDraftComposerRef.current) handleCommentClose();
     setToolbarState((open) => {
       if (open?.source && !isMathAnnotationSource(open.source) && open.source.id !== id) highlighter.remove(open.source.id);
       return null;
