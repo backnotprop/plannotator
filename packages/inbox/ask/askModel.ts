@@ -63,7 +63,7 @@ export interface AskLiveText {
 
 /**
  * A turn's question as the person reads it. A Show me (code review) sent the
- * agent its request to draw; the person sees what they asked: "Show me on
+ * agent its request for a Shape; the person sees what they asked: "Show me on
  * retry-worker.ts lines 16–18", and their words.
  */
 export function askShownQuestion(turn: Pick<InboxAskTurnWire, 'question' | 'kind' | 'show_me'>): string {
