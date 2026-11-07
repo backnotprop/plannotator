@@ -2140,6 +2140,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * waits for a list of five threads or more.
    */
   const listIntroState = () => ({ due: listIntroDue(loadConfig().inboxListIntro) });
+  const listIntroMinThreads = INBOX_REVEALS.find((entry) => entry.id === "list_intro")?.minThreads ?? 0;
+  /** Due, with the threads the dialog waits for: what holds the dialogs after it back. */
+  const listIntroWaits = () => listIntroState().due && store.threadIds().length >= listIntroMinThreads;
   if (normalizeStableVersion(version) !== null) {
     const next = listIntroAtStart(loadConfig().inboxListIntro, new Date().toISOString());
     if (next) saveConfig({ inboxListIntro: next });
@@ -3644,9 +3647,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     usedBefore,
     decidesIntro: normalizeStableVersion(version) !== null,
     computerName: () => phones?.machineDoor.computerName() ?? "this computer",
-    // It goes last: the sound and list options dialogs first, whatever keeps them waiting; and the line's day, load and
+    // It goes last: the sound dialog first, and the list dialog while it can show (due, and the five threads it waits
+    // for: below that it is due but no page shows it, so it never holds voice back); and the line's day, load and
     // spacing (shared/inbox/reveals.ts).
-    otherDialogDue: (load) => soundState().dialog_due || listIntroState().due || !lineFree("spaced", load),
+    otherDialogDue: (load) => soundState().dialog_due || listIntroWaits() || !lineFree("spaced", load),
     lineStamp: (at, load) => lineStamp(at, true, load),
     json,
     readBody,

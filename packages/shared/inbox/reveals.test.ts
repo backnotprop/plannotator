@@ -53,6 +53,15 @@ describe("the order", () => {
     expect(after(24 * HOUR)).toBe("steps");
   });
 
+  test("the list dialog waits for five threads, fresh installs included (no day count); below that the line passes it", () => {
+    // Approval "inbox-rows-dialog", round 7b (q-2c590791): 5+ threads, no day-four rule.
+    const list = (threads: number, firstUseAt: string | null = ago(4 * DAY)) => revealNext(state({ threads, firstUseAt, open: { list_intro: true, voice: true } }), NOW);
+    expect(list(4)).toBe("voice");
+    expect(list(5)).toBe("list_intro");
+    expect(list(5, null)).toBe("list_intro");
+    expect(list(5, ago(HOUR))).toBe("list_intro");
+  });
+
   test("a dev build, or no first use known, decides nothing", () => {
     expect(revealNext(state({ release: false }), NOW)).toBeNull();
     expect(revealNext(state({ firstUseAt: null }), NOW)).toBeNull();

@@ -175,7 +175,7 @@ export function RowsIntroWindow({ scene, moving }: { scene: RowsIntroScene; movi
             <Row key={row.title} row={row} i={i} />
           ))}
           <div className="ib-rl-band">
-            New since you looked <span className="ib-rl-n">9</span>
+            New since you looked <span className="ib-rl-n">{NEW.length}</span>
           </div>
           {NEW.map((row, i) => (
             <Row key={row.title} row={row} i={i + WAITING.length} />
