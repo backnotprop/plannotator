@@ -2070,9 +2070,9 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 /* the file's own layers (the viewer draws at z-50) stay under the sheet */
 .ib-view.ib-fold .ib-docarea { isolation: isolate; z-index: 0; }
 .ib-view.ib-fold.ib-panel-open .ib-apanel { display: flex; position: absolute; top: 0; right: 0; bottom: 0; width: min(300px, 100%); z-index: 6; box-shadow: -16px 0 48px rgba(0, 0, 0, 0.18); }
-.ib-fold .ib-sheet-h { flex: none; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 4px 0 14px; border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); font-size: var(--ib-fs-13-5, 13.5px); }
-.ib-fold .ib-sheet-h b { font-weight: 600; }
-.ib-fold .ib-sheet-h .ib-sp { flex: 1; }
+:is(.ib-fold, .ib-review) .ib-sheet-h { flex: none; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 4px 0 14px; border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); font-size: var(--ib-fs-13-5, 13.5px); }
+:is(.ib-fold, .ib-review) .ib-sheet-h b { font-weight: 600; }
+:is(.ib-fold, .ib-review) .ib-sheet-h .ib-sp { flex: 1; }
 /* the viewer's Global comment and Copy float right by the window's width; in a narrow pane they sit on their own line, as on a phone */
 .ib-fold [data-sticky-actions] { float: none; justify-content: flex-end; margin: 0 -4px 6px 0; }
 
@@ -2406,15 +2406,10 @@ pre code.pn-code[data-keep-layout] {
 .ib-gbody diffs-container { --diffs-dark-bg: var(--background); --diffs-light-bg: var(--background); --diffs-dark: var(--foreground); --diffs-light: var(--foreground); }
 /* FileHeader's height is this variable, which only the review stylesheet defined: here the row shrank onto its file name. */
 .ib-gbody { --panel-header-h: 33px; }
-/* The guide beside its comments: the attachment pane's panel column, with what rides the next Send at its foot. */
-.ib-gsplit { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; }
-.ib-gstrip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
-.ib-gstrip .ib-l { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
-.ib-gstrip .ib-rchip { border: 1px solid var(--border); background: var(--card); }
-.ib-gstrip .ib-sp { flex: 1; }
-/* A guide narrower than GUIDE_FOLD_PANEL_BELOW (GuidePane.tsx): the panel folds into the header's Comments button and
-   opens over the guide's right edge, as the file pane's does (it was hidden at 900 px and below, with no way to it). */
-.ib-viewer.ib-fold .ib-gsplit { grid-template-columns: minmax(0, 1fr); position: relative; }
+/* The foot of a review's comments panel when no verdict is given there: what rides the next Send. */
+.ib-gstrip { margin: 0; padding: 10px 12px; border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); }
+/* A review narrower than its fold width (REVIEW_FOLD_PANEL_BELOW, PullReview's): the panel folds into the header's
+   Comments button and opens over the review's right edge, as the file pane's does. */
 .ib-viewer.ib-fold .ib-gpanel { display: none; }
 .ib-viewer.ib-fold .ib-gbody { isolation: isolate; z-index: 0; }
 .ib-viewer.ib-fold.ib-panel-open .ib-gpanel { display: flex; position: absolute; top: 0; right: 0; bottom: 0; width: min(300px, 100%); z-index: 6; box-shadow: -16px 0 48px rgba(0, 0, 0, 0.18); }
@@ -8001,7 +7996,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 
 /* The full-window review (ReviewPane.tsx): the guide viewer's frame with a rail on the left (Walkthrough | All files,
    then the chapters or the files) and the verdict in the header (ui's DecisionControl). The comments panel folds into
-   the header's Comments button below REVIEW_FOLD_PANEL_BELOW, as the guide pane's does below its own width. */
+   the header's Comments button below REVIEW_FOLD_PANEL_BELOW. */
 .ib-review .ib-rsplit { display: grid; grid-template-columns: 264px minmax(0, 1fr) 300px; min-height: 0; }
 .ib-review.ib-fold .ib-rsplit { grid-template-columns: 264px minmax(0, 1fr); position: relative; }
 .ib-review.ib-fold .ib-gpanel { display: none; }
@@ -8076,6 +8071,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
    the tab above each chapter's card, as two marks, and docks in the bar while no tab is in view. */
 .ib-review.ib-rv-walk .ib-rsplit { grid-template-columns: minmax(0, 1fr) 300px; }
 .ib-review.ib-rv-walk.ib-fold .ib-rsplit { grid-template-columns: minmax(0, 1fr); }
+/* The comments panel closed from the header's Comments button: the diff takes the width, nothing of the panel stays. */
+.ib-review.ib-rv-walk.ib-rv-shut .ib-rsplit { grid-template-columns: minmax(0, 1fr); }
+.ib-review.ib-rv-shut .ib-gpanel { display: none; }
 .ib-rv-walk .ib-vhead { gap: 10px; }
 .ib-rv-walk .ib-vhead > * { flex: none; }
 .ib-rv-walk .ib-vhead > .ib-sp { flex: 1 1 0; min-width: 0; }
@@ -8083,6 +8081,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rv-walk .ib-gbody { --panel-header-h: 33px; }
 /* The title asks for no room: it takes what is free, up to its own width, so the chapter name gives way only after it. */
 .ib-review.ib-rv-walk .ib-vhead .ib-rv-title { flex: 1000 1 0; max-width: max-content; min-width: 0; text-overflow: ellipsis; font-size: var(--ib-fs-13, 13px); font-weight: 400; color: var(--muted-foreground); }
+/* Who sent it and when, after the title: both give way together where the bar is short. */
+.ib-review.ib-rv-walk .ib-vhead .ib-rv-from { flex: 1000 1 0; max-width: max-content; min-width: 0; margin-left: 2px; }
 .ib-rv-walk .ib-vhead > .ib-rv-nav { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 6px; min-width: 0; margin-left: -2px; }
 .ib-rv-nav .ib-rv-modes { flex: none; }
 .ib-rv-nav > [data-review-jump] { min-width: 0; }
@@ -8097,7 +8097,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* Where the bar is short of room the place (the switch, the chapter) keeps it, and the title goes: the heading under
    the bar holds the same facts. A PR's title stays, shortened: it is the only way to the PR's details. */
 @media (min-width: 768px) and (max-width: 959px) {
-  .ib-rv-nav ~ .ib-rv-titlesep:not(:has(+ .ib-dtitle)), .ib-review.ib-rv-walk .ib-vhead .ib-rv-nav ~ .ib-rv-title:not(.ib-dtitle) { display: none; }
+  .ib-rv-nav ~ .ib-rv-titlesep:not(:has(+ .ib-dtitle)), .ib-review.ib-rv-walk .ib-vhead .ib-rv-nav ~ .ib-rv-title:not(.ib-dtitle), .ib-review.ib-rv-walk .ib-vhead .ib-rv-nav ~ .ib-rv-from { display: none; }
   /* With the diff controls and a pull request's destination too, the bar's gaps narrow so the place still reads whole. */
   .pn-inbox .ib-review.ib-rv-walk .ib-vhead:has([data-review-destination]) { gap: 6px; }
 }
