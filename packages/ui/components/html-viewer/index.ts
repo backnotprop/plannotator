@@ -11,6 +11,7 @@ export {
   checkBridgeProtocolVersion,
   formatBridgeProtocolWarning,
   type BridgeProtocolVerdict,
+  type HtmlContentWidth,
   type HtmlScrollClear,
 } from "./useHtmlAnnotation";
 export {

@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
 import {
   formatInboxVideoTime,
@@ -89,6 +89,7 @@ import { escapeRung, type EscapeRung } from '../escapeLadder';
 import { Tip } from './Tip';
 import { CopyFileButton } from './CopyFileButton';
 import { LinkedMarkdown } from './LinkedMarkdown';
+import { PAGE_DESKTOP_WIDTH, desktopFitScale, pageIsWide, readPageSize, shownPageSize, writePageSize, type PageSize } from '../pageSize';
 
 /**
  * The pane width below which the 300 px comments panel beside the thread
@@ -1622,6 +1623,40 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // ── An HTML page on a phone (approval "inbox-html-attachments-phone") ──────
   const phoneHtml = full && phone && isHtml;
   const threadId = props.composer?.threadId ?? null;
+  // Part B, "Fit the page" (pageSize.ts): Desktop size lays the page out at a laptop's width and scales it to the
+  // phone's. A press is remembered per file; until then a page wider than the phone opens on Desktop size by itself.
+  const pageKey = `${attachment.id}:${view?.version ?? ''}`;
+  const storedSize = useMemo(() => (isHtml ? readPageSize(attachment.path) : null), [isHtml, attachment.path]);
+  const [pickedNow, setPickedNow] = useState<{ file: string; size: PageSize } | null>(null);
+  const pickedSize = pickedNow?.file === attachment.path ? pickedNow.size : storedSize;
+  /** The page reported itself wider than the phone, for this file as it is open now. */
+  const [widePage, setWidePage] = useState<string | null>(null);
+  const pageSize = shownPageSize(pickedSize, widePage === pageKey);
+  const fitted = phoneHtml && pageSize === 'desktop';
+  const [fitBox, setFitBox] = useState<HTMLDivElement | null>(null);
+  const [fitScale, setFitScale] = useState(1);
+  useLayoutEffect(() => {
+    if (!fitBox || !phoneHtml) return;
+    const measure = () => setFitScale(desktopFitScale(fitBox.clientWidth));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(fitBox);
+    return () => observer.disconnect();
+  }, [fitBox, phoneHtml]);
+  // Measured at the phone's width only: on Desktop size the frame is the laptop's width.
+  const onContentWidth = useCallback(
+    (report: { width: number; viewport: number }) => {
+      if (pickedSize === null && !fitted && pageIsWide(report)) setWidePage(pageKey);
+    },
+    [pickedSize, fitted, pageKey],
+  );
+  const togglePageSize = () => {
+    const next: PageSize = pageSize === 'desktop' ? 'phone' : 'desktop';
+    writePageSize(attachment.path, next);
+    setPickedNow({ file: attachment.path, size: next });
+    announce(next === 'desktop' ? 'Desktop size: the page is laid out at laptop width and fitted to the screen.' : 'Phone size: the page is laid out at the phone\'s width.');
+  };
   // It opens clear, like Markdown: the reply is the pill in the toolbar's row, whatever the last file left open.
   useLayoutEffect(() => {
     if (phoneHtml && threadId) forgetComposerOpened(threadId);
@@ -2095,15 +2130,39 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               {error}
             </div>
           )}
+          {view && isHtml && view.html !== null && phoneHtml && !linkedTop && (
+            // One size control, in a slim row of its own above the page so it never covers it (pageSize.ts).
+            <div className="ib-sizerow" data-page-size-row="">
+              <span className="ib-sizerow-name">{attachment.name}</span>
+              <button
+                type="button"
+                className="ib-sizebtn"
+                onClick={togglePageSize}
+                data-page-size-toggle={pageSize}
+              >
+                <Icon name={pageSize === 'desktop' ? 'phone' : 'laptop'} size={14} />
+                {pageSize === 'desktop' ? 'Phone size' : 'Desktop size'}
+              </button>
+            </div>
+          )}
           {view && isHtml && view.html !== null && (
             // Kept mounted under a linked page (inert, hidden), so Back finds it as it was left.
-            <div className={`ib-htmlframe${linkedTop ? ' ib-covered' : ''}`} inert={linkedTop ? true : undefined}>
+            <div
+              ref={setFitBox}
+              className={`ib-htmlframe${linkedTop ? ' ib-covered' : ''}${phoneHtml && !linkedTop ? ' ib-sized' : ''}${fitted ? ' ib-fitdesk' : ''}`}
+              inert={linkedTop ? true : undefined}
+              data-page-size={phoneHtml ? pageSize : undefined}
+              style={fitted ? ({ '--ib-fit-scale': String(fitScale), '--ib-fit-width': `${PAGE_DESKTOP_WIDTH}px` } as CSSProperties) : undefined}
+            >
             <HtmlViewer
               ref={viewerRef}
               key={`${attachment.id}:${view.version}:${view.attachment.current?.sha256 ?? ''}`}
               // A phone's comment goes in the composer's card (HtmlPageComment.tsx), and a selection made with a finger counts.
               onHostDraft={phoneHtml && hasComposer ? htmlComment.onHostDraft : undefined}
               touchSelection={phoneHtml && hasComposer}
+              // Desktop size scales the page down: what the page measures converts through it.
+              frameScale={fitted ? fitScale : undefined}
+              onContentWidth={phoneHtml ? onContentWidth : undefined}
               rawHtml={view.html}
               // Its own document, served under its own policy: web pictures load in the page, never in the window.
               frameUrl={source.pageFrameUrl}

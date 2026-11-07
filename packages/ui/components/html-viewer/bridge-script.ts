@@ -461,6 +461,25 @@ export const BRIDGE_SCRIPT = `(function() {
   // The frame resizing is what tells the guard its last grow was applied.
   window.addEventListener('resize', postResize, { passive: true });
 
+  // How wide the page lays out against the frame's own width: a host that can
+  // show the page at another width (the Inbox on a phone: "Desktop size") reads
+  // a page wider than its frame as one made for a wider screen. Posted when
+  // either number changes; a host that does not listen ignores it.
+  var lastContentWidth = '';
+  function postContentWidth() {
+    if (LIVE) return;
+    var root = document.documentElement;
+    if (!root) return;
+    var width = Math.max(root.scrollWidth || 0, document.body ? document.body.scrollWidth || 0 : 0);
+    var viewport = root.clientWidth || window.innerWidth || 0;
+    var key = width + 'x' + viewport;
+    if (key === lastContentWidth) return;
+    lastContentWidth = key;
+    postToParent({ type: PREFIX + 'content-width', width: Math.ceil(width), viewport: Math.ceil(viewport) });
+  }
+  window.addEventListener('load', postContentWidth);
+  window.addEventListener('resize', postContentWidth, { passive: true });
+
   // --- Selection ---
   var pendingSelection = null;
   var pendingRange = null; // live range for the pending selection (scroll tracking)
@@ -6190,6 +6209,7 @@ export const BRIDGE_SCRIPT = `(function() {
     if (typeof ResizeObserver !== 'undefined' && document.body) {
       var resizeObserver = new ResizeObserver(function() {
         postResize();
+        postContentWidth();
         scheduleVimUiUpdate();
         schedulePinpointReconcile();
       });
@@ -6207,6 +6227,7 @@ export const BRIDGE_SCRIPT = `(function() {
     var readyMsg = { type: PREFIX + 'ready', protocolVersion: ${BRIDGE_PROTOCOL_VERSION} };
     if (LIVE) readyMsg.pageUrl = currentPageUrl();
     postToParent(readyMsg);
+    postContentWidth();
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', onReady);

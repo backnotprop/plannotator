@@ -52,7 +52,9 @@ import {
   checkBridgeProtocolVersion,
   formatBridgeProtocolWarning,
   rejectsLiveMessage,
+  resolveFrameScale,
   useHtmlAnnotation,
+  type HtmlContentWidth,
   type HtmlLiveSession,
   type HtmlScrollClear,
 } from "./useHtmlAnnotation";
@@ -386,6 +388,21 @@ export interface HtmlViewerProps {
    */
   onHostDraft?: (draft: HostDraft | null) => void;
   /**
+   * Opt-in: how much the host scales this viewer on screen (a CSS transform
+   * on an ancestor; the Inbox's phone "Desktop size" lays the page out wide
+   * and scales it to fit). The bridge measures in the page's own pixels, so
+   * the selection anchor, the composer's yield and `revealPin`'s
+   * `clearBottom` convert through it. Absent → 1, unchanged.
+   */
+  frameScale?: number;
+  /**
+   * Opt-in: how wide the page lays out against the frame's own width, in the
+   * page's pixels, reported by the bridge after it loads and whenever either
+   * changes (a page wider than its frame was made for a wider screen).
+   * Delivered in readOnly mode too. Absent → ignored.
+   */
+  onContentWidth?: (report: HtmlContentWidth) => void;
+  /**
    * Opt-in: on a touch screen (`pointer: coarse`), a text selection made with
    * a finger counts, read from `selectionchange` once it rests (a long press
    * sends no mouseup). The Inbox's phone layout turns it on. Absent → only a
@@ -497,6 +514,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onBridgeUnavailable,
       bridgeErrorDisplay = "banner",
       onHostDraft,
+      frameScale,
+      onContentWidth,
       touchSelection = false,
       hostNavigates = false,
       sandbox = HTML_VIEWER_SANDBOX,
@@ -684,6 +703,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     const composerYieldRef = useRef(composerYield);
     composerYieldRef.current = composerYield;
     const shiftHeldRef = useRef(false);
+    const frameScaleRef = useRef(resolveFrameScale(frameScale));
+    frameScaleRef.current = resolveFrameScale(frameScale);
 
     const handleYieldPointer = useCallback((clientX: number, clientY: number) => {
       if (!shiftHeldRef.current) return;
@@ -710,7 +731,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         }
         const iframeRect = iframeRef.current?.getBoundingClientRect();
         if (!iframeRect) return;
-        handleYieldPointer(iframeRect.left + x, iframeRect.top + y);
+        const s = frameScaleRef.current;
+        handleYieldPointer(iframeRect.left + x * s, iframeRect.top + y * s);
       },
       [handleYieldPointer],
     );
@@ -790,6 +812,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       scrollBehavior,
       scrollClear,
       onHostDraft: readOnly ? undefined : onHostDraft,
+      frameScale,
+      onContentWidth,
     });
     createdIdsRef.current = hook.createdAnnotationIds;
 
@@ -1283,7 +1307,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       revealPin: (options?: { clearBottom?: number }) =>
         postToBridge({
           type: `${PREFIX}reveal-pin`,
-          ...(options?.clearBottom ? { clearBottom: options.clearBottom } : {}),
+          // Measured in the parent; the bridge reads the page's own pixels.
+          ...(options?.clearBottom ? { clearBottom: options.clearBottom / frameScaleRef.current } : {}),
         }),
     }));
 

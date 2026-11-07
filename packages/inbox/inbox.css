@@ -1992,6 +1992,22 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 .ib-contents-phone .ib-contents-list { padding: 0 6px 16px; }
 .ib-contents-phone nav button { min-height: 44px; font-size: var(--ib-fs-15, 15px); padding-top: 10px; padding-bottom: 10px; }
 .ib-htmlframe { position: absolute; inset: 0; }
+/* An HTML page on a phone, part B "Fit the page" (pageSize.ts): one size control in a slim row of its own above the
+   page, so it never covers the page. Desktop size lays the page out at a laptop's width and scales it to the phone's;
+   pinch zoom then zooms the window, and the page redraws sharp at the new zoom. */
+.ib-sizerow { --ib-sizerow-h: 40px; position: absolute; top: 0; left: 0; right: 0; box-sizing: border-box; height: calc(var(--ib-sizerow-h) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) calc(8px + env(safe-area-inset-right)) 0 calc(14px + env(safe-area-inset-left)); display: flex; align-items: center; gap: 10px; background: var(--background); border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent); }
+.ib-sizerow-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-sizebtn { position: relative; flex: none; display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px 0 8px; border: 0; border-radius: 999px; background: color-mix(in oklch, var(--muted) 85%, transparent); color: var(--foreground); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; line-height: 1; white-space: nowrap; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.ib-sizebtn svg { color: var(--muted-foreground); }
+.ib-sizebtn:active { background: var(--muted); }
+.ib-sizebtn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* 44 px to press, the pill drawn at 28. */
+.ib-sizebtn::after { content: ''; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: 44px; transform: translate(-50%, -50%); }
+.ib-htmlframe.ib-sized { top: calc(40px + env(safe-area-inset-top)); }
+.ib-htmlframe.ib-fitdesk { overflow: hidden; }
+.ib-htmlframe.ib-fitdesk > div:first-child { position: absolute; top: 0; left: 0; width: var(--ib-fit-width) !important; height: calc(100% / var(--ib-fit-scale)) !important; transform: scale(var(--ib-fit-scale)); transform-origin: 0 0; }
+/* The pen's armed ring keeps its 2 px on screen. */
+.ib-htmlframe.ib-fitdesk [data-annotate-armed-ring] { box-shadow: inset 0 0 0 calc(2px / var(--ib-fit-scale)) color-mix(in srgb, var(--primary) 45%, transparent) !important; }
 /* A page the attached page links to, not attached: read-only over the attached page, which stays mounted under it (htmlLinks.ts). */
 .ib-htmlframe.ib-covered, .ib-docscroll.ib-covered { visibility: hidden; }
 .ib-linked { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--background); }
