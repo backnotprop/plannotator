@@ -83,6 +83,8 @@ interface FileTreeNodeProps {
   onToggleViewed?: (filePath: string) => void;
   showViewedControls?: boolean;
   hideViewedFiles: boolean;
+  /** The viewed files Hide viewed takes out (`useHiddenViewedFiles`); `viewedFiles` when absent. */
+  hiddenFiles?: ReadonlySet<string>;
   getAnnotationCount: (filePath: string) => number;
   /** EFFECTIVE staged set from useGitAdd (sidecar + session overrides).
    *  REQUIRED and the ONLY staging source surfaces may render from — the
@@ -103,7 +105,7 @@ interface FileTreeNodeProps {
 
 function hasVisibleChildren(
   node: TreeNode,
-  viewedFiles: Set<string>,
+  hiddenFiles: ReadonlySet<string>,
   activeFileIndex: number,
   hideViewedFiles: boolean,
 ): boolean {
@@ -112,9 +114,9 @@ function hasVisibleChildren(
 
   return node.children.some(child => {
     if (child.type === 'file') {
-      return child.fileIndex === activeFileIndex || !viewedFiles.has(child.path);
+      return child.fileIndex === activeFileIndex || !hiddenFiles.has(child.path);
     }
-    return hasVisibleChildren(child, viewedFiles, activeFileIndex, hideViewedFiles);
+    return hasVisibleChildren(child, hiddenFiles, activeFileIndex, hideViewedFiles);
   });
 }
 
@@ -130,6 +132,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
   onToggleViewed,
   showViewedControls = true,
   hideViewedFiles,
+  hiddenFiles = viewedFiles,
   getAnnotationCount,
   stagedFiles,
   scrollHighlightIndex,
@@ -143,7 +146,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
   const paddingLeft = indent(node.depth);
 
   if (node.type === 'folder') {
-    if (!hasVisibleChildren(node, viewedFiles, activeFileIndex, hideViewedFiles)) {
+    if (!hasVisibleChildren(node, hiddenFiles, activeFileIndex, hideViewedFiles)) {
       return null;
     }
 
@@ -166,6 +169,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
             onToggleViewed={onToggleViewed}
             showViewedControls={showViewedControls}
             hideViewedFiles={hideViewedFiles}
+            hiddenFiles={hiddenFiles}
             getAnnotationCount={getAnnotationCount}
             stagedFiles={stagedFiles}
             scrollHighlightIndex={scrollHighlightIndex}
@@ -197,7 +201,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
   // unstaged this session would render staged and invert the next toggle.
   const isStageable = sinceBaseMode && !!onStageFile && sectionEntry != null && sectionEntry.group !== 'committed';
 
-  if (hideViewedFiles && isViewed && !isActive) {
+  if (hideViewedFiles && hiddenFiles.has(node.path) && !isActive) {
     return null;
   }
 

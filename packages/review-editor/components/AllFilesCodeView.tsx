@@ -423,7 +423,7 @@ export interface AllFilesCodeViewProps {
   scrollsWithPage?: boolean;
   /**
    * No spacing around a hunk separator, nor at the foot of a file beyond the code's padding, so a host's files sit
-   * flush (the Inbox's PR page). `scrollsWithPage` already draws them so, and takes its own metrics. Absent: as before.
+   * flush (the Inbox's PR page). Every list now counts no such spacing (#2713), so this changes nothing in the metrics.
    */
   flushFiles?: boolean;
   /**
@@ -3327,15 +3327,17 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     () => ({
       diffHeaderHeight: compactTouchLayout ? COMPACT_PANEL_HEADER_HEIGHT : PANEL_HEADER_HEIGHT,
       hunkSeparatorHeight: HUNK_SEPARATOR_HEIGHT,
-      // HUNK_SEPARATOR_HEIGHT already holds the drawn margins. In a box that is as tall as this layout, Pierre's gaps
-      // around each separator would be empty space the rows float in. Files that sit flush without scrolling with the
-      // page (`flushFiles`) drop the gaps too.
+      // HUNK_SEPARATOR_HEIGHT already holds the drawn margins, so Pierre's gaps around each separator are never drawn.
+      // Counted, every open file was laid out 8px taller per gap than it is. In a box as tall as the layout the rows
+      // float in that room; in the scroller, a list that just outgrows the view is pushed down by it, under the
+      // pointer, when a file opens (#2713: Pierre's sticky window sits at the bottom of the room it is given).
+      spacing: 0,
       // Spacing 0 would count no room under the last row, but the code keeps Pierre's 8px there (its padding plus its
       // sideways scrollbar's gutter): counted, the bar is not cut off by the box or drawn over the next file.
-      ...((scrollsWithPage || flushFiles) && { spacing: 0, paddingBottom: 8 }),
+      paddingBottom: 8,
       ...(customLineHeight != null && { lineHeight: customLineHeight }),
     }),
-    [compactTouchLayout, customLineHeight, flushFiles, scrollsWithPage],
+    [compactTouchLayout, customLineHeight],
   );
   itemMetricsRef.current = itemMetrics;
 
