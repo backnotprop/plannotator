@@ -273,13 +273,17 @@ for (const phone of [
       await page.locator('[data-fcomp-mode="comment"]').tap();
       await expect(field(page)).toHaveValue('Keep this');
 
-      // Words waiting: a step to the next file asks first, as it does for an image's comment. (The Reply tab
-      // brings the toolbar back; the pin's draft is held.)
+      // Words waiting: a step to the next file goes at once (nothing asks), and the words wait as report.html's
+      // draft, back on the same pin when it opens again. (The Reply tab brings the toolbar back; the pin's draft is held.)
       await page.locator('[data-fcomp-mode="reply"]').tap();
       await bar(page).locator('[data-full-view-position]').tap();
       await page.locator('[data-image-peek-sheet]').getByRole('gridcell', { name: /^second\.html/ }).tap();
-      await expect(page.locator('.ib-stepguard')).toBeVisible();
+      await expect(pane(page)).toHaveAttribute('data-attachment-pane', w.ids['second.html']!);
+      await expect(page.locator('.ib-stepguard, [data-step-guard]')).toHaveCount(0);
+      await bar(page).locator('[data-full-view-position]').tap();
+      await page.locator('[data-image-peek-sheet]').getByRole('gridcell', { name: /^report\.html/ }).tap();
       await expect(pane(page)).toHaveAttribute('data-attachment-pane', w.ids['report.html']!);
+      await expect(field(page)).toHaveValue('Keep this');
     });
   });
 

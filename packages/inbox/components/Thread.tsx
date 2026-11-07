@@ -3132,7 +3132,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   /** The Reply button's path, from a key: from a file in full screen, back beside the thread first (the strip's Write a reply). */
   const replyByKey = () => {
     // From a file in full screen, back beside the thread first, even with the box open (the composer opens it behind the file).
-    // A file full screen is all a narrow window shows, so this leaves it: an unsaved comment on it is asked about first.
+    // A file full screen is all a narrow window shows, so this leaves it: an unsaved comment on it waits as its draft.
     if (file && shownFull) (phone || fileStacked ? () => fileToThread(writeReplyFromFile) : writeReplyFromFile)();
     else if (box.open) textRef.current?.focus();
     else openBox();
@@ -3717,7 +3717,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   /**
    * From full screen to the thread, on the device's own route: beside the thread where there is room (as
    * Write the reply goes), else the file closes (a phone's or a stacked window's Back to the thread). A
-   * comment not saved yet in the file is asked about first.
+   * comment not saved yet in the file waits as its draft (nothing asks).
    */
   const fileToThread = (then: () => void = () => {}) => {
     const go = () => {

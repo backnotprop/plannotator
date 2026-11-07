@@ -15,7 +15,7 @@
  *    opens again), never asked about.
  *  - A folded pill never lies under the toolbar: it shares the row when both fit, else it sits above (360 px overlapped by 24).
  *  - A desktop window's foot takes none of this. A window too narrow for a view beside the thread leaves the file as a
- *    phone does: R and Write the reply close it, and R asks about an unsaved comment first.
+ *    phone does: R and Write the reply close it at once (an unsaved comment waits as the file's draft).
  *
  * Voice is on but not ready in this sandbox, so the box also carries its note: the mic shows, dimmed, as it does on a
  * phone that cannot record. Build the binary first (see inbox.spec.ts).

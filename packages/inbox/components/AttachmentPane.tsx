@@ -44,6 +44,7 @@ import {
   codeRangeOf,
   compareVideoTimes,
   inboxViewKind,
+  type InboxCodeRange,
 } from '../attachments';
 import { whenTime, formatBytes } from '../format';
 import { useRefRepo } from '../links';
@@ -313,12 +314,16 @@ export function unsavedComposer(pane: HTMLElement | null, savedText: (id: string
  * in this order: comment popovers, a diagram's composer, the file's own row
  * (`data-image-composer`), edit boxes. Their textareas.
  */
-export function unsavedComposers(pane: HTMLElement | null, savedText: (id: string) => string | undefined = () => undefined): HTMLTextAreaElement[] {
+export function unsavedComposers(
+  pane: HTMLElement | null,
+  savedText: (id: string) => string | undefined = () => undefined,
+  owns: (area: HTMLTextAreaElement) => boolean = () => true,
+): HTMLTextAreaElement[] {
   const found: HTMLTextAreaElement[] = [];
   const typed = (area: HTMLTextAreaElement) => area.value.trim() !== '';
-  // Plannotator's comment popover (text, HTML pinpoint, code lines) draws in a portal on the page.
+  // Plannotator's comment popover (text, HTML pinpoint, code lines) draws in a portal on the page: only the pane's own.
   for (const area of document.querySelectorAll<HTMLTextAreaElement>('[data-comment-popover] textarea')) {
-    if (typed(area)) found.push(area);
+    if (typed(area) && owns(area)) found.push(area);
   }
   if (!pane) return found;
   for (const area of pane.querySelectorAll<HTMLTextAreaElement>('[data-diagram-composer] textarea, [data-image-composer] textarea')) {
@@ -359,6 +364,22 @@ function whenStill(el: () => HTMLElement | null, then: () => void): () => void {
     else id = requestAnimationFrame(tick);
   });
   return () => cancelAnimationFrame(id);
+}
+
+/**
+ * Where a kept line comment's lines are in the file now: where they were when they still read the same, else the
+ * nearest place they do (the file was edited above them), else null (they changed: the words wait, on nothing).
+ */
+export function relocateCodeRange(range: InboxCodeRange, text: string): { lineStart: number; lineEnd: number } | null {
+  const lines = text.split('\n');
+  const count = range.lineEnd - range.lineStart + 1;
+  const matchesAt = (start: number) => start >= 1 && start + count - 1 <= lines.length && codeRangeMatches(range, lines.slice(start - 1, start - 1 + count).join('\n'));
+  for (let distance = 0; distance < lines.length; distance++) {
+    for (const start of distance === 0 ? [range.lineStart] : [range.lineStart - distance, range.lineStart + distance]) {
+      if (matchesAt(start)) return { lineStart: start, lineEnd: start + count - 1 };
+    }
+  }
+  return null;
 }
 
 /** The element that scrolls the open file (a document, code, or an image at its own size). */
@@ -678,10 +699,16 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const waiting = useRef<FileCommentDraft[]>([]);
   /** The file's own comment row (an image's, a film's), read as the file closes (`useRowDraft`). */
   const rowReaders = useRef(new Set<() => FileCommentDraft | null>());
+  /** The comment popovers' boxes this pane opened (focused, typed in, or shown with put-back words). */
+  const ownBoxes = useRef(new WeakSet<HTMLTextAreaElement>());
   /** The comment box last typed in, with what it is on then: read if the pane goes without `leave`. */
   const live = useRef<{ area: HTMLTextAreaElement; anchor: Annotation | null } | null>(null);
   /** The lines of the code view's comment being written (CodeFileView's onComposerLines). */
   const codeLines = useRef<{ lineStart: number; lineEnd: number; originalCode: string } | null>(null);
+  /** The row draft the file's own row took as it mounted: the row holds those words now, so nothing keeps them twice. */
+  const rowTook = useRef<{ key: string; draft: RowDraft } | null>(null);
+  /** Whose drafts `waiting` holds (the file's key, set as it opens). */
+  const waitingKey = useRef('');
   /** This file's drafts were kept since it opened: leaving and the pane going never keep them twice. */
   const kept = useRef(false);
   const recordsRef = useRef(props.records);
@@ -1616,11 +1643,15 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // (fileCommentDrafts.ts) and is back in its comment box when the file opens again. Escape that reaches a
   // comment being written in full screen sets it aside the same way. The composers save on Cmd/Ctrl+Enter;
   // while `capturing` is set, that save lands here (`save` above) and the composer closes as if saved.
-  const draftKey = fileDraftKey(attachment.id, annotationVersion);
+  // From the props, never from `view`: on the first render after a step `view` is still the last file's.
+  const draftVersion = effectiveVersion === 'sent' ? attachment.sent_sha256 : 'current';
+  const draftKey = fileDraftKey(attachment.id, draftVersion);
   draftKeyRef.current = draftKey;
   const isCodeRef = useRef(isCode);
   isCodeRef.current = isCode;
   recordsRef.current = props.records;
+  /** Whether a comment popover's box is this pane's (popovers draw in a portal on the page, outside the section). */
+  const ownsBox = (area: HTMLTextAreaElement) => ownBoxes.current.has(area);
   /** The words of every composer open in the file, as drafts: the file's own row read, the others "saved" into `capturing`. */
   const takeComposers = (): FileCommentDraft[] => {
     if (readOnlyRef.current) return [];
@@ -1634,7 +1665,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     const caught: FileCommentDraft[] = [];
     capturing.current = caught;
     try {
-      for (const area of unsavedComposers(sectionRef.current, savedTextRef.current)) {
+      for (const area of unsavedComposers(sectionRef.current, savedTextRef.current, ownsBox)) {
         // The file's own row (and a phone page's card) was read above.
         if (area.closest('[data-image-composer]')) continue;
         area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true, composed: true }));
@@ -1649,21 +1680,32 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   /**
    * The pane is being taken away without `leave` (another thread picked, the window's route moved): its composers
    * answer no key now, so their words are read from the boxes still on the page, with what each is on from the
-   * viewer (`peekComment`), the code view (`codeLines`) or the last words typed (`live`).
+   * viewer (`peekComment`: a selection, a pin, a global comment, a code block, a diagram part), the code view
+   * (`codeLines`) or the last words typed (`live`).
    */
   const readComposers = (): FileCommentDraft[] => {
     if (readOnlyRef.current) return [];
     const read: FileCommentDraft[] = [];
-    const box = [...document.querySelectorAll<HTMLTextAreaElement>('[data-comment-popover] textarea')].find((area) => area.value.trim() !== '');
+    const peek = isCodeRef.current ? null : (viewerRef.current?.peekComment?.() ?? null);
+    const box = [...document.querySelectorAll<HTMLTextAreaElement>('[data-comment-popover] textarea')].find((area) => ownsBox(area) && area.value.trim() !== '');
     if (box) {
       const lines = isCodeRef.current ? codeLines.current : null;
       const anchor = lines
         ? codeCommentAnnotation({ id: 'ann-code-kept', lineStart: lines.lineStart, lineEnd: lines.lineEnd, text: '', code: lines.originalCode })
-        : (viewerRef.current?.peekComment?.() ?? (live.current?.area === box ? live.current.anchor : null));
+        : peek && peek.diagramAnchor == null
+          ? peek
+          : live.current?.area === box
+            ? live.current.anchor
+            : null;
       if (anchor) read.push({ kind: 'comment', annotation: { ...anchor, text: box.value } });
     }
     const scope = sectionRef.current;
     if (scope) {
+      // A diagram part's box: in the file, or in its popout (drawn outside the section, the pane's own when used here).
+      const part = [...document.querySelectorAll<HTMLTextAreaElement>('[data-diagram-composer] textarea')].find(
+        (area) => (scope.contains(area) || ownsBox(area)) && area.value.trim() !== '',
+      );
+      if (part && peek?.diagramAnchor != null) read.push({ kind: 'comment', annotation: { ...peek, text: part.value } });
       const roots: ParentNode[] = [scope];
       for (const container of scope.querySelectorAll('diffs-container')) if (container.shadowRoot) roots.push(container.shadowRoot);
       for (const root of roots) {
@@ -1677,16 +1719,63 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     }
     return read;
   };
+  /**
+   * Drafts put back whose box has not been seen open yet (a comment the page or the code view is still placing, an
+   * edit whose card has not drawn its box): a close or Back before then keeps them as they were.
+   */
+  const reopening = useRef<{ draft: FileCommentDraft; seen: () => boolean }[]>([]);
+  const reopeningWatch = useRef<number | null>(null);
+  /** Track a draft put back until its box shows (or the pane forgets it), checking once a frame for a few seconds. */
+  const trackReopen = (draft: FileCommentDraft, seen: () => boolean) => {
+    reopening.current = [...reopening.current, { draft, seen }];
+    if (reopeningWatch.current !== null) return;
+    let frames = 0;
+    const tick = () => {
+      reopening.current = reopening.current.filter((entry) => !entry.seen());
+      if (reopening.current.length === 0 || ++frames > 300) {
+        reopeningWatch.current = null;
+        return;
+      }
+      reopeningWatch.current = requestAnimationFrame(tick);
+    };
+    reopeningWatch.current = requestAnimationFrame(tick);
+  };
+  const stopReopenWatch = () => {
+    if (reopeningWatch.current !== null) cancelAnimationFrame(reopeningWatch.current);
+    reopeningWatch.current = null;
+  };
+  /** The comment popover's box with words, as a put-back comment shows it (registered as this pane's when seen). */
+  const popoverShown = () => {
+    const area = [...document.querySelectorAll<HTMLTextAreaElement>('[data-comment-popover] textarea')].find((a) => a.value.trim() !== '');
+    if (area) ownBoxes.current.add(area);
+    return area !== undefined;
+  };
+  /** Whether an edit box for the comment `id` shows (the panel's card, or under a code line in Pierre's shadow root). */
+  const editShown = (id: string) => {
+    const scope = sectionRef.current;
+    if (!scope) return false;
+    const selector = `[data-annotation-id="${CSS.escape(id)}"] textarea, [data-code-annotation-id="${CSS.escape(id)}"] textarea`;
+    if (scope.querySelector(selector)) return true;
+    for (const container of scope.querySelectorAll('diffs-container')) if (container.shadowRoot?.querySelector(selector)) return true;
+    return false;
+  };
   /** Keep what the file holds as its draft, once per time it is left. `tearing`: the pane is going without `leave`. */
   const keepDrafts = (tearing = false) => {
     if (kept.current) return;
     kept.current = true;
+    stopReopenWatch();
     const taken = takeComposers();
     const read = tearing && !taken.some((d) => d.kind !== 'row') ? readComposers() : [];
-    // A kept comment not back in its box yet (the pane was still moving, or the text still loading) waits on.
+    // A kept comment not back in its box yet (the pane was still moving, or the text still loading) waits on, and so
+    // does anything put back whose box has not shown yet.
     const notShown: FileCommentDraft[] = reopenNext.current ? [{ kind: 'comment', annotation: reopenNext.current }] : [];
     reopenNext.current = null;
-    keepFileDrafts(draftKeyRef.current, [...waiting.current, ...notShown, ...taken, ...read]);
+    for (const entry of reopening.current) if (!entry.seen()) notShown.push(entry.draft);
+    reopening.current = [];
+    // The row holds the words it took as it mounted (read above), so they are not kept twice.
+    const took = rowTook.current?.key === draftKeyRef.current ? rowTook.current.draft : null;
+    const waited = waiting.current.filter((d) => d !== took);
+    keepFileDrafts(draftKeyRef.current, [...waited, ...notShown, ...taken, ...read]);
     waiting.current = [];
   };
   keepDraftsRef.current = keepDrafts;
@@ -1735,10 +1824,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     const rest: FileCommentDraft[] = [];
     const comments = drafts.filter((d): d is Extract<FileCommentDraft, { kind: 'comment' }> => d.kind === 'comment');
     const newest = comments.at(-1) ?? null;
+    const took = rowTook.current?.key === draftKeyRef.current ? rowTook.current.draft : null;
     for (const draft of drafts) {
       if (draft.kind === 'row') {
-        // The row took it as it mounted; without a row (it never drew), it keeps waiting.
-        if (!rowOnScreen && rowReaders.current.size === 0) rest.push(draft);
+        // The row still holds it, or took it as it mounted; else it waits for the row (drawn once the picture loads).
+        if (!rowOnScreen && draft !== took) rest.push(draft);
         continue;
       }
       if (draft.kind === 'edit') {
@@ -1751,6 +1841,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           if (drawerMode) setDrawerOpen(true);
           else if (sheetMode) setSheet(true);
         }
+        trackReopen(draft, () => editShown(draft.id));
         continue;
       }
       if (draft !== newest) {
@@ -1760,9 +1851,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       reopenNext.current = draft.annotation;
     }
     waiting.current = [...waiting.current, ...rest];
-    // Still on the file: its viewer is drawn. A file just opened waits for its text (the effect on `view` below);
-    // the code view takes its lines whenever it draws them.
-    if ((rowOnScreen || isCode) && reopenNext.current) reopenInViewer();
+    // Still on the file: its viewer is drawn. A file just opened waits for its text (the effect on `view` below).
+    if (rowOnScreen && reopenNext.current) reopenInViewer();
   };
   /** The waiting comment, into the viewer once it is drawn and the pane is still (a phone page's card takes the words when the page hands it the pin). */
   const reopenInViewer = () => {
@@ -1771,19 +1861,36 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   };
   const reopenNow = () => {
     const annotation = reopenNext.current;
-    const range = annotation && isCode ? codeRangeOf(annotation) : null;
+    // The file's own text, not the last file's (the view is reset just after a step).
+    if (!annotation || !view || view.attachment.id !== attachment.id) return;
+    reopenNext.current = null;
+    const draft: FileCommentDraft = { kind: 'comment', annotation };
+    let missed = false;
+    const missing = () => {
+      // Not on the file any more (the file changed): the words still wait, on nothing.
+      if (missed) return;
+      missed = true;
+      reopening.current = reopening.current.filter((entry) => entry.draft !== draft);
+      waiting.current = [...waiting.current, draft];
+    };
+    const range = isCode ? codeRangeOf(annotation) : null;
     if (range) {
-      reopenNext.current = null;
-      setCodeReopen({ lineStart: range.lineStart, lineEnd: range.lineEnd, text: annotation?.text ?? '' });
+      // The lines it was on, where they are now (the file may have changed since): never other code under the words.
+      const at = relocateCodeRange(range, view.text);
+      if (!at) {
+        missing();
+        return;
+      }
+      trackReopen(draft, popoverShown);
+      setCodeReopen({ lineStart: at.lineStart, lineEnd: at.lineEnd, text: annotation.text ?? '' });
       return;
     }
     const viewer = viewerRef.current;
-    if (!annotation || !viewer || !view) return;
-    reopenNext.current = null;
-    const missing = () => {
-      // Not on the page any more (the file changed): the words still wait.
-      waiting.current = [...waiting.current, { kind: 'comment', annotation }];
-    };
+    if (!viewer) {
+      reopenNext.current = annotation;
+      return;
+    }
+    trackReopen(draft, () => popoverShown() || (annotation.diagramAnchor != null && sectionRef.current?.querySelector('[data-diagram-composer] textarea') != null) || htmlComment.open);
     if (phoneHtml && hasComposer) htmlComment.expectWords(annotation.text ?? '');
     if (!viewer.reopenComment?.(annotation, missing)) missing();
   };
@@ -1817,6 +1924,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     () => () => {
       settling.current?.();
       keepDraftsRef.current(true);
+      stopReopenWatch();
     },
     [],
   );
@@ -1830,11 +1938,46 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     document.addEventListener('input', onInput, true);
     return () => document.removeEventListener('input', onInput, true);
   }, []);
+  /** A comment popover box focused, typed in or pressed through the pane's own tree is the pane's. */
+  const claimBox = (event: React.SyntheticEvent) => {
+    const area = event.target;
+    if (area instanceof HTMLTextAreaElement && area.closest('[data-comment-popover], [data-diagram-composer]')) ownBoxes.current.add(area);
+  };
+  // Escape typed in a diagram part's box, or in a comment's edit box holding changed words, would throw the words
+  // away: they wait as the file's draft instead, as every other box keeps them (its Cancel still discards).
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
+      const area = event.composedPath()[0];
+      if (!(area instanceof HTMLTextAreaElement) || area.value.trim() === '') return;
+      const owner = area.closest('[data-annotation-id], [data-code-annotation-id]');
+      if (owner) {
+        const id = owner.getAttribute('data-annotation-id') ?? owner.getAttribute('data-code-annotation-id') ?? '';
+        if (area.value.trim() === (savedTextRef.current(id) ?? '').trim()) return;
+      } else if (!area.closest('[data-diagram-composer]')) return;
+      if (!setAsideRef.current(area)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      announce('Comment closed. Your words are kept for when you open this file again.');
+      requestAnimationFrame(() => {
+        const active = document.activeElement;
+        if (!active || active === document.body || !active.isConnected) sectionRef.current?.focus({ preventScroll: true });
+      });
+    };
+    section.addEventListener('keydown', onKey, true);
+    return () => section.removeEventListener('keydown', onKey, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Each file (and version) as it opens: what waited for it is its own again, back in its boxes.
   useLayoutEffect(() => {
     kept.current = false;
     waiting.current = [];
+    waitingKey.current = draftKey;
     reopenNext.current = null;
+    reopening.current = [];
+    stopReopenWatch();
     settling.current?.();
     settling.current = null;
     live.current = null;
@@ -1856,7 +1999,15 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   }, [view]);
   const draftSeat = useMemo<FileDraftSeat>(
     () => ({
-      peekRow: () => (readOnlyRef.current ? null : ((peekFileDrafts(draftKeyRef.current).find((d) => d.kind === 'row') as RowDraft | undefined) ?? null)),
+      peekRow: () => {
+        if (readOnlyRef.current) return null;
+        const key = draftKeyRef.current;
+        // A row that mounts after the file opened (the picture loads first) takes what waits for it.
+        const pool = waitingKey.current === key ? [...waiting.current, ...peekFileDrafts(key)] : peekFileDrafts(key);
+        const draft = (pool.find((d) => d.kind === 'row') as RowDraft | undefined) ?? null;
+        if (draft) rowTook.current = { key, draft };
+        return draft;
+      },
       register: (read) => {
         rowReaders.current.add(read);
         return () => {
@@ -2046,6 +2197,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       data-full-view={full ? '' : undefined}
       // Hide (») or the composer's ⌄ gathers what floats over the file into the corner control (inbox.css).
       data-tools={full ? shownToolbar : undefined}
+      // A comment popover draws in a portal outside the section; its events still come through here (React's tree),
+      // which is how the pane knows the popovers that are its own.
+      onFocusCapture={claimBox}
+      onInputCapture={claimBox}
+      onPointerDownCapture={claimBox}
     >
       <FileDraftContext.Provider value={draftSeat}>
       <FullScreenComposerContext.Provider value={composerValue}>
@@ -2369,8 +2525,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           )}
           {isImage && (
             <ImageAttachmentView
-              // Its own comment box per file: typed text never carries over to the next image.
-              key={attachment.id}
+              // Its own comment box per file and version: typed text never carries over to the next image, or to the
+              // other version (each version keeps its own draft).
+              key={draftKey}
               attachment={attachment}
               version={effectiveVersion}
               annotations={annotations}
@@ -2402,8 +2559,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           )}
           {isVideo && (
             <VideoAttachmentView
-              // Its own comment row per file: a typed comment never carries over to the next film.
-              key={attachment.id}
+              // Its own comment row per file and version: a typed comment never carries over to the next film or version.
+              key={draftKey}
               ref={videoRef}
               attachment={attachment}
               version={effectiveVersion}

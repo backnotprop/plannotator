@@ -123,9 +123,25 @@ describe.if(hasDom)('HtmlViewer reopenComment', () => {
   test('only the answer to the request carries the words: another selection opens as it always has', async () => {
     const { handle, restores, fromBridge } = await mount();
     handle.current!.reopenComment!(kept);
-    await fromBridge(selectionFor('reopen-someone-else'));
+    await fromBridge(selectionFor(undefined));
     expect(composerText()).toBe('');
     expect(restores()).toHaveLength(1);
+  });
+
+  // Failure to catch: a bridge that never answers (an older cached asset ignores restore-draft) keeping the words
+  // from the host for good, or its late answer opening a composer the host no longer expects.
+  test('no answer: after a few seconds onMissing runs, and a late answer is let go', async () => {
+    const { handle, restores, posted, fromBridge } = await mount();
+    let missing = 0;
+    handle.current!.reopenComment!(kept, () => (missing += 1));
+    const id = restores()[0]!.id;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 3200));
+    });
+    expect(missing).toBe(1);
+    await fromBridge(selectionFor(id));
+    expect(document.querySelector('[data-comment-popover]')).toBeNull();
+    expect(posted.some((m) => m.type === 'plannotator-bridge-cancel-selection')).toBe(true);
   });
 
   // Failure to catch: words lost without the host knowing, when the page no longer has the element.

@@ -559,6 +559,8 @@ export function useHtmlAnnotation({
   createdAnnotationIds: ReadonlySet<string>;
   /** HtmlViewer's reopenComment: the restore-draft message to post, or null. */
   prepareReopen: (annotation: Annotation, onMissing?: () => void) => Record<string, unknown> | null;
+  /** Give up on a restore-draft not answered yet: its `onMissing` runs. */
+  expireReopen: (id: string) => void;
 } {
   const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
   const [commentPopover, setCommentPopover] = useState<CommentPopoverState | null>(null);
@@ -766,6 +768,11 @@ export function useHtmlAnnotation({
       }
 
       if (type === `${PREFIX}selection`) {
+        // The answer to a restore-draft that gave up waiting (expireReopen): its words went back to the host.
+        if (message.restoreId && reopenRef.current?.id !== message.restoreId) {
+          post({ type: `${PREFIX}cancel-selection` });
+          return;
+        }
         setPinVisible(true);
         setComposerWasHidden(false);
         pendingTextRef.current = message.text;
@@ -1331,6 +1338,18 @@ export function useHtmlAnnotation({
     };
   }, []);
 
+  /**
+   * A restore-draft with no answer yet (a bridge asset older than the
+   * message ignores it): the host gets its words back (`onMissing`), and a
+   * late answer is let go.
+   */
+  const expireReopen = useCallback((id: string) => {
+    const pending = reopenRef.current;
+    if (pending?.id !== id) return;
+    reopenRef.current = null;
+    pending.onMissing?.();
+  }, []);
+
   const removeHighlight = useCallback(
     (id: string) => {
       post({ type: `${PREFIX}remove-mark`, id });
@@ -1392,6 +1411,7 @@ export function useHtmlAnnotation({
     composerFocusToken,
     createdAnnotationIds: mintedIdsRef.current,
     prepareReopen,
+    expireReopen,
     peekComment,
   };
 }

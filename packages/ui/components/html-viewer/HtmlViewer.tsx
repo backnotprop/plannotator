@@ -211,6 +211,9 @@ function parseVimBridgeCopy(value: unknown): string | null {
 /** The fewest milliseconds between two honored `step` messages from the page. */
 export const STEP_MESSAGE_MIN_INTERVAL_MS = 150;
 
+/** How long a restore-draft (`reopenComment`) waits for the bridge's answer before the host gets the words back. */
+const REOPEN_ANSWER_MS = 3000;
+
 export interface HtmlViewerProps {
   rawHtml: string;
   /** Live proxied-app mode: render `src` (no sandbox, no srcdoc) instead of
@@ -1072,13 +1075,21 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     // reopenComment asked before the bridge was ready: posted once it is,
     // after the saved annotations above are drawn.
     const pendingReopenRef = useRef<Record<string, unknown> | null>(null);
+    // A bridge that never answers restore-draft (an older cached asset): after
+    // REOPEN_ANSWER_MS the host gets the words back through its onMissing.
+    const postReopenRef = useRef<(message: Record<string, unknown>) => void>(() => {});
+    postReopenRef.current = (message: Record<string, unknown>) => {
+      postToBridge(message);
+      const id = typeof message.id === "string" ? message.id : null;
+      if (id) setTimeout(() => hook.expireReopen(id), REOPEN_ANSWER_MS);
+    };
     const iframeReadyRef = useRef(iframeReadyVersion);
     iframeReadyRef.current = iframeReadyVersion;
     useEffect(() => {
       if (iframeReadyVersion === 0 || !pendingReopenRef.current) return;
       const message = pendingReopenRef.current;
       pendingReopenRef.current = null;
-      postToBridge(message);
+      postReopenRef.current(message);
     }, [iframeReadyVersion, postToBridge]);
 
     // A linked document opened from a `#`-carrying link: the srcdoc document
@@ -1296,7 +1307,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         if (readOnly || liveMode) return false;
         const message = hook.prepareReopen(annotation, onMissing);
         if (!message) return false;
-        if (iframeReadyRef.current > 0) postToBridge(message);
+        if (iframeReadyRef.current > 0) postReopenRef.current(message);
         else pendingReopenRef.current = message;
         return true;
       },

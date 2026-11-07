@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { diagramTargetText, type DiagramKind } from '@plannotator/core/diagram-anchor';
+import { diagramTargetText, type DiagramAnchor, type DiagramKind } from '@plannotator/core/diagram-anchor';
 import type { AnnotationRestoreReport } from '../hooks/useAnnotationHighlighter';
 import { AnnotationType, type Annotation, type Block } from '../types';
 import { useConfigValue } from '../config';
@@ -91,6 +91,10 @@ export interface DiagramBlockProps {
   /** Opt-in: a comment being written that the host kept, put back in the
    * inline diagram's composer (see `DiagramReopenRequest`). */
   reopenComment?: DiagramReopenRequest;
+  /** Opt-in: the part the diagram's composer is on as it opens, null as it
+   * closes (`where`: the inline diagram's or the popout's composer). Reads
+   * only. Absent: nothing changes. */
+  onComposerAnchor?: (blockId: string, where: 'inline' | 'popout', anchor: DiagramAnchor | null) => void;
 }
 
 const NO_ANNOTATIONS: readonly Annotation[] = [];
@@ -107,8 +111,13 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   onAskAI,
   askAISourcePath,
   reopenComment,
+  onComposerAnchor,
 }) => {
   const label = LABELS[kind];
+  const onComposerAnchorRef = useRef(onComposerAnchor);
+  onComposerAnchorRef.current = onComposerAnchor;
+  const inlineComposerAnchor = useCallback((anchor: DiagramAnchor | null) => onComposerAnchorRef.current?.(block.id, 'inline', anchor), [block.id]);
+  const popoutComposerAnchor = useCallback((anchor: DiagramAnchor | null) => onComposerAnchorRef.current?.(block.id, 'popout', anchor), [block.id]);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [showSource, setShowSource] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -406,6 +415,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
               onRenderState={setRenderState}
               renderFallback={renderFallback}
               reopenComment={reopenComment}
+              onComposerAnchor={inlineComposerAnchor}
             />
           </div>
         )}
@@ -422,6 +432,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
               title={`${label} diagram`}
               renderId={`${kind}-${block.id}-popout`}
               onAskAI={handlePopoutAskAI}
+              onComposerAnchor={popoutComposerAnchor}
               dataAttributes={{ 'data-block-id': block.id }}
             />
           </Suspense>

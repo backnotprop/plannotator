@@ -17,7 +17,7 @@
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { act, useState } from 'react';
+import { act, StrictMode, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAnnotationRecord, InboxAttachmentState, InboxMessageWire } from '@plannotator/core/inbox-types';
 import { attachmentSequence, type AttachmentStep } from './stepping';
@@ -90,6 +90,7 @@ afterEach(async () => {
     window.getSelection()?.removeAllRanges();
   }
   clearFileDrafts();
+  for (const id of Object.keys(servedVersion)) delete servedVersion[id];
 });
 
 const M1 = 'msg_01K7M1MMMMMMMMMMMMMMMMMMMM';
@@ -116,8 +117,11 @@ const scope = file('att_01K7AAAAAAAAAAAAAAAAAAAAAA', 'SCOPE.md', 'markdown');
 const page = file('att_01K7BBBBBBBBBBBBBBBBBBBBBB', 'checkout.html', 'html');
 const flow = file('att_01K7CCCCCCCCCCCCCCCCCCCCCC', 'retry.mmd', 'mermaid');
 const policy = file('att_01K7DDDDDDDDDDDDDDDDDDDDDD', 'refund-policy.pdf', 'pdf');
+const shot = { ...file('att_01K7EEEEEEEEEEEEEEEEEEEEEE', 'checkout.png', 'image'), media_type: 'image/png' } as InboxAttachmentState;
 const message = { id: M1, created_at: '2026-10-10T10:42:00.000Z', author: { kind: 'agent', host: 'claude-code', session: 'ses_a', name: 'Claude' } } as unknown as InboxMessageWire;
 const STEPS: AttachmentStep[] = attachmentSequence([message], [scope, page, flow, policy]);
+/** A file's view at a version other than "current" (the sent one), as the server names it: its sha. */
+const servedVersion: Record<string, string> = {};
 const TEXT: Record<string, { text: string; html: string | null }> = {
   [scope.id]: { text: MARKDOWN, html: null },
   [page.id]: { text: PAGE, html: PAGE },
@@ -137,7 +141,8 @@ function serve(): Server {
     if (view) {
       const attachment = [scope, page, flow, policy].find((a) => a.id === view[1])!;
       const body = TEXT[attachment.id]!;
-      return new Response(JSON.stringify({ serverSession: 's', attachment, version: 'current', text: body.text, html: body.html }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      const version = servedVersion[attachment.id] ?? 'current';
+      return new Response(JSON.stringify({ serverSession: 's', attachment, version, text: body.text, html: body.html }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
     if (url.endsWith('/api/inbox/annotations')) {
       const body = JSON.parse(String(init?.body ?? '{}'));
@@ -159,9 +164,21 @@ function Shown({ children }: { children: React.ReactNode }) {
   return shown ? <>{children}</> : null;
 }
 
-function Pane({ start, steps, records = [], onClose = noop }: { start: InboxAttachmentState; steps: { id: string }[]; records?: InboxAnnotationRecord[]; onClose?: () => void }) {
+function Pane({
+  start,
+  steps,
+  records = [],
+  onClose = noop,
+  list = STEPS,
+}: {
+  start: InboxAttachmentState;
+  steps: { id: string }[];
+  records?: InboxAnnotationRecord[];
+  onClose?: () => void;
+  list?: AttachmentStep[];
+}) {
   const [open, setOpen] = useState(start);
-  const all = STEPS.map((s) => s.attachment);
+  const all = list.map((s) => s.attachment);
   return (
     <AttachmentPane
       attachment={open}
@@ -182,7 +199,7 @@ function Pane({ start, steps, records = [], onClose = noop }: { start: InboxAtta
       onOpenAt={noop}
       onClose={onClose}
       strip={{ picks: 0, annotations: 0, onWriteReply: noop }}
-      steps={STEPS}
+      steps={list}
       onStep={(id) => {
         steps.push({ id });
         setOpen(all.find((a) => a.id === id)!);
@@ -618,4 +635,159 @@ test.skipIf(!hasDom)('a kept comment opens its box where a fresh one on the same
   } finally {
     proto.getBoundingClientRect = real;
   }
+});
+
+// What would regress (F1): the first render after a step still holds the last file's view, so a draft key taken from it
+// (that file's sha) makes the image's row start empty, and the row's real draft is then thrown away as "taken".
+test.skipIf(!hasDom)('an image\'s typed comment waits for it across a file shown at its sent version', async () => {
+  serve();
+  servedVersion[scope.id] = 'b'.repeat(64);
+  const list = attachmentSequence([message], [shot, scope]);
+  const steps: { id: string }[] = [];
+  await render(<Pane start={shot} steps={steps} list={list} />);
+  const row = () => pane().querySelector<HTMLTextAreaElement>('[data-image-composer] textarea');
+  await waitFor(() => expect(row()).not.toBeNull());
+  await type(row()!, 'Too much padding.');
+  await pressNext();
+  expect(openId()).toBe(scope.id);
+  // The markdown file's view (at its sha) is in before the step back.
+  await waitFor(() => expect(pane().querySelector('.ib-docscroll')?.textContent).toContain('Payment retries'));
+  await pressPrev();
+  await waitFor(() => expect(row()?.value).toBe('Too much padding.'));
+  await settle(60);
+  expect(row()!.value).toBe('Too much padding.');
+});
+
+// What would regress (F3): an edit put back is held only in the card's request until its box draws; the pane going
+// before then drops the words. StrictMode's unmount and mount right after the first commit is exactly that moment.
+test.skipIf(!hasDom)('an edit put back and not drawn yet survives the pane going (StrictMode\'s remount); the box has the words', async () => {
+  serve();
+  const record = {
+    id: 'ann-2',
+    attachment_id: scope.id,
+    path: scope.path,
+    version: 'current',
+    message_id: M1,
+    annotation: { id: 'ann-2', blockId: 'block-2', startOffset: 0, endOffset: 8, type: 'COMMENT', text: 'Fine as is.', originalText: 'Partial', createdA: 1 },
+  } as unknown as InboxAnnotationRecord;
+  await render(
+    <StrictMode>
+      <Shown>
+        <Pane start={scope} steps={[]} records={[record]} />
+      </Shown>
+    </StrictMode>,
+  );
+  const editButton = () => pane().querySelector<HTMLButtonElement>('[data-annotation-id="ann-2"] button:is([title="Edit annotation"], [aria-label="Edit annotation"])')!;
+  const editBox = () => pane().querySelector<HTMLTextAreaElement>('[data-annotation-id="ann-2"] textarea');
+  await waitFor(() => expect(pane().querySelector('[data-annotation-id="ann-2"]')).not.toBeNull());
+  await act(async () => editButton().click());
+  await type(editBox()!, 'Not in v1 either.');
+  await act(async () => showPane(false));
+  // Opened again: StrictMode takes the pane away and back right after it puts the edit back, before its box draws.
+  await act(async () => showPane(true));
+  await waitFor(() => expect(editBox()?.value).toBe('Not in v1 either.'));
+});
+
+// What would regress (F9): Escape typed in a changed edit box, or a diagram part's box, throwing the words away.
+test.skipIf(!hasDom)('Escape in a changed edit box keeps the words as the file\'s draft; they are back when it opens again', async () => {
+  serve();
+  const record = {
+    id: 'ann-3',
+    attachment_id: scope.id,
+    path: scope.path,
+    version: 'current',
+    message_id: M1,
+    annotation: { id: 'ann-3', blockId: 'block-2', startOffset: 0, endOffset: 8, type: 'COMMENT', text: 'Leave it.', originalText: 'Payment', createdA: 1 },
+  } as unknown as InboxAnnotationRecord;
+  const server = serve();
+  await render(
+    <Shown>
+      <Pane start={scope} steps={[]} records={[record]} />
+    </Shown>,
+  );
+  const editButton = () => pane().querySelector<HTMLButtonElement>('[data-annotation-id="ann-3"] button:is([title="Edit annotation"], [aria-label="Edit annotation"])')!;
+  const editBox = () => pane().querySelector<HTMLTextAreaElement>('[data-annotation-id="ann-3"] textarea');
+  await waitFor(() => expect(pane().querySelector('[data-annotation-id="ann-3"]')).not.toBeNull());
+  await act(async () => editButton().click());
+  await type(editBox()!, 'Cap it at ten.');
+  await act(async () => {
+    editBox()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+  });
+  await waitFor(() => expect(editBox() === null).toBe(true));
+  expect(server.saved).toEqual([]);
+  await act(async () => showPane(false));
+  await act(async () => showPane(true));
+  await waitFor(() => expect(editBox()?.value).toBe('Cap it at ten.'));
+});
+
+test.skipIf(!hasDom)('Escape in a diagram part\'s box keeps the words; another thread picked while one is written keeps them too', async () => {
+  serve();
+  await render(
+    <Shown>
+      <Pane start={flow} steps={[]} />
+    </Shown>,
+  );
+  const partBox = () => pane().querySelector<HTMLTextAreaElement>('[data-diagram-composer] textarea');
+  await clickNodeD();
+  await type(partBox()!, 'Who approves on weekends?');
+  await act(async () => {
+    partBox()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+  });
+  await waitFor(() => expect(partBox() === null).toBe(true));
+  await act(async () => showPane(false));
+  await act(async () => showPane(true));
+  await waitFor(() => expect(partBox()?.value).toBe('Who approves on weekends?'));
+  // Typed on, then another thread: the pane goes with no close.
+  await type(partBox()!, 'Who approves on weekends and holidays?');
+  await act(async () => showPane(false));
+  await act(async () => showPane(true));
+  await waitFor(() => expect(partBox()?.value).toBe('Who approves on weekends and holidays?'));
+});
+
+// What would regress (F8): a comment popover of another surface, open with words, "saved" by the pane's capture
+// (its own owner would really save it) or kept as this file's comment.
+test.skipIf(!hasDom)('a comment popover that is not the pane\'s is neither submitted nor kept when the file closes', async () => {
+  serve();
+  const { CommentPopover } = await import('@plannotator/ui/components/CommentPopover');
+  const elsewhere: string[] = [];
+  const anchor = document.createElement('span');
+  document.body.appendChild(anchor);
+  let closed = 0;
+  await render(
+    <>
+      <Shown>
+        <Pane
+          start={scope}
+          steps={[]}
+          onClose={() => {
+            closed++;
+            showPane(false);
+          }}
+        />
+      </Shown>
+      <CommentPopover anchorEl={anchor} contextText="elsewhere" isGlobal={false} autoFocus={false} onSubmit={(text) => elsewhere.push(text)} onClose={noop} />
+    </>,
+  );
+  const foreign = document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea')!;
+  await type(foreign, 'Not the file\'s words.');
+  await waitFor(() => expect(pane().querySelector('.ib-docscroll')?.textContent).toContain('Payment'));
+  await act(async () => host!.querySelector<HTMLButtonElement>('[aria-label="Close SCOPE.md"]')!.click());
+  expect(closed).toBe(1);
+  expect(elsewhere).toEqual([]);
+  await act(async () => showPane(true));
+  await waitFor(() => expect(pane().querySelector('.ib-docscroll')?.textContent).toContain('Payment'));
+  await settle(150);
+  expect([...document.querySelectorAll('[data-comment-popover] textarea')].length).toBe(1);
+});
+
+// What would regress (F4): a kept line comment reopened on whatever those lines hold now.
+test('a kept line comment goes back where its lines are now, and nowhere when they changed', async () => {
+  const { relocateCodeRange } = await import('./components/AttachmentPane');
+  const { codeCommentAnnotation, codeRangeOf } = await import('./attachments');
+  const range = codeRangeOf(codeCommentAnnotation({ id: 'k', lineStart: 2, lineEnd: 3, text: 'x', code: 'const b = 2;\nconst c = 3;' }))!;
+  expect(relocateCodeRange(range, 'const a = 1;\nconst b = 2;\nconst c = 3;')).toEqual({ lineStart: 2, lineEnd: 3 });
+  // Two lines added above: the comment follows its lines.
+  expect(relocateCodeRange(range, '// one\n// two\nconst a = 1;\nconst b = 2;\nconst c = 3;')).toEqual({ lineStart: 4, lineEnd: 5 });
+  // The lines changed: no place (the words wait, on nothing).
+  expect(relocateCodeRange(range, 'const a = 1;\nconst b = 20;\nconst c = 3;')).toBeNull();
 });

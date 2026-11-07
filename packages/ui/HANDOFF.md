@@ -2760,6 +2760,8 @@ Optional seams, so a host can put an unsaved comment back in its composer (the I
 - `AnnotationPanel`'s `reopenEdit?: { id, text }`: a saved comment's edit box, opened with changed words.
 - `ViewerHandle.peekComment?() => Annotation | null`: the comment being written in the viewer's own composer (markdown: a text selection's; `HtmlViewer`: a pin's or a selection's), as the annotation its submit would add, with empty words. It only reads: nothing is added, closed or focused, so a host can call it while the viewer is being taken away (the Inbox reads it in its pane's unmount cleanup).
 - `CodeFileView` `onComposerLines?: (lines: { lineStart, lineEnd, originalCode } | null) => void`: told the lines of the line comment being written as its composer opens, null as it closes.
+- `peekComment` on the markdown `Viewer` also covers its global comment, a code block's comment and a diagram part's (with `diagramAnchor`), read through the new `DiagramViewer` `onComposerAnchor?(anchor | null)` and `DiagramBlock` / `MermaidBlock` / `GraphvizBlock` `onComposerAnchor?(blockId, 'inline' | 'popout', anchor | null)` (read only; absent: nothing changes).
+- `HtmlViewer`: a `restore-draft` that gets no answer within 3 s (a cached older bridge asset ignores the message) runs the host's `onMissing`, and a late answer (a selection carrying that `restoreId`) is let go with `cancel-selection`. A selection with no `restoreId` opens as it always has.
 
 ## Shape and links: a slot for a file's action (unreleased; additive)
 

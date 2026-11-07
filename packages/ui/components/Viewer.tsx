@@ -14,6 +14,7 @@ import { getRichCopyEnabled } from '../utils/richCopyPolicy';
 import { BlockRenderer } from './BlockRenderer';
 import { BELOW_TITLE_SLOT_MARKER } from '../utils/belowTitleSlot';
 import { indexQuestionBlocks, type IndexedQuestion, type ParsedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
+import { diagramTargetText, type DiagramAnchor } from '@plannotator/core/diagram-anchor';
 import type { QuestionBlockProps } from './blocks/QuestionBlock';
 import { resolveQuestionAnswers } from '../utils/questionAnswers';
 import { CodeBlock } from './blocks/CodeBlock';
@@ -512,7 +513,8 @@ export interface ViewerHandle {
    * box), or null when none is open. Reads only: nothing is added, closed or
    * focused, so a host can call it at any time, also while it is being taken
    * away (the Inbox keeps the comment as the file's draft then). Markdown
-   * `Viewer`: a text selection's comment. `HtmlViewer`: a pin's or a text
+   * `Viewer`: a text selection's comment, the global comment, a code block's,
+   * a diagram part's (`diagramAnchor`). `HtmlViewer`: a pin's or a text
    * selection's comment.
    */
   peekComment?: () => Annotation | null;
@@ -1030,6 +1032,15 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     isGlobal: boolean;
     codeBlock?: { block: Block; element: HTMLElement };
   } | null>(null);
+  const viewerCommentPopoverRef = useRef(viewerCommentPopover);
+  viewerCommentPopoverRef.current = viewerCommentPopover;
+  /** The part each diagram's composer is on while it is open (DiagramBlock's onComposerAnchor), for `peekComment`. */
+  const diagramComposers = useRef(new Map<string, { blockId: string; anchor: DiagramAnchor }>());
+  const onDiagramComposer = useCallback((blockId: string, where: 'inline' | 'popout', anchor: DiagramAnchor | null) => {
+    const key = `${blockId}:${where}`;
+    if (anchor) diagramComposers.current.set(key, { blockId, anchor });
+    else diagramComposers.current.delete(key);
+  }, []);
   // Viewer-specific quick label state (code blocks)
   const [codeBlockQuickLabelPicker, setCodeBlockQuickLabelPicker] = useState<{
     anchorEl: HTMLElement;
@@ -1071,7 +1082,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     applyAnnotations,
     takeSelection,
     reopenComment: hookReopenComment,
-    peekComment,
+    peekComment: peekSelectionComment,
   } = useAnnotationHighlighter({
     containerRef,
     annotations,
@@ -1506,6 +1517,22 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     if (!annotation.originalText) return false;
     return hookReopenComment(annotation, missing);
   }, [blocks, hookReopenComment, selectionCommentsOn]);
+
+  // `ViewerHandle.peekComment`: the comment being written, as its submit would add it, with empty words. Reads only.
+  const peekComment = useCallback((): Annotation | null => {
+    const selection = peekSelectionComment();
+    if (selection) return selection;
+    const base = { startOffset: 0, endOffset: 0, text: '', createdA: Date.now(), author: getIdentity() };
+    const open = viewerCommentPopoverRef.current;
+    if (open?.isGlobal) return { ...base, id: 'global-kept', blockId: '', type: AnnotationType.GLOBAL_COMMENT, originalText: '' };
+    if (open?.codeBlock) {
+      const codeText = open.codeBlock.element.querySelector('code')?.textContent ?? '';
+      return { ...base, id: 'codeblock-kept', blockId: open.codeBlock.block.id, endOffset: codeText.length, type: AnnotationType.COMMENT, originalText: codeText };
+    }
+    const part = [...diagramComposers.current.values()].at(-1);
+    if (part) return { ...base, id: 'diagram-kept', blockId: part.blockId, type: AnnotationType.COMMENT, originalText: diagramTargetText(part.anchor), diagramAnchor: part.anchor };
+    return null;
+  }, [peekSelectionComment]);
 
   // Imperative handle — delegates to hook, extends removeHighlight for code blocks
   useImperativeHandle(ref, () => ({
@@ -1961,6 +1988,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   block={group.block}
                   annotations={annotations}
                   reopenComment={diagramReopen?.blockId === group.block.id ? diagramReopen.request : undefined}
+                  onComposerAnchor={onDiagramComposer}
                   selectedAnnotationId={selectedAnnotationId}
                   onSelectAnnotation={onSelectAnnotation}
                   onAddAnnotation={selectionCommentsOn ? onAddAnnotation : undefined}
@@ -1978,6 +2006,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   block={group.block}
                   annotations={annotations}
                   reopenComment={diagramReopen?.blockId === group.block.id ? diagramReopen.request : undefined}
+                  onComposerAnchor={onDiagramComposer}
                   selectedAnnotationId={selectedAnnotationId}
                   onSelectAnnotation={onSelectAnnotation}
                   onAddAnnotation={selectionCommentsOn ? onAddAnnotation : undefined}

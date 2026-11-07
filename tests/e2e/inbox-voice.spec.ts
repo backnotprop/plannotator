@@ -23,8 +23,8 @@
  *  - The announcement: once, on a computer with a ChatGPT login only, its Phones only option saved by Turn on voice. It
  *    waits for its moment (approval "inbox-one-time-dialogs"): a reply of 40 or more words just sent.
  *  - A file or the artifacts opening over the box closes the microphone.
- *  - A take full screen's card is transcribing outlives the card: Write the reply (through the unsaved-comment question
- *    too), the Comment tab and browser Back; its words reach the thread it was said in, never the thread now open. A
+ *  - A take full screen's card is transcribing outlives the card: Write the reply (with a comment being written too),
+ *    the Comment tab and browser Back; its words reach the thread it was said in, never the thread now open. A
  *    microphone still listening closes all the same.
  *
  * Build the apps first (bun run --cwd apps/review build && bun run build:hook), then

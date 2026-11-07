@@ -115,6 +115,10 @@ export interface DiagramViewerProps {
    * `DiagramReopenRequest`): the composer opens at its part once the diagram
    * is drawn, holding its words. Absent: nothing changes. */
   readonly reopenComment?: DiagramReopenRequest;
+  /** Opt-in: told the part the composer is on as it opens (and as it moves),
+   * null as it closes, so a host can keep the words (read from the box) if
+   * the viewer is taken away. Reads only. Absent: nothing changes. */
+  readonly onComposerAnchor?: (anchor: DiagramAnchor | null) => void;
 }
 
 /** A part's identity, as the composer's key names it. */
@@ -127,6 +131,7 @@ export function DiagramViewer({
   comments,
   onCreateComment,
   onHostDraft,
+  onComposerAnchor,
   onAskAI,
   onSave,
   readOnlySource = false,
@@ -249,6 +254,11 @@ export function DiagramViewer({
   const openComposerRef = useRef(openComposer);
   openComposerRef.current = openComposer;
   const hostComposes = onHostDraft !== undefined;
+  const onComposerAnchorRef = useRef(onComposerAnchor);
+  onComposerAnchorRef.current = onComposerAnchor;
+  useEffect(() => {
+    onComposerAnchorRef.current?.(openComposer === null ? null : buildDiagramAnchorValue(openComposer.primary.target, openComposer.sourceLine));
+  }, [openComposer]);
   useEffect(() => {
     const report = onHostDraftRef.current;
     if (!report) return;
