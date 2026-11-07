@@ -38,9 +38,11 @@ export interface SystemDrawingAnswer<Model = unknown> {
 export interface SystemPullTouch<Change = unknown> {
   /** The PR's key in the pulls list (`InboxPull.key`). */
   key: string;
+  /** The PR's number (`InboxPull.number`): the drawing tags its parts "PR <number>". */
+  number: number;
   /** The drawn parts it changes, in the drawing's order. */
   parts: { id: string; name: string }[];
-  /** The package's gate result for its files (`GateResult` from @plannotator/system): what the drawing marks for it at rest. */
+  /** What the drawing marks for it at rest: the `touched` of the package's gate result for its files (`GateResult` from @plannotator/system). */
   change: Change;
 }
 

@@ -45,10 +45,15 @@ export interface SystemPaneProps {
 }
 
 type Drawing = { project: SystemProjectRow; model: SystemModel | null };
+/** The server's answer: each PR's touched parts and lines only (what the drawing marks), not the gate's whole result. */
+type PullTouches = SystemPullsAnswer<Pick<GateResult, 'touched'>>;
 
-/** The drawing's marks at rest: one per open PR that touches it, labelled "PR <n>" with its gate result. */
-export function touchesOf(answer: SystemPullsAnswer<GateResult> | null): Touch[] {
-  return (answer?.pulls ?? []).map((touch) => ({ label: `PR ${touch.key.slice(touch.key.lastIndexOf('#') + 1)}`, change: touch.change }));
+/** The drawing's marks at rest: one per open PR that touches it, labelled "PR <number>" with the parts and lines it touches. */
+export function touchesOf(answer: PullTouches | null): Touch[] {
+  return (answer?.pulls ?? []).map((touch) => ({
+    label: `PR ${touch.number}`,
+    change: { touched: touch.change.touched, wake: false, why: [], ignored: [] },
+  }));
 }
 
 /** "Desktop app", "Desktop app and The Inbox", "A, B and 2 more". */
@@ -62,7 +67,10 @@ export function SystemPane({ project, sheet, full, phone, pulls, onSheet, onFull
   const read = api ?? { drawing: inboxApi.systemDrawing, pulls: inboxApi.systemPulls };
   const [drawing, setDrawing] = useState<Drawing | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [touches, setTouches] = useState<SystemPullsAnswer<GateResult> | null>(null);
+  // The last answer, with the project it is for: kept while the next read is out, so the marks (and the drawing's
+  // zoom) don't drop each time the Reviews list is read again; another project's answer is not this one's.
+  const [answer, setAnswer] = useState<{ project: string; touches: PullTouches } | null>(null);
+  const touches = answer?.project === project ? answer.touches : null;
   // One array per answer: the drawing keeps its sheet while the same PRs mark it.
   const marks = useMemo(() => touchesOf(touches), [touches]);
   const [reading, setReading] = useState<Reading>(lastReading);
@@ -72,7 +80,7 @@ export function SystemPane({ project, sheet, full, phone, pulls, onSheet, onFull
     setError(null);
     read
       .drawing(project)
-      .then((answer) => live && setDrawing({ project: answer.project, model: answer.model }))
+      .then((got) => live && setDrawing({ project: got.project, model: got.model }))
       .catch((cause: unknown) => live && setError(cause instanceof Error ? cause.message : 'The drawing could not be read.'));
     return () => {
       live = false;
@@ -83,11 +91,11 @@ export function SystemPane({ project, sheet, full, phone, pulls, onSheet, onFull
   const listedAt = pulls?.fetched_at ?? null;
   useEffect(() => {
     let live = true;
-    setTouches(null);
     read
       .pulls(project)
-      .then((answer) => live && setTouches(answer))
-      .catch(() => live && setTouches({ pulls: [], unread: 0 }));
+      .then((next) => live && setAnswer({ project, touches: next }))
+      // A failed read keeps this project's last answer; with none yet, no PR changes it.
+      .catch(() => live && setAnswer((last) => (last?.project === project ? last : { project, touches: { pulls: [], unread: 0 } })));
     return () => {
       live = false;
     };
@@ -208,7 +216,7 @@ export function inertAround(el: HTMLElement): () => void {
 }
 
 /** "Open PRs that change this": one row per open PR whose files touch the drawing; a row opens the PR's pane. */
-function SystemPulls({ touches, pulls, onOpenStack }: { touches: SystemPullsAnswer<GateResult> | null; pulls: InboxPullsAnswer | null; onOpenStack: (key: string) => void }) {
+function SystemPulls({ touches, pulls, onOpenStack }: { touches: PullTouches | null; pulls: InboxPullsAnswer | null; onOpenStack: (key: string) => void }) {
   const groups = useMemo(() => (pulls ? pullGroups(pulls, null) : null), [pulls]);
   const rows = (touches?.pulls ?? []).flatMap((touch) => {
     const item = groups ? findStack(groups, touch.key) : null;

@@ -1282,7 +1282,7 @@ export const inboxApi = {
   /** System (on only): the projects with their drawing's state, one project's drawing, and the open PRs that change it. */
   systemProjects: () => get<SystemProjectsAnswer>(inboxUrl('/system/projects')),
   systemDrawing: (project: string) => get<SystemDrawingAnswer<SystemModel>>(inboxUrl(`/system/drawing?project=${encodeURIComponent(project)}`)),
-  systemPulls: (project: string) => get<SystemPullsAnswer<GateResult>>(inboxUrl(`/system/pulls?project=${encodeURIComponent(project)}`)),
+  systemPulls: (project: string) => get<SystemPullsAnswer<Pick<GateResult, 'touched'>>>(inboxUrl(`/system/pulls?project=${encodeURIComponent(project)}`)),
   /** System's setup dialog (System on only): the projects found on this Mac with a git remote, and one project's save. */
   systemSetup: () => get<SystemSetupAnswer>(inboxUrl('/system/setup')),
   saveSystemSetup: (input: SystemSetupInput) => post<{ setup: SystemSetup }>(inboxUrl('/system/setup'), { ...input }),

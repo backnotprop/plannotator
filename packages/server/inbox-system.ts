@@ -156,6 +156,9 @@ export function systemFilesCache(max = 400): SystemFilesCache {
 /** A PR's place in the cache: its head commit, or (when the list did not say it) its last update. */
 const filesKeyOf = (pull: InboxPull) => `${pull.key}@${pull.head_sha ?? `updated ${pull.updated_at}`}`;
 
+/** What the pulls answer carries of each PR's gate result: the parts and lines it touches, all the drawing marks. */
+export type SystemPullChange = Pick<GateResult, "touched">;
+
 /** The open PRs of a repo in the list, newest first. A PR is read at most once per list here, so a repo with many open PRs reads the newest. */
 export const SYSTEM_PULLS_READ_MAX = 40;
 const READ_AT_ONCE = 4;
@@ -171,13 +174,13 @@ export async function systemPullTouches(
   pulls: readonly InboxPull[],
   patchOf: (key: string) => Promise<string>,
   cache: SystemFilesCache = systemFilesCache(),
-): Promise<SystemPullsAnswer<GateResult>> {
+): Promise<SystemPullsAnswer<SystemPullChange>> {
   const wanted = repo.toLowerCase();
   const open = pulls
     .filter((pull) => (pull.state === "open" || pull.state === "draft") && `${pull.host}/${pull.repo}`.toLowerCase() === wanted)
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
     .slice(0, SYSTEM_PULLS_READ_MAX);
-  const found: (SystemPullTouch<GateResult> | null)[] = new Array(open.length).fill(null);
+  const found: (SystemPullTouch<SystemPullChange> | null)[] = new Array(open.length).fill(null);
   let unread = 0;
   let next = 0;
   const worker = async () => {
@@ -193,14 +196,15 @@ export async function systemPullTouches(
         }
         const change = gate({ files: [...files], model });
         const parts = touchedParts(model, change);
-        if (parts.length > 0) found[i] = { key: pull.key, parts, change };
+        // Only what the drawing marks: the gate's reasons and ignored paths stay here.
+        if (parts.length > 0) found[i] = { key: pull.key, number: pull.number, parts, change: { touched: change.touched } };
       } catch {
         unread += 1;
       }
     }
   };
   await Promise.all(Array.from({ length: Math.min(READ_AT_ONCE, open.length) }, worker));
-  return { pulls: found.filter((touch): touch is SystemPullTouch<GateResult> => touch !== null), unread };
+  return { pulls: found.filter((touch): touch is SystemPullTouch<SystemPullChange> => touch !== null), unread };
 }
 
 /** What the System read routes need from the running Inbox (inbox.ts passes its own). */
