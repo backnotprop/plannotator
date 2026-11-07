@@ -287,7 +287,7 @@ function GeneralSection({
   onTestNotification?: () => Promise<TestResult>;
   sound?: InboxSound;
 }) {
-  const { mode, shown, choose } = useInboxTheme();
+  const { mode, choose } = useInboxTheme();
   const textSize = useInboxTextSize();
   const notificationsOn = settings.notifications.enabled && permission === 'granted';
   const status = notifyStatusKind(settings.notifications.enabled, permission);
@@ -330,7 +330,7 @@ function GeneralSection({
                 Theme
               </span>
               <span className="ib-desc">
-                {mode === 'system' ? `Follows this computer, ${shown} now. Also plan review, code review and annotate.` : 'Also plan review, code review and annotate.'}
+                Also plan review, code review and annotate.
               </span>
             </span>
             <span className="ib-ctl">
