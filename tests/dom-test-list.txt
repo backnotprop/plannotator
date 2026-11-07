@@ -473,6 +473,11 @@ packages/ui/components/ThemeProvider.test.tsx
 packages/ui/components/MarkdownEditor.embedPicker.test.ts
 packages/ui/hooks/useViewportEnvironment.test.tsx
 packages/ui/hooks/useIsMobile.test.tsx
+packages/ui/hooks/useEdgeSwipe.test.tsx
+packages/ui/hooks/usePanelPresence.test.tsx
+packages/ui/hooks/usePanelScrollLock.test.tsx
+packages/ui/components/OverlayScrollArea.scrollMemory.test.tsx
+packages/editor/App.edgeSwipe.mobile.test.tsx
 packages/ui/hooks/useVimDocumentFocus.test.tsx
 packages/ui/hooks/useScrollKeyRouting.test.tsx
 packages/ui/hooks/useScrollViewport.test.ts

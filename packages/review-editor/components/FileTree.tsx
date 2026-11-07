@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useCallback, useLayoutEffect, useState, useMemo, useRef } from 'react';
 import { CodeAnnotation } from '@plannotator/ui/types';
 import type {
   JjEvoLogEntry,
@@ -15,7 +15,7 @@ import { EvoLogPicker } from './EvoLogPicker';
 import { WorktreePicker } from './WorktreePicker';
 import { getReviewSearchSideLabel, type ReviewSearchFileGroup, type ReviewSearchMatch } from '../utils/reviewSearch';
 import type { DiffFile } from '../types';
-import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
+import { OverlayScrollArea, type ScrollMemory } from '@plannotator/ui/components/OverlayScrollArea';
 import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
 import { Paperclip } from 'lucide-react';
 import { RepoFileTree } from './RepoFileTree';
@@ -30,7 +30,15 @@ import { SidebarActionRow, SemanticDiffRow, CallFlowRow, AllChangesRow } from '.
 import { PanelControlsRow, PanelSearchField, TOOLS_ONE_ROW_WIDTH } from './PanelChrome';
 import { PanelSectionHeader, CountColumns, countColumnVars, compactRowsProps } from './FileRowBits';
 
+/** Per-snapshot state needed to restore the same All files rows on remount. */
+export interface RepoFolderMemory {
+  expanded: ReadonlySet<string> | null;
+  activeTarget?: string | null;
+}
+
 interface FileTreeProps {
+  scrollMemory?: ScrollMemory;
+  repoFolderMemory?: RepoFolderMemory;
   /** The top of the panel (views, the comparison sentence, Changes | All
    *  files, Go to File), shared with the other views. Absent: no header. */
   header?: ReviewPanelHeaderModel;
@@ -136,6 +144,8 @@ interface FileTreeProps {
 }
 
 export const FileTree: React.FC<FileTreeProps> = ({
+  scrollMemory,
+  repoFolderMemory,
   header,
   treeScope = 'changes',
   repoFiles,
@@ -349,7 +359,15 @@ export const FileTree: React.FC<FileTreeProps> = ({
   const showAllFiles = treeScope === 'all' && !!repoFiles;
   const repoState = repoFiles?.state;
   const repoReady = repoState?.status === 'ready' ? repoState : null;
-  const [repoExpanded, setRepoExpanded] = useState<ReadonlySet<string> | null>(null);
+  const [repoExpanded, setRepoExpanded] = useState<ReadonlySet<string> | null>(() => repoFolderMemory?.expanded ?? null);
+  const [previousRepoFolderMemory, setPreviousRepoFolderMemory] = useState(repoFolderMemory);
+  if (repoFolderMemory !== previousRepoFolderMemory) {
+    setPreviousRepoFolderMemory(repoFolderMemory);
+    setRepoExpanded(repoFolderMemory?.expanded ?? null);
+  }
+  useLayoutEffect(() => {
+    if (repoFolderMemory) repoFolderMemory.expanded = repoExpanded;
+  }, [repoExpanded, repoFolderMemory]);
   // Opens on the paths that lead to the changes (and the active file).
   useEffect(() => {
     if (!repoReady || repoExpanded) return;
@@ -357,8 +375,12 @@ export const FileTree: React.FC<FileTreeProps> = ({
   }, [repoReady, repoExpanded, files, activePath]);
   // The active file's folders open when it changes, as in Changes.
   const activeRepoTarget = activeRepoPath ?? activePath ?? null;
+  const lastRepoTarget = useRef<string | null | undefined>(undefined);
   useEffect(() => {
-    if (!activeRepoTarget) return;
+    const previous = repoFolderMemory ? repoFolderMemory.activeTarget : lastRepoTarget.current;
+    lastRepoTarget.current = activeRepoTarget;
+    if (repoFolderMemory) repoFolderMemory.activeTarget = activeRepoTarget;
+    if (!activeRepoTarget || previous === activeRepoTarget) return;
     setRepoExpanded((current) => {
       if (!current) return current;
       const missing = repoAncestors(activeRepoTarget).filter((dir) => !current.has(dir));
@@ -367,7 +389,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
       for (const dir of missing) next.add(dir);
       return next;
     });
-  }, [activeRepoTarget]);
+  }, [activeRepoTarget, repoFolderMemory]);
   const toggleRepoFolder = useCallback((path: string) => {
     setRepoExpanded((current) => {
       const next = new Set(current ?? []);
@@ -527,7 +549,13 @@ export const FileTree: React.FC<FileTreeProps> = ({
 
       {/* The list: the nav rows scroll with it; the tools and progress rows
           stick to its top. Then the file tree, All files or search results. */}
-      <OverlayScrollArea ref={scrollAreaRef} className="flex-1 min-h-0">
+      <OverlayScrollArea
+        ref={scrollAreaRef}
+        // All files initializes its expanded ancestors after mount. Restore
+        // only once those rows exist, rather than clamping to an empty list.
+        scrollMemory={showAllFiles && (!repoReady || !repoExpanded) ? undefined : scrollMemory}
+        className="flex-1 min-h-0"
+      >
         <div
           {...reviewPanelBodyProps(header)}
           className="px-2 pb-2"

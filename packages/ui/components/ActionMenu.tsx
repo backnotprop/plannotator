@@ -1,10 +1,17 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useDismissablePopover } from '../hooks/useDismissablePopover';
+import { useEdgeSwipe } from '../hooks/useEdgeSwipe';
+import { usePanelPresence } from '../hooks/usePanelPresence';
+import { usePanelScrollLock } from '../hooks/usePanelScrollLock';
+import { usePanelDrag } from '../hooks/usePanelDrag';
 
 interface ActionMenuProps {
   className?: string;
   panelClassName?: string;
   panelWidth?: 'default' | 'wide';
+  /** Let the compact header's Options menu own the right-edge gesture. */
+  compactEdgeSwipe?: boolean;
   renderTrigger: (props: {
     isOpen: boolean;
     toggleMenu: () => void;
@@ -16,37 +23,95 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
   className,
   panelClassName,
   panelWidth = 'default',
+  compactEdgeSwipe = false,
   renderTrigger,
   children,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [presentation, setPresentation] = useState<'popover' | 'drawer'>('popover');
+  const drawer = compactEdgeSwipe && presentation === 'drawer';
   const menuRef = useRef<HTMLDivElement>(null);
+  const panelId = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const selector = `[data-pn-options-menu="${panelId}"]`;
+  const panelDrag = usePanelDrag({
+    selector,
+    onPreview: () => setPresentation('drawer'),
+    onOpen: () => setIsOpen(true),
+    onClose: () => setIsOpen(false),
+    fallbackWidth: () => {
+      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+      return Math.min(18 * rem, window.visualViewport?.width || window.innerWidth);
+    },
+  });
+  const previewing = drawer && panelDrag.active && !isOpen;
+  const presence = usePanelPresence(isOpen || previewing, drawer);
+  usePanelScrollLock(compactEdgeSwipe && presence.present);
 
-  // Shared dismissal (outside pointerdown + Escape). The hook consumes the
-  // dismissing Escape, so closing an open Options menu no longer also runs
-  // the host app's own Escape ladder — one Escape, one rung.
-  const dismiss = useCallback(() => setIsOpen(false), []);
+  const cancelDrag = panelDrag.cancel;
+  const dismiss = useCallback(() => { cancelDrag(); setIsOpen(false); }, [cancelDrag]);
+  useEdgeSwipe({
+    enabled: compactEdgeSwipe,
+    onOpenRight: () => { setPresentation('drawer'); setIsOpen(true); },
+    drag: { right: panelDrag.gesture },
+    panel: isOpen ? { side: 'right', selector, onClose: dismiss, trackDrag: drawer } : undefined,
+  });
   useDismissablePopover({
     enabled: isOpen,
     ref: menuRef,
+    contentRef: panelRef,
     onDismiss: dismiss,
   });
 
-  return (
-    <div ref={menuRef} className={className ? `relative ${className}` : 'relative'}>
-      {renderTrigger({
-        isOpen,
-        toggleMenu: () => setIsOpen(open => !open),
-      })}
-
-      {isOpen && (
-        <div
-          data-pn-dismissable-popover="true"
-          className={panelClassName ?? `absolute top-full right-0 mt-1 ${panelWidth === 'wide' ? 'w-64' : 'w-56'} rounded-lg border border-border bg-popover py-1 shadow-xl z-[70]`}
-        >
-          {children({ closeMenu: () => setIsOpen(false) })}
+  const panel = presence.present ? (
+    <div
+      ref={panelRef}
+      data-pn-dismissable-popover="true"
+      data-pn-options-menu={compactEdgeSwipe ? panelId : undefined}
+      data-print-hide={drawer || undefined}
+      data-pn-compact-touch-layout={compactEdgeSwipe ? 'true' : undefined}
+      role={compactEdgeSwipe ? 'dialog' : undefined}
+      aria-label={compactEdgeSwipe ? 'Options' : undefined}
+      aria-hidden={(presence.closing || previewing) || undefined}
+      inert={(presence.closing || previewing) || undefined}
+      data-pn-panel-side={compactEdgeSwipe ? 'right' : undefined}
+      data-pn-panel-state={drawer ? (presence.closing ? 'closed' : 'open') : undefined}
+      className={drawer
+        ? 'pn-options-drawer flex flex-col border-l border-border bg-popover text-foreground shadow-xl z-[70]'
+        : compactEdgeSwipe
+          ? 'absolute top-full right-0 mt-1 w-[min(18rem,calc(100vw-1rem))] max-h-[calc(var(--pn-viewport-height,100vh)-4.5rem-var(--pn-safe-top)-var(--pn-safe-bottom))] overflow-y-auto rounded-lg border border-border bg-popover py-1 shadow-xl z-[70]'
+          : panelClassName ?? `absolute top-full right-0 mt-1 ${panelWidth === 'wide' ? 'w-64' : 'w-56'} rounded-lg border border-border bg-popover py-1 shadow-xl z-[70]`}
+    >
+      {drawer && (
+        <div className="flex h-[52px] shrink-0 items-center justify-between border-b border-border/50 px-3">
+          <h2 className="text-sm font-semibold">Options</h2>
+          <button
+            type="button"
+            data-pn-touch-target
+            data-pn-touch-target-icon
+            aria-label="Close options"
+            onClick={dismiss}
+            className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" d="m6 6 12 12M18 6 6 18" />
+            </svg>
+          </button>
         </div>
       )}
+      {compactEdgeSwipe
+        ? <div data-pn-options-content className={drawer ? "min-h-0 flex-1 overflow-y-auto overscroll-contain py-1" : undefined}>{children({ closeMenu: dismiss })}</div>
+        : children({ closeMenu: dismiss })}
+    </div>
+  ) : null;
+
+  return (
+    <div ref={menuRef} className={className ? `relative ${className}` : 'relative'}>
+      {renderTrigger({ isOpen, toggleMenu: () => {
+        if (!isOpen) setPresentation('popover');
+        setIsOpen(open => !open);
+      } })}
+      {drawer && panel ? createPortal(panel, document.body) : panel}
     </div>
   );
 };

@@ -916,6 +916,72 @@ body:has([data-pn-document-scroll="true"]) > #root {
   padding-left: max(1rem, var(--pn-safe-left));
 }
 
+/* Stop background scrolling without fixing the body or rewriting scrollY:
+ * choosing a heading may still scroll the document programmatically. */
+html[data-pn-panel-scroll-lock="true"],
+html[data-pn-panel-scroll-lock="true"] body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* Compact panels share one short slide/fade, including interrupted exits. */
+.pn-options-drawer {
+  position: fixed;
+  z-index: 110;
+  top: var(--pn-viewport-offset-top, 0px);
+  right: calc(100vw - var(--pn-viewport-offset-left, 0px) - var(--pn-viewport-width, 100vw));
+  width: min(18rem, var(--pn-viewport-width, 100vw));
+  height: 100dvh;
+  height: var(--pn-viewport-height, 100dvh);
+  box-sizing: border-box;
+  padding-top: var(--pn-safe-top);
+  padding-bottom: var(--pn-safe-bottom);
+  padding-right: var(--pn-safe-right);
+  overscroll-behavior: contain;
+}
+
+[data-pn-panel-side] {
+  --pn-panel-offset: 100%;
+  transform: none;
+  opacity: 1;
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease-out;
+}
+
+[data-pn-panel-side="left"] { --pn-panel-offset: -100%; }
+
+[data-pn-panel-state="closed"] {
+  transform: translateX(var(--pn-panel-offset));
+  opacity: 0;
+  pointer-events: none;
+}
+
+[data-pn-panel-drag] {
+  --pn-panel-drag-sign: 1;
+  transition: none;
+  opacity: 1;
+}
+
+[data-pn-panel-side="left"][data-pn-panel-drag] { --pn-panel-drag-sign: -1; }
+
+[data-pn-panel-drag="opening"] {
+  transform: translateX(calc(var(--pn-panel-drag-sign) * max(0px, calc(100% - var(--pn-panel-drag-distance)))));
+}
+
+[data-pn-panel-drag="closing"] {
+  transform: translateX(calc(var(--pn-panel-drag-sign) * min(100%, var(--pn-panel-drag-distance))));
+}
+
+@starting-style {
+  [data-pn-panel-state="open"] {
+    transform: translateX(var(--pn-panel-offset));
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-pn-panel-side] { transition: none; transform: none; }
+}
+
 /* Full-stage compact surfaces (for example the Plan navigator) use the same
  * observed visual viewport as portaled dialogs without inheriting their 1rem
  * ornamental margin. The stage owns its safe areas and contains scroll-chain

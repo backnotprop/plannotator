@@ -20,7 +20,7 @@ import { fileKind } from '@plannotator/core/file-kind';
 import { FileKindIcon } from '@plannotator/guide-viewer/FileKindIcon';
 import { SearchFileGroup } from './FileTree';
 import type { ReviewSearchFileGroup, ReviewSearchMatch } from '../utils/reviewSearch';
-import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
+import { OverlayScrollArea, type ScrollMemory } from '@plannotator/ui/components/OverlayScrollArea';
 import type { DiffFile } from '../types';
 
 /**
@@ -43,6 +43,7 @@ interface SectionItem {
 }
 
 interface SectionsPanelProps {
+  scrollMemory?: ScrollMemory;
   files: DiffFile[];
   /** The server's generated set, so a generated file never reads as a test. */
   generatedFiles?: ReadonlySet<string>;
@@ -200,6 +201,7 @@ const SectionRow: React.FC<{
 };
 
 export const SectionsPanel: React.FC<SectionsPanelProps> = ({
+  scrollMemory,
   files,
   generatedFiles,
   sections,
@@ -534,7 +536,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
       {/* Sections (or search results — same swap the tree view does). The
           nav rows scroll with the list; the tools and progress rows stick. */}
       <div ref={scrollportRef} className="flex-1 min-h-0">
-        <OverlayScrollArea className="h-full">
+        <OverlayScrollArea scrollMemory={scrollMemory} className="h-full">
           <div
             ref={contentRef}
             {...reviewPanelBodyProps(header)}
