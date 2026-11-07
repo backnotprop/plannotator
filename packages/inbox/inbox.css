@@ -7639,7 +7639,7 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
    width. Three-line rows here, phone rows below; a wide row keeps its columns. */
 .ib-nrow .ib-l4 { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; margin-top: 4px; font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-nrow .ib-l4 > .ib-t { flex: none; margin-right: auto; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); line-height: 17px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.ib-nrow .ib-l4 > :is(.ib-badge, .ib-c, .ib-pinmark, .ib-stm, .ib-zwhen) { flex: none; }
+.ib-nrow .ib-l4-end > :is(.ib-badge, .ib-c, .ib-pinmark, .ib-stm, .ib-zwhen) { flex: none; }
 .ib-nrow .ib-l4 .ib-c { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; }
 .ib-nrow .ib-l4 .ib-c:has(.ib-b-wait) { display: inline-flex; align-items: center; }
 .ib-m4 { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; min-height: 22px; margin-top: 2px; }
@@ -7658,9 +7658,12 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 .ib-lk-tbelow.ib-lk-compact.ib-lk-pv2 .ib-lbody > .ib-group > .ib-mrow { contain-intrinsic-size: auto none auto 90px; }
 /* With the time under the preview, line 1 has no time for the hover action (Mark read, Mark unread, Send now) to
    cover, and the name runs to the row's edge: the action sits on the time's line instead, over the row's end (the
-   pin, badge, words, count or status mark), as a wide row's covers its counts. The time at that line's left, and its
-   delivery tick, stay as they are, so the action keeps its 12 px from the edge. The default look keeps line 1. */
-.pn-inbox .ib-lk-tbelow .ib-rw .ib-nrow ~ .ib-ract { top: auto; bottom: 7px; }
+   pin, badge, words, count or status mark, hidden under it), as a wide row's covers its counts. The time at that
+   line's left, and its delivery tick, stay as they are, so the action keeps its 12 px from the edge. The default
+   look keeps line 1. */
+.pn-inbox .ib-lk-tbelow .ib-rw .ib-nrow ~ .ib-ract { top: auto; bottom: 10px; }
+.ib-nrow .ib-l4-end { display: contents; }
+.ib-lk-tbelow .ib-rw:is(:hover, :has(:focus-visible), [data-action-focus]):has(.ib-ract) .ib-l4-end { visibility: hidden; }
 .pn-inbox .ib-lk-tbelow .ib-rw:is(:hover, :has(:focus-visible), [data-action-focus]):has(.ib-tick) > .ib-ract { right: 12px; }
 .ib-lk-tbelow .ib-rw:is(:hover, :has(:focus-visible), [data-action-focus]):has(.ib-ract) .ib-l4 .ib-t .ib-tickt { flex-direction: row; }
 /* Dividers (.ib-lk-div): a hairline in the theme's border colour between two rows, inset to the row's text on both

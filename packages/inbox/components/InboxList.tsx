@@ -1034,7 +1034,8 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
       {timeBelow && (
         <div className="ib-l4" data-time-below="">
           {time}
-          {end}
+          {/* One box (display: contents) so the hover action can hide the row's end under it by class. */}
+          <span className="ib-l4-end">{end}</span>
         </div>
       )}
       {pinned && <PinnedWords />}
