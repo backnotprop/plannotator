@@ -301,14 +301,19 @@ test('a phone: the worst case stays in the sheet, thirty comments and a long one
 });
 
 test('a desktop: the panel is the docked column or the 300 px sheet at the right edge, under the bars', async ({ browser }) => {
-  // The review's own fold is 1500 px wide.
+  // The review's own fold is 1500 px wide. A pull request's page sits beside the open sidebar, not over it, so its
+  // window needs the sidebar's width more than that to keep the column docked; the panel's edge is the review's.
+  const reviewRight = async (page: Page) => {
+    const review = (await page.locator('.ib-review').boundingBox())!;
+    return review.x + review.width;
+  };
   for (const [name, open] of Object.entries(opens)) {
-    const docked = await windowAt(browser, 1600, 900, false);
+    const docked = await windowAt(browser, 1900, 900, false);
     try {
       await open(docked.page);
       const panel = (await docked.page.locator('.ib-gpanel').boundingBox())!;
       expect(panel.width).toBe(300);
-      expect(panel.x + panel.width).toBe(1600);
+      expect(panel.x + panel.width).toBe(await reviewRight(docked.page));
       expect(panel.y, name).toBeGreaterThan(0);
       await expect(docked.page.locator('.ib-vhead')).toBeVisible();
       await expect(docked.page.locator('.ib-gbody')).toBeVisible();
@@ -323,8 +328,10 @@ test('a desktop: the panel is the docked column or the 300 px sheet at the right
         const sheet = folded.page.locator('.ib-gpanel');
         await expect(sheet).toBeVisible();
         const box = (await sheet.boundingBox())!;
-        expect(box.width).toBe(300);
-        expect(box.x + box.width).toBe(width);
+        // 300 px, or the diff's width when that is less (a pull request beside the sidebar at 800).
+        const diff = (await folded.page.locator('.ib-gbody').boundingBox())!;
+        expect(box.width).toBe(Math.min(300, diff.width));
+        expect(box.x + box.width).toBe(await reviewRight(folded.page));
         expect(box.y, name).toBeGreaterThan(0);
         expect(await sheet.evaluate((el) => getComputedStyle(el).position)).toBe('absolute');
         await expect(folded.page.locator('.ib-vhead')).toBeVisible();

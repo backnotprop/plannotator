@@ -292,6 +292,7 @@ packages/review-editor/edit/useEditSession.recovery.test.tsx
 packages/review-editor/edit/discardRestoreRender.test.tsx
 packages/review-editor/edit/selectionActionPopover.test.ts
 packages/review-editor/components/AllFilesCodeView.lifecycle.test.tsx
+packages/review-editor/components/AllFilesCodeView.flushTrailing.test.tsx
 packages/review-editor/components/AllFilesCodeView.generated.test.tsx
 packages/review-editor/components/AllFilesCodeView.autoViewed.test.tsx
 packages/review-editor/components/AllFilesCodeView.imagePreview.test.tsx
@@ -330,6 +331,7 @@ packages/review-editor/components/PanelChrome.test.tsx
 packages/review-editor/components/FileTree.search-placement.test.tsx
 packages/review-editor/components/FileTree.fileKinds.test.tsx
 packages/review-editor/components/FileHeader.fileKind.test.tsx
+packages/review-editor/components/FileHeader.narrow.test.tsx
 packages/review-editor/components/PackageChangesCard.test.tsx
 packages/review-editor/components/FileTreeNode.controls.test.tsx
 packages/ui/components/Settings.analysis.test.tsx
@@ -537,7 +539,10 @@ packages/inbox/guideGlobalComment.test.tsx
 packages/inbox/guideExpandContext.test.tsx
 packages/inbox/guideScrollsWithPage.test.tsx
 packages/inbox/pulls/pullReview.test.tsx
+packages/inbox/pulls/pullAllFiles.test.tsx
+packages/inbox/pulls/railTree.test.tsx
 packages/inbox/pulls/usePulls.test.tsx
+packages/inbox/shortcuts/useSheetEscape.test.tsx
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/inbox/pulls/pullReviewKept.test.tsx
 packages/ui/components/shape/ShapeDrawn.test.tsx

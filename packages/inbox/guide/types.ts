@@ -58,6 +58,8 @@ export interface GuideReaderProps {
   highlight?: { path: string; start: number; end: number; token: number } | null;
   /** Under the host's own title (the PR review): no heading block of the reader's own, the host's page margins. */
   bare?: boolean;
+  /** Bare: Global comment and Split | Unified in this element of the host's (the PR review's strip), not above the files. */
+  controlsHost?: HTMLElement | null;
   /** Reads one changed file's whole text, for the "N unmodified lines" arrows. Absent: the diffs show as they came. */
   fileContents?: (path: string, signal: AbortSignal, patch: string) => Promise<InboxFileContents>;
   /**
