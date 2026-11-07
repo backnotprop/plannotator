@@ -10,8 +10,9 @@
  * (`auto_reload` on the poll). Then, from the Inbox tick (a `$.clock` timer,
  * never a hook a turn waits on), this runs `/reload-plugins plannotator`
  * once, when:
- *  - no main-loop turn and no subagent runs, no prompt is on its way in (seen
- *    at `prompt.submit`, its turn not started yet), and the mod has no
+ *  - no main-loop turn and no subagent runs, no prompt is on its way in (inside
+ *    `prompt.submit`, with no time limit, or entered as a new turn whose
+ *    `turn.start` has not come yet), and the mod has no
  *    Plannotator work in flight (an open review, a decision waiting to go in,
  *    an Inbox reply being delivered, an Ask question): `busyReason`, plus
  *    `agentsBusy` (`$.agent.list()`, which also sees agents started before
@@ -82,8 +83,9 @@ export const AUTO_RELOAD_MAX_REFUSALS = 3
 /** After the store did not keep a record, how long before it is tried again. */
 export const AUTO_RELOAD_STORE_RETRY_MS = 60_000
 /**
- * Ticks a prompt seen at `prompt.submit` counts as on its way in without a
- * turn start or a drop (a slash command that starts no turn): then it is let go.
+ * Ticks a prompt that entered as a new turn (prompt.submit resolved with no
+ * turn id) waits for its `turn.start` before it is let go (a slash command
+ * that starts no turn). A prompt still inside prompt.submit has no limit.
  */
 export const AUTO_RELOAD_PROMPT_GAP_TICKS = 30
 
@@ -220,9 +222,13 @@ export class AutoReload {
   private storeRetryAt = 0
   /** Ticks seen, the clock of the prompt gap below. */
   private ticks = 0
-  /** Prompts seen at prompt.submit whose turn has not started (nor were they dropped), and the tick of the last. */
-  private promptsEntering = 0
-  private promptEnteringTick = 0
+  /** Prompts inside prompt.submit (the hooks beneath have not finished): busy with no time limit. */
+  private promptsSubmitting = 0
+  /** Prompts that entered as a new turn whose turn.start has not come, and the tick the last one entered. */
+  private promptsAwaitingTurn = 0
+  private promptAwaitingTick = 0
+  /** The last reason a look stopped, logged once per change. */
+  private lastHeld: string | null = null
 
   constructor(private readonly deps: AutoReloadDeps) {
     this.attempts = deps.attempts ?? moduleAttempts
@@ -235,21 +241,35 @@ export class AutoReload {
     this.offer = target
   }
 
-  /** A main-loop turn started: a refused run may be tried again, and the prompts on their way in have arrived. */
+  /** A main-loop turn started: a refused run may be tried again, and the prompts that entered have their turn. */
   onInputMoved(): void {
     this.heldForInput = false
-    this.promptsEntering = 0
+    this.promptsAwaitingTurn = 0
   }
 
-  /** A prompt reached prompt.submit: the session counts as busy until its turn starts, it is dropped, or it went into a running turn. */
-  notePromptEntering(): void {
-    this.promptsEntering += 1
-    this.promptEnteringTick = this.ticks
+  /** A prompt reached our prompt.submit hook: busy until the hooks beneath have finished with it (notePromptLeft). */
+  notePromptSubmitting(): void {
+    this.promptsSubmitting += 1
   }
 
-  /** A prompt noted by notePromptEntering was dropped, or went into a turn already running. */
-  notePromptSettled(): void {
-    if (this.promptsEntering > 0) this.promptsEntering -= 1
+  /**
+   * prompt.submit finished with a prompt notePromptSubmitting saw: `dropped`
+   * (a hook beneath dropped it, or it threw), `into-turn` (it went into a turn
+   * already running, which keeps the session busy), or `new-turn` (its
+   * turn.start is still to come: busy until then, or AUTO_RELOAD_PROMPT_GAP_TICKS).
+   */
+  notePromptLeft(how: 'dropped' | 'into-turn' | 'new-turn'): void {
+    if (this.promptsSubmitting > 0) this.promptsSubmitting -= 1
+    if (how !== 'new-turn') return
+    this.promptsAwaitingTurn += 1
+    this.promptAwaitingTick = this.ticks
+  }
+
+  /** A look stopped for `reason`: one debug line per change of reason. */
+  private held(reason: string): void {
+    if (reason === this.lastHeld) return
+    this.lastHeld = reason
+    this.deps.debug(`auto-reload: not now (${reason})`)
   }
 
   dispose(): void {
@@ -297,14 +317,15 @@ export class AutoReload {
   private busyNow(target: string): string | null {
     if (this.disposed) return 'the instance was disposed'
     if (this.offer !== target) return 'the Inbox changed its word'
-    if (this.promptsEntering > 0) return 'a prompt is on its way in'
+    if (this.promptsSubmitting > 0) return 'a prompt is being submitted'
+    if (this.promptsAwaitingTurn > 0) return 'a prompt waits for its turn to start'
     return this.deps.busyReason()
   }
 
   /** One look, from the Inbox tick. Never throws; runs at most one reload at a time. */
   async tick(): Promise<void> {
     this.ticks += 1
-    if (this.promptsEntering > 0 && this.ticks - this.promptEnteringTick > AUTO_RELOAD_PROMPT_GAP_TICKS) this.promptsEntering = 0
+    if (this.promptsAwaitingTurn > 0 && this.ticks - this.promptAwaitingTick > AUTO_RELOAD_PROMPT_GAP_TICKS) this.promptsAwaitingTurn = 0
     const target = this.offer
     if (this.running || this.disposed || this.heldForInput || !target || !this.deps.run || !this.deps.promptText) return
     this.running = true
@@ -318,10 +339,11 @@ export class AutoReload {
   }
 
   private async consider(target: string): Promise<void> {
-    if (this.busyNow(target) !== null) return
+    const early = this.busyNow(target)
+    if (early !== null) return this.held(early)
     const attempt = this.attempts.get(target)
     // In memory first: this module ran for that version already (unless the engine refused it, within the limit).
-    if (attempt && !(attempt.refused && attempt.runs < AUTO_RELOAD_MAX_REFUSALS)) return
+    if (attempt && !(attempt.refused && attempt.runs < AUTO_RELOAD_MAX_REFUSALS)) return this.held(`this module already ran for ${target}`)
     const loaded = await this.deps.loaded()
     if (!loaded || loaded.version === null) return
     const start = await this.deps.now()
@@ -333,10 +355,12 @@ export class AutoReload {
       return
     }
     const previous = all[this.deps.sessionId] ?? null
-    if (!storeAllows(previous, target)) return
-    if ((await this.deps.promptText!()).trim() !== '') return
-    if (this.deps.agentsBusy && (await this.deps.agentsBusy()) !== null) return
-    if (this.busyNow(target) !== null) return
+    if (!storeAllows(previous, target)) return this.held(`this session already tried ${target} (${previous?.outcome ?? 'no record'})`)
+    if ((await this.deps.promptText!()).trim() !== '') return this.held('text is in the prompt box')
+    const agentsFirst = this.deps.agentsBusy ? await this.deps.agentsBusy() : null
+    if (agentsFirst !== null) return this.held(agentsFirst)
+    const beforeWrite = this.busyNow(target)
+    if (beforeWrite !== null) return this.held(beforeWrite)
 
     // The pending record first, read back: nothing runs unless the store kept it.
     const at = await this.deps.now()
@@ -365,10 +389,12 @@ export class AutoReload {
     const busy = box.trim() !== '' ? 'text is in the prompt box' : (agents ?? this.busyNow(target))
     if (busy !== null) {
       // Put the record back as it was: this run never happened.
-      await this.update((current) => (current && current.at === at && current.outcome === 'pending' ? previous : undefined))
-      this.deps.debug(`auto-reload: not now (${busy})`)
+      const putBack = await this.update((current) => (current && current.at === at && current.outcome === 'pending' ? previous : undefined))
+      this.held(busy)
+      if (!putBack) this.deps.debug(`auto-reload: the record could not be put back; ${target} stays pending and is not tried again in this session (the manual notice stays)`)
       return
     }
+    this.lastHeld = null
     const runs = (attempt?.runs ?? 0) + 1
     this.attempts.set(target, { runs, refused: false })
     this.deps.debug(`auto-reload: running /${AUTO_RELOAD_COMMAND} ${AUTO_RELOAD_ARGS} (loaded ${loaded.version}, installed ${target})`)

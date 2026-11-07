@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { AUTO_RELOAD_ARGS, AUTO_RELOAD_COMMAND } from './auto-reload'
+import { AUTO_RELOAD_ARGS, AUTO_RELOAD_COMMAND, AUTO_RELOAD_PROMPT_GAP_TICKS } from './auto-reload'
 import { inboxRegistryPathOf } from './inbox'
 import { INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_RELOAD_FIELD } from './inbox-contract'
 
@@ -160,7 +160,8 @@ describe('auto reload through the registered hooks', () => {
     // The hooks beneath are still working on the prompt (prompt.submit has not resolved).
     let enter: (value: unknown) => void = () => undefined
     const submitted = hook('prompt.submit')($, { text: 'go', origin: { kind: 'composer' } }, () => new Promise((resolve) => (enter = resolve)))
-    await world.tick(5)
+    // Longer than the gap a prompt that entered gets: a prompt still inside prompt.submit has no time limit.
+    await world.tick(AUTO_RELOAD_PROMPT_GAP_TICKS + 10)
     expect(world.commands).toEqual([])
     enter({ text: 'go' })
     await submitted

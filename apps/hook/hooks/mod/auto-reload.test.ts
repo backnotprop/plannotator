@@ -319,27 +319,82 @@ describe('never a loop, never over work that started meanwhile (review of #2873)
     expect(record()).toBeNull()
   })
 
-  test('a prompt on its way in (prompt.submit seen, no turn yet) counts as busy until its turn starts, it is dropped, or it is let go', async () => {
+  test('a prompt inside prompt.submit holds the run with no time limit; one that entered as a new turn, until its turn starts or it is let go', async () => {
     const { d, state } = deps()
     const reload = new AutoReload(d)
     reload.setOffer({ installed: '0.28.51' })
-    reload.notePromptEntering()
-    await reload.tick()
+    // The hooks beneath ours are slow (another plugin, a UserPromptSubmit command): far past the gap.
+    reload.notePromptSubmitting()
+    for (let i = 0; i < AUTO_RELOAD_PROMPT_GAP_TICKS + 10; i += 1) await reload.tick()
     expect(state.runs).toBe(0)
-    reload.notePromptSettled()
+    // Dropped: nothing more to wait for.
+    reload.notePromptLeft('dropped')
     await reload.tick()
     expect(state.runs).toBe(1)
 
+    const into = deps()
+    const a = new AutoReload(into.d)
+    a.setOffer({ installed: '0.28.51' })
+    a.notePromptSubmitting()
+    await a.tick()
+    // Into a turn already running (that turn's own count holds the run).
+    a.notePromptLeft('into-turn')
+    await a.tick()
+    expect(into.state.runs).toBe(1)
+
+    const fresh = deps()
+    const b = new AutoReload(fresh.d)
+    b.setOffer({ installed: '0.28.51' })
+    b.notePromptSubmitting()
+    b.notePromptLeft('new-turn')
+    await b.tick()
+    expect(fresh.state.runs).toBe(0)
+    // Its turn started (and, in the mod, that turn now holds the run).
+    b.onInputMoved()
+    await b.tick()
+    expect(fresh.state.runs).toBe(1)
+
     const late = deps()
-    const other = new AutoReload(late.d)
-    other.setOffer({ installed: '0.28.51' })
-    other.notePromptEntering()
-    for (let i = 0; i < AUTO_RELOAD_PROMPT_GAP_TICKS; i += 1) await other.tick()
+    const c = new AutoReload(late.d)
+    c.setOffer({ installed: '0.28.51' })
+    c.notePromptSubmitting()
+    c.notePromptLeft('new-turn')
+    for (let i = 0; i < AUTO_RELOAD_PROMPT_GAP_TICKS; i += 1) await c.tick()
     expect(late.state.runs).toBe(0)
-    // A prompt that started no turn (a slash command) is let go.
-    await other.tick()
-    await other.tick()
+    // A prompt that entered and started no turn (a slash command) is let go.
+    await c.tick()
+    await c.tick()
     expect(late.state.runs).toBe(1)
+  })
+
+  test('why nothing runs is in the debug log, once per reason: an agent list that cannot be read, a failed put-back', async () => {
+    const { d, state, record } = deps()
+    const lines: string[] = []
+    const reload = new AutoReload({ ...d, debug: (line) => lines.push(line), agentsBusy: async () => 'the agent list could not be read' })
+    reload.setOffer({ installed: '0.28.51' })
+    for (let i = 0; i < 5; i += 1) await reload.tick()
+    expect(state.runs).toBe(0)
+    expect(lines.filter((line) => line.includes('the agent list could not be read'))).toHaveLength(1)
+
+    // The gate fails after the record was written, and the put-back write fails too.
+    const failing = deps()
+    const said: string[] = []
+    let writes = 0
+    const racing = new AutoReload({
+      ...failing.d,
+      debug: (line) => said.push(line),
+      storeSet: async (key, value) => {
+        if ((writes += 1) > 1) throw new Error('the store is over 4 MiB')
+        await failing.d.storeSet(key, value)
+        failing.state.box = 'typed meanwhile'
+      },
+    })
+    racing.setOffer({ installed: '0.28.51' })
+    await racing.tick()
+    expect(failing.state.runs).toBe(0)
+    expect(failing.record()?.outcome).toBe('pending')
+    expect(said.some((line) => line.includes('could not be put back'))).toBe(true)
+    expect(record()).toBeNull()
   })
 
   test("an agent in the engine's list holds the run, also when it shows up while the record is written", async () => {

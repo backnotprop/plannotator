@@ -1840,8 +1840,9 @@ export class PlannotatorMod {
     )
     const wasOurs = !!turnId && this.turns.ownsTurn(turnId)
     this.turns.onPromptEntered(prompt)
-    // Into a turn already running: no turn.start follows for it (that turn keeps the session busy).
-    if (turnId) this.autoReload?.notePromptSettled()
+    // Auto reload: a prompt into a turn already running gets no turn.start of its own (that turn keeps the
+    // session busy); a new one counts as on its way in until its turn.start.
+    this.autoReload?.notePromptLeft(turnId ? 'into-turn' : 'new-turn')
     if (!fromUs) this.inbox?.onForeignPrompt(prompt)
     if (!fromUs) this.inputMoved()
     if (wasOurs && turnId && this.turns.isTakenOver(turnId)) this.host.debug(`ask turn ${turnId} taken over`)
@@ -1852,14 +1853,14 @@ export class PlannotatorMod {
   /** A prompt reached prompt.submit, before the hooks beneath it ran, from register.ts. */
   onPromptSubmitting(prompt: Omit<EnteredPrompt, 'text'>): void {
     this.turns.onPromptSubmitting(prompt)
-    // Between Enter and turn.start no turn is counted yet: auto reload waits for the prompt's turn.
-    this.autoReload?.notePromptEntering()
+    // Between Enter and turn.start no turn is counted yet: auto reload waits while the prompt is submitted.
+    this.autoReload?.notePromptSubmitting()
   }
 
   /** A prompt announced by onPromptSubmitting did not enter, from register.ts. */
   onPromptDropped(prompt: Omit<EnteredPrompt, 'text'>): void {
     this.turns.onPromptDropped(prompt)
-    this.autoReload?.notePromptSettled()
+    this.autoReload?.notePromptLeft('dropped')
   }
 
   /** A main-loop model request is about to go out (every turn.step without an agent id), from register.ts. */
