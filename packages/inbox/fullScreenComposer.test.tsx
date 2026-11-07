@@ -591,8 +591,9 @@ test.skipIf(!hasDom)('a long text paste in the card is a pasted-text tile in bot
 });
 
 for (const away of ['the Reply tab', 'gathered into the corner'] as const) {
-  test.skipIf(!hasDom)(`an image comment not saved yet is kept on ${away}: → asks first, and Keep writing brings the Comment tab back with focus in its words`, async () => {
+  test.skipIf(!hasDom)(`an image comment not saved yet is kept on ${away}: → steps at once, and back on the image its words are in the Comment row again`, async () => {
     await renderFull('shot.png');
+    const shot = world.openIn.ids['shot.png'];
     type(commentField()!, 'Too much padding.');
     if (away === 'the Reply tab') await click(radio('reply'));
     else await click(card()!.querySelector<HTMLButtonElement>('[data-fcomp-minimize]')!);
@@ -601,24 +602,16 @@ for (const away of ['the Reply tab', 'gathered into the corner'] as const) {
     expect(commentField()!.value).toBe('Too much padding.');
     await act(async () => (document.activeElement as HTMLElement | null)?.blur());
     await stepNext();
-    await until(() => stepGuard() !== null, 'the "not saved yet" question');
-    // The step waited: still on the image.
-    expect(host!.querySelector(`[data-attachment-pane="${world.openIn.ids['shot.png']}"]`)).not.toBeNull();
-    await click(stepGuard()!.querySelector<HTMLButtonElement>('[data-guard-keep]')!);
-    await until(() => document.activeElement === commentField(), 'focus in the comment');
-    expect(card()).not.toBeNull();
-    expect(radio('comment').getAttribute('aria-checked')).toBe('true');
-    expect(commentField()!.closest('[hidden]')).toBeNull();
+    // Nothing asks: the step goes on the first press, and nothing is posted.
+    await until(() => host!.querySelector(`[data-attachment-pane="${shot}"]`) === null, 'the next file');
+    expect(stepGuard()).toBeNull();
+    expect(posted.some((p) => p.path.endsWith('/api/inbox/annotations'))).toBe(false);
+    // Back on the image: the words wait in its row.
+    await act(async () => {
+      (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', code: 'ArrowLeft', bubbles: true, cancelable: true }));
+    });
+    await until(() => host!.querySelector(`[data-attachment-pane="${shot}"]`) !== null && commentField() !== null, 'the image again');
     expect(commentField()!.value).toBe('Too much padding.');
-    if (away === 'gathered into the corner') {
-      // Keep writing brought the tools back, so the ⌄ that gathered them is forgotten: » and the corner control put
-      // focus back on », not in a field (on a phone that would raise the keyboard).
-      expect(toolsState()).toBe('pinned');
-      const hide = host!.querySelector<HTMLButtonElement>('[data-full-view-hide]')!;
-      await click(hide);
-      await click(corner()!);
-      expect(document.activeElement).toBe(hide);
-    }
   });
 }
 

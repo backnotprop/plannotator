@@ -77,6 +77,7 @@ import { AttachmentsButton } from './AttachmentsButton';
 import { MessagesIcon } from './icons/MessagesIcon';
 import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/anchorClaims';
 import { DiagramBlockPending } from './diagram/DiagramPending';
+import type { DiagramReopenRequest } from './diagram/reopen';
 import { LazyBlockBoundary } from './LazyBlockBoundary';
 import { isGraphvizLanguage, isMermaidLanguage } from './diagramLanguages';
 import { isHtmlEmbedLanguage, isSvgFenceLanguage } from './html-embed/languages';
@@ -490,6 +491,21 @@ export interface ViewerHandle {
    *  Comment action), reported through `onHostDraft` as `'selection'`.
    *  Returns false when nothing in the document is selected. */
   takeSelection?: () => boolean;
+  /**
+   * Opt-in, for a host that keeps a comment being written when its file
+   * closes: open the comment composer again on what `annotation` is on (its
+   * anchor, found the way `annotations` are drawn), holding `annotation.text`
+   * as words not saved yet. Nothing is saved until the person saves it; the
+   * composer's own close and Escape act as for any comment. May be called
+   * right after mount: it opens once the document is drawn. Returns false
+   * when this viewer cannot reopen that kind of comment. `onMissing` runs
+   * (once, possibly later) when the anchor is not found in the document, so
+   * the host can keep the words some other way. Markdown `Viewer`: a text
+   * selection, a global comment, a diagram part. `HtmlViewer`: a pin or a
+   * text selection (with `onHostDraft`, the draft is handed to the host,
+   * which keeps the words itself).
+   */
+  reopenComment?: (annotation: Annotation, onMissing?: () => void) => boolean;
 }
 
 interface CodeBlockToolbarTarget {
@@ -1044,6 +1060,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     clearAllHighlights,
     applyAnnotations,
     takeSelection,
+    reopenComment: hookReopenComment,
   } = useAnnotationHighlighter({
     containerRef,
     annotations,
@@ -1423,6 +1440,62 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     return () => document.removeEventListener('copy', handleCopy);
   }, [toolbarState]);
 
+  // `ViewerHandle.reopenComment`: a comment being written that the host kept
+  // when its file closed, back in its composer. A global comment opens the
+  // global composer (anchored on its button), a fenced code block's opens on
+  // that block, a diagram part's in its diagram (once drawn), a text
+  // selection's through the highlighter. Kinds with no composer here say no.
+  const [diagramReopen, setDiagramReopen] = useState<{ blockId: string; request: DiagramReopenRequest } | null>(null);
+  const reopenComment = useCallback((annotation: Annotation, onMissing?: () => void): boolean => {
+    const words = annotation.text ?? '';
+    if (annotation.imageRegion != null || annotation.questionAnswer || annotation.mathTargets?.length) return false;
+    if (annotation.type !== AnnotationType.COMMENT && annotation.type !== AnnotationType.GLOBAL_COMMENT) return false;
+    let missed = false;
+    const missing = () => {
+      if (missed) return;
+      missed = true;
+      onMissing?.();
+    };
+    if (annotation.type === AnnotationType.GLOBAL_COMMENT) {
+      if (readOnlyRef.current) return false;
+      const anchorEl = globalCommentButtonRef.current;
+      if (!anchorEl) return false;
+      setViewerCommentPopover({ anchorEl, contextText: '', isGlobal: true, initialText: words });
+      return true;
+    }
+    if (annotation.diagramAnchor != null) {
+      if (!selectionCommentsOn) return false;
+      const block = blocks.find((candidate) => candidate.id === annotation.blockId);
+      if (!block || block.type !== 'code') {
+        missing();
+        return true;
+      }
+      setDiagramReopen({ blockId: block.id, request: { anchor: annotation.diagramAnchor, text: words, onMissing: missing } });
+      return true;
+    }
+    if (!annotation.startMeta && annotation.blockId && annotation.id.startsWith('codeblock-')) {
+      if (readOnlyRef.current) return false;
+      const block = blocks.find((candidate) => candidate.id === annotation.blockId);
+      const element = containerRef.current?.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(annotation.blockId)}"]`);
+      const codeText = element?.querySelector('code')?.textContent ?? null;
+      if (!block || !element || codeText === null || codeText !== annotation.originalText) {
+        missing();
+        return true;
+      }
+      setViewerCommentPopover({
+        anchorEl: element,
+        contextText: codeText.slice(0, 80),
+        selectedText: codeText,
+        initialText: words,
+        isGlobal: false,
+        codeBlock: { block, element },
+      });
+      return true;
+    }
+    if (!annotation.originalText) return false;
+    return hookReopenComment(annotation, missing);
+  }, [blocks, hookReopenComment, selectionCommentsOn]);
+
   // Imperative handle — delegates to hook, extends removeHighlight for code blocks
   useImperativeHandle(ref, () => ({
     scrollToAnchor,
@@ -1453,7 +1526,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     clearAllHighlights,
     applySharedAnnotations: applyAnnotations,
     takeSelection,
-  }), [hookRemoveHighlight, clearAllHighlights, applyAnnotations, blocks, takeSelection, scrollToAnchor]);
+    reopenComment,
+  }), [hookRemoveHighlight, clearAllHighlights, applyAnnotations, blocks, takeSelection, scrollToAnchor, reopenComment]);
 
   // --- Viewer-specific: code block annotation ---
 
@@ -1874,6 +1948,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 <MermaidBlock
                   block={group.block}
                   annotations={annotations}
+                  reopenComment={diagramReopen?.blockId === group.block.id ? diagramReopen.request : undefined}
                   selectedAnnotationId={selectedAnnotationId}
                   onSelectAnnotation={onSelectAnnotation}
                   onAddAnnotation={selectionCommentsOn ? onAddAnnotation : undefined}
@@ -1890,6 +1965,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 <GraphvizBlock
                   block={group.block}
                   annotations={annotations}
+                  reopenComment={diagramReopen?.blockId === group.block.id ? diagramReopen.request : undefined}
                   selectedAnnotationId={selectedAnnotationId}
                   onSelectAnnotation={onSelectAnnotation}
                   onAddAnnotation={selectionCommentsOn ? onAddAnnotation : undefined}

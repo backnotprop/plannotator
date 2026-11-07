@@ -1069,6 +1069,18 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       postToBridge({ type: `${PREFIX}report-unanchored` });
     }, [iframeReadyVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // reopenComment asked before the bridge was ready: posted once it is,
+    // after the saved annotations above are drawn.
+    const pendingReopenRef = useRef<Record<string, unknown> | null>(null);
+    const iframeReadyRef = useRef(iframeReadyVersion);
+    iframeReadyRef.current = iframeReadyVersion;
+    useEffect(() => {
+      if (iframeReadyVersion === 0 || !pendingReopenRef.current) return;
+      const message = pendingReopenRef.current;
+      pendingReopenRef.current = null;
+      postToBridge(message);
+    }, [iframeReadyVersion, postToBridge]);
+
     // A linked document opened from a `#`-carrying link: the srcdoc document
     // has no URL, so the fragment is replayed once its bridge is ready.
     useEffect(() => {
@@ -1277,6 +1289,17 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
           type: `${PREFIX}reveal-pin`,
           ...(options?.clearBottom ? { clearBottom: options.clearBottom } : {}),
         }),
+      // A comment being written when its file closed, put back by the host:
+      // the bridge pins its element again (or selects its words again) and
+      // the composer opens holding its words. Not in live sessions.
+      reopenComment: (annotation: Annotation, onMissing?: () => void) => {
+        if (readOnly || liveMode) return false;
+        const message = hook.prepareReopen(annotation, onMissing);
+        if (!message) return false;
+        if (iframeReadyRef.current > 0) postToBridge(message);
+        else pendingReopenRef.current = message;
+        return true;
+      },
     }));
 
     const handleGlobalCommentSubmit = useCallback(

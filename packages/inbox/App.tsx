@@ -1154,7 +1154,7 @@ function Inbox() {
       }
       // Over a dialog the screen would change out of sight, and a comment not saved yet would go with its file: a new tab keeps both.
       // The pane's own question (saved words compared), so a comment opened for editing and not changed is not unsaved.
-      // Here a new tab keeps the comment; a link inside an attached HTML page asks the pane's "Discard and go" instead.
+      // Here a new tab keeps the comment; a link inside an attached HTML page goes through the pane, which keeps the words as the file's draft.
       if (link.closest('dialog') || inOverlay(link) || openPaneUnsaved()) {
         if (link.target) return;
         event.preventDefault();

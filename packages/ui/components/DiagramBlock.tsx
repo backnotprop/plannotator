@@ -15,6 +15,7 @@ import { diagramAskAIContext } from '../utils/diagramAskAI';
 import { svgContentSize } from './diagram/svgContentSize';
 import type { DiagramComment, DiagramCreateComment } from './diagram/useDiagramComments';
 import type { DiagramRenderState } from './diagram/useDiagramRender';
+import type { DiagramReopenRequest } from './diagram/reopen';
 import { useTheme } from './ThemeProvider';
 import { LazyBlockBoundary } from './LazyBlockBoundary';
 
@@ -87,6 +88,9 @@ export interface DiagramBlockProps {
   onAskAI?: CommentAskAIHandler;
   /** The document's path, sent with an Ask AI question (`sourcePath`). */
   askAISourcePath?: string;
+  /** Opt-in: a comment being written that the host kept, put back in the
+   * inline diagram's composer (see `DiagramReopenRequest`). */
+  reopenComment?: DiagramReopenRequest;
 }
 
 const NO_ANNOTATIONS: readonly Annotation[] = [];
@@ -102,6 +106,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   onRestoreReport,
   onAskAI,
   askAISourcePath,
+  reopenComment,
 }) => {
   const label = LABELS[kind];
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -400,6 +405,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
               onResolutionChange={setResolution}
               onRenderState={setRenderState}
               renderFallback={renderFallback}
+              reopenComment={reopenComment}
             />
           </div>
         )}

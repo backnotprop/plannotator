@@ -10,6 +10,7 @@ import { useDiagramComments, type DiagramComment, type DiagramCreateComment } fr
 import { useDiagramRender, type DiagramRenderState } from './useDiagramRender';
 import { useDiagramSourceDraft, type SaveResult } from './useDiagramSourceDraft';
 import { LazyBlockBoundary } from '../LazyBlockBoundary';
+import type { DiagramReopenRequest } from './reopen';
 
 /**
  * The one diagram viewer: the canvas with its overlay, the Source pane on
@@ -110,7 +111,14 @@ export interface DiagramViewerProps {
    * past it (`touch-action: pan-y`); a viewer that owns the whole screen
    * passes `touch-none`. */
   readonly canvasClassName?: string;
+  /** Opt-in: a comment being written that the host kept, put back (see
+   * `DiagramReopenRequest`): the composer opens at its part once the diagram
+   * is drawn, holding its words. Absent: nothing changes. */
+  readonly reopenComment?: DiagramReopenRequest;
 }
+
+/** A part's identity, as the composer's key names it. */
+const diagramPartKey = (target: DiagramTarget): string => `${target.kind}:${target.id ?? ''}:${target.from ?? ''}:${target.to ?? ''}`;
 
 export function DiagramViewer({
   kind,
@@ -138,6 +146,7 @@ export function DiagramViewer({
   autoFocus,
   className,
   canvasClassName,
+  reopenComment,
 }: DiagramViewerProps) {
   const finder = diagramFinder(kind);
   const familyOf = useCallback((svg: Element) => (kind === 'graphviz' ? ('graphviz' as const) : diagramFamilyOf(svg)), [kind]);
@@ -175,6 +184,27 @@ export function DiagramViewer({
     onResolutionChange,
     familyOf,
   });
+
+  // A comment put back by the host: once the render is in, the composer opens
+  // at its part holding its words (each request once), or the host hears the
+  // part is gone.
+  const [reopenedText, setReopenedText] = useState<{ part: string; text: string } | null>(null);
+  const reopenDoneRef = useRef<DiagramReopenRequest | null>(null);
+  const openAt = commentsState.openAt;
+  useEffect(() => {
+    if (reopenComment === undefined || reopenDoneRef.current === reopenComment) return;
+    if (svgRoot === null || render.renderId === null) return;
+    reopenDoneRef.current = reopenComment;
+    if (openAt(reopenComment.anchor)) setReopenedText({ part: diagramPartKey(reopenComment.anchor), text: reopenComment.text });
+    else reopenComment.onMissing?.();
+  }, [openAt, reopenComment, render.renderId, svgRoot]);
+  // The words go with the composer they were put back in; a composer opened afterwards starts empty.
+  const hadComposerRef = useRef(false);
+  useEffect(() => {
+    const open = commentsState.composer !== null;
+    if (hadComposerRef.current && !open) setReopenedText(null);
+    hadComposerRef.current = open;
+  }, [commentsState.composer]);
 
   // The selected comment's source line for the pane's gutter mark. The
   // anchor names DOCUMENT lines; the pane shows the diagram text.
@@ -273,12 +303,13 @@ export function DiagramViewer({
               onSubmit={(text) => void commentsState.submit(text)}
               onCancel={commentsState.cancel}
               onAskAI={askFromComposer}
+              initialText={reopenedText?.part === diagramPartKey(commentsState.composer.primary.target) ? reopenedText.text : undefined}
             />
           )
         }
       />
     ),
-    [askFromComposer, commentingDisabledReason, commentsState, hostComposes, onSelectComment, selectedCommentId, sourceDirty],
+    [askFromComposer, commentingDisabledReason, commentsState, hostComposes, onSelectComment, reopenedText, selectedCommentId, sourceDirty],
   );
 
   const showFallback = render.svgNode === null;

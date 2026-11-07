@@ -22,5 +22,6 @@ export const GraphvizBlock = React.memo(
     prev.onSelectAnnotation === next.onSelectAnnotation &&
     prev.onAddAnnotation === next.onAddAnnotation &&
     prev.readOnly === next.readOnly &&
-    prev.onRestoreReport === next.onRestoreReport,
+    prev.onRestoreReport === next.onRestoreReport &&
+    prev.reopenComment === next.reopenComment,
 );

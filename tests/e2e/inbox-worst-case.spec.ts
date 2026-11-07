@@ -290,7 +290,7 @@ test('things that grow: the reply chooser with 50 sessions, the compose To picke
   }
 });
 
-test('a long file name never widens the window: the stepping guard, the header (rows 49, 74)', async ({ browser }) => {
+test('a long file name never widens the window: stepping to it, the header (rows 49, 74)', async ({ browser }) => {
   const { context, page } = await open(browser, WIDTHS[0]!, `thread=${world.seed.threads.files}`);
   try {
     await page.locator(`section.ib-pane .ib-atts.ib-tiles [data-attachment-name="${world.seed.files.arabic}"]`).first().click();
@@ -300,18 +300,12 @@ test('a long file name never widens the window: the stepping guard, the header (
     const box = page.getByPlaceholder(/comment/i).last();
     await box.waitFor({ timeout: 10_000 });
     await box.fill('Not saved yet.');
+    // A comment being written never stops a step: Next goes to the long name on that press (the words wait for this file).
     await page.locator('[data-step-next]').click();
-    await page.waitForSelector('[data-step-guard]', { timeout: 10_000 });
+    await expect(page.locator('section.ib-view .ib-fname', { hasText: world.seed.files.long }).first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('[data-step-guard]')).toHaveCount(0);
     expect(await shapes(page)).toEqual([]);
-    await expect(page.locator('[data-guard-discard]')).toHaveText(`Discard and go to ${world.seed.files.long}`);
-    // One space between the words and the name, not the words' space and the button's gap (about 4 px, not 11).
-    const space = await page.locator('[data-guard-discard] .ib-gto').evaluate((el) => {
-      const words = document.createRange();
-      words.selectNodeContents(el.firstChild!);
-      return el.querySelector('.ib-fname')!.getBoundingClientRect().left - words.getBoundingClientRect().right;
-    });
-    expect(space).toBeLessThan(7);
-    await shot(page, 'guard-1440');
+    await shot(page, 'long-name-step-1440');
   } finally {
     await context.close();
   }

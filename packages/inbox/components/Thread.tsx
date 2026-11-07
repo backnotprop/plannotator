@@ -1195,8 +1195,8 @@ export interface ThreadPaneProps {
   /**
    * A file open beside the thread on a desktop hides the list and the
    * sidebar: the header then leads with `‹ Inbox` (`backLabel`), which closes
-   * the file (through the pane's unsaved-comment question, as the file's ×
-   * does) and calls this with the file's name, so the window can bring the
+   * the file (through the pane's leave, as the file's × does: a typed
+   * comment waits as the file's draft) and calls this with the file's name, so the window can bring the
    * list back and put focus on this thread's row. Absent: no such button.
    */
   onBackToList?: (fileName: string | null) => void;
@@ -2547,8 +2547,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     const overSide = file !== null && !shownFull && opening === 'full';
     onOpenFile({ id: attachment.id, version, focus, view: opening, set }, overSide ? { move: 'open-full' } : undefined);
   };
-  /** A tile, or a link in a message: the file as it is now, focus in its pane (a typed comment in the open file asks first). */
-  /** `opening`: called only when the file does open (not after "Keep writing" on a typed comment). */
+  /** A tile, or a link in a message: the file as it is now, focus in its pane (a typed comment in the open file waits as its draft). */
+  /** `opening`: called as the file opens. */
   /** `set`: a question's picture choices the viewer then steps through (optionSets.ts); absent: every file of the thread. */
   /** `version`: the version the agent sent (a file the person's reply names, commented at that version, or moved since). */
   const openFromMessage = (attachment: Pick<InboxAttachmentState, 'id' | 'kind' | 'ref'> & { name?: string }, view: FileView | null = null, opening?: () => void, set: string | null = null, version: 'current' | 'sent' = 'current') => {
@@ -2600,7 +2600,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     const attachment = allFiles.find((a) => a.id === record.attachment_id);
     if (!attachment) return;
     const go = () => openFile(attachment, record.version === 'current' ? 'current' : 'sent', record.id);
-    // Another file than the one open: a typed comment in the open file asks first.
+    // Another file than the one open: a typed comment in the open file waits as its draft.
     if (paneRef.current && file && file.id !== attachment.id) paneRef.current.leave(attachment.name, go);
     else go();
   };
@@ -6317,7 +6317,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
             artifacts={files === null ? null : artifactList}
             annotationCounts={countsByPath}
             openId={file && !shownFull ? file.id : null}
-            // Focus comes back to the tile only when it did open (a typed comment's "Keep writing" keeps the file).
+            // Focus comes back to the tile the file opened from.
             onOpen={(artifact) => openFromMessage(artifact.attachment, null, () => (artifactOpened.current = artifactKey(artifact)))}
             onOpenGuide={(artifact) => {
               artifactOpened.current = artifactKey(artifact);
@@ -6782,7 +6782,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
         fullLocked={phone || fileStacked}
         // Full screen opened from the thread alone: × and Escape close the file, back to the thread as it was.
         exitCloses={fullScreenExit(fullFromSide, phone || fileStacked) === 'close'}
-        // A full screen opened over another file beside the thread goes back to that file: the pane asks first about a comment not saved yet.
+        // A full screen opened over another file beside the thread goes back to that file: a comment not saved yet waits as the full screen file's draft.
         exitLeavesFor={fullExitFile && fullExitFile !== openAttachment.id ? (allFiles.find((a) => a.id === fullExitFile)?.name ?? 'that file') : null}
         phone={phone}
         openIn={openIn}

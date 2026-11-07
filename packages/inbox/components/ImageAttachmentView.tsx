@@ -17,6 +17,7 @@ import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { markupWords, noteOnto } from '../markup';
 import { DRAWING_SCREEN, KeptMarkup, markupAddedToast, OverWindow, type Notice } from './Markup';
 import { FullScreenComposer, FullScreenComposerContext } from './FullScreenComposer';
+import { useRowDraft } from '../fileCommentDrafts';
 
 /** A fresh annotation id. */
 function newId(): string {
@@ -143,8 +144,10 @@ export function ImageAttachmentView({
   }, [fit]);
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const [failed, setFailed] = useState(false);
-  const [text, setText] = useState(suggestion ?? '');
-  const [markup, setMarkup] = useState<ImageAttachment | null>(null);
+  // Words (and a drawing) the box held when this file last closed: back in it, and read again as it closes.
+  const waiting = useRowDraft(() => (readOnly ? null : { kind: 'row', text, markup }));
+  const [text, setText] = useState(waiting?.text ?? suggestion ?? '');
+  const [markup, setMarkup] = useState<ImageAttachment | null>(waiting?.markup ?? null);
   // The drawing the ✓ just added to the reply: its comment's id, for a note, a redraw or ×.
   const [kept, setKept] = useState<{ id: string; image: ImageAttachment } | null>(null);
   // One drawing per opening of the drawing screen: set as it opens, taken by the first ✓ or Enter. ui calls

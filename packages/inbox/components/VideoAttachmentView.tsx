@@ -15,6 +15,7 @@ import { useConfigValue } from '@plannotator/ui/config';
 import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { markupWords, noteOnto } from '../markup';
 import { DRAWING_SCREEN, KeptMarkup, markupAddedToast, OverWindow, type Notice } from './Markup';
+import { useRowDraft } from '../fileCommentDrafts';
 
 /** A fresh annotation id. */
 function newId(): string {
@@ -114,10 +115,13 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   const [ratio, setRatio] = useState(attachment.width && attachment.height ? attachment.width / attachment.height : 16 / 9);
   const [failed, setFailed] = useState(false);
   const [focused, setFocused] = useState(false);
-  const [text, setText] = useState('');
-  const [pinned, setPinned] = useState<number | null>(null);
-  const [frame, setFrame] = useState<Frame | null>(null);
-  const [markup, setMarkup] = useState<ImageAttachment | null>(null);
+  // Words, the pinned moment, its frame and a drawing the row held when this file last closed: back in it, and
+  // read again as it closes.
+  const waiting = useRowDraft(() => (readOnly ? null : { kind: 'row', text, markup, time: pinned, frame: frameRef.current?.blob ?? null }));
+  const [text, setText] = useState(waiting?.text ?? '');
+  const [pinned, setPinned] = useState<number | null>(waiting?.time ?? null);
+  const [frame, setFrame] = useState<Frame | null>(() => (waiting?.frame ? { blob: waiting.frame, url: URL.createObjectURL(waiting.frame) } : null));
+  const [markup, setMarkup] = useState<ImageAttachment | null>(waiting?.markup ?? null);
   // The drawing the ✓ just added to the reply: its comment, for a note, a redraw or ×.
   const [kept, setKept] = useState<{ id: string; image: ImageAttachment; time: number } | null>(null);
   // One drawing per opening of the drawing screen: set as it opens, taken by the first ✓ or Enter. ui calls
@@ -134,8 +138,8 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     if (annotating) acceptable.current = true;
   }, [annotating]);
   const [saving, setSaving] = useState(false);
-  /** A phone opens the row from "Comment at 1:42". */
-  const [composing, setComposing] = useState(false);
+  /** A phone opens the row from "Comment at 1:42" (open already when it holds kept words). */
+  const [composing, setComposing] = useState(waiting !== null);
   // The `#t` fragment asks for the first frame, a free poster.
   const src = `${source.videoUrl(attachment, version)}#t=0.001`;
 
@@ -187,6 +191,13 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     const time = readInboxVideoTime(annotations.find((a) => a.id === selectedId));
     if (time !== null) seek(time);
   }, [selectedId, annotations, seek]);
+
+  // Kept words come back at their moment.
+  useEffect(() => {
+    if (waiting?.time != null) seek(waiting.time);
+    // Once, as the row mounts with them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** Pause and pin the moment the comment is about, and grab its frame. */
   const pin = useCallback(async (): Promise<Frame | null> => {
@@ -340,7 +351,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
         <KeptMarkup image={kept.image} onRedraw={() => setAnnotating(true)} onRemove={() => removeKept(kept.id)} wide />
       ) : (
         (markup || frame) && (
-          // `ib-markup` on a drawing: the pane's unsaved-comment question (unsavedComposer) knows a drawing not yet commented.
+          // `ib-markup` on a drawing: the pane (unsavedComposers) knows a drawing not yet commented.
           <Tip content={markup ? 'Your marked-up frame rides this comment' : `The frame at ${formatInboxVideoTime(shownTime)} rides this comment`}>
             <span className={`ib-vframe${markup ? ' ib-markup' : ''}`} data-video-frame="">
               <img src={markup ? getImageSrc(markup.path) : frame!.url} alt="" />
