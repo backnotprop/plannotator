@@ -211,8 +211,6 @@ import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
 import { createLoginEnv } from "./inbox-launch-env";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxAsk } from "./inbox-ask";
-import { createInboxReviewDrawings, INBOX_REVIEW_DRAWINGS_PATH } from "./inbox-review-drawings";
-import { pruneInboxReviewDrawings } from "@plannotator/shared/inbox/review-drawings";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxSnoozes } from "./inbox-snooze";
@@ -2373,6 +2371,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * group, and no agent text names it. Read on every request.
    */
   const shapeOn = () => options.shape ?? shapeSwitchOn();
+  /** The boards themselves: Shape on, or Code review on, whose Show me makes a board (approval "code-review-launch-build", item 1). */
+  const boardsOn = () => shapeOn() || codeReviewOn();
   const saveShape = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
       throw new InboxError("validation_error", "shape: { on: boolean }.", { field: "shape" });
@@ -2866,14 +2866,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (windowId) rowsListeners.add(onRows);
         // The steps switch was saved (any window's): every window reads its settings and the open thread's steps again. Windows only.
         // Shape's boards changed (a version, a note, a delivery, seen): `event: shapes` on this one stream, so a window
-        // opens no second connection (sharedEvents.ts holds every tab to one). Only while Shape is on, and only for the
+        // opens no second connection (sharedEvents.ts holds every tab to one). Only while boards are on, and only for the
         // owner's window (here, or the owner over the tailnet): a tailnet guest, refused the routes, hears no board ids
         // and starts no polling. Off, nothing polls.
         const shapesFor = ownerOrLocal(req, via);
         let stopShapes: (() => void) | null = null;
         const syncShapes = () => {
-          if (windowId && shapesFor && shapeOn() && !stopShapes) stopShapes = shapes.watch.subscribe((ids) => send(shapeEventFrame(ids)));
-          else if (!shapeOn() && stopShapes) {
+          if (windowId && shapesFor && boardsOn() && !stopShapes) stopShapes = shapes.watch.subscribe((ids) => send(shapeEventFrame(ids)));
+          else if (!boardsOn() && stopShapes) {
             stopShapes();
             stopShapes = null;
           }
@@ -3349,7 +3349,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session)],
   });
 
-  // Shape (approval "shape-inbox-placement"): the boards' routes and event feed, mounted only while Shape is on.
+  // Shape (approval "shape-inbox-placement"): the boards' routes and event feed, mounted only while boards are on.
   // The drawing session's state, for the board's Ask footer: its own session, else the thread's owner.
   const shapes = createBunShapeRoutes({
     dataDir,
@@ -3559,6 +3559,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const ask = createInboxAsk({
     on: askOnNow,
     codeReviewOn,
+    // The boards of a thread, for naming the board each Show me made (`showMeShapes`).
+    boardsOf: (threadId) =>
+      shapes.store
+        .list({ state: "all" })
+        .filter((shape) => shape.thread === threadId)
+        .map((shape) => ({ id: shape.id, versions: shapes.store.versionStamps(shape.id) })),
     // Show me's review: its thread, title and the files of its diff (inbox-guides.ts reads the stored snapshot).
     reviewOf: (messageId) => {
       const message = store.message(messageId);
@@ -3580,20 +3586,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     hostOf: (session) => live.askHostOf(session),
     ...(options.askTimes ? { times: options.askTimes } : {}),
   });
-  // Show me's drawings (packages/server/inbox-review-drawings.ts): the agent's pictures for a review, beside it.
-  const reviewDrawings = createInboxReviewDrawings({
-    store,
-    serverSession,
-    json,
-    readBody: (req) => readBody(req),
-    codeReviewOn,
-    isGuest: (req, via) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers),
-    onAskChange: (threadId) => {
-      for (const listener of askListeners) listener(threadId);
-    },
-  });
-  // A deleted review takes its drawings along.
-  store.onDeletion(() => pruneInboxReviewDrawings(store.dir, (messageId) => store.message(messageId) !== null));
   // Pins: threads pinned to the window's sidebar (packages/server/inbox-pins.ts). A deletion's prune tells the windows too.
   const pins = createInboxPins({ store, serverSession, readBody: (req) => readBody(req), json });
   // Snoozes: threads out of the list until a time (packages/server/inbox-snooze.ts).
@@ -3855,10 +3847,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const isPermissionHook = /^\/api\/inbox\/launch\/[^/]+\/permission$/.test(path);
     // Ask AI's client (inbox-ask-live.ts). With the setting off, the unknown route, as if it did not exist.
     const askClient = askOnNow() && path.startsWith(INBOX_ASK_BRIDGE_PREFIX);
-    // `plannotator review draw` / `drawings` (inbox-review-drawings.ts): a POST, or a read that carries the token. The window reads below.
-    // Code review off: not a route at all, as before Show me.
-    const drawingsClient = INBOX_REVIEW_DRAWINGS_PATH.test(path) && (req.method !== "GET" || req.headers.has("authorization")) && codeReviewOn();
-    if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/") || isPermissionHook || askClient || drawingsClient) {
+    if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/") || isPermissionHook || askClient) {
       // A tailnet peer can claim a loopback Host (serve passes it through, and
       // the tailnet HTTPS port is this port), so the listener decides.
       if (via === "tailnet") return localOnly();
@@ -3880,13 +3869,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (askClient) {
         try {
           return await ask.hostRoute(req, url);
-        } catch (error) {
-          return errorResponse(error);
-        }
-      }
-      if (drawingsClient) {
-        try {
-          return (await reviewDrawings.cliRoute(req, path)) ?? json({ error: "Not found", code: "not_found" }, 404);
         } catch (error) {
           return errorResponse(error);
         }
@@ -4690,7 +4672,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Shape (packages/server/shape-routes.ts): off, every path is the unknown-route 404, as if absent. The person's
       // own window only: another site is refused (reads too: a board names files and folders), and a tailnet guest.
       if (path === "/api/shapes" || path.startsWith("/api/shapes/")) {
-        if (!shapeOn()) return json({ error: "Not found", code: "not_found" }, 404);
+        if (!boardsOn()) return json({ error: "Not found", code: "not_found" }, 404);
         const crossSite = crossSiteCardRead(req);
         if (crossSite) return crossSite;
         if (!ownerOrLocal(req, via)) return localOnly();
@@ -4726,9 +4708,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Ask AI: off, this answers nothing and the path is an unknown route.
       const asked = await ask.route(req, url, via);
       if (asked) return asked;
-      // Show me's drawings, for the owner's window (inbox-review-drawings.ts; the CLI's door is above).
-      const drawn = await reviewDrawings.windowRoute(req, path, via);
-      if (drawn) return drawn;
       // Pins (approval "inbox-pinned-threads"): pin, unpin and the order of the sidebar's pinned threads.
       const pinned = await pins.route(req, url);
       if (pinned) return pinned;

@@ -8573,6 +8573,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-main[data-shape-open] { position: relative; }
 .ib-shape-layer { position: absolute; inset: var(--ib-gutter); z-index: 19; display: flex; flex-direction: column; background: var(--background); border-radius: inherit; overflow: hidden; }
 .ib-shape-layer > * { flex: 1; min-height: 0; }
+.ib-shape-layer[hidden] { display: none; }
+.ib-review > .ib-shape-layer { inset: 0; }
 .ib-shape-loading { flex: 1; }
 /* The board's sidebar toggle sits alone in the gutter, 22px from the pane's edge where every full page's head has it;
    the title and the claim share one left edge after it (the board's own phone layout: 10px, its padding). */
@@ -8692,20 +8694,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-sm-line b { color: var(--foreground); font-weight: 550; }
 .ib-sm-answer { margin: 0; white-space: pre-wrap; }
 .ib-sm-problem { margin: 0; color: var(--destructive); font-size: var(--ib-fs-12-5, 12.5px); }
-.ib-sm-sheet { position: absolute; left: 290px; right: 36px; top: 58px; max-height: calc(100% - 76px); z-index: 12; display: flex; flex-direction: column; overflow: hidden; border-radius: 14px; background: var(--popover); color: var(--popover-foreground, var(--foreground)); box-shadow: 0 0 0 1px var(--border), 0 30px 70px -24px color-mix(in oklch, var(--ib-shadow-ink, #000) 70%, transparent); animation: ib-sm-in .38s cubic-bezier(.2, .8, .2, 1) both; }
-@keyframes ib-sm-in { from { opacity: 0; transform: translateY(14px) scale(.98); } }
-.ib-sm-sheet-h { display: flex; align-items: center; gap: 10px; padding: 12px 12px 12px 16px; border-bottom: 1px solid var(--ib-hair); }
-.ib-sm-tx { min-width: 0; flex: 1; }
-.ib-sm-sheet-h .ib-sm-tx b { display: block; font-size: var(--ib-fs-15, 15px); font-weight: 650; }
-.ib-sm-sheet-h .ib-sm-tx span { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
-.ib-sm-sheet-b { flex: 1 1 auto; min-height: 0; overflow: auto; background: var(--shp-paper); padding: 16px 26px 12px; }
-.ib-sm-sheet-b .shp-diagram { height: auto; }
-.ib-sm-sheet-f { display: flex; align-items: flex-start; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--ib-hair); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; }
-.ib-sm-sheet-f .ib-sm-tx { color: color-mix(in oklch, var(--foreground) 88%, transparent); white-space: pre-wrap; }
-.ib-sm-sheet-f:has(.ib-sm-again) { flex-wrap: wrap; }
-.ib-sm-sheet-f:has(.ib-sm-again) .ib-sm-tx { flex: 1 1 220px; min-width: 0; }
-.ib-sm-sheet-f .ib-sm-again { flex: none; gap: 6px; margin-left: auto; }
-.ib-sm-mark { flex: none; margin-top: 1px; }
 .ib-sm-pip { width: 320px; max-width: calc(100% - 20px); border-radius: 12px; transform-origin: 100% 100%; animation: ib-sm-pip-in .42s cubic-bezier(.2, .8, .2, 1) both; }
 @keyframes ib-sm-pip-in { from { transform: scale(2.4) translate(-30%, -20%); opacity: .2; } }
 .ib-sm-pip-h { display: flex; align-items: center; gap: 7px; padding: 7px 7px 7px 11px; font-size: var(--ib-fs-12-5, 12.5px); }
@@ -8714,6 +8702,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-sm-pip-b { display: block; height: 190px; padding: 6px 8px; background: var(--shp-paper); border-top: 1px solid var(--ib-hair); border-bottom: 1px solid var(--ib-hair); cursor: pointer; }
 .ib-sm-pip-f { padding: 7px 11px; font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-sm-pip-f b { font-weight: 600; }
+.ib-sm-pip-n { display: flex; align-items: center; gap: 10px; justify-content: space-between; margin-top: 6px; color: var(--muted-foreground); }
+.ib-sm-pip-n .ib-btn { flex: none; }
 .ib-sm-pip-f span { font: var(--ib-fs-11-5, 11.5px) var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); }
 .ib-ov-fig { margin: 18px 0 4px; border-radius: 12px; background: var(--shp-paper); box-shadow: 0 0 0 1px var(--ib-line); overflow: hidden; }
 .ib-ov-fig-h { display: flex; align-items: center; gap: 8px; padding: 10px 12px 0 14px; font-size: var(--ib-fs-13, 13px); }
@@ -8722,28 +8712,16 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-ov-fig-b { padding: 10px 18px 6px; }
 .ib-ov-fig-b .shp-diagram { height: auto; }
 .ib-ov-fig-f { padding: 0 14px 10px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
-@media (prefers-reduced-motion: reduce) { .ib-sm-sheet, .ib-sm-pip { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .ib-sm-pip { animation: none; } }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-sm-box, .ib-sm-pip { left: 10px; right: 10px; width: auto; max-width: none; }
-  .ib-sm-sheet { left: 0; right: 0; top: 46px; bottom: 0; max-height: none; border-radius: var(--ib-sheet-corner, 12px) var(--ib-sheet-corner, 12px) 0 0; }
-  .ib-sm-sheet-b { padding: 10px 8px; }
-  .ib-sm-sheet-h .ib-sm-tx span { font-size: var(--ib-fs-11-5, 11.5px); }
-  .ib-sm-sheet-f { font-size: var(--ib-fs-13, 13px); }
   .ib-ov-fig-m { display: none; }
   .ib-ov-fig-b { padding: 8px 8px 4px; }
-  .pn-inbox .ib-sm-h .ib-iconbtn, .pn-inbox .ib-sm-sheet-h .ib-iconbtn { min-width: 44px; min-height: 44px; }
+  .pn-inbox .ib-sm-h .ib-iconbtn { min-width: 44px; min-height: 44px; }
 }
-.ib-sm-banner { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; background: color-mix(in oklab, var(--warning) 12%, var(--card)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning) 40%, transparent); font-size: var(--ib-fs-13-5, 13.5px); }
-.ib-sm-banner b { font-weight: 650; }
-.ib-sm-banner .ib-btn { flex: none; gap: 6px; }
-@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) { .ib-sm-banner { flex-wrap: wrap; } }
 .ib-sm-pip-b { position: relative; overflow: hidden; }
 .ib-sm-pip-in { position: absolute; top: 6px; left: 8px; transform-origin: 0 0; pointer-events: none; }
 .ib-sm-h .ib-sp, .ib-sm-pip-h .ib-sp, .ib-ov-fig-h .ib-sp { flex: 1; }
-/* The picture moves by its header, like the Ask window (useSheetDrag); not on a phone, where it is a sheet. */
-.ib-sm-sheet-h[data-show-me-drag] { cursor: grab; touch-action: none; user-select: none; }
-.ib-sm-sheet-h[data-show-me-drag="dragging"] { cursor: grabbing; }
-.ib-sm-sheet-h[data-show-me-drag] button { cursor: pointer; }
 /*
  * Hashtags (approval "board-hashtags"): the skill list's own menu (ui SkillReferenceMenu, unchanged), restyled here
  * for `#` only. A light popover as wide as its names, hung under the `#` (`--ib-hash-x`, hashtags.ts), not a slab
