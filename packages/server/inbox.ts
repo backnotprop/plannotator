@@ -176,12 +176,14 @@ import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannota
 import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT } from "./inbox-mcp";
 import { guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
+import { systemSetupRoute } from "./inbox-system-setup";
 import { createRefCards, type RefRunner } from "./ref-cards";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
-import { createInboxAccountsFor } from "./inbox-accounts";
+import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
+import { INBOX_ACCOUNT_SWITCHING } from "@plannotator/core/inbox-types";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
@@ -464,6 +466,8 @@ export interface InboxServerOptions {
   codeReview?: boolean;
   /** Shape, decided here instead of config.json `inboxShape` (tests). Absent: config.json decides on every request. */
   shape?: boolean;
+  /** System, decided here instead of config.json `inboxSystem` (tests). Absent: config.json decides on every request. Shown only while Code review is on. */
+  system?: boolean;
   /**
    * `plannotator inbox --tailscale`: publish over the tailnet for this run
    * whatever PLANNOTATOR_INBOX_TAILSCALE / config.json `inboxTailscale` say
@@ -702,6 +706,8 @@ const ERROR_STATUS: Record<string, number> = {
   guide_not_found: 404,
   // A verdict on a review while the person has Code review off (Settings → Capabilities).
   code_review_off: 409,
+  // System's routes while System (or Code review, which it needs) is off.
+  system_off: 409,
   // New message (step 8).
   session_not_live: 409,
   // Launch (inbox-launch.ts): the project's folder is gone, the agent can't be started, or the feature is off.
@@ -1707,7 +1713,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (problem) problems.push(problem);
     }
     if (typeof body.tool === "boolean") {
-      if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "tool: only Claude Code, Pi, OpenCode and DeepSeek Harness have one.", { field: "tool" });
+      if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "tool: only Claude Code, Pi, OpenCode, DeepSeek Harness and Cline have one.", { field: "tool" });
       const problem = setInboxTool(agent as InboxToolHost, body.tool, agentEnvironment);
       if (problem) problems.push(problem);
     }
@@ -2289,6 +2295,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const codeReviewOn = () => options.codeReview ?? loadConfig().inboxCodeReview === true;
   /**
+   * System (approval "system-inbox"): a drawing of each project, shown only while Code review is on. The one
+   * reading every System route and the settings answer use. Settings → Capabilities' switch is step B1; until it
+   * lands, only config.json `inboxSystem` turns it on.
+   */
+  const systemOn = () => codeReviewOn() && (options.system ?? loadConfig().inboxSystem === true);
+  /**
    * Ask AI is on with PLANNOTATOR_INBOX_ASK_AI, or whenever Code review is on
    * (approval "shape-in-code-review", q-668227a8: Code review brings Ask, and
    * so Show me). Read on every request, as the switch is.
@@ -2604,6 +2616,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     /** Code review (config.json `inboxCodeReview`) and Shape (`inboxShape`): off unless the person turned them on. Held until the next big release: absent while off. */
     ...heldSwitch("code_review", codeReviewOn()),
     ...heldSwitch("shape", shapeOn()),
+    /** System (config.json `inboxSystem`, only while Code review is on): absent while off. */
+    ...(systemOn() ? { system: { on: true } } : {}),
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder (editable by the owner) and the plan, review and annotate prompts. */
@@ -2627,7 +2641,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const changes: Partial<Record<InboxToolHost, boolean>> = {};
     for (const [host, value] of Object.entries(input as Record<string, unknown>)) {
       if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(host)) {
-        throw new InboxError("validation_error", `inbox_tool.${host}: not a host (claude-code, pi, opencode, dsh).`, { field: `inbox_tool.${host}` });
+        throw new InboxError("validation_error", `inbox_tool.${host}: not a host (claude-code, pi, opencode, dsh, cline).`, { field: `inbox_tool.${host}` });
       }
       if (typeof value !== "boolean") {
         throw new InboxError("validation_error", `inbox_tool.${host}: must be a boolean.`, { field: `inbox_tool.${host}` });
@@ -4008,6 +4022,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const rows = inboxReviewRows({ threads, stacks, links, pulls: listed.pulls, pullReasons, landed: pullOwners.landings(), owners: pullOwners.all() });
         return json({ serverSession, fetched_at: listed.fetched_at, hosts: listed.hosts, rows, projects: Object.fromEntries(projectsByRepo) });
       }
+      // System's project setup (inbox-system-setup.ts): the projects found on this Mac with a git remote, and the
+      // save of one project's setup.json. Owner only, same origin, and only while System is on.
+      if (path === "/api/inbox/system/setup") {
+        // Awaited: a thrown InboxError reaches this handler's error answer.
+        return await systemSetupRoute(req, {
+          dataDir,
+          repoOf: async (root: string) => repos.get(root) ?? (await repos.refresh(root)),
+          store,
+          serverSession,
+          ownerOrLocal: (request) => ownerOrLocal(request, via),
+          systemOn,
+          readBody,
+          json,
+        });
+      }
       // Pull requests: the person hands a PR (or a stack's PRs) to an agent's thread, the one compose's Send (to a
       // live session, or to an agent it launches) just started for it. The Inbox keeps that choice
       // (inbox/pull-links.json); verdicts and Reply go there. Same guards as the list.
@@ -4387,6 +4416,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!ownerOrLocal(req, via)) throw new InboxError("owner_only", "Only this computer's owner can see its accounts.");
         const fresh = url.searchParams.get("fresh") === "1";
         return json(machineAccounts ? await machines.accountsOf(machineAccounts[1]!, fresh, req.signal) : await accounts.read({ fresh }));
+      }
+      // Switch this computer's Claude account (step 3): it writes the login Claude Code uses, so the same two
+      // checks as the read, on the server and not only in the window. No door route and no forward reaches it:
+      // a linked machine's switch is a later step. The answer has no address: a door would keep it on disk.
+      // Not there at all while INBOX_ACCOUNT_SWITCHING is off: the path falls through to the 404 below.
+      if (INBOX_ACCOUNT_SWITCHING && path === "/api/inbox/accounts/switch") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!ownerOrLocal(req, via)) throw new InboxError("owner_only", "Only this computer's owner can switch its accounts.");
+        const body = await readBody(req);
+        // A page from an earlier Inbox on this address: what it showed may name other logins.
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const target = switchTarget(body);
+        if (!target) throw new InboxError("validation_error", "number: cswap's account number; email and organizationName: as the list read them, or null.", { field: "number" });
+        return json(await accounts.switchTo(target));
       }
 
       // The one-time sound dialog: the page asks to show it, and only the first ask ever gets `show: true`.

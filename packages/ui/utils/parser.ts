@@ -829,6 +829,15 @@ const commentHeadingLine = (ann: any): string => {
   return element ? `Feedback on ${element}` : `Feedback on: "${ann.originalText}"`;
 };
 
+/** A quick label's tip, the instruction the agent gets with the label, as
+ *  the feedback export quotes it under the label's heading (`> <tip>`); empty
+ *  for a label without a tip and for every other annotation. The export and
+ *  the Inbox's message comments both write a label's tip through this, so
+ *  the agent reads one format (#2626); Ask's one-line drafts carry the same
+ *  tip text after the label. */
+export const quickLabelTipLine = (ann: any): string =>
+  ann?.isQuickLabel && ann.quickLabelTip ? `> ${ann.quickLabelTip}\n` : '';
+
 /** `the <nav> element — "Primary"` for a text-less pinpoint whose quote is
  *  the bridge's placeholder; null for every other annotation. */
 const elementSubject = (ann: any): string | null => {
@@ -1049,7 +1058,7 @@ export const exportAnnotationEntry = (ann: any, opts: ElementContextExportOption
         output += `[${ann.text}] ${commentHeadingLine(ann)}\n`;
         const region = imageRegionOf(ann);
         if (region) output += imageRegionExportLines(region);
-        if (ann.quickLabelTip) output += `> ${ann.quickLabelTip}\n`;
+        output += quickLabelTipLine(ann);
       } else {
         output += `${commentHeadingLine(ann)}\n${diagramLocationExportLine(ann)}> ${ann?.text ?? ''}\n`;
       }
@@ -1408,9 +1417,7 @@ const renderAnnotationEntries = (
         if (ann.isQuickLabel) {
           output += `[${ann.text}] ${commentHeadingLine(ann)}\n`;
           output += diagramLocationExportLine(ann);
-          if (ann.quickLabelTip) {
-            output += `> ${ann.quickLabelTip}\n`;
-          }
+          output += quickLabelTipLine(ann);
         } else {
           output += `${commentHeadingLine(ann)}\n`;
           output += diagramLocationExportLine(ann);
@@ -1736,8 +1743,10 @@ export const formatDraftAnnotationsForAsk = (input: DraftAnnotationsForAsk): str
       const target = region
         ? `a region of the image ${quote(region.src)} [${safeInline(imageRegionLocationLines(region).replace('\n', '; '), 300)}]`
         : anchor ? `${subject} [${safeInline(diagramAnchorLocationLine(anchor), 300)}]` : subject;
+      // A label's tip is its instruction to the agent: it takes the place a
+      // comment's words take, on the draft's one line (#2626).
       body = ann.isQuickLabel
-        ? `label ${quote(ann.text)} on ${target}`
+        ? `label ${quote(ann.text)} on ${target}${ann.quickLabelTip ? ` — ${text(ann.quickLabelTip)}` : ''}`
         : `comment on ${target} — ${text(ann.text)}`;
     }
     lines.push(`${head} ${body}${from}${images(ann.images)}`);

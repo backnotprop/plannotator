@@ -508,6 +508,12 @@ export interface PlannotatorConfig {
    */
   inboxShape?: boolean;
   /**
+   * System in the Inbox (approval "system-inbox"): a drawing of each project's code, kept current by an agent.
+   * Shown only while Code review is on. Off unless turned on; config only until Settings → Capabilities' switch
+   * lands. Read on every request.
+   */
+  inboxSystem?: boolean;
+  /**
    * The queue of one-time reveals for returning users (approval
    * "inbox-feature-reveal"; rules in packages/shared/inbox/reveals.ts). Written
    * only by the server. `lastShownAt`: the last one-time announcement claimed
@@ -1565,30 +1571,35 @@ export function resolvePlanReview(config: PlannotatorConfig, env: NodeJS.Process
  * The hosts that register the Inbox's `plannotator_inbox` tool. The Pi
  * extension registers it as `pi` in Oh My Pi too: OMP has no Inbox host key
  * of its own (yet), so `inboxTool.pi` and the Pi default decide there.
- * `dsh` is the DeepSeek Harness plugin (`@plannotator/dsh`).
+ * `dsh` is the DeepSeek Harness plugin (`@plannotator/dsh`), `cline` the
+ * Cline plugin (`@plannotator/cline`).
  */
-export type InboxToolHost = "claude-code" | "pi" | "opencode" | "dsh";
+export type InboxToolHost = "claude-code" | "pi" | "opencode" | "dsh" | "cline";
 
 /**
  * Whether each host registers the Inbox's `plannotator_inbox` tool when
  * nothing is set: the agent tool's rule (on for the Claude Code mod, where
  * tools are deferred behind tool search; off on Pi, OpenCode 2 and DeepSeek
  * Harness, which send every tool's full definition with each request; DSH
- * also keeps its tool list fixed for request caching).
+ * also keeps its tool list fixed for request caching). Cline sends every
+ * tool's definition too and has no `plannotator` agent tool, so its entry is
+ * its own, off like Pi's.
  */
 export const INBOX_TOOL_DEFAULTS: Readonly<Record<InboxToolHost, boolean>> = {
   "claude-code": AGENT_TOOL_DEFAULTS["claude-code"],
   pi: AGENT_TOOL_DEFAULTS.pi,
   opencode: AGENT_TOOL_DEFAULTS.opencode,
   dsh: AGENT_TOOL_DEFAULTS.dsh,
+  cline: false,
 };
 
-export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode", "dsh"];
+export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode", "dsh", "cline"];
 
 /**
  * The hosts that give a session the Inbox reminder (INBOX_REMINDER_TEXT) with
  * the tool. DeepSeek Harness does not yet: it has no hidden-message slot like
- * Pi's, and a context message there shows as the person's own words.
+ * Pi's, and a context message there shows as the person's own words. Nor does
+ * Cline (its plugin has no hidden-message slot either).
  */
 export const INBOX_REMINDER_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode"];
 
