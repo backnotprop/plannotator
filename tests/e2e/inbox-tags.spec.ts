@@ -80,7 +80,7 @@ async function openReply(page: Page, threadId: string): Promise<ReturnType<Page[
   // itself once read (approval "inbox-reply-drafts"); the read can land between the check and
   // the click, so a click that finds no Reply is tried again. The test starts from an empty box.
   const box = pane.getByRole('textbox', { name: /^Reply to/ });
-  const reply = pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
+  const reply = pane.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ });
   for (let attempt = 0; attempt < 10 && !(await box.isVisible()); attempt += 1) {
     await reply.click({ timeout: 1_000 }).catch(() => {});
   }

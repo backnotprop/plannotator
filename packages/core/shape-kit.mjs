@@ -19,6 +19,9 @@
 // A board of real objects: dots(w, h) the board; pic(x, y, w, h, 'crop.png', { dark: 'crop-dark.png' }) pastes a real picture;
 // tile('claude', x, y) a real mark; card and sticky are objects; later ones sit on earlier ones, so let them overlap a little.
 //
+// Icons, logos and drawn things by name (the store fills them in): icon('server', x, y), logo('stripe', x, y), thing('database', x, y, w, h, { label: 'Postgres' }),
+// thing('envelope', x, y, 56, 40, { to: [x2, y2] }) travels along a wire. Colour an icon or a thing with { color: 'var(--blue)' }.
+//
 // A flow with branches: wrap what belongs to a path in on(['a'], ...), put pick('a', x, y, w, h, 'Case A') and pick('all', x, y, w, h, 'All paths', { of: ['a', 'b'], checked: true })
 // on the board, and give the view followCss(['a', 'b']): how: { ...svg(w, h, body), css: followCss(['a', 'b']) }. Picking one lights its path. No script.
 
@@ -121,6 +124,18 @@ export function mark(name, x, y, size = 40) {
 /** A mark on a little tile, an object you can overlap. */
 export const tile = (name, x, y, size = 56) =>
   `<g class="obj"><rect x="${x}" y="${y}" width="${size}" height="${size}" rx="${size * 0.22}" style="fill:var(--surface);stroke:var(--rule)" stroke-width="1.5"/>${mark(name, x + size * 0.2, y + size * 0.2, size * 0.6)}</g>`;
+
+const named = (attr, name, x, y, w, h, { color, label, to } = {}) =>
+  `<svg ${attr}="${esc(name)}" x="${x}" y="${y}" width="${w}" height="${h}"${color ? ` style="color:${esc(color)}"` : ''}${label ? ` data-label="${esc(label)}"` : ''}${to ? ` data-to="${to[0]} ${to[1]}"` : ''}/>`;
+
+/** Any Lucide icon by name (lucide.dev): server, database, laptop, key, credit-card… In the ink, or { color }. */
+export const icon = (name, x, y, size = 28, options = {}) => named('data-icon', name, x, y, size, size, options);
+
+/** A product's real logo by name: stripe, postgresql, redis, supabase, cloudflare, google, apple… Keeps its own colours. */
+export const logo = (name, x, y, size = 40) => named('data-logo', name, x, y, size, size);
+
+/** A drawn thing: database, server, phone, laptop, browser, envelope, queue. { label } inside it; { to: [x, y] } it travels there. */
+export const thing = (kind, x, y, w, h, options = {}) => named('data-draw', kind, x, y, w, h, options);
 
 /** A real picture pasted on the board, framed so a white screenshot holds on a dark board. dark: its dark twin. */
 export function pic(x, y, w, h, src, { dark, r = 10, alt = '', anchor = 'xMinYMin' } = {}) {

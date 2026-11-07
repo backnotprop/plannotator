@@ -119,6 +119,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   // No HOME of our own: PLANNOTATOR_TEST_SANDBOX gives the Inbox a scratch agent home inside its data dir.
   const env = {
     PATH: process.env.PATH ?? '',
+    HOME: root,
     PLANNOTATOR_DATA_DIR: data,
     PLANNOTATOR_TEST_SANDBOX: '1',
     PLANNOTATOR_BROWSER: NO_BROWSER,

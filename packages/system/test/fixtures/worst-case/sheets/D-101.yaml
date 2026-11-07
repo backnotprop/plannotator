@@ -1,0 +1,42 @@
+sheet: D-101
+scope: core
+kind: deployment
+title: Dispatch and billing core
+question: Where each part runs.
+left:
+  - label: Shipper, driver and carrier devices
+    tone: sand
+    stack: [ web, ios, android, kiosk, rtl, slackbot ]
+groups:
+  - label: AWS eu-central-1 (Frankfurt), primary region for EU and Gulf customers
+    means: three availability zones
+    marks: [ aws ]
+    around: [ edge, compute, data ]
+bands:
+  - id: edge
+    label: Edge
+    means: behind the load balancer
+    tone: mist
+    row: [ gateway 6, auth 3, webhooks 3 ]
+  - id: compute
+    label: Kubernetes, three node pools
+    tone: stone
+    row: [ dispatch, recon, routing, notify, ledger ]
+  - id: data
+    label: Data
+    tone: sage
+    row: [ pg 6, s3 2, redis 2, warehouse 2 ]
+right:
+  - label: Vendors
+    stack: [ twilio, sfsl, sap ]
+  - label: Snowflake
+    means: AWS eu-central-1, a different account
+    marks: [ snowflake ]
+    tone: sage
+    beside: data
+    stack: [ snow ]
+show: [ g1, g2, g3, g4, g11, g12, g13, g14, assign, bill, stops, photos, sessions, load, sendsms ]
+says:
+  stops: "every query, cross-AZ"
+notes:
+  a: { on: pg, text: "The read replica's hostname is longer than the box it sits in." }

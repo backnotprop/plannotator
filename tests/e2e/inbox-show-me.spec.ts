@@ -15,8 +15,8 @@
  *     it was. Show me on the same lines opens it again, from any window, and asks
  *     nothing. Plain Ask opens the Ask window with the lines named.
  *  3. The thread works with the board as Shape does on its own: the Chat's Ask
- *     reaches the session and its answer shows; Annotate's and Global comment's
- *     Change it wake it and a new version draws in; the thread's own header has
+ *     reaches the session and its answer shows; the crosshair's (Comment, in
+ *     Annotate's place on the Inbox's board) and Global comment's Change it wake it and a new version draws in; the thread's own header has
  *     the Pebble; the board's Thread tab reads the thread.
  *  4. Show me again is a new turn and a new version of the same board.
  *  5. A busy agent gets the Ask window's choice, never "drawing".
@@ -33,7 +33,11 @@
  *     the board's own viewer; a deleted file and a rename's old name: the file and the
  *     note, never a dead click; leaving the review closes the board.
  *
- * 11. A Change it while the session answers another thread: quiet, then through, once.
+ * 11. A link on a board over the thread (What's changed's `file:line`) shows the code:
+ *     the review at that line, painted, with the board as the corner card naming no
+ *     part (the owner, approval "review-show-me", addendum 2026-11-07); the card brings
+ *     the board back over the review, its links land the same way, and Esc closes it.
+ * 12. A Change it while the session answers another thread: quiet, then through, once.
  *
  * HOME is a scratch folder and the sandbox env keeps the binary off the person's agents.
  * gh and glab are traps. Build the binary first (see inbox.spec.ts), then
@@ -550,7 +554,7 @@ test('Show me on selected lines: the popover, the box, the agent makes a Shape, 
   await expect(page).toHaveURL(new RegExp(`guide=${round1.message_id}.*shape=${shapeId}`));
   await expect(board(page).getByRole('heading', { name: 'After the third failure' })).toBeVisible();
   await expect(part(board(page), 'stays')).toBeVisible();
-  for (const name of ['Picture', 'How it works', 'What to know', 'Annotate', 'References', 'Chat']) {
+  for (const name of ['Picture', 'How it works', 'What to know', 'Comment', 'References', 'Chat']) {
     await expect(board(page).getByRole('toolbar').getByRole('button', { name, exact: false }).first()).toBeVisible();
   }
   await expect(board(page).getByRole('button', { name: 'Global comment' })).toBeVisible();
@@ -651,8 +655,9 @@ test("the thread works with the board as Shape does on its own: Chat's Ask, Anno
   await shot(page, '06-chat', ['light', 'dark']);
   await board(page).getByRole('button', { name: 'Close panel' }).click();
 
-  // Annotate: point at a part, Change it: the session is woken, reads the note and draws v2.
-  await toolbar.getByRole('button', { name: 'Annotate' }).click();
+  // The crosshair (Annotate's place on the Inbox's board): point at a part, Change it: the session is woken, reads
+  // the note and draws v2.
+  await toolbar.getByRole('button', { name: 'Comment', exact: true }).click();
   await part(board(page), 'stays').click();
   const popover = page.getByRole('dialog').filter({ hasText: 'Change it' }).or(page.locator('[data-comment-popover]')).first();
   const words = page.locator('textarea:visible').last();
@@ -664,7 +669,7 @@ test("the thread works with the board as Shape does on its own: Chat's Ask, Anno
   await expect(part(board(page), 'stays')).toContainText('The row is removed');
   // It stays on the board, not in the review's own comments: no second comment system.
   await expect(page.locator('.ib-gpanel')).not.toContainText('Remove the row before the email.');
-  await toolbar.getByRole('button', { name: 'Annotate' }).click();
+  await toolbar.getByRole('button', { name: 'Comment', exact: true }).click();
   await shot(page, '08-redrawn', ['light', 'dark']);
 
   // Global comment: the same path, for the whole board.
@@ -747,9 +752,9 @@ test("the Overview's picture opens its code; with no picture, the Overview's Sho
   await openReview(page, bare.thread_id);
   const ask = page.locator('[data-overview-show-me]');
   await expect(ask).toBeVisible();
+  await shot(page, '11-overview-show-me', ['light', 'dark']);
   // Beside Global comment, on the heading's line (approval "review-deslop").
   await expect(page.locator('[data-guide-heading] .gv-tools button')).toHaveText(['Show me', 'Global comment']);
-  await shot(page, '11-overview-show-me', ['light', 'dark']);
   await ask.click();
   await expect(page.locator('[data-show-me-place]')).toHaveText('The whole review');
   await page.locator('[data-show-me-send]').click();
@@ -1023,6 +1028,75 @@ test("a part on a deleted file or a rename's old name: the file and the note, ne
   await expect(page.locator('[data-guide-file-shell="src/new-name.ts"]').first()).toBeVisible();
   await corner(page).getByRole('button', { name: 'Grow the board' }).click();
   await board(page).getByRole('button', { name: 'Close Shape' }).click();
+});
+
+test("a link on a board over the thread (What's changed): the code shows and the board shrinks to the corner card; the card brings it back", async () => {
+  test.setTimeout(120_000);
+  const { page } = world;
+  const asked = await call('send_message', { project_path: world.project, body: 'What changed in the retry?', thread: 'board-links', subject: 'Board links' });
+  const review = await call('submit_guide', { project_path: world.project, guide: guide(1, false), patch: world.round1, review: true, reply_to: asked.message_id, body: 'The review.' });
+  expect(review.thread_id).toBe(asked.thread_id);
+  const path = join(world.boardDir, 'board-links.json');
+  writeFileSync(
+    path,
+    JSON.stringify({
+      title: 'Board links',
+      claim: 'The retry stops after the third failure.',
+      views: {
+        picture: { width: 800, height: 300, html: '<div data-mark="it" style="padding:16px">it</div>' },
+        changed: { summary: 'The third failure stops the retry.', items: [{ id: 'stop', kind: 'behaviour', title: 'The retry stops after three', now: 'stop after the third failure', code: [`${WORKER}:17`] }] },
+      },
+    }),
+  );
+  const run = world.shape(['update', '--file', path, '--thread', asked.thread_id]);
+  expect(run.status, run.stderr).toBe(0);
+  const id = (JSON.parse(run.stdout) as { id: string }).id;
+  const link = (scope: Locator) => scope.getByRole('button', { name: `retry-worker.ts:17, open ${WORKER} at line 17` });
+  const pane = page.locator(`[data-review-message="${review.message_id}"]`);
+  const shell = page.locator(`[data-guide-file-shell="${WORKER}"]`).first();
+
+  // The board over the thread, no review open: its What's changed link.
+  await page.goto(`${world.url}#thread=${asked.thread_id}&shape=${encodeURIComponent(id)}`);
+  await page.reload();
+  await expect(board(page)).toContainText('The retry stops after the third failure.');
+  await expect(pane).toHaveCount(0);
+  await board(page).getByRole('toolbar').getByRole('button', { name: "What's changed" }).click();
+  await link(board(page)).click();
+
+  // The code shows: the review at that line, painted and scrolled into view clear of the card; the board is the
+  // corner card, naming no part.
+  await expect(pane).toBeVisible();
+  await expect(shell).toBeInViewport();
+  const painted = shell.locator('[data-line][data-selected-line]');
+  await expect(painted).toHaveCount(1);
+  await expect(painted).toBeInViewport();
+  const clearOfCard = async () => {
+    const line = (await painted.boundingBox())!;
+    const card = (await corner(page).boundingBox())!;
+    return line.y + line.height <= card.y;
+  };
+  await expect.poll(clearOfCard).toBe(true);
+  await expect(corner(page)).toHaveAttribute('data-show-me-corner', id);
+  await expect(corner(page).locator('.ib-sm-pip-f')).toHaveCount(0);
+  await expect(board(page)).toBeHidden();
+  await shot(page, '13-board-link', ['light', 'dark']);
+
+  // The card brings the board back, over the review, on What's changed where the person left it; its link lands the same way.
+  await corner(page).getByRole('button', { name: 'Grow the board' }).click();
+  await expect(corner(page)).toHaveCount(0);
+  await expect(board(page)).toBeVisible();
+  await expect(board(page).getByRole('toolbar').getByRole('button', { name: "What's changed" })).toHaveAttribute('aria-pressed', 'true');
+  await link(board(page)).click();
+  await expect(corner(page)).toBeVisible();
+  await expect(board(page)).toBeHidden();
+  await expect(painted).toBeInViewport();
+  await expect.poll(clearOfCard).toBe(true);
+
+  // Esc closes the board, as after a part lands on its line; the review stays.
+  await page.keyboard.press('Escape');
+  await expect(corner(page)).toHaveCount(0);
+  await expect(board(page)).toHaveCount(0);
+  await expect(pane).toBeVisible();
 });
 
 test('a Change it while the session answers another thread: no storm of requests, and it goes through once that turn ends, once', async () => {

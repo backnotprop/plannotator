@@ -7,18 +7,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { PanePart, ShapeBoardPart } from '../lazyParts';
 import type { InboxThread } from '@plannotator/core/inbox-types';
-import type { ShapeCodeTarget, ShapeVersion } from '@plannotator/core/shape';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 // The parts by file, never the index: the index holds ShapeSurface, which only the lazy #shape-board may load.
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import { ShapeGrid, shapeAgo, type ShapeGridItem } from '@plannotator/ui/components/shape/ShapeGrid';
-import type { ShapeHost } from '@plannotator/ui/components/shape';
+import type { ShapeHost, ShapeReviewAt } from '@plannotator/ui/components/shape';
+import type { ShapeBoardPlace, ShapeBoardProps } from './types';
 import { inboxApi, type InboxShapeSummary } from '../api';
 import { agentName, whenTime } from '../format';
 import { Icon } from '../icons';
 import { MessageBody } from '../components/Thread';
 import { Tip } from '../components/Tip';
 import { SidebarTrigger, useSidebar } from '../shell/sidebar';
+import { shapeReview, shapeReviewMessage } from './review';
 
 const ShapeBoard = ShapeBoardPart.Part;
 const NO_ANSWERS: ReadonlyMap<string, QuestionAnswer> = new Map();
@@ -66,16 +67,76 @@ export function ShapePebbleButton({ shape, open, onToggle }: { shape: InboxShape
 /**
  * The board, over the thread or the grid: its ×, Esc or Back closes it. It covers the page's head, so the sidebar
  * toggle every full page's head has sits at its title's left: the board can take the window's width.
+ *
+ * `onOpenReview`: a link on the board (What's changed, a `file:line`) opens the thread's review there; with Code
+ * review on the board rides along as its corner card (ReviewPane). `covered`: a review (the guide pane) is open over
+ * it. The board is inert meanwhile, so Esc and Tab go to the review, not to the board's panel, bubble or Show more
+ * under it. `place` and `onNavigate`: where it starts (the place a link left it, back from the review) and where the
+ * person goes on it. `back` and `headSide`: the way back to the board it came from, at the title's left, and the
+ * thread's other boards at its right (Show me from a board, `ThreadShapeLayer`).
  */
-export function ShapeLayer(props: { host: ShapeHost; id: string; onClose: () => void; thread: InboxThread | null }) {
+export function ShapeLayer({
+  host,
+  id,
+  onClose,
+  thread,
+  onOpenReview,
+  covered = false,
+  onAddToReply,
+  place = null,
+  onNavigate,
+  back = null,
+  headSide,
+}: {
+  host: ShapeHost;
+  id: string;
+  onClose: () => void;
+  thread: InboxThread | null;
+  onOpenReview?: (messageId: string, at: ShapeReviewAt | null) => void;
+  covered?: boolean;
+  onAddToReply?: ShapeBoardProps['onAddToReply'];
+  place?: ShapeBoardPlace | null;
+  onNavigate?: ShapeBoardProps['onNavigate'];
+  back?: ReactNode;
+  headSide?: ReactNode;
+}) {
   // A phone has none: there the sidebar is a sheet and the board covers the window, as before.
   const { isMobile } = useSidebar();
-  return <ShapeBoardLayer {...props} headStart={isMobile ? undefined : <SidebarTrigger />} />;
+  const reviewMessage = shapeReviewMessage(thread);
+  const openReview = useRef(onOpenReview);
+  openReview.current = onOpenReview;
+  const review = useMemo(
+    () => (reviewMessage && onOpenReview ? shapeReview(reviewMessage, (message, at) => openReview.current?.(message, at), inboxApi.guide) : null),
+    // A new review in the thread, or new facts on it; not every render's new callback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [reviewMessage?.id, reviewMessage?.guide?.sha256, !!onOpenReview],
+  );
+  return (
+    <ShapeBoardLayer
+      host={host}
+      id={id}
+      onClose={onClose}
+      thread={thread}
+      review={review}
+      covered={covered}
+      onAddToReply={onAddToReply}
+      place={place}
+      onNavigate={onNavigate}
+      headStart={isMobile && !back ? undefined : (
+        <>
+          {!isMobile && <SidebarTrigger />}
+          {back}
+        </>
+      )}
+      headSide={headSide}
+    />
+  );
 }
 
 /**
  * The layer itself, needing no sidebar: a review is a full window of its own, outside the sidebar's shell. `hidden`:
  * kept as it is (its view, its panel) while the review shows a part's code. `onCode`: a review lands a part on its line.
+ * `place`: the view and panel it starts on (read once, when it mounts); `onNavigate`: each view or panel the person picks.
  */
 export function ShapeBoardLayer({
   host,
@@ -84,17 +145,27 @@ export function ShapeBoardLayer({
   thread,
   hidden,
   onCode,
+  review = null,
+  covered = false,
+  onAddToReply,
   headStart,
   headSide,
+  place = null,
+  onNavigate,
 }: {
   host: ShapeHost;
   id: string;
   onClose: () => void;
   thread: InboxThread | null;
   hidden?: boolean;
-  onCode?: (target: ShapeCodeTarget, el: HTMLElement, version?: ShapeVersion | null) => boolean;
+  onCode?: ShapeBoardProps['onCode'];
+  review?: ShapeBoardProps['review'];
+  covered?: boolean;
+  onAddToReply?: ShapeBoardProps['onAddToReply'];
   headStart?: ReactNode;
   headSide?: ReactNode;
+  place?: ShapeBoardPlace | null;
+  onNavigate?: ShapeBoardProps['onNavigate'];
 }) {
   // The board is a chunk the Inbox serves: one that cannot arrive says so here, with Reload, and the next open
   // (this layer mounted again, or another board in it) asks for the chunk again.
@@ -109,16 +180,21 @@ export function ShapeBoardLayer({
     setFailedOn(id);
   }, [id]);
   return (
-    <section className="ib-shape-layer pn-shape" data-shape-layer={id} aria-label="Shape" hidden={hidden}>
+    <section className="ib-shape-layer ib-wlayer pn-shape" data-shape-layer={id} aria-label="Shape" hidden={hidden} inert={covered || undefined}>
       <PanePart key={attempt} loading={<div className="ib-shape-loading" aria-busy="true" />} onFailed={failed}>
         <ShapeBoard
           host={host}
           id={id}
           onClose={onClose}
           onCode={onCode}
-          renderThread={thread ? ({ flash }) => <ShapeThreadTab thread={thread} flash={flash} /> : undefined}
+          review={review}
+          renderThread={thread ? ({ flash }) => <ShapeThreadTab thread={thread} flash={flash} openInFiles={!!host.fileAction} /> : undefined}
           headStart={headStart}
           headSide={headSide}
+          crosshair
+          onAddToReply={thread ? onAddToReply : undefined}
+          {...(place ? { initialView: place.view, initialPanel: place.panel } : {})}
+          onNavigate={onNavigate}
         />
       </PanePart>
     </section>
@@ -126,7 +202,7 @@ export function ShapeBoardLayer({
 }
 
 /** The board's Thread tab: the thread's messages, read-only, each marked for the board's "jump to the message". */
-export function ShapeThreadTab({ thread, flash }: { thread: InboxThread; flash: string | null }) {
+export function ShapeThreadTab({ thread, flash, openInFiles = false }: { thread: InboxThread; flash: string | null; openInFiles?: boolean }) {
   return (
     <div className="ib-shape-thread">
       {thread.messages.map((m) => (
@@ -135,7 +211,7 @@ export function ShapeThreadTab({ thread, flash }: { thread: InboxThread; flash: 
             <b>{m.author.kind === 'person' ? 'You' : agentName(m.author)}</b>
             <span>{whenTime(m.created_at)}</span>
           </div>
-          <MessageBody message={m} projectRoot={thread.project.root} repo={thread.project.repo ?? null} readOnly answers={NO_ANSWERS} onPick={noop} footerFor={noFooter} onOpenAttachment={noop} />
+          <MessageBody message={m} projectRoot={thread.project.root} openInFiles={openInFiles} repo={thread.project.repo ?? null} readOnly answers={NO_ANSWERS} onPick={noop} footerFor={noFooter} onOpenAttachment={noop} />
         </article>
       ))}
     </div>

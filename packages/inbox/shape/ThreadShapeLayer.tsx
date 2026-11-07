@@ -6,13 +6,11 @@
  * The Show me itself (`useThreadShowMe`) lives in the window, above the board: a board closed while one draws keeps
  * its wait and the presses behind it, and the new board opens when it lands, as over a review.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { InboxThread } from '@plannotator/core/inbox-types';
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import type { ShapeHost } from '@plannotator/ui/components/shape';
-import { useSidebar, SidebarTrigger } from '../shell/sidebar';
 import { ShowMeBox } from '../review-drawing/ShowMeLayer';
 import { useShowMe } from '../review-drawing/useShowMe';
-import { ShapeBoardLayer } from './ShapeParts';
+import { ShapeLayer } from './ShapeParts';
 import { useBoardsNav } from './ShapeBoardsNav';
 import type { InboxShapes } from './useInboxShapes';
 
@@ -37,8 +35,14 @@ export function useThreadShowMe({ shapes, board, onBoard, say }: { shapes: Inbox
   return { showMe, threadId };
 }
 
-export function ThreadShapeLayer({ host, id, thread, shapes, threadShowMe, onClose, onBoard }: { host: ShapeHost; id: string; thread: InboxThread | null; shapes: InboxShapes; threadShowMe: ThreadShowMe; onClose: () => void; onBoard: (id: string) => void }) {
-  const { isMobile } = useSidebar();
+export function ThreadShapeLayer({
+  host,
+  id,
+  shapes,
+  threadShowMe,
+  onBoard,
+  ...layer
+}: Omit<ComponentProps<typeof ShapeLayer>, 'back' | 'headSide'> & { shapes: InboxShapes; threadShowMe: ThreadShowMe; onBoard: (id: string) => void }) {
   const boardThread = (shapes.shapes ?? []).find((shape) => shape.id === id)?.thread ?? null;
   const { showMe, threadId } = threadShowMe;
   const fromBoard = useRef(showMe.fromBoard);
@@ -50,21 +54,7 @@ export function ThreadShapeLayer({ host, id, thread, shapes, threadShowMe, onClo
     [host, canShowMe],
   );
   const nav = useBoardsNav({ shapes: shapes.shapes, threadId: boardThread, board: id, parents: showMe.parents, onBoard });
-  return (
-    <ShapeBoardLayer
-      host={withShowMe}
-      id={id}
-      thread={thread}
-      onClose={onClose}
-      headStart={isMobile && !nav.back ? undefined : (
-        <>
-          {!isMobile && <SidebarTrigger />}
-          {nav.back}
-        </>
-      )}
-      headSide={nav.list}
-    />
-  );
+  return <ShapeLayer {...layer} host={withShowMe} id={id} back={nav.back} headSide={nav.list} />;
 }
 
 /** The wait for a Show me from a thread's board: it stays when the board closes, and goes when the new board opens. */

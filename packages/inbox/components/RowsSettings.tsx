@@ -12,7 +12,7 @@
  */
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { InboxListRow, InboxSectionId } from '@plannotator/core/inbox-types';
-import { LIST_LOOK_KEYS, LIST_LOOK_OFF, listLookClasses, useListLook, type ListLook, type ListLookKey } from '../listLook';
+import { LIST_LOOK_DEFAULT, LIST_LOOK_KEYS, LIST_LOOK_OFF, listLookClasses, useListLook, type ListLook, type ListLookKey } from '../listLook';
 import { ListRow } from './InboxList';
 import { Icon } from '../icons';
 
@@ -198,12 +198,13 @@ const SHOW: readonly { key: ListLookKey; label: string; desc?: string }[] = [
 export type RowsPreset = 'minimal' | 'balanced' | 'detailed';
 
 /**
- * The presets: starting points, each a whole look. Balanced is the defaults (every option off), so choosing it is
- * also how to reset. A look that matches none reads "Custom".
+ * The presets: starting points, each a whole look. Balanced is the defaults (smaller thread names on, every other
+ * option off), so choosing it is also how to reset. Detailed keeps the larger unread names it had before smaller
+ * names became the default, so a look saved as Detailed still reads Detailed. A look that matches none reads "Custom".
  */
 export const ROWS_PRESETS: readonly { id: RowsPreset; label: string; look: ListLook }[] = [
   { id: 'minimal', label: 'Minimal', look: { ...LIST_LOOK_OFF, compact: true, hideAgents: true, hidePreview: true, smallNames: true, unreadDot: true, relativeTime: true } },
-  { id: 'balanced', label: 'Balanced', look: LIST_LOOK_OFF },
+  { id: 'balanced', label: 'Balanced', look: LIST_LOOK_DEFAULT },
   { id: 'detailed', label: 'Detailed', look: { ...LIST_LOOK_OFF, roomy: true, highlight: true, previewTwo: true } },
 ];
 

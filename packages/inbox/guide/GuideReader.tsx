@@ -13,9 +13,11 @@
  * served by the Inbox (build/pack-inbox.ts, #2593): its modules (the guide
  * chain, the diff renderer) load and run on the first Open, never at page load.
  * The first section card carries the Split | Unified tab (DiffStyleSwitch,
- * through the chain's `renderSectionTab`; under `threadHeading`, every open
- * chapter with diffs does); a phone draws every diff Unified
- * and has no tab. No new Tailwind classes here or in the chain. The comment cards, toolbar
+ * through the chain's `renderSectionTab`) unless the host draws the diff
+ * controls in its own bar (`hostDiffControls`: the guided review and the
+ * full-window review, approval "diff-controls-headers"); a phone draws every
+ * diff Unified and has no tab. The diffs follow every display setting the
+ * "Diff display" popover writes, the tab size included. No new Tailwind classes here or in the chain. The comment cards, toolbar
  * and suggestion blocks are styled by packages/review-editor/comments.css,
  * which apps/inbox/index.css imports (guides.show gets it through
  * review-editor's index.css; its pinned manifest follows the viewer build).
@@ -31,6 +33,9 @@ import type {
   ConventionalLabel,
   TokenAnnotationMeta,
 } from '@plannotator/ui/types';
+import { ReviewWorkerPoolProvider } from '@plannotator/review-editor/worker-pool';
+import { openedLinesQuote } from '../attachments';
+import { wholeFileReader, type KeptWholeFiles } from './wholeFileReader';
 import type { GuideReaderProps } from './types';
 import type ReaderShape from './reader-module';
 import { GuideHostProvider, GuideView, type GuideDiffRendererContext, type GuideDiffRendererProps, type GuideGlobalComments } from '@plannotator/guide-viewer';
@@ -41,7 +46,7 @@ import { parseDiffToFiles } from '@plannotator/guide-viewer/diffParser';
 import { engineLabel } from '@plannotator/guide-viewer/GuideViewer';
 import { AllFilesCodeView, type AllFilesCodeViewProps } from '@plannotator/review-editor/components/AllFilesCodeView';
 import type { DiffSelectionActions } from '@plannotator/review-editor/components/SelectionChooser';
-import { extractLinesFromPatch } from '@plannotator/review-editor/utils/patchParser';
+import { extractLinesFromPatch, isLineRangeInPatch } from '@plannotator/review-editor/utils/patchParser';
 import { useConfigValue } from '@plannotator/ui/config';
 import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
 import { reviewSourceLine } from './sourceLine';
@@ -98,6 +103,8 @@ export const GuideDiff: FC<
     /** The review's Viewed ticks (the header's Viewed control). Absent: none, as before. */
     viewedFiles?: Set<string>;
     onToggleViewed?: (filePath: string) => void;
+    /** Reads a file's whole text for the expand arrows. Absent: the diff shows as it came. */
+    fetchFileContent?: AllFilesCodeViewProps['fetchFileContent'];
     fileOpenIn?: (filePath: string) => ReactNode;
   }
 > = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, fileOpenIn, ...props }) => {
@@ -161,7 +168,19 @@ function allFilesGuide(snapshot: GuideSnapshot, files: readonly { path: string }
   };
 }
 
-export default function GuideReader({
+/**
+ * Highlighting runs off the page's thread, or a long file freezes it. The pool's three workers start with the first
+ * reader on screen and end with the last, so a page with no diff does not hold them.
+ */
+export default function GuideReader(props: GuideReaderProps) {
+  return (
+    <ReviewWorkerPoolProvider>
+      <Reader {...props} />
+    </ReviewWorkerPoolProvider>
+  );
+}
+
+function Reader({
   snapshot,
   reviewed,
   onReviewedChange,
@@ -176,10 +195,15 @@ export default function GuideReader({
   renderHeadActions,
   highlight = null,
   bare = false,
+  fileContents,
   threadHeading = false,
+  hostDiffControls = false,
+  collapseAll,
 }: GuideReaderProps) {
   const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
+  const wholeFiles = useRef<KeptWholeFiles>(new Map());
+  const fetchFileContent = useMemo<AllFilesCodeViewProps['fetchFileContent']>(() => (fileContents ? wholeFileReader(fileContents, wholeFiles.current) : undefined), [fileContents]);
   const walkthrough = useMemo<CodeGuideData>(
     () => ({
       title: snapshot.guide.title,
@@ -269,7 +293,11 @@ export default function GuideReader({
       const side = range.side === 'additions' ? 'new' : 'old';
       const file = files.find((f) => f.path === filePath);
       // The lines as the person read them, quoted in the reply.
-      const selectedText = file ? extractLinesFromPatch(file.patch, lineStart, lineEnd, side) : '';
+      // On a line an expand arrow opened: no forge takes it inline, so a PR's review posts it in its main comment, the code quoted.
+      const outsideDiff = !!file && !isLineRangeInPatch(file.patch, lineStart, lineEnd, side);
+      const whole = wholeFiles.current.get(filePath);
+      const openedCode = outsideDiff && whole ? openedLinesQuote(whole.contents, side, lineStart, lineEnd) : '';
+      const selectedText = !outsideDiff && file ? extractLinesFromPatch(file.patch, lineStart, lineEnd, side) : '';
       wiring.onSave({
         id: newCommentId(),
         type,
@@ -283,6 +311,7 @@ export default function GuideReader({
         originalCode,
         ...(tokenMeta && { charStart: tokenMeta.charStart, charEnd: tokenMeta.charEnd, tokenText: tokenMeta.tokenText }),
         ...(selectedText && { selectedText }),
+        ...(outsideDiff && { outsideDiff: true, ...(openedCode && { anchorText: openedCode }) }),
         createdAt: Date.now(),
         conventionalLabel,
         decorations,
@@ -334,20 +363,17 @@ export default function GuideReader({
   }, [commentFile, reveal]);
 
   // A phone draws one column, always, and offers no switch (two ~130 px columns read as nothing);
-  // the saved layout is left as it is. Elsewhere the first card carries the Split | Unified tab (the review: every open chapter).
+  // the saved layout is left as it is. Elsewhere the first card carries the Split | Unified tab, unless the host's bar has it.
   const phone = usePhone();
+  // The tab size the popover sets, as code review applies it (Pierre reads it off the page).
+  const tabSize = useConfigValue('diffTabSize');
+  useEffect(() => {
+    document.documentElement.style.setProperty('--diffs-tab-size', String(tabSize));
+  }, [tabSize]);
   // AllFilesCodeView compares Viewed sets by identity: a new Set only when the ticks change.
   const viewedFilesKey = viewed ? [...viewed.files].sort().join('\n') : null;
   const viewedSet = useMemo(() => (viewed ? new Set(viewed.files) : undefined), [viewedFilesKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  // The review: every open chapter with diffs carries it too, so a jump to a chapter lands with the control attached.
-  const renderSectionTab = useCallback(
-    (index: number, card: { folded: boolean; diffs: number; title: string }) => {
-      if (index === 0) return <DiffStyleSwitch icons={threadHeading} name={threadHeading ? 'ib-diff-style-0' : undefined} />;
-      if (!threadHeading || card.folded || card.diffs === 0) return null;
-      return <DiffStyleSwitch icons name={`ib-diff-style-${index}`} label={`Diff layout, ${card.title}`} />;
-    },
-    [threadHeading],
-  );
+  const renderSectionTab = useCallback((index: number) => (index === 0 ? <DiffStyleSwitch /> : null), []);
 
   const getDiffRendererProps = useCallback(
     ({ file }: GuideDiffRendererContext): {
@@ -355,9 +381,11 @@ export default function GuideReader({
       diffStyleOverride?: 'unified';
       viewedFiles?: Set<string>;
       onToggleViewed?: (filePath: string) => void;
+      fetchFileContent?: AllFilesCodeViewProps['fetchFileContent'];
       fileOpenIn?: (filePath: string) => ReactNode;
     } => ({
       ...(phone && { diffStyleOverride: 'unified' as const }),
+      ...(fetchFileContent && { fetchFileContent }),
       ...(fileOpenIn ? { fileOpenIn } : {}),
       ...(viewedSet && viewed ? { viewedFiles: viewedSet, onToggleViewed: viewed.onToggle } : {}),
       ...(comments
@@ -377,7 +405,7 @@ export default function GuideReader({
           }
         : {}),
     }),
-    [phone, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fileOpenIn],
+    [phone, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, fileOpenIn],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).
@@ -412,15 +440,17 @@ export default function GuideReader({
       DiffRenderer: GuideDiff,
       getDiffRendererProps,
       ...(revealFile ? { revealFile } : {}),
-      ...(phone ? {} : { renderSectionTab }),
+      ...(phone || hostDiffControls ? {} : { renderSectionTab }),
       ...(renderOverviewDiagram ? { renderOverviewDiagram } : {}),
       ...(renderOverviewFigure ? { renderOverviewFigure } : {}),
       ...(renderHeadActions ? { renderHeadActions } : {}),
       ...(globalComments ? { globalComments } : {}),
       // What GuideDiff draws (a phone: always Unified), for a file box's first estimate.
       diffStyle: phone ? ('unified' as const) : savedDiffStyle,
+      opensWholeFiles: !!fetchFileContent,
+      ...(collapseAll ? { collapseAll } : {}),
     }),
-    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle],
+    [files, getDiffRendererProps, revealFile, phone, hostDiffControls, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent, collapseAll],
   );
 
   // The window's wrap for a code span, for the viewer's own inline parser.

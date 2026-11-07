@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { useAnnotationFactory } from '../hooks/useAnnotationFactory';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { parseDiffToFiles } from './diffParser';
-import { reanchorCodeAnnotations } from './codeAnnotationAnchor';
+import { reanchorCodeAnnotations } from '@plannotator/ui/utils/codeAnnotationAnchor';
 import { localReviewDraftTransport, withLocalReviewTarget } from './localReviewDraft';
 import { DraftTargetChangedError } from '@plannotator/ui/hooks/useCodeAnnotationDraft';
 

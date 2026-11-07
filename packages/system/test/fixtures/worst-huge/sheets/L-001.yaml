@@ -1,0 +1,14 @@
+sheet: L-001
+scope: root
+kind: logical
+title: Everything on one sheet
+question: All 60 parts and all 120 lines, with nothing hidden.
+bands:
+  - { id: edge, label: "Clients and edge", row: [ shipperweb, driverios, driverandroid, kiosk, partnerapi, edi, sftp, emailintake, sms, voice, slackbot, opsconsole ] }
+  - { id: doors, label: "Doors", row: [ publicgateway, partnergateway, auth, webhooks, ratelimiter, waf, graphql, grpcedge, uploads, adminapi, statuspage, featureflags ] }
+  - { id: svc, label: "Services", row: [ dispatch, routing, pricing, quotes, billing, recon, ledger, notify, tracking, eta, fraud, claims ] }
+  - { id: jobs, label: "Jobs and streams", row: [ scheduler, kafka, outboxrelay, searchindexer, exports, imports, geocoder, photoresizer, invoicepdf, payouts, auditlog, retention ] }
+  - { id: data, label: "Storage", row: [ postgres, readreplica, redis, s3, snowflake, elasticsearch, clickhouse, dynamodb, vault, kms, backups, tilescache ] }
+show: all
+notes:
+  a: { on: publicgateway, text: "Sixty parts, one hundred and twenty lines." }
