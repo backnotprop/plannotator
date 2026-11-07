@@ -85,6 +85,19 @@ function listKey(rows: readonly InboxListRow[]): string {
 /**
  * The leave tracker, the settling wait, the claim and the opening, for one reveal. `target`: the thread just left.
  */
+/**
+ * Another one-time dialog showed on this load (the Board's first visit, the star ask's card): App's `revealBlocked`
+ * reads it, so Snooze, the Board and the Checklist reveals hold back for the rest of the load. Nothing is stamped: the
+ * line and every day stay as they are.
+ */
+let otherOneTimeDialog = false;
+export function noteOneTimeDialogShown(): void {
+  otherOneTimeDialog = true;
+}
+export function oneTimeDialogShownThisLoad(): boolean {
+  return otherOneTimeDialog;
+}
+
 export function useRevealMoment(input: RevealMomentInput) {
   const [stage, setStage] = useState<RevealStage>('none');
   const [moment, setMoment] = useState<RevealVisit | null>(null);
@@ -230,16 +243,18 @@ export interface RevealArmed {
   snoozeDue: boolean;
   /** The offers this load may also arm, each at its own moment (settings `reveal.ahead`: List view). */
   ahead: readonly InboxRevealId[];
+  /** Armed beside `next`, outside the line's order (settings `reveal.aside`: the star ask). */
+  aside: readonly InboxRevealId[];
 }
 
 /**
  * The load's latch (App): only `reveal.next` is armed. An older Inbox reports no queue (no `reveal`): its Snooze rule
  * alone, and never the Board.
  */
-export function revealArmed(settings: { reveal?: { next: RevealArmed['next']; ahead?: readonly InboxRevealId[] }; snooze_intro?: { due: boolean } }): RevealArmed {
+export function revealArmed(settings: { reveal?: { next: RevealArmed['next']; ahead?: readonly InboxRevealId[]; aside?: readonly InboxRevealId[] }; snooze_intro?: { due: boolean } }): RevealArmed {
   const snoozeDue = settings.snooze_intro?.due === true;
   const next = settings.reveal ? settings.reveal.next : snoozeDue ? 'snooze' : null;
-  return { next, snoozeDue: snoozeDue && next === 'snooze', ahead: settings.reveal?.ahead ?? [] };
+  return { next, snoozeDue: snoozeDue && next === 'snooze', ahead: settings.reveal?.ahead ?? [], aside: settings.reveal?.aside ?? [] };
 }
 
 /** The Board reveal's need: the list holds this many rows or more (the approval: "the list has 5 rows or more"). */
@@ -435,6 +450,57 @@ export function useLineReveal(input: LineRevealInput) {
     },
     atOnce: input.atOnce,
   });
+}
+
+/** What one load knows for the "Star the repo" ask (approval "star-ask"): the Board's inputs, without its switch. */
+export type StarRevealInput = Omit<BoardRevealInput, 'onBoardOn' | 'on'>;
+
+/**
+ * Leaving a thread counts for the star ask when it was open long enough to read (the proposal: "just after the person
+ * leaves a thread they read for 5 s or more"), back on the list or on to another thread.
+ */
+export function starRevealLeaveCounts(visit: RevealVisit, now: number): boolean {
+  return now - visit.at >= REVEAL_TIMES.readMs;
+}
+
+/** At a settled moment: the list is loaded and not the first-run screen, and the page has been open 60 s or more. */
+export function starRevealMayClaim(gate: Pick<StarRevealInput, 'due' | 'blocked' | 'listLoaded' | 'firstRun'>, pageAge: number): boolean {
+  return gate.due && !gate.blocked && gate.listLoaded && !gate.firstRun && pageAge >= REVEAL_TIMES.pageAgeMs;
+}
+
+/**
+ * The "Star the repo" ask (approval "star-ask", 2026-11-06; packages/shared/star-ask.ts): last in the line, at the
+ * shared calm moment. Its claim (`claimReveal('star')`) runs the already-starred check on the Inbox and answers
+ * whether the button stars with gh (`canStar`) or is a link; the page then shows the corner card (`StarAskCard`).
+ */
+export function useStarReveal(input: StarRevealInput) {
+  const latest = useRef(input);
+  latest.current = input;
+  const key = useRef<string | null>(null);
+  const [canStar, setCanStar] = useState(false);
+  const moment = useRevealMoment({
+    wanted: input.due && !input.blocked,
+    thread: input.thread,
+    rows: input.rows,
+    clear: input.clear,
+    place: input.place,
+    heldBack: input.heldBack,
+    toast: input.toast,
+    leaveCounts: (visit, now) => starRevealLeaveCounts(visit, now),
+    mayClaim: (pageAge) => starRevealMayClaim(latest.current, pageAge),
+    holds: () => true,
+    claim: async () => {
+      key.current ??= newUuid();
+      const answer = await claimRevealOnce('star', key.current);
+      setCanStar(answer.star?.can_star === true);
+      return answer.show;
+    },
+  });
+  // The card is up: the other reveals hold back for the rest of this load (App's `revealBlocked`), without a stamp.
+  useEffect(() => {
+    if (moment.stage === 'open') noteOneTimeDialogShown();
+  }, [moment.stage]);
+  return { ...moment, canStar };
 }
 
 /**

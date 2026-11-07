@@ -72,6 +72,8 @@ export interface PullReviewProps {
   onBack: () => void;
   /** The verdict went. */
   onSent: () => void;
+  /** A review went to the PR on the forge: Reviews reads its rows again. */
+  onPosted?: () => void;
 }
 
 const NO_BLOCKS: never[] = [];
@@ -257,7 +259,7 @@ function forPost(comments: readonly KeptComment[], screen: Pick<OnScreen, 'stamp
   });
 }
 
-function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onBack, onSent }: PullReviewProps) {
+function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onBack, onSent, onPosted }: PullReviewProps) {
   const phone = usePhone();
   const item = useMemo(() => (model ? findStack(pullGroups(model, null), stackId) : null), [model, stackId]);
   const stack = item?.stack ?? null;
@@ -675,6 +677,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               // Only what went is cleared: a whole stack's line comments map to no PR's lines and stay.
               forgetWent(result.posted);
               setPosted({ label: result.label, url: result.url, action: result.action });
+              onPosted?.();
             }}
           />
         ) : canDecide ? (

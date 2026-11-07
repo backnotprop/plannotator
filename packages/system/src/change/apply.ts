@@ -73,6 +73,60 @@ function gateAfter(model: SystemModel, g: GateResult, files?: ChangeFile[]): Sys
   return out;
 }
 
+// ---------------------------------------------------------------- several open PRs at rest
+/** One open PR's touched parts, as the gate found them, and the label it shows by the parts ("PR 2848"). */
+export type Touch = { label: string; change: GateResult };
+
+const TOUCHED = new WeakMap<SystemModel, Map<string, SystemModel>>();
+
+/**
+ * The words a touched part carries: every label when one or two PRs touch it
+ * ("PR 2848 · PR 2851"), the first and how many more past two ("PR 2848 +2"),
+ * so a part's second line stays short and the sheet keeps its shape.
+ */
+export function touchWords(labels: string[]): string {
+  return labels.length <= 2 ? labels.join(' · ') : `${labels[0]} +${labels.length - 1}`;
+}
+
+/**
+ * The drawing at rest with several open PRs' touched parts on it: amber only,
+ * as the gate draws one, each touched part labelled with the PRs that touch it
+ * (in the order given) in place of its second line. No numbers, no counts.
+ * Kept per drawing and per content, so a host's new array of the same touches
+ * is the same model. With nothing touched it is the drawing itself.
+ */
+export function applyTouches(model: SystemModel, touches: Touch[]): SystemModel {
+  const byPart = new Map<string, string[]>();
+  const flows = new Set<string>();
+  for (const t of touches) {
+    for (const id of t.change.touched.parts) {
+      if (!has(model.parts, id)) continue;
+      const l = byPart.get(id) ?? [];
+      if (!l.includes(t.label)) l.push(t.label);
+      byPart.set(id, l);
+    }
+    for (const id of t.change.touched.flows) if (has(model.flows, id)) flows.add(id);
+  }
+  if (!byPart.size && !flows.size) return model;
+  const key = JSON.stringify([[...byPart], [...flows]]);
+  let kept = TOUCHED.get(model);
+  if (!kept) TOUCHED.set(model, (kept = new Map()));
+  const hit = kept.get(key);
+  if (hit) return hit;
+  const parts = { ...model.parts };
+  const marks: ChangeMarks = { parts: {}, flows: {}, hops: {} };
+  for (const [id, labels] of byPart) {
+    const words = touchWords(labels);
+    marks.parts[id] = { is: 'changed', n: 0, lines: words, who: labels };
+    parts[id] = { ...parts[id]!, sub: words };
+  }
+  for (const id of flows) marks.flows[id] = 'changed';
+  const out = { ...model, parts };
+  setMarks(out, marks);
+  kept.set(key, out);
+  return out;
+}
+
 // ---------------------------------------------------------------- before
 function before(model: SystemModel, r: Revision): SystemModel {
   // a `~` part or line is in the drawing already (a merged PR): before the PR it was not there

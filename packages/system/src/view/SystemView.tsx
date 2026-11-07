@@ -12,14 +12,16 @@
 // Before / After switch the drawing (the parts both draw travel, the rest
 // fades); Steps puts the change's one sequence in place of the sheet. In a
 // full window the parts list stands beside the sheet and a numbered legend
-// under it; a plan is drawn dashed.
+// under it; a plan is drawn dashed. With no one change, several open PRs'
+// touched parts (`touches`) mark the drawing at rest amber, each part labelled
+// with the PRs that touch it.
 //
 // The sheet on screen is always at the world's origin. A dive flies the camera
 // into a window's box while the box's inside unrolls out of it and the sheet
 // around lowers; at 97% of the way it re-roots the world on the inside sheet
 // and glides the rest. The inside is drawn from the at-rest layout the dive
 // lands on, so nothing flashes or jumps at the landing (G step 8h).
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { flushSync } from 'react-dom';
 import type { Revision, SystemModel } from '../format/types.ts';
 import type { GateResult } from '../gate/gate.ts';
@@ -35,7 +37,7 @@ import {
 } from './camera.ts';
 import { all, born, clearFlip, easeOut, FULL_LINES, FULL_WORDS, placesOf, startFlip, type Flip } from './flip.ts';
 import { KeyCard, NotesCard } from './cards.tsx';
-import { applyChange, hasSteps, type ChangeView } from '../change/apply.ts';
+import { applyChange, applyTouches, hasSteps, type ChangeView, type Touch } from '../change/apply.ts';
 import { changeSummary, isRevision, type ChangeFile } from '../change/summary.ts';
 import { PartsList } from './PartsList.tsx';
 import { StepsStage } from './StepsStage.tsx';
@@ -56,6 +58,8 @@ export type SystemViewProps = {
   keys?: boolean;
   /** A change to draw: a PR's revision, a plan, or the gate's touched parts (amber only). Opens on the sheet it touches most when `sheet` is left out. */
   revision?: Revision | GateResult;
+  /** Several open PRs on the drawing at rest, each the gate's touched parts with its label ("PR 2848"): amber only, each touched part labelled. Ignored when `revision` is given. */
+  touches?: Touch[];
   /** Before, After (default) or Steps of a change. A gate result has After only; Steps needs a revision with steps. */
   view?: 'before' | 'after' | 'steps';
   /** plan: the change drawn dashed where not built, for Shape's System (plan) tab. Default review. */
@@ -78,6 +82,8 @@ export type SystemViewProps = {
   onOpenFull?(): void;
   /** Shown as a close button when given; Esc on the landing sheet calls it too. */
   onClose?(): void;
+  /** The host's own control at the start of the top bar, before the crumbs ("‹ Reviews"), in a pane or a window. */
+  leading?: ReactNode;
 };
 
 /** A window being entered or left: the part, the sheet inside, the box its inside opens from, and how far (0 outside, 1 inside). */
@@ -87,7 +93,7 @@ type Door = DoorWindow & { id: string; code: string; r: Rect; s: number };
 
 
 export function SystemView({
-  model: base, sheet, project, reading = 'full', layout, keys = true, revision, view = 'after', mode = 'review', files, pr,
+  model: base, sheet, project, reading = 'full', layout, keys = true, revision, view = 'after', mode = 'review', files, pr, touches, leading,
   onNavigate, onReading, onView, onOpenFile, onOpenFull, onClose, onOpenDetails,
 }: SystemViewProps) {
   const root = useRef<HTMLDivElement>(null);
@@ -107,7 +113,9 @@ export function SystemView({
   const canSteps = hasSteps(change);
   const vw: ChangeView = !change ? 'after' : view === 'steps' && canSteps ? 'steps' : view === 'before' && rev ? 'before' : 'after';
   const asBefore = vw === 'before';
-  const model = useMemo(() => (change ? applyChange(base, change, asBefore ? 'before' : 'after', files) : base), [base, change, asBefore, files]);
+  // several open PRs at rest, when there is no one change: the same model for the same touches, so a host's new array does not turn the sheet
+  const atRest = !change && touches?.length ? applyTouches(base, touches) : base;
+  const model = useMemo(() => (change ? applyChange(base, change, asBefore ? 'before' : 'after', files) : atRest), [base, change, asBefore, files, atRest]);
   const stepsModel = useMemo(() => (change && canSteps && vw === 'steps' ? applyChange(base, change, 'steps', files) : null), [base, change, canSteps, vw, files]);
   const [picked, setPicked] = useState<string | null>(null);
   const [rowHover, setRowHover] = useState<string | null>(null);
@@ -852,26 +860,30 @@ export function SystemView({
     )
   ) : null;
 
+  const crumbs = (
+    <nav className="sys-crumbs" aria-label="Where this sheet is">
+      {projectCrumb && <span className="sys-crumb">{projectCrumb}</span>}
+      {path.map(([id, label], i) => {
+        const here = i === path.length - 1;
+        return (
+          <span key={id} className="sys-crumb-w">
+            {(projectCrumb || i > 0) && <span className="sys-crumb-sep" aria-hidden="true">/</span>}
+            {here ? (
+              <span className="sys-crumb sys-here" aria-current="location">{label}</span>
+            ) : (
+              <button type="button" className="sys-crumb sys-crumb-b" title={`Up to ${label}`} onClick={() => travel(childFor(id) ?? model.root)}>{label}</button>
+            )}
+          </span>
+        );
+      })}
+      {shownSheet && <span className="sys-code">{shownCode}</span>}
+    </nav>
+  );
+
   return (
     <div ref={root} className={'sys sys-view sys-' + layout + (plan ? ' sys-plan' : '') + (aside ? ' sys-has-aside' : '')} data-sheet={code} data-reading={two ? reading : 'full'} data-view={change ? vw : undefined} onKeyDown={onKeyDown}>
       <div className="sys-bar">
-        <nav className="sys-crumbs" aria-label="Where this sheet is">
-          {projectCrumb && <span className="sys-crumb">{projectCrumb}</span>}
-          {path.map(([id, label], i) => {
-            const here = i === path.length - 1;
-            return (
-              <span key={id} className="sys-crumb-w">
-                {(projectCrumb || i > 0) && <span className="sys-crumb-sep" aria-hidden="true">/</span>}
-                {here ? (
-                  <span className="sys-crumb sys-here" aria-current="location">{label}</span>
-                ) : (
-                  <button type="button" className="sys-crumb sys-crumb-b" title={`Up to ${label}`} onClick={() => travel(childFor(id) ?? model.root)}>{label}</button>
-                )}
-              </span>
-            );
-          })}
-          {shownSheet && <span className="sys-code">{shownCode}</span>}
-        </nav>
+        {leading ? <div className="sys-start"><div className="sys-lead">{leading}</div>{crumbs}</div> : crumbs}
         {/* every chip says its sheet's kind in words: a code's first letter alone ("F" beside "Logical") named nothing,
             and F is also the fit key; two sheets of one kind add their codes; the current one takes the selected fill */}
         {vw === 'steps' && stepsModel ? (
@@ -1003,7 +1015,7 @@ export function SystemView({
             )}
           </div>
         )}
-        {keyOpen && <KeyCard notes={!!L?.notes.length} sheets={codes.length > 1} keys={keys} pane={layout === 'pane'} change={change ? (plan ? 'plan' : rev ? 'review' : 'gate') : null} />}
+        {keyOpen && <KeyCard notes={!!L?.notes.length} sheets={codes.length > 1} keys={keys} pane={layout === 'pane'} change={change ? (plan ? 'plan' : rev ? 'review' : 'gate') : atRest !== base ? 'touches' : null} />}
         {notesOpen && L && L.notes.length > 0 && <NotesCard notes={L.notes} onClose={() => { setNotesOpen(false); notesBtn.current?.focus({ preventScroll: true }); }} />}
         <div className="sys-sr" aria-live="polite">{said}</div>
       </div>

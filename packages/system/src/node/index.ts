@@ -1,4 +1,4 @@
-// @plannotator/system/node: reads a drawing from disk or from git. Bun or
+// @plannotator/system/node: reads a drawing from disk and checks it against git. Bun or
 // Node. Git is only ever read (rev-parse, ls-tree, cat-file, diff); nothing
 // here fetches.
 import { lstat, readdir, readFile } from 'node:fs/promises';
@@ -8,7 +8,7 @@ import { MAX_FILE_BYTES, MAX_TOTAL_BYTES } from '../format/keys.ts';
 import { loadFiles } from '../format/load.ts';
 import { stillWanted } from '../format/status.ts';
 import type { LoadIssue, LoadResult, SystemFiles } from '../format/types.ts';
-import { decodeUtf8, git, gitBytes, isGitRepo, lsTree, resolveCommit } from './git.ts';
+import { decodeUtf8, git, isGitRepo, lsTree, resolveCommit } from './git.ts';
 
 /** Where a drawing lives inside a repo. */
 export const DRAWING_DIR = '.plannotator/system';
@@ -80,55 +80,9 @@ function withIssues(files: SystemFiles, issues: LoadIssue[]): LoadResult {
   return { ...result, errors: [...issues, ...errors] };
 }
 
-/** Load the drawing in a folder (usually `<repo>/.plannotator/system`). No folder: model null and no errors. */
+/** Load the drawing in a folder (a drawing folder in the Inbox data dir, or a fixture). No folder: model null and no errors. */
 export async function load(dir: string): Promise<LoadResult> {
   const { files, issues } = await readFiles(dir);
-  return withIssues(files, issues);
-}
-
-async function collectCommitted(o: { root: string; ref: string }): Promise<{ files: SystemFiles; issues: LoadIssue[] }> {
-  const commit = await resolveCommit(o.root, o.ref);
-  if (!commit) throw new Error(`git: "${o.ref}" is not a commit in ${o.root}`);
-  const tree = await lsTree(o.root, commit, DRAWING_DIR);
-  const files: SystemFiles = Object.create(null);
-  const issues: LoadIssue[] = [];
-  let total = 0;
-  for (const [full, entry] of tree) {
-    if (!full.startsWith(DRAWING_DIR + '/')) continue;
-    const rel = full.slice(DRAWING_DIR.length + 1);
-    if (!isDrawingFile(rel) && !(entry.mode === '120000' && (rel === 'sheets' || rel === 'revisions'))) continue;
-    if (entry.mode === '120000') {
-      issues.push(issue(rel, `is a symlink at ${o.ref}; a drawing file is a plain file in the drawing folder`));
-      continue;
-    }
-    if (entry.type !== 'blob') continue;
-    if ((entry.size ?? 0) > MAX_FILE_BYTES) {
-      issues.push(issue(rel, `is ${entry.size} bytes; this Plannotator reads at most ${MAX_FILE_BYTES} bytes in one file`));
-      continue;
-    }
-    total += entry.size ?? 0;
-    if (total > MAX_TOTAL_BYTES) return { files: Object.create(null), issues: [totalCap()] };
-    const text = decodeUtf8(await gitBytes(o.root, ['cat-file', 'blob', `${commit}:${full}`], MAX_FILE_BYTES + 1));
-    if (text == null) issues.push(issue(rel, 'is not UTF-8 text'));
-    else files[rel] = text;
-  }
-  return { files, issues };
-}
-
-/**
- * The drawing as committed at a ref, read only. No drawing at that ref gives
- * no files. Throws when the ref is not a commit, or a drawing file is a
- * symlink, over the size cap or not UTF-8.
- */
-export async function readCommitted(o: { root: string; ref: string }): Promise<SystemFiles> {
-  const { files, issues } = await collectCommitted(o);
-  if (issues.length) throw new Error(issues.map((i) => `${i.file || DRAWING_DIR}: ${i.message}`).join('\n'));
-  return files;
-}
-
-/** Load the drawing as committed at a ref, with any file that could not be read as an error. */
-export async function loadCommitted(o: { root: string; ref: string }): Promise<LoadResult> {
-  const { files, issues } = await collectCommitted(o);
   return withIssues(files, issues);
 }
 
