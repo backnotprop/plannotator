@@ -497,7 +497,8 @@ button.ib-mut { border-radius: 6px; }
   .pn-inbox .ib-side-sec:hover svg.ib-side-sec-chev { visibility: visible; }
   .ib-side-sec:hover .ib-n { opacity: 0; }
 }
-.ib-pins[data-closed] + .ib-side-sec, .ib-pins[data-closed] + .ib-secrow { margin-top: 2px; }
+/* One rule for every section: a header sits 2 px under a closed section with no row left, and 12 px (8 on a phone) under rows, so closed headers read as an even stack and an open section's rows stay with their header. */
+.ib-sidescroll > [data-closed]:empty + :is(.ib-side-sec, .ib-secrow) { margin-top: 2px; }
 /* The order of Projects: beside the chevron, a sibling of the header so it stays one button; the row keeps the header's hover while the pointer is on it.
    The header's margin is the row's, so the row is exactly the header and hovers only where a click opens or closes. */
 .ib-secrow { position: relative; margin-top: 12px; }
