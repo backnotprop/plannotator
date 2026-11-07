@@ -49,6 +49,7 @@ export const SHAPE_GUIDE = `## The stance
 
 - Before you draw a new version, run \`plannotator shape drawing <id>\`, so the board shows that you are drawing.
 - Store the new version with \`plannotator shape update --file <file> --id <id> --base <the version you started from>\`. If someone changed it since, it is refused and prints the latest version: start from that one.
+- Run \`plannotator shape update\` from the project's folder, or pass \`--project <folder>\`, so the board is filed under that project.
 - Keep the same ids (\`data-mark\`, ref numbers) for the same parts in every version. The board redraws only what changed.
 - The person points at parts of the board to change or ask about them. Run \`plannotator shape read <id> --notes\` at the start of each turn. It prints the notes that wait for you and marks them as received:
   - a \`change\` note: draw the change as a new version;
@@ -84,7 +85,8 @@ export const SHAPE_GUIDE = `## The stance
   - \`signature\`: name, parameters and return type, no keywords: \`sound(r: Reading): Sound\`. \`code\`: its \`{ path, line }\`.
   - \`checks\`, in code order: \`[{ code, constant, saw, result }]\`. A check is a condition the code needs to go on (\`a || b\` is one check). \`result\` is \`pass\`, \`fail\` (the code stops there; later checks are \`not-reached\`) or \`not-reached\`. Mark the check that decided the step \`"decides": true\`; give a failing one its \`short\` ("20_000 short (20 s)").
   - \`output\`: \`{ name, value, type }\`.
-- **views.code** (Code, optional): a Guided Review of the change. Leave it out unless the person asks.
+- **views.changed** (What's changed, optional): when the work changes code, what it now does differently, so the person can check it without reading the diff. Write only what you saw in the code; leave it out when nothing changed. \`items\` (one per change, at most 40), each with an \`id\` (ids start with a letter, then letters, digits, \`.\`, \`-\` or \`_\`, up to 64 characters) and a \`title\` in the person's words. Each item has a \`kind\`: one of \`behaviour\`, \`contract\`, \`moved\`, \`removed\` or \`check\`. \`behaviour\` (what someone sees or gets) and \`contract\` (a name, type, setting or API), each with \`was\`, \`now\` or both (a line or a list of lines); \`moved\` with \`from\` and \`to\`; \`removed\` with \`was\`; \`check\`, a thing to look at, with a \`note\` that says why. Add \`code: ["src/kettle.ts:42"]\` for where it is, and \`step\` for its step in your Guided Review, if there is one. \`flows\` (optional) follow one call path: \`{ "id": "boil", "title": "Water boils", "start": "The sensor reads 100 °C", "steps": [{ "call": "whistleOnce()", "is": "new", "at": "src/kettle.ts:42" }], "forks": [{ "when": "Lid open", "end": { "now": "No whistle" } }], "end": { "was": "Whistles until lifted", "now": "One whistle" } }\`, where \`is\` is \`new\`, \`gone\`, \`changed\` or \`same\`. \`summary\` (one line) and \`also\` (one line, such as tests) are optional.
+- **views.code** (Code, optional): a Guided Review of the change. Leave it out unless the person asks. The Plannotator Inbox does not show it: there, What's changed opens the thread's own review.
 - **refs:** numbered sources; on the Picture, a handful. Any kind can have \`sub\` and \`images\` (\`{ src, alt, crop: [x, y, width, height] }\`, 0 to 1); the bubble shows the first. \`message\` targets a thread message id; \`file\` a path in the project (with \`line\`); \`image\` a picture, named as on the Picture (the store keeps a copy); \`pr\` and \`link\` an https URL.
 
 ## Drawing rules
@@ -120,11 +122,12 @@ export const SHAPE_HELP_INTRO = [
   "",
   "Start:",
   "1. Write the board as JSON (the format is below) in a scratch file, such as /tmp/shape-<topic>.json.",
-  "2. Store it: `plannotator shape update --file /tmp/shape-<topic>.json`. It prints { id, v }. Keep the id.",
+  "2. Check that the Picture, How it works and What's changed agree before you update.",
+  "3. Store it: `plannotator shape update --file /tmp/shape-<topic>.json`. It prints { id, v }. Keep the id.",
   "   If it is refused, fix what it lists and run it again. Each problem names its field.",
-  "3. Open it: `plannotator shape open <id>`. The Shape page opens in the person's browser, and the",
+  "4. Open it: `plannotator shape open <id>`. The Shape page opens in the person's browser, and the",
   "   command prints its address. Tell the person in one line that the board is up (v1), with the address.",
-  "4. A page that is already open shows each new version by itself: do not open it again. Run",
+  "5. A page that is already open shows each new version by itself: do not open it again. Run",
   "   `plannotator shape open` again only when the person closed it or asks for it.",
   "",
   "In a Plannotator Inbox thread, add --thread <the thread's id> to the first update and",
@@ -141,8 +144,9 @@ export const SHAPE_HELP_INTRO = [
   "  plannotator shape open [<shp_id>]",
   "  plannotator shape on | off",
   "",
-  "A shape is a board you draw for the person: a Picture, How it works and Code,",
-  "with numbered references. Each update stores a new version of the whole board.",
+  "A shape is a board you draw for the person: a Picture, How it works, What's changed",
+  "and Code, with numbered references. Each update stores a new version of",
+  "the whole board.",
   "",
   "(none)   Opens Shape's page in the person's browser, or the one already open, and prints its address.",
   "update   Stores the board in <board.json>. Without --id it makes a new shape and",
@@ -187,9 +191,10 @@ DRAFT. The person wants to see the work in this thread the way you see it, so th
 
 1. Read the whole thread (\`read_thread\`, every message). Note: what the work makes, what is settled, what is open and whose call it is, and what happens next. Then pick the one idea to draw; the rest goes behind numbers or in your message to the person.
 2. Write the board as JSON (the format is below) in a scratch file, such as \`/tmp/shape-<topic>.json\`.
-3. Store it: \`plannotator shape update --file /tmp/shape-<topic>.json --thread <the thread's id: thread_id from read_thread> --through <the latest message id you read>\`. It prints \`{ id, v }\`. Keep the id.
-4. If it is refused, fix what it lists and run it again. Each problem names its field.
-5. Tell the person in one line that the board is up (v1), in this thread.
+3. Check that the Picture, How it works and What's changed agree before you update.
+4. Store it: \`plannotator shape update --file /tmp/shape-<topic>.json --thread <the thread's id: thread_id from read_thread> --through <the latest message id you read>\`. It prints \`{ id, v }\`. Keep the id.
+5. If it is refused, fix what it lists and run it again. Each problem names its field.
+6. Tell the person in one line that the board is up (v1), in this thread.
 
 Every later update in this thread also takes \`--through <the latest message id you read>\`.
 `;

@@ -1,7 +1,7 @@
 /**
- * Shape: the living board. One shape's views (Shape, How it works, Code) with
- * fades between them, `views.know`'s words under the drawing in the Shape view,
- * the dock, live marking with
+ * Shape: the living board. One shape's views (Shape, How it works, What's
+ * changed, Code) with fades between them, `views.know`'s words under the drawing
+ * in the Shape view, the dock, live marking with
  * two intents (Change it / Ask, on a part or on the whole board), numbered
  * references that open in the real viewers, and one floating panel (Ask ·
  * Thread · References) over the board's right side.
@@ -44,13 +44,14 @@ import type { CodeAnnotation, EditorMode, InputMethod } from '../../types';
 import { Pebble, useReducedMotion } from './Pebble';
 import { NO_MARKS, ShapeDrawn, type MarkState } from './ShapeDrawn';
 import { ShapeKnow } from './ShapeKnow';
+import { ShapeChanged, openShapeReview } from './ShapeChanged';
 import { ShapeCode, ShapePatch, type ShapeFileTarget } from './ShapeCode';
 import { RefList, RefPeek, RefsCtx, shapeRefPicture, type RefsState } from './refs';
 import { useShapeFollow } from './ShapeFollow';
 import { CodeSpanContext } from '../LocalLinkContext';
 import { ShapeInline } from './inline';
 import { boxNoteInput, captureBox, pictureRect, placeBox, readBox, useBoxDrag, type KeptBox, type ShapeBoxSelection } from './boxSelect';
-import type { ShapeEvent, ShapeHost, ShapeLoaded, ShapePanelTab, ShapeSessionStatus, ShapeSurfaceProps } from './types';
+import type { ShapeEvent, ShapeHost, ShapeLoaded, ShapePanelTab, ShapeSessionStatus, ShapeSurfaceProps, ShapeSurfaceReview } from './types';
 
 const DRAW_MS = 1500; // the longest draw-in, for Esc
 const DRAWN_MS = DRAW_MS + 1400; // when a view counts as drawn (its draw-in class is dropped)
@@ -80,6 +81,7 @@ const ViewIcon = ({ id }: { id: ShapeViewId }) => {
   const p = { width: 14, height: 14, fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true };
   if (id === 'picture') return <svg {...p}><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M7 15l3-3 3 3 2-2 3 3" /></svg>;
   if (id === 'how') return <svg {...p}><rect x="2.5" y="9" width="6" height="6" rx="1.5" /><rect x="15.5" y="4" width="6" height="6" rx="1.5" /><rect x="15.5" y="14" width="6" height="6" rx="1.5" /><path d="M8.5 12h3.5M12 12V7h3.5M12 12v5h3.5" /></svg>;
+  if (id === 'changed') return <svg {...p}><circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M13 6h3a2 2 0 0 1 2 2v7M11 18H8a2 2 0 0 1-2-2V9" /></svg>;
   return <svg {...p}><path d="M8 7l-5 5 5 5M16 7l5 5-5 5" /></svg>;
 };
 /** The globe Plannotator draws on its "Global comment" buttons. */
@@ -103,12 +105,16 @@ const noteNow = (note: ShapeNote): ShapeNote => (shapeViewNow(note.view) === not
 const TABS: readonly { id: ShapeViewId; label: string; short: string }[] = [
   { id: 'picture', label: 'Shape', short: 'Shape' },
   { id: 'how', label: 'How it works', short: 'How' },
+  { id: 'changed', label: "What's changed", short: 'Changed' },
   { id: 'code', label: 'Code', short: 'Code' },
 ];
 const shapeTab = <T,>(view: T): T | 'picture' => (view === 'know' ? 'picture' : view);
 const tabLabel = (view: ShapeViewId) => TABS.find((t) => t.id === shapeTab(view))?.label ?? view;
 /** The Shape view shows the drawing, the words, or both. */
 const tabHas = (views: ShapeVersion['views'], id: ShapeViewId) => !!shapeViewContent(views, id) || (id === 'picture' && !!shapeViewContent(views, 'know'));
+
+/** What's changed is words the board sets (not a drawing, not the guide): a part is pointed at in it directly. */
+const textView = (view: ShapeViewId) => view === 'changed';
 
 type Viewer =
   | { kind: 'image'; ref: ShapeRef }
@@ -174,7 +180,7 @@ export function shapeEndedLabel(host: Pick<ShapeHost, 'askWaitsWhenEnded'>): str
   return host.askWaitsWhenEnded ? 'Session ended · your question waits for the agent' : 'Session ended · Ask AI answers; changes wait for the agent';
 }
 
-export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, renderThread, readFirst = false, initialView, initialPanel, onNavigate, headStart, boxSelect, darkContrast = false }: ShapeSurfaceProps) {
+export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, renderThread, readFirst = false, initialView, initialPanel, onNavigate, headStart, codeView = true, review = null, boxSelect, darkContrast = false }: ShapeSurfaceProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
   const attachRoot = useCallback((el: HTMLDivElement | null) => {
@@ -193,7 +199,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   versionRef.current = version;
 
   // ── views: erase the old one, draw the new one ──
-  const views = useMemo(() => TABS.filter((t) => version && tabHas(version.views, t.id)), [version]);
+  const views = useMemo(() => TABS.filter((t) => version && (codeView || t.id !== 'code') && tabHas(version.views, t.id)), [version, codeView]);
   const [view, setView] = useState<ShapeViewId>(shapeTab(shapeViewNow(initialView)) ?? 'picture');
   const viewRef = useRef(view);
   viewRef.current = view;
@@ -372,9 +378,9 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     host.seen(id, version.n);
   }, [drawnKey, version, loaded, host, id, view, drawKey]);
 
-  // Keep the view on one the board has.
+  // Keep the view on one the board has (and shows: a host may leave the Code view out).
   useEffect(() => {
-    if (version && !tabHas(version.views, view) && views[0]) setView(views[0].id);
+    if (version && !views.some((v) => v.id === view) && views[0]) setView(views[0].id);
   }, [version, view, views]);
 
   useEffect(() => {
@@ -421,22 +427,46 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     [host, id],
   );
 
-  // A drawn part with `data-code`: the Code view's whole file when it has one, else the file viewer.
+  // The review as the board uses it: a host's throw or rejection is a false, and an open bubble closes once the
+  // review is over the board (the host makes the board inert meanwhile, so Esc goes to the review).
+  const boardReview = useMemo<ShapeSurfaceReview | null>(
+    () =>
+      review && {
+        ...review,
+        open: async (at) => {
+          const ok = await openShapeReview(review, at);
+          if (ok) setPeek(null);
+          return ok;
+        },
+      },
+    [review],
+  );
+
+  // A part that names a place in code (a drawn part's `data-code`, a What's changed link): the Code view's whole file
+  // when it has one, else the review's guided review there (a board with no Code view), else the file viewer.
   const openCodeTarget = useCallback(async (at: ShapeCodeTarget) => {
     const v = versionRef.current;
-    if (v?.views.code && host.readFile && (v.views.code.files ?? []).some((f) => f.path === at.path)) {
+    if (codeView && v?.views.code && host.readFile && (v.views.code.files ?? []).some((f) => f.path === at.path)) {
       openCode(at.path, at.line);
       return;
     }
+    if (boardReview && (await boardReview.open({ path: at.path, line: at.line }))) return;
     const contents = await readProjectFile(at.path);
     if (contents != null) setViewer({ kind: 'file', path: at.path, contents, line: at.line, token: Date.now() });
-  }, [readProjectFile, host, openCode]);
+  }, [readProjectFile, host, openCode, codeView, boardReview]);
+  /** A `path` and `line` from the board's words (the words under the drawing, an answer's `code:` link): the Code view, or as a part's. */
+  const showCode = useCallback((path: string, line: number) => {
+    if (codeView) openCode(path, line);
+    else void openCodeTarget({ path, line });
+  }, [codeView, openCode, openCodeTarget]);
 
   // Esc: close the panel; otherwise skip the drawing while it plays.
   const stopFollowRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || target || viewer || boxDragging.current) return;
+      // A board the host covers (inert, such as the Inbox's review open over it) leaves Esc to what covers it.
+      if (rootRef.current?.closest('[inert]')) return;
       // An open menu (a host's fileAction) closes alone. By what is open, not by the key's target: focus may not be in it yet.
       if (document.querySelector('[role="menu"]')) return;
       // An open bubble goes first.
@@ -474,7 +504,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     return () => window.removeEventListener('keydown', on, true);
   }, [target, viewer]);
 
-  // An old link to What to know or Requirements: the Shape view, at those words.
+  // An old link to `view=know` or `view=reqs`: the Shape view, at the words under the drawing.
   const landOnKnow = useRef(shapeViewNow(initialView) === 'know');
   useEffect(() => {
     if (!version || !landOnKnow.current) return;
@@ -587,11 +617,12 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     const cite = new RegExp(`\\[\\^${n}\\]`);
     const tag = new RegExp(`data-ref\\s*=\\s*["']?${n}\\b`);
     if (cite.test(v.claim)) return 'header';
-    if (view !== 'code' && JSON.stringify(shapeViewContent(v.views, view) ?? null).match(tag)) return view;
+    if (view !== 'code' && JSON.stringify(shapeViewContent(v.views, view) ?? null).match(textView(view) ? cite : tag)) return view;
     const inKnow = cite.test(JSON.stringify(shapeViewContent(v.views, 'know') ?? null));
     if (view === 'picture' && inKnow) return 'know';
     if (tag.test(v.views.picture?.html ?? '') || tag.test(v.views.picture?.tall?.html ?? '')) return 'picture';
     if (tag.test(v.views.how?.html ?? '') || tag.test(v.views.how?.tall?.html ?? '')) return 'how';
+    if (cite.test(JSON.stringify(v.views.changed ?? null))) return 'changed';
     return inKnow ? 'know' : null;
   }, [view]);
 
@@ -602,7 +633,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     const needView = tab && tab !== view ? tab : null;
     if (needView) go(needView);
     later(() => {
-      if (home === 'header' || home === 'know') rootRef.current?.querySelector(`.shp-surface [data-ref="${n}"]`)?.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' });
+      if (home === 'header' || home === 'know' || home === 'changed') rootRef.current?.querySelector(`.shp-surface [data-ref="${n}"]`)?.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' });
       setRefFlash(n);
       later(() => setRefFlash((f) => (f === n ? null : f)), 1700);
     }, needView ? (reduce ? 200 : 1100) : phone ? 280 : 0);
@@ -671,12 +702,15 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     setHoverRect(next ? next.getBoundingClientRect() : null);
   }, [annotating, target, inputMethod, boxSelect]);
 
-  // The words under the drawing are the board's own markup: point at them here.
+  // The words under the drawing and What's changed are the board's own markup: point at them here.
+  // The view a part in them is noted on: the words under the drawing say `know`.
+  const wordsView: ShapeViewId | null = view === 'picture' ? 'know' : textView(view) ? view : null;
   const onKnowMove = (e: React.PointerEvent) => {
-    if (view !== 'picture') return;
+    // How it works points through ShapeDrawn. (This line used to clear its ring on every other pointer move.)
+    if (!wordsView) return;
     const over = e.target as Element;
     // A drawing points through ShapeDrawn: only the words' own ring goes here, or this would clear the drawing's.
-    if (!over.closest('.shp-know')) {
+    if (view === 'picture' && !over.closest('.shp-know')) {
       if (hoverEl.current?.closest('.shp-know')) hoverMark(null);
       return;
     }
@@ -684,19 +718,19 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     hoverMark(over.closest<HTMLElement>('[data-mark]'));
   };
   const onKnowClick = (e: React.MouseEvent) => {
-    if (!annotating || view !== 'picture' || inputMethod !== 'pinpoint') return;
+    if (!annotating || !wordsView || inputMethod !== 'pinpoint') return;
     if ((e.target as Element).closest('a,button,select')) return;
     const el = (e.target as Element).closest<HTMLElement>('[data-mark]');
-    if (el) pickMark(el, 'know');
+    if (el) pickMark(el, wordsView);
   };
   const onKnowMouseUp = () => {
-    if (!annotating || view !== 'picture' || inputMethod !== 'drag') return;
+    if (!annotating || !wordsView || inputMethod !== 'drag') return;
     requestAnimationFrame(() => {
       const sel = window.getSelection();
       const text = sel?.toString().trim();
       if (!sel || sel.isCollapsed || !text) return;
       const el = (sel.anchorNode instanceof Element ? sel.anchorNode : sel.anchorNode?.parentElement)?.closest<HTMLElement>('[data-mark]');
-      if (el && stageRef.current?.contains(el)) pickMark(el, 'know', text);
+      if (el && stageRef.current?.contains(el)) pickMark(el, wordsView, text);
     });
   };
 
@@ -774,7 +808,8 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   };
   const boxDragging = useBoxDrag({
     stageRef,
-    enabled: !!boxSelect && annotating && inputMethod === 'pinpoint' && view !== 'code' && !target && !general && !finished,
+    // What's changed takes a click on a change or a path, as before: a box there has nothing to land on yet.
+    enabled: !!boxSelect && annotating && inputMethod === 'pinpoint' && view !== 'code' && view !== 'changed' && !target && !general && !finished,
     onStart: () => {
       closePeek();
       clearHover();
@@ -822,7 +857,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   const boxesOn = useMemo(() => {
     const of = (v: ShapeViewId, onMore: boolean): KeptBox[] =>
       keptBoxes.filter((n) => n.view === v && !!n.box!.more === onMore).map((n) => ({ id: n.id, box: n.box!, text: n.text }));
-    const main = { picture: of('picture', false), how: of('how', false), know: of('know', false), code: [] as KeptBox[] };
+    const main = { picture: of('picture', false), how: of('how', false), know: of('know', false), changed: [] as KeptBox[], code: [] as KeptBox[] };
     const onMore = of('picture', true);
     return (v: ShapeViewId, showMore: boolean) => (showMore ? onMore : main[v]);
   }, [keptBoxes]);
@@ -911,8 +946,9 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     if (v === 'picture' || v === 'how') {
       const main = version.views[v];
       // views.know: under the drawing, in the same scroll; with no drawing, the words are the view.
+      const knowCode = codeView ? (version.views.code ? openCode : undefined) : review || host.readFile ? showCode : undefined;
       const know = v === 'picture' && shapeViewContent(version.views, 'know') ? (
-        <ShapeKnow know={version.views.know} reqs={version.views.reqs} marks={marksFor(marks, 'know')} onCode={version.views.code ? openCode : undefined} boxes={phase === 'leaving' || !boxSelect ? undefined : boxesOn('know', false)} />
+        <ShapeKnow know={version.views.know} reqs={version.views.reqs} marks={marksFor(marks, 'know')} onCode={knowCode} boxes={phase === 'leaving' || !boxSelect ? undefined : boxesOn('know', false)} />
       ) : null;
       if (!main) return know;
       const drawn = v === 'picture' && showMore && main.more ? { ...main.more, css: main.more.css ?? main.css } : main;
@@ -946,6 +982,12 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
         {know}
         </>
       );
+    }
+    if (v === 'changed') {
+      const changed = version.views.changed;
+      if (!changed) return null;
+      const canOpenCode = !!review || !!host.readFile || (codeView && !!version.views.code);
+      return <ShapeChanged changed={changed} marks={vm} review={boardReview} onCode={canOpenCode ? (at) => void openCodeTarget(at) : undefined} />;
     }
     const code = version.views.code;
     if (!code) return null;
@@ -1275,7 +1317,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
             const m = a?.getAttribute('href')?.match(/^code:([^#]+)#L(\d+)/);
             if (m) {
               e.preventDefault();
-              openCode(m[1]!, Number(m[2]));
+              showCode(m[1]!, Number(m[2]));
             }
           }}
         >
