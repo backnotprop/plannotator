@@ -238,6 +238,9 @@
      own). Phone inputs never go under 16 px (iOS zooms under it). Used as font-size: var(--ib-fs-N, Npx).
      Row and control heights keep today's pitch, so phones keep their 44 px targets. */
   --ib-type: var(--inbox-text-size, 14);
+  --ib-fs-7: max(7px, calc(7px * var(--ib-type) / 14));
+  --ib-fs-7-5: max(7.5px, calc(7.5px * var(--ib-type) / 14));
+  --ib-fs-8-5: max(8.5px, calc(8.5px * var(--ib-type) / 14));
   --ib-fs-9: max(9px, calc(9px * var(--ib-type) / 14));
   --ib-fs-10: max(10px, calc(10px * var(--ib-type) / 14));
   --ib-fs-10-5: max(10.5px, calc(10.5px * var(--ib-type) / 14));
@@ -8909,3 +8912,67 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-sys-phone .ib-sys-x, .pn-inbox .ib-sys-phone .ib-sys-x { width: 32px; height: 32px; }
   .ib-sys-phone .ib-sys-acts .ib-btn { height: 44px; }
 }
+
+/* ── Letter marks (approval "inbox-letter-marks", 2026-11-07; letterMarks.tsx), all off by default ──
+   Eight hues turned from the theme's --primary (45° apart), lightness and chroma fixed so every theme and mode
+   gets the same contrast. Soft: a tint of the hue on the page, letters the hue mixed toward the text colour.
+   Solid: the hue itself, letters in the page's lightest. Mixed in oklab: in oklch the hue drifts to the page's. */
+.ib-lm { --lm-rot: 0; --lm-c: oklch(from var(--primary) 0.62 0.14 calc(h + var(--lm-rot)));
+  position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; overflow: hidden;
+  width: var(--ib-mark-20); height: var(--ib-mark-20); border-radius: var(--ib-mark-20-r);
+  background: color-mix(in oklab, var(--lm-c) 22%, var(--background));
+  color: color-mix(in oklab, var(--lm-c) 58%, var(--foreground));
+  font-family: var(--font-sans); font-weight: 650; line-height: 1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums;
+  font-size: var(--ib-fs-10, 10px); user-select: none; white-space: nowrap; }
+.ib-lm[data-hue="1"] { --lm-rot: 45; } .ib-lm[data-hue="2"] { --lm-rot: 90; } .ib-lm[data-hue="3"] { --lm-rot: 135; }
+.ib-lm[data-hue="4"] { --lm-rot: 180; } .ib-lm[data-hue="5"] { --lm-rot: 225; } .ib-lm[data-hue="6"] { --lm-rot: 270; } .ib-lm[data-hue="7"] { --lm-rot: 315; }
+.ib-lm[data-solid] { background: oklch(from var(--lm-c) 0.5 0.13 h); color: oklch(from var(--background) 0.985 0.005 h); }
+.ib-lm[data-size="12"] { width: 12px; height: 12px; border-radius: 4px; font-size: var(--ib-fs-7, 7px); }
+.ib-lm[data-size="14"] { width: 14px; height: 14px; border-radius: 4px; font-size: var(--ib-fs-7-5, 7.5px); }
+.ib-lm[data-size="16"] { width: var(--ib-mark-16); height: var(--ib-mark-16); border-radius: var(--ib-mark-16-r); font-size: var(--ib-fs-8-5, 8.5px); }
+.ib-lm[data-size="24"] { width: var(--ib-mark-24); height: var(--ib-mark-24); border-radius: var(--ib-mark-24-r); font-size: var(--ib-fs-11, 11px); }
+.ib-lm[data-size="30"] { width: var(--ib-mark-30); height: var(--ib-mark-30); border-radius: var(--ib-mark-30-r); font-size: var(--ib-fs-13, 13px); }
+/* One letter (one-letter names, CJK, Arabic) a step larger; an emoji-only name shows its emoji. */
+.ib-lm[data-n="1"][data-size="12"], .ib-lm[data-n="1"][data-size="14"] { font-size: var(--ib-fs-8-5, 8.5px); }
+.ib-lm[data-n="1"][data-size="16"] { font-size: var(--ib-fs-10, 10px); }
+.ib-lm[data-n="1"]:not([data-size]), .ib-lm[data-n="1"][data-size="20"] { font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-lm[data-n="1"][data-size="24"] { font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-lm[data-n="1"][data-size="30"] { font-size: var(--ib-fs-16, 16px); }
+.ib-lm[data-kind="emoji"] { letter-spacing: 0; }
+/* A project's picture covers its letters once it has loaded (until then, or with none, the letters show). */
+.ib-lm > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0; }
+.ib-lm[data-pic] { background: var(--muted); color: transparent; }
+.ib-lm[data-pic] > img { opacity: 1; }
+
+/* Take "inline": the thread's 20 px tile before its title; the project's 16 px one before its name. */
+.ib-lm-tt { display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; }
+.ib-lm-tt > :last-child { min-width: 0; }
+.ib-row .ib-subj > .ib-lm-tt { flex: 0 1 auto; }
+.ib-mrow .ib-lm-tt, .ib-nrow .ib-l2 > .ib-lm-tt { align-items: flex-start; }
+.ib-mrow .ib-lm-tt > .ib-lm, .ib-nrow .ib-l2 > .ib-lm-tt > .ib-lm { margin-top: 1px; }
+.ib-lm-rowp { margin-right: -2px; }
+.ib-proj > .ib-lm-side { margin-left: -2px; }
+
+/* Take "dot": the hue alone, 8 px, before the title. */
+.ib-lm-dot { --lm-rot: 0; flex: none; width: 8px; height: 8px; border-radius: 50%; background: oklch(from var(--primary) 0.72 0.15 calc(h + var(--lm-rot))); }
+.light .ib-lm-dot { background: oklch(from var(--primary) 0.56 0.15 calc(h + var(--lm-rot))); }
+.ib-lm-dot[data-hue="1"] { --lm-rot: 45; } .ib-lm-dot[data-hue="2"] { --lm-rot: 90; } .ib-lm-dot[data-hue="3"] { --lm-rot: 135; }
+.ib-lm-dot[data-hue="4"] { --lm-rot: 180; } .ib-lm-dot[data-hue="5"] { --lm-rot: 225; } .ib-lm-dot[data-hue="6"] { --lm-rot: 270; } .ib-lm-dot[data-hue="7"] { --lm-rot: 315; }
+.ib-lm-tt[data-take="dot"] { gap: 8px; }
+.ib-mrow .ib-lm-tt[data-take="dot"] > .ib-lm-dot, .ib-nrow .ib-l2 > .ib-lm-tt[data-take="dot"] > .ib-lm-dot { margin-top: 6px; }
+.ib-lm-hero { display: flex; align-items: flex-end; gap: 0; margin: 0 0 10px; }
+.ib-lm-hero > .ib-lm-heroP { margin-left: -6px; box-shadow: 0 0 0 2px var(--background); }
+
+/* Take "avatar": one mark per row in a column of its own (30 px in three-line and phone rows, 24 px in a wide row),
+   the project's on its corner, cut out of the row by a ring in the page's colour. */
+.ib-lm-av { position: relative; display: inline-flex; flex: none; }
+.ib-lm-av > .ib-lm-badge, .ib-lm-head > .ib-lm-badge { position: absolute; right: -4px; bottom: -4px; box-shadow: 0 0 0 2px var(--background); }
+.ib-row .ib-from > .ib-lm-av { order: -2; margin-right: 4px; }
+.ib-nrow[data-lm-av], .ib-mrow[data-lm-av] { padding-left: 56px; }
+.ib-nrow[data-lm-av] > .ib-lm-av, .ib-mrow[data-lm-av] > .ib-lm-av { position: absolute; left: 14px; top: 12px; }
+.ib-mrow[data-lm-av] { position: relative; }
+.ib-sel .ib-lm-badge, .ib-row:hover .ib-lm-badge { box-shadow: 0 0 0 2px var(--ib-row-fill, var(--background)); }
+
+/* Header: the bar's title leads with the mark. */
+.ib-lm-head { position: relative; display: inline-flex; vertical-align: -5px; margin-right: 8px; }
+.ib-bc-proj { display: inline-flex; }

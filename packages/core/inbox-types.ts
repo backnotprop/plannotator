@@ -1942,18 +1942,51 @@ export function isInboxTextSize(value: unknown): value is InboxTextSize {
  * set goes wherever they're using the app"). GET answers null until a window
  * first saves it.
  */
-export const INBOX_ROWS_OPTIONS = ["highlight", "compact", "hideAgents", "smallNames", "hideProject", "hidePreview", "roomy", "unreadDot", "previewTwo", "relativeTime", "titleFirst"] as const;
+export const INBOX_ROWS_OPTIONS = [
+  "highlight",
+  "compact",
+  "hideAgents",
+  "smallNames",
+  "hideProject",
+  "hidePreview",
+  "roomy",
+  "unreadDot",
+  "previewTwo",
+  "relativeTime",
+  "titleFirst",
+  // Letter marks (approval "inbox-letter-marks", 2026-11-07), all off by default. Show → Letter marks is the pair
+  // `marksThreads` / `marksProjects` (Off, Threads, Projects, Both). Look → Mark style is Avatar unless `markInline`
+  // or `markDot` is on. Show's two picture switches: `repoLogo` (Logo from the repo) and `githubPictures`.
+  "marksThreads",
+  "marksProjects",
+  "markInline",
+  "markDot",
+  "repoLogo",
+  "githubPictures",
+] as const;
 export type InboxRowsOption = (typeof INBOX_ROWS_OPTIONS)[number];
 
 /**
  * The options' rivals, never on together: Compact wins over Roomy, no preview over two lines, and Dot is Bold with
  * a dot (`unreadDot` brings `smallNames`). A look in any other shape is read as this one.
+ *
+ * Letter marks: Inline wins over Dot. A mark style counts only while some marks show, and the picture switches only
+ * while project marks show, so with marks off the look holds none of them (turned on again, marks start as Avatar).
  */
 export function inboxRowsCanonical(rows: readonly InboxRowsOption[]): InboxRowsOption[] {
   const on = new Set(rows);
   if (on.has("compact")) on.delete("roomy");
   if (on.has("hidePreview")) on.delete("previewTwo");
   if (on.has("unreadDot")) on.add("smallNames");
+  if (on.has("markInline")) on.delete("markDot");
+  if (!on.has("marksThreads") && !on.has("marksProjects")) {
+    on.delete("markInline");
+    on.delete("markDot");
+  }
+  if (!on.has("marksProjects")) {
+    on.delete("repoLogo");
+    on.delete("githubPictures");
+  }
   return INBOX_ROWS_OPTIONS.filter((name) => on.has(name));
 }
 
