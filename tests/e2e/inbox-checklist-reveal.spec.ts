@@ -3,7 +3,7 @@
  * against a compiled binary with a release version (0.30.0): the shared e2e binary is 0.0.0-dev, which never decides a
  * reveal, so the spec compiles its own (as inbox-board-reveal.spec.ts does). Each case is its own Inbox in a temp data
  * dir, seeded at day 8 with six threads (inbox-board-reveal-seed.ts), Snooze and the Board already revealed (the Board
- * on, its reveal 3 days ago, so the 48 h spacing holds), the Checklist as each case says.
+ * on, its reveal 3 days ago, so the spacing holds), the Checklist as each case says.
  *
  * Reveals are opt-in (the owner, 2026-11-04): showing the dialog turns nothing on.
  *
@@ -60,14 +60,14 @@ function compileReleaseBinary(): string {
 /**
  * An Inbox eight days into use: the seeded log, Snooze shown 5.5 days ago and the Board revealed (and on) 3 days ago,
  * every other one-time dialog and the tour behind the person, and every agent's home a temp folder. `steps`: the
- * person's own Checklist setting (absent: never set). HOME is left as it is (never set).
+ * person's own Checklist setting (absent: never set). HOME is the world's temp folder.
  */
 async function world(steps?: boolean): Promise<World> {
   const root = realpathSync(mkdtempSync(join(scratch, 'world-')));
   const dataDir = join(root, 'data');
   const src = join(root, 'src');
   for (const dir of [dataDir, src, join(root, 'claude'), join(root, 'codex'), join(root, 'xdg-config'), join(root, 'xdg-data')]) mkdirSync(dir, { recursive: true });
-  const seeded = spawnSync('bun', [join(repo, 'tests/e2e/inbox-board-reveal-seed.ts'), dataDir, src, '8'], { cwd: repo, encoding: 'utf8', env: { PATH: process.env.PATH ?? '', PLANNOTATOR_DATA_DIR: dataDir } });
+  const seeded = spawnSync('bun', [join(repo, 'tests/e2e/inbox-board-reveal-seed.ts'), dataDir, src, '8'], { cwd: repo, encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir } });
   expect(seeded.status, seeded.stderr).toBe(0);
   const ids = JSON.parse(seeded.stdout.trim()) as Record<string, string>;
   const past = '2026-10-01T10:00:00.000Z';
@@ -92,6 +92,7 @@ async function world(steps?: boolean): Promise<World> {
   );
   const env = {
     PATH: process.env.PATH ?? '',
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     // A release version: never the live daily ping (packages/shared/daily-ping.ts).
     NO_ANON_PING: '1',

@@ -35,7 +35,8 @@
  * line says that ("waiting on a permission prompt" once a host read made after
  * the answer settled still shows the session on its dialog). A read made
  * before then still shows the prompt just answered, and counts for nothing
- * (`settledAfter`).
+ * (`settledAfter`). That holds from the person's answer on: the hook takes it
+ * at its next look, and the question no longer says the session waits on them.
  */
 
 import { timingSafeEqual } from "node:crypto";
@@ -54,7 +55,7 @@ import {
 } from "@plannotator/core/inbox-permission";
 import { INBOX_HOST_NAMES, type InboxLaunchRecord, type InboxMessage } from "@plannotator/core/inbox-types";
 import type { LaunchPermissionContext } from "./inbox-launch-host";
-import { createLaunchQuestions, openPermissionQuestions, type PermissionAnswer, type PermissionTarget } from "./inbox-launch-permission";
+import { createLaunchQuestions, lastPermissionAnswerAt, openPermissionQuestions, type PermissionAnswer, type PermissionTarget } from "./inbox-launch-permission";
 
 export const PERMISSION_HOLD_MS = 25_000;
 export const PERMISSION_LEASE_MS = 60_000;
@@ -141,6 +142,11 @@ export function createLaunchPermissions(options: LaunchPermissionContext & { hol
   /** The latest answer handed to a hook, per launch. */
   const answeredAt = new Map<string, number>();
   const questions = createLaunchQuestions({ store, name: CLAUDE_NAME, displayFolder: options.displayFolder, onChange: options.onChange, log, forget: (messageId) => leases.delete(messageId) });
+  /** When a launch's last answer settles: counted from the person's answer, and again from the hook's taking it. Null with no answer. */
+  const settledAt = (root: InboxMessage): number | null => {
+    const at = Math.max(lastPermissionAnswerAt(store, root.thread_id) ?? 0, answeredAt.get(root.launch!.id) ?? 0);
+    return at === 0 ? null : at + ANSWER_SETTLE_MS;
+  };
 
   /** The key in the launch's settings file; null when there is no such file. */
   const keyOf = (launchId: string): string | null => {
@@ -287,15 +293,17 @@ export function createLaunchPermissions(options: LaunchPermissionContext & { hol
 
     /** A host read made before this still shows the launch's last answered prompt (it counts for nothing), or null. */
     settledAfter(launchId: string): number | null {
-      const at = answeredAt.get(launchId);
-      return at === undefined ? null : at + ANSWER_SETTLE_MS;
+      const root = options.rootOf(launchId);
+      return root ? settledAt(root) : null;
     },
 
     /** Whether a launch's answer has settled since the last host read (one more read says where the session is). */
     readDue(readAt: number): boolean {
       const t = now();
-      for (const at of answeredAt.values()) if (readAt < at + ANSWER_SETTLE_MS && t >= at + ANSWER_SETTLE_MS) return true;
-      return false;
+      return options.roots().some((root) => {
+        const at = settledAt(root);
+        return at !== null && readAt < at && t >= at;
+      });
     },
 
     /** A deleted launch: nothing kept for it. */

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { inboxPullStacks, type InboxPull, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { composeActions, type ComposeTarget } from './model';
 import { pullHandoffMessage, pullHandoffThreadName } from '../pulls/model';
-import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewBoxPull, reviewBoxPulls, reviewDefaultTo, reviewLinkListed, reviewLinkStack, reviewLinkWords, unsentReview, type ReviewBoxPull } from './reviewBox';
+import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewBoxPull, reviewBoxPulls, reviewDefaultTo, reviewLinkListed, reviewLinkStack, reviewLinkWords, reviewToWithChanges, unsentReview, type ReviewBoxPull } from './reviewBox';
 
 const pull = (number: number, over: Partial<InboxPull> = {}): InboxPull =>
   ({
@@ -189,5 +189,17 @@ describe('a pull request link', () => {
     const line = reviewLinkWords({ ...read(8, { host: 'gitlab.example.com' }), cli: 'glab' });
     expect(line).toContain('glab');
     expect(line).toContain('gitlab.example.com');
+  });
+});
+
+describe('To moves to an agent with changes to review', () => {
+  const t = (session: string, project: string | null) => ({ session, project: { id: project } });
+  const targets = [t('ses_a', 'prj_a'), t('ses_b', 'prj_b'), t('ses_c', 'prj_c'), t('ses_x', null)];
+  test('the agent last sent to first, else list order; a project with no changes, or not read, is never picked', () => {
+    expect(reviewToWithChanges(targets, new Map([['prj_b', 2], ['prj_c', 5]]), 'ses_c')).toBe('ses_c');
+    expect(reviewToWithChanges(targets, new Map([['prj_b', 2], ['prj_c', 5]]), 'ses_a')).toBe('ses_b');
+    expect(reviewToWithChanges(targets, new Map([['prj_a', 0], ['prj_c', 1]]), null)).toBe('ses_c');
+    expect(reviewToWithChanges(targets, new Map([['prj_a', 0], ['prj_b', 0]]), 'ses_b')).toBeNull();
+    expect(reviewToWithChanges([], new Map(), null)).toBeNull();
   });
 });

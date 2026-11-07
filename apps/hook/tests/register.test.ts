@@ -221,6 +221,30 @@ describe('register', () => {
     expect(seen[0].tool_input).toEqual({ command: 'ls' })
   })
 
+  // CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS (skip-rm-prompts.ts),
+  // with the engine's own `$`: the call's verdict reaches the mod's tool.check
+  // hook, and its removal prompt in bypass mode is answered with allow, unless
+  // the person's settings hold an ask rule for rm.
+  for (const [name, settings, answered] of [
+    ['answered with allow', {}, true],
+    ["left to the person's ask rule", { permissions: { ask: ['Bash(rm *)'] } }, false],
+  ] as const) {
+    test(`the variable set, in bypass mode: a removal prompt is ${name}`, async ($: any, on: any) => {
+      world(on, { env: { CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS: '1' } })
+      on('settings.read', () => ({ value: settings }))
+      const command = 'rm -rf t/logs/*/*'
+      on('tool.check', () => ({ decision: 'ask', reason: "Dangerous rm operation detected: '/work/t/logs/*/*'" }))
+      on('classic.PermissionRequest', () => ({ decision: { behavior: 'deny', message: 'beneath' } }))
+      await $.session.start(SESSION)
+
+      const verdict = await $.tool.check({ tool: 'Bash', input: { command }, tool_use_id: 'toolu_rm' })
+      const answer = await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command }, permission_mode: 'bypassPermissions' })
+
+      expect(verdict.decision).toBe('ask')
+      expect(answer.decision).toEqual(answered ? { behavior: 'allow' } : { behavior: 'deny', message: 'beneath' })
+    })
+  }
+
   test('the decision arrives later as a plugin turn', async ($: any, on: any) => {
     const w = world(on)
     await $.session.start(SESSION)
@@ -624,6 +648,22 @@ describe('register', () => {
   const firstTurn = { answer: 'done', durationMs: 5, isAborted: false, reason: 'answer' as const }
   const SUMMARY_ROWS = [{ role: 'user', text: 'Summary: the handler is refactored.', toolUses: [] }]
   const skippedOf = (logs: string[]) => logs.filter((line) => line.startsWith('skipped: '))
+
+  // Under the guard the mod's Bash permission hook is passed by like every
+  // classic.* hook: the removal prompt stays exactly as it is today.
+  test('under the guard, a removal prompt in bypass mode with the variable set is left to the dialog', { plugins: [GUARD] }, async ($: any, on: any) => {
+    world(on, { env: { CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS: '1' } })
+    on('settings.read', () => ({ value: {} }))
+    const command = 'rm -rf t/logs/*/*'
+    on('tool.check', () => ({ decision: 'ask', reason: "Dangerous rm operation detected: '/work/t/logs/*/*'" }))
+    on('classic.PermissionRequest', () => ({ decision: { behavior: 'deny', message: 'beneath' } }))
+    await $.session.start(SESSION)
+
+    await $.tool.check({ tool: 'Bash', input: { command }, tool_use_id: 'toolu_rm' })
+    const answer = await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command }, permission_mode: 'bypassPermissions' })
+
+    expect(answer.decision).toEqual({ behavior: 'deny', message: 'beneath' })
+  })
 
   test('under the guard, the mod has no prompt.context or classic.SessionStart hook for Claude Code to report skipped', { plugins: [GUARD] }, async ($: any, on: any) => {
     const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []) })
@@ -1217,9 +1257,8 @@ describe('register', () => {
     for (let second = 0; second < 6; second++) await w.clock.advance(1_000)
 
     expect(w.submits).toEqual([
-      'Plannotator Inbox: Ship it? (msg_reply)\nThe person replied to you in the Plannotator Inbox. Their reply follows as they wrote it: it is their answer to you. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above.\n\nYes.\n\nAfter the 3pm freeze.' +
-        // The closing line names the tool by the full name $.tool.register answered.
-        `\n\n[thread msg_1 · more: ${INBOX_TOOL} read_thread · how it works: plannotator inbox --help]`,
+      'Plannotator Inbox: Ship it? (msg_reply)\nThis is a user reply from Plannotator Inbox. Their reply follows as they wrote it: it is their answer to you. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above.\n\nYes.\n\nAfter the 3pm freeze.' +
+        `\n\n[for context: read_thread (opt: set limit) or search · help: plannotator inbox --help]`,
     ])
     expect(delivered).toBe(true)
     const polls = calls.filter((c) => c.url.endsWith('/api/inbox/bridge/poll'))

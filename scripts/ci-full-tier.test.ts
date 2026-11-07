@@ -9,7 +9,10 @@
  *    would not hold the gate back);
  *  - a heavy workflow that does not run when the `ci:full` label is added, or
  *    a root job that ignores the label;
- *  - the fast tier rerunning (and cancelling itself) on every label change.
+ *  - the fast tier rerunning (and cancelling itself) on every label change;
+ *  - a heavy workflow running again after every merge to main (the train
+ *    already ran it on the merged tree), or losing the nightly and manual runs
+ *    that cover main and that a release dispatches before its tag.
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -20,9 +23,19 @@ const GATE = 'Full CI (all green)';
 const LABEL_CHECK = "contains(github.event.pull_request.labels.*.name, 'ci:full')";
 const HEAVY = ['windows.yml', 'release.yml', 'inbox-e2e.yml', 'inbox-pi.yml', 'inbox-claude-code.yml', 'relay.yml'];
 const FAST = ['test.yml', 'security.yml'];
+/** Heavy workflows that cover main nightly; release.yml runs on its tags instead. */
+const NIGHTLY = HEAVY.filter((file) => file !== 'release.yml');
 
 type Job = { name?: string; if?: string; needs?: string | string[] };
-type Workflow = { on: { pull_request?: { types?: string[] } }; jobs: Record<string, Job> };
+type Workflow = {
+  on: {
+    pull_request?: { types?: string[] };
+    push?: { branches?: string[] } | null;
+    schedule?: { cron: string }[];
+    workflow_dispatch?: unknown;
+  };
+  jobs: Record<string, Job>;
+};
 
 function workflow(file: string): Workflow {
   return Bun.YAML.parse(readFileSync(join(repoRoot, '.github/workflows', file), 'utf8')) as Workflow;
@@ -46,6 +59,20 @@ describe('CI tiers', () => {
       for (const [id, job] of prJobs) {
         if (needsOf(job).length === 0) expect(job.if, `${file}: ${id}`).toContain(LABEL_CHECK);
       }
+    });
+  }
+
+  for (const file of HEAVY) {
+    test(`${file}: not run by a push to main`, () => {
+      expect(workflow(file).on.push?.branches ?? []).not.toContain('main');
+    });
+  }
+
+  for (const file of NIGHTLY) {
+    test(`${file}: runs on main nightly and by hand`, () => {
+      const { on } = workflow(file);
+      expect(on.schedule?.length).toBe(1);
+      expect('workflow_dispatch' in on).toBe(true);
     });
   }
 

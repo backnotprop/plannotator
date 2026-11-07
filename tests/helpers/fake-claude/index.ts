@@ -58,6 +58,8 @@ export interface FakeClaudeConfig {
   localAnswer?: string | null;
   /** How long a safety check's own dialog (up once the hook ended with no decision) waits before it blocks the call (ms; Claude's is about 2 minutes). */
   safetyBlockMs?: number;
+  /** A prompt not yet begun waits here, unlisted and with no hook, until this is false: a check sees only the prompt before it. */
+  holdPrompts?: boolean;
 }
 
 /** One tool call that needs permission (Claude Code's PermissionRequest stdin, less what the session fills in). */
