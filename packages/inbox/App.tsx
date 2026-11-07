@@ -122,7 +122,7 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro, VOICE_INTRO_MIN_WORDS, VOICE_INTRO_MOMENT_MS } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
-import { listTallerThanScreen, listViewRevealLeaveCounts, listViewRevealMayClaim, noteRevealThread, openThreadAsks, revealArmed, useBoardReveal, useLineReveal, useStepsReveal } from './reveal';
+import { listTallerThanScreen, listViewRevealLeaveCounts, listViewRevealMayClaim, noteRevealThread, openThreadAsks, revealArmed, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
 import type { InboxRevealId } from './api';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
 import { namesCapability, withCapabilities } from './capabilities';
@@ -172,6 +172,7 @@ import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
 import { ListViewIntro } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
+import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
 import { CodeReviewOffer } from './components/CodeReviewOffer';
 import { useCodeReviewOffer } from './codeReviewOffer';
 import { CardChip } from './board/CardChip';
@@ -1019,7 +1020,7 @@ function Inbox() {
    * `ahead` offers (settings `reveal.ahead`, List view once registered), which go at their own moment; the Inbox's
    * claim lets only one of them show (one a day).
    */
-  const snoozeIntroLatch = useRef<{ due: boolean; next: InboxRevealId | null; ahead: readonly InboxRevealId[] } | null>(null);
+  const snoozeIntroLatch = useRef<{ due: boolean; next: InboxRevealId | null; ahead: readonly InboxRevealId[]; aside: readonly InboxRevealId[] } | null>(null);
   /** The list's rows, for "a question waits in the open thread" (`openThreadAsks`) in checks that run on a timer. */
   const oneTimeRows = useRef<readonly InboxListRow[]>([]);
   /** An update dialog or a restart was on screen in this load: no Snooze announcement on it. */
@@ -4481,7 +4482,7 @@ function Inbox() {
   if (snoozeIntroLatch.current === null && settings && latest !== null) {
     // Only `reveal.next` is armed; an older Inbox reports no queue: its Snooze rule alone (reveal.ts `revealArmed`).
     const armed = revealArmed(settings);
-    snoozeIntroLatch.current = { due: armed.snoozeDue, next: armed.next, ahead: armed.ahead };
+    snoozeIntroLatch.current = { due: armed.snoozeDue, next: armed.next, ahead: armed.ahead, aside: armed.aside };
   }
   const snoozeIntroRows = useMemo(() => latestSections.flatMap((section) => section.threads), [latestSections]);
   oneTimeRows.current = snoozeIntroRows;
@@ -4578,6 +4579,22 @@ function Inbox() {
   // The choice's two pictures: the person's own list as the groups draw it, and as the Simple list draws it.
   const listViewChoiceGroups: ListIntroGroup[] = listViewChoiceOpen && shown ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 8) }] : [])) : [];
   const listViewChoiceFlat = listViewChoiceOpen && shown ? flatRows(filterList(shown), null, { epoch: 0, keep: null }).rows.slice(0, 10) : [];
+  // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
+  // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
+  // claim runs the already-starred check, then the corner card shows.
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, listViewReveal.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const starReveal = useStarReveal({
+    due: snoozeIntroLatch.current?.aside.includes('star') === true,
+    listLoaded: snoozeIntroLatch.current !== null,
+    firstRun,
+    blocked: revealBlocked || otherRevealActive,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+  });
   /** A reveal's "Turn it on" (revealTurnOn.ts): Settings' own save; not saved, the switch goes back off and a toast says so. */
   const turnOnFromReveal = (feature: RevealFeature, close: () => void) =>
     void turnOnRevealFeature(feature, close, {
@@ -4643,6 +4660,8 @@ function Inbox() {
     boardReveal.stage !== 'claimed' &&
     stepsReveal.stage !== 'open' &&
     stepsReveal.stage !== 'claimed' &&
+    starReveal.stage !== 'open' &&
+    starReveal.stage !== 'claimed' &&
     listViewReveal.stage !== 'open' &&
     listViewReveal.stage !== 'claimed';
   const listIntroGroups: ListIntroGroup[] =
@@ -6376,6 +6395,15 @@ function Inbox() {
             stepsReveal.close();
           }}
           onTurnOn={() => turnOnFromReveal('steps', stepsReveal.close)}
+        />
+      )}
+      {starReveal.stage === 'open' && (
+        <StarAskCard
+          shape="corner"
+          canStar={starReveal.canStar}
+          onStar={() => inboxApi.starAskStar().then((answer) => answer.starred === true)}
+          onAnswer={(answer) => void inboxApi.starAskAnswer(answer)}
+          onLeave={starReveal.close}
         />
       )}
       {listViewChoiceOpen && (
