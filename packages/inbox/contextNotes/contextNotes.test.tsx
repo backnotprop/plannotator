@@ -133,9 +133,33 @@ test.skipIf(!hasDom)('a risk place with no rule of the person’s, and an answer
   expect(el.querySelector('[data-context-note-row="r-0"] .ib-ctxn-t')!.textContent).toBe('Charges retry.');
   // An answer still says when it came, and nothing else.
   const by = el.querySelector('[data-context-note-row="t3"] .ib-ctxn-by')!.textContent!;
-  expect(by.startsWith('· ')).toBe(true);
+  expect(by.startsWith('\u00a0· ')).toBe(true);
   expect(by).not.toContain('Claude');
   expect(by).not.toContain('you asked');
+});
+
+test.skipIf(!hasDom)('an open note says who and when on the writer’s line, and a wrap never starts a line with “·”', () => {
+  const timed: ContextNote = { ...answer, at: new Date().toISOString() };
+  const el = mount([timed], {});
+  const button = el.querySelector<HTMLButtonElement>('button.ib-ctxn-row')!;
+  act(() => button.click());
+  const head = button.querySelector('.ib-ctxn-h')!;
+  // On the name's line, in the row: "Claude Code · you asked “Why retry?” · <time>".
+  const by = head.querySelector('.ib-ctxn-by')!;
+  expect(head.querySelector('b')!.textContent).toBe('Claude Code');
+  expect(by.textContent).toContain('you asked “Why retry?”');
+  // Each "·" is held to the words before it by a no-break space: no ordinary space before a "·".
+  expect(by.textContent!.match(/·/g)!.length).toBe(2);
+  expect(/[^\u00a0]·/.test(head.textContent!)).toBe(false);
+  // Read once by a screen reader: hidden on the line, said in the open note before its words.
+  expect(by.getAttribute('aria-hidden')).toBe('true');
+  const body = el.querySelector(`#${CSS.escape(button.getAttribute('aria-controls')!)}`)!;
+  expect(body.querySelector('.sr-only')!.textContent).toContain('you asked “Why retry?”');
+  expect(body.querySelector('.ib-ctxn-by')).toBeNull();
+  // Closed again: the first words, and no who-and-when on the line.
+  act(() => button.click());
+  expect(button.querySelector('.ib-ctxn-by')).toBeNull();
+  expect(button.querySelector('.ib-ctxn-first')!.textContent).toBe('The retry lives here.');
 });
 
 async function renderMessage(body: string, contextNotes?: { onOpen?: (note: InboxNoteBlock) => void }) {

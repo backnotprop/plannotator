@@ -10,7 +10,7 @@
  * reads its note from this module's context, so a note that opens, moves or
  * goes stale redraws without the diff rebuilding.
  */
-import { createContext, useCallback, useContext, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, Fragment, useCallback, useContext, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import type { ContextNoteAnchor } from '@plannotator/review-editor/components/AllFilesCodeView';
 import { noteTime, staleWords, writerWord, type ContextNote } from './model';
@@ -85,41 +85,52 @@ function Quote({ children }: { children: ReactNode }) {
 }
 
 /**
- * Who wrote the note and why it is there, in words: what the open note says after the writer. Only the approved
- * words: a risk place with no rule of the person's, or an answer to nothing the person said, says nothing more
- * (an answer still says when it came); nothing at all draws no line.
+ * Who wrote the note and why it is there, in words: what the open note says after the writer, as its parts (each
+ * drawn after a "·"). Only the approved words: a risk place with no rule of the person's, or an answer to nothing
+ * the person said, says nothing more (an answer still says when it came); nothing at all is no part.
  */
-function NoteBy({ note }: { note: ContextNote }) {
-  const time = note.writer === 'thread' ? noteTime(note.at) : null;
-  const words =
-    note.writer === 'guide' ? (
-      <>· {note.agent ?? 'The agent'}, in its review</>
-    ) : note.writer === 'risk' ? (
-      note.rule ? (
-        <>
-          · your rule <Quote>{note.rule}</Quote>
-        </>
-      ) : null
-    ) : note.writer === 'thread' ? (
-      note.asked || time ? (
-        <>
-          {note.asked && (
-            <>
-              · you asked <Quote>{note.asked}</Quote>
-            </>
-          )}
-          {time ? `${note.asked ? ' ' : ''}· ${time}` : ''}
-        </>
-      ) : null
-    ) : note.picture ? (
-      <>
-        · <Quote>{note.picture.title}</Quote>, {note.picture.part}
-      </>
-    ) : null;
-  if (!words) return null;
+function noteByParts(note: ContextNote): ReactNode[] {
+  if (note.writer === 'guide') return [<>{note.agent ?? 'The agent'}, in its review</>];
+  if (note.writer === 'risk') return note.rule ? [<>your rule <Quote>{note.rule}</Quote></>] : [];
+  if (note.writer === 'thread') {
+    const time = noteTime(note.at);
+    return [...(note.asked ? [<>you asked <Quote>{note.asked}</Quote></>] : []), ...(time ? [time] : [])];
+  }
+  return note.picture ? [<><Quote>{note.picture.title}</Quote>, {note.picture.part}</>] : [];
+}
+
+/**
+ * The open note's words after the writer, on the writer's line: "Claude Code · 12:34 PM". Each "·" is held to the
+ * words before it (a no-break space), so a line that wraps (a long name, a phone) ends on a "·" and never starts with
+ * one. Screen readers get these words once, in the open body (`NoteByForReaders`); here they are hidden from them.
+ */
+function NoteByInline({ note }: { note: ContextNote }) {
+  const parts = noteByParts(note);
+  if (parts.length === 0) return null;
   return (
-    <span className="ib-ctxn-by" dir="auto">
-      {words}
+    <span className="ib-ctxn-by" dir="auto" aria-hidden="true" data-context-note-by="">
+      {parts.map((part, i) => (
+        <Fragment key={i}>
+          {'\u00a0· '}
+          {part}
+        </Fragment>
+      ))}
+    </span>
+  );
+}
+
+/** The same words for screen readers, where they were: at the start of the open note, before its text. */
+function NoteByForReaders({ note }: { note: ContextNote }) {
+  const parts = noteByParts(note);
+  if (parts.length === 0) return null;
+  return (
+    <span className="sr-only">
+      {parts.map((part, i) => (
+        <Fragment key={i}>
+          {i > 0 ? ' · ' : '· '}
+          {part}
+        </Fragment>
+      ))}
     </span>
   );
 }
@@ -139,7 +150,7 @@ function RiskGauge() {
  * The writer's name starts the row (the owner, q-9ad31b4e: no mark, only the writer's name). A Picture keeps Show
  * me's mark (it comes from a board, and that mark is drawing's and the board's); Risk, its own family, has a gauge.
  */
-function NoteHead({ note }: { note: ContextNote }) {
+function NoteHead({ note, open }: { note: ContextNote; open: boolean }) {
   return (
     <span className="ib-ctxn-h">
       {note.writer === 'picture' && <Pebble alive={false} size={12} className="ib-sm-peb ib-ctxn-peb" />}
@@ -150,6 +161,7 @@ function NoteHead({ note }: { note: ContextNote }) {
           High
         </span>
       )}
+      {open && <NoteByInline note={note} />}
     </span>
   );
 }
@@ -205,11 +217,13 @@ export function ContextNoteRow({ id }: { id: string }) {
       onMouseUp={(event) => event.stopPropagation()}
     >
       <button type="button" className="ib-ctxn-row" aria-expanded={open} aria-controls={bodyId} onClick={() => api.toggle(id)}>
-        <NoteHead note={note} />
-        <span className="ib-ctxn-first" dir="auto">
-          {note.stale ? 'Changed since · ' : ''}
-          {note.text}
-        </span>
+        <NoteHead note={note} open={open} />
+        {!open && (
+          <span className="ib-ctxn-first" dir="auto">
+            {note.stale ? 'Changed since · ' : ''}
+            {note.text}
+          </span>
+        )}
         <svg className="ib-ctxn-chev" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
           <path d="M5 6l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
@@ -217,7 +231,7 @@ export function ContextNoteRow({ id }: { id: string }) {
       <div className="ib-ctxn-open" id={bodyId} hidden={!open}>
         {open && (
           <>
-            <NoteBy note={note} />
+            <NoteByForReaders note={note} />
             <p className="ib-ctxn-t" dir="auto">
               {note.text}
             </p>

@@ -8959,7 +8959,12 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-ctxn-first { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-ctxn-chev { flex: none; color: var(--muted-foreground); transition: transform 0.15s ease-out; }
 .ib-ctxn-line[data-open] .ib-ctxn-chev { transform: rotate(180deg); }
-.ib-ctxn-line[data-open] .ib-ctxn-first { visibility: hidden; }
+/* Open: the words after the writer follow on its line ("Claude Code · 12:34 PM"), wrapping as text, with the marks inline. */
+.ib-ctxn-line[data-open] .ib-ctxn-row { padding-block: 5px; }
+.ib-ctxn-line[data-open] .ib-ctxn-h { display: block; flex: 1 1 auto; overflow-wrap: anywhere; }
+.ib-ctxn-line[data-open] .ib-ctxn-h > svg { display: inline-block; vertical-align: -2px; margin-right: 6px; }
+.ib-ctxn-line[data-open] .ib-ctxn-h > .ib-ctxn-risk { display: inline-flex; margin-left: 6px; vertical-align: 1px; }
+.ib-ctxn-h .ib-ctxn-by { display: inline; }
 .ib-ctxn-open { padding: 0 12px 10px 30px; }
 .ib-ctxn-by { display: block; font-size: var(--ib-fs-12, 12px); line-height: 18px; color: var(--muted-foreground); overflow-wrap: anywhere; }
 .ib-ctxn-t { margin: 4px 0 0; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
