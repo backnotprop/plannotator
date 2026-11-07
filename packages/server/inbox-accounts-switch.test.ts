@@ -10,8 +10,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { createInboxAccounts, parseCswapSwitch, switchTarget } from "./inbox-accounts";
+import { accountSwitchingOn, createInboxAccounts, parseCswapSwitch, parsePeerAccounts, parsePeerSwitch, switchTarget } from "./inbox-accounts";
 import { createAgentEnvironmentFor } from "./inbox-agents";
+import { neverReached } from "./inbox-machines";
+import { INBOX_ACCOUNT_SWITCHING } from "@plannotator/core/inbox-types";
 import { fakeCswapCalls, writeFakeCswap, type FakeCswapAnswer, type FakeCswapSwitch } from "../../tests/helpers/fake-cswap";
 
 const FIXTURES = resolve(import.meta.dir, "../../tests/fixtures/cswap");
@@ -142,5 +144,54 @@ describe.skipIf(process.platform === "win32")("createInboxAccounts().switchTo, w
     for (let i = 0; i < 60 && !ended(); i++) await Bun.sleep(50);
     expect(ended()).toBe(true);
     expect(await inUse(accounts)).toBe(2);
+  });
+});
+
+describe("accountSwitchingOn", () => {
+  // The owner's two-login test turns it on in the Inbox's environment; nothing else does while the constant is off.
+  test("on only for 1, true or on, any case, around spaces; off for anything else or unset", () => {
+    for (const value of ["1", "true", "on", "TRUE", " On "]) expect(accountSwitchingOn({ PLANNOTATOR_INBOX_ACCOUNT_SWITCHING: value })).toBe(true);
+    for (const value of ["0", "false", "off", "", "yes", "2"]) expect(accountSwitchingOn({ PLANNOTATOR_INBOX_ACCOUNT_SWITCHING: value })).toBe(INBOX_ACCOUNT_SWITCHING);
+    expect(accountSwitchingOn({})).toBe(INBOX_ACCOUNT_SWITCHING);
+  });
+});
+
+describe("a linked machine's answers, picked by name", () => {
+  const account = { number: 1, email: "a@fake.test", organizationName: null, alias: null, isOrganization: false, active: true, usageStatus: "ok", usage: null };
+  test("its read keeps `switching` only when that Inbox says true, so an older one is offered no switch", () => {
+    expect(parsePeerAccounts({ state: "accounts", accounts: [account], switching: true })).toMatchObject({ state: "accounts", switching: true });
+    for (const switching of [undefined, false, "true", 1]) expect("switching" in parsePeerAccounts({ state: "accounts", accounts: [account], switching })).toBe(false);
+    expect(parsePeerAccounts({ state: "not_installed", switching: true })).toEqual({ state: "not_installed" });
+  });
+
+  test("its switch: a whole number, a known reason, not installed; anything else is a build apart or no answer", () => {
+    expect(parsePeerSwitch({ state: "switched", number: 2, to: { email: "b@fake.test" }, message: "words" })).toEqual({ state: "switched", number: 2 });
+    expect(parsePeerSwitch({ state: "not_installed" })).toEqual({ state: "not_installed" });
+    for (const reason of ["changed", "renumbered", "busy", "timed_out", "bad_output"]) expect(parsePeerSwitch({ state: "failed", reason })).toEqual({ state: "failed", reason });
+    expect(parsePeerSwitch({ state: "failed", reason: "cswap said: token sk-ant-x" })).toEqual({ state: "failed", reason: "run_failed" });
+    for (const number of [-1, 1.5, "1"]) expect(parsePeerSwitch({ state: "switched", number })).toEqual({ state: "needs_update" });
+    expect(parsePeerSwitch({ state: "accounts" })).toEqual({ state: "needs_update" });
+    expect(parsePeerSwitch(null)).toEqual({ state: "unreachable" });
+    expect(parsePeerSwitch("switched")).toEqual({ state: "unreachable" });
+  });
+});
+
+describe("neverReached", () => {
+  // A linked switch refused before a byte went out did not start there: `offline`, never "still switching".
+  test("a refused connection never reached the machine; a time limit or an abort may have", async () => {
+    const refused = await fetch("http://127.0.0.1:9/api/inbox/device/accounts/switch", { method: "POST", body: "{}" }).catch((error: unknown) => error);
+    expect(neverReached(refused)).toBe(true);
+    const hung = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Promise<Response>(() => {}) });
+    try {
+      const late = await fetch(`http://127.0.0.1:${hung.port}/x`, { signal: AbortSignal.timeout(100) }).catch((error: unknown) => error);
+      expect(neverReached(late)).toBe(false);
+      const stop = new AbortController();
+      setTimeout(() => stop.abort(), 100);
+      expect(neverReached(await fetch(`http://127.0.0.1:${hung.port}/x`, { signal: stop.signal }).catch((error: unknown) => error))).toBe(false);
+    } finally {
+      void hung.stop(true);
+    }
+    expect(neverReached(null)).toBe(false);
+    expect(neverReached(new Error("ECONNREFUSED"))).toBe(false);
   });
 });

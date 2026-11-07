@@ -2230,16 +2230,30 @@ export type InboxAccountsRead =
  * `unreachable`, it answered something else (a 500, a refused token). None is
  * an error.
  */
-export type InboxMachineAccountsRead = InboxAccountsRead | { state: "offline" } | { state: "needs_update" } | { state: "unreachable" };
+export type InboxMachineAccountsRead = InboxAccountsAnswer | { state: "offline" } | { state: "needs_update" } | { state: "unreachable" };
+
+/**
+ * What `GET /api/inbox/accounts` answers: the read, and `switching: true`
+ * while that Inbox switches logins (`INBOX_ACCOUNT_SWITCHING`, or
+ * `PLANNOTATOR_INBOX_ACCOUNT_SWITCHING` where it started). The window offers a
+ * switch only where its own Inbox and the machine's both say so.
+ */
+export type InboxAccountsAnswer = InboxAccountsRead & { switching?: true };
 
 /**
  * Whether Settings → Accounts switches logins. Off until switching is tried
  * with the owner on two real logins (approval "accounts-page", 2026-11-06):
  * while off, no row is a switch and the Inbox has no
- * `POST /api/inbox/accounts/switch` (404 `not_found`, nothing runs). The page
- * and the server both read this one constant; it is no setting.
+ * `POST /api/inbox/accounts/switch` (404 `not_found`, nothing runs). It is no
+ * setting. For that test one Inbox turns it on with
+ * `PLANNOTATOR_INBOX_ACCOUNT_SWITCHING=1` in the environment it starts in
+ * (`accountSwitchingOn` in packages/server/inbox-accounts.ts); the window
+ * learns it from the read (`InboxAccountsAnswer.switching`).
  */
 export const INBOX_ACCOUNT_SWITCHING: boolean = false;
+
+/** The env var that turns account switching on for one Inbox (the owner's two-login test): `1` / `true` / `on`. */
+export const INBOX_ACCOUNT_SWITCHING_ENV = "PLANNOTATOR_INBOX_ACCOUNT_SWITCHING";
 
 /**
  * `POST /api/inbox/accounts/switch`: the account a person picked, as the window
@@ -2267,6 +2281,13 @@ export type InboxAccountSwitchFailure = InboxAccountsFailure | "changed" | "renu
 
 /** The switch's answer. No address and no `cswap` words: `number` is the account in use after it. */
 export type InboxAccountSwitch = { state: "switched"; number: number } | { state: "failed"; reason: InboxAccountSwitchFailure } | { state: "not_installed" };
+
+/**
+ * `POST /api/inbox/m/<machine>/accounts/switch`: a linked machine's switch,
+ * sent now through its door and never held. Its own answer, or why there is
+ * none, as for its read: `offline`, `needs_update`, `unreachable`.
+ */
+export type InboxMachineAccountSwitch = InboxAccountSwitch | { state: "offline" } | { state: "needs_update" } | { state: "unreachable" };
 
 export interface InboxAgentsModel {
   agents: InboxAgentRow[];

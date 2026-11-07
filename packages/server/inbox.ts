@@ -92,6 +92,7 @@ import {
   type InboxProject,
   type InboxProjectRepo,
   type InboxTag,
+  type InboxAccountsAnswer,
   inboxStepsProgress,
 } from "@plannotator/core/inbox-types";
 import { checkServerSession, createServerSessionNonce, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
@@ -183,8 +184,7 @@ import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHom
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
-import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
-import { INBOX_ACCOUNT_SWITCHING } from "@plannotator/core/inbox-types";
+import { accountSwitchingOn, createInboxAccountsFor, switchTarget } from "./inbox-accounts";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
@@ -532,6 +532,8 @@ export interface InboxServerOptions {
   voice?: { chatgptUrl?: string; openaiUrl?: string; extraClis?: readonly string[] };
   /** Tests: where a read of `cswap list --json` looks, how long it waits, when a stuck run is killed, and how long an answer serves (packages/server/inbox-accounts.ts). */
   accounts?: { environment?: AgentEnvironment; timeoutMs?: number; hardLimitMs?: number; cacheMs?: number };
+  /** Whether Settings → Accounts switches logins, decided here (tests). Absent: `accountSwitchingOn()`, the shipped constant or `PLANNOTATOR_INBOX_ACCOUNT_SWITCHING`, read once at start. */
+  accountSwitching?: boolean;
   /** The Qwen Code wake's clock and time limits (inbox-qwen-wake.ts): tests shorten them. */
   qwenWake?: { now?: () => number; sendTimeoutMs?: number; receiptTimeoutMs?: number; comebackMs?: number; socketParent?: string };
   /** The T3 Code wake (inbox-t3-wake.ts): tests pass a scripted T3, a clock and a log. */
@@ -3642,6 +3644,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   /** Settings → Accounts (inbox-accounts.ts): this computer's Claude accounts, read through `cswap`. */
   const accounts = createInboxAccountsFor(agentEnvironment, options.accounts);
+  /** Whether Settings → Accounts switches logins (off as shipped; `PLANNOTATOR_INBOX_ACCOUNT_SWITCHING=1` for the owner's test). */
+  const accountSwitching = options.accountSwitching ?? accountSwitchingOn();
 
   /** "Open in" for attachments: launches an app on this computer, so local only (never the tailnet, never the device door). */
   const openInRoute = createInboxOpenInRoute({
@@ -4516,13 +4520,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         if (!ownerOrLocal(req, via)) throw new InboxError("owner_only", "Only this computer's owner can see its accounts.");
         const fresh = url.searchParams.get("fresh") === "1";
-        return json(machineAccounts ? await machines.accountsOf(machineAccounts[1]!, fresh, req.signal) : await accounts.read({ fresh }));
+        if (machineAccounts) return json(await machines.accountsOf(machineAccounts[1]!, fresh, req.signal));
+        // Whether this Inbox switches rides on its own read, so the window (and a linked machine, through the door) knows.
+        const read: InboxAccountsAnswer = await accounts.read({ fresh });
+        return json(accountSwitching ? { ...read, switching: true } : read);
       }
       // Switch this computer's Claude account (step 3): it writes the login Claude Code uses, so the same two
-      // checks as the read, on the server and not only in the window. No door route and no forward reaches it:
-      // a linked machine's switch is a later step. The answer has no address: a door would keep it on disk.
-      // Not there at all while INBOX_ACCOUNT_SWITCHING is off: the path falls through to the 404 below.
-      if (INBOX_ACCOUNT_SWITCHING && path === "/api/inbox/accounts/switch") {
+      // checks as the read, on the server and not only in the window. A linked machine reaches it only through its door's
+      // `accounts/switch` (inbox-devices.ts), which the owner's forward sends (inbox-machines.ts `switchOn`), never a
+      // phone or the relay. The answer has no address.
+      // Not there at all while switching is off (`accountSwitching`): the path falls through to the 404 below.
+      if (accountSwitching && path === "/api/inbox/accounts/switch") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
@@ -5500,6 +5508,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       holds: (kind, id) =>
         kind === "projects" ? store.project(id) !== null : kind === "attachments" ? store.attachment(id) !== null : kind === "annotations" ? store.annotation(id) !== null : store.message(id) !== null,
       isGuest: (req, via) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers),
+      accountSwitching,
       timings: options.machineLinkTimings,
     });
     if (phonesOn) {

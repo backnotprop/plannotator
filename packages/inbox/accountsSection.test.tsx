@@ -61,6 +61,10 @@ let readsAnswered = 0;
 let linked: { id: string; name: string; answer: () => unknown }[] = [];
 /** Every read of a linked machine, by URL. */
 let machineReads: string[] = [];
+/** Set by a test: what a linked machine's switch through the forward answers. */
+let farSwitchRoute: ((machine: string) => Promise<Response>) | null = null;
+/** Every linked machine's switch the window asked for. */
+let farSwitches: { machine: string; body: Record<string, unknown> }[] = [];
 /** Set by a test: the merged list has not named the machines, this one included. */
 let listNamesNoMachine = false;
 
@@ -118,6 +122,8 @@ beforeEach(async () => {
   accountReads = [];
   linked = [];
   machineReads = [];
+  farSwitchRoute = null;
+  farSwitches = [];
   listNamesNoMachine = false;
   // A window leaves a read behind when it closes, and the server's next caller would join that run: see it out first.
   await call('/api/inbox/accounts');
@@ -128,6 +134,11 @@ beforeEach(async () => {
     if (String(input) === '/api/inbox/machines' && linked.length > 0) {
       const machines = [{ id: 'ibx_self', name: 'Studio', self: true }, ...linked.map(({ id, name }) => ({ id, name, self: false }))];
       return Response.json({ self: 'ibx_self', machines });
+    }
+    const far = /^\/api\/inbox\/m\/([^/]+)\/accounts\/switch$/.exec(String(input));
+    if (far) {
+      farSwitches.push({ machine: far[1]!, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+      return farSwitchRoute ? farSwitchRoute(far[1]!) : Response.json({ state: 'failed', reason: 'run_failed' });
     }
     const machine = linked.find(({ id }) => String(input).startsWith(`/api/inbox/accounts/${id}`));
     if (machine) {
@@ -958,8 +969,18 @@ test.skipIf(!hasDom)('a far answer that grows an open peek leaves it in place, w
   expect(document.activeElement).toBe(block);
 });
 
-/** Linked machines: a `GET accounts/<machine>` answer holding these rows. */
-const farList = (...accounts: Record<string, unknown>[]) => ({ state: 'accounts', accounts: accounts.map(farAccount) });
+/** Linked machines: a `GET accounts/<machine>` answer holding these rows, from an Inbox of this build (it switches when this one does). */
+const farList = (...accounts: Record<string, unknown>[]) => ({ state: 'accounts', accounts: accounts.map(farAccount), ...(INBOX_ACCOUNT_SWITCHING ? { switching: true } : {}) });
+/** The same from a linked Inbox that switches (`PLANNOTATOR_INBOX_ACCOUNT_SWITCHING` there). */
+const farSwitching = (...accounts: Record<string, unknown>[]) => ({ ...farList(...accounts), switching: true });
+/**
+ * `accountsRoute` for an Inbox that switches (`PLANNOTATOR_INBOX_ACCOUNT_SWITCHING` here): the real server's read,
+ * saying so. The window then offers switches whatever the shipped constant says; a switch it sends is a test's fake.
+ */
+const switchingRead = async () => {
+  const read = await call('/api/inbox/accounts');
+  return Response.json({ ...(JSON.parse(read.text) as object), switching: true }, { status: read.status });
+};
 const farAccount = (row: Record<string, unknown>, i: number) => ({
   number: i + 1,
   alias: null,
@@ -1090,7 +1111,7 @@ test.skipIf(!hasDom)('a linked machine that does not give a list says so in its 
   expect(order(el)).toEqual(['work']);
 });
 
-test.skipIf(!hasDom)("a linked machine's rows are not a switch in this build: no button, no confirm", async () => {
+test.skipIf(withoutSwitching)("a linked machine's rows are not a switch while switching is off: no button, no confirm", async () => {
   answer({ stdout: listOf({ alias: 'work', active: true }, { alias: 'side' }) });
   linked = [{ id: 'ibx_mini', name: 'Mac mini', answer: () => farList({ alias: 'personal', active: true }, { alias: 'build' }) }];
   const el = await open('accounts');
@@ -1098,6 +1119,111 @@ test.skipIf(!hasDom)("a linked machine's rows are not a switch in this build: no
   expect(shown(machineOf(el, 'ibx_mini')!.querySelector('button'))).toBeNull();
   expect(row(el, 2, 'ibx_mini').querySelector('.ib-acct-sw')?.textContent).toBe('');
   expect(row(el, 2).tagName).toBe(OTHER_ROW);
+});
+
+test.skipIf(!hasDom)("this Inbox switching, a linked machine whose read does not say it switches (off there, or an older Plannotator) has plain rows with no empty circle; this machine's rows are the switch", async () => {
+  answer({ stdout: listOf({ alias: 'work', active: true }, { alias: 'side' }) });
+  accountsRoute = switchingRead;
+  // No `switching` in its read, whatever this build ships.
+  linked = [{ id: 'ibx_mini', name: 'Mac mini', answer: () => ({ state: 'accounts', accounts: [{ alias: 'personal', active: true }, { alias: 'build' }].map(farAccount) }) }];
+  const el = await open('accounts');
+  await until(() => order(el, 'ibx_mini').length === 2, "the other machine's rows");
+  expect(row(el, 2).tagName).toBe('BUTTON');
+  expect(row(el, 2).querySelector('.ib-acct-dot')?.hasAttribute('data-blank')).toBe(false);
+  expect(row(el, 2, 'ibx_mini').tagName).toBe('DIV');
+  expect(row(el, 2, 'ibx_mini').querySelector('.ib-acct-dot')?.hasAttribute('data-blank')).toBe(true);
+  expect(shown(machineOf(el, 'ibx_mini')!.querySelector('button'))).toBeNull();
+});
+
+test.skipIf(!hasDom)("a linked machine's row is the switch too: its confirm names that machine, it goes through the forward, and that machine's read after it puts the new login first", async () => {
+  answer({ stdout: listOf({ alias: 'work', active: true }, { alias: 'side' }) });
+  accountsRoute = switchingRead;
+  let miniInUse = 1;
+  linked = [{ id: 'ibx_mini', name: 'Mac mini', answer: () => farSwitching({ alias: 'personal', active: miniInUse === 1 }, { alias: 'build', active: miniInUse === 2 }) }];
+  let letGo = () => {};
+  farSwitchRoute = async () => {
+    await new Promise<void>((go) => (letGo = go));
+    miniInUse = 2;
+    return Response.json({ state: 'switched', number: 2 });
+  };
+  const el = await open('accounts');
+  await until(() => order(el, 'ibx_mini').length === 2, "the other machine's rows");
+  expect(row(el, 2, 'ibx_mini').tagName).toBe('BUTTON');
+  act(() => row(el, 2, 'ibx_mini').click());
+  expect(row(el, 2, 'ibx_mini').nextElementSibling).toBe(confirmOf(el));
+  expect(confirmOf(el)!.getAttribute('aria-label')).toBe('Switch Claude Code on Mac mini to build?');
+  // The quiet confirm (approval addendum 2026-11-06): its question alone; the block names the machine, its label says it.
+  expect(confirmOf(el)!.textContent).toBe('Switch to build?CancelSwitch');
+  await act(async () => (confirmOf(el)!.querySelector('[data-accounts-switch-go]') as HTMLButtonElement).click());
+  await until(() => row(el, 2, 'ibx_mini').querySelector('[data-going]') !== null, 'Switching… on the far row');
+  // That machine's rows wait for it; this machine's do not.
+  expect((row(el, 2, 'ibx_mini') as HTMLButtonElement).disabled).toBe(true);
+  expect((row(el, 2) as HTMLButtonElement).disabled).toBe(false);
+  const reads = machineReads.length;
+  letGo();
+  await until(() => order(el, 'ibx_mini')[0] === 'build', 'the far login now in use, first');
+  expect(row(el, 2, 'ibx_mini').hasAttribute('data-in-use')).toBe(true);
+  expect(machineReads.length).toBe(reads + 1);
+  expect(farSwitches).toHaveLength(1);
+  expect(farSwitches[0]).toMatchObject({ machine: 'ibx_mini', body: { number: 2, email: 'far2@fake.test', organizationName: null, alias: 'build' } });
+  // This computer's own switch was never asked, and its list was not read again.
+  expect(switches).toEqual([]);
+  expect(switchNote(el)).toBeNull();
+});
+
+test.skipIf(!hasDom)("a linked machine's switch that fails says so under its row in the page's words; asleep or an older Plannotator there, in a few words", async () => {
+  answer({ stdout: listOf({ alias: 'work', active: true }) });
+  accountsRoute = switchingRead;
+  let asleep = false;
+  linked = [{ id: 'ibx_mini', name: 'Mac mini', answer: () => (asleep ? { state: 'offline' } : farSwitching({ alias: 'personal', active: true }, { alias: 'build' })) }];
+  const el = await open('accounts');
+  await until(() => order(el, 'ibx_mini').length === 2, "the other machine's rows");
+  const farSwitch = async () => {
+    act(() => row(el, 2, 'ibx_mini').click());
+    await act(async () => (confirmOf(el)!.querySelector('[data-accounts-switch-go]') as HTMLButtonElement).click());
+  };
+
+  farSwitchRoute = async () => Response.json({ state: 'failed', reason: 'run_failed' });
+  await farSwitch();
+  await until(() => switchNote(el) !== null, 'the failure line');
+  expect(row(el, 2, 'ibx_mini').nextElementSibling).toBe(switchNote(el));
+  expect(switchNote(el)!.querySelector('span')?.textContent).toBe("Couldn't switch to build. claude-swap failed.");
+  expect(row(el, 2, 'ibx_mini').querySelector('.ib-acct-dot')?.hasAttribute('data-failed')).toBe(true);
+
+  farSwitchRoute = async () => Response.json({ state: 'needs_update' });
+  act(() => (switchNote(el)!.querySelector('[data-accounts-retry]') as HTMLButtonElement).click());
+  await act(async () => (confirmOf(el)!.querySelector('[data-accounts-switch-go]') as HTMLButtonElement).click());
+  await until(() => switchNote(el)?.getAttribute('data-accounts-switch-failed') === 'needs_update', 'needs an update');
+  expect(switchNote(el)!.querySelector('span')?.textContent).toBe("Couldn't switch to build. Update Plannotator there.");
+
+  // Asleep by the time it is sent: the read after it is no list, so the line stands over the block's own word.
+  farSwitchRoute = async () => {
+    asleep = true;
+    return Response.json({ state: 'offline' });
+  };
+  await farSwitch();
+  await until(() => switchNote(el)?.getAttribute('data-accounts-switch-failed') === 'offline', 'asleep');
+  expect(switchNote(el)!.querySelector('span')?.textContent).toBe("Couldn't switch to build. The machine is asleep.");
+  expect(machineOf(el, 'ibx_mini')!.querySelector('[data-machine-state]')?.textContent).toBe('Asleep');
+  // A later list from it answers the line.
+  asleep = false;
+  act(() => refresh(el).click());
+  await until(() => switchNote(el) === null, 'the line answered');
+});
+
+test.skipIf(!hasDom)("a linked machine's switch the server refuses says Owner only, and this machine's list stays as it was", async () => {
+  answer({ stdout: listOf({ alias: 'work', active: true }, { alias: 'side' }) });
+  accountsRoute = switchingRead;
+  linked = [{ id: 'ibx_mini', name: 'Mac mini', answer: () => farSwitching({ alias: 'personal', active: true }, { alias: 'build' }) }];
+  farSwitchRoute = async () => Response.json({ error: 'refused', code: 'owner_only' }, { status: 403 });
+  const el = await open('accounts');
+  await until(() => order(el, 'ibx_mini').length === 2, "the other machine's rows");
+  act(() => row(el, 2, 'ibx_mini').click());
+  await act(async () => (confirmOf(el)!.querySelector('[data-accounts-switch-go]') as HTMLButtonElement).click());
+  await until(() => switchNote(el) !== null, 'the failure line');
+  expect(switchNote(el)!.querySelector('span')?.textContent).toBe("Couldn't switch to build. Owner only.");
+  expect(order(el)).toEqual(['work', 'side']);
+  expect(order(el, 'ibx_mini')).toEqual(['personal', 'build']);
 });
 
 test.skipIf(!hasDom)('Refresh reads every machine again, and one slow machine holds up only its own block', async () => {
@@ -1265,8 +1391,8 @@ test.skipIf(!hasDom)('the worst case: long unbroken names, 30 logins a machine, 
     for (const rowEl of rows) {
       const figure = rowEl.querySelector('b[data-usage]')?.textContent ?? '';
       const notes = notesOf(rowEl);
-      // Only this machine's rows not in use carry the hover's "Switch", and only while switching is on.
-      const hover = INBOX_ACCOUNT_SWITCHING && key === 'self' && !rowEl.hasAttribute('data-in-use') ? 'Switch' : '';
+      // Rows not in use carry the hover's "Switch", on every machine, and only while switching is on.
+      const hover = INBOX_ACCOUNT_SWITCHING && !rowEl.hasAttribute('data-in-use') ? 'Switch' : '';
       // The face is the name, its note and its figure: nothing else.
       expect(faceOf(rowEl)).toBe(`${nameOf(rowEl)}${notes ?? ''}${figure}${hover}`);
       expect(notes === null || notes.startsWith('on ')).toBe(true);

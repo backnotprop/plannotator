@@ -24,14 +24,14 @@
  *    (`link-back`, `unlink`).
  */
 
-import { inboxRowArchived, isInboxId, type InboxListRow, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
+import { inboxRowArchived, isInboxId, type InboxAccountSwitchTarget, type InboxListRow, type InboxMachineAccountSwitch, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSnoozeRefusal, inboxSnoozeRunning } from "@plannotator/core/inbox-snooze";
 import { refuseInboxSnoozeUntil } from "@plannotator/shared/inbox/snoozes";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { INBOX_MACHINE_WINDOW_ONLY_BODY, isWindowRequest } from "./inbox-cross-site";
-import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
+import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts, parsePeerSwitch, switchTarget } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
 import { doorWriteKind, InboxOutbox, type OutboxEntry } from "./inbox-outbox";
 import { MACHINE_LINKS_PROTOCOL, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerLinkTimings, type PeerRecord } from "./inbox-peer-link";
@@ -111,6 +111,8 @@ export interface InboxMachinesContext {
   holds: (kind: HeldKind, id: string) => boolean;
   /** A tailnet request from someone other than this computer's owner (a login from `inboxTailscaleAllow`). */
   isGuest: (req: Request, via: "local" | "tailnet") => boolean;
+  /** Whether this Inbox switches logins (Settings → Accounts). Off: no switch is forwarded, as everything else under `accounts/`. */
+  accountSwitching?: boolean;
   /** Tests: the links' clocks. */
   timings?: MachineLinkTimings;
   now?: () => Date;
@@ -209,6 +211,19 @@ export const outboxView = (entry: OutboxEntry): OutboxView => ({
 });
 
 const FORWARD = /^\/api\/inbox\/m\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/(.+)$/;
+/** The one accounts write a door takes from a linked machine, and the one the forward sends: never held. */
+export const MACHINE_ACCOUNTS_SWITCH = "accounts/switch";
+/** A switch's answer is a few fields; anything past this is no answer. */
+const SWITCH_ANSWER_MAX_BYTES = 4096;
+
+/** Socket errors that mean no connection was made, so no byte of a request went out (Bun's names, then Node's). */
+const NEVER_CONNECTED = new Set(["ConnectionRefused", "FailedToOpenSocket", "ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH", "ENOTFOUND", "EADDRNOTAVAIL"]);
+
+/** Whether a request failed before it reached the other machine: then a switch did not start there, whatever the line says. */
+export function neverReached(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === "string" && NEVER_CONNECTED.has(code);
+}
 const SNOOZE_ROUTE = /^threads\/[^/]+\/snooze$/;
 const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
 /** A tailnet guest of this Inbox, acting on another machine or on what waits for one. */
@@ -627,9 +642,11 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (/%2e|%2f|%5c|\\/i.test(route) || segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
       return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     }
-    // Accounts go by `accountsOf` alone: a forward would pass the far answer as it came, past the owner's check, and
-    // would hold a write such as a switch on disk. Nothing under `accounts/` either: a linked machine's switch is its own step.
-    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(segments[0]!) === "accounts") {
+    // Accounts go by `accountsOf` alone: a forward would pass the far answer as it came, past the owner's check. Of
+    // everything under `accounts/`, only the switch's POST while this Inbox switches, which `switchOn` sends now and
+    // never holds (below).
+    const isSwitch = context.accountSwitching === true && route === MACHINE_ACCOUNTS_SWITCH && req.method === "POST";
+    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || (safeDecode(segments[0]!) === "accounts" && !isSwitch)) {
       return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     }
     // This machine's own thread, message, file or project never goes to a peer, whatever the window learned: a
@@ -651,9 +668,11 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
     // A guest let onto this Inbox's tailnet was never let onto that machine: it writes nothing there. Reads stay as they are.
     if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
+    if (isSwitch) return switchOn(req, machine);
     // Rule 8's table decides, by route: a write it has not classified, or calls `local`, never reaches another machine.
     const kind = doorWriteKind(route);
-    if (!kind) return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
+    // `now` is the switch, sent above: nothing else of that kind is ever held.
+    if (!kind || kind === "now") return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     if (kind === "file") {
       // A file (an upload, a drawing): never held. It goes now, or not at all.
       if (peer.state !== "online") return offline();
@@ -801,6 +820,68 @@ export function createInboxMachines(context: InboxMachinesContext) {
       return response.ok ? parsePeerAccounts(body) : { state: "unreachable" };
     } catch {
       return { state: peer.state === "online" ? "unreachable" : "offline" };
+    }
+  };
+
+  /**
+   * A linked machine's switch: it writes the login Claude Code uses there, so
+   * it goes now or not at all, never through the outbox, which would hold it
+   * and send it later. The owner only (the forward's guest check above), another
+   * site's page never, and a page from an earlier Inbox gets the 409 of every
+   * write. Only the target's four fields go on. The far door hands it to that
+   * Inbox's own `POST /api/inbox/accounts/switch`, which re-lists and matches
+   * there, and its answer is picked by name again. A wait that runs out with the
+   * line up is the far switch's own `timed_out`: it goes on there, and the read
+   * after it says how it ended.
+   */
+  const switchOn = async (req: Request, machine: string): Promise<Response> => {
+    if (!isSameOriginOrNoOrigin(req.headers.get("origin"), req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+      return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+    }
+    const body = await context.readBody(req);
+    if (checkServerSession(body, context.serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+    const target = switchTarget(body);
+    if (!target) throw new InboxError("validation_error", "number: cswap's account number; email and organizationName: as the list read them, or null.", { field: "number" });
+    return json(await sendSwitch(machine, target, req.signal));
+  };
+
+  const sendSwitch = async (machine: string, target: InboxAccountSwitchTarget, signal: AbortSignal): Promise<InboxMachineAccountSwitch> => {
+    const peer = peers.get(machine);
+    if (!peer) throw new InboxError("machine_not_linked", "That machine is not linked.");
+    if (peer.state === "needs_update") return { state: "needs_update" };
+    if (peer.state === "revoked") return { state: "unreachable" };
+    if (peer.state === "offline") {
+      peer.poke();
+      return { state: "offline" };
+    }
+    const waitMs = context.timings?.accountsMs ?? INBOX_MACHINE_ACCOUNTS_WAIT_MS;
+    let response: Response;
+    try {
+      response = await peer.request(MACHINE_ACCOUNTS_SWITCH, "", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(target),
+        timeoutMs: waitMs,
+        signal: AbortSignal.any([signal, AbortSignal.timeout(waitMs)]),
+      });
+    } catch (error) {
+      // Never reached (refused before the line noticed it went down): nothing started there, so it is not reachable now.
+      if (neverReached(error) || peer.state !== "online") return { state: "offline" };
+      // Sent with the line up and no answer in time: it may be switching there.
+      return { state: "failed", reason: "timed_out" };
+    }
+    try {
+      const raw = await readCapped(response, SWITCH_ANSWER_MAX_BYTES);
+      let answer: unknown = null;
+      try {
+        answer = raw === null ? null : JSON.parse(raw);
+      } catch {
+        // Not JSON: no answer, below.
+      }
+      if (response.status === 404 && (answer as { code?: unknown } | null)?.code === "device_route_not_found") return { state: "needs_update" };
+      return response.ok ? parsePeerSwitch(answer) : { state: "unreachable" };
+    } catch {
+      return peer.state === "online" ? { state: "failed", reason: "timed_out" } : { state: "offline" };
     }
   };
 
