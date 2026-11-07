@@ -19,11 +19,16 @@
  *  - `diffShapeVersions` compares two snapshots by those ids ("what changed
  *    since you looked"). The agent never writes what changed; it is worked
  *    out here.
+ *  - A board may carry `scenes` (`./shape-scene`): the agent's own SVG in a
+ *    drawn view's `<div data-scene="id">…</div>`, whose `data-part` pieces the
+ *    board's player moves by the scene's keyframes. Data only, never a script.
  *
  * Spec: the approved Shape design record ("shape-living-board"), sections 3 and 4.
  */
 import type { CodeGuideOutput } from './guide';
 import { ulid } from './ulid';
+import { checkShapeScene, shapeHtmlParts, shapeHtmlSceneSlots, shapeHtmlScenes, shapeScenePieceRefs, type ShapeScene } from './shape-scene';
+export type { ShapeScene } from './shape-scene';
 
 export const SHAPE_FORMAT_VERSION = 1;
 
@@ -318,6 +323,8 @@ export interface ShapeBoard {
     code?: ShapeCodeView;
   };
   refs?: ShapeRef[];
+  /** Scenes the agent draws and the board's player plays, by id (`./shape-scene`): where a drawn view puts `<div data-scene="id">…</div>`. */
+  scenes?: Record<string, ShapeScene>;
 }
 
 // ───────────────────────────── what the store keeps ─────────────────────────────
@@ -447,6 +454,8 @@ export function isShapeNoteId(value: unknown): value is string {
 
 /** The most a board may hold. A refusal names the field and the limit. */
 export const SHAPE_LIMITS = {
+  /** Scenes a board holds (`./shape-scene`). */
+  scenes: 8,
   title: 140,
   claim: 400,
   note: 280,
@@ -1616,6 +1625,65 @@ export function checkShapeDrawnView(input: unknown, field = 'view'): ShapeCheck<
   return { ok: true, value: view };
 }
 
+const SHAPE_SCENE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
+
+/**
+ * A board's scenes, by id, each checked by its own format; then the drawings: a `data-scene` slot
+ * must name a scene the board has, and a scene's pieces (its tracks, `to` and `along`) must be
+ * `data-part` names in a drawing, so a typo is named here instead of a piece that never moves.
+ * Ids are matched with `Object.hasOwn`, so `constructor` and other prototype keys never resolve.
+ */
+function checkScenes(c: Checker, input: unknown, views: ShapeBoard['views']): Record<string, ShapeScene> | undefined {
+  const htmlOf = (v: 'picture' | 'how') => {
+    const view = views[v];
+    return view ? [view.html, view.tall?.html ?? '', view.more?.html ?? ''] : [];
+  };
+  // Which views play each scene (a slot is a <div data-scene>; the player finds pieces in the view that holds it).
+  const playedIn = new Map<string, ('picture' | 'how')[]>();
+  for (const v of ['picture', 'how'] as const) {
+    const slots = htmlOf(v).flatMap(shapeHtmlSceneSlots);
+    for (const slot of slots) {
+      if (slot.tag !== 'div') c.fail(`views.${v}.html`, `data-scene="${slot.id}" is on a <${slot.tag}>; put it on a <div> around your SVG: <div data-scene="${slot.id}"><svg>…</svg></div>`);
+    }
+    for (const id of new Set(slots.filter((s) => s.tag === 'div').map((s) => s.id))) {
+      playedIn.set(id, [...(playedIn.get(id) ?? []), v]);
+      if (isRecord(input) && Object.hasOwn(input, id)) continue;
+      c.fail(`views.${v}.html`, `has data-scene="${id}", but ${isRecord(input) ? `scenes has no "${id}"` : 'the board has no scenes'}`);
+    }
+  }
+  if (input === undefined || input === null) return undefined;
+  if (!isRecord(input)) {
+    c.fail('scenes', 'must be an object of scenes by id: { "pool": { … } }');
+    return undefined;
+  }
+  const entries = Object.entries(input);
+  if (entries.length > SHAPE_LIMITS.scenes) c.fail('scenes', `has ${entries.length}; at most ${SHAPE_LIMITS.scenes}`);
+  const partsOf = { picture: new Set(htmlOf('picture').flatMap(shapeHtmlParts)), how: new Set(htmlOf('how').flatMap(shapeHtmlParts)) };
+  const out: Record<string, ShapeScene> = {};
+  for (const [id, value] of entries.slice(0, SHAPE_LIMITS.scenes)) {
+    if (!SHAPE_SCENE_ID.test(id)) {
+      c.fail(`scenes.${id}`, 'the id must be a short word: letters, digits, _ and -, starting with a letter or digit, at most 40');
+      continue;
+    }
+    const checked = checkShapeScene(value, `scenes.${id}`);
+    if (checked.ok === false) {
+      c.errors.push(...checked.errors);
+      continue;
+    }
+    const where = playedIn.get(id) ?? [];
+    if (where.length === 0) {
+      c.fail(`scenes.${id}`, `no drawing plays it; put <div data-scene="${id}"><svg>…</svg></div> in the Picture or How it works`);
+      continue;
+    }
+    for (const ref of shapeScenePieceRefs(checked.value, `scenes.${id}`)) {
+      // Every view that plays the scene needs the piece: the player looks for it in that view only.
+      if (where.some((v) => !partsOf[v].has(ref.id))) c.fail(ref.at, `the drawing has no data-part="${ref.id}"; put data-part="${ref.id}" on that piece of your SVG in <div data-scene="${id}">`);
+    }
+    out[id] = checked.value;
+  }
+  return entries.length ? out : undefined;
+}
+
 export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
   const c = new Checker();
   if (!isRecord(input)) return { ok: false, errors: ['the board must be a JSON object: { title, claim, views, refs }'] };
@@ -1647,8 +1715,9 @@ export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
     if (!input.views.picture && !input.views.how && !input.views.changed && !input.views.know && !input.views.reqs && !input.views.code) c.fail('views', 'needs at least one view');
   }
   const refs = checkRefs(c, input.refs);
+  const scenes = checkScenes(c, input.scenes, views);
   if (c.errors.length || !title || !claim) return { ok: false, errors: c.errors.length ? c.errors : ['title and claim are required'] };
-  const board: ShapeBoard = { title, claim, ...(asOf ? { asOf } : {}), ...(note ? { note } : {}), views, ...(refs?.length ? { refs } : {}) };
+  const board: ShapeBoard = { title, claim, ...(asOf ? { asOf } : {}), ...(note ? { note } : {}), views, ...(refs?.length ? { refs } : {}), ...(scenes ? { scenes } : {}) };
   // Every cited reference must exist.
   const known = new Set((refs ?? []).map((r) => r.n));
   const cited = shapeCitedRefs(board);
@@ -1994,7 +2063,11 @@ export function shapeBoardNotes(board: Pick<ShapeBoard, 'views' | 'refs'>): stri
   if (!picture) return notes;
   const words = shapeDrawnWords(picture.html);
   if (words > 240) notes.push(`The Picture has ${words} words. Read at a glance, about 200 is the most. Move the rest behind numbers (a ref's sub and images) or to your message to the person.`);
-  if (picture.width === undefined) notes.push('The Picture has no width and height, so it scrolls like a page. Give it a fixed canvas: it then always fits one screen.');
+  // A Picture that plays a scene: the player sizes the drawing and its controls to the screen, so it wants no canvas.
+  const scene = shapeHtmlScenes(picture.html).length > 0;
+  if (scene) {
+    if (picture.width !== undefined) notes.push('The Picture plays a scene, so leave its width and height off: the player fits the drawing and its controls to the screen.');
+  } else if (picture.width === undefined) notes.push('The Picture has no width and height, so it scrolls like a page. Give it a fixed canvas: it then always fits one screen.');
   else if (!picture.tall) notes.push('The Picture has no tall drawing, so a phone pans it sideways. That works. For a board you expect on a phone, add views.picture.tall.');
   const cited = [...picture.html.matchAll(/\sdata-ref\s*=\s*["']?(\d{1,3})/g)].map((m) => Number(m[1]));
   const onPicture = (board.refs ?? []).filter((r) => cited.includes(r.n));

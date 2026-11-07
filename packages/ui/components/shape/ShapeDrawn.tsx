@@ -28,6 +28,8 @@ import {
 import { useReducedMotion } from './Pebble';
 import { syncKeptBoxes, type KeptBox } from './boxSelect';
 import { holdDarkBoard, releaseDarkBoard } from './darkContrast';
+import { ScenePlayers } from './scene/ScenePlayers';
+import type { ShapeScene } from '@plannotator/core/shape-scene';
 
 /**
  * A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first.
@@ -340,6 +342,13 @@ export interface ShapeDrawnProps {
    * that works on the drawing itself ("Follow an example").
    */
   onBoard?: (board: HTMLElement | null) => void;
+  /**
+   * The board's scenes: a `<div data-scene="id">` holding the agent's SVG plays `scenes[id]` (`scene/ScenePlayer`,
+   * loaded lazily, in a shadow root of its own inside the slot). Absent: the drawing stays still, as before.
+   */
+  scenes?: Readonly<Record<string, ShapeScene>>;
+  /** 'technical': scenes take the technical look (`scene/look.ts`). Absent: scenes play as drawn. A board without scenes is never touched. */
+  sceneLook?: 'technical';
 }
 
 /** What a followed canvas leaves of the view's height, so the words under it show above the dock. */
@@ -709,6 +718,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       <div className="shp-drawn-fit" style={scaled && fit ? { width: drawn.width! * k, height: drawn.height! * k } : undefined}>
         <div ref={hostRef} className="shp-drawn-host" />
       </div>
+      {props.scenes && <ScenePlayers board={rootRef.current?.querySelector<HTMLElement>('.board') ?? null} drawnKey={contentKey} scenes={props.scenes} reduce={reduce} look={props.sceneLook} />}
     </div>
   );
 }

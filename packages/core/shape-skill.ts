@@ -17,8 +17,14 @@
  * approved words (.product/approved/shape-skill/approval.md): never edit them
  * here alone.
  *
+ * The stance ends with `SHAPE_PICTURE_LOOK` and the guide with `SHAPE_ANIMATIONS_SECTION`,
+ * both from ./shape-animate.ts (approval "shape-animated-scenes"), which also builds
+ * `plannotator shape --help animate` from the same words.
+ *
  * Browser-safe, no dependencies: the server lists it and the window pastes it.
  */
+
+import { SHAPE_ANIMATIONS_SECTION, SHAPE_PICTURE_LOOK } from './shape-animate';
 
 export interface ShapeSkillText {
   name: string;
@@ -44,6 +50,8 @@ export const SHAPE_GUIDE = `## The stance
 - Use the source's own words, names and numbers (the thread, the conversation, the code). Never invent data. If the source contradicts itself and nothing settles it, draw the latest statement and say it is open.
 - Commit to a clear reading. A clear picture can be corrected; a vague one cannot.
 - Handing the board to a helper or subagent? Give it the strongest model you can choose: the board is only as good as the model that draws it.
+
+${SHAPE_PICTURE_LOOK}
 
 ## Keeping it current
 
@@ -108,7 +116,8 @@ Draw it however you like, by hand or from a one-off script. The board makes it b
 - A phone shows the board narrow. For a wide How it works, add \`"tall": { "html": … }\` with the same parts stacked about 400 px wide.
 - \`shape update\` prints \`notes\` when a board will not behave. It stores the board anyway: fix them and update again.
 - Optional helpers: \`plannotator shape kit > kit.mjs\` (JavaScript, no dependencies). Its first lines show how.
-`;
+
+${SHAPE_ANIMATIONS_SECTION}`;
 
 /**
  * The start of `plannotator shape --help`: the welcome, how to open the page
@@ -142,6 +151,7 @@ export const SHAPE_HELP_INTRO = [
   "  plannotator shape done [<shp_id>]",
   "  plannotator shape list [--all] [--json]",
   "  plannotator shape open [<shp_id>]",
+  "  plannotator shape frame [<shp_id>] [--view picture|how] [--scene <id>] [--at <time|end|beat N>] [--phone] [--out <file.png>]",
   "  plannotator shape on | off",
   "",
   "A shape is a board you draw for the person: a Picture, How it works, What's changed",
@@ -163,10 +173,14 @@ export const SHAPE_HELP_INTRO = [
   "list     Lists the active shapes, newest change first (--all: finished ones too).",
   "open     Opens the Shape page in the person's browser: every board, or one board.",
   "         It prints the page's address.",
+  "frame    Saves a picture (PNG) of the board as the person sees it and prints its path:",
+  "         the Picture, or --view how. On a board that moves, --at picks the moment of the scene",
+  "         (default: its end); --phone draws it on a phone's screen. It uses the Chrome on this",
+  "         computer; with none, it says so.",
   "on, off  Turns Shape on or off: the same switch as the Plannotator Inbox's Settings →",
   "         Capabilities → Shape. Run them only when the person asks.",
   "",
-  "Without <shp_id>, read, drawing, answer and done use your session's newest active shape,",
+  "Without <shp_id>, read, drawing, answer, done and frame use your session's newest active shape,",
   "else this project's.",
 ].join("\n");
 

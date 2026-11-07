@@ -92,7 +92,7 @@ async function agentTexts(codeReview: boolean): Promise<Record<string, string>> 
  * pins the new hash here; one that names the code review belongs in the request.
  */
 // #2703 (approval shape-know-removed): Shape stops asking agents for views.know.
-const SHAPE_TEXT_SHA256 = { "shape --help": "5c577afa01247e2e66aac641eccbc47ee92c3c3499b69ec390e87b90fbf82dc3", "/shape skill": "64b900a13740b7be7cf3d365d330ca0803a4e489177eb92b3b16d65a7554faf8" };
+const SHAPE_TEXT_SHA256 = { "shape --help": "56bc99aba4a1aec24c12537289d1b8ba9540bdcb1a9dfc7e88816e5319502061", "/shape skill": "61f8b668fff2a2b125a7c5ae1137d13c093ebf415dc044d29d04e02dbefbc2d4" };
 
 test("Code review off: Shape's own agent text is byte for byte what it was", () => {
   const sha = (text: string) => createHash("sha256").update(text).digest("hex");
