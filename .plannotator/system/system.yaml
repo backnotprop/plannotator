@@ -9,7 +9,7 @@ system: Plannotator
 root: C-001
 sources:
   repos:
-    self: { repo: github.com/backnotprop/plannotator, at: 0a684262fbe457d06ccfd4ed64c5bb2189b1254a }
+    self: { repo: github.com/backnotprop/plannotator, at: efd8239747d2b1e1b4a9f1f20654e31892eee99a }
   docs: []
 watch:
   - apps/*/wrangler.toml
