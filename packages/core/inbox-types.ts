@@ -2941,17 +2941,24 @@ export interface InboxVoiceStatus {
   plan: string | null;
 }
 
-/** Why a clip came back with no words: the `code` of a `POST /api/inbox/voice/transcribe` failure. */
-export type InboxVoiceFailure =
-  | "voice_off"
-  | "voice_not_ready"
-  | "voice_bad_clip"
-  | "voice_expired"
-  | "voice_refused"
-  | "voice_key_refused"
-  | "voice_unreachable"
-  | "voice_codex_failed"
-  | "voice_empty";
+/**
+ * Every `code` a `POST /api/inbox/voice/transcribe` failure can carry: why a clip came back with no words. The server
+ * sends only these; a page must still take a code it does not know (a newer Inbox may add one) as a generic failure.
+ */
+export const INBOX_VOICE_FAILURES = [
+  "voice_off",
+  "voice_not_ready",
+  "voice_bad_clip",
+  "voice_expired",
+  "voice_refused",
+  "voice_key_refused",
+  "voice_unreachable",
+  "voice_codex_failed",
+  "voice_empty",
+] as const;
+
+/** Why a clip came back with no words: one of `INBOX_VOICE_FAILURES`. */
+export type InboxVoiceFailure = (typeof INBOX_VOICE_FAILURES)[number];
 
 /** The largest clip the Inbox takes: a 2:00 clip at 24 kHz, 16-bit mono is 5.76 MB. */
 export const INBOX_VOICE_MAX_CLIP_BYTES = 6 * 1024 * 1024;
