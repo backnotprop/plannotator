@@ -18,6 +18,8 @@
 @source "../../packages/inbox/review-drawing/**/*.tsx";
 /* System: the project setup dialog (packages/inbox/system). */
 @source "../../packages/inbox/system/**/*.tsx";
+/* Floating reply drafts (packages/inbox/floaters/). */
+@source "../../packages/inbox/floaters/**/*.tsx";
 
 @import "../../packages/ui/theme.css";
 /* The board's own sheet (shp- classes). */
@@ -27,6 +29,8 @@
 /* The guide reader's line comments: the review app's comment cards, toolbar and suggestion styles. */
 @import "../../packages/review-editor/comments.css";
 @import "../../packages/inbox/inbox.css";
+/* Floating reply drafts and Ask AI in the corner. */
+@import "../../packages/inbox/floaters/floaters.css";
 /* A launched session's permission prompt (components/PermissionCard.tsx). */
 @import "../../packages/inbox/permissionCard.css";
 

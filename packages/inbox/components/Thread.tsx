@@ -62,6 +62,7 @@ import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../
 import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
 import { clearLateVoiceMiss, LATE_VOICE_MISSED, noteLateVoiceMiss, useLateVoiceMiss } from '../lateVoice';
+import { replyBoxSetAside } from '../floaters/model';
 import { landInReplyDraft, landWordsInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
 import { useReplyHasWords, useReplyText, useReplyTextStore, useReplyTextWhile, type ReplyText } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
@@ -1764,6 +1765,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     setTaggedIds([]);
     if (!discarded && !machine) landLater(thread.thread_id, replyFiles.detach());
     replyFiles.reset();
+  };
+  /** T6's down arrow or Escape: the box closes and keeps its draft, which floats in the corner (approval "inbox-reply-floaters"). */
+  const setAside = () => {
+    closeBox();
+    replyBoxSetAside(thread.thread_id);
   };
   /**
    * The questions the person chose to skip with this Send ("Skip them" on the
@@ -6601,7 +6607,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               {/* The one visible way to close for a pointer or a phone (Esc does the same): it keeps the words and files as
                   the draft, as Cancel did; an empty box leaves none. */}
               <Tip content="Close (Esc). Your words stay as a draft.">
-                <button type="button" className="ib-rclose" aria-label="Close the reply box (your draft is kept)" data-reply-close="" onClick={() => closeBox()}>
+                <button type="button" className="ib-rclose" aria-label="Close the reply box (your draft is kept)" data-reply-close="" onClick={() => setAside()}>
                   <Icon name="chevD" size={phone ? 20 : 16} />
                 </button>
               </Tip>
@@ -6636,7 +6642,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                       event.preventDefault();
                       event.stopPropagation();
                       if (route.open) routeBack();
-                      else closeBox();
+                      else setAside();
                     }
                   }}
                 />

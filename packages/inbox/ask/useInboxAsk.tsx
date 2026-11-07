@@ -5,6 +5,7 @@ import { useOpenInCodeRegion } from '../components/OpenIn';
 import { Tip } from '../components/Tip';
 import { AskChat } from './AskChat';
 import { onAskChange } from './askEvents';
+import { askUnseen } from './askModel';
 
 export interface InboxAskOptions {
   /** `ask_ai` in the settings, and not the tour: while false nothing is read and nothing shows. */
@@ -30,6 +31,28 @@ export interface InboxAskParts {
    * already there (code review's Ask on selected lines). Nothing while Ask is off.
    */
   askWith: (words: string) => void;
+  /** What the corner (floaters/useReplyFloaters.tsx) needs: this thread's chat as a row of its list, and the window. */
+  corner: AskCorner;
+}
+
+/**
+ * Ask's window as the corner sees it (approval "inbox-reply-floaters"): the corner's list holds this thread's chat
+ * while its window is minimized, and a floating draft's window opens beside Ask's window.
+ */
+export interface AskCorner {
+  on: boolean;
+  /** The thread whose chat the window shows, or null. */
+  threadId: string | null;
+  /** The open thread has a chat (a first Ask AI happened): its row shows in the corner. */
+  hasChat: boolean;
+  /** An answer the person has not seen: a dot on its row. */
+  unseen: boolean;
+  host: string | null;
+  subject: string | null;
+  minimized: boolean;
+  store: ChatWindowStore;
+  open: () => void;
+  minimize: () => void;
 }
 
 /** Lucide's sparkles: the Inbox's own icons have no such mark, and `packages/inbox` does not depend on lucide. */
@@ -168,10 +191,32 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
     [store],
   );
 
+  const corner: AskCorner = {
+    on,
+    threadId: askFor,
+    hasChat: (model?.conversation?.turns.length ?? 0) > 0,
+    unseen: askUnseen(model?.conversation ?? null) !== null,
+    host: model?.agent?.host ?? null,
+    subject: model?.subject ?? null,
+    minimized,
+    store,
+    open: () => {
+      if (!askFor) return;
+      openChats.current.add(askFor);
+      store.setMinimized(false);
+      askForFocus(askFor);
+    },
+    minimize: () => {
+      if (askFor) openChats.current.delete(askFor);
+      store.setMinimized(true);
+    },
+  };
+
   const region = useOpenInCodeRegion({ thread: askFor ?? '' }, codeReview && !!askFor);
 
   return {
     askWith,
+    corner,
     button: icon('ib-iconbtn ib-artbtn'),
     fileButton: icon(pressed ? 'ib-fvb ib-on' : 'ib-fvb'),
     layer: askFor ? (

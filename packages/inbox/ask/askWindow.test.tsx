@@ -337,7 +337,10 @@ test('a question gets its answer, under the real agent name and icon', async () 
   await openChat();
   const header = askWindow()!.querySelector('[data-ask-chip]')!;
   expect(header.textContent).toContain('Why did the retry fail?');
-  expect(header.querySelector('.ib-mk')!.outerHTML).toBe(claudeMark);
+  // The header tells Ask's window from a floating draft's (approval "inbox-reply-floaters"): Ask's sparkle and
+  // "Ask AI · <thread>"; the agent's own mark is on its answers.
+  expect(header.textContent).toContain('Ask AI · ');
+  expect(header.querySelector('[data-ask-sparkle]')).not.toBeNull();
   type(askBox()!, 'What ran out?');
   pressEnter(askBox()!);
   await until(() => askWindow()!.textContent!.includes('Answered: What ran out?'), 'the answer');
