@@ -28,14 +28,12 @@ export type ChildEnv = Record<string, string | undefined>;
  *
  * - `GIT_CONFIG_NOSYSTEM`: git skips the system config, Xcode's included,
  *   which sets `credential.helper=osxkeychain`.
- * - `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`: no password prompt and
- *   no Git Credential Manager window.
+ * - `GCM_INTERACTIVE=never`: no Git Credential Manager window.
  * - `GH_PROMPT_DISABLED`, `GH_NO_UPDATE_NOTIFIER`: gh never prompts and never
  *   checks for its own update.
  */
 export const SANDBOX_NO_KEYCHAIN_ENV: Readonly<Record<string, string>> = Object.freeze({
   GIT_CONFIG_NOSYSTEM: "1",
-  GIT_TERMINAL_PROMPT: "0",
   GCM_INTERACTIVE: "never",
   GH_PROMPT_DISABLED: "1",
   GH_NO_UPDATE_NOTIFIER: "1",

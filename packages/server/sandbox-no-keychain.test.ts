@@ -57,8 +57,8 @@ describe("git the Inbox starts", () => {
 
   test("a caller's own setting still wins over the sandbox's", () => {
     process.env.PLANNOTATOR_TEST_SANDBOX = dir;
-    expect(childEnv({ GIT_TERMINAL_PROMPT: "1" }).GIT_TERMINAL_PROMPT).toBe("1");
-    expect(childEnv().GIT_TERMINAL_PROMPT).toBe("0");
+    expect(childEnv({ GCM_INTERACTIVE: "auto" }).GCM_INTERACTIVE).toBe("auto");
+    expect(childEnv().GCM_INTERACTIVE).toBe("never");
   });
 });
 
