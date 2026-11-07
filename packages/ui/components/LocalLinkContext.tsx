@@ -10,6 +10,9 @@ import { isCodeFilePath } from "@plannotator/core/code-file";
  *   click (Cmd/Ctrl/Shift, middle button), drag and copy use it: a host's
  *   own address for the same thing. Without it, a modified click also calls
  *   `open` and the middle button does nothing.
+ *   `wrap`, when given (opt-in), draws the link inside it, without the
+ *   tooltip: a host's own hover for that path (its code, say). The link
+ *   still opens on a click; absent, the link is drawn exactly as before.
  * - `unavailable`: draw the link text as inert text with `title` as its
  *   tooltip: no href, so nothing is fetched or navigated. `wrap`, when given,
  *   draws that text instead, without the tooltip (a host's own hover for that
@@ -18,7 +21,7 @@ import { isCodeFilePath } from "@plannotator/core/code-file";
  * - `null` from the resolver: the renderer's default for that link.
  */
 export type LocalLinkResolution =
-  | { kind: "open"; open: () => void; title?: string; href?: string }
+  | { kind: "open"; open: () => void; title?: string; href?: string; wrap?: (link: ReactNode) => ReactNode }
   | {
       kind: "unavailable";
       title: string;

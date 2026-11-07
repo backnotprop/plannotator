@@ -341,6 +341,9 @@ export interface CodeFileViewProps {
   /** Scroll this line to the middle and mark it, once per `token` (a jump to
    *  a definition, a reference or a line). */
   revealLine?: { line: number; token: number };
+  /** Opt-in (the Inbox's file panes): `'vertical'` scrolls to a referenced or revealed line up and down only, never
+   *  sliding a long row sideways, even in a short file (`scrollCodeLineIntoView`). Absent: exactly as before. */
+  lineScroll?: 'vertical';
   /** The token under the pointer (`enter` / `leave`) and the last one clicked
    *  (`click`): a host's "go to definition" looks there. Turning it on wraps
    *  the file's tokens (Pierre's token transformer). */
@@ -385,6 +388,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
   overflow = 'scroll',
   extraCss,
   revealLine,
+  lineScroll,
   onTokenTarget,
   onTokenNavigate,
 }) => {
@@ -462,9 +466,23 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     const find = () => {
       const root = fileAreaRef.current?.querySelector('diffs-container')?.shadowRoot;
       const row = root?.querySelector(`[data-line="${revealLine.line}"]`);
-      if (row instanceof HTMLElement) {
-        // Vertically only: scrollIntoView alone would also slide a long line sideways.
+      if (row instanceof HTMLElement && lineScroll === 'vertical') {
         scrollCodeLineIntoView(row);
+        return;
+      }
+      if (row) {
+        // Vertically only: scrollIntoView would also scroll a long line sideways.
+        let node: Element | null = fileAreaRef.current;
+        while (node) {
+          if (node instanceof HTMLElement && node.scrollHeight > node.clientHeight && /(auto|scroll)/.test(getComputedStyle(node).overflowY)) {
+            const box = node.getBoundingClientRect();
+            const rect = row.getBoundingClientRect();
+            node.scrollTop += rect.top - (box.top + box.height / 2) + rect.height / 2;
+            return;
+          }
+          node = node.parentElement;
+        }
+        row.scrollIntoView({ block: 'center', inline: 'nearest' });
         return;
       }
       attempts += 1;
@@ -497,7 +515,8 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     const area = fileAreaRef.current;
     if (line == null || !area || selectedAnnotationIdRef.current) return;
     return whenCodeLineRendered(area, line, (lineEl) => {
-      scrollCodeLineIntoView(lineEl, { smooth: true });
+      if (lineScroll === 'vertical') scrollCodeLineIntoView(lineEl, { smooth: true });
+      else lineEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, { lineCount });
   }, [line, filepath, lineCount, revealKey]);
 

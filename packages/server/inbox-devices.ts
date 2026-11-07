@@ -244,6 +244,20 @@ const MACHINE_DOOR_WRITES = ["link-back", "unlink"] as const;
 /** This computer's accounts, for a linked machine's window: never on the allowlist, so no phone and no relay command reaches them. */
 const MACHINE_DOOR_ACCOUNTS = "accounts";
 
+/**
+ * The window route a door request goes to, or null: the allowlist's first entry for its method and route, skipping a
+ * linked machine's own entries for a phone.
+ */
+export function doorRouteOf(method: string, route: string, machine: boolean): { entry: (typeof ALLOWLIST)[number]; windowPath: string } | null {
+  for (const entry of ALLOWLIST) {
+    if (entry.method !== method) continue;
+    if (entry.machineOnly && !machine) continue;
+    const match = entry.route.exec(route);
+    if (match) return { entry, windowPath: entry.window(match) };
+  }
+  return null;
+}
+
 /** For rule 8's test (inbox-outbox.test.ts): every door route in words (`GET threads`, `POST messages/:id/(picks|reply|…)`). */
 export function doorRouteNames(): string[] {
   const words = (route: RegExp) => route.source.replace(/^\^|\$$/g, "").replaceAll("([^/]+)", ":id").replaceAll("\\/", "/");
@@ -880,12 +894,9 @@ export function createInboxDevices(context: InboxDevicesContext) {
       // Only this Inbox's own read, so it never passes on a third machine's. Of the query, only Refresh's `fresh`.
       if (req.method === "GET" && route === MACHINE_DOOR_ACCOUNTS) return await toWindow(req, device, "/api/inbox/accounts", url.searchParams.get("fresh") === "1" ? "?fresh=1" : "", null, req.signal);
     }
-    for (const entry of ALLOWLIST) {
-      if (entry.method !== req.method) continue;
-      if (entry.machineOnly && device.platform !== MACHINE_PLATFORM) continue;
-      const match = entry.route.exec(route);
-      if (!match) continue;
-      const windowPath = entry.window(match);
+    const door = doorRouteOf(req.method, route, device.platform === MACHINE_PLATFORM);
+    if (door) {
+      const { entry, windowPath } = door;
       if (req.method === "POST") return await command(req, device, url, windowPath, entry);
       if (route !== "events") return await toWindow(req, device, windowPath, url.search, null, req.signal);
       // The event stream lives until the phone leaves or is removed.

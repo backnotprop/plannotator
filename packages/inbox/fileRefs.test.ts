@@ -41,4 +41,11 @@ describe('what names a file (approval inbox-file-refs-open-viewer)', () => {
     expect(found('Uses vendor/Three.js today')).toEqual(['vendor/Three.js']);
     expect(found('Node.js and Vue.js')).toEqual([]);
   });
+
+  test("another repository's issue or PR, and a web address without its scheme, are not files", () => {
+    expect(found('Fixed upstream in vercel/next.js#123 and vuejs/vue.js#5.')).toEqual([]);
+    expect(found('Pinned to owner/repo.js@3f2a9c1')).toEqual([]);
+    expect(found('See example.com/docs/page.html and docs.github.com/en/a.md')).toEqual([]);
+    expect(found('But src/next.js and docs/plan.md stay files.')).toEqual(['src/next.js', 'docs/plan.md']);
+  });
 });

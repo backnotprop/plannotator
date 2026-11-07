@@ -5,7 +5,7 @@
  * review on, a code file still shows its code on hover (OpenInCodeHover) and the click opens the pane; on a touch
  * screen the tap goes straight to the pane.
  */
-import { useMemo, type MutableRefObject, type ReactNode } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { BarePathContext, CodeSpanContext, CodeSpanMatchContext, type BarePathWrap } from '@plannotator/ui/components/LocalLinkContext';
 import { isCodeFilePath } from '@plannotator/core/code-file';
 import { fileRefOf, findBarePaths, looksLikeFilePath, type FileRef } from '../fileRefs';
@@ -16,11 +16,21 @@ import { useTouchScreen } from '../phone';
 function FileRefSpan({ text, children, bare, hover, scope, openRef }: { text: string; children: ReactNode; bare: boolean; hover: boolean; scope: { thread: string; message: string }; openRef: MutableRefObject<((ref: FileRef) => void) | undefined> }) {
   const touch = useTouchScreen();
   const ref = fileRefOf(text, bare);
+  const el = useRef<HTMLSpanElement>(null);
+  // Inside a question's choice (a label) or another control, the words stay that control's: a click picks the choice.
+  const [inControl, setInControl] = useState(false);
+  useLayoutEffect(() => {
+    // From outside its own hover (whose trigger is a button).
+    const from = el.current ? (el.current.closest('[data-code-hover]') ?? el.current).parentElement : null;
+    if (from?.closest('label, button, a, [role="button"], [role="radio"], [role="checkbox"], [role="option"]')) setInControl(true);
+  }, []);
   if (!ref) return <>{children}</>;
   const open = () => openRef.current?.(ref);
   const peek = hover && !touch && isCodeFilePath(text);
+  if (inControl) return peek ? <OpenInCodeHover scope={scope} path={ref.path} line={ref.line} lineEnd={ref.lineEnd}>{children}</OpenInCodeHover> : <>{children}</>;
   const span = (
     <span
+      ref={el}
       className={`ib-fileref${bare ? ' ib-fileref-bare' : ''}`}
       // With the peek, its trigger is the button (Enter shows the code); a click on the words opens the pane.
       role={peek ? undefined : 'button'}

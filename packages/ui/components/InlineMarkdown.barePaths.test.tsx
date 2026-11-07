@@ -30,12 +30,12 @@ const wrap: BarePathWrap = {
   ),
 };
 
-async function draw(text: string, withHost: boolean): Promise<HTMLElement> {
+async function draw(text: string, withHost: boolean, githubRepo?: string): Promise<HTMLElement> {
   host = document.createElement('div');
   document.body.appendChild(host);
   await act(async () => {
     root = createRoot(host!);
-    root.render(withHost ? <BarePathContext.Provider value={wrap}><InlineMarkdown text={text} /></BarePathContext.Provider> : <InlineMarkdown text={text} />);
+    root.render(withHost ? <BarePathContext.Provider value={wrap}><InlineMarkdown text={text} githubRepo={githubRepo} /></BarePathContext.Provider> : <InlineMarkdown text={text} githubRepo={githubRepo} />);
   });
   return host;
 }
@@ -54,6 +54,12 @@ describe.if(hasDom)('BarePathContext', () => {
     expect(paths(el)).toEqual(['docs/c.md']);
     expect(el.querySelector('code')?.textContent).toBe('src/a.ts');
     expect(el.querySelector('strong [data-path]')).not.toBeNull();
+  });
+
+  test("another repository's ref stays that ref, even where the host's finder would take its owner/repo as a path", async () => {
+    const el = await draw('Fixed upstream in vercel/next.js#123, and docs/plan.md here.', true, 'acme/app');
+    expect(paths(el)).toEqual(['docs/plan.md']);
+    expect(el.querySelector('a[href="https://github.com/vercel/next.js/issues/123"]')?.textContent).toBe('vercel/next.js#123');
   });
 
   test('without a host the words render exactly as before', async () => {

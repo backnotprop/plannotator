@@ -143,6 +143,7 @@
     "./live-proxy-node": "./live-proxy-node.ts",
     "./inbox/snoozes": "./inbox/snoozes.ts",
     "./inbox/schema": "./inbox/schema.ts",
+    "./inbox/network-paths": "./inbox/network-paths.ts",
     "./inbox/ask": "./inbox/ask.ts",
     "./inbox/system-setup": "./inbox/system-setup.ts",
     "./inbox/debug-log": "./inbox/debug-log.ts",

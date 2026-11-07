@@ -5,7 +5,7 @@
  * fixture under a temp folder (never the real home).
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxStore } from "@plannotator/shared/inbox/store";
@@ -37,7 +37,7 @@ const launcher: InboxOpenInLauncher = {
 
 const SESSION = "srv-session";
 
-function world() {
+function world(pulls: { threadPulls?: () => string[]; pullFile?: (pull: string, path: string) => Promise<any> } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-refs-")));
   roots.push(root);
   const home = join(root, "home");
@@ -55,6 +55,18 @@ function world() {
   writeFileSync(join(home, ".aws", "credentials"), "[default]\n");
   symlinkSync(join(project, ".env"), join(project, "settings.txt"));
   symlinkSync(join(home, ".ssh", "id_rsa"), join(elsewhere, "key.txt"));
+  // Plannotator's own state (tokens, secrets, logs) in the data folder in use and in ~/.plannotator; its plans are documents.
+  const data = join(root, "data");
+  for (const dir of [join(data, "inbox", "device-secrets"), join(data, "plans"), join(home, ".plannotator", "inbox"), join(project, "src", "keychains"), join(home, "Library", "Keychains")]) mkdirSync(dir, { recursive: true });
+  writeFileSync(join(data, "inbox", "machines.json"), '{"token":"secret"}\n');
+  writeFileSync(join(data, "inbox", "relay.json"), '{"secret":"x"}\n');
+  writeFileSync(join(data, "inbox", "device-secrets", "dev_1"), "secret\n");
+  writeFileSync(join(data, "config.json"), "{}\n");
+  writeFileSync(join(data, "plans", "saved.md"), "# Saved plan\n");
+  writeFileSync(join(home, ".plannotator", "inbox", "machines.json"), '{"token":"secret"}\n');
+  symlinkSync(join(data, "inbox", "relay.json"), join(elsewhere, "relay.txt"));
+  writeFileSync(join(project, "src", "keychains", "index.ts"), "export const keychains = [];\n");
+  writeFileSync(join(home, "Library", "Keychains", "login.txt"), "secret\n");
 
   const store = InboxStore.open(join(root, "data"));
   const prj = store.ensureProject({ name: "project", root: project });
@@ -71,8 +83,8 @@ function world() {
     codeReviewOn: () => false,
     shapeRoot: () => null,
     repoRoots: () => [],
-    threadPulls: () => [],
-    pullFile: async () => null,
+    threadPulls: pulls.threadPulls ?? (() => []),
+    pullFile: pulls.pullFile ?? (async () => null),
     ownerOrLocal: (_req, via) => via === "local",
     home,
   });
@@ -124,6 +136,36 @@ describe("a file a message names: the view", () => {
     }
   });
 
+  test("never Plannotator's own state: the Inbox's tokens and secrets, in the data folder in use and in ~/.plannotator; its saved plans open", async () => {
+    const w = world();
+    const data = join(w.root, "data");
+    for (const path of [
+      join(data, "inbox", "machines.json"),
+      join(data, "inbox", "relay.json"),
+      join(data, "inbox", "device-secrets", "dev_1"),
+      join(data, "inbox", "inbox.json"),
+      join(data, "config.json"),
+      "~/.plannotator/inbox/machines.json",
+      join(w.elsewhere, "relay.txt"),
+    ]) {
+      const { body } = await w.view(path);
+      expect([path, body.found, body.contents]).toEqual([path, false, undefined]);
+    }
+    expect((await w.view(join(data, "plans", "saved.md"))).body).toMatchObject({ found: true, contents: "# Saved plan\n" });
+    expect((await w.attach(join(data, "inbox", "machines.json"))).body.code).toBe("attachment_missing");
+  });
+
+  test("a folder named keychains in a project opens; the real Keychains folder does not", async () => {
+    const w = world();
+    expect((await w.view("src/keychains/index.ts")).body).toMatchObject({ found: true, contents: "export const keychains = [];\n" });
+    expect((await w.view("~/Library/Keychains/login.txt")).body).toMatchObject({ found: false, reason: "refused" });
+  });
+
+  test("never a path on another computer: a UNC path is refused before anything touches it", async () => {
+    const w = world();
+    for (const path of ["//fileserver/share/plan.md", "//10.255.255.1/c$/x.md"]) expect((await w.view(path)).body).toMatchObject({ found: false, reason: "refused" });
+  });
+
   test("through the tailnet only the owner reads it", async () => {
     const w = world();
     expect((await w.view("docs/plan.md", "tailnet")).status).toBe(403);
@@ -147,6 +189,22 @@ describe("a file a message names: the bytes of an image", () => {
     expect(svg.headers.get("content-security-policy")).not.toContain("script");
     expect((await w.raw("~/.ssh/id_ed25519")).status).toBe(404);
     expect((await w.raw("docs/plan.md")).status).toBe(404);
+  });
+});
+
+describe("a file a message names, in a thread with a pull request", () => {
+  const pr = (contents: string) => ({ threadPulls: () => ["gh:o/r#7"], pullFile: async (_pull: string, path: string) => (path === "docs/plan.md" ? { contents, label: "#7", platform: "github", url: "https://github.com/o/r/pull/7" } : null) });
+
+  test("the view shows the pull request's version; a comment attaches the file here only when it is that text", async () => {
+    const differs = world(pr("# Plan\n\nShip it in the PR.\n"));
+    const shown = await differs.view("docs/plan.md");
+    expect(shown.body).toMatchObject({ found: true, contents: "# Plan\n\nShip it in the PR.\n", local_matches: false, pull: { label: "#7" } });
+    expect((await differs.attach("docs/plan.md")).body.code).toBe("annotation_not_allowed");
+    expect(differs.store.message(differs.message.id)!.attachments ?? []).toEqual([]);
+
+    const same = world(pr("# Plan\n\nShip it.\n"));
+    expect((await same.view("docs/plan.md")).body.local_matches).toBe(true);
+    expect((await same.attach("docs/plan.md")).body.attachment).toMatchObject({ name: "plan.md" });
   });
 });
 
@@ -187,5 +245,14 @@ describe("a file a message names: attached when commented on", () => {
     // A message named with another thread brings nothing.
     expect((await w.attach("docs/plan.md", person.id)).body.code).toBe("message_not_found");
     expect((w.store.message(w.message.id)!.attachments ?? []).map((a) => a.name)).toEqual(["out.log"]);
+  });
+
+  test("a resolved thread takes no attach, and keeps no copy of the file", async () => {
+    const w = world();
+    const blobs = join(w.root, "data", "inbox", "blobs");
+    const before = existsSync(blobs) ? readdirSync(blobs, { recursive: true }).length : 0;
+    w.store.resolveThread(w.message.thread_id, true, "person");
+    expect((await w.attach("docs/plan.md")).body.code).toBe("thread_resolved");
+    expect(existsSync(blobs) ? readdirSync(blobs, { recursive: true }).length : 0).toBe(before);
   });
 });

@@ -953,6 +953,8 @@ export type ReferencedFileView =
       tooLarge?: boolean;
       attachment_id?: string;
       pull?: { label: string; platform: 'github' | 'gitlab'; url: string };
+      /** With `pull`: the file on this computer is that same text, so a comment (which attaches it) is taken. */
+      local_matches?: boolean;
     };
 
 /** Where a file a message names is asked about: its thread (whose machine holds it) and the message. */

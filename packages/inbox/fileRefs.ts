@@ -47,6 +47,9 @@ export function fileRefOf(text: string, needsFolder = false): FileRef | null {
 const BARE_PATH = /(?:~\/|\.{0,2}\/)?[\w@.\-][\w@.\-[\]]*\/(?:[\w@.\-[\]]+\/)*[\w.\-[\]]+\.[A-Za-z0-9]{1,10}(?::\d+(?:-\d+)?)?/g;
 
 /** Each bare path in `text` that names a file (`fileRefOf` with a folder), as its start and end. */
+/** A first segment that is a web host (`example.com/…`, `docs.github.com/…`). */
+const WEB_HOST = /^(?:[a-z0-9-]+\.)+(?:com|org|net|io|dev|app|ai|co|edu|gov|so|sh|me|xyz|info)\//i;
+
 export function findBarePaths(text: string): { start: number; end: number }[] {
   const out: { start: number; end: number }[] = [];
   BARE_PATH.lastIndex = 0;
@@ -56,6 +59,10 @@ export function findBarePaths(text: string): { start: number; end: number }[] {
     if (/[\w/~[]/.test(before)) continue;
     // A sentence's full stop is not part of the name.
     const words = match[0].replace(/[.]+$/, '');
+    // Another repository's issue or PR (`vercel/next.js#123`, `owner/repo@sha`): a reference, never a file here.
+    if (/^[#@][0-9a-f]/i.test(text.slice(match.index + words.length))) continue;
+    // A web address written without its scheme (`example.com/docs/page.html`).
+    if (WEB_HOST.test(words)) continue;
     if (!fileRefOf(words, true)) continue;
     out.push({ start: match.index, end: match.index + words.length });
   }

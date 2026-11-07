@@ -506,6 +506,12 @@ See HANDOFF.md § "Decision toggle on any question, and an opener for the host's
 
 **Local links decided by the host (ui 0.53.0).** `Viewer` `resolveLocalLink`: the host decides what a link to a local path does (open it itself, or draw it as inert text), markdown and raw HTML alike. See HANDOFF.md § "Viewer `resolveLocalLink` (ui 0.53.0)".
 
+**File paths in words, decided by the host (unreleased; the Inbox's "every file a message names opens").** All opt-in, in `components/LocalLinkContext.tsx`; with no provider every path renders exactly as before.
+- `CodeSpanMatchContext`: which code spans `CodeSpanContext`'s wrap is asked about (default `isCodeFilePath`); a host that opens documents, pictures and films gives its own test.
+- `BarePathContext` (`{ find, wrap }`): file paths written as plain words. InlineMarkdown asks `find` for each plain run (after cross-repo refs), stops a chunk where a found path starts so a `_` or `@` in it does not cut it, and draws each through `wrap`. Never inside code, links or markup.
+- An `'open'` resolution's `wrap?: (link) => ReactNode`: draws the link inside the host's own hover (its code, say), without the tooltip; the click still calls `open`.
+- `CodeFileView` `lineScroll?: 'vertical'`: a referenced or revealed line is scrolled to up and down only (`scrollCodeLineIntoView`, across Pierre's shadow root), never sliding a long row sideways. Absent: the old scroll, unchanged.
+
 ### Diff file tree (`components/DiffFileTree`; ui 0.50.0)
 
 A read-only file tree for a list of changed files, to sit beside a host's own per-file diff list. It is Plannotator's code-review tree, not a lookalike: the builder (`utils/diffFileTree`), the folder open/closed hook (`hooks/useDiffFileTreeExpansion`) and the row atoms moved here from `packages/review-editor`, and the review now renders from them.

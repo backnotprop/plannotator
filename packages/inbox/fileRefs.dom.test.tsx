@@ -9,6 +9,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAttachment, InboxMessageWire } from '@plannotator/core/inbox-types';
 import type { FileRef } from './fileRefs';
+import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 
 const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
@@ -45,11 +46,16 @@ function message(body: string, kind: 'agent' | 'person', attachments: InboxAttac
     author: kind === 'agent' ? { kind: 'agent', host: 'claude-code', session: 'ses_1', name: 'Claude Code' } : { kind: 'person' },
     body,
     attachments,
-    questions: [],
+    questions: parseInboxQuestionBlocks(body).map((q) => ({
+      key: q.key, position: q.position, kind: q.kind, prompt: q.prompt, context: q.parsed.context, choices: q.parsed.choices,
+      recommendation: null, suggested_text: null, stopped: q.stopped, holds_up: q.holds_up, asked_by_agent_id: 'ses_1', orphaned: false,
+      state: 'open', answer: null, revision: 0, sent_revision: 0, picked_by: null, picked_at: null, sent_reply_id: null,
+      message_id: 'msg_01K7ZZZZZZZZZZZZZZZZZZZZZZ', superseded_by: null,
+    })),
   } as unknown as InboxMessageWire;
 }
 
-async function draw(body: string, kind: 'agent' | 'person', attachments: InboxAttachment[] = []) {
+async function draw(body: string, kind: 'agent' | 'person', attachments: InboxAttachment[] = [], openInFiles = false, picks: string[] = []) {
   const refs: FileRef[] = [];
   const opened: string[] = [];
   host = document.createElement('div');
@@ -64,8 +70,9 @@ async function draw(body: string, kind: 'agent' | 'person', attachments: InboxAt
         onOpenFileRef={(ref) => refs.push(ref)}
         readOnly={false}
         answers={new Map()}
-        onPick={() => {}}
+        onPick={(key) => picks.push(key)}
         footerFor={() => null}
+        openInFiles={openInFiles}
       />,
     );
   });
@@ -109,4 +116,28 @@ test.skipIf(!hasDom)("the person's own words keep their links: nothing in them o
   expect(host!.querySelector('[data-local-link="open"]')).toBeNull();
   expect(host!.textContent).toContain('docs/plan.md');
   expect(refs).toEqual([]);
+});
+
+test.skipIf(!hasDom)('with Code review on, a link to a file keeps its code on hover, and a click still opens the file beside the thread', async () => {
+  const { refs } = await draw('The fix is in [the worker](src/retry/worker.ts#L42).', 'agent', [], true);
+  const link = host!.querySelector<HTMLAnchorElement>('a[data-local-link="open"]')!;
+  expect(link.closest('[data-code-hover]')?.getAttribute('data-code-hover')).toBe('src/retry/worker.ts');
+  await act(async () => link.click());
+  expect(refs).toEqual([{ path: 'src/retry/worker.ts', line: 42 }]);
+});
+
+test.skipIf(!hasDom)('with Code review off, the same link opens the file and has no hover', async () => {
+  await draw('The fix is in [the worker](src/retry/worker.ts#L42).', 'agent');
+  expect(host!.querySelector('a[data-local-link="open"]')!.closest('[data-code-hover]')).toBeNull();
+});
+
+test.skipIf(!hasDom)("a file named in a question's choice leaves the choice to the person: a click picks it, nothing opens", async () => {
+  const picks: string[] = [];
+  const { refs } = await draw(['Which way?', '', ':::question', 'Rename the module?', '', '- [ ] Rename `src/api.ts`', '- [ ] Keep src/api.ts as is', ':::'].join('\n'), 'agent', [], false, picks);
+  const labels = [...host!.querySelectorAll('label')].filter((label) => label.textContent?.includes('src/api.ts'));
+  expect(labels.length).toBe(2);
+  for (const label of labels) expect(label.querySelector('[data-file-ref], [role="button"]')).toBeNull();
+  await act(async () => labels[0]!.querySelector('code')!.click());
+  expect(refs).toEqual([]);
+  expect(picks.length).toBe(1);
 });

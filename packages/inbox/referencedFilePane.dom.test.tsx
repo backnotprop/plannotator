@@ -62,3 +62,15 @@ test.skipIf(!hasDom)('a markdown reference opens as a document, and its copy con
   expect(labels).toContain('Copy file');
   expect(labels).not.toContain('Copy plan');
 });
+
+test.skipIf(!hasDom)("a pull request's version takes comments only where the file here is that same text", async () => {
+  const pull = { label: '#7', platform: 'github', url: 'https://github.com/o/r/pull/7' };
+  await open('src/a.ts', { found: true, name: 'a.ts', path: 'src/a.ts', kind: 'code', contents: 'const a = 1;\n', pull, local_matches: false });
+  expect(host!.querySelector('[data-code-view]')).not.toBeNull();
+  expect(host!.textContent).not.toContain('to comment');
+  act(() => root?.unmount());
+  host?.remove();
+  root = null;
+  await open('src/a.ts', { found: true, name: 'a.ts', path: 'src/a.ts', kind: 'code', contents: 'const a = 1;\n', pull, local_matches: true });
+  expect(host!.textContent).toContain('to comment');
+});

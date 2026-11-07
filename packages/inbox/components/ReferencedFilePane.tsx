@@ -20,6 +20,7 @@ import { ScrollViewportProvider } from '@plannotator/ui/hooks/useScrollViewport'
 import type { Annotation } from '@plannotator/ui/types';
 import { inboxApi, InboxApiError, referencedFileRawUrl, type ReferencedFileScope, type ReferencedFileView } from '../api';
 import { attachmentBlocks, codeCommentAnnotation, inboxViewKind } from '../attachments';
+import { referencedCommentQueue } from '../referencedComments';
 import { InboxFileSourceProvider, useInboxFileSource, type InboxFileSource } from '../fileSource';
 import { Icon } from '../icons';
 import { FileName } from './FileName';
@@ -140,33 +141,38 @@ export function ReferencedFilePane({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  /** The first comment: attach the file to its message, keep the comment there, and open the attachment. Once at a time. */
-  const saving = useRef<Promise<boolean> | null>(null);
-  const save = useCallback(
-    (annotation: Annotation | object): Promise<boolean> => {
-      if (saving.current) return saving.current;
-      const answer = (async () => {
-        try {
-          const { attachment } = await inboxApi.attachReferencedFile(scope, fileRef.path);
-          const { annotation: record } = await inboxApi.saveAnnotation(attachment.id, 'current', annotation);
-          await attachedRef.current(attachment.id, record.id);
-          return true;
-        } catch (cause) {
+  /**
+   * Comments made here: the first attaches the file to its message, then each is kept there in the order made, and
+   * the attachment opens (at the first). One more made while that runs waits its turn, never dropped. What is not
+   * kept stays here, its words shown with the reason, until Try again keeps it.
+   */
+  const [unsaved, setUnsaved] = useState<object[]>([]);
+  const comments = useMemo(
+    () =>
+      referencedCommentQueue({
+        attach: async () => (await inboxApi.attachReferencedFile(scope, fileRef.path)).attachment.id,
+        save: async (id, annotation) => (await inboxApi.saveAnnotation(id, 'current', annotation)).annotation.id,
+        done: async (id, first) => {
+          setUnsaved([]);
+          setError(null);
+          await attachedRef.current(id, first);
+        },
+        failed: (cause, left) => {
           setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not saved.');
-          return false;
-        } finally {
-          saving.current = null;
-        }
-      })();
-      saving.current = answer;
-      return answer;
-    },
-    [scope, fileRef.path],
+          setUnsaved(left);
+        },
+      }),
+    // A new file, a new queue. `key` names the message and the path.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [key],
   );
-  const writes = commentable && source.writes;
+  useEffect(() => setUnsaved([]), [key]);
+  const save = useCallback((annotation: Annotation | object): Promise<boolean> => comments.add(annotation), [comments]);
 
   const name = view?.name ?? fileRef.path.split('/').pop() ?? fileRef.path;
   const found = view?.found ? view : null;
+  // A PR's version is shown: a comment attaches this computer's file, so it is taken only where that is the same text.
+  const writes = commentable && source.writes && !(found?.pull && !found.local_matches);
   // Drawn as an attachment of that kind is (inboxViewKind): a log or data file as code, with its lines and their
   // numbers, so a comment made here anchors the same way once it is attached.
   const kind = found ? inboxViewKind(found.kind, found.name) : null;
@@ -223,8 +229,18 @@ export function ReferencedFilePane({
       <div className="ib-vbody">
         <div className={`ib-docarea${kind === 'html' ? ' ib-html' : ''}`}>
           {error && (
-            <div className="ib-error ib-view-error" role="alert">
+            <div className="ib-error ib-view-error" role="alert" data-ref-error="">
               {error}
+              {unsaved.map((annotation, index) => (
+                <q key={index} className="ib-ref-unsaved" data-ref-unsaved="">
+                  {(annotation as { text?: string }).text ?? ''}
+                </q>
+              ))}
+              {unsaved.length > 0 && (
+                <button type="button" className="ib-btn ib-ghost ib-sm ib-ref-retry" onClick={() => void comments.retry()} data-ref-retry="">
+                  Try again
+                </button>
+              )}
             </div>
           )}
           {!view && !failed && <div className="ib-refwait" aria-hidden="true" />}
@@ -249,6 +265,7 @@ export function ReferencedFilePane({
               <CodeFileView
                 key={key}
                 filepath={found.path}
+                lineScroll="vertical"
                 contents={found.contents}
                 line={fileRef.line}
                 lineEnd={fileRef.lineEnd}

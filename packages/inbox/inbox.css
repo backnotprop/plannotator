@@ -8916,6 +8916,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-refmissing-name { max-width: 46ch; font-family: var(--font-mono); font-size: var(--ib-fs-13, 13px); color: var(--foreground); overflow-wrap: anywhere; }
 .ib-refmissing-t { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .ib-refview.ib-phone .ib-vhead { padding-left: 6px; gap: 8px; }
+/* A comment not kept (the attach or the save failed): its words stay, with Try again. */
+.ib-refview .ib-view-error { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 10px 12px; border-radius: 10px; background: var(--card); box-shadow: 0 2px 12px color-mix(in oklch, var(--foreground) 12%, transparent); }
+.ib-ref-unsaved { display: block; max-height: 8em; overflow: auto; font-size: var(--ib-fs-13, 13px); color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; }
 /* The words that name a file: a code span, and a bare path (ui's BarePathContext, fileRefs.ts). */
 .ib-fileref { cursor: pointer; border-radius: 4px; }
 .ib-fileref code { text-decoration: underline dotted color-mix(in oklch, var(--primary) 55%, transparent); text-underline-offset: 3px; }

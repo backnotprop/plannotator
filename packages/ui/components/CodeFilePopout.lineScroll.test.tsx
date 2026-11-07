@@ -158,6 +158,27 @@ describe.if(hasDom)('CodeFileView with a referenced line', () => {
     const scrolled = await renderView({});
     expect(scrolled).toEqual([]);
   });
+
+  test('a host that passes nothing scrolls as it always did; the Inbox opts into vertical only', async () => {
+    const asked: unknown[] = [];
+    const stub = function (this: HTMLElement, options?: unknown) {
+      scrolled.push(this.getAttribute('data-line') ?? this.tagName);
+      asked.push(options);
+    };
+    const { CodeFileView } = await import('./CodeFilePopout');
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    scrolled = [];
+    HTMLElement.prototype.scrollIntoView = stub;
+    await act(async () => root!.render(<CodeFileView filepath="/repo/src/big.ts" contents={contents} line={250} />));
+    await waitForScroll(1);
+    expect(asked).toEqual([{ behavior: 'smooth', block: 'center' }]);
+    // The opt-in: no ancestor scrolls here, so the line is brought on screen with nothing slid sideways.
+    await act(async () => root!.render(<CodeFileView filepath="/repo/src/big.ts" contents={contents} line={250} revealKey={2} lineScroll="vertical" />));
+    await waitForScroll(2);
+    expect(asked).toEqual([{ behavior: 'smooth', block: 'center' }, { block: 'center', inline: 'nearest' }]);
+  });
 });
 
 describe.if(hasDom)('scrollCodeLineIntoView', () => {

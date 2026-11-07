@@ -626,23 +626,6 @@ export const InlineMarkdown: React.FC<{
       }
     }
 
-    // A file path the host finds (BarePathContext, opt-in) starting here,
-    // whole: a chunk was stopped where it starts (barePathRunningPast), so a
-    // `_` or `@` inside it does not cut it. Never where markdown starts (`*`,
-    // `_`, `[`, a backtick), and a code path ui links itself stays ui's.
-    if (barePaths && !/\w/.test(previousChar) && /^[A-Za-z0-9./~]/.test(remaining)) {
-      const space = remaining.search(/\s/);
-      const word = space === -1 ? remaining : remaining.slice(0, space);
-      const found = barePaths.find(word).find((span) => span.start === 0 && span.end > 0 && span.end <= word.length);
-      if (found && !(onOpenCodeFile && isCodeFilePathStrict(word.slice(0, found.end)))) {
-        const value = word.slice(0, found.end);
-        parts.push(<React.Fragment key={key++}>{barePaths.wrap(value)}</React.Fragment>);
-        remaining = remaining.slice(found.end);
-        previousChar = value[value.length - 1]!;
-        continue;
-      }
-    }
-
     // Cross-repo ref: owner/repo#123, shown as written, linked on the
     // project's forge host. Read before file-path detection, so
     // `vercel/next.js#1` is a ref, not a path (unless the viewer knows that
@@ -667,6 +650,24 @@ export const InlineMarkdown: React.FC<{
       remaining = remaining.slice(crossRepoRef.label.length);
       previousChar = crossRepoRef.label[crossRepoRef.label.length - 1];
       continue;
+    }
+
+    // A file path the host finds (BarePathContext, opt-in) starting here, after
+    // cross-repo refs (`vercel/next.js#123` stays a ref),
+    // whole: a chunk was stopped where it starts (barePathRunningPast), so a
+    // `_` or `@` inside it does not cut it. Never where markdown starts (`*`,
+    // `_`, `[`, a backtick), and a code path ui links itself stays ui's.
+    if (barePaths && !/\w/.test(previousChar) && /^[A-Za-z0-9./~]/.test(remaining)) {
+      const space = remaining.search(/\s/);
+      const word = space === -1 ? remaining : remaining.slice(0, space);
+      const found = barePaths.find(word).find((span) => span.start === 0 && span.end > 0 && span.end <= word.length);
+      if (found && !(onOpenCodeFile && isCodeFilePathStrict(word.slice(0, found.end)))) {
+        const value = word.slice(0, found.end);
+        parts.push(<React.Fragment key={key++}>{barePaths.wrap(value)}</React.Fragment>);
+        remaining = remaining.slice(found.end);
+        previousChar = value[value.length - 1]!;
+        continue;
+      }
     }
 
     // Autolinks: <https://url> or <email@domain.com>
@@ -1139,8 +1140,7 @@ export const InlineMarkdown: React.FC<{
       if (localLink?.kind === 'open') {
         const openLink = localLink.open;
         const hostHref = localLink.href;
-        parts.push(
-          <HostTitle key={key++} title={localLink.title}>
+        const link = (
           <a
             href={hostHref ?? safeLinkUrl}
             onClick={(e) => {
@@ -1171,7 +1171,11 @@ export const InlineMarkdown: React.FC<{
               />
             </svg>
           </a>
-          </HostTitle>,
+        );
+        parts.push(
+          localLink.wrap
+            ? <React.Fragment key={key++}>{localLink.wrap(link)}</React.Fragment>
+            : <HostTitle key={key++} title={localLink.title}>{link}</HostTitle>,
         );
       } else if (localLink?.kind === 'unavailable') {
         const inert = (

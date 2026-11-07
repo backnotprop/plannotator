@@ -763,7 +763,21 @@ export function MessageBody({
       const attachment = attachmentForLink(href, { attachments: message.attachments ?? [], root: projectRoot, base: message.base_path ?? null });
       const named = !attachment && openFileRefRef.current ? projectFileOfLink(href) : null;
       if (named) {
-        return { kind: 'open', title: openAttachmentTitle(named.path), open: () => openFileRefRef.current?.(named) };
+        // A click opens it beside the thread; with Code review on, its code still shows on hover, with Open in.
+        return {
+          kind: 'open',
+          title: openAttachmentTitle(named.path),
+          open: () => openFileRefRef.current?.(named),
+          ...(openInFiles
+            ? {
+                wrap: (link: ReactNode) => (
+                  <OpenInCodeHover scope={{ thread: message.thread_id, message: message.id }} path={named.path} line={named.line} lineEnd={named.lineEnd}>
+                    {link}
+                  </OpenInCodeHover>
+                ),
+              }
+            : {}),
+        };
       }
       if (!attachment) {
         // Not attached, but a file of the project: its code on hover, with Open in (nothing when there is no such file).
