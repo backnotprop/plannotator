@@ -951,6 +951,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           )}
           {phone && <div ref={setControlsHost} className="ib-prr-controls ib-prp-sheetctl" data-pull-controls="" />}
           <AnnotationPanel
+            title="Comments"
             emptyHint={readerComments ? 'Click a line number, drag across lines, or select code to comment' : undefined}
             isOpen
             presentation={folded ? 'embedded' : undefined}

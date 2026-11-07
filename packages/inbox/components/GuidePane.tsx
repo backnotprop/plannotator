@@ -339,6 +339,7 @@ export function GuidePane({ thread, message, onBack, onClose, guest = false, cod
             </div>
           )}
           <AnnotationPanel
+            title="Comments"
             emptyHint={readOnly ? undefined : 'Click a line number, drag across lines, or select code to comment'}
             isOpen
             // A folded panel draws as a sheet of its own (the panel's window-wide overlay below 768 px has no close here).
