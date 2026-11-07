@@ -6709,6 +6709,33 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
 .ib-bi-acts { display: flex; align-items: center; gap: 8px; padding: 18px 18px 18px 22px; }
 .pn-inbox .ib-bi-copy, dialog .ib-bi-copy { min-width: 142px; justify-content: center; }
 
+/* Code review's one-time offer (approval "code-review-offer-card", the Card): the brand kit's static storm on top
+   (an illustration, the same in light and dark), then the title, the lines and the two buttons. Every surface, line,
+   text colour and button is the Inbox's own token. */
+.pn-inbox dialog.ib-dlg.ib-cro, dialog.ib-dlg.ib-cro { width: min(540px, calc(100vw - 32px)); overflow: hidden; }
+.ib-cro .ib-dlg-in { padding: 0; }
+.ib-cro:focus { outline: none; }
+.ib-cro-art { position: relative; height: 200px; overflow: hidden; background: #0F0D16; }
+.ib-cro-art canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+.ib-cro-body { display: grid; gap: 18px; padding: 22px 24px 20px; }
+.ib-cro-body h2 { margin: 0; font-size: var(--ib-fs-20, 20px); font-weight: 600; letter-spacing: -0.01em; color: var(--foreground); }
+.ib-cro-feats { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.ib-cro-feats li { display: flex; align-items: flex-start; gap: 11px; font-size: var(--ib-fs-14, 14px); line-height: 1.45; color: var(--foreground); }
+.ib-cro-name { font-weight: 600; }
+.ib-cro-feats svg { flex: none; width: 18px; height: 18px; margin-top: 1px; fill: none; stroke: var(--muted-foreground); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.ib-cro-acts { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.pn-inbox .ib-cro-acts .ib-btn, dialog .ib-cro-acts .ib-btn { height: 36px; padding: 0 16px; font-size: var(--ib-fs-14, 14px); justify-content: center; }
+.pn-inbox .ib-cro-acts .ib-btn.ib-ghost, dialog .ib-cro-acts .ib-btn.ib-ghost { color: var(--foreground); }
+.pn-inbox .ib-cro-acts .ib-btn.ib-ghost:hover, dialog .ib-cro-acts .ib-btn.ib-ghost:hover { background: var(--ib-hover, var(--muted)); }
+.ib-cro-acts .ib-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-cro-note { margin: 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+/* A phone: a shorter picture, the buttons stacked with Turn on on top, each a full tap target. */
+.ib-cro-phone .ib-cro-art { height: 148px; }
+.ib-cro-phone .ib-cro-body { padding: 18px 18px 16px; gap: 16px; }
+.ib-cro-phone .ib-cro-acts { flex-direction: column-reverse; align-items: stretch; }
+.ib-cro-phone .ib-cro-acts .ib-bsp { display: none; }
+.pn-inbox .ib-cro-phone .ib-cro-acts .ib-btn, dialog.ib-cro-phone .ib-cro-acts .ib-btn { height: 44px; }
+
 /* The Checklist's reveal (approval "inbox-checklist-reveal"; ChecklistIntro.tsx): the Board dialog's frame, text and buttons (.ib-bi), over a
    small thread foot whose checklist ticks itself, its list open for a moment. The list and the button are the real
    ones (.ib-stp, .ib-st-btn). */
