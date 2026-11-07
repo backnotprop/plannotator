@@ -4,7 +4,8 @@
  * 230-character server message is for the Details.
  *
  * - A refusal (4xx) the Inbox wrote for people, short and with no path in it, is the line as it is: it says what to do.
- * - The disk is full: "The reply was not sent: the disk is full. …".
+ * - The disk is full (an upload's `upload_no_space`, or ENOSPC in the words of a reply the Inbox could not write):
+ *   "The reply was not sent: the disk is full. …".
  * - Any other failure of the Inbox (5xx): "The reply was not sent: the Inbox could not write it. Send again to retry."
  * - No answer at all (the Inbox is down, the network dropped): "The reply was not sent. Send again to retry."
  */
@@ -30,13 +31,13 @@ export function sendFailure(cause: unknown): SendFailure {
   const words = cause.message.trim();
   const plain = words.length > 0 && words.length <= LINE_MAX && !TECHNICAL.test(words);
   if (cause.status < 500 && plain) return { line: words, details: null };
-  const line =
-    cause.code === 'upload_no_space'
-      ? 'The reply was not sent: the disk is full. Free some space, then send again.'
-      : cause.status >= 500
-        ? 'The reply was not sent: the Inbox could not write it. Send again to retry.'
-        : 'The reply was not sent.';
-  // "Internal error." says nothing the line does not, nor do the disk-full words.
+  const full = cause.code === 'upload_no_space' || /\bENOSPC\b/.test(words);
+  const line = full
+    ? 'The reply was not sent: the disk is full. Free some space, then send again.'
+    : cause.status >= 500
+      ? 'The reply was not sent: the Inbox could not write it. Send again to retry.'
+      : 'The reply was not sent.';
+  // "Internal error." says nothing the line does not, nor do an upload's disk-full words (an ENOSPC's say where).
   const details = words && cause.code !== 'upload_no_space' && words !== 'Internal error.' && words !== line ? words : null;
   return { line, details };
 }

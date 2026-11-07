@@ -667,8 +667,10 @@ test("the reply box's chips wrap inside it beside a file and stacked, a phone's 
   const pane = page.locator(`[data-attachment-pane="${world.attachments.html}"]`);
   await pane.getByRole('button', { name: 'Side by side' }).click();
   await expect(pane).not.toHaveClass(/ib-full/);
-  // The 440 px thread column beside the file: the chips, or the summary line when they don't fit beside the tools.
-  await expect(page.locator('section.ib-pane .ib-rbox :is([data-annotations-chip], [data-foot-summary])').first()).toBeVisible();
+  // The 440 px thread column beside the file: the picks, the skip chip and "3 comments" do not fit beside Send and
+  // its tools, so they fold into the one summary line (approval "inbox-reply-box", D4), which names the comments.
+  await expect(page.locator('section.ib-pane .ib-rbox [data-foot-summary]')).toContainText('3 comments');
+  await expect(page.locator('section.ib-pane .ib-rbox [data-annotations-chip]')).toHaveCount(0);
   expect(await replyChipProblems(page)).toEqual([]);
   expect(await annotationListProblems(page)).toEqual([]);
   await pane.getByRole('button', { name: 'Close admin-view.html' }).click();

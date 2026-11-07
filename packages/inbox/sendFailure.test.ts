@@ -6,7 +6,8 @@ import { expect, test } from 'bun:test';
 import { InboxApiError } from './api';
 import { SEND_NOT_SENT, sendFailure } from './sendFailure';
 
-const PATH_ERROR = "ENOSPC: no space left on device, write '/Users/me/.plannotator/inbox/projects/ledger/threads/msg_01.jsonl'";
+const PATH_ERROR = "EACCES: permission denied, open '/Users/me/.plannotator/inbox/projects/ledger/threads/msg_01.jsonl'";
+const FULL_ERROR = "ENOSPC: no space left on device, write '/Users/me/.plannotator/inbox/projects/ledger/threads/msg_01.jsonl'";
 
 test('a refusal written for people (4xx, short, no path) is the line as it is, with no Details', () => {
   expect(sendFailure(new InboxApiError(409, 'question_closed', 'That question was already answered in another window.'))).toEqual({
@@ -40,9 +41,16 @@ test('a 4xx too long for a line goes behind Details', () => {
 });
 
 test('the disk full says so and what to do, with nothing more behind it', () => {
-  expect(sendFailure(new InboxApiError(507, 'upload_no_space', PATH_ERROR))).toEqual({
+  expect(sendFailure(new InboxApiError(507, 'upload_no_space', FULL_ERROR))).toEqual({
     line: 'The reply was not sent: the disk is full. Free some space, then send again.',
     details: null,
+  });
+});
+
+test('a reply the Inbox could not write for a full disk (ENOSPC in a 500) says the disk is full; where, behind Details', () => {
+  expect(sendFailure(new InboxApiError(500, 'internal', FULL_ERROR))).toEqual({
+    line: 'The reply was not sent: the disk is full. Free some space, then send again.',
+    details: FULL_ERROR,
   });
 });
 

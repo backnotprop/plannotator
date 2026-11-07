@@ -137,6 +137,7 @@ import type { MentionSource } from '@plannotator/ui/utils/mentions';
 import { TAG_TOKEN_CLASS } from './ComposerField';
 import { HostMark } from '../icons';
 import { INBOX_REPLY_SKILL_AUDIENCE, annotationSkillTexts, inboxSkillFilter, inboxSkillsBlock, withSkillsBlock } from '../skills';
+import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { ActionChecklist, type ActionMark } from './ActionChecklist';
 import { actionForBlock } from '../actions';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
@@ -4972,15 +4973,28 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     }
     openBox();
   };
-  /** "Draft  Saved 4:51 PM  Discard" for the open box: under it in Send's row, or above it on a phone. Nothing until the first save. */
+  /** "Draft  Saved 4:51 PM  Discard" for the open box: above it on a phone; a computer shows only "Not saved …", over the box's row. Nothing until the first save. */
   const stampSavedAt = replyDraft.conflict === null && (boxHasWords || replyDraft.draft?.files?.length) ? (replyDraft.draft?.updated_at ?? null) : null;
   const stampTooLong = replyDraft.conflict === null && replyDraft.tooLong;
   const stampFailed = replyDraft.conflict === null && replyDraft.failed && (boxHasWords || replyFiles.files.length > 0);
   /** Discard: the Draft line's (a phone, above the box) and the bin's (a computer, the row's far right). */
   const discardReply = () => {
+    // An empty box with nothing saved has nothing to discard: it only closes, and says nothing that is not so.
+    const had = replyText.get().trim() !== '' || replyFiles.files.length > 0 || replyDraft.draft !== null;
     replyDraft.discard();
     closeBox(true);
-    announce('Draft discarded.');
+    if (had) announce('Draft discarded.');
+  };
+  /** The live-session choice open under the box: it stands in for the box's Send and bin. */
+  const routeChoiceOpen = route.open && asking;
+  /** After a conflict, "Discard mine": only this window's words and file changes go; the other window's draft stays and comes into the box. */
+  const discardMine = () => {
+    const draft = replyDraft.takeTheirs();
+    const theirs = draft?.body ?? '';
+    setBox({ open: true, text: theirs });
+    takeDraftFiles(draft?.files ?? [], theirs);
+    announce(theirs.trim() ? 'Your words were discarded; the other window’s are in the box.' : 'Your words were discarded.');
+    requestAnimationFrame(() => textRef.current?.focus());
   };
   const draftStamp = <DraftStamp savedAt={stampSavedAt} tooLong={stampTooLong} failed={stampFailed} onDiscard={discardReply} />;
   // The box's row (approval "inbox-reply-box", T6; ReplyRow.tsx). What goes with the reply: chips on a computer that
@@ -5011,6 +5025,17 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   );
   /** "27 files": the files are in the scroll region with the words; this brings them into view there. */
   const replyScrollRef = useRef<HTMLDivElement>(null);
+  // A classic (always shown) scrollbar on the scroll region: its width, so the chevron sits clear of it (inbox.css).
+  useEffect(() => {
+    const region = replyScrollRef.current;
+    const holder = region?.parentElement;
+    if (!region || !holder || typeof ResizeObserver === 'undefined') return;
+    const fit = () => holder.style.setProperty('--ib-rsb', `${Math.max(0, region.offsetWidth - region.clientWidth)}px`);
+    const observer = new ResizeObserver(fit);
+    observer.observe(region);
+    fit();
+    return () => observer.disconnect();
+  }, [box.open]);
   const showReplyFiles = () => {
     const region = replyScrollRef.current;
     const files = region?.querySelector<HTMLElement>('[data-reply-files]');
@@ -5018,14 +5043,22 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     region.scrollTo({ top: files.offsetTop - region.offsetTop, behavior: reduce ? 'auto' : 'smooth' });
   };
-  /** Skills (the cube): a real `/` at the caret (after a space when it follows a word), so the field's own skill picker opens. */
+  /**
+   * Skills (the cube): a real `/` at the caret (after a space when it follows a word), so the field's own skill picker
+   * opens. With no skill to pick here, no `/` (it would open nothing and stay in the words): it says so instead.
+   */
   const openSkillsFromBox = () => {
     const field = textRef.current;
     if (!field) return;
     field.focus();
-    const at = field.selectionStart ?? field.value.length;
-    const before = field.value.slice(0, at);
-    document.execCommand('insertText', false, at === 0 || /\s$/.test(before) ? '/' : ' /');
+    const slash = () => {
+      if (textRef.current !== field) return;
+      const at = field.selectionStart ?? field.value.length;
+      const before = field.value.slice(0, at);
+      document.execCommand('insertText', false, at === 0 || /\s$/.test(before) ? '/' : ' /');
+    };
+    if (getCachedSkillCatalog().some(skillFilter)) return slash();
+    void fetchSkillCatalog().then((catalog) => (catalog.some(skillFilter) ? slash() : announce('No skills are installed to pick from.')));
   };
   // On a phone the Draft line is above the box. Where the foot scrolls in its own box (the keyboard up, the phone
   // on its side), a line coming or going at its top would push the box and its mic down or pull them up: the
@@ -6458,22 +6491,14 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                     announce('Your words are saved.');
                     requestAnimationFrame(() => textRef.current?.focus());
                   },
-                  onDiscard: () => {
-                    // Only this window's words and file changes go: the other window's draft stays and comes into the box.
-                    const draft = replyDraft.takeTheirs();
-                    const theirs = draft?.body ?? '';
-                    setBox({ open: true, text: theirs });
-                    takeDraftFiles(draft?.files ?? [], theirs);
-                    announce(theirs.trim() ? 'Your words were discarded; the other window’s are in the box.' : 'Your words were discarded.');
-                    requestAnimationFrame(() => textRef.current?.focus());
-                  },
+                  onDiscard: discardMine,
                 }}
               />
             )}
             {staleQuestions.length > 0 && <ChangedNotice questions={staleQuestions} thread={thread} onJump={jumpTo} />}
             {/* On a phone "Draft  Saved 4:51 PM  Discard" sits above the box, at the right, once something is saved.
-                While the live-session choice stands in for Send's row it goes, as it does on a computer (it lives in
-                that row there), so Discard cannot close the box under the choice. */}
+                While the live-session choice stands in for the box's Send it goes, as a computer's bin does, so
+                Discard cannot close the box under the choice. */}
             {phone && !(route.open && asking) && (
               <div className="ib-draft-above" data-draft-above="" ref={draftAboveRef}>
                 {draftStamp}
@@ -6569,6 +6594,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                 onFold={setReplyFold}
                 fitKey={replyFitKey}
                 send={
+                  routeChoiceOpen ? null : (
                   <Tip content={withShortcut('Send', { scope: inboxThreadShortcuts, action: 'send' })}>
                     <button type="button" className="ib-btn ib-pri ib-rsend" ref={sendRef} data-reply-send="" onClick={() => void send()} disabled={sending || voice.busy}>
                       {/* While it sends the spinner takes the word's place and Send keeps its width, so nothing beside it moves. */}
@@ -6576,6 +6602,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                       <span className="ib-rsend-w">Send</span>
                     </button>
                   </Tip>
+                  )
                 }
                 clip={
                   <AttachFilesButton
@@ -6611,7 +6638,16 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                 summary={<ReplySummary skip={replySkip} dropped={dropped.length} comments={takesAnnotations ? { props: commentsListProps, list: commentsList?.card ? null : commentsList, onList: setCommentsList } : null} />}
                 pill={!phone && pillActive ? rcptPill : null}
                 discard={
-                  phone ? null : (
+                  // While the live-session choice is open it stands in for Send and the bin, as it did for Send's
+                  // row, so nothing can close the box under it. After a conflict the bin is "Discard mine": the
+                  // other window's draft is never deleted from here.
+                  phone || routeChoiceOpen ? null : replyDraft.conflict !== null ? (
+                    <Tip content="Discard your words; the other window’s draft stays">
+                      <button type="button" className="ib-ricon ib-rdiscard" aria-label="Discard my words" data-reply-discard="" onClick={discardMine}>
+                        <Icon name="trash" size={16} />
+                      </button>
+                    </Tip>
+                  ) : (
                     <Tip content="Discard this draft">
                       <button type="button" className="ib-ricon ib-rdiscard" aria-label="Discard draft" data-reply-discard="" onClick={discardReply}>
                         <Icon name="trash" size={16} />

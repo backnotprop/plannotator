@@ -76,7 +76,7 @@ import type { TagMode } from '../api';
  * An iPhone with the keyboard up (`data-ib-keyboard-pin`): the thread's foot is a short box that scrolls, and the
  * picker drawn above the field opened behind the header, cut off (approval "inbox-reply-recipient", "fix with it").
  * There it is placed on the screen instead: as wide as the field, above it up to the header, never past it; with no
- * room above the field, over the box from Send's row up. Elsewhere it keeps its place in the page.
+ * room above the field, over the box from its row (Send's) up. Elsewhere it keeps its place in the page.
  */
 function useKeyboardSpot(): { ref: RefObject<HTMLDivElement | null>; style: CSSProperties | undefined } {
   const ref = useRef<HTMLDivElement | null>(null);

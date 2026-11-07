@@ -40,12 +40,16 @@ test.describe.configure({ mode: 'serial' });
 
 let world: ListWorld;
 let thread = '';
+/** A thread both agents wrote in: the box has the recipient pill. */
+let twoAgents = '';
 let serverSession = '';
 
 test.beforeAll(async () => {
-  world = await startWorld({ agentName: LONG_NAME });
+  world = await startWorld({ agentName: LONG_NAME, second: 'Codex' });
   const sent = await world.agent.send({ project_path: world.project, subject: 'Retry worker', thread: 'retry-foot', body: BODY, attachments: ['docs/retry-plan.md'] });
   thread = sent.thread_id as string;
+  await world.agent.send({ project_path: world.project, subject: 'Two agents', thread: 'retry-two', body: 'First, from the long name.' });
+  twoAgents = (await world.other!.send({ project_path: world.project, subject: 'Two agents', thread: 'retry-two', body: 'Second, from Codex.' })).thread_id as string;
   const post = async (path: string, body: object) => expect((await fetch(new URL(path, world.url), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status, path).toBe(200);
   const model = (await (await fetch(new URL(`/api/inbox/threads/${thread}/attachments`, world.url))).json()) as { attachments: { id: string; name: string }[] };
   const plan = model.attachments.find((a) => a.name === 'retry-plan.md')!.id;
@@ -107,6 +111,8 @@ async function openBox(page: Page): Promise<void> {
 }
 
 const line = (page: Page) => pane(page).locator('.ib-rbox [data-foot-summary]');
+/** The line's words are drawn whole: nothing cut with an ellipsis (`innerText` reads them whole either way). */
+const whole = (page: Page) => line(page).locator('[data-foot-summary-text]').evaluate((el) => el.scrollWidth <= el.clientWidth);
 
 /** The row as drawn: each visible control's box and its press area (its own box, or its ::after where that is bigger). */
 const readRow = (page: Page) =>
@@ -150,8 +156,11 @@ for (const width of [390, 320] as const) {
   test(`a phone at ${width} wide, the worst case: the line over one row of the paperclip, Skills, the mic and Send; no bin`, async ({ browser }) => {
     const page = await phone(browser, width);
     await openBox(page);
-    const words = await line(page).innerText();
-    expect(['4 questions open · 3 comments', '4 open · 3 comments']).toContain(words);
+    // On its own line over the row the whole words fit even at 320 (on main they shared Send's row and were cut to
+    // "4 open · 3 comments" there); never cut with an ellipsis either.
+    const words = '4 questions open · 3 comments';
+    await expect(line(page)).toHaveText(words);
+    expect(await whole(page), 'the words are not cut').toBe(true);
     // Its name is the words it shows (what a voice-control user says); the full sentence is its description.
     await expect(line(page)).toHaveAccessibleName(words);
     await expect(line(page)).toHaveAccessibleDescription('4 questions stay open, 3 comments');
@@ -177,6 +186,25 @@ for (const width of [390, 320] as const) {
     await expect(pane(page).locator('[data-reply-discard]')).toHaveCount(0);
     await expect(pane(page).locator('.ib-rbox').locator('[data-skip-chip], [data-annotations-chip], [data-picks-chip]')).toHaveCount(0);
     await expect(pane(page).locator('[data-draft-above] [data-draft-discard]')).toBeVisible();
+    await page.context().close();
+  });
+}
+
+for (const width of [390, 320] as const) {
+  test(`a phone at ${width} wide, two agents: the recipient pill on the line over the row is 44 px to press, its folder alone, no "to"`, async ({ browser }) => {
+    const page = await phone(browser, width);
+    await page.goto(`${world.url}#thread=${twoAgents}`);
+    await pane(page).locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
+    const pill = pane(page).locator('.ib-rbox [data-reply-line] .ib-rto');
+    await expect(pill).toBeVisible();
+    const drawn = await pill.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const to = el.querySelector('.ib-rto-l');
+      const box = el.closest('.ib-rbox')!.getBoundingClientRect();
+      return { height: r.height, to: to ? to.getClientRects().length > 0 : false, inside: r.left >= box.left - 0.5 && r.right <= box.right + 0.5 };
+    });
+    expect(drawn.height, 'the pill is 44 px to press').toBeGreaterThanOrEqual(44);
+    expect({ to: drawn.to, inside: drawn.inside }).toEqual({ to: false, inside: true });
     await page.context().close();
   });
 }
@@ -217,7 +245,8 @@ test('the sheet: Skip them skips them, Review opens the list, and a long agent n
     expect(Math.min(box.width, box.height), `"${await button.textContent()}" is 44 px to press`).toBeGreaterThanOrEqual(44);
   }
   await sheet.getByRole('button', { name: 'Skip them' }).tap();
-  await expect(line(page)).toHaveText(/^4 to skip · 3 comments$|^4 questions to skip · 3 comments$/);
+  await expect(line(page)).toHaveText('4 questions to skip · 3 comments');
+  expect(await whole(page), 'the words are not cut').toBe(true);
   await expect(sheet.getByRole('button', { name: 'Keep open' })).toBeVisible();
   await sheet.getByRole('button', { name: 'Review comments' }).tap();
   await expect(sheet).toHaveCount(0);
@@ -310,7 +339,8 @@ for (const size of [
 }
 
 test('a computer: Send, the paperclip, Skills and the mic at the left, the bin at the far right; chips when they fit, the summary line when they do not; recording moves nothing', async ({ browser }) => {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: 'light', permissions: ['microphone'] });
+  // 1440: the box (about 740 px) has room for the chips; at 1280 (about 580) they fold into the line.
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light', permissions: ['microphone'] });
   const page = await context.newPage();
   await voiceReady(page);
   await openBox(page);
@@ -326,7 +356,7 @@ test('a computer: Send, the paperclip, Skills and the mic at the left, the bin a
   await expect(row.locator('[data-foot-summary]')).toHaveCount(0);
   // A box too narrow for them: the one summary line instead, and the row still one row inside the box.
   const narrow = await page.addStyleTag({ content: 'section.ib-pane .ib-rbox { width: 440px !important; }' });
-  await expect(row.locator('[data-foot-summary]')).toBeVisible();
+  await expect(row.locator('[data-foot-summary]')).toHaveText('4 open · 3 comments');
   await expect(row.locator('[data-skip-chip], [data-annotations-chip]')).toHaveCount(0);
   oneRow(await readRow(page), 32);
   await narrow.evaluate((el) => el.remove());

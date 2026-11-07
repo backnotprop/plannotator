@@ -3199,14 +3199,18 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   /* The reply's words scroll in their own box, and their ends never drag the page. */
   .ib-rtext { overscroll-behavior: contain; }
   /* iOS with the keyboard up: Safari no longer pans to what the keyboard covers (phone.ts), so everything that must
-     be reached fits above it. The foot shrinks and scrolls in its own box, with Send's row held at its bottom
-     (attached files, picks, a notice or an error line scroll above it; the skill picker is portalled out of it; the scroll to the caret clears that row);
+     be reached fits above it. The foot shrinks and scrolls in its own box, with the row that holds Send held at its bottom
+     (the open box's own row, else the closed foot's buttons; attached files, picks, a notice or an error line scroll above it; the skill picker is portalled out of it; the scroll to the caret clears that row);
      the home bar's gap goes, since the keyboard covers it. Under 400 px left (`tight`: an iPhone's ~257 in
      portrait, ~140 on its side) the thread's padding also closes and the reply's words scroll past a third of the
      visible height (about two and a half lines). */
   /* overflow-anchor: none, since the Draft line's arrival keeps the foot's view itself (Thread.tsx, draftAboveRef). */
   :root[data-ib-keyboard-pin] .ib-pane .ib-pfoot { flex: 0 1 auto; min-height: 0; overflow-y: auto; overflow-anchor: none; overscroll-behavior: contain; padding-bottom: 0; scroll-padding-bottom: 64px; }
   :root[data-ib-keyboard-pin] .ib-pane .ib-pfoot > .ib-acts { position: sticky; bottom: 0; z-index: 2; padding-bottom: 10px; background: var(--card); }
+  /* The open box's own row (Send, the paperclip, Skills, the mic) is the row held at the foot's bottom; its corners follow the box's. */
+  :root[data-ib-keyboard-pin] .ib-pane .ib-pfoot .ib-rbox > .ib-rrow { position: sticky; bottom: 0; z-index: 2; background: var(--card); border-radius: 0 0 17px 17px; }
+  :root.dark[data-ib-keyboard-pin] .ib-pane .ib-pfoot .ib-rbox:not([data-drop-over]) > .ib-rrow,
+  :root[data-ib-keyboard-pin] .dark .ib-pane .ib-pfoot .ib-rbox:not([data-drop-over]) > .ib-rrow { background: color-mix(in oklch, var(--card) 94%, var(--foreground)); }
   :root[data-ib-keyboard-pin="tight"] .ib-pane .ib-pbody { padding-top: 0; padding-bottom: 0; }
   :root[data-ib-keyboard-pin="tight"] .ib-pfoot :is(.ib-rtext, .ib-rmirror) { max-height: max(52px, calc(var(--ib-vvh, 100dvh) * 0.3)); }
   /* A field in the thread itself (an action item's note) takes the keyboard: the foot steps aside, so the field
@@ -7709,7 +7713,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 @media (hover: hover) { .pn-inbox .ib-rpick-more:hover { background: color-mix(in oklch, var(--muted) 55%, transparent); color: var(--foreground); } }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   /* The Draft line is above the box, at the right, once something is saved (the owner, 2026-11-03): the foot is held
-     at the bottom, so the line grows it upward and the box, its mic and Send's row stay where they are. Nothing is
+     at the bottom, so the line grows it upward and the box, its row, the mic and Send stay where they are. Nothing is
      there, and nothing is kept for it, before the first save. Discard's 44 px tap area stays inside the foot: the
      foot's 10 px top padding plus the line's 4 px above it, and 14 px between the line and the box under it. */
   .ib-draft-above { display: flex; justify-content: flex-end; padding-top: 4px; margin-bottom: 14px; }
@@ -8616,8 +8620,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-file .ib-nm { font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-file .ib-kd { font-size: var(--ib-fs-11-5, 11.5px); }
 /* The close chevron over the region's top right, on its own ground, so words scrolling under it never show through. */
+/* Clear of a classic (always shown) scrollbar on the scroll region: `--ib-rsb` is its width (Thread.tsx), 0 for overlay scrollbars. */
 .pn-inbox .ib-rclose {
-  position: absolute; top: 8px; right: 8px; z-index: 2;
+  position: absolute; top: 8px; right: calc(8px + var(--ib-rsb, 0px)); z-index: 2;
   display: inline-flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; padding: 0; border: 0; border-radius: 999px;
   background: var(--card); color: var(--muted-foreground); cursor: pointer;
@@ -8700,8 +8705,11 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-rline[data-empty] { display: none; }
   .ib-rline > .ib-rsum { flex: 1 1 auto; }
   .ib-rline > .ib-rto-wrap { flex: 0 1 auto; min-width: 0; max-width: 55%; margin-left: auto; }
-  /* The row: the paperclip at the left (the owner), then Skills; the mic and Send at the right edge, where Send is in
-     the closed foot too. No bin: Discard is on the Draft line above the box. Every target 44 px. */
+  /* The pill as it was in a phone's Send row: 44 px, 15 px words, no "to" (approval "inbox-reply-recipient"). */
+  .ib-rline > .ib-rto-wrap .ib-rto-l { display: none; }
+  .pn-inbox .ib-rline > .ib-rto-wrap .ib-rto { height: 44px; padding: 0 2px 0 4px; font-size: var(--ib-fs-15, 15px); }
+  /* The row: the paperclip at the left (the owner), then Skills; the mic and Send at the right edge, under the thumb.
+     No bin: Discard is on the Draft line above the box. Every target 44 px. The closed foot is today's bar. */
   .ib-rrow { gap: 2px; padding: 0 6px 6px; }
   .ib-rmid { height: 44px; }
   .ib-rlayer { gap: 2px; padding-left: 0; }
@@ -8711,17 +8719,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .pn-inbox .ib-rfilesn { height: 44px; padding: 0 10px; background: none; }
   .pn-inbox .ib-pfoot .ib-rmid > .ib-vline { gap: 8px; padding-left: 8px; }
   .pn-inbox .ib-rmid > .ib-vline .ib-dtlink[data-voice-cancel] { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; }
-  /* The closed foot: Send at the right edge too, so it never jumps when the box opens: [? 1 ⌄] [✎ Draft 1] … [Send].
-     The open questions button keeps its words for a screen reader and shows the count, so the three fit at 320. */
-  .pn-inbox .ib-pfoot .ib-footbtns:has(> .ib-btn.ib-pri) { flex: 1 1 auto; flex-wrap: nowrap; }
-  .pn-inbox .ib-pfoot .ib-footbtns:has(> .ib-btn.ib-pri) > [data-open-questions] { order: 0; margin-left: 0; gap: 5px; padding-left: 12px; padding-right: 10px; }
-  .pn-inbox .ib-pfoot .ib-footbtns:has(> .ib-btn.ib-pri) > [data-reply-button] { order: 1; }
-  .pn-inbox .ib-pfoot .ib-footbtns:has(> .ib-btn.ib-pri) > [data-steps-button] { order: 2; margin-left: 0; }
-  .pn-inbox .ib-pfoot .ib-footbtns > .ib-btn.ib-pri { order: 9; margin-left: auto; }
-  .pn-inbox .ib-pfoot .ib-footbtns:has(> .ib-btn.ib-pri) > [data-open-questions] > [data-oq-words] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .pn-inbox .ib-pfoot .ib-footbtns:has(> .ib-btn.ib-pri) > [data-open-questions]::after { content: attr(data-oq-n) / ""; order: 1; font-variant-numeric: tabular-nums; }
-  .pn-inbox .ib-pfoot .ib-footbtns:has(> .ib-btn.ib-pri) > [data-open-questions] > .ib-oq-chev { display: inline-flex; order: 2; }
-  .pn-inbox .ib-pfoot .ib-footbtns:has(> .ib-btn.ib-pri) > [data-open-questions] > .ib-kbd { display: none; }
 }
 :root[data-ib-keyboard-pin] .ib-rscroll { max-height: max(96px, calc(var(--ib-vvh, 100dvh) * 0.34)); }
 @media (prefers-reduced-motion: reduce) {

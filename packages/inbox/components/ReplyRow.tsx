@@ -11,7 +11,8 @@
  *   picker; a phone: the paperclip and Skills), in the same box, so nothing reflows and nothing still in use is
  *   covered. The mic and Send stay where they are.
  * - Chips or summary (decision D4): the chips when they fit beside the picker, else the summary line. Measured
- *   before paint, again whenever the cell's width, the chips' words, the text size or the fonts change.
+ *   before paint, again whenever the cell's width, the chips' words, the text size or the fonts change; held while
+ *   the person is in the summary line, so it never remounts under them.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useInboxTextSize } from '../textSize';
@@ -64,18 +65,24 @@ export function ReplyRow({
   const [fonts, setFonts] = useState(0);
   const key = `${fitKey}|${textSize}|${width}|${fonts}|${pill ? 1 : 0}|${files ? 1 : 0}`;
   const measured = useRef(key);
+  // Bumped when focus leaves the summary line, so a fit held while the person was in it is tried again.
+  const [left, setLeft] = useState(0);
   // Tried unfolded first whenever something changed, then folded only if the chips overflow the cell (before paint).
+  // Not while the person is in the summary line (its sheet or the comments list open, or focus on it): trying the
+  // chips would remount the line under them and drop both, so a "Skip them" press would close its own sheet. The
+  // line stays until they leave it, then the fit is tried again.
   useLayoutEffect(() => {
     if (phone) return;
+    const layer = layerRef.current;
     if (measured.current !== key && fold) {
+      if (layer && inLine(layer)) return;
       measured.current = key;
       onFold(false);
       return;
     }
     measured.current = key;
-    const layer = layerRef.current;
     if (!fold && layer && layer.scrollWidth > layer.clientWidth + 1) onFold(true);
-  }, [key, fold, phone, onFold]);
+  }, [key, fold, phone, onFold, left]);
   useEffect(() => {
     const mid = midRef.current;
     if (phone || !mid || typeof ResizeObserver === 'undefined') return;
@@ -116,7 +123,14 @@ export function ReplyRow({
         {mic}
       </div>
       <div className="ib-rmid" ref={midRef} data-fold={fold ? '' : undefined}>
-        <div className="ib-rlayer" ref={layerRef}>
+        <div
+          className="ib-rlayer"
+          ref={layerRef}
+          onBlur={(event) => {
+            const line = event.currentTarget.querySelector('[data-reply-summary]');
+            if (fold && line?.contains(event.target as Node) && !line.contains(event.relatedTarget as Node | null)) setLeft((n) => n + 1);
+          }}
+        >
           {files}
           {fold ? summary : <span className="ib-rchips">{chips}</span>}
           {pill && <span className="ib-rto-cell">{pill}</span>}
@@ -126,4 +140,11 @@ export function ReplyRow({
       {discard}
     </div>
   );
+}
+
+/** The person is in the summary line: focus on it, or its sheet or the comments list open from it. */
+function inLine(layer: HTMLElement): boolean {
+  const line = layer.querySelector('[data-reply-summary]');
+  if (!line) return false;
+  return line.contains(document.activeElement) || line.querySelector('[aria-expanded="true"]') !== null;
 }

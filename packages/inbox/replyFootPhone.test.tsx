@@ -29,6 +29,8 @@
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
@@ -37,6 +39,7 @@ import type { InboxAnnotationRecord, InboxAttachmentState, InboxAuthor, InboxMes
 const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
+const { replyDraftUnsaved } = (hasDom ? await import('./replyDraft') : {}) as typeof import('./replyDraft');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'ledger-abcdef', name: 'ledger', root: '/work/ledger', created_at: '2026-11-02T09:00:00.000Z' };
 const A: Extract<InboxAuthor, { kind: 'agent' }> = { kind: 'agent', host: 'codex', session: 'ses_a', name: 'Codex (northwind-industries-holdings platform reviewer)' };
@@ -146,16 +149,23 @@ let comments: InboxAnnotationRecord[] = [];
 let closes = 0;
 /** What a reply's POST gets back; null: the stub's plain `{}`. */
 let replyAnswer: (() => Response) | null = null;
+/** The draft route's answer in place of the stub's (null: the stub's own), and the DELETEs it took. */
+let draftAnswer: ((init?: RequestInit) => Response) | null = null;
+let draftDeletes = 0;
 
 beforeEach(() => {
   if (!hasDom) return;
   comments = [];
   closes = 0;
   replyAnswer = null;
+  draftAnswer = null;
+  draftDeletes = 0;
   savedFetch = globalThis.fetch;
   const draft = (body: string): InboxReplyDraft => ({ v: 1, thread_id: THREAD, body, created_at: '2026-11-02T10:10:00.000Z', updated_at: new Date().toISOString() });
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
+    if (path.includes('/draft') && init?.method === 'DELETE') draftDeletes += 1;
+    if (path.includes('/draft') && draftAnswer) return draftAnswer(init);
     // A saved draft: the box opens holding it.
     if (path.includes('/draft')) return Response.json({ serverSession: 's', draft: draft(init?.method === 'POST' ? JSON.parse(String(init.body)).body : 'Mostly yes.') });
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: comments.length ? [file] : [], annotations: comments });
@@ -167,12 +177,15 @@ beforeEach(() => {
   }) as typeof fetch;
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
   root = null;
   host = null;
+  // The box's words the pane saves as it goes (a failed Send leaves them in the box) land on this stub before the real
+  // fetch is back: nothing is left unsaved in the drafts' module state for a later test (the restart guard reads it).
+  for (let i = 0; i < 100 && replyDraftUnsaved(); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
   globalThis.fetch = savedFetch;
 });
 
@@ -260,6 +273,43 @@ test.skipIf(!hasDom)('a computer: Send first, the paperclip, Skills and the mic,
   }
 });
 
+/** Words typed into the box, as a person types them. */
+function typeInBox(el: HTMLElement, words: string) {
+  const text = el.querySelector('.ib-rbox textarea') as HTMLTextAreaElement;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  act(() => {
+    setter.call(text, words);
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+test.skipIf(!hasDom)('a computer, after a conflict: the bin is "Discard mine": only this window\'s words go, the other window\'s draft stays and comes into the box', async () => {
+  const el = await open({ questions: false, phone: false });
+  // Another window saved "Theirs." meanwhile: this window's save is refused, and the draft read back is theirs.
+  let stored = 'Mostly yes.';
+  const draftOf = (body: string): InboxReplyDraft => ({ v: 1, thread_id: THREAD, body, created_at: '2026-11-02T10:10:00.000Z', updated_at: new Date().toISOString() });
+  draftAnswer = (init) => {
+    if (init?.method === 'POST') {
+      stored = 'Theirs.';
+      return Response.json({ error: 'The draft changed in another window.', code: 'draft_conflict' }, { status: 409 });
+    }
+    if (init?.method === 'DELETE') return Response.json({ serverSession: 's', draft: null });
+    return Response.json({ serverSession: 's', draft: draftOf(stored) });
+  };
+  typeInBox(el, 'Mine.');
+  await settle(4, 200);
+  expect(!!el.querySelector('[data-draft-conflict]')).toBe(true);
+  const bin = el.querySelector<HTMLButtonElement>('.ib-rbox [data-reply-discard]');
+  expect(bin?.getAttribute('aria-label')).toBe('Discard my words');
+  await press(bin);
+  await settle();
+  // Nothing was deleted on the server: the other window's words are the draft, and now in the box.
+  expect(draftDeletes).toBe(0);
+  expect(stored).toBe('Theirs.');
+  expect((el.querySelector('.ib-rbox textarea') as HTMLTextAreaElement | null)?.value).toBe('Theirs.');
+  expect(!!el.querySelector('[data-draft-conflict]')).toBe(false);
+});
+
 /** The words a failed Send leaves under the box, and its Details. */
 const failure = (el: HTMLElement) => {
   const alert = el.querySelector<HTMLElement>('.ib-pfoot .ib-error[role="alert"]');
@@ -274,13 +324,13 @@ const failure = (el: HTMLElement) => {
 for (const phone of [false, true]) {
   test.skipIf(!hasDom)(`${phone ? 'a phone' : 'a computer'}: a Send the Inbox fails says so in one plain line, its own words folded behind Details; the words stay in the box (decision D3)`, async () => {
     replyAnswer = () =>
-      Response.json({ error: "ENOSPC: no space left on device, write '/Users/me/.plannotator/inbox/projects/ledger-abcdef/threads/msg_01M6RF.jsonl'", code: 'internal' }, { status: 500 });
+      Response.json({ error: "EACCES: permission denied, open '/Users/me/.plannotator/inbox/projects/ledger-abcdef/threads/msg_01M6RF.jsonl'", code: 'internal' }, { status: 500 });
     const el = await open({ questions: false, phone });
     await press(el.querySelector<HTMLButtonElement>('.ib-rbox [data-reply-send]'));
     await settle();
     expect(failure(el)).toEqual({
       line: 'The reply was not sent: the Inbox could not write it. Send again to retry.',
-      details: "ENOSPC: no space left on device, write '/Users/me/.plannotator/inbox/projects/ledger-abcdef/threads/msg_01M6RF.jsonl'",
+      details: "EACCES: permission denied, open '/Users/me/.plannotator/inbox/projects/ledger-abcdef/threads/msg_01M6RF.jsonl'",
       folded: true,
     });
     // Nothing was lost: the box is still open with the words, and Send can be pressed again.
@@ -485,4 +535,40 @@ test.skipIf(!hasDom)('a computer shows the chips while they fit: the skip chip a
   expect(!!(line(el))).toBe(false);
   expect(el.querySelector('.ib-rbox [data-reply-row] [data-skip-chip]')?.textContent).toContain('4 questions stay open');
   expect(el.querySelector('.ib-rbox [data-reply-row] [data-annotations-chip]')?.textContent).toBe('3 comments');
+});
+
+test.skipIf(!hasDom)('a narrow computer pane (the summary line in place of the chips): Skip them in its sheet keeps the sheet open and focus in it', async () => {
+  // The chips need 900 px; the cell has 300.
+  const proto = HTMLElement.prototype;
+  const saved = { scroll: Object.getOwnPropertyDescriptor(proto, 'scrollWidth'), client: Object.getOwnPropertyDescriptor(proto, 'clientWidth') };
+  const isLayer = (el: HTMLElement) => el.classList.contains('ib-rlayer');
+  Object.defineProperty(proto, 'scrollWidth', { configurable: true, get(this: HTMLElement) { return isLayer(this) ? (this.querySelector('.ib-rchips') ? 900 : 120) : (saved.scroll?.get?.call(this) ?? 0); } });
+  Object.defineProperty(proto, 'clientWidth', { configurable: true, get(this: HTMLElement) { return isLayer(this) ? 300 : (saved.client?.get?.call(this) ?? 0); } });
+  try {
+    const el = await open({ questions: true, n: 3, phone: false });
+    expect(!!el.querySelector('.ib-rbox [data-reply-row] [data-skip-chip]')).toBe(false);
+    // (Long or short words: this DOM measures no text.)
+    expect(words(el)).toMatch(/^4 (questions )?open · 3 comments$/);
+    await press(line(el));
+    const skip = buttonIn(sheet(), 'Skip them');
+    act(() => skip?.focus());
+    await press(skip);
+    // The press changed what goes with the reply; the line was not drawn anew under the person.
+    expect(!!sheet()).toBe(true);
+    expect(document.activeElement === buttonIn(sheet(), 'Keep open')).toBe(true);
+    expect(words(el)).toMatch(/^4 (questions )?to skip · 3 comments$/);
+  } finally {
+    if (saved.scroll) Object.defineProperty(proto, 'scrollWidth', saved.scroll);
+    if (saved.client) Object.defineProperty(proto, 'clientWidth', saved.client);
+  }
+});
+
+test('the closed foot is today\'s bar: no style redraws the open questions button\'s words as a bare count, or moves its buttons', () => {
+  // Its words are footFit's forms ("2 open", "Questions", the icon alone), never a count CSS draws (which reads "0"
+  // when the open items are action items or permissions, or every question is answered in the draft).
+  const css = readFileSync(join(import.meta.dir, 'inbox.css'), 'utf8');
+  expect(css).not.toMatch(/attr\(data-oq-(?:n|actions|permission|label)\)/);
+  // The closed foot's buttons keep today's order (the bottom-bar question is the owner's).
+  expect(css).not.toMatch(/\[data-open-questions\][^{}]*\{[^}]*(?:^|[;\s])order\s*:/m);
+  expect(css).not.toMatch(/\.ib-footbtns[^{}]*\.ib-pri[^{}]*\{[^}]*(?:^|[;\s])order\s*:/m);
 });

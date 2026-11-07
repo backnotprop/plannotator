@@ -215,14 +215,14 @@ test.skipIf(!hasDom)('one agent: nothing new, no pill and no label above the box
   expect(text.getAttribute('aria-label')).toBe('Reply to Claude Code');
   const leaves = [...el.querySelectorAll('.ib-pfoot *')].filter((n) => n.children.length === 0).map((n) => n.textContent ?? '');
   expect(leaves.some((t) => t.startsWith('Reply to'))).toBe(false);
-  // The draft saved (below), and nothing says so in the box; Discard is the bin in Send's row (approval "inbox-reply-box", T6).
+  // The draft saved (below), and nothing says so in the box; Discard is the bin in the box's row (approval "inbox-reply-box", T6).
   expect(el.querySelector('[data-draft-stamp]')).toBeNull();
   expect(el.querySelector('[data-reply-row] [data-reply-discard]')?.getAttribute('aria-label')).toBe('Discard draft');
   // The one-agent draft names no recipient.
   expect(drafts().at(-1)!.body.recipients).toBeUndefined();
 });
 
-test.skipIf(!hasDom)('on a phone the Draft line is nothing before the first save, then sits above the box, outside Send\'s row', async () => {
+test.skipIf(!hasDom)('on a phone the Draft line is nothing before the first save, then sits above the box, outside the box\'s row', async () => {
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, CLAUDE, 45)), true);
   act(() => button(el.querySelector('.ib-pfoot') as HTMLElement, 'Reply').click());
   await settle();
@@ -232,7 +232,7 @@ test.skipIf(!hasDom)('on a phone the Draft line is nothing before the first save
   expect(el.querySelector('[data-draft-stamp]')).toBeNull();
   await write(el, 'Ship it.');
   await settle(1100);
-  // One line, above the box: none in Send's row.
+  // One line, above the box: none in the box's row.
   expect(el.querySelectorAll('[data-draft-stamp]').length).toBe(1);
   expect(el.querySelector('[data-reply-row] [data-draft-stamp]')).toBeNull();
   expect(above!.querySelector('[data-draft-stamp] [data-draft-discard]')).not.toBeNull();

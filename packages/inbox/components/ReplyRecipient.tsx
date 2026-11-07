@@ -1,8 +1,9 @@
 /**
  * Who gets the reply (approval "inbox-reply-recipient", option E "Under the
- * box, right"): in a thread with more than one agent, a pill at the right end
- * of Send's row, "to [tile] Claude Code (plannotator) ⌄". On a phone it sits
- * after Cancel and shows the folder alone.
+ * box, right"): in a thread with more than one agent, a pill in the box's own
+ * row, at the right of what goes with the reply, "to [tile] Claude Code
+ * (plannotator) ⌄" (approval "inbox-reply-box", T6). On a phone it sits on the
+ * line over the row and shows the folder alone.
  *
  * Tap it for the thread's agents (live first, ended last), the chosen ones
  * ticked. Tap a name: only that agent. Tap a circle: that agent too ("2
