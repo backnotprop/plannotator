@@ -11,7 +11,11 @@ import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHig
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
-import { SoftLineBreaksContext } from '@plannotator/ui/components/InlineMarkdown';
+import { InlineMarkdown, SoftLineBreaksContext } from '@plannotator/ui/components/InlineMarkdown';
+import { inboxNoteBlocks, type InboxNoteBlock } from '@plannotator/core/inbox-context-notes';
+import { ContextNoteChip } from '../contextNotes/ContextNotes';
+import { rangeWord } from '../contextNotes/model';
+import { reviewDrawnOn } from '../review-drawing/showMeModel';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
@@ -387,7 +391,13 @@ export function MessageBody({
   pictureBadge,
   inlineRefOf,
   replyFiles,
+  contextNotes,
 }: {
+  /**
+   * Context notes (Code review on; approval "inbox-context-notes"): an agent's `:::note path#L…` block shows as a
+   * chip naming its file and lines, with its words; `onOpen` opens the review at them. Absent: the text as it is.
+   */
+  contextNotes?: { onOpen?: (note: InboxNoteBlock) => void };
   /**
    * The action items this person's message carried (approval
    * "inbox-action-items-in-reply"): listed as "You did 1 action item", and the
@@ -527,7 +537,19 @@ export function MessageBody({
   const wordsText = replyParts ? replyParts.words : sent;
   const restText = replyParts ? replyParts.rest : '';
   const feedback = useMemo(() => (ownReply ? splitReplyFeedback(replyParts ? restText : wordsText) : null), [ownReply, replyParts, restText, wordsText]);
-  const shown = useMemo(() => linkFiles(feedback && !replyParts ? feedback.words : wordsText), [linkFiles, feedback, replyParts, wordsText]);
+  const linked = useMemo(() => linkFiles(feedback && !replyParts ? feedback.words : wordsText), [linkFiles, feedback, replyParts, wordsText]);
+  // An agent's `:::note path#L…` blocks: the opening line becomes a plain `:::note` (the same lines, so every other
+  // block keeps its place) and the block draws as the note's chip and words (`directiveBlock`).
+  const noteBlocks = useMemo(() => (contextNotes && message.author.kind === 'agent' ? inboxNoteBlocks(linked) : []), [contextNotes !== undefined, message.author.kind, linked]); // eslint-disable-line react-hooks/exhaustive-deps
+  const shown = useMemo(() => {
+    if (noteBlocks.length === 0) return linked;
+    const lines = linked.split('\n');
+    for (const note of noteBlocks) lines[note.from] = ':::note';
+    return lines.join('\n');
+  }, [linked, noteBlocks]);
+  const noteAtLine = useMemo(() => new Map(noteBlocks.map((note) => [note.from + 1, note] as const)), [noteBlocks]);
+  const notesRef = useRef(contextNotes);
+  notesRef.current = contextNotes;
   const restShown = useMemo(() => (replyParts ? linkFiles(feedback ? feedback.words : restText) : ''), [linkFiles, feedback, replyParts, restText]);
   const feedbackShown = useMemo(() => (feedback ? linkFiles(feedback.feedback) : ''), [linkFiles, feedback]);
   const blocks = useMemo(() => parseMarkdownToBlocks(shown, { frontmatter: false, keepBlankLines: ownReply }), [shown, ownReply]);
@@ -809,12 +831,25 @@ export function MessageBody({
   }, [blocks, message.actions, renderActions !== undefined]);
   const directiveBlock = useCallback(
     (block: Block) => {
+      if (block.directiveKind === 'note') {
+        const note = noteAtLine.get(block.startLine);
+        if (!note) return undefined;
+        const open = notesRef.current?.onOpen;
+        return (
+          <div className="ib-ctxn-msg" data-context-note-block="">
+            <ContextNoteChip file={note.file} lines={`${note.side === 'old' ? 'removed ' : ''}${rangeWord([note.lineStart, note.lineEnd])}`} {...(open ? { onOpen: () => open(note) } : {})} />
+            <div className="ib-ctxn-msg-t">
+              <InlineMarkdown text={note.text} />
+            </div>
+          </div>
+        );
+      }
       if (block.directiveKind !== 'action') return undefined;
       const run = actionRuns.get(block.id);
       if (!run) return undefined;
       return run.first ? actionsRef.current?.render(run.records) : null;
     },
-    [actionRuns],
+    [actionRuns, noteAtLine],
   );
 
   // ── Comments on the text (approval "inbox-message-comments") ──────────────
@@ -988,7 +1023,7 @@ export function MessageBody({
         questionPictureSize={pictureSizeOf}
         renderQuestionCard={renderReplacedCard ? questionCard : undefined}
         renderQuestionBelowPrompt={renderReplacesLine ? belowPrompt : undefined}
-        renderDirectiveBlock={renderActions ? directiveBlock : undefined}
+        renderDirectiveBlock={renderActions || noteBlocks.length > 0 ? directiveBlock : undefined}
       />
       )}
       {replyParts && sentAnswers && sentAnswers.length > 0 && <SentAnswers groups={sentAnswers} onJump={onJumpQuestion} />}
@@ -1076,7 +1111,8 @@ export interface ThreadPaneProps {
   /** The file × and Escape go back to when it is not the one on screen (fullScreenOrigin.ts `fullExitFile`), or null. */
   fullExitFile?: string | null;
   /** Open the guided review a message carries (the record's 4.2). */
-  onOpenGuide: (messageId: string) => void;
+  /** Open a guided review (`at`: a place in it, a context note's "Open in the review"). */
+  onOpenGuide: (messageId: string, at?: { path: string; line: number }) => void;
   /**
    * Where "new since you looked" starts (folding.ts `lookBoundary`), read
    * from the thread BEFORE the window recorded this look and kept until the
@@ -3667,6 +3703,15 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         }),
   );
 
+  // Context notes (approval "inbox-context-notes"): in a thread with a review, an agent's `:::note` block is a chip
+  // that opens the review it is drawn on (the newest at or before its message) at its lines.
+  const hasReview = useMemo(() => thread.messages.some((m) => m.guide?.review), [thread.messages]);
+  const openNote = (messageId: string, note: InboxNoteBlock) => {
+    const at = thread.messages.find((m) => m.id === messageId);
+    const review = reviewDrawnOn(messageId, thread.messages, undefined, at?.created_at);
+    if (review) onOpenGuide(review, { path: note.file, line: note.lineStart });
+  };
+
   // The action items each of the person's messages carried (its reply, or the report the timed path sent):
   // listed under its words as "You did 1 action item" (approval "inbox-action-items-in-reply").
   const sentActionsByReply = useMemo(() => {
@@ -6171,6 +6216,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   onJumpQuestion={jumpTo}
                   projectRoot={thread.project.root}
                   openInFiles={codeReview}
+                  {...(codeReview && isAgent && hasReview ? { contextNotes: { onOpen: (note: InboxNoteBlock) => openNote(message.id, note) } } : {})}
                   repo={thread.project.repo ?? null}
                   onOpenAttachment={openFromMessage}
                   onOpenInlineImage={(image) => openFromMessage(image)}

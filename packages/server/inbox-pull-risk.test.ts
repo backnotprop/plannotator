@@ -1413,3 +1413,52 @@ describe("finding the agent", () => {
     expect(installedPath("sh")).not.toBeNull();
   });
 });
+
+describe("a high judgment's places (context notes)", () => {
+  const PATCH = "diff --git a/src/billing.ts b/src/billing.ts\n--- a/src/billing.ts\n+++ b/src/billing.ts\n@@ -10,3 +10,5 @@\n context\n-old line\n+new one\n+new two\n+new three\n context\n";
+  const RULES = "- Anything in billing.\n- Auth changes.";
+  const check = { rules: RULES, patch: PATCH };
+  const place = { file: "src/billing.ts", side: "new", lines: [11, 13], rule: "Anything in billing.", why: "Charges now retry." };
+  const answer = (risk: string, where: unknown) => JSON.stringify({ risk, why: "It changes billing.", where });
+
+  test("keeps a place inside one hunk, with the person's rule matched line for line", () => {
+    expect(parseRiskAnswer(answer("high", [place]), check)).toEqual({ level: "high", why: "It changes billing.", where: [{ file: "src/billing.ts", side: "new", lines: [11, 13], rule: "Anything in billing.", why: "Charges now retry." }] });
+    expect(parseRiskAnswer(answer("high", [{ ...place, side: "old", lines: [11, 11] }]), check)?.where).toHaveLength(1);
+  });
+
+  test("only a high judgment keeps places; low and medium keep their verdict without them", () => {
+    expect(parseRiskAnswer(answer("medium", [place]), check)).toEqual({ level: "medium", why: "It changes billing." });
+    expect(parseRiskAnswer(answer("low", [place]), check)).toEqual({ level: "low", why: "It changes billing." });
+  });
+
+  test("a bad place is dropped, never the judgment", () => {
+    const bad = [
+      { ...place, file: "src/other.ts" },
+      { ...place, lines: [30, 31] },
+      { ...place, lines: [13, 11] },
+      { ...place, side: "both" },
+      { ...place, why: "" },
+      { ...place, extra: 1 },
+      "src/billing.ts#L11",
+    ];
+    expect(parseRiskAnswer(answer("high", bad), check)).toEqual({ level: "high", why: "It changes billing." });
+  });
+
+  test("a rule that is not one of the person's lines is left off; at most five places", () => {
+    expect(parseRiskAnswer(answer("high", [{ ...place, rule: "Something I made up." }]), check)?.where?.[0]?.rule).toBeUndefined();
+    expect(parseRiskAnswer(answer("high", Array.from({ length: 8 }, () => place)), check)?.where).toHaveLength(5);
+  });
+
+  test("a fourth key, or where beside another extra key, is still no judgment", () => {
+    expect(parseRiskAnswer(JSON.stringify({ risk: "high", why: "x", where: [place], note: "y" }), check)).toBeNull();
+    expect(parseRiskAnswer(JSON.stringify({ risk: "high", why: "x", note: "y" }), check)).toBeNull();
+  });
+
+  test("the engine keeps a high judgment's places for its head and drops ones outside the diff", async () => {
+    setRules(RULES);
+    const { risk } = engine({ patch: PATCH, answer: async () => ({ text: answer("high", [place, { ...place, lines: [40, 41] }]) }) });
+    risk.assess([pull(7)]);
+    await settled();
+    expect(risk.answer().judgments["github.com/n/b#7"]?.where).toEqual([{ file: "src/billing.ts", side: "new", lines: [11, 13], rule: "Anything in billing.", why: "Charges now retry." }]);
+  });
+});

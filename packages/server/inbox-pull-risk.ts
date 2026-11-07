@@ -5,7 +5,11 @@
  * low, medium or high with one sentence why, in the background, a few at a time. The
  * agent reads the whole diff.
  *
- *   inbox/pull-risk.json   { v: 1, judgments: { [pull key]: { head, base, rules, level, why } } }
+ *   inbox/pull-risk.json   { v: 1, judgments: { [pull key]: { head, base, rules, level, why, where? } } }
+ *
+ * - A high judgment may name its places in the diff (`where`, context notes,
+ *   approval "inbox-context-notes"): checked against the diff that was judged
+ *   when it is made, kept beside it, and shown on the PR's diff.
  *
  * - Runs only while Code review is on and rules exist, and only from the owner's
  *   window's list read (the routes in inbox.ts guard those). Open and draft PRs only.
@@ -300,7 +304,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; judgments?: Record<string, Kept> };
       if (parsed.v !== 1 || !parsed.judgments || typeof parsed.judgments !== "object") throw new Error("not a risk file");
       for (const [key, value] of Object.entries(parsed.judgments)) {
-        const clean = parseRiskAnswer(JSON.stringify({ risk: value?.level, why: value?.why }));
+        const clean = parseRiskAnswer(JSON.stringify({ risk: value?.level, why: value?.why, ...(value?.where !== undefined ? { where: value.where } : {}) }));
         if (typeof value?.head === "string" && typeof value.base === "string" && typeof value.rules === "string" && clean) kept.set(key, { head: value.head, base: value.base, rules: value.rules, ...clean });
       }
     } catch {
@@ -407,18 +411,19 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       }
     };
     let result = await ask(patch);
+    // A high judgment's places are checked against the diff it read, held only for that.
+    let judgment = "text" in result ? parseRiskAnswer(result.text, { rules: current.rules, patch }) : null;
     // The whole diff is held only for its run.
     patch = null;
     if (stopping.signal.aborted) return;
-    let judgment = "text" in result ? parseRiskAnswer(result.text) : null;
     // An answer that is no ranking may still say why: "Prompt is too long" comes back as a CLI's ordinary answer.
     if (!judgment && heldBack && riskRunTooLong(result)) {
       // Too long whole, from a clone: once more as the forge gave it, its held-back files as their headers.
       result = await ask(heldBack);
+      judgment = "text" in result ? parseRiskAnswer(result.text, { rules: current.rules, patch: heldBack }) : null;
       heldBack = null;
       partial = true;
       if (stopping.signal.aborted) return;
-      judgment = "text" in result ? parseRiskAnswer(result.text) : null;
     }
     if (!judgment) {
       const reason = riskFailureLine("failed" in result ? result.failed : `The agent didn\u2019t answer with a ranking: ${result.text}`) || "The agent gave no answer.";
@@ -466,7 +471,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
           const one = all.get(pull.key);
           if (!inboxPullIsOpen(pull)) continue;
           if (one && one.head === pull.head_sha && one.base === pull.base && one.rules === hash) {
-            judgments[pull.key] = { level: one.level, why: one.why };
+            judgments[pull.key] = { level: one.level, why: one.why, ...(one.where ? { where: one.where } : {}) };
             continue;
           }
           const failure = failures.get(pull.key);

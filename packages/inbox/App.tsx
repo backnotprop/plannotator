@@ -6127,7 +6127,7 @@ function Inbox() {
             }}
             fullFromSide={fullFromSide(window.history.state)}
             fullExitFile={fullExitFile(window.history.state)}
-            onOpenGuide={(messageId) => go({ ...route, guide: messageId })}
+            onOpenGuide={(messageId, at) => go({ ...route, guide: messageId, ...(at ? { guideAt: at } : {}) })}
             artifacts={route.artifacts === true}
             onArtifacts={(open) => (open ? go({ ...routeRef.current, artifacts: true, msg: null }) : close({ ...routeRef.current, artifacts: false }))}
             // Decision mode's one way in (thread only): from two of this thread's decisions up, and not while a

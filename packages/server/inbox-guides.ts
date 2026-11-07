@@ -33,6 +33,7 @@ import {
   GUIDE_SNAPSHOT_OVERVIEW_VERSION,
   GUIDE_SNAPSHOT_VERSION,
   guideDiagramIsDrawn,
+  guideSnapshotVersionFor,
   parseGuideSnapshot,
   parseGuideSnapshotJson,
   type GuideSnapshot,
@@ -41,7 +42,16 @@ import type { GuideOverviewDiagram } from "@plannotator/core/guide";
 import { displayInboxSubject, inboxReviewSourceOf, type InboxFileContents, type InboxGuideRef } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { readFileSync } from "node:fs";
-import { checkInboxDrawing, INBOX_REVIEW_FIELD_DESCRIPTION, INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC, inboxReviewTitleLine } from "@plannotator/core/inbox-review";
+import {
+  checkInboxDrawing,
+  INBOX_GUIDE_FIELD_DESCRIPTION,
+  INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES,
+  INBOX_REVIEW_FIELD_DESCRIPTION,
+  INBOX_REVIEW_NOTES_RULE,
+  INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC,
+  inboxReviewTitleLine,
+} from "@plannotator/core/inbox-review";
+import { checkGuideNotes, readGuideDiffNotes, type GuideDiffNote } from "@plannotator/core/inbox-context-notes";
 import { inboxBlobPath, writeBlob } from "@plannotator/shared/inbox/attachments";
 import { questionOpenersWithTextText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -84,6 +94,23 @@ export const GUIDE_BRIEF_EXAMPLE = {
     "diff --git a/package.json b/package.json\n--- a/package.json\n+++ b/package.json\n@@ -1 +1 @@\n-{}\n+{ }\n",
 };
 
+/**
+ * The worked example while Code review is on: the same call, its one file with one note (context notes, approval
+ * "inbox-context-notes"). Off, the brief's example is `GUIDE_BRIEF_EXAMPLE`, byte for byte.
+ */
+export const GUIDE_BRIEF_EXAMPLE_WITH_NOTE = {
+  ...GUIDE_BRIEF_EXAMPLE,
+  guide: {
+    ...GUIDE_BRIEF_EXAMPLE.guide,
+    sections: [
+      {
+        ...GUIDE_BRIEF_EXAMPLE.guide.sections[0]!,
+        diffs: [{ file: "src/auth.ts", summary: "Adds the refresh guard.", notes: [{ lineStart: 1, lineEnd: 1, text: "Refresh happens here so callers stop retrying on their own (from the PR description)." }] }],
+      },
+    ],
+  },
+};
+
 export const GET_GUIDE_BRIEF_DESCRIPTION =
   "Get what you need to write a guided review of a code change for the person: Plannotator's method, the JSON shape of the guide, how to read the diff, the rules, and a worked submit_guide call. Read the diff in your checkout, write the guide on your own model, then call submit_guide with the guide and that exact patch.";
 
@@ -116,6 +143,9 @@ export function checkInboxGuide(input: { snapshot?: unknown; guide?: unknown; pa
     // document is taken as it always was; the review pane draws its html picture only if it keeps Shape's rules.
     const drawnProblem = overviewDiagramProblem(snapshot.guide.overview?.diagram, snapshot.review.rawPatch);
     if (drawnProblem) return { ok: false, error: drawnProblem };
+    // Notes (version 4, read only while Code review is on): each inside one hunk of its file.
+    const noteProblems = checkGuideNotes(snapshot.guide, snapshot.review.rawPatch);
+    if (noteProblems.length > 0) return { ok: false, error: `Guide notes are not valid:\n- ${noteProblems.join("\n- ")}` };
     // The strict placement checks, on the snapshot's own guide and patch. The
     // snapshot format lets a file reference omit its summary (a shipped
     // fixture does); the authored form wants a string, so an absent one is "".
@@ -144,8 +174,45 @@ export function checkInboxGuide(input: { snapshot?: unknown; guide?: unknown; pa
     }
   }
   const overview = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>).overview : undefined;
-  if (overview === undefined) return { ok: true, snapshot: built.snapshot };
-  return withAuthoredOverview(built.snapshot, overview);
+  const withOverview = overview === undefined ? ({ ok: true, snapshot: built.snapshot } as const) : withAuthoredOverview(built.snapshot, overview);
+  if (!withOverview.ok) return withOverview;
+  return withAuthoredNotes(withOverview.snapshot, raw);
+}
+
+/**
+ * An authored guide's `sections[].diffs[].notes` (context notes, code review in the Inbox), on the snapshot built from
+ * it: each read and checked inside one hunk of its file (a refusal names the note), then the snapshot is version 4
+ * and parsed again by its own strict parser. A guide with no note is returned as it was.
+ */
+function withAuthoredNotes(snapshot: GuideSnapshot, raw: unknown): InboxGuideCheck {
+  const sections = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>).sections : undefined;
+  if (!Array.isArray(sections)) return { ok: true, snapshot };
+  const byFile = new Map<string, GuideDiffNote[]>();
+  const problems: string[] = [];
+  sections.forEach((section, i) => {
+    const diffs = section && typeof section === "object" ? (section as Record<string, unknown>).diffs : undefined;
+    if (!Array.isArray(diffs)) return;
+    diffs.forEach((ref, j) => {
+      const r = ref && typeof ref === "object" ? (ref as Record<string, unknown>) : {};
+      if (r.notes === undefined || typeof r.file !== "string") return;
+      const read = readGuideDiffNotes(r.notes, `sections[${i}].diffs[${j}].notes`);
+      problems.push(...read.problems);
+      if (read.notes.length > 0) byFile.set(r.file, read.notes);
+    });
+  });
+  if (problems.length > 0) return { ok: false, error: `Guide notes are not valid:\n- ${problems.join("\n- ")}` };
+  if (byFile.size === 0) return { ok: true, snapshot };
+  const guide = {
+    ...snapshot.guide,
+    sections: snapshot.guide.sections.map((section) => ({
+      ...section,
+      diffs: section.diffs.map((ref) => (byFile.has(ref.file) ? { ...ref, notes: byFile.get(ref.file)! } : ref)),
+    })),
+  };
+  const hunkProblems = checkGuideNotes(guide, snapshot.review.rawPatch);
+  if (hunkProblems.length > 0) return { ok: false, error: `Guide notes are not valid:\n- ${hunkProblems.join("\n- ")}` };
+  const parsed = parseGuideSnapshot({ ...snapshot, version: guideSnapshotVersionFor(guide), guide });
+  return parsed.ok ? { ok: true, snapshot: parsed.value } : { ok: false, error: `Invalid notes (${parsed.error.path}): ${parsed.error.message}` };
 }
 
 /** What is wrong with an overview's drawn (version-3) diagram, by Shape's rules and the patch's files, or null. */
@@ -425,6 +492,17 @@ export async function inboxGuideRoute(
  */
 function guideSchemaWithOverview(): Record<string, unknown> {
   const schema = JSON.parse(GUIDE_SCHEMA_JSON) as { properties: Record<string, unknown> } & Record<string, unknown>;
+  // Context notes: a diff reference's optional `notes` (only this brief's copy; the review app's guide job keeps its schema).
+  const diffItem = (schema.properties.sections as { items: { properties: { diffs: { items: { properties: Record<string, unknown> } } } } }).items.properties.diffs.items;
+  diffItem.properties.notes = {
+    type: "array",
+    items: {
+      type: "object",
+      properties: { lineStart: { type: "integer" }, lineEnd: { type: "integer" }, side: { type: "string", enum: ["new", "old"] }, text: { type: "string" } },
+      required: ["lineStart", "lineEnd", "text"],
+      additionalProperties: false,
+    },
+  };
   const drawnSide = { type: "object", properties: { source: { type: "string" }, css: { type: "string" } }, required: ["source"], additionalProperties: false };
   schema.properties.overview = {
     type: "object",
@@ -466,8 +544,9 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
         output_schema: context.codeReviewOn?.() ? guideSchemaWithOverview() : (JSON.parse(GUIDE_SCHEMA_JSON) as Record<string, unknown>),
         diff_steps: GUIDE_DIFF_STEPS,
         // Code review on (approval "shape-in-code-review", AGENT-TEXT §4, approved): the overview and its one drawing. Off: as before, byte for byte.
-        rules: context.codeReviewOn?.() ? [...GUIDE_RULES, INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC] : GUIDE_RULES,
-        example: GUIDE_BRIEF_EXAMPLE,
+        // Context notes ride the same switch (approval "inbox-context-notes"): a rule, the schema's `notes` and an example note.
+        rules: context.codeReviewOn?.() ? [...GUIDE_RULES, INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC, INBOX_REVIEW_NOTES_RULE] : GUIDE_RULES,
+        example: context.codeReviewOn?.() ? GUIDE_BRIEF_EXAMPLE_WITH_NOTE : GUIDE_BRIEF_EXAMPLE,
       }),
   );
 
@@ -481,7 +560,7 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
           guide: z
             .union([z.record(z.string(), z.unknown()), z.string()])
             .optional()
-            .describe("The guide: { title, intent, sections: [{ title, overview, diffs: [{ file, summary }] }], unplacedFiles?, review?: { gitRef, base }, source?, generator? } (get_guide_brief's output_schema), as an object or its JSON."),
+            .describe(context.codeReviewOn?.() ? INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES : INBOX_GUIDE_FIELD_DESCRIPTION),
           patch: z.string().optional().describe("The exact unified diff the guide describes (get_guide_brief's diff_steps)."),
           snapshot: z
             .union([z.record(z.string(), z.unknown()), z.string()])

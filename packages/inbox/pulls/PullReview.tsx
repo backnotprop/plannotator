@@ -55,6 +55,8 @@ import { forgeName } from './labels';
 import { railRows } from './rail';
 import { isOpen, layerPosition, layerVerdictLink, nextLayer, stackVerdictLink } from './topology';
 import { RiskMark } from './RiskMark';
+import { ContextNotesProvider, useContextNotes } from '../contextNotes/ContextNotes';
+import { placesWord, riskNotes, takeRiskPlaces } from '../contextNotes/model';
 import { usePullRisk } from './usePullRisk';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
@@ -516,6 +518,26 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const toggleViewed = useCallback((path: string) => write({ viewed: viewed.includes(path) ? viewed.filter((p) => p !== path) : [...viewed, path] }), [viewed, comments]); // eslint-disable-line react-hooks/exhaustive-deps
   const [reveal, setReveal] = useState<{ path: string; token: number } | null>(null);
   const move = (path: string) => setReveal((was) => ({ path, token: (was?.token ?? 0) + 1 }));
+  // A high judgment's places (context notes, approval "inbox-context-notes"): on this layer's own diff, at the head it
+  // judged, each a row under its lines. Never comments. The header's "N places" steps through them.
+  const placeNotes = useMemo(
+    () => (scope === 'layer' && judged && layer && diff?.head_sha && diff.head_sha === layer.head_sha ? riskNotes(judged, files) : []),
+    [scope, judged, layer?.head_sha, diff?.head_sha, files], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const places = useContextNotes(placeNotes, {});
+  const placeAt = useRef(-1);
+  const goToPlace = (index: number) => {
+    const note = placeNotes[index];
+    if (!note) return;
+    placeAt.current = index;
+    move(note.file);
+    places.show(note.id);
+  };
+  const nextPlace = () => goToPlace((placeAt.current + 1) % placeNotes.length);
+  // The PR page's "See the N places": the first place, once this diff has its places.
+  useEffect(() => {
+    if (layer && placeNotes.length > 0 && takeRiskPlaces(layer.key)) goToPlace(0);
+  }, [placeNotes.length, layer?.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The verdict: one reply to the agent's last message in its thread.
   const [sending, setSending] = useState(false);
@@ -634,6 +656,11 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           <bdi>{layer.title}</bdi>
         </span>
         {judged && <RiskMark judgment={judged} />}
+        {placeNotes.length > 0 && (
+          <button type="button" className="ib-ctxn-places" onClick={nextPlace} data-pull-risk-places={placeNotes.length}>
+            {placesWord(placeNotes.length)}
+          </button>
+        )}
         {!judged && riskFailure && <RiskMark failed={riskFailure} />}
         <span className="ib-sp" />
         {folded && (readerComments || comments.length > 0) && (
@@ -819,7 +846,21 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             // arrive says so here (GuidePane).
             <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ repo: repoKey ?? '', pull: layerKey }} on={!!repoKey}>
-                <GuideReader bare snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} fileContents={fileContents} />
+                <ContextNotesProvider api={places.api}>
+                  <GuideReader
+                    bare
+                    snapshot={snapshot}
+                    reviewed={[]}
+                    onReviewedChange={() => {}}
+                    comments={readerComments}
+                    mode="files"
+                    reveal={reveal}
+                    viewed={{ files: viewedSet, onToggle: toggleViewed }}
+                    fileOpenIn={fileOpenIn}
+                    fileContents={fileContents}
+                    {...(places.anchors.length > 0 ? { contextNotes: places.anchors, renderContextNote: places.renderContextNote } : {})}
+                  />
+                </ContextNotesProvider>
               </OpenInCodeSpans>
             </ReaderPart>
           ) : (

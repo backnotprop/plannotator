@@ -54,6 +54,9 @@ import { OverviewFigure, ShowMeButton } from '../review-drawing/OverviewFigure';
 import { ShowMeBox, ShowMeCorner } from '../review-drawing/ShowMeLayer';
 import { partLanding, reviewDrawnOn, overviewPicture, baseName, changedMarks, chapterOf, markOf, partName, targetLines } from '../review-drawing/showMeModel';
 import { useShowMe } from '../review-drawing/useShowMe';
+import { ContextNotesProvider, useContextNotes } from '../contextNotes/ContextNotes';
+import { askAgainWords } from '../contextNotes/model';
+import { useReviewNotes } from '../contextNotes/useReviewNotes';
 import { ShapeBoardLayer, ShapePebbleButton } from '../shape/ShapeParts';
 import type { ShapeBoardPlace } from '../shape/types';
 import { useLineInView } from './reviewLineInView';
@@ -319,6 +322,36 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   }, [board]);
   const threadBoard = shapes.byThread.get(thread.thread_id);
   const boardSummary = board ? (shapes.shapes ?? []).find((shape) => shape.id === board) : undefined;
+  // Context notes (approval "inbox-context-notes"): the guide's, the thread agent's `:::note` blocks and the Show me
+  // boards' code parts, each a row under its lines. Never comments: the count, the panel and the verdict don't see them.
+  const noteBoardsKey = [...showMe.boards, ...(threadBoard ? [threadBoard.id] : [])].join(',');
+  const noteBoards = useMemo(() => (noteBoardsKey ? noteBoardsKey.split(',') : []), [noteBoardsKey]);
+  const contextNotes = useReviewNotes({
+    enabled: !!snapshot,
+    messages: thread.messages,
+    message,
+    snapshot,
+    files,
+    boards: noteBoards,
+    askedOn: showMe.askedOn,
+    subscribeBoards: shapes.subscribe,
+  });
+  const noteRows = useContextNotes(contextNotes, {
+    ...(onAsk && !readOnly ? { onAskAgain: (note) => onAsk(askAgainWords(note)) } : {}),
+    onOpenPicture: (note) => {
+      if (note.picture) onBoard(note.picture.board);
+    },
+  });
+  /** A place opened from the thread (a note's "Open in the review"): its note opens once it is drawn. */
+  const noteAt = useRef<{ path: string; line: number } | null>(null);
+  useEffect(() => {
+    const want = noteAt.current;
+    if (!want) return;
+    const hit = contextNotes.find((note) => note.file === want.path && want.line >= note.lineStart && want.line <= note.lineEnd);
+    if (!hit) return;
+    noteAt.current = null;
+    noteRows.show(hit.id);
+  }, [contextNotes, noteRows.show]); // eslint-disable-line react-hooks/exhaustive-deps
   const showMeAgain = useRef(showMe.again);
   showMeAgain.current = showMe.again;
   const onBoardRef = useRef(onBoard);
@@ -413,6 +446,11 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     const key = JSON.stringify(at);
     if (placed.current === key) return;
     placed.current = key;
+    if (at.path && at.line) {
+      const hit = contextNotes.find((note) => note.file === at.path && at.line! >= note.lineStart && at.line! <= note.lineEnd);
+      if (hit) noteRows.show(hit.id);
+      else noteAt.current = { path: at.path, line: at.line };
+    }
     goTo(at);
     onLanded?.();
     // The place is read once per review; the jumps read the latest render.
@@ -854,6 +892,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
             <div ref={contentRef}>
             <ReaderPart diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on>
+              <ContextNotesProvider api={noteRows.api}>
               <GuideReader
                 snapshot={snapshot}
                 reviewed={reviewed}
@@ -871,7 +910,9 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
                 threadHeading
                 hostDiffControls
                 {...(collapseAll ? { collapseAll } : {})}
+                {...(noteRows.anchors.length > 0 ? { contextNotes: noteRows.anchors, renderContextNote: noteRows.renderContextNote } : {})}
               />
+              </ContextNotesProvider>
               </OpenInCodeSpans>
             </ReaderPart>
             </div>
