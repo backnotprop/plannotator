@@ -32,7 +32,8 @@ import {
 } from '@plannotator/core/shape';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import { AnnotationToolstrip } from '../AnnotationToolstrip';
-import { CommentPopover } from '../CommentPopover';
+import { CommentPopover, type CommentExtraAction } from '../CommentPopover';
+import { partName } from './partName';
 import { DocumentAIChatPanel } from '../ai/DocumentAIChatPanel';
 import { SparklesIcon } from '../SparklesIcon';
 import { RefHoverCards } from '../RefHoverCard';
@@ -52,7 +53,7 @@ import { useShapeFollow } from './ShapeFollow';
 import { CodeSpanContext } from '../LocalLinkContext';
 import { ShapeInline } from './inline';
 import { boxNoteInput, captureBox, pictureRect, placeBox, readBox, useBoxDrag, type KeptBox, type ShapeBoxSelection } from './boxSelect';
-import type { ShapeEvent, ShapeHost, ShapeLoaded, ShapePanelTab, ShapeSessionStatus, ShapeSurfaceProps, ShapeSurfaceReview } from './types';
+import type { ShapeEvent, ShapeHost, ShapeLoaded, ShapePanelTab, ShapeSessionStatus, ShapeShowMeInput, ShapeSurfaceProps, ShapeSurfaceReview } from './types';
 
 const DRAW_MS = 1500; // the longest draw-in, for Esc
 const DRAWN_MS = DRAW_MS + 1400; // when a view counts as drawn (its draw-in class is dropped)
@@ -121,6 +122,23 @@ interface Target {
   retry?: { text: string; error: string };
   /** Chosen with a dragged box: what it holds. `el` is the box's own element, gone when the composer closes. */
   box?: ShapeBoxSelection;
+  /** A dragged box's Show me: the whole parts it covered, named as when they are clicked. */
+  boxPart?: Omit<ShapeShowMeInput, 'words'>;
+}
+
+/**
+ * What a box's Show me is on: one part by its own name (and its code), several as "A part of the board" with each
+ * part's name, and the box's picture either way.
+ */
+function boxShowMePart(scope: ParentNode, sel: ShapeBoxSelection): Omit<ShapeShowMeInput, 'words'> {
+  const els = sel.parts.map((part) => scope.querySelector<HTMLElement>(`[data-mark="${CSS.escape(part)}"]`));
+  const names = sel.parts.map((part, i) => (els[i] ? partName(els[i]!) : '') || part).slice(0, 40);
+  if (names.length === 1) {
+    const el = els[0];
+    const code = (el?.closest('[data-code]') ?? el?.querySelector('[data-code]'))?.getAttribute('data-code') ?? sel.code[0];
+    return { name: names[0]!, ...(code ? { code } : {}), picture: sel.picture };
+  }
+  return { name: 'A part of the board', ...(names.length > 1 ? { parts: names } : {}), picture: sel.picture };
 }
 
 /**
@@ -169,7 +187,19 @@ export function shapeEndedLabel(host: Pick<ShapeHost, 'askWaitsWhenEnded'>): str
   return host.askWaitsWhenEnded ? 'Session ended · your question waits for the agent' : 'Session ended · Ask AI answers; changes wait for the agent';
 }
 
-export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCard, renderThread, readFirst = false, initialView, initialPanel, onNavigate, headStart, codeView = true, review = null, boxSelect, darkContrast = false }: ShapeSurfaceProps) {
+/**
+ * What the Annotate box is on, for Show me: the words picked if they are less than the part, else the part's name.
+ * In What to know a part is words: its own words name it (a bold word in it is no heading).
+ */
+function shapeBoxPart(target: { el: HTMLElement; view: string | null; id: string | null; text: string }): { name: string; code?: string } {
+  const whole = partWords(target.el).replace(/\s+/g, ' ').trim();
+  const words = (target.text && target.text !== whole) || target.view === 'know';
+  const name = (words ? target.text || whole : partName(target.el)) || target.id || 'A part of the board';
+  const code = (target.el.closest('[data-code]') ?? target.el.querySelector('[data-code]'))?.getAttribute('data-code') ?? undefined;
+  return { name: Array.from(name).slice(0, 600).join(''), ...(code ? { code } : {}) };
+}
+
+export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCard, renderThread, readFirst = false, initialView, initialPanel, onNavigate, headStart, headSide, codeView = true, review = null, boxSelect, darkContrast = false }: ShapeSurfaceProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
   const attachRoot = useCallback((el: HTMLDivElement | null) => {
@@ -670,6 +700,12 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
 
   const refsState = useMemo<RefsState>(() => ({ refs, hover: refHover, flash: refFlash, onHover: setRefHover, onOpen: openRef, onPeek: readFirst ? onRefPeek : undefined }), [refs, refHover, refFlash, openRef, onRefPeek, readFirst]);
 
+  // ── Show me, the Annotate box's third action: on whatever the box was opened on ──
+  const showMeAction = (part: { name: string; code?: string }): CommentExtraAction | undefined =>
+    host.showMe && !finished
+      ? { label: 'Show me', icon: <Pebble alive={false} size={13} />, onAction: (words) => host.showMe!(id, { ...part, words }) }
+      : undefined;
+
   // ── pointing at the board ──
   const pickMark = useCallback((el: HTMLElement, v: ShapeViewId, text?: string) => {
     setTarget({ el, view: v, id: el.getAttribute('data-mark'), text: (text ?? partWords(el)).replace(/\s+/g, ' ').trim() });
@@ -788,12 +824,14 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
       const tall = !!(scope.getRootNode() as ShadowRoot).host?.closest('.shp-drawn.tall');
       const box = { ...read.box, ...(tall ? { tall: true as const } : {}), ...(more && view === 'picture' ? { more: true as const } : {}) };
       const k = scope.offsetWidth ? scope.getBoundingClientRect().width / scope.offsetWidth : 1;
+      const selection: ShapeBoxSelection = { view, v: v.n, parts: read.parts, words: read.words, code: read.code, box, picture: captureBox(scope, pictureRect(scope, rect, read.parts), boxSelect?.readAsset, rect) };
       setTarget({
         el: placeBox(scope, box, k),
         view,
         id: read.parts.join(',') || null,
         text: read.words,
-        box: { view, v: v.n, parts: read.parts, words: read.words, code: read.code, box, picture: captureBox(scope, pictureRect(scope, rect, read.parts), boxSelect?.readAsset, rect) },
+        box: selection,
+        boxPart: boxShowMePart(scope, selection),
       });
     },
   });
@@ -961,6 +999,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
         annotations={codeNotes}
         onComment={codeInput('change')}
         onAsk={codeInput('ask')}
+        lineAction={(lines) => showMeAction({ name: `${lines.filePath.split('/').pop()} ${lines.lineStart === lines.lineEnd ? `line ${lines.lineStart}` : `lines ${lines.lineStart}–${lines.lineEnd}`}`, code: `${lines.filePath}#L${lines.lineStart}${lines.lineEnd !== lines.lineStart ? `-L${lines.lineEnd}` : ''}` })}
         generalComment={phase === 'leaving' ? null : generalButton('code')}
         phone={phone}
         fileAction={host.fileAction ? fileAction : undefined}
@@ -1011,6 +1050,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
                   </span>
                 )}
                 {finished && <span className="shp-finished">Finished</span>}
+                {headSide}
                 {!phone && generalButton(null)}
                 {host.refresh && !finished && (
                   <button type="button" className="shp-quiet-btn" onClick={() => void bringUpToDate()} disabled={busy}>{host.refreshLabel ?? 'Bring it up to date'}</button>
@@ -1183,11 +1223,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
               headerText={boxSelect ? quoteLabel(target) : undefined}
               placement={target.box ? 'side' : undefined}
               extraActions={target.box ? [
-                ...(boxSelect?.onShowMe ? [{
-                  label: 'Show me',
-                  // The composer stays, its words with it: Show me takes them without spending them.
-                  onSelect: (text: string) => boxSelect.onShowMe!(target.box!, text),
-                }] : []),
+                // The box's Show me is the host's own (`host.showMe`, `extraAction` below): one button, the board's.
                 ...(boxSelect?.onAddToReply ? [{
                   label: 'Add to reply',
                   spends: true,
@@ -1203,6 +1239,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
               draftKey={shapeCommentDraftKey(id, target)}
               submitLabel="Change it"
               askAILabel="Ask"
+              extraAction={showMeAction(target.boxPart ?? shapeBoxPart(target))}
               initialText={target.retry?.text}
               errorText={target.retry?.error}
               onSubmit={(text) => {
@@ -1241,6 +1278,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
               draftKey={shapeCommentDraftKey(id, { view: general.view, id: null, text: '' })}
               submitLabel="Change it"
               askAILabel="Ask"
+              extraAction={showMeAction({ name: 'The whole board' })}
               initialText={general.retry?.text}
               errorText={general.retry?.error}
               onSubmit={(text) => {

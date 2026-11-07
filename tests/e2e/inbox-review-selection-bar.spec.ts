@@ -241,11 +241,18 @@ async function closeBar(page: Page): Promise<void> {
   await expect(bar(page)).toHaveCount(0);
 }
 
+/** The review's chapter menu in its top bar. */
+async function pickChapter(page: Page, row: number): Promise<void> {
+  await page.locator('[data-review-message] [data-review-jump]').click();
+  await page.locator(`[data-review-jump-menu] [data-review-jump-row="${row}"]`).click();
+  await expect(page.locator('[data-review-jump-menu]')).toHaveCount(0);
+}
+
 async function openReview(page: Page, chapter = 1, thread = world.thread): Promise<void> {
   await page.goto(`${world.url}#thread=${thread}`);
   await page.locator('[data-review-card]').last().getByRole('button', { name: /review/ }).click();
   await expect(page.locator('[data-review-message]')).toBeVisible();
-  await page.locator('[data-review-chapters] li').nth(chapter).click();
+  await pickChapter(page, chapter - 1);
 }
 
 async function setStyle(page: Page, style: 'split' | 'unified'): Promise<void> {
@@ -372,11 +379,12 @@ test('the bottom of the viewport: above the first selected line, not on them, in
   await expect(line(page, LONG, 1)).toBeVisible({ timeout: 30_000 });
   for (const style of ['split', 'unified'] as const) {
     await setStyle(page, style);
-    await line(page, LONG, 25).scrollIntoViewIfNeeded();
-    // The last selected line is the last on screen.
-    await line(page, LONG, 27).evaluate((el) => el.scrollIntoView({ block: 'end' }));
+    // The last selected line is the last on screen: lines near the top of a file the page has only begun to show.
+    await page.locator(`[data-guide-file-shell="${NEXT}"]`).first().scrollIntoViewIfNeeded();
+    await expect(line(page, NEXT, 5)).toBeVisible({ timeout: 30_000 });
+    await line(page, NEXT, 5).evaluate((el) => el.scrollIntoView({ block: 'end' }));
     await page.waitForTimeout(300);
-    await select(page, LONG, 25, 27);
+    await select(page, NEXT, 3, 5);
     const g = await geometry(page);
     const box = clearOfLines(g);
     expect(g.viewport.height - g.bottom, 'no room for it below').toBeLessThan(42);
@@ -479,7 +487,7 @@ test('a phone at 390 px: touch-sized, on screen, not on the lines, at the bottom
     await page.goto(`${world.url}#thread=${world.thread}`);
     await page.locator('[data-review-card]').last().getByRole('button', { name: /review/ }).click();
     await expect(page.locator('[data-review-message]')).toBeVisible();
-    await page.locator('[data-review-phonebar] select').selectOption('0');
+    await pickChapter(page, 0);
     await expect(line(page, LONG, 1)).toBeVisible({ timeout: 30_000 });
     await line(page, LONG, 17).evaluate((el) => el.scrollIntoView({ block: 'center' }));
     await page.waitForTimeout(300);
@@ -494,7 +502,8 @@ test('a phone at 390 px: touch-sized, on screen, not on the lines, at the bottom
     expect(box.top).toBeGreaterThan(g.bottom);
     expect(box.top - g.bottom).toBeLessThan(12);
     await pictures(page, 'phone', box);
-    await page.touchscreen.tap(195, 8);
+    // The page's left margin: nothing there but the click away.
+    await page.touchscreen.tap(5, 400);
     await expect(bar(page)).toHaveCount(0);
 
     await line(page, LONG, 25).evaluate((el) => el.scrollIntoView({ block: 'end' }));

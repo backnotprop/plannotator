@@ -10,7 +10,9 @@
  * (`409 code_review_off`), about a review of this thread, and its `question`
  * is exactly `inboxShowMeRequest`'s words. The board comes back the way any
  * board does (`plannotator shape update --thread`); a read names it on the turn
- * (`showMeShapes`), so nothing is kept twice.
+ * (`showMeShapes`), so nothing is kept twice. A dragged box's Show me sends its
+ * picture as `show_me.part.picture` (a data: URL): it is kept in the board's
+ * folder (`keepPicture`) and the stored request names the file.
  *
  *   GET  /api/inbox/ask                    `{ chats }`: every thread with a conversation, for the
  *                                          window's chat list
@@ -46,7 +48,7 @@
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { inboxAgentName, type InboxThread } from "@plannotator/core/inbox-types";
 import { isAIEndpointPath } from "@plannotator/ai/endpoints";
-import { inboxReviewRound, inboxShowMeRequest, type InboxShowMeTarget } from "@plannotator/core/inbox-review";
+import { inboxReviewRound, inboxShowMeRequest, type InboxShowMePart, type InboxShowMeTarget } from "@plannotator/core/inbox-review";
 import { addInboxAskTurn, checkInboxAskInput, checkInboxShowMeInput, findInboxAskTurn, inboxAskFiles, inboxAskSummary, markInboxAskSeen, readInboxAsk, removeInboxAsk, showMeShapes, type ShowMeBoardVersion, updateInboxAskTurn, type InboxAskConversation, type InboxAskSummary } from "@plannotator/shared/inbox/ask";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -88,10 +90,22 @@ export function createInboxAsk(options: {
   on: () => boolean;
   /** Code review (Settings → Capabilities): Show me exists only while it is on. Absent: off. */
   codeReviewOn?: () => boolean;
+  /**
+   * Plain questions are on. `on` is also true for a Shape on its own (Shape's switch alone), whose only question is a
+   * Show me from a board: its plain questions answer as if the Ask were off, so Shape's Ask keeps waiting for the agent.
+   */
+  questionsOn?: () => boolean;
+  /**
+   * The boards are on (Shape's switch or Code review): a Show me from a board is taken only then, even with
+   * PLANNOTATOR_INBOX_ASK_AI set. Absent: off.
+   */
+  boardsOn?: () => boolean;
   /** A review message (`guide.review`) by id, or null when the message is not one. Absent: none. */
   reviewOf?: (messageId: string) => InboxAskReview | "not_a_review" | null;
   /** A thread's Shape boards, and when each version was written, to name the board each Show me made. Absent: none. */
   boardsOf?: (threadId: string) => { id: string; versions: ShowMeBoardVersion[] }[];
+  /** A Show me's box picture, kept in that board's folder: the file's full path, or null. Absent: no picture is kept. */
+  keepPicture?: (board: string, picture: string) => Promise<string | null>;
   store: InboxStore;
   serverSession: string;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
@@ -221,25 +235,38 @@ export function createInboxAsk(options: {
       return json({ conversation: seen.conversation });
     }
 
+    if (!(options.questionsOn?.() ?? true) && !(body as { show_me?: { part?: unknown } } | null)?.show_me?.part) return null;
     const input = checkInboxAskInput(body);
     // Show me: a question that asks the agent to draw, about a review of this thread. Only while Code review is on.
     const showMe = checkInboxShowMeInput(body);
     let showMeFields: { kind: "show_me"; show_me: InboxShowMeTarget; again_shape?: string } | null = null;
+    let boxPicture: string | null = null;
+    let requestOf: ((target: InboxShowMeTarget) => string) | null = null;
     if (showMe) {
-      if (!(options.codeReviewOn?.() ?? false)) return json({ error: "Code review is off in this Inbox (Settings → Capabilities).", code: "code_review_off" }, 409);
-      const review = options.reviewOf?.(showMe.target.review) ?? null;
-      if (review === null) return json({ error: `No review ${showMe.target.review} here.`, code: "not_found" }, 404);
-      if (review === "not_a_review" || review.threadId !== threadId) return json({ error: `${showMe.target.review} is not a review in this thread.`, code: "not_a_review" }, 409);
-      if (showMe.target.file !== null && !review.files.includes(showMe.target.file)) {
-        throw new InboxError("validation_error", `show_me.file: ${showMe.target.file} is not a file of this review.`, { field: "show_me" });
+      const asked = showMe.target;
+      // A review's Show me needs Code review; a board's, the boards (Shape or Code review).
+      if (!(asked.part ? (options.boardsOn?.() ?? false) : (options.codeReviewOn?.() ?? false))) return json({ error: "Code review is off in this Inbox (Settings → Capabilities).", code: "code_review_off" }, 409);
+      if (asked.part && !(options.boardsOf?.(threadId) ?? []).some((board) => board.id === asked.part!.board)) {
+        throw new InboxError("validation_error", `show_me.part: ${asked.part.board} is not a board of this thread.`, { field: "show_me" });
+      }
+      const review = asked.review === null ? null : (options.reviewOf?.(asked.review) ?? null);
+      if (asked.review !== null) {
+        if (review === null) return json({ error: `No review ${asked.review} here.`, code: "not_found" }, 404);
+        if (review === "not_a_review" || review.threadId !== threadId) return json({ error: `${asked.review} is not a review in this thread.`, code: "not_a_review" }, 409);
+        if (asked.file !== null && !review.files.includes(asked.file)) {
+          throw new InboxError("validation_error", `show_me.file: ${asked.file} is not a file of this review.`, { field: "show_me" });
+        }
       }
       if (showMe.againShape !== undefined && !(options.boardsOf?.(threadId) ?? []).some((board) => board.id === showMe.againShape)) {
         throw new InboxError("validation_error", `again_shape: ${showMe.againShape} is not a board of this thread.`, { field: "again_shape" });
       }
       // The round is the Inbox's to say: the review's place among the thread's reviews.
-      const target: InboxShowMeTarget = { ...showMe.target, round: inboxReviewRound(thread.messages, showMe.target.review) };
-      const expected = inboxShowMeRequest({ target, title: review.title, threadId, ...(showMe.againShape !== undefined ? { again: showMe.againShape } : {}) });
-      if (input.question !== expected) throw new InboxError("validation_error", "question: a Show me's question is its request, as inboxShowMeRequest writes it.", { field: "question" });
+      // A box's picture is kept apart (below, with the turn): the window's request is written without it.
+      const { picture: _picture, ...part } = asked.part ?? {};
+      boxPicture = asked.part?.picture ?? null;
+      const target: InboxShowMeTarget = { ...asked, ...(asked.part ? { part: part as InboxShowMePart } : {}), round: asked.review === null ? 1 : inboxReviewRound(thread.messages, asked.review) };
+      requestOf = (shown) => inboxShowMeRequest({ target: shown, title: review && review !== "not_a_review" ? review.title : "", threadId, ...(showMe.againShape !== undefined ? { again: showMe.againShape } : {}) });
+      if (input.question !== requestOf(target)) throw new InboxError("validation_error", "question: a Show me's question is its request, as inboxShowMeRequest writes it.", { field: "question" });
       showMeFields = { kind: "show_me", show_me: target, ...(showMe.againShape !== undefined ? { again_shape: showMe.againShape } : {}) };
     }
     // Before the gates: a retry of a saved turn gets that turn, even if the thread was archived since.
@@ -269,6 +296,15 @@ export function createInboxAsk(options: {
       if (moved) saved = updateInboxAskTurn(store.dir, threadId, input.id, { session: owner.session, host: owner.host }) ?? known;
       else if (known) saved = known;
       else {
+        // A box's Show me: its picture goes in the board's folder, and the request the agent reads names the file.
+        // A picture it cannot save leaves its line out: the Show me still goes.
+        const board = boxPicture ? showMeFields?.show_me.part?.board : undefined;
+        const kept = board && options.keepPicture ? await options.keepPicture(board, boxPicture!).catch(() => null) : null;
+        if (kept && showMeFields?.show_me.part && requestOf) {
+          const show_me: InboxShowMeTarget = { ...showMeFields.show_me, part: { ...showMeFields.show_me.part, picture: kept } };
+          showMeFields = { ...showMeFields, show_me };
+          input.question = requestOf(show_me);
+        }
         const added = addInboxAskTurn(store.dir, threadId, { ...input, ...showMeFields, at: new Date().toISOString(), session: owner.session, host: owner.host });
         saved = { conversation: added.conversation, turn: added.turn };
         options.onChange(threadId);

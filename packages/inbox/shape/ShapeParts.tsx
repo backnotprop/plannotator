@@ -72,7 +72,8 @@ export function ShapePebbleButton({ shape, open, onToggle }: { shape: InboxShape
  * review on the board rides along as its corner card (ReviewPane). `covered`: a review (the guide pane) is open over
  * it. The board is inert meanwhile, so Esc and Tab go to the review, not to the board's panel, bubble or Show more
  * under it. `place` and `onNavigate`: where it starts (the place a link left it, back from the review) and where the
- * person goes on it.
+ * person goes on it. `back` and `headSide`: the way back to the board it came from, at the title's left, and the
+ * thread's other boards at its right (Show me from a board, `ThreadShapeLayer`).
  */
 export function ShapeLayer({
   host,
@@ -84,6 +85,8 @@ export function ShapeLayer({
   onAddToReply,
   place = null,
   onNavigate,
+  back = null,
+  headSide,
 }: {
   host: ShapeHost;
   id: string;
@@ -94,6 +97,8 @@ export function ShapeLayer({
   onAddToReply?: ShapeBoardProps['onAddToReply'];
   place?: ShapeBoardPlace | null;
   onNavigate?: ShapeBoardProps['onNavigate'];
+  back?: ReactNode;
+  headSide?: ReactNode;
 }) {
   // A phone has none: there the sidebar is a sheet and the board covers the window, as before.
   const { isMobile } = useSidebar();
@@ -117,7 +122,13 @@ export function ShapeLayer({
       onAddToReply={onAddToReply}
       place={place}
       onNavigate={onNavigate}
-      headStart={isMobile ? undefined : <SidebarTrigger />}
+      headStart={isMobile && !back ? undefined : (
+        <>
+          {!isMobile && <SidebarTrigger />}
+          {back}
+        </>
+      )}
+      headSide={headSide}
     />
   );
 }
@@ -138,6 +149,7 @@ export function ShapeBoardLayer({
   covered = false,
   onAddToReply,
   headStart,
+  headSide,
   place = null,
   onNavigate,
 }: {
@@ -151,6 +163,7 @@ export function ShapeBoardLayer({
   covered?: boolean;
   onAddToReply?: ShapeBoardProps['onAddToReply'];
   headStart?: ReactNode;
+  headSide?: ReactNode;
   place?: ShapeBoardPlace | null;
   onNavigate?: ShapeBoardProps['onNavigate'];
 }) {
@@ -177,6 +190,7 @@ export function ShapeBoardLayer({
           review={review}
           renderThread={thread ? ({ flash }) => <ShapeThreadTab thread={thread} flash={flash} openInFiles={!!host.fileAction} /> : undefined}
           headStart={headStart}
+          headSide={headSide}
           crosshair
           onAddToReply={thread ? onAddToReply : undefined}
           {...(place ? { initialView: place.view, initialPanel: place.panel } : {})}

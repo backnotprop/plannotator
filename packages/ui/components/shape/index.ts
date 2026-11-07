@@ -18,6 +18,7 @@ export type {
   ShapePanelTab,
   ShapeReviewAt,
   ShapeSessionStatus,
+  ShapeShowMeInput,
   ShapeSurfaceProps,
   ShapeSurfaceReview,
 } from './types';

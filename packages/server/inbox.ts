@@ -274,7 +274,7 @@ import { handleInboxTourRequest } from "./inbox-tour";
 import { createBunShapeRoutes } from "./shape-routes";
 import { shapeCodeRoot } from "@plannotator/shared/shape/store";
 import { shapeEventFrame } from "@plannotator/shared/shape/routes";
-import { shapeAgentName } from "@plannotator/shared/shape/routes";
+import { shapeAgentName, unlocked as unlockedShape } from "@plannotator/shared/shape/routes";
 import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch, shapeSwitchOn } from "@plannotator/shared/shape/switch";
 import {
   agentSpec,
@@ -3541,14 +3541,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   // Ask AI: the conversation a thread keeps with its agent (packages/server/inbox-ask.ts).
   const ask = createInboxAsk({
-    on: askOnNow,
+    // Shape on its own needs it only for a Show me from a board (`questionsOn`): the window's Ask stays off (`ask_ai`).
+    on: () => askOnNow() || shapeOn(),
+    questionsOn: askOnNow,
     codeReviewOn,
+    boardsOn,
     // The boards of a thread, for naming the board each Show me made (`showMeShapes`).
     boardsOf: (threadId) =>
       shapes.store
         .list({ state: "all" })
         .filter((shape) => shape.thread === threadId)
         .map((shape) => ({ id: shape.id, versions: shapes.store.versionStamps(shape.id) })),
+    // A Show me's box picture: in the board's own folder, as a box note's picture is.
+    keepPicture: async (board, picture) => ((await unlockedShape(shapes.store, board)) ? shapes.store.keepShowMePicture(board, picture) : null),
     // Show me's review: its thread, title and the files of its diff (inbox-guides.ts reads the stored snapshot).
     reviewOf: (messageId) => {
       const message = store.message(messageId);
@@ -3830,7 +3835,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // (this machine, no browser, the Inbox token), then the launch's own key. Never a window route.
     const isPermissionHook = /^\/api\/inbox\/launch\/[^/]+\/permission$/.test(path);
     // Ask AI's client (inbox-ask-live.ts). With the setting off, the unknown route, as if it did not exist.
-    const askClient = askOnNow() && path.startsWith(INBOX_ASK_BRIDGE_PREFIX);
+    const askClient = (askOnNow() || shapeOn()) && path.startsWith(INBOX_ASK_BRIDGE_PREFIX);
     if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/") || isPermissionHook || askClient) {
       // A tailnet peer can claim a loopback Host (serve passes it through, and
       // the tailnet HTTPS port is this port), so the listener decides.

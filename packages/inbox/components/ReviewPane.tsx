@@ -53,8 +53,9 @@ import type { ShapeHost, ShapeReviewAt } from '@plannotator/ui/components/shape'
 import { OverviewFigure, ShowMeButton } from '../review-drawing/OverviewFigure';
 import { ShowMeBox, ShowMeCorner } from '../review-drawing/ShowMeLayer';
 import { partLanding, reviewDrawnOn, overviewPicture, baseName, changedMarks, chapterOf, markOf, partName, targetLines } from '../review-drawing/showMeModel';
-import { useShowMe } from '../review-drawing/useShowMe';
+import { showMeFromShape, useShowMe } from '../review-drawing/useShowMe';
 import { ShapeBoardLayer, ShapePebbleButton } from '../shape/ShapeParts';
+import { useBoardsNav } from '../shape/ShapeBoardsNav';
 import type { ShapeBoardPlace } from '../shape/types';
 import { useLineInView } from './reviewLineInView';
 import { shapeReview } from '../shape/review';
@@ -115,6 +116,8 @@ export interface ReviewPaneProps {
   /** The board open over the review (`&shape=` in the address), or null. */
   board: string | null;
   onBoard: (id: string | null) => void;
+  /** The window's polite live region: a new board's title is said when Show me opens it. */
+  onSay?: (text: string) => void;
   /** Opened from a link on that board: the board starts as the corner card, the review at `at`. */
   boardShrunk?: boolean;
   /** The view and panel the person left that board on (the link's): the board under the card opens there. */
@@ -137,7 +140,7 @@ const NO_ANNOTATIONS: never[] = [];
 
 type RailMode = 'walkthrough' | 'files';
 
-export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onPosted, onAsk, shapeHost, shapes, board, onBoard, boardShrunk = false, boardPlace = null, onBoardNavigate, at = null, onLanded }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onPosted, onAsk, shapeHost, shapes, board, onBoard, boardShrunk = false, boardPlace = null, onBoardNavigate, at = null, onLanded, onSay }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = state;
   // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
@@ -303,6 +306,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     enabled: !readOnly,
     subscribeBoards: shapes.subscribe,
     onBoard,
+    say: onSay,
   });
   /**
    * The board shrunk to the corner card, kept as it is underneath: the part a click landed on, or none (a link on the
@@ -323,12 +327,16 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   showMeAgain.current = showMe.again;
   const onBoardRef = useRef(onBoard);
   onBoardRef.current = onBoard;
+  const showMeFromBoard = useRef(showMe.fromBoard);
+  showMeFromBoard.current = showMe.fromBoard;
+  const boardsNav = useBoardsNav({ shapes: shapes.shapes, threadId: thread.thread_id, board, parents: showMe.parents, onBoard });
   // The board's Show me again: the box, over the review, for what it was made of; the new version opens the board again.
   const boardHost = useMemo<ShapeHost>(
     () =>
       showMe.state.canAsk
         ? {
             ...shapeHost,
+            showMe: (id, part) => showMeFromShape(() => showMeFromBoard.current, id, part),
             refreshLabel: 'Show me again',
             refresh: async (id) => {
               onBoardRef.current(null);
@@ -733,7 +741,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
         )}
         <span className="ib-sp" />
         {snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
-        {threadBoard && <ShapePebbleButton shape={threadBoard} open={board === threadBoard.id} onToggle={() => onBoard(board === threadBoard.id ? null : threadBoard.id)} />}
+        {threadBoard && <ShapePebbleButton shape={threadBoard} open={!!board} onToggle={() => onBoard(board ? null : threadBoard.id)} />}
         {folded && (
           <button
             type="button"
@@ -928,7 +936,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
         onStop={() => void showMe.stop()}
         onClose={showMe.closeBox}
       />
-      {board && <ShapeBoardLayer host={boardHost} id={board} thread={thread} hidden={!!landed} onClose={() => onBoard(null)} onCode={landOnCode} review={boardReview} place={boardPlace} onNavigate={onBoardNavigate} />}
+      {board && <ShapeBoardLayer host={boardHost} id={board} thread={thread} hidden={!!landed} onClose={() => onBoard(null)} onCode={landOnCode} review={boardReview} place={boardPlace} onNavigate={onBoardNavigate} headStart={boardsNav.back} headSide={boardsNav.list} />}
       {board && landed && (
         <ShowMeCorner shape={board} title={boardSummary?.title ?? 'Shape'} picture={boardSummary?.preview?.picture ?? null} part={landed.part} resolveSrc={(src) => shapeHost.assetUrl?.(board, src) ?? src} onGrow={() => setLanded(null)} onClose={() => onBoard(null)} {...(showMe.state.canAsk ? { onAgain: () => { onBoard(null); showMe.again(board); } } : {})} />
       )}

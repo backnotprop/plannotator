@@ -193,7 +193,9 @@ import { emitAskChange } from './ask/askEvents';
 import { useInboxAsk } from './ask/useInboxAsk';
 import { setSessionLabels } from './sessionLabels';
 import { createInboxShapeHost } from './shape/inboxShapeHost';
-import { ShapeGridPage, ShapeLayer, ShapePebbleButton } from './shape/ShapeParts';
+import { ShapeGridPage, ShapePebbleButton } from './shape/ShapeParts';
+import { ThreadShapeLayer, ThreadShowMeBox, useThreadShowMe } from './shape/ThreadShapeLayer';
+import { showMeBoardOpensIn } from './shape/showMeOpensIn';
 import { shapeReplyPart, type ShapeReplyPart } from './shape/addToReply';
 import type { ShapeBoxSelection } from '@plannotator/ui/components/shape';
 import { useBoardPlaces } from './shape/boardPlace';
@@ -5315,6 +5317,20 @@ function Inbox() {
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
   // A review, while Code review is on: the full-window review (ReviewPane).
   const reviewPaneOpen = codeReviewOn && !!guideMessage?.guide?.review;
+  // Show me from a thread's board, above the board: one closed while another draws keeps its wait and the presses
+  // behind it, and the new board opens when it lands: over the grid or its own thread, else in its own thread.
+  const showMeThreadRef = useRef<string | null>(null);
+  const threadShowMe = useThreadShowMe({
+    shapes,
+    board: shapeLayerId && !reviewPaneOpen ? shapeLayerId : null,
+    onBoard: (id) => {
+      const now = routeRef.current;
+      const home = showMeThreadRef.current;
+      go(showMeBoardOpensIn(now, home) === 'here' ? { ...now, shape: id } : { page: 'inbox', project: null, thread: home, shape: id });
+    },
+    say,
+  });
+  showMeThreadRef.current = threadShowMe.threadId;
   reviewPaneOpenRef.current = reviewPaneOpen;
   // The review is at the place a board's link named: the address lets it go, so a reload opens it at the top.
   const landGuide = () => {
@@ -6064,7 +6080,7 @@ function Inbox() {
             shapeButton={(() => {
               const board = boardsOn && thread ? shapes.byThread.get(thread.thread_id) : undefined;
               if (!board) return null;
-              const open = route.shape === board.id;
+              const open = !!route.shape;
               return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : go({ ...route, shape: board.id }))} />;
             })()}
             askFileButton={ask.fileButton}
@@ -6311,11 +6327,14 @@ function Inbox() {
         <main className="ib-main" data-shape-open={shapeLayerId ? '' : undefined}>
           {main}
           {shapeLayerId && !reviewPaneOpen && (
-            <ShapeLayer
+            <ThreadShapeLayer
               host={shapeHost}
               id={shapeLayerId}
               thread={route.page === 'inbox' && thread && thread.thread_id === route.thread ? thread : null}
+              shapes={shapes}
+              threadShowMe={threadShowMe}
               onClose={() => close({ ...routeRef.current, shape: null })}
+              onBoard={(id) => go({ ...routeRef.current, shape: id })}
               // Its review opens at the place a link names. With Code review on the code shows and the board is its
               // corner card (ReviewPane); otherwise the guide pane opens over the board, and Back or Esc comes back to it.
               onOpenReview={(messageId, at) => {
@@ -6329,6 +6348,7 @@ function Inbox() {
               onNavigate={(place) => boardPlaces.moved(shapeLayerId, place)}
             />
           )}
+          {!reviewPaneOpen && <ThreadShowMeBox threadShowMe={threadShowMe} />}
         </main>
       </SidebarShell>
       <UsagePeek
@@ -6751,6 +6771,7 @@ function Inbox() {
               if (id) go({ ...now, shape: id });
               else close({ ...now, shape: null });
             }}
+            onSay={say}
             boardShrunk={boardLink === guideMessage.id}
             boardPlace={shapeLayerId ? boardPlaces.placeOf(shapeLayerId) : null}
             onBoardNavigate={(place) => {
