@@ -91,9 +91,15 @@ export function canMarkUnread(
   return row.sent === null;
 }
 
-/** The toast after Mark unread: where the row went (the subject names it, as the list's Mark read toast does). */
-export function markUnreadToast(before: Pick<InboxListRow, 'subject'>): { lead: string; detail: string } {
-  return { lead: 'Marked unread', detail: `“${before.subject ?? '(no subject)'}” · back in New` };
+/**
+ * The toast after Mark unread (the subject names the row, as the list's Mark read toast does). `moved`: the thread
+ * was the open one, which closes, and the list settles with its row back in New, so the toast says so. From a row
+ * the list holds still (approval "inbox-list-view", R7): the row is bold where it is and goes to New when the list
+ * next settles, so the toast names it only.
+ */
+export function markUnreadToast(before: Pick<InboxListRow, 'subject'>, moved: boolean): { lead: string; detail: string } {
+  const subject = `“${before.subject ?? '(no subject)'}”`;
+  return { lead: 'Marked unread', detail: moved ? `${subject} · back in New` : subject };
 }
 
 export interface MarkReadToast {
@@ -114,9 +120,11 @@ export interface MarkReadToast {
 /**
  * Where the thread marked read was when the person marked it:
  * - `open`: it is the thread open on screen (its header names it);
- * - `held`: another thread is open, so the list holds still (settle.ts) and
- *   the row has not moved yet;
- * - `list`: no thread is open, and the row has moved.
+ * - `held`: a row that is not the open thread (another thread open, or none):
+ *   the list holds still (settle.ts; approval "inbox-list-view", R7) and the
+ *   row has not moved yet;
+ * - `list`: the row has moved (a seen update held in New, moved to Quiet beside
+ *   an open thread, App.tsx `moveSeenToQuiet`).
  */
 export type MarkReadPlace = 'open' | 'held' | 'list';
 

@@ -164,7 +164,7 @@ const click = async (selector: string) => {
   await settle();
 };
 
-test.skipIf(!hasDom)('the top bar holds what the rail held: Walkthrough | All files, the chapter menu, the title; no rail, and no Split | Unified in the bar', async () => {
+test.skipIf(!hasDom)('the top bar holds what the rail held: Walkthrough | All files, the chapter menu, the title, then the diff controls; no rail', async () => {
   await render();
   const bar = document.querySelector<HTMLElement>('[data-review-message] .ib-vhead')!;
   expect(document.querySelector('[data-review-message] .ib-rrail')).toBeNull();
@@ -178,8 +178,13 @@ test.skipIf(!hasDom)('the top bar holds what the rail held: Walkthrough | All fi
   expect(back.getAttribute('aria-label')).toBe('Thread');
   // Nothing of the old header's: the review's name is said once.
   expect(bar.textContent).not.toContain('· from');
-  // The layout is above the diffs, not in the bar (the browser walk draws it there).
-  expect(bar.querySelector('[data-diff-style-switch]')).toBeNull();
+  // The diff controls are the bar's (approval "diff-controls-headers"): one Split / Unified button, not the old radios.
+  const controls = bar.querySelector<HTMLElement>('[data-diff-controls]')!;
+  expect(controls).not.toBeNull();
+  expect(bar.querySelector('[data-review-title]')!.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(controls.querySelector('[data-diff-layout-toggle]')).not.toBeNull();
+  expect(controls.querySelector('[data-diff-display-options]')).not.toBeNull();
+  expect(document.querySelector('[data-review-message] [data-diff-style-switch]')).toBeNull();
 });
 
 test.skipIf(!hasDom)("a teammate's pull request (the thread holds only theirs): the review reads with no Approve or Request changes, and its card waits on no verdict", async () => {

@@ -64,6 +64,7 @@ import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { INBOX_DEVICE_MARKUP_MAX_BYTES } from "@plannotator/shared/inbox/markups";
 import { inboxDiskFullError, INBOX_UPLOAD_MAX_BYTES } from "@plannotator/shared/inbox/uploads";
 import { describeTailscaleFailure, runTailscale, TAILSCALE_SERVE_TIMEOUT_MS, type TailscaleRunner } from "@plannotator/shared/tailscale";
+import { MACHINE_WINDOW_HEADER } from "./inbox-outbox";
 import { INBOX_SNOOZE_HELD } from "./inbox-snooze";
 import { createInboxLan, LanUnavailableError } from "./inbox-lan";
 import {
@@ -152,6 +153,8 @@ interface DoorRoute {
   refuse?: readonly { field: string; message: string }[];
   /** The window route's query when a linked machine asks: its write may have waited in that machine's outbox. */
   fromMachine?: string;
+  /** Only a linked machine's token reaches it (a phone gets the unknown-route 404): starting and stopping agents from another machine. */
+  machineOnly?: true;
 }
 
 const ALLOWLIST: readonly DoorRoute[] = [
@@ -227,6 +230,9 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // A pending pasted-text upload's words (approval "inbox-paste-attachment"), read only: a linked machine's
   // window puts a long paste back in a reply to this machine's thread, as it uploaded it here.
   { method: "GET", route: /^uploads\/([^/]+)\/text$/, window: (m) => `/api/inbox/uploads/${m[1]}/text` },
+  // A launched agent's Stop, Try again, Trust folder and Delete from a linked machine's window (remote launch). Open in
+  // Terminal and the launch settings never cross: they are this computer's.
+  { method: "POST", route: /^launch\/([^/]+)\/(stop|retry|trust|delete)$/, window: (m) => `/api/inbox/launch/${m[1]}/${m[2]}`, machineOnly: true },
 ];
 
 /** The two writes only a linked machine sends this door (inbox-machines.ts answers them); never a window route. */
@@ -312,8 +318,8 @@ export interface InboxDevicesContext {
   port: () => number;
   registry: () => InboxRegistryEntry;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
-  /** The server's own `fetch`: the door hands each allowed request to it on loopback. */
-  dispatch: (req: Request) => Promise<Response>;
+  /** The server's own `fetch`: the door hands each allowed request to it on loopback, saying which device asked. */
+  dispatch: (req: Request, from: InboxDoorCaller) => Promise<Response>;
   now?: () => Date;
   /** Tests: how long the door stays up for a machine unlinked while it could not be told. Default `UNLINKED_REFUSAL_KEPT_MS`. */
   refusalKeptMs?: number;
@@ -333,6 +339,17 @@ export interface InboxDevicesContext {
   phones?: boolean;
   /** Linked machines (inbox-machines.ts): the two door routes only a machine calls. Bound after both exist. */
   machines?: () => InboxDoorMachines | null;
+}
+
+/**
+ * Who a request the door hands on came from. `window`: a linked machine says the person pressed it in a window
+ * there (`X-Plannotator-Window`), which its own Inbox checked; only a machine's word counts, a phone's never asks.
+ */
+export interface InboxDoorCaller {
+  device_id: string;
+  name: string;
+  platform: string;
+  window: boolean;
 }
 
 /** What the door hands to inbox-machines.ts. */
@@ -696,6 +713,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
   /** Hand one allowed request to the window's handler, on loopback, as the window would send it. */
   const toWindow = (
     req: Request,
+    device: InboxDevice,
     windowPath: string,
     search: string,
     body: string | ReadableStream<Uint8Array> | null,
@@ -725,7 +743,13 @@ export function createInboxDevices(context: InboxDevicesContext) {
       const ifRange = req.headers.get("if-range");
       if (ifRange) headers.set("If-Range", ifRange);
     }
-    return context.dispatch(new Request(`http://127.0.0.1:${context.port()}${windowPath}${search}`, { method: req.method, headers, body, signal }));
+    const from: InboxDoorCaller = {
+      device_id: device.id,
+      name: device.name,
+      platform: device.platform,
+      window: device.platform === MACHINE_PLATFORM && req.headers.get(MACHINE_WINDOW_HEADER) === "1",
+    };
+    return context.dispatch(new Request(`http://127.0.0.1:${context.port()}${windowPath}${search}`, { method: req.method, headers, body, signal }), from);
   };
 
   /** A POST through the door: answered once per device and key, then replayed. */
@@ -752,7 +776,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
         return finish(refuse(422, "validation_error", "idempotency_key: required on a phone's command (in the query for a file).", { field: "idempotency_key" }));
       }
       return claim(req, device, doorPath, key, finish, async () => {
-        const response = await toWindow(req, windowPath, url.search, metered?.stream ?? null, req.signal, true);
+        const response = await toWindow(req, device, windowPath, url.search, metered?.stream ?? null, req.signal, true);
         const answer = await response.text();
         // Past the bound: the door's own refusal (nothing kept, nothing recorded), whatever the window made of the cut stream.
         if (metered?.over()) return { response: withClose(tooLarge()), record: false };
@@ -777,7 +801,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
       if (fields[refused.field] !== undefined) throw new InboxError("validation_error", refused.message, { field: refused.field });
     }
     return claim(req, device, doorPath, key, async (response) => response, async () => {
-      const response = await toWindow(req, windowPath, device.platform === MACHINE_PLATFORM ? (entry.fromMachine ?? "") : "", text, req.signal);
+      const response = await toWindow(req, device, windowPath, device.platform === MACHINE_PLATFORM ? (entry.fromMachine ?? "") : "", text, req.signal);
       const answer = await response.text();
       return { response: new Response(answer, { status: response.status, headers: response.headers }), answer, status: response.status, record: true };
     });
@@ -850,15 +874,16 @@ export function createInboxDevices(context: InboxDevicesContext) {
       if (machines && req.method === "POST" && route === linkBack) return machines.linkBack(device.id, await context.readBody(req));
       if (machines && req.method === "POST" && route === unlink) return machines.unlinkedBy(device.id);
       // Only this Inbox's own read, so it never passes on a third machine's. Of the query, only Refresh's `fresh`.
-      if (req.method === "GET" && route === MACHINE_DOOR_ACCOUNTS) return await toWindow(req, "/api/inbox/accounts", url.searchParams.get("fresh") === "1" ? "?fresh=1" : "", null, req.signal);
+      if (req.method === "GET" && route === MACHINE_DOOR_ACCOUNTS) return await toWindow(req, device, "/api/inbox/accounts", url.searchParams.get("fresh") === "1" ? "?fresh=1" : "", null, req.signal);
     }
     for (const entry of ALLOWLIST) {
       if (entry.method !== req.method) continue;
+      if (entry.machineOnly && device.platform !== MACHINE_PLATFORM) continue;
       const match = entry.route.exec(route);
       if (!match) continue;
       const windowPath = entry.window(match);
       if (req.method === "POST") return await command(req, device, url, windowPath, entry);
-      if (route !== "events") return await toWindow(req, windowPath, url.search, null, req.signal);
+      if (route !== "events") return await toWindow(req, device, windowPath, url.search, null, req.signal);
       // The event stream lives until the phone leaves or is removed.
       const stream = new AbortController();
       req.signal.addEventListener("abort", () => stream.abort());
@@ -866,7 +891,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
       open.add(stream);
       streams.set(device.id, open);
       stream.signal.addEventListener("abort", () => open.delete(stream));
-      return await toWindow(req, windowPath, url.search, null, stream.signal);
+      return await toWindow(req, device, windowPath, url.search, null, stream.signal);
     }
     return refuse(404, "device_route_not_found", "Not a phone route.");
   };

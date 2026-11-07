@@ -9,11 +9,13 @@
   "exports": {
     ".": "./src/index.ts",
     "./node": "./src/node/index.ts",
+    "./commands": "./src/agent/command.ts",
     "./react": "./src/react.ts",
     "./system.css": "./src/system.css"
   },
   "scripts": {
     "check": "bun src/node/check-cli.ts",
+    "recipes": "bun src/node/recipes-cli.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test",
     "demo": "bun demo/serve.ts"

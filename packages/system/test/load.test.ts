@@ -22,7 +22,7 @@ function textsUnder(dir: string): [string, string][] {
 // capitalized words in a person's slot (people parts, "by", authors) fail.
 const ALLOWED_PEOPLE = new Set(['Maya Chen', 'Alex Rivera']);
 
-describe('the committed drawing', () => {
+describe('the plannotator fixture', () => {
   test('loads with no errors and no warnings', async () => {
     const r = await load(drawingDir);
     expect(r.errors).toEqual([]);
@@ -46,7 +46,8 @@ describe('the committed drawing', () => {
   });
 
   test('the drawing and the tests hold no private path, private repo alias or real person', async () => {
-    const texts = [...textsUnder(drawingDir), ...textsUnder(join(fixturesDir, '..'))];
+    // the plannotator fixture sits under test/fixtures, so this covers it
+    const texts = textsUnder(join(fixturesDir, '..'));
     expect(texts.length).toBeGreaterThan(10);
     const names = new Set<string>();
     for (const [path, t] of texts) {

@@ -5,7 +5,7 @@
  * (scripts/inbox-sim.ts):
  *
  *  - words dragged across in an agent's message open the comment-only
- *    toolbar (Comment and 👍, no Delete); Escape closes it, not the thread;
+ *    toolbar (Delete, Comment and 👍); Escape closes it, not the thread;
  *  - Comment opens the composer; ⌘↵ saves; the passage keeps a light
  *    highlight; the reply box's chip counts it and lists it under the message;
  *  - Send carries it, and the agent's read_thread returns the quote and the
@@ -156,12 +156,13 @@ test("a comment on words in an agent's message: toolbar, composer, highlight, ch
   await page.goto(`${world.url}#thread=${sent.thread_id}`);
   await expect(page.locator(`[data-message-id="${id}"]`)).toContainText('dead-letter queue');
 
-  // The comment-only toolbar: Comment and 👍, no Delete.
+  // Delete, Comment and 👍 (approval "inbox-toolbar-delete"), no label picker.
   await dragSelect(page, id, 'two, four and eight seconds');
   await expect(toolbar(page)).toBeVisible();
+  await expect(toolbar(page).getByRole('button', { name: 'Delete' })).toBeVisible();
   await expect(toolbar(page).getByRole('button', { name: 'Comment' })).toBeVisible();
   await expect(toolbar(page).getByRole('button', { name: 'Looks good' })).toBeVisible();
-  await expect(toolbar(page).getByRole('button', { name: 'Delete' })).toHaveCount(0);
+  await expect(toolbar(page).getByRole('button', { name: 'Quick label' })).toHaveCount(0);
   await shot(page, '01-desktop-selected');
   // Escape closes the toolbar, never the thread.
   await page.keyboard.press('Escape');
