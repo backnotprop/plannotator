@@ -117,13 +117,19 @@
 .sys-card-pop { position: absolute; left: 14px; bottom: 54px; max-height: calc(100% - 70px); overflow: auto; background: var(--sys-paper); border: 1px solid var(--ib-line, var(--border)); border-radius: var(--ib-r10-s, 8px); box-shadow: 0 8px 28px color-mix(in oklab, var(--foreground) 12%, transparent); padding: 12px 14px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--sys-ink); cursor: default; z-index: 3; }
 .sys-keycard { width: 300px; }
 .sys-notescard { width: min(560px, calc(100% - 28px)); display: grid; gap: 9px; }
+.sys-notescard .sys-kc-h { display: flex; align-items: center; justify-content: space-between; margin: -2px -6px -4px 0; }
+.sys .sys-card-x { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--ib-r8-s, 5px); color: var(--sys-ink2); }
+.sys .sys-card-x:hover { background: var(--ib-fill, var(--muted)); color: var(--foreground); }
+.sys .sys-card-x:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .sys-kc-h { font-size: var(--ib-fs-12, 12px); font-weight: 600; color: var(--sys-ink2); margin: 10px 0 5px; }
 .sys-kc-h:first-child { margin-top: 0; }
 .sys-kc-w { font-weight: 600; color: var(--sys-ink); margin-right: 2px; }
 .sys-kc-r { display: flex; align-items: center; gap: 10px; min-height: 22px; }
 .sys-kc-i { width: 40px; flex: none; display: inline-flex; justify-content: center; }
 .sys-kc-k { display: flex; align-items: center; gap: 4px; min-height: 22px; }
-.sys-kc-k > span:last-child { margin-left: 6px; color: var(--sys-ink2); }
+/* the words after a key's caps; a row of words alone (the drag line) starts at the edge like the rest */
+.sys-kc-k > span:last-child:not(:first-child) { margin-left: 6px; }
+.sys-kc-k > span:last-child { color: var(--sys-ink2); }
 .sys-kbd { font-family: var(--font-mono); font-size: var(--ib-fs-11, 11px); min-width: 20px; height: 20px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ib-line, var(--border)); border-radius: 4px; color: var(--sys-ink); }
 .sys-note-row { display: flex; gap: 9px; align-items: flex-start; }
 .sys-note-row .sys-letter { margin-top: 1px; }

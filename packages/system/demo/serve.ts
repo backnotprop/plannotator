@@ -8,6 +8,7 @@
 //   ?shot=change&pr=2543&view=before|after|steps   the full System view of a PR (&gate=1, &open=1 as above)
 //   ?shot=plan                        a plan drawn dashed, as Shape's System (plan) tab
 //   &mode=light|dark                  the theme mode (dark by default)
+//   &keys=off                         the single-key shortcuts off, as the Inbox passes them
 //
 // The drawing is read from disk here and handed to the page as files; the page
 // loads them with the browser entry's loadFiles. The sheets are served as they
