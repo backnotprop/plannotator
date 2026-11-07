@@ -318,18 +318,21 @@ describe.if(hasDom)('the empty second line folds only when nothing shows on it',
   const NARROW_NAME_FIRST = ['ib-l1 +time', 'ib-l2 ib-l2-lead', 'ib-l3'];
   const PHONE_PROJECT_FIRST = ['ib-m1 +time', 'ib-m2', 'ib-m3'];
   const PHONE_NAME_FIRST = ['ib-m1 +time', 'ib-m1 ib-m1-lead', 'ib-m3'];
-  const looks: [string, InboxRowsOption[], string[], string[]][] = [
+  // The options are read inside each test: the presets come from a DOM-only import, absent where the file only loads.
+  const preset = (id: string) => () => rowsFromLook(ROWS_PRESETS.find((p) => p.id === id)!.look);
+  const looks: [string, () => InboxRowsOption[], string[], string[]][] = [
     // The owner's own look (rows-bold-1357.png): the defaults, the agents and the project on line 1.
-    ['the defaults', [], NARROW_PROJECT_FIRST, PHONE_PROJECT_FIRST],
+    ['the defaults', () => [], NARROW_PROJECT_FIRST, PHONE_PROJECT_FIRST],
     // Detailed's names in their pill: a phone's line 2 is the pill.
-    ['Detailed', rowsFromLook(ROWS_PRESETS.find((p) => p.id === 'detailed')!.look), NARROW_PROJECT_FIRST, ['ib-m1 +time', 'ib-key ib-rowkey', 'ib-m3']],
-    ['Minimal (compact, agents off)', rowsFromLook(ROWS_PRESETS.find((p) => p.id === 'minimal')!.look), ['ib-l1 +time', 'ib-l3'], ['ib-m1 +time', 'ib-m3']],
-    ['name first', ['titleFirst'], NARROW_NAME_FIRST, PHONE_NAME_FIRST],
-    ['name first, agents off', ['titleFirst', 'hideAgents'], NARROW_NAME_FIRST, PHONE_NAME_FIRST],
-    ['name first, project off', ['titleFirst', 'hideProject'], NARROW_NAME_FIRST, PHONE_NAME_FIRST],
+    ['Detailed', preset('detailed'), NARROW_PROJECT_FIRST, ['ib-m1 +time', 'ib-key ib-rowkey', 'ib-m3']],
+    ['Minimal (compact, agents off)', preset('minimal'), ['ib-l1 +time', 'ib-l3'], ['ib-m1 +time', 'ib-m3']],
+    ['name first', () => ['titleFirst'], NARROW_NAME_FIRST, PHONE_NAME_FIRST],
+    ['name first, agents off', () => ['titleFirst', 'hideAgents'], NARROW_NAME_FIRST, PHONE_NAME_FIRST],
+    ['name first, project off', () => ['titleFirst', 'hideProject'], NARROW_NAME_FIRST, PHONE_NAME_FIRST],
   ];
-  for (const [name, on, narrow, phone] of looks) {
+  for (const [name, options, narrow, phone] of looks) {
     test(`${name}: every row keeps its lines, nothing folded`, () => {
+      const on = options();
       act(() => adoptSavedRows(on.length ? on : ['smallNames'], 1));
       for (const [shape, expected] of [['narrow', narrow], ['phone', phone]] as const) {
         const el = mount(shape);
