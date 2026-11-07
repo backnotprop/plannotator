@@ -4,6 +4,9 @@ import {
   AUTO_RELOAD_CHECK_IN_MS,
   AUTO_RELOAD_COMMAND,
   AUTO_RELOAD_MAX_REFUSALS,
+  AUTO_RELOAD_PROMPT_GAP_TICKS,
+  AUTO_RELOAD_QUEUE_MAX_MS,
+  AUTO_RELOAD_STORE_RETRY_MS,
   AutoReload,
   hidesReloadOutput,
   readAutoReloads,
@@ -25,7 +28,11 @@ import { fakeHost, type FakeHost } from './testing/fake-host'
 // loop); a refused run retried without the person's input, or forever; the old
 // module not saying the reload did not take; the new module not checking in;
 // the poll not asking or the Inbox's word not reaching the reload; and the
-// render hook hiding anything but our own run's plain success.
+// render hook hiding anything but our own run's plain success. And the loops
+// the review of #2873 found: a store that refuses or loses the record, a
+// reload that does not replace the module, an Inbox that alternates versions,
+// a turn that starts while the store is written, a refusal that lands after
+// the new module checked in.
 
 const SESSION = 'sess-1'
 
@@ -56,6 +63,8 @@ function deps(overrides: Partial<AutoReloadDeps> = {}) {
     },
     after: (ms, fn) => timers.push({ at: state.clock + ms, fn }),
     debug: () => undefined,
+    // One module's memory per deps(): a test that reloads the module gives the new one a fresh map.
+    attempts: new Map(),
     ...overrides,
   }
   const elapse = async (ms: number) => {
@@ -125,14 +134,6 @@ describe('when Plannotator reloads itself', () => {
     expect(state.runs).toBe(1)
   })
 
-  test('a box the host cannot read is never taken for empty', async () => {
-    const { d, state } = deps()
-    const reload = new AutoReload({ ...d, promptText: async () => Promise.reject(new Error('no box')) })
-    reload.setOffer({ installed: '0.28.51' })
-    await reload.tick()
-    expect(state.runs).toBe(0)
-  })
-
   test('once per version: a reload that loaded nothing new is not tried again, and says so', async () => {
     const { d, state, elapse, record } = deps()
     const reload = new AutoReload(d)
@@ -159,18 +160,19 @@ describe('when Plannotator reloads itself', () => {
     const first = new AutoReload(d)
     first.setOffer({ installed: '0.28.51' })
     await first.tick()
-    const second = new AutoReload(d)
+    // A reloaded module: its memory starts over, the store remembers.
+    const second = new AutoReload({ ...d, attempts: new Map() })
     second.setOffer({ installed: '0.28.51' })
     await second.tick()
     expect(state.runs).toBe(1)
   })
 
-  test('each session tries its own reload', async () => {
+  test('each session (its own process) tries its own reload', async () => {
     const a = deps()
     const reloadA = new AutoReload(a.d)
     reloadA.setOffer({ installed: '0.28.51' })
     await reloadA.tick()
-    const reloadB = new AutoReload({ ...a.d, sessionId: 'sess-2' })
+    const reloadB = new AutoReload({ ...a.d, sessionId: 'sess-2', attempts: new Map() })
     reloadB.setOffer({ installed: '0.28.51' })
     await reloadB.tick()
     expect(a.state.runs).toBe(2)
@@ -204,6 +206,189 @@ describe('when Plannotator reloads itself', () => {
   })
 })
 
+describe('never a loop, never over work that started meanwhile (review of #2873)', () => {
+  test('a store that refuses writes (over 4 MiB, a host error) runs nothing, and tries the store again only after a while', async () => {
+    const { d, state, elapse } = deps()
+    let sets = 0
+    const reload = new AutoReload({
+      ...d,
+      storeSet: async () => {
+        sets += 1
+        throw new Error('the store is over 4 MiB')
+      },
+    })
+    reload.setOffer({ installed: '0.28.51' })
+    for (let i = 0; i < 10; i += 1) {
+      await reload.tick()
+      await elapse(1_000)
+    }
+    expect(state.runs).toBe(0)
+    expect(sets).toBe(1)
+    await elapse(AUTO_RELOAD_STORE_RETRY_MS)
+    await reload.tick()
+    expect(sets).toBe(2)
+    expect(state.runs).toBe(0)
+  })
+
+  test('a store that cannot be read, or that does not read back what was written, runs nothing', async () => {
+    const unreadable = deps()
+    const a = new AutoReload({ ...unreadable.d, storeGet: async () => Promise.reject(new Error('host error')) })
+    a.setOffer({ installed: '0.28.51' })
+    for (let i = 0; i < 5; i += 1) await a.tick()
+    expect(unreadable.state.runs).toBe(0)
+
+    const forgetful = deps()
+    // set resolves, but nothing is kept.
+    const b = new AutoReload({ ...forgetful.d, storeSet: async () => undefined })
+    b.setOffer({ installed: '0.28.51' })
+    for (let i = 0; i < 5; i += 1) await b.tick()
+    expect(forgetful.state.runs).toBe(0)
+  })
+
+  test('a reload that does not replace the module runs once, even when the store loses the record afterwards', async () => {
+    const { d, state, store, elapse } = deps()
+    const reload = new AutoReload(d)
+    reload.setOffer({ installed: '0.28.51' })
+    await reload.tick()
+    expect(state.runs).toBe(1)
+    // Another session's read-modify-write dropped this record; the did_not_take write may fail too.
+    store.delete(STORE_AUTO_RELOAD)
+    await elapse(AUTO_RELOAD_CHECK_IN_MS)
+    store.delete(STORE_AUTO_RELOAD)
+    for (let i = 0; i < 20; i += 1) {
+      await elapse(1_000)
+      await reload.tick()
+    }
+    expect(state.runs).toBe(1)
+    // A /clear moves the session id in the same module: still no second run for that version.
+    const cleared = new AutoReload({ ...d, sessionId: 'sess-after-clear' })
+    cleared.setOffer({ installed: '0.28.51' })
+    await cleared.tick()
+    expect(state.runs).toBe(1)
+  })
+
+  test('an Inbox that names A, B, A, B runs once per version, in this module and in a reloaded one', async () => {
+    const { d, state } = deps()
+    const reload = new AutoReload(d)
+    for (const version of ['0.28.51', '0.28.52', '0.28.51', '0.28.52', '0.28.51']) {
+      reload.setOffer({ installed: version })
+      await reload.tick()
+    }
+    expect(state.runs).toBe(2)
+    // A module the reload loaded (fresh memory) reads the tried versions from the store.
+    const next = new AutoReload({ ...d, attempts: new Map() })
+    for (const version of ['0.28.51', '0.28.52']) {
+      next.setOffer({ installed: version })
+      await next.tick()
+    }
+    expect(state.runs).toBe(2)
+  })
+
+  test('a turn that starts while the record is written stops the run, and the record is put back', async () => {
+    const { d, state, record } = deps()
+    let writes = 0
+    const reload = new AutoReload({
+      ...d,
+      storeSet: async (key, value) => {
+        await d.storeSet(key, value)
+        // The person pressed Enter while the first record was written.
+        if ((writes += 1) === 1) state.busy = 'a turn runs'
+      },
+    })
+    reload.setOffer({ installed: '0.28.51' })
+    await reload.tick()
+    expect(state.runs).toBe(0)
+    expect(record()).toBeNull()
+    state.busy = null
+    await reload.tick()
+    expect(state.runs).toBe(1)
+  })
+
+  test('text typed while the record is written stops the run', async () => {
+    const { d, state, record } = deps()
+    const reload = new AutoReload({
+      ...d,
+      storeSet: async (key, value) => {
+        await d.storeSet(key, value)
+        state.box = 'wait'
+      },
+    })
+    reload.setOffer({ installed: '0.28.51' })
+    await reload.tick()
+    expect(state.runs).toBe(0)
+    expect(record()).toBeNull()
+  })
+
+  test('a prompt on its way in (prompt.submit seen, no turn yet) counts as busy until its turn starts, it is dropped, or it is let go', async () => {
+    const { d, state } = deps()
+    const reload = new AutoReload(d)
+    reload.setOffer({ installed: '0.28.51' })
+    reload.notePromptEntering()
+    await reload.tick()
+    expect(state.runs).toBe(0)
+    reload.notePromptSettled()
+    await reload.tick()
+    expect(state.runs).toBe(1)
+
+    const late = deps()
+    const other = new AutoReload(late.d)
+    other.setOffer({ installed: '0.28.51' })
+    other.notePromptEntering()
+    for (let i = 0; i < AUTO_RELOAD_PROMPT_GAP_TICKS; i += 1) await other.tick()
+    expect(late.state.runs).toBe(0)
+    // A prompt that started no turn (a slash command) is let go.
+    await other.tick()
+    await other.tick()
+    expect(late.state.runs).toBe(1)
+  })
+
+  test("an agent in the engine's list holds the run, also when it shows up while the record is written", async () => {
+    const { d, state, record } = deps()
+    let agents: string | null = '1 agent running'
+    const reload = new AutoReload({ ...d, agentsBusy: async () => agents })
+    reload.setOffer({ installed: '0.28.51' })
+    await reload.tick()
+    expect(state.runs).toBe(0)
+    agents = null
+    let calls = 0
+    const racing = new AutoReload({
+      ...d,
+      agentsBusy: async () => ((calls += 1) > 1 ? '1 agent running' : null),
+    })
+    racing.setOffer({ installed: '0.28.51' })
+    await racing.tick()
+    expect(state.runs).toBe(0)
+    expect(record()).toBeNull()
+    await reload.tick()
+    expect(state.runs).toBe(1)
+  })
+
+  test("a refusal that settles after the new module checked in never overwrites its record", async () => {
+    const { d, state, record } = deps()
+    let refuse: (error: Error) => void = () => undefined
+    const old = new AutoReload({
+      ...d,
+      run: () => {
+        state.runs += 1
+        return new Promise((_, reject) => {
+          refuse = reject
+        })
+      },
+    })
+    old.setOffer({ installed: '0.28.51' })
+    void old.tick()
+    for (let i = 0; i < 50; i += 1) await Promise.resolve()
+    expect(state.runs).toBe(1)
+    state.clock += 500
+    state.loaded = { version: '0.28.51', root: '/plugins/cache/plannotator/0.28.51', loaded_at: state.clock }
+    expect(await new AutoReload({ ...d, attempts: new Map() }).checkIn()).not.toBeNull()
+    refuse(new Error('the environment was torn down'))
+    for (let i = 0; i < 50; i += 1) await Promise.resolve()
+    expect(record()).toMatchObject({ outcome: 'checked_in' })
+    expect(record()?.refusals).toBeUndefined()
+  })
+})
+
 describe('after the reload', () => {
   test('the new module checks in, then notes its tools and its first Inbox poll', async () => {
     const { d, state, elapse, record } = deps()
@@ -215,7 +400,7 @@ describe('after the reload', () => {
     old.dispose()
     await elapse(500)
     state.loaded = { version: '0.28.51', root: '/plugins/cache/plannotator/0.28.51', loaded_at: state.clock }
-    const fresh = new AutoReload(d)
+    const fresh = new AutoReload({ ...d, attempts: new Map() })
     expect(await fresh.checkIn()).not.toBeNull()
     await fresh.noteTools(true)
     await fresh.notePolled()
@@ -229,16 +414,49 @@ describe('after the reload', () => {
     expect(state.runs).toBe(1)
   })
 
-  test('a module loaded before the run, or long after it, does not check in', async () => {
+  test('a module loaded before the run, long after it, or checking in long after it loaded, does not check in', async () => {
     const { d, state, record } = deps()
     const old = new AutoReload(d)
     old.setOffer({ installed: '0.28.51' })
     await old.tick()
+    const queuedAt = state.clock
     expect(await new AutoReload(d).checkIn()).toBeNull()
-    state.clock += 3 * AUTO_RELOAD_CHECK_IN_MS
-    state.loaded = { ...state.loaded, loaded_at: state.clock }
+    state.clock = queuedAt + AUTO_RELOAD_QUEUE_MAX_MS + 1_000
+    state.loaded = { version: '0.28.51', root: '/plugins/cache/plannotator/0.28.51', loaded_at: state.clock }
+    expect(await new AutoReload(d).checkIn()).toBeNull()
+    state.loaded = { ...state.loaded, loaded_at: queuedAt + 5_000 }
     expect(await new AutoReload(d).checkIn()).toBeNull()
     expect(record()?.outcome).toBe('pending')
+  })
+
+  test('a queued run that waited minutes for the session to go idle still checks in: the window starts when the module loaded', async () => {
+    const { d, state, record } = deps()
+    const old = new AutoReload(d)
+    old.setOffer({ installed: '0.28.51' })
+    await old.tick()
+    old.dispose()
+    state.clock += 5 * 60_000
+    state.loaded = { version: '0.28.51', root: '/plugins/cache/plannotator/0.28.51', loaded_at: state.clock }
+    state.clock += 1_000
+    expect(await new AutoReload({ ...d, attempts: new Map() }).checkIn()).not.toBeNull()
+    expect(record()?.outcome).toBe('checked_in')
+  })
+
+  test('a reload that loaded the old code again says did_not_take, and the module it loaded does not run again', async () => {
+    const { d, state, record } = deps()
+    const old = new AutoReload(d)
+    old.setOffer({ installed: '0.28.51' })
+    await old.tick()
+    old.dispose()
+    state.clock += 500
+    // The module ran again, but it is still 0.28.50.
+    state.loaded = { ...state.loaded, loaded_at: state.clock }
+    const again = new AutoReload({ ...d, attempts: new Map() })
+    expect(await again.checkIn()).toMatchObject({ outcome: 'did_not_take', checkedIn: { version: '0.28.50' } })
+    expect(record()?.outcome).toBe('did_not_take')
+    again.setOffer({ installed: '0.28.51' })
+    for (let i = 0; i < 5; i += 1) await again.tick()
+    expect(state.runs).toBe(1)
   })
 
   test('tools and polls are noted only on a module that checked in', async () => {
@@ -321,7 +539,7 @@ async function ticks(host: FakeHost, n: number) {
 describe('through the mod', () => {
   test('the poll says the connection reloads itself, and the Inbox word leads to one run at idle', async () => {
     const host = fakeHost()
-    const { mod, polls, reloads } = modOver(host, { offer: '0.28.51' })
+    const { mod, polls, reloads } = modOver(host, { offer: '0.28.71' })
     await ticks(host, 4)
     expect(polls.length).toBeGreaterThan(0)
     expect(polls.every((poll) => poll[INBOX_AUTO_RELOAD_POLL_FIELD] === true)).toBe(true)
@@ -341,7 +559,7 @@ describe('through the mod', () => {
 
   test('a main-loop turn holds the run until it ends; so does a subagent that is still running', async () => {
     const host = fakeHost()
-    const { mod, reloads } = modOver(host, { offer: '0.28.51' })
+    const { mod, reloads } = modOver(host, { offer: '0.28.72' })
     await mod.onTurnStart('turn-1', 'work', undefined)
     await mod.onTurnStart('agent-turn', 'research', 'agent-7')
     await ticks(host, 5)
@@ -359,10 +577,41 @@ describe('through the mod', () => {
   test('text in the prompt box holds the run until it is cleared', async () => {
     const host = fakeHost()
     let box = 'draft'
-    const { mod, reloads } = modOver(host, { offer: '0.28.51', box: () => box })
+    const { mod, reloads } = modOver(host, { offer: '0.28.73', box: () => box })
     await ticks(host, 5)
     expect(reloads).toHaveLength(0)
     box = ''
+    await ticks(host, 3)
+    expect(reloads).toHaveLength(1)
+    mod.dispose()
+  })
+
+  test('a prompt between Enter and its turn start holds the run; its turn then holds it until it ends', async () => {
+    const host = fakeHost()
+    const { mod, reloads } = modOver(host, { offer: '0.28.74' })
+    mod.onPromptSubmitting({ fromUs: false, originKind: 'composer' })
+    await ticks(host, 5)
+    expect(reloads).toHaveLength(0)
+    mod.onPromptEntered({ fromUs: false, originKind: 'composer', text: 'go' })
+    await ticks(host, 3)
+    expect(reloads).toHaveLength(0)
+    await mod.onTurnStart('turn-1', 'go', undefined)
+    await ticks(host, 3)
+    expect(reloads).toHaveLength(0)
+    mod.onTurnComplete('turn-1', 'done', false)
+    await ticks(host, 3)
+    expect(reloads).toHaveLength(1)
+    mod.dispose()
+  })
+
+  test("an agent the engine lists (started before this module loaded) holds the run", async () => {
+    const host = fakeHost()
+    let agents = [{ status: 'running' }, { status: 'completed' }]
+    host.listAgents = async () => agents
+    const { mod, reloads } = modOver(host, { offer: '0.28.75' })
+    await ticks(host, 5)
+    expect(reloads).toHaveLength(0)
+    agents = [{ status: 'completed' }, { status: 'idle' }]
     await ticks(host, 3)
     expect(reloads).toHaveLength(1)
     mod.dispose()

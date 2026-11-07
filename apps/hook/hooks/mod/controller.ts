@@ -196,6 +196,8 @@ export const STORE_LAUNCHES = 'launches'
 export const STORE_APPROVALS = 'approvals'
 
 const TICK_MS = 1_000
+/** `$.agent.list()` statuses auto reload waits for: an agent not started yet, running a turn, or held on work it owns. */
+const RELOAD_BUSY_AGENT_STATUSES = new Set(['pending', 'running', 'waiting'])
 /** Liveness check of a launch whose server has not decided yet. */
 const PID_CHECK_EVERY_TICKS = 15
 const PID_MISSES_BEFORE_STOPPED = 3
@@ -380,7 +382,7 @@ export class PlannotatorMod {
     readonly session: SessionInfo,
   ) {
     this.instanceId = host.randomHex(8)
-    const { readPrompt, runReload, loadedPlugin } = host
+    const { readPrompt, runReload, loadedPlugin, listAgents } = host
     this.autoReload =
       session.inboxTools && readPrompt && runReload && loadedPlugin
         ? new AutoReload({
@@ -392,6 +394,17 @@ export class PlannotatorMod {
             promptText: () => readPrompt.call(host),
             run: () => runReload.call(host),
             busyReason: () => this.reloadBusyReason(),
+            ...(listAgents
+              ? {
+                  agentsBusy: async () => {
+                    // An agent the engine tracks, started before this module loaded or after; a list that cannot be read counts as busy.
+                    const agents = await listAgents.call(host).catch(() => null)
+                    if (!agents) return 'the agent list could not be read'
+                    const running = agents.filter((agent) => RELOAD_BUSY_AGENT_STATUSES.has(agent.status)).length
+                    return running > 0 ? `${running} agent${running === 1 ? '' : 's'} running` : null
+                  },
+                }
+              : {}),
             after: (ms, fn) => {
               const timer = host.every(ms, () => {
                 timer.cancel()
@@ -1827,6 +1840,8 @@ export class PlannotatorMod {
     )
     const wasOurs = !!turnId && this.turns.ownsTurn(turnId)
     this.turns.onPromptEntered(prompt)
+    // Into a turn already running: no turn.start follows for it (that turn keeps the session busy).
+    if (turnId) this.autoReload?.notePromptSettled()
     if (!fromUs) this.inbox?.onForeignPrompt(prompt)
     if (!fromUs) this.inputMoved()
     if (wasOurs && turnId && this.turns.isTakenOver(turnId)) this.host.debug(`ask turn ${turnId} taken over`)
@@ -1837,11 +1852,14 @@ export class PlannotatorMod {
   /** A prompt reached prompt.submit, before the hooks beneath it ran, from register.ts. */
   onPromptSubmitting(prompt: Omit<EnteredPrompt, 'text'>): void {
     this.turns.onPromptSubmitting(prompt)
+    // Between Enter and turn.start no turn is counted yet: auto reload waits for the prompt's turn.
+    this.autoReload?.notePromptEntering()
   }
 
   /** A prompt announced by onPromptSubmitting did not enter, from register.ts. */
   onPromptDropped(prompt: Omit<EnteredPrompt, 'text'>): void {
     this.turns.onPromptDropped(prompt)
+    this.autoReload?.notePromptSettled()
   }
 
   /** A main-loop model request is about to go out (every turn.step without an agent id), from register.ts. */

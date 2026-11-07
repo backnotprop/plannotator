@@ -127,6 +127,12 @@ export interface Host {
    * turn waits on. Optional: without it Plannotator never reloads itself.
    */
   runReload?(): Promise<unknown>
+  /**
+   * `$.agent.list()`: every subagent and teammate the engine tracks, with its
+   * status, including ones started before this module loaded. Optional:
+   * without it auto reload counts only the subagent turns it saw start.
+   */
+  listAgents?(): Promise<{ status: string }[]>
   /** Claude Code's own version (`$.session.version()`'s `base`); null when unknown. Optional. */
   engineVersion?(): Promise<string | null>
   /** `$.session.append` of a notice the transcript shows and the model never reads. */

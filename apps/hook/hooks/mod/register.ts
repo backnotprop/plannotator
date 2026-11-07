@@ -233,6 +233,11 @@ function hostOf($: Engine, debugPath: string | null): Host {
     },
     // From the Inbox tick's timer only (auto-reload.ts): never from a hook a turn waits on, never --force.
     runReload: () => $.command.run({ command: AUTO_RELOAD_COMMAND, args: AUTO_RELOAD_ARGS }),
+    listAgents: async () => {
+      const agents: unknown = await $.agent.list()
+      if (!Array.isArray(agents)) throw new Error('the agent list did not read as a list')
+      return agents.map((agent) => ({ status: String((agent as { status?: unknown } | null)?.status) }))
+    },
     suggest: async (text) => {
       await $.prompt.suggest({ text })
     },
