@@ -80,6 +80,11 @@ import {
   isInboxSoundVolume,
   isInboxTextSize,
   type InboxTextSize,
+  isInboxReactionEmoji,
+  parseInboxReaction,
+  parseInboxSavedReactions,
+  INBOX_SAVED_REACTIONS_MAX,
+  type InboxReaction,
   inboxRowsList,
   inboxRowsRead,
   inboxRowsSaved,
@@ -1973,6 +1978,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * The reaction tray's saved emoji (config.json `inboxReactions`, approval
+   * "inbox-reaction-tray"): up to INBOX_SAVED_REACTIONS_MAX emoji, each with
+   * the person's name for it (optional), in the order saved. Lenient on read
+   * (an entry that is not one is dropped), strict on write (a `422`).
+   */
+  const reactionsState = (): InboxReaction[] => parseInboxSavedReactions(loadConfig().inboxReactions) ?? [];
+
+  const saveReactions = (input: unknown, validateOnly = false): InboxReaction[] => {
+    const list = parseInboxSavedReactions(input);
+    if (!list || !Array.isArray(input) || list.length !== input.length || input.length > INBOX_SAVED_REACTIONS_MAX) {
+      throw new InboxError("validation_error", `reactions: up to ${INBOX_SAVED_REACTIONS_MAX} of { emoji: one emoji, label?: string }, each emoji once.`, { field: "reactions" });
+    }
+    if (validateOnly) return reactionsState();
+    saveConfig({ inboxReactions: list });
+    if (JSON.stringify(reactionsState()) !== JSON.stringify(list)) {
+      throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    }
+    return list;
+  };
+
+  /**
    * How the list's rows look (config.json `inboxRows`, approval "inbox-customize-rows"): the options that are on.
    * Null until a window first saves it, so the first window adopts its browser's old cookies. Lenient on read (a name
    * this build does not know is dropped, so a downgrade or a typo never reads as "never saved"), strict on write (a
@@ -2626,6 +2652,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     theme: themeState(),
     /** The window's text size in px (config.json `inboxTextSize`), 14 unless chosen. */
     text_size: textSizeState(),
+    /** The reaction tray's saved emoji (config.json `inboxReactions`): up to 5, in the order saved; [] until one is saved. */
+    reactions: reactionsState(),
     /** How the list's rows look (config.json `inboxRows`): the options that are on, null until first saved; `rows_rev` counts the saves. */
     ...rowsWire(rowsState()),
     /** The guided review's diff layout (config.json `diffOptions.diffStyle`), shared with code review; null when never chosen. Also `diff_options.diff_style`. */
@@ -4332,6 +4360,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.tailscale === undefined &&
           body.theme === undefined &&
           body.text_size === undefined &&
+          body.reactions === undefined &&
           body.rows === undefined &&
           body.diff_style === undefined &&
           body.diff_options === undefined &&
@@ -4346,7 +4375,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.voice === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, rows, diff_style, diff_options, experimental, tour, prompts, board, steps, code_review, shape, voice, update_check, auto_update or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, reactions, rows, diff_style, diff_options, experimental, tour, prompts, board, steps, code_review, shape, voice, update_check, auto_update or cookie_host is required.");
         }
         const owner = ownerOrLocal(req, via);
         // The Board changes what agents on this computer are offered (the card tool): the owner's to change.
@@ -4391,6 +4420,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (updateSwitches) saveUpdateSwitches(body, true);
         if (body.theme !== undefined) saveTheme(body.theme, true);
         if (body.text_size !== undefined) saveTextSize(body.text_size, true);
+        if (body.reactions !== undefined) saveReactions(body.reactions, true);
         if (body.rows !== undefined) saveRows(body.rows, true);
         const diffOptionsChange = body.diff_style !== undefined || body.diff_options !== undefined;
         if (diffOptionsChange) saveDiffOptions(body, true);
@@ -4413,6 +4443,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (updateSwitches) updates.refresh();
         const theme = body.theme === undefined ? themeState() : saveTheme(body.theme);
         const textSize = body.text_size === undefined ? textSizeState() : saveTextSize(body.text_size);
+        const reactions = body.reactions === undefined ? reactionsState() : saveReactions(body.reactions);
         const rows = rowsWire(body.rows === undefined ? rowsState() : saveRows(body.rows));
         const diffOptions = diffOptionsChange ? saveDiffOptions(body) : diffOptionsState();
         const experimental = body.experimental === undefined ? experimentalState() : saveExperimental(body.experimental);
@@ -4423,7 +4454,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const shape = body.shape === undefined ? { on: shapeOn() } : saveShape(body.shape);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, reactions, ...rows, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
@@ -4870,7 +4901,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         if (body.ack !== undefined && typeof body.ack !== "boolean") throw new InboxError("validation_error", "ack: must be a boolean.", { field: "ack" });
         const on = body.ack !== false;
-        const result = store.ackMessage(ackMatch[1]!, on);
+        // The tray's emoji (approval "inbox-reaction-tray"): for the window only; the agent hears 👍 Looks good, as before.
+        let reaction: InboxReaction | null | undefined;
+        if (body.reaction !== undefined && body.reaction !== null) {
+          const emoji = (body.reaction as { emoji?: unknown } | null)?.emoji;
+          if (!isInboxReactionEmoji(emoji)) throw new InboxError("validation_error", "reaction: { emoji: one emoji, label?: string }.", { field: "reaction" });
+          reaction = parseInboxReaction(body.reaction);
+        } else if (body.reaction === null) reaction = null;
+        const result = store.ackMessage(ackMatch[1]!, on, on ? reaction : undefined);
         if (on) scheduleAckSettle();
         return json(result);
       }

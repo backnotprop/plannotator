@@ -64,6 +64,7 @@ import {
   INBOX_AUTO_SEND_ACK_NOTES,
   INBOX_RECORD_VERSION,
   type InboxAck,
+  type InboxReaction,
   type InboxAddressee,
   type InboxLaunchError,
   type InboxLaunchRecord,
@@ -477,6 +478,11 @@ function lastNonNote(messages: readonly InboxMessage[]): InboxMessage | undefine
 /** The note that carries a 👍 Looks good to the agent (`ack_of`): never listed in a thread, the ack on its message says it. */
 function isAckNote(message: InboxMessage): boolean {
   return message.author.kind === "person" && typeof message.ack_of === "string" && message.ack_of !== "";
+}
+
+/** Two tray reactions are the same emoji with the same name (null is 👍 Looks good). */
+function sameReaction(a: InboxReaction | null, b: InboxReaction | null): boolean {
+  return (a?.emoji ?? null) === (b?.emoji ?? null) && (a?.label ?? "") === (b?.label ?? "");
 }
 
 /**
@@ -2797,8 +2803,14 @@ export class InboxStore {
    * thread's latest agent message (a newer one arrived), while a question in
    * the thread is open or picked, and on an archived thread. No write when
    * nothing changes.
+   *
+   * `reaction` (approval "inbox-reaction-tray"): the emoji the person picked
+   * in the 👍's tray, kept on the ack for the window only; undefined keeps an
+   * ack's reaction as it is, null makes it 👍 Looks good again. Picking another
+   * emoji on a message already marked changes only the emoji: the ack, its
+   * Undo window and what reaches the agent stay as they were.
    */
-  ackMessage(messageId: string, on: boolean): { message: InboxMessageWire; thread: InboxListRow } {
+  ackMessage(messageId: string, on: boolean, reaction?: InboxReaction | null): { message: InboxMessageWire; thread: InboxListRow } {
     const message = this.messages.get(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
     const threadId = message.thread_id;
@@ -2838,8 +2850,14 @@ export class InboxStore {
           settled_seq: null,
           settled_at: null,
           seen_at: null,
+          ...(reaction ? { reaction } : {}),
         };
         this.appendMessage({ ...this.messages.get(messageId)!, ack }, at);
+      } else if (reaction !== undefined && !sameReaction(message.ack.reaction ?? null, reaction)) {
+        // Another emoji on a message already marked: only the emoji changes.
+        const at = this.stamp();
+        const { reaction: _was, ...rest } = message.ack;
+        this.appendMessage({ ...message, ack: reaction ? { ...rest, reaction } : rest }, at);
       }
     } else if (message.ack) {
       const ack = message.ack;

@@ -190,3 +190,36 @@ describe("a 👍 that can no longer go when its window ends", () => {
   });
 
 });
+
+describe("a reaction from the 👍's tray (approval \"inbox-reaction-tray\")", () => {
+  test("it is kept on the ack for the window, and reaches the agent exactly as 👍 Looks good does", () => {
+    const { store, clock, sent, dir } = setup();
+    store.ackMessage(sent.id, true, { emoji: "🚀", label: "Ship it" });
+    expect(store.message(sent.id)!.ack).toMatchObject({ label: "Looks good", reaction: { emoji: "🚀", label: "Ship it" } });
+    clock.now += WINDOW;
+    const [settled] = store.settleAcks(WINDOW);
+    // The note the agent is handed is today's 👍 line, word for word, and read_thread shows only { label, at }.
+    expect(store.message(settled!.ack!.note_id!)!.body).toBe(inboxAckLine(sent.id));
+    expect(store.agentThread(sent.id)!.messages[0]!.ack).toEqual({ label: "Looks good", at: settled!.ack!.at });
+    expect(JSON.stringify(store.agentThread(sent.id))).not.toContain("🚀");
+    // The window's thread carries it from disk, so the line under the message shows the emoji after a restart.
+    const reopened = InboxStore.open(dir, { now: () => new Date(clock.now) });
+    expect(reopened.thread(sent.id)!.messages[0]!.ack).toMatchObject({ reaction: { emoji: "🚀", label: "Ship it" } });
+  });
+
+  test("another emoji on a marked message changes only the emoji; null is 👍 Looks good again; none keeps it", () => {
+    const { store, sent } = setup();
+    store.ackMessage(sent.id, true, { emoji: "🦄" });
+    const at = store.message(sent.id)!.ack!.at;
+    store.ackMessage(sent.id, true, { emoji: "🧪", label: "Add tests" });
+    expect(store.message(sent.id)!.ack).toMatchObject({ at, reaction: { emoji: "🧪", label: "Add tests" } });
+    const before = store.cursor();
+    // The plain call (an older window) leaves the emoji as it is, and writes nothing.
+    store.ackMessage(sent.id, true);
+    expect(store.cursor()).toBe(before);
+    expect(store.message(sent.id)!.ack!.reaction).toEqual({ emoji: "🧪", label: "Add tests" });
+    store.ackMessage(sent.id, true, null);
+    expect(store.message(sent.id)!.ack!.reaction).toBeUndefined();
+    expect(store.message(sent.id)!.ack!.at).toBe(at);
+  });
+});

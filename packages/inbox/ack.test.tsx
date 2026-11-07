@@ -6,8 +6,8 @@
  * an Undo window of a few seconds). What is proved: the thread's foot is
  * Reply and Looks good side by side, with no New message button; Looks good
  * is hidden while a question waits; a click presses the button, draws the
- * pill under the message ("goes to … in a few seconds"), shows the one toast
- * with Undo, and the row reads "👍 Looks good" in place of "Read" once the
+ * pill under the message ("goes to … in a few seconds"), shows no toast
+ * (approval "inbox-reaction-tray"), and the row reads "👍 Looks good" in place of "Read" once the
  * list settles; Z takes it back. Once the window passes the line says it is
  * saved for the agent, and once its session took it, "👍 Looks good ·
  * Delivered to Claude Code, <time>". The line's other states on their own.
@@ -23,7 +23,6 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { InboxListSection, InboxMessageWire } from '@plannotator/core/inbox-types';
 import type { RecipientConnection } from './deliveryLine';
-import { tooltipOf } from './testing/tooltip';
 import { resetListGroupsForTests } from './listGroups';
 
 const hasDom = typeof document !== 'undefined';
@@ -187,9 +186,9 @@ test.skipIf(!hasDom)('the foot is Reply and Looks good side by side; there is no
   expect(footButtons(el)).toEqual(['Reply', '👍Looks good']);
   expect(el.querySelector('[data-new-message]')).toBeNull();
   expect(ackButton(el)!.getAttribute('aria-pressed')).toBe('false');
-  // Its explanation is the component tooltip, not a native title.
+  // No native title, and no tooltip with a mouse: resting on it opens its reaction tray (approval "inbox-reaction-tray").
   expect(ackButton(el)!.hasAttribute('title')).toBe(false);
-  expect(await tooltipOf(ackButton(el)!)).toContain('Tells Claude Code you read it');
+  expect(el.querySelector('section.ib-pane .ib-pfoot [data-react-more]')?.getAttribute('aria-label')).toBe("More reactions for Claude Code's message");
 });
 
 test.skipIf(!hasDom)('hidden while a question waits: the foot is Reply and the open question (Re-ask is in its list)', async () => {
@@ -200,7 +199,7 @@ test.skipIf(!hasDom)('hidden while a question waits: the foot is Reply and the o
   expect(footButtons(el)).toEqual(['Reply', '1 open question']);
 });
 
-test.skipIf(!hasDom)('a click presses the button, the pill and the toast show, the row says Looks good; Z takes it back', async () => {
+test.skipIf(!hasDom)('a click presses the button and the pill shows, with no toast; the row says Looks good; Z takes it back', async () => {
   const thread = world.news[1]!;
   const el = await renderApp(`#thread=${thread}`);
   await until(() => ackButton(el) !== null, 'the Looks good button');
@@ -215,9 +214,8 @@ test.skipIf(!hasDom)('a click presses the button, the pill and the toast show, t
   const pill = el.querySelector('[data-ack-pill]') as HTMLElement;
   expect(pill.getAttribute('data-ack-pill')).toBe('pending');
   expect(pill.textContent).toContain('goes to Claude Code in a few seconds');
-  const toast = el.querySelector('.ib-toast') as HTMLElement;
-  expect(toast.textContent).toContain('Looks good');
-  expect(toast.textContent).toContain('Goes to Claude Code in 10 s · Moves to Quiet');
+  // No toast after a reaction (approval "inbox-reaction-tray"): the pill under the message is the confirmation.
+  expect(el.querySelector('.ib-toast')).toBeNull();
   expect((await serverRow(thread)).section).toBe('quiet');
 
   // Leave the thread: the row settles in Quiet and says Looks good in place of Read.
@@ -228,7 +226,7 @@ test.skipIf(!hasDom)('a click presses the button, the pill and the toast show, t
   await until(() => el.querySelector(`[data-section-id="quiet"] [data-row="${thread}"]`) !== null, 'the row in Quiet');
   expect(el.querySelector(`.ib-listcol [data-row="${thread}"]`)?.textContent).toContain('👍 Looks good');
 
-  // Z while the toast is up: the ack and its Mark read are gone.
+  // Z inside the Undo window (the toast is kept unseen): the ack and its Mark read are gone.
   press('z');
   await until(async () => (await serverMessages(thread)).at(-1)!.ack === null, 'the Undo');
   expect((await serverRow(thread)).read_at ?? null).toBeNull();

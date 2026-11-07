@@ -15,7 +15,7 @@ import { SoftLineBreaksContext } from '@plannotator/ui/components/InlineMarkdown
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
-import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListGroupId, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxReplyDraft, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
+import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListGroupId, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxReaction, type InboxReplyDraft, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
 import { INBOX_AUTO_SEND_ACK_NOTES, inboxAskingMessage, wholeMinutes, isInboxNote, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState, type InboxInlineImage, type InboxQuestionState } from '@plannotator/core/inbox-types';
@@ -139,6 +139,7 @@ import { ActionChecklist, type ActionMark } from './ActionChecklist';
 import { actionForBlock } from '../actions';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import { Tip } from './Tip';
+import { ReactionTray, reactionSpeech } from './ReactionTray';
 import { threadChipName } from '../threadChip';
 import { OpenQuestionsButton, type OpenQuestionsDecide } from './OpenQuestions';
 import { fitWholeFootRowForms, footRowOpenQuestionsForm, footRowTokens, laidOutChildren, pillHitsButtons, type OpenQuestionsLabelForm } from '../footFit';
@@ -1114,9 +1115,11 @@ export interface ThreadPaneProps {
   /**
    * 👍 Looks good on the agent's latest message (`on`), or take it back:
    * silent, nothing is sent; the thread is marked read. `agent` names the
-   * agent for the toast. Absent: no Looks good button.
+   * agent for the toast. Absent: no Looks good button. `reaction`: the emoji
+   * picked in the 👍's tray (null: 👍 Looks good; taking back, the one taken
+   * back), approval "inbox-reaction-tray".
    */
-  onAck?: (messageId: string, on: boolean, agent: string) => void;
+  onAck?: (messageId: string, on: boolean, agent: string, reaction?: InboxReaction | null) => void;
   /**
    * An action item's Done or Can't do it (`mark`) into the reply draft, or
    * taking it back (`null`), approval "inbox-action-items-in-reply": the window
@@ -1383,8 +1386,11 @@ export function AckPill({
   agent,
   wakes = false,
   connection,
+  messageId,
 }: {
   ack: NonNullable<InboxMessageWire['ack']>;
+  /** The message it marks: where a reaction's emoji lands (ReactionTray.tsx `flyReaction`). */
+  messageId?: string;
   agent: string;
   wakes?: boolean;
   /** How the agent's session is connected now (the sessions route's `asker.connection`); undefined while unknown. */
@@ -1393,10 +1399,15 @@ export function AckPill({
   // The wait on a busy session is written in whole minutes: its own clock, while the 👍 waits.
   const now = useMinuteClock(!ack.delivered_at && !!ack.note_id);
   const line = ackPillLine(ack, agent, wakes, whenTime, connection, now);
+  // The emoji picked in the 👍's tray (approval "inbox-reaction-tray"): its name, or the emoji alone.
+  const reaction = ack.reaction ?? null;
   return (
-    <p className="ib-ackpill" data-ack-pill={line.state}>
-      <span className="ib-ackchip">
-        <span aria-hidden="true">👍</span> {ack.label}
+    <p className="ib-ackpill" data-ack-pill={line.state} data-ack-for={messageId}>
+      <span className="ib-ackchip" data-bare={reaction && !reaction.label ? '' : undefined}>
+        <span className="ib-ackemoji" aria-hidden="true">
+          {reaction?.emoji ?? '👍'}
+        </span>
+        {reaction ? reaction.label ? ` ${reaction.label}` : <span className="ib-sr">{reactionSpeech(reaction)}</span> : ` ${ack.label}`}
       </span>
       <Tip content={line.state === 'delivered' && ack.delivered_at ? `You marked it ${fullTime(ack.at)}; delivered ${fullTime(ack.delivered_at)}` : fullTime(ack.at)}>
         <span className="ib-ackwhen">{line.text}</span>
@@ -6173,7 +6184,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                     <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />
                   ))}
                 {isAgent && message.ack && (
-                  <AckPill ack={message.ack} agent={name} wakes={message.wakes === true} connection={message.id === ackWaiting?.id ? ackConnection : undefined} />
+                  <AckPill ack={message.ack} agent={name} wakes={message.wakes === true} connection={message.id === ackWaiting?.id ? ackConnection : undefined} messageId={message.id} />
                 )}
                 {message === lastAgent && liveMessage(lastAgent) && waitingHoldsUp.length > 0 && (
                   <div className="ib-waitfoot">
@@ -6655,21 +6666,16 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
               )}
               {/* 👍 Looks good beside Reply: sent to the agent after the Undo window; hidden while a question waits.
                   Before the checklist: the actions first, the status after. */}
+              {/* With its tray of reactions (approval "inbox-reaction-tray"): one click still marks it Looks good. */}
               {ackOffered && !waiting && !draftKept && (
-                <Tip
-                  content={
-                    ackOn
-                      ? 'Take back Looks good'
-                      : `Tells ${agentName(ackTarget!.author)} you read it and need nothing more. Moves to Quiet until it writes again.`
-                  }
-                >
-                  <button type="button" className="ib-btn ib-ack" data-ack="" aria-pressed={ackOn} onClick={() => onAck!(ackTarget!.id, !ackOn, agentName(ackTarget!.author))}>
-                    <span className="ib-ack-emoji" aria-hidden="true">
-                      👍
-                    </span>
-                    Looks good
-                  </button>
-                </Tip>
+                <ReactionTray
+                  messageId={ackTarget!.id}
+                  agent={agentName(ackTarget!.author)}
+                  on={ackOn}
+                  current={ackTarget!.ack?.reaction ?? null}
+                  phone={phone}
+                  onAck={(next, reaction) => onAck!(ackTarget!.id, next, agentName(ackTarget!.author), reaction)}
+                />
               )}
               {/* The session ended (the note above says so): what the person can do about it, with Reply. */}
               {showAskerNote && (

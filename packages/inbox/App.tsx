@@ -158,6 +158,7 @@ import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, withFullMa
 import { adoptSavedTheme, inboxServerSync } from './theme';
 import { adoptSavedDiffOptions } from './diffOptions';
 import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
+import { adoptSavedReactions } from './reactions';
 import { parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 import { ComposeDialog, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { DraftsPage } from './compose/DraftsPage';
@@ -179,7 +180,8 @@ import { useComposeSessions } from './compose/useComposeSessions';
 import { composeActions, composeTargets, hostLabel, type ComposeAction } from './compose/model';
 import type { CardsModel, DraftView, InboxStorageModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
-import type { InboxRestartAgents } from '@plannotator/core/inbox-types';
+import type { InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
+import { reactionSpeech } from './components/ReactionTray';
 import { inboxTabCount, useTabCount } from './tabCount';
 import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPage } from './updateNotice';
 import { actedSince, inputMark, lastInput } from './lastInput';
@@ -1573,6 +1575,7 @@ function Inbox() {
       const next = await inboxApi.settings();
       adoptSavedTheme(next.theme);
       adoptSavedTextSize(next.text_size);
+      adoptSavedReactions(next.reactions);
       adoptSavedRows(next.rows, next.rows_rev, mark);
       adoptSavedDiffOptions(next.diff_options, next.diff_style);
       adoptVoiceSettings(next.voice);
@@ -3210,10 +3213,17 @@ function Inbox() {
    * is marked read; once the Undo window passes the Inbox sends it to the
    * agent. The held-order rules of Mark read apply: with the thread open its
    * row changes in place.
+   *
+   * `reaction` (approval "inbox-reaction-tray"): the emoji picked in the 👍's
+   * tray, null for 👍 Looks good, undefined for the plain button (today's call).
+   * It reaches the agent as 👍 Looks good does. A reaction draws no toast: the
+   * emoji flies to the message; the toast is kept unseen, so `Z` still undoes it
+   * and the live region still says it. Taking one back, `reaction` is the one
+   * taken back, for the words only.
    */
-  const acknowledge = async (threadId: string, messageId: string, on: boolean, agent: string) => {
+  const acknowledge = async (threadId: string, messageId: string, on: boolean, agent: string, reaction?: InboxReaction | null) => {
     try {
-      await inboxApi.ack(messageId, on);
+      await inboxApi.ack(messageId, on, reaction);
     } catch (cause) {
       showError(cause);
       await afterWrite();
@@ -3222,7 +3232,18 @@ function Inbox() {
     await afterWrite([threadId]);
     if (!on) {
       dismissToast();
-      say('Looks good taken back.');
+      say(`${reaction ? reactionSpeech(reaction) : 'Looks good'} taken back.`);
+      return;
+    }
+    if (reaction !== undefined) {
+      const words = reaction ? reactionSpeech(reaction) : 'Looks good';
+      showToast({
+        hidden: true,
+        icon: 'thumb',
+        lead: words,
+        speech: `${words}. Goes to ${agent} in 10 seconds and moves to Quiet.`,
+        onUndo: () => void acknowledge(threadId, messageId, false, agent, reaction),
+      });
       return;
     }
     // Only the open thread's foot offers 👍, so the toast always speaks of that thread.
@@ -5933,7 +5954,7 @@ function Inbox() {
             drawn={drawnSection(shown, thread.thread_id)}
             onMarkRead={(read) => void markRead(thread.thread_id, read)}
             onMarkUnread={() => void markUnread(thread.thread_id)}
-            onAck={(messageId, on, agent) => void acknowledge(thread.thread_id, messageId, on, agent)}
+            onAck={(messageId, on, agent, reaction) => void acknowledge(thread.thread_id, messageId, on, agent, reaction)}
             onAction={(messageId, key, mark) => markAction(messageId, key, mark)}
             onArchive={(next) => void archive(thread.thread_id, thread.messages[0]!.id, next)}
             pinned={pinnedIds.has(thread.thread_id)}
@@ -6502,7 +6523,7 @@ function Inbox() {
         </div>
       )}
       {ask.layer}
-      {toast && soundDialog !== 'open' && !agentNoteOpen && <InboxToast toast={toast} phone={phone} onDismiss={dismissToast} onHold={holdToast} />}
+      {toast && !toast.hidden && soundDialog !== 'open' && !agentNoteOpen && <InboxToast toast={toast} phone={phone} onDismiss={dismissToast} onHold={holdToast} />}
       <SearchHost
         mounted={searchMounted}
         open={searchOpen}
