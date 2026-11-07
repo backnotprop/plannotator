@@ -8647,7 +8647,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-rdiscard:hover { color: var(--destructive, var(--foreground)); }
 .ib-rrow > .ib-rdiscard { margin-left: 2px; }
 /* The middle cell: what goes with the reply and who gets it, or, while voice runs, its status in exactly that place. */
-.ib-rmid { flex: 1 1 0; min-width: 0; height: 36px; display: grid; grid-template-areas: "cell"; grid-template-rows: minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); align-items: center; container: rmid / inline-size; }
+.ib-rmid { flex: 1 1 0; min-width: 0; height: 36px; display: grid; grid-template-areas: "cell"; grid-template-rows: minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); align-items: center; container: ib-rmid / inline-size; }
 .ib-rmid > * { grid-area: cell; min-width: 0; }
 .ib-rlayer { display: flex; align-items: center; gap: 6px; min-width: 0; height: 100%; padding-left: 6px; transition: opacity 120ms ease-out, visibility 0s linear 0s; }
 /* Measured unfolded (ReplyRow.tsx): nothing shrinks, so chips that don't fit overflow and the row folds. */
@@ -8660,7 +8660,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rto-cell { margin-left: auto; min-width: 0; display: flex; justify-content: flex-end; }
 .ib-rmid[data-fold] .ib-rto-cell { flex: 0 1 auto; }
 .ib-rto-cell .ib-rto-slot { justify-items: end; margin: 0; max-width: 100%; }
-@container rmid (max-width: 420px) { .ib-rto-cell .ib-rto-full { display: none; } .ib-rto-cell .ib-rto-short { display: block; } }
+@container ib-rmid (max-width: 420px) { .ib-rto-cell .ib-rto-full { display: none; } .ib-rto-cell .ib-rto-short { display: block; } }
 .pn-inbox .ib-rfilesn { border: 0; cursor: pointer; font: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; font-variant-numeric: tabular-nums; }
 .pn-inbox .ib-rfilesn:hover { color: var(--foreground); background: color-mix(in oklch, var(--muted) 70%, var(--border)); }
 .pn-inbox .ib-rfilesn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
@@ -8674,9 +8674,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rmid > .ib-vline .ib-vhint { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-rmid > .ib-vline .ib-vsp { flex: 1 1 0; min-width: 0; }
 .ib-rmid > .ib-vline .ib-dttime { flex: none; font-variant-numeric: tabular-nums; }
-@container rmid (max-width: 470px) { .ib-rmid > .ib-vline .ib-vhint { display: none; } }
-@container rmid (max-width: 110px) { .ib-rmid > .ib-vline .ib-vbars { display: none; } }
-@container rmid (max-width: 180px) { .ib-rmid > .ib-vline b { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); } }
+@container ib-rmid (max-width: 470px) { .ib-rmid > .ib-vline .ib-vhint { display: none; } }
+@container ib-rmid (max-width: 110px) { .ib-rmid > .ib-vline .ib-vbars { display: none; } }
+@container ib-rmid (max-width: 180px) { .ib-rmid > .ib-vline b { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); } }
 /* The mic's spinner only for a step that takes a while (150 ms), so a quick one never flashes it. */
 .pn-inbox .ib-rrow .ib-vmic .ib-spin { animation-name: ib-spin, ib-rfade-in; animation-duration: 0.8s, 1ms; animation-delay: 0s, 150ms; animation-iteration-count: infinite, 1; animation-fill-mode: none, backwards; animation-timing-function: linear, linear; }
 @keyframes ib-rfade-in { from { opacity: 0; } to { opacity: 1; } }
