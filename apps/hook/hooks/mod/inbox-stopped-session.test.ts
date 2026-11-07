@@ -138,7 +138,7 @@ describe('a session whose plugin prompts Claude Code refuses until the person ty
     await until('its delivery', async () => (await delivery(second)) !== null)
     expect(wakes(session, FIRST)).toHaveLength(1)
     expect(wakes(session, SECOND)).toHaveLength(1)
-    // Nothing held any more: the next reply never read stopped on the way.
+    // Nothing held any more: the next reply ends delivered too (the state event itself: inbox-held-state.test.ts).
     expect(await rowReason()).toBe('delivered')
   }, 40_000)
   // Review of #2780: the person typed while the dropped reply's claim was being given back. The hold set after that
