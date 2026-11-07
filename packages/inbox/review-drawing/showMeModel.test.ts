@@ -7,9 +7,17 @@
 import { describe, expect, test } from 'bun:test';
 import { askShownQuestion } from '../ask/askModel';
 import { FIXTURE_V2_HTML } from '@plannotator/core/guide-format-fixtures';
-import { boardParents, boardRows, reviewDrawnOn, reviewLines, anchorLines, anchorPart, overviewPicture, changedMarks, chapterOf, earlierLinesNow, newSideLines, partLanding, showMeEnded, showMeSamePlace, shiftLines, waitingShowMe } from './showMeModel';
+import { boardParents, boardPressWaits, boardRows, reviewDrawnOn, reviewLines, anchorLines, anchorPart, overviewPicture, changedMarks, chapterOf, earlierLinesNow, newSideLines, partLanding, showMeEnded, showMeSamePlace, shiftLines, waitingShowMe } from './showMeModel';
 
 describe('Show me model', () => {
+  test("a board's Show me never throws away words typed in the review's Show me box: it waits behind them", () => {
+    expect(boardPressWaits({ words: 'why this lock?', turn: null }, false)).toBe('wait');
+    expect(boardPressWaits({ words: 'x', turn: 'turn_1' }, false)).toBe('wait');
+    expect(boardPressWaits(null, true)).toBe('wait');
+    expect(boardPressWaits({ words: '  ', turn: null }, false)).toBe('go');
+    expect(boardPressWaits(null, false)).toBe('go');
+  });
+
   test("a part drawn on this review lands on lines its diff shows; lines it does not show go to the board's own viewer", () => {
     const now = new Map([['w.ts', new Map([[16, 'a'], [17, 'b']])]]);
     expect(partLanding({ path: 'w.ts', line: 16, lineEnd: 17 }, now)).toEqual([16, 17]);

@@ -297,7 +297,9 @@ export function createInboxAsk(options: {
       else if (known) saved = known;
       else {
         // A box's Show me: its picture goes in the board's folder, and the request the agent reads names the file.
-        const kept = boxPicture && showMeFields?.show_me.part ? await options.keepPicture?.(showMeFields.show_me.part.board, boxPicture) : null;
+        // A picture it cannot save leaves its line out: the Show me still goes.
+        const board = boxPicture ? showMeFields?.show_me.part?.board : undefined;
+        const kept = board && options.keepPicture ? await options.keepPicture(board, boxPicture!).catch(() => null) : null;
         if (kept && showMeFields?.show_me.part && requestOf) {
           const show_me: InboxShowMeTarget = { ...showMeFields.show_me, part: { ...showMeFields.show_me.part, picture: kept } };
           showMeFields = { ...showMeFields, show_me };

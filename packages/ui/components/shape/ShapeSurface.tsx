@@ -1223,12 +1223,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
               headerText={boxSelect ? quoteLabel(target) : undefined}
               placement={target.box ? 'side' : undefined}
               extraActions={target.box ? [
-                // A host's own Show me (`host.showMe`) is the box's: one button, the board's.
-                ...(boxSelect?.onShowMe && !host.showMe ? [{
-                  label: 'Show me',
-                  // The composer stays, its words with it: Show me takes them without spending them.
-                  onSelect: (text: string) => boxSelect.onShowMe!(target.box!, text),
-                }] : []),
+                // The box's Show me is the host's own (`host.showMe`, `extraAction` below): one button, the board's.
                 ...(boxSelect?.onAddToReply ? [{
                   label: 'Add to reply',
                   spends: true,

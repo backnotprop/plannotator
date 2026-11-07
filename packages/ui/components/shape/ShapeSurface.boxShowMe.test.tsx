@@ -9,7 +9,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { shapeParts, type ShapeBoard, type ShapeVersion } from '@plannotator/core/shape';
 import { bridgeSanitizerDom } from '../../../../tests/helpers/chat-sanitizer-dom';
-import type { ShapeHost, ShapeLoaded, ShapeShowMeInput } from './types';
+import type { ShapeBoxOptions, ShapeHost, ShapeLoaded, ShapeShowMeInput } from './types';
 
 const hasDom = typeof document !== 'undefined';
 const { ShapeSurface } = (hasDom ? await import('./ShapeSurface') : {}) as typeof import('./ShapeSurface');
@@ -91,6 +91,9 @@ const wait = () => act(() => new Promise((r) => setTimeout(r, 20)));
 const popover = () => document.querySelector('[data-comment-popover]');
 const buttons = (words: string) => [...(popover()?.querySelectorAll('button') ?? [])].filter((b) => b.textContent?.trim() === words);
 
+/** The stand-in Show me the box once took (`onShowMe`), gone from `ShapeBoxOptions`: given, it must draw nothing. */
+const STAND_IN = { onShowMe: () => { throw new Error('not the board’s Show me'); } } as unknown as ShapeBoxOptions;
+
 async function mount(h: ShapeHost, boxSelect: React.ComponentProps<typeof ShapeSurface>['boxSelect'] = {}) {
   const el = document.createElement('div');
   document.body.appendChild(el);
@@ -115,8 +118,8 @@ async function drag(from: [number, number], to: [number, number]) {
 
 test.skipIf(!hasDom)('a box over two parts: one Show me, on "A part of the board" with both parts named, and the box’s picture', async () => {
   const asked: ShapeShowMeInput[] = [];
-  // A box option's own Show me too: the host's is the box's, and only one shows.
-  await mount(host((_id, input) => asked.push(input)), { onShowMe: () => { throw new Error('not the board’s Show me'); } });
+  // The old box option's own Show me, given anyway: the host's is the box's, and only one shows.
+  await mount(host((_id, input) => asked.push(input)), STAND_IN);
   await drag([5, 5], [150, 160]);
   expect(popover()).not.toBeNull();
   expect(buttons('Show me').length).toBe(1);
@@ -139,7 +142,7 @@ test.skipIf(!hasDom)('a box over one part: its own name and code, no list of par
 });
 
 test.skipIf(!hasDom)('a host with no Show me (the standalone page, no live agent): the box has none, not even a stand-in', async () => {
-  await mount(host());
+  await mount(host(), STAND_IN);
   await drag([5, 5], [150, 160]);
   expect(popover()).not.toBeNull();
   expect(buttons('Show me').length).toBe(0);

@@ -733,6 +733,30 @@ test('over a thread, × while one draws keeps the wait and the press behind it; 
   await focusedAndSaid(page, /^About The worker charges/);
 });
 
+test('over a thread, another thread opened while one draws: the new board opens in its own thread, not over the other', async () => {
+  test.setTimeout(150_000);
+  const { page } = world;
+  const thread = world.review.thread_id;
+  const sent = (await world.client.callTool({ name: 'send_message', arguments: { subject: 'Another thread', body: 'Something else.', project_path: world.project, agent_session: 'ses-other', agent_host: 'claude-code', agent_name: 'Claude Code' } })) as { structuredContent?: { thread_id: string } };
+  const elsewhere = sent.structuredContent!.thread_id;
+  const made = world.storeBoard('Moved away while drawing', ['--thread', thread]);
+  await page.goto(`${world.url}#thread=${thread}&shape=${made.id}`);
+  await expect(title(page)).toHaveText('Moved away while drawing', { timeout: 30_000 });
+  world.hold = gate();
+  await startAnnotating(page);
+  await part(page, 'next').click();
+  await showMeButton(page).click();
+  await expect(waitBox(page)).toHaveAttribute('data-show-me-box', 'drawing');
+  await page.goto(`${world.url}#thread=${elsewhere}`);
+  await expect(page.getByRole('heading', { name: 'Another thread', level: 2 })).toBeVisible({ timeout: 30_000 });
+  world.hold.release();
+  world.hold = null;
+  await expect(title(page)).toHaveText(/^About The next attempt/, { timeout: 40_000 });
+  // Its own thread's board, with its own thread under it: never over the thread the person moved to.
+  expect(new URL(page.url()).hash).toContain(`thread=${thread}`);
+  expect(new URL(page.url()).hash).not.toContain(elsewhere);
+});
+
 test('both off: no board, and a Show me is refused', async () => {
   const { page } = world;
   setSwitches({ inboxCodeReview: false, inboxShape: false });

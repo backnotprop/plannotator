@@ -102,8 +102,6 @@ export interface ShapeHost {
 export interface ShapeBoxOptions {
   /** A same-site image or font as a data: URL, for the box's picture. Absent: the picture has no images and the system's font. */
   readAsset?: ShapeReadAsset;
-  /** The box's Show me: the same object a comment is made from, and whatever was typed. Absent: no Show me. */
-  onShowMe?: (selection: ShapeBoxSelection, text: string) => void;
   /**
    * The box's Add to reply: the same object and whatever was typed, for the host's reply to the board's thread (the
    * Inbox: the picture as a file, the label and words as text). Absent: no Add to reply.

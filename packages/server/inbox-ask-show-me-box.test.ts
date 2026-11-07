@@ -3,7 +3,8 @@
  * Inbox started. The window sends the box's picture as a data: URL and a request without the picture's line; the
  * route keeps the picture in the board's own folder and the request the agent reads names that file. What regresses
  * if these fail: the picture is dropped or kept outside the board, the agent is never told where it is, a box over
- * several parts goes out under one part's name, or the picture is kept again on a retry of the same turn.
+ * several parts goes out under one part's name, the picture is kept again on a retry of the same turn, or a picture
+ * that cannot be saved fails the whole Show me.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
@@ -27,7 +28,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function setup() {
+function setup(keep?: (id: string, picture: string) => Promise<string | null>) {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-ask-box-"));
   dirs.push(dir);
   const shapes = createShapeStore({ dataDir: join(dir, "data") });
@@ -49,7 +50,7 @@ function setup() {
     codeReviewOn: () => false,
     boardsOn: () => true,
     boardsOf: () => [{ id: board, versions: [] }],
-    keepPicture: async (id, picture) => shapes.keepShowMePicture(id, picture),
+    keepPicture: keep ?? (async (id, picture) => shapes.keepShowMePicture(id, picture)),
     store,
     serverSession: SESSION,
     readBody: async (req) => (await req.json()) as Record<string, unknown>,
@@ -106,5 +107,17 @@ describe("a Show me from a box", () => {
     expect(files()).toHaveLength(1);
     const plain = await post({ board, name: "Sign in" }, "ask_01J8ZK3TQ4VW7Y9A2B5C6D8E0G");
     expect(plain.body.turn.question).not.toContain("A picture of what they boxed");
+  });
+
+  test("a picture that cannot be saved: the Show me still goes, without the picture's line", async () => {
+    const failing = setup(async () => {
+      throw new Error("disk full");
+    });
+    const board = failing.board;
+    const { status, body } = await failing.post({ board, name: "A part of the board", parts: ["Sign in", "Token store"], picture: `data:image/png;base64,${PNG}` });
+    expect(status).toBe(200);
+    expect(body.turn.question).toStartWith(`The person pressed Show me on "A part of the board" (parts: Sign in, Token store) in your Shape ${board}`);
+    expect(body.turn.question).not.toContain("A picture of what they boxed");
+    expect(failing.files()).toHaveLength(0);
   });
 });

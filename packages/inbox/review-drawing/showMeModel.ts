@@ -380,3 +380,12 @@ export function boardRows(boards: readonly { id: string; title: string }[], pare
   walk(null, 0);
   return rows;
 }
+
+/**
+ * A Show me pressed on a board: what it does with the box under the review. A box the person is writing in keeps its
+ * words and a box already sent keeps its wait, so the press waits its turn; an empty box gives way to it.
+ */
+export function boardPressWaits(box: { words: string; turn: string | null } | null, posting: boolean): 'wait' | 'go' {
+  if (box?.turn || posting) return 'wait';
+  return box && box.words.trim() ? 'wait' : 'go';
+}

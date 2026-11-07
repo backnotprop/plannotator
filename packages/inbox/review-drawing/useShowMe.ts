@@ -27,7 +27,7 @@ import { onAskChange } from '../ask/askEvents';
 import { askTurnNote } from '../ask/askModel';
 import { errorText } from '../toastError';
 import { focusBoardTitle } from '../shape/boardFocus';
-import { boardParents, earlierLinesNow, reviewLines, showMeEnded, showMeSamePlace, waitingShowMe, type ReviewLines } from './showMeModel';
+import { boardParents, boardPressWaits, earlierLinesNow, reviewLines, showMeEnded, showMeSamePlace, waitingShowMe, type ReviewLines } from './showMeModel';
 
 /** The server writes the real context for each session (inbox-ask.ts): the hook only needs one to start. */
 const ASK_CONTEXT = { mode: 'annotate', annotate: { filePath: '', content: '' } } as const;
@@ -352,9 +352,11 @@ export function useShowMe({
     setProblem(null);
     const place: ShowMePlace = { file: null, lines: null, part };
     // One is drawing and its box is closed (or the page was reloaded): its box comes back, and this one waits.
-    const drawing = !box?.turn && running ? turnOf(running) : undefined;
+    // A box the person is still writing in keeps its words: this one waits behind it.
+    const waits = boardPressWaits(box, posting) === 'wait';
+    const drawing = !box && running ? turnOf(running) : undefined;
     if (drawing?.show_me) setBox({ place: { file: drawing.show_me.file, lines: drawing.show_me.lines, ...(drawing.show_me.part ? { part: drawing.show_me.part } : {}) }, words: drawing.show_me.words ?? '', turn: drawing.id });
-    if (box?.turn || posting || drawing?.show_me) setQueue((current) => [...current, { place, words }]);
+    if (waits || drawing?.show_me) setQueue((current) => [...current, { place, words }]);
     else void start(place, words);
     // The box it was pressed in has closed: the focus goes back to the board, not to the page.
     focusBoardTitle(part.board);

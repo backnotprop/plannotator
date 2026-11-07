@@ -195,6 +195,7 @@ import { setSessionLabels } from './sessionLabels';
 import { createInboxShapeHost } from './shape/inboxShapeHost';
 import { ShapeGridPage, ShapePebbleButton } from './shape/ShapeParts';
 import { ThreadShapeLayer, ThreadShowMeBox, useThreadShowMe } from './shape/ThreadShapeLayer';
+import { showMeBoardOpensIn } from './shape/showMeOpensIn';
 import { shapeReplyPart, type ShapeReplyPart } from './shape/addToReply';
 import type { ShapeBoxSelection } from '@plannotator/ui/components/shape';
 import { useBoardPlaces } from './shape/boardPlace';
@@ -5317,7 +5318,7 @@ function Inbox() {
   // A review, while Code review is on: the full-window review (ReviewPane).
   const reviewPaneOpen = codeReviewOn && !!guideMessage?.guide?.review;
   // Show me from a thread's board, above the board: one closed while another draws keeps its wait and the presses
-  // behind it, and the new board opens when it lands (in its thread, if the page shows no board now).
+  // behind it, and the new board opens when it lands: over the grid or its own thread, else in its own thread.
   const showMeThreadRef = useRef<string | null>(null);
   const threadShowMe = useThreadShowMe({
     shapes,
@@ -5325,8 +5326,7 @@ function Inbox() {
     onBoard: (id) => {
       const now = routeRef.current;
       const home = showMeThreadRef.current;
-      const shows = now.page === 'shapes' || (now.page === 'inbox' && !!now.thread);
-      go(shows || !home ? { ...now, shape: id } : { page: 'inbox', project: null, thread: home, shape: id });
+      go(showMeBoardOpensIn(now, home) === 'here' ? { ...now, shape: id } : { page: 'inbox', project: null, thread: home, shape: id });
     },
     say,
   });
