@@ -2537,6 +2537,9 @@ pre code.pn-code[data-keep-layout] {
 /* "Skip to the list" (App.tsx): off screen until a Tab reaches it, then a small pill over the window's top left. */
 .ib-skip { position: fixed; top: 8px; left: 8px; z-index: 60; padding: 6px 12px; border-radius: 8px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-s, 0 0 0 1px var(--border), 0 12px 30px -12px oklch(0 0 0 / 0.5)); font-size: var(--ib-fs-13, 13px); line-height: 20px; text-decoration: none; transform: translateY(calc(-100% - 16px)); }
 .ib-skip:focus { transform: none; }
+/* The window's live region, on the page and not under it: at its static place it made #root 1 px taller than the window,
+   and a scroll into view (a click or focus while the panes move) lifted every pane by that 1 px until a reload. */
+.pn-inbox > .ib-sr { top: 0; }
 @media (prefers-reduced-transparency: reduce) {
   .ib-sb-scrim { backdrop-filter: none; background-color: rgb(0 0 0 / 0.65); }
 }
