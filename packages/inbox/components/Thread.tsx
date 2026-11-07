@@ -1893,7 +1893,9 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     if (!body || !room) return;
     const height = room.offsetHeight;
     if (height === 0) return;
-    const seen = Math.max(0, Math.ceil(body.getBoundingClientRect().bottom - room.getBoundingClientRect().top));
+    // The view's padding under the room is scrollable too: only what is above it counts as in view.
+    const pad = parseFloat(getComputedStyle(body).paddingBottom) || 0;
+    const seen = Math.max(0, Math.ceil(body.getBoundingClientRect().bottom - pad - room.getBoundingClientRect().top));
     if (seen < height) room.style.height = `${seen}px`;
   }, []);
   /** Stops holding the place put back after a file (threadPlace.ts `holdPlace`); everything that scrolls the thread calls it first. */
@@ -3077,23 +3079,29 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
       atEndRef.current = atEnd(body);
     };
     trackEnd();
+    // A shorter view (the reply box opening, a smaller window) trims a fold step's borrowed room to what is
+    // still in view, so the person can never scroll down into it.
+    const resize = () => {
+      shrinkRoom();
+      updateChrome();
+    };
     body.addEventListener('scroll', trackEnd, { passive: true });
     body.addEventListener('scroll', updateChrome, { passive: true });
-    window.addEventListener('resize', updateChrome);
+    window.addEventListener('resize', resize);
     document.addEventListener('visibilitychange', updateChrome);
     // The thread's own box changes without a scroll or a window resize when
     // the foot grows (the reply box, the stale guard, the New-message
     // composer) or a file opens beside it.
-    const resized = typeof ResizeObserver === 'function' ? new ResizeObserver(() => updateChrome()) : null;
+    const resized = typeof ResizeObserver === 'function' ? new ResizeObserver(() => resize()) : null;
     resized?.observe(body);
     return () => {
       body.removeEventListener('scroll', trackEnd);
       body.removeEventListener('scroll', updateChrome);
-      window.removeEventListener('resize', updateChrome);
+      window.removeEventListener('resize', resize);
       document.removeEventListener('visibilitychange', updateChrome);
       resized?.disconnect();
     };
-  }, [updateChrome]);
+  }, [updateChrome, shrinkRoom]);
 
   // The room a step borrowed shrinks on every scroll; a new thread starts without it.
   useEffect(() => {
@@ -3145,7 +3153,10 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
         focus.focus({ preventScroll: true });
         const r = focus.getBoundingClientRect();
         const b = body.getBoundingClientRect();
-        if (r.top < b.top + 8 || r.bottom > b.bottom - 8) focus.scrollIntoView?.({ block: 'nearest' });
+        // A fold step keeps the newest messages still: its focus (where the fold was) is brought into view only
+        // when it is wholly out of it, never nudged because it sits at the view's edge.
+        const out = anchor.room ? r.bottom <= b.top || r.top >= b.bottom : r.top < b.top + 8 || r.bottom > b.bottom - 8;
+        if (out) focus.scrollIntoView?.({ block: 'nearest' });
       }
     }
     // Whatever changed (an arrival, a send, a fold), borrowed room keeps only its part in view.
@@ -5873,10 +5884,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
         {thread.messages.flatMap((message, index) => {
           const before: React.ReactNode[] = [];
           // The middle of a long read run: one fold ("Show 20 earlier · N hidden") in place of the part still hidden.
-          const run = fold.hidden.findIndex((ids, i) => {
-            const rest = stillHidden(ids, fold.shown[i]);
-            return rest.length > 0 && rest[0] === message.id;
-          });
+          // What is still hidden always starts at the run's first message, so no slice is needed here.
+          const run = fold.hidden.findIndex((ids, i) => (fold.shown[i] ?? 0) < ids.length && ids[0] === message.id);
           if (run >= 0) before.push(foldBand(run));
           if (hiddenNow.has(message.id)) return before;
           const isNew = showNew && fresh.has(message.id);
