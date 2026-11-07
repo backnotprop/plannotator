@@ -7,7 +7,8 @@
  * corner, outside the scaled page, and gathers with the other tools; its icon
  * shows the size the page is at and its name and tooltip say what a press
  * does; a page that fits opens on Phone size (a phone icon, "Desktop size"); a
- * page the bridge reports wider than the phone opens on Desktop size by itself,
+ * page the bridge reports clearly wider than the phone (1.2 times) opens on Desktop size by itself,
+ * while one long line poking out a little does not;
  * scaled to the phone's width (a laptop icon, "Phone size"); a press switches and
  * is remembered for that file, so a remount (a reload) opens the way it was
  * left even when the page is wide; the remembered choice is per file; the
@@ -191,6 +192,14 @@ test.if(hasDom)('a page wider than the phone opens on Desktop size by itself, la
   // Once fitted, the page reports against the laptop width: that does not undo it.
   await reportWidth(1280, 1280);
   expect(frameBox().dataset.pageSize).toBe('desktop');
+});
+
+test.if(hasDom)('a phone-friendly page with one long line poking out a little stays on Phone size', async () => {
+  await render(dashboard);
+  // One unbroken hash or URL: about 430 px on a 390 px phone, under the 1.2 line.
+  await reportWidth(430);
+  expect(frameBox().dataset.pageSize).toBe('phone');
+  expect(frameBox().classList.contains('ib-fitdesk')).toBe(false);
 });
 
 test.if(hasDom)('a squeezed page takes one press, and the press is remembered after a reload', async () => {

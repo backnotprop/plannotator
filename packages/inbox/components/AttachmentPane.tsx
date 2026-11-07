@@ -1644,12 +1644,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     observer.observe(fitBox);
     return () => observer.disconnect();
   }, [fitBox, phoneHtml]);
-  // Measured at the phone's width only: on Desktop size the frame is the laptop's width.
+  // A pick wins over this flag (shownPageSize), and a frame already at the laptop's width never reports itself wide.
   const onContentWidth = useCallback(
     (report: { width: number; viewport: number }) => {
-      if (pickedSize === null && !fitted && pageIsWide(report)) setWidePage(pageKey);
+      if (pageIsWide(report)) setWidePage(pageKey);
     },
-    [pickedSize, fitted, pageKey],
+    [pageKey],
   );
   const togglePageSize = () => {
     const next: PageSize = pageSize === 'desktop' ? 'phone' : 'desktop';

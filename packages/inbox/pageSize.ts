@@ -25,12 +25,17 @@ export const PAGE_SIZE_KEY = 'plannotator-inbox-page-size';
 /** How many files keep a remembered size; the oldest choice goes first. */
 export const PAGE_SIZE_KEPT = 200;
 
+/** How much wider than its frame a page must lay out to count as made for a wider screen. */
+export const PAGE_WIDE_RATIO = 1.2;
+
 /**
- * A page lays out wider than its frame by more than rounding: it was made for a
- * wider screen. A page that fits (or a frame already at desktop width) is not.
+ * A page lays out clearly wider than its frame (at least PAGE_WIDE_RATIO times):
+ * it was made for a wider screen. A phone-friendly page with one long hash, URL
+ * or unwrapped line pokes out a little and stays on Phone size; a page that fits
+ * (or a frame already at desktop width) is not wide either.
  */
 export function pageIsWide(report: { width: number; viewport: number }): boolean {
-  return report.viewport > 0 && report.width > report.viewport + 1;
+  return report.viewport > 0 && report.width >= report.viewport * PAGE_WIDE_RATIO;
 }
 
 /** The scale that fits a desktop-width page in a box this wide (never larger than 1). */

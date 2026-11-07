@@ -21,9 +21,15 @@ function memoryStore(initial: Record<string, string> = {}) {
 }
 
 describe('a wide page', () => {
-  test('is one that lays out past its frame', () => {
+  test('is one that lays out clearly past its frame', () => {
     expect(pageIsWide({ width: 1180, viewport: 390 })).toBe(true);
-    expect(pageIsWide({ width: 392, viewport: 390 })).toBe(true);
+    // The line: 1.2 times the frame.
+    expect(pageIsWide({ width: 468, viewport: 390 })).toBe(true);
+  });
+  test('a phone-friendly page with one long hash or URL poking out is not', () => {
+    // A 64-character commit hash in <code>, or an unwrapped URL: about 430 px on a 390 px phone.
+    expect(pageIsWide({ width: 430, viewport: 390 })).toBe(false);
+    expect(pageIsWide({ width: 467, viewport: 390 })).toBe(false);
   });
   test('a page that fits, or is off by rounding, is not', () => {
     expect(pageIsWide({ width: 390, viewport: 390 })).toBe(false);
