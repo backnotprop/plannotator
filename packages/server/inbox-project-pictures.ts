@@ -56,8 +56,10 @@ const HOUR_MS = 60 * 60 * 1000;
 const REPO_MS = 5 * 60 * 1000;
 const MAX_REDIRECTS = 3;
 const GITHUB_AVATARS = "avatars.githubusercontent.com";
-/** What an uploaded picture or a repo's logo may be. */
-const PICTURE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml", "image/x-icon", "image/avif", "image/bmp"]);
+/** What a picture set with Set picture… may be: the five the refusal names. */
+const UPLOAD_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"]);
+/** What a repo's logo may be: a favicon is often an ICO. */
+const PICTURE_TYPES = new Set([...UPLOAD_TYPES, "image/x-icon", "image/avif", "image/bmp"]);
 /** What GitHub's answer may be: never SVG. */
 const GITHUB_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 const PROJECT_ID = /^[A-Za-z0-9_]{1,80}$/;
@@ -162,9 +164,13 @@ function findIn(root: string, base: string): { type: string; body: Uint8Array<Ar
   for (const file of INDEX_HTML) {
     let html: string;
     try {
-      const full = join(root, base, file);
-      if (!statSync(full).isFile() || statSync(full).size > 512 * 1024) continue;
-      html = readFileSync(full, "utf8");
+      // The page itself must be inside the folder too (a symlink out of it is not read).
+      const real = realpathSync(join(root, base, file));
+      const rel = relative(root, real);
+      if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) continue;
+      const stat = statSync(real);
+      if (!stat.isFile() || stat.size > 512 * 1024) continue;
+      html = readFileSync(real, "utf8");
     } catch {
       continue;
     }
@@ -363,7 +369,7 @@ export function createProjectPictures(options: ProjectPictureOptions): ProjectPi
       if (!PROJECT_ID.test(projectId)) return { ok: false, reason: "not_saved" };
       if (bytes.byteLength === 0 || bytes.byteLength > PROJECT_PICTURE_MAX_BYTES) return { ok: false, reason: bytes.byteLength === 0 ? "not_image" : "too_big" };
       const type = sniffImageContentType(bytes);
-      if (!type || !PICTURE_TYPES.has(type)) return { ok: false, reason: "not_image" };
+      if (!type || !UPLOAD_TYPES.has(type)) return { ok: false, reason: "not_image" };
       // Never the same time twice for one project, so the window's key always changes.
       const at = Math.max(now(), (uploadTimes().get(projectId) ?? 0) + 1);
       if (!writePicture(uploadDir, projectId, type, bytes, at)) return { ok: false, reason: "not_saved" };
@@ -384,7 +390,7 @@ export function createProjectPictures(options: ProjectPictureOptions): ProjectPi
     },
     async get(project, use) {
       if (PROJECT_ID.test(project.id) && uploadTimes().has(project.id)) {
-        const upload = readPicture(join(uploadDir, project.id), PICTURE_TYPES);
+        const upload = readPicture(join(uploadDir, project.id), UPLOAD_TYPES);
         if (upload) return { type: upload.type, body: upload.body, from: "upload" };
       }
       if (use.logo) {

@@ -47,7 +47,7 @@ function fakeGithub(answers: (url: string) => Response) {
     },
   };
 }
-const picture = (bytes: Uint8Array, type = "image/png") => new Response(bytes, { status: 200, headers: { "content-type": type } });
+const picture = (bytes: Uint8Array<ArrayBuffer>, type = "image/png") => new Response(bytes, { status: 200, headers: { "content-type": type } });
 
 describe("a repo's logo", () => {
   test("found in the usual places, in order, and in a monorepo's apps/*", () => {
@@ -75,6 +75,13 @@ describe("a repo's logo", () => {
     symlinkSync(join(scratch, "secret.png"), join(root, "favicon.png"));
     expect(findRepoLogo(root)).toBeNull();
     expect(findRepoLogo(repo({ "favicon.svg": "<html><script>x</script></html>", "favicon.png": PNG }))?.type).toBe("image/png");
+  });
+
+  test("an index.html that is a symlink out of the folder is not read", () => {
+    const outside = repo({ "index.html": '<link rel="icon" href="img/i.png">' });
+    const root = repo({ "img/i.png": PNG });
+    symlinkSync(join(outside, "index.html"), join(root, "index.html"));
+    expect(findRepoLogo(root)).toBeNull();
   });
 });
 
@@ -206,6 +213,8 @@ describe("Set picture…", () => {
     expect(pictures.setUpload("prj_a", SVG)).toEqual({ ok: true, at: 6 });
     expect(pictures.setUpload("prj_a", new TextEncoder().encode("<html></html>"))).toEqual({ ok: false, reason: "not_image" });
     expect(pictures.setUpload("prj_a", new Uint8Array(600 * 1024).fill(1))).toEqual({ ok: false, reason: "too_big" });
+    // Set picture… takes the five the refusal names: a favicon's ICO is a repo logo only.
+    expect(pictures.setUpload("prj_a", ICO)).toEqual({ ok: false, reason: "not_image" });
     expect(pictures.uploadedAt("prj_a")).toBe(6);
     // A new Inbox on the same data dir knows it.
     now = 100;

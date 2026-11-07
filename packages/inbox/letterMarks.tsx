@@ -9,7 +9,8 @@
  *   Deterministic: no AI, no randomness.
  * - A project's mark: its picture (the one set with Set picture…, then the repo's logo, then the GitHub owner's, each
  *   served by the Inbox: inbox-project-pictures.ts), else its letters keyed on the project id.
- * - Every mark is decorative (`aria-hidden`): the name is always in text beside it.
+ * - Every mark is decorative (`aria-hidden`): beside a row's or a project's name in text; on a Board card (which showed
+ *   no project before) the project's name is in the mark's tooltip.
  * - Agent icons off (`hideAgents`) also takes the agent mark off the row's hover card (InboxList.tsx `RowMark`).
  */
 import { createContext, useContext, useState, type ReactNode } from 'react';

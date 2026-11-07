@@ -204,7 +204,7 @@ const SHOW: readonly { key: ListLookKey; label: string; desc?: string }[] = [
 /** A project's picture instead of its letters. Turning one on turns project marks on (listLook.ts `lookWithChange`). */
 const PICTURES: readonly { key: 'repoLogo' | 'githubPictures'; label: string; desc: string }[] = [
   { key: 'repoLogo', label: 'Logo from the repo', desc: "A favicon or logo found in the project's folder. Nothing leaves this computer." },
-  { key: 'githubPictures', label: 'GitHub pictures', desc: "A project on GitHub shows its owner's picture. Asks GitHub once, then kept here." },
+  { key: 'githubPictures', label: 'GitHub pictures', desc: "A project on GitHub shows its owner's picture. Asks GitHub once a week." },
 ];
 
 export type RowsPreset = 'minimal' | 'balanced' | 'detailed';
@@ -212,7 +212,8 @@ export type RowsPreset = 'minimal' | 'balanced' | 'detailed';
 /**
  * The presets: starting points, each a whole look. Balanced is the defaults (smaller thread names on, every other
  * option off), so choosing it is also how to reset. Detailed keeps the larger unread names it had before smaller
- * names became the default, so a look saved as Detailed still reads Detailed. A look that matches none reads "Custom".
+ * names became the default. A look that matches none reads "Custom": a look saved as Detailed before Detailed turned
+ * letter marks on (approval "inbox-letter-marks") now reads Custom until Detailed is picked again.
  */
 // Letter marks (approval "inbox-letter-marks"): Minimal and Balanced keep them off (Balanced is the defaults); Detailed
 // turns them on, both kinds as Avatar (no style option on), with the picture switches off.

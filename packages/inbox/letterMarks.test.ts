@@ -9,6 +9,7 @@
 import { describe, expect, test } from 'bun:test';
 import { INBOX_ROWS_DEFAULT, inboxRowsCanonical, inboxRowsList, inboxRowsRead } from '@plannotator/core/inbox-types';
 import { HUES, hueOf, markLetters } from './letterMarks';
+import { PICTURE_MAX_BYTES, pictureFromFile } from './projectPictures';
 import { LIST_LOOK_DEFAULT, LIST_LOOK_OFF, lookFromRows, lookMarks, lookWithChange, markStyleLook, marksWhatLook, rowsFromLook } from './listLook';
 
 describe('the letters: first and last letter of the title, by grapheme', () => {
@@ -107,5 +108,24 @@ describe('the marks in the Rows look', () => {
     // A hand-edited config.json in a shape the window never writes reads as the window would make it.
     expect(inboxRowsCanonical(['markInline', 'markDot', 'githubPictures', 'marksThreads'])).toEqual(['marksThreads', 'markInline']);
     expect(inboxRowsCanonical(['markDot', 'repoLogo'])).toEqual([]);
+  });
+});
+
+describe('Set picture…: the picked file', () => {
+  test('a file over 512 KB is refused with the approved words, never read', async () => {
+    let read = false;
+    const big = new Blob([new Uint8Array(PICTURE_MAX_BYTES + 1)], { type: 'image/jpeg' });
+    big.arrayBuffer = async () => {
+      read = true;
+      return new ArrayBuffer(0);
+    };
+    expect(await pictureFromFile(big)).toEqual({ refused: 'Picture: at most 512 KB.' });
+    expect(read).toBe(false);
+  });
+
+  test('a small one goes as a data: URL the Inbox takes', async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    const result = await pictureFromFile(new Blob([png], { type: 'image/png' }));
+    expect(result).toEqual({ picture: `data:image/png;base64,${Buffer.from(png).toString('base64')}` });
   });
 });

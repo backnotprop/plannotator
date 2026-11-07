@@ -5043,20 +5043,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           });
         }
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
+        // A tailnet guest cannot see the picture, so it cannot set one either.
+        if (!ownerOrLocal(req, via)) return localOnly();
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         if (body.picture === null) {
           projectPictures.removeUpload(projectId);
         } else {
+          // Only the approved words reach the toast: too big (however long the data URL), or not one of the five.
           const given = typeof body.picture === "string" ? body.picture : "";
-          const dataUrl = given.length <= 800_000 ? /^data:image\/[a-z0-9.+-]+;base64,([A-Za-z0-9+/=\s]+)$/i.exec(given) : null;
-          if (!dataUrl) {
-            throw new InboxError("validation_error", "picture: an image as a data: URL (base64, at most 512 KB), or null to take it away.", { field: "picture" });
-          }
-          const saved = projectPictures.setUpload(projectId, new Uint8Array(Buffer.from(dataUrl[1]!, "base64")));
+          if (given.length > 800_000) throw new InboxError("validation_error", "Picture: at most 512 KB.", { field: "picture" });
+          const dataUrl = /^data:image\/[a-z0-9.+-]+;base64,([A-Za-z0-9+/=\s]+)$/i.exec(given);
+          const saved = dataUrl ? projectPictures.setUpload(projectId, new Uint8Array(Buffer.from(dataUrl[1]!, "base64"))) : ({ ok: false, reason: "not_image" } as const);
           if (!saved.ok) {
-            if (saved.reason === "not_saved") throw new InboxError("config_not_saved", "The picture could not be saved; nothing changed.");
-            throw new InboxError("validation_error", saved.reason === "too_big" ? "picture: at most 512 KB." : "picture: a PNG, JPEG, GIF, WebP or SVG image.", { field: "picture" });
+            if (saved.reason === "not_saved") throw new InboxError("config_not_saved", "The picture did not change.");
+            throw new InboxError("validation_error", saved.reason === "too_big" ? "Picture: at most 512 KB." : "Picture: a PNG, JPEG, GIF, WebP or SVG image.", { field: "picture" });
           }
         }
         return json({ project: projectFolders().find((p) => p.id === projectId) ?? null });

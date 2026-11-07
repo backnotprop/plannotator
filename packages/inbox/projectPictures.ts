@@ -73,3 +73,18 @@ export function resetKnownProjectsForTests(): void {
   projects.clear();
   notifyProjects();
 }
+
+/** The most Set picture… sends: the Inbox refuses more (PROJECT_PICTURE_MAX_BYTES on the server). */
+export const PICTURE_MAX_BYTES = 512 * 1024;
+
+/**
+ * A picked file as the data: URL the Inbox takes, or the approved refusal: a file over 512 KB (a phone photo) is
+ * refused here, before it is read, so a big file is never read into memory or sent.
+ */
+export async function pictureFromFile(file: Blob): Promise<{ picture: string } | { refused: string }> {
+  if (file.size > PICTURE_MAX_BYTES) return { refused: 'Picture: at most 512 KB.' };
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = '';
+  for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+  return { picture: `data:${file.type || 'application/octet-stream'};base64,${btoa(binary)}` };
+}

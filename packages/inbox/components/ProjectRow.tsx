@@ -45,7 +45,7 @@ export interface ProjectRowProps {
    * Set picture… (this machine's projects, only while Settings → Rows shows project marks): an image as a data: URL,
    * or null to take the picture away. Resolves true once the list has it. Absent: not offered.
    */
-  onPicture?: (picture: string | null) => Promise<boolean>;
+  onPicture?: (file: File | null) => Promise<boolean>;
 }
 
 /**
@@ -113,7 +113,7 @@ export function ProjectRow(props: ProjectRowProps) {
         setContextOpen(false);
         if (action === 'picture') {
           const onPicture = props.onPicture;
-          if (onPicture) pickPicture((picture) => void onPicture(picture));
+          if (onPicture) pickPicture((file) => void onPicture(file));
           return;
         }
         if (action === 'unpicture') {
@@ -473,19 +473,14 @@ export function ProjectTip({ name, root, refresh = false, children }: { name: st
   );
 }
 
-/** Set picture…: the system's file picker, for one image, read as a data: URL. Nothing picked: nothing happens. */
-function pickPicture(onPicked: (picture: string) => void): void {
+/** Set picture…: the system's file picker, for one image (read by `pictureFromFile`). Nothing picked: nothing happens. */
+function pickPicture(onPicked: (file: File) => void): void {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/png,image/jpeg,image/gif,image/webp,image/svg+xml';
   input.onchange = () => {
     const file = input.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') onPicked(reader.result);
-    };
-    reader.readAsDataURL(file);
+    if (file) onPicked(file);
   };
   input.click();
 }
