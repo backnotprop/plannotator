@@ -155,7 +155,8 @@ const CodeInlineAnnotation: React.FC<{
   onSelect?: (id: string | null) => void;
   onEdit?: (id: string, updates: Partial<CodeAnnotation>) => void;
   onDelete?: (id: string) => void;
-}> = ({ annotation, isSelected, onSelect, onEdit, onDelete }) => {
+  plain?: boolean;
+}> = ({ annotation, isSelected, onSelect, onEdit, onDelete, plain = false }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(annotation.text ?? '');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -190,7 +191,7 @@ const CodeInlineAnnotation: React.FC<{
         opacity: 1,
       }}
     >
-      <div className="flex items-center gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+      <div className={`flex items-center gap-2 text-muted-foreground ${plain ? 'text-[11px]' : 'text-[10px] uppercase tracking-wide'}`}>
         <span className="font-semibold text-primary">Comment</span>
         <span className="rounded bg-muted px-1.5 py-0.5 font-mono normal-case text-foreground">
           {lineLabel(annotation.lineStart, annotation.lineEnd)}
@@ -286,7 +287,7 @@ const CodeInlineAnnotation: React.FC<{
         </div>
       ) : (
         annotation.text && (
-          <div className="mt-1.5 whitespace-pre-wrap border-l-2 border-primary/50 pl-2 text-foreground/90">
+          <div className={`mt-1.5 whitespace-pre-wrap text-foreground/90 ${plain ? '' : 'border-l-2 border-primary/50 pl-2'}`}>
             {annotation.text}
           </div>
         )
@@ -344,6 +345,9 @@ export interface CodeFileViewProps {
   /** Opt-in (the Inbox's file panes): `'vertical'` scrolls to a referenced or revealed line up and down only, never
    *  sliding a long row sideways, even in a short file (`scrollCodeLineIntoView`). Absent: exactly as before. */
   lineScroll?: 'vertical';
+  /** Opt-in (the Inbox's file panes): `'plain'` draws a saved comment's card with its words as plain text (no
+   *  left bar, which reads as a quote) and a sentence-case "Comment" label. Absent: exactly as before. */
+  commentCard?: 'plain';
   /** The token under the pointer (`enter` / `leave`) and the last one clicked
    *  (`click`): a host's "go to definition" looks there. Turning it on wraps
    *  the file's tokens (Pierre's token transformer). */
@@ -389,6 +393,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
   extraCss,
   revealLine,
   lineScroll,
+  commentCard,
   onTokenTarget,
   onTokenNavigate,
 }) => {
@@ -569,9 +574,10 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
         onSelect={onSelectAnnotation}
         onEdit={onEditAnnotation}
         onDelete={onDeleteAnnotation}
+        plain={commentCard === 'plain'}
       />
     );
-  }, [onDeleteAnnotation, onEditAnnotation, onSelectAnnotation, selectedAnnotationId]);
+  }, [commentCard, onDeleteAnnotation, onEditAnnotation, onSelectAnnotation, selectedAnnotationId]);
 
   const renderGutterUtility = useCallback((getHoveredLine: () => { lineNumber: number } | undefined) => {
     return (

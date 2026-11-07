@@ -266,6 +266,7 @@ export function ReferencedFilePane({
                 key={key}
                 filepath={found.path}
                 lineScroll="vertical"
+                commentCard="plain"
                 contents={found.contents}
                 line={fileRef.line}
                 lineEnd={fileRef.lineEnd}

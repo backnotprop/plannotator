@@ -511,6 +511,7 @@ See HANDOFF.md § "Decision toggle on any question, and an opener for the host's
 - `BarePathContext` (`{ find, wrap }`): file paths written as plain words. InlineMarkdown asks `find` for each plain run (after cross-repo refs), stops a chunk where a found path starts so a `_` or `@` in it does not cut it, and draws each through `wrap`. Never inside code, links or markup.
 - An `'open'` resolution's `wrap?: (link) => ReactNode`: draws the link inside the host's own hover (its code, say), without the tooltip; the click still calls `open`.
 - `CodeFileView` `lineScroll?: 'vertical'`: a referenced or revealed line is scrolled to up and down only (`scrollCodeLineIntoView`, across Pierre's shadow root), never sliding a long row sideways. Absent: the old scroll, unchanged.
+- `CodeFileView` `commentCard?: 'plain'`: a saved comment's card shows its words as plain text, with no left bar (a bar reads as a quote), and a sentence-case "Comment" label instead of the uppercase tracked one. Absent: the card is unchanged.
 
 ### Diff file tree (`components/DiffFileTree`; ui 0.50.0)
 
