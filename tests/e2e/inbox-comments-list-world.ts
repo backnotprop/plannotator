@@ -144,6 +144,19 @@ export async function openThread(page: Page, world: ListWorld, t: ListThread): P
   await expect(highlight(page, t)).toBeVisible();
 }
 
+/**
+ * With a file open in a wide window the sidebar is shut, and a pointer resting on the window's left 20 px slides
+ * it in over the thread's foot, Send included (SidebarPeek). The spec's pointer starts at (0, 0), on that strip,
+ * and CI's browser has delivered a move there with no input from the spec: the panel opened and, as the pointer
+ * never entered or left it, stayed over Send. Moves the pointer across the panel and off it, so an open panel
+ * shuts and a pending one never opens.
+ */
+export async function pointerOffTheEdge(page: Page): Promise<void> {
+  await page.mouse.move(120, 4);
+  await page.mouse.move(page.viewportSize()!.width / 2, 4);
+  await expect(page.locator('[data-sidebar-peek][data-visible]')).toHaveCount(0);
+}
+
 /** Where everything behind the list is, once a phone's pane has finished pushing in. */
 export async function layout(page: Page): Promise<string> {
   await page.evaluate(() => Promise.allSettled((document.querySelector('section.ib-pane')?.getAnimations() ?? []).map((animation) => animation.finished)));

@@ -141,6 +141,15 @@ test.skipIf(!hasDom)('Turn on saves through POST /api/inbox/agents, says when it
   expect(text(m.el.querySelector('[aria-live="polite"]'))).toBe("Pi's Inbox tool is on. Start a new Pi session, or run /reload in one that is running.");
 });
 
+test.skipIf(!hasDom)("Turn on for Cline says its tool is on and when it applies, and lists it as next session", async () => {
+  const m = mount(agentsModel({ cline: toolOff() }));
+  globalThis.fetch = (async (_input: RequestInfo | URL, _init?: RequestInit) =>
+    new Response(JSON.stringify({ ...agentsModel({ cline: ready() }), error: null }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch;
+  await click(button(card(m.el), 'Turn on')!);
+  expect(text(m.el.querySelector('[aria-live="polite"]'))).toBe("Cline's Inbox tool is on. It applies to Cline sessions started from now on.");
+  expect([...listOf(m.el, 'Already connected')].map(text)).toContain('Cline next session');
+});
+
 test.skipIf(!hasDom)('a refused Turn on says why on the card and offers Try again', async () => {
   const m = mount(SCENARIOS.typical());
   globalThis.fetch = (async () =>
