@@ -2043,13 +2043,6 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 .ib-stepchev { display: inline-flex; color: var(--muted-foreground); transition: transform 160ms ease; }
 .ib-stepchev.ib-on { transform: rotate(180deg); }
 @media (prefers-reduced-motion: reduce) { .ib-stepchev { transition: none; } }
-/* A typed comment that would be lost: the question row directly above the bar, part of the layout. */
-.ib-stepguard { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 14px; font-size: var(--ib-fs-13, 13px); background: color-mix(in oklab, var(--primary) 10%, var(--card)); border-top: 1px solid color-mix(in oklab, var(--primary) 30%, transparent); }
-.ib-stepguard > .ib-ic { color: var(--primary); flex: none; }
-.ib-stepguard .ib-gt { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
-/* "Discard and go to <a long name>" cuts the name in its middle and never widens the page. */
-.pn-inbox .ib-stepguard .ib-btn { max-width: 100%; min-width: 0; }
-.ib-stepguard .ib-gt b { font-weight: 600; }
 /* The open file's tile beside the thread. */
 .ib-att-t.ib-open-beside { border-color: color-mix(in oklch, var(--primary) 55%, var(--border)); background: color-mix(in oklch, var(--primary) 6%, var(--card)); }
 .ib-view.ib-phone .ib-vbody { grid-template-columns: minmax(0, 1fr); }
@@ -2074,8 +2067,8 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 .ib-fold [data-sticky-actions] { float: none; justify-content: flex-end; margin: 0 -4px 6px 0; }
 
 /* Full screen (approval "inbox-one-fullscreen"): one mode. The file fills the window; what floats over it is one
-   toolbar (it gathers into the corner control, "inbox-fullscreen-gather"), the changed chip (it stays), the step chip
-   and the question row. The comments float over the page at its right, under the toolbar, in the toolbar's material:
+   toolbar (it gathers into the corner control, "inbox-fullscreen-gather"), the changed chip (it stays) and the step chip.
+   The comments float over the page at its right, under the toolbar, in the toolbar's material:
    the page keeps its whole width, and the panel is as tall as what it lists, up to the window's foot. It gathers into
    the corner control with the tools (below, with the others). On a phone the comments are the bottom sheet (its rules
    are in the phone query). */
@@ -2097,7 +2090,7 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 .pn-inbox .ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-apanel :is(.bg-card, .ib-earlier-row) { background: var(--popover); }
 /* The page's right edge is under the panel: its Contents rail yields while the panel is open. */
 .ib-view.ib-fullview.ib-drawer:not(.ib-phone) .pn-contents-rail { visibility: hidden; }
-/* What is centred at the page's foot (the reply card, the step chip, the question row) keeps clear of the open panel:
+/* What is centred at the page's foot (the reply card, the step chip) keeps clear of the open panel:
    centred on the window while it fits beside the panel (from about 1420 px), else moved left as far as it must. */
 .ib-view.ib-fullview.ib-drawer:not(.ib-phone) {
   --ib-foot-c: min(50%, calc(100% - 368px - min(340px, (100% - 392px) / 2)));
@@ -2174,10 +2167,6 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 .ib-fvchip-keys { display: inline-flex; gap: 4px; }
 .ib-fvchip kbd { display: inline-flex; align-items: center; justify-content: center; height: 20px; min-width: 20px; border-radius: 5px; border: 1px solid color-mix(in oklch, var(--border) 70%, transparent); background: var(--muted); font: 600 var(--ib-fs-11, 11px)/1 var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); }
 @media (prefers-reduced-motion: reduce) { .ib-fvchip, .ib-fvchip.ib-on { transition: none; } }
-/* The question row comes back as an overlay at the foot (there is no bar to sit on). */
-.ib-view.ib-fullview > .ib-stepguard { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 9; width: min(760px, calc(100% - 24px)); box-sizing: border-box; border: 1px solid color-mix(in oklab, var(--primary) 30%, transparent); border-radius: 10px; box-shadow: 0 12px 34px rgba(0, 0, 0, 0.3); }
-/* With the comments panel open the question keeps clear of it, as the chip does; the panel's foot stays free to press. */
-.ib-view.ib-fullview.ib-drawer:not(.ib-phone) > .ib-stepguard { left: var(--ib-foot-c); width: min(680px, var(--ib-foot-w)); }
 /* The drawer's foot: what rides the next Send, and the way to the reply. */
 .ib-fvfoot { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 14px; border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); background: var(--card); }
 .ib-fvsend { margin: 0; font-size: var(--ib-fs-13, 13px); line-height: 1.4; color: var(--muted-foreground); }
@@ -3804,12 +3793,9 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 .ib-fname[data-name]::after { content: attr(data-name); position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .ib-fname.ib-fname-wrap { display: block; white-space: normal; overflow: visible; overflow-wrap: anywhere; }
 .ib-fname-wrap > .ib-fname-h { white-space: normal; overflow: visible; }
-/* The open file's one column never grows past the pane for a row's content ("Discard and go to <a long name>"
-   was a 1,215 px button and scrolled the whole window sideways): its rows shrink their content instead. */
+/* The open file's one column never grows past the pane for a row's content (a 1,215 px button once
+   scrolled the whole window sideways): its rows shrink their content instead. */
 .ib-view { grid-template-columns: minmax(0, 1fr); }
-/* The button's words and the name are one item (the button's 7 px gap after the words' own space read as two spaces). */
-.ib-gto { display: flex; min-width: 0; }
-.ib-gto > .ib-fname { margin-inline-start: 0.28em; }
 
 
 /* "Where should this reply go?" with many live sessions: the reply area stops at 70% of the thread, the list of

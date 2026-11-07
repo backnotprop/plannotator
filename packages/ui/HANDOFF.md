@@ -2752,6 +2752,18 @@ These did not change: `@codemirror/autocomplete` `^6.20.3`, `lang-javascript` `^
 - **`parseMarkdownToBlocks(text, { keepBlankLines: true })`**: a paragraph that follows 2+ blank lines carries `Block.blankLinesBefore` (capped at 10), and `BlockRenderer` gives it a top margin of that many lines. Absent: nothing is set and no style is emitted, so plan, review and annotate blocks and DOM are unchanged.
 - **`SoftLineBreaksContext`** (exported from `components/InlineMarkdown`; `RenderedMarkdown`'s `softLineBreaks` provides it): inside it a bare newline is a `<br>`. Together the two show text as typed (single breaks and blank lines), as Slack does. Workspaces can wrap a Viewer holding the person's own text in the provider and pass the option; a document or an agent's text should not.
 
+## Reopening a comment draft (unreleased; additive)
+
+Optional seams, so a host can put an unsaved comment back in its composer (the Inbox keeps a comment being written when its file closes, and opens it again when the file does). A host that uses none of them sees no change.
+
+- `ViewerHandle.reopenComment?(annotation, onMissing?) => boolean`: the markdown `Viewer` re-marks the comment's words (or a diagram part, through `diagram/reopen.ts` and `useDiagramComments`' `openAt`, `DiagramComposer`'s `initialText`) and opens its composer with the words. `HtmlViewer` posts the new bridge message `plannotator-bridge-restore-draft { id, anchor?, text }`; the bridge pins the anchor again and its selection carries `restoreId`, or it answers `plannotator-bridge-restore-draft-missing { id }` and `onMissing` runs. Additive to the protocol: an older bridge asset ignores it, so `BRIDGE_PROTOCOL_VERSION` is unchanged.
+- `CodeFileView` (in `CodeFilePopout.tsx`) `reopenComment?: { lineStart, lineEnd, text }` (a comment on lines, opened with its words) and `reopenEdit?: { id, text }` (a saved comment's edit box, with changed words).
+- `AnnotationPanel`'s `reopenEdit?: { id, text }`: a saved comment's edit box, opened with changed words.
+- `ViewerHandle.peekComment?() => Annotation | null`: the comment being written in the viewer's own composer (markdown: a text selection's; `HtmlViewer`: a pin's or a selection's), as the annotation its submit would add, with empty words. It only reads: nothing is added, closed or focused, so a host can call it while the viewer is being taken away (the Inbox reads it in its pane's unmount cleanup).
+- `CodeFileView` `onComposerLines?: (lines: { lineStart, lineEnd, originalCode } | null) => void`: told the lines of the line comment being written as its composer opens, null as it closes.
+- `peekComment` on the markdown `Viewer` also covers its global comment, a code block's comment and a diagram part's (with `diagramAnchor`), read through the new `DiagramViewer` `onComposerAnchor?(anchor | null)` and `DiagramBlock` / `MermaidBlock` / `GraphvizBlock` `onComposerAnchor?(blockId, 'inline' | 'popout', anchor | null)` (read only; absent: nothing changes).
+- `HtmlViewer`: a `restore-draft` that gets no answer within 3 s (a cached older bridge asset ignores the message) runs the host's `onMissing` (not after the viewer unmounts: its waits are cleared then), and a late answer (a selection carrying that `restoreId`) is let go with `cancel-selection`. A selection with no `restoreId` opens as it always has.
+
 ## Shape and links: a slot for a file's action (unreleased; additive)
 
 Optional seams, so a host can put its own control beside a file a board or a message names. A host that passes none of them sees no change. Plannotator's Inbox uses them for "Open in".

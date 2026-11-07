@@ -273,13 +273,17 @@ for (const phone of [
       await page.locator('[data-fcomp-mode="comment"]').tap();
       await expect(field(page)).toHaveValue('Keep this');
 
-      // Words waiting: a step to the next file asks first, as it does for an image's comment. (The Reply tab
-      // brings the toolbar back; the pin's draft is held.)
+      // Words waiting: a step to the next file goes at once (nothing asks), and the words wait as report.html's
+      // draft, back on the same pin when it opens again. (The Reply tab brings the toolbar back; the pin's draft is held.)
       await page.locator('[data-fcomp-mode="reply"]').tap();
       await bar(page).locator('[data-full-view-position]').tap();
       await page.locator('[data-image-peek-sheet]').getByRole('gridcell', { name: /^second\.html/ }).tap();
-      await expect(page.locator('.ib-stepguard')).toBeVisible();
+      await expect(pane(page)).toHaveAttribute('data-attachment-pane', w.ids['second.html']!);
+      await expect(page.locator('.ib-stepguard, [data-step-guard]')).toHaveCount(0);
+      await bar(page).locator('[data-full-view-position]').tap();
+      await page.locator('[data-image-peek-sheet]').getByRole('gridcell', { name: /^report\.html/ }).tap();
       await expect(pane(page)).toHaveAttribute('data-attachment-pane', w.ids['report.html']!);
+      await expect(field(page)).toHaveValue('Keep this');
     });
   });
 
@@ -419,29 +423,24 @@ test('Pixel 7 (Chromium), real pinch: the next file opens at full view, and pinc
   });
 });
 
-test('Pixel 7 (Chromium): words in the card wait for an answer before the other version opens', async () => {
+test('Pixel 7 (Chromium): words in the card wait for their version: the other version opens at once, and back on this one the card holds them', async () => {
   await withPhone('chromium', async (w, page) => {
     writeFileSync(join(w.dir, 'report.html'), pageOf('Latency report, rewritten'));
     await open(w, page, 'report.html');
     await pen(page).tap();
     await frame(page).locator('#n1').tap();
     await field(page).fill('Keep this');
-    // ⌄ gathers the tools; the changed chip stays (a fact about the file), and its link still asks first.
+    // ⌄ gathers the tools; the changed chip stays (a fact about the file), and its link still works.
     await page.locator('[data-fcomp-minimize]').tap();
     await expect.poll(() => tools(page)).toBe('tucked');
     await page.getByRole('button', { name: 'Open the version it sent' }).tap();
-    await expect(page.locator('.ib-stepguard')).toBeVisible();
-    await expect(page.locator('.ib-fvver-t')).toHaveText('Changed since sent');
-    // Keep writing brings the tools back first, then the card on its words.
-    await page.locator('[data-guard-keep]').tap();
-    await expect.poll(() => tools(page)).toBe('pinned');
-    await expect(field(page)).toHaveValue('Keep this');
-    await expect(field(page)).toBeFocused();
-    // Discarded on purpose, the other version opens.
-    await page.locator('[data-fcomp-minimize]').tap();
-    await page.getByRole('button', { name: 'Open the version it sent' }).tap();
-    await page.locator('[data-guard-discard]').tap();
+    // Nothing asks: the sent version opens on that tap.
     await expect(page.locator('.ib-fvver-t')).toHaveText('Showing the sent version');
+    await expect(page.locator('.ib-stepguard')).toHaveCount(0);
+    // Back on the file as it is now: the page pins the same element again, and the card holds the words.
+    await page.getByRole('button', { name: 'Open the file as it is now' }).tap();
+    await expect(page.locator('.ib-fvver-t')).toHaveText('Changed since sent');
+    await expect(field(page)).toHaveValue('Keep this');
   });
 });
 

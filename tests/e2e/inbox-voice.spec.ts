@@ -23,8 +23,8 @@
  *  - The announcement: once, on a computer with a ChatGPT login only, its Phones only option saved by Turn on voice. It
  *    waits for its moment (approval "inbox-one-time-dialogs"): a reply of 40 or more words just sent.
  *  - A file or the artifacts opening over the box closes the microphone.
- *  - A take full screen's card is transcribing outlives the card: Write the reply (through the unsaved-comment question
- *    too), the Comment tab and browser Back; its words reach the thread it was said in, never the thread now open. A
+ *  - A take full screen's card is transcribing outlives the card: Write the reply (with a comment being written too),
+ *    the Comment tab and browser Back; its words reach the thread it was said in, never the thread now open. A
  *    microphone still listening closes all the same.
  *
  * Build the apps first (bun run --cwd apps/review build && bun run build:hook), then
@@ -1006,31 +1006,21 @@ test.describe('a take being transcribed outlives full screen’s card', () => {
         await finish(page, context);
       });
 
-      for (const answer of ['save', 'discard', 'keep'] as const) {
-        test(`the unsaved comment’s question, ${answer}: the words still reach the reply`, async () => {
-          const { w, context, page } = await start();
-          await page.goto(`${w.url}${fileHash(w)}`);
-          const { card, field } = await transcribing(page, w);
-          await page.locator('[data-fcomp-mode="comment"]').click();
-          const comment = card.locator('[data-image-composer] textarea');
-          await comment.fill('A thought');
-          await openTheSheet(page);
-          await writeTheReply(page);
-          await page.locator('[data-step-guard]').waitFor();
-          await page.locator(`[data-guard-${answer}]`).click();
-          if (answer === 'keep') {
-            await expect(comment).toHaveValue('A thought');
-            w.send({ release: true });
-            await page.locator('[data-fcomp-mode="reply"]').click();
-            await expect(field).toHaveValue('Before. Landed.');
-          } else {
-            await expect(box(page)).toHaveValue('Before.');
-            w.send({ release: true });
-            await expect(box(page)).toHaveValue('Before. Landed.');
-          }
-          await finish(page, context);
-        });
-      }
+      test('a comment being written never stops Write the reply: the file closes on that press and the words still reach the reply', async () => {
+        const { w, context, page } = await start();
+        await page.goto(`${w.url}${fileHash(w)}`);
+        const { card } = await transcribing(page, w);
+        await page.locator('[data-fcomp-mode="comment"]').click();
+        await card.locator('[data-image-composer] textarea').fill('A thought');
+        await openTheSheet(page);
+        await writeTheReply(page);
+        await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
+        await expect(page.locator('[data-step-guard]')).toHaveCount(0);
+        await expect(box(page)).toHaveValue('Before.');
+        w.send({ release: true });
+        await expect(box(page)).toHaveValue('Before. Landed.');
+        await finish(page, context);
+      });
 
       test('the Comment tab: the words wait in the reply, Esc there leaves the take alone, and Reply’s Send is on again', async () => {
         const { w, context, page } = await start({ phone: false, width: 1440, height: 900 });

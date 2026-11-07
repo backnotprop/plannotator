@@ -212,6 +212,9 @@ function parseVimBridgeCopy(value: unknown): string | null {
 /** The fewest milliseconds between two honored `step` messages from the page. */
 export const STEP_MESSAGE_MIN_INTERVAL_MS = 150;
 
+/** How long a restore-draft (`reopenComment`) waits for the bridge's answer before the host gets the words back. */
+const REOPEN_ANSWER_MS = 3000;
+
 export interface HtmlViewerProps {
   rawHtml: string;
   /** Live proxied-app mode: render `src` (no sandbox, no srcdoc) instead of
@@ -1077,6 +1080,40 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       postToBridge({ type: `${PREFIX}report-unanchored` });
     }, [iframeReadyVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // reopenComment asked before the bridge was ready: posted once it is,
+    // after the saved annotations above are drawn.
+    const pendingReopenRef = useRef<Record<string, unknown> | null>(null);
+    // A bridge that never answers restore-draft (an older cached asset): after
+    // REOPEN_ANSWER_MS the host gets the words back through its onMissing.
+    const postReopenRef = useRef<(message: Record<string, unknown>) => void>(() => {});
+    const reopenTimersRef = useRef(new Set<ReturnType<typeof setTimeout>>());
+    postReopenRef.current = (message: Record<string, unknown>) => {
+      postToBridge(message);
+      const id = typeof message.id === "string" ? message.id : null;
+      if (!id) return;
+      const timer = setTimeout(() => {
+        reopenTimersRef.current.delete(timer);
+        hook.expireReopen(id);
+      }, REOPEN_ANSWER_MS);
+      reopenTimersRef.current.add(timer);
+    };
+    // Gone before the answer: the host is not told later (it kept the words as the viewer went).
+    useEffect(() => {
+      const timers = reopenTimersRef.current;
+      return () => {
+        for (const timer of timers) clearTimeout(timer);
+        timers.clear();
+      };
+    }, []);
+    const iframeReadyRef = useRef(iframeReadyVersion);
+    iframeReadyRef.current = iframeReadyVersion;
+    useEffect(() => {
+      if (iframeReadyVersion === 0 || !pendingReopenRef.current) return;
+      const message = pendingReopenRef.current;
+      pendingReopenRef.current = null;
+      postReopenRef.current(message);
+    }, [iframeReadyVersion, postToBridge]);
+
     // A linked document opened from a `#`-carrying link: the srcdoc document
     // has no URL, so the fragment is replayed once its bridge is ready.
     useEffect(() => {
@@ -1285,6 +1322,18 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
           type: `${PREFIX}reveal-pin`,
           ...(options?.clearBottom ? { clearBottom: options.clearBottom } : {}),
         }),
+      // A comment being written when its file closed, put back by the host:
+      // the bridge pins its element again (or selects its words again) and
+      // the composer opens holding its words. Not in live sessions.
+      reopenComment: (annotation: Annotation, onMissing?: () => void) => {
+        if (readOnly || liveMode) return false;
+        const message = hook.prepareReopen(annotation, onMissing);
+        if (!message) return false;
+        if (iframeReadyRef.current > 0) postReopenRef.current(message);
+        else pendingReopenRef.current = message;
+        return true;
+      },
+      peekComment: () => (readOnly || liveMode ? null : hook.peekComment()),
     }));
 
     const handleGlobalCommentSubmit = useCallback(

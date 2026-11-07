@@ -38,6 +38,7 @@ export function DiagramComposer({
   onSubmit,
   onCancel,
   onAskAI,
+  initialText,
 }: {
   draft: DiagramComposerDraft;
   anchorRect: ScreenRect;
@@ -57,8 +58,10 @@ export function DiagramComposer({
    * the host took it (the composer then closes), false to keep the draft.
    * Absent: no Ask AI button. */
   onAskAI?: (question: string) => Promise<boolean>;
+  /** Opt-in: the words it opens with (a comment the host kept and put back). Absent: empty, as always. */
+  initialText?: string;
 }) {
-  const [text, setText] = useState('');
+  const [text, setText] = useState(initialText ?? '');
   const [asking, setAsking] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   useEffect(() => {
