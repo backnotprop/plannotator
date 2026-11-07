@@ -25,6 +25,8 @@ const SHOTS = [
   ['view-gate-2563', '?shot=change&pr=2563&gate=1'],
   ['view-removes-after', '?shot=change&removes=1&view=after'],
   ['plan', '?shot=plan'],
+  ['touches-pane', '?shot=touches&layout=pane'],
+  ['touches-window-lead', '?shot=touches&layout=window&lead=1'],
 ];
 
 // The inks' contrast, measured in the page: a marked part's name against its box (the wash

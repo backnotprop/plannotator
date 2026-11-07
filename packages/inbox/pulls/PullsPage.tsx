@@ -16,6 +16,7 @@
  *
  * Read only while the page is open (usePulls). No new keyboard shortcuts.
  */
+import { reviewBoxPull, type ReviewBoxPull } from '../compose/reviewBox';
 import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullRiskJudgment, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
@@ -34,15 +35,11 @@ import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import {
   checksWords,
   findStack,
-  handoffKeys,
   inboxPullLabel,
   ladderHeading,
   layerPill,
   linkAgentName,
   pullGroups,
-  pullHandoffAskLine,
-  pullHandoffThreadName,
-  handoffStack,
   openLayers,
   pullNounWord,
   stackProjects,
@@ -54,7 +51,6 @@ import { ReviewsList } from './ReviewsList';
 import { reviewRowProjects, reviewRowsIn } from './reviewsModel';
 import { forgeName } from './labels';
 import { answeredClis } from './notices';
-import { ReviewPicker } from './ReviewPicker';
 import { filterReviewRows, readRiskFilter, riskLevelWord, saveRiskFilter, stackRisk, stackRiskFailure, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
 import { RiskFilter } from './RiskFilter';
 import { COULD_NOT_RANK, RiskMark } from './RiskMark';
@@ -85,13 +81,8 @@ export interface PullsPageProps {
   onOpenThread: (threadId: string) => void;
   /** Absent while the Board is off (no card chip shows then: the answer has no cards). */
   onOpenCard?: (cardId: string) => void;
-  /**
-   * Start a new agent: compose's New thread, with the review thread's first message and the PRs it is for.
-   * `threadName`: the new thread's name (`pullHandoffThreadName`), compose's chip as it opens.
-   */
-  onLaunch: (keys: readonly string[], projects: readonly string[], body: string, askLine: string, opener: HTMLElement, threadName: string) => void;
-  /** A review thread started with `session`, the picked agent: the list reads it. */
-  onStarted: (session: string) => void;
+  /** A PR nobody is reviewing: the New review box, filled in with it. */
+  onNewReview: (pick: ReviewBoxPull, opener: HTMLElement) => void;
 }
 
 const NO_JUDGMENTS: RiskJudgments = {};
@@ -287,9 +278,6 @@ function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnsw
   );
 }
 
-/** How long the primary waits for a just-started thread's link before it comes back anyway. */
-const AWAIT_LINK_MS = 15_000;
-
 function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPullsAnswer; judgments: RiskJudgments; riskFailed: RiskFailures; phone: boolean; onClose: () => void }) {
   const { item, model, phone, judgments, riskFailed } = props;
   const stack = item.stack;
@@ -308,11 +296,8 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   // What a review thread is about (`handoffStack`): with none yet, the whole stack (a tree: the chain to its top); a new
   // one after its agent ended, the layers that thread had. A tree's sibling left out of that chain shows nothing of
   // its own here.
-  const handed = (link ? handoffStack(stack, model.links, link.thread_id) : null) ?? handoffStack(stack, model.links) ?? stack;
   const top = open[open.length - 1] ?? stack.layers[stack.layers.length - 1]!;
   const titleId = useId();
-  const pickerId = useId();
-  const primaryId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     // A stack opened from the list: its title takes focus only on a phone (the list stays where the person is otherwise).
@@ -320,51 +305,19 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   }, [stack.id, phone]);
   const forge = forgeName(stack);
   const many = open.length > 1;
+  // A thread that only named the PR isn't a review of it: the page's rows say so, the stack stays Open, not reviewed.
+  const mentioned = !!link && !ended && props.state.reviews?.rows.find((row) => row.stacks.some((s) => s.id === stack.id))?.reviewed === false;
   // One review thread at a time: the picker opens only while there is none, or its agent has ended.
-  const canStart = open.length > 0 && (!link || ended);
-  const [picking, setPicking] = useState(false);
-  // After a thread starts, focus moves to the line that names its agent (the picker that held it is gone).
-  const said = useRef<HTMLDivElement>(null);
-  const focusSaid = useRef(false);
-  const linkThread = link?.thread_id ?? null;
-  useEffect(() => {
-    if (!focusSaid.current || !linkThread || !said.current) return;
-    focusSaid.current = false;
-    said.current.focus();
-  }, [linkThread]);
-  // A send to a running agent, then the wait for its link: the primary waits too, so a second thread can't start.
-  // `awaiting` holds the thread the stack had when the send began; the link to a new thread ends the wait.
-  const [pickerSending, setPickerSending] = useState(false);
-  const [awaiting, setAwaiting] = useState<{ from: string | null } | null>(null);
-  useEffect(() => {
-    if (awaiting && linkThread !== awaiting.from) setAwaiting(null);
-  }, [awaiting, linkThread]);
-  useEffect(() => {
-    // The list never brought the link in (a failed read): the button comes back rather than staying off.
-    if (!awaiting) return;
-    const timer = window.setTimeout(() => setAwaiting(null), AWAIT_LINK_MS);
-    return () => window.clearTimeout(timer);
-  }, [awaiting]);
-  const primaryWaits = pickerSending || awaiting !== null;
-  const primaryButton = useRef<HTMLButtonElement>(null);
-  const closePicker = () => {
-    setPicking(false);
-    primaryButton.current?.focus({ preventScroll: true });
-  };
+  const canStart = open.length > 0 && (!link || ended || mentioned);
   const primary = canStart ? (
     <button
-      ref={primaryButton}
-      id={primaryId}
       type="button"
       className="ib-btn ib-pri"
-      disabled={primaryWaits}
-      onClick={() => setPicking((v) => !v)}
-      aria-expanded={picking}
-      aria-controls={picking ? pickerId : undefined}
-      data-pulls-primary={link ? 'again' : 'review'}
+      onClick={(event) => props.onNewReview(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects), event.currentTarget)}
+      data-pulls-primary={link && !mentioned ? 'again' : 'review'}
     >
       <Icon name="plus" size={15} />
-      {link ? 'Start a new review thread' : 'Review with an agent'}
+      {link && !mentioned ? 'Start a new review thread' : 'Review with an agent'}
     </button>
   ) : link && !ended ? (
     <button type="button" className="ib-btn ib-pri" onClick={() => props.onOpenThread(link.thread_id)} data-pulls-primary="open">
@@ -374,6 +327,11 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   ) : null;
   // The person's own review, in every state: straight into phase 1's review mode (layer by layer for a stack), no stop on the way.
   // A stack's whole diff is the review's own "This layer | Whole stack" switch, not a second button here.
+  const openThread = mentioned ? (
+    <button type="button" className="ib-btn" onClick={() => props.onOpenThread(link!.thread_id)} data-pulls-open-thread="">
+      Open thread
+    </button>
+  ) : null;
   const openDiff = start ? (
     <button type="button" className="ib-btn" onClick={() => props.onReview(stack.id, start.key, 'layer')} data-pulls-open-diff="">
       <Icon name="code" size={15} />
@@ -381,7 +339,6 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
     </button>
   ) : null;
   const projects = stackProjects(model, stack);
-  const threadName = pullHandoffThreadName(handed, model.links, stack);
   const judged = stackRisk(stack, judgments);
   const riskFailure = stackRiskFailure(stack, judgments, riskFailed);
   return (
@@ -443,36 +400,13 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             <span dir="auto">{judged.why}</span>
           </p>
         )}
-        {link && <ThreadLine ref={said} link={link} ended={ended} now={now} />}
+        {link && <ThreadLine link={link} ended={ended} mentioned={mentioned} now={now} />}
         {(primary || openDiff) && (
           <div className="ib-pr-actions">
             {primary}
+            {openThread}
             {openDiff}
           </div>
-        )}
-        {picking && canStart && (
-          <ReviewPicker
-            id={pickerId}
-            labelId={primaryId}
-            stack={handed}
-            projects={projects}
-            threadName={threadName}
-            exclude={link ? [link.agent?.session, link.handed_to].filter((s): s is string => !!s) : []}
-            onLaunch={(body, opener) => {
-              // Compose takes it from here: the picker closes, so it never comes back by itself (an agent ending later).
-              setPicking(false);
-              props.onLaunch(handoffKeys(handed), projects, body, pullHandoffAskLine(handed, { kind: 'guide' }), opener, threadName);
-            }}
-            onSending={setPickerSending}
-            onStarted={(session) => {
-              focusSaid.current = true;
-              setAwaiting({ from: linkThread });
-              setPicking(false);
-              props.onStarted(session);
-            }}
-            onCancel={closePicker}
-            onReload={props.state.reload}
-          />
         )}
         <div className="ib-pr-order">
           <div className="ib-pr-order-h">
@@ -499,7 +433,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
  * on its way, the last answer's time, or none yet), its last words under it; "Claude Code ended" once its session
  * ended. No box. Focus lands here when a thread has just started.
  */
-const ThreadLine = forwardRef<HTMLDivElement, { link: InboxPullLink; ended: boolean; now: number }>(function ThreadLine({ link, ended, now }, ref) {
+const ThreadLine = forwardRef<HTMLDivElement, { link: InboxPullLink; ended: boolean; mentioned?: boolean; now: number }>(function ThreadLine({ link, ended, mentioned, now }, ref) {
   const name = linkAgentName(link) ?? 'Agent';
   // The ask (the person started it), until the agent's guided review arrives in the thread.
   const asked = link.via === 'owner' && link.ask && !link.guide?.review ? (link.ask === 'custom' ? 'Custom curation on the way' : 'Guided review on the way') : null;
@@ -514,7 +448,7 @@ const ThreadLine = forwardRef<HTMLDivElement, { link: InboxPullLink; ended: bool
         ) : (
           <>
             <span>
-              Review thread with <b>{name}</b>
+              {mentioned ? 'Thread' : 'Review thread'} with <b>{name}</b>
             </span>
             <span className="ib-mut" data-pulls-ask={asked ? link.ask : undefined}>
               {asked ?? (link.last ? relativeTime(link.last.at, now) : 'No answer yet')}

@@ -49,6 +49,7 @@ import {
   INBOX_PULLS_OTHERS_FRESH_MS,
   INBOX_PULLS_RATE_FLOOR,
   linkInboxPulls,
+  threadAgent,
   parseGithubPulls,
   parseGitlabPulls,
   previewOf,
@@ -1094,6 +1095,23 @@ describe("the worst case (break-ui on #2590)", () => {
     expect(previewOf("Layer 3 fails `settle_batch()` on EUR→JPY. Rebased from `main`.")).toBe("Layer 3 fails settle_batch() on EUR→JPY. Rebased from main.");
     expect(previewOf("## Status\n\n> **Done:** the _retry_ layer, see [the PR](https://x.test/1)\n- one\n- two")).toBe("Status Done: the retry layer, see the PR one two");
     expect(previewOf("snake_case_name and 2*3*4")).toBe("snake_case_name and 2*3*4");
+  });
+
+  test("a hand-off not yet answered: a session gone is ended, one the Inbox launched is still starting", () => {
+    const messages = new Map<string, unknown>([
+      ["t_gone", { id: "t_gone", thread_id: "t_gone", author: { kind: "person" }, to: { host: "pi", session: "ses_gone" } }],
+      ["t_launched", { id: "t_launched", thread_id: "t_launched", author: { kind: "person" }, to: { host: "claude-code", session: "ses_new" }, launch: { id: "l" } }],
+    ]);
+    const store = {
+      threadsOf: () => [],
+      threadMessageIds: (thread: string) => [thread],
+      message: (id: string) => (messages.get(id) as never) ?? null,
+      threadSubject: () => "Subject",
+      threadProject: () => "prj_1",
+      sessionLive: () => false,
+    };
+    expect(threadAgent(store, "t_gone")?.ended).toBe(true);
+    expect(threadAgent(store, "t_launched")?.ended).toBeUndefined();
   });
 
   test("an agent that sent with a wake and polls no more is marked ended; a live one and an MCP-only one are not", () => {

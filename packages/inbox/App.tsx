@@ -122,7 +122,7 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro, VOICE_INTRO_MIN_WORDS, VOICE_INTRO_MOMENT_MS } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
-import { listTallerThanScreen, listViewRevealLeaveCounts, listViewRevealMayClaim, noteRevealThread, openThreadAsks, revealArmed, useBoardReveal, useLineReveal, useStepsReveal } from './reveal';
+import { listTallerThanScreen, listViewRevealLeaveCounts, listViewRevealMayClaim, noteRevealThread, openThreadAsks, revealArmed, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
 import type { InboxRevealId } from './api';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
 import { namesCapability, withCapabilities } from './capabilities';
@@ -166,18 +166,20 @@ import { PullsPage, ReviewsOff } from './pulls/PullsPage';
 import { PullReview } from './pulls/PullReview';
 import { usePulls } from './pulls/usePulls';
 import { pullFilterOf, type PullFilter } from './pulls/model';
-import { reviewViewOf } from './pulls/reviewsModel';
+import { reviewRowProject, reviewViewOf } from './pulls/reviewsModel';
 import { reviewsAlias } from './reviewsRoute';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
 import { ListViewIntro } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
+import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
 import { CodeReviewOffer } from './components/CodeReviewOffer';
 import { useCodeReviewOffer } from './codeReviewOffer';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
 import { composeActions, composeTargets, hostLabel, type ComposeAction } from './compose/model';
+import { reviewBoxPulls } from './compose/reviewBox';
 import type { CardsModel, DraftView, InboxStorageModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
 import type { InboxRestartAgents } from '@plannotator/core/inbox-types';
@@ -1018,7 +1020,7 @@ function Inbox() {
    * `ahead` offers (settings `reveal.ahead`, List view once registered), which go at their own moment; the Inbox's
    * claim lets only one of them show (one a day).
    */
-  const snoozeIntroLatch = useRef<{ due: boolean; next: InboxRevealId | null; ahead: readonly InboxRevealId[] } | null>(null);
+  const snoozeIntroLatch = useRef<{ due: boolean; next: InboxRevealId | null; ahead: readonly InboxRevealId[]; aside: readonly InboxRevealId[] } | null>(null);
   /** The list's rows, for "a question waits in the open thread" (`openThreadAsks`) in checks that run on a timer. */
   const oneTimeRows = useRef<readonly InboxListRow[]>([]);
   /** An update dialog or a restart was on screen in this load: no Snooze announcement on it. */
@@ -2751,8 +2753,9 @@ function Inbox() {
   };
   // The palette's Actions group reads the live sessions while it is open.
   const { model: paletteSessions } = useComposeSessions(searchOpen);
+  const pullsShownRef = useRef(false);
   const paletteActions = useCallback(
-    (q: string): ComposeAction[] => composeActions(q, composeTargets(paletteSessions?.projects ?? []), lastSentRef.current),
+    (q: string): ComposeAction[] => composeActions(q, composeTargets(paletteSessions?.projects ?? []), lastSentRef.current, pullsShownRef.current),
     [paletteSessions],
   );
 
@@ -4479,7 +4482,7 @@ function Inbox() {
   if (snoozeIntroLatch.current === null && settings && latest !== null) {
     // Only `reveal.next` is armed; an older Inbox reports no queue: its Snooze rule alone (reveal.ts `revealArmed`).
     const armed = revealArmed(settings);
-    snoozeIntroLatch.current = { due: armed.snoozeDue, next: armed.next, ahead: armed.ahead };
+    snoozeIntroLatch.current = { due: armed.snoozeDue, next: armed.next, ahead: armed.ahead, aside: armed.aside };
   }
   const snoozeIntroRows = useMemo(() => latestSections.flatMap((section) => section.threads), [latestSections]);
   oneTimeRows.current = snoozeIntroRows;
@@ -4576,6 +4579,22 @@ function Inbox() {
   // The choice's two pictures: the person's own list as the groups draw it, and as the Simple list draws it.
   const listViewChoiceGroups: ListIntroGroup[] = listViewChoiceOpen && shown ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 8) }] : [])) : [];
   const listViewChoiceFlat = listViewChoiceOpen && shown ? flatRows(filterList(shown), null, { epoch: 0, keep: null }).rows.slice(0, 10) : [];
+  // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
+  // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
+  // claim runs the already-starred check, then the corner card shows.
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, listViewReveal.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const starReveal = useStarReveal({
+    due: snoozeIntroLatch.current?.aside.includes('star') === true,
+    listLoaded: snoozeIntroLatch.current !== null,
+    firstRun,
+    blocked: revealBlocked || otherRevealActive,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+  });
   /** A reveal's "Turn it on" (revealTurnOn.ts): Settings' own save; not saved, the switch goes back off and a toast says so. */
   const turnOnFromReveal = (feature: RevealFeature, close: () => void) =>
     void turnOnRevealFeature(feature, close, {
@@ -4641,6 +4660,8 @@ function Inbox() {
     boardReveal.stage !== 'claimed' &&
     stepsReveal.stage !== 'open' &&
     stepsReveal.stage !== 'claimed' &&
+    starReveal.stage !== 'open' &&
+    starReveal.stage !== 'claimed' &&
     listViewReveal.stage !== 'open' &&
     listViewReveal.stage !== 'claimed';
   const listIntroGroups: ListIntroGroup[] =
@@ -4662,8 +4683,12 @@ function Inbox() {
   // this computer's gh / glab).
   const codeReviewOn = settings?.code_review?.on === true;
   const pullsShown = codeReviewOn && !guestPage;
+  pullsShownRef.current = pullsShown;
   const onReviews = route.page === 'reviews' || !!route.reviews;
   const pulls = usePulls(onReviews && pullsShown, pullsShown, (route.reviews?.view ?? route.view) === 'others');
+  // The list a thread from the box opens beside: the one the box opened over.
+  const reviewsScope = () => (route.page === 'reviews' ? { project: route.project, view: route.view ?? pullFilterOf(null) } : (route.reviews ?? { project: null, view: pullFilterOf(null) }));
+  const reviewPulls = useMemo(() => reviewBoxPulls(pulls.reviews, new Map((projects ?? []).map((p) => [p.id, p.name]))), [pulls.reviews, projects]);
   // A review arrived, a verdict went: the rows and the sidebar's count follow the store, a moment after it changed.
   const pullsReloadRows = pulls.reloadRows;
   const rowsWaitingSince = useRef<number | null>(null);
@@ -4683,11 +4708,23 @@ function Inbox() {
     if (onReviews && guestPage) writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onReviews, guestPage]);
+  // Code review turned off (from another window, say): nothing starts a review from here, and the box says why it went.
+  // Its words stay in memory for when it's back.
+  const reviewBoxOpen = !!compose?.review;
+  useEffect(() => {
+    if (settings === null || pullsShown) return;
+    if (reviewBoxOpen) {
+      closeCompose();
+      showToast({ icon: 'warn', lead: 'Code review is off', detail: 'no review was started', wrap: true });
+    }
+    if (route.page === 'reviews' && route.new) writeRoute({ ...route, new: false }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings === null, pullsShown, reviewBoxOpen, route.page, route.new]);
   // `#reviews&new`: the box opens once, over the page, and the address goes back to the page (Back and a reload do not reopen it).
   useEffect(() => {
     if (route.page !== 'reviews' || !route.new || !pullsShown) return;
     writeRoute({ ...route, new: false }, { replace: true });
-    openCompose({});
+    openCompose({ review: {} });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.page, route.new, pullsShown]);
   useEffect(() => {
@@ -5510,7 +5547,7 @@ function Inbox() {
   const reviewView =
     reviewRow && thread && thread.thread_id === route.thread
       ? reviewViewOf(reviewRow, thread, {
-          projectName: reviewRow.review ? (projectNames.get(reviewRow.review.project_id) ?? null) : null,
+          projectName: projectNames.get(reviewRowProject(reviewRow) ?? '') ?? null,
           onWholeThread: () => go({ page: 'inbox', project: null, thread: reviewRow.thread_id }),
           onOpenStack: (stackId) => go({ page: 'reviews', project: route.reviews?.project ?? null, view: route.reviews?.view, thread: null, stack: stackId }),
         })
@@ -5526,17 +5563,13 @@ function Inbox() {
       projects={projects}
       projectNames={projectNames}
       phone={phone}
-      onNew={() => openCompose({})}
+      onNew={() => openCompose({ review: {} })}
       onOpenStack={(id) => (id ? writeRoute({ page: 'reviews', project, view, thread: null, stack: id, layer: null }, { replace: !!route.stack && !phone }) : close({ page: 'reviews', project, view, thread: null, stack: null, layer: null }))}
       onScope={({ filter, project: next }) => go(threadId ? { ...route, reviews: { project: next, view: filter } } : { page: 'reviews', project: next, view: filter, thread: null, stack: null })}
       onReview={(stack, layer, scope) => go({ page: 'reviews', project, view, thread: null, stack, layer, scope })}
       onOpenThread={(id) => go({ page: 'inbox', reviews: { project, view }, project: null, thread: id })}
       onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
-      onLaunch={(keys, projectIds, body, askLine, opener, threadName) => openCompose({ body, threadName, pulls: { keys: [...keys], projects: [...projectIds], ask_line: askLine } }, opener)}
-      onStarted={(session) => {
-        rememberSent(session);
-        pulls.reload();
-      }}
+      onNewReview={(pick, opener) => openCompose({ review: { pick } }, opener)}
     />
   );
   let main: ReactNode;
@@ -6364,6 +6397,15 @@ function Inbox() {
           onTurnOn={() => turnOnFromReveal('steps', stepsReveal.close)}
         />
       )}
+      {starReveal.stage === 'open' && (
+        <StarAskCard
+          shape="corner"
+          canStar={starReveal.canStar}
+          onStar={() => inboxApi.starAskStar().then((answer) => answer.starred === true)}
+          onAnswer={(answer) => void inboxApi.starAskAnswer(answer)}
+          onLeave={starReveal.close}
+        />
+      )}
       {listViewChoiceOpen && (
         <ListViewIntro
           groups={listViewChoiceGroups}
@@ -6565,7 +6607,11 @@ function Inbox() {
         onClose={closeSearch}
         onOpenResult={openSearchResult}
         actions={paletteActions}
-        onAction={(action) => openCompose(action.kind === 'message' ? { session: action.target.session } : {}, searchOpener.current)}
+        onAction={(action) => {
+          // New review opens over Reviews: its list is the box's pull requests, and the thread it starts opens beside it.
+          if (action.kind === 'review') writeRoute({ page: 'reviews', project: null, thread: null, stack: null, new: true });
+          else openCompose(action.kind === 'message' ? { session: action.target.session } : {}, searchOpener.current);
+        }}
         shapes={shapeOn ? searchShapes : undefined}
       />
       {compose && (
@@ -6576,9 +6622,17 @@ function Inbox() {
           lastSent={lastSent}
           home={settings?.home ?? null}
           board={boardEnabled === true}
+          reviewPulls={compose.review ? reviewPulls : undefined}
+          reviewPullsRead={!pulls.reviews ? (pulls.error ? 'failed' : 'reading') : pulls.reviews.hosts.length > 0 && pulls.reviews.hosts.some((host) => host.error) ? 'failed' : 'read'}
+          onOpenReviewThread={(id) => writeRoute({ page: 'inbox', reviews: reviewsScope(), project: null, thread: id })}
           onSent={(sent) => {
             rememberSent(sent.session);
             composeSent(sent);
+            // A New review opens beside the list, where it shows as Curating.
+            if (compose.review) {
+              writeRoute({ page: 'inbox', reviews: reviewsScope(), project: null, thread: sent.threadId });
+              pulls.reloadRows();
+            }
             // Create thread from a Board card: the new thread is linked to the card, so its Open thread goes there.
             if (sent.cardId) {
               void inboxApi

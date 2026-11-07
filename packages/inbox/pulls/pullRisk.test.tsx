@@ -130,8 +130,7 @@ const page = (stackId: string | null = null, opened: string[] = [], state = pull
       onReview={() => {}}
       onOpenThread={() => {}}
       onNew={() => {}}
-      onLaunch={() => {}}
-      onStarted={() => {}}
+      onNewReview={() => {}}
     />
   </SidebarProvider>
 );
