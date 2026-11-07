@@ -8901,6 +8901,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prr-wide .ib-gbody { border-radius: 0; }
 .ib-review.ib-prreview.ib-prr-wide:not(.ib-railfold) .ib-rsplit { grid-template-columns: var(--ib-rail-w, 280px) minmax(0, 1fr) 300px; }
 .ib-review.ib-prreview.ib-prr-wide.ib-fold:not(.ib-railfold) .ib-rsplit { grid-template-columns: var(--ib-rail-w, 280px) minmax(0, 1fr); }
+/* Closed beside the code (PullReview's Comments button, approval pr-view-one-surface 11-07 18:33Z): its width goes back to the code. */
+.ib-review.ib-prreview.ib-prr-wide.ib-prr-panel-shut:not(.ib-railfold) .ib-rsplit { grid-template-columns: var(--ib-rail-w, 280px) minmax(0, 1fr); }
+.ib-prreview.ib-prr-panel-shut .ib-gpanel { display: none; }
 .ib-prp-handle { position: absolute; top: 0; bottom: 0; left: calc(var(--ib-rail-w, 280px) - 4px); width: 8px; z-index: 4; cursor: col-resize; touch-action: none; }
 .ib-prp-handle::after { content: ""; position: absolute; top: 12px; bottom: 12px; left: 3px; width: 2px; border-radius: 1px; background: transparent; transition: background-color 120ms ease; }
 .ib-prp-handle:hover::after, .ib-prp-handle:active::after, .ib-prp-handle:focus-visible::after { background: var(--ring); }
