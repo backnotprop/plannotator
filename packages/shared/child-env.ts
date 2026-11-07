@@ -21,12 +21,34 @@
 export type ChildEnv = Record<string, string | undefined>;
 
 /**
+ * What keeps a sandboxed child's git and gh away from the macOS Keychain and
+ * from prompts. A sandbox (`PLANNOTATOR_TEST_SANDBOX`) runs with a scratch
+ * HOME, where macOS finds no keychain, so any credential write there showed
+ * "Keychain Not Found" on the person's screen, once per process.
+ *
+ * - `GIT_CONFIG_NOSYSTEM`: git skips the system config, Xcode's included,
+ *   which sets `credential.helper=osxkeychain`.
+ * - `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`: no password prompt and
+ *   no Git Credential Manager window.
+ * - `GH_PROMPT_DISABLED`, `GH_NO_UPDATE_NOTIFIER`: gh never prompts and never
+ *   checks for its own update.
+ */
+export const SANDBOX_NO_KEYCHAIN_ENV: Readonly<Record<string, string>> = Object.freeze({
+  GIT_CONFIG_NOSYSTEM: "1",
+  GIT_TERMINAL_PROMPT: "0",
+  GCM_INTERACTIVE: "never",
+  GH_PROMPT_DISABLED: "1",
+  GH_NO_UPDATE_NOTIFIER: "1",
+});
+
+/**
  * A fresh copy of the live `process.env`, with `extra` laid over it. A key in
  * `extra` whose value is `undefined` removes that variable from the child's
- * environment.
+ * environment. Under the test sandbox, `SANDBOX_NO_KEYCHAIN_ENV` comes before
+ * `extra`; outside it nothing is added.
  */
 export function childEnv(extra?: Readonly<ChildEnv>): ChildEnv {
-  const env: ChildEnv = { ...process.env };
+  const env: ChildEnv = { ...process.env, ...(process.env.PLANNOTATOR_TEST_SANDBOX ? SANDBOX_NO_KEYCHAIN_ENV : {}) };
   if (extra) {
     for (const [key, value] of Object.entries(extra)) {
       if (value === undefined) delete env[key];
