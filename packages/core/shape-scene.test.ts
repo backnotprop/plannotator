@@ -158,6 +158,34 @@ describe('a board with scenes', () => {
     expect(all).toContain('views.picture.html: has data-scene="nope", but the board has no scenes');
     expect(all).not.toContain('"old"');
   });
+
+  // What the player and `shape frame` cannot play is refused at `shape update`, not shown broken later.
+  test('a data-scene on anything but a <div> is refused by name', () => {
+    const r = checkShapeBoard(board(scene(), '<svg viewBox="0 0 200 100"><g data-scene="pool"><path data-part="wire"/><circle data-part="job"/><g data-part="w2"/></g></svg>'));
+    expect(r.ok ? '' : r.errors.join('\n')).toContain('views.picture.html: data-scene="pool" is on a <g>; put it on a <div> around your SVG: <div data-scene="pool"><svg>…</svg></div>');
+  });
+
+  test("a scene's pieces must be in the view that plays it, not another view", () => {
+    const r = checkShapeBoard({
+      ...board(scene(), '<div data-scene="pool"><svg viewBox="0 0 200 100"><path data-part="wire"/><circle data-part="job"/></svg></div>'),
+      views: {
+        picture: { html: '<div data-scene="pool"><svg viewBox="0 0 200 100"><path data-part="wire"/><circle data-part="job"/></svg></div>' },
+        how: { html: '<svg><g data-part="w2"/></svg>' },
+      },
+    });
+    expect(r.ok ? '' : r.errors.join('\n')).toContain('scenes.pool.tracks.w2: the drawing has no data-part="w2"');
+    // In the same view's tall or more drawing it counts: the player finds it there.
+    const more = checkShapeBoard({
+      ...board(scene()),
+      views: { picture: { html: '<div data-scene="pool"><svg viewBox="0 0 200 100"><path data-part="wire"/><circle data-part="job"/></svg></div>', more: { html: '<svg><g data-part="w2"/></svg>' } } },
+    });
+    expect(more.ok ? '' : more.errors.join('\n')).toBe('');
+  });
+
+  test('a scene that no drawing plays is refused, with where its slot goes', () => {
+    const r = checkShapeBoard({ ...board(scene()), scenes: { pool: scene(), spare: scene() } });
+    expect(r.ok ? [] : r.errors).toEqual(['scenes.spare: no drawing plays it; put <div data-scene="spare"><svg>…</svg></div> in the Picture or How it works']);
+  });
 });
 
 describe('the notes shape update prints for a board with a scene', () => {

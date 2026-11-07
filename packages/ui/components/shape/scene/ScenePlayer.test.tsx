@@ -2,6 +2,8 @@
  * The scene player in the DOM (DOM_TESTS=1). What regresses if these fail:
  * - under reduced motion a scene moves by itself, or shows a moment between two beats
  *   (Next, a drag of the time slider, Play), so a person who asked for no motion sees it;
+ * - under reduced motion a scene whose first beat comes after 0 opens on a moment that is no beat,
+ *   or the slider's arrow keys snap back to the same beat, so a keyboard user can't move on;
  * - `plannotator shape frame`'s page (frame.ts) no longer stands the scene still at the moment asked;
  * - the player's own controls reach past its shadow root into the drawing, or the drawing's
  *   pieces are not put back when the player goes;
@@ -79,7 +81,12 @@ async function mount(reduce: boolean, scene: ShapeScene = SCENE) {
     });
   };
   const count = () => shadow.querySelector('.ssc-bar .n')!.textContent ?? '';
-  return { board, shadow, piece, slider, caption, count, press, drag };
+  const key = async (k: string) => {
+    await act(async () => {
+      slider().dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+    });
+  };
+  return { board, shadow, piece, slider, caption, count, press, drag, key };
 }
 
 describe.skipIf(!hasDom)('the scene player', () => {
@@ -169,5 +176,42 @@ describe.skipIf(!hasDom)('the scene player', () => {
     check(4);
     await p.press('Back one beat');
     check(3);
+  });
+
+  test('reduced motion: a first beat after 0 is where it opens, and Play from the last beat starts there again', async () => {
+    const late: ShapeScene = {
+      ...SCENE,
+      beats: [{ at: 5, say: 'The switch closes.' }, { at: 8, say: 'The lamp is on.' }],
+      tracks: { lamp: [{ at: 0, opacity: 0.2 }, { at: 5, opacity: 0.6, ease: 'jump' }, { at: 8, opacity: 1, ease: 'jump' }] },
+    };
+    const p = await mount(true, late);
+    expect(Number(p.slider().value)).toBe(5);
+    expect(Number(p.piece.style.opacity)).toBeCloseTo(0.6);
+    expect(p.caption()).toContain('The switch closes.');
+    expect(p.count()).toBe('1 of 2');
+    await p.press('Next beat');
+    expect(Number(p.slider().value)).toBe(8);
+    expect(p.count()).toBe('2 of 2');
+    await p.press('Double speed');
+    await p.press('Play');
+    expect(Number(p.slider().value)).toBe(5);
+    expect(p.caption()).toContain('The switch closes.');
+  });
+
+  test("reduced motion: the slider's keys step by beats", async () => {
+    const p = await mount(true);
+    await p.key('ArrowRight');
+    expect(Number(p.slider().value)).toBe(4);
+    await p.key('ArrowUp');
+    expect(Number(p.slider().value)).toBe(8);
+    await p.key('ArrowRight');
+    expect(Number(p.slider().value)).toBe(8);
+    await p.key('ArrowLeft');
+    expect(Number(p.slider().value)).toBe(4);
+    expect(p.caption()).toContain('The switch closes.');
+    await p.key('End');
+    expect(Number(p.slider().value)).toBe(8);
+    await p.key('Home');
+    expect(Number(p.slider().value)).toBe(0);
   });
 });

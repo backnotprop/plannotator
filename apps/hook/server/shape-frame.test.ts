@@ -5,25 +5,57 @@
  * - `--at` words (end, a time, beat N) are misread, or a moment past the scene is pictured anyway;
  * - the throwaway server lets the page write (seen, notes) or hold a stream open, binds anywhere but
  *   127.0.0.1, or outlives the command;
- * - a Chrome that hangs holds the agent past the timeout.
+ * - a Chrome that hangs holds the agent past the timeout, or is left running;
+ * - each run leaves a Chrome profile behind in temp (agents run frame after every draw);
+ * - the picture lands in a folder other users share, or readable by them;
+ * - a Chrome that quits right after sending the picture is reported as a failure.
+ * The real runner (defaultRunChrome) is driven here only by stand-in programs: a shell script that
+ * sleeps, and a tiny script that answers the DevTools pipe. Never a browser.
  */
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createShapeStore } from "@plannotator/shared/shape/store";
 import type { ShapeBoard } from "@plannotator/core/shape";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
-import { chromeArgs, findChrome, NO_CHROME_LINE, parseShapeFrame, runShapeFrame, type ShapeFrameDeps } from "./shape-frame";
+import { chromeArgs, defaultRunChrome, findChrome, NO_CHROME_LINE, parseShapeFrame, runShapeFrame, type ShapeFrameDeps } from "./shape-frame";
 
 const wasBrowser = process.env.PLANNOTATOR_BROWSER;
 process.env.PLANNOTATOR_BROWSER = NO_BROWSER;
+// Every folder a test makes, removed when the file is done.
+const made: string[] = [];
 afterAll(() => {
   if (wasBrowser === undefined) delete process.env.PLANNOTATOR_BROWSER;
   else process.env.PLANNOTATOR_BROWSER = wasBrowser;
+  for (const dir of made) rmSync(dir, { recursive: true, force: true });
 });
 
-const scratch = () => mkdtempSync(join(tmpdir(), "shape-frame-test-"));
+const scratch = () => {
+  const dir = mkdtempSync(join(tmpdir(), "shape-frame-test-"));
+  made.push(dir);
+  return dir;
+};
+
+/** A stand-in "Chrome" program in a scratch folder: `body` is its script after the #! line. */
+function standIn(shebang: string, body: string): string {
+  const path = join(scratch(), "chrome");
+  writeFileSync(path, `#!${shebang}\n${body}`);
+  chmodSync(path, 0o755);
+  return path;
+}
+
+async function gone(pid: number): Promise<boolean> {
+  for (let i = 0; i < 40; i++) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return true;
+    }
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return false;
+}
 
 const BOARD: ShapeBoard = {
   title: "The lamp",
@@ -159,23 +191,84 @@ describe("shape frame", () => {
     expect(s.profile.startsWith(tmpdir())).toBe(true);
     expect(chromeArgs({ profile: s.profile, phone: false })).toEqual(expect.arrayContaining(["--headless=new", `--user-data-dir=${s.profile}`, "--remote-debugging-pipe"]));
     expect(chromeArgs({ profile: s.profile, phone: false }).some((a) => a.startsWith("--remote-debugging-port"))).toBe(false);
-    // Stopped once the command returns.
+    // Stopped once the command returns, and Chrome's profile is gone with it.
     expect(await fetch(url.origin).then(() => "up", () => "down")).toBe("down");
+    expect(existsSync(s.profile)).toBe(false);
   });
 
-  test("a Chrome that fails or hangs: no picture, exit 1, and the board is still saved", async () => {
+  test("by default the picture goes in a new folder of this run's own, closed to other users", async () => {
     const { dataDir, id } = stored();
-    const failed = deps(dataDir, { runChrome: async () => ({ failed: "Chrome closed before the picture was taken" }) });
+    const outs: string[] = [];
+    const { d, out } = deps(dataDir, {
+      runChrome: async (_p, shot) => {
+        outs.push(shot.out);
+        writeFileSync(shot.out, "png");
+        return "saved";
+      },
+    });
+    expect(await runShapeFrame([id], d)).toBe(0);
+    expect(await runShapeFrame([id], d)).toBe(0);
+    made.push(...outs.map((o) => dirname(o)));
+    expect(out).toEqual(outs);
+    const [a, b] = outs.map((o) => dirname(o));
+    expect(a).not.toBe(b);
+    for (const dir of [a!, b!]) {
+      expect(dir.startsWith(tmpdir())).toBe(true);
+      expect(statSync(dir).mode & 0o777).toBe(0o700);
+    }
+    expect(outs[0]!.endsWith(`${id}-lamp-end.png`)).toBe(true);
+  });
+
+  test("a Chrome that fails: no picture, exit 1, the board is still saved, and nothing is left in temp", async () => {
+    const { dataDir, id } = stored();
+    let shot: { out: string; profile: string } | null = null;
+    const failed = deps(dataDir, { runChrome: async (_p, s) => ((shot = s), { failed: "Chrome closed before the picture was taken" }) });
     expect(await runShapeFrame([id], failed.d)).toBe(1);
     expect(failed.err[0]).toBe("Chrome did not save a picture (Chrome closed before the picture was taken); the board is saved.");
+    expect(existsSync(shot!.profile)).toBe(false);
+    expect(existsSync(dirname(shot!.out))).toBe(false);
   });
 
-  test("a Chrome that hangs past the timeout: no picture, exit 1, the agent is not held", async () => {
+  test("a Chrome that hangs is killed at the timeout (the real runner, a stand-in that sleeps): exit 1, the agent is not held", async () => {
     const { dataDir, id } = stored();
-    const { d, out, err } = deps(dataDir, { runChrome: async () => "timeout", timeoutMs: 50 });
-    expect(await runShapeFrame([id], d)).toBe(1);
+    const chrome = standIn("/bin/sh", 'echo $$ > "$(dirname "$0")/pid"\nexec sleep 30\n');
+    const { d, out, err } = deps(dataDir, { findChrome: () => chrome, runChrome: undefined, timeoutMs: 300 });
+    const started = Date.now();
+    expect(await runShapeFrame([id, "--at", "end"], d)).toBe(1);
+    expect(Date.now() - started).toBeLessThan(5000);
     expect(out).toEqual([]);
-    expect(err[0]).toContain("no picture; the board is saved.");
+    expect(err[0]).toContain("Chrome took longer than");
+    expect(err[0]).toContain("so no picture; the board is saved.");
+    const pid = Number(readFileSync(join(dirname(chrome), "pid"), "utf8"));
+    expect(pid).toBeGreaterThan(0);
+    expect(await gone(pid)).toBe(true);
+  });
+
+  test("a Chrome that quits right after sending the picture: saved (0600), not a failure", async () => {
+    // Answers the DevTools pipe (fd 3 in, fd 4 out) like Chrome, and exits as soon as the picture is sent.
+    const chrome = standIn(
+      process.execPath,
+      `const fs = require("fs");
+let buf = "";
+const say = (m) => fs.writeSync(4, JSON.stringify(m) + "\\0");
+fs.createReadStream("", { fd: 3 }).on("data", (c) => {
+  buf += c;
+  const parts = buf.split("\\0");
+  buf = parts.pop();
+  for (const p of parts) {
+    const m = JSON.parse(p);
+    if (m.method === "Page.captureScreenshot") { say({ id: m.id, result: { data: Buffer.from("png").toString("base64") } }); process.exit(0); }
+    const result = m.method === "Target.createTarget" ? { targetId: "t" } : m.method === "Target.attachToTarget" ? { sessionId: "s" } : m.method === "Runtime.evaluate" ? { result: { value: true } } : {};
+    say({ id: m.id, result });
+  }
+});
+`,
+    );
+    const dir = scratch();
+    const shot = { url: "http://127.0.0.1:9/#shape=x", out: join(dir, "p.png"), profile: join(dir, "profile"), phone: false };
+    expect(await defaultRunChrome(chrome, shot, 10_000)).toBe("saved");
+    expect(readFileSync(shot.out, "utf8")).toBe("png");
+    expect(statSync(shot.out).mode & 0o777).toBe(0o600);
   });
 
   test("a still board is pictured as it stands; --at says it changes nothing", async () => {

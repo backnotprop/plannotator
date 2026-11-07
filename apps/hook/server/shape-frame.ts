@@ -8,15 +8,16 @@
  * no event stream: `readOnly`), never registered in `server.json`, so the person's own Shape page and
  * Inbox are never touched. The Chrome already on this computer (never a download) opens the real Shape
  * page there, headless, with `#shape=<id>&frame=<scene>&at=<t>` (the page draws that scene still at that
- * moment: `@plannotator/ui/components/shape/scene/frame`), and saves its window as a PNG. Its profile is a
- * new folder in the OS temp dir. After `FRAME_TIMEOUT_MS` the Chrome this started (its own pid, nothing
- * else) is killed, so the command can never hang an agent.
+ * moment: `@plannotator/ui/components/shape/scene/frame`), and saves its window as a PNG (0600; by default
+ * in a new folder of its own in the OS temp dir, 0700, so no other user can read or plant it). Its
+ * profile is a new folder in the OS temp dir, removed once Chrome is gone. After `FRAME_TIMEOUT_MS` the
+ * Chrome this started (its own pid, nothing else) is killed, so the command can never hang an agent.
  *
  * With no Chrome it says so in one line and exits 0: the board is saved, and the agent carries on.
  * Like every `plannotator shape …`, it runs only while Shape is on (index.ts).
  */
 import { spawn as nodeSpawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
 import { shapeHtmlScenes, type ShapeScene } from "@plannotator/core/shape-scene";
@@ -239,7 +240,7 @@ const SETTLE_MS = 2000;
  * pipe: set the window, go to the page, wait until the board is drawn and has settled, take the
  * picture, close. Past `timeoutMs`, or when done, it kills the Chrome it started (its own pid only).
  */
-function defaultRunChrome(path: string, shot: FrameShot, timeoutMs: number): Promise<"saved" | "timeout" | { failed: string }> {
+export function defaultRunChrome(path: string, shot: FrameShot, timeoutMs: number): Promise<"saved" | "timeout" | { failed: string }> {
   return new Promise((done) => {
     let finished = false;
     const child = nodeSpawn(path, chromeArgs(shot), { stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] });
@@ -261,8 +262,12 @@ function defaultRunChrome(path: string, shot: FrameShot, timeoutMs: number): Pro
     };
     const timer = setTimeout(() => finish("timeout"), timeoutMs);
     child.on("error", (e) => finish({ failed: e.message }));
-    child.on("exit", () => finish({ failed: "Chrome closed before the picture was taken" }));
+    // "close", not "exit": everything Chrome wrote to the pipe is read first, so a picture sent just before it quit still counts.
+    child.on("close", () => finish({ failed: "Chrome closed before the picture was taken" }));
     if (!toChrome || !fromChrome) return finish({ failed: "no pipe to Chrome" });
+    // A write or read after Chrome is gone (killed, or closed on its own) is not an error worth a crash.
+    toChrome.on("error", () => finish({ failed: "Chrome closed before the picture was taken" }));
+    fromChrome.on("error", () => finish({ failed: "Chrome closed before the picture was taken" }));
 
     let next = 0;
     const waiting = new Map<number, (msg: { result?: Record<string, unknown>; error?: { message: string } }) => void>();
@@ -304,8 +309,8 @@ function defaultRunChrome(path: string, shot: FrameShot, timeoutMs: number): Pro
       }
       await pause(SETTLE_MS);
       const { data } = (await send("Page.captureScreenshot", { format: "png" }, sessionId)) as { data: string };
-      writeFileSync(shot.out, Buffer.from(data, "base64"));
-      await send("Browser.close").catch(() => {});
+      writeFileSync(shot.out, Buffer.from(data, "base64"), { mode: 0o600 });
+      // Saved: done now. `finish` kills Chrome, so there is no waiting on a reply it may never send.
       finish("saved");
     })().catch((e: unknown) => finish({ failed: e instanceof Error ? e.message : String(e) }));
   });
@@ -350,14 +355,11 @@ export async function runShapeFrame(argv: readonly string[], deps: ShapeFrameDep
     return 0;
   }
 
-  let file: string;
-  if (c.out) file = isAbsolute(c.out) ? c.out : resolve(deps.cwd, c.out);
-  else {
-    const dir = join(tmpdir(), "plannotator-shape-frames");
-    mkdirSync(dir, { recursive: true });
-    file = join(dir, `${id}-${planned.plan.label}${c.phone ? "-phone" : ""}.png`);
-  }
+  // The picture: where --out says, or a new folder of this run's own (mkdtemp: 0700, never a shared one).
+  const ownDir = c.out ? null : mkdtempSync(join(tmpdir(), "plannotator-shape-frame-"));
+  const file = c.out ? (isAbsolute(c.out) ? c.out : resolve(deps.cwd, c.out)) : join(ownDir!, `${id}-${planned.plan.label}${c.phone ? "-phone" : ""}.png`);
   const profile = mkdtempSync(join(tmpdir(), "plannotator-frame-chrome-"));
+  let saved = false;
   const server = await startShapeServer({ dataDir: deps.dataDir, pageGzip: deps.pageGzip, shape: true, port: 0, register: false, readOnly: true, version: deps.version, idleMs: 60 * 60_000 });
   try {
     const url = `${server.url}/${planned.plan.hash}`;
@@ -377,9 +379,19 @@ export async function runShapeFrame(argv: readonly string[], deps: ShapeFrameDep
       err(`Chrome did not save a picture${result !== "saved" ? ` (${result.failed})` : ""}; the board is saved.`);
       return 1;
     }
+    saved = true;
     out(file);
     return 0;
   } finally {
     server.stop();
+    // Chrome is gone by now (runChrome kills it before it resolves): its profile goes too, and the
+    // run's own picture folder when no picture was saved in it.
+    for (const dir of [profile, ...(ownDir && !saved ? [ownDir] : [])]) {
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      } catch {
+        // left for the OS to clear
+      }
+    }
   }
 }

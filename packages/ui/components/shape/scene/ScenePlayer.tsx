@@ -107,7 +107,11 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
   const rootRef = useRef<HTMLDivElement>(null);
   const codeRef = useRef<HTMLDivElement>(null);
   const domRef = useRef<SceneDom | null>(null);
-  const [t, setT] = useState(() => Math.max(0, Math.min(scene.end, at ?? 0)));
+  // Reduced motion opens on the first beat, even when it comes after 0 (a frame's `at` is kept exact).
+  const [t, setT] = useState(() => {
+    const t0 = Math.max(0, Math.min(scene.end, at ?? 0));
+    return reduce && at === undefined ? reducedTime(scene, t0) : t0;
+  });
   const tRef = useRef(t);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
@@ -269,7 +273,8 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
   const words = (i: number) => `Beat ${beatCount(scene, beats[i]!.at)}: ${beats[i]!.say}`;
   const play = (on: boolean) => {
     goal.current = null;
-    if (on && tRef.current >= scene.end - 1e-9) show(0);
+    // From the end (or, under reduced motion, from the last beat) Play starts again at the first beat.
+    if (on && (tRef.current >= scene.end - 1e-9 || (reduce && nextBeatTime(scene, tRef.current) === null))) show(reduce ? beats[0]!.at : 0);
     setPlaying(on);
     if (!on) setSrLine(words(beatAt(scene, tRef.current)));
   };
@@ -295,6 +300,13 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
     setPlaying(false);
     // Reduced motion: the slider lands on beats only, so nothing is ever shown half way.
     show(reduce ? reducedTime(scene, v) : v);
+  };
+  // Reduced motion: the slider's keys step by beats (an arrow's 1% would snap back to the same beat).
+  const beatKeys = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const to = { ArrowRight: bi + 1, ArrowUp: bi + 1, PageUp: bi + 1, ArrowLeft: bi - 1, ArrowDown: bi - 1, PageDown: bi - 1, Home: 0, End: beats.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    toBeat(to, false);
   };
   const scenario = /^(scenario|simulated|written from|read from)/i.test(scene.source ?? '');
 
@@ -348,7 +360,7 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
           <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M11 2v10M2.5 2.6v8.8a.5.5 0 0 0 .8.4L9 7.4a.5.5 0 0 0 0-.8L3.3 2.2a.5.5 0 0 0-.8.4Z" fill="currentColor" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
         </button>
         <span className="ticks">
-          <input type="range" min={0} max={scene.end} step="any" value={t} aria-label="Time" aria-valuetext={words(bi)} onChange={(e) => scrub(Number(e.target.value))} />
+          <input type="range" min={0} max={scene.end} step="any" value={t} aria-label="Time" aria-valuetext={words(bi)} onChange={(e) => scrub(Number(e.target.value))} onKeyDown={reduce ? beatKeys : undefined} />
           {beats.map((b, i) => (
             <span key={i} style={{ left: `${(b.at / scene.end) * 100}%` }} />
           ))}

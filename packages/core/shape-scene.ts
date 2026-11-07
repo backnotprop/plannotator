@@ -318,6 +318,14 @@ export function shapeHtmlScenes(html: string): string[] {
   return htmlAttr(html, 'data-scene');
 }
 
+/** Each `data-scene` slot in a drawn view's HTML, with the tag it sits on (only a `<div>` can play). No DOM. */
+export function shapeHtmlSceneSlots(html: string): { id: string; tag: string }[] {
+  const out: { id: string; tag: string }[] = [];
+  const re = /<([A-Za-z][\w:-]*)\b[^>]*?\sdata-scene\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi;
+  for (const m of html.replace(/<!--[\s\S]*?-->/g, '').matchAll(re)) out.push({ id: (m[2] ?? m[3] ?? m[4] ?? '').trim(), tag: m[1]!.toLowerCase() });
+  return out;
+}
+
 /** The piece names a drawn view's HTML gives (`data-part="name"`). No DOM. */
 export function shapeHtmlParts(html: string): string[] {
   return htmlAttr(html, 'data-part');

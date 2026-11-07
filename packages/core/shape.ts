@@ -27,7 +27,7 @@
  */
 import type { CodeGuideOutput } from './guide';
 import { ulid } from './ulid';
-import { checkShapeScene, shapeHtmlParts, shapeHtmlScenes, shapeScenePieceRefs, type ShapeScene } from './shape-scene';
+import { checkShapeScene, shapeHtmlParts, shapeHtmlSceneSlots, shapeHtmlScenes, shapeScenePieceRefs, type ShapeScene } from './shape-scene';
 export type { ShapeScene } from './shape-scene';
 
 export const SHAPE_FORMAT_VERSION = 1;
@@ -1638,8 +1638,15 @@ function checkScenes(c: Checker, input: unknown, views: ShapeBoard['views']): Re
     const view = views[v];
     return view ? [view.html, view.tall?.html ?? '', view.more?.html ?? ''] : [];
   };
+  // Which views play each scene (a slot is a <div data-scene>; the player finds pieces in the view that holds it).
+  const playedIn = new Map<string, ('picture' | 'how')[]>();
   for (const v of ['picture', 'how'] as const) {
-    for (const id of new Set(htmlOf(v).flatMap(shapeHtmlScenes))) {
+    const slots = htmlOf(v).flatMap(shapeHtmlSceneSlots);
+    for (const slot of slots) {
+      if (slot.tag !== 'div') c.fail(`views.${v}.html`, `data-scene="${slot.id}" is on a <${slot.tag}>; put it on a <div> around your SVG: <div data-scene="${slot.id}"><svg>…</svg></div>`);
+    }
+    for (const id of new Set(slots.filter((s) => s.tag === 'div').map((s) => s.id))) {
+      playedIn.set(id, [...(playedIn.get(id) ?? []), v]);
       if (isRecord(input) && Object.hasOwn(input, id)) continue;
       c.fail(`views.${v}.html`, `has data-scene="${id}", but ${isRecord(input) ? `scenes has no "${id}"` : 'the board has no scenes'}`);
     }
@@ -1651,7 +1658,7 @@ function checkScenes(c: Checker, input: unknown, views: ShapeBoard['views']): Re
   }
   const entries = Object.entries(input);
   if (entries.length > SHAPE_LIMITS.scenes) c.fail('scenes', `has ${entries.length}; at most ${SHAPE_LIMITS.scenes}`);
-  const parts = new Set([...htmlOf('picture'), ...htmlOf('how')].flatMap(shapeHtmlParts));
+  const partsOf = { picture: new Set(htmlOf('picture').flatMap(shapeHtmlParts)), how: new Set(htmlOf('how').flatMap(shapeHtmlParts)) };
   const out: Record<string, ShapeScene> = {};
   for (const [id, value] of entries.slice(0, SHAPE_LIMITS.scenes)) {
     if (!SHAPE_SCENE_ID.test(id)) {
@@ -1663,8 +1670,14 @@ function checkScenes(c: Checker, input: unknown, views: ShapeBoard['views']): Re
       c.errors.push(...checked.errors);
       continue;
     }
+    const where = playedIn.get(id) ?? [];
+    if (where.length === 0) {
+      c.fail(`scenes.${id}`, `no drawing plays it; put <div data-scene="${id}"><svg>…</svg></div> in the Picture or How it works`);
+      continue;
+    }
     for (const ref of shapeScenePieceRefs(checked.value, `scenes.${id}`)) {
-      if (!parts.has(ref.id)) c.fail(ref.at, `the drawing has no data-part="${ref.id}"; put data-part="${ref.id}" on that piece of your SVG in <div data-scene="${id}">`);
+      // Every view that plays the scene needs the piece: the player looks for it in that view only.
+      if (where.some((v) => !partsOf[v].has(ref.id))) c.fail(ref.at, `the drawing has no data-part="${ref.id}"; put data-part="${ref.id}" on that piece of your SVG in <div data-scene="${id}">`);
     }
     out[id] = checked.value;
   }
