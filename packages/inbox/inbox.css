@@ -8601,3 +8601,79 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-dd-box input { flex-basis: 100%; }
   .pn-inbox .ib-dd-box .ib-btn { max-width: 100%; }
 }
+
+/* System → Set up a project (packages/inbox/system/SetupDialog.tsx; approval "system-inbox", screens 2b to 2d):
+   three steps in one dialog. Today's dialog, buttons, fields and segmented control. A chosen row takes the thread
+   rows' filled highlight (--ib-sel), never a border or outline (owner, 2026-11-06; the walkthrough's rings are
+   overruled); the focus ring stays, for the keyboard. */
+.pn-inbox dialog.ib-dlg.ib-sys, dialog.ib-dlg.ib-sys { width: min(620px, calc(100vw - 32px)); }
+.ib-sys .ib-dlg-in { padding: 20px 24px 18px; }
+.ib-sys h2:focus { outline: none; }
+.ib-sys h2:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
+.ib-sys-steps { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0 0 14px; padding: 0; list-style: none; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-sys-steps li { display: inline-flex; align-items: center; gap: 6px; }
+.ib-sys-steps li[aria-current="step"] { color: var(--foreground); font-weight: 600; }
+.ib-sys-n { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--ib-fill); font-size: var(--ib-fs-11, 11px); font-weight: 600; }
+.ib-sys-steps li[aria-current="step"] .ib-sys-n { background: var(--primary); color: var(--primary-foreground); }
+.ib-sys-steps li[data-done] .ib-sys-n { color: var(--muted-foreground); }
+.ib-sys .ib-sub { margin: 4px 0 14px; line-height: 1.5; }
+.ib-sys .ib-quietline { margin: 12px 0 0; line-height: 1.5; }
+.ib-sys-picks { display: grid; gap: 4px; }
+.ib-sys-pick { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 10px; font-size: var(--ib-fs-14, 14px); cursor: pointer; min-width: 0; }
+.ib-sys-pick:hover { background: var(--ib-hover); }
+.ib-sys-pick[data-on] { background: var(--ib-sel); }
+.ib-sys-pick[data-on]:hover { background: var(--ib-sel-hover); }
+.ib-sys-pick input { flex: none; width: 15px; height: 15px; margin: 0; accent-color: var(--primary); }
+.ib-sys-pick:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-sys-pick input:focus-visible { outline: none; }
+.ib-sys-nm { flex: none; min-width: 110px; font-weight: 600; }
+.ib-sys-lc { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-sys-lc span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-sys-ok { flex: none; display: inline-flex; align-items: center; gap: 4px; margin-left: auto; font-size: var(--ib-fs-12, 12px); color: var(--success); }
+.ib-sys-fl { margin: 6px 0 6px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 600; color: var(--muted-foreground); }
+.ib-sys-fl2 { margin-top: 20px; }
+.ib-sys-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ib-sys-chips > li { display: contents; }
+.pn-inbox .ib-sys-chip, .ib-sys-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 30px; padding: 0 6px 0 10px; border: 0; border-radius: 8px; background: var(--ib-fill); font-size: var(--ib-fs-13, 13px); color: var(--foreground); }
+.ib-sys-chips > li.ib-sys-chip[data-system-own] { padding-right: 10px; }
+.ib-sys-mono { font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); overflow-wrap: anywhere; }
+.ib-sys-from { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.pn-inbox .ib-sys-x { display: inline-grid; place-items: center; width: 22px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+.pn-inbox .ib-sys-x:hover { background: var(--ib-hover); color: var(--foreground); }
+.pn-inbox .ib-sys-x:focus-visible, .pn-inbox .ib-sys-add:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.pn-inbox .ib-sys-add { padding: 0 10px; background: transparent; color: var(--primary); cursor: pointer; font: inherit; font-size: var(--ib-fs-13, 13px); font-weight: 550; }
+.pn-inbox .ib-sys-add:hover { background: var(--ib-hover); }
+.ib-sys-addrow { display: flex; gap: 8px; margin-top: 8px; }
+.ib-sys-inp { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); }
+.ib-sys-inp::placeholder { color: var(--muted-foreground); opacity: 0.8; }
+.ib-sys-inp:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
+.ib-sys-err { margin: 6px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); }
+.ib-sys-agentrow { border-radius: 10px; }
+.ib-sys-agentrow[data-on] { background: var(--ib-sel); }
+.ib-sys-agentrow[data-on] > .ib-sys-pick, .ib-sys-agentrow[data-on] > .ib-sys-pick:hover { background: transparent; }
+.ib-sys-agentrow .ib-sys-nm { min-width: 0; }
+.ib-sys-rb { display: flex; flex-direction: column; align-items: flex-start; padding: 0 14px 12px 41px; }
+.ib-sys-rec { margin-left: 6px; font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--primary); }
+.ib-sys-rb small { display: block; margin-top: 8px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); }
+.ib-sys-model { flex-wrap: wrap; }
+.ib-sys-cost { display: block; margin-top: 4px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-callout.ib-sys-msg { margin: 12px 0 0; }
+.ib-sys-acts { margin-top: 22px; }
+@media (forced-colors: active) {
+  .ib-sys-pick[data-on], .ib-sys-agentrow[data-on] { forced-color-adjust: none; background: Highlight; color: HighlightText; }
+}
+/* A phone: a bottom sheet, as Feedback's. */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox dialog.ib-dlg.ib-sys.ib-sys-phone, dialog.ib-dlg.ib-sys.ib-sys-phone {
+    inset: auto 0 calc(100% - var(--ib-vvh, 100%)) 0; margin: 0; width: 100vw; max-width: 100vw; max-height: calc(var(--ib-vvh, 100dvh) - 24px);
+    border-radius: var(--ib-sheet-corner, 12px) var(--ib-sheet-corner, 12px) 0 0; border-bottom: 0;
+  }
+  .ib-sys-phone .ib-dlg-in { padding: 18px calc(16px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); }
+  .ib-sys-phone .ib-sys-pick { flex-wrap: wrap; row-gap: 6px; min-height: 44px; }
+  .ib-sys-phone .ib-sys-nm { min-width: 0; }
+  .ib-sys-phone .ib-sys-lc { order: 3; flex-basis: 100%; padding-left: 27px; }
+  .ib-sys-phone .ib-sys-rb { padding-left: 14px; }
+  .ib-sys-phone .ib-sys-inp { height: 44px; font-size: var(--ib-fs-16-in, 16px); }
+  .ib-sys-phone .ib-sys-x, .pn-inbox .ib-sys-phone .ib-sys-x { width: 32px; height: 32px; }
+  .ib-sys-phone .ib-sys-acts .ib-btn { height: 44px; }
+}
