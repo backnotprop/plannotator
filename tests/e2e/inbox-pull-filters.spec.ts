@@ -335,7 +335,7 @@ async function menuRows(page: Page, selector: string): Promise<string[]> {
 
 /** Every row the list shows, the folded ones opened. */
 async function rows(page: Page): Promise<string[]> {
-  const fold = page.locator('[data-pulls-waiting-toggle]');
+  const fold = page.locator('[data-reviews-fold="not_reviewed"]');
   if ((await fold.count()) > 0 && (await fold.getAttribute('aria-expanded')) === 'false') await fold.click();
   return (await page.locator('[data-pulls-row]').evaluateAll((els) => els.map((el) => el.getAttribute('data-pulls-row')!))).sort();
 }
