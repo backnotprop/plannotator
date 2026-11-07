@@ -271,7 +271,7 @@ test.skipIf(!hasDom)('the line lands clear of the corner card: above its top, on
 
 test.skipIf(!hasDom)("a stack badge's \"Read it in the review\" shows the PR's chapter with only the part's files, until Show the whole stack", async () => {
   served = stackSnapshot;
-  await open({ step: 2, narrow: { part: 'The timer', pr: 12, title: 'The setting', colour: 2, files: ['src/timer.ts'] } });
+  await open({ step: 2, narrow: { part: 'The timer', pr: 12, title: 'The setting', hue: 72, files: ['src/timer.ts'] } });
   const files = () => reader?.snapshot?.guide.sections.map((s) => s.diffs.map((d) => d.file));
   expect(files()).toEqual([['src/kettle.ts'], ['src/timer.ts']]);
   const bar = document.querySelector('[data-review-narrow]');

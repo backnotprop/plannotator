@@ -56,7 +56,7 @@ test('open goes to the review at a file it changes or a step it has, and answers
 });
 
 test("a stack badge's narrowing survives the address with its place, and a forged one is dropped", () => {
-  const narrow = { part: 'The dialog', pr: 2547, title: 'What it shows', url: 'https://github.com/acme/kettle/pull/2547', colour: 3, files: ['src/a.ts', 'src/b.ts'] };
+  const narrow = { part: 'The dialog', pr: 2547, title: 'What it shows', url: 'https://github.com/acme/kettle/pull/2547', hue: 357, files: ['src/a.ts', 'src/b.ts'] };
   for (const at of [{ step: 3, narrow }, { path: 'src/a.ts', narrow }] as ShapeReviewAt[]) {
     const params = new URLSearchParams('thread=msg_1&guide=msg_2');
     writeShapeReviewAt(params, at);

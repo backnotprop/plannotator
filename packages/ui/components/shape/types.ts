@@ -147,8 +147,8 @@ export interface ShapeReviewNarrow {
   /** The PR's title. */
   title?: string;
   url?: string;
-  /** The PR's colour on the board, 1 to 3 (teal, amber, rose). */
-  colour?: number;
+  /** The PR's hue on the board (OKLCH degrees, `shapeStackHue`), so its number keeps its colour in the review. */
+  hue?: number;
   files: string[];
 }
 

@@ -134,7 +134,10 @@ describe.if(hasDom)('Stack badges', () => {
   test('a stack shows a tag per PR on each part it changed, and the row; one PR or a host that did not ask shows none', async () => {
     await mount(board(STACK));
     expect(tags().map((t) => `${t.closest('[data-shp-stack-part]')!.getAttribute('data-shp-stack-part')}#${t.getAttribute('data-shp-stack-pr')}`)).toEqual(['how-a#11', 'how-b#12', 'how-b#13']);
-    expect(tag('how-b', 12).getAttribute('data-c')).toBe('2');
+    // A PR keeps one colour: its tag and its chip in the row carry the same hue, and no two PRs share one.
+    const hue = (el: Element | null) => (el as HTMLElement | null)?.style.getPropertyValue('--shp-h');
+    expect(hue(tag('how-b', 12))).toBe(hue(document.querySelector('[data-shp-stack-pick="12"]')));
+    expect(new Set([11, 12, 13].map((n) => hue(document.querySelector(`[data-shp-stack-pick="${n}"]`)))).size).toBe(3);
     // A tag says it opens a dialog, and is closed until its card opens.
     expect(tag('how-b', 12).getAttribute('aria-haspopup')).toBe('dialog');
     expect(tag('how-b', 12).getAttribute('aria-expanded')).toBe('false');
@@ -229,7 +232,7 @@ describe.if(hasDom)('Stack badges', () => {
     await mount(board(STACK), { stackBadges: true, review });
     await click(tag('how-b', 12));
     await click(card()!.querySelector('[data-shp-stack-review]'));
-    expect(opened).toEqual([{ step: 2, narrow: { part: 'It boils', pr: 12, title: 'The boil', colour: 2, files: ['src/boil.ts', 'src/pot.ts'] } }]);
+    expect(opened).toEqual([{ step: 2, narrow: { part: 'It boils', pr: 12, title: 'The boil', hue: 72, files: ['src/boil.ts', 'src/pot.ts'] } }]);
     expect(card()).toBeNull();
     act(() => root!.unmount());
     document.body.innerHTML = '';

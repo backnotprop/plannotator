@@ -1742,10 +1742,34 @@ export function shapeStackBadges(stack: ShapeStack | undefined): Map<string, num
   return badges;
 }
 
-/** A PR's colour on the board, 1 to 3 (teal, amber, rose) by its place in the stack; 0 when it is not in it. */
-export function shapeStackColour(stack: ShapeStack, n: number): 0 | 1 | 2 | 3 {
+/**
+ * The PRs' hues (OKLCH degrees), by place in a stack of `count` (owner, 2026-11-07: "Dude why limit."): every PR its
+ * own. Up to three keep the first look: teal, amber, rose. More are spread evenly from 330 (rose) through red, amber,
+ * green and teal to 235 (blue), so the board's purple (about 280) stays out, and handed out a few steps apart so PRs
+ * next to each other in the stack never get neighbouring hues. The UI turns a hue into a colour at one lightness and
+ * chroma (`--shp-h`, shape.css), so every hue holds the same contrast.
+ */
+export function shapeStackHues(count: number): number[] {
+  const first = [186, 72, 357];
+  if (count <= first.length) return first.slice(0, Math.max(0, count));
+  const from = 330;
+  const arc = 265;
+  const hues = Array.from({ length: count }, (_, k) => Math.round((from + ((k + 0.5) * arc) / count) % 360));
+  const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+  let stride = 1;
+  for (let s = 1; s < count; s++) if (gcd(s, count) === 1 && Math.abs(s - count * 0.382) < Math.abs(stride - count * 0.382)) stride = s;
+  const away = (h: number) => Math.min(Math.abs(h - first[0]!), 360 - Math.abs(h - first[0]!));
+  let start = 0;
+  hues.forEach((h, k) => {
+    if (away(h) < away(hues[start]!)) start = k;
+  });
+  return hues.map((_, k) => hues[(start + k * stride) % count]!);
+}
+
+/** A PR's hue on the board (`shapeStackHues`, by its place in the stack); null when it is not in it. */
+export function shapeStackHue(stack: ShapeStack, n: number): number | null {
   const i = stack.pulls.findIndex((p) => p.n === n);
-  return i < 0 ? 0 : (((i % 3) + 1) as 1 | 2 | 3);
+  return i < 0 ? null : shapeStackHues(stack.pulls.length)[i]!;
 }
 
 /** Validate what an agent writes. Every problem is named by its field. */

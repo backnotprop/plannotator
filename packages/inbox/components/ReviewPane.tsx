@@ -35,7 +35,7 @@
  * No new keyboard shortcuts: Escape and "Thread" go back as the guide pane's do.
  */
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import type { InboxMessageWire, InboxPull, InboxThread } from '@plannotator/core/inbox-types';
@@ -944,14 +944,18 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
                   Back to the board
                 </button>
                 <span className="ib-rv-narrow-what">
-                  <b>{narrow.part}</b>
-                  <span className="ib-mut">in</span>
-                  <a className="ib-rv-narrow-pr" data-c={narrow.colour ?? 0} {...(narrow.url ? { href: narrow.url, target: '_blank', rel: 'noreferrer noopener' } : {})}>
+                  {/* The spaces keep the words apart where a phone runs them as text (inbox.css); a flex row ignores them. */}
+                  <b>{narrow.part}</b> <span className="ib-mut">in</span>{' '}
+                  <a
+                    className="ib-rv-narrow-pr"
+                    {...(narrow.hue !== undefined ? { 'data-hue': '', style: { '--shp-h': narrow.hue } as CSSProperties } : {})}
+                    {...(narrow.url ? { href: narrow.url, target: '_blank', rel: 'noreferrer noopener' } : {})}>
                     <span className="ib-rv-narrow-n">
                       <Icon name="pullRequest" size={12} />#{narrow.pr}
                     </span>
-                    {narrow.title && <b>{narrow.title}</b>}
+                    {narrow.title && <> <b>{narrow.title}</b></>}
                   </a>
+                  {narrowed.shown < narrowed.total && ' '}
                   {narrowed.shown < narrowed.total && (
                     <span className="ib-mut">
                       · {narrowed.shown} of the {narrowed.total} files in this chapter

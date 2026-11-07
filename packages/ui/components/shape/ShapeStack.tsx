@@ -13,13 +13,16 @@
  *    "1 of 3 files ‹ ›".
  */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { shapeStackBadges, shapeStackColour, type ShapeStack, type ShapeVersion } from '@plannotator/core/shape';
+import { shapeStackBadges, shapeStackHue, type ShapeStack, type ShapeVersion } from '@plannotator/core/shape';
 import { PopoutDialog } from '../PopoutDialog';
 import { CodeFilePopout } from '../CodeFilePopout';
 import { ShapePatch } from './ShapeCode';
 import { StackBadgeLayer, PR_ICON_SVG } from './stackBadges';
 import { stackCard, stackFileCounts, stackFileName, stackFilePatch, stackPartName } from './stackModel';
 import type { ShapeSurfaceReview } from './types';
+
+/** A PR's colour on a chip: its hue (shape.css turns it into the colour and the soft fill). */
+const hueOf = (stack: ShapeStack, n: number) => ({ '--shp-h': shapeStackHue(stack, n) ?? 186 }) as React.CSSProperties;
 
 const PrIcon = () => <span className="shp-stk-ic" aria-hidden="true" dangerouslySetInnerHTML={{ __html: PR_ICON_SVG }} />;
 const FileIcon = () => (
@@ -38,7 +41,7 @@ const Chevron = ({ back = false }: { back?: boolean }) => (
 function PrName({ stack, n, title = true, link = true }: { stack: ShapeStack; n: number; title?: boolean; link?: boolean }) {
   const pull = stack.pulls.find((p) => p.n === n);
   const chip = (
-    <span className="shp-stk-pr" data-c={shapeStackColour(stack, n)}>
+    <span className="shp-stk-pr" style={hueOf(stack, n)}>
       <PrIcon />#{n}
     </span>
   );
@@ -112,7 +115,7 @@ export function useShapeStack({
       if (!board || !on || !stack) return;
       const layer = new StackBadgeLayer(board, {
         badges,
-        colour: (n) => shapeStackColour(stack, n),
+        hue: (n) => shapeStackHue(stack, n) ?? 186,
         onOpen: (pr, part, tag) => {
           const mark = board.querySelector(`[data-mark="${part.replace(/["\\]/g, '\\$&')}"]`);
           setFile(null);
@@ -170,7 +173,7 @@ export function useShapeStack({
           key={p.n}
           type="button"
           className={`shp-stk-chip${pick === p.n ? ' on' : ''}`}
-          data-c={shapeStackColour(stack!, p.n)}
+          style={hueOf(stack!, p.n)}
           aria-pressed={pick === p.n}
           aria-label={`#${p.n} ${p.title}: show only its parts`}
           data-shp-stack-pick={p.n}
@@ -347,7 +350,7 @@ function StackCard({
   const reviewAt = review
     ? {
         ...(pull.step ? { step: pull.step } : { path: change.files[0]!.path }),
-        narrow: { part: partName, pr: pull.n, title: pull.title, ...(pull.url ? { url: pull.url } : {}), colour: shapeStackColour(stack, pull.n), files: change.files.map((f) => f.path) },
+        narrow: { part: partName, pr: pull.n, title: pull.title, ...(pull.url ? { url: pull.url } : {}), hue: shapeStackHue(stack, pull.n) ?? 186, files: change.files.map((f) => f.path) },
       }
     : null;
 
@@ -393,7 +396,7 @@ function StackCard({
             <span className="shp-stk-also">
               <span>Also changed here by</span>
               {others.map((p) => (
-                <button key={p.n} type="button" className="shp-stk-pr" data-c={shapeStackColour(stack, p.n)} onClick={() => onSwitch(p.n)} data-shp-stack-switch={p.n}>
+                <button key={p.n} type="button" className="shp-stk-pr" style={hueOf(stack, p.n)} onClick={() => onSwitch(p.n)} data-shp-stack-switch={p.n}>
                   <PrIcon />#{p.n}
                 </button>
               ))}

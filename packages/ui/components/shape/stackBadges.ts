@@ -16,18 +16,16 @@ export const PR_ICON_SVG =
   '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" x2="6" y1="9" y2="21"/></svg>';
 
 /**
- * The PR colours (teal, amber, rose; kept off the board's purple), each mixed toward the ink or the paper like the
- * board's zone colours, so light and dark both hold. Shared by the drawing's tags and the board's row and card.
+ * A PR's colour from its hue (`--shp-h`, set on the tag, chip or bar: `shapeStackHues` in core): one lightness and
+ * chroma for every hue, mixed toward the ink, and a soft fill toward the paper, so light and dark both hold and every
+ * PR in a stack, however many, reads at the same contrast (badge text 4.9:1 or more on its fill, the default theme).
+ * Shared by the drawing's tags, the board's row and card, and the review's bar.
  */
-export const STACK_COLOUR_VARS = `
-  --shp-pr1: color-mix(in oklab, #0f8a80 74%, var(--foreground)); --shp-pr1-soft: color-mix(in oklab, #0f8a80 15%, var(--shp-paper, var(--background)));
-  --shp-pr2: color-mix(in oklab, #b87a12 70%, var(--foreground)); --shp-pr2-soft: color-mix(in oklab, #d9971f 18%, var(--shp-paper, var(--background)));
-  --shp-pr3: color-mix(in oklab, #b23a6e 70%, var(--foreground)); --shp-pr3-soft: color-mix(in oklab, #b23a6e 13%, var(--shp-paper, var(--background)));
-`;
+export const stackColourVars = (paper: string) =>
+  `--c: color-mix(in oklab, oklch(0.56 0.15 var(--shp-h, 186)) 74%, var(--foreground)); --c-soft: color-mix(in oklab, oklch(0.62 0.14 var(--shp-h, 186)) 15%, ${paper});`;
 
 /** The layer's CSS, in the drawing's own scope (a shadow root does not see the page's). */
 export const STACK_DRAWN_CSS = `
-.board { ${STACK_COLOUR_VARS} }
 .shp-stk-layer { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 7; pointer-events: none; }
 .shp-stk-g { position: absolute; transform-origin: 0 0; display: flex; gap: 4px; pointer-events: none; white-space: nowrap; transition: opacity .25s ease; }
 .shp-stk-g.dim { opacity: .2; }
@@ -35,9 +33,7 @@ export const STACK_DRAWN_CSS = `
   height: 20px; padding: 0 6px 0 5px; border-radius: 6px; font: 600 var(--ib-fs-12, 12px)/1 var(--font-mono, ui-monospace, monospace); letter-spacing: 0;
   color: var(--c); background: var(--c-soft); box-shadow: 0 0 0 2px var(--paper), inset 0 0 0 1px color-mix(in oklab, var(--c) 38%, transparent);
   transition: background-color .15s ease, color .15s ease, opacity .25s ease; }
-.shp-stk-b[data-c="1"] { --c: var(--shp-pr1); --c-soft: var(--shp-pr1-soft); }
-.shp-stk-b[data-c="2"] { --c: var(--shp-pr2); --c-soft: var(--shp-pr2-soft); }
-.shp-stk-b[data-c="3"] { --c: var(--shp-pr3); --c-soft: var(--shp-pr3-soft); }
+.shp-stk-b { ${stackColourVars('var(--shp-paper, var(--background))')} }
 @media (hover: hover) { .shp-stk-b:hover { background: var(--c); color: var(--paper); } }
 .shp-stk-b.on { background: var(--c); color: var(--paper); }
 .shp-stk-b:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
@@ -61,8 +57,8 @@ function boxed(el: HTMLElement): boolean {
 export interface StackBadgeOptions {
   /** Part (`data-mark`) to the PRs that changed it, in landing order. */
   badges: ReadonlyMap<string, readonly number[]>;
-  /** A PR's colour, 1 to 3. */
-  colour: (n: number) => number;
+  /** A PR's hue (\`shapeStackHue\`). */
+  hue: (n: number) => number;
   /** A tag was clicked (or Enter / Space on it). */
   onOpen: (pr: number, part: string, tag: HTMLElement) => void;
 }
@@ -108,7 +104,7 @@ export class StackBadgeLayer {
         const tag = doc.createElement('button');
         tag.type = 'button';
         tag.className = 'shp-stk-b';
-        tag.setAttribute('data-c', String(options.colour(n)));
+        tag.style.setProperty('--shp-h', String(options.hue(n)));
         tag.setAttribute('data-shp-stack-pr', String(n));
         tag.setAttribute('aria-label', `#${n} changed this part: open its card`);
         tag.setAttribute('aria-haspopup', 'dialog');

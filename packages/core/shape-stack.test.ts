@@ -4,10 +4,12 @@
  * - a badge names a part the drawings do not have, or a PR the stack does not list, and the board draws a tag on
  *   nothing or a card with no PR;
  * - a board of one PR shows badges (the record: "a single-PR board has none");
- * - tags come in another order than landing order, or a PR changes colour between the row and its tags.
+ * - tags come in another order than landing order, or a PR changes colour between the row and its tags;
+ * - two PRs of a stack share a colour (owner, 2026-11-07: no cycle, every PR its own), a PR takes the board's purple,
+ *   or PRs next to each other in the stack get hues too close to tell apart.
  */
 import { expect, test } from 'bun:test';
-import { checkShapeBoard, shapeStackBadges, shapeStackColour, type ShapeStack } from './shape';
+import { checkShapeBoard, shapeStackBadges, shapeStackHue, shapeStackHues, type ShapeStack } from './shape';
 
 const views = {
   picture: { html: '<div data-mark="pic-a">Kettle</div>' },
@@ -79,10 +81,21 @@ test('badges come part by part in landing order, and a board of one PR has none'
   expect(shapeStackBadges(undefined).size).toBe(0);
 });
 
-test('a PR has one colour, by its place in the stack: teal, amber, rose', () => {
+test('a PR has one colour, by its place in the stack: teal, amber, rose for three, then one hue each however many', () => {
   const s = stack();
-  expect([11, 12, 13].map((n) => shapeStackColour(s, n))).toEqual([1, 2, 3]);
-  expect(shapeStackColour(s, 99)).toBe(0);
-  const four = { pulls: [...s.pulls, { n: 14, title: 'Fourth' }], changes: [] };
-  expect(shapeStackColour(four, 14)).toBe(1);
+  expect([11, 12, 13].map((n) => shapeStackHue(s, n))).toEqual([186, 72, 357]);
+  expect(shapeStackHue(s, 99)).toBeNull();
+  const apart = (a: number, b: number) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
+  for (let count = 2; count <= 20; count++) {
+    const hues = shapeStackHues(count);
+    expect(hues.length).toBe(count);
+    expect(new Set(hues).size).toBe(count);
+    // Off the board's purple (the default theme's primary is hue 280).
+    for (const h of hues) expect(apart(h, 280)).toBeGreaterThanOrEqual(40);
+    // Evenly spread: no two closer than the arc shared out, less rounding.
+    const sorted = [...hues].sort((a, b) => a - b);
+    if (count >= 4) for (let i = 1; i < count; i++) expect(sorted[i]! - sorted[i - 1]!).toBeGreaterThanOrEqual(Math.floor(265 / count) - 1);
+    // PRs next to each other in the stack never take neighbouring hues where the count allows a wider step (not 4 or 6).
+    if (count >= 5 && count !== 6) for (let i = 1; i < count; i++) expect(apart(hues[i]!, hues[i - 1]!)).toBeGreaterThanOrEqual(Math.floor((2 * 265) / count) - 2);
+  }
 });

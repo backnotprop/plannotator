@@ -42,7 +42,7 @@ export function shapeReviewNarrowOf(value: string | null): ShapeReviewNarrow | n
     pr: n.pr,
     ...(typeof n.title === 'string' && n.title ? { title: n.title.slice(0, 200) } : {}),
     ...(typeof n.url === 'string' && /^https?:\/\//i.test(n.url) ? { url: n.url.slice(0, 2000) } : {}),
-    ...(n.colour === 1 || n.colour === 2 || n.colour === 3 ? { colour: n.colour } : {}),
+    ...(typeof n.hue === 'number' && Number.isFinite(n.hue) && n.hue >= 0 && n.hue < 360 ? { hue: Math.round(n.hue) } : {}),
     files,
   };
 }

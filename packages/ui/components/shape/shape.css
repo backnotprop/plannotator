@@ -725,17 +725,12 @@ code.shp-ex-fn, span.shp-ex-line { cursor: default; text-decoration: none; }
 /*
  * Stack badges (approval "stack-show-me", addendum 2026-11-06; ShapeStack.tsx, only with `stackBadges`): the row of
  * a stack's PRs under the claim, a tag's card by it (a bottom sheet on a phone) and the code popup's way back. The PR
- * colours are teal, amber and rose, kept off the board's purple; the drawing's tags use the same ones (stackBadges.ts).
- * The popup is drawn outside the board, so its bar carries the colours too.
+ * colour comes from its hue (`--shp-h`, one per PR however many: `shapeStackHues`), kept off the board's purple; the
+ * drawing's tags use the same colours (stackBadges.ts). The popup is drawn outside the board: its chips carry the hue.
  */
-.shp-root, .shp-stk-nav {
-  --shp-pr1: color-mix(in oklab, #0f8a80 74%, var(--foreground)); --shp-pr1-soft: color-mix(in oklab, #0f8a80 15%, var(--shp-paper, var(--background)));
-  --shp-pr2: color-mix(in oklab, #b87a12 70%, var(--foreground)); --shp-pr2-soft: color-mix(in oklab, #d9971f 18%, var(--shp-paper, var(--background)));
-  --shp-pr3: color-mix(in oklab, #b23a6e 70%, var(--foreground)); --shp-pr3-soft: color-mix(in oklab, #b23a6e 13%, var(--shp-paper, var(--background)));
+.shp-stk-chip, .shp-stk-pr {
+  --c: color-mix(in oklab, oklch(0.56 0.15 var(--shp-h, 186)) 74%, var(--foreground)); --c-soft: color-mix(in oklab, oklch(0.62 0.14 var(--shp-h, 186)) 15%, var(--shp-paper, var(--background)));
 }
-:is(.shp-stk-chip, .shp-stk-pr)[data-c="1"] { --c: var(--shp-pr1); --c-soft: var(--shp-pr1-soft); }
-:is(.shp-stk-chip, .shp-stk-pr)[data-c="2"] { --c: var(--shp-pr2); --c-soft: var(--shp-pr2-soft); }
-:is(.shp-stk-chip, .shp-stk-pr)[data-c="3"] { --c: var(--shp-pr3); --c-soft: var(--shp-pr3-soft); }
 .shp-stk-ic { display: inline-flex; flex: none; }
 .shp-stk-ic svg { display: block; }
 .shp-stk-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0 2px; }
