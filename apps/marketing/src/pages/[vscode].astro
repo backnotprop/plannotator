@@ -1,0 +1,870 @@
+---
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import GuidesShot from '../components/guides-vscode/GuidesShot.astro';
+import { GUIDES_VSCODE_LAUNCHED, GUIDES_VSCODE_ROUTE } from '../lib/guides-vscode-launch';
+
+// /vscode/ is generated only once Guided Reviews for VS Code ships: until then the
+// deployed site has no such page (src/lib/guides-vscode-launch.ts).
+export function getStaticPaths() {
+  return GUIDES_VSCODE_LAUNCHED ? [{ params: { vscode: GUIDES_VSCODE_ROUTE } }] : [];
+}
+
+// Modeled on the Inbox page ([inbox].astro): same shapes, sizes and voice.
+// Copy is rev 4 (the landing copy of record, kept outside the repo): a guided
+// review in the editor everyone already uses, with any agent that speaks ACP.
+const title = 'Guided Reviews for VS Code';
+const description =
+  'An agent turns a pull request or your local changes into chapters, the core of the change first, and you read them in VS Code with everything the editor already does.';
+const github = 'https://github.com/backnotprop/plannotator';
+const marketplace = 'https://marketplace.visualstudio.com/items?itemName=backnotprop.plannotator-webview';
+const openVsx = 'https://open-vsx.org/extension/backnotprop/plannotator-webview';
+const acpAgents = 'https://agentclientprotocol.com/get-started/agents';
+const extensionInstall = 'code --install-extension backnotprop.plannotator-webview';
+const adapterInstall = 'npm install -g @agentclientprotocol/claude-agent-acp';
+
+// Agents that speak ACP (listed on acpAgents) whose marks are already in the
+// repo: the site's own agent icons, Cursor's from packages/ui's app icons, and
+// Kilo Code's favicon from Kilo-Org/kilocode (packages/kilo-docs/public/favicon).
+const agents = [
+  { name: 'Claude Code', src: '/assets/icon-claude.svg' },
+  { name: 'Codex', src: '/assets/icon-codex.png', cls: 'gv-agent-round' },
+  { name: 'Cursor', src: '/assets/icon-cursor.svg' },
+  { name: 'GitHub Copilot', src: '/assets/icon-copilot.svg', cls: 'icon-copilot' },
+  { name: 'OpenCode', src: '/assets/icon-opencode-dark.svg', cls: 'icon-opencode' },
+  { name: 'Pi', src: '/assets/icon-pi.svg' },
+  { name: 'Kiro', src: '/assets/icon-kiro.svg', cls: 'gv-agent-round' },
+  { name: 'Kilo Code', src: '/assets/icon-kilo.svg', cls: 'gv-agent-round' },
+];
+
+// The film is made separately. It shows only when its file is in public/ at
+// build time (the build runs in apps/marketing); until then the screenshot
+// under it stands alone. The poster falls back to that screenshot.
+const filmSrc = '/assets/guides-vscode.mp4';
+const hasFilm = existsSync(join(process.cwd(), 'public', filmSrc));
+const posterSrc = existsSync(join(process.cwd(), 'public/assets/guides-vscode-poster.png'))
+  ? '/assets/guides-vscode-poster.png'
+  : '/assets/guides-vscode/guide-overview@2x.webp';
+
+const copyIcon =
+  '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+---
+
+<Base
+  title={title}
+  description={description}
+  ogImage="https://plannotator.ai/assets/guides-vscode/guides-vscode-og.jpg"
+>
+  <div class="min-h-screen bg-background text-foreground">
+    <Nav />
+
+    <main class="max-w-6xl mx-auto px-6 md:px-8">
+      <!-- ── 1. Hero ── -->
+      <header class="gv-hero">
+        <div class="gv-hero-inner">
+          <div class="gv-cmd-row">
+            <p class="gv-cmd">
+              <img src="/assets/icon-vscode.svg" alt="" width="14" height="14" />
+              Plannotator · VS Code
+            </p>
+            <a href={github} target="_blank" rel="noopener noreferrer" class="gv-gh" aria-label="Plannotator on GitHub">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8C0 11.54 2.29 14.53 5.47 15.59C5.87 15.66 6.02 15.42 6.02 15.21C6.02 15.02 6.01 14.39 6.01 13.72C4 14.09 3.48 13.23 3.32 12.78C3.23 12.55 2.84 11.84 2.5 11.65C2.22 11.5 1.82 11.13 2.49 11.12C3.12 11.11 3.57 11.7 3.72 11.94C4.44 13.15 5.59 12.81 6.05 12.6C6.12 12.08 6.33 11.73 6.56 11.53C4.78 11.33 2.92 10.64 2.92 7.58C2.92 6.71 3.23 5.99 3.74 5.43C3.66 5.23 3.38 4.41 3.82 3.31C3.82 3.31 4.49 3.1 6.02 4.13C6.66 3.95 7.34 3.86 8.02 3.86C8.7 3.86 9.38 3.95 10.02 4.13C11.55 3.09 12.22 3.31 12.22 3.31C12.66 4.41 12.38 5.23 12.3 5.43C12.81 5.99 13.12 6.7 13.12 7.58C13.12 10.65 11.25 11.33 9.47 11.53C9.76 11.78 10.01 12.26 10.01 13.01C10.01 14.08 10 14.94 10 15.21C10 15.42 10.15 15.67 10.55 15.59C13.71 14.53 16 11.53 16 8C16 3.58 12.42 0 8 0Z"/></svg>
+            </a>
+          </div>
+
+          <h1 class="font-display gv-heading">Guided Reviews for VS Code</h1>
+
+          <p class="gv-overview">
+            An agent reads a pull request or your local changes and splits them into chapters: the core of the change
+            first, then what follows from it, with wiring and config at the end. Each chapter says what changed and why. You read it in VS Code.
+          </p>
+
+          <div class="gv-hero-actions">
+            <a href={marketplace} target="_blank" rel="noopener noreferrer" class="gv-install-btn">
+              <img src="/assets/icon-vscode.svg" alt="" width="17" height="17" />
+              Install from the Marketplace
+            </a>
+            <a href={openVsx} target="_blank" rel="noopener noreferrer" class="gv-link">Open VSX</a>
+            <a href="#install" class="gv-link">Setup steps</a>
+          </div>
+          <div class="gv-acp">
+            <ul class="gv-agents" aria-label="Agents that connect over ACP">
+              {agents.map((agent) => (
+                <li class="gv-agent">
+                  <img src={agent.src} alt="" width="16" height="16" class={agent.cls} />
+                  <span>{agent.name}</span>
+                </li>
+              ))}
+            </ul>
+            <p class="gv-acp-line">
+              Works with your agent, over <a href={acpAgents} target="_blank" rel="noopener noreferrer">ACP</a>.
+            </p>
+          </div>
+        </div>
+
+        <!-- The film: never autoplays. The poster and one play button until it
+             plays, then the native controls. Without the file at build time, or
+             if it fails to load, the screenshot below stands alone. -->
+        {hasFilm && (
+          <figure class="gv-film" data-film>
+            <video
+              class="gv-film-video"
+              controls
+              playsinline
+              preload="metadata"
+              poster={posterSrc}
+              width="1920"
+              height="1080"
+              aria-label="Guided Reviews for VS Code film"
+            >
+              <source src={filmSrc} type="video/mp4" />
+            </video>
+            <button type="button" class="gv-film-play" aria-label="Play the film" data-film-play hidden>
+              <span class="gv-film-play-dot" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+              </span>
+            </button>
+          </figure>
+        )}
+
+        <GuidesShot
+          name="guide-overview"
+          alt="A guide open in a VS Code tab with its overview diagram and its five chapters in the side bar"
+          large
+          eager
+          class="gv-hero-shot"
+        />
+
+      </header>
+
+      <!-- ── 2. The guide ── -->
+      <section class="gv-arc" id="guide">
+        <h2 class="font-display gv-arc-title">The guide</h2>
+      </section>
+
+      <section class="gv-beat" id="core">
+        <div class="gv-beat-head">
+          <h3 class="font-display gv-title">The core of the change first</h3>
+          <p class="gv-body">
+            A large change read file by file leaves you to work out what matters. The guide opens on the part that
+            explains the rest. Call sites and tests come next. Renames, config and generated files are grouped at the
+            end. Every changed file is placed somewhere.
+          </p>
+        </div>
+      </section>
+
+      <section class="gv-beat" id="why">
+        <div class="gv-beat-head">
+          <h3 class="font-display gv-title">Why next to the code</h3>
+          <p class="gv-body">
+            Each chapter says what changed, why it was done that way, and what it touches. An overview with one diagram
+            shows how the whole change fits together; click a box and its code opens.
+          </p>
+        </div>
+      </section>
+
+      <!-- ── 3. In the editor ── -->
+      <section class="gv-arc gv-arc-gap" id="editor">
+        <h2 class="font-display gv-arc-title">In the editor</h2>
+        <p class="gv-body">
+          The guide opens in one editor tab, each chapter's text beside the diffs of its files. Hover a name in a diff
+          and you get its signature, where it's defined and which chapter changed it. Follow a call out of the diff into
+          the rest of the repo, then pick the guide back up where you left it.
+        </p>
+      </section>
+      <GuidesShot
+        name="diff-hover"
+        alt="A hover card on computeBackoff in a diff with its signature and the chapter that changed it"
+      />
+      <GuidesShot
+        name="chapter-diff"
+        alt="Chapter two's text beside the diff of its file in the Guide tab with the guide's outline in the side bar"
+        class="gv-after"
+      />
+
+      <!-- ── 4. Your setup ── -->
+      <section class="gv-arc gv-arc-gap" id="setup">
+        <h2 class="font-display gv-arc-title">Your setup</h2>
+        <p class="gv-body">
+          The agent runs with your own install, login and settings. It can read the code but never change it, and a pull
+          request is checked out separately, so your working copy stays as it is. Guides are saved where Plannotator's
+          web app reads them, and any guide downloads as one HTML file.
+        </p>
+      </section>
+
+      <!-- ── 5. Install ── -->
+      <section class="gv-cta" id="install">
+        <h2 class="font-display gv-title">Install</h2>
+
+        <div class="gv-steps">
+          <div class="gv-step">
+            <span class="gv-step-n" aria-hidden="true">01</span>
+            <div>
+              <h3>The extension</h3>
+              <p>
+                <a href={marketplace} target="_blank" rel="noopener noreferrer">VS Code Marketplace</a>, or
+                <a href={openVsx} target="_blank" rel="noopener noreferrer">Open VSX</a> for Cursor, Windsurf and
+                VSCodium.
+              </p>
+              <div class="hero-install gv-box">
+                <span class="gv-dollar" aria-hidden="true">$</span>
+                <code>{extensionInstall}</code>
+                <button type="button" class="copy-btn" data-copy={extensionInstall} aria-label="Copy the command" set:html={copyIcon} />
+              </div>
+            </div>
+          </div>
+
+          <div class="gv-step">
+            <span class="gv-step-n" aria-hidden="true">02</span>
+            <div>
+              <h3>Your agent's ACP adapter</h3>
+              <p>For example:</p>
+              <div class="hero-install gv-box">
+                <span class="gv-dollar" aria-hidden="true">$</span>
+                <code>{adapterInstall}</code>
+                <button type="button" class="copy-btn" data-copy={adapterInstall} aria-label="Copy the command" set:html={copyIcon} />
+              </div>
+              <p>
+                The Guided Reviews view lists the agents it finds and how to add the others. Pull requests also need
+                <code>gh</code>.
+              </p>
+            </div>
+          </div>
+
+          <div class="gv-step">
+            <span class="gv-step-n" aria-hidden="true">03</span>
+            <div>
+              <h3>Open Guided Reviews</h3>
+              <p>Its icon is in the activity bar.</p>
+              <p class="gv-step-note">VS Code 1.85 or newer.</p>
+            </div>
+          </div>
+        </div>
+
+        <p class="gv-acp-line">
+          All agents connect through <a href={acpAgents} target="_blank" rel="noopener noreferrer">ACP</a>.
+        </p>
+      </section>
+    </main>
+
+    <!-- ── Screenshot lightbox (the Inbox page's) ── -->
+    <div class="gv-lightbox" data-lightbox-modal hidden>
+      <div class="gv-lightbox-backdrop" data-close-lightbox></div>
+      <div class="gv-lightbox-dialog" role="dialog" aria-modal="true" aria-label="Screenshot">
+        <button class="gv-lightbox-close" type="button" aria-label="Close" data-close-lightbox>&times;</button>
+        <img class="gv-lightbox-img" alt="" />
+      </div>
+    </div>
+
+    <p class="sr-only" aria-live="polite" data-copy-live></p>
+
+    <script is:inline>
+      (() => {
+        const live = document.querySelector('[data-copy-live]');
+        const announce = (message) => {
+          if (!live) return;
+          live.textContent = '';
+          setTimeout(() => { live.textContent = message; }, 50);
+        };
+
+        // The clipboard API, else a selected off-screen textarea.
+        const copyText = (text) => {
+          const fallback = () =>
+            new Promise((resolve, reject) => {
+              const ta = document.createElement('textarea');
+              ta.value = text;
+              ta.setAttribute('readonly', '');
+              ta.setAttribute('aria-hidden', 'true');
+              ta.style.position = 'fixed';
+              ta.style.top = '0';
+              ta.style.left = '0';
+              ta.style.opacity = '0';
+              document.body.appendChild(ta);
+              const focused = document.activeElement;
+              ta.select();
+              try {
+                document.execCommand('copy') ? resolve() : reject(new Error('copy failed'));
+              } catch (e) {
+                reject(e);
+              } finally {
+                ta.remove();
+                if (focused && focused.focus) focused.focus();
+              }
+            });
+          if (navigator.clipboard && window.isSecureContext) {
+            return navigator.clipboard.writeText(text).catch(fallback);
+          }
+          return fallback();
+        };
+
+        const check =
+          '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>';
+        document.querySelectorAll('[data-copy]').forEach((b) => {
+          const icon = b.innerHTML;
+          b.addEventListener('click', () => {
+            copyText(b.getAttribute('data-copy') || '').then(() => {
+              b.innerHTML = check;
+              announce('Copied.');
+              setTimeout(() => { b.innerHTML = icon; }, 1500);
+            }, () => announce('Copy failed. Select the command and copy it by hand.'));
+          });
+        });
+
+        // The film, when the page has one: the poster and one play button until
+        // it plays, then the native controls. A file that fails to load takes
+        // the figure with it, leaving the screenshot.
+        const film = document.querySelector('[data-film]');
+        const filmVideo = film?.querySelector('video');
+        const filmSource = filmVideo?.querySelector('source');
+        const filmPlay = film?.querySelector('[data-film-play]');
+        if (film && filmVideo && filmPlay) {
+          filmSource?.addEventListener('error', () => film.remove());
+          filmVideo.controls = false;
+          filmPlay.hidden = false;
+          filmPlay.addEventListener('click', () => {
+            filmVideo.play().catch(() => {});
+          });
+          filmVideo.addEventListener('play', () => {
+            filmPlay.hidden = true;
+            filmVideo.controls = true;
+          });
+        }
+
+        // Lightbox: the 2x render.
+        const lb = document.querySelector('[data-lightbox-modal]');
+        const img = lb?.querySelector('.gv-lightbox-img');
+        if (!lb || !img) return;
+        let opener = null;
+        const close = () => {
+          lb.hidden = true;
+          document.body.style.overflow = '';
+          img.removeAttribute('src');
+          if (opener) opener.focus();
+        };
+        document.querySelectorAll('[data-lightbox-src]').forEach((b) =>
+          b.addEventListener('click', () => {
+            opener = b;
+            img.src = b.getAttribute('data-lightbox-src');
+            img.alt = b.getAttribute('data-lightbox-alt') || '';
+            lb.hidden = false;
+            document.body.style.overflow = 'hidden';
+            lb.querySelector('.gv-lightbox-close')?.focus();
+          }),
+        );
+        document.querySelectorAll('[data-close-lightbox]').forEach((b) => b.addEventListener('click', close));
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && !lb.hidden) close();
+        });
+      })();
+    </script>
+
+    <Footer />
+  </div>
+</Base>
+
+<style>
+  /* The Inbox page's shapes ([inbox].astro), with a gv- prefix. Tokens come
+     from global.css. No motion on this page. */
+  main {
+    --gv-dim: color-mix(in oklab, var(--foreground) 62%, transparent);
+    --gv-subtle: color-mix(in oklab, var(--foreground) 38%, transparent);
+  }
+
+  main code {
+    font-family: var(--font-mono);
+  }
+
+  /* ── Hero ── */
+  .gv-hero {
+    padding: 6.5rem 0 3rem;
+  }
+
+  .gv-hero-inner {
+    max-width: 46rem;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1.25rem;
+  }
+
+  .gv-cmd-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    width: 100%;
+  }
+
+  .gv-cmd {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--primary);
+    letter-spacing: 0.01em;
+  }
+
+  .gv-cmd img { width: 14px; height: 14px; }
+
+  .gv-gh {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    line-height: 1;
+    padding: 0.5rem 0.875rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--gv-dim);
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .gv-gh:hover,
+  .gv-gh:focus-visible {
+    color: var(--foreground);
+    border-color: var(--gv-subtle);
+  }
+
+  .gv-heading {
+    font-size: clamp(2.5rem, 7vw, 4rem);
+    line-height: 1.04;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    text-wrap: balance;
+  }
+
+  .gv-overview {
+    font-size: 1rem;
+    line-height: 1.7;
+    color: var(--gv-dim);
+    max-width: 42rem;
+  }
+
+  .gv-hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1.25rem;
+    margin-top: 0.5rem;
+  }
+
+  /* The Inbox page's "Copy install prompt" button, as a link. */
+  .gv-install-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.8rem 1.25rem;
+    border-radius: 10px;
+    border: 1px solid var(--primary);
+    background: var(--primary);
+    color: var(--primary-foreground);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    transition: background-color 150ms ease-out;
+  }
+
+  .gv-install-btn img {
+    width: 17px;
+    height: 17px;
+    flex: 0 0 auto;
+    background: #fff;
+    border-radius: 4px;
+    padding: 1px;
+  }
+
+  .gv-install-btn:hover { background: color-mix(in oklab, var(--primary) 90%, var(--foreground)); }
+
+  .gv-link {
+    font-size: 0.875rem;
+    color: var(--muted-foreground);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-color: color-mix(in oklab, currentColor 35%, transparent);
+    border-radius: 2px;
+    transition: color 150ms ease-out;
+  }
+
+  .gv-link:hover { color: var(--foreground); }
+
+  .gv-install-btn:focus-visible,
+  .gv-link:focus-visible,
+  .gv-box :global(.copy-btn:focus-visible) {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .gv-install-btn,
+    .gv-link { transition: none; }
+  }
+
+  @media (max-width: 639px) {
+    .gv-install-btn { width: 100%; justify-content: center; }
+  }
+
+  .gv-hero :global(.gv-hero-shot) {
+    margin-top: 3.5rem;
+  }
+
+  /* ── The film (the Inbox page's) ── */
+  .gv-film {
+    position: relative;
+    margin: 3.5rem 0 0;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: #000;
+    box-shadow:
+      0 30px 80px -20px color-mix(in oklab, #000 45%, transparent),
+      0 1px 2px color-mix(in oklab, var(--foreground) 6%, transparent);
+  }
+
+  :global(.light) .gv-film {
+    box-shadow: 0 30px 70px -24px color-mix(in oklab, var(--foreground) 22%, transparent);
+  }
+
+  .gv-film-video {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+  }
+
+  .gv-film-play {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+  }
+
+  .gv-film-play[hidden] { display: none; }
+
+  .gv-film-play-dot {
+    width: 76px;
+    height: 76px;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--primary) 92%, transparent);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+    transition: background-color 0.15s;
+  }
+
+  .gv-film-play-dot svg {
+    width: 34px;
+    height: 34px;
+    margin-left: 4px;
+  }
+
+  .gv-film-play:hover .gv-film-play-dot { background: var(--primary); }
+
+  .gv-film-play:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: -4px;
+    border-radius: 12px;
+  }
+
+  @media (max-width: 639px) {
+    .gv-film { margin-top: 2.5rem; }
+    .gv-film-play-dot { width: 56px; height: 56px; }
+    .gv-film-play-dot svg { width: 26px; height: 26px; margin-left: 3px; }
+  }
+
+  /* ── Agents over ACP ── */
+  .gv-acp {
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+    margin-top: 0.75rem;
+    /* Wider than the hero text column, so the eight marks fit one line on a desktop. */
+    width: max-content;
+    max-width: min(100vw - 3rem, 64rem);
+  }
+
+  .gv-agents {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+  }
+
+  .gv-agent {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4375rem;
+    font-size: 0.8125rem;
+    color: var(--gv-dim);
+  }
+
+  .gv-agent img {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+  }
+
+  .gv-agent img.gv-agent-round { border-radius: 3px; }
+
+  .gv-acp-line {
+    font-size: 0.875rem;
+    color: var(--gv-dim);
+  }
+
+  .gv-acp-line a {
+    color: var(--foreground);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--foreground) 30%, transparent);
+    text-underline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  .gv-acp-line a:hover { text-decoration-color: var(--primary); }
+
+  .gv-acp-line a:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+  }
+
+  /* ── Chapter markers ── */
+  .gv-arc {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+    padding: 4.5rem 0 2.5rem;
+    border-top: 2px solid var(--border);
+  }
+
+  .gv-arc-gap { margin-top: 4rem; }
+
+  .gv-arc-title {
+    font-size: clamp(1.75rem, 3.5vw, 2.375rem);
+    line-height: 1.1;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  .gv-arc .gv-body { max-width: 42rem; }
+  .gv-arc .gv-body + .gv-body { margin-top: 0.25rem; }
+
+  .gv-title {
+    font-size: clamp(1.375rem, 2.6vw, 1.75rem);
+    line-height: 1.2;
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+  }
+
+  .gv-body {
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    color: var(--gv-dim);
+  }
+
+  .gv-body code {
+    font-size: 0.85em;
+    padding: 0.05em 0.35em;
+    border-radius: 5px;
+    background: color-mix(in oklab, var(--foreground) 8%, transparent);
+    color: var(--foreground);
+  }
+
+  main :global(.gv-after) {
+    margin-top: 2rem;
+  }
+
+  /* ── The guide ── */
+  .gv-beat {
+    padding: 3.5rem 0 0;
+    scroll-margin-top: 4rem;
+  }
+
+  .gv-arc + .gv-beat { padding-top: 0.5rem; }
+
+  .gv-beat-head {
+    display: grid;
+    gap: 0.875rem;
+    margin-bottom: 1.75rem;
+    max-width: 46rem;
+  }
+
+  /* ── Install ── */
+  .gv-cta {
+    margin-top: 4rem;
+    padding: 4.5rem 0 6rem;
+    border-top: 2px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+    scroll-margin-top: 3rem;
+  }
+
+  /* The Inbox page's manual steps, always open. */
+  .gv-steps {
+    width: 100%;
+    max-width: 46rem;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--card);
+    padding: 0.5rem 1.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .gv-step {
+    display: grid;
+    grid-template-columns: 2.25rem minmax(0, 1fr);
+    gap: 0 0.5rem;
+    padding: 1.25rem 0;
+  }
+
+  .gv-step + .gv-step { border-top: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
+
+  .gv-step-n {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--primary);
+    letter-spacing: 0.05em;
+    padding-top: 0.2rem;
+  }
+
+  .gv-step h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin-bottom: 0.375rem;
+  }
+
+  .gv-step p {
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--gv-dim);
+  }
+
+  .gv-step p a {
+    color: var(--foreground);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--foreground) 30%, transparent);
+    text-underline-offset: 3px;
+  }
+
+  .gv-step p a:hover { text-decoration-color: var(--primary); }
+
+  .gv-step p + .gv-box,
+  .gv-step .gv-box + p,
+  .gv-step p + p { margin-top: 0.625rem; }
+
+  .gv-step p code {
+    font-size: 0.85em;
+    padding: 0.05em 0.35em;
+    border-radius: 5px;
+    background: color-mix(in oklab, var(--foreground) 8%, transparent);
+    color: var(--foreground);
+  }
+
+  .gv-step .gv-step-note {
+    font-size: 0.8125rem;
+    color: var(--gv-subtle);
+  }
+
+  /* Command boxes: global.css .hero-install, wrapping. */
+  .gv-box {
+    display: flex;
+    align-items: flex-start;
+    padding: 0.7rem 3rem 0.7rem 1rem;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+  }
+
+  .gv-box code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--foreground);
+  }
+
+  .gv-dollar {
+    color: var(--muted-foreground);
+    margin-right: 0.5rem;
+    user-select: none;
+  }
+
+  .gv-steps .gv-box :global(.copy-btn) {
+    top: 0.5rem;
+    right: 0.5rem;
+    transform: none;
+    display: inline-flex;
+  }
+
+  @media (max-width: 639px) {
+    .gv-steps { padding: 0.25rem 1rem; }
+    .gv-step { grid-template-columns: 1.75rem minmax(0, 1fr); }
+    .gv-box { font-size: 0.75rem; padding: 0.65rem 2.75rem 0.65rem 0.875rem; }
+  }
+
+  /* ── Lightbox (the Inbox page's) ── */
+  .gv-lightbox[hidden] { display: none; }
+
+  .gv-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4vw;
+  }
+
+  .gv-lightbox-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.82);
+    backdrop-filter: blur(4px);
+  }
+
+  .gv-lightbox-dialog {
+    position: relative;
+    max-width: 96vw;
+    max-height: 92vh;
+  }
+
+  .gv-lightbox-img {
+    display: block;
+    max-width: 96vw;
+    max-height: 92vh;
+    width: auto;
+    height: auto;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6);
+  }
+
+  .gv-lightbox-close {
+    position: absolute;
+    top: -48px;
+    right: 0;
+    width: 40px;
+    height: 40px;
+    border: none;
+    background: transparent;
+    color: #fff;
+    font-size: 36px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.8;
+  }
+
+  .gv-lightbox-close:hover { opacity: 1; }
+</style>
