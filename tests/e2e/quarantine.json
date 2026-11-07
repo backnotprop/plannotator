@@ -130,6 +130,17 @@
         42272056744,
         42307730886
       ]
+    },
+    {
+      "spec": "inbox-guides.spec.ts",
+      "title": "a thread's guided review with Code review off: arrows open a long file in place, the page scrolls with no box limit, the file header sticks, and a comment on an opened line saves",
+      "why": "The middle scroll check misses by a few hundred px (line 689, `expect(await scrollTop()).toBe(middle)`, e.g. 10932 vs 10512), and the runner was then killed (exit 137) on one run. Failed on three unrelated PRs (#2721 shape kit contrast, #2842 Shape run player, #2847 checklist line) that do not touch guided review.",
+      "firstSeen": "2026-11-07",
+      "evidence": [
+        42346233742,
+        42347213074,
+        42348560192
+      ]
     }
   ]
 }

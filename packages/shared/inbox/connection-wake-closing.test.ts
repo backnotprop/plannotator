@@ -139,7 +139,7 @@ test("a Tidy closes with the line and names no thread; a 👍 keeps its own shor
 
 test("the steps line stays its own paragraph before the closing line", () => {
   const text = wake({ steps: { done: 2, total: 5, doing: "Replay" }, context: context() });
-  expect(text.endsWith(`\n\nYour steps here: 2 of 5 done; doing: Replay. Update them if that changed.\n\n${INBOX_WAKE_CLOSING_LINE}`)).toBe(true);
+  expect(text.endsWith(`\n\nYour checklist here: 2 of 5 done; doing: Replay. If you're still working on this, keep it current.\n\n${INBOX_WAKE_CLOSING_LINE}`)).toBe(true);
 });
 
 const STILL_OPEN = "You have 1 other question open in this thread. It stays open; the person will answer it in the Inbox. Don't re-ask it.";
