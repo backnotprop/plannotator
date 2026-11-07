@@ -3723,6 +3723,10 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
       text.focus();
       text.setSelectionRange(text.value.length, text.value.length);
       text.scrollTop = text.scrollHeight;
+      // The words scroll in the box's capped region (approval "inbox-reply-box", D1), not in the field: their end, and
+      // the caret there, are brought to the region's bottom.
+      const region = text.closest<HTMLElement>('[data-reply-scroll]');
+      if (region) region.scrollTop += text.getBoundingClientRect().bottom - region.getBoundingClientRect().bottom;
     });
   /**
    * From full screen to the thread, on the device's own route: beside the thread where there is room (as
