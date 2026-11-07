@@ -15,6 +15,10 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
+import type { ShapeHost } from '@plannotator/ui/components/shape';
+import type { InboxShapes } from './shape/useInboxShapes';
+
+const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
 const hasDom = typeof document !== 'undefined';
 if (hasDom) {
@@ -82,7 +86,7 @@ test.skipIf(!hasDom)("a reader chunk that cannot load says so in the pane, with 
       root.render(
         <div className="pn-inbox">
           <p data-window-sentinel="">the rest of the window</p>
-          <ReviewPane thread={thread} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} />
+          <ReviewPane thread={thread} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />
         </div>,
       );
     });

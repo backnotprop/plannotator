@@ -27,6 +27,8 @@
  *   accounts) sends `classic.PermissionRequest` past this mod, the command
  *   hook is reached; it finds the approval the mod recorded for the call in
  *   flight (plan.ts `PLAN_APPROVALS_DIR`) and allows it without a review (#2007).
+ *   With plan review off (`PLANNOTATOR_PLAN_REVIEW=0` / `{ "planReview": false }`),
+ *   the two ExitPlanMode hooks call next and Claude Code shows its own dialog.
  * - `/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`
  *   (`command.run`): the user's skills keep their names; the mod answers the
  *   command itself, starting the CLI detached with the same arguments, and
@@ -83,8 +85,8 @@
  */
 
 import { PlannotatorMod } from './controller'
-import { resolveAgentToolEnabled, resolveClaudeModEnabled, resolveInboxReminderCustom, resolveInboxReminderEnabled, resolveInboxToolEnabled } from './enabled'
-import type { Host, LoadedPluginInfo } from './host'
+import { resolveAgentToolEnabled, resolveClaudeModEnabled, resolveInboxReminderCustom, resolveInboxReminderEnabled, resolveInboxToolEnabled, resolvePlanReviewEnabled } from './enabled'
+import { submitOrThrow, type Host, type LoadedPluginInfo } from './host'
 import {
   claudeTranscriptPaths,
   conversationResumed,
@@ -109,6 +111,8 @@ import { inboxAgentTool, inboxReminderFor, type InboxToolInfo } from './inbox-co
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
 import { COMMANDS, debugAppendArgv, INBOX_COMMAND, isModCommand, resolveDataDir, waitArgv } from './launch'
 import { PLAN_TOOL } from './plan'
+import { disposesOnSessionEnd, healAction, MOD_HEAL_EVERY_MS } from './self-heal'
+import { answerRemovalPrompt, isEnvOn, removalAskKey, RemovalAsks } from './skip-rm-prompts'
 import { answerShellCall, SHELL_TOOL, shellTakeOver } from './take-over'
 import { PLANNOTATOR_TOOL_NAME, PLANNOTATOR_TOOL_TAILSCALE_DESCRIPTION, PLANNOTATOR_TOOL_TAILSCALE_INPUT_SCHEMA } from './tool'
 
@@ -196,9 +200,8 @@ function hostOf($: Engine, debugPath: string | null): Host {
     },
     storeGet: (key) => $.store.get(key),
     storeSet: (key, value) => $.store.set(key, value),
-    submit: async (text) => {
-      await $.prompt.submit({ text })
-    },
+    // The engine resolves `{ drop }` for a prompt it refused (Host.submit): that rejects, never reads as a turn.
+    submit: (text) => submitOrThrow(() => $.prompt.submit({ text })),
     // Called only where `sessionAppendAvailable` said the engine has it; a refusal stops Send now here (inbox.ts).
     appendUserRow: async (text) => {
       const stored = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
@@ -271,6 +274,8 @@ interface Allowed {
   debugPath: string | null
   /** Register Claude's `plannotator` tool (the agent tool switch, on by default). */
   agentTool: boolean
+  /** Review ExitPlanMode (`planReview`, on by default). Off: Claude Code's own dialog. */
+  planReview: boolean
   /** Connect to the Plannotator Inbox (the inbox tool switch, on by default). */
   inboxTool: boolean
   /** With the Inbox tool: the one-line reminder at the start of each conversation (`inboxReminder`, on by default). */
@@ -292,7 +297,20 @@ let inboxToolName: string | null = null
 /** `inbox/inbox.json` existed at the first session.start: the person has run the Inbox here (the reminder's gate). */
 let inboxRanHere = false
 let mod: PlannotatorMod | null = null
+/** Recent Bash calls' verdicts, read at their permission prompt (skip-rm-prompts.ts). */
+const removalAsks = new RemovalAsks()
 let switching: Promise<PlannotatorMod | null> | null = null
+/**
+ * The self-heal's timer (self-heal.ts), started at the first session.start the
+ * mod runs in, and when it last fired (or was armed): the engine ends an
+ * interval at a refused period, so a turn's end arms it again once it has been
+ * silent for two periods (`startSelfHeal`).
+ */
+let healTimer: { cancel?: () => void } | null = null
+let healFiredAt = 0
+let healing = false
+/** When this session's own `session.end` disposed the instance; null: it did not. */
+let endedAt: number | null = null
 
 /**
  * The reminder is on in this process: the switch, an Inbox that has run here,
@@ -505,7 +523,7 @@ function sessionTitleOf($: Engine, host: Host, sessionId: string): TranscriptTit
  * (restoring that session's open reviews) when it changed. The old one was
  * disposed at `session.end`, so its decisions never land in another session.
  */
-async function currentMod($: Engine): Promise<PlannotatorMod | null> {
+async function currentMod($: Engine, options: { healed?: boolean } = {}): Promise<PlannotatorMod | null> {
   const settings = allowed
   if (!settings) return null
   const sessionId = await $.session.id()
@@ -530,6 +548,7 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
       root: async () => String(await $.session.root()),
       label: async () => (await title.read().catch(() => null)) ?? sessionNameOf($, String(sessionId)),
       ...(inboxTools ? { inboxTools } : {}),
+      ...(options.healed ? { healed: true } : {}),
     })
     // A question queued behind the old session's turn still enters as a turn of the new one: the new instance drops it.
     instance.carryQueued(previous)
@@ -545,6 +564,50 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
   } finally {
     switching = null
   }
+}
+
+/**
+ * The self-heal (self-heal.ts): every MOD_HEAL_EVERY_MS while the mod runs
+ * here, rebuild an instance that is gone or disposed (a quiet one: no touch),
+ * else re-arm its Inbox tick if that stopped. One timer per process: called
+ * again, it arms a new one only when the last has not fired for two periods
+ * (the engine ended it), cancelling that one first.
+ */
+async function startSelfHeal($: Engine): Promise<void> {
+  const armedAt = await $.clock.now()
+  // No await from here to the arm: two callers never both arm.
+  if (healTimer && armedAt - healFiredAt < 2 * MOD_HEAL_EVERY_MS) return
+  if (healTimer) {
+    healTimer.cancel?.()
+    if (allowed?.debugPath) hostOf($, allowed.debugPath).debug('self-heal: its timer had stopped firing; armed again')
+  }
+  healTimer = null
+  healFiredAt = armedAt
+  healTimer = $.clock.every(MOD_HEAL_EVERY_MS, () => {
+    void Promise.resolve($.clock.now()).then(
+      (now) => {
+        healFiredAt = Math.max(healFiredAt, Number(now))
+      },
+      () => undefined,
+    )
+    if (healing || !allowed) return
+    healing = true
+    void (async () => {
+      const action = healAction(mod, endedAt, await $.clock.now())
+      if (action === 'wait') return
+      // Live and still this session's: only its tick is looked at. A session id that moved with no hook is rebuilt.
+      if (action === 'check' && mod && mod.session.sessionId === (await $.session.id())) return await mod.inbox?.ensureTicking()
+      const previous = mod
+      const instance = await currentMod($, { healed: true })
+      if (instance && instance !== previous && allowed?.debugPath) {
+        hostOf($, allowed.debugPath).debug(`self-heal: made the instance for ${instance.session.sessionId} again (${previous ? 'it was disposed' : 'there was none'})`)
+      }
+    })()
+      .catch(() => undefined)
+      .finally(() => {
+        healing = false
+      })
+  })
 }
 
 /** Whether the mod runs here (on unless the user turned it off) and where its data dir is; null: stay inert. */
@@ -576,6 +639,7 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
     dataDir,
     debugPath: debug && debug !== '0' ? `${dataDir}/claude-code-mod/debug.log` : null,
     agentTool: resolveAgentToolEnabled(await $.env.get('PLANNOTATOR_AGENT_TOOL'), configText),
+    planReview: resolvePlanReviewEnabled(await $.env.get('PLANNOTATOR_PLAN_REVIEW'), configText),
     inboxTool: resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminder: resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminderCustom: resolveInboxReminderCustom(configText),
@@ -676,13 +740,40 @@ export function register(on: On) {
     // Decided once per process, here: the tool list is part of Claude's
     // prompt, so it never changes under a running session.
     if (allowed.agentTool) await registerTool($)
+    // After the commands and the tool, and never holding them: a safety net only (a
+    // refusal leaves no timer, and the next turn's end tries again).
+    void startSelfHeal($).catch(() => undefined)
     return result
   })
 
   on('session.end', async ($: Engine, e: any, next: Next) => {
     // Stop delivering for the session that ended; its open reviews stay in
-    // the store and reattach if it is resumed.
-    mod?.dispose()
+    // the store and reattach if it is resumed. Only this instance's own
+    // session, defensively: an end naming another session or a subagent
+    // (none on 2.1.318, whose session.end names this session) would leave it
+    // disposed with nothing polling the Inbox until the next turn.
+    // Decided from the event first, so the dispose (the lease release, the
+    // hand-off writes) goes out at once, inside the hook's time bound; the
+    // process's own id is asked only when the event names another one.
+    const current = mod && !mod.isDisposed ? mod : null
+    let disposes = disposesOnSessionEnd(current ? current.session : null, e)
+    if (current && !disposes && !e?.agentId && typeof e?.sessionId === 'string') {
+      const processSessionId = await Promise.resolve()
+        .then(() => $.session.id())
+        .then(String, () => '')
+      disposes = disposesOnSessionEnd(current.session, e, processSessionId)
+    }
+    if (current && disposes && !current.isDisposed) {
+      current.dispose()
+      endedAt = await Promise.resolve()
+        .then(() => $.clock.now())
+        .then(Number, () => Date.now())
+    }
+    if (allowed?.debugPath) {
+      hostOf($, allowed.debugPath).debug(
+        `session.end: sessionId ${String(e?.sessionId ?? 'none')}, agentId ${String(e?.agentId ?? 'none')}, reason ${String(e?.reason ?? 'none')}; ${current ? (disposes ? `disposed ${current.session.sessionId}` : `kept ${current.session.sessionId}`) : 'no live instance'}`,
+      )
+    }
     return next(e)
   })
 
@@ -802,7 +893,7 @@ export function register(on: On) {
       return answerShellCall(instance, input)
     }
     // Only the main loop's ExitPlanMode: a subagent's keeps the classic flow.
-    if (!allowed || e.tool !== PLAN_TOOL || e.agentId) return next(e)
+    if (!allowed?.planReview || e.tool !== PLAN_TOOL || e.agentId) return next(e)
     const instance = await currentMod($)
     if (!instance) return next(e)
     const answer = await instance.onPlanCall({ tool_use_id: e.tool_use_id, plan: e.plan, planFilePath: e.planFilePath })
@@ -823,10 +914,50 @@ export function register(on: On) {
   on('classic.PermissionRequest', { tool_name: PLAN_TOOL }, async ($: Engine, e: any, next: Next) => {
     const instance = mod
     // A subagent's ExitPlanMode keeps the classic hook (its tool.call was not ours).
-    if (!instance || instance.isDisposed || e.tool_name !== PLAN_TOOL || e.agent_id) return next(e)
+    if (!instance || instance.isDisposed || !allowed?.planReview || e.tool_name !== PLAN_TOOL || e.agent_id) return next(e)
     const decision = instance.onPlanPermission(typeof e.tool_use_id === 'string' ? e.tool_use_id : undefined, e.tool_input)
     // Answered here, without next(e): the plugin's own classic command hook
     // below never runs for this call, so it cannot open a second review.
+    return decision ? { decision } : next(e)
+  })
+
+  // CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS (skip-rm-prompts.ts):
+  // Plannotator's plan hook turns the variable off, so where it would have
+  // waived a removal prompt in bypass mode, the mod answers that prompt with
+  // allow. The `tool.check` hook only watches the call's own verdict (which
+  // rule, hook or plugin asked); the person's own rules and hooks, and every
+  // enabled plugin's PreToolUse and PermissionRequest hooks, win.
+  on('tool.check', { tool: SHELL_TOOL }, async ($: Engine, e: any, next: Next) => {
+    const verdict = await next(e)
+    if (!allowed || typeof e.tool_use_id !== 'string') return verdict
+    removalAsks.note(removalAskKey(e.agentId, e.input), verdict)
+    if (allowed.debugPath && verdict?.decision === 'ask' && isEnvOn(await $.env.get('CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS'))) {
+      const by = ['rule', 'hook', 'setting', 'plugin'].filter((key) => verdict[key]).map((key) => `${key} ${verdict[key]}`)
+      hostOf($, allowed.debugPath).debug(`Bash ask (${e.agentId ? 'subagent' : 'main'}): ${String(verdict.reason ?? '').slice(0, 80)}${by.length ? ` [${by.join(', ')}]` : ''}`)
+    }
+    return verdict
+  })
+
+  on('classic.PermissionRequest', { tool_name: SHELL_TOOL }, async ($: Engine, e: any, next: Next) => {
+    if (!allowed || e.tool_name !== SHELL_TOOL) return next(e)
+    const decision = await answerRemovalPrompt(e, removalAsks, {
+      variable: () => $.env.get('CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS'),
+      childSession: () => $.env.get('CLAUDE_CODE_CHILD_SESSION'),
+      settings: () => $.settings.read(),
+      configDir: async () => {
+        const home = await $.env.get('HOME')
+        return (await $.env.get('CLAUDE_CONFIG_DIR')) || (typeof home === 'string' && home ? `${home.replace(/\/+$/, '')}/.claude` : null)
+      },
+      readText: async (path) => {
+        if (!(await $.fs.exists(path))) return null
+        const text = await $.fs.read(path)
+        if (typeof text !== 'string') throw new Error(`unreadable: ${path}`)
+        return text
+      },
+    })
+    if (allowed.debugPath && (decision || isEnvOn(await $.env.get('CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS')))) {
+      hostOf($, allowed.debugPath).debug(`removal prompt (${e.agent_id ? 'subagent' : 'main'}, ${String(e.permission_mode)}): ${decision ? 'allowed, as the variable asks' : 'left to the dialog'}`)
+    }
     return decision ? { decision } : next(e)
   })
 
@@ -959,6 +1090,8 @@ export function register(on: On) {
     if (allowed && mod && !mod.isDisposed && !e.agentId && typeof e.turnId === 'string') {
       mod.onTurnComplete(e.turnId, typeof e.answer === 'string' ? e.answer : '', e.isAborted === true)
     }
+    // The session goes idle: a self-heal timer the engine ended is armed again (never a second one).
+    if (allowed && healTimer) void startSelfHeal($).catch(() => undefined)
     return next(e)
   })
 }

@@ -21,6 +21,10 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxAnnotationRecord, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
+import type { ShapeHost } from '@plannotator/ui/components/shape';
+import type { InboxShapes } from './shape/useInboxShapes';
+
+const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
 const hasDom = typeof document !== 'undefined';
 /** The props the review handed the reader on its last draw. */
@@ -136,6 +140,10 @@ async function render(review: boolean, codeReview: boolean, threadPatch: Partial
           onSent={() => {}}
           onAsk={() => {}}
           onWriteReply={() => (writeReplies += 1)}
+          shapeHost={{} as ShapeHost}
+          shapes={NO_BOARDS}
+          board={null}
+          onBoard={() => {}}
         />
       </div>,
     );
@@ -224,7 +232,7 @@ test.skipIf(!hasDom)('one comment rides (the singular), and a resolved thread re
     root = createRoot(host!);
     root.render(
       <div className="pn-inbox">
-        <ReviewPane thread={{ ...threadOf(message), resolved_at: '2026-10-11T11:00:00.000Z' }} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} onWriteReply={() => (writeReplies += 1)} />
+        <ReviewPane thread={{ ...threadOf(message), resolved_at: '2026-10-11T11:00:00.000Z' }} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} onWriteReply={() => (writeReplies += 1)} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />
       </div>,
     );
   });

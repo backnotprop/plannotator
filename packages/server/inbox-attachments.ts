@@ -37,7 +37,7 @@ import { htmlAssetPathRefused, isWithinDirectory } from "@plannotator/shared/htm
 import { HTML_ASSET_DOCUMENT_CSP, htmlAssetDocumentHeaders, htmlAssetHeaders, MAX_HTML_ASSET_DOCUMENT_BYTES, refusesHiddenHtmlAssetPath } from "@plannotator/shared/html-assets";
 import { INBOX_ANNOTATION_CURRENT, isInboxTextKind, readInboxAttachmentKind, type InboxAttachment } from "@plannotator/core/inbox-types";
 import {
-  checkCurrent,
+  checkCurrentAsync,
   inboxAttachmentState,
   isPdfHead,
   openInboxAttachmentVersion,
@@ -376,7 +376,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       }
       const version = versionOf(url);
       if (version === "current") {
-        const check = checkCurrent(attachment);
+        const check = await checkCurrentAsync(attachment);
         if (!check.ok) throw new InboxError(check.unavailable.code, check.unavailable.message);
         // The file at its own folder's asset URL: relative assets, #anchors and frames
         // resolve natively, with the document CSP. A name the asset route refuses
@@ -480,7 +480,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       if (route === "image" && kind !== "image") throw new InboxError("attachment_not_image", `${attachment.name} is not an image; download it instead.`);
       // An image a message shows: refused by its size before the image route hashes it whole.
       if ("ref" in attachment && versionOf(url) === "current") {
-        const check = checkCurrent(attachment);
+        const check = await checkCurrentAsync(attachment);
         if (check.ok && check.stat.size > MAX_REVIEW_IMAGE_PREVIEW_BYTES) {
           return json({ error: `${attachment.name} is larger than 10 MB; open the version it sent.`, code: "image_too_large" }, 413);
         }

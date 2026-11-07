@@ -3,8 +3,8 @@
  * "inbox-message-comments", 2026-10-19), as the window draws them: the whole
  * window (InboxApp) over a REAL Inbox in a temp data dir (its own process,
  * tests/helpers/inbox-dom-server.ts). What is proved: words selected in an
- * agent's message open the comment-only toolbar (Comment and 👍, no Delete,
- * no label picker); Comment opens the composer, Save stores the comment
+ * agent's message open the toolbar (Delete, Comment and 👍, approval
+ * "inbox-toolbar-delete"; no label picker); Comment opens the composer, Save stores the comment
  * (`POST /api/inbox/messages/:id/annotations`), the passage keeps its
  * highlight, and the reply box's chip counts and lists it; Send carries it,
  * and the agent's own `read_thread` (through the Inbox's MCP) returns the
@@ -292,17 +292,17 @@ async function pending(threadId: string): Promise<InboxAnnotationRecord[]> {
   return (await api<{ annotations: InboxAnnotationRecord[] }>(`/api/inbox/threads/${threadId}/attachments`)).annotations;
 }
 
-test.skipIf(!hasDom)("words selected in an agent's message: the comment-only toolbar, the composer, the highlight, the chip, Send; the agent reads the quote and the comment", async () => {
+test.skipIf(!hasDom)("words selected in an agent's message: the toolbar, the composer, the highlight, the chip, Send; the agent reads the quote and the comment", async () => {
   const message = await agentWrites();
   const el = await renderApp(`#thread=${message.id}`);
   await until(() => messageBody(message.id)?.textContent?.includes('Retry-After') === true, 'the message');
 
-  // The toolbar a file's comments use on these surfaces: Comment and 👍, no Delete, no label picker.
+  // Delete, Comment and 👍 (approval "inbox-toolbar-delete"), no label picker.
   await select(messageBody(message.id)!, 'two, four and eight seconds');
   const names = toolbarButtons();
+  expect(names).toContain('Delete');
   expect(names).toContain('Comment');
   expect(names).toContain('Looks good');
-  expect(names).not.toContain('Delete');
   expect(names).not.toContain('Quick label');
   // Escape closes the toolbar, not the thread.
   act(() => {
