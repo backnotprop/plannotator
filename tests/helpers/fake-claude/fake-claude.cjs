@@ -25,6 +25,7 @@
  *                            "backgrounded · <8 hex> · N (idle — send a prompt to start)"
  *                            and starts the session process, unless a server in
  *                            the folder's .mcp.json waits on approval.
+ *  auth status               {"loggedIn":true,...} exit 0; with `signedOut`, {"loggedIn":false,...} exit 1
  *  agents --json [--all] [--cwd D]  without --all, done and stopped sessions are left out
  *  stop <id> / respawn <id> / rm <id> / purge [--dry-run | --yes] <folder> / attach <id>
  *
@@ -267,6 +268,12 @@ function main() {
   }
   record({});
   const [command, ref] = args;
+  if (command === "auth" && ref === "status") {
+    const loggedIn = !cfg.signedOut;
+    process.stdout.write(`${JSON.stringify(loggedIn ? { loggedIn, authMethod: "claude.ai", apiProvider: "firstParty" } : { loggedIn, authMethod: "none", apiProvider: "firstParty" })}\n`);
+    if (!loggedIn) process.exit(1);
+    return;
+  }
   if (command === "agents") {
     const all = args.includes("--all");
     const cwd = flag("--cwd");

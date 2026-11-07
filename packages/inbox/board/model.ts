@@ -540,11 +540,13 @@ export function agentState(session: string | null, live: readonly { session: str
 }
 
 /**
- * A card's whole accessible name: the title, its line, the lane, the age,
- * whether it is new, and where a click goes.
+ * A card's whole accessible name: the title, its project while the card shows
+ * it, its line, the lane, the age, whether it is new, and where a click goes.
+ * The title stays first: it is the button's visible words.
  */
-export function cardLabel(card: InboxCardWire, unread: boolean, now: number = Date.now()): string {
+export function cardLabel(card: InboxCardWire, unread: boolean, now: number = Date.now(), project: string | null = null): string {
   const parts = [card.title];
+  if (project) parts.push(project);
   const line = cardLine(card);
   if (line) parts.push(line.you ? `You: ${line.text}` : line.text);
   parts.push(INBOX_CARD_COLUMN_LABELS[card.column]);
