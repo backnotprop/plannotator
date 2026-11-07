@@ -441,6 +441,11 @@ slot and mentions on the edit box (0.45.0)".
   "Save (Enter)". The Inbox passes it (the owner's rule, 2026-10-26). Omit it
   and Escape, Enter and a click outside all accept, under "Save (Esc)", as
   plan review has always done.
+- **`askBeforeDiscard?: boolean`** — with `escapeCancels`: Escape on a drawing
+  with strokes asks first, in a row under the image ("Your drawing is not
+  saved yet." Save it, Discard it, Keep drawing; focus on Save it; Escape there
+  keeps drawing). An empty drawing still closes at once. The Inbox passes it.
+  Omit it and Escape cancels at once, as before.
 - **`hint?: ReactNode`** — the line under the image in place of "Press Esc or
   Enter or click outside to accept" (the Inbox: "Enter or ✓ adds to your
   reply · Esc cancels"). Omit it and the line is as before.

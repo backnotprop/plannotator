@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useId, useRef } from 'react';
 import { Canvas } from './Canvas';
 import { Toolbar } from './Toolbar';
 import { renderStroke } from './utils';
@@ -27,6 +27,14 @@ interface ImageAnnotatorProps {
    * Enter and a click outside all accept, exactly as before.
    */
   escapeCancels?: boolean;
+  /**
+   * Optional, with `escapeCancels`: Escape on a drawing with strokes asks
+   * first, in a row under the drawing ("Your drawing is not saved yet." Save
+   * it, Discard it, Keep drawing; Escape there keeps drawing), so a drawing is
+   * never thrown away by one key. An empty drawing still closes at once.
+   * Absent: Escape cancels at once, exactly as before.
+   */
+  askBeforeDiscard?: boolean;
   /** Optional: the line under the image in place of "Press Esc or Enter or click outside to accept". */
   hint?: React.ReactNode;
 }
@@ -38,6 +46,7 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
   onClose,
   initialName = '',
   escapeCancels = false,
+  askBeforeDiscard = false,
   hint,
 }) => {
   const [state, setState] = useState<StrokeHistoryState>(DEFAULT_STROKE_HISTORY_STATE);
@@ -45,14 +54,33 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
   const [name, setName] = useState(initialName);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  /** Escape asked before throwing strokes away (`askBeforeDiscard`): the question row shows. */
+  const [asking, setAsking] = useState(false);
+  const askRef = useRef<HTMLDivElement>(null);
+  const askTextId = useId();
+  /** What held focus when Escape asked: Keep drawing puts it back. */
+  const focusBeforeAsk = useRef<Element | null>(null);
 
   // Reset state when dialog opens
   useEffect(() => {
     if (isOpen) {
       setState(DEFAULT_STROKE_HISTORY_STATE);
       setName(initialName);
+      setAsking(false);
     }
   }, [isOpen, initialName]);
+
+  // The question row takes focus on its first choice, as the Inbox's unsaved-comment row does.
+  useEffect(() => {
+    if (asking) askRef.current?.querySelector<HTMLButtonElement>('[data-pn-image-annotator-ask-save]')?.focus();
+  }, [asking]);
+
+  const keepDrawing = () => {
+    setAsking(false);
+    const before = focusBeforeAsk.current;
+    focusBeforeAsk.current = null;
+    if (before instanceof HTMLElement && before.isConnected) before.focus();
+  };
 
   const handleStrokeStart = useCallback((point: Point) => {
     const id = newUuid();
@@ -180,10 +208,17 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
         handle: handleRedo,
       },
       save: {
-        when: (event) => isOpen && !saving && !keyboardTargetIsInput(event),
+        // While the question row shows, Enter belongs to its focused choice.
+        when: (event) => isOpen && !saving && !keyboardTargetIsInput(event) && !(asking && event.key !== 'Escape'),
         handle: (event) => {
-          if (escapeCancels && event.key === 'Escape') onClose();
-          else void handleAccept();
+          if (escapeCancels && event.key === 'Escape') {
+            // One layer at a time: Escape over the question keeps drawing; over strokes it asks before throwing them away.
+            if (asking) keepDrawing();
+            else if (askBeforeDiscard && state.strokes.length > 0) {
+              focusBeforeAsk.current = document.activeElement;
+              setAsking(true);
+            } else onClose();
+          } else void handleAccept();
         },
       },
     },
@@ -263,6 +298,54 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
               className="flex-1 px-2 py-1 text-xs bg-muted/50 border border-border rounded-md text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               placeholder="Image name..."
             />
+          </div>
+        )}
+
+        {asking && (
+          <div
+            ref={askRef}
+            role="group"
+            aria-labelledby={askTextId}
+            className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-popover px-3 py-2 text-xs text-foreground shadow-sm"
+            data-pn-image-annotator-ask=""
+            onKeyDown={(e) => {
+              if (e.key !== 'Escape') return;
+              e.preventDefault();
+              e.stopPropagation();
+              keepDrawing();
+            }}
+          >
+            <span id={askTextId}>Your drawing is not saved yet.</span>
+            <button
+              type="button"
+              className="rounded-md bg-primary px-2 py-1 font-medium text-primary-foreground"
+              data-pn-image-annotator-ask-save=""
+              onClick={() => {
+                setAsking(false);
+                void handleAccept();
+              }}
+            >
+              Save it
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-border px-2 py-1 font-medium hover:bg-muted"
+              data-pn-image-annotator-ask-discard=""
+              onClick={() => {
+                setAsking(false);
+                onClose();
+              }}
+            >
+              Discard it
+            </button>
+            <button
+              type="button"
+              className="rounded-md px-2 py-1 font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+              data-pn-image-annotator-ask-keep=""
+              onClick={keepDrawing}
+            >
+              Keep drawing
+            </button>
           </div>
         )}
 

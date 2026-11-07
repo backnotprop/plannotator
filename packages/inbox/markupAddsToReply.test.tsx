@@ -4,7 +4,7 @@
  * the reply at once as its own comment, selected, with the window's toast and
  * its Undo; × on the box's picture takes it out; a note goes onto the same
  * comment; a drawing with no words shows its picture as its card (the agent
- * still gets the stand-in words); Escape discards, and a click outside never
+ * still gets the stand-in words); Escape asks before it discards strokes, and a click outside never
  * loses strokes. The drawing screen sits over the whole window (in
  * `.pn-inbox`), not inside the pane.
  */
@@ -307,7 +307,7 @@ test.skipIf(!hasDom)("the toast's Undo and the picture's × each take the drawin
   expect($('[data-markup-kept]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('Escape discards the drawing and adds nothing; a click outside keeps strokes and closes only an empty drawing', async () => {
+test.skipIf(!hasDom)('Escape on strokes asks first (as on a typed comment), Discard it adds nothing; a click outside keeps strokes and closes only an empty drawing', async () => {
   await render(<Harness attachment={shot} />);
   await openAndDraw();
   const overlay = () => $('[data-pn-image-annotator-stage]')?.closest<HTMLElement>('.pn-visible-viewport-overlay') ?? null;
@@ -315,7 +315,13 @@ test.skipIf(!hasDom)('Escape discards the drawing and adds nothing; a click outs
   await act(async () => overlay()!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
   await settle();
   expect(overlay()).not.toBeNull();
+  // Escape never throws strokes away by itself: the row asks (Save it, Discard it, Keep drawing).
   await press('Escape');
+  await settle();
+  expect(overlay()).not.toBeNull();
+  expect($('[data-pn-image-annotator-ask]')!.textContent).toContain('Your drawing is not saved yet.');
+  expect(posts).toEqual([]);
+  await act(async () => $<HTMLButtonElement>('[data-pn-image-annotator-ask-discard]')!.click());
   await settle();
   expect(overlay()).toBeNull();
   expect(posts).toEqual([]);

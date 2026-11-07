@@ -11,12 +11,14 @@ export type Notice = (toast: Omit<InboxToastModel, 'id'>) => void;
 
 /**
  * ui `ImageAnnotator`'s Inbox props (the owner's answer, 2026-10-26): Escape
- * cancels and keeps nothing, Enter or the ✓ adds the drawing to the reply, and
+ * cancels and keeps nothing (asking first when something is drawn), Enter or the ✓ adds the drawing to the reply, and
  * a click outside closes only an empty drawing, so a stray click never loses
  * one. The line under the drawing says so. Plan review keeps its own rule.
  */
 export const DRAWING_SCREEN = {
   escapeCancels: true,
+  // Escape on strokes asks first (Save it, Discard it, Keep drawing), as Escape on a typed comment does.
+  askBeforeDiscard: true,
   hint: (
     <>
       <kbd className="ib-markkey">Enter</kbd> or ✓ adds to your reply · <kbd className="ib-markkey">Esc</kbd> cancels
