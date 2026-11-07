@@ -856,6 +856,12 @@ export interface UseAnnotationHighlighterReturn {
    * highlighter when it does not exist yet. False while disabled.
    */
   reopenComment: (annotation: Annotation, onMissing?: () => void) => boolean;
+  /**
+   * The text selection comment being written, as the comment its submit
+   * would add (its words empty), without adding it or closing anything (see
+   * `ViewerHandle.peekComment`). Null when no such composer is open.
+   */
+  peekComment: () => Annotation | null;
 }
 
 /**
@@ -2320,6 +2326,22 @@ export function useAnnotationHighlighter({
     return true;
   }, [containerRef, enabled]);
 
+  // --- The comment being written, read without touching it (ViewerHandle.peekComment) ---
+  const commentPopoverRef = useRef(commentPopover);
+  commentPopoverRef.current = commentPopover;
+  const buildAnnotationRef = useRef(buildAnnotationFromSource);
+  buildAnnotationRef.current = buildAnnotationFromSource;
+  const peekComment = useCallback((): Annotation | null => {
+    const open = commentPopoverRef.current;
+    const highlighter = highlighterRef.current;
+    if (!open?.source || !highlighter || isMathAnnotationSource(open.source)) return null;
+    try {
+      return buildAnnotationRef.current(highlighter, open.source, AnnotationType.COMMENT, '');
+    } catch {
+      return null;
+    }
+  }, []);
+
   // --- The composer handed to the host (onHostDraft) ---
   // The toolbar and composer states still drive everything here; the host is
   // told about them instead of seeing them drawn. A math source has no id of
@@ -2400,5 +2422,6 @@ export function useAnnotationHighlighter({
     applyAnnotations: applyAnnotationsInternal,
     takeSelection,
     reopenComment,
+    peekComment,
   };
 }

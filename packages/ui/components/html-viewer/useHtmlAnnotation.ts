@@ -1299,6 +1299,38 @@ export function useHtmlAnnotation({
     };
   }, []);
 
+  /** The comment being written, as `commitComposerDraft` would add it (its words empty), touching nothing. */
+  const peekComment = useCallback((): Annotation | null => {
+    const open = commentPopoverRef.current;
+    if (!enabledRef.current || !open) return null;
+    const text = open.selectedText || pendingTextRef.current;
+    if (!text) return null;
+    const targets = draftTargetsRef.current;
+    const additionalTargets: HtmlAnnotationTarget[] | undefined =
+      targets.length > 1
+        ? targets.slice(1, 1 + maxTargetsRef.current).map((t) => ({
+            label: t.label,
+            text: t.text,
+            anchor: t.anchor ?? undefined,
+            ...(t.context ? { context: t.context } : {}),
+          }))
+        : undefined;
+    return {
+      id: "peek",
+      blockId: "",
+      startOffset: 0,
+      endOffset: 0,
+      type: AnnotationType.COMMENT,
+      text: "",
+      originalText: text,
+      author: getIdentity(),
+      createdA: Date.now(),
+      htmlAnchor: pendingAnchorRef.current ?? undefined,
+      elementContext: pendingContextRef.current ?? undefined,
+      htmlAdditionalTargets: additionalTargets,
+    };
+  }, []);
+
   const removeHighlight = useCallback(
     (id: string) => {
       post({ type: `${PREFIX}remove-mark`, id });
@@ -1360,5 +1392,6 @@ export function useHtmlAnnotation({
     composerFocusToken,
     createdAnnotationIds: mintedIdsRef.current,
     prepareReopen,
+    peekComment,
   };
 }

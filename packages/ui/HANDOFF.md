@@ -2758,6 +2758,8 @@ Optional seams, so a host can put an unsaved comment back in its composer (the I
 - `ViewerHandle.reopenComment?(annotation, onMissing?) => boolean`: the markdown `Viewer` re-marks the comment's words (or a diagram part, through `diagram/reopen.ts` and `useDiagramComments`' `openAt`, `DiagramComposer`'s `initialText`) and opens its composer with the words. `HtmlViewer` posts the new bridge message `plannotator-bridge-restore-draft { id, anchor?, text }`; the bridge pins the anchor again and its selection carries `restoreId`, or it answers `plannotator-bridge-restore-draft-missing { id }` and `onMissing` runs. Additive to the protocol: an older bridge asset ignores it, so `BRIDGE_PROTOCOL_VERSION` is unchanged.
 - `CodeFileView` (in `CodeFilePopout.tsx`) `reopenComment?: { lineStart, lineEnd, text }` (a comment on lines, opened with its words) and `reopenEdit?: { id, text }` (a saved comment's edit box, with changed words).
 - `AnnotationPanel`'s `reopenEdit?: { id, text }`: a saved comment's edit box, opened with changed words.
+- `ViewerHandle.peekComment?() => Annotation | null`: the comment being written in the viewer's own composer (markdown: a text selection's; `HtmlViewer`: a pin's or a selection's), as the annotation its submit would add, with empty words. It only reads: nothing is added, closed or focused, so a host can call it while the viewer is being taken away (the Inbox reads it in its pane's unmount cleanup).
+- `CodeFileView` `onComposerLines?: (lines: { lineStart, lineEnd, originalCode } | null) => void`: told the lines of the line comment being written as its composer opens, null as it closes.
 
 ## Shape and links: a slot for a file's action (unreleased; additive)
 

@@ -506,6 +506,16 @@ export interface ViewerHandle {
    * which keeps the words itself).
    */
   reopenComment?: (annotation: Annotation, onMissing?: () => void) => boolean;
+  /**
+   * The comment being written in the viewer's own composer, as the comment
+   * its submit would add, with empty words (the host reads them from the
+   * box), or null when none is open. Reads only: nothing is added, closed or
+   * focused, so a host can call it at any time, also while it is being taken
+   * away (the Inbox keeps the comment as the file's draft then). Markdown
+   * `Viewer`: a text selection's comment. `HtmlViewer`: a pin's or a text
+   * selection's comment.
+   */
+  peekComment?: () => Annotation | null;
 }
 
 interface CodeBlockToolbarTarget {
@@ -1061,6 +1071,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     applyAnnotations,
     takeSelection,
     reopenComment: hookReopenComment,
+    peekComment,
   } = useAnnotationHighlighter({
     containerRef,
     annotations,
@@ -1527,7 +1538,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     applySharedAnnotations: applyAnnotations,
     takeSelection,
     reopenComment,
-  }), [hookRemoveHighlight, clearAllHighlights, applyAnnotations, blocks, takeSelection, scrollToAnchor, reopenComment]);
+    peekComment,
+  }), [hookRemoveHighlight, clearAllHighlights, applyAnnotations, blocks, takeSelection, scrollToAnchor, reopenComment, peekComment]);
 
   // --- Viewer-specific: code block annotation ---
 

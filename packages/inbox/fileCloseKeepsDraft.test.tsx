@@ -5,7 +5,10 @@
  * back in the comment box when that same file opens again. Proved through
  * the real viewers: a markdown selection's comment popover, an HTML pin's, a
  * diagram node's composer, an annotation being edited in the panel; and that
- * discarding on the comment itself, or typing nothing, leaves no draft.
+ * discarding on the comment itself, or typing nothing, leaves no draft. The
+ * pane taken away without `leave` (another thread picked) keeps a markdown or
+ * HTML comment being written too, and a kept comment's box opens only once
+ * the pane stops moving, where a fresh one on the same words opens.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  * The diagram fixture and its geometry are DiagramBlock.askAI.test.tsx's.
@@ -496,4 +499,123 @@ test.skipIf(!hasDom)('a page posting the bridge step every 50 ms without focus n
     await settle(50);
   }
   expect(steps).toEqual([]);
+});
+
+// What would regress: the pane taken away without `leave` (another thread picked while the file is open: Thread
+// unmounts it) dropping the words of a comment being written, because its composer answers no key while it goes.
+test.skipIf(!hasDom)('markdown: another thread picked while a comment is being written keeps it; the file opened again has the words on the same words', async () => {
+  const server = serve();
+  await render(
+    <Shown>
+      <Pane start={scope} steps={[]} />
+    </Shown>,
+  );
+  await commentOnPhrase('five attempts');
+  await type(popoverBox()!, 'Seven, with a longer wait.');
+  // Another thread: the pane goes with no close, no step and no Back.
+  await act(async () => showPane(false));
+  expect(popoverBox() === null).toBe(true);
+  await settle();
+  // Back on the thread, the same file opens.
+  await act(async () => showPane(true));
+  await waitFor(() => expect(popoverBox()?.value).toBe('Seven, with a longer wait.'));
+  expect(document.querySelector('[data-comment-popover]')!.textContent).toContain('five attempts');
+  expect(server.saved).toEqual([]);
+});
+
+test.skipIf(!hasDom)('HTML pin: another thread picked while its comment is being written keeps it; the page is asked to pin the same element again', async () => {
+  const server = serve();
+  await render(
+    <Shown>
+      <Pane start={page} steps={[]} />
+    </Shown>,
+  );
+  await pinParagraph();
+  await type(popoverBox()!, 'Bigger, and in the brand colour.');
+  await act(async () => showPane(false));
+  await settle();
+  await act(async () => showPane(true));
+  await waitFor(() => expect(pane().querySelector('iframe')).not.toBeNull());
+  const iframe = pane().querySelector('iframe')!;
+  const posted: Record<string, unknown>[] = [];
+  (iframe.contentWindow as unknown as { postMessage: (data: unknown) => void }).postMessage = (data: unknown) => {
+    if (data && typeof data === 'object') posted.push(data as Record<string, unknown>);
+  };
+  await act(async () => {
+    window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow, data: { type: 'plannotator-bridge-ready', protocolVersion: bridge!.BRIDGE_PROTOCOL_VERSION } }));
+  });
+  const restore = () => posted.find((m) => m.type === 'plannotator-bridge-restore-draft');
+  await waitFor(() => expect(restore()).toBeTruthy());
+  expect(restore()).toMatchObject({ anchor: { selector: 'p:nth-of-type(1)' } });
+  expect(server.saved).toEqual([]);
+});
+
+test.skipIf(!hasDom)('a comment discarded before another thread is picked is not kept', async () => {
+  serve();
+  await render(
+    <Shown>
+      <Pane start={scope} steps={[]} />
+    </Shown>,
+  );
+  await commentOnPhrase('Payment retries');
+  await type(popoverBox()!, 'Not this one.');
+  // Discarded on the comment itself: its own Escape.
+  await act(async () => {
+    popoverBox()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+  });
+  await waitFor(() => expect(popoverBox() === null).toBe(true));
+  await act(async () => showPane(false));
+  await act(async () => showPane(true));
+  await waitFor(() => expect(pane().querySelector('.ib-docscroll')?.textContent).toContain('Payment retries'));
+  await settle(150);
+  expect(popoverBox() === null).toBe(true);
+});
+
+// What would regress: a kept comment's box opening while the pane still slides in (the list and sidebar folding
+// away), placed for where its words were mid-slide, away from them, instead of where a click on them opens it.
+test.skipIf(!hasDom)('a kept comment opens its box where a fresh one on the same words opens, after the pane stops moving', async () => {
+  serve();
+  const proto = HTMLElement.prototype as unknown as { getBoundingClientRect: () => DOMRect };
+  const real = proto.getBoundingClientRect;
+  // Every element sits 100 px down a 20 px tall line, `shift` px right of where it lands.
+  let shift = 0;
+  proto.getBoundingClientRect = function () {
+    const left = 300 + shift;
+    return { x: left, y: 100, left, top: 100, right: left + 200, bottom: 120, width: 200, height: 20, toJSON() {} } as DOMRect;
+  };
+  try {
+    await render(
+      <Shown>
+        <Pane start={scope} steps={[]} />
+      </Shown>,
+    );
+    await commentOnPhrase('Partial refunds');
+    const where = () => {
+      const box = document.querySelector<HTMLElement>('[data-comment-popover]')!;
+      return { left: parseFloat(box.style.left), top: parseFloat(box.style.top) };
+    };
+    const fresh = where();
+    expect(Number.isFinite(fresh.left)).toBe(true);
+    await type(popoverBox()!, 'Say which ones.');
+    await act(async () => showPane(false));
+    // The file opens again sliding in from 240 px right: 30 px nearer each frame.
+    shift = 240;
+    let sliding = true;
+    const slide = () => {
+      shift = Math.max(0, shift - 30);
+      if (sliding && shift > 0) requestAnimationFrame(slide);
+    };
+    requestAnimationFrame(slide);
+    try {
+      await act(async () => showPane(true));
+      await waitFor(() => expect(popoverBox()?.value).toBe('Say which ones.'));
+    } finally {
+      sliding = false;
+    }
+    const back = where();
+    expect(Math.abs(back.left - fresh.left)).toBeLessThan(3);
+    expect(Math.abs(back.top - fresh.top)).toBeLessThan(3);
+  } finally {
+    proto.getBoundingClientRect = real;
+  }
 });

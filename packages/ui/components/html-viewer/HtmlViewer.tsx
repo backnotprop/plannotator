@@ -1300,6 +1300,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         else pendingReopenRef.current = message;
         return true;
       },
+      peekComment: () => (readOnly || liveMode ? null : hook.peekComment()),
     }));
 
     const handleGlobalCommentSubmit = useCallback(

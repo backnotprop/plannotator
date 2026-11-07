@@ -341,6 +341,26 @@ export function unsavedComposers(pane: HTMLElement | null, savedText: (id: strin
   return found;
 }
 
+/**
+ * Run `then` once `el` stops moving: the same box three frames running (or after about a second). A file opening
+ * beside the thread slides in as the list and sidebar fold away; a comment box placed before that would stay where
+ * its words were mid-slide, so one put back waits, as a person's click always does.
+ */
+function whenStill(el: () => HTMLElement | null, then: () => void): () => void {
+  let last = '';
+  let still = 0;
+  let frames = 0;
+  let id = requestAnimationFrame(function tick() {
+    const box = el()?.getBoundingClientRect();
+    const now = box ? `${box.left},${box.top},${box.width},${box.height}` : '';
+    still = now === last ? still + 1 : 0;
+    last = now;
+    if (still >= 3 || ++frames >= 60) then();
+    else id = requestAnimationFrame(tick);
+  });
+  return () => cancelAnimationFrame(id);
+}
+
 /** The element that scrolls the open file (a document, code, or an image at its own size). */
 function scrollerOf(pane: HTMLElement | null): HTMLElement | null {
   if (!pane) return null;
@@ -647,7 +667,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     };
   }, []);
   /** Filled once the drafts are wired (below `edit`): keep the file's drafts; put them back while it is still open; set one aside. */
-  const keepDraftsRef = useRef<() => void>(() => {});
+  const keepDraftsRef = useRef<(tearing?: boolean) => void>(() => {});
   const putBackRef = useRef<() => void>(() => {});
   const setAsideRef = useRef<(area: HTMLTextAreaElement) => boolean>(() => false);
   /** The open file's draft key (fileCommentDrafts.ts): its attachment at the version its comments are on. */
@@ -658,6 +678,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const waiting = useRef<FileCommentDraft[]>([]);
   /** The file's own comment row (an image's, a film's), read as the file closes (`useRowDraft`). */
   const rowReaders = useRef(new Set<() => FileCommentDraft | null>());
+  /** The comment box last typed in, with what it is on then: read if the pane goes without `leave`. */
+  const live = useRef<{ area: HTMLTextAreaElement; anchor: Annotation | null } | null>(null);
+  /** The lines of the code view's comment being written (CodeFileView's onComposerLines). */
+  const codeLines = useRef<{ lineStart: number; lineEnd: number; originalCode: string } | null>(null);
   /** This file's drafts were kept since it opened: leaving and the pane going never keep them twice. */
   const kept = useRef(false);
   const recordsRef = useRef(props.records);
@@ -1594,6 +1618,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // while `capturing` is set, that save lands here (`save` above) and the composer closes as if saved.
   const draftKey = fileDraftKey(attachment.id, annotationVersion);
   draftKeyRef.current = draftKey;
+  const isCodeRef = useRef(isCode);
+  isCodeRef.current = isCode;
   recordsRef.current = props.records;
   /** The words of every composer open in the file, as drafts: the file's own row read, the others "saved" into `capturing`. */
   const takeComposers = (): FileCommentDraft[] => {
@@ -1620,11 +1646,47 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     for (const draft of caught) if (draft.kind === 'comment') viewerRef.current?.removeHighlight(draft.annotation.id);
     return [...taken, ...caught.filter(draftHasWords)];
   };
-  /** Keep what the file holds as its draft, once per time it is left. */
-  const keepDrafts = () => {
+  /**
+   * The pane is being taken away without `leave` (another thread picked, the window's route moved): its composers
+   * answer no key now, so their words are read from the boxes still on the page, with what each is on from the
+   * viewer (`peekComment`), the code view (`codeLines`) or the last words typed (`live`).
+   */
+  const readComposers = (): FileCommentDraft[] => {
+    if (readOnlyRef.current) return [];
+    const read: FileCommentDraft[] = [];
+    const box = [...document.querySelectorAll<HTMLTextAreaElement>('[data-comment-popover] textarea')].find((area) => area.value.trim() !== '');
+    if (box) {
+      const lines = isCodeRef.current ? codeLines.current : null;
+      const anchor = lines
+        ? codeCommentAnnotation({ id: 'ann-code-kept', lineStart: lines.lineStart, lineEnd: lines.lineEnd, text: '', code: lines.originalCode })
+        : (viewerRef.current?.peekComment?.() ?? (live.current?.area === box ? live.current.anchor : null));
+      if (anchor) read.push({ kind: 'comment', annotation: { ...anchor, text: box.value } });
+    }
+    const scope = sectionRef.current;
+    if (scope) {
+      const roots: ParentNode[] = [scope];
+      for (const container of scope.querySelectorAll('diffs-container')) if (container.shadowRoot) roots.push(container.shadowRoot);
+      for (const root of roots) {
+        for (const area of root.querySelectorAll<HTMLTextAreaElement>('[data-annotation-id] textarea, [data-code-annotation-id] textarea')) {
+          const owner = area.closest('[data-annotation-id], [data-code-annotation-id]');
+          const id = owner?.getAttribute('data-annotation-id') ?? owner?.getAttribute('data-code-annotation-id') ?? '';
+          const saved = savedTextRef.current(id);
+          if (id && saved !== undefined && area.value.trim() !== saved.trim()) read.push({ kind: 'edit', id, text: area.value });
+        }
+      }
+    }
+    return read;
+  };
+  /** Keep what the file holds as its draft, once per time it is left. `tearing`: the pane is going without `leave`. */
+  const keepDrafts = (tearing = false) => {
     if (kept.current) return;
     kept.current = true;
-    keepFileDrafts(draftKeyRef.current, [...waiting.current, ...takeComposers()]);
+    const taken = takeComposers();
+    const read = tearing && !taken.some((d) => d.kind !== 'row') ? readComposers() : [];
+    // A kept comment not back in its box yet (the pane was still moving, or the text still loading) waits on.
+    const notShown: FileCommentDraft[] = reopenNext.current ? [{ kind: 'comment', annotation: reopenNext.current }] : [];
+    reopenNext.current = null;
+    keepFileDrafts(draftKeyRef.current, [...waiting.current, ...notShown, ...taken, ...read]);
     waiting.current = [];
   };
   keepDraftsRef.current = keepDrafts;
@@ -1651,6 +1713,19 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const [panelReopenEdit, setPanelReopenEdit] = useState<{ id: string; text: string } | null>(null);
   /** A kept comment waiting for the viewer to be drawn (the document loads after the pane mounts). */
   const reopenNext = useRef<Annotation | null>(null);
+  /** A comment box waiting for the pane to stop moving before it opens (`whenStill`): its way to stop waiting. */
+  const settling = useRef<(() => void) | null>(null);
+  /** Open a kept comment's box once the pane is still, so it opens where a click on the same words opens one. */
+  const afterSettle = (then: () => void) => {
+    settling.current?.();
+    settling.current = whenStill(
+      () => sectionRef.current,
+      () => {
+        settling.current = null;
+        if (mountedRef.current) then();
+      },
+    );
+  };
   /**
    * Put this file's waiting drafts back in their boxes: the newest comment on what it was on, each edit in its
    * card. Anything that cannot be shown (a second comment: one composer opens at a time) keeps waiting.
@@ -1682,17 +1757,26 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         rest.push(draft);
         continue;
       }
-      const range = isCode ? codeRangeOf(draft.annotation) : null;
-      if (range) setCodeReopen({ lineStart: range.lineStart, lineEnd: range.lineEnd, text: draft.annotation.text ?? '' });
-      else reopenNext.current = draft.annotation;
+      reopenNext.current = draft.annotation;
     }
     waiting.current = [...waiting.current, ...rest];
-    // Still on the file: its viewer is drawn. A file just opened waits for its text (the effect on `view` below).
-    if (rowOnScreen && reopenNext.current) reopenInViewer();
+    // Still on the file: its viewer is drawn. A file just opened waits for its text (the effect on `view` below);
+    // the code view takes its lines whenever it draws them.
+    if ((rowOnScreen || isCode) && reopenNext.current) reopenInViewer();
   };
-  /** The waiting comment, into the viewer once it is drawn (a phone page's card takes the words when the page hands it the pin). */
+  /** The waiting comment, into the viewer once it is drawn and the pane is still (a phone page's card takes the words when the page hands it the pin). */
   const reopenInViewer = () => {
+    if (!reopenNext.current) return;
+    afterSettle(() => reopenNowRef.current());
+  };
+  const reopenNow = () => {
     const annotation = reopenNext.current;
+    const range = annotation && isCode ? codeRangeOf(annotation) : null;
+    if (range) {
+      reopenNext.current = null;
+      setCodeReopen({ lineStart: range.lineStart, lineEnd: range.lineEnd, text: annotation?.text ?? '' });
+      return;
+    }
     const viewer = viewerRef.current;
     if (!annotation || !viewer || !view) return;
     reopenNext.current = null;
@@ -1705,6 +1789,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   };
   const reopenInViewerRef = useRef(reopenInViewer);
   reopenInViewerRef.current = reopenInViewer;
+  const reopenNowRef = useRef(reopenNow);
+  reopenNowRef.current = reopenNow;
   putBackRef.current = () => {
     if (!kept.current) return;
     kept.current = false;
@@ -1724,20 +1810,35 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     window.addEventListener('popstate', onTraverse, true);
     return () => window.removeEventListener('popstate', onTraverse, true);
   }, []);
-  // The pane goes any other way without `leave`: what it can read still is kept (the file's own row, a phone page's
-  // card, what waited). A composer answers no key while React removes it, so one only `leave` or Back took is lost.
-  // Declared before the effect below, so on unmount it runs first.
+  // The pane goes any other way without `leave` (another thread picked): a composer answers no key while React
+  // removes it, so its words are read from its box, still on the page here (`readComposers`), with the rows, a
+  // phone page's card and what waited. Declared before the effect below, so on unmount it runs first.
   useLayoutEffect(
     () => () => {
-      keepDraftsRef.current();
+      settling.current?.();
+      keepDraftsRef.current(true);
     },
     [],
   );
+  // What each comment box is on, as it is typed in (a fallback for `readComposers` when the viewer is gone first).
+  useEffect(() => {
+    const onInput = (event: Event) => {
+      const area = event.target;
+      if (!(area instanceof HTMLTextAreaElement) || !area.closest('[data-comment-popover]')) return;
+      live.current = { area, anchor: isCodeRef.current ? null : (viewerRef.current?.peekComment?.() ?? null) };
+    };
+    document.addEventListener('input', onInput, true);
+    return () => document.removeEventListener('input', onInput, true);
+  }, []);
   // Each file (and version) as it opens: what waited for it is its own again, back in its boxes.
   useLayoutEffect(() => {
     kept.current = false;
     waiting.current = [];
     reopenNext.current = null;
+    settling.current?.();
+    settling.current = null;
+    live.current = null;
+    codeLines.current = null;
     setCodeReopen(null);
     setCodeReopenEdit(null);
     setPanelReopenEdit(null);
@@ -2373,6 +2474,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 onEditAnnotation={props.readOnly ? undefined : (id, updates) => edit(id, { text: updates.text })}
                 reopenComment={codeReopen}
                 reopenEdit={codeReopenEdit}
+                onComposerLines={(lines) => {
+                  codeLines.current = lines;
+                }}
                 onDeleteAnnotation={props.readOnly ? undefined : (id) => void remove(id)}
                 allowImages={false}
                 lang={view.text.length > CODE_HIGHLIGHT_MAX_CHARS ? 'text' : undefined}

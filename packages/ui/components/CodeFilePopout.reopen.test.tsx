@@ -6,7 +6,7 @@
  * What regresses: the composer opening before Pierre has drawn the line (no
  * place to anchor), on other lines, empty, more than once for one request, or
  * a save happening without the person; and, with neither prop, anything
- * opening at all.
+ * opening at all. `onComposerLines` tells the host the open composer's lines.
  *
  * Pierre's `File` is replaced by a stub that draws one `[data-line]` row per
  * line (once the test says Pierre has drawn) and the inline comments through
@@ -132,6 +132,24 @@ describe.if(hasDom)('CodeFileView put-back seams', () => {
     expect(edits).toEqual([]);
     await submitKey(box!);
     expect(edits).toEqual([['savedOne', { text: 'new words not saved' }]]);
+  });
+
+  // What regresses: a host told nothing (or other lines) while a line comment is written, so it cannot keep the words
+  // when the view is taken away; or told lines after the composer closed.
+  test('onComposerLines: the lines (and their code) as the composer opens, null as it closes', async () => {
+    const added: CodeFileAnnotationInput[] = [];
+    const edits: Array<[string, Partial<CodeAnnotation>]> = [];
+    const told: Array<{ lineStart: number; lineEnd: number; originalCode: string } | null> = [];
+    await mount(view({ reopenComment: { lineStart: 2, lineEnd: 3, text: 'kept' }, onComposerLines: (lines) => told.push(lines) }, added, edits));
+    await frames();
+    expect(composer()?.value).toBe('kept');
+    expect(told.at(-1)).toEqual({ lineStart: 2, lineEnd: 3, originalCode: 'const b = 2;\nconst c = 3;' });
+    await act(async () => {
+      composer()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    await frames(1);
+    expect(composer()).toBeNull();
+    expect(told.at(-1)).toBeNull();
   });
 
   test('neither prop: no composer and no edit box open by themselves', async () => {

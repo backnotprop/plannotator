@@ -379,6 +379,12 @@ export interface CodeFileViewProps {
    * words (not saved). Absent: nothing changes.
    */
   reopenEdit?: { id: string; text: string } | null;
+  /**
+   * Opt-in: told which lines the line comment being written is on as its
+   * composer opens, and null as it closes, so a host can keep its words
+   * (read from the box) if the view is taken away. Absent: nothing changes.
+   */
+  onComposerLines?: (lines: { lineStart: number; lineEnd: number; originalCode: string } | null) => void;
 }
 
 /** A token of a file drawn by `CodeFileView` (Pierre's token event, file mode). */
@@ -421,6 +427,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
   onTokenNavigate,
   reopenComment,
   reopenEdit,
+  onComposerLines,
 }) => {
   const { resolvedMode } = useTheme();
   const mode = resolvedMode ?? 'dark';
@@ -430,6 +437,15 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     css: buildPierreCSS(mode, colors.bg, colors.fg),
   }));
   const [pendingComment, setPendingComment] = useState<PendingComment | null>(null);
+  const onComposerLinesRef = useRef(onComposerLines);
+  onComposerLinesRef.current = onComposerLines;
+  useEffect(() => {
+    onComposerLinesRef.current?.(
+      pendingComment
+        ? { lineStart: pendingComment.range.start, lineEnd: pendingComment.range.end, originalCode: pendingComment.originalCode }
+        : null,
+    );
+  }, [pendingComment]);
   const fileAreaRef = useRef<HTMLDivElement>(null);
   const lastPointerRectRef = useRef<DOMRect | null>(null);
   const suppressLineClickUntilRef = useRef(0);
