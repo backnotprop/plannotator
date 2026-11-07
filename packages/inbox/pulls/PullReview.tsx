@@ -59,6 +59,9 @@ import { TooltipEscapePassesThrough } from '@plannotator/ui/components/Tooltip';
 import { RailStack } from './RailStack';
 import { RailTree } from './RailTree';
 import { DetailsStatus, PullDetails, usePullDetails } from './PullDetails';
+import { LineThread, ThreadMemory } from './LineThreads';
+import { placeThreads, threadKey } from './threadPlaces';
+import type { GuideLineNote } from '../guide/types';
 import { RailScopeSwitch } from './RailScope';
 import { useTreeScope } from '@plannotator/ui/hooks/useTreeScope';
 import { useSheetEscape } from '../shortcuts/useSheetEscape';
@@ -496,6 +499,27 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // Only once the list names it: on a fresh load the Inbox has no list yet, and would refuse a PR it has not listed.
   // Read again when the PR moves, and whenever the panel opens (the server keeps a read for a minute).
   const details = usePullDetails(layer ? layerKey : null, layer ? `${layer.head_sha ?? ''}\u0000${layer.updated_at}` : '');
+  // Other people's threads, on the lines they are about (the details' read: no read of their own). Only this layer's
+  // answer: another layer's threads are on another diff.
+  const threadMemory = useRef(new ThreadMemory()).current;
+  const threadsHere = details.data && details.data.key === layerKey ? details.data.threads : undefined;
+  const threads = useMemo(() => (threadsHere && diff ? placeThreads(threadsHere, files, scope) : null), [threadsHere, diff, files, scope]);
+  const threadHead = diff?.head_sha;
+  const lineNotes = useMemo<GuideLineNote[] | undefined>(
+    () =>
+      threads && layer
+        ? threads.placed.map((placed) => ({
+            id: `forge:${placed.thread.id}`,
+            filePath: placed.thread.file,
+            line: placed.line,
+            side: placed.side,
+            key: `${layer.key}|${threadHead ?? ''}|${threadKey(placed)}`,
+            render: () => <LineThread placed={placed} layer={layer} memory={threadMemory} headSha={threadHead} />,
+          }))
+        : undefined,
+    [threads, layer, threadHead, threadMemory],
+  );
+  const openThreads = threads?.open;
   const detailsPanel = useRef<HTMLElement>(null);
   const detailsOpener = useRef<HTMLElement | null>(null);
   const toggleDetails = (event: React.MouseEvent<HTMLElement>) => {
@@ -766,7 +790,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           />
         </PanePart>
       ) : (
-        <RailTree tree={tree} loose={loose} files={files} viewed={viewedSet} commentCount={(path) => comments.filter((comment) => comment.filePath === path).length} onSelect={pickFile} onToggleViewed={toggleViewed} head={scopeSwitch} />
+        <RailTree tree={tree} loose={loose} files={files} viewed={viewedSet} commentCount={(path) => comments.filter((comment) => comment.filePath === path).length} threadCount={openThreads ? (path) => openThreads.get(path) ?? 0 : undefined} onSelect={pickFile} onToggleViewed={toggleViewed} head={scopeSwitch} />
       )}
     </>
   );
@@ -980,7 +1004,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             // arrive says so here (GuidePane).
             <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ repo: repoKey ?? '', pull: layerKey }} on={!!repoKey}>
-                <GuideReader bare controlsHost={controlsHost} hostDiffControls snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} fileContents={fileContents} />
+                <GuideReader bare controlsHost={controlsHost} hostDiffControls snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} fileContents={fileContents} lineNotes={lineNotes} />
               </OpenInCodeSpans>
             </ReaderPart>
           ) : (

@@ -57,9 +57,9 @@ function useReached(at: number | null): boolean {
 
 const REVIEW_WORDS: Record<InboxPullReviewState, string> = { approved: 'Approved', changes: 'Changes requested', commented: 'Commented', waiting: 'Waiting' };
 const REVIEW_ORDER: InboxPullReviewState[] = ['changes', 'approved', 'commented', 'waiting'];
-const DELETED = 'A deleted account';
+export const DELETED = 'A deleted account';
 const initial = (login: string) => (login.includes('/') ? login.split('/')[1]! : login).replace(/\[bot\]$/, '').slice(0, 1).toUpperCase();
-const shortName = (login: string) => login.replace(/\[bot\]$/, '');
+export const shortName = (login: string) => login.replace(/\[bot\]$/, '');
 const checkName = (check: InboxPullCheck) => (check.workflow ? `${check.workflow} / ${check.name}` : check.name);
 /** A bot that only commented says nothing about where the review stands: it follows the people who were asked. */
 const quietBot = (r: InboxPullReviewer) => !!r.bot && r.state === 'commented';
@@ -84,7 +84,7 @@ export function reviewWords(all: readonly InboxPullReviewer[]) {
  * A person's picture, round: the initial while it loads and when it cannot, a grey person for a deleted account. An app
  * or a team is a soft square, as on the forge; a team has no picture to ask for.
  */
-function Face({ login, host, size, bot, team, state }: { login: string; host: string; size: number; bot?: boolean; team?: boolean; state?: InboxPullReviewState }) {
+export function Face({ login, host, size, bot, team, state }: { login: string; host: string; size: number; bot?: boolean; team?: boolean; state?: InboxPullReviewState }) {
   const [shown, setShown] = useState(false);
   const [failed, setFailed] = useState(false);
   const isTeam = team || login.includes('/');

@@ -33,12 +33,17 @@ const hasDom = typeof document !== 'undefined';
 const shown: { patch: string; title: string }[] = [];
 /** The reader's comment seam as the review last gave it (a test writes a comment through it). */
 let readerComments: { onSave: (annotation: unknown) => void } | undefined;
+/** What the reader was last given to draw under lines (others' threads). */
+let readerNotes: { id: string; filePath: string; line: number; side: string }[] | undefined;
+/** The threads the details door answers, by PR key. */
+let detailThreads: Record<string, unknown[]> = {};
 /** The reader's whole-file seam as the review last gave it. */
 let readerFiles: ((path: string, signal: AbortSignal, patch: string) => Promise<unknown>) | undefined;
 if (hasDom) {
   mock.module('#guide-reader', () => ({
-    default: (props: { snapshot: { review: { rawPatch: string }; guide: { title: string } }; comments?: { onSave: (annotation: unknown) => void }; fileContents?: typeof readerFiles }) => {
+    default: (props: { snapshot: { review: { rawPatch: string }; guide: { title: string } }; comments?: { onSave: (annotation: unknown) => void }; fileContents?: typeof readerFiles; lineNotes?: typeof readerNotes }) => {
       readerComments = props.comments;
+      readerNotes = props.lineNotes;
       readerFiles = props.fileContents;
       shown.push({ patch: props.snapshot.review.rawPatch, title: props.snapshot.guide.title });
       return null;
@@ -160,6 +165,8 @@ beforeEach(() => {
     ],
   };
   shown.length = 0;
+  readerNotes = undefined;
+  detailThreads = {};
   reviewAnswer = { status: 200, body: { ok: true, prUrl: '', submission: { status: 'complete' } } };
   diffHead = 'a'.repeat(40);
   diffPatch = null;
@@ -194,7 +201,10 @@ beforeEach(() => {
       sessionReads += 1;
       return Response.json(sessionsAnswer);
     }
-    if (url.pathname.endsWith('/pulls/details')) return Response.json({ serverSession: 's', key: url.searchParams.get('key'), description: null, labels: [], reviewers: [], checks: [], comments: [] });
+    if (url.pathname.endsWith('/pulls/details')) {
+      const key = url.searchParams.get('key')!;
+      return Response.json({ serverSession: 's', key, description: null, labels: [], reviewers: [], checks: [], comments: [], ...(detailThreads[key] ? { threads: detailThreads[key] } : {}) });
+    }
     if (url.pathname.endsWith('/pulls/file')) {
       fileAsks.push(url.searchParams.get('scope')!);
       return Response.json({ serverSession: 's', oldContent: 'a\n', newContent: 'b\n' });
@@ -299,6 +309,29 @@ test.skipIf(!hasDom)('a layer opens its own diff; Whole stack asks for the stack
   expect(shown.at(-1)!.patch).toContain('layer-413.ts');
   expect(el('[data-pull-review]').getAttribute('data-pull-review')).toBe(stack[1]!.key);
   expect(el('[data-pull-layer-row][aria-current="step"]').getAttribute('data-pull-layer-row')).toBe(stack[1]!.key);
+});
+
+test.skipIf(!hasDom)("others' threads from the details go on their lines in this layer's diff, counted on the file's row; another layer's do not", async () => {
+  diffPatch = 'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n';
+  const said = (id: string) => ({ id, author: 'theo', at: '2026-11-01T00:00:00Z', body: id, url: 'https://x' });
+  const thread = (id: string, fields: Record<string, unknown> = {}) => ({ id, file: 'src/a.ts', line: 2, start_line: null, side: 'new', resolved: false, outdated: false, comments: [said(`${id}-1`)], ...fields });
+  detailThreads[stack[0]!.key] = [thread('t1'), thread('t2', { side: 'old' }), thread('t3', { resolved: true, line: null, outdated: true }), thread('t4', { file: 'src/elsewhere.ts' })];
+  detailThreads[stack[1]!.key] = [thread('other-layer')];
+  // A push of its own: the window keeps a patch read a moment ago per push.
+  const pushed = { ...model, pulls: model.pulls.map((p) => (p.key === stack[0]!.key || p.key === STACK_ID ? { ...p, updated_at: '2026-11-04T07:00:00.000Z' } : p)) };
+  mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={pushed} />);
+  await settle();
+  expect(readerNotes!.map((n) => [n.id, n.filePath, n.line, n.side])).toEqual([
+    ['forge:t1', 'src/a.ts', 2, 'new'],
+    ['forge:t2', 'src/a.ts', 2, 'old'],
+    ['forge:t3', 'src/a.ts', 1, 'new'],
+  ]);
+  // Open threads only: the resolved one is drawn but not counted.
+  expect(el('[data-review-file="src/a.ts"] [data-pull-file-threads]').textContent).toBe('2');
+  await act(async () => el('[data-pull-layer-all]').click());
+  await settle();
+  // The whole stack's diff is the top layer's answer: this layer's threads are not on it.
+  expect((readerNotes ?? []).map((n) => n.id)).toEqual([]);
 });
 
 test.skipIf(!hasDom)("Approve goes into the agent's thread as a reply to its last message, naming the layer", async () => {

@@ -259,6 +259,40 @@ describe("reading them through the list", () => {
     expect(answer.threads_incomplete).toBeUndefined();
   });
 
+  test("each thread whole, for the page to draw on its line: its side, resolved, outdated, a comment the forge hides", async () => {
+    const f = forge();
+    let asked = "";
+    const pulls = createInboxPulls({
+      run: changed(f, (args) => {
+        if (!threadsField(args, "query")?.includes("reviewThreads(first")) return undefined;
+        asked = threadsField(args, "query") ?? "";
+        return threadPage([
+          { ...thread("t1", { nodes: [noted("t1-1"), { ...noted("t1-2"), author: { __typename: "Bot", login: "lint[bot]" }, isMinimized: true, minimizedReason: "OFF_TOPIC" }] }), line: 9, startLine: 7, diffSide: "LEFT", isResolved: true },
+          { ...thread("t2", { nodes: [noted("t2-1")] }), line: null, startLine: null, isOutdated: true },
+          { ...thread("empty", { nodes: [] }) },
+        ]);
+      }),
+    });
+    await pulls.list(repos);
+    const answer = await pulls.details(KEY);
+    expect(asked).toContain("isMinimized");
+    expect(answer.threads).toEqual([
+      {
+        id: "t1", file: "src/a.ts", line: 9, start_line: 7, side: "old", resolved: true, outdated: false,
+        comments: [
+          { id: "t1-1", author: "kim", at: "2026-11-01T00:00:00Z", body: "t1-1", url: "u", file: "src/a.ts", line: 9 },
+          { id: "t1-2", author: "lint[bot]", bot: true, at: "2026-11-01T00:00:00Z", body: "t1-2", url: "u", file: "src/a.ts", line: 9, hidden: "off-topic" },
+        ],
+      },
+      {
+        id: "t2", file: "src/a.ts", line: null, start_line: null, side: "new", resolved: false, outdated: true,
+        comments: [{ id: "t2-1", author: "kim", at: "2026-11-01T00:00:00Z", body: "t2-1", url: "u", file: "src/a.ts" }],
+      },
+    ]);
+    // The flat list keeps them too, with the hidden mark.
+    expect(answer.comments.find((c) => c.id === "t1-2")?.hidden).toBe("off-topic");
+  });
+
   test("a page of threads that fails: what was read shows, says it is not all, keeps its faces, and is read again", async () => {
     const f = forge();
     let failing = true;

@@ -472,7 +472,7 @@ export interface DiffAnnotationMetadata {
    *  the projected metadata, not the full annotation. */
   copyText?: string;
   // AI marker fields (set when kind === 'ai-marker')
-  kind?: 'annotation' | 'ai-marker';
+  kind?: 'annotation' | 'ai-marker' | 'host-note';
   questionId?: string;
   promptPreview?: string;
   hasResponse?: boolean;

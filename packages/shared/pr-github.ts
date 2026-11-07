@@ -409,7 +409,9 @@ const PR_THREAD_COMMENT_FIELDS = `id
               author { __typename login avatarUrl(size: 48) }
               createdAt
               url
-              diffHunk`;
+              diffHunk
+              isMinimized
+              minimizedReason`;
 
 const PR_CONTEXT_GRAPHQL_QUERY = `
 query($owner: String!, $repo: String!, $number: Int!, $withComments: Boolean = true, $withReviews: Boolean = true, $withThreads: Boolean = true, $commentsAfter: String, $reviewsAfter: String, $threadsAfter: String) {
@@ -503,6 +505,7 @@ async function fetchGhThreadsAndBots(
       createdAt: String(c.createdAt ?? ''),
       url: String(c.url ?? ''),
       ...(c.diffHunk ? { diffHunk: String(c.diffHunk) } : {}),
+      ...(c.isMinimized === true ? { isMinimized: true, ...(typeof c.minimizedReason === 'string' && c.minimizedReason ? { minimizedReason: c.minimizedReason } : {}) } : {}),
     };
   };
 

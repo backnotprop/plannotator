@@ -213,6 +213,10 @@ export interface PRThreadComment {
   createdAt: string;
   url: string;
   diffHunk?: string;
+  /** The forge hides it (GitHub's minimized comment). */
+  isMinimized?: boolean;
+  /** Why, in the forge's words ("OFF_TOPIC", "outdated"), when it is hidden and says. */
+  minimizedReason?: string;
 }
 
 export interface PRReviewThread {

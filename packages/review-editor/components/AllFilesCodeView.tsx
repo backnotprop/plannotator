@@ -71,6 +71,7 @@ import type { SuggestionHunk } from '../edit/deriveSuggestions';
 import { lineAnnotationMetadata } from '../utils/annotationDisplay';
 import { InlineAnnotation } from './InlineAnnotation';
 import { InlineAIMarker } from './InlineAIMarker';
+import { hostLineNoteSignatures, NO_HOST_LINE_NOTES, projectHostLineNotes, type HostLineNote } from './hostLineNotes';
 import { detectLanguage } from '../utils/detectLanguage';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import type { ReviewSearchMatch } from '../utils/reviewSearch';
@@ -205,6 +206,9 @@ export interface AllFilesCodeViewProps {
   // Annotation state (P4). Mirrors AllFilesDiffView's annotation surface so
   // line annotations render through CodeView item state.
   annotations: CodeAnnotation[];
+  /** What the host draws itself under lines (hostLineNotes.ts): read-only, never annotations, above them on a shared
+   *  line. Absent: none, as before. */
+  hostLineNotes?: readonly HostLineNote[];
   selectedAnnotationId: string | null;
   scrollTargetAnnotation: AnnotationScrollTarget | null;
   pendingSelection: SelectedLineRange | null;
@@ -540,6 +544,7 @@ function projectFileAnnotations(
   filePath: string,
   prUrl: string | undefined,
   prDiffScope: string | undefined,
+  hostLineNotes: readonly HostLineNote[] = NO_HOST_LINE_NOTES,
 ): DiffLineAnnotation<DiffAnnotationMetadata>[] {
   const reviewAnnotations = annotations
     .filter(
@@ -553,7 +558,8 @@ function projectFileAnnotations(
       lineNumber: ann.lineEnd,
       metadata: lineAnnotationMetadata(ann),
     }));
-  return [...reviewAnnotations, ...projectFileAIMarkers(aiMessages, filePath)];
+  // The host's notes first: on a line with both, what others said reads above the person's own comment.
+  return [...projectHostLineNotes(hostLineNotes, filePath), ...reviewAnnotations, ...projectFileAIMarkers(aiMessages, filePath)];
 }
 
 function buildItemIdentity(
@@ -567,6 +573,7 @@ function buildItemIdentity(
   seedCollapsed: boolean,
   generatedFiles: Set<string> | undefined,
   expandedGeneratedFiles: Set<string> | undefined,
+  hostLineNotes: readonly HostLineNote[] = NO_HOST_LINE_NOTES,
 ): ItemIdentity {
   const items: CodeViewItem<DiffAnnotationMetadata>[] = [];
   const filePathToItemId = new Map<string, string>();
@@ -615,7 +622,7 @@ function buildItemIdentity(
     fileDiff.cacheKey = `${id}#${patchHashes[index] ?? ''}`;
     // Seed annotations at build time so the first render (and any remount via
     // fileSetKey) already paints existing annotations without an extra update.
-    const fileAnnotations = projectFileAnnotations(annotations, aiMessages, file.path, prUrl, prDiffScope);
+    const fileAnnotations = projectFileAnnotations(annotations, aiMessages, file.path, prUrl, prDiffScope, hostLineNotes);
     // Generated files (#1317) seed collapsed like GitHub's diff view, unless
     // the user already expanded them this session. A view-state seed only —
     // the item carries the full fileDiff either way.
@@ -732,6 +739,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   fontFamily,
   fontSize,
   annotations,
+  hostLineNotes = NO_HOST_LINE_NOTES,
   selectedAnnotationId,
   scrollTargetAnnotation,
   pendingSelection,
@@ -1012,6 +1020,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   annotationsRef.current = annotations;
   const aiMessagesRef = useRef(aiMessages);
   aiMessagesRef.current = aiMessages;
+  // The host's notes: seeded at build from the latest, then applied per file by their own sync effect below.
+  const hostLineNotesRef = useRef(hostLineNotes);
+  hostLineNotesRef.current = hostLineNotes;
   // Per-file patch content hashes — shared by fileSetKey (remount detection)
   // and the items' cacheKeys (highlight cache identity). Hashed once per
   // files-identity change.
@@ -1040,6 +1051,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       seedCollapsed === true,
       generatedFiles,
       expandedGeneratedRef.current,
+      hostLineNotesRef.current,
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [files, visualOrder, prUrl, prDiffScope, patchHashes, seedCollapsed, generatedKey],
@@ -1305,6 +1317,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     ) => {
       if (!('side' in annotation) || item.type !== 'diff') return null;
       if (!annotation.metadata) return null;
+      if (annotation.metadata.kind === 'host-note') {
+        const id = annotation.metadata.annotationId;
+        return hostLineNotesRef.current.find((note) => note.id === id)?.render() ?? null;
+      }
       if (annotation.metadata.kind === 'ai-marker') {
         return (
           <InlineAIMarker
@@ -2283,6 +2299,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         filePath,
         prUrl,
         prDiffScope,
+        hostLineNotesRef.current,
       );
       item.version = (item.version ?? 0) + 1;
       handle.updateItem(item);
@@ -2364,6 +2381,32 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       }
     }
   }, [aiMessages, annotations, filePathToItemIds, syncItemAnnotations, workerPoolReady]);
+
+  // The host's notes come and change on their own (a read of the forge after the diff drew): only files whose notes
+  // moved are drawn again.
+  const prevHostLineNotesRef = useRef(hostLineNotes);
+  useEffect(() => {
+    const handle = viewerRef.current;
+    const prev = prevHostLineNotesRef.current;
+    // If the worker-pool gate still hides CodeView, retain the old snapshot; workerPoolReady replays this sync.
+    if (handle == null) return;
+    prevHostLineNotesRef.current = hostLineNotes;
+    if (prev === hostLineNotes) return;
+    const nextSig = hostLineNoteSignatures(hostLineNotes);
+    const prevSig = hostLineNoteSignatures(prev);
+    const changedPaths = new Set<string>();
+    nextSig.forEach((sig, path) => {
+      if (prevSig.get(path) !== sig) changedPaths.add(path);
+    });
+    prevSig.forEach((_sig, path) => {
+      if (!nextSig.has(path)) changedPaths.add(path);
+    });
+    for (const path of changedPaths) {
+      for (const itemId of filePathToItemIds.get(path) ?? []) {
+        syncItemAnnotations(path, itemId, annotations, aiMessages);
+      }
+    }
+  }, [hostLineNotes, annotations, aiMessages, filePathToItemIds, syncItemAnnotations, workerPoolReady]);
 
   // --- Header actions ---------------------------------------------------------
 

@@ -78,6 +78,23 @@ export interface GuideReaderProps {
   renderHeadActions?: () => ReactNode | null;
   /** "Open in" on each file's header (a review while Code review is on). Absent: none, as before. */
   fileOpenIn?: (path: string) => ReactNode;
+  /**
+   * What the host draws itself under lines of the diffs (the PR page: other people's threads from the forge). Never
+   * comments: nothing counts, sends or posts them. Absent: none, as before.
+   */
+  lineNotes?: readonly GuideLineNote[];
+}
+
+/** One thing the host draws under a line (review-editor's `HostLineNote`, as the window's strict typecheck sees it). */
+export interface GuideLineNote {
+  /** Stable for the same note across reads. */
+  id: string;
+  filePath: string;
+  line: number;
+  side: 'old' | 'new';
+  /** Changes whenever what `render` draws changes; the same key leaves the line as it is. */
+  key: string;
+  render: () => ReactNode;
 }
 
 /** Selected lines, as a selection action receives them (review-editor's `DiffSelection`). */
