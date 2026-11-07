@@ -21,13 +21,22 @@ export function shapeReviewMessage(thread: InboxThread | null): InboxMessageWire
   return null;
 }
 
-/** Where the review opens, in the window's address beside `guide=`: `code=path:line`, `step=N`, or `files`. */
-export function shapeReviewAtOf(params: URLSearchParams): ShapeReviewAt | null {
+/**
+ * Where a review opens: a board's place, or a context note's lines (`side: 'old'`: the line is a removed line's
+ * number, as `:::note path#L3 old` names it; absent, the new side's).
+ */
+export interface ReviewAt extends ShapeReviewAt {
+  side?: 'old';
+}
+
+/** Where the review opens, in the window's address beside `guide=`: `code=path:line` (`&side=old`), `step=N`, or `files`. */
+export function shapeReviewAtOf(params: URLSearchParams): ReviewAt | null {
   const code = params.get('code');
   if (code) {
     const m = code.match(/^(.+):(\d+)$/);
     const line = m ? Number(m[2]) : NaN;
-    return m && Number.isSafeInteger(line) && line > 0 ? { path: m[1]!, line } : { path: code };
+    if (!m || !Number.isSafeInteger(line) || line < 1) return { path: code };
+    return { path: m[1]!, line, ...(params.get('side') === 'old' ? { side: 'old' as const } : {}) };
   }
   const step = Number(params.get('step'));
   if (params.has('step') && Number.isSafeInteger(step) && step > 0) return { step };
@@ -35,9 +44,12 @@ export function shapeReviewAtOf(params: URLSearchParams): ShapeReviewAt | null {
   return null;
 }
 
-export function writeShapeReviewAt(params: URLSearchParams, at: ShapeReviewAt | null | undefined): void {
+export function writeShapeReviewAt(params: URLSearchParams, at: ReviewAt | null | undefined): void {
   if (!at) return;
-  if (at.path) params.set('code', at.line ? `${at.path}:${at.line}` : at.path);
+  if (at.path) {
+    params.set('code', at.line ? `${at.path}:${at.line}` : at.path);
+    if (at.line && at.side === 'old') params.set('side', 'old');
+  }
   else if (at.step) params.set('step', String(at.step));
   else if (at.files) params.set('files', '');
 }

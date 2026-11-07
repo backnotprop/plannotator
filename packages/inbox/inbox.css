@@ -8598,6 +8598,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-main[data-shape-open] { position: relative; }
 .ib-shape-layer { position: absolute; inset: var(--ib-gutter); z-index: 19; display: flex; flex-direction: column; background: var(--background); border-radius: inherit; overflow: hidden; }
 .ib-shape-layer > * { flex: 1; min-height: 0; }
+.ib-shape-layer[hidden] { display: none; }
+.ib-review > .ib-shape-layer { inset: 0; }
 .ib-shape-loading { flex: 1; }
 /* The board's sidebar toggle sits alone in the gutter, 22px from the pane's edge where every full page's head has it;
    the title and the claim share one left edge after it (the board's own phone layout: 10px, its padding). */
@@ -8717,20 +8719,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-sm-line b { color: var(--foreground); font-weight: 550; }
 .ib-sm-answer { margin: 0; white-space: pre-wrap; }
 .ib-sm-problem { margin: 0; color: var(--destructive); font-size: var(--ib-fs-12-5, 12.5px); }
-.ib-sm-sheet { position: absolute; left: 290px; right: 36px; top: 58px; max-height: calc(100% - 76px); z-index: 12; display: flex; flex-direction: column; overflow: hidden; border-radius: 14px; background: var(--popover); color: var(--popover-foreground, var(--foreground)); box-shadow: 0 0 0 1px var(--border), 0 30px 70px -24px color-mix(in oklch, var(--ib-shadow-ink, #000) 70%, transparent); animation: ib-sm-in .38s cubic-bezier(.2, .8, .2, 1) both; }
-@keyframes ib-sm-in { from { opacity: 0; transform: translateY(14px) scale(.98); } }
-.ib-sm-sheet-h { display: flex; align-items: center; gap: 10px; padding: 12px 12px 12px 16px; border-bottom: 1px solid var(--ib-hair); }
-.ib-sm-tx { min-width: 0; flex: 1; }
-.ib-sm-sheet-h .ib-sm-tx b { display: block; font-size: var(--ib-fs-15, 15px); font-weight: 650; }
-.ib-sm-sheet-h .ib-sm-tx span { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
-.ib-sm-sheet-b { flex: 1 1 auto; min-height: 0; overflow: auto; background: var(--shp-paper); padding: 16px 26px 12px; }
-.ib-sm-sheet-b .shp-diagram { height: auto; }
-.ib-sm-sheet-f { display: flex; align-items: flex-start; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--ib-hair); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; }
-.ib-sm-sheet-f .ib-sm-tx { color: color-mix(in oklch, var(--foreground) 88%, transparent); white-space: pre-wrap; }
-.ib-sm-sheet-f:has(.ib-sm-again) { flex-wrap: wrap; }
-.ib-sm-sheet-f:has(.ib-sm-again) .ib-sm-tx { flex: 1 1 220px; min-width: 0; }
-.ib-sm-sheet-f .ib-sm-again { flex: none; gap: 6px; margin-left: auto; }
-.ib-sm-mark { flex: none; margin-top: 1px; }
 .ib-sm-pip { width: 320px; max-width: calc(100% - 20px); border-radius: 12px; transform-origin: 100% 100%; animation: ib-sm-pip-in .42s cubic-bezier(.2, .8, .2, 1) both; }
 @keyframes ib-sm-pip-in { from { transform: scale(2.4) translate(-30%, -20%); opacity: .2; } }
 .ib-sm-pip-h { display: flex; align-items: center; gap: 7px; padding: 7px 7px 7px 11px; font-size: var(--ib-fs-12-5, 12.5px); }
@@ -8739,6 +8727,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-sm-pip-b { display: block; height: 190px; padding: 6px 8px; background: var(--shp-paper); border-top: 1px solid var(--ib-hair); border-bottom: 1px solid var(--ib-hair); cursor: pointer; }
 .ib-sm-pip-f { padding: 7px 11px; font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-sm-pip-f b { font-weight: 600; }
+.ib-sm-pip-n { display: flex; align-items: center; gap: 10px; justify-content: space-between; margin-top: 6px; color: var(--muted-foreground); }
+.ib-sm-pip-n .ib-btn { flex: none; }
 .ib-sm-pip-f span { font: var(--ib-fs-11-5, 11.5px) var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); }
 .ib-ov-fig { margin: 18px 0 4px; border-radius: 12px; background: var(--shp-paper); box-shadow: 0 0 0 1px var(--ib-line); overflow: hidden; }
 .ib-ov-fig-h { display: flex; align-items: center; gap: 8px; padding: 10px 12px 0 14px; font-size: var(--ib-fs-13, 13px); }
@@ -8747,28 +8737,16 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-ov-fig-b { padding: 10px 18px 6px; }
 .ib-ov-fig-b .shp-diagram { height: auto; }
 .ib-ov-fig-f { padding: 0 14px 10px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
-@media (prefers-reduced-motion: reduce) { .ib-sm-sheet, .ib-sm-pip { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .ib-sm-pip { animation: none; } }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-sm-box, .ib-sm-pip { left: 10px; right: 10px; width: auto; max-width: none; }
-  .ib-sm-sheet { left: 0; right: 0; top: 46px; bottom: 0; max-height: none; border-radius: var(--ib-sheet-corner, 12px) var(--ib-sheet-corner, 12px) 0 0; }
-  .ib-sm-sheet-b { padding: 10px 8px; }
-  .ib-sm-sheet-h .ib-sm-tx span { font-size: var(--ib-fs-11-5, 11.5px); }
-  .ib-sm-sheet-f { font-size: var(--ib-fs-13, 13px); }
   .ib-ov-fig-m { display: none; }
   .ib-ov-fig-b { padding: 8px 8px 4px; }
-  .pn-inbox .ib-sm-h .ib-iconbtn, .pn-inbox .ib-sm-sheet-h .ib-iconbtn { min-width: 44px; min-height: 44px; }
+  .pn-inbox .ib-sm-h .ib-iconbtn { min-width: 44px; min-height: 44px; }
 }
-.ib-sm-banner { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; background: color-mix(in oklab, var(--warning) 12%, var(--card)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning) 40%, transparent); font-size: var(--ib-fs-13-5, 13.5px); }
-.ib-sm-banner b { font-weight: 650; }
-.ib-sm-banner .ib-btn { flex: none; gap: 6px; }
-@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) { .ib-sm-banner { flex-wrap: wrap; } }
 .ib-sm-pip-b { position: relative; overflow: hidden; }
 .ib-sm-pip-in { position: absolute; top: 6px; left: 8px; transform-origin: 0 0; pointer-events: none; }
 .ib-sm-h .ib-sp, .ib-sm-pip-h .ib-sp, .ib-ov-fig-h .ib-sp { flex: 1; }
-/* The picture moves by its header, like the Ask window (useSheetDrag); not on a phone, where it is a sheet. */
-.ib-sm-sheet-h[data-show-me-drag] { cursor: grab; touch-action: none; user-select: none; }
-.ib-sm-sheet-h[data-show-me-drag="dragging"] { cursor: grabbing; }
-.ib-sm-sheet-h[data-show-me-drag] button { cursor: pointer; }
 /*
  * Hashtags (approval "board-hashtags"): the skill list's own menu (ui SkillReferenceMenu, unchanged), restyled here
  * for `#` only. A light popover as wide as its names, hung under the `#` (`--ib-hash-x`, hashtags.ts), not a slab
@@ -8960,4 +8938,63 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-sys-phone .ib-sys-inp { height: 44px; font-size: var(--ib-fs-16-in, 16px); }
   .ib-sys-phone .ib-sys-x, .pn-inbox .ib-sys-phone .ib-sys-x { width: 32px; height: 32px; }
   .ib-sys-phone .ib-sys-acts .ib-btn { height: 44px; }
+}
+
+/* ── Context notes (approval "inbox-context-notes", take Line) ──────────────────────────────────────────────────────
+   An agent's words on lines of the diff, drawn through review-editor's `contextNotes` seam (`.context-note-slot`):
+   one row (Show me's Pebble, the writer in words, the first words), opened in place. Shape's paper with a breath of the
+   accent; a stale note goes grey. No comment chrome: no border, no card shadow, no count. */
+.ib-review, .ib-prreview { --ctxn-paper: color-mix(in oklab, var(--shp-paper, color-mix(in oklab, var(--background) 92%, var(--muted))) 95%, var(--primary)); }
+.context-note-slot { margin: 4px 0.25rem; font-family: var(--font-sans); white-space: normal; }
+.ib-ctxn { color: var(--foreground); }
+.ib-ctxn-line { border-radius: 8px; background: var(--ctxn-paper, color-mix(in oklab, var(--muted) 60%, var(--card))); }
+.ib-ctxn-line[data-stale] { background: color-mix(in oklch, var(--muted) 40%, var(--card)); }
+.ib-ctxn-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ib-ctxn-row:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 60%, transparent); outline-offset: 1px; }
+.ib-ctxn-h { flex: none; display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--ib-fs-12, 12px); line-height: 18px; color: var(--muted-foreground); }
+.ib-ctxn-h b { flex: none; color: var(--foreground); font-weight: 600; }
+.ib-ctxn-peb { flex: none; }
+.ib-ctxn-risk-mark { flex: none; color: var(--muted-foreground); }
+.ib-ctxn-risk { font-size: var(--ib-fs-11-5, 11.5px); line-height: 16px; }
+.ib-ctxn-first { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-ctxn-chev { flex: none; color: var(--muted-foreground); transition: transform 0.15s ease-out; }
+.ib-ctxn-line[data-open] .ib-ctxn-chev { transform: rotate(180deg); }
+/* Open: the words after the writer follow on its line ("Claude Code · 12:34 PM"), wrapping as text, with the marks inline. */
+.ib-ctxn-line[data-open] .ib-ctxn-row { padding-block: 5px; }
+.ib-ctxn-line[data-open] .ib-ctxn-h { display: block; flex: 1 1 auto; overflow-wrap: anywhere; }
+.ib-ctxn-line[data-open] .ib-ctxn-h > svg { display: inline-block; vertical-align: -2px; margin-right: 6px; }
+.ib-ctxn-line[data-open] .ib-ctxn-h > .ib-ctxn-risk { display: inline-flex; margin-left: 6px; vertical-align: 1px; }
+.ib-ctxn-h .ib-ctxn-by { display: inline; }
+.ib-ctxn-open { padding: 0 12px 10px 30px; }
+.ib-ctxn-by { display: block; font-size: var(--ib-fs-12, 12px); line-height: 18px; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.ib-ctxn-t { margin: 4px 0 0; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
+[data-stale] .ib-ctxn-t { color: var(--muted-foreground); }
+.ib-ctxn-acts { margin-top: 6px; display: flex; gap: 14px; }
+.ib-ctxn-link { padding: 0; border: 0; background: none; color: var(--primary); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); cursor: pointer; }
+.ib-ctxn-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.ib-ctxn-link:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 60%, transparent); outline-offset: 2px; border-radius: 3px; }
+.ib-ctxn-stale { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--ib-hair); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.4; color: var(--muted-foreground); }
+.ib-ctxn-act { flex: none; }
+/* A risk's places: the PR page's "See the N places" and the diff header's "N places". */
+.ib-ctxn-places { margin-left: 6px; padding: 0; border: 0; background: none; color: var(--primary); font: inherit; font-size: var(--ib-fs-12, 12px); cursor: pointer; white-space: nowrap; }
+.ib-ctxn-places:hover { text-decoration: underline; text-underline-offset: 2px; }
+.ib-ctxn-places:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 60%, transparent); outline-offset: 2px; border-radius: 3px; }
+/* The thread: a `:::note` block's chip and words. */
+.ib-ctxn-msg { margin: 10px 0 14px; }
+.ib-ctxn-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 24px; padding: 0 9px; border: 0; border-radius: 999px; background: color-mix(in oklch, var(--primary) 8%, var(--card)); color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-12, 12px); text-align: left; }
+button.ib-ctxn-chip { cursor: pointer; }
+button.ib-ctxn-chip:hover { color: var(--foreground); }
+button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 60%, transparent); outline-offset: 1px; }
+.ib-ctxn-chip-f { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-11-5, 11.5px); color: var(--foreground); }
+.ib-ctxn-chip-go { color: var(--primary); }
+.ib-ctxn-msg-t { margin-top: 6px; font-size: var(--ib-fs-15, 15px); line-height: 1.6; color: color-mix(in oklch, var(--foreground) 90%, transparent); }
+@media (max-width: 640px) {
+  .ib-ctxn-open { padding-left: 12px; }
+}
+@media (pointer: coarse) {
+  .ib-ctxn-row { min-height: 44px; }
+  .ib-ctxn-chip { min-height: 32px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ib-ctxn-chev { transition: none; }
 }

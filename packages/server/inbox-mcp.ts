@@ -19,6 +19,7 @@ import { findQuestionBlocks, QUESTION_AUTHORING_GUIDE } from "@plannotator/core/
 import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import { inboxQuestionKeysWithRecommendedMarker, parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from "@plannotator/core/inbox-actions";
+import { INBOX_NOTE_BLOCK_LINE } from "@plannotator/core/inbox-review";
 import { checkInboxSubject, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, inboxTidyMcpLine, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
 import { inboxStopNoticeReply, INBOX_AGENT_RULES, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
@@ -1054,7 +1055,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
       description: SEND_MESSAGE_DESCRIPTION,
       inputSchema: z
         .object({
-          body: z.string().min(1).describe(SEND_BODY_DESCRIPTION),
+          // Code review on: one more sentence, the thread agent's `:::note` (context notes, approval "inbox-context-notes").
+          body: z.string().min(1).describe(context.codeReviewOn?.() ? `${SEND_BODY_DESCRIPTION}\n\n${INBOX_NOTE_BLOCK_LINE}` : SEND_BODY_DESCRIPTION),
           ...SEND_ROUTING_FIELDS,
           attachments: z
             .array(z.string())

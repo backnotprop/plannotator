@@ -596,9 +596,11 @@ export interface InboxPulls {
    * When that read is partial or empty and `roots` holds a clone of the PR's repository on this computer, git reads
    * the whole diff there instead (`localWholeDiff`), and it is not partial; `held_back` is then the forge's own read
    * (its held-back files as their headers), for an agent the whole is too long for.
+   * `per_file` when the forge would not serve the diff as one document (the per-file read or a clone gave it): the
+   * PR's diff on screen (`diff`) reads only that document, so it shows none of this.
    * `head_sha` as `diff`'s. Throws InboxPullsError when there is nothing.
    */
-  wholeDiff(key: string, signal?: AbortSignal, roots?: readonly string[]): Promise<{ patch: string; head_sha: string | null; partial: boolean; held_back?: string }>;
+  wholeDiff(key: string, signal?: AbortSignal, roots?: readonly string[]): Promise<{ patch: string; head_sha: string | null; partial: boolean; held_back?: string; per_file?: true }>;
   /** The head commit of the last patch read for this PR, either scope (`diff`'s `head_sha`), or null. */
   readHead(key: string): string | null;
   /**
@@ -1411,7 +1413,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       let patch = whole.exitCode === 0 ? whole.stdout : "";
       let partial = false;
       let heldBack: string | undefined;
-      if (!patch.trim()) {
+      const perFile = !patch.trim();
+      if (perFile) {
         const stop = whole.exitCode === 0 ? null : stopFor(whole);
         if (stop) throw new InboxPullsError("pull_diff_failed", stop);
         // The forge's per-file read: a file it holds back still comes by name, and a page that failed leaves the ones before it.
@@ -1439,7 +1442,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         }
       }
       const headAfter = headBefore ? await readHeadNow(pull, cli) : null;
-      return { patch, partial, head_sha: headBefore && headBefore === headAfter ? headBefore : null, ...(heldBack ? { held_back: heldBack } : {}) };
+      return { patch, partial, head_sha: headBefore && headBefore === headAfter ? headBefore : null, ...(heldBack ? { held_back: heldBack } : {}), ...(perFile ? { per_file: true as const } : {}) };
     },
     async fileContents(key, scope, path, roots, ids, oldPath) {
       const none: InboxFileContents = { oldContent: null, newContent: null };
