@@ -11,14 +11,13 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ShapeScene } from '@plannotator/core/shape-scene';
 import { SceneDom } from './dom';
-import { beatAt, clockWords, nextBeatTime, playMs, reducedTime } from './timeline';
+import { beatAt, beatCount, nextBeatTime, playMs, reducedTime } from './timeline';
 import { fitScene, scrollerOf } from './fit';
 import { LIT_TECHNICAL, LOOK_CSS, applyTechnicalLook } from './look';
 
 const CSS = `
 .ssc { display: block; width: 100%; color: var(--ink); font-size: calc(12.5px * var(--u)); line-height: 1.4; text-align: left; margin-top: calc(8px * var(--u)); }
 .ssc-cap { margin: 0 calc(2px * var(--u)); min-height: 2.9em; line-height: 1.45; color: var(--ink); }
-.ssc-cap b { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink2); margin-right: .5em; }
 .ssc-side { display: flex; flex-wrap: wrap; gap: calc(6px * var(--u)) calc(14px * var(--u)); align-items: center; padding-top: calc(4px * var(--u)); color: var(--ink2); }
 .ssc-legend { display: flex; flex-wrap: wrap; gap: calc(4px * var(--u)) calc(12px * var(--u)); color: var(--grey); font-size: .92em; }
 .ssc-legend i { display: inline-block; width: calc(10px * var(--u)); height: calc(10px * var(--u)); border-radius: calc(3px * var(--u)); margin-right: calc(5px * var(--u)); vertical-align: -1px; }
@@ -40,7 +39,7 @@ const CSS = `
 .ssc .play { background: var(--mark); color: var(--primary-foreground, #fff); border-radius: 999px; }
 .ssc .play:hover:not([aria-disabled=true]) { background: color-mix(in oklab, var(--mark) 85%, var(--ink)); }
 .ssc input[type=range] { flex: 1 1 calc(140px * var(--u)); min-width: calc(90px * var(--u)); accent-color: var(--mark); height: calc(24px * var(--u)); margin: 0; }
-.ssc .n { font-variant-numeric: tabular-nums; color: var(--ink2); font-family: var(--font-mono, ui-monospace, monospace); font-size: .92em; min-width: 6.5em; }
+.ssc .n { font-variant-numeric: tabular-nums; color: var(--ink2); font-family: var(--font-mono, ui-monospace, monospace); font-size: .92em; min-width: 4.5em; text-align: right; }
 .ssc .seg { display: inline-flex; padding: calc(2px * var(--u)); border-radius: calc(9px * var(--u)); background: var(--sunk); gap: calc(2px * var(--u)); }
 .ssc .seg button[aria-pressed=true] { background: var(--paper); font-weight: 600; }
 .ssc .ticks { position: relative; flex: 1 1 calc(140px * var(--u)); min-width: calc(90px * var(--u)); display: flex; flex-direction: column; }
@@ -51,7 +50,6 @@ const CSS = `
 /* The technical look: hairline controls, a monospace for the numbers, one accent. */
 .ssc.tech { border-top: 1px solid var(--rule); padding-top: calc(10px * var(--u)); margin-top: calc(10px * var(--u)); }
 .ssc.tech .ssc-cap { font-size: 1.04em; letter-spacing: -.003em; }
-.ssc.tech .ssc-cap b { font-family: var(--font-mono, ui-monospace, monospace); font-weight: 500; font-size: .86em; color: var(--grey); letter-spacing: .02em; margin-right: .9em; }
 .ssc.tech .ssc-legend, .ssc.tech .ssc-src { font-family: var(--font-mono, ui-monospace, monospace); font-size: .8em; letter-spacing: .01em; }
 .ssc.tech .ssc-legend i { width: calc(12px * var(--u)); height: calc(3px * var(--u)); border-radius: 0; vertical-align: 2px; }
 .ssc.tech button { border-radius: calc(3px * var(--u)); }
@@ -268,7 +266,7 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
     if (top < pane.scrollTop + 4 || bottom > pane.scrollTop + pane.clientHeight - 4) pane.scrollTop = Math.max(0, top - pane.clientHeight / 2 + li.offsetHeight / 2);
   }, [bi]);
 
-  const words = (i: number) => `Beat ${i + 1} of ${beats.length}, ${clockWords(scene, beats[i]!.at)}: ${beats[i]!.say}`;
+  const words = (i: number) => `Beat ${beatCount(scene, beats[i]!.at)}: ${beats[i]!.say}`;
   const play = (on: boolean) => {
     goal.current = null;
     if (on && tRef.current >= scene.end - 1e-9) show(0);
@@ -303,8 +301,8 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
   return (
     <div className={`ssc${reduce ? ' reduce' : ''}${look === 'technical' ? ' tech' : ''}`} ref={rootRef} style={{ ['--u' as string]: String(u) }} role="group" aria-label={`Animation: ${scene.title}`}>
       <style>{CSS}</style>
+      {/* One count on screen: the beat number lives by the time slider (beatCount), not here too. */}
       <p className="ssc-cap" aria-hidden="true">
-        <b>{look === 'technical' ? `${String(bi + 1).padStart(2, '0')}/${String(beats.length).padStart(2, '0')}` : `${bi + 1}/${beats.length}`}</b>
         {beat.say}
       </p>
       {(scene.legend?.length || scene.source) && (
@@ -355,7 +353,7 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
             <span key={i} style={{ left: `${(b.at / scene.end) * 100}%` }} />
           ))}
         </span>
-        <span className="n" aria-hidden="true">{clockWords(scene, t)}</span>
+        <span className="n" aria-hidden="true">{beatCount(scene, t)}</span>
         <span className="seg" role="group" aria-label="Speed">
           {SPEEDS.map((s) => (
             <button key={s} type="button" aria-pressed={speed === s} onClick={() => setSpeed(s)} aria-label={`${s === 0.5 ? 'Half' : s === 1 ? 'Normal' : 'Double'} speed`}>

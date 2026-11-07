@@ -161,12 +161,13 @@ export function playMs(scene: ShapeScene): number {
   return Math.max(2, Math.min(120, s)) * 1000;
 }
 
-/** A moment in the scene's own clock, for words: "3 / 12" for steps, "14 ms" for a clock. */
-export function clockWords(scene: ShapeScene, t: number): string {
-  const unit = scene.unit ?? 'step';
-  const round = (v: number) => (Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 10) / 10);
-  if (unit === 'step') return `step ${Math.floor(t + 1e-6)} of ${round(scene.end)}`;
-  return `${round(t)} ${unit === 'us' ? 'µs' : unit} of ${round(scene.end)}`;
+/**
+ * The player's one count: the beat the caption shows, as "10 of 15". The time slider, the caption and
+ * the screen reader's words all count beats from this, so no second number (a clock in the scene's
+ * unit) can disagree with it.
+ */
+export function beatCount(scene: ShapeScene, t: number): string {
+  return `${beatAt(scene, t) + 1} of ${scene.beats.length}`;
 }
 
 /** A board colour, or a mix on the way between two, as CSS. */

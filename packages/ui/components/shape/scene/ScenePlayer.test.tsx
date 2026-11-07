@@ -4,7 +4,9 @@
  *   (Next, a drag of the time slider, Play), so a person who asked for no motion sees it;
  * - `plannotator shape frame`'s page (frame.ts) no longer stands the scene still at the moment asked;
  * - the player's own controls reach past its shadow root into the drawing, or the drawing's
- *   pieces are not put back when the player goes.
+ *   pieces are not put back when the player goes;
+ * - two counts come back on screen (a beat number in the caption and a clock in the scene's unit
+ *   by the slider) and disagree: "10/15" next to "step 9 of 15" read as a bug to the person.
  * happy-dom has no SVG geometry, so places and paths are not checked here (timeline.test.ts does
  * them on their own); a look such as opacity is.
  */
@@ -40,7 +42,7 @@ afterEach(() => {
   frame?.setSceneFrame(null);
 });
 
-async function mount(reduce: boolean) {
+async function mount(reduce: boolean, scene: ShapeScene = SCENE) {
   container = document.createElement('div');
   const board = document.createElement('div');
   board.className = 'board';
@@ -52,7 +54,7 @@ async function mount(reduce: boolean) {
   root = createRoot(mountAt);
   const { ScenePlayers } = players!;
   await act(async () => {
-    root!.render(<ScenePlayers board={board} drawnKey={0} scenes={{ lamp: SCENE }} reduce={reduce} />);
+    root!.render(<ScenePlayers board={board} drawnKey={0} scenes={{ lamp: scene }} reduce={reduce} />);
   });
   // The player is a lazy chunk: wait for it to land.
   for (let i = 0; i < 50 && !board.querySelector('[data-shape-player]')?.shadowRoot?.querySelector('.ssc'); i++) {
@@ -76,7 +78,8 @@ async function mount(reduce: boolean) {
       slider().dispatchEvent(new Event('input', { bubbles: true }));
     });
   };
-  return { board, shadow, piece, slider, caption, press, drag };
+  const count = () => shadow.querySelector('.ssc-bar .n')!.textContent ?? '';
+  return { board, shadow, piece, slider, caption, count, press, drag };
 }
 
 describe.skipIf(!hasDom)('the scene player', () => {
@@ -133,5 +136,38 @@ describe.skipIf(!hasDom)('the scene player', () => {
     root = null;
     expect(p.piece.style.opacity).toBe('');
     expect(p.board.querySelector('[data-shape-player]')).toBeNull();
+  });
+
+  test('a scene counted in steps shows one count, the caption\'s beat, at every beat, between beats and at the end', async () => {
+    // Beats on whole steps from 0 (the old clock read "step 0" at beat 1) and one half way (it read the step before).
+    const says = ['Start.', 'One road.', 'A shorter road.', 'Half way there.', 'Done.'];
+    const steps: ShapeScene = {
+      ...SCENE,
+      unit: 'step',
+      end: 6,
+      beats: [0, 1, 2, 3.5, 5].map((at, i) => ({ at, say: says[i]! })),
+    };
+    const p = await mount(false, steps);
+    const check = (i: number) => {
+      expect(p.count()).toBe(`${i + 1} of 5`);
+      // The caption is the beat's words alone: no number of its own to disagree with the count.
+      expect(p.caption().trim()).toBe(says[i]!);
+      expect(p.slider().getAttribute('aria-valuetext')).toBe(`Beat ${i + 1} of 5: ${says[i]}`);
+      // Exactly one count on screen (the screen reader's live line, hidden, says the same words as the slider).
+      const shown = [...p.shadow.querySelectorAll('.ssc > *:not(.sr):not(style)')].map((el) => el.textContent ?? '').join(' ');
+      expect(shown.match(/\d+\s*(of|\/)\s*\d+/g)).toEqual([`${i + 1} of 5`]);
+      const live = p.shadow.querySelector('.sr')!.textContent ?? '';
+      if (live) expect(live).toBe(`Beat ${i + 1} of 5: ${says[i]}`);
+    };
+    for (const [t, i] of [[0, 0], [0.5, 0], [1, 1], [2, 2], [3.4, 2], [3.5, 3], [4.9, 3], [5, 4], [6, 4]] as const) {
+      await p.drag(t);
+      expect(Number(p.slider().value)).toBe(t);
+      check(i);
+    }
+    // Back and Next keep the count with the caption too.
+    await p.press('Back one beat');
+    check(4);
+    await p.press('Back one beat');
+    check(3);
   });
 });
