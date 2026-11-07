@@ -16,6 +16,14 @@ import { QuestionContext } from './QuestionContext';
 import { HostTitle } from '../HostTitle';
 import { UNAVAILABLE_IMAGE_CLASS, useImageResolver } from '../ImageResolverContext';
 import { getImageSrc } from '../ImageThumbnail';
+import {
+  questionChoiceWords,
+  questionPictureShape,
+  questionPicturesShape,
+  readQuestionPictureSize,
+  type QuestionPictureShape,
+  type QuestionPictureSize,
+} from './questionPictureLayout';
 
 /**
  * A `:::question` block rendered as an answer card (the approved "Card"
@@ -276,6 +284,12 @@ export interface QuestionBlockProps {
    *  open a gallery of that question's choices (the Plannotator Inbox's option
    *  sets). Absent: the zoom calls `onImageClick(url, alt)` as before. */
   onZoomChoice?: (key: string, index: number, url: string, alt: string) => void;
+  /** A picture choice's size in pixels, given the URL its picture loads from,
+   *  when the host knows it before the picture loads (the Plannotator Inbox
+   *  records it when the message is sent); null or absent: unknown. The tiles
+   *  carry it for the host's CSS (see `QuestionPictureTiles`); nothing is drawn
+   *  differently without host CSS. */
+  pictureSize?: (url: string) => QuestionPictureSize | null;
 }
 
 /** The picture tile's label (`pictureBadge`): a small dark chip over the picture's top-left corner. */
@@ -327,6 +341,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   pictureChoices = true,
   pictureBadge,
   onZoomChoice,
+  pictureSize,
 }) => {
   const { question, number } = indexed;
   const resolveImage = useImageResolver();
@@ -896,6 +911,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                 renderText={inline}
                 labelProps={(label) => ({ onPointerDown: onRowPointerDown, onClickCapture: (event) => onRowClick(event, label) })}
                 pictureBadge={pictureBadge}
+                // Asked by the picture's own URL, loaded or not: a picture that fails keeps the set's layout.
+                pictureSize={pictureSize ? (index) => (pictures[index] ? pictureSize(pictures[index]!) : null) : undefined}
               />
             ) : (
               question.choices.map((choice) => {
@@ -1146,6 +1163,9 @@ export interface QuestionPictureTilesProps {
   renderBadges?: (choice: QuestionPictureTileChoice, index: number) => React.ReactNode;
   /** A small label over a tile's picture, top left (the card's `pictureBadge`); null or absent draws none. */
   pictureBadge?: (choice: { label: string; image: { alt: string; src: string } }) => string | null;
+  /** Each choice's picture size in pixels by its place in `choices`, when the host knows it before the picture loads
+   *  (the card's `pictureSize`). Asked whether or not the picture loaded, so one that fails leaves the layout as it was. */
+  pictureSize?: (index: number) => QuestionPictureSize | null;
 }
 
 /**
@@ -1172,111 +1192,135 @@ export const QuestionPictureTiles: React.FC<QuestionPictureTilesProps> = ({
   inputProps,
   renderBadges,
   pictureBadge,
-}) => (
-  <div
-    className="mb-1 grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2"
-    data-question-tiles=""
-  >
-    {choices.map((choice, index) => {
-      const checked = selected.includes(choice.label);
-      const shown = urls[index] ?? null;
-      // The alt text names the picture; one that only repeats the label is decorative.
-      const alt = choice.image ? (choice.image.alt || choice.label) : '';
-      const decorative = !!choice.image && alt.trim() === choice.label.trim();
-      const host = labelProps?.(choice.label);
-      const input = inputProps?.(choice.label);
-      return (
-        <div
-          key={choice.label}
-          className={cx(
-            'relative flex min-w-0 flex-col overflow-hidden rounded-[9px] border transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary',
-            checked ? 'border-primary/70 bg-primary/10' : 'border-border/80 bg-background/40',
-            !readOnly && !checked && 'hover:border-foreground/30',
-          )}
-          data-question-tile=""
-          data-question-tile-checked={checked ? '' : undefined}
-          data-question-tile-recommended={choice.recommended ? '' : undefined}
-        >
-          <label
-            {...host}
-            className={cx('flex min-w-0 flex-1 flex-col', readOnly ? 'cursor-default' : 'cursor-pointer')}
-            data-question-option=""
-          >
-            {choice.image && (
-              <span
-                className="annotation-exclude select-none block aspect-[4/3] w-full overflow-hidden border-b border-border/60 bg-muted/35"
-                // Inline, not a utility class: the badge's position needs it, and no new class reaches the guides.show viewer's CSS.
-                style={{ position: 'relative' }}
-                data-pinpoint-ignore=""
-                data-question-tile-picture=""
-              >
-                {(() => {
-                  const badge = pictureBadge?.({ label: choice.label, image: choice.image });
-                  return badge ? (
-                    <span style={PICTURE_BADGE_STYLE} data-question-picture-badge="">
-                      {badge}
-                    </span>
-                  ) : null;
-                })()}
-                {shown ? (
-                  <img
-                    src={shown}
-                    alt={decorative ? '' : alt}
-                    draggable={false}
-                    loading="lazy"
-                    className="h-full w-full object-contain"
-                    data-question-picture=""
-                    data-zoomable=""
-                    data-image-src={choice.image.src}
-                    onError={() => onPictureError?.(shown)}
-                  />
-                ) : (
-                  <span
-                    className="grid h-full place-items-center px-2 text-center text-xs text-muted-foreground"
-                    title={heldTitle?.(choice.image.src) ?? undefined}
-                    data-image-unavailable=""
-                  >
-                    {alt}
-                  </span>
-                )}
-              </span>
+  pictureSize,
+}) => {
+  // Known before any picture loads, so a host's layout (inbox.css) never moves once they do.
+  // A picture that fails to load keeps its recorded size and shape (the failed box draws none of it), so the set's
+  // shape, and with it the layout, stays as it was.
+  const sizes = choices.map((choice, index) => (choice.image ? readQuestionPictureSize(pictureSize?.(index)) : null));
+  const shapes: (QuestionPictureShape | null)[] = sizes.map((size) => (size ? questionPictureShape(size) : null));
+  const pictured = choices.flatMap((choice, index) => (choice.image ? [shapes[index] ?? null] : []));
+  return (
+    <div
+      className="mb-1 grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2"
+      data-question-tiles=""
+      data-question-tiles-count={choices.length}
+      data-question-tiles-shape={questionPicturesShape(pictured)}
+      data-question-tiles-words={questionChoiceWords(choices)}
+      data-question-tiles-bare={choices.some((choice) => !choice.image) ? '' : undefined}
+    >
+      {choices.map((choice, index) => {
+        const checked = selected.includes(choice.label);
+        const shown = urls[index] ?? null;
+        const size = sizes[index];
+        // The alt text names the picture; one that only repeats the label is decorative.
+        const alt = choice.image ? (choice.image.alt || choice.label) : '';
+        const decorative = !!choice.image && alt.trim() === choice.label.trim();
+        const host = labelProps?.(choice.label);
+        const input = inputProps?.(choice.label);
+        const held = choice.image && !shown ? (heldTitle?.(choice.image.src) ?? null) : null;
+        return (
+          <div
+            key={choice.label}
+            className={cx(
+              'relative flex min-w-0 flex-col overflow-hidden rounded-[9px] border transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary',
+              checked ? 'border-primary/70 bg-primary/10' : 'border-border/80 bg-background/40',
+              !readOnly && !checked && 'hover:border-foreground/30',
             )}
-            <span className="flex w-full min-w-0 items-start gap-2 px-2.5 py-2" data-question-tile-caption="">
-              <input
-                {...input}
-                type={inputType}
-                name={name}
-                checked={checked}
-                onChange={(e) => onPick(choice.label, e.target.checked)}
-                className="mt-[3px] h-[15px] w-[15px] shrink-0 cursor-pointer accent-primary disabled:cursor-default"
-                data-question-control=""
-                disabled={readOnly}
-              />
-              <span className="min-w-0 flex-1 select-text text-[13px] leading-[1.4] text-foreground" data-question-part="choice">
-                <span className="font-[550]" data-question-tile-label="">{renderText(choice.label)}</span>
-                {choice.description && (
-                  <span className="block text-muted-foreground" data-question-tile-description="">{renderText(choice.description)}</span>
-                )}
-                {renderBadges
-                  ? renderBadges(choice, index)
-                  : choice.recommended && <span className="mt-1 block"><Tag tone="rec">Recommended</Tag></span>}
-              </span>
-            </span>
-          </label>
-          {shown && onZoom && (
-            <button
-              type="button"
-              onClick={() => onZoom(shown, alt, index)}
-              aria-label={`Zoom: ${alt}`}
-              className="annotation-exclude absolute right-1.5 top-1.5 grid h-7 w-7 place-items-center rounded-md bg-background/85 text-foreground shadow-sm ring-1 ring-border/70 before:absolute before:-inset-2 before:content-[''] hover:bg-background focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary"
-              data-pinpoint-ignore=""
-              data-question-zoom=""
+            data-question-tile=""
+            data-question-tile-checked={checked ? '' : undefined}
+            data-question-tile-recommended={choice.recommended ? '' : undefined}
+            data-question-tile-shape={shapes[index] ?? undefined}
+            data-question-tile-no-picture={choice.image ? undefined : ''}
+          >
+            <label
+              {...host}
+              className={cx('flex min-w-0 flex-1 flex-col', readOnly ? 'cursor-default' : 'cursor-pointer')}
+              data-question-option=""
             >
-              <ZoomGlyph />
-            </button>
-          )}
-        </div>
-      );
-    })}
-  </div>
-);
+              {choice.image && (
+                <span
+                  className="annotation-exclude select-none block aspect-[4/3] w-full overflow-hidden border-b border-border/60 bg-muted/35"
+                  // Inline, not a utility class: the badge's position needs it, and no new class reaches the guides.show viewer's CSS.
+                  // The size rides custom properties, which draw nothing unless a host's CSS reads them.
+                  style={
+                    size
+                      ? ({ position: 'relative', '--question-picture-ratio': `${size.width} / ${size.height}`, '--question-picture-width': `${size.width}px` } as React.CSSProperties)
+                      : { position: 'relative' }
+                  }
+                  data-pinpoint-ignore=""
+                  data-question-tile-picture=""
+                >
+                  {(() => {
+                    const badge = pictureBadge?.({ label: choice.label, image: choice.image });
+                    return badge ? (
+                      <span style={PICTURE_BADGE_STYLE} data-question-picture-badge="">
+                        {badge}
+                      </span>
+                    ) : null;
+                  })()}
+                  {shown ? (
+                    <img
+                      src={shown}
+                      alt={decorative ? '' : alt}
+                      draggable={false}
+                      loading="lazy"
+                      className="h-full w-full object-contain"
+                      data-question-picture=""
+                      data-zoomable=""
+                      data-image-src={choice.image.src}
+                      onError={() => onPictureError?.(shown)}
+                    />
+                  ) : (
+                    <span
+                      className="grid h-full place-items-center px-2 text-center text-xs text-muted-foreground"
+                      title={held ?? undefined}
+                      data-image-unavailable=""
+                      // Not held by the host: the picture failed to load.
+                      data-question-picture-failed={held ? undefined : ''}
+                    >
+                      {alt}
+                    </span>
+                  )}
+                </span>
+              )}
+              <span className="flex w-full min-w-0 items-start gap-2 px-2.5 py-2" data-question-tile-caption="">
+                <input
+                  {...input}
+                  type={inputType}
+                  name={name}
+                  checked={checked}
+                  onChange={(e) => onPick(choice.label, e.target.checked)}
+                  className="mt-[3px] h-[15px] w-[15px] shrink-0 cursor-pointer accent-primary disabled:cursor-default"
+                  data-question-control=""
+                  disabled={readOnly}
+                />
+                <span className="min-w-0 flex-1 select-text text-[13px] leading-[1.4] text-foreground" data-question-part="choice">
+                  <span className="font-[550]" data-question-tile-label="">{renderText(choice.label)}</span>
+                  {choice.description && (
+                    <span className="block text-muted-foreground" data-question-tile-description="">{renderText(choice.description)}</span>
+                  )}
+                  {renderBadges
+                    ? renderBadges(choice, index)
+                    : choice.recommended && <span className="mt-1 block"><Tag tone="rec">Recommended</Tag></span>}
+                </span>
+              </span>
+            </label>
+            {shown && onZoom && (
+              <button
+                type="button"
+                onClick={() => onZoom(shown, alt, index)}
+                aria-label={`Zoom: ${alt}`}
+                className="annotation-exclude absolute right-1.5 top-1.5 grid h-7 w-7 place-items-center rounded-md bg-background/85 text-foreground shadow-sm ring-1 ring-border/70 before:absolute before:-inset-2 before:content-[''] hover:bg-background focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary"
+                data-pinpoint-ignore=""
+                data-question-zoom=""
+              >
+                <ZoomGlyph />
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};

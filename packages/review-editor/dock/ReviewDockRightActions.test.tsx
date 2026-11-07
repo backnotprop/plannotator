@@ -46,10 +46,11 @@ describe('ReviewDockRightActions', () => {
     expect(configStore.get('diffStyle')).toBe('unified');
   });
 
-  test.skipIf(!hasDom)('preserves desktop split and options controls', async () => {
+  test.skipIf(!hasDom)('desktop: one Split/Unified button that switches to the other layout, and the Diff display gear with every row', async () => {
+    const onDiffStyleChange = mock((_style: 'split' | 'unified') => {});
     const state = {
       diffStyle: 'unified',
-      onDiffStyleChange: mock(() => {}),
+      onDiffStyleChange,
       isCompactTouchLayout: false,
       allFilesAllCollapsed: false,
       onToggleAllFilesCollapsed: () => {},
@@ -64,7 +65,21 @@ describe('ReviewDockRightActions', () => {
       </ReviewStateProvider>,
     ));
 
-    expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent === 'Split')).toBe(true);
-    expect(Array.from(host.querySelectorAll('button')).some((button) => button.title === 'Diff display options')).toBe(true);
+    // One button, no "Split" / "Unified" words: it shows the layout on screen and offers the other.
+    const buttons = Array.from(host.querySelectorAll('button'));
+    expect(buttons.some((button) => button.textContent === 'Split' || button.textContent === 'Unified')).toBe(false);
+    const toggle = host.querySelector<HTMLButtonElement>('[data-diff-layout-toggle]')!;
+    expect(toggle.getAttribute('data-diff-layout-toggle')).toBe('unified');
+    expect(toggle.getAttribute('aria-label')).toBe('Switch to Split view');
+    await act(async () => toggle.click());
+    expect(onDiffStyleChange).toHaveBeenCalledWith('split');
+
+    // The gear opens the popover: no layout row (the button above has it), and code review's two repository rows.
+    const gear = buttons.find((button) => button.title === 'Diff display options')!;
+    await act(async () => gear.click());
+    const popup = document.querySelector('[data-diff-display-popup]')!;
+    const rows = Array.from(popup.querySelectorAll('[role="switch"]')).map((row) => row.textContent);
+    expect(rows).toEqual(['Wrap long lines', 'Line numbers', 'Backgrounds', 'Whole file', 'Hide whitespace']);
+    expect(popup.textContent).not.toContain('Unified');
   });
 });

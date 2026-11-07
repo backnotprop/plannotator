@@ -1,27 +1,35 @@
 /**
  * Show me's pure parts. What regresses if these fail: a picture's part opens
  * the wrong chapter (or none, when one holds the file), or round 2's Overview
- * tags parts the agent did not change (or misses one it did).
+ * tags parts the agent did not change (or misses one it did), or a part of an
+ * older board lands on lines that hold other code now.
  */
 import { describe, expect, test } from 'bun:test';
 import { askShownQuestion } from '../ask/askModel';
 import { FIXTURE_V2_HTML } from '@plannotator/core/guide-format-fixtures';
-import { anchorLines, anchorPart, overviewPicture, changedMarks, chapterOf, earlierLinesNow, newSideLines, showMeEnded, showMePlace, showMeSamePlace, shiftLines, waitingShowMe } from './showMeModel';
+import { reviewDrawnOn, reviewLines, anchorLines, anchorPart, overviewPicture, changedMarks, chapterOf, earlierLinesNow, newSideLines, partLanding, showMeEnded, showMeSamePlace, shiftLines, waitingShowMe } from './showMeModel';
 
 describe('Show me model', () => {
-  test("a part opens the chapter that holds its file, else All files (null)", () => {
-    const chapters = [{ diffs: [{ file: 'a.ts' }] }, { diffs: [{ file: 'b.ts' }, { file: 'src/retry.ts' }] }];
-    expect(chapterOf(chapters, 'src/retry.ts')).toBe(1);
-    expect(chapterOf(chapters, 'unplaced.ts')).toBeNull();
+  test("a part drawn on this review lands on lines its diff shows; lines it does not show go to the board's own viewer", () => {
+    const now = new Map([['w.ts', new Map([[16, 'a'], [17, 'b']])]]);
+    expect(partLanding({ path: 'w.ts', line: 16, lineEnd: 17 }, now)).toEqual([16, 17]);
+    expect(partLanding({ path: 'w.ts', line: 9999 }, now)).toBeNull();
+    expect(partLanding({ path: 'other.ts', line: 16 }, now)).toBeNull();
   });
 
-  test("round 2's changed parts: new words or a new id, never a part that kept both", () => {
-    const before = '<div data-mark="pick">Pick</div><div data-mark="wait">Wait 1s</div><div data-mark="gone">Gone</div>';
-    const after = '<div data-mark="pick">Pick</div><div data-mark="wait">Wait, then back off</div><div data-mark="new">Dead letter</div>';
-    expect([...changedMarks([before], [after])].sort()).toEqual(['new', 'wait']);
+  test("a part drawn on an earlier review lands where its code is now, never on its old numbers", () => {
+    const earlier = new Map([['w.ts', new Map([[16, 'a'], [17, 'b'], [18, 'c']])]]);
+    const moved = new Map([['w.ts', new Map([[6, 'log'], [17, 'a'], [18, 'b'], [19, 'c']])]]);
+    expect(partLanding({ path: 'w.ts', line: 16, lineEnd: 18 }, moved, { lines: earlier })).toEqual([17, 19]);
+    // Rewritten, with nothing around it to go by; the earlier review not read yet: its old numbers would be other code.
+    const rewritten = new Map([['w.ts', new Map([[16, 'x'], [17, 'y'], [18, 'z']])]]);
+    expect(partLanding({ path: 'w.ts', line: 16, lineEnd: 18 }, rewritten, { lines: earlier })).toBe('changed');
+    expect(partLanding({ path: 'w.ts', line: 16 }, moved, { lines: undefined })).toBe('changed');
+    // The earlier diff did not show that code, or the file is not in this one: the board's own viewer.
+    expect(partLanding({ path: 'w.ts', line: 400 }, moved, { lines: earlier })).toBeNull();
+    expect(partLanding({ path: 'gone.ts', line: 16 }, moved, { lines: earlier })).toBeNull();
   });
 
-  // Round 2 for Show me: a picture stays as asked; its parts follow moved lines, and lines rewritten since are "changed since asked".
   test("round 2: a part follows its moved lines, keeps unchanged ones, and lines rewritten since are changed", () => {
     const round1 = newSideLines(['@@ -1,3 +1,4 @@', ' a', '+pick()', '+wait()', ' b', ''].join('\n'));
     // Round 2 adds two lines above pick() and rewrites wait().
@@ -32,52 +40,11 @@ describe('Show me model', () => {
     expect(anchorPart({ path: 'w.ts', line: 1 }, round1, round2)).toEqual({ now: { path: 'w.ts', line: 1 }, changed: false });
   });
 
-  // The Ask window shows a Show me as the person asked it: the agent's request to draw (with its CLI line) never shows.
-  test("the Ask window reads a Show me turn as the person's words, a plain turn as its question", () => {
-    const show_me = { review: 'msg_1', file: 'src/jobs/retry-worker.ts', lines: [16, 18] as [number, number], round: 1, words: 'after the third failure?' };
-    expect(askShownQuestion({ question: 'The reviewer pressed Show me… plannotator review draw …', kind: 'show_me', show_me })).toBe('Show me on retry-worker.ts lines 16–18: after the third failure?');
-    expect(askShownQuestion({ question: '…', kind: 'show_me', show_me: { review: 'msg_1', file: null, lines: null, round: 1 } })).toBe('Show me on the whole review');
-    expect(askShownQuestion({ question: 'Why five attempts?' })).toBe('Why five attempts?');
-  });
-
-  test('the sheet names lines with an en dash, and the Overview as the whole review', () => {
-    expect(showMePlace('src/retry-worker.ts', [16, 18])).toBe('retry-worker.ts lines 16–18');
-    expect(showMePlace(null, null)).toBe('the whole review');
-  });
   test("Show me again asks about the lines where they are now: moved, they follow; changed or unseen, none", () => {
     const before = new Map([[16, 'a'], [17, 'b'], [18, 'c']]);
     expect(anchorLines([16, 18], before, new Map([[17, 'a'], [18, 'b'], [19, 'c']]))).toEqual([17, 19]);
     expect(anchorLines([16, 18], before, new Map([[16, 'a'], [17, 'B'], [18, 'c']]))).toBeNull();
     expect(anchorLines([15, 16], before, new Map([[15, 'z'], [16, 'a']]))).toBeNull();
-  });
-
-  test("this round's picture opens again only for the same place: inside its lines, or most of the lines both cover", () => {
-    const asked = { file: 'w.ts', lines: [16, 18] as [number, number] };
-    expect(showMeSamePlace(asked, { file: 'w.ts', lines: [17, 17] })).toBe(true);
-    expect(showMeSamePlace(asked, { file: 'w.ts', lines: [15, 18] })).toBe(true);
-    expect(showMeSamePlace(asked, { file: 'w.ts', lines: [1, 200] })).toBe(false);
-    expect(showMeSamePlace(asked, { file: 'w.ts', lines: [18, 30] })).toBe(false);
-    expect(showMeSamePlace({ file: null, lines: null }, { file: null, lines: null })).toBe(true);
-  });
-
-  test("a Show me waits only while the agent draws it; one the Inbox kept unanswered never locks its lines", () => {
-    const place = { file: 'w.ts', lines: [16, 18] as [number, number] };
-    const turn = (id: string) => ({ id, kind: 'show_me' as const, show_me: { review: 'msg_r', file: 'w.ts', lines: [16, 18] as [number, number] } });
-    // POST …/ask answered `provider_id: null, reason: "no_connection"`: the turn is kept, nothing runs.
-    expect(waitingShowMe([turn('t-noconn')], 'msg_r', place, null, null)).toBeUndefined();
-    // The session went away before a word (a failure with no words writes nothing): the same kept turn, a slot freed.
-    expect(waitingShowMe([turn('t-gone')], 'msg_r', place, 't-other', null)).toBeUndefined();
-    // Drawn now: the Inbox's running turn, or this window's own stream.
-    expect(waitingShowMe([turn('t-run')], 'msg_r', place, 't-run', null)?.id).toBe('t-run');
-    expect(waitingShowMe([turn('t-live')], 'msg_r', place, null, 't-live')?.id).toBe('t-live');
-  });
-  test("only a drawn (version-3) overview is a Shape picture; every version-2 html diagram keeps the viewer's note", () => {
-    // The format's own `code:` link picture, and one that would pass Shape's rules: both as before Show me.
-    expect(overviewPicture(FIXTURE_V2_HTML.guide.overview?.diagram)).toBeNull();
-    expect(overviewPicture({ kind: 'html', source: '<div data-mark="g" data-code="src/auth.ts#L1">guard</div>' })).toBeNull();
-    expect(overviewPicture({ kind: 'mermaid', source: 'flowchart LR' })).toBeNull();
-    const drawn = { kind: 'html' as const, source: '<div data-mark="g">guard</div>', width: 800, height: 360 };
-    expect(overviewPicture(drawn)).toBe(drawn);
   });
 
   test("an earlier round's changed lines are found where the code around them moved, never at their old numbers (the delta-5 repro)", () => {
@@ -123,17 +90,112 @@ describe('Show me model', () => {
     expect(earlierLinesNow([200, 202], before, after)).toBeNull();
   });
 
-  test("a Show me that named its picture has not ended, even before this window has read the picture", () => {
-    const idle = { running: false, busy: false, drawn: false };
+  test("a part opens the chapter that holds its file, else All files (null)", () => {
+    const chapters = [{ diffs: [{ file: 'a.ts' }] }, { diffs: [{ file: 'b.ts' }, { file: 'src/retry.ts' }] }];
+    expect(chapterOf(chapters, 'src/retry.ts')).toBe(1);
+    expect(chapterOf(chapters, 'unplaced.ts')).toBeNull();
+  });
+
+  test("round 2's changed parts: new words or a new id, never a part that kept both", () => {
+    const before = '<div data-mark="pick">Pick</div><div data-mark="wait">Wait 1s</div><div data-mark="gone">Gone</div>';
+    const after = '<div data-mark="pick">Pick</div><div data-mark="wait">Wait, then back off</div><div data-mark="new">Dead letter</div>';
+    expect([...changedMarks([before], [after])].sort()).toEqual(['new', 'wait']);
+  });
+
+  // Round 2 for Show me: a picture stays as asked; its parts follow moved lines, and lines rewritten since are "changed since asked".
+  test("the Ask window reads a Show me turn as the person's words, a plain turn as its question", () => {
+    const show_me = { review: 'msg_1', file: 'src/jobs/retry-worker.ts', lines: [16, 18] as [number, number], round: 1, words: 'after the third failure?' };
+    expect(askShownQuestion({ question: 'The reviewer pressed Show me… plannotator review draw …', kind: 'show_me', show_me })).toBe('Show me on retry-worker.ts lines 16–18: after the third failure?');
+    expect(askShownQuestion({ question: '…', kind: 'show_me', show_me: { review: 'msg_1', file: null, lines: null, round: 1 } })).toBe('Show me on the whole review');
+    expect(askShownQuestion({ question: 'Why five attempts?' })).toBe('Why five attempts?');
+  });
+
+  test("this round's picture opens again only for the same place: inside its lines, or most of the lines both cover", () => {
+    const asked = { file: 'w.ts', lines: [16, 18] as [number, number] };
+    expect(showMeSamePlace(asked, { file: 'w.ts', lines: [17, 17] })).toBe(true);
+    expect(showMeSamePlace(asked, { file: 'w.ts', lines: [15, 18] })).toBe(true);
+    expect(showMeSamePlace(asked, { file: 'w.ts', lines: [1, 200] })).toBe(false);
+    expect(showMeSamePlace(asked, { file: 'w.ts', lines: [18, 30] })).toBe(false);
+    expect(showMeSamePlace({ file: null, lines: null }, { file: null, lines: null })).toBe(true);
+  });
+
+  test("a Show me waits only while the agent draws it; one the Inbox kept unanswered never locks its lines", () => {
+    const place = { file: 'w.ts', lines: [16, 18] as [number, number] };
+    const turn = (id: string) => ({ id, kind: 'show_me' as const, show_me: { review: 'msg_r', file: 'w.ts', lines: [16, 18] as [number, number] } });
+    // POST …/ask answered `provider_id: null, reason: "no_connection"`: the turn is kept, nothing runs.
+    expect(waitingShowMe([turn('t-noconn')], 'msg_r', place, null, null)).toBeUndefined();
+    // The session went away before a word (a failure with no words writes nothing): the same kept turn, a slot freed.
+    expect(waitingShowMe([turn('t-gone')], 'msg_r', place, 't-other', null)).toBeUndefined();
+    // Drawn now: the Inbox's running turn, or this window's own stream.
+    expect(waitingShowMe([turn('t-run')], 'msg_r', place, 't-run', null)?.id).toBe('t-run');
+    expect(waitingShowMe([turn('t-live')], 'msg_r', place, null, 't-live')?.id).toBe('t-live');
+  });
+  test("only a drawn (version-3) overview is a Shape picture; every version-2 html diagram keeps the viewer's note", () => {
+    // The format's own `code:` link picture, and one that would pass Shape's rules: both as before Show me.
+    expect(overviewPicture(FIXTURE_V2_HTML.guide.overview?.diagram)).toBeNull();
+    expect(overviewPicture({ kind: 'html', source: '<div data-mark="g" data-code="src/auth.ts#L1">guard</div>' })).toBeNull();
+    expect(overviewPicture({ kind: 'mermaid', source: 'flowchart LR' })).toBeNull();
+    const drawn = { kind: 'html' as const, source: '<div data-mark="g">guard</div>', width: 800, height: 360 };
+    expect(overviewPicture(drawn)).toBe(drawn);
+  });
+
+  test("a Show me with a board has not ended; with no board or answer, and nothing running, it has", () => {
+    const idle = { running: false, busy: false };
+    expect(showMeEnded({ shape: 'shp_1' }, idle)).toBe(false);
     expect(showMeEnded({}, idle)).toBe(true);
-    expect(showMeEnded({ drawing: 'drw_1' }, idle)).toBe(false);
-    // The list, read again for it, still lacks the picture: it never comes, and the box does not wait on it.
-    expect(showMeEnded({ drawing: 'drw_1' }, { ...idle, lost: true })).toBe(true);
-    expect(showMeEnded({ drawing: 'drw_1', answer: 'words' }, { ...idle, lost: true })).toBe(false);
-    expect(showMeEnded({ answer: '' }, idle)).toBe(false);
+    expect(showMeEnded({}, { running: true, busy: false })).toBe(false);
+    expect(showMeEnded({ answer: 'words' }, idle)).toBe(false);
     expect(showMeEnded({ stopped: true }, idle)).toBe(false);
-    expect(showMeEnded({}, { ...idle, running: true })).toBe(false);
-    expect(showMeEnded({}, { ...idle, busy: true })).toBe(false);
-    expect(showMeEnded({}, { ...idle, drawn: true })).toBe(false);
+  });
+});
+
+describe('which review a version counts its lines in', () => {
+  const messages = [
+    { id: 'ask', created_at: '2026-01-01T10:00:00.000Z' },
+    { id: 'r1', created_at: '2026-01-01T11:00:00.000Z', guide: { review: {} } },
+    { id: 'reply1', created_at: '2026-01-01T12:00:00.000Z' },
+    { id: 'r2', created_at: '2026-01-01T13:00:00.000Z', guide: { review: {} } },
+    { id: 'reply2', created_at: '2026-01-01T14:00:00.000Z' },
+  ];
+  test('the newest review at or before the message it was stored through', () => {
+    expect(reviewDrawnOn('r1', messages, undefined)).toBe('r1');
+    expect(reviewDrawnOn('reply1', messages, undefined)).toBe('r1');
+    expect(reviewDrawnOn('r2', messages, 'r1')).toBe('r2');
+    expect(reviewDrawnOn('reply2', messages, undefined)).toBe('r2');
+  });
+  test('stored through nothing, or through something before any review: the review its Show me names', () => {
+    expect(reviewDrawnOn(null, messages, 'r1', '2026-01-01T15:00:00.000Z')).toBe('r1');
+    expect(reviewDrawnOn('ask', messages, 'r1')).toBe('r1');
+    expect(reviewDrawnOn('elsewhere', messages, 'r1')).toBe('r1');
+  });
+  test('no Show me made it: the newest review when the version was stored, wherever it was stored through', () => {
+    expect(reviewDrawnOn(null, messages, undefined, '2026-01-01T12:30:00.000Z')).toBe('r1');
+    expect(reviewDrawnOn(null, messages, undefined, '2026-01-01T13:30:00.000Z')).toBe('r2');
+    expect(reviewDrawnOn('ask', messages, undefined, '2026-01-01T12:30:00.000Z')).toBe('r1');
+    expect(reviewDrawnOn('elsewhere', messages, undefined, '2026-01-01T13:30:00.000Z')).toBe('r2');
+    // At the very moment of the review counts as after it.
+    expect(reviewDrawnOn(null, messages, undefined, '2026-01-01T11:00:00.000Z')).toBe('r1');
+  });
+  test('stored before any review, or with no time: none', () => {
+    expect(reviewDrawnOn(null, messages, undefined, '2026-01-01T10:30:00.000Z')).toBeNull();
+    expect(reviewDrawnOn('ask', messages, undefined, '2026-01-01T10:30:00.000Z')).toBeNull();
+    expect(reviewDrawnOn(null, messages, undefined)).toBeNull();
+  });
+});
+
+describe('a part whose lines mean nothing here', () => {
+  const now = new Map([['w.ts', new Map([[16, 'a'], [17, 'b']])], ['gone.ts', new Map<number, string>()]]);
+  test('drawn on none of these reviews: the board\'s own viewer, never its numbers, even when this diff has those lines', () => {
+    expect(partLanding({ path: 'w.ts', line: 16 }, now, null)).toBeNull();
+    expect(partLanding({ path: 'other.ts', line: 16 }, now, null)).toBeNull();
+    expect(partLanding({ path: 'gone.ts', line: 2 }, now, null)).toBe('changed');
+  });
+  test('a file the review deletes: the note, in any review', () => {
+    expect(partLanding({ path: 'gone.ts', line: 2 }, now)).toBe('changed');
+    expect(partLanding({ path: 'gone.ts', line: 2 }, now, { lines: new Map() })).toBe('changed');
+  });
+  test('a file with no hunks shows no lines and hides none: the board opens it', () => {
+    const lines = reviewLines([{ path: 'moved.ts', patch: 'diff --git a/o.ts b/moved.ts\nsimilarity index 100%\nrename from o.ts\nrename to moved.ts\n' }]);
+    expect(partLanding({ path: 'moved.ts', line: 2 }, lines)).toBeNull();
   });
 });

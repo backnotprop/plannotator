@@ -687,8 +687,11 @@ describe("the announcement", () => {
     expect(w.codex.starts()).toBe(0);
   });
 
-  test("no Codex: nothing started", async () => {
+  test("no Codex: not due (so it never holds the line of one-time dialogs), and nothing started", async () => {
     const w = await world({ version: "0.30.0", usedBefore: true, codex: null });
+    // No `codex` CLI at all: settled without asking Codex, before any page waits on a long reply to claim it.
+    expect((await w.settings()).voice.intro_due).toBe(false);
+    expect(((await w.settings()) as unknown as { reveal: { next: string | null } }).reveal.next).not.toBe("voice");
     expect(await claim(w)).toBe(false);
     expect(w.saved().inboxVoiceIntro?.shownAt).toBeUndefined();
   });

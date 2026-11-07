@@ -1,7 +1,8 @@
 /**
  * The one-time voice announcement, shaped like the list options intro (ListLookIntro.tsx): a picture in the
  * always-light frame, a title, a line, then the choice. Turn on voice only sets the switch: the browser's microphone
- * prompt comes at the first press of the mic. Not now and Escape change nothing, and the Inbox has already retired it.
+ * prompt comes at the first press of the mic. Not now and Escape change nothing, and the Inbox has already retired it:
+ * voice is an update-day dialog, so its Not now keeps the line's usual day (only an offer's Not now waits three).
  */
 import { useId, useState } from 'react';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';

@@ -1,0 +1,26 @@
+# Root sheet, zero notes.
+sheet: C-001
+scope: root
+kind: conceptual
+title: Northwind Freight dispatch and billing platform
+question: Who sends us freight, who moves it, who pays for it, and where a person still has to step in by hand.
+bands:
+  - id: read
+    label: Where dispatchers, shippers and drivers in 31 countries read and decide
+    means: six surfaces, four scripts
+    tone: sand
+    row: [ ops, ui, jp, ar, vn, fleet ]
+  - id: work
+    label: Where the work lives
+    tone: stone
+    row: [ platform 8, [ legacy, partners, 4 ] ]
+  - id: hands
+    label: Vendors with no drawn logo
+    tone: mist
+    show: chip
+    row: [ kafka, snow, twilio, ~, sfsl, sap ]
+    split: { before: sfsl, left: in our AWS account, right: SaaS we pay per seat }
+callouts:
+  - { to: platform, side: left, title: Frachtabrechnungssachbearbeiter, text: "Freight billing clerks in Hamburg and Rotterdam, who still reconcile 2% of invoices by hand every month-end." }
+  - { to: partners, side: right, title: Carriers that will never use an API, text: "EDI over SFTP since 1998." }
+show: all

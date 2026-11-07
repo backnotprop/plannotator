@@ -60,6 +60,8 @@ async function shot(page: Page, name: string, sizes: ('desktop' | 'narrow')[] = 
 function envFor(fake: FakeAgents, root: string, extra: Record<string, string> = {}): Record<string, string> {
   return {
     ...fake.env,
+    // The fakes' scratch home, where they set the agents up (spread above; named so the HOME scan sees it).
+    HOME: fake.env.HOME,
     PLANNOTATOR_DATA_DIR: join(root, 'data'),
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_SKIP_BROWSER_OPEN: '1',
@@ -307,6 +309,8 @@ test('stress: every note agent at once, long and non-Latin paths, at 1280 and 37
   mkdirSync(openCodeDir, { recursive: true });
   writeFileSync(join(openCodeDir, 'opencode.json'), JSON.stringify({ plugin: ['@plannotator/opencode'] }));
   writeFileSync(join(openCodeDir, 'AGENTS.md'), '# OpenCode rules\n');
+  // The tour decided: the note waits for the tour's entry screen to go (approval "inbox-one-time-dialogs").
+  markTourDecided(join(root, 'data'));
   const env = envFor(fake, root, { CODEX_HOME: codexHome, PI_CODING_AGENT_DIR: piDir, CLAUDE_CONFIG_DIR: claudeDir });
   const run = (args: string[]) => spawnSync(binary, ['inbox', ...args], { env, cwd: root, encoding: 'utf8', timeout: 90_000 });
   const context = await newContext(browser);

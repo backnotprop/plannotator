@@ -12,7 +12,7 @@
  *   GET  /api/inbox/sessions                 every live session, grouped by project;
  *                                            `?session=<id>` adds `session: { session, live }`
  *                                            (with the asker grace) for a thread's delivery line
- *   POST /api/inbox/messages                 `{ to, body, idempotency_key, uploads?, draft_id?, thread_name?, thread_name_auto?, board_request?, decision_ask? }`:
+ *   POST /api/inbox/messages                 `{ to, body, idempotency_key, uploads?, draft_id?, thread_name?, thread_name_auto?, thread_name_numbered?, review?, board_request?, decision_ask? }`:
  *                                            a new thread (409 `session_not_live`, nothing written). With
  *                                            `to.launch.trust` (Trust and start) only the owner's window: the
  *                                            Send saves the folder's trust, so this form alone is never a plain write
@@ -44,7 +44,9 @@ import { deleteInboxDraft, inboxDraftUploadIds, listInboxDrafts, saveInboxDraft 
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import {
+  assertInboxUploadsPending,
   inboxUploadAttachments,
+  inboxUploadFromAttachment,
   INBOX_UPLOAD_MAX_BYTES,
   readInboxUploadText,
   receiveInboxUpload,
@@ -92,6 +94,8 @@ export function createInboxCompose(options: {
   now?: () => Date;
   /** Whether the person has the Board on: a Send's `board_request` is kept only then. Absent: off. */
   boardOn?: () => boolean;
+  /** A New review on local changes started this thread (`review` on a Send): its row shows from now on. */
+  onReviewStart?: (threadId: string, review: unknown, where: { host: string; project_id: string; at: string }) => void;
   /** This Inbox's stable id (linked machines): the sessions answer says whose sessions they are. */
   machine?: () => string;
   /** A compose draft was saved, deleted or sent: every window's stream says `event: drafts`, so its Drafts count follows (#2593). */
@@ -187,14 +191,16 @@ export function createInboxCompose(options: {
     const project = prepared ? prepared.project : target.root !== null ? await options.resolveProject(root) : store.projectByRoot(root);
     if (!project) throw new InboxError("project_not_found", "That session's project is gone.");
     const at = now().toISOString();
-    let attachments: ReturnType<typeof inboxUploadAttachments> = [];
+    let attachments: Awaited<ReturnType<typeof inboxUploadAttachments>> = [];
     let result: ReturnType<InboxStore["startPersonThread"]>;
     try {
-      attachments = uploads.length > 0 ? inboxUploadAttachments(store.dir, uploads, at) : [];
+      attachments = uploads.length > 0 ? await inboxUploadAttachments(store.dir, uploads, at) : [];
+      // The same Send while this one copied is a replay, below; another Send of these files already has them.
+      if (uploads.length > 0 && !store.personThreadByKey(key)) assertInboxUploadsPending(store.dir, uploads, attachments);
       // Trust and start: every check first, the trust next, and only then the thread. A name the thread would be
       // refused must not leave the folder trusted, and `trust_failed` sends nothing.
       if (prepared?.trust) {
-        const name = { project_id: project.id, thread_name: body.thread_name, thread_name_auto: body.thread_name_auto };
+        const name = { project_id: project.id, thread_name: body.thread_name, thread_name_auto: body.thread_name_auto, thread_name_numbered: body.thread_name_numbered };
         store.checkPersonThreadName(name);
         // Again under the agent's lock, whose wait can run to 12 s: a name taken meanwhile saves nothing, and the write
         // below refuses the thread as usual.
@@ -215,6 +221,7 @@ export function createInboxCompose(options: {
         attachments,
         thread_name: body.thread_name,
         thread_name_auto: body.thread_name_auto,
+        thread_name_numbered: body.thread_name_numbered,
         // The Board chip (approval "inbox-compose-board-chip"): kept only while the Board is on, so an agent is
         // never asked for cards the Board would refuse (`board_off`).
         board_request: body.board_request === true && boardOn(),
@@ -235,7 +242,10 @@ export function createInboxCompose(options: {
       if (prepared) options.launch!.abandon(prepared.launch, prepared.project);
     }
     // The thread is written: only now does the agent start (in the background; the answer comes at once).
-    else if (prepared) options.launch!.begin(result.message);
+    else {
+      if (body.review) options.onReviewStart?.(result.message.thread_id, body.review, { host: target.host, project_id: project.id, at });
+      if (prepared) options.launch!.begin(result.message);
+    }
     // Sent: the uploads are attachments now, and the draft it came from is done.
     removeInboxUploads(store.dir, uploads.filter((id): id is string => typeof id === "string"));
     if (body.draft_id !== undefined && deleteInboxDraft(store.dir, body.draft_id)) options.onDraftsChange?.();
@@ -262,9 +272,12 @@ export function createInboxCompose(options: {
     const askedWakes = asked?.author.kind === "agent" && asked.wakes === true ? asked.author.session : null;
     const waitsOn = message.to?.session ?? askedWakes;
     const there = thereInThread(live, options.launch, message.thread_id);
+    // Its session's connection claimed it and will never deliver it (its wake was killed mid-delivery): that session
+    // does not get it, running or not, so it moves as off an ended one. Nothing delivers it again by itself.
+    const stuck = !!waitsOn && live.stuck(waitsOn, messageId);
     const next = store.readdressMessage(messageId, target, {
-      targetLive: !!waitsOn && there.askerLive(waitsOn),
-      askerEnded: replacesEndedAsker(asked, there),
+      targetLive: !!waitsOn && !stuck && there.askerLive(waitsOn),
+      askerEnded: stuck || replacesEndedAsker(asked, there),
       tookOver: takesOver(store, message.thread_id, asked, waitsOn, there),
     });
     return json({ message: next, row: store.listRow(next.thread_id) });
@@ -355,6 +368,19 @@ export function createInboxCompose(options: {
         throw new InboxError("upload_too_large", `Not attached: a file is at most ${INBOX_UPLOAD_MAX_BYTES / (1024 * 1024)} MB.`, { max_bytes: INBOX_UPLOAD_MAX_BYTES });
       }
       const upload = await receiveInboxUpload(store.dir, url.searchParams.get("name"), req.body, { at: now().toISOString() });
+      return json({ upload });
+    }
+    // A file the Inbox already holds, for the message being written: no bytes in the body.
+    if (path === "/api/inbox/uploads/reuse") {
+      if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+      const body = await options.readBody(req);
+      const stale = staleTab(body);
+      if (stale) return stale;
+      const hit = typeof body.attachment_id === "string" ? store.attachment(body.attachment_id) : null;
+      if (!hit) throw new InboxError("upload_not_found", "That file is no longer in the Inbox.");
+      const version = body.version === "current" ? "current" : "sent";
+      const sha256 = typeof body.sha256 === "string" ? body.sha256 : undefined;
+      const upload = await inboxUploadFromAttachment(store.dir, hit.attachment, version, { at: now().toISOString(), ...(sha256 ? { sha256 } : {}) });
       return json({ upload });
     }
     const textMatch = /^\/api\/inbox\/uploads\/([A-Za-z0-9_]+)\/text$/.exec(path);
