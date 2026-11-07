@@ -7,7 +7,10 @@ when the drawing may be out of date. System never commits, branches or pushes in
 in their checkout or its `.git`; it only reads the repo's history to see what merged. (Replaced 2026-11-06 by the
 owner's ruling, row 7689, q-122e6577; the drawing was committed to the repo before.)
 
-This package holds the format, its loader, the check of cited paths, the gate, the recipes agents follow, and the scheduled check that wakes an agent to redraw. It has no UI yet and no Inbox wiring; the `plannotator system` command is its one door from a shell.
+This package holds the format, its loader, the check of cited paths, the gate, the recipes agents follow, the
+scheduled check that wakes an agent to redraw, and the drawing at rest as React components
+(`@plannotator/system/react`). It has no Inbox wiring yet; the `plannotator system` command is its one door from a
+shell.
 This repo also keeps a drawing of Plannotator itself at [`.plannotator/system/`](../../.plannotator/system/), for its
 own tests and CI; that copy is a developer file, not where System keeps a person's drawing.
 
@@ -46,6 +49,80 @@ export function check(o: { dir: string; root: string; roots?: Record<string, str
 export function gateRepo(o: { root: string; from: string; to: string; model: SystemModel }): Promise<GateResult>;
   // git diff --name-status -M <from> <to>, read only, then gate()
 ```
+
+```ts
+// @plannotator/system/react: React components that take props; no fetching, no routes, no storage; browser-safe
+import '@plannotator/system/system.css'; // once: plain CSS, sys- classes, the Inbox's tokens, light and dark
+
+export function SystemThumb(p: {
+  model: SystemModel;
+  sheet?: string;                 // default: the landing sheet
+  revision?: Revision | GateResult; // drawn from step A5 on; ignored at rest
+  width: number;                  // px; the height follows the sheet
+}): JSX.Element;                  // a still picture (role img), no controls
+
+export function SystemView(p: {
+  model: SystemModel;
+  sheet?: string;                 // default (and when the drawing lacks it): the landing sheet; a new value travels there
+  project?: string;               // the first crumb, the host's project name
+  reading?: 'simple' | 'full';    // default full; a sheet with one reading draws it
+  layout: 'pane' | 'window';      // pane: fits the width and grows down; window: fits the window
+  revision?: Revision | GateResult; view?: 'before' | 'after' | 'steps'; mode?: 'review' | 'plan'; // step A5
+  keys?: boolean;                 // default true: + - F, 1 to 9 and N act with the drawing in focus (see Moving)
+  onNavigate(sheet: string): void; // the sheet on screen changed: a dive landed, Esc or a crumb climbed, a chip turned
+  onReading?(r: 'simple' | 'full'): void; // shows the Simple / Full switch on a sheet with both
+  onView?(v: 'before' | 'after' | 'steps'): void; onOpenFile?(path: string, part: string): void; // step A5
+  onOpenFull?(): void;            // shows Open full window, in the pane
+  onClose?(): void;               // shows the close button
+}): JSX.Element;
+
+export function Sheet(p: { layout: SheetLayout; model: SystemModel; lod?: 0 | 1 | 2 | 3; live?: boolean;
+  onNavigate?(sheet: string): void;  // a window's cue, when onEnter is not given: the first sheet inside
+  onEnter?(part: string): void }): JSX.Element; // a window's cue: the host dives into that part
+  // one laid-out sheet, in sheet units (1600 wide); live parts with sheets inside are Tab stops
+export function layoutSheet(model: SystemModel, code: string, opts?: LayoutOpts): SheetLayout;
+export function restLayout(model: SystemModel, code: string, o?: { simple?: boolean }): SheetLayout; // at rest
+export function hasSimple(model: SystemModel, code: string): boolean;
+export function setText(t: { type: number; sans: string; mono: string }): void; // what the layout measures with
+export function fontsReady(): Promise<void>; // forgets widths measured before the faces loaded
+```
+
+- The components read the host's text size (`--ib-type`) and faces (`--font-sans`, `--font-mono`) from where they
+  are drawn, and the layout measures with them, so a box fits its words at every Text size. Every font size in the
+  sheet is `var(--ib-fs-N, Npx)`.
+- At rest a sheet fits its pane or window, never past 1:1. Below 0.95 the quiet lines lose their words; below 0.3 every
+  line does.
+- A part that opens a scope with sheets is drawn as a plate with a "N sheets inside" cue. A change drawn on the sheet
+  is step A5.
+- CI fetches the drawing's pinned commit (`sources.repos.self.at`) one commit deep before the tests, so the cited paths
+  are checked offline. That fetch costs more as the pinned commit ages; a redraw that refreshes `at` keeps it cheap.
+- `bun run --cwd packages/system demo` serves a page that draws this repo's drawing, for screenshots only:
+  `?shot=thumb`, or `?shot=view&sheet=C-001&reading=simple&layout=window|pane`, with `&mode=light`.
+
+### Moving
+
+The view owns its camera and the sheet on screen; the host hears where it is through `onNavigate`. `sheet` is where to
+start, and a new value travels there: a dive when it is inside, a climb when it is above, a turn when it is a sheet of
+the same scope.
+
+- The wheel and a pinch zoom about the pointer; in a pane the wheel scrolls the host and zooms only with Ctrl or ⌘ (a
+  pinch always zooms). A drag moves the sheet and glides when let go.
+- A window's cue, a double click on it, or Enter on it dives in: the camera flies into the box while the inside unrolls
+  out of it, and lands on the inside sheet at rest. Zooming into a window does the same through its door. Esc, the
+  wheel out, or a crumb above climbs. A second input during a dive turns it round from where it is.
+- The chips name the sheets of the scope by kind ("Logical", "Data flow"); a chip or keys 1 to 9 turn to one. The
+  parts both sheets draw travel to their new places, the rest fades.
+- The Simple / Full switch moves the parts to the other reading's places: into Simple the lines and words fade first,
+  into Full they come back after the parts land.
+- The zoom group: zoom out, the percent (which fits), zoom in, and Key (the symbols, the line colours and the keys). N
+  opens every note of the sheet. Esc closes a card before it climbs, and on the landing sheet calls `onClose`.
+- Keys act only with focus in the drawing: Tab and the arrows move between parts, Enter opens, Esc climbs. `keys={false}`
+  turns off + - F, 1 to 9 and N for a host that owns those keys; the Inbox needs the owner's approval for new
+  shortcuts before it turns them on.
+- Every move is a critically damped spring launched by the input (90% of the way in 250 ms for + and -, 375 ms for a
+  fit or a turn, 700 ms for a dive). With reduced motion the camera cuts and the drawing fades up over 180 ms.
+- `node scripts/measure.mjs` (with the demo running, `SYSTEM_URL` set) films every move and reports the step size per
+  frame, dropped frames and long tasks.
 
 `SystemModel` and `Revision` are plain JSON-safe data (`src/format/types.ts`), so a server may load a drawing and send
 the model, or send the files and let the window call `loadFiles()`.

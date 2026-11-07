@@ -41,6 +41,14 @@ describe('the browser entry', () => {
     expect(graph(join(import.meta.dir, '..', 'src', 'index.ts'))).toEqual([]);
   });
 
+  test('the React entry (the drawing, SystemThumb, SystemView) reaches no Node or Bun code', () => {
+    const seen = new Set<string>();
+    expect(graph(join(import.meta.dir, '..', 'src', 'react.ts'), seen)).toEqual([]);
+    // the walk did reach the drawing, not only the entry file
+    expect([...seen].some((f) => f.endsWith('SystemView.tsx'))).toBe(true);
+    expect([...seen].some((f) => f.endsWith('route.ts'))).toBe(true);
+  });
+
   test('the import scan sees every form of import', () => {
     const text = [
       `import { a } from "node:fs";`,

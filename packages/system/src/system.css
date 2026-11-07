@@ -1,0 +1,334 @@
+/* System: the drawing at rest, in the Inbox's own tokens.
+ *
+ * Every colour here comes from the theme the Inbox already sets (packages/ui
+ * themes: --background, --card, --foreground, --muted-foreground, --border,
+ * --success, --warning, --secondary, --primary, --accent) and from the Inbox's
+ * own tokens (packages/inbox/inbox.css: --ib-hair, --ib-line, --ib-sel,
+ * --ib-seg-bg-s, --ib-r8-s). Dark is the default; light follows the Inbox's
+ * .light class on :root or on an .ib-lightscope ancestor.
+ *
+ * Every font size is var(--ib-fs-N, Npx), so the drawing follows the person's
+ * Text size setting; line heights scale with it through --sys-k. The layout
+ * (src/layout/measure.ts) measures with the same rule.
+ *
+ * Plain CSS, every class prefixed sys-. No Tailwind. */
+
+.sys {
+  --sys-k: calc(var(--ib-type, 14) / 14);
+  /* the paper and what is drawn on it: one flat ground with the pane */
+  --sys-paper: var(--card);
+  --sys-box: color-mix(in oklab, var(--card) 88%, var(--foreground));
+  --sys-ink: var(--foreground);
+  --sys-ink2: color-mix(in oklab, var(--foreground) 70%, var(--muted-foreground));
+  --sys-ink3: var(--muted-foreground);
+  --sys-hair: var(--ib-hair, var(--border));
+  --sys-line: color-mix(in oklab, var(--foreground) 78%, var(--sys-paper));
+  --sys-line-soft: color-mix(in oklab, var(--foreground) 45%, var(--sys-paper));
+  --sys-line-faint: color-mix(in oklab, var(--foreground) 28%, var(--sys-paper));
+  --sys-zone: color-mix(in oklab, var(--foreground) 6%, var(--sys-paper));
+  --sys-card-title: color-mix(in oklab, var(--foreground) 7%, var(--sys-box));
+  --sys-lane-bg: color-mix(in oklab, var(--foreground) 88%, var(--sys-paper));
+  --sys-lane-fg: var(--sys-paper);
+  --sys-lane-sub: color-mix(in oklab, var(--sys-paper) 72%, var(--foreground));
+  --sys-label-bg: color-mix(in oklab, var(--sys-paper) 92%, transparent);
+  /* hover and focus light a box with a fill, the Inbox way: no border colour, no outline */
+  --sys-lit-fill: color-mix(in oklab, var(--foreground) 7%, transparent);
+  /* the hue of a line says what it carries: data is graphite */
+  --sys-l-data: var(--sys-line);
+  --sys-l-people: color-mix(in oklab, color-mix(in oklab, var(--secondary) 60%, var(--primary)) 78%, var(--foreground));
+  --sys-l-money: color-mix(in oklab, var(--success) 84%, var(--foreground));
+  --sys-l-energy: color-mix(in oklab, var(--accent) 50%, var(--foreground));
+  /* the change inks (step A5 draws them): added green, changed amber, removed grey;
+     on dark paper the theme hues are lifted toward the foreground so they read as ink */
+  --sys-add-ink: color-mix(in oklab, var(--success) 86%, var(--foreground));
+  --sys-add-wash: color-mix(in oklab, var(--sys-add-ink) 13%, transparent);
+  --sys-chg-ink: color-mix(in oklab, var(--warning) 88%, var(--foreground));
+  --sys-chg-wash: color-mix(in oklab, var(--sys-chg-ink) 12%, transparent);
+  --sys-gone-ink: var(--sys-ink3);
+  /* the curves, as tokens (step A4 moves on them) */
+  --sys-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --sys-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --sys-ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  font-family: var(--font-sans);
+  color: var(--foreground);
+}
+:root.light .sys,
+.light .sys {
+  --sys-box: var(--card);
+  --sys-add-ink: var(--success);
+  --sys-chg-ink: var(--warning);
+}
+/* resets at zero specificity, so every sys- class wins over them */
+:where(.sys) *, :where(.sys) *::before, :where(.sys) *::after { box-sizing: border-box; }
+:where(.sys) :where(button) { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; }
+.sys-mono { font-family: var(--font-mono); }
+
+/* ---------------------------------------------------------------- the view */
+.sys-view { display: flex; flex-direction: column; min-height: 0; height: 100%; background: var(--sys-paper); }
+.sys-bar { height: 46px; flex: none; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px; padding: 0 10px 0 16px; border-bottom: 1px solid var(--ib-hair, var(--border)); }
+.sys-crumbs { display: flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; font-size: var(--ib-fs-13-5, 13.5px); color: var(--ib-quiet-fg, var(--muted-foreground)); }
+.sys-crumb-w { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
+.sys-crumb { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sys-crumb.sys-here { color: var(--foreground); }
+.sys-crumb-sep { color: var(--ib-quiet-fg, var(--muted-foreground)); }
+.sys-code { flex: none; font-family: var(--font-mono); font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); margin-left: 2px; }
+.sys-kind { font-size: var(--ib-fs-13-5, 13.5px); color: var(--foreground); font-weight: 500; white-space: nowrap; }
+.sys-tools { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.sys-seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: var(--ib-r10-s, 8px); background: var(--ib-seg-bg-s, var(--muted)); border: 1px solid var(--ib-seg-line-s, var(--border)); }
+.sys-seg-o { height: 26px; padding: 0 10px; border-radius: var(--ib-r8-s, 6px); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: nowrap; }
+.sys .sys-seg-o:hover { color: var(--foreground); }
+/* the chosen reading takes the Inbox's selected-row fill: no border, no outline, no shadow */
+.sys .sys-seg-o[data-on] { background: var(--ib-sel, var(--muted)); color: var(--foreground); }
+.sys .sys-seg-o:focus-visible, .sys .sys-btn:focus-visible, .sys .sys-icon-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.sys .sys-btn { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: var(--ib-r8-s, 6px); border: 1px solid var(--ib-line, var(--border)); font-size: var(--ib-fs-13, 13px); color: var(--foreground); white-space: nowrap; }
+.sys .sys-btn:hover, .sys .sys-icon-btn:hover { background: var(--ib-fill, var(--muted)); }
+.sys .sys-icon-btn { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--ib-r8-s, 6px); color: var(--muted-foreground); }
+.sys-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none; cursor: grab; outline: none; }
+.sys-stage.sys-drag { cursor: grabbing; }
+.sys-stage:focus-visible { box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--ring) 70%, transparent); }
+/* a pane grows down to its sheet; the height follows the sheet on screen */
+.sys-pane .sys-stage { flex: none; transition: height .375s var(--sys-ease-out); }
+.sys-fit { position: relative; overflow: hidden; }
+.sys-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.sys-layer { position: absolute; left: 0; top: 0; }
+.sys-ghost { pointer-events: none; }
+/* a window's inside, drawn into its box as the person goes in */
+.sys-mini { position: absolute; transform-origin: 0 0; pointer-events: none; }
+.sys-mini .sys-paper { opacity: var(--sys-mini-paper, 1); }
+/* the Simple / Full move: while a box travels its frame is drawn by an SVG that scales, and its own border steps aside */
+.sys-pframe { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.sys-pframe > g { transform-origin: 0 0; }
+.sys-pframe path, .sys-pframe rect { vector-effect: non-scaling-stroke; }
+.sys-part.sys-flip > .sys-pv { border-color: transparent !important; background: transparent !important; overflow: visible; }
+.sys-win-stack { transform-origin: 0 0; }
+.sys-zones rect { transform-box: view-box; }
+.sys-live .sys-part:focus { outline: none; }
+.sys-live .sys-part:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; border-radius: 3px; }
+@media (prefers-reduced-motion: reduce) { .sys-pane .sys-stage { transition: none; } }
+
+/* the zoom group and the Key, flat at the bottom left of the stage */
+.sys-zoom { position: absolute; left: 14px; bottom: 14px; display: flex; align-items: center; height: 32px; padding: 0 3px; gap: 1px; border-radius: var(--ib-r8-s, 6px); border: 1px solid var(--ib-line, var(--border)); background: var(--sys-paper); cursor: default; }
+.sys .sys-zoom button { height: 26px; min-width: 26px; padding: 0 7px; border-radius: var(--ib-r8-s, 5px); font-size: var(--ib-fs-13, 13px); color: var(--sys-ink2); display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
+.sys .sys-zoom button:hover { background: var(--ib-fill, var(--muted)); color: var(--foreground); }
+.sys .sys-zoom button[aria-expanded="true"] { background: var(--ib-sel, var(--muted)); color: var(--foreground); }
+.sys .sys-zoom button:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.sys .sys-zoom .sys-pct { font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); min-width: 48px; font-variant-numeric: tabular-nums; }
+.sys-zoom .sys-zsep { width: 1px; height: 16px; background: var(--ib-hair, var(--border)); margin: 0 3px; }
+.sys-card-pop { position: absolute; left: 14px; bottom: 54px; max-height: calc(100% - 70px); overflow: auto; background: var(--sys-paper); border: 1px solid var(--ib-line, var(--border)); border-radius: var(--ib-r10-s, 8px); box-shadow: 0 8px 28px color-mix(in oklab, var(--foreground) 12%, transparent); padding: 12px 14px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--sys-ink); cursor: default; z-index: 3; }
+.sys-keycard { width: 300px; }
+.sys-notescard { width: min(560px, calc(100% - 28px)); display: grid; gap: 9px; }
+.sys-notescard .sys-kc-h { display: flex; align-items: center; justify-content: space-between; margin: -2px -6px -4px 0; }
+.sys .sys-card-x { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--ib-r8-s, 5px); color: var(--sys-ink2); }
+.sys .sys-card-x:hover { background: var(--ib-fill, var(--muted)); color: var(--foreground); }
+.sys .sys-card-x:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.sys-kc-h { font-size: var(--ib-fs-12, 12px); font-weight: 600; color: var(--sys-ink2); margin: 10px 0 5px; }
+.sys-kc-h:first-child { margin-top: 0; }
+.sys-kc-w { font-weight: 600; color: var(--sys-ink); margin-right: 2px; }
+.sys-kc-r { display: flex; align-items: center; gap: 10px; min-height: 22px; }
+.sys-kc-i { width: 40px; flex: none; display: inline-flex; justify-content: center; }
+.sys-kc-k { display: flex; align-items: center; gap: 4px; min-height: 22px; }
+/* the words after a key's caps; a row of words alone (the drag line) starts at the edge like the rest */
+.sys-kc-k > span:last-child:not(:first-child) { margin-left: 6px; }
+.sys-kc-k > span:last-child { color: var(--sys-ink2); }
+.sys-kbd { font-family: var(--font-mono); font-size: var(--ib-fs-11, 11px); min-width: 20px; height: 20px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ib-line, var(--border)); border-radius: 4px; color: var(--sys-ink); }
+.sys-note-row { display: flex; gap: 9px; align-items: flex-start; }
+.sys-note-row .sys-letter { margin-top: 1px; }
+.sys-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* the sheet chips: one per sheet of the scope, the one on screen named by its kind */
+.sys-chips { display: inline-flex; align-items: center; gap: 2px; }
+.sys .sys-chip-b { height: 28px; min-width: 28px; padding: 0 9px; border-radius: var(--ib-r8-s, 6px); font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); white-space: nowrap; }
+.sys .sys-chip-b:hover { color: var(--foreground); background: var(--ib-fill, var(--muted)); }
+.sys .sys-chip-b[aria-current="page"] { color: var(--foreground); font-weight: 500; background: var(--ib-sel, var(--muted)); }
+.sys .sys-chip-b .sys-chip-k { font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); }
+.sys .sys-chip-b:focus-visible, .sys .sys-crumb-b:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.sys .sys-crumb-b { border-radius: 4px; padding: 1px 3px; margin: -1px -3px; }
+.sys .sys-crumb-b:hover { color: var(--foreground); background: var(--ib-fill, var(--muted)); }
+.sys-empty { padding: 24px; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
+.sys-scaled { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.sys-thumb { position: relative; overflow: hidden; background: var(--sys-paper); }
+
+/* ---------------------------------------------------------------- the sheet */
+.sys-sheet { position: absolute; left: 0; top: 0; color: var(--sys-ink); user-select: none; -webkit-user-select: none; line-height: normal; }
+.sys-paper { position: absolute; inset: 0; background: var(--sys-paper); }
+.sys-abs { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.sys-parts, .sys-ann { position: absolute; inset: 0; pointer-events: none; }
+.sys-live .sys-parts .sys-part { pointer-events: auto; }
+.sys-zlabel, .sys-elabel { pointer-events: none; }
+
+/* bands: one stone ground in every tone, a hairline for a side section with none */
+.sys-zone { fill: var(--sys-zone); stroke: color-mix(in oklab, var(--sys-ink) 6%, transparent); stroke-width: 1; }
+.sys-zone.sys-none { fill: none; stroke: none; }
+.sys-zone.sys-hair { fill: none; stroke: var(--sys-hair); }
+.sys-zone.sys-solid { fill: none; stroke: var(--sys-line); stroke-width: 1.4; }
+.sys-zlabel { position: absolute; display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 600; line-height: 1; color: var(--sys-ink2); white-space: nowrap; padding: 2px 5px; margin: -2px -5px; border-radius: 3px; background: var(--sys-zone); }
+.sys-zlabel.sys-on-paper { background: var(--sys-paper); }
+.sys-zlabel em { font-style: italic; font-weight: 400; font-size: var(--ib-fs-12-5, 12.5px); color: var(--sys-ink3); }
+.sys-zlabel.sys-side { white-space: normal; flex-wrap: wrap; row-gap: 3px; line-height: calc(13px * var(--sys-k)); }
+.sys-zsplit { position: absolute; font-style: italic; font-size: var(--ib-fs-12, 12px); line-height: 1; color: var(--sys-ink3); white-space: nowrap; }
+
+/* parts */
+.sys-part { position: absolute; }
+.sys-pv { position: absolute; inset: 0; overflow: hidden; }
+.sys-marks { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.sys-mark { display: inline-flex; align-items: center; }
+.sys-tag { font-family: var(--font-mono); font-weight: 500; border: 1px solid currentColor; border-radius: 3px; padding: 1px 4px; line-height: 1.1; color: var(--sys-ink2); white-space: nowrap; max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
+.sys-mark-mcp { font-family: var(--font-mono); font-weight: 500; border: 1px solid currentColor; border-radius: 3px; padding: 1px 3px; line-height: 1; color: var(--sys-ink); }
+.sys-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sys-sub { color: var(--sys-ink3); font-family: var(--font-sans); }
+
+.sys-plate { background: var(--sys-box); border: 1.4px solid var(--sys-ink); border-radius: 3px; padding: 13px 15px; }
+.sys-plate .sys-top .sys-marks { align-self: flex-start; }
+.sys-plate .sys-nm { font-size: var(--ib-fs-18, 18px); line-height: calc(24px * var(--sys-k)); font-weight: 600; letter-spacing: -0.005em; overflow-wrap: anywhere; min-width: 0; }
+.sys-plate .sys-rl { font-size: var(--ib-fs-13-5, 13.5px); line-height: calc(18.5px * var(--sys-k)); color: var(--sys-ink2); margin-top: 5px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.sys-plate .sys-sub { font-size: var(--ib-fs-11-5, 11.5px); line-height: calc(15px * var(--sys-k)); margin-top: 9px; }
+.sys-mk-row { display: flex; margin-top: 12px; height: 20px; }
+.sys-mk-row .sys-marks { gap: 14px; }
+
+.sys-chip { background: var(--sys-box); border: 1px solid var(--sys-line-soft); border-radius: 3px; padding: 9px 11px; }
+.sys-chip .sys-top { justify-content: flex-start; gap: 7px; }
+.sys-chip .sys-nm { font-size: var(--ib-fs-14, 14px); line-height: calc(18px * var(--sys-k)); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.sys-chip .sys-sub { font-size: var(--ib-fs-11, 11px); line-height: calc(14px * var(--sys-k)); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.sys-box { background: var(--sys-box); border: 1.2px solid var(--sys-line); border-radius: 3px; padding: 8px 12px; }
+.sys-box .sys-top { align-items: flex-start; }
+.sys-box .sys-top .sys-marks { margin-top: 2px; }
+.sys-box .sys-nm { font-size: var(--ib-fs-15, 15px); line-height: calc(20px * var(--sys-k)); font-weight: 600; min-width: 0; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sys-box .sys-nm.sys-fit { display: block; overflow-wrap: normal; }
+.sys-box .sys-nm.sys-fit > span { display: block; white-space: nowrap; }
+.sys-box .sys-sub { font-size: var(--ib-fs-11-5, 11.5px); line-height: calc(15px * var(--sys-k)); margin-top: 3px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.sys-box .sys-rl { font-size: var(--ib-fs-12-5, 12.5px); line-height: calc(17px * var(--sys-k)); color: var(--sys-ink2); margin-top: 4px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.sys-box.sys-client { border-color: var(--sys-line-soft); }
+.sys-box.sys-store { border-top: 3.5px double var(--sys-line); padding-top: 6px; }
+.sys-box.sys-door { border-width: 1.8px; border-color: var(--sys-ink); }
+
+/* a row in a side column: a rule under it, never a bar beside it */
+.sys-row { border-bottom: 1px solid var(--sys-hair); padding: 7px 2px 8px; }
+.sys-row .sys-nm { font-size: var(--ib-fs-14, 14px); line-height: calc(20px * var(--sys-k)); font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
+.sys-row .sys-nm.sys-wm { display: flex; height: 20px; align-items: center; }
+.sys-row .sys-rl { font-size: var(--ib-fs-12-5, 12.5px); line-height: calc(17px * var(--sys-k)); color: var(--sys-ink2); margin-top: 2px; }
+.sys-row.sys-rowx { border-bottom: 0; border-top: 1px solid var(--sys-hair); padding-top: 11px; }
+
+.sys-card { background: var(--sys-box); border: 1.2px solid var(--sys-line); border-radius: 3px; display: flex; flex-direction: column; }
+.sys-card-title { background: var(--sys-card-title); padding: 12px 14px; }
+.sys-card.sys-door .sys-card-title { background: var(--sys-lane-bg); color: var(--sys-lane-fg); }
+.sys-card-title .sys-nm { font-size: var(--ib-fs-15, 15px); line-height: calc(18px * var(--sys-k)); font-weight: 600; }
+.sys-card-sec { padding: 10px 14px; border-bottom: 1px dashed var(--sys-hair); }
+.sys-card-sec.sys-runtime { display: flex; flex-direction: column; gap: 8px; }
+.sys-card-sec .sys-cap { font-size: var(--ib-fs-12, 12px); line-height: calc(16px * var(--sys-k)); color: var(--sys-ink2); overflow-wrap: anywhere; }
+.sys-sec-h { font-size: var(--ib-fs-11, 11px); line-height: 1; font-weight: 600; color: var(--sys-ink3); margin-bottom: 6px; }
+.sys-route { font-size: var(--ib-fs-12, 12px); line-height: calc(16px * var(--sys-k)); padding: 3px 0; border-bottom: 1px solid var(--sys-hair); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sys-bind { display: flex; justify-content: space-between; gap: 8px; font-size: var(--ib-fs-12, 12px); line-height: calc(16px * var(--sys-k)); padding: 2px 0; color: var(--sys-ink2); white-space: nowrap; }
+.sys-bind .sys-mono { font-size: var(--ib-fs-11-5, 11.5px); color: var(--sys-ink); flex: none; }
+.sys-bind .sys-bv { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sys-card-scale { padding: 12px 14px; display: flex; align-items: baseline; gap: 10px; }
+.sys-card-scale .sys-big { font-size: var(--ib-fs-34, 34px); line-height: 1; font-weight: 600; }
+.sys-card-scale .sys-lbl { font-size: var(--ib-fs-13, 13px); color: var(--sys-ink2); display: flex; flex-direction: column; gap: 3px; }
+.sys-card-scale em { font-size: var(--ib-fs-12, 12px); color: var(--sys-ink3); }
+.sys-card-strip { margin-top: auto; background: var(--sys-zone); padding: 10px 14px; font-size: var(--ib-fs-12, 12px); line-height: calc(15px * var(--sys-k)); border-top: 1px solid var(--sys-hair); }
+.sys-card-strip .sys-mono { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sys-card-strip .sys-dim { color: var(--sys-ink3); margin-top: 3px; }
+
+.sys-bar-v, .sys-pv.sys-bar { background: var(--sys-box); border: 1.2px solid var(--sys-line); border-top: 3.5px double var(--sys-line); border-radius: 3px; display: flex; align-items: center; gap: 12px; padding: 0 16px; }
+.sys-pv.sys-bar .sys-nm { font-size: var(--ib-fs-15, 15px); font-weight: 600; white-space: nowrap; }
+.sys-pv.sys-bar .sys-rl { font-size: var(--ib-fs-12-5, 12.5px); color: var(--sys-ink2); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* a lane head: the part as a dark bar (flow and algorithm sheets) */
+.sys-lane { background: var(--sys-lane-bg); color: var(--sys-lane-fg); border-radius: 3px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border: 1.2px solid var(--sys-lane-bg); }
+.sys-lane .sys-nm { font-size: var(--ib-fs-14-5, 14.5px); line-height: 1.1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.sys-lane .sys-sub { font-size: var(--ib-fs-11, 11px); color: var(--sys-lane-sub); margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.sys-lane .sys-tag, .sys-lane .sys-mark-mcp { color: var(--sys-lane-fg); }
+
+/* a technology on a landscape: the mark large, the name and version small */
+.sys-tile { background: var(--sys-box); border: 1px solid var(--sys-hair); border-radius: 3px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 8px 6px; }
+.sys-tile-mk { height: 46px; display: flex; align-items: center; justify-content: center; }
+.sys-tile-mk .sys-tag { padding: 3px 6px; }
+.sys-tile-none { font-size: var(--ib-fs-18, 18px); font-weight: 600; color: var(--sys-ink3); }
+.sys-tile .sys-nm { font-size: var(--ib-fs-12-5, 12.5px); line-height: calc(15px * var(--sys-k)); font-weight: 600; margin-top: 6px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sys-tile .sys-sub { font-size: var(--ib-fs-10-5, 10.5px); line-height: calc(13px * var(--sys-k)); margin-top: 3px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.sys-tile.sys-for .sys-tile-mk { height: 50px; }
+.sys-tile.sys-for .sys-rl { font-size: var(--ib-fs-11-5, 11.5px); line-height: calc(14.5px * var(--sys-k)); color: var(--sys-ink2); margin-top: 4px; max-height: calc(29px * var(--sys-k)); overflow: hidden; padding: 0 4px; }
+
+/* a lit part (hovered or focused, and the far ends of its lines) takes a fill, never a border colour:
+   the fill rides as a background-image so the box keeps its own background underneath */
+.sys-part.sys-lit .sys-pv { background-image: linear-gradient(var(--sys-lit-fill), var(--sys-lit-fill)); }
+.sys-part .sys-ov-tint { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
+.sys-part .sys-ov-mark { position: absolute; top: 4px; right: 6px; font-size: var(--ib-fs-11, 11px); color: var(--sys-ink2); pointer-events: none; }
+
+/* a window at rest: a second hairline behind its corner, and its cue */
+.sys-win-stack { position: absolute; left: 3px; top: 3px; right: -3px; bottom: -3px; border: 1px solid var(--sys-line-faint); border-radius: 3px; pointer-events: none; z-index: -1; }
+.sys-win-cue { position: absolute; left: 13px; bottom: 8px; display: inline-flex; align-items: center; gap: 5px; font-size: var(--ib-fs-11-5, 11.5px); line-height: calc(14px * var(--sys-k)); color: var(--sys-ink3); white-space: nowrap; pointer-events: none; }
+.sys-win-cue svg { flex: none; }
+.sys .sys-win-cue.sys-go { pointer-events: auto; cursor: pointer; border-radius: 3px; }
+.sys .sys-win-cue.sys-go:hover { color: var(--sys-ink); }
+.sys .sys-win-cue.sys-go:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+/* lines */
+.sys-edges .sys-hit { pointer-events: stroke; }
+.sys-elabel { position: absolute; font-style: italic; font-size: var(--ib-fs-12-5, 12.5px); line-height: calc(16px * var(--sys-k)); color: var(--sys-ink2); background: var(--sys-label-bg); padding: 1px 3px; border-radius: 2px; display: flex; gap: 5px; align-items: flex-start; white-space: nowrap; }
+.sys-elabel.sys-show { color: var(--sys-ink); background: var(--sys-label-bg); z-index: 5; }
+.sys-elabel .sys-rate { font-style: normal; font-size: var(--ib-fs-11, 11px); margin-left: 6px; }
+.sys-edges .sys-port-name { font-size: var(--ib-fs-11-5, 11.5px); font-weight: 500; fill: var(--sys-ink3); }
+.sys-sheet.sys-dense.sys-lod-1 .sys-edge:not(.sys-lit) path { stroke-opacity: .42; fill-opacity: .42; }
+.sys-sheet.sys-dense .sys-edge circle { display: none; }
+
+/* the title, callouts and notes */
+.sys-head { position: absolute; }
+.sys-title { font-size: var(--ib-fs-34, 34px); font-weight: 600; letter-spacing: -0.012em; line-height: 1.1; }
+.sys-q { font-size: var(--ib-fs-16, 16px); color: var(--sys-ink2); margin-top: 4px; }
+.sys-aud { position: absolute; }
+.sys-aud .sys-big { font-size: var(--ib-fs-17, 17px); font-weight: 600; line-height: calc(21px * var(--sys-k)); letter-spacing: -0.012em; overflow-wrap: anywhere; }
+.sys-aud .sys-big > div { white-space: nowrap; }
+.sys-aud .sys-body { font-size: var(--ib-fs-13-5, 13.5px); color: var(--sys-ink2); margin-top: 9px; line-height: calc(19px * var(--sys-k)); overflow-wrap: anywhere; }
+.sys-letter { display: inline-flex; width: 17px; height: 17px; border-radius: 50%; background: var(--sys-paper); color: var(--sys-ink3); border: 1px solid var(--sys-line-faint); font-size: var(--ib-fs-10-5, 10.5px); font-weight: 500; line-height: 1; align-items: center; justify-content: center; flex: none; padding: 0; }
+.sys-letter.sys-mk { z-index: 6; position: absolute; transform: translate(-50%, -50%); }
+.sys-letter.sys-in { background: transparent; margin-top: -1px; font-style: normal; }
+.sys-live .sys-letter.sys-peek { pointer-events: auto; cursor: default; position: relative; }
+.sys-live .sys-letter.sys-mk.sys-peek { position: absolute; }
+.sys .sys-letter.sys-peek:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.sys-note-peek { position: absolute; left: calc(100% + 8px); top: -6px; width: max-content; max-width: 340px; text-align: left; white-space: normal; font-style: normal; font-weight: 400; z-index: 9; display: flex; gap: 9px; align-items: flex-start; padding: 8px 11px; background: var(--sys-box); border: 1px solid var(--sys-line-soft); border-radius: 4px; font-size: var(--ib-fs-13, 13px); line-height: 1.4; color: var(--sys-ink); pointer-events: none; }
+.sys-note-peek .sys-letter { margin-top: 1px; }
+
+/* figures: lifelines, payloads on the wire, steps, decisions, exits, schemas, time ticks */
+.sys-figl { position: absolute; inset: 0; pointer-events: none; }
+.sys-fig-tick { position: absolute; text-align: right; white-space: nowrap; font-size: var(--ib-fs-11, 11px); line-height: calc(16px * var(--sys-k)); color: var(--sys-ink2); }
+.sys-fig-text { position: absolute; font-size: var(--ib-fs-12-5, 12.5px); line-height: calc(18.5px * var(--sys-k)); color: var(--sys-ink2); }
+.sys-fig-timeh { font-size: var(--ib-fs-11, 11px); line-height: 1; font-weight: 600; color: var(--sys-ink3); text-align: right; padding-right: 10px; }
+.sys-fig-colnote { font-size: var(--ib-fs-13, 13px); color: var(--sys-ink2); }
+.sys-fig-metric { font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); line-height: calc(16px * var(--sys-k)); color: var(--sys-ink); }
+.sys-fig-port { font-size: var(--ib-fs-11-5, 11.5px); line-height: calc(15px * var(--sys-k)); font-weight: 500; color: var(--sys-ink3); text-align: center; }
+.sys-fig-albl { font-style: italic; font-size: var(--ib-fs-12-5, 12.5px); fill: var(--sys-ink2); }
+.sys-fig-step { position: absolute; background: var(--sys-box); border: 1px solid var(--sys-line-soft); border-radius: 3px; padding: 6px 12px; text-align: center; }
+.sys-fig-step.sys-strong { border: 1.3px solid var(--sys-ink); text-align: left; padding: 11px 14px 10px; }
+.sys-st-s { font-size: var(--ib-fs-12-5, 12.5px); line-height: calc(16px * var(--sys-k)); color: var(--sys-ink2); }
+.sys-st-s > div { white-space: nowrap; }
+.sys-st-t { font-size: var(--ib-fs-13-5, 13.5px); line-height: calc(18px * var(--sys-k)); font-weight: 600; color: var(--sys-ink); }
+.sys-st-c { font-size: var(--ib-fs-11-5, 11.5px); line-height: calc(15px * var(--sys-k)); color: var(--sys-ink2); margin-top: 6px; white-space: pre; }
+.sys-fig-dia { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center; font-size: var(--ib-fs-12-5, 12.5px); line-height: calc(16px * var(--sys-k)); color: var(--sys-ink); }
+.sys-fig-term { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center; border: 1.6px solid var(--sys-ink); border-radius: 22px; background: var(--sys-box); font-size: var(--ib-fs-13-5, 13.5px); line-height: calc(18px * var(--sys-k)); font-weight: 600; padding: 0 14px; }
+.sys-fig-term.sys-bad { border: 1.2px dashed var(--sys-line-soft); font-weight: 500; font-size: var(--ib-fs-12-5, 12.5px); line-height: calc(16px * var(--sys-k)); color: var(--sys-ink2); background: var(--sys-paper); }
+.sys-fig-term.sys-entry { font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; }
+.sys-fig-load { position: absolute; border: 1.2px solid var(--sys-ink); border-radius: 3px; background: var(--sys-box); padding: 10px 14px; }
+.sys-ld-h { display: flex; justify-content: space-between; font-size: var(--ib-fs-11, 11px); color: var(--sys-ink3); margin-bottom: 4px; }
+.sys-ld-when { font-weight: 600; }
+.sys-fig-letter { position: absolute; right: -9px; top: -9px; }
+.sys-fig-pl { position: absolute; background: var(--sys-box); border: 1px solid var(--sys-line-soft); border-radius: 2px; padding: 6px 10px; overflow: hidden; }
+.sys-fig-pl.sys-lit { background-image: linear-gradient(var(--sys-lit-fill), var(--sys-lit-fill)); }
+.sys-fig-pl.sys-schema { border-color: var(--sys-line); padding: 8px 12px; }
+.sys-pl-h { font-size: var(--ib-fs-10-5, 10.5px); line-height: calc(13px * var(--sys-k)); color: var(--sys-ink3); margin-bottom: 4px; font-weight: 500; }
+.sys-pl-b { font-size: var(--ib-fs-11-5, 11.5px); line-height: calc(15.5px * var(--sys-k)); color: var(--sys-ink); white-space: pre; }
+
+/* level of detail: 0 outlines, 1 names, 2 phrases, 3 everything */
+.sys-lod-0 .sys-t-name, .sys-lod-0 .sys-t-phrase, .sys-lod-0 .sys-t-quiet, .sys-lod-0 .sys-pv .sys-marks,
+.sys-lod-1 .sys-t-phrase, .sys-lod-1 .sys-t-quiet,
+.sys-lod-2 .sys-t-quiet { opacity: 0 !important; }
+.sys-lod-0 .sys-letter.sys-mk, .sys-lod-1 .sys-letter.sys-mk { opacity: 0 !important; }
+/* what the level of detail hides can not be clicked or focused either */
+.sys-lod-0 :is(.sys-t-name, .sys-t-phrase, .sys-t-quiet), .sys-lod-1 :is(.sys-t-phrase, .sys-t-quiet), .sys-lod-2 .sys-t-quiet,
+.sys-lod-0 .sys-letter, .sys-lod-1 .sys-letter.sys-mk { visibility: hidden; }
+.sys-elabel.sys-show.sys-t-quiet, .sys-elabel.sys-show.sys-t-phrase { visibility: visible; }
+.sys-elabel.sys-show.sys-t-quiet, .sys-elabel.sys-show.sys-t-phrase { opacity: 1 !important; }
+
+@media (forced-colors: active) {
+  .sys-seg-o[data-on] { outline: 2px solid Highlight; outline-offset: -2px; }
+}

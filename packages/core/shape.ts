@@ -3,7 +3,7 @@
  *
  * A shape is one thing being worked out with one agent session. Each time the
  * agent draws it, the store keeps a full snapshot: a version. A version holds
- * four views (Picture, How it works, What to know, Code), the numbered
+ * its views (Picture, How it works, What's changed, What to know, Code), the numbered
  * references the views cite, and the parts the person can point at.
  *
  * Browser-safe and dependency-free: the store (packages/shared/shape), the
@@ -12,7 +12,8 @@
  *  - `checkShapeBoard` validates what an agent writes (`plannotator shape
  *    update --file`) and names the exact field that is wrong.
  *  - `shapeParts` lists the parts of a board: every `data-mark` of a drawn
- *    view, every paragraph of What to know, every Code step, the title and the claim. Ids
+ *    view, every change and call path of What's changed, every paragraph of What to know,
+ *    every Code step, the title and the claim. Ids
  *    stay the same across versions, which is what lets the board redraw only
  *    what changed.
  *  - `diffShapeVersions` compares two snapshots by those ids ("what changed
@@ -26,12 +27,13 @@ import { ulid } from './ulid';
 
 export const SHAPE_FORMAT_VERSION = 1;
 
-export type ShapeViewId = 'picture' | 'how' | 'know' | 'code';
+export type ShapeViewId = 'picture' | 'how' | 'changed' | 'know' | 'code';
 
-/** The four views, in the dock's order. Their labels are the product's words. */
+/** The views, in the dock's order. Their labels are the product's words. */
 export const SHAPE_VIEWS: readonly { id: ShapeViewId; label: string }[] = [
   { id: 'picture', label: 'Picture' },
   { id: 'how', label: 'How it works' },
+  { id: 'changed', label: "What's changed" },
   { id: 'know', label: 'What to know' },
   { id: 'code', label: 'Code' },
 ];
@@ -197,6 +199,81 @@ export interface ShapeCodeView {
   files?: { path: string; line?: number }[];
 }
 
+/**
+ * What's changed: the change read as a patch, after How it works. The agent
+ * that draws the board writes it, and keeps it in agreement with the Picture
+ * and How it works.
+ *
+ * Text fields are inline Markdown (`code`, **bold**, links, `[^n]`), except
+ * `was` and `now`, which are diff lines: plain words, with `code` for names.
+ * A place in code is `path:line` (or `path#L42`), a path in the project; a
+ * guide step is the review's chapter number, from 1.
+ */
+export type ShapeChangeKind = 'behaviour' | 'contract' | 'moved' | 'removed' | 'check';
+export const SHAPE_CHANGE_KINDS: readonly ShapeChangeKind[] = ['behaviour', 'contract', 'moved', 'removed', 'check'];
+
+export interface ShapeChangeItem {
+  /** Stable across versions: a part the person can point at. */
+  id: string;
+  /**
+   * behaviour: what a person or a program sees happen; contract: a name, an
+   * address, a format others rely on; moved: code that moved unchanged;
+   * removed: what is gone; check: something to look at, with a note.
+   */
+  kind: ShapeChangeKind;
+  title: string;
+  /** The − lines: what it was. One line, or several. */
+  was?: string | string[];
+  /** The + lines: what it is now. */
+  now?: string | string[];
+  /** moved: from where, to where (paths or names), and how many lines. */
+  from?: string;
+  to?: string;
+  lines?: number;
+  /** A sentence under the lines; required on check. */
+  note?: string;
+  /** Where it is in the code: `path:line`. */
+  code?: string[];
+  /** The review's guide step (chapter) that walks through it, from 1. */
+  step?: number;
+}
+
+/** A step on a call path, marked as it changed. `same` is context. */
+export interface ShapeFlowStep {
+  call: string;
+  is: 'new' | 'gone' | 'changed' | 'same';
+  note?: string;
+  /** `path:line`. */
+  at?: string;
+}
+
+/** Where a path ends: before and after (the same words when it did not change). */
+export interface ShapeFlowEnd {
+  was?: string;
+  now: string;
+}
+
+/** One path through the change, read as a unified diff: it starts, steps, forks and ends. */
+export interface ShapeChangeFlow {
+  id: string;
+  title: string;
+  start: string;
+  steps?: ShapeFlowStep[];
+  /** Branches after the steps, each with its own steps and end. */
+  forks?: { when: string; steps?: ShapeFlowStep[]; end?: ShapeFlowEnd }[];
+  end?: ShapeFlowEnd;
+}
+
+export interface ShapeChanged {
+  /** One sentence: what is different now. */
+  summary?: string;
+  items: ShapeChangeItem[];
+  /** The call paths the change moves. Most changes have one or none. */
+  flows?: ShapeChangeFlow[];
+  /** One line for the rest (renames that stay, tests, docs). */
+  also?: string;
+}
+
 export type ShapeRefKind = 'message' | 'image' | 'file' | 'pr' | 'diff' | 'link';
 export const SHAPE_REF_KINDS: readonly ShapeRefKind[] = ['message', 'image', 'file', 'pr', 'diff', 'link'];
 
@@ -232,6 +309,8 @@ export interface ShapeBoard {
   views: {
     picture?: ShapeDrawnView;
     how?: ShapeDrawnView;
+    /** What's changed: the change as a patch (items, call paths). */
+    changed?: ShapeChanged;
     /** What the person needs to know: at most two short paragraphs of prose. Inline Markdown. */
     know?: string;
     /** Only on a version saved before What to know. */
@@ -387,6 +466,12 @@ export const SHAPE_LIMITS = {
   images: 12,
   noteText: 4000,
   quote: 600,
+  /** What's changed: items, lines per side, call paths, steps and forks per path. */
+  changes: 40,
+  changeLines: 12,
+  flows: 6,
+  flowSteps: 40,
+  forks: 12,
   examples: 6,
   exampleSteps: 12,
   exampleRows: 12,
@@ -660,7 +745,7 @@ export function shapeHtmlProblems(html: string): string[] {
       else if (SHAPE_URL_ATTRS.includes(name)) {
         const link = tag === 'a' && (name === 'href' || name === 'xlink:href');
         if (!shapeUrlAllowed(value, link)) {
-          add(`<${tag} ${name}="${shown}">: nothing may load from outside the board; use a file on this computer, files/<name>, #id or a data:image${link ? ' (a link may be https://)' : ''}`);
+          add(`<${tag} ${name}="${shown}">: nothing may load from outside the board; use files/<name>, #id or a data:image (a picture on this computer or the web goes in <img src> or <image href>, and shape update copies it in)${link ? ' (a link may be https://)' : ''}`);
         }
       } else if (name === 'style') {
         for (const p of shapeCssProblems(value)) add(`<${tag} style>: ${p}`);
@@ -1296,6 +1381,184 @@ function checkCode(c: Checker, value: unknown, field: string): ShapeCodeView | u
   };
 }
 
+/** A place in code, `path:line` or `path#L42`, kept as written. */
+function checkCodePlace(c: Checker, value: unknown, field: string): string | undefined {
+  const text = c.text(value, field, 520);
+  if (text === undefined) return undefined;
+  if (!parseShapeCodeTarget(text)) {
+    c.fail(field, `"${text.slice(0, 80)}" must be path:line (src/a.ts:42), a path in the project`);
+    return undefined;
+  }
+  return text;
+}
+
+const CITE_RE = /\[\^\d{1,3}\]/;
+
+/**
+ * Words What's changed draws as they are (diff lines, a call path's steps and ends, a move's from and to): a `[^n]`
+ * there would show as written, so it is refused, naming the field.
+ */
+function plainText(c: Checker, value: string | undefined, field: string): string | undefined {
+  if (value !== undefined && CITE_RE.test(value)) {
+    c.fail(field, 'shows a [^n] as written: cite a reference in a title, a note, the summary or also');
+    return undefined;
+  }
+  return value;
+}
+
+/** `was` or `now`: one line, or a list of lines. Kept as written. */
+function checkDiffLines(c: Checker, value: unknown, field: string): string | string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (Array.isArray(value)) {
+    const lines = c.list(value, field, SHAPE_LIMITS.changeLines);
+    if (!lines) return undefined;
+    if (!lines.length) {
+      c.fail(field, 'is empty');
+      return undefined;
+    }
+    const out = lines.map((line, i) => plainText(c, c.text(line, `${field}[${i}]`, SHAPE_LIMITS.line), `${field}[${i}]`));
+    return out.every((line): line is string => line !== undefined) ? out : undefined;
+  }
+  return plainText(c, c.text(value, field, SHAPE_LIMITS.line), field);
+}
+
+function checkFlowEnd(c: Checker, value: unknown, field: string): ShapeFlowEnd | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isRecord(value)) {
+    c.fail(field, 'must be { was?, now }');
+    return undefined;
+  }
+  const was = plainText(c, c.text(value.was, `${field}.was`, SHAPE_LIMITS.line, false), `${field}.was`);
+  const now = plainText(c, c.text(value.now, `${field}.now`, SHAPE_LIMITS.line), `${field}.now`);
+  return now === undefined ? undefined : { ...(was !== undefined ? { was } : {}), now };
+}
+
+const FLOW_IS: readonly ShapeFlowStep['is'][] = ['new', 'gone', 'changed', 'same'];
+
+function checkFlowSteps(c: Checker, value: unknown, field: string): ShapeFlowStep[] | undefined {
+  const steps = c.list(value, field, SHAPE_LIMITS.flowSteps);
+  if (!steps) return undefined;
+  return steps.flatMap((s, i) => {
+    const f = `${field}[${i}]`;
+    if (!isRecord(s)) {
+      c.fail(f, 'must be { call, is, note?, at? }');
+      return [];
+    }
+    const call = plainText(c, c.text(s.call, `${f}.call`, 200), `${f}.call`);
+    const is = FLOW_IS.includes(s.is as ShapeFlowStep['is']) ? (s.is as ShapeFlowStep['is']) : undefined;
+    if (!is) c.fail(`${f}.is`, `must be one of ${FLOW_IS.join(', ')}`);
+    const note = plainText(c, c.text(s.note, `${f}.note`, SHAPE_LIMITS.line, false), `${f}.note`);
+    const at = s.at === undefined || s.at === null ? undefined : checkCodePlace(c, s.at, `${f}.at`);
+    return call !== undefined && is ? [{ call, is, ...(note !== undefined ? { note } : {}), ...(at !== undefined ? { at } : {}) }] : [];
+  });
+}
+
+/** The fields of a change the board draws only for some kinds, and what each kind shows instead. */
+const CHANGE_FIELDS_NOT_DRAWN: Record<ShapeChangeKind, readonly ('was' | 'now' | 'from' | 'to' | 'lines')[]> = {
+  behaviour: ['from', 'to', 'lines'],
+  contract: ['from', 'to', 'lines'],
+  removed: ['from', 'to', 'lines'],
+  moved: ['was', 'now'],
+  check: ['was', 'now', 'from', 'to', 'lines'],
+};
+const CHANGE_FIELDS_DRAWN: Record<ShapeChangeKind, string> = {
+  behaviour: 'it shows was and now',
+  contract: 'it shows was and now',
+  removed: 'it shows was and now',
+  moved: 'it shows from, to and lines',
+  check: 'it shows its note',
+};
+
+function checkChanged(c: Checker, value: unknown, field: string): ShapeChanged | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isRecord(value)) {
+    c.fail(field, 'must be an object with items');
+    return undefined;
+  }
+  const ids = new Set<string>();
+  const ownId = (v: unknown, f: string) => {
+    const id = c.id(v, f);
+    if (id !== undefined && ids.has(id)) c.fail(f, `"${id}" is used twice`);
+    if (id !== undefined) ids.add(id);
+    return id;
+  };
+  const summary = c.text(value.summary, `${field}.summary`, SHAPE_LIMITS.line, false);
+  const also = c.text(value.also, `${field}.also`, 600, false);
+  const list = c.list(value.items, `${field}.items`, SHAPE_LIMITS.changes);
+  if (value.items === undefined || value.items === null) c.fail(`${field}.items`, 'is required');
+  const items: ShapeChangeItem[] = [];
+  (list ?? []).forEach((it, i) => {
+    const f = `${field}.items[${i}]`;
+    if (!isRecord(it)) return c.fail(f, 'must be { id, kind, title, … }');
+    const id = ownId(it.id, `${f}.id`);
+    const kind = SHAPE_CHANGE_KINDS.includes(it.kind as ShapeChangeKind) ? (it.kind as ShapeChangeKind) : undefined;
+    if (!kind) c.fail(`${f}.kind`, `must be one of ${SHAPE_CHANGE_KINDS.join(', ')}`);
+    const title = c.text(it.title, `${f}.title`, 200);
+    const was = checkDiffLines(c, it.was, `${f}.was`);
+    const now = checkDiffLines(c, it.now, `${f}.now`);
+    const from = plainText(c, c.text(it.from, `${f}.from`, 500, false), `${f}.from`);
+    const to = plainText(c, c.text(it.to, `${f}.to`, 500, false), `${f}.to`);
+    const lines = c.int(it.lines, `${f}.lines`, 1, 10_000_000, false);
+    const note = c.text(it.note, `${f}.note`, 1000, false);
+    // A kind's own rule only on a field the agent left out: one that is there but wrong already has its error.
+    const absent = (name: string) => it[name] === undefined || it[name] === null;
+    if (kind === 'moved' && (absent('from') || absent('to'))) c.fail(f, 'a moved change needs from and to');
+    if (kind === 'removed' && absent('was')) c.fail(`${f}.was`, 'a removed change needs was: what is gone');
+    if (kind === 'check' && absent('note')) c.fail(`${f}.note`, 'a check needs a note: what to look at, and why');
+    if ((kind === 'behaviour' || kind === 'contract') && absent('was') && absent('now')) c.fail(f, `a ${kind} change needs was, now or both`);
+    // A field the board does not draw for this kind is refused, not stored unseen.
+    if (kind) {
+      for (const name of CHANGE_FIELDS_NOT_DRAWN[kind]) if (!absent(name)) c.fail(`${f}.${name}`, `is not shown on a ${kind} change (${CHANGE_FIELDS_DRAWN[kind]})`);
+    }
+    const codeList = c.list(it.code, `${f}.code`, 8);
+    // The same place twice is one link.
+    const code = codeList && [...new Set(codeList.map((p, j) => checkCodePlace(c, p, `${f}.code[${j}]`)).filter((p): p is string => p !== undefined))];
+    const step = c.int(it.step, `${f}.step`, 1, SHAPE_LIMITS.sections, false);
+    if (id === undefined || !kind || title === undefined) return;
+    items.push({
+      id,
+      kind,
+      title,
+      ...(was !== undefined ? { was } : {}),
+      ...(now !== undefined ? { now } : {}),
+      ...(from !== undefined ? { from } : {}),
+      ...(to !== undefined ? { to } : {}),
+      ...(lines !== undefined ? { lines } : {}),
+      ...(note !== undefined ? { note } : {}),
+      ...(code?.length ? { code } : {}),
+      ...(step !== undefined ? { step } : {}),
+    });
+  });
+  if (list && !list.length) c.fail(`${field}.items`, 'is empty: name at least one change');
+  const flowList = c.list(value.flows, `${field}.flows`, SHAPE_LIMITS.flows);
+  const flows: ShapeChangeFlow[] = [];
+  (flowList ?? []).forEach((fl, i) => {
+    const f = `${field}.flows[${i}]`;
+    if (!isRecord(fl)) return c.fail(f, 'must be { id, title, start, steps?, forks?, end? }');
+    const id = ownId(fl.id, `${f}.id`);
+    const title = c.text(fl.title, `${f}.title`, 200);
+    const start = plainText(c, c.text(fl.start, `${f}.start`, SHAPE_LIMITS.line), `${f}.start`);
+    const steps = checkFlowSteps(c, fl.steps, `${f}.steps`);
+    const forkList = c.list(fl.forks, `${f}.forks`, SHAPE_LIMITS.forks);
+    const forks = (forkList ?? []).flatMap((k, j) => {
+      const ff = `${f}.forks[${j}]`;
+      if (!isRecord(k)) {
+        c.fail(ff, 'must be { when, steps?, end? }');
+        return [];
+      }
+      const when = plainText(c, c.text(k.when, `${ff}.when`, 200), `${ff}.when`);
+      const kSteps = checkFlowSteps(c, k.steps, `${ff}.steps`);
+      const end = checkFlowEnd(c, k.end, `${ff}.end`);
+      return when === undefined ? [] : [{ when, ...(kSteps ? { steps: kSteps } : {}), ...(end ? { end } : {}) }];
+    });
+    const end = checkFlowEnd(c, fl.end, `${f}.end`);
+    if (id === undefined || title === undefined || start === undefined) return;
+    flows.push({ id, title, start, ...(steps ? { steps } : {}), ...(forkList ? { forks } : {}), ...(end ? { end } : {}) });
+  });
+  if (!list) return undefined;
+  return { ...(summary !== undefined ? { summary } : {}), items, ...(flowList ? { flows } : {}), ...(also !== undefined ? { also } : {}) };
+}
+
 function checkRefs(c: Checker, value: unknown): ShapeRef[] | undefined {
   const refs = c.list(value, 'refs', SHAPE_LIMITS.refs);
   if (!refs) return undefined;
@@ -1369,17 +1632,19 @@ export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
   else {
     for (const key of Object.keys(input.views)) {
       if (key === 'reqs') c.fail('views.reqs', 'Requirements are gone. Put what the person needs to know in views.know, as at most two short paragraphs');
-      else if (!SHAPE_VIEWS.some((v) => v.id === key)) c.fail(`views.${key}`, 'is not a view (picture, how, know, code)');
+      else if (!SHAPE_VIEWS.some((v) => v.id === key)) c.fail(`views.${key}`, 'is not a view (picture, how, changed, know, code)');
     }
     const picture = checkDrawn(c, input.views.picture, 'views.picture');
     const how = checkDrawn(c, input.views.how, 'views.how', true);
+    const changed = checkChanged(c, input.views.changed, 'views.changed');
     const know = checkKnow(c, input.views.know, 'views.know');
     const code = checkCode(c, input.views.code, 'views.code');
     if (picture) views.picture = picture;
     if (how) views.how = how;
+    if (changed) views.changed = changed;
     if (know) views.know = know;
     if (code) views.code = code;
-    if (!input.views.picture && !input.views.how && !input.views.know && !input.views.reqs && !input.views.code) c.fail('views', 'needs at least one view');
+    if (!input.views.picture && !input.views.how && !input.views.changed && !input.views.know && !input.views.reqs && !input.views.code) c.fail('views', 'needs at least one view');
   }
   const refs = checkRefs(c, input.refs);
   if (c.errors.length || !title || !claim) return { ok: false, errors: c.errors.length ? c.errors : ['title and claim are required'] };
@@ -1483,6 +1748,12 @@ export function shapeParts(board: ShapeBoard): ShapePart[] {
       }
     }
   }
+  const changed = board.views.changed;
+  for (const item of changed?.items ?? []) {
+    const lines = [item.was, item.now].flatMap((l) => (l === undefined ? [] : Array.isArray(l) ? l : [l]));
+    parts.push({ view: 'changed', id: item.id, text: fold([item.kind, item.title, ...lines, item.from, item.to, item.note, ...(item.code ?? [])].filter(Boolean).join(' ')) });
+  }
+  for (const flow of changed?.flows ?? []) parts.push({ view: 'changed', id: flow.id, text: fold(JSON.stringify([flow.title, flow.start, flow.steps ?? [], flow.forks ?? [], flow.end ?? null])) });
   shapeKnowParagraphs(board.views.know ?? '').forEach((text, i) => parts.push({ view: 'know', id: `know-${i + 1}`, text: fold(text) }));
   for (const group of board.views.reqs?.groups ?? []) {
     for (const item of group.items) parts.push({ view: 'know', id: item.id, text: fold(`${group.label}: ${item.text}`) });
@@ -1532,6 +1803,13 @@ export function shapeCitedRefs(board: ShapeBoard): Set<number> {
     fromHtml(board.views[view]?.tall?.html);
     fromHtml(board.views[view]?.more?.html);
   }
+  fromText(board.views.changed?.summary);
+  fromText(board.views.changed?.also);
+  for (const item of board.views.changed?.items ?? []) {
+    fromText(item.title);
+    fromText(item.note);
+  }
+  for (const flow of board.views.changed?.flows ?? []) fromText(flow.title);
   fromText(board.views.know);
   for (const group of board.views.reqs?.groups ?? []) for (const item of group.items) fromText(item.text);
   for (const foot of board.views.reqs?.foot ?? []) fromText(foot.text);

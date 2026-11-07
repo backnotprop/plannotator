@@ -32,6 +32,7 @@ import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { inboxScratch, rememberInboxOf } from './inbox-scratch';
+import { clearSidebarPeek } from './sidebar-peek';
 
 export const repo = resolve(__dirname, '../..');
 export const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -236,6 +237,7 @@ export async function openTab(world: World, options: { url?: string; timeout?: n
   });
   const started = Date.now();
   await page.goto(options.url ?? world.url, { timeout: options.timeout ?? 30_000 });
+  await clearSidebarPeek(page);
   await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible({ timeout: options.timeout ?? 30_000 });
   const ms = Date.now() - started;
   world.pages.push(page);

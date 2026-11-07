@@ -68,7 +68,8 @@ const SPOTS = {
   action: [':::action', 'Spot action: approve the prompt', 'It lands on your phone.', ':::'].join('\n'),
   actionNote: [':::action', 'Spot action note: approve the prompt', 'It lands on your phone.', ':::'].join('\n'),
   page: spotQuestion('question', 'Spot page: which flavour?'),
-  menu: spotQuestion('question', 'Spot menu: which flavour?'),
+  // A second question stays unanswered after the pick, so the open questions button (and Q) stay (approval "reply-bar-pairs").
+  menu: [spotQuestion('question', 'Spot menu: which flavour?'), spotQuestion('question', 'And a topping?')].join('\n\n'),
   link: `${spotQuestion('question', 'Spot link: which flavour?')}\n\nThe menu is at [the flavour page](https://example.com/flavours).`,
   boxopen: spotQuestion('question', 'Spot boxopen: which flavour?'),
   late: spotQuestion('question-text', 'Spot late: what should we call it?'),
@@ -76,7 +77,8 @@ const SPOTS = {
   cant: [spotQuestion('question', 'Spot cant: which flavour?'), '', ':::action', 'Spot cant: open the vault', 'Needs your badge.', ':::'].join('\n'),
   cover: spotQuestion('question', 'Spot cover: which flavour?'),
   coverimg: spotQuestion('question', 'Spot coverimg: which flavour?'),
-  guided: spotQuestion('question', 'Spot guided: which flavour?'),
+  // A second question stays unanswered after the pick, so the open questions button (and Q) stay (approval "reply-bar-pairs").
+  guided: [spotQuestion('question', 'Spot guided: which flavour?'), spotQuestion('question', 'And a topping?')].join('\n\n'),
   click: spotQuestion('question', 'Spot click: which flavour?'),
 };
 /** Files a spot's message carries (the project's own files), and which spot also gets a guided review reply. */
