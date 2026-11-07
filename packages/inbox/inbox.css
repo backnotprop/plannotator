@@ -8033,6 +8033,38 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rv-dir { color: var(--muted-foreground); }
 .ib-rv-route { margin: 0 0 12px; }
 .ib-rv-route .ib-sessnote { margin: 0; }
+/* A stack badge's "Read it in the review" (ReviewPane `narrow`): the bar over the narrowed chapter, kept in view. */
+.ib-rv-narrow { position: sticky; top: 0; z-index: 6; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 12px; padding: 8px 12px 8px 8px; border-radius: 12px;
+  background: color-mix(in oklab, var(--foreground) 6%, var(--background)); font-size: var(--ib-fs-14, 14px); }
+.ib-rv-narrow-back { appearance: none; border: 0; margin: 0; display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 10px 0 6px; border-radius: 8px;
+  background: var(--background); color: var(--foreground); font: inherit; font-weight: 600; cursor: pointer; transition: background-color .15s ease; }
+@media (hover: hover) { .ib-rv-narrow-back:hover { background: color-mix(in oklab, var(--foreground) 8%, var(--background)); } }
+.ib-rv-narrow-back:active { transform: scale(.97); }
+.ib-rv-narrow-what { flex: 1 1 18em; min-width: 0; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.ib-rv-narrow-pr { display: inline-flex; align-items: center; gap: 6px; color: var(--foreground); text-decoration: none; }
+a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-offset: 3px; }
+.ib-rv-narrow-n { display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 6px 0 5px; border-radius: 6px; font: 600 var(--ib-fs-13, 13px)/1 var(--font-mono, ui-monospace, monospace);
+  background: color-mix(in oklab, var(--foreground) 8%, transparent); color: var(--foreground); }
+/* The PR's colour from its hue (--shp-h on the link; the board's own mix, shape.css .shp-stk-pr). */
+.ib-rv-narrow-pr[data-hue] .ib-rv-narrow-n { background: color-mix(in oklab, oklch(0.62 0.14 var(--shp-h, 186)) 15%, var(--background)); color: color-mix(in oklab, oklch(0.56 0.15 var(--shp-h, 186)) 74%, var(--foreground)); }
+.ib-rv-narrow-all { appearance: none; border: 0; margin: 0; padding: 4px 4px; background: none; color: var(--primary); font: inherit; font-weight: 500; cursor: pointer; }
+@media (hover: hover) { .ib-rv-narrow-all:hover { text-decoration: underline; text-underline-offset: 3px; } }
+@media (prefers-reduced-motion: reduce) { .ib-rv-narrow-back:active { transform: none; } }
+/* On a phone (owner, 2026-11-07: "Feels crowded up there on mobile"): one quiet line with both buttons as plain
+   words, then what was opened as running text in the smaller secondary size, which wraps word by word (a long PR title
+   takes a second line; the file count follows it on the same line when it fits). Nothing is dropped. */
+@media (max-width: 640px) {
+  .ib-rv-narrow { gap: 0 8px; margin-bottom: 8px; padding: 2px 10px 8px 2px; border-radius: 0 0 12px 12px; background: var(--background);
+    box-shadow: 0 1px 0 color-mix(in oklab, var(--foreground) 8%, transparent); }
+  .ib-rv-narrow-back { height: 36px; padding: 0 8px 0 4px; background: none; font-size: var(--ib-fs-14, 14px); }
+  .ib-rv-narrow-all { margin-left: auto; padding: 8px 4px; font-size: var(--ib-fs-13, 13px); }
+  .ib-rv-narrow-what { order: 2; flex-basis: 100%; display: block; padding: 0 6px 0 8px; font-size: var(--ib-fs-13, 13px); line-height: 20px; color: var(--muted-foreground); overflow-wrap: anywhere; }
+  .ib-rv-narrow-what > b { color: var(--foreground); font-weight: 600; }
+  .ib-rv-narrow-pr { display: inline; }
+  .ib-rv-narrow-pr b { font-weight: 400; color: var(--foreground); }
+  .ib-rv-narrow-n { height: 18px; margin-right: 2px; padding: 0 5px 0 4px; font-size: var(--ib-fs-12, 12px); vertical-align: -3px; }
+}
+@media (max-width: 640px) and (hover: hover) { .ib-rv-narrow-back:hover { background: color-mix(in oklab, var(--foreground) 6%, transparent); } }
 .ib-rv-n { flex: none; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ib-rv-progress { margin-top: auto; padding: 8px 8px 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-rv-phonebar { display: none; }
@@ -8172,6 +8204,10 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rv-walk[data-review-mode='files'] [data-guide-file-shell] { scroll-margin-top: 16px; }
 /* A jump to a chapter lands on its first file, with the chapter's tab above it in view. */
 .ib-rv-walk [data-guide-section-tabbed] [data-guide-file-shell]:first-child { scroll-margin-top: 62px; }
+/* Narrowed from a stack badge: the bar stays over the reader, so a jump lands below it (ReviewPane sets the height). */
+.ib-rv-walk[data-review-narrowed] [data-guide-section] { scroll-margin-top: calc(var(--ib-rv-narrow-h, 48px) + 12px); }
+.ib-rv-walk[data-review-narrowed] [data-guide-file-shell] { scroll-margin-top: calc(var(--ib-rv-narrow-h, 48px) + 30px); }
+.ib-rv-walk[data-review-narrowed] [data-guide-section-tabbed] [data-guide-file-shell]:first-child { scroll-margin-top: calc(var(--ib-rv-narrow-h, 48px) + 62px); }
 /* All files: every changed file in one full-width column, no chapter card (the menu lists them). */
 .ib-rv-walk[data-review-mode='files'] [data-guide-section] { border: 0; border-radius: 0; background: transparent; overflow: visible; }
 .ib-rv-walk[data-review-mode='files'] [data-guide-section-grid] { display: block; }

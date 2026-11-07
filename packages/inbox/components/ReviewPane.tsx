@@ -35,7 +35,7 @@
  * No new keyboard shortcuts: Escape and "Thread" go back as the guide pane's do.
  */
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import type { InboxMessageWire, InboxPull, InboxThread } from '@plannotator/core/inbox-types';
@@ -50,7 +50,7 @@ import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 import { parseGuideSnapshot } from '@plannotator/core/guide-format';
 import { inboxDrawnViewOf, inboxReviewLines, inboxReviewRound } from '@plannotator/core/inbox-review';
 import type { ShapeCodeTarget, ShapeVersion } from '@plannotator/core/shape';
-import type { ShapeHost, ShapeReviewAt } from '@plannotator/ui/components/shape';
+import type { ShapeHost, ShapeReviewAt, ShapeReviewNarrow } from '@plannotator/ui/components/shape';
 import { OverviewFigure, ShowMeButton } from '../review-drawing/OverviewFigure';
 import { ShowMeBox, ShowMeCorner } from '../review-drawing/ShowMeLayer';
 import { partLanding, reviewDrawnOn, overviewPicture, baseName, changedMarks, chapterOf, markOf, partName, targetLines } from '../review-drawing/showMeModel';
@@ -409,8 +409,34 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     setLanded({ part: { name: partName(el), mark: markOf(el), file: target.path, lines: landing === 'changed' ? null : landing } });
     return true;
   };
+  /**
+   * A stack badge's "Read it in the review" (`narrow`): that PR's chapter shows only the part's files, under a bar with
+   * the way back to the board ("Back to the board") and "Show the whole stack". The chapter is the PR's step, else the
+   * one that holds the part's first file. Null: the review as it is.
+   */
+  const [narrow, setNarrow] = useState<(ShapeReviewNarrow & { chapter: number }) | null>(null);
   /** A place in the review (a Shape board's link): a file at a line, a file, a chapter, or All files. */
+  // Narrowing gives the reader a new snapshot: the jump waits for it to draw, or the move is lost with the old one.
+  const narrowJump = useRef<{ chapter: number; file: string | null } | null>(null);
+  const narrowBack = useRef<HTMLButtonElement>(null);
+  // The bar stays over the narrowed chapter: a jump lands below it (`--ib-rv-narrow-h`, read by the file's scroll margin).
+  const narrowBar = useRef<HTMLDivElement>(null);
   const goTo = (to: ShapeReviewAt) => {
+    if (to.narrow) {
+      const chapter = to.step && to.step <= chapters.length ? to.step - 1 : chapterOf(chapters, to.narrow.files[0]!);
+      if (chapter !== null) {
+        setNarrow({ ...to.narrow, chapter });
+        // The chapter's first file that is kept: its first file may be one the narrowing leaves out.
+        const kept = to.narrow.files;
+        const first = chapters[chapter]?.diffs.find((ref) => kept.includes(ref.file) && files.some((file) => file.path === ref.file));
+        narrowJump.current = { chapter, file: first?.file ?? null };
+        return;
+      }
+    }
+    setNarrow(null);
+    jump(to);
+  };
+  const jump = (to: ShapeReviewAt) => {
     if (to.path && to.line) openCode({ path: to.path, line: to.line });
     else if (to.path && files.some((file) => file.path === to.path)) toFile(to.path);
     else if (to.step && to.step <= chapters.length) {
@@ -486,6 +512,64 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   // The Overview's picture, drawn as a Shape picture (overviewPicture: version 3 only); any other diagram keeps the
   // guide viewer's own. In a later round, which of its parts the agent redrew.
   const overviewHtml = useMemo(() => overviewPicture(snapshot?.guide.overview?.diagram), [snapshot]);
+  // Narrowed (a stack badge): the PR's chapter with only the part's files, when it has any of them.
+  const narrowed = useMemo(() => {
+    if (!snapshot || !narrow) return null;
+    const section = snapshot.guide.sections[narrow.chapter];
+    if (!section) return null;
+    const total = new Set(section.diffs.map((d) => d.file)).size;
+    const kept = section.diffs.filter((d) => narrow.files.includes(d.file));
+    if (!kept.length) return null;
+    const sections = snapshot.guide.sections.map((s, i) => (i === narrow.chapter ? { ...s, diffs: kept } : s));
+    return { snapshot: { ...snapshot, guide: { ...snapshot.guide, sections } }, shown: new Set(kept.map((d) => d.file)).size, total };
+  }, [snapshot, narrow]);
+  const readerSnapshot = narrowed?.snapshot ?? snapshot;
+  useEffect(() => {
+    const bar = narrowBar.current;
+    const pane = paneRef.current;
+    if (!bar || !pane) return;
+    const set = () => pane.style.setProperty('--ib-rv-narrow-h', `${bar.offsetHeight}px`);
+    set();
+    const seen = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(set);
+    seen?.observe(bar);
+    return () => {
+      seen?.disconnect();
+      pane.style.removeProperty('--ib-rv-narrow-h');
+    };
+  }, [narrow, narrowed]);
+  // The move to the narrowed chapter (or file) waits for the reader to draw: the reader loads lazily, and a move made
+  // before it mounts reads as one it has already seen (a review opened from the board over the thread).
+  useEffect(() => {
+    if (!narrowJump.current) return;
+    let tries = 0;
+    let frame = 0;
+    const go = () => {
+      if (!bodyRef.current?.querySelector('[data-guide-section]') && tries++ < 120) {
+        frame = requestAnimationFrame(go);
+        return;
+      }
+      const pending = narrowJump.current;
+      narrowJump.current = null;
+      if (!pending) return;
+      if (pending.file) {
+        jumped.current = true;
+        setCurrent(pending.chapter);
+        if (mode !== 'walkthrough') setMode('walkthrough');
+        move(pending.file);
+      } else jump({ step: pending.chapter + 1 });
+      // The card that sent the person here is gone behind the review: focus starts on the way back.
+      narrowBack.current?.focus({ preventScroll: true });
+    };
+    go();
+    return () => cancelAnimationFrame(frame);
+    // Runs once per narrowing; the jump reads this render's state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [narrow]);
+  const backToBoard = () => {
+    setNarrow(null);
+    if (board) setLanded(null);
+    else if (threadBoard) onBoard(threadBoard.id);
+  };
   const earlierReview = earlierReviews.at(-1) ?? null;
   const [earlierOverview, setEarlierOverview] = useState<GuideOverviewDiagram | null>(null);
   useEffect(() => {
@@ -689,6 +773,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
       aria-label="Review"
       data-review-message={message.id}
       data-review-mode={mode}
+      {...(narrow && narrowed ? { 'data-review-narrowed': '' } : {})}
     >
       <div className="ib-vhead">
         <Tip content="Thread">
@@ -879,10 +964,40 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
           ) : snapshot ? (
             // The reader is a chunk loaded on first use: one that cannot arrive says so here (GuidePane).
             <div ref={contentRef}>
+            {narrow && narrowed && (
+              <div ref={narrowBar} className="ib-rv-narrow" role="region" aria-label="Opened from the board" data-review-narrow={narrow.pr}>
+                <button ref={narrowBack} type="button" className="ib-rv-narrow-back" onClick={backToBoard} data-review-narrow-back="">
+                  <Icon name="chevL" size={15} />
+                  Back to the board
+                </button>
+                <span className="ib-rv-narrow-what">
+                  {/* The spaces keep the words apart where a phone runs them as text (inbox.css); a flex row ignores them. */}
+                  <b>{narrow.part}</b> <span className="ib-mut">in</span>{' '}
+                  <a
+                    className="ib-rv-narrow-pr"
+                    {...(narrow.hue !== undefined ? { 'data-hue': '', style: { '--shp-h': narrow.hue } as CSSProperties } : {})}
+                    {...(narrow.url ? { href: narrow.url, target: '_blank', rel: 'noreferrer noopener' } : {})}>
+                    <span className="ib-rv-narrow-n">
+                      <Icon name="pullRequest" size={12} />#{narrow.pr}
+                    </span>
+                    {narrow.title && <> <b>{narrow.title}</b></>}
+                  </a>
+                  {narrowed.shown < narrowed.total && ' '}
+                  {narrowed.shown < narrowed.total && (
+                    <span className="ib-mut">
+                      · {narrowed.shown} of the {narrowed.total} files in this chapter
+                    </span>
+                  )}
+                </span>
+                <button type="button" className="ib-rv-narrow-all" onClick={() => setNarrow(null)} data-review-narrow-all="">
+                  Show the whole stack
+                </button>
+              </div>
+            )}
             <ReaderPart diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on>
               <GuideReader
-                snapshot={snapshot}
+                snapshot={readerSnapshot!}
                 reviewed={reviewed}
                 onReviewedChange={changeReviewed}
                 comments={readerComments}

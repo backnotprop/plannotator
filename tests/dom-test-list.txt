@@ -566,6 +566,7 @@ packages/ui/components/shape/ShapeSurface.board.test.tsx
 packages/ui/components/shape/ShapeSurface.onCode.test.tsx
 packages/ui/components/AnnotationToolstrip.hideActionModes.test.tsx
 packages/ui/components/shape/ShapeSurface.changed.test.tsx
+packages/ui/components/shape/ShapeSurface.stack.test.tsx
 packages/inbox/shapeWhatsChanged.test.tsx
 packages/inbox/reviewPaneAt.test.tsx
 packages/inbox/shapeBoardPlace.test.tsx

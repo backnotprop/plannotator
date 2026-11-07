@@ -5,7 +5,9 @@
  *  - a board's `file:line` opens the review at its top, not at that file with the lines painted;
  *  - a guide step opens a chapter other than that step's, or Full review opens the walkthrough;
  *  - the place is not let go once there (a reload would jump again), or is let go before the review is read;
- *  - the painted line is left off screen or under the corner card (the review paints it but does not scroll to it).
+ *  - the painted line is left off screen or under the corner card (the review paints it but does not scroll to it);
+ *  - a stack badge's "Read it in the review" showing the whole chapter, or no way back, or "Show the whole stack" not
+ *    bringing the chapter's other files back.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -20,7 +22,7 @@ import type { InboxShapes } from './shape/useInboxShapes';
 
 const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
-type ReaderProps = { mode?: string; reveal?: { path: string } | null; highlight?: { path: string; start: number; end: number } | null };
+type ReaderProps = { mode?: string; reveal?: { path: string } | null; highlight?: { path: string; start: number; end: number } | null; snapshot?: { guide: { sections: { diffs: { file: string }[] }[] } } };
 let reader: ReaderProps | null = null;
 const hasDom = typeof document !== 'undefined';
 if (hasDom) {
@@ -29,11 +31,17 @@ if (hasDom) {
       reader = props;
       // The painted row, as Pierre marks it, in its file's box.
       const lit = props.highlight;
-      return lit ? (
-        <div data-guide-file-shell={lit.path}>
-          <div data-line={lit.start} data-selected-line="" />
-        </div>
-      ) : null;
+      return (
+        <>
+          {/* A heading per chapter, as the reader draws them: a jump waits for these. */}
+          {props.snapshot?.guide.sections.map((_, i) => <div key={i} data-guide-section={i} />)}
+          {lit && (
+            <div data-guide-file-shell={lit.path}>
+              <div data-line={lit.start} data-selected-line="" />
+            </div>
+          )}
+        </>
+      );
     },
   }));
 }
@@ -57,6 +65,21 @@ const snapshot = buildGuideSnapshot({
   review: { rawPatch: patch, gitRef: 'main...HEAD', source: { kind: 'local' } },
   exportedAt: '2026-11-05T10:40:00.000Z',
 });
+// A stack's review: the second chapter (one PR) changed two files; a badge's part holds only one of them.
+const stackSnapshot = buildGuideSnapshot({
+  guide: {
+    title: 'Kettle',
+    intent: 'One whistle.',
+    sections: [
+      { title: '#11 · The whistle', overview: '', diffs: [{ file: 'src/kettle.ts', summary: '' }] },
+      { title: '#12 · The setting', overview: '', diffs: [{ file: 'src/settings.ts', summary: '' }, { file: 'src/timer.ts', summary: '' }] },
+    ],
+  },
+  reviewed: [false, false],
+  review: { rawPatch: patch, gitRef: 'main...HEAD', source: { kind: 'local' } },
+  exportedAt: '2026-11-05T10:40:00.000Z',
+});
+let served = snapshot;
 const message = {
   id: REVIEW,
   project_id: PROJECT.id,
@@ -83,7 +106,7 @@ beforeEach(() => {
   window.localStorage.clear();
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const path = String(input);
-    if (path.includes('/guide')) return Response.json({ message_id: REVIEW, guide: message.guide, snapshot });
+    if (path.includes('/guide')) return Response.json({ message_id: REVIEW, guide: message.guide, snapshot: served });
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
     if (path.includes('/sessions')) return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: [], asker: { session: 'ses_review', live: true } });
     return Response.json({});
@@ -96,6 +119,7 @@ afterEach(() => {
   root = null;
   el = null;
   globalThis.fetch = savedFetch;
+  served = snapshot;
 });
 
 async function open(at: ShapeReviewAt | null, pane: 'review' | 'guide' = 'review'): Promise<{ landed: () => number }> {
@@ -243,4 +267,26 @@ test.skipIf(!hasDom)('the line lands clear of the corner card: above its top, on
   expect(lineScrollBy({ top: 300, bottom: 320 }, view, 622)).toBe(0);
   // A range taller than the room: its first line at the top of the room.
   expect(lineScrollBy({ top: 1500, bottom: 2600 }, view, 622)).toBe(1500 - (100 + 72));
+});
+
+test.skipIf(!hasDom)("a stack badge's \"Read it in the review\" shows the PR's chapter with only the part's files, until Show the whole stack", async () => {
+  served = stackSnapshot;
+  await open({ step: 2, narrow: { part: 'The timer', pr: 12, title: 'The setting', hue: 72, files: ['src/timer.ts'] } });
+  const files = () => reader?.snapshot?.guide.sections.map((s) => s.diffs.map((d) => d.file));
+  expect(files()).toEqual([['src/kettle.ts'], ['src/timer.ts']]);
+  const bar = document.querySelector('[data-review-narrow]');
+  expect(bar?.textContent).toContain('Back to the board');
+  expect(bar?.textContent).toContain('The timer');
+  expect(bar?.textContent).toContain('1 of the 2 files in this chapter');
+  // The PR's number keeps its board colour: the chip carries the hue it came with.
+  const pr = bar?.querySelector<HTMLElement>('.ib-rv-narrow-pr');
+  expect(pr?.hasAttribute('data-hue')).toBe(true);
+  expect(pr?.style.getPropertyValue('--shp-h')).toBe('72');
+  // The jump to the chapter's narrowed file holds (the reader drew first), and focus starts on the way back.
+  for (let i = 0; i < 20 && reader?.reveal?.path !== 'src/timer.ts'; i++) await act(async () => new Promise((r) => setTimeout(r, 20)));
+  expect(reader?.reveal?.path).toBe('src/timer.ts');
+  expect(document.activeElement).toBe(document.querySelector('[data-review-narrow-back]'));
+  await act(async () => (document.querySelector('[data-review-narrow-all]') as HTMLButtonElement).click());
+  expect(document.querySelector('[data-review-narrow]')).toBeNull();
+  expect(files()).toEqual([['src/kettle.ts'], ['src/settings.ts', 'src/timer.ts']]);
 });
