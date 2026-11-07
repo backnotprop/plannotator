@@ -10,7 +10,7 @@
  * once the inside has ink.
  */
 import { expect, test } from 'bun:test';
-import { camAt, CAM_MS, diveInk, diveReading, DIVE_MS, doorOf, doorT, fitRect, LAND, PAD, springStep, STEP_MS, toSheet, wOf, zoomAbout, type Cam } from '../src/view/camera.ts';
+import { camAt, CAM_MS, diveInk, diveReading, turnLeg, DIVE_MS, doorOf, doorT, fitRect, LAND, PAD, springStep, STEP_MS, toSheet, wOf, zoomAbout, type Cam } from '../src/view/camera.ts';
 
 /** A move as the view launches it: from rest at 0 toward 1, kicked by the input (half the rate), stepped at 60 Hz. */
 function run(ms90: number, frames: number, kick = true) {
@@ -116,7 +116,8 @@ test('the zoom readout of a dive or a climb never jumps: it reads the sheet arou
   const s = r.w / 2000;
   const B = fitRect({ x: r.x, y: r.y, w: r.w, h: 1100 * s }, st, 1 / s);
   for (const from of [0, 1] as const) {
-    const at = (x: number) => diveReading(camAt(A, B, x).k, s, x, from);
+    const leg = from === 0 ? { x0: 0, w0: 0, to: 1 as const } : { x0: 1, w0: 1, to: 0 as const };
+    const at = (x: number) => diveReading(camAt(A, B, x).k, s, x, leg);
     // a dive leaves at the sheet around's scale and lands (re-roots) on the inside's own;
     // a climb leaves at the inside's scale and lands out on the sheet around's
     if (from === 0) {
@@ -139,5 +140,19 @@ test('the zoom readout of a dive or a climb never jumps: it reads the sheet arou
     }
   }
   // a wheel already past half way into the window has named the inside: the readout stays on it
-  expect(diveReading(2, s, 0.3, 0, true)).toBeCloseTo(2 * s, 9);
+  expect(diveReading(2, s, 0.3, { x0: 0, w0: 0, to: 1 }, true)).toBeCloseTo(2 * s, 9);
+
+  // a dive turned round half way: no step at the turn, and it lands out on the sheet around's own scale (it stepped about 6% there)
+  const dive = { x0: 0, w0: 0, to: 1 as const };
+  for (const xt of [0.2, 0.5, 0.9]) {
+    const back = turnLeg(dive, xt, 0);
+    const read = (x: number, leg: typeof dive | typeof back) => diveReading(camAt(A, B, x).k, s, x, leg);
+    expect(read(xt, back)).toBeCloseTo(read(xt, dive), 9);
+    expect(read(LAND, back)).toBeCloseTo(camAt(A, B, LAND).k, 9);
+    // and turned round again on the way out, it lands in on the inside's own scale
+    const xt2 = (xt + LAND) / 2, again = turnLeg(back, xt2, 1);
+    expect(read(xt2, again)).toBeCloseTo(read(xt2, back), 9);
+    expect(read(1 - LAND, again)).toBeCloseTo(camAt(A, B, 1 - LAND).k * s, 9);
+  }
+  expect(turnLeg(dive, 0.4, 1)).toBe(dive);
 });
