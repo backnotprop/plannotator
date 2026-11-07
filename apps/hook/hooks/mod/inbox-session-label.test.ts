@@ -358,7 +358,8 @@ function engineOver(firstSession: string) {
     [inboxRegistryPathOf(DATA), REGISTRY],
   ])
   const store = new Map<string, unknown>()
-  const timers = new Set<() => void>()
+  /** Each `$.clock.every` fires on its own period, as the engine's: the self-heal's 30 s is not the tick's 1 s. */
+  const timers = new Set<{ ms: number; fn: () => void; due: number }>()
   const polls: { session: unknown; label: unknown }[] = []
   let clock = 1_000_000
   const world = {
@@ -368,7 +369,11 @@ function engineOver(firstSession: string) {
     tick: async (n: number) => {
       for (let i = 0; i < n; i += 1) {
         clock += 1_000
-        for (const fn of [...timers]) fn()
+        for (const timer of [...timers]) {
+          if (!timers.has(timer) || clock < timer.due) continue
+          timer.due += timer.ms
+          timer.fn()
+        }
         for (let spin = 0; spin < 500; spin += 1) await Promise.resolve()
         await new Promise((resolve) => setTimeout(resolve, 0))
       }
@@ -395,9 +400,10 @@ function engineOver(firstSession: string) {
       clock: {
         now: async () => clock,
         sleep: realSleep,
-        every: (_ms: number, fn: () => void) => {
-          timers.add(fn)
-          return { cancel: () => timers.delete(fn) }
+        every: (ms: number, fn: () => void) => {
+          const timer = { ms, fn, due: clock + ms }
+          timers.add(timer)
+          return { cancel: () => timers.delete(timer) }
         },
       },
       store: { get: async (key: string) => store.get(key), set: async (key: string, value: unknown) => void store.set(key, value) },

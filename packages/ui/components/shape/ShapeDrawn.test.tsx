@@ -333,11 +333,105 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
     expect(shadow.querySelector('[data-ref="9"]')).toBeNull();
   });
 
+  // A <span> or <div> inside an <svg> ends the SVG where it stands in a browser, and all drawn after it was lost
+  // (shapeKeepSvgWhole's parse5 test shows that parse; happy-dom drops the span instead).
+  test('an HTML tag inside an SVG keeps the rest of the drawing; an empty <span data-ref> there is its number, once, in place', async () => {
+    const { shadow } = await draw({
+      html:
+        '<svg viewBox="0 0 400 200"><g data-mark="queue"><rect class="ink" x="10" y="10" width="100" height="40"/><text x="20" y="35">Queue</text><span data-ref="1"></span></g>' +
+        '<g data-mark="diff"><rect class="ink" x="200" y="10" width="100" height="40"/><text x="210" y="35">Diff <span data-ref="2"></span></text></g>' +
+        '<div></div><circle id="last" cx="50" cy="150" r="9"/><text x="1" y="1">x</text><circle data-ref="3" r="4"/></svg>',
+      refs: REFS,
+    });
+    const svg = shadow.querySelector('svg')!;
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    // Every part drawn after the span is still in the SVG, as SVG.
+    expect(svg.querySelector('[data-mark="diff"] rect')?.namespaceURI).toBe(SVG_NS);
+    expect(svg.querySelector('#last')?.namespaceURI).toBe(SVG_NS);
+    // One number each, in the SVG, in the words it follows.
+    for (const [n, words] of [[1, 'Queue'], [2, 'Diff']] as const) {
+      const spots = shadow.querySelectorAll(`[data-ref="${n}"]`);
+      expect(spots.length).toBe(1);
+      const spot = spots[0]!;
+      expect(spot.namespaceURI).toBe(SVG_NS);
+      expect(spot.textContent).toBe(String(n));
+      expect(spot.classList.contains('shp-rb')).toBe(true);
+      expect(spot.closest('text')?.textContent?.startsWith(words)).toBe(true);
+    }
+    // A shape that is a number stays that shape.
+    expect(shadow.querySelector('[data-ref="3"]')?.localName).toBe('circle');
+  });
+
+  test('an empty number in an SVG with no words before it goes to the nearest drawn words, else just after the SVG; never a hidden one', async () => {
+    const { shadow } = await draw({
+      html:
+        '<svg><g><span data-ref="1"></span><rect width="9" height="9"/><text x="1" y="9">Label</text></g></svg>' +
+        '<svg id="bare"><defs><text id="tucked">tucked</text></defs><span data-ref="2"></span><rect width="9" height="9"/></svg>',
+      refs: REFS,
+    });
+    const one = shadow.querySelectorAll('[data-ref="1"]');
+    expect(one.length).toBe(1);
+    expect(one[0]!.closest('text')?.textContent).toBe('Label1');
+    // No drawn words: a bubble just after the SVG, not one inside <defs>.
+    const two = shadow.querySelectorAll('[data-ref="2"]');
+    expect(two.length).toBe(1);
+    expect(shadow.querySelector('#tucked')?.textContent).toBe('tucked');
+    expect(two[0]!.localName).toBe('span');
+    expect(two[0]!.previousElementSibling?.id).toBe('bare');
+    expect(two[0]!.textContent).toBe('2');
+  });
+
   test('kept pictures reach the host, in HTML and in SVG, and nothing else is rewritten', async () => {
     const { shadow } = await draw({ html: '<img src="files/a.png"><svg><image href="files/b.png"></image></svg><img src="data:image/png;base64,AAAA">', resolveSrc: (src) => `/assets/${src}` });
     const imgs = [...shadow.querySelectorAll('img')].map((i) => i.getAttribute('src'));
     expect(imgs).toEqual(['/assets/files/a.png', 'data:image/png;base64,AAAA']);
     expect(shadow.querySelector('image')?.getAttribute('href')).toBe('/assets/files/b.png');
+  });
+
+  test('darkContrast on a dark board: edges on zones that draw no line, a tile behind each kept SVG picture (never a logo or a framed one), and a light board left exactly as drawn', async () => {
+    const { holdDarkBoard, releaseDarkBoard } = await import('./darkContrast');
+    // A stand-in for the canvas: happy-dom resolves the variables below to plain rgb().
+    const paint = (color: string) => {
+      const m = /^rgba?\((\d+)[ ,]+(\d+)[ ,]+(\d+)/.exec(color);
+      return m ? ([Number(m[1]), Number(m[2]), Number(m[3])] as const) : null;
+    };
+    const palette = (dark: boolean) => dark
+      ? '.board { --paper: rgb(8 13 22); --ink: rgb(218 222 229); --grey: rgb(150 156 166); --surface: rgb(22 28 40); --rule: rgb(55 61 72); --blue: rgb(94 140 191); --blue-soft: rgb(13 24 39); --amber: rgb(193 147 86); --amber-soft: rgb(36 33 30); --green: rgb(90 170 120); --green-soft: rgb(12 30 25); --plum: rgb(180 100 150); --plum-soft: rgb(28 18 30); --alert: rgb(241 77 76); --alert-soft: rgb(38 16 20); }'
+      : '.board { --paper: rgb(245 246 248); --ink: rgb(20 24 32); --grey: rgb(90 96 106); --surface: rgb(255 255 255); --rule: rgb(220 222 226); --blue: rgb(40 90 150); --blue-soft: rgb(225 233 243); --amber: rgb(150 100 20); --amber-soft: rgb(248 236 215); --green: rgb(30 110 70); --green-soft: rgb(222 240 230); --plum: rgb(130 50 100); --plum-soft: rgb(243 226 236); --alert: rgb(200 30 30); --alert-soft: rgb(250 225 225); }';
+    const logo = expandShapeStamps('<svg data-logo="codex" x="0" y="0" width="40" height="40"/>').html;
+    const html = `<svg><rect id="zone" width="300" height="200" style="fill:var(--blue-soft)"/><rect id="lined" width="80" height="60" style="fill:var(--amber-soft);stroke:var(--rule)"/>${logo}<image href="files/shot.png" x="10" y="20" width="100" height="50" transform="rotate(3)" data-step="2"/><image href="files/framed.png" x="0" y="0" width="80" height="80" clip-path="url(#c)"/><defs><pattern id="p"><image href="files/pat.png" width="8" height="8"/></pattern></defs><image href="files/nosize.png"/></svg><div id="hz" style="background: var(--amber-soft)">zone</div><img src="files/a.png">`;
+
+    const dark = await draw({ html, css: palette(true), resolveSrc: (src) => `/assets/${src}`, darkContrast: true });
+    expect(holdDarkBoard(dark.board, paint)).toBe(true);
+    expect(dark.board.classList.contains('dark-hold')).toBe(true);
+    // Every structural colour it set reads at 3:1 or more on what it meets (the rule itself: darkContrast.test.ts).
+    expect(dark.board.style.getPropertyValue('--rule')).toMatch(/^rgb\(/);
+    expect(dark.board.style.getPropertyValue('--shp-edge-blue')).toMatch(/^rgb\(/);
+    expect(dark.shadow.getElementById('zone')?.getAttribute('data-shp-edge')).toBe('blue');
+    expect(dark.shadow.getElementById('hz')?.getAttribute('data-shp-edge')).toBe('amber');
+    // A zone that draws its own line keeps it (and its --rule is lifted instead).
+    expect(dark.shadow.getElementById('lined')?.hasAttribute('data-shp-edge')).toBe(false);
+    const tiles = [...dark.shadow.querySelectorAll('rect.shp-pic-tile')];
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0]!.nextElementSibling?.getAttribute('href')).toBe('/assets/files/shot.png');
+    expect(['x', 'y', 'width', 'height'].map((k) => Number(tiles[0]!.getAttribute(k)))).toEqual([4, 14, 112, 62]);
+    // It turns and draws in with its picture.
+    expect(tiles[0]!.getAttribute('transform')).toBe('rotate(3)');
+    expect(tiles[0]!.getAttribute('data-step')).toBe('2');
+    expect(dark.shadow.querySelector('svg[data-brand] image')?.hasAttribute('data-shp-pic')).toBe(false);
+    // Taken back, nothing of it stays.
+    releaseDarkBoard(dark.board);
+    expect(dark.board.classList.contains('dark-hold')).toBe(false);
+    expect(dark.board.getAttribute('style') ?? '').not.toMatch(/--rule|--surface|--grey|--shp-edge/);
+    expect(dark.shadow.querySelectorAll('rect.shp-pic-tile, [data-shp-edge]')).toHaveLength(0);
+
+    // A light board: the same drawing, with the opt-in and without, is the same DOM (but the pictures' own mark).
+    const light = await draw({ html, css: palette(false), resolveSrc: (src) => `/assets/${src}`, darkContrast: true });
+    const before = light.board.outerHTML;
+    expect(holdDarkBoard(light.board, paint)).toBe(false);
+    expect(light.board.outerHTML).toBe(before);
+    const plain = await draw({ html, css: palette(false), resolveSrc: (src) => `/assets/${src}` });
+    expect(before.replace(/ data-shp-pic=""/g, '')).toBe(plain.board.outerHTML);
   });
 
   test('a mouse over a number peeks; leaving hides it; a click opens it', async () => {

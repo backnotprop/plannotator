@@ -1,0 +1,5 @@
+revision: W-07
+scope: core
+title: Small plan 7
+change:
+  warehouse: "Small change number 7."

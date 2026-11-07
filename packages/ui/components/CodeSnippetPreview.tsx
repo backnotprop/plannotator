@@ -11,6 +11,10 @@ import { useFenceTheme } from "../hooks/useFenceTheme";
  * Used by plan / annotate code-file links (`CodeFileLink` in InlineMarkdown,
  * the exact range only) and by code review's Call Flow locations
  * (`CallFlowTreeView`, with `contextLines` around the target).
+ *
+ * A host may add its own controls to the header (`actions`), draw the window
+ * inside its own root (`container`), and show it as a sheet from the bottom edge
+ * where there is no hover (`sheet`; a click on the scrim calls `onDismiss`).
  */
 
 /** Lines highlighted above the shown ones so a range opening inside a block comment or string tokenises as one. */
@@ -51,6 +55,14 @@ export interface CodeSnippetPreviewProps {
   onDismiss?: () => void;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
+  /** A host's controls, at the end of the header. */
+  actions?: React.ReactNode;
+  /** Where the window is portalled; the body by default. */
+  container?: Element | null;
+  /** A sheet from the bottom edge over a scrim, instead of a window at the anchor. */
+  sheet?: boolean;
+  /** The window's element, for a host that moves focus into `actions`. */
+  windowRef?: React.Ref<HTMLDivElement>;
 }
 
 export const CodeSnippetPreview: React.FC<CodeSnippetPreviewProps> = ({
@@ -64,6 +76,10 @@ export const CodeSnippetPreview: React.FC<CodeSnippetPreviewProps> = ({
   onDismiss,
   onMouseEnter,
   onMouseLeave,
+  actions,
+  container,
+  sheet = false,
+  windowRef: hostWindowRef,
 }) => {
   const allLines = contents.split('\n');
   const targetStart = Math.max(0, line - 1);
@@ -95,11 +111,16 @@ export const CodeSnippetPreview: React.FC<CodeSnippetPreviewProps> = ({
   }, [lang, fenceTheme]);
 
   useEffect(() => {
-    if (!onDismiss) return;
-    const dismiss = () => onDismiss();
+    // A sheet does not hang from its anchor, so a scroll under it moves nothing.
+    if (!onDismiss || sheet) return;
+    const dismiss = (event: Event) => {
+      // The window's own code scrolling is reading, not drift.
+      if (event.target instanceof Node && windowRef.current?.contains(event.target)) return;
+      onDismiss();
+    };
     window.addEventListener('scroll', dismiss, { capture: true, passive: true });
     return () => window.removeEventListener('scroll', dismiss, { capture: true });
-  }, [onDismiss]);
+  }, [onDismiss, sheet]);
 
   const highlightedLines = useMemo(() => {
     // Highlight the snippet as one unit so multi-line constructs (block
@@ -131,19 +152,35 @@ export const CodeSnippetPreview: React.FC<CodeSnippetPreviewProps> = ({
   const top = showAbove ? undefined : rect.bottom + 4;
   const bottom = showAbove ? window.innerHeight - rect.top + 4 : undefined;
   const left = Math.max(VIEWPORT_MARGIN, Math.min(rect.left, window.innerWidth - (renderedWidth ?? 520) - VIEWPORT_MARGIN));
+  // The room on the side it opens to, so its last lines scroll rather than run off the screen.
+  const room = (showAbove ? rect.top : spaceBelow) - 4 - VIEWPORT_MARGIN;
+  const label = title ?? filepath.split('/').pop();
 
-  return createPortal(
+  const preview = (
     <div
-      ref={windowRef}
-      className="code-snippet-preview-window fixed z-[9999] rounded-lg border border-border bg-card shadow-xl flex flex-col"
-      style={{ top, bottom, left, maxWidth: `min(600px, calc(100vw - ${VIEWPORT_MARGIN * 2}px))`, maxHeight: '300px' }}
+      ref={(element) => {
+        windowRef.current = element;
+        if (typeof hostWindowRef === 'function') hostWindowRef(element);
+        else if (hostWindowRef) (hostWindowRef as React.MutableRefObject<HTMLDivElement | null>).current = element;
+      }}
+      className={sheet
+        ? 'code-snippet-preview-window fixed inset-x-0 bottom-0 z-[9999] flex max-h-[78vh] flex-col overflow-hidden rounded-t-[12px] border border-border bg-card pb-[env(safe-area-inset-bottom)] shadow-2xl'
+        : 'code-snippet-preview-window fixed z-[9999] rounded-lg border border-border bg-card shadow-xl flex flex-col'}
+      style={sheet ? undefined : { top, bottom, left, maxWidth: `min(600px, calc(100vw - ${VIEWPORT_MARGIN * 2}px))`, maxHeight: `${Math.min(300, Math.max(room, 120))}px` }}
       data-code-snippet-preview={filepath}
+      data-code-snippet-sheet={sheet ? '' : undefined}
+      role={actions || sheet ? 'dialog' : undefined}
+      aria-label={actions || sheet ? label : undefined}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
-      <div className="px-3 py-1.5 border-b border-border/50 text-[10px] text-muted-foreground font-mono flex items-center justify-between gap-4 flex-shrink-0">
-        <span>{title ?? filepath.split('/').pop()}</span>
-        <span className="opacity-60">{lineEnd && lineEnd !== line ? `lines ${line}–${lineEnd}` : `line ${line}`}</span>
+      <div className={`px-3 py-1.5 border-b border-border/50 text-muted-foreground font-mono flex items-center justify-between gap-x-4 flex-shrink-0 ${sheet ? 'flex-wrap text-xs pt-3' : 'text-[10px]'}`}>
+        {/* A sheet is narrow: the whole label on its own line, the controls under it. */}
+        <span className={sheet ? 'w-full [overflow-wrap:anywhere]' : 'min-w-0 truncate'}>{label}</span>
+        <span className={`flex items-center gap-2 ${sheet ? 'w-full' : 'flex-shrink-0'}`}>
+          <span className={`opacity-60 ${sheet ? 'mr-auto' : ''}`}>{lineEnd && lineEnd !== line ? `lines ${line}–${lineEnd}` : `line ${line}`}</span>
+          {actions}
+        </span>
       </div>
       <div className="code-snippet-preview overflow-auto text-[12px] leading-5 min-h-0" style={{ padding: 0, background: 'var(--code-bg, #1e293b)' }}>
         <table className="border-collapse w-full">
@@ -168,7 +205,18 @@ export const CodeSnippetPreview: React.FC<CodeSnippetPreviewProps> = ({
           </tbody>
         </table>
       </div>
-    </div>,
-    document.body,
+    </div>
+  );
+
+  return createPortal(
+    sheet ? (
+      <>
+        <div className="fixed inset-0 z-[9998] bg-black/30" data-code-snippet-scrim="" onClick={onDismiss} />
+        {preview}
+      </>
+    ) : (
+      preview
+    ),
+    container ?? document.body,
   );
 };
