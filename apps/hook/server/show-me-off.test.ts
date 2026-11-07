@@ -2,18 +2,19 @@
  * Show me (approval "shape-in-code-review") gates every word it adds to an
  * agent on the Code review switch. With Code review off, no Show me word is in
  * what an agent can read: the Inbox's MCP tool list, the guide brief,
- * `plannotator inbox --help`, the top-level help (Board off and on) and
- * `plannotator review --help`; `plannotator review draw …` and `review drawings …`
- * are the review parse's (`review <DIRECTORY>`), the drawings routes are the
- * unknown route, and a version-3 guide snapshot is refused with the release's
+ * `plannotator inbox --help`, the top-level help (Board off and on),
+ * `plannotator review --help`, and Shape's own text (`shape --help`, `/shape`),
+ * which stays byte for byte; `plannotator review draw …` and `review drawings …`
+ * are the review parse's (`review <DIRECTORY>`), and a version-3 guide snapshot is refused with the release's
  * own "Unsupported snapshot version" words.
  *
- * What regresses: a Show me word (the `overview.diagram` rules, `review draw`,
+ * What regresses: a Show me word (the `overview.diagram` rules, the refusal of `review draw`,
  * the skills' drawing lines) reaching an agent whose person has Code review
  * off. These texts change for everyone on purpose, so the test names the words
  * and not the texts; a control proves each word is real, with Code review on.
  */
 import { afterAll, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,9 +22,10 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { startInboxServer } from "@plannotator/server/inbox";
 import { createAgentEnvironmentFor } from "@plannotator/server/inbox-agents";
 import { formatInboxHelp } from "./inbox-help";
-import { formatSubcommandHelp, formatTopLevelHelp } from "./cli";
-import { isReviewDrawCommand, runReviewDrawCommand } from "./review-draw-command";
-import { INBOX_REVIEW_SKILLS } from "@plannotator/core/inbox-review";
+import { formatSubcommandHelp, formatTopLevelHelp, SHAPE_COMMAND_USAGE } from "./cli";
+import { SHAPE_SKILL } from "@plannotator/core/shape-skill";
+import { isReviewDrawCommand } from "./review-draw-command";
+import { INBOX_REVIEW_DRAW_GONE, INBOX_REVIEW_SKILLS } from "@plannotator/core/inbox-review";
 import { FIXTURE_V2_HTML } from "@plannotator/core/guide-format-fixtures";
 import { checkInboxGuide } from "../../../packages/server/inbox-guides";
 
@@ -38,11 +40,11 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
  */
 const SHOW_ME_WORDS = {
   /** INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC */
-  get_guide_brief: ["overview.diagram", "one drawing of how the whole change works", "review draw"],
-  /** INBOX_REVIEW_DRAW_HELP */
-  "review draw --help": ["review draw", "review drawings", "Show me", "data-code", "data-mark", "data-step"],
+  get_guide_brief: ["overview.diagram", "one drawing of how the whole change works", "plannotator shape --help"],
+  /** INBOX_REVIEW_DRAW_GONE: what an older `review draw` gets */
+  "review draw": ["review_draw_gone", "Show me makes a Shape"],
   /** INBOX_REVIEW_CURATE_DRAWING_LINE and INBOX_REVIEW_RECHECK_DRAWING_LINE */
-  "the review skills": ["overview.diagram", "give the overview one drawing", "redrawn, as this review's", "review drawings"],
+  "the review skills": ["overview.diagram", "give the overview one drawing", "redrawn, as this review's"],
 };
 
 /** Each text an agent reads, with Code review on or off. */
@@ -84,6 +86,18 @@ async function agentTexts(codeReview: boolean): Promise<Record<string, string>> 
   }
 }
 
+/**
+ * Shape's own agent text, as it is on main without Show me, by SHA-256: Show me's agent words go in its request,
+ * never here, because someone with Shape on and Code review off reads these. A change to Shape's text on purpose
+ * pins the new hash here; one that names the code review belongs in the request.
+ */
+const SHAPE_TEXT_SHA256 = { "shape --help": "bcdec3588504812aacbcd9c5d7c11e762b971b69ab93a066ddc0a45d26cb9ea5", "/shape skill": "8003b59c8b957d7caf58b6d178c2e929aed430db90fd08480c7140a30dec12fd" };
+
+test("Code review off: Shape's own agent text is byte for byte what it was", () => {
+  const sha = (text: string) => createHash("sha256").update(text).digest("hex");
+  expect({ "shape --help": sha(SHAPE_COMMAND_USAGE), "/shape skill": sha(JSON.stringify(SHAPE_SKILL)) }).toEqual(SHAPE_TEXT_SHA256);
+});
+
 test("Code review off: no agent text holds a Show me word", async () => {
   const words = [...new Set(Object.values(SHOW_ME_WORDS).flat())];
   const texts = await agentTexts(false);
@@ -92,16 +106,9 @@ test("Code review off: no agent text holds a Show me word", async () => {
 });
 
 test("Code review on: the text that carries each Show me word holds it, so a word misspelt in the list fails", async () => {
-  const printed: string[] = [];
-  const code = await runReviewDrawCommand(["draw", "--help"], {
-    cwd: root,
-    ensureRunning: () => Promise.reject(new Error("help reads no Inbox")),
-    stdout: (text) => printed.push(text),
-  });
-  expect(code).toBe(0);
   const carriers: Record<keyof typeof SHOW_ME_WORDS, string> = {
     get_guide_brief: (await agentTexts(true)).get_guide_brief!,
-    "review draw --help": printed.join("\n"),
+    "review draw": INBOX_REVIEW_DRAW_GONE,
     "the review skills": INBOX_REVIEW_SKILLS.map((skill) => skill.body).join("\n"),
   };
   const missing = Object.entries(SHOW_ME_WORDS).flatMap(([name, words]) =>
@@ -195,22 +202,7 @@ test("Code review off with a broken config.json: --version, --help, review --hel
   }
 }, 120_000);
 
-test("Code review off: the drawings routes are the unknown route, and a version-3 snapshot is an unsupported version", async () => {
-  const dataDir = join(root, "data-routes");
-  mkdirSync(dataDir, { recursive: true });
-  const server = await startInboxServer({ dataDir, codeReview: false, phones: false });
-  try {
-    const base = `http://127.0.0.1:${server.port}`;
-    const path = "/api/inbox/reviews/msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F/drawings";
-    for (const headers of [{ "sec-fetch-site": "same-origin" }, { authorization: "Bearer x" }]) {
-      const unknown = await fetch(`${base}/api/inbox/reviewz/msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F/drawings`, { headers });
-      const read = await fetch(`${base}${path}`, { headers });
-      expect([read.status, await read.text()]).toEqual([unknown.status, await unknown.text()]);
-      expect(read.status).toBe(404);
-    }
-  } finally {
-    server.stop();
-  }
+test("Code review off: a version-3 snapshot is an unsupported version", () => {
   // 0.28.49's parser knew versions 1 and 2: any other was "Unsupported snapshot version: <n>", at $.version.
   const snapshot = { kind: "plannotator-guided-review", version: 3, exportedAt: "2026-01-01T00:00:00Z", guide: {}, review: {}, source: {} };
   expect(checkInboxGuide({ snapshot }, root, { codeReview: false })).toEqual({ ok: false, error: "Invalid guide snapshot ($.version): Unsupported snapshot version: 3" });
