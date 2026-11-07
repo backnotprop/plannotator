@@ -9,6 +9,8 @@ import { projectNameMatches } from '../projectCombine';
 import type { LabeledProject } from '../projectLabels';
 import type { ProjectAction } from '../projectMenu';
 import { ProjectTipText, Tip } from './Tip';
+import { ProjectMark, showsProjects, useRowMarks } from '../letterMarks';
+import { hasSetPicture, useKnownProjects } from '../projectPictures';
 
 export interface ProjectRowProps {
   project: ProjectFolder;
@@ -39,6 +41,11 @@ export interface ProjectRowProps {
   others?: readonly LabeledProject[];
   /** The warning's Combine: this project goes into `into`. Resolves true once the list shows it. Absent: no warning. */
   onCombine?: (into: LabeledProject) => Promise<boolean>;
+  /**
+   * Set picture… (this machine's projects, only while Settings → Rows shows project marks): an image as a data: URL,
+   * or null to take the picture away. Resolves true once the list has it. Absent: not offered.
+   */
+  onPicture?: (file: File | null) => Promise<boolean>;
 }
 
 /**
@@ -78,6 +85,10 @@ export function ProjectRow(props: ProjectRowProps) {
   }, [renaming]);
   const { project } = props;
   const onRename = props.onRename;
+  // Letter marks (letterMarks.tsx): the project's mark before its name, while Settings → Rows shows project marks.
+  const { marks } = useRowMarks();
+  const projectMarks = showsProjects(marks.what);
+  useKnownProjects();
   const row = (children: ReactNode, extra: Record<string, unknown> = {}) => (
     <div
       className="ib-projrow"
@@ -96,9 +107,19 @@ export function ProjectRow(props: ProjectRowProps) {
       readable={props.readable}
       rename={onRename !== undefined}
       named={typeof project.display_name === 'string' && project.display_name !== ''}
+      picture={projectMarks && props.onPicture ? (hasSetPicture(project.id) ? 'set' : 'none') : null}
       onAction={(action) => {
         setMenuOpen(false);
         setContextOpen(false);
+        if (action === 'picture') {
+          const onPicture = props.onPicture;
+          if (onPicture) pickPicture((file) => void onPicture(file));
+          return;
+        }
+        if (action === 'unpicture') {
+          void props.onPicture?.(null);
+          return;
+        }
         if (action === 'rename') {
           toField.current = true;
           setRenaming(true);
@@ -153,6 +174,7 @@ export function ProjectRow(props: ProjectRowProps) {
           data-refreshes={props.refreshes ? '' : undefined}
           data-refreshing={props.refreshSpin != null ? '' : undefined}
         >
+          {projectMarks && <ProjectMark projectId={project.id} name={project.name} size={marks.style === 'avatar' ? 20 : 16} solid={marks.style === 'avatar'} className="ib-lm-side" />}
           <span className="ib-name" dir="auto">{project.name}</span>
           {/* On the list it shows, the row refreshes it (click Inbox to refresh): ↻ on hover, one turn on a click. */}
           {(props.refreshes || props.refreshSpin != null) && (
@@ -193,7 +215,7 @@ export function ProjectRow(props: ProjectRowProps) {
 }
 
 /** The menu's own items beside the batches: Rename… and Reset name stay in the row. */
-type ProjectMenuAction = ProjectAction | 'rename' | 'reset';
+type ProjectMenuAction = ProjectAction | 'rename' | 'reset' | 'picture' | 'unpicture';
 
 /**
  * The items, no descriptions: the two batches, then (this machine's projects) Rename… and, once a name is
@@ -204,6 +226,8 @@ function ProjectMenuItems(props: {
   readable: boolean;
   rename: boolean;
   named: boolean;
+  /** Set picture… is offered (null: not; "set": a picture is set, so it can also be taken away). */
+  picture: 'none' | 'set' | null;
   onAction: (action: ProjectMenuAction) => void;
 }) {
   const { name, readable, onAction } = props;
@@ -221,6 +245,22 @@ function ProjectMenuItems(props: {
         <Icon name="archive" size={15} />
         Archive all
       </Menu.Item>
+      {/* Only while project marks show (Settings → Rows), so it is not there by default. */}
+      {props.picture && (
+        <>
+          <Menu.Separator className="ib-pm-sep" />
+          <Menu.Item className="ib-pmi" label="Set picture…" onClick={() => onAction('picture')} data-project-action="picture">
+            <Icon name="photo" size={15} />
+            Set picture…
+          </Menu.Item>
+          {props.picture === 'set' && (
+            <Menu.Item className="ib-pmi" label="Remove picture" onClick={() => onAction('unpicture')} data-project-action="unpicture">
+              <Icon name="replay" size={15} />
+              Remove picture
+            </Menu.Item>
+          )}
+        </>
+      )}
       {props.rename && (
         <>
           <Menu.Separator className="ib-pm-sep" />
@@ -431,4 +471,16 @@ export function ProjectTip({ name, root, refresh = false, children }: { name: st
       </span>
     </>
   );
+}
+
+/** Set picture…: the system's file picker, for one image (read by `pictureFromFile`). Nothing picked: nothing happens. */
+function pickPicture(onPicked: (file: File) => void): void {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/png,image/jpeg,image/gif,image/webp,image/svg+xml';
+  input.onchange = () => {
+    const file = input.files?.[0];
+    if (file) onPicked(file);
+  };
+  input.click();
 }
