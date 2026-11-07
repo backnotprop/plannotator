@@ -1,4 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
+import { ProjectMark, showsProjects, useRowMarks } from '../letterMarks';
+import { knownProjectName, useKnownProjects } from '../projectPictures';
 import { INBOX_CARD_COLUMN_LABELS, INBOX_CARD_LIVE_COLUMNS, displayInboxSubject, inboxCardMarkRef, type InboxCardColumn, type InboxCardMark, type InboxCardHistoryEntry, type InboxCardRef, type InboxCardWire, type InboxListRow, type InboxProjectRepo, type InboxInitiative } from '@plannotator/core/inbox-types';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { inboxApi, type CardsModel, type ComposeSessionsModel, type ProjectFolder } from '../api';
@@ -956,6 +958,7 @@ function BoardCard({
           </span>
         </Tip>
       )}
+      <BoardProjectMark projectId={card.project_id} />
       <Tip content={owner === 'You' ? 'Your card' : owner}>
         <span className="ib-bc-who" data-host={card.agent?.kind === 'agent' ? card.agent.host : 'you'}>
           {card.agent ? <AuthorMark author={card.agent} /> : <span className="ib-lane-dot ib-bc-yourdot" data-col="backlog" aria-hidden="true" />}
@@ -1472,5 +1475,20 @@ function OpenedCard({
       onOpenThread={onOpenThread}
       onCreateThread={(opener) => onCreateThread(askTarget?.session ?? null, opener)}
     />
+  );
+}
+
+/** Letter marks (letterMarks.tsx): the card's project mark (16 px) in its meta, while project marks show. */
+function BoardProjectMark({ projectId }: { projectId: string }) {
+  const { marks } = useRowMarks();
+  useKnownProjects();
+  const name = knownProjectName(projectId);
+  if (!showsProjects(marks.what) || !name) return null;
+  return (
+    <Tip content={name}>
+      <span className="ib-bc-proj">
+        <ProjectMark projectId={projectId} name={name} size={16} solid={marks.style === 'avatar'} />
+      </span>
+    </Tip>
   );
 }

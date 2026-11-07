@@ -86,6 +86,8 @@ export interface SidebarProps {
    * machine's projects only (names stay per machine). Resolves true once the list shows the new name.
    */
   onProjectRename?: (projectId: string, name: string | null) => Promise<boolean>;
+  /** The project menu's Set picture… (letter marks): an image as a data: URL, or null to take it away. This machine's projects only. */
+  onProjectPicture?: (projectId: string, picture: string | null) => Promise<boolean>;
   /** One step of combining: `from` into `into`. Resolves true once the list shows it. */
   onProjectCombine?: (pair: { from: string; into: string; intoName: string }) => Promise<boolean>;
   /** Says a line in the window's live region (the rename field's refusals). */
@@ -601,6 +603,8 @@ export function Sidebar(props: SidebarProps) {
                       ? (name) => props.onProjectRename!(project.id, name)
                       : undefined
                   }
+                  // A picture is kept by the Inbox that has the project: this machine's projects only.
+                  onPicture={props.onProjectPicture && local(project) ? (picture) => props.onProjectPicture!(project.id, picture) : undefined}
                   announce={props.announce}
                   // This machine's projects only: combining never crosses machines.
                   others={local(project) ? props.projects.filter((p) => p.id !== project.id && local(p)).map((p) => ({ ...p, name: props.projectNames?.get(p.id) ?? p.name })) : []}

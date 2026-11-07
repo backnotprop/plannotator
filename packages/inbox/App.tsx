@@ -3720,6 +3720,21 @@ function Inbox() {
   };
 
   /**
+   * The project menu's Set picture… (approval "inbox-letter-marks"): the picture kept by the Inbox, then the list read
+   * again, so every project mark shows it. A refused picture (not an image, too big) says why in the toast.
+   */
+  const setProjectPicture = async (projectId: string, picture: string | null): Promise<boolean> => {
+    try {
+      await inboxApi.setProjectPicture(projectId, picture);
+    } catch (cause) {
+      showToast(errorToast(cause, 'The picture did not change.'));
+      return false;
+    }
+    await refreshList(false);
+    return true;
+  };
+
+  /**
    * Combine projects (approval "project-combine"): each `from` goes into its
    * `into`. One toast with one Undo for the whole step (the button and `Z`),
    * whichever of the rename warning or Tidy took it. Pairs that went through
@@ -6257,6 +6272,7 @@ function Inbox() {
             projectsReadable={projectsReadable}
             onProjectAction={(projectId, action) => void projectAction(projectId, action)}
             onProjectRename={renameProject}
+            onProjectPicture={setProjectPicture}
             onProjectCombine={async (pair) => (await combineProjects([pair])) === null}
             announce={say}
             // Not on a tailnet guest's page: the update routes answer it 403 local_only.
