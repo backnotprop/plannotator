@@ -102,7 +102,7 @@ async function world(options: WorldOptions = {}) {
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(home);
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
-  const config = { ...(options.usedBefore ? { inboxNotifications: { dismissed: true }, inboxSound: { dialogShownFor: "0.1.0" }, inboxListIntro: { shownAt: "2026-10-01T00:00:00.000Z" } } : {}), ...options.config };
+  const config = { ...(options.usedBefore ? { inboxNotifications: { dismissed: true }, inboxSound: { dialogShownFor: "0.1.0" }, inboxListIntro: { shownAt: "2026-10-01T00:00:00.000Z", version: 2 } } : {}), ...options.config };
   if (Object.keys(config).length > 0) writeFileSync(join(dataDir, "config.json"), JSON.stringify(config));
   const codex = options.codex === null ? null : installFakeCodex(root, options.codex ?? CHATGPT);
   const environment = createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: { HOME: home, PATH: codex ? `${codex.bin}:/usr/bin:/bin` : "/nowhere", ...options.env } });

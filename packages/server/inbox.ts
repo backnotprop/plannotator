@@ -40,6 +40,7 @@
  */
 
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
+import { listIntroAtStart, listIntroDue } from "./inbox-list-intro";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -2133,17 +2134,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   }
 
   /**
-   * The one-time list options dialog (approval "inbox-list-options-intro"): `due` while it waits for a page on this
-   * computer to claim it. Decided at the first release start that knows it, like the sound dialog: someone who used an
-   * Inbox before gets it due; a fresh install is marked shown and never sees it (the tour shows today's list).
+   * The one-time "Choose how your list looks" dialog: `due` while it waits for a page on this computer to claim it.
+   * Decided at the first release start of each version (inbox-list-intro.ts): version 2, the three looks (approval
+   * "inbox-rows-dialog"), is due once for everyone, fresh installs and those who saw version 1 included. The page
+   * waits for a list of five threads or more.
    */
-  const listIntroState = () => {
-    const saved = loadConfig().inboxListIntro;
-    return { due: typeof saved?.dueAt === "string" && saved.dueAt !== "" && !saved.shownAt };
-  };
-  if (normalizeStableVersion(version) !== null && loadConfig().inboxListIntro === undefined) {
-    const at = new Date().toISOString();
-    saveConfig({ inboxListIntro: usedBefore ? { dueAt: at } : { shownAt: at } });
+  const listIntroState = () => ({ due: listIntroDue(loadConfig().inboxListIntro) });
+  if (normalizeStableVersion(version) !== null) {
+    const next = listIntroAtStart(loadConfig().inboxListIntro, new Date().toISOString());
+    if (next) saveConfig({ inboxListIntro: next });
   }
   /**
    * The page that is about to show the dialog claims it: only the first claim ever gets `show: true`, so two tabs
@@ -2451,6 +2450,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const reveals = config.inboxReveals;
     // A list options or voice `shownAt` without `dueAt` is a fresh install's mark (never shown), not a show.
     const shown = (intro: { dueAt?: string; shownAt?: string } | undefined) => (intro?.dueAt ? intro.shownAt : undefined);
+    // Version 1 of the list dialog, kept under `before` when version 2 became due (inbox-list-intro.ts).
     const offers = Object.fromEntries(Object.entries(lineOffers).map(([id, undecided]) => [id, undecided!() && !lineOfferSaved(id as RevealId)?.shownAt]));
     const open: RevealState["open"] = {
       // The update-day dialogs: who they are for was decided at a release start (and is kept until claimed).
@@ -2467,7 +2467,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       release: snoozeIntroRelease,
       firstUseAt: snooze?.firstUseAt ?? null,
       // The spacing clock: the reveals' own stamp, and every announcement shown before this key existed (an upgrade).
-      lastShownAt: revealLastShown([reveals?.lastShownAt, snooze?.shownAt, shown(config.inboxListIntro), shown(config.inboxVoiceIntro), config.inboxBoardIntro?.shownAt]),
+      lastShownAt: revealLastShown([reveals?.lastShownAt, snooze?.shownAt, shown(config.inboxListIntro), shown(config.inboxListIntro?.before), shown(config.inboxVoiceIntro), config.inboxBoardIntro?.shownAt]),
       dayShownAt: reveals?.dayShownAt ?? null,
       notNowAt: reveals?.notNowAt ?? null,
       afterShowLoad: revealAfterShowLoad(reveals?.shownLoad, pageLoads, load),
