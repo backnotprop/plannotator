@@ -11,11 +11,12 @@
     "moduleDetection": "force",
     "skipLibCheck": true,
     "noEmit": true,
+    "jsx": "react-jsx",
     "strict": true,
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "demo/**/*.ts", "demo/**/*.tsx"]
 }

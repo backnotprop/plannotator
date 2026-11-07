@@ -2,12 +2,12 @@ import { afterAll, beforeAll } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { SystemFiles } from '../src/index.ts';
 
-export const repoRoot = resolve(import.meta.dir, '..', '..', '..');
-export const drawingDir = join(repoRoot, '.plannotator', 'system');
 export const fixturesDir = join(import.meta.dir, 'fixtures');
+/** Plannotator drawn from its own code: a test fixture. People's drawings live in the Inbox data folder. */
+export const drawingDir = join(fixturesDir, 'plannotator');
 
 /** A temp folder removed by the returned cleanup. */
 export function tempDir(): { dir: string; done: () => void } {

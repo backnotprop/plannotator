@@ -60,6 +60,8 @@ export interface InboxRunEvidence {
   stoppedByPersonAt: number | null;
   /** The host's words for a stop that was not the person's (`LaunchHost.stoppedNote`): the stopped line's `cause`. */
   stoppedNote?: string | null;
+  /** What of Plannotator's connects the session ("plugin" when not given; Pi's "extension"). */
+  connector?: string;
   /** `cd <folder> && claude attach <ref>`; null before the session exists. */
   attachCommand: string | null;
   /** When the oldest permission question of ours still open was asked (its hook holds it), or null. */
@@ -111,7 +113,7 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
   if (e.cliAvailable === false) return e.turnWaiting ? line("missing") : null;
   if (inGrace) return starting();
   const hostStopped = e.host === "absent" || host?.state === "stopped" || host?.state === "done";
-  if (!e.seenLive && !hostStopped) return line("failed", { cause: "Started, but not connected to the Inbox. Is Plannotator's plugin on in that folder?" });
+  if (!e.seenLive && !hostStopped) return line("failed", { cause: `Started, but not connected to the Inbox. Is Plannotator's ${e.connector ?? "plugin"} on in that folder?` });
   const byPerson = e.stoppedByPersonAt !== null;
   // Not the person's Stop: the host's own words, when it has some.
   return line("stopped", { stopped_by_person: byPerson, since: iso(e.stoppedByPersonAt), ...(!byPerson && e.stoppedNote ? { cause: e.stoppedNote } : {}) });

@@ -1452,6 +1452,8 @@ export interface InboxPullLinkStore {
   threadProject(threadId: string): string | null;
   /** Whether an agent session polls now (the live sessions); absent: every agent is taken as live. */
   sessionLive?(session: string): boolean;
+  /** A launched thread whose start failed, or whose agent never connected. */
+  launchDead?(threadId: string): boolean;
 }
 
 /**
@@ -1499,6 +1501,21 @@ function threadFacts(store: InboxPullLinkStore, threadId: string) {
  * every Inbox project whose origin is that repository (two clones are two
  * projects). Nothing else ties a PR to a thread: no branch guess, no Board card.
  */
+/**
+ * The agent working in a thread. A thread the person just handed over: its agent has not written yet, so it is the
+ * session the first message went to. Ended: a session that sent with a wake polls while it runs, so one not polling now
+ * has ended; the session a hand-off went to was live then. An agent that only reads the Inbox (no wake) is never called ended.
+ */
+export function threadAgent(store: InboxPullLinkStore, threadId: string): InboxPullLink["agent"] {
+  const { last } = threadFacts(store, threadId);
+  const root = store.message(threadId);
+  const to = last ? null : (root?.to ?? null);
+  const ended = (session: string | null, wakes: boolean): boolean => !!store.sessionLive && !!session && wakes && !store.sessionLive(session);
+  if (last && last.author.kind === "agent") return { host: last.author.host, session: last.author.session, name: last.author.name, ...(ended(last.author.session, last.wakes === true) ? { ended: true } : {}) };
+  // A session the Inbox launched polls only once it has started: until it writes, not polling isn't ended, its run state is.
+  return to ? { host: to.host, session: to.session, name: null, ...((root?.launch ? store.launchDead?.(threadId) : ended(to.session, true)) ? { ended: true } : {}) } : null;
+}
+
 export function linkInboxPulls(
   pulls: readonly InboxPull[],
   store: InboxPullLinkStore,
@@ -1536,23 +1553,13 @@ export function linkInboxPulls(
   const linkOf = (via: InboxPullLink["via"], threadId: string, projectId: string): InboxPullLink => {
     const { last, guide } = threadFacts(store, threadId);
     const root = store.message(threadId)?.to ?? null;
-    // A thread the person just handed over: its agent has not written yet, so it is the session the first message went to.
-    const to = last ? null : root;
-    // Ended: a session that sent with a wake polls while it runs, so one not polling now has ended; the session a
-    // hand-off went to was live then. An agent that only reads the Inbox (no wake) is never called ended.
-    const ended = (session: string | null, wakes: boolean): boolean => !!store.sessionLive && !!session && wakes && !store.sessionLive(session);
     return {
       via,
       ...(via === "owner" && root?.session ? { handed_to: root.session } : {}),
       thread_id: threadId,
       thread_subject: store.threadSubject(threadId),
       project_id: projectId,
-      agent:
-        last && last.author.kind === "agent"
-          ? { host: last.author.host, session: last.author.session, name: last.author.name, ...(ended(last.author.session, last.wakes === true) ? { ended: true } : {}) }
-          : to
-            ? { host: to.host, session: to.session, name: null, ...(ended(to.session, true) ? { ended: true } : {}) }
-            : null,
+      agent: threadAgent(store, threadId),
       last: last ? { message_id: last.id, preview: previewOf(last.body), at: last.created_at } : null,
       guide: guide?.guide ? { message_id: guide.id, title: guide.guide.title, steps: guide.guide.sections, review: guide.guide.review === true } : null,
     };

@@ -69,6 +69,12 @@ export interface RevealMomentInput {
   holds: (threadId: string) => boolean;
   /** Spend the claim: true only for the first claim ever. */
   claim: () => Promise<boolean>;
+  /**
+   * The moment needs no leave: it is now, while the page is clear (and again each time one lapses). Code review's
+   * day-0 offer (codeReviewOffer.ts): "show up like immediately", still after the settling wait and never over
+   * something typed or open.
+   */
+  atOnce?: boolean;
 }
 
 /** A row's state in the list, for "the list settled": ids, sections and what is unseen. */
@@ -79,6 +85,19 @@ function listKey(rows: readonly InboxListRow[]): string {
 /**
  * The leave tracker, the settling wait, the claim and the opening, for one reveal. `target`: the thread just left.
  */
+/**
+ * Another one-time dialog showed on this load (the Board's first visit, the star ask's card): App's `revealBlocked`
+ * reads it, so Snooze, the Board and the Checklist reveals hold back for the rest of the load. Nothing is stamped: the
+ * line and every day stay as they are.
+ */
+let otherOneTimeDialog = false;
+export function noteOneTimeDialogShown(): void {
+  otherOneTimeDialog = true;
+}
+export function oneTimeDialogShownThisLoad(): boolean {
+  return otherOneTimeDialog;
+}
+
 export function useRevealMoment(input: RevealMomentInput) {
   const [stage, setStage] = useState<RevealStage>('none');
   const [moment, setMoment] = useState<RevealVisit | null>(null);
@@ -102,6 +121,13 @@ export function useRevealMoment(input: RevealMomentInput) {
     // `watching` is read, not watched: a visit is what changes it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input.thread]);
+
+  // A moment that needs no leave (`atOnce`): now, and again once one lapses or a gate drops it.
+  const atOnce = input.atOnce === true;
+  useEffect(() => {
+    if (!atOnce || !watching || moment) return;
+    setMoment({ threadId: latest.current.thread ?? '', at: Date.now() });
+  }, [atOnce, watching, moment]);
 
   // A moment lasts so long.
   useEffect(() => {
@@ -217,16 +243,18 @@ export interface RevealArmed {
   snoozeDue: boolean;
   /** The offers this load may also arm, each at its own moment (settings `reveal.ahead`: List view). */
   ahead: readonly InboxRevealId[];
+  /** Armed beside `next`, outside the line's order (settings `reveal.aside`: the star ask). */
+  aside: readonly InboxRevealId[];
 }
 
 /**
  * The load's latch (App): only `reveal.next` is armed. An older Inbox reports no queue (no `reveal`): its Snooze rule
  * alone, and never the Board.
  */
-export function revealArmed(settings: { reveal?: { next: RevealArmed['next']; ahead?: readonly InboxRevealId[] }; snooze_intro?: { due: boolean } }): RevealArmed {
+export function revealArmed(settings: { reveal?: { next: RevealArmed['next']; ahead?: readonly InboxRevealId[]; aside?: readonly InboxRevealId[] }; snooze_intro?: { due: boolean } }): RevealArmed {
   const snoozeDue = settings.snooze_intro?.due === true;
   const next = settings.reveal ? settings.reveal.next : snoozeDue ? 'snooze' : null;
-  return { next, snoozeDue: snoozeDue && next === 'snooze', ahead: settings.reveal?.ahead ?? [] };
+  return { next, snoozeDue: snoozeDue && next === 'snooze', ahead: settings.reveal?.ahead ?? [], aside: settings.reveal?.aside ?? [] };
 }
 
 /** The Board reveal's need: the list holds this many rows or more (the approval: "the list has 5 rows or more"). */
@@ -392,6 +420,8 @@ export interface LineRevealInput {
   mayClaim: (pageAge: number) => boolean;
   /** Still worth showing (its feature not turned on meanwhile). */
   holds: () => boolean;
+  /** Its moment needs no leave: as soon as the page is clear (`RevealMomentInput.atOnce`). */
+  atOnce?: boolean;
 }
 
 /**
@@ -418,5 +448,89 @@ export function useLineReveal(input: LineRevealInput) {
       key.current ??= newUuid();
       return (await claimRevealOnce(latest.current.id, key.current)).show;
     },
+    atOnce: input.atOnce,
   });
+}
+
+/** What one load knows for the "Star the repo" ask (approval "star-ask"): the Board's inputs, without its switch. */
+export type StarRevealInput = Omit<BoardRevealInput, 'onBoardOn' | 'on'>;
+
+/**
+ * Leaving a thread counts for the star ask when it was open long enough to read (the proposal: "just after the person
+ * leaves a thread they read for 5 s or more"), back on the list or on to another thread.
+ */
+export function starRevealLeaveCounts(visit: RevealVisit, now: number): boolean {
+  return now - visit.at >= REVEAL_TIMES.readMs;
+}
+
+/** At a settled moment: the list is loaded and not the first-run screen, and the page has been open 60 s or more. */
+export function starRevealMayClaim(gate: Pick<StarRevealInput, 'due' | 'blocked' | 'listLoaded' | 'firstRun'>, pageAge: number): boolean {
+  return gate.due && !gate.blocked && gate.listLoaded && !gate.firstRun && pageAge >= REVEAL_TIMES.pageAgeMs;
+}
+
+/**
+ * The "Star the repo" ask (approval "star-ask", 2026-11-06; packages/shared/star-ask.ts): last in the line, at the
+ * shared calm moment. Its claim (`claimReveal('star')`) runs the already-starred check on the Inbox and answers
+ * whether the button stars with gh (`canStar`) or is a link; the page then shows the corner card (`StarAskCard`).
+ */
+export function useStarReveal(input: StarRevealInput) {
+  const latest = useRef(input);
+  latest.current = input;
+  const key = useRef<string | null>(null);
+  const [canStar, setCanStar] = useState(false);
+  const moment = useRevealMoment({
+    wanted: input.due && !input.blocked,
+    thread: input.thread,
+    rows: input.rows,
+    clear: input.clear,
+    place: input.place,
+    heldBack: input.heldBack,
+    toast: input.toast,
+    leaveCounts: (visit, now) => starRevealLeaveCounts(visit, now),
+    mayClaim: (pageAge) => starRevealMayClaim(latest.current, pageAge),
+    holds: () => true,
+    claim: async () => {
+      key.current ??= newUuid();
+      const answer = await claimRevealOnce('star', key.current);
+      setCanStar(answer.star?.can_star === true);
+      return answer.show;
+    },
+  });
+  // The card is up: the other reveals hold back for the rest of this load (App's `revealBlocked`), without a stamp.
+  useEffect(() => {
+    if (moment.stage === 'open') noteOneTimeDialogShown();
+  }, [moment.stage]);
+  return { ...moment, canStar };
+}
+
+/**
+ * List view's moment, as registered with the line (approval "inbox-one-time-dialogs", the change): leaving a thread
+ * for the list itself (not for another thread).
+ */
+export function listViewRevealLeaveCounts(next: string | null): boolean {
+  return next === null;
+}
+
+/** What List view's need reads at a settled moment. */
+export interface ListViewRevealGate {
+  listLoaded: boolean;
+  firstRun: boolean;
+  /** The list draws its groups (Smart groups): the choice is for someone who has not picked Simple list. */
+  grouped: boolean;
+  /** The list on screen is taller than the screen (`listTallerThanScreen`). */
+  taller: boolean;
+}
+
+/**
+ * List view's need (approval "inbox-one-time-dialogs": "once the person's list has grown taller than the screen, on
+ * Grouped, at the next calm moment"): the list loaded and not the first-run screen, the page old enough, on Smart
+ * groups, and taller than the screen. The line decides the day (`reveal.next`, or `reveal.ahead` at its moment).
+ */
+export function listViewRevealMayClaim(gate: ListViewRevealGate, pageAge: number): boolean {
+  return gate.listLoaded && !gate.firstRun && gate.grouped && gate.taller && pageAge >= REVEAL_TIMES.pageAgeMs;
+}
+
+/** The list's scrolling body holds more than it shows: the list is taller than the screen. */
+export function listTallerThanScreen(body: Element | null): boolean {
+  return body !== null && body.scrollHeight > body.clientHeight;
 }
