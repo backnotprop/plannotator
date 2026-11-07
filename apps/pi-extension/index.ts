@@ -2728,9 +2728,11 @@ Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the
 		});
 	});
 
-	// The Plannotator Inbox (`plannotator_inbox` and the reply wake, inbox.ts):
-	// only where the inbox tool switch allows it for Pi and an Inbox was found.
-	// Pi awaits the extension factory, so the tool list is read (bounded) before
-	// the session's first request; otherwise this returns nothing.
+	// The Plannotator Inbox (inbox.ts): where an Inbox was found, the session
+	// claim (which session this Pi runs, the tool on or off); and the
+	// `plannotator_inbox` tool and the reply wake only where the inbox tool
+	// switch allows it for Pi. Pi awaits the extension factory, so the tool list
+	// is read (bounded) before the session's first request; otherwise this
+	// returns nothing.
 	return setupPiInbox(pi, { isAskActive: () => sessionBridgeHub.hasActiveAsk });
 }

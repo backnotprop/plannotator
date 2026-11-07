@@ -745,7 +745,7 @@ export function shapeHtmlProblems(html: string): string[] {
       else if (SHAPE_URL_ATTRS.includes(name)) {
         const link = tag === 'a' && (name === 'href' || name === 'xlink:href');
         if (!shapeUrlAllowed(value, link)) {
-          add(`<${tag} ${name}="${shown}">: nothing may load from outside the board; use a file on this computer, files/<name>, #id or a data:image${link ? ' (a link may be https://)' : ''}`);
+          add(`<${tag} ${name}="${shown}">: nothing may load from outside the board; use files/<name>, #id or a data:image (a picture on this computer or the web goes in <img src> or <image href>, and shape update copies it in)${link ? ' (a link may be https://)' : ''}`);
         }
       } else if (name === 'style') {
         for (const p of shapeCssProblems(value)) add(`<${tag} style>: ${p}`);

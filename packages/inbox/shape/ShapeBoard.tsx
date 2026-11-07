@@ -49,6 +49,7 @@ export default function ShapeBoard({ host, id, onClose, renderThread, initialVie
       review={review}
       renderThread={renderThread}
       readFirst
+      darkContrast
       boxSelect={boxSelect}
       initialView={initialView}
       initialPanel={initialPanel}
