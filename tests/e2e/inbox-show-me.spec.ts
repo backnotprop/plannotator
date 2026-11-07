@@ -1052,24 +1052,34 @@ test("a link on a board over the thread (What's changed): the code shows and the
   await board(page).getByRole('toolbar').getByRole('button', { name: "What's changed" }).click();
   await link(board(page)).click();
 
-  // The code shows: the review at that line, painted; the board is the corner card, naming no part.
+  // The code shows: the review at that line, painted and scrolled into view clear of the card; the board is the
+  // corner card, naming no part.
   await expect(pane).toBeVisible();
   await expect(shell).toBeInViewport();
-  await expect(shell.locator('[data-line][data-selected-line]')).toHaveCount(1);
+  const painted = shell.locator('[data-line][data-selected-line]');
+  await expect(painted).toHaveCount(1);
+  await expect(painted).toBeInViewport();
+  const clearOfCard = async () => {
+    const line = (await painted.boundingBox())!;
+    const card = (await corner(page).boundingBox())!;
+    return line.y + line.height <= card.y;
+  };
+  await expect.poll(clearOfCard).toBe(true);
   await expect(corner(page)).toHaveAttribute('data-show-me-corner', id);
   await expect(corner(page).locator('.ib-sm-pip-f')).toHaveCount(0);
   await expect(board(page)).toBeHidden();
   await shot(page, '13-board-link', ['light', 'dark']);
 
-  // The card brings the board back, over the review; its link lands the same way.
+  // The card brings the board back, over the review, on What's changed where the person left it; its link lands the same way.
   await corner(page).getByRole('button', { name: 'Grow the board' }).click();
   await expect(corner(page)).toHaveCount(0);
   await expect(board(page)).toBeVisible();
-  await board(page).getByRole('toolbar').getByRole('button', { name: "What's changed" }).click();
+  await expect(board(page).getByRole('toolbar').getByRole('button', { name: "What's changed" })).toHaveAttribute('aria-pressed', 'true');
   await link(board(page)).click();
   await expect(corner(page)).toBeVisible();
   await expect(board(page)).toBeHidden();
-  await expect(shell).toBeInViewport();
+  await expect(painted).toBeInViewport();
+  await expect.poll(clearOfCard).toBe(true);
 
   // Esc closes the board, as after a part lands on its line; the review stays.
   await page.keyboard.press('Escape');

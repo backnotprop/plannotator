@@ -7,13 +7,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { PanePart, ShapeBoardPart } from '../lazyParts';
 import type { InboxThread } from '@plannotator/core/inbox-types';
-import type { ShapeCodeTarget, ShapeVersion } from '@plannotator/core/shape';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 // The parts by file, never the index: the index holds ShapeSurface, which only the lazy #shape-board may load.
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import { ShapeGrid, shapeAgo, type ShapeGridItem } from '@plannotator/ui/components/shape/ShapeGrid';
 import type { ShapeHost, ShapeReviewAt } from '@plannotator/ui/components/shape';
-import type { ShapeBoardProps } from './types';
+import type { ShapeBoardPlace, ShapeBoardProps } from './types';
 import { inboxApi, type InboxShapeSummary } from '../api';
 import { agentName, whenTime } from '../format';
 import { Icon } from '../icons';
@@ -72,7 +71,8 @@ export function ShapePebbleButton({ shape, open, onToggle }: { shape: InboxShape
  * `onOpenReview`: a link on the board (What's changed, a `file:line`) opens the thread's review there; with Code
  * review on the board rides along as its corner card (ReviewPane). `covered`: a review (the guide pane) is open over
  * it. The board is inert meanwhile, so Esc and Tab go to the review, not to the board's panel, bubble or Show more
- * under it.
+ * under it. `place` and `onNavigate`: where it starts (the place a link left it, back from the review) and where the
+ * person goes on it.
  */
 export function ShapeLayer({
   host,
@@ -82,6 +82,8 @@ export function ShapeLayer({
   onOpenReview,
   covered = false,
   onAddToReply,
+  place = null,
+  onNavigate,
 }: {
   host: ShapeHost;
   id: string;
@@ -90,6 +92,8 @@ export function ShapeLayer({
   onOpenReview?: (messageId: string, at: ShapeReviewAt | null) => void;
   covered?: boolean;
   onAddToReply?: ShapeBoardProps['onAddToReply'];
+  place?: ShapeBoardPlace | null;
+  onNavigate?: ShapeBoardProps['onNavigate'];
 }) {
   // A phone has none: there the sidebar is a sheet and the board covers the window, as before.
   const { isMobile } = useSidebar();
@@ -111,6 +115,8 @@ export function ShapeLayer({
       review={review}
       covered={covered}
       onAddToReply={onAddToReply}
+      place={place}
+      onNavigate={onNavigate}
       headStart={isMobile ? undefined : <SidebarTrigger />}
     />
   );
@@ -119,6 +125,7 @@ export function ShapeLayer({
 /**
  * The layer itself, needing no sidebar: a review is a full window of its own, outside the sidebar's shell. `hidden`:
  * kept as it is (its view, its panel) while the review shows a part's code. `onCode`: a review lands a part on its line.
+ * `place`: the view and panel it starts on (read once, when it mounts); `onNavigate`: each view or panel the person picks.
  */
 export function ShapeBoardLayer({
   host,
@@ -131,17 +138,21 @@ export function ShapeBoardLayer({
   covered = false,
   onAddToReply,
   headStart,
+  place = null,
+  onNavigate,
 }: {
   host: ShapeHost;
   id: string;
   onClose: () => void;
   thread: InboxThread | null;
   hidden?: boolean;
-  onCode?: (target: ShapeCodeTarget, el: HTMLElement, version?: ShapeVersion | null) => boolean;
+  onCode?: ShapeBoardProps['onCode'];
   review?: ShapeBoardProps['review'];
   covered?: boolean;
   onAddToReply?: ShapeBoardProps['onAddToReply'];
   headStart?: ReactNode;
+  place?: ShapeBoardPlace | null;
+  onNavigate?: ShapeBoardProps['onNavigate'];
 }) {
   // The board is a chunk the Inbox serves: one that cannot arrive says so here, with Reload, and the next open
   // (this layer mounted again, or another board in it) asks for the chunk again.
@@ -168,6 +179,8 @@ export function ShapeBoardLayer({
           headStart={headStart}
           crosshair
           onAddToReply={thread ? onAddToReply : undefined}
+          {...(place ? { initialView: place.view, initialPanel: place.panel } : {})}
+          onNavigate={onNavigate}
         />
       </PanePart>
     </section>

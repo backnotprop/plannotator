@@ -567,6 +567,7 @@ packages/ui/components/AnnotationToolstrip.hideActionModes.test.tsx
 packages/ui/components/shape/ShapeSurface.changed.test.tsx
 packages/inbox/shapeWhatsChanged.test.tsx
 packages/inbox/reviewPaneAt.test.tsx
+packages/inbox/shapeBoardPlace.test.tsx
 packages/inbox/system/setupDialog.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.frameUrl.test.tsx
 packages/ui/components/StarAskCard.test.tsx

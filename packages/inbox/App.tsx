@@ -196,6 +196,7 @@ import { createInboxShapeHost } from './shape/inboxShapeHost';
 import { ShapeGridPage, ShapeLayer, ShapePebbleButton } from './shape/ShapeParts';
 import { shapeReplyPart, type ShapeReplyPart } from './shape/addToReply';
 import type { ShapeBoxSelection } from '@plannotator/ui/components/shape';
+import { useBoardPlaces } from './shape/boardPlace';
 import { useInboxShapes } from './shape/useInboxShapes';
 import { shapeReviewAtOf, writeShapeReviewAt } from './shape/review';
 import type { ShapeReviewAt } from '@plannotator/ui/components/shape/types';
@@ -1054,6 +1055,8 @@ function Inbox() {
   useEffect(() => {
     if (!route.guide) setBoardLink(null);
   }, [route.guide]);
+  // The view and panel a link left the board on: the review's board (the corner card's Grow) and Back open there.
+  const boardPlaces = useBoardPlaces(route.shape ?? null);
   /**
    * Real messages that reached the person's Inbox while the tour ran (choice
    * 7): a chip in the tour bar, never an interruption. The tour is in front,
@@ -6317,10 +6320,13 @@ function Inbox() {
               // corner card (ReviewPane); otherwise the guide pane opens over the board, and Back or Esc comes back to it.
               onOpenReview={(messageId, at) => {
                 setBoardLink(messageId);
+                boardPlaces.leave(shapeLayerId);
                 go({ ...routeRef.current, guide: messageId, guideAt: at });
               }}
               covered={!!guideMessage}
               onAddToReply={addShapeReply}
+              place={boardPlaces.placeOf(shapeLayerId)}
+              onNavigate={(place) => boardPlaces.moved(shapeLayerId, place)}
             />
           )}
         </main>
@@ -6746,6 +6752,10 @@ function Inbox() {
               else close({ ...now, shape: null });
             }}
             boardShrunk={boardLink === guideMessage.id}
+            boardPlace={shapeLayerId ? boardPlaces.placeOf(shapeLayerId) : null}
+            onBoardNavigate={(place) => {
+              if (shapeLayerId) boardPlaces.moved(shapeLayerId, place);
+            }}
             at={route.guideAt ?? null}
             onLanded={landGuide}
           />

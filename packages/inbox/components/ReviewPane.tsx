@@ -55,6 +55,8 @@ import { ShowMeBox, ShowMeCorner } from '../review-drawing/ShowMeLayer';
 import { partLanding, reviewDrawnOn, overviewPicture, baseName, changedMarks, chapterOf, markOf, partName, targetLines } from '../review-drawing/showMeModel';
 import { useShowMe } from '../review-drawing/useShowMe';
 import { ShapeBoardLayer, ShapePebbleButton } from '../shape/ShapeParts';
+import type { ShapeBoardPlace } from '../shape/types';
+import { useLineInView } from './reviewLineInView';
 import { shapeReview } from '../shape/review';
 import type { InboxShapes } from '../shape/useInboxShapes';
 import type { GuideSelectionActions } from '../guide/types';
@@ -115,6 +117,10 @@ export interface ReviewPaneProps {
   onBoard: (id: string | null) => void;
   /** Opened from a link on that board: the board starts as the corner card, the review at `at`. */
   boardShrunk?: boolean;
+  /** The view and panel the person left that board on (the link's): the board under the card opens there. */
+  boardPlace?: ShapeBoardPlace | null;
+  /** The person moved to another view or panel on the board. */
+  onBoardNavigate?: (place: ShapeBoardPlace) => void;
   /**
    * Where to open (a Shape board's link, `&code=`, `&step=`, `&files`): a file at a line, a chapter, or All files.
    * Once there, `onLanded` (the window drops it from the address, so a reload starts at the top).
@@ -131,7 +137,7 @@ const NO_ANNOTATIONS: never[] = [];
 
 type RailMode = 'walkthrough' | 'files';
 
-export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onPosted, onAsk, shapeHost, shapes, board, onBoard, boardShrunk = false, at = null, onLanded }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onPosted, onAsk, shapeHost, shapes, board, onBoard, boardShrunk = false, boardPlace = null, onBoardNavigate, at = null, onLanded }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = state;
   // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
@@ -333,6 +339,8 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     [shapeHost, showMe.state.canAsk],
   );
   const [highlight, setHighlight] = useState<{ path: string; start: number; end: number; token: number } | null>(null);
+  // Painted lines come into view, clear of the corner card.
+  useLineInView(bodyRef, highlight);
   /** The chapter that holds the file (else All files), and the review moves to it. */
   const showFile = (path: string) => {
     const index = chapterOf(chapters, path);
@@ -920,7 +928,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
         onStop={() => void showMe.stop()}
         onClose={showMe.closeBox}
       />
-      {board && <ShapeBoardLayer host={boardHost} id={board} thread={thread} hidden={!!landed} onClose={() => onBoard(null)} onCode={landOnCode} review={boardReview} />}
+      {board && <ShapeBoardLayer host={boardHost} id={board} thread={thread} hidden={!!landed} onClose={() => onBoard(null)} onCode={landOnCode} review={boardReview} place={boardPlace} onNavigate={onBoardNavigate} />}
       {board && landed && (
         <ShowMeCorner shape={board} title={boardSummary?.title ?? 'Shape'} picture={boardSummary?.preview?.picture ?? null} part={landed.part} resolveSrc={(src) => shapeHost.assetUrl?.(board, src) ?? src} onGrow={() => setLanded(null)} onClose={() => onBoard(null)} {...(showMe.state.canAsk ? { onAgain: () => { onBoard(null); showMe.again(board); } } : {})} />
       )}
