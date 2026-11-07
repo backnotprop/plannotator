@@ -47,6 +47,9 @@ export interface AIErrorMessage {
   code?: string;
 }
 
+/** An error's `code` when the provider itself says the prompt was past the model's context window (Codex's `contextWindowExceeded`). */
+export const AI_ERROR_CONTEXT_WINDOW_EXCEEDED = "context_window_exceeded";
+
 export interface AIResultMessage {
   type: "result";
   sessionId: string;

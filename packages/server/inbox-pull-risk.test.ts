@@ -8,10 +8,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AIMessage, AIProvider, CreateSessionOptions } from "@plannotator/ai/types";
+import { AI_ERROR_CONTEXT_WINDOW_EXCEEDED, type AIMessage, type AIProvider, type CreateSessionOptions } from "@plannotator/ai/types";
 import type { InboxPull } from "@plannotator/core/inbox-types";
 import { ClaudeAgentSDKProvider } from "@plannotator/ai/providers/claude-agent-sdk";
-import { CodexAppServerProvider } from "@plannotator/ai/providers/codex-app-server";
+import { CodexAppServerProvider, mapCodexAppServerEvent } from "@plannotator/ai/providers/codex-app-server";
 import { PiSDKProvider } from "@plannotator/ai/providers/pi-sdk";
 import { saveConfig } from "@plannotator/shared/config";
 import { INBOX_PULL_RISK_FILE, RISK_AGENT_PAUSE_MS, RISK_CONCURRENCY, RISK_RETRY_MS, createPullRisk, installedPath, runRiskAgent, startingRiskModel, type RiskRunResult, type RiskRun, type RiskRunner } from "./inbox-pull-risk";
@@ -20,6 +20,10 @@ import { INBOX_PULL_WHOLE_DIFF_TIMEOUT_MS, createInboxPulls, createPullGitRunner
 
 const AGENTS = [{ id: "pi-sdk", label: "Pi" }];
 const HIGH = '{"risk":"high","why":"It changes the billing webhook."}';
+/** Providers' own words for a prompt past the model's context. */
+const CODEX_TOO_LONG = "Codex ran out of room in the model's context window. Start a new thread or clear earlier history before retrying.";
+const GEMINI_TOO_LONG = "The input token count (1048577) exceeds the maximum number of tokens allowed (1048576).";
+const REQUEST_TOO_LARGE = '413 {"type":"error","error":{"type":"request_too_large","message":"Request exceeds the maximum allowed number of bytes."}}';
 
 let dataDir: string;
 const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
@@ -351,11 +355,16 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
       expect(stateOf(clone)).toEqual(before);
     }, 30_000);
 
-    const TOO_LONG = "prompt is too long: 900000 tokens > 200000 maximum";
-    test("too long whole for the model: tried once more as the forge gave it, its held-back files as headers, and a Low from that is Medium", async () => {
+    test.each([
+      ["Anthropic", { failed: "prompt is too long: 900000 tokens > 200000 maximum" }],
+      ["Codex's own words", { failed: CODEX_TOO_LONG }],
+      ["Codex's contextWindowExceeded code, whatever the words", { failed: "Turn failed", tooLong: true }],
+      ["Gemini", { failed: GEMINI_TOO_LONG }],
+      ["request_too_large", { failed: REQUEST_TOO_LARGE }],
+    ] as [string, RiskRunResult][])("too long whole for the model (%s): tried once more as the forge gave it, its held-back files as headers, and a Low from that is Medium", async (_name, tooLong) => {
       setRules();
       const { clone, head } = repositories();
-      const { risk, runs, judge, key } = await reading("github", { whole: refused, paged: heldBack }, { head, clones: [clone], gitEnv, respond: (_run, n) => (n === 1 ? { failed: TOO_LONG } : { text: LOW }) });
+      const { risk, runs, judge, key } = await reading("github", { whole: refused, paged: heldBack }, { head, clones: [clone], gitEnv, respond: (_run, n) => (n === 1 ? tooLong : { text: LOW }) });
       await judge();
       expect(runs).toHaveLength(2);
       expect(runs[0]!.prompt).toContain("+v2 sends the card number home");
@@ -739,9 +748,15 @@ describe("no cost repeats", () => {
     expect(new Set(runs.map((r) => r.prompt)).size).toBe(RISK_CONCURRENCY * 2);
   });
 
-  test("diffs too long for the model are each PR's own: they never pause the others", async () => {
+  test.each([
+    ["Anthropic", { failed: "prompt is too long: 2500000 tokens > 200000 maximum" }],
+    ["Codex's own words", { failed: CODEX_TOO_LONG }],
+    ["Codex's contextWindowExceeded code", { failed: "Turn failed", tooLong: true }],
+    ["Gemini", { failed: GEMINI_TOO_LONG }],
+    ["request_too_large", { failed: REQUEST_TOO_LARGE }],
+  ] as [string, RiskRunResult][])("diffs too long for the model (%s) are each PR's own: they never pause the others", async (_name, tooLong) => {
     setRules();
-    const { risk, runs } = engine({ answer: async () => ({ failed: "prompt is too long: 2500000 tokens > 200000 maximum" }) });
+    const { risk, runs } = engine({ answer: async () => tooLong });
     risk.assess(many);
     await settled();
     expect(runs).toHaveLength(many.length);
@@ -1088,6 +1103,27 @@ describe("one run on a provider", () => {
     const answer = await runRiskAgent(provider([{ type: "text", text: HIGH }, message, { type: "result", sessionId: "s", success: true, result: HIGH }], seen), run);
     expect(answer).toEqual({ failed: reason });
     expect(seen.aborted).toBe(true);
+  });
+
+  test("a provider's own context-window code marks the run too long", async () => {
+    const answer = await runRiskAgent(provider([{ type: "error", error: "Turn failed", code: AI_ERROR_CONTEXT_WINDOW_EXCEEDED }]), run);
+    expect(answer).toEqual({ failed: "Turn failed", tooLong: true });
+  });
+
+  test.each([
+    ["turn/completed, failed", { method: "turn/completed", params: { turn: { status: "failed", error: { message: CODEX_TOO_LONG, codexErrorInfo: "contextWindowExceeded" } } } }],
+    ["error", { method: "error", params: { error: { message: CODEX_TOO_LONG, codexErrorInfo: "contextWindowExceeded" }, willRetry: false } }],
+    ["error, the info as an object", { method: "error", params: { error: { message: "x", codexErrorInfo: { contextWindowExceeded: null } }, willRetry: false } }],
+  ] as [string, { method: string; params: Record<string, unknown> }][])("Codex's contextWindowExceeded (%s) reaches the queue as too long", async (_name, event) => {
+    const mapped = mapCodexAppServerEvent(event, "thr-1");
+    expect(mapped).toHaveLength(1);
+    expect(mapped[0]).toMatchObject({ type: "error", code: AI_ERROR_CONTEXT_WINDOW_EXCEEDED });
+    const answer = await runRiskAgent(provider(mapped), run);
+    expect("failed" in answer && answer.tooLong).toBe(true);
+  });
+
+  test("another Codex error keeps its own code", () => {
+    expect(mapCodexAppServerEvent({ method: "error", params: { error: { message: "usage limit reached", codexErrorInfo: "usageLimitExceeded" }, willRetry: false } }, "thr-1")).toEqual([{ type: "error", error: "usage limit reached", code: "codex_error" }]);
   });
 
   test("an agent that says nothing has no answer", async () => {

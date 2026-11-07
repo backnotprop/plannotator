@@ -37,6 +37,7 @@ import type {
   CodexSDKConfig,
   CreateSessionOptions,
 } from "../types.ts";
+import { AI_ERROR_CONTEXT_WINDOW_EXCEEDED } from "../types.ts";
 import { registerProviderFactory } from "../provider.ts";
 import {
   buildWindowsCommandScriptSpawnCommand,
@@ -168,6 +169,16 @@ export function codexOneShotToolUse(notification: { method: string; params?: Rpc
  * Map a Codex app-server notification (`{ method, params }`) to AIMessages.
  * `sessionId` is the resolved thread id, injected into the terminal result.
  */
+/**
+ * A TurnError's code: Codex's own `codexErrorInfo` says when the prompt was past the model's context window
+ * (`"contextWindowExceeded"`, or an object keyed by it); anything else keeps `fallback`.
+ */
+function codexErrorCode(error: RpcMessage | undefined, fallback: string): string {
+  const info = error?.codexErrorInfo;
+  const exceeded = info === "contextWindowExceeded" || (!!info && typeof info === "object" && "contextWindowExceeded" in info);
+  return exceeded ? AI_ERROR_CONTEXT_WINDOW_EXCEEDED : fallback;
+}
+
 export function mapCodexAppServerEvent(
   notification: { method: string; params?: RpcMessage },
   sessionId: string,
@@ -221,7 +232,7 @@ export function mapCodexAppServerEvent(
         return [{
           type: "error",
           error: (error?.message as string) ?? "Turn failed",
-          code: "turn_failed",
+          code: codexErrorCode(error, "turn_failed"),
         }];
       }
       return [{ type: "result", sessionId, success: true }];
@@ -238,7 +249,7 @@ export function mapCodexAppServerEvent(
       return [{
         type: "error",
         error: errObj?.message ?? (params.message as string) ?? "Unknown error",
-        code: "codex_error",
+        code: codexErrorCode(errObj as RpcMessage | undefined, "codex_error"),
       }];
     }
 

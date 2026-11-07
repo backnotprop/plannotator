@@ -33,7 +33,7 @@ import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { resolveWindowsCommandShim } from "@plannotator/ai/providers/command-path";
 import { createProvider } from "@plannotator/ai/provider";
-import type { AIProvider, AISession, CatalogModel, ClaudeAgentSDKConfig, CodexSDKConfig, PiSDKConfig } from "@plannotator/ai/types";
+import { AI_ERROR_CONTEXT_WINDOW_EXCEEDED, type AIProvider, type AISession, type CatalogModel, type ClaudeAgentSDKConfig, type CodexSDKConfig, type PiSDKConfig } from "@plannotator/ai/types";
 import { inboxPullIsOpen, type InboxPull, type InboxPullRiskAgent, type InboxPullRiskAnswer, type InboxPullRiskJudgment, type InboxPullRiskModels } from "@plannotator/core/inbox-types";
 import { resolveModelChoice } from "@plannotator/core/model-catalog";
 import { childPath } from "@plannotator/shared/child-env";
@@ -137,8 +137,11 @@ export interface RiskRun {
   cwd: string;
 }
 
-/** The agent's whole answer, or why there is none, in words a person reads. */
-export type RiskRunResult = { text: string } | { failed: string };
+/**
+ * The agent's whole answer, or why there is none, in words a person reads. `tooLong`: the provider itself said the
+ * prompt was past the model's context (an error code, not words).
+ */
+export type RiskRunResult = { text: string } | { failed: string; tooLong?: true };
 export type RiskRunner = (run: RiskRun) => Promise<RiskRunResult>;
 
 /** Ask a provider that reads its models only on request (Pi, OpenCode). */
@@ -176,7 +179,7 @@ export async function runRiskAgent(provider: AIProvider, run: Omit<RiskRun, "pro
     let final: string | undefined;
     for await (const message of opened.query(run.prompt)) {
       if (message.type === "tool_use" || message.type === "permission_request") return { failed: "The agent tried to use a tool, so its answer was dropped." };
-      if (message.type === "error") return { failed: message.error };
+      if (message.type === "error") return message.code === AI_ERROR_CONTEXT_WINDOW_EXCEEDED ? { failed: message.error, tooLong: true } : { failed: message.error };
       if (message.type === "text") whole.push(message.text);
       if (message.type === "text_delta") deltas.push(message.delta);
       if (message.type === "result") {
@@ -267,7 +270,13 @@ function settingsOf(value: unknown): PullRiskSettings {
 
 /** The agent's words for a prompt past its model's context: that diff's, not a broken agent's. */
 export function isPromptTooLong(text: string): boolean {
-  return /prompt is too long|input is too long|too many (input )?tokens|context[ _-]?length[ _-]?exceeded|maximum context length|exceeds? (the |its )?(model'?s? )?context( window)?|context window (is )?exceeded|request too large/i.test(text);
+  return /prompt is too long|input is too long|too many (input )?tokens|context[ _-]?length[ _-]?exceeded|maximum context length|exceeds? (the |its )?(model'?s? )?context( window)?|context window (is )?exceeded|ran out of room in the model.?s context window|exceeds? the maximum number of (input )?tokens|request[ _-]too[ _-]large/i.test(text);
+}
+
+/** A run that ended because its prompt was past the model's context: the provider said so, or its words do. */
+export function riskRunTooLong(result: RiskRunResult): boolean {
+  if ("failed" in result) return result.tooLong === true || isPromptTooLong(result.failed);
+  return isPromptTooLong(result.text);
 }
 
 const hashOf = (rules: string) => createHash("sha256").update(rules).digest("hex").slice(0, 32);
@@ -403,8 +412,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     if (stopping.signal.aborted) return;
     let judgment = "text" in result ? parseRiskAnswer(result.text) : null;
     // An answer that is no ranking may still say why: "Prompt is too long" comes back as a CLI's ordinary answer.
-    const said = (one: RiskRunResult) => ("failed" in one ? one.failed : one.text);
-    if (!judgment && heldBack && isPromptTooLong(said(result))) {
+    if (!judgment && heldBack && riskRunTooLong(result)) {
       // Too long whole, from a clone: once more as the forge gave it, its held-back files as their headers.
       result = await ask(heldBack);
       heldBack = null;
@@ -418,7 +426,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       lastFailure = reason;
       waits.set(job, now() + RISK_RETRY_MS);
       // A diff too long for the model is this PR's alone: it says nothing of the agent.
-      if (!isPromptTooLong(said(result))) {
+      if (!riskRunTooLong(result)) {
         failuresInARow++;
         if (failuresInARow >= RISK_AGENT_FAILURES) agentPausedUntil = now() + RISK_AGENT_PAUSE_MS;
       }
