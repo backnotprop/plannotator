@@ -7,6 +7,7 @@
  * bun tests drive this class with a host made of memory.
  */
 
+import { AutoReload } from './auto-reload'
 import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeEnd, type BridgeHandle } from './bridge'
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
 import { PromptDropped, type Host, type HttpResult } from './host'
@@ -195,6 +196,8 @@ export const STORE_LAUNCHES = 'launches'
 export const STORE_APPROVALS = 'approvals'
 
 const TICK_MS = 1_000
+/** `$.agent.list()` statuses auto reload waits for: an agent not started yet, running a turn, or held on work it owns. */
+const RELOAD_BUSY_AGENT_STATUSES = new Set(['pending', 'running', 'waiting'])
 /** Liveness check of a launch whose server has not decided yet. */
 const PID_CHECK_EVERY_TICKS = 15
 const PID_MISSES_BEFORE_STOPPED = 3
@@ -365,12 +368,52 @@ export class PlannotatorMod {
   private tickCount = 0
   /** This session's connection to the Plannotator Inbox (the tool and the reply wake); null without one. */
   readonly inbox: InboxLink | null
+  /**
+   * Plannotator reloads itself after an update (auto-reload.ts), told by the
+   * Inbox link's polls; null without an Inbox link, or a host that cannot read
+   * the prompt box or run a command.
+   */
+  readonly autoReload: AutoReload | null
+  /** Subagent turns running now (`turn.start` / `turn.complete` with an agent id), by agent and turn. */
+  private agentTurns = new Set<string>()
 
   constructor(
     private readonly host: Host,
     readonly session: SessionInfo,
   ) {
     this.instanceId = host.randomHex(8)
+    const { readPrompt, runReload, loadedPlugin, listAgents } = host
+    this.autoReload =
+      session.inboxTools && readPrompt && runReload && loadedPlugin
+        ? new AutoReload({
+            sessionId: session.sessionId,
+            now: () => host.now(),
+            storeGet: (key) => host.storeGet(key),
+            storeSet: (key, value) => host.storeSet(key, value),
+            loaded: () => loadedPlugin.call(host),
+            promptText: () => readPrompt.call(host),
+            run: () => runReload.call(host),
+            busyReason: () => this.reloadBusyReason(),
+            ...(listAgents
+              ? {
+                  agentsBusy: async () => {
+                    // An agent the engine tracks, started before this module loaded or after; a list that cannot be read counts as busy.
+                    const agents = await listAgents.call(host).catch(() => null)
+                    if (!agents) return 'the agent list could not be read'
+                    const running = agents.filter((agent) => RELOAD_BUSY_AGENT_STATUSES.has(agent.status)).length
+                    return running > 0 ? `${running} agent${running === 1 ? '' : 's'} running` : null
+                  },
+                }
+              : {}),
+            after: (ms, fn) => {
+              const timer = host.every(ms, () => {
+                timer.cancel()
+                fn()
+              })
+            },
+            debug: (text) => host.debug(text),
+          })
+        : null
     this.inbox = session.inboxTools
       ? new InboxLink({
           host,
@@ -389,9 +432,30 @@ export class PlannotatorMod {
           ...(session.label ? { label: session.label } : {}),
           instanceId: this.instanceId,
           turns: this.turns,
+          ...(this.autoReload ? { reload: this.autoReload } : {}),
         })
       : null
     this.inbox?.start({ touch: !session.healed })
+  }
+
+  /**
+   * Why Plannotator should not reload itself now, or null: a main-loop turn
+   * or this session's own Ask question, a subagent turn, an open review or a
+   * decision waiting to go in, Inbox work in flight. The prompt box is read
+   * by AutoReload itself.
+   */
+  reloadBusyReason(): string | null {
+    if (this.disposed) return 'the instance was disposed'
+    if (this.turns.busy) return 'a turn runs'
+    if (this.agentTurns.size > 0) return 'a subagent runs'
+    if (this.launches.size > 0 || this.awaitingIdle.size > 0) return 'a Plannotator review is open'
+    if (this.inbox?.hasWorkInFlight) return 'Inbox work is in flight'
+    return null
+  }
+
+  /** The first instance of a freshly loaded module: if this session's reload made it, say so (auto-reload.ts). */
+  async checkInAfterReload(): Promise<boolean> {
+    return (await this.autoReload?.checkIn().catch(() => null)) != null
   }
 
   /** The PLANNOTATOR_SESSION_PROJECT value last exported (null: none yet, or the write failed). */
@@ -581,6 +645,7 @@ export class PlannotatorMod {
    */
   dispose(): void {
     this.disposed = true
+    this.autoReload?.dispose()
     this.timer?.cancel()
     this.timer = null
     this.inbox?.dispose()
@@ -1775,6 +1840,9 @@ export class PlannotatorMod {
     )
     const wasOurs = !!turnId && this.turns.ownsTurn(turnId)
     this.turns.onPromptEntered(prompt)
+    // Auto reload: a prompt into a turn already running gets no turn.start of its own (that turn keeps the
+    // session busy); a new one counts as on its way in until its turn.start.
+    this.autoReload?.notePromptLeft(turnId ? 'into-turn' : 'new-turn')
     if (!fromUs) this.inbox?.onForeignPrompt(prompt)
     if (!fromUs) this.inputMoved()
     if (wasOurs && turnId && this.turns.isTakenOver(turnId)) this.host.debug(`ask turn ${turnId} taken over`)
@@ -1785,11 +1853,14 @@ export class PlannotatorMod {
   /** A prompt reached prompt.submit, before the hooks beneath it ran, from register.ts. */
   onPromptSubmitting(prompt: Omit<EnteredPrompt, 'text'>): void {
     this.turns.onPromptSubmitting(prompt)
+    // Between Enter and turn.start no turn is counted yet: auto reload waits while the prompt is submitted.
+    this.autoReload?.notePromptSubmitting()
   }
 
   /** A prompt announced by onPromptSubmitting did not enter, from register.ts. */
   onPromptDropped(prompt: Omit<EnteredPrompt, 'text'>): void {
     this.turns.onPromptDropped(prompt)
+    this.autoReload?.notePromptLeft('dropped')
   }
 
   /** A main-loop model request is about to go out (every turn.step without an agent id), from register.ts. */
@@ -1813,13 +1884,22 @@ export class PlannotatorMod {
     // background one included), but its end is not counted (register.ts
     // filters turn.complete by agent id), so counting the start left the
     // session busy after the main turn ended, and the Inbox's replies waited.
-    if (agentId) return
+    if (agentId) {
+      this.agentTurns.add(`${agentId}\u0000${turnId}`)
+      return
+    }
     this.host.debug(`turn.start ${turnId}: ${JSON.stringify(text.slice(0, 160))}`)
     this.inbox?.onMainTurnStart()
+    this.autoReload?.onInputMoved()
     this.inputMoved()
     const drop = this.turns.onTurnStart(turnId, text)
     if (drop) await this.host.abortTurn(drop).catch(() => undefined)
     this.pushBridgeStatus()
+  }
+
+  /** A subagent's turn ended (register.ts passes only those with an agent id here). */
+  onAgentTurnComplete(agentId: string, turnId: string): void {
+    this.agentTurns.delete(`${agentId}\u0000${turnId}`)
   }
 
   onTurnComplete(turnId: string, answer: string, aborted: boolean): void {

@@ -115,6 +115,24 @@ export interface Host {
    * when a read failed); optional for test hosts, which then send nothing.
    */
   loadedPlugin?(): Promise<LoadedPluginInfo | null>
+  /**
+   * The prompt box's text now (`$.prompt.read()`; `''` where no box is drawn).
+   * Optional: without it Plannotator never reloads itself (auto-reload.ts).
+   */
+  readPrompt?(): Promise<string>
+  /**
+   * `$.command.run({ command: 'reload-plugins', args: 'plannotator' })`: queued
+   * by the engine and run once the session is idle; rejects when the engine
+   * refused it before it ran. Called only from a timer, never from a hook a
+   * turn waits on. Optional: without it Plannotator never reloads itself.
+   */
+  runReload?(): Promise<unknown>
+  /**
+   * `$.agent.list()`: every subagent and teammate the engine tracks, with its
+   * status, including ones started before this module loaded. Optional:
+   * without it auto reload counts only the subagent turns it saw start.
+   */
+  listAgents?(): Promise<{ status: string }[]>
   /** Claude Code's own version (`$.session.version()`'s `base`); null when unknown. Optional. */
   engineVersion?(): Promise<string | null>
   /** `$.session.append` of a notice the transcript shows and the model never reads. */
