@@ -1,0 +1,5 @@
+revision: W-24
+scope: core
+title: Small plan 24
+change:
+  webhooks: "Small change number 24."

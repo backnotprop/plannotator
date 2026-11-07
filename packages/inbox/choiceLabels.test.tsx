@@ -232,8 +232,16 @@ test.skipIf(!hasDom)('the live card draws the label as markdown: a link and code
   expect(card.textContent).not.toContain('](');
 });
 
+/** The sample with one more question on the latest message, left open: the list shows only while a question is unanswered (approval "reply-bar-pairs"). */
+function sampleWithOpen(): InboxThread {
+  const thread = sample();
+  const body = [LATEST, '', ':::question', 'Send it on a Monday?', '', '- [ ] Yes', '- [ ] No', ':::'].join('\n');
+  const latest = questionsOf(M2, body, (q) => (q.position === 0 ? { state: 'picked', revision: 1, picked_at: '2026-10-26T13:20:00.000Z', answer: answerFor(q, ['[Beta list](forecast-15.html)']) } : {}));
+  return { ...thread, messages: thread.messages.map((m) => (m.id === M2 ? { ...m, body, questions: latest } : m)) };
+}
+
 test.skipIf(!hasDom)("the open questions list's Draft and the answers going with the reply: the pick as words", async () => {
-  const el = await render(sample());
+  const el = await render(sampleWithOpen());
   await press(el.querySelector<HTMLElement>('[data-open-questions]')!);
   await until(() => !!document.querySelector('[data-open-questions-list]'), 'the list');
   const row = document.querySelector('[data-open-questions-list] .ib-oq-row')!;
