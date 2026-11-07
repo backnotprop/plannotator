@@ -148,6 +148,8 @@ packages/inbox/listHeaderCompose.test.tsx
 packages/inbox/tidyMenu.test.tsx
 packages/inbox/listLook.test.tsx
 packages/inbox/threadPanel.test.tsx
+packages/inbox/listViewMenu.test.tsx
+packages/inbox/listViewReveal.test.tsx
 packages/inbox/listIntroDialog.test.tsx
 packages/inbox/rowsSettings.test.tsx
 packages/inbox/relativeTime.test.tsx
@@ -560,6 +562,9 @@ packages/review-editor/components/guide/GuideGlobalCommentPopover.test.tsx
 packages/review-editor/utils/scrollWithPage.test.ts
 packages/ui/components/shape/ShapeSurface.board.test.tsx
 packages/ui/components/AnnotationToolstrip.hideActionModes.test.tsx
+packages/ui/components/shape/ShapeSurface.changed.test.tsx
+packages/inbox/shapeWhatsChanged.test.tsx
+packages/inbox/reviewPaneAt.test.tsx
 packages/inbox/system/setupDialog.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.frameUrl.test.tsx
 packages/ui/components/StarAskCard.test.tsx

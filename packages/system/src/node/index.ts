@@ -235,3 +235,13 @@ export async function check(o: { dir: string; root: string; roots?: Record<strin
 }
 
 export { gateRepo, parseNameStatus } from './gate-repo.ts';
+
+// The recipes, the agents and the scheduled check (step A6).
+export { firstDrawPrompt, recipes, reviewPrompt, updatePrompt, type ReviewPromptInput, type UpdatePromptInput } from '../recipe/prompts.ts';
+export { parseSetup, SYSTEM_AGENTS, type SystemAgent, type SystemSetup } from '../agent/setup.ts';
+export { agentModel } from '../agent/model.ts';
+export { unattendedDocs, unattendedDocUrl, type DocUrlCheck } from '../agent/docs.ts';
+export { redrawCommand, SYSTEM_COMMANDS, type SystemSubcommand } from '../agent/command.ts';
+export { checkKey, EMPTY_STATE, readSetup, readState, systemPaths, takeLock, writeState, type TickState } from './state.ts';
+export { changedCount, mergedPrs, plannotatorProgram, prepareSource, redrawNote, runCommand, tick, TICK_TIMEOUTS_MS, type Notify, type Run, type RunAgent, type TickDeps, type TickResult } from './tick.ts';
+export { install, LABEL_PREFIX, launchAgentsDir, list, plist, remove, schedule, scheduleLabel, SYSTEM_TICK_INTERVAL_SECONDS, type CommandRunner, type ScheduleOptions } from './schedule.ts';

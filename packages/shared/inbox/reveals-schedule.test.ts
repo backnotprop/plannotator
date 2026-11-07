@@ -5,8 +5,8 @@
  * A machine keeps what config.json keeps for the line (`inboxReveals`) and changes it only through the module's own
  * helpers, as packages/server/inbox.ts does: a page load is seen (`revealSeeLoad`), the page arms `revealNext`, the
  * agent note asks `revealLineFree("setup")`, a claim stamps (`revealStamp`), a Not now stamps (`revealStampNotNow`).
- * Each user brings their own loads, reads and moments (what the page would see). Bro mode and List view are not built
- * here: they are registered in a test table the way their branches register (`heavyUse`, `minThreads`), so the line's
+ * Each user brings their own loads, reads and moments (what the page would see). List view is in the real queue; Bro
+ * mode is not built here: it is registered in a test table the way its branch registers (`heavyUse`), so the line's
  * seam is what is tested.
  *
  * What regresses: a heavy user's dialogs leaving their approved days (setup on day 0, then one a day from day 2: the
@@ -51,15 +51,18 @@ const DAY = 24 * HOUR;
 const at = (day: number, hour: number) => new Date(2026, 10, 2 + day, hour, 0, 0, 0);
 
 const BRO = "bro" as RevealId;
-const LIST_VIEW = "list_view" as RevealId;
-/** The queue with Bro mode and List view registered at their places, as #2693 and #2716 add them. */
+const LIST_VIEW: RevealId = "list_view";
+/** The queue with Bro mode registered at its place, as #2693 adds it (List view, #2716, is in the real queue). */
 const AFTER_SNOOZE = INBOX_REVEALS.findIndex((entry) => entry.id === "snooze") + 1;
 const TABLE: readonly RevealEntry[] = [
   ...INBOX_REVEALS.slice(0, AFTER_SNOOZE),
   { id: BRO, kind: "offer", tenureMs: 2 * DAY, minThreads: 0, heavyUse: true, enabled: true },
   ...INBOX_REVEALS.slice(AFTER_SNOOZE),
-  { id: LIST_VIEW, kind: "offer", tenureMs: 2 * DAY, minThreads: 15, ahead: true, enabled: true },
 ];
+
+test("List view is registered in the real queue as the approval places it: last, an offer, ahead at its moment", () => {
+  expect(INBOX_REVEALS.at(-1)).toEqual({ id: LIST_VIEW, kind: "offer", tenureMs: 2 * DAY, minThreads: 15, ahead: true, enabled: true });
+});
 
 type Dialog = RevealId | "agent_note";
 

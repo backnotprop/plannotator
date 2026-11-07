@@ -41,7 +41,7 @@
  */
 
 /** Every dialog the queue orders. A registered dialog adds its id here. */
-export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "snooze" | "board" | "steps" | "star";
+export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "snooze" | "board" | "steps" | "star" | "list_view";
 /** Every dialog that keeps the line's day: the queue's, and the agent note (setup). */
 export type LineDialogId = RevealId | "agent_note";
 
@@ -113,9 +113,10 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // only its own `inboxReveals.star`, so every other dialog keeps its day. Its claim runs the already-starred check
   // (gh) before it stamps anything; starred already, nothing shows.
   { id: "star", kind: "offer", tenureMs: 0, minThreads: 0, laterDay: true, aside: true, enabled: true },
-  // List view (#2716) goes here, last in order but ahead at its moment (`ahead`; approval "inbox-one-time-dialogs": once
-  // the list is taller than the screen, at the next calm moment). `minThreads: 15` is the server's stand-in for "taller
-  // than the screen": { id: "list_view", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 15, ahead: true, enabled: true }.
+  // List view's choice (approval "inbox-list-view-dialog"): last in order but ahead at its moment (`ahead`; approval
+  // "inbox-one-time-dialogs": once the list is taller than the screen, on Grouped, at the next calm moment; the page
+  // checks the screen). `minThreads: 15` is the server's stand-in for "taller than the screen".
+  { id: "list_view", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 15, ahead: true, enabled: true },
 ];
 
 /**

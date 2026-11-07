@@ -111,8 +111,8 @@
     },
     {
       "spec": "inbox-code-review.spec.ts",
-      "title": "the top bar holds what the rail held: chapters, the count, files, Overview, Split | Unified, by mouse and by keyboard",
-      "why": "After Enter on the third chapter in the jump menu, the top bar still reads \"1 of 3\" where \"3 of 3\" is expected (line 735, `expect(await jump.textContent()).toBe(place)`).",
+      "title": "the top bar holds what the rail held: chapters, the count, files, Overview, and the diff controls, by mouse and by keyboard",
+      "why": "After Enter on the third chapter in the jump menu, the top bar still reads \"1 of 3\" where \"3 of 3\" is expected (line 698, `expect(await jump.textContent()).toBe(place)`).",
       "firstSeen": "2026-11-05",
       "evidence": [
         42119502727,

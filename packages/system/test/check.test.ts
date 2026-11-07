@@ -32,6 +32,13 @@ function smallRepo(code: Record<string, string> = { 'src/main.ts': '', 'src/api/
 }
 
 describe('check', () => {
+  test('a band whose written spans pass 12 columns is still clean: spans are a preference, and a full band is narrowed to fit', async () => {
+    const r = smallRepo();
+    writeTree(r.dir, { 'sheets/L-101.yaml': 'sheet: L-101\nscope: app\nkind: logical\ntitle: The app\nbands:\n  - { id: inside, row: [api 4, ~ 8] }\n  - { id: more, row: [~ 6, [api, 10]] }\n' });
+    const over = await check({ dir: r.dir, root: r.root, at: r.sha });
+    expect(over).toEqual({ errors: [], warnings: [], missing: [] });
+  });
+
   test('a cited file is looked up at the commit, not in the working tree', async () => {
     const { root, dir, sha } = smallRepo();
     expect(await check({ dir, root, at: sha })).toEqual({ errors: [], warnings: [], missing: [] });
