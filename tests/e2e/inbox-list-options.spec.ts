@@ -602,7 +602,7 @@ test('Settings → Rows: a choice shows in another window at once, is saved for 
     // Another browser (another cookie jar), no reload: the Detailed look.
     await expect.poll(() => lookClasses(list)).toEqual(['ib-lk-pill', 'ib-lk-roomy', 'ib-lk-pv2']);
     const saved = (await (await fetch(new URL('/api/inbox/settings', url))).json()) as { rows: string[] };
-    // Detailed turns letter marks on for threads and projects (#2867); marks add no column class.
+    // Detailed also turns letter marks on (approval: Detailed turns marks on).
     expect(saved.rows).toEqual(['highlight', 'roomy', 'previewTwo', 'marksThreads', 'marksProjects']);
     // A wide row with Roomy is 60 px tall.
     expect(Math.round((await list.locator(`.ib-row[data-thread-id="${threads.ledger}"]`).boundingBox())!.height)).toBe(60);
