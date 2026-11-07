@@ -5,7 +5,7 @@
  * client, the real `plannotator shape`; never a real agent CLI).
  *
  * In order: from a review (Code review on, Shape's switch off), the box, the wait on the board, the new board, three
- * levels, the arrow, browser Back, each board intact, Show me again, the whole-board box, the box over a whole file,
+ * levels, the arrow, browser Back, each board intact, Show me again, the whole-board box, a part outside the diff,
  * the list with 2, 6 and 20 boards, several presses in a row, a phone's tap; the review's selection still works; then
  * Shape on its own (Code review off): the same on a board over its thread, with a plain Ask still refused; then both
  * off: nothing.
@@ -169,7 +169,8 @@ const setSwitches = (on: { inboxCodeReview: boolean; inboxShape: boolean }) => {
 const board = (page: Page) => page.locator('[data-shape-layer]');
 const part = (page: Page, mark: string) => board(page).locator('.shp-drawn-host').first().locator(`[data-mark="${mark}"]`);
 const title = (page: Page) => board(page).locator('.shp-title, h1').first();
-const annotate = (page: Page) => board(page).locator('button[aria-pressed]').filter({ has: page.locator('svg') }).locator('visible=true').and(page.locator('[title^="Annotate"], [title="Stop annotating"]'));
+// The crosshair (Comment), in Annotate's place on the Inbox's board.
+const annotate = (page: Page) => board(page).locator('.shp-tstrip button[aria-label="Comment"]').locator('visible=true');
 const startAnnotating = async (page: Page) => {
   await expect(annotate(page)).toBeVisible();
   if ((await annotate(page).getAttribute('aria-pressed')) !== 'true') await annotate(page).click();
@@ -690,19 +691,15 @@ test('Shape on its own, Code review off: the same on a board over its thread; pl
   await boardBack(page).click();
   await expect(title(page)).toHaveText('On its own');
 
-  // A part with code outside any diff: a click lands in the Code view's whole file, and a line's box has the same three.
-  if ((await annotate(page).getAttribute('aria-pressed')) === 'true') await annotate(page).click();
-  await part(page, 'ledger').locator('text').first().click();
-  const whole = board(page).locator('.shp-file-over');
-  const fileLine = whole.locator('[data-line="2"]').first();
-  await expect(fileLine).toBeVisible({ timeout: 30_000 });
-  await whole.hover();
-  await fileLine.click();
+  // A part with code outside any diff (the Inbox's board has no Code view, so no whole file to box lines in): the
+  // crosshair's box on the part has the same three, and the request names its code.
+  await startAnnotating(page);
+  await part(page, 'ledger').click();
   await expect(showMeButton(page)).toBeVisible();
-  await shot(page, '18-box-on-a-whole-file', ['light']);
+  await shot(page, '18-box-on-a-part-outside-the-diff', ['light']);
   await showMeButton(page).click();
-  await expect(title(page)).toHaveText(/^About ledger\.ts line 2/, { timeout: 30_000 });
-  expect(world.requests.at(-1)).toContain(`(${OUTSIDE}#L2)`);
+  await expect(title(page)).toHaveText(/^About The ledger, outside the review/, { timeout: 30_000 });
+  expect(world.requests.at(-1)).toContain(`(${OUTSIDE}#L1-L3)`);
 });
 
 test('over a thread, × while one draws keeps the wait and the press behind it; the last opens when it lands', async () => {
