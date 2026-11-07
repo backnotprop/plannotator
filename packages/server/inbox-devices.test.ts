@@ -292,7 +292,7 @@ describe("the device door, on the binary", () => {
     const health = await door("health");
     expect(health.status).toBe(200);
     const h = (await health.json()) as Json;
-    expect(Object.keys(h).sort()).toEqual(["app", "event_streams", "inbox_id", "machine_links", "notify_reach", "ok", "peek", "pid", "serverSession", "update", "version", "window_controls"]);
+    expect(Object.keys(h).sort()).toEqual(["app", "event_streams", "inbox_id", "launch_from_machines", "machine_links", "notify_reach", "ok", "peek", "pid", "serverSession", "update", "version", "window_controls"]);
     expect(h).toMatchObject({ ok: true, app: "plannotator-inbox", serverSession });
     expect(await (await door("health", { token: null })).json()).toEqual({ error: "This request needs the phone's token.", code: "device_token_missing" });
   });
