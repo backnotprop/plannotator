@@ -404,6 +404,16 @@ export interface PlannotatorConfig {
    */
   inboxTextSize?: number;
   /**
+   * The Inbox reaction tray's saved emoji (approval "inbox-reaction-tray"):
+   * up to 5, each with the person's name for it (optional), in the order
+   * saved. Unset: none saved. Written by the tray's + through POST
+   * /api/inbox/settings `{ reactions }`; an entry that is not an emoji is
+   * dropped on read.
+   */
+  inboxReactions?: { emoji: string; label?: string }[];
+  /** How many times `inboxReactions` was saved: windows take a list only when it is newer than the last they took. */
+  inboxReactionsRev?: number;
+  /**
    * How the Inbox list's rows look: the names of the row options that are on
    * (core `INBOX_ROWS_OPTIONS`), every other one off. Unset: none written yet
    * (a window adopts its browser's old cookies once). Written by the Inbox's ⋮

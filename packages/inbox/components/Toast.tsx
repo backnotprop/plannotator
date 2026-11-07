@@ -14,6 +14,11 @@ export interface InboxToastModel {
   id: number;
   /** `warn`: the icon in the warning colour (an agent stopped or held up, an error). */
   icon: InboxToastIcon;
+  /**
+   * Kept but never drawn (a reaction from the 👍's tray, approval "inbox-reaction-tray": the emoji flying to the
+   * message is the confirmation, no toast): `Z` still undoes it and the live region still says it.
+   */
+  hidden?: boolean;
   /** The bold first words ("Marked read"). */
   lead: string;
   /** What a phone says instead ("Read"). */

@@ -8904,3 +8904,168 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-sys-phone .ib-sys-x, .pn-inbox .ib-sys-phone .ib-sys-x { width: 32px; height: 32px; }
   .ib-sys-phone .ib-sys-acts .ib-btn { height: 44px; }
 }
+
+/* ===== The reaction tray on 👍 Looks good (approval "inbox-reaction-tray"; ReactionTray.tsx, EmojiPicker.tsx). =====
+   👍, the saved emoji, the free +, then …: 46 px cells, 2 px apart, 6 px around; at most 7 cells (5 saved) is 346 px,
+   so it fits a 390 px phone inside its 12 px margins. Entries ease out (cubic-bezier(0.23, 1, 0.32, 1)), exits are
+   faster, all transitions so a re-hover mid-exit turns back; reduced motion keeps only the fades. */
+.ib-react { position: relative; display: inline-flex; align-items: center; }
+.pn-inbox .ib-react .ib-btn.ib-ack .ib-ack-emoji { display: inline-block; }
+/* A hold is the tray's, not the browser's: no text selection, callout or pan starting on the 👍. */
+.pn-inbox .ib-react .ib-btn.ib-ack { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
+/* The keyboard's and screen reader's way in: hidden until it has keyboard focus, then a small round chip. */
+.pn-inbox .ib-react-more { position: absolute; left: calc(100% + 4px); top: 50%; translate: 0 -50%; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 999px; background: var(--muted); color: var(--muted-foreground); opacity: 0; pointer-events: none; }
+.pn-inbox .ib-react-more:focus-visible { opacity: 1; pointer-events: auto; outline: 2px solid var(--ring); outline-offset: 1px; }
+
+.ib-react-pos { z-index: 80; outline: none; }
+.ib-react-pop { position: relative; padding: 6px; border-radius: 16px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-shadow); outline: none; transform-origin: var(--transform-origin, bottom left); transition: opacity 150ms cubic-bezier(0.23, 1, 0.32, 1), transform 180ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-react-pop[data-starting-style] { opacity: 0; transform: translateY(6px) scale(0.94); }
+.ib-react-pop[data-ending-style] { opacity: 0; transform: translateY(3px) scale(0.97); transition-duration: 110ms; }
+.ib-react-cells { display: grid; grid-auto-flow: column; grid-auto-columns: 46px; gap: 2px; }
+.ib-react-cell { position: relative; display: flex; align-items: center; justify-content: center; height: 44px; border-radius: 10px; outline: none; cursor: pointer; user-select: none; -webkit-user-select: none; }
+.ib-react-e { display: inline-block; font-size: var(--ib-fs-24, 24px); line-height: 1; transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-react-pop[data-reaction-tray] .ib-react-cell .ib-react-e { animation: ib-react-cell-in 240ms cubic-bezier(0.23, 1, 0.32, 1) both; animation-delay: calc(var(--i, 0) * 28ms); }
+@keyframes ib-react-cell-in { from { opacity: 0; transform: translateY(8px) scale(0.6); } }
+/* Back after a name was kept: the row is already where the field leaves it, so it is just there (no fade, no stagger). */
+.ib-react-pop[data-instant][data-starting-style] { opacity: 1; transform: none; }
+.ib-react-pop[data-reaction-tray][data-instant] .ib-react-cell .ib-react-e { animation: none; }
+.ib-react-pop .ib-react-cell[data-highlighted] { background: color-mix(in oklch, var(--muted) 85%, transparent); }
+.ib-react-pop .ib-react-cell:is(:focus, :focus-visible) { outline: none; box-shadow: none; }
+.ib-react-pop .ib-react-cell[data-current] { background: color-mix(in oklch, var(--success) 16%, transparent); }
+.ib-react-pop .ib-react-cell:active .ib-react-e { transform: scale(0.9); transition-duration: 80ms; }
+/* A free + and …: a quiet hollow; it wakes under the pointer. */
+.ib-react-hole { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 999px; background: color-mix(in oklch, var(--muted) 45%, transparent); color: color-mix(in oklch, var(--muted-foreground) 60%, transparent); transition: background-color 140ms ease-out, color 140ms ease-out, transform 140ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-react-pop .ib-react-cell[data-highlighted] .ib-react-hole { background: var(--muted); color: var(--foreground); }
+.ib-react-dots { color: var(--muted-foreground); }
+.ib-react-dots, .ib-react-pop .ib-react-cell[data-highlighted] .ib-react-dots { background: transparent; }
+:is(.ib-react-pop, .ib-emo) svg.ib-ic { flex: none; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+/* A name is a small tooltip over its emoji, after a short rest (a sweep along the row shows none). */
+.ib-react-pop[data-reaction-tray] .ib-react-cell[data-tip]::after { content: attr(data-tip); position: absolute; left: 50%; bottom: calc(100% + 10px); transform: translate(-50%, 3px); padding: 3px 8px; border-radius: 7px; background: var(--foreground); color: var(--background); font-size: var(--ib-fs-12, 12px); font-weight: 550; line-height: 1.35; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 120ms ease-out, transform 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-react-pop[data-reaction-tray] .ib-react-cell[data-tip][data-highlighted]::after { opacity: 1; transform: translate(-50%, 0); transition-delay: 380ms; }
+@media (hover: hover) and (pointer: fine) {
+  .ib-react-pop[data-reaction-tray] .ib-react-cell[data-highlighted] .ib-react-e:not(.ib-react-hole) { transform: translateY(-3px) scale(1.18); }
+}
+@media (hover: none) {
+  .ib-react-pop[data-reaction-tray] .ib-react-cell[data-tip]::after { display: none; }
+}
+/* An emoji just saved: a little spring (overshoot, then settle), in the name field's row. */
+.ib-react-pop .ib-react-cell[data-fresh] .ib-react-e { animation: ib-react-spring 460ms 60ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+@keyframes ib-react-spring { from { opacity: 0; transform: scale(0.35) rotate(-14deg); } 60% { opacity: 1; } to { opacity: 1; transform: none; } }
+/* The keyboard's pen, beside the tray's end: out of sight (and of the pointer's way) until the arrows reach it. */
+.ib-react-kedit { position: absolute; top: 50%; left: calc(100% + 6px); width: 32px; height: 32px; margin-top: -16px; display: flex; align-items: center; justify-content: center; border-radius: 999px; background: var(--popover); color: var(--foreground); box-shadow: var(--ib-float-shadow); outline: none; opacity: 0; transform: scale(0.8); pointer-events: none; transition: opacity 120ms ease-out, transform 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-react-kedit[data-highlighted] { opacity: 1; transform: none; pointer-events: auto; }
+
+/* The light name field, and a saved emoji's editor: the tray with a field over it; the row stays where the tray was. */
+.ib-react-namer, .ib-react-ed { min-width: 202px; clip-path: inset(-60px round 16px); transition: clip-path 220ms cubic-bezier(0.23, 1, 0.32, 1), opacity 120ms ease-out; }
+.ib-react-ed { width: 268px; }
+.ib-react-namer[data-starting-style], .ib-react-ed[data-starting-style] { opacity: 1; transform: none; clip-path: inset(calc(100% - 56px) 0 0 0 round 16px); }
+.ib-react-namer[data-ending-style], .ib-react-ed[data-ending-style] { opacity: 0; transform: none; transition-duration: 140ms, 100ms; }
+.ib-react-namer .ib-react-cell, .ib-react-fixed { cursor: default; }
+.ib-react-ed .ib-react-fixed { opacity: 0.45; }
+.ib-react-ed .ib-react-cells { grid-auto-columns: 34px; }
+.ib-react-ed .ib-react-e { font-size: var(--ib-fs-20, 20px); }
+.ib-react-ed button.ib-react-cell { border: 0; padding: 0; background: transparent; font: inherit; color: inherit; cursor: pointer; }
+.ib-react-ed button.ib-react-cell:hover { background: color-mix(in oklch, var(--muted) 60%, transparent); }
+.ib-react-ed button.ib-react-cell[data-highlighted] { background: color-mix(in oklch, var(--muted) 95%, transparent); }
+.ib-react-ed button.ib-react-cell:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+/* Under the name field the row is the tray itself: the emoji just saved reacts from it at once. */
+.ib-react-namer button.ib-react-cell { border: 0; padding: 0; background: transparent; font: inherit; color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.ib-react-namer button.ib-react-cell:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-react-namer button.ib-react-cell:active .ib-react-e { transform: scale(0.9); transition-duration: 80ms; }
+.ib-react-namer[data-ending-style] { pointer-events: none; }
+@media (hover: hover) and (pointer: fine) {
+  .ib-react-namer button.ib-react-cell:hover { background: color-mix(in oklch, var(--muted) 60%, transparent); }
+}
+/* A phone's Reply opens the tray when held (holdPress.ts): the hold is ours, not the browser's (no selection or
+   callout), and the button sinks a little while the finger rests on it. */
+.pn-inbox .ib-btn[data-reply-hold] { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms ease-out; }
+.pn-inbox .ib-btn[data-reply-hold][data-holding] { transform: scale(0.95); background: var(--muted); transition: transform 450ms cubic-bezier(0.23, 1, 0.32, 1), background-color 450ms ease-out; }
+.ib-namer-in { display: block; width: 100%; height: 30px; margin: 0 0 6px; padding: 0 10px; border: 0; border-radius: 9px; background: color-mix(in oklch, var(--muted) 70%, transparent); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); outline: none; animation: ib-react-in 160ms 70ms cubic-bezier(0.23, 1, 0.32, 1) both; transition: box-shadow 140ms ease-out, background-color 140ms ease-out; }
+.ib-namer-in::placeholder { color: var(--muted-foreground); }
+.ib-namer-in:focus { background: color-mix(in oklch, var(--muted) 45%, transparent); box-shadow: 0 0 0 1.5px color-mix(in oklch, var(--ring) 75%, transparent); }
+@keyframes ib-react-in { from { opacity: 0; } }
+.ib-react-form { display: flex; flex-direction: column; gap: 2px; padding-bottom: 6px; margin-bottom: 6px; border-bottom: 1px solid var(--ib-hair, var(--border)); }
+.ib-react-form .ib-namer-in { margin: 0; }
+.ib-react-acts { display: flex; align-items: center; gap: 2px; padding-top: 4px; }
+.ib-react-sp { flex: 1; }
+.ib-react-a, .ib-react-done { height: 28px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; white-space: nowrap; cursor: pointer; transition: background-color 120ms ease-out, color 120ms ease-out, transform 120ms ease-out; }
+.ib-react-a:hover { background: color-mix(in oklch, var(--muted) 80%, transparent); color: var(--foreground); }
+.ib-react-done { padding: 0 12px; background: var(--primary); color: var(--primary-foreground); font-weight: 600; }
+.ib-react-done:hover { background: color-mix(in oklch, var(--primary) 88%, var(--foreground)); }
+:is(.ib-react-a, .ib-react-done):focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+:is(.ib-react-a, .ib-react-done):active { transform: scale(0.97); }
+
+/* The emoji picker: it grows out of the tray's own rectangle (bottom left), so the tray reads as opening up. */
+.ib-emo-pos { z-index: 81; outline: none; }
+.ib-emo { width: 352px; background: var(--popover); color: var(--popover-foreground); border-radius: 14px; box-shadow: var(--ib-float-shadow); outline: none; overflow: hidden; clip-path: inset(-60px round 14px); transform-origin: var(--transform-origin, bottom left); transition: clip-path 260ms cubic-bezier(0.23, 1, 0.32, 1), opacity 150ms cubic-bezier(0.23, 1, 0.32, 1), transform 150ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-emo[data-starting-style] { clip-path: inset(calc(100% - 56px) calc(100% - 202px) 0 0 round 16px); opacity: 0.4; }
+.ib-emo[data-side="bottom"][data-starting-style] { clip-path: inset(0 calc(100% - 202px) calc(100% - 56px) 0 round 16px); }
+.ib-emo[data-ending-style] { opacity: 0; transform: translateY(3px) scale(0.98); transition-duration: 110ms; }
+.ib-emo-in { display: flex; flex-direction: column; }
+.ib-emo-in > * { animation: ib-react-in 180ms 70ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+.ib-emo-search { display: flex; align-items: center; gap: 8px; margin: 10px 10px 6px; height: 34px; padding: 0 10px; border-radius: 9px; background: color-mix(in oklch, var(--muted) 75%, transparent); color: var(--muted-foreground); }
+.ib-emo-search:focus-within { box-shadow: 0 0 0 1.5px color-mix(in oklch, var(--ring) 75%, transparent); background: color-mix(in oklch, var(--muted) 55%, transparent); }
+.ib-emo-search input { flex: 1; min-width: 0; height: 100%; border: 0; padding: 0; background: transparent; outline: none; font: inherit; font-size: var(--ib-fs-13-5, 13.5px); color: var(--foreground); }
+.ib-emo-search input:focus-visible { outline: none; }
+.ib-emo-search input::placeholder { color: var(--muted-foreground); }
+.ib-emo-tabs { display: flex; gap: 2px; padding: 0 8px 4px; }
+.ib-emo-tab { flex: 1; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); font-size: var(--ib-fs-15, 15px); line-height: 1; cursor: pointer; filter: grayscale(1); opacity: 0.55; transition: opacity 140ms ease-out, filter 140ms ease-out, background-color 140ms ease-out; }
+.ib-emo-tab:hover, .ib-emo-tab[aria-current] { filter: none; opacity: 1; }
+.ib-emo-tab[aria-current] { background: color-mix(in oklch, var(--muted) 75%, transparent); }
+.ib-emo-tab:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-emo-body { height: 264px; overflow-y: auto; padding: 0 8px 6px; overscroll-behavior: contain; scrollbar-width: thin; }
+.ib-emo-h { position: sticky; top: 0; z-index: 1; padding: 8px 4px 4px; font-size: var(--ib-fs-12, 12px); font-weight: 550; color: var(--muted-foreground); background: var(--popover); }
+.ib-emo-grid { display: grid; grid-template-columns: repeat(8, 1fr); }
+.ib-emo-cell { height: 38px; display: flex; align-items: center; justify-content: center; border-radius: 8px; font-size: var(--ib-fs-22, 22px); line-height: 1; cursor: pointer; user-select: none; -webkit-user-select: none; }
+.ib-emo-cell[data-active] { background: color-mix(in oklch, var(--muted) 95%, transparent); }
+.ib-emo-cell:active { transform: scale(0.9); transition: transform 80ms ease-out; }
+.ib-emo-none { margin: 0; padding: 22px 6px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-emo-foot { display: flex; align-items: center; gap: 10px; min-height: 54px; padding: 8px 12px; border-top: 1px solid var(--ib-hair, var(--border)); }
+.ib-emo-big { flex: none; width: 32px; text-align: center; font-size: var(--ib-fs-30, 30px); line-height: 1; }
+.ib-emo-say { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; font-size: var(--ib-fs-12, 12px); }
+.ib-emo-say b { font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-emo-say span { color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-emo-hint { padding-left: 2px; }
+.ib-emo-close { flex: none; width: 44px; height: 44px; margin: -6px -8px -6px 0; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: var(--muted-foreground); }
+/* A touch phone: a bottom sheet with 44 px cells. */
+.ib-emo-pos[data-phone] { position: fixed !important; left: 0 !important; right: 0 !important; top: auto !important; bottom: 0 !important; transform: none !important; width: auto !important; }
+.ib-emo-pos[data-phone] .ib-emo { width: auto; border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom); clip-path: none; transition: opacity 150ms cubic-bezier(0.23, 1, 0.32, 1), transform 220ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-emo-pos[data-phone] .ib-emo[data-starting-style] { clip-path: none; opacity: 1; transform: translateY(100%); }
+.ib-emo-pos[data-phone] .ib-emo[data-ending-style] { transform: translateY(100%); opacity: 1; transition-duration: 180ms; }
+.ib-emo-pos[data-phone] .ib-emo-body { height: 40vh; }
+.ib-emo-pos[data-phone] .ib-emo-cell { height: 44px; font-size: var(--ib-fs-24, 24px); }
+.ib-emo-pos[data-phone] .ib-emo-search { height: 40px; }
+.ib-emo-pos[data-phone] .ib-emo-tab { height: 36px; }
+
+/* The sent moment: the emoji in flight (ReactionTray.tsx flyReaction), and the line it lands on. */
+.ib-react-flight { position: fixed; left: 0; top: 0; z-index: 200; width: 0; height: 0; pointer-events: none; will-change: transform; }
+.ib-react-flight > span { position: absolute; left: 0; top: 0; font-size: var(--ib-fs-20, 20px); line-height: 1; }
+.ib-ackemoji { display: inline-block; }
+.ib-ackpill[data-ack-fresh] { animation: ib-react-in 160ms ease-out; }
+/* An emoji with no name: the emoji alone on the line. */
+.ib-ackchip[data-bare] { padding: 0 8px; }
+
+@media (pointer: coarse) {
+  .ib-react-cell { height: 48px; }
+  .ib-namer-in { height: 40px; font-size: var(--ib-fs-16-in, 16px); }
+  .ib-emo-pos[data-phone] .ib-emo-search input { font-size: var(--ib-fs-16-in, 16px); }
+  .ib-react-ed .ib-react-cells { grid-auto-columns: 40px; }
+  .ib-react-ed[data-phone] { width: min(320px, calc(100vw - 24px)); }
+  :is(.ib-react-a, .ib-react-done) { height: 40px; font-size: var(--ib-fs-14, 14px); }
+  .ib-emo[data-starting-style] { clip-path: inset(calc(100% - 60px) calc(100% - 202px) 0 0 round 16px); }
+  .ib-react-namer[data-starting-style], .ib-react-ed[data-starting-style] { clip-path: inset(calc(100% - 60px) 0 0 0 round 16px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ib-react-pop[data-starting-style], .ib-react-pop[data-ending-style] { transform: none; }
+  .ib-react-pop[data-reaction-tray] .ib-react-cell .ib-react-e, .ib-namer-in, .ib-emo-in > * { animation: none; }
+  .ib-react-pop .ib-react-cell[data-fresh] .ib-react-e { animation: ib-react-in 160ms ease-out both; }
+  .ib-react-pop .ib-react-cell[data-highlighted] .ib-react-e, .ib-react-pop .ib-react-cell:active .ib-react-e, .ib-emo-cell:active, :is(.ib-react-a, .ib-react-done):active { transform: none; }
+  .ib-react-pop[data-reaction-tray] .ib-react-cell[data-tip]::after { transition: opacity 110ms ease-out; transform: translate(-50%, 0); }
+  .ib-react-kedit { transform: none; }
+  .pn-inbox .ib-btn[data-reply-hold][data-holding], .ib-react-namer button.ib-react-cell:active .ib-react-e { transform: none; }
+  .ib-react-namer, .ib-react-ed, .ib-react-namer[data-starting-style], .ib-react-ed[data-starting-style] { clip-path: none; transition: opacity 120ms ease-out; }
+  .ib-react-namer[data-starting-style], .ib-react-ed[data-starting-style] { opacity: 0; }
+  .ib-emo, .ib-emo-pos[data-phone] .ib-emo { clip-path: none; transition: opacity 120ms ease-out; }
+  .ib-emo[data-starting-style], .ib-emo[data-ending-style], .ib-emo-pos[data-phone] .ib-emo[data-starting-style], .ib-emo-pos[data-phone] .ib-emo[data-ending-style] { clip-path: none; transform: none; opacity: 0; }
+}
