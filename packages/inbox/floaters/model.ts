@@ -13,7 +13,7 @@ const SET_KEY = 'plannotator-reply-floaters';
 
 /** A draft under this floats nowhere (a stray half word). It stays a draft: the row and the Drafts page still have it. */
 export const FLOAT_MIN_CHARS = 8;
-/** Untouched this long, a draft stops floating. It stays a draft. */
+/** Untouched this long (from when it floated or was last edited, whichever is later), a draft stops floating. It stays a draft. */
 export const FLOAT_MAX_AGE_MS = 24 * 60 * 60_000;
 /** A thread that just started to float is left alone this long, while the drafts list catches up with its save. */
 export const FLOAT_SETTLE_MS = 4_000;
@@ -56,15 +56,17 @@ export function floatingDrafts(entries: readonly FloatEntry[], rows: readonly In
 }
 
 /**
- * The threads that stop floating: sent or discarded anywhere (no row with words), or older than a day. One that
+ * The threads that stop floating: sent or discarded anywhere (no row with words), or untouched for a day. One that
  * started a moment ago, or whose window is open, is kept until the drafts list has caught up.
  */
 export function staleFloats(entries: readonly FloatEntry[], rows: readonly InboxReplyDraftRow[], openWindows: readonly string[], now: number): string[] {
   const byId = new Map(rows.map((row) => [row.thread_id, row]));
   return entries.flatMap((entry) => {
-    if (now - entry.at > FLOAT_MAX_AGE_MS) return [entry.id];
-    if (now - entry.at < FLOAT_SETTLE_MS || openWindows.includes(entry.id)) return [];
     const row = byId.get(entry.id);
+    const edited = row?.unsent?.reply_at ? Date.parse(row.unsent.reply_at) : NaN;
+    const touched = Number.isFinite(edited) ? Math.max(entry.at, edited) : entry.at;
+    if (now - touched > FLOAT_MAX_AGE_MS) return [entry.id];
+    if (now - entry.at < FLOAT_SETTLE_MS || openWindows.includes(entry.id)) return [];
     return !row || !hasWords(row) ? [entry.id] : [];
   });
 }

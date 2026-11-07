@@ -11,8 +11,8 @@ import { FLOAT_MAX_AGE_MS, FLOAT_SETTLE_MS, floatingDrafts, floatsAfterVisit, st
 const AT = '2026-11-07T10:00:00.000Z';
 const LATER = '2026-11-07T10:05:00.000Z';
 
-function row(id: string, words = true, picks = 0): InboxReplyDraftRow {
-  return { thread_id: id, subject: `Thread ${id}`, thread_name: null, unsent: { reply_at: words ? AT : null, picks, comments: 0 } } as unknown as InboxReplyDraftRow;
+function row(id: string, words = true, picks = 0, editedAt = AT): InboxReplyDraftRow {
+  return { thread_id: id, subject: `Thread ${id}`, thread_name: null, unsent: { reply_at: words ? editedAt : null, picks, comments: 0 } } as unknown as InboxReplyDraftRow;
 }
 
 test('a draft floats only when the person typed on this visit and it holds 8 characters or a file', () => {
@@ -46,9 +46,10 @@ test('the corner shows floating drafts with words, newest first, never the open 
   expect(floatingDrafts([{ id: 'thr_picks', at: 1 }], rows, null)).toEqual([]);
 });
 
-test('a draft stops floating once sent or discarded anywhere, or a day old; one just set aside waits for the list', () => {
-  const now = 10 * FLOAT_MAX_AGE_MS;
-  const rows = [row('thr_kept'), row('thr_old'), row('thr_words_gone', false, 1)];
+test('a draft stops floating once sent or discarded anywhere, or a day untouched; one just set aside waits for the list', () => {
+  const now = Date.parse(AT) + 10 * FLOAT_MAX_AGE_MS;
+  // Floated more than a day ago, but edited in its window a minute ago: it is not untouched, so it keeps floating.
+  const rows = [row('thr_kept'), row('thr_old'), row('thr_words_gone', false, 1), row('thr_edited', true, 0, new Date(now - 60_000).toISOString())];
   const entries = [
     { id: 'thr_kept', at: now - 60_000 },
     { id: 'thr_old', at: now - FLOAT_MAX_AGE_MS - 1 },
@@ -56,6 +57,7 @@ test('a draft stops floating once sent or discarded anywhere, or a day old; one 
     { id: 'thr_words_gone', at: now - 60_000 },
     { id: 'thr_new', at: now - FLOAT_SETTLE_MS + 500 },
     { id: 'thr_open', at: now - 60_000 },
+    { id: 'thr_edited', at: now - FLOAT_MAX_AGE_MS - 1 },
   ];
   expect(staleFloats(entries, rows, ['thr_open'], now).sort()).toEqual(['thr_old', 'thr_sent', 'thr_words_gone']);
 });

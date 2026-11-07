@@ -7,7 +7,7 @@
  *   screen exactly as Ask does. No "Draft · Saved · Discard" line: the box saves quietly and the bin discards; only
  *   "Not saved …" shows, over the row, as in the thread.
  * - A phone: the whole screen, T6's phone row (no bin) and T6's Draft line above the box, which keeps Discard.
- * - ⌘↵ sends, Escape minimizes (the box's own keys; no new shortcut).
+ * - ⌘↵ sends (the thread box's own key). No Escape: Ask's window takes none (AskChat.tsx), and this is Ask's window.
  *
  * Send here is the plain case: words and files, to the message the words answer, in a thread with one agent. A
  * thread holding picks or comments, a chosen recipient, several agents or a hand-off, or whose agent has ended,
@@ -15,6 +15,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { InboxDraftFile, InboxMessageWire, InboxReplyDraftRow, InboxThread } from '@plannotator/core/inbox-types';
+import type { ReplyDraftFileRef } from '@plannotator/core/inbox-reply-draft';
 import { ChatFrame, type ChatWindowStore } from '@plannotator/ui/components/chat';
 import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { inboxApi } from '../api';
@@ -64,8 +65,8 @@ export interface FloaterBoxProps {
   onPutAway: () => void;
   onOpenThread: () => void;
   onSent: (agent: string) => void;
-  /** Discarded; the words, for Undo. */
-  onDiscarded: (words: string) => void;
+  /** Discarded; the words and files, for Undo. */
+  onDiscarded: (words: string, files: readonly ReplyDraftFileRef[]) => void;
   /** Sent or discarded in another window. */
   onGone: () => void;
 }
@@ -75,6 +76,8 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
   const [text, setText] = useState('');
   const textRef = useRef('');
   textRef.current = text;
+  /** The bin was pressed: nothing this window still holds is saved again (no upload lands, no tile saves). */
+  const discarded = useRef(false);
   const fieldRef = useRef<HTMLTextAreaElement | null>(null);
   const [said, setSaid] = useState('');
   const takeFiles = useRef<(threadId: string, draft: { files?: readonly InboxDraftFile[] }, wanted: readonly string[]) => void>(() => {});
@@ -92,6 +95,8 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
       set: (next) => change(next),
     },
     onUnmountUploads: (uploads) => {
+      // Discarded: what still uploads joins no draft (the bin threw the reply away).
+      if (discarded.current) return;
       for (const upload of uploads) void landInReplyDraft(threadId, upload);
     },
   });
@@ -103,6 +108,8 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
   }, [frame, phone]);
 
   function change(next: string) {
+    // Before the draft's read lands the field is read-only: words typed then would be overwritten by the read.
+    if (!loaded.current || discarded.current) return;
     setText(next);
     textRef.current = next;
     files.follow();
@@ -111,8 +118,12 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
     draft.save(next, list);
   }
 
-  // The draft's words and tiles come in once, when its read lands.
+  // The draft's words and tiles come in once, when its read lands. Until then the field takes no typing.
   const loaded = useRef(false);
+  const ready = draft.loadedFor === threadId;
+  useLayoutEffect(() => {
+    if (fieldRef.current) fieldRef.current.readOnly = !ready;
+  });
   useEffect(() => {
     if (loaded.current || draft.loadedFor !== threadId) return;
     loaded.current = true;
@@ -139,7 +150,7 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
   // A tile finished or was removed: the draft keeps it.
   const signature = pastedSignature(files.draftFiles());
   useEffect(() => {
-    if (!loaded.current || signature === filesSaved.current) return;
+    if (!loaded.current || discarded.current || signature === filesSaved.current) return;
     filesSaved.current = signature;
     draft.save(textRef.current, files.draftFiles(textRef.current));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -216,7 +227,8 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
   const skillFilter = useMemo(() => inboxSkillFilter(false), []);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const sendKey = useRef<string | null>(null);
+  /** The key of a Send that failed, kept for its retry only while the words and files are the same ones. */
+  const sendKey = useRef<{ key: string; content: string } | null>(null);
   const hasSomething = text.trim() !== '' || files.draftFiles().length > 0;
   const send = async () => {
     if (sending || voice.busy) return;
@@ -259,9 +271,11 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
       const skills = await inboxSkillsBlock([words], INBOX_REPLY_SKILL_AUDIENCE, undefined, skillFilter);
       const feedback = withSkillsBlock('', skills);
       const uploads = files.draftFiles().map((file) => file.upload_id);
-      if (!sendKey.current) sendKey.current = crypto.randomUUID();
+      // A retry of the same reply keeps its key (a lost answer is not sent twice); changed words are a new reply.
+      const content = `${words}\u0000${uploads.join(',')}`;
+      if (sendKey.current?.content !== content) sendKey.current = { key: crypto.randomUUID(), content };
       await inboxApi.reply(target.id, {
-        idempotency_key: sendKey.current,
+        idempotency_key: sendKey.current.key,
         words,
         questions: [],
         ...(feedback ? { feedback } : {}),
@@ -282,9 +296,15 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
   };
 
   const discard = () => {
+    // Mid-send the reply is on its way: throwing it away now would say "discarded" while it still posts.
+    if (sending || discarded.current) return;
     const words = textRef.current;
+    const kept: ReplyDraftFileRef[] = files.draftFiles(words).map((file) => (file.pasted ? { upload_id: file.upload_id, pasted: file.pasted } : { upload_id: file.upload_id }));
+    discarded.current = true;
     draft.discard();
-    onDiscarded(words);
+    // Uploads still in flight stop here; none is handed to the draft as the window goes.
+    files.reset();
+    onDiscarded(words, kept);
   };
 
   const drop = useFileDrop((list) => files.add(list));
@@ -295,12 +315,8 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
   const conflictId = `ib-rf-conflict-${threadId}`;
   const peekId = `ib-rf-peek-${threadId}`;
 
-  // Escape is what it is in the reply box: the box goes away, the words stay. ⌘↵ sends, as in the thread's box.
+  // ⌘↵ sends, as in the thread's box. No Escape: this is Ask's window, and Ask's window takes none.
   const onKey = (event: React.KeyboardEvent) => {
-    if (event.key === 'Escape' && !event.defaultPrevented) {
-      event.stopPropagation();
-      onMinimize();
-    }
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing) {
       event.preventDefault();
       event.stopPropagation();
@@ -470,7 +486,7 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
           discard={
             phone ? null : (
               <Tip content="Discard this draft">
-                <button type="button" className="ib-ricon ib-rdiscard" aria-label="Discard draft" onClick={discard} data-rf-discard="">
+                <button type="button" className="ib-ricon ib-rdiscard" aria-label="Discard draft" onClick={discard} disabled={sending} data-rf-discard="">
                   <Icon name="trash" size={16} />
                 </button>
               </Tip>

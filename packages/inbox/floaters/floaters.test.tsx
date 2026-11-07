@@ -6,6 +6,9 @@
  * - a floating draft's Send posting to the wrong thread or message, or leaving its draft behind (it would come back
  *   in the thread and float again); Discard leaving it; a thread with picks waiting sent without them;
  * - Ask's window listing drafts (the owner: separate windows, "no drafts in Ask's menu");
+ * - a draft coming back after Discard because a file was still uploading; Undo losing the files or failing silently;
+ * - the window closing itself when the person empties the words to rewrite them; Escape minimizing it (Ask's window
+ *   takes no Escape, and this is Ask's window); the bin working while a Send is on its way;
  * - Ask's return arrow pressable with nothing to ask, or not turning into Stop while an answer runs.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -34,12 +37,16 @@ interface Fake {
   threads: Map<string, InboxThread>;
   posts: { path: string; body: Record<string, unknown> }[];
   saves: number;
+  /** Draft saves answer 409 draft_conflict (another window wrote meanwhile). */
+  refuseSaves: boolean;
+  /** The reply POST waits for this. */
+  holdReply: Promise<void> | null;
 }
 let fake: Fake;
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
-let toasts: { lead: string }[] = [];
+let toasts: { lead: string; icon?: string; onUndo?: () => void }[] = [];
 let opened: string[] = [];
 
 function thread(id: string, agent = 'msg_' + id): InboxThread {
@@ -83,7 +90,7 @@ const json = (value: unknown) => Response.json(value);
 
 beforeEach(() => {
   if (!hasDom) return;
-  fake = { drafts: new Map(), threads: new Map(), posts: [], saves: 0 };
+  fake = { drafts: new Map(), threads: new Map(), posts: [], saves: 0, refuseSaves: false, holdReply: null };
   toasts = [];
   opened = [];
   window.localStorage.clear();
@@ -104,6 +111,7 @@ beforeEach(() => {
       const id = decodeURIComponent(m[1]!);
       if (init?.method === 'POST') {
         fake.saves += 1;
+        if (fake.refuseSaves) return Response.json({ code: 'draft_conflict', error: 'The draft changed.' }, { status: 409 });
         const words = String(body.body ?? '');
         if (!words) {
           fake.drafts.delete(id);
@@ -117,6 +125,7 @@ beforeEach(() => {
     }
     m = path.match(/\/messages\/([^/]+)\/reply$/);
     if (m) {
+      if (fake.holdReply) await fake.holdReply;
       const owner = [...fake.threads.values()].find((t) => t.messages.some((msg) => msg.id === decodeURIComponent(m![1]!)));
       // The server's compare-and-set clear: the draft named by `clear_draft` goes.
       if (owner && fake.drafts.get(owner.thread_id)?.updated_at === body.clear_draft) fake.drafts.delete(owner.thread_id);
@@ -128,6 +137,8 @@ beforeEach(() => {
       return found ? json({ serverSession: 's', cursor: 1, thread: found }) : new Response('{}', { status: 404 });
     }
     if (path.includes('/sessions')) return json({ serverSession: 's', home: '/h', project: PROJECT, sessions: [] });
+    // The drafts list holds every reply draft, so a menu that read it would list them.
+    if (path.endsWith('/drafts')) return json({ serverSession: 's', drafts: [], replies: [...fake.drafts.keys()].map((id) => row(id)) });
     if (path.endsWith('/ask')) return json({ chats: [{ thread_id: 'thr_ask', subject: 'Ledger schema review', project: 'billing', host: 'claude-code', at: T0, unread: false, answering: false }] });
     if (path.includes('/skills')) return json({ skills: [] });
     return json({});
@@ -184,7 +195,7 @@ function Harness({ start, rows: first, ask }: { start: string | null; rows: Inbo
     openThread: (id) => opened.push(id),
     openDrafts: () => opened.push('drafts'),
     refreshDrafts: () => setRowsState([...fake.drafts.keys()].map((id) => row(id))),
-    toast: (next) => toasts.push({ lead: next.lead ?? '' }),
+    toast: (next) => toasts.push({ lead: next.lead ?? '', icon: next.icon, onUndo: next.onUndo }),
     dismissToast: () => {},
   });
   return <>{layer}</>;
@@ -299,10 +310,19 @@ test('the corner lists this thread’s Ask chat beside the drafts, and Ask’s o
   expect(document.querySelector('[data-rf-box]')).toBeNull();
   act(() => root!.unmount());
 
-  // Ask's header menu, with a draft floating: chats only.
+  // Ask's header menu, beside the corner with a draft floating (the corner lists it; the drafts list the server
+  // answers holds it too): chats only.
   root = createRoot(host!);
   const chat = { thread_id: 'thr_ask', subject: 'Ledger schema review', project: 'billing', host: 'claude-code', at: T0, unread: false, answering: false };
-  await act(async () => root!.render(<mods.AskChatMenu current={chat} phone={false} onPick={() => {}} />));
+  await act(async () =>
+    root!.render(
+      <>
+        <Harness start={null} rows={[row('thr_a')]} ask={fakeAsk()} />
+        <mods.AskChatMenu current={chat} phone={false} onPick={() => {}} />
+      </>,
+    ),
+  );
+  await until(() => card('thr_a') !== null, "the draft's row in the corner, beside Ask's menu");
   const chip = document.querySelector<HTMLElement>('[data-ask-chip]')!;
   expect(chip.textContent).toContain('Ask AI · Ledger schema review');
   act(() => chip.click());
@@ -343,4 +363,141 @@ test('Ask’s return arrow is grey and off while the box is empty, sends once th
   await act(async () => root!.render(box('', false, true)));
   expect(ask().querySelector('[data-ask-glyph="up"]')).not.toBeNull();
   expect(ask().disabled).toBe(true);
+});
+
+const box = (id: string) => document.querySelector<HTMLElement>(`[data-rf-box="${id}"]`);
+const field = (id: string) => document.querySelector<HTMLTextAreaElement>(`[data-rf-box="${id}"] textarea`);
+
+function typeInto(el: HTMLTextAreaElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')!.set!;
+  act(() => {
+    setter.call(el, value);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+async function openFloating(id: string, words: string, files: InboxReplyDraft['files'] = []) {
+  fake.threads.set(id, thread(id));
+  fake.drafts.set(id, { ...draft(id, words), files });
+  mods.floatThread(id, Date.now() - 10_000);
+  await act(async () => root!.render(<Harness start={null} rows={[row(id)]} ask={fakeAsk()} />));
+  await until(() => card(id) !== null, 'the corner');
+  act(() => card(id)!.click());
+  await until(() => field(id)?.value === words, 'the words in the window');
+}
+
+test('Discard while a file still uploads: the upload stops and no draft comes back', async () => {
+  if (!hasDom) return;
+  const RealXHR = (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest;
+  let finish: () => void = () => {};
+  let aborted = 0;
+  class FakeXHR {
+    status = 0;
+    responseText = '';
+    upload: Record<string, unknown> = {};
+    onload: (() => void) | null = null;
+    onabort: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    open() {}
+    setRequestHeader() {}
+    send() {
+      finish = () => {
+        this.status = 200;
+        this.responseText = JSON.stringify({ upload: { upload_id: 'up_1', name: 'notes.txt', size: 5, kind: 'file', sha256: 'x', created_at: T0 } });
+        this.onload?.();
+      };
+    }
+    abort() {
+      aborted += 1;
+      this.onabort?.();
+    }
+  }
+  (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest = FakeXHR;
+  try {
+    await openFloating('thr_b', 'Leave the ledger for next sprint');
+    const input = document.querySelector<HTMLInputElement>('[data-rf-box="thr_b"] input[type="file"]')!;
+    Object.defineProperty(input, 'files', { value: [new File(['hello'], 'notes.txt', { type: 'text/plain' })], configurable: true });
+    act(() => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await wait(100);
+    act(() => document.querySelector<HTMLElement>('[data-rf-box="thr_b"] [data-rf-discard]')!.click());
+    await until(() => fake.posts.some((p) => p.path.endsWith('/threads/thr_b/draft/delete')), 'the discard');
+    const deletedAt = fake.posts.findIndex((p) => p.path.endsWith('/threads/thr_b/draft/delete'));
+    finish();
+    await wait(500);
+    // Nothing saved the thread's draft again after the bin (the real store would keep a file-only draft).
+    expect(fake.posts.slice(deletedAt + 1).filter((p) => p.path.endsWith('/threads/thr_b/draft'))).toEqual([]);
+    expect(aborted).toBe(1);
+    expect(fake.drafts.has('thr_b')).toBe(false);
+  } finally {
+    (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest = RealXHR;
+  }
+});
+
+test('emptying the words to rewrite them keeps the window open; Escape does not minimize it; minimized empty, it stops floating', async () => {
+  if (!hasDom) return;
+  await openFloating('thr_a', 'Key the retry on invoice_id alone');
+  typeInto(field('thr_a')!, '');
+  await until(() => !fake.drafts.has('thr_a'), 'the empty save to delete the draft');
+  // What App does on the drafts event: tell the floaters, then read the drafts list again (it no longer has A).
+  act(() => mods.emitFloaterEvent('draft', 'thr_a'));
+  act(() => setRows([...fake.drafts.keys()].map((id) => row(id))));
+  await wait(300);
+  expect(box('thr_a')).not.toBeNull();
+  expect(floating()).toEqual(['thr_a']);
+  // Escape: Ask's window takes none, and neither does this one.
+  act(() => {
+    field('thr_a')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  });
+  await wait(50);
+  expect(box('thr_a')).not.toBeNull();
+  // Rewritten: the draft is back, in the same window.
+  typeInto(field('thr_a')!, 'Key it on the invoice and the attempt');
+  await until(() => fake.drafts.get('thr_a')?.body === 'Key it on the invoice and the attempt', 'the new words saved');
+  // Emptied again and minimized: nothing to float, so the float entry goes too.
+  typeInto(field('thr_a')!, '');
+  await until(() => !fake.drafts.has('thr_a'), 'the draft gone again');
+  act(() => setRows([]));
+  act(() => document.querySelector<HTMLElement>('[data-rf-box="thr_a"] [aria-label="Minimize"]')!.click());
+  await until(() => floating().length === 0, 'the float entry to go');
+  expect(box('thr_a')).toBeNull();
+});
+
+test('Undo after Discard brings back the words and the files; a refused Undo says so', async () => {
+  if (!hasDom) return;
+  const kept = { upload_id: 'up_9', name: 'trace.log', size: 12, kind: 'file', sha256: 'x', created_at: T0 } as unknown as NonNullable<InboxReplyDraft['files']>[number];
+  await openFloating('thr_b', 'See the trace for the second charge', [kept]);
+  act(() => document.querySelector<HTMLElement>('[data-rf-box="thr_b"] [data-rf-discard]')!.click());
+  await until(() => toasts.some((t) => t.lead === 'Reply discarded'), 'the discard toast');
+  const undo = toasts.find((t) => t.lead === 'Reply discarded')!.onUndo!;
+  const before = fake.posts.length;
+  act(() => undo());
+  await until(() => fake.posts.slice(before).some((p) => p.path.endsWith('/threads/thr_b/draft')), 'the restore');
+  const restore = fake.posts.slice(before).find((p) => p.path.endsWith('/threads/thr_b/draft'))!;
+  expect(restore.body.body).toBe('See the trace for the second charge');
+  expect(restore.body.files_add).toEqual([{ upload_id: 'up_9' }]);
+  await until(() => floating().includes('thr_b'), 'it floats again');
+
+  // Refused (another window wrote a draft meanwhile): a toast says it, nothing is thrown away quietly.
+  fake.refuseSaves = true;
+  act(() => undo());
+  await until(() => toasts.some((t) => t.icon === 'warn' && t.lead === 'The reply could not be restored.'), 'the refused toast');
+});
+
+test('the bin is off while a Send is on its way', async () => {
+  if (!hasDom) return;
+  let release: () => void = () => {};
+  fake.holdReply = new Promise<void>((resolve) => (release = resolve));
+  await openFloating('thr_a', 'Key the retry on invoice_id alone');
+  await until(() => document.querySelector('[data-rf-box="thr_a"] [data-rf-peek]') !== null, 'the thread read');
+  act(() => document.querySelector<HTMLElement>('[data-rf-box="thr_a"] [data-rf-send]')!.click());
+  await until(() => fake.posts.some((p) => p.path.endsWith('/reply')), 'the reply on its way');
+  const bin = document.querySelector<HTMLButtonElement>('[data-rf-box="thr_a"] [data-rf-discard]')!;
+  expect(bin.disabled).toBe(true);
+  act(() => bin.click());
+  await wait(50);
+  expect(fake.posts.some((p) => p.path.endsWith('/draft/delete'))).toBe(false);
+  release();
+  await until(() => toasts.some((t) => t.lead === 'Sent to Claude Code'), 'the sent toast');
 });

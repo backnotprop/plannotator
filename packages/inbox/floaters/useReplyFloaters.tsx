@@ -16,6 +16,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import type { InboxReplyDraftRow } from '@plannotator/core/inbox-types';
+import type { ReplyDraftFileRef } from '@plannotator/core/inbox-reply-draft';
 import { ChatWindowStore } from '@plannotator/ui/components/chat';
 import { AuthorMark, HostMark } from '@plannotator/ui/components/inbox-thread/icons';
 import { inboxApi } from '../api';
@@ -89,6 +90,7 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
   // land after the close: the draft is read again when it does (its `drafts` event), for a few seconds.
   const visit = useRef<{ id: string; updated: string | null | undefined } | null>(null);
   const settling = useRef(new Map<string, { updated: string | null | undefined; until: number }>());
+  const settleTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const look = useCallback((id: string) => {
     const was = settling.current.get(id);
     if (!was) return;
@@ -107,10 +109,24 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
   const settle = useCallback(
     (id: string, updated: string | null | undefined, wait: number) => {
       settling.current.set(id, { updated, until: Date.now() + SETTLE_WINDOW_MS });
-      setTimeout(() => look(id), wait);
+      const timer = setTimeout(() => {
+        settleTimers.current.delete(timer);
+        look(id);
+      }, wait);
+      settleTimers.current.add(timer);
     },
     [look],
   );
+  // Off (the tour, a guest) or gone: no look still waiting floats a draft.
+  useEffect(() => {
+    if (off) return;
+    const timers = settleTimers.current;
+    return () => {
+      for (const timer of timers) clearTimeout(timer);
+      timers.clear();
+      settling.current.clear();
+    };
+  }, [off]);
   useEffect(() => {
     if (off) return;
     return onFloaterEvent((kind, changed) => {
@@ -148,8 +164,12 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
 
   const drafts = useMemo(() => floatingDrafts(entries, rows, threadId), [entries, rows, threadId]);
 
+  /** Back to the corner's button; when the last item went with it, to the open thread's title (never to the page). */
   const focusLauncher = useCallback(() => {
-    requestAnimationFrame(() => layerRef.current?.querySelector<HTMLElement>('[data-rf-launcher]')?.focus({ preventScroll: true }));
+    requestAnimationFrame(() => {
+      const target = layerRef.current?.querySelector<HTMLElement>('[data-rf-launcher]') ?? document.querySelector<HTMLElement>('section.ib-pane .ib-subject');
+      target?.focus({ preventScroll: true });
+    });
   }, []);
 
   /** Beside Ask's window when it is open (they never cover each other), else in the corner. */
@@ -244,7 +264,7 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
     [dismissToast, focusLauncher, openThread, toast],
   );
   const discarded = useCallback(
-    (row: InboxReplyDraftRow, words: string) => {
+    (row: InboxReplyDraftRow, words: string, files: readonly ReplyDraftFileRef[]) => {
       setOpenId(null);
       unfloatThread(row.thread_id);
       void refresh.current();
@@ -253,10 +273,16 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
         lead: 'Reply discarded',
         onUndo: () => {
           dismissToast();
-          void inboxApi.saveReplyDraft(row.thread_id, words, null, null, { add: [], remove: [], place: [] }).then(() => {
-            floatThread(row.thread_id);
-            return refresh.current();
-          });
+          // The words and the files come back together (their uploads are kept until the sweep).
+          const add = [...files];
+          const place = add.flatMap((file) => (file.pasted ? [{ upload_id: file.upload_id, pasted: file.pasted }] : []));
+          void inboxApi
+            .saveReplyDraft(row.thread_id, words, null, null, { add, remove: [], place })
+            .then(() => {
+              floatThread(row.thread_id);
+              return refresh.current();
+            })
+            .catch(() => toast({ icon: 'warn', lead: 'The reply could not be restored.', wrap: true }));
         },
       });
       focusLauncher();
@@ -269,7 +295,18 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
     void refresh.current();
   }, []);
 
-  const openRow = openId !== null && openId !== threadId ? (rows.find((each) => each.thread_id === openId) ?? null) : null;
+  // The open window keeps the row it opened with while the list loses it (the person emptied the words to rewrite
+  // them, so the draft went for now). It closes only on Send, Discard, ×, minimize, or a send or discard elsewhere.
+  const openedRow = useRef<InboxReplyDraftRow | null>(null);
+  const listed = openId !== null ? (rows.find((each) => each.thread_id === openId) ?? null) : null;
+  if (listed) openedRow.current = listed;
+  else if (openedRow.current?.thread_id !== openId) openedRow.current = null;
+  const openRow = openId !== null && openId !== threadId ? (listed ?? openedRow.current) : null;
+  // A window with nothing to show is closed, so its float entry is not kept for good.
+  const orphan = openId !== null && openId !== threadId && openRow === null;
+  useEffect(() => {
+    if (orphan) setOpenId(null);
+  }, [orphan]);
   const askChat = ask.on && ask.threadId !== null && ask.hasChat;
 
   const items: CornerItem[] = [
@@ -358,7 +395,7 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
             onPutAway={() => putAway(openRow.thread_id)}
             onOpenThread={() => toThread(openRow.thread_id)}
             onSent={(agent) => sent(openRow, agent)}
-            onDiscarded={(words) => discarded(openRow, words)}
+            onDiscarded={(words, files) => discarded(openRow, words, files)}
             onGone={() => gone(openRow.thread_id)}
           />
         )}
