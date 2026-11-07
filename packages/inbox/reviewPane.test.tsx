@@ -154,7 +154,7 @@ async function render(on: InboxThread = thread) {
     root = createRoot(host!);
     root.render(
       <div className="pn-inbox">
-        <ReviewPane thread={on} message={message} onBack={() => (backs += 1)} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />
+        <ReviewPane thread={on} message={message} codeReview onBack={() => (backs += 1)} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />
       </div>,
     );
   });
