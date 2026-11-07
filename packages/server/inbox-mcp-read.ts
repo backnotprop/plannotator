@@ -168,6 +168,8 @@ export interface AgentMessageLine {
   attachments?: string[];
   guide?: string;
   ack?: true;
+  /** With `ack`: the tray emoji the person reacted with instead of 👍 (approval "inbox-reaction-tray"); the line shows it, never its name. */
+  reaction?: string;
   to?: AgentAddressee;
   tagged?: AgentTagged[];
   board_request?: true;
@@ -454,6 +456,7 @@ export function agentMessageLine(message: InboxMessageWire, caller: string | nul
     ...(message.attachments?.length ? { attachments: message.attachments.map((a) => a.name) } : {}),
     ...(message.guide ? { guide: message.guide.title } : {}),
     ...(message.ack ? { ack: true as const } : {}),
+    ...(message.ack && inboxAckReaction(message.ack.reaction) ? { reaction: inboxAckReaction(message.ack.reaction)!.emoji } : {}),
     ...(message.to ? { to: addressee(message, caller) } : {}),
     ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
     ...(message.board_request === true ? { board_request: true as const } : {}),
@@ -667,7 +670,7 @@ export function messageLineText(line: AgentMessageLine, context: TranscriptConte
   if (line.questions?.length) parts.push(line.questions.map((q) => questionWords(q, true)).join("; "));
   if (line.attachments?.length) parts.push(`files: ${line.attachments.join(", ")}`);
   if (line.guide) parts.push(`guided review: ${line.guide}`);
-  if (line.ack) parts.push("👍");
+  if (line.ack) parts.push(line.reaction ?? "👍");
   // Shown in full only: the line says it is there, so a reader that sees just the line expands it.
   if (line.board_request) parts.push(`Board request (read_thread expand: ["${line.id}"] shows it)`);
   return parts.join(" · ");

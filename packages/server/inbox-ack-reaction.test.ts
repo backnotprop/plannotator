@@ -14,7 +14,7 @@ import { join } from "node:path";
 import type { InboxAuthor, InboxReaction } from "@plannotator/core/inbox-types";
 import { inboxWakeText } from "@plannotator/shared/inbox/connection";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { agentMessage, messageText } from "./inbox-mcp-read";
+import { agentMessage, agentMessageLine, messageLineText, messageText } from "./inbox-mcp-read";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -38,24 +38,30 @@ function reacted(reaction: InboxReaction | null) {
   const [note] = store.pendingReplies("ses_a");
   // The bridge command as the server builds it for a note (`ack_of`, and `ack_reaction` when it has one).
   const wake = inboxWakeText({ type: "reply", id: note!.id, thread_id: sent.id, subject: null, body: note!.body, ack_of: note!.ack_of, ...(note!.ack_reaction ? { ack_reaction: note!.ack_reaction } : {}) });
-  const read = messageText(agentMessage(store.agentThread(sent.id)!.messages[0]!), { previousId: null, previousDate: null, rootId: sent.id });
-  return { id: sent.id, note: note!, wake: wake.split("\n"), readLine: read.split("\n").at(-1) };
+  const shown = store.agentThread(sent.id)!.messages[0]!;
+  const read = messageText(agentMessage(shown), { previousId: null, previousDate: null, rootId: sent.id });
+  // The one-line form an earlier message takes in a long thread: the emoji alone, last.
+  const oneLine = messageLineText(agentMessageLine(shown), { previousId: null, previousDate: null, rootId: sent.id }).split(" · ").at(-1);
+  return { id: sent.id, note: note!, wake: wake.split("\n"), readLine: read.split("\n").at(-1), oneLine };
 }
 
 test("a named reaction: the wake and read_thread say the emoji and its name", () => {
-  const { id, note, wake, readLine } = reacted({ emoji: "🎉", label: "Ship it" });
+  const { id, note, wake, readLine, oneLine } = reacted({ emoji: "🎉", label: "Ship it" });
+  expect(oneLine).toBe("🎉");
   expect(wake).toEqual([`Plannotator Inbox: a message (${note.id})`, `The person reacted 🎉 Ship it to your message (${id}). No reply needed unless the reaction asks for one.`, "", `[thread ${id}]`]);
   expect(readLine).toBe("🎉 Ship it (2026-11-07 14:40Z): the person's reaction.");
 });
 
 test("a reaction with no name (an unnamed saved emoji, or one from the … picker): the emoji alone", () => {
-  const { id, wake, readLine } = reacted({ emoji: "🦄" });
+  const { id, wake, readLine, oneLine } = reacted({ emoji: "🦄" });
+  expect(oneLine).toBe("🦄");
   expect(wake[1]).toBe(`The person reacted 🦄 to your message (${id}). No reply needed unless the reaction asks for one.`);
   expect(readLine).toBe("🦄 (2026-11-07 14:40Z): the person's reaction.");
 });
 
 test("👍 Looks good keeps today's words, in the wake and in read_thread", () => {
-  const { id, note, wake, readLine } = reacted(null);
+  const { id, note, wake, readLine, oneLine } = reacted(null);
+  expect(oneLine).toBe("👍");
   expect(note.ack_reaction).toBeUndefined();
   expect(wake[1]).toBe(`The person marked your message 👍 Looks good (${id}). No reply needed unless you have a question.`);
   expect(readLine).toBe("👍 Looks good (2026-11-07 14:40Z): the person read it and needs nothing more.");
