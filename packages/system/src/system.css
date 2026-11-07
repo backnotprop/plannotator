@@ -386,8 +386,8 @@
 /* a change on the sheet (change/apply.ts): added green, changed amber on its wash, removed grey, dashed and struck;
    a part's number in the change on its corner; its line counts as its second line, in its ink */
 .sys-part.sys-st-added > .sys-pv { border-color: var(--sys-add-ink); }
-.sys-part.sys-st-changed > .sys-pv { border-color: var(--sys-chg-ink); background: color-mix(in oklab, var(--sys-chg-ink) 11%, var(--sys-box)); }
-.sys-part.sys-st-removed > .sys-pv { border-color: var(--sys-gone-ink); border-style: dashed; background: var(--sys-paper); }
+.sys-part.sys-st-changed > .sys-pv { border-color: var(--sys-chg-ink); background-color: color-mix(in oklab, var(--sys-chg-ink) 11%, var(--sys-box)); }
+.sys-part.sys-st-removed > .sys-pv { border-color: var(--sys-gone-ink); border-style: dashed; background-color: var(--sys-paper); }
 .sys-part.sys-st-added .sys-nm, .sys-part.sys-st-added .sys-lines { color: var(--sys-add-ink); }
 .sys-part.sys-st-changed .sys-nm, .sys-part.sys-st-changed .sys-lines { color: var(--sys-chg-ink); }
 .sys-part.sys-st-removed .sys-nm, .sys-part.sys-st-removed .sys-rl, .sys-part.sys-st-removed .sys-sub { color: var(--sys-gone-ink); text-decoration: line-through; }
@@ -401,12 +401,12 @@
 .sys-elabel.sys-st-changed { color: var(--sys-chg-ink); }
 .sys-elabel.sys-st-removed { color: var(--sys-gone-ink); text-decoration: line-through; }
 .sys-fig-step.sys-st-added, .sys-fig-pl.sys-st-added { border-color: var(--sys-add-ink); }
-.sys-fig-step.sys-st-changed, .sys-fig-pl.sys-st-changed { border-color: var(--sys-chg-ink); background: color-mix(in oklab, var(--sys-chg-ink) 11%, var(--sys-box)); }
+.sys-fig-step.sys-st-changed, .sys-fig-pl.sys-st-changed { border-color: var(--sys-chg-ink); background-color: color-mix(in oklab, var(--sys-chg-ink) 11%, var(--sys-box)); }
 .sys-fig-step.sys-st-added .sys-st-s, .sys-fig-step.sys-st-added .sys-st-t { color: var(--sys-add-ink); }
 .sys-fig-step.sys-st-changed .sys-st-s, .sys-fig-step.sys-st-changed .sys-st-t { color: var(--sys-chg-ink); }
 /* a plan (Shape's System (plan) tab): what is not built yet is dashed, new on a green wash; nothing is numbered */
 .sys-plan .sys-part.sys-st-added > .sys-pv, .sys-plan .sys-part.sys-st-changed > .sys-pv { border-style: dashed; }
-.sys-plan .sys-part.sys-st-added > .sys-pv { background: color-mix(in oklab, var(--sys-add-ink) 10%, var(--sys-box)); }
+.sys-plan .sys-part.sys-st-added > .sys-pv { background-color: color-mix(in oklab, var(--sys-add-ink) 10%, var(--sys-box)); }
 .sys-plan .sys-edge.sys-st-added .sys-stroke, .sys-plan .sys-edge.sys-st-changed .sys-stroke { stroke-dasharray: 6 4; }
 .sys-plan .sys-num { display: none; }
 
