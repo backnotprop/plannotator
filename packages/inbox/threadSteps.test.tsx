@@ -1,32 +1,38 @@
 /**
- * Thread steps in the window (approval "inbox-thread-steps", 2026-11-03, A1 "Linear"):
+ * Thread steps in the window (approval "inbox-thread-steps", 2026-11-03; the look is
+ * "inbox-checklist-spinners-2026-11-07", Take C with spinners):
  *
- *  - the rules (steps/model.ts): what a row says at its right (a done step's time, a note, "Waiting on you"),
- *    "3/6" counting no dropped step, "as of" only once the session ended, where "Waiting on you ›" goes (that
- *    session's open question, else its action item, else any), and the pie's wedge;
- *  - the thread's foot (ThreadPane): no button while the switch is off (and no read), "◑ 3/6" beside the open
- *    questions while it is on, the popover's rows in their states, the presence class that turns the in-progress
- *    mark, "Waiting on you ›" closing the list and ringing the question, a phone's sheet with its close;
+ *  - the rules (steps/model.ts): what a row says at its right (a done step's time, a note, "Dropped: <note>",
+ *    "Waiting on you"), "3 of 6 done" counting no dropped step, "as of" only once the session ended, where "Waiting on
+ *    you ›" goes (that session's open question, else its action item, else any), what the line names in each state
+ *    (next, doing, waiting, all done), which list it names, and when a row or lane card wears the amber pause;
+ *  - the thread (ThreadPane): no line while the switch is off (and no read); the line at the top of the thread (after
+ *    the subject and meta line, before the messages, never in the foot) while it is on; a click opening the whole list
+ *    in place under it (`aria-expanded`, no popover) and closing it again; the presence class that turns the spinner;
+ *    "Waiting on you ›" ringing the question; two sessions; the Board icon; a phone;
  *  - live: a steps change for this thread (or every thread) reads again; another thread's does not, and an older
  *    answer never lands over a newer one;
+ *  - the stylesheet: the spinner turns only while working; the line cuts a long step, the list keeps it whole;
  *  - the wire: `event: capabilities` reaches the window's handler.
  *
- * What regresses: steps shown (or read) with the switch off, a dropped step counted, a dead session's mark still
- * turning or no "as of", the waiting row going nowhere or to another agent's question, a list that never updates,
- * and a window that misses another window's switch.
+ * What regresses: steps shown (or read) with the switch off, a dropped step counted, the line naming the wrong step
+ * or sliding back to the foot, a dead or idle session's spinner still turning, the waiting row going nowhere or to
+ * another agent's question, a list that never updates, and a window that misses another window's switch.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
-import type { InboxAuthor, InboxMessageWire, InboxProject, InboxQuestion, InboxStepsWire, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxAuthor, InboxListRow, InboxMessageWire, InboxProject, InboxQuestion, InboxStepsWire, InboxThread } from '@plannotator/core/inbox-types';
 import type { OpenActionItem, OpenQuestion } from '@plannotator/core/inbox-open-questions';
 import { dispatchInboxFrame, type InboxEventHandlers } from './api';
-import { cardStepLists, pieGeometry, stepMeta, stepsAsOf, stepsCount, stepsDoneWords, stepsListLabels, stepsName, stepsWaitTarget, threadBoardCard } from './steps/model';
+import { cardStepLists, stepMeta, stepsAsOf, stepsCount, stepsDoneWords, stepsLine, stepsLineList, stepsLineName, stepsListLabels, stepsName, stepsWaitOnPerson, stepsWaitTarget, stepsWaitWords, threadBoardCard } from './steps/model';
 import { createStepsBus } from './steps/useThreadSteps';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
+const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
+const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'billing-abcdef', name: 'billing-svc', root: '/work/billing', created_at: '2026-10-22T09:00:00.000Z' };
 const A: Extract<InboxAuthor, { kind: 'agent' }> = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null };
@@ -110,8 +116,15 @@ function list(presence: InboxStepsWire['presence'], author = A): InboxStepsWire 
   };
 }
 
+
+/** The same list with its steps' statuses set, in order. */
+function withStatuses(statuses: InboxStepsWire['steps'][number]['status'][], presence: InboxStepsWire['presence'] = 'working'): InboxStepsWire {
+  const base = list(presence);
+  return { ...base, steps: statuses.map((status, i) => ({ ...base.steps[i]!, status })) };
+}
+
 describe('the rules (steps/model.ts)', () => {
-  test('a row\'s right side: a done step\'s time, a note for the others, "Waiting on you" for a waiting one', () => {
+  test('a row\'s right side: a done step\'s time, a note for the others, "Dropped: <note>", "Waiting on you" for a waiting one', () => {
     const steps = list('working').steps;
     expect(steps.map((s) => stepMeta(s, NOW))).toEqual([
       { kind: 'time', text: '11:05 AM', title: '11:05 AM' },
@@ -120,11 +133,13 @@ describe('the rules (steps/model.ts)', () => {
       { kind: 'waiting' },
       { kind: 'note', text: 'Starting the table' },
       null,
-      { kind: 'note', text: 'Stripe settles them' },
+      { kind: 'note', text: 'Dropped: Stripe settles them' },
     ]);
+    // A dropped step with no note still says so.
+    expect(stepMeta({ ...steps[6]!, note: null }, NOW)).toEqual({ kind: 'note', text: 'Dropped' });
   });
 
-  test('the Board (part 4): a card\'s lists come from every thread it links, the latest written first; the head\'s icon opens a card that links the thread, never a cancelled one', () => {
+  test('the Board (part 4): a card\'s lists come from every thread it links, the latest written first; the line\'s icon opens a card that links the thread, never a cancelled one', () => {
     const older = { ...list('idle'), id: 'stp_old', thread_id: 'msg_old', updated_at: at(10, 0) };
     const newer = { ...list('working'), id: 'stp_new', thread_id: 'msg_new', updated_at: at(14, 0) };
     const cleared = { ...list('working'), id: 'stp_gone', thread_id: 'msg_gone', updated_at: at(15, 0), steps: [] };
@@ -151,8 +166,8 @@ describe('the rules (steps/model.ts)', () => {
     expect(stepsListLabels([first, codex])).toEqual(['Claude Code', 'Codex']);
   });
 
-  test('"3/6": a dropped step is not counted; the name says whose and how far', () => {
-    expect(stepsCount(list('working'))).toEqual({ done: 3, total: 6, text: '3/6' });
+  test('"3 of 6 done": a dropped step is not counted; the name says whose and how far', () => {
+    expect(stepsCount(list('working'))).toEqual({ done: 3, total: 6, text: '3 of 6 done' });
     expect(stepsName('Claude Code', list('working'))).toBe("Claude Code's checklist: 3 of 6 steps done");
   });
 
@@ -172,11 +187,30 @@ describe('the rules (steps/model.ts)', () => {
     expect(stepsWaitTarget('ses_a', [], [], sessionOf)).toBeNull();
   });
 
-  test('the pie: no wedge at none, a wedge past the half takes the large arc, a full disc at all', () => {
-    expect(pieGeometry(0, 6, 13)).toMatchObject({ path: null, full: false });
-    expect(pieGeometry(6, 6, 13)).toMatchObject({ path: null, full: true });
-    expect(pieGeometry(2, 6, 13).path).toMatch(/A[\d.]+ [\d.]+ 0 0 1 /);
-    expect(pieGeometry(4, 6, 13).path).toMatch(/A[\d.]+ [\d.]+ 0 1 1 /);
+  // The approval's five states: what the line names, with which mark, and its count.
+  test('the line: next while none started, the step in progress, "waiting on you" before any other, all done; a dropped step never counts', () => {
+    expect(stepsLine(withStatuses(['todo', 'todo', 'todo', 'todo']))).toEqual({ kind: 'next', step: 'Classify 30 days of failed charges', mark: 'todo', count: '0 of 4 done' });
+    expect(stepsLine(withStatuses(['done', 'doing', 'todo', 'todo']))).toEqual({ kind: 'doing', step: 'Retry worker on pg-boss', mark: 'doing', count: '1 of 4 done' });
+    // Waiting wins over a step in progress: it is what the person has to do.
+    expect(stepsLine(withStatuses(['done', 'doing', 'waiting', 'todo']))).toMatchObject({ kind: 'waiting', step: 'Replay the failures in staging', mark: 'waiting', count: '1 of 4 done' });
+    expect(stepsLine(withStatuses(['done', 'done', 'dropped', 'doing']))).toMatchObject({ kind: 'doing', step: 'Ship it behind a flag', count: '2 of 3 done' });
+    expect(stepsLine(withStatuses(['done', 'done', 'done', 'done']))).toEqual({ kind: 'done', step: null, mark: 'done', count: '4 of 4' });
+    // Some done, nothing in progress: the next step.
+    expect(stepsLine(withStatuses(['done', 'todo', 'todo']))).toMatchObject({ kind: 'next', step: 'Retry worker on pg-boss', count: '1 of 3 done' });
+    expect(stepsLineName('Claude Code', withStatuses(['done', 'waiting']))).toBe("Claude Code's checklist: 1 of 2 steps done; waiting on you: Retry worker on pg-boss");
+    expect(stepsLineName('Claude Code', withStatuses(['done', 'done']))).toBe("Claude Code's checklist: 2 of 2 steps done");
+  });
+
+  test('the line names a list that waits on the person first, else the newest; a row and a lane card wear the pause only while one waits', () => {
+    const working = withStatuses(['done', 'doing']);
+    const waiting = { ...withStatuses(['waiting']), id: 'stp_w' };
+    expect(stepsLineList([working, waiting])?.id).toBe('stp_w');
+    expect(stepsLineList([working])).toBe(working);
+    expect(stepsLineList([])).toBeNull();
+    expect(stepsWaitOnPerson([working])).toBe(false);
+    expect(stepsWaitOnPerson([working, waiting])).toBe(true);
+    expect(stepsWaitWords([working])).toBeNull();
+    expect(stepsWaitWords([working, waiting])).toBe('Checklist: 0 of 1 steps done; waiting on you: Classify 30 days of failed charges');
   });
 });
 
@@ -221,7 +255,6 @@ afterEach(() => {
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
-  document.querySelectorAll('[data-steps-panel]').forEach((n) => n.closest('.ib-st-pos')?.remove());
   root = null;
   host = null;
   globalThis.fetch = savedFetch;
@@ -269,150 +302,198 @@ async function render(options: { on?: boolean; phone?: boolean; bus?: ReturnType
   return { el: host, bus };
 }
 
-const button = () => document.querySelector<HTMLButtonElement>('[data-steps-button]');
+
+const line = () => document.querySelector<HTMLElement>('[data-steps-line]');
+const toggle = () => document.querySelector<HTMLButtonElement>('[data-steps-toggle]');
 const panel = () => document.querySelector<HTMLElement>('[data-steps-panel]');
 const rows = () => [...(panel()?.querySelectorAll<HTMLElement>('.ib-st-row') ?? [])];
+/** The line's words as drawn: the step (or its lead words) and the count. */
+const lineWords = () => `${toggle()!.querySelector('[data-steps-now]')!.textContent} · ${toggle()!.querySelector('[data-steps-count]')!.textContent}`;
 
-async function press(el: HTMLElement) {
-  await act(async () => {
-    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
-    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
-    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerType: 'mouse' }));
-    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
-    el.click();
-  });
+async function openList() {
+  await act(async () => toggle()!.click());
+  await until(() => !!panel(), 'the list under the line');
 }
 
-async function openPanel() {
-  await press(button()!);
-  await until(() => !!panel(), 'the steps panel');
+/** The window's stylesheet, in force for one test. */
+async function withStylesheet(run: () => Promise<void> | void) {
+  const css = await Bun.file(new URL('./inbox.css', import.meta.url)).text();
+  const style = document.createElement('style');
+  style.textContent = css;
+  document.head.appendChild(style);
+  try {
+    await run();
+  } finally {
+    style.remove();
+  }
 }
 
-test.skipIf(!hasDom)('off: no button, and the steps are never read', async () => {
+test.skipIf(!hasDom)('off: no line, and the steps are never read', async () => {
   await render({ on: false });
   await settle();
-  expect(button()).toBeNull();
+  expect(line()).toBeNull();
   expect(stepsReads).toBe(0);
 });
 
-test.skipIf(!hasDom)('on: "3/6" after the open questions, named for whose steps; a list cleared to nothing shows no button', async () => {
+test.skipIf(!hasDom)('on: the line at the top of the thread, under the subject and before the messages, never in the foot; a list cleared to nothing shows no line', async () => {
   const { el } = await render();
-  await until(() => !!button(), 'the steps button');
-  const foot = [...el.querySelectorAll<HTMLElement>('[data-foot-buttons] > *')];
-  const oq = foot.findIndex((n) => n.hasAttribute('data-open-questions'));
-  expect(oq).toBeGreaterThanOrEqual(0);
-  expect(foot[oq + 1]).toBe(button()!);
-  expect(button()!.textContent).toBe('3/6');
-  expect(button()!.getAttribute('aria-label')).toBe("Claude Code's checklist: 3 of 6 steps done");
-  expect(button()!.querySelector('[data-steps-pie="3/6"]')).not.toBeNull();
+  await until(() => !!line(), 'the checklist line');
+  const subject = el.querySelector('.ib-subject')!;
+  const firstMessage = el.querySelector('[data-message-id]')!;
+  expect(subject.compareDocumentPosition(line()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(line()!.compareDocumentPosition(firstMessage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(line()!.closest('[data-foot-buttons]')).toBeNull();
+  expect(el.querySelector('[data-foot-buttons] [data-steps-toggle]')).toBeNull();
+  // The list waits on the person: its first words say so, then the step, then the count.
+  expect(line()!.dataset.stepsLine).toBe('waiting');
+  expect(lineWords()).toBe('Waiting on you: Ship it behind a flag · 3 of 6 done');
+  expect(toggle()!.querySelector('.ib-stl-wait')!.textContent).toBe('Waiting on you:');
+  expect(toggle()!.querySelector('[data-step-mark]')!.getAttribute('data-step-mark')).toBe('waiting');
+  expect(toggle()!.getAttribute('aria-label')).toBe("Claude Code's checklist: 3 of 6 steps done; waiting on you: Ship it behind a flag");
+  expect(toggle()!.getAttribute('aria-expanded')).toBe('false');
   act(() => root?.unmount());
   host?.remove();
   answer = async () => Response.json({ serverSession: 's', on: true, steps: [{ ...list('working'), steps: [] }] });
   await render();
   await until(() => stepsReads >= 2, 'the second read');
   await settle();
-  expect(button()).toBeNull();
+  expect(line()).toBeNull();
 });
 
-test.skipIf(!hasDom)('the panel: "Checklist 3/6", one row per step in its state, times and notes at the right; the mark turns while the session works', async () => {
-  await render();
-  await until(() => !!button(), 'the steps button');
-  await openPanel();
-  const head = panel()!.querySelector('[data-steps-head]')!;
-  expect(head.textContent).toBe('Checklist3/6');
-  // "Checklist" is never cut, so no tooltip repeats it.
-  expect(head.querySelector('.ib-st-lbl')!.hasAttribute('title')).toBe(false);
-  expect(panel()!.querySelector('[data-steps-as-of]')).toBeNull();
-  expect(rows().map((r) => [r.dataset.stepStatus, r.querySelector('.ib-st-t')!.textContent, r.querySelector('.ib-st-m')?.textContent ?? ''])).toEqual([
-    ['done', 'Classify 30 days of failed charges', expect.stringMatching(/^11:05 AM$|^Nov 3$/)],
-    ['done', 'Retry worker on pg-boss', expect.any(String)],
-    ['done', 'Replay the failures in staging', expect.any(String)],
-    ['waiting', 'Ship it behind a flag', 'Waiting on you'],
-    ['doing', 'Admin retry view', 'Starting the table'],
-    ['todo', 'On-call runbook entry', ''],
-    ['dropped', 'Retry Stripe 409s', 'Stripe settles them'],
+test.skipIf(!hasDom)('each state\'s line: next with the ring, the step in progress with the spinner, all done with the check', async () => {
+  const cases: [InboxStepsWire, string, string, string][] = [
+    [withStatuses(['todo', 'todo', 'todo', 'todo']), 'next', 'todo', 'Next: Classify 30 days of failed charges · 0 of 4 done'],
+    [withStatuses(['done', 'doing', 'todo', 'todo']), 'doing', 'doing', 'Retry worker on pg-boss · 1 of 4 done'],
+    [withStatuses(['done', 'done', 'dropped', 'doing']), 'doing', 'doing', 'Ship it behind a flag · 2 of 3 done'],
+    [withStatuses(['done', 'done', 'done', 'done']), 'done', 'done', 'All steps done · 4 of 4'],
+  ];
+  for (const [shown, kind, mark, words] of cases) {
+    answer = async () => Response.json({ serverSession: 's', on: true, steps: [shown] });
+    await render();
+    await until(() => !!line(), `the ${kind} line`);
+    expect(line()!.dataset.stepsLine).toBe(kind);
+    expect(toggle()!.querySelector('[data-step-mark]')!.getAttribute('data-step-mark')).toBe(mark);
+    expect(lineWords()).toBe(words);
+    act(() => root?.unmount());
+    host?.remove();
+  }
+});
+
+test.skipIf(!hasDom)('a click opens the whole list in place under the line, with the same marks; a second click closes it', async () => {
+  const { el } = await render();
+  await until(() => !!line(), 'the checklist line');
+  expect(panel()).toBeNull();
+  await openList();
+  expect(toggle()!.getAttribute('aria-expanded')).toBe('true');
+  expect(toggle()!.getAttribute('aria-controls')).toBe(panel()!.id);
+  // In place: inside the thread, under the line; nothing floats over the messages.
+  expect(line()!.contains(panel())).toBe(true);
+  expect(el.contains(panel())).toBe(true);
+  // One list: the line is its head, so the list draws none of its own.
+  expect(panel()!.querySelector('[data-steps-head]')).toBeNull();
+  expect(rows().map((r) => [r.dataset.stepStatus, r.querySelector('[data-step-mark]')!.getAttribute('data-step-mark'), r.querySelector('.ib-st-t')!.textContent, r.querySelector('.ib-st-m')?.textContent ?? ''])).toEqual([
+    ['done', 'done', 'Classify 30 days of failed charges', expect.stringMatching(/^11:05 AM$|^Nov 3$/)],
+    ['done', 'done', 'Retry worker on pg-boss', expect.any(String)],
+    ['done', 'done', 'Replay the failures in staging', expect.any(String)],
+    ['waiting', 'waiting', 'Ship it behind a flag', 'Waiting on you'],
+    ['doing', 'doing', 'Admin retry view', 'Starting the table'],
+    ['todo', 'todo', 'On-call runbook entry', ''],
+    ['dropped', 'dropped', 'Retry Stripe 409s', 'Dropped: Stripe settles them'],
   ]);
   expect(rows()[6]!.getAttribute('aria-label')).toBe('Retry Stripe 409s, dropped: Stripe settles them');
+  await act(async () => toggle()!.click());
+  await until(() => !panel(), 'the list to close');
+  expect(toggle()!.getAttribute('aria-expanded')).toBe('false');
+});
+
+test.skipIf(!hasDom)('the spinner turns while the session works: the presence class on the line and on its list', async () => {
+  answer = async () => Response.json({ serverSession: 's', on: true, steps: [withStatuses(['done', 'doing', 'todo'])] });
+  await render();
+  await until(() => !!line(), 'the checklist line');
+  expect(toggle()!.className).toContain('ib-st-working');
+  expect(toggle()!.querySelector('.ib-stg-spin')).not.toBeNull();
+  await openList();
   expect(panel()!.querySelector('[data-steps-group]')!.className).toContain('ib-st-working');
 });
 
-test.skipIf(!hasDom)('an ended session: the mark stops (no working class) and the head says "as of"', async () => {
-  answer = async () => Response.json({ serverSession: 's', on: true, steps: [list('ended')] });
+test.skipIf(!hasDom)('an ended session: the spinner stops (no working class) and the count says "as of"', async () => {
+  answer = async () => Response.json({ serverSession: 's', on: true, steps: [withStatuses(['done', 'doing', 'todo'], 'ended')] });
   await render();
-  await until(() => !!button(), 'the steps button');
-  await openPanel();
+  await until(() => !!line(), 'the checklist line');
+  expect(toggle()!.className).toContain('ib-st-ended');
+  expect(toggle()!.className).not.toContain('ib-st-working');
+  expect(toggle()!.querySelector('[data-steps-as-of]')!.textContent).toMatch(/^ · as of /);
+  await openList();
   const group = panel()!.querySelector<HTMLElement>('[data-steps-group]')!;
   expect(group.className).toContain('ib-st-ended');
-  expect(group.className).not.toContain('ib-st-working');
-  expect(panel()!.querySelector('[data-steps-as-of]')!.textContent).toMatch(/^as of /);
 });
 
-test.skipIf(!hasDom)('"Waiting on you ›" closes the list and rings the question of that session, not another agent\'s', async () => {
+test.skipIf(!hasDom)('"Waiting on you ›" rings the question of that session, not another agent\'s', async () => {
   const { el } = await render();
-  await until(() => !!button(), 'the steps button');
-  await openPanel();
+  await until(() => !!line(), 'the checklist line');
+  await openList();
   await act(async () => panel()!.querySelector<HTMLButtonElement>('[data-steps-waiting]')!.click());
-  await until(() => !panel(), 'the panel to close');
   await until(() => !!el.querySelector(`[data-message-id="${M3}"] [data-question-key].ib-q-target`), "Claude Code's question ringed");
   expect(el.querySelector(`[data-message-id="${M2}"] [data-question-key].ib-q-target`)).toBeNull();
 });
 
-test.skipIf(!hasDom)('two sessions: each list under its agent\'s name; the button shows the newest', async () => {
-  answer = async () => Response.json({ serverSession: 's', on: true, steps: [list('working'), { ...list('idle', B), steps: list('idle', B).steps.slice(0, 2) }] });
+test.skipIf(!hasDom)('two sessions: the line names the list that waits on the person, with "+1"; the open list shows each under its agent\'s name', async () => {
+  // Codex's list is the newest, but Claude Code's waits on the person: the line names Claude Code's.
+  const codex = { ...list('idle', B), updated_at: at(14, 50), steps: [{ ...list('idle', B).steps[4]!, status: 'doing' as const }] };
+  answer = async () => Response.json({ serverSession: 's', on: true, steps: [codex, list('working')] });
   await render();
-  await until(() => !!button(), 'the steps button');
-  // "+1": another session's list is there too, and the button's name says so.
-  expect(button()!.textContent).toBe('3/6+1');
-  expect(button()!.getAttribute('aria-label')).toEndWith(', and 1 more checklist');
-  await openPanel();
-  expect([...panel()!.querySelectorAll('.ib-st-lbl')].map((n) => n.textContent)).toEqual(['Claude Code', 'Codex']);
+  await until(() => !!line(), 'the checklist line');
+  expect(lineWords()).toBe('Waiting on you: Ship it behind a flag · 3 of 6 done');
+  expect(toggle()!.querySelector('[data-steps-more]')!.textContent).toBe('+1');
+  expect(toggle()!.getAttribute('aria-label')).toEndWith(', and 1 more checklist');
+  await openList();
+  expect([...panel()!.querySelectorAll('.ib-st-lbl')].map((n) => n.textContent)).toEqual(['Codex', 'Claude Code']);
   // A name can be cut with an ellipsis: its title says it whole.
-  expect([...panel()!.querySelectorAll('.ib-st-lbl')].map((n) => n.getAttribute('title'))).toEqual(['Claude Code', 'Codex']);
-  expect(panel()!.getAttribute('aria-label')).toBe('Checklist');
+  expect([...panel()!.querySelectorAll('.ib-st-lbl')].map((n) => n.getAttribute('title'))).toEqual(['Codex', 'Claude Code']);
+  // Each list turns by its own session: Codex's is idle, though the line's (Claude Code's) works.
+  expect(panel()!.querySelector<HTMLElement>('[data-steps-group="ses_b"]')!.className).toContain('ib-st-idle');
 });
 
-// Part 4: "the head reads Steps ◑ 3/6 plus a small Board icon that opens the thread's card".
-test.skipIf(!hasDom)('the head\'s Board icon: there only when a card links the thread; it closes the list and opens the card', async () => {
+// Part 4: a small Board icon opens the thread's card.
+test.skipIf(!hasDom)('the Board icon: at the open line\'s end only when a card links the thread; it opens the card', async () => {
   await render();
-  await until(() => !!button(), 'the steps button');
-  await openPanel();
-  expect(panel()!.querySelector('[data-steps-card]')).toBeNull();
+  await until(() => !!line(), 'the checklist line');
+  await openList();
+  expect(line()!.querySelector('[data-steps-card]')).toBeNull();
   act(() => root?.unmount());
   host?.remove();
-  document.querySelectorAll('[data-steps-panel]').forEach((n) => n.closest('.ib-st-pos')?.remove());
 
   const opened: string[] = [];
   await render({ boardCard: { title: 'Stripe retry worker', onOpen: () => opened.push('crd_stripe') } });
-  await until(() => !!button(), 'the steps button');
-  await openPanel();
-  const icon = panel()!.querySelector<HTMLButtonElement>('[data-steps-card]')!;
-  expect(icon.closest('[data-steps-head]')).not.toBeNull();
+  await until(() => !!line(), 'the checklist line');
+  // The closed line stays as approved: no icon until the list is open.
+  expect(line()!.querySelector('[data-steps-card]')).toBeNull();
+  await openList();
+  const icon = line()!.querySelector<HTMLButtonElement>('[data-steps-card]')!;
   expect(icon.getAttribute('aria-label')).toBe('Open “Stripe retry worker” on the Board');
   await act(async () => icon.click());
-  await until(() => !panel(), 'the panel to close');
   expect(opened).toEqual(['crd_stripe']);
 });
 
-test.skipIf(!hasDom)('a phone: the sheet over a scrim, with a close', async () => {
+test.skipIf(!hasDom)('a phone: the same line and the list in place (no sheet, no scrim)', async () => {
   await render({ phone: true });
-  await until(() => !!button(), 'the steps button');
-  await openPanel();
-  expect(panel()!.closest('.ib-st-pos')!.hasAttribute('data-phone')).toBe(true);
-  expect(document.querySelector('[data-steps-scrim]')).not.toBeNull();
-  await act(async () => document.querySelector<HTMLElement>('[data-steps-close]')!.click());
-  await until(() => !panel(), 'the sheet to close');
+  await until(() => !!line(), 'the checklist line');
+  expect(line()!.className).toContain('ib-stl-phone');
+  await openList();
+  expect(line()!.contains(panel())).toBe(true);
+  expect(document.querySelector('.ib-oq-scrim')).toBeNull();
 });
 
 // Review of #2571, finding 3: presence moves often; a thread showing no list has nothing it could change.
 test.skipIf(!hasDom)('live: presence moving reads again only while a list shows', async () => {
   const { bus } = await render();
-  await until(() => !!button(), 'the steps button');
+  await until(() => !!line(), 'the checklist line');
   const reads = stepsReads;
   act(() => bus.emit('presence'));
   await until(() => stepsReads === reads + 1, 'a presence read');
   answer = async () => Response.json({ serverSession: 's', on: true, steps: [] });
   act(() => bus.emit(M1));
-  await until(() => !button(), 'the list cleared');
+  await until(() => !line(), 'the list cleared');
   const cleared = stepsReads;
   act(() => bus.emit('presence'));
   await settle();
@@ -424,12 +505,12 @@ test.skipIf(!hasDom)('live: presence moving reads again only while a list shows'
 
 test.skipIf(!hasDom)('live: a change for this thread or every thread reads again; another thread\'s does not; an older answer never lands last', async () => {
   const { bus } = await render();
-  await until(() => !!button(), 'the steps button');
+  await until(() => !!line(), 'the checklist line');
   const reads = stepsReads;
   act(() => bus.emit('msg_another'));
   await settle();
   expect(stepsReads).toBe(reads);
-  // The next read is slow and says 3/6; the one after it is quick and says 4/6: 4/6 stays.
+  // The next read is slow and says 3 of 6; the one after it is quick and says 4 of 6: 4 of 6 stays.
   let release: () => void = () => {};
   answer = () => new Promise<Response>((done) => (release = () => done(Response.json({ serverSession: 's', on: true, steps: [list('working')] }))));
   act(() => bus.emit(M1));
@@ -438,101 +519,125 @@ test.skipIf(!hasDom)('live: a change for this thread or every thread reads again
   four.steps[4] = { ...four.steps[4]!, status: 'done' };
   answer = async () => Response.json({ serverSession: 's', on: true, steps: [four] });
   act(() => bus.emit('*'));
-  await until(() => button()!.textContent === '4/6', 'the newer list');
+  await until(() => toggle()?.querySelector('[data-steps-count]')?.textContent === '4 of 6 done', 'the newer list');
   release();
   await settle();
   await settle();
-  expect(button()!.textContent).toBe('4/6');
+  expect(toggle()!.querySelector('[data-steps-count]')!.textContent).toBe('4 of 6 done');
 });
 
 // Break-ui #1: the step row's class once was `.ib-st`, which is also the foot's status words (the draft note, the
-// archived note), Settings → Archived and the Open in caret: its padding and hover moved all of them. Checked with the
+// archived note), Settings → Archived and the Open in caret: its padding moved all of them. Checked with the
 // window's own stylesheet, so a rule that reaches them again fails here.
 test.skipIf(!hasDom)('the checklist\'s row styles never reach the foot\'s status words', async () => {
-  const css = await Bun.file(new URL('./inbox.css', import.meta.url)).text();
-  const style = document.createElement('style');
-  style.textContent = css;
-  document.head.appendChild(style);
-  const box = document.createElement('div');
-  box.className = 'pn-inbox';
-  box.innerHTML = '<div class="ib-acts"><span class="ib-draft-foot"><span class="ib-st">Your reply, 4 picks</span></span></div><ul class="ib-sts"><li class="ib-st-row">Replay</li></ul>';
-  document.body.appendChild(box);
-  try {
-    const status = getComputedStyle(box.querySelector('.ib-st')!);
-    const row = getComputedStyle(box.querySelector('.ib-st-row')!);
-    // The stylesheet is in force: the step row has its 10 px sides.
-    expect(row.paddingLeft).toBe('10px');
-    expect(status.paddingLeft === '' || status.paddingLeft === '0px').toBe(true);
-    expect(status.display).not.toBe('flex');
-  } finally {
-    box.remove();
-    style.remove();
-  }
+  await withStylesheet(() => {
+    const box = document.createElement('div');
+    box.className = 'pn-inbox';
+    box.innerHTML = '<div class="ib-acts"><span class="ib-draft-foot"><span class="ib-st">Your reply, 4 picks</span></span></div><ul class="ib-sts"><li class="ib-st-row">Replay</li></ul>';
+    document.body.appendChild(box);
+    try {
+      const status = getComputedStyle(box.querySelector('.ib-st')!);
+      const row = getComputedStyle(box.querySelector('.ib-st-row')!);
+      // The stylesheet is in force: the step row has its 10 px sides.
+      expect(row.paddingLeft).toBe('10px');
+      expect(status.paddingLeft === '' || status.paddingLeft === '0px').toBe(true);
+      expect(status.display).not.toBe('flex');
+    } finally {
+      box.remove();
+    }
+  });
 });
 
-// Break-ui #2: on a phone every done time read "2:…". A time never shrinks; a note does.
-test.skipIf(!hasDom)('a step\'s time keeps its width; only a note gives way', async () => {
-  const css = await Bun.file(new URL('./inbox.css', import.meta.url)).text();
-  const style = document.createElement('style');
-  style.textContent = css;
-  document.head.appendChild(style);
-  await render();
-  await until(() => !!button(), 'the steps button');
-  await openPanel();
-  try {
+// Break-ui #2: on a phone every done time read "2:…". A time never shrinks; a note does. The approval: long step
+// words are cut on the line, and whole in the list.
+test.skipIf(!hasDom)('a step\'s time keeps its width, only a note gives way; the line cuts a long step, the list keeps it whole', async () => {
+  await withStylesheet(async () => {
+    await render({ phone: true });
+    await until(() => !!line(), 'the checklist line');
+    await openList();
     const done = rows().find((r) => r.dataset.stepStatus === 'done')!.querySelector<HTMLElement>('.ib-st-m')!;
     const noted = rows().find((r) => r.dataset.stepStatus === 'doing')!.querySelector<HTMLElement>('.ib-st-m')!;
     expect(getComputedStyle(done).flexShrink).toBe('0');
     expect(getComputedStyle(noted).flexShrink).toBe('1');
     // The step's own words read in their own direction (an Arabic step starts at its right).
     expect(rows()[0]!.querySelector('.ib-st-t')!.getAttribute('dir')).toBe('auto');
-  } finally {
-    style.remove();
-  }
+    const now = getComputedStyle(toggle()!.querySelector('[data-steps-now]')!);
+    expect(now.whiteSpace).toBe('nowrap');
+    expect(now.textOverflow).toBe('ellipsis');
+    expect(getComputedStyle(rows()[0]!.querySelector('.ib-st-t')!).whiteSpace).toBe('normal');
+  });
 });
 
-// The crowded phone foot (amendment 3, approved as shown): 👍 Looks good sits before the checklist.
-test.skipIf(!hasDom)('the foot: 👍 Looks good comes before the checklist', async () => {
-  const quiet: InboxThread = { ...THREAD, messages: [message(1, A, 'Starting the retry worker.')] };
-  await render({ thread: quiet, onAck: () => {} });
-  await until(() => !!button(), 'the steps button');
-  const buttons = [...document.querySelector('[data-foot-buttons]')!.children];
-  const ack = buttons.findIndex((el) => el.matches('[data-ack]') || !!el.querySelector('[data-ack]'));
-  const steps = buttons.findIndex((el) => el.matches('[data-steps-button]'));
-  expect(ack).toBeGreaterThanOrEqual(0);
-  expect(steps).toBeGreaterThan(ack);
+// The approval's spinner: it turns (0.9 s, linear) only while its session works; idle and ended it rests.
+test.skipIf(!hasDom)('the stylesheet: the spinner turns while working, and rests while idle or ended', async () => {
+  await withStylesheet(() => {
+    const box = document.createElement('div');
+    box.className = 'pn-inbox';
+    const spin = '<svg class="ib-stg ib-stg-spin"><circle class="tr"/><circle class="arc"/></svg>';
+    box.innerHTML = ['working', 'idle', 'ended'].map((p) => `<span class="ib-st-${p}" data-k="${p}">${spin}</span>`).join('');
+    document.body.appendChild(box);
+    try {
+      const turn = (k: string) => getComputedStyle(box.querySelector(`[data-k="${k}"] .ib-stg-spin`)!).animation;
+      expect(turn('working')).toContain('ib-st-turn');
+      expect(['', 'none']).toContain(turn('idle'));
+      expect(['', 'none']).toContain(turn('ended'));
+    } finally {
+      box.remove();
+    }
+  });
 });
 
-// Amendment 3: the checklist gives way first (its chevron), from the row's `steps` step or the buttons' own fit; on
-// a phone a step's words wrap to two lines, in the sheet and the opened card. Checked with the window's stylesheet.
-test.skipIf(!hasDom)('the stylesheet: the checklist\'s chevron goes at the steps fit, and phone steps wrap to two lines', async () => {
-  const css = await Bun.file(new URL('./inbox.css', import.meta.url)).text();
-  const style = document.createElement('style');
-  style.textContent = css;
-  document.head.appendChild(style);
-  const box = document.createElement('div');
-  box.className = 'pn-inbox';
-  const chev = '<button class="ib-btn ib-st-btn"><span class="ib-oq-chev">v</span></button>';
-  box.innerHTML = [
-    `<div class="ib-footrow" data-k="plain"><div class="ib-footbtns">${chev}</div></div>`,
-    `<div class="ib-footrow" data-fit="keys skip edit steps" data-k="row"><div class="ib-footbtns">${chev}</div></div>`,
-    `<div class="ib-footrow" data-k="own"><div class="ib-footbtns" data-steps-fit="">${chev}</div></div>`,
-    '<div class="ib-oq-pos" data-phone=""><ul class="ib-sts"><li class="ib-st-row"><span class="ib-st-t" data-k="sheet">A long step</span></li></ul></div>',
-    '<div class="ib-crdp-phone"><div class="ib-crdp-steps"><ul class="ib-sts"><li class="ib-st-row"><span class="ib-st-t" data-k="card">A long step</span></li></ul></div></div>',
-    '<div class="ib-oq-pos"><ul class="ib-sts"><li class="ib-st-row"><span class="ib-st-t" data-k="desk">A long step</span></li></ul></div>',
-  ].join('');
-  document.body.appendChild(box);
-  try {
-    const chevOf = (k: string) => getComputedStyle(box.querySelector(`[data-k="${k}"] .ib-oq-chev`)!).display;
-    expect(chevOf('plain')).not.toBe('none');
-    expect(chevOf('row')).toBe('none');
-    expect(chevOf('own')).toBe('none');
-    const text = (k: string) => getComputedStyle(box.querySelector(`[data-k="${k}"]`)!);
-    // (happy-dom computes no line clamp: the wrap is what it can read.)
-    for (const k of ['sheet', 'card']) expect(text(k).whiteSpace).toBe('normal');
-    expect(text('desk').whiteSpace).toBe('nowrap');
-  } finally {
-    box.remove();
-    style.remove();
+// The calm row (approval "inbox-checklist-spinners-2026-11-07", row option A): the row never moves; it wears only the
+// still amber pause, after the project, while the server says a step waits on the person (`steps_waiting`).
+test.skipIf(!hasDom)('the list row: the still amber pause after the project only while a step waits on the person; never a spinner', async () => {
+  const listRow = (id: string, waiting: boolean): InboxListRow => ({
+    thread_id: id,
+    project_id: PROJECT.id,
+    subject: 'Nightly export drops rows',
+    author: A,
+    created_at: at(14, 0),
+    last_at: at(14, 30),
+    last_author: 'agent',
+    message_count: 2,
+    resolved_at: null,
+    questions: { open: 1, picked: 0, stopped: false, holds_up: [], prompt: null },
+    waiting_on_person: true,
+    project: { id: PROJECT.id, name: PROJECT.name },
+    thread_name: null,
+    section: 'waiting',
+    unread: true,
+    answered_not_sent: false,
+    waiting_since: null,
+    unseen: 0,
+    sent: null,
+    guide: false,
+    ...(waiting ? { steps_waiting: true as const } : {}),
+  });
+  for (const phone of [false, true]) {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    act(() => {
+      root = createRoot(host!);
+      root.render(
+        <SidebarProvider>
+          <div className="pn-inbox">
+            <InboxList title="Inbox" path={null} sections={[{ id: 'waiting', label: 'Waiting on you', threads: [listRow('msg_wait', true), listRow('msg_work', false)] }]} filtered={false} narrow={phone} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} phone={phone} />
+          </div>
+        </SidebarProvider>,
+      );
+    });
+    const rowEl = (id: string) => host!.querySelector<HTMLElement>(`[data-thread-id="${id}"]`)!;
+    const mark = rowEl('msg_wait').querySelector<HTMLElement>('[data-row-steps-waiting]')!;
+    expect(mark.querySelector('[data-step-mark]')!.getAttribute('data-step-mark')).toBe('waiting');
+    expect(mark.getAttribute('aria-label')).toBe('Checklist: waiting on you');
+    // After the project: the project's words come first in the row's first cell.
+    const project = mark.parentElement!.querySelector('.ib-p')!;
+    expect(project.compareDocumentPosition(mark) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(rowEl('msg_work').querySelector('[data-row-steps-waiting]')).toBeNull();
+    expect(host!.querySelector('.ib-stg-spin')).toBeNull();
+    act(() => root?.unmount());
+    host.remove();
+    root = null;
+    host = null;
   }
 });

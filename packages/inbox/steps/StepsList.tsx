@@ -1,13 +1,14 @@
 /**
- * A session's steps as rows (approval "inbox-thread-steps", A1): the shape, the step, and its right side (a done
- * step's time, a note, or "Waiting on you ›"). One text weight, no fills but hover; drawn the same in the foot's
- * popover, the phone's sheet and the Board's opened card. Read only: nothing here changes a step.
+ * A session's steps as rows (approval "inbox-checklist-spinners-2026-11-07", Take C with spinners): the mark, the
+ * step's words, and its right side (a done step's time, a note, "Dropped: <note>", or "Waiting on you ›"). Weight for
+ * the step in progress and the one waiting on the person, muted words for done and dropped. Drawn the same under the
+ * line at the top of the thread and in the Board's opened card. Read only: nothing here changes a step.
  */
 
 import type { InboxStepsWire } from '@plannotator/core/inbox-types';
 import { Icon } from '../icons';
 import { STEP_STATUS_WORDS, presenceClass, stepMeta, stepsAsOf, stepsCount, stepsListLabels, stepsName } from './model';
-import { StepGlyph, StepsPie } from './StepsMarks';
+import { StepGlyph } from './StepsMarks';
 
 export function StepsList({ list, onWaiting, now }: { list: InboxStepsWire; onWaiting?: (() => void) | null; now?: Date }) {
   return (
@@ -19,7 +20,7 @@ export function StepsList({ list, onWaiting, now }: { list: InboxStepsWire; onWa
             <span className="ib-st-gl">
               <StepGlyph status={step.status} />
             </span>
-            {/* An agent's words, in whatever script: the browser finds their direction. */}
+            {/* An agent's words, in whatever script: the browser finds their direction. Whole here (the line cuts them). */}
             <span className="ib-st-t" dir="auto">
               {step.step}
             </span>
@@ -50,8 +51,8 @@ export function StepsList({ list, onWaiting, now }: { list: InboxStepsWire; onWa
 }
 
 /**
- * A list's head: "Checklist ◑ 3/6", "· as of 2:40 PM" once its session ended, and what the caller adds at the right
- * (the Board icon, a phone's close). With more than one session's list, each head names its agent instead.
+ * A list's head where one is drawn (the Board's opened card, and each list when two sessions keep one): its label,
+ * "3 of 6 done", "· as of 2:40 PM" once its session ended, and what the caller adds at the right.
  */
 export function StepsHead({
   list,
@@ -72,7 +73,7 @@ export function StepsHead({
   /** The label is a section heading (the opened card's, beside Threads and Links), not plain words. */
   heading?: boolean;
 }) {
-  const { done, total, text } = stepsCount(list);
+  const { text } = stepsCount(list);
   const asOf = stepsAsOf(list, now);
   const Label = heading ? 'h3' : 'span';
   return (
@@ -81,11 +82,8 @@ export function StepsHead({
       <Label className="ib-st-lbl" id={headingId} title={named ? label : undefined} dir="auto">
         {label}
       </Label>
-      <span className="ib-st-plan" aria-label={`${done} of ${total} done`}>
-        <StepsPie done={done} total={total} size={12} />
-        <span className="ib-st-num" aria-hidden="true">
-          {text}
-        </span>
+      <span className="ib-st-plan" data-steps-count="">
+        {text}
       </span>
       {asOf && (
         <span className="ib-st-asof" data-steps-as-of="">
@@ -98,32 +96,34 @@ export function StepsHead({
   );
 }
 
-/** Every shown list: one head and its rows each, in the server's order; one list reads "Checklist". */
+/**
+ * Every shown list, in the server's order. `heads`: `always` draws a head over each list ("Checklist", or each
+ * agent's name when there are more); `many` only when there is more than one list (under the thread's line, which is
+ * the one list's head).
+ */
 export function StepsLists({
   lists,
   onWaiting,
-  headExtra,
   now,
   heading = false,
+  heads = 'always',
 }: {
   lists: readonly InboxStepsWire[];
   /** "Waiting on you ›" for a list, or null where there is nowhere to go. */
   onWaiting?: (list: InboxStepsWire) => (() => void) | null;
-  /** What sits at the right of the first head (the Board icon, a phone's close). */
-  headExtra?: React.ReactNode;
   now?: Date;
   /** Each head's label is a section heading (the opened card). */
   heading?: boolean;
+  heads?: 'always' | 'many';
 }) {
   // Two sessions of one agent each get a number, so the person can tell the lists apart.
   const labels = stepsListLabels(lists);
+  const headed = heads === 'always' || lists.length > 1;
   return (
     <>
       {lists.map((list, index) => (
         <section key={list.id} className={`ib-st-group ${presenceClass(list.presence)}`} data-steps-group={list.agent.session ?? ''} data-presence={list.presence} aria-label={stepsName(labels[index]!, list)}>
-          <StepsHead list={list} label={lists.length > 1 ? labels[index]! : 'Checklist'} named={lists.length > 1} now={now} heading={heading}>
-            {index === 0 ? headExtra : null}
-          </StepsHead>
+          {headed && <StepsHead list={list} label={lists.length > 1 ? labels[index]! : 'Checklist'} named={lists.length > 1} now={now} heading={heading} />}
           <StepsList list={list} onWaiting={onWaiting?.(list) ?? null} now={now} />
         </section>
       ))}

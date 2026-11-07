@@ -1537,6 +1537,14 @@ export interface InboxListRow extends InboxThreadSummary {
    * since: the row's small clock. Only on the list model, like `snoozed`.
    */
   snooze_back?: string | null;
+  /**
+   * A checklist in this thread has a step waiting on the person (approval
+   * "inbox-checklist-spinners-2026-11-07", the calm row): the row's still
+   * amber pause. Only while the person's Checklist switch is on, and only on
+   * the list model the window and the phone read, never on anything an agent
+   * reads. Absent otherwise, and from an older Inbox.
+   */
+  steps_waiting?: true;
 
   /**
    * Agent messages after the person's last look (a reply of theirs counts as

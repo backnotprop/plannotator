@@ -23,7 +23,7 @@ import { isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { Tip } from './Tip';
 import { pickWords } from './ReplacedQuestion';
 import { decideThreadLabel } from '../decisions/entry';
-import { drawOpenQuestionsForm, drawStepsFit, fitFootRow, footFitCandidates, footFitCandidatesWithSteps, laidOutChildren, openQuestionsFormText, type FootFit, type OpenQuestionsLabelForm } from '../footFit';
+import { drawOpenQuestionsForm, fitFootRow, footFitCandidates, laidOutChildren, openQuestionsFormText, type FootFit, type OpenQuestionsLabelForm } from '../footFit';
 
 /** A row's Stopped or Holds up, as its name says it. */
 const stateWordsOf = (state: OpenQuestionState): string => (state?.kind === 'stopped' ? 'Stopped' : state?.kind === 'holds' ? `Holds up ${state.count}` : '');
@@ -192,8 +192,6 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
         fittedFor.current = `row:${rowForm}|${n}|${a}|${permission}|${skipCount}|${answered}`;
         const next = { form: rowForm, tight: false };
         drawOpenQuestionsForm(button, next);
-        // The row's `steps` step narrows the checklist there (data-fit), not this fit.
-        drawStepsFit(buttons, false);
         setFitted((current) => (current.form === next.form && current.tight === next.tight ? current : next));
         return;
       }
@@ -204,14 +202,8 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
       const key = `${row.getBoundingClientRect().width}|${n}|${a}|${permission}|${skipCount}|${answered}|${max}|${others}`;
       if (!force && key === fittedFor.current) return;
       fittedFor.current = key;
-      // The checklist button beside it gives way first (its chevron), so these words stay whole longest.
-      const withSteps = buttons.querySelector(':scope > [data-steps-button]') !== null;
-      const apply = (next: FootFit & { steps?: boolean }) => {
-        drawOpenQuestionsForm(button, next);
-        drawStepsFit(buttons, next.steps === true);
-      };
-      const candidates: (FootFit & { steps?: boolean })[] = withSteps ? footFitCandidatesWithSteps(max) : footFitCandidates(max);
-      const next = fitFootRow(buttons, candidates, apply) ?? { form: max, tight: false };
+      const apply = (next: FootFit) => drawOpenQuestionsForm(button, next);
+      const next = fitFootRow(buttons, footFitCandidates(max), apply) ?? { form: max, tight: false };
       // The page now shows `next` (or the longest form, where there is no layout): React draws the same.
       apply(next);
       setFitted((current) => (current.form === next.form && current.tight === next.tight ? current : next));
