@@ -139,7 +139,7 @@ import { ActionChecklist, type ActionMark } from './ActionChecklist';
 import { actionForBlock } from '../actions';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import { Tip } from './Tip';
-import { ReactionTray, reactionSpeech } from './ReactionTray';
+import { ReactionTray, justReacted, reactionSpeech } from './ReactionTray';
 import { threadChipName } from '../threadChip';
 import { OpenQuestionsButton, type OpenQuestionsDecide } from './OpenQuestions';
 import { fitWholeFootRowForms, footRowOpenQuestionsForm, footRowTokens, laidOutChildren, pillHitsButtons, type OpenQuestionsLabelForm } from '../footFit';
@@ -1117,9 +1117,10 @@ export interface ThreadPaneProps {
    * silent, nothing is sent; the thread is marked read. `agent` names the
    * agent for the toast. Absent: no Looks good button. `reaction`: the emoji
    * picked in the 👍's tray (null: 👍 Looks good; taking back, the one taken
-   * back), approval "inbox-reaction-tray".
+   * back), approval "inbox-reaction-tray". `was`: set only when the message
+   * already had the mark (the reaction it had; null: 👍), so only the emoji changes.
    */
-  onAck?: (messageId: string, on: boolean, agent: string, reaction?: InboxReaction | null) => void;
+  onAck?: (messageId: string, on: boolean, agent: string, reaction?: InboxReaction | null, was?: InboxReaction | null) => void;
   /**
    * An action item's Done or Can't do it (`mark`) into the reply draft, or
    * taking it back (`null`), approval "inbox-action-items-in-reply": the window
@@ -1401,8 +1402,10 @@ export function AckPill({
   const line = ackPillLine(ack, agent, wakes, whenTime, connection, now);
   // The emoji picked in the 👍's tray (approval "inbox-reaction-tray"): its name, or the emoji alone.
   const reaction = ack.reaction ?? null;
+  // Only the line a reaction was just sent to fades in; an old one is simply there when the thread opens.
+  const [fresh] = useState(() => !!messageId && justReacted(messageId));
   return (
-    <p className="ib-ackpill" data-ack-pill={line.state} data-ack-for={messageId}>
+    <p className="ib-ackpill" data-ack-pill={line.state} data-ack-for={messageId} data-ack-fresh={fresh ? '' : undefined}>
       <span className="ib-ackchip" data-bare={reaction && !reaction.label ? '' : undefined}>
         <span className="ib-ackemoji" aria-hidden="true">
           {reaction?.emoji ?? '👍'}
@@ -6674,7 +6677,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                   on={ackOn}
                   current={ackTarget!.ack?.reaction ?? null}
                   phone={phone}
-                  onAck={(next, reaction) => onAck!(ackTarget!.id, next, agentName(ackTarget!.author), reaction)}
+                  onAck={(next, reaction, was) => onAck!(ackTarget!.id, next, agentName(ackTarget!.author), reaction, was)}
                 />
               )}
               {/* The session ended (the note above says so): what the person can do about it, with Reply. */}

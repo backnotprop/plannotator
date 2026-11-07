@@ -158,7 +158,7 @@ import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, withFullMa
 import { adoptSavedTheme, inboxServerSync } from './theme';
 import { adoptSavedDiffOptions } from './diffOptions';
 import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
-import { adoptSavedReactions } from './reactions';
+import { adoptSavedReactions, hearReactionsEvent, onSavedReactionsFailed, reactionsReadMark } from './reactions';
 import { parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 import { ComposeDialog, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { DraftsPage } from './compose/DraftsPage';
@@ -1572,10 +1572,11 @@ function Inbox() {
   const refreshSettings = useCallback(async () => {
     try {
       const mark = listLookReadMark();
+      const reactionsMark = reactionsReadMark();
       const next = await inboxApi.settings();
       adoptSavedTheme(next.theme);
       adoptSavedTextSize(next.text_size);
-      adoptSavedReactions(next.reactions);
+      adoptSavedReactions(next.reactions, next.reactions_rev, reactionsMark);
       adoptSavedRows(next.rows, next.rows_rev, mark);
       adoptSavedDiffOptions(next.diff_options, next.diff_style);
       adoptVoiceSettings(next.voice);
@@ -2043,6 +2044,7 @@ function Inbox() {
         // How the rows look was saved (here, another window, a phone): every list takes it at once.
         // One at or below the last event's count (the count gone back, or a late copy): the settings read decides.
         onRows: (rows, rev) => hearRowsEvent(rows, rev, () => void refreshSettings()),
+        onReactions: (reactions, rev) => hearReactionsEvent(reactions, rev),
         // A capability switch saved here or in another window (approval "inbox-thread-steps"; the Board too): every window follows.
         onCapabilities: (capabilities) => {
           // Code review and Shape move the "/" list: the next box reads the catalog again.
@@ -2952,8 +2954,16 @@ function Inbox() {
     }, ms);
   };
   const showToast = (next: Omit<InboxToastModel, 'id'>, ms = MARK_READ_UNDO_MS) => {
+    // An unseen toast (a reaction's Undo for `Z`) never takes the place of one on screen (an error, another Undo): the
+    // live region still says it.
+    if (next.hidden && toastNow.current && !toastNow.current.hidden) {
+      say(toastSpeech(next, isTouchPhone()));
+      return;
+    }
     toastLeft.current = null;
-    setToast({ ...next, id: Date.now() });
+    const model = { ...next, id: Date.now() };
+    toastNow.current = model;
+    setToast(model);
     // A narrow desktop window (the phone layout, a mouse and keys) keeps Z, so it hears "Press Z to undo".
     say(toastSpeech(next, isTouchPhone()));
     armToastTimer(ms);
@@ -2980,6 +2990,11 @@ function Inbox() {
    * machine takes it, and says so, without the warning.
    */
   const showError = (cause: unknown) => showToast(errorToast(cause, 'The thread did not change.'));
+  // A tray change the server refused (approval "inbox-reaction-tray"): already taken back on screen; the toast says why.
+  useEffect(() => {
+    onSavedReactionsFailed((cause) => showToast(errorToast(cause, 'Your saved emoji did not change.')));
+    return () => onSavedReactionsFailed(null);
+  });
   useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
   }, []);
@@ -3220,8 +3235,13 @@ function Inbox() {
    * emoji flies to the message; the toast is kept unseen, so `Z` still undoes it
    * and the live region still says it. Taking one back, `reaction` is the one
    * taken back, for the words only.
+   *
+   * `was` (defined only when the message already had the person's mark): the
+   * reaction it had (null: 👍 Looks good). Then only the emoji changes (the
+   * store keeps the ack, its time and whether it went), so `Z` puts the one it
+   * had back, never takes the mark away, and nothing says it goes in 10 s.
    */
-  const acknowledge = async (threadId: string, messageId: string, on: boolean, agent: string, reaction?: InboxReaction | null) => {
+  const acknowledge = async (threadId: string, messageId: string, on: boolean, agent: string, reaction?: InboxReaction | null, was?: InboxReaction | null) => {
     try {
       await inboxApi.ack(messageId, on, reaction);
     } catch (cause) {
@@ -3231,8 +3251,32 @@ function Inbox() {
     }
     await afterWrite([threadId]);
     if (!on) {
-      dismissToast();
+      // Only a 👍's own toast goes with it; an error or another Undo on screen stays.
+      if (toastNow.current && (toastNow.current.hidden || toastNow.current.icon === 'thumb')) dismissToast();
       say(`${reaction ? reactionSpeech(reaction) : 'Looks good'} taken back.`);
+      return;
+    }
+    if (was !== undefined && reaction !== undefined) {
+      const words = reaction ? reactionSpeech(reaction) : 'Looks good';
+      const before = was ? reactionSpeech(was) : 'Looks good';
+      showToast({
+        hidden: true,
+        icon: 'thumb',
+        lead: words,
+        speech: `Changed to ${words}.`,
+        onUndo: () =>
+          void (async () => {
+            try {
+              await inboxApi.ack(messageId, true, was);
+            } catch (cause) {
+              showError(cause);
+              await afterWrite();
+              return;
+            }
+            await afterWrite([threadId]);
+            say(`Back to ${before}.`);
+          })(),
+      });
       return;
     }
     if (reaction !== undefined) {
@@ -5954,7 +5998,7 @@ function Inbox() {
             drawn={drawnSection(shown, thread.thread_id)}
             onMarkRead={(read) => void markRead(thread.thread_id, read)}
             onMarkUnread={() => void markUnread(thread.thread_id)}
-            onAck={(messageId, on, agent, reaction) => void acknowledge(thread.thread_id, messageId, on, agent, reaction)}
+            onAck={(messageId, on, agent, reaction, was) => void acknowledge(thread.thread_id, messageId, on, agent, reaction, was)}
             onAction={(messageId, key, mark) => markAction(messageId, key, mark)}
             onArchive={(next) => void archive(thread.thread_id, thread.messages[0]!.id, next)}
             pinned={pinnedIds.has(thread.thread_id)}

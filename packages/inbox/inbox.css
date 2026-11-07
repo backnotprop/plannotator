@@ -8885,6 +8885,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-react-e { display: inline-block; font-size: var(--ib-fs-24, 24px); line-height: 1; transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1); }
 .ib-react-pop[data-reaction-tray] .ib-react-cell .ib-react-e { animation: ib-react-cell-in 240ms cubic-bezier(0.23, 1, 0.32, 1) both; animation-delay: calc(var(--i, 0) * 28ms); }
 @keyframes ib-react-cell-in { from { opacity: 0; transform: translateY(8px) scale(0.6); } }
+/* Back after a name was kept: the row is already where the field leaves it, so it is just there (no fade, no stagger). */
+.ib-react-pop[data-instant][data-starting-style] { opacity: 1; transform: none; }
+.ib-react-pop[data-reaction-tray][data-instant] .ib-react-cell .ib-react-e { animation: none; }
 .ib-react-pop .ib-react-cell[data-highlighted] { background: color-mix(in oklch, var(--muted) 85%, transparent); }
 .ib-react-pop .ib-react-cell:is(:focus, :focus-visible) { outline: none; box-shadow: none; }
 .ib-react-pop .ib-react-cell[data-current] { background: color-mix(in oklch, var(--success) 16%, transparent); }
@@ -8985,7 +8988,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-react-flight { position: fixed; left: 0; top: 0; z-index: 200; width: 0; height: 0; pointer-events: none; will-change: transform; }
 .ib-react-flight > span { position: absolute; left: 0; top: 0; font-size: var(--ib-fs-20, 20px); line-height: 1; }
 .ib-ackemoji { display: inline-block; }
-.ib-ackpill[data-ack-for] { animation: ib-react-in 160ms ease-out; }
+.ib-ackpill[data-ack-fresh] { animation: ib-react-in 160ms ease-out; }
 /* An emoji with no name: the emoji alone on the line. */
 .ib-ackchip[data-bare] { padding: 0 8px; }
 
@@ -9002,8 +9005,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 
 @media (prefers-reduced-motion: reduce) {
   .ib-react-pop[data-starting-style], .ib-react-pop[data-ending-style] { transform: none; }
-  .ib-react-pop[data-reaction-tray] .ib-react-cell .ib-react-e, .ib-namer-in, .ib-emo-in > *, .ib-ackpill[data-ack-for] { animation: none; }
-  .ib-ackpill[data-ack-for] { animation: ib-react-in 160ms ease-out; }
+  .ib-react-pop[data-reaction-tray] .ib-react-cell .ib-react-e, .ib-namer-in, .ib-emo-in > * { animation: none; }
   .ib-react-pop .ib-react-cell[data-fresh] .ib-react-e { animation: ib-react-in 160ms ease-out both; }
   .ib-react-pop .ib-react-cell[data-highlighted] .ib-react-e, .ib-react-pop .ib-react-cell:active .ib-react-e, .ib-emo-cell:active, :is(.ib-react-a, .ib-react-done):active { transform: none; }
   .ib-react-pop[data-reaction-tray] .ib-react-cell[data-tip]::after { transition: opacity 110ms ease-out; transform: translate(-50%, 0); }

@@ -5,8 +5,8 @@
  * Resting the pointer on it (a moment), holding it on a touch screen, or the keyboard's "More reactions"
  * button after it opens the tray above it: 👍, the person's saved emoji, then free + slots, then …. There is
  * always one free + until INBOX_SAVED_REACTIONS_MAX emoji are saved (two while none is). A + saves an emoji
- * (the picker, a little spring, then a light name field: Enter keeps the name, Escape or a click away skips
- * it). … reacts once with any emoji; nothing is saved. A right-click or a hold on a saved emoji, or the pen
+ * (the picker, a little spring, then a light name field: Enter or a click away keeps what was typed, Escape
+ * skips it). … reacts once with any emoji; nothing is saved. A right-click or a hold on a saved emoji, or the pen
  * the arrow keys reach at the tray's end, edits it (its name, another emoji, Remove).
  *
  * No words on the tray (a name is a tooltip) and no toast: the picked emoji flies from where it was pressed
@@ -146,6 +146,12 @@ export function flyReaction(from: Element | null, emoji: string, messageId: stri
   frame(start);
 }
 
+/** The message a reaction was last sent to, and when: only its line under the message fades in (Thread.tsx AckPill). */
+let lastReacted: { id: string; at: number } | null = null;
+export function justReacted(messageId: string): boolean {
+  return !!lastReacted && lastReacted.id === messageId && Date.now() - lastReacted.at < 2000;
+}
+
 /** The button's own emoji answers the press at once. */
 function popEmoji(el: Element | null | undefined) {
   if (!el || reduced()) return;
@@ -160,8 +166,11 @@ export interface ReactionTrayProps {
   /** The mark's emoji when it is one from the tray; null for 👍 Looks good. */
   current: InboxReaction | null;
   phone: boolean;
-  /** Mark the message with `reaction` (null: 👍 Looks good), or take the mark back (`on` false, `reaction` the one taken back). */
-  onAck: (on: boolean, reaction: InboxReaction | null) => void;
+  /**
+   * Mark the message with `reaction` (null: 👍 Looks good), or take the mark back (`on` false, `reaction` the one taken
+   * back). `was`: only when the message already had the mark, the reaction it had (null: 👍): only the emoji changes.
+   */
+  onAck: (on: boolean, reaction: InboxReaction | null, was?: InboxReaction | null) => void;
 }
 
 type PickerFor = { kind: 'save' } | { kind: 'once' } | { kind: 'change'; index: number };
@@ -175,6 +184,8 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck }: Re
   const [editing, setEditing] = useState<number | null>(null);
   const [fresh, setFresh] = useState<number | null>(null);
   const [said, setSaid] = useState('');
+  // Back after a name was kept: the tray is simply there again (no fade, no stagger), where the field's row was.
+  const [instant, setInstant] = useState(false);
   const mainRef = useRef<HTMLButtonElement>(null);
   // The tray, the picker and the fields are drawn inside the window's root, so its styles, theme and text size reach them.
   const [portal, setPortal] = useState<HTMLElement | null>(null);
@@ -194,6 +205,9 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck }: Re
   const pickerKind = useRef<PickerFor['kind']>('once');
   // A pick that goes on to a field (the name field, the editor): the closing picker gives focus to nobody.
   const toField = useRef(false);
+  // Between the tray closing and the picker or a field opening (a frame, or the picker's exit): busy, so a pointer
+  // crossing the 👍 then does not open the tray over the field, nor a leave close the one coming back.
+  const between = useRef(false);
   useEffect(
     () => () => {
       if (timer.current) clearTimeout(timer.current);
@@ -213,11 +227,30 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck }: Re
     clear();
     timer.current = setTimeout(fn, ms);
   };
-  const reopen = (ms: number) =>
-    after(ms, () => {
-      reopenedAt.current = Date.now();
-      setOpen(true);
-    });
+  const show = (instantly = false) => {
+    setInstant(instantly);
+    setOpen(true);
+  };
+  /**
+   * The tray back after the picker or the name field: no close timer left from a pointer that left the 👍 meanwhile,
+   * and no hand-off, so Escape gives focus back to "More reactions" as after any open.
+   */
+  const reopenNow = (instantly: boolean) => {
+    clear();
+    between.current = false;
+    handOff.current = false;
+    reopenedAt.current = Date.now();
+    show(instantly);
+  };
+  const handTo = (ms: number | 'frame', fn: () => void) => {
+    between.current = true;
+    const run = () => {
+      between.current = false;
+      fn();
+    };
+    if (ms === 'frame') requestAnimationFrame(run);
+    else after(ms, run);
+  };
 
   const send = (reaction: InboxReaction | null, from: Element | null) => {
     clear();
@@ -228,18 +261,20 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck }: Re
       return;
     }
     popEmoji(mainRef.current?.querySelector('.ib-ack-emoji'));
+    lastReacted = { id: messageId, at: Date.now() };
     flyReaction(from, reaction?.emoji ?? '👍', messageId);
-    onAck(true, reaction);
+    // Already marked: only the emoji changes (Z puts the one it had back).
+    onAck(true, reaction, on ? current : undefined);
   };
 
   // Hover (a fine pointer only) opens after a short rest; leaving the button and the tray closes it.
-  const busy = picker !== null || naming !== null || editing !== null;
+  const busy = () => picker !== null || naming !== null || editing !== null || between.current;
   const enter = (e: ReactPointerEvent) => {
-    if (phone || e.pointerType !== 'mouse' || busy) return;
-    later(open ? 0 : HOVER_OPEN_MS, () => setOpen(true));
+    if (phone || e.pointerType !== 'mouse' || busy()) return;
+    later(open ? 0 : HOVER_OPEN_MS, () => show());
   };
   const leave = (e: ReactPointerEvent) => {
-    if (phone || e.pointerType !== 'mouse' || busy) return;
+    if (phone || e.pointerType !== 'mouse' || busy()) return;
     later(HOVER_CLOSE_MS, () => setOpen(false));
   };
   // Touch: a hold opens the tray, and the click that follows the hold is swallowed.
@@ -250,7 +285,7 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck }: Re
       held.current = true;
       heldAt.current = Date.now();
       navigator.vibrate?.(8);
-      setOpen(true);
+      show();
     });
   };
   const up = () => {
@@ -264,13 +299,13 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck }: Re
     // After the tray has closed (and not given focus back to its trigger): the picker takes it.
     pickerKind.current = next.kind;
     toField.current = false;
-    requestAnimationFrame(() => setPicker(next));
+    handTo('frame', () => setPicker(next));
   };
   const openEditor = (index: number) => {
     handOff.current = true;
     clear();
     setOpen(false);
-    requestAnimationFrame(() => setEditing(index));
+    handTo('frame', () => setEditing(index));
   };
 
   const pick = (row: EmojiRow) => {
@@ -289,7 +324,7 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck }: Re
       changeSavedReaction(what.index, row[0]);
       rememberEmoji(row[0]);
       setPicker(null);
-      after(140, () => setEditing(savedReactions().findIndex((r) => r.emoji === row[0])));
+      handTo(140, () => setEditing(savedReactions().findIndex((r) => r.emoji === row[0])));
       return;
     }
     setPicker(null);
@@ -297,15 +332,14 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck }: Re
     const at = row[0] === '👍' ? -1 : addSavedReaction(row[0]);
     if (at < 0) {
       toField.current = false;
-      handOff.current = false;
-      reopen(140);
+      handTo(140, () => reopenNow(false));
       return;
     }
     rememberEmoji(row[0]);
     setFresh(at);
     after(1100, () => setFresh((f) => (f === at ? null : f)));
     setSaid(`${row[0]} saved to your tray.`);
-    after(140, () => setNaming(at));
+    handTo(140, () => setNaming(at));
   };
 
   const label = on ? (current ? current.label || 'Reacted' : LOOKS_GOOD_LABEL) : LOOKS_GOOD_LABEL;
@@ -355,10 +389,15 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck }: Re
         <Menu.Root
           open={open}
           onOpenChange={(next, details) => {
-            if (!next && Date.now() - heldAt.current < 700) return;
+            const reason = details?.reason;
+            // The press or focus that ends a hold does not close the tray it opened; Escape always does.
+            if (!next && (reason === 'outside-press' || reason === 'focus-out') && Date.now() - heldAt.current < 700) return;
             // Brought back after a save, the tray is not closed by the focus the closing field lets go of.
-            if (!next && details?.reason === 'focus-out' && Date.now() - reopenedAt.current < 900) return;
-            if (next) handOff.current = false;
+            if (!next && reason === 'focus-out' && Date.now() - reopenedAt.current < 300) return;
+            if (next) {
+              handOff.current = false;
+              setInstant(false);
+            }
             setOpen(next);
           }}
           modal={false}
@@ -368,7 +407,7 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck }: Re
           {!phone && !on ? (
             main
           ) : (
-            <Tip content={tip} when={() => !open && !busy}>
+            <Tip content={tip} when={() => !open && !busy()}>
               {main}
             </Tip>
           )}
@@ -382,6 +421,7 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck }: Re
               <Menu.Popup
                 className="ib-react-pop"
                 data-reaction-tray=""
+                data-instant={instant ? '' : undefined}
                 aria-label="Reactions"
                 style={{ ['--n' as string]: cells }}
                 // A pick with the pointer, or a hand-off to the picker or a field, does not move focus to the hidden "More reactions".
@@ -523,7 +563,9 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck }: Re
         onClose={(how) => {
           setNaming(null);
           setFresh(null);
-          if (how === 'enter') reopen(150);
+          // Enter: the tray is back in the same moment, its row where the field's row was (no gap, nothing fades in).
+          if (how === 'enter') reopenNow(true);
+          else handOff.current = false;
         }}
       />
       <SavedEditor
@@ -536,7 +578,7 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck }: Re
           setEditing(null);
           pickerKind.current = 'change';
           toField.current = false;
-          requestAnimationFrame(() => setPicker({ kind: 'change', index }));
+          handTo('frame', () => setPicker({ kind: 'change', index }));
         }}
         onClose={() => setEditing(null)}
       />
@@ -594,23 +636,32 @@ function TrayRow({ highlight, fresh, onPick }: { highlight: number | null; fresh
 
 /**
  * Right after a save: a light name field over the tray (optional). The row under it is the tray as it now is,
- * the new emoji springing in. Enter keeps the name (or none) and brings the tray back; Escape or a click away
- * skips it. A phone waits for a tap on the field (no keyboard popping up for an optional name).
+ * the new emoji springing in. Enter keeps the name (or none) and brings the tray back; a click or tap away keeps
+ * what was typed (on a phone that is how one finishes); only Escape skips it. A phone waits for a tap on the field
+ * (no keyboard popping up for an optional name). Closing, it keeps its words and row while it fades.
  */
 function NameField({ container, index, fresh, anchor, phone, onClose }: { container: HTMLElement | null; index: number | null; fresh: number | null; anchor: RefObject<HTMLButtonElement | null>; phone: boolean; onClose: (how: 'enter' | 'escape' | 'dismiss') => void }) {
   const saved = useSavedReactions();
-  const r = index === null ? null : saved[index];
+  // The last emoji it named: drawn while the field fades out, so it never empties before it goes.
+  const last = useRef<number | null>(null);
+  if (index !== null) last.current = index;
+  const shown = index ?? last.current;
+  const r = shown === null ? null : saved[shown];
   const [text, setText] = useState('');
   const nameRef = useRef<HTMLInputElement>(null);
   const closing = useRef<'enter' | 'escape' | 'dismiss'>('dismiss');
-  useEffect(() => setText(r?.label ?? ''), [index]); // eslint-disable-line react-hooks/exhaustive-deps -- a fresh field per saved emoji
+  useEffect(() => {
+    if (index !== null) setText(saved[index]?.label ?? '');
+  }, [index]); // eslint-disable-line react-hooks/exhaustive-deps -- a fresh field per saved emoji
   const close = (how: 'enter' | 'escape' | 'dismiss') => {
+    if (index === null) return;
     closing.current = how;
-    if (how === 'enter' && index !== null) nameSavedReaction(index, text);
+    // Enter keeps the name (or takes it away); a click away keeps only words typed; Escape keeps nothing.
+    if (how === 'enter' || (how === 'dismiss' && text.trim())) nameSavedReaction(index, text);
     onClose(how);
   };
   return (
-    <Popover.Root open={index !== null && !!r} onOpenChange={(next, details) => !next && close(details?.reason === 'escape-key' ? 'escape' : 'dismiss')} modal={false}>
+    <Popover.Root open={index !== null && !!saved[index]} onOpenChange={(next, details) => !next && close(details?.reason === 'escape-key' ? 'escape' : 'dismiss')} modal={false}>
       <Popover.Portal container={container ?? undefined}>
         <Popover.Positioner className="ib-react-pos" anchor={anchor} side="top" align="start" sideOffset={10} alignOffset={-6} collisionPadding={12}>
           <Popover.Popup
@@ -641,7 +692,7 @@ function NameField({ container, index, fresh, anchor, phone, onClose }: { contai
                     }
                   }}
                 />
-                <TrayRow highlight={index} fresh={fresh} />
+                <TrayRow highlight={shown} fresh={fresh} />
               </>
             )}
           </Popover.Popup>

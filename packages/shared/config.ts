@@ -411,6 +411,8 @@ export interface PlannotatorConfig {
    * dropped on read.
    */
   inboxReactions?: { emoji: string; label?: string }[];
+  /** How many times `inboxReactions` was saved: windows take a list only when it is newer than the last they took. */
+  inboxReactionsRev?: number;
   /**
    * How the Inbox list's rows look: the names of the row options that are on
    * (core `INBOX_ROWS_OPTIONS`), every other one off. Unset: none written yet

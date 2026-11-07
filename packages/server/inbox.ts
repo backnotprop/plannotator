@@ -83,6 +83,8 @@ import {
   isInboxReactionEmoji,
   parseInboxReaction,
   parseInboxSavedReactions,
+  parseInboxReactionChange,
+  applyInboxReactionChange,
   INBOX_SAVED_REACTIONS_MAX,
   type InboxReaction,
   inboxRowsList,
@@ -1054,6 +1056,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const snoozeListeners = new Set<() => void>();
   /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
   const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number) => void>();
+  /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
+  const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: held until the next big release (heldSwitch). */
   const capabilityListeners = new Set<(changed?: "code_review" | "shape") => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
@@ -1982,20 +1986,54 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * "inbox-reaction-tray"): up to INBOX_SAVED_REACTIONS_MAX emoji, each with
    * the person's name for it (optional), in the order saved. Lenient on read
    * (an entry that is not one is dropped), strict on write (a `422`).
+   *
+   * A window sends one change (`reaction_change`: add, name, change or remove
+   * an emoji), applied here to the list as it is now, so two windows (a
+   * laptop and a phone) never write over each other's emoji. `reactions`
+   * replaces the whole list. `inboxReactionsRev` counts the saves; every
+   * answer and `event: reactions` carries it, so a window takes a list only
+   * when it is newer than the last it took.
    */
-  const reactionsState = (): InboxReaction[] => parseInboxSavedReactions(loadConfig().inboxReactions) ?? [];
+  const reactionsState = (): { reactions: InboxReaction[]; rev: number } => {
+    const config = loadConfig();
+    const rev = config.inboxReactionsRev;
+    return { reactions: parseInboxSavedReactions(config.inboxReactions) ?? [], rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0 };
+  };
+  const reactionsWire = (state: { reactions: InboxReaction[]; rev: number }) => ({ reactions: state.reactions, reactions_rev: state.rev });
 
-  const saveReactions = (input: unknown, validateOnly = false): InboxReaction[] => {
-    const list = parseInboxSavedReactions(input);
-    if (!list || !Array.isArray(input) || list.length !== input.length || input.length > INBOX_SAVED_REACTIONS_MAX) {
-      throw new InboxError("validation_error", `reactions: up to ${INBOX_SAVED_REACTIONS_MAX} of { emoji: one emoji, label?: string }, each emoji once.`, { field: "reactions" });
+  /** The list `body` asks for (`reactions`, else `reaction_change` on the list now), or a `422`. */
+  const reactionsWanted = (body: { reactions?: unknown; reaction_change?: unknown }): InboxReaction[] => {
+    if (body.reactions !== undefined) {
+      const input = body.reactions;
+      const list = parseInboxSavedReactions(input);
+      if (!list || !Array.isArray(input) || list.length !== input.length || input.length > INBOX_SAVED_REACTIONS_MAX) {
+        throw new InboxError("validation_error", `reactions: up to ${INBOX_SAVED_REACTIONS_MAX} of { emoji: one emoji, label?: string }, each emoji once.`, { field: "reactions" });
+      }
+      return list;
     }
-    if (validateOnly) return reactionsState();
-    saveConfig({ inboxReactions: list });
-    if (JSON.stringify(reactionsState()) !== JSON.stringify(list)) {
+    const change = parseInboxReactionChange(body.reaction_change);
+    if (!change) {
+      throw new InboxError("validation_error", "reaction_change: { op: add | remove, emoji } or { op: name, emoji, label } or { op: change, emoji, to }, each one emoji other than 👍.", { field: "reaction_change" });
+    }
+    const list = applyInboxReactionChange(reactionsState().reactions, change);
+    if (!list) throw new InboxError("validation_error", `reaction_change: your tray already has ${INBOX_SAVED_REACTIONS_MAX} emoji. Remove one to save another.`, { field: "reaction_change" });
+    return list;
+  };
+
+  const saveReactions = (body: { reactions?: unknown; reaction_change?: unknown }, validateOnly = false): { reactions: InboxReaction[]; rev: number } => {
+    const list = reactionsWanted(body);
+    const before = reactionsState();
+    if (validateOnly) return before;
+    // Nothing to change (a name for an emoji another window took out): no write, no event.
+    if (JSON.stringify(before.reactions) === JSON.stringify(list)) return before;
+    const rev = before.rev + 1;
+    saveConfig({ inboxReactions: list, inboxReactionsRev: rev });
+    const saved = reactionsState();
+    if (saved.rev !== rev || JSON.stringify(saved.reactions) !== JSON.stringify(list)) {
       throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     }
-    return list;
+    for (const listener of reactionsListeners) listener(list, rev);
+    return saved;
   };
 
   /**
@@ -2652,8 +2690,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     theme: themeState(),
     /** The window's text size in px (config.json `inboxTextSize`), 14 unless chosen. */
     text_size: textSizeState(),
-    /** The reaction tray's saved emoji (config.json `inboxReactions`): up to 5, in the order saved; [] until one is saved. */
-    reactions: reactionsState(),
+    /** The reaction tray's saved emoji (config.json `inboxReactions`): up to 5, in the order saved; [] until one is saved. `reactions_rev` counts the saves. */
+    ...reactionsWire(reactionsState()),
     /** How the list's rows look (config.json `inboxRows`): the options that are on, null until first saved; `rows_rev` counts the saves. */
     ...rowsWire(rowsState()),
     /** The guided review's diff layout (config.json `diffOptions.diffStyle`), shared with code review; null when never chosen. Also `diff_options.diff_style`. */
@@ -2824,6 +2862,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onRows = (rows: readonly InboxRowsOption[], rev: number) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
+        // The tray's saved emoji changed (any window's, a phone's too): every window takes the list at once. Windows only.
+        const onReactions = (reactions: readonly InboxReaction[], rev: number) => send(`event: reactions\ndata: ${JSON.stringify({ reactions, rev })}\n\n`);
+        if (windowId) reactionsListeners.add(onReactions);
         // The steps switch was saved (any window's): every window reads its settings and the open thread's steps again. Windows only.
         // Shape's boards changed (a version, a note, a delivery, seen): `event: shapes` on this one stream, so a window
         // opens no second connection (sharedEvents.ts holds every tab to one). Only while Shape is on, and only for the
@@ -2881,6 +2922,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           pinListeners.delete(onPins);
           snoozeListeners.delete(onSnoozes);
           rowsListeners.delete(onRows);
+          reactionsListeners.delete(onReactions);
           capabilityListeners.delete(onCapabilities);
           stopShapes?.();
           stopShapes = null;
@@ -4361,6 +4403,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.theme === undefined &&
           body.text_size === undefined &&
           body.reactions === undefined &&
+          body.reaction_change === undefined &&
           body.rows === undefined &&
           body.diff_style === undefined &&
           body.diff_options === undefined &&
@@ -4375,7 +4418,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.voice === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, reactions, rows, diff_style, diff_options, experimental, tour, prompts, board, steps, code_review, shape, voice, update_check, auto_update or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, reactions, reaction_change, rows, diff_style, diff_options, experimental, tour, prompts, board, steps, code_review, shape, voice, update_check, auto_update or cookie_host is required.");
         }
         const owner = ownerOrLocal(req, via);
         // The Board changes what agents on this computer are offered (the card tool): the owner's to change.
@@ -4420,7 +4463,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (updateSwitches) saveUpdateSwitches(body, true);
         if (body.theme !== undefined) saveTheme(body.theme, true);
         if (body.text_size !== undefined) saveTextSize(body.text_size, true);
-        if (body.reactions !== undefined) saveReactions(body.reactions, true);
+        const reactionsChange = body.reactions !== undefined || body.reaction_change !== undefined;
+        if (reactionsChange) saveReactions(body, true);
         if (body.rows !== undefined) saveRows(body.rows, true);
         const diffOptionsChange = body.diff_style !== undefined || body.diff_options !== undefined;
         if (diffOptionsChange) saveDiffOptions(body, true);
@@ -4443,7 +4487,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (updateSwitches) updates.refresh();
         const theme = body.theme === undefined ? themeState() : saveTheme(body.theme);
         const textSize = body.text_size === undefined ? textSizeState() : saveTextSize(body.text_size);
-        const reactions = body.reactions === undefined ? reactionsState() : saveReactions(body.reactions);
+        const reactions = reactionsWire(reactionsChange ? saveReactions(body) : reactionsState());
         const rows = rowsWire(body.rows === undefined ? rowsState() : saveRows(body.rows));
         const diffOptions = diffOptionsChange ? saveDiffOptions(body) : diffOptionsState();
         const experimental = body.experimental === undefined ? experimentalState() : saveExperimental(body.experimental);
@@ -4454,7 +4498,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const shape = body.shape === undefined ? { on: shapeOn() } : saveShape(body.shape);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, reactions, ...rows, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...reactions, ...rows, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {

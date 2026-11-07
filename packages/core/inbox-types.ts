@@ -1961,10 +1961,14 @@ export function isInboxReactionEmoji(value: unknown): value is string {
   return Segmenter ? [...new Segmenter(undefined, { granularity: "grapheme" }).segment(value)].length === 1 : true;
 }
 
-/** A reaction's name as kept: controls made spaces, trimmed, at most INBOX_REACTION_LABEL_MAX characters. */
+/**
+ * A reaction's name as kept: controls and line breaks made spaces, invisible format characters (bidi overrides,
+ * zero-width spaces) taken out except the joiner emoji use, trimmed, at most INBOX_REACTION_LABEL_MAX characters.
+ */
 export function inboxReactionLabel(value: unknown): string {
   if (typeof value !== "string") return "";
-  return [...value.replace(/\p{Cc}/gu, " ").trim()].slice(0, INBOX_REACTION_LABEL_MAX).join("").trim();
+  const text = value.replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, " ").replace(/(?!‍)\p{Cf}/gu, "").trim();
+  return [...text].slice(0, INBOX_REACTION_LABEL_MAX).join("").trim();
 }
 
 /**
@@ -1998,6 +2002,55 @@ export function parseInboxSavedReactions(value: unknown): InboxReaction[] | null
     if (out.length === INBOX_SAVED_REACTIONS_MAX) break;
   }
   return out;
+}
+
+/**
+ * One change to the saved emoji (POST /api/inbox/settings `reaction_change`), named by its emoji, not its place,
+ * so the server applies it to the list as it is now: a change made in another window meanwhile is kept, not
+ * written over. `add` saves an emoji at the end; `name` names one ('' takes the name away); `change` puts another
+ * emoji in its place, keeping its name; `remove` takes it out. 👍 is never saved (it is the tray's first).
+ */
+export type InboxReactionChange =
+  | { op: "add"; emoji: string }
+  | { op: "name"; emoji: string; label: string }
+  | { op: "change"; emoji: string; to: string }
+  | { op: "remove"; emoji: string };
+
+/** A change from the wire, or null when it is not one. A long name is cut, not refused. */
+export function parseInboxReactionChange(value: unknown): InboxReactionChange | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { op, emoji, label, to } = value as { op?: unknown; emoji?: unknown; label?: unknown; to?: unknown };
+  if (!isInboxReactionEmoji(emoji) || emoji === "👍") return null;
+  if (op === "add" || op === "remove") return { op, emoji };
+  if (op === "name") return typeof label === "string" ? { op, emoji, label: inboxReactionLabel(label) } : null;
+  if (op === "change") return isInboxReactionEmoji(to) && to !== "👍" ? { op, emoji, to } : null;
+  return null;
+}
+
+/**
+ * `list` with `change` applied: a copy that changes nothing when there is nothing to change (a name for an emoji
+ * another window took out, an emoji saved already), or null when it adds to a full tray.
+ */
+export function applyInboxReactionChange(list: readonly InboxReaction[], change: InboxReactionChange): InboxReaction[] | null {
+  const at = list.findIndex((r) => r.emoji === change.emoji);
+  const was = list[at];
+  switch (change.op) {
+    case "add":
+      if (was) return [...list];
+      return list.length >= INBOX_SAVED_REACTIONS_MAX ? null : [...list, { emoji: change.emoji }];
+    case "name": {
+      if (!was) return [...list];
+      const label = inboxReactionLabel(change.label);
+      return list.map((r, i) => (i === at ? (label ? { emoji: r.emoji, label } : { emoji: r.emoji }) : r));
+    }
+    case "change": {
+      if (!was || change.to === change.emoji) return [...list];
+      const moved = was.label ? { emoji: change.to, label: was.label } : { emoji: change.to };
+      return list.flatMap((r, i) => (i === at ? [moved] : r.emoji === change.to ? [] : [r]));
+    }
+    case "remove":
+      return list.filter((_, i) => i !== at);
+  }
 }
 
 /**
