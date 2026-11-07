@@ -141,6 +141,27 @@
         42347213074,
         42348560192
       ]
+    },
+    {
+      "spec": "inbox-list-view.spec.ts",
+      "title": "grouped: the same hover Mark read keeps the row in its group, not bold, and brings no news in",
+      "why": "After the hover Mark read is clicked, the row in New stays bold (line 333, `expect(row).not.toHaveClass(/\\bib-u\\b/)`: still \"ib-row ib-u\" after 15 s). Failed on three unrelated PRs (#2824 reply box, #2690 Reviews links, #2822 close keeps the draft) and passed on #2721's run of the same main.",
+      "firstSeen": "2026-11-07",
+      "evidence": [
+        42350363799,
+        42350656727,
+        42357501348
+      ],
+      "dependents": [
+        {
+          "title": "grouped: with a read waiting in place, a snooze made elsewhere moves only its own row (review P1)",
+          "why": "It needs the Grouped view, which the left-out test chooses; the test before it leaves List on."
+        },
+        {
+          "title": "grouped: an Archive waits in place, faded; after the list settles without it, its Undo brings the row back (review N1)",
+          "why": "It needs the Grouped view too, and follows the snooze test."
+        }
+      ]
     }
   ]
 }
