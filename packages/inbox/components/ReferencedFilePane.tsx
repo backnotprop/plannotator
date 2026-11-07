@@ -19,7 +19,7 @@ import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkCont
 import { ScrollViewportProvider } from '@plannotator/ui/hooks/useScrollViewport';
 import type { Annotation } from '@plannotator/ui/types';
 import { inboxApi, InboxApiError, referencedFileRawUrl, type ReferencedFileScope, type ReferencedFileView } from '../api';
-import { attachmentBlocks, codeCommentAnnotation } from '../attachments';
+import { attachmentBlocks, codeCommentAnnotation, inboxViewKind } from '../attachments';
 import { InboxFileSourceProvider, useInboxFileSource, type InboxFileSource } from '../fileSource';
 import { Icon } from '../icons';
 import { FileName } from './FileName';
@@ -167,7 +167,9 @@ export function ReferencedFilePane({
 
   const name = view?.name ?? fileRef.path.split('/').pop() ?? fileRef.path;
   const found = view?.found ? view : null;
-  const kind = found?.kind ?? null;
+  // Drawn as an attachment of that kind is (inboxViewKind): a log or data file as code, with its lines and their
+  // numbers, so a comment made here anchors the same way once it is attached.
+  const kind = found ? inboxViewKind(found.kind, found.name) : null;
   const folder = folderOfPath(view?.path ?? fileRef.path);
   const openFromDoc = useCallback((href: string) => onOpen({ messageId: fileRef.messageId, path: joinPath(folder, href.replace(/[?#].*$/s, '')) }), [onOpen, fileRef.messageId, folder]);
 
