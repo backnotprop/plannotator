@@ -614,6 +614,31 @@ test.skipIf(!hasDom)('a narrow computer pane (the summary line in place of the c
   }
 });
 
+test.skipIf(!hasDom)('a computer with the comments list open from its chip: a change in what goes with the reply keeps the chip and its list (the open list is never measured as chips)', async () => {
+  // The chips fit (200 of 300 px); the open list makes the cell scroll wide (900), as a popover inside it does.
+  const proto = HTMLElement.prototype;
+  const saved = { scroll: Object.getOwnPropertyDescriptor(proto, 'scrollWidth'), client: Object.getOwnPropertyDescriptor(proto, 'clientWidth') };
+  const isLayer = (el: HTMLElement) => el.classList.contains('ib-rlayer');
+  Object.defineProperty(proto, 'scrollWidth', { configurable: true, get(this: HTMLElement) { return isLayer(this) ? (this.querySelector('[data-comments-list]') ? 900 : 200) : (saved.scroll?.get?.call(this) ?? 0); } });
+  Object.defineProperty(proto, 'clientWidth', { configurable: true, get(this: HTMLElement) { return isLayer(this) ? 300 : (saved.client?.get?.call(this) ?? 0); } });
+  try {
+    const el = await open({ questions: true, n: 3, phone: false });
+    const chip = () => el.querySelector<HTMLButtonElement>('.ib-rbox [data-reply-row] [data-annotations-chip]');
+    expect(!!chip()).toBe(true);
+    await press(chip());
+    expect(!!el.querySelector('[data-comments-list]')).toBe(true);
+    // Three questions answered elsewhere meanwhile: the skip chip's words change.
+    act(() => draw(true, oneOpen, false));
+    await settle(2);
+    expect(!!chip()).toBe(true);
+    expect(!!line(el)).toBe(false);
+    expect(!!el.querySelector('.ib-rbox [data-reply-row] .ib-annchip [data-comments-list]')).toBe(true);
+  } finally {
+    if (saved.scroll) Object.defineProperty(proto, 'scrollWidth', saved.scroll);
+    if (saved.client) Object.defineProperty(proto, 'clientWidth', saved.client);
+  }
+});
+
 test('the closed foot is today\'s bar: no style redraws the open questions button\'s words as a bare count, or moves its buttons', () => {
   // Its words are footFit's forms ("2 open", "Questions", the icon alone), never a count CSS draws (which reads "0"
   // when the open items are action items or permissions, or every question is answered in the draft).

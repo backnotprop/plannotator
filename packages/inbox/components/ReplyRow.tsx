@@ -12,7 +12,7 @@
  *   covered. The mic and Send stay where they are.
  * - Chips or summary (decision D4): the chips when they fit beside the picker, else the summary line. Measured
  *   before paint, again whenever the cell's width, the chips' words, the text size or the fonts change; held while
- *   the person is in the summary line, so it never remounts under them.
+ *   the person is in the cell (a chip, the line, or a list or sheet open from them), so it never remounts under them.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useInboxTextSize } from '../textSize';
@@ -71,24 +71,32 @@ export function ReplyRow({
   const [fonts, setFonts] = useState(0);
   const key = `${fitKey}|${textSize}|${width}|${fonts}|${pill ? 1 : 0}|${files ? 1 : 0}`;
   const measured = useRef(key);
-  // Bumped when focus leaves the summary line, so a fit held while the person was in it is tried again.
-  const [left, setLeft] = useState(0);
+  /** The fold the last fit was checked at (null: not yet, or since a change). */
+  const checked = useRef<boolean | null>(null);
+  // Bumped when focus leaves the cell, so a fit held while the person was in it is tried again.
+  const [, setLeft] = useState(0);
   // Tried unfolded first whenever something changed, then folded only if the chips overflow the cell (before paint).
-  // Not while the person is in the summary line (its sheet or the comments list open, or focus on it): trying the
-  // chips would remount the line under them and drop both, so a "Skip them" press would close its own sheet. The
-  // line stays until they leave it, then the fit is tried again.
+  // Not while the person is in the cell (focus on a chip or the summary line, or a sheet or the comments list open from
+  // it): trying again would remount what they are in and drop it (a "Skip them" press would close its own sheet; the
+  // last comment removed from the chip's list would send focus to the line, not the field), and an open list would be
+  // measured as chips. The fit waits for a later render once they have left (focus leaving the cell brings one).
   useLayoutEffect(() => {
     if (phone) return;
     const layer = layerRef.current;
-    if (measured.current !== key && fold) {
-      if (layer && inLine(layer)) return;
+    if (!layer) return;
+    const changed = measured.current !== key;
+    if (!changed && checked.current === fold) return;
+    if (inCell(layer)) return;
+    if (changed && fold) {
       measured.current = key;
+      checked.current = null;
       onFold(false);
       return;
     }
     measured.current = key;
-    if (!fold && layer && layer.scrollWidth > layer.clientWidth + 1) onFold(true);
-  }, [key, fold, phone, onFold, left]);
+    checked.current = fold;
+    if (!fold && layer.scrollWidth > layer.clientWidth + 1) onFold(true);
+  });
   useEffect(() => {
     const mid = midRef.current;
     if (phone || !mid || typeof ResizeObserver === 'undefined') return;
@@ -138,8 +146,7 @@ export function ReplyRow({
           className="ib-rlayer"
           ref={layerRef}
           onBlur={(event) => {
-            const line = event.currentTarget.querySelector('[data-reply-summary]');
-            if (fold && line?.contains(event.target as Node) && !line.contains(event.relatedTarget as Node | null)) setLeft((n) => n + 1);
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setLeft((n) => n + 1);
           }}
         >
           {files}
@@ -158,9 +165,8 @@ export function ReplyRow({
   );
 }
 
-/** The person is in the summary line: focus on it, or its sheet or the comments list open from it. */
-function inLine(layer: HTMLElement): boolean {
-  const line = layer.querySelector('[data-reply-summary]');
-  if (!line) return false;
-  return line.contains(document.activeElement) || line.querySelector('[aria-expanded="true"]') !== null;
+/** The person is in the middle cell: focus on a chip or the summary line, or a sheet or the comments list open from it. */
+function inCell(layer: HTMLElement): boolean {
+  const active = document.activeElement;
+  return (active !== null && active !== layer && layer.contains(active)) || layer.querySelector('[aria-expanded="true"]') !== null;
 }
