@@ -177,8 +177,8 @@ describe("the event stream", () => {
     // The frame carries the window-followed capabilities (the Board's too); Code review and Shape, off here, are held until
     // the next big release (inbox.ts heldSwitch) and left out, so a window that never drew their rows does not start to.
     expect(told.map((frame) => JSON.parse(frame.data))).toEqual([
-      { board: { on: false }, steps: { on: true } },
-      { board: { on: false }, steps: { on: false } },
+      { board: { on: false }, steps: { on: true }, bro: { on: false } },
+      { board: { on: false }, steps: { on: false }, bro: { on: false } },
     ]);
     // The agent's stream, open all along, never gets one.
     expect(agentStream.frames.some((frame) => frame.event === "capabilities")).toBe(false);

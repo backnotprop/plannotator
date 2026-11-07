@@ -36,6 +36,8 @@ export const REVEAL_TIMES = {
   recheckMs: 700,
   /** A claim whose answer was lost (a network error) is sent again, once, after this long. */
   claimRetryMs: 1_500,
+  /** Bro mode's moment: the long agent message was open this long before the person went back to the list. */
+  broReadMs: 20_000,
 };
 
 /** One visit to a thread: which, and when it opened. */
@@ -328,6 +330,18 @@ function stepsRevealMayClaim(gate: Pick<BoardRevealInput, 'due' | 'blocked' | 'l
  */
 export function stepsRevealLeaveCounts(visit: RevealVisit, now: number, next: string | null): boolean {
   return boardRevealLeaveCounts(visit, now, next) && (revealThreadFactsOf(visit.threadId)?.mostFromOneAgent ?? 0) >= STEPS_REVEAL_MIN_RUN;
+}
+
+/** Bro mode's moment: the last agent message of the thread left has this many words or more. */
+export const BRO_REVEAL_MIN_WORDS = 150;
+
+/**
+ * Leaving a thread counts for the Bro mode offer when the person goes back to the list after `REVEAL_TIMES.broReadMs`
+ * (20 s) or more on a thread whose last agent message has `BRO_REVEAL_MIN_WORDS` or more (approval
+ * "inbox-one-time-dialogs": "Back on the list after a 150+ word agent message, open 20 s+").
+ */
+export function broRevealLeaveCounts(visit: RevealVisit, now: number, next: string | null): boolean {
+  return next === null && now - visit.at >= REVEAL_TIMES.broReadMs && (revealThreadFactsOf(visit.threadId)?.lastAgentWords ?? 0) >= BRO_REVEAL_MIN_WORDS;
 }
 
 /**

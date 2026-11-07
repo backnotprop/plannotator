@@ -260,6 +260,9 @@
   --ib-fs-30: max(11px, calc(30px * var(--ib-type) / 14));
   --ib-fs-32: max(11px, calc(32px * var(--ib-type) / 14));
   --ib-fs-34: max(11px, calc(34px * var(--ib-type) / 14));
+  --ib-fs-84: max(11px, calc(84px * var(--ib-type) / 14));
+  --ib-fs-104: max(11px, calc(104px * var(--ib-type) / 14));
+  --ib-fs-132: max(11px, calc(132px * var(--ib-type) / 14));
   --ib-fs-16-in: max(16px, calc(16px * var(--ib-type) / 14));
   /* Hovers and fades (--ib-soft-hover). Today's fade is ui's global one (packages/ui/theme.css `*`). */
   --ib-ui-fade: color 150ms cubic-bezier(0.4, 0, 0.2, 1), background-color 150ms cubic-bezier(0.4, 0, 0.2, 1), border-color 150ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -6773,6 +6776,42 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
 .ib-bi-text .ib-bi-q { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); margin-top: 10px; }
 .ib-bi-acts { display: flex; align-items: center; gap: 8px; padding: 18px 18px 18px 22px; }
 .pn-inbox .ib-bi-copy, dialog .ib-bi-copy { min-width: 142px; justify-content: center; }
+/* BRO-CARD-START Bro mode's card (the owner's pick, "poster"): the name as the picture on sneaker navy, the same in
+   both themes; the sidebar's Tater sits on the e. */
+dialog.ib-dlg.ib-bi.ib-bro { --bro-w: 77px; --bro-h: 88px; width: min(480px, calc(100vw - 32px)); border: 0; border-radius: 16px; background: #27345a; color: #fbfaf5; box-shadow: 0 18px 50px oklch(0 0 0 / 0.4); }
+dialog.ib-dlg.ib-bi.ib-bro::before { content: ""; position: absolute; inset: 0 0 auto; height: 62%; border-radius: inherit; background: radial-gradient(circle at center, #fbfaf533 0 1.2px, transparent 1.5px) 0 0 / 8px 8px; -webkit-mask-image: linear-gradient(to bottom, #000 30%, transparent); mask-image: linear-gradient(to bottom, #000 30%, transparent); pointer-events: none; }
+dialog.ib-dlg.ib-bro h2 { position: relative; margin: 0; padding: 18px 24px 0; font-size: var(--ib-fs-132, 132px); font-weight: 800; line-height: 0.84; letter-spacing: -0.055em; color: #fbfaf5; }
+/* The sprite as the sidebar plays it (TaterMark): 24 frames, 3.5 s, mirrored; the first frame under reduced motion. */
+.ib-bro .ib-bro-tater { position: absolute; left: 292px; top: 80px; display: block; width: var(--bro-w); height: var(--bro-h); overflow: hidden; transform: scaleX(-1); }
+.ib-bro .ib-bro-strip { display: block; width: calc(var(--bro-w) * 24); height: var(--bro-h); background: left center / 100% 100% no-repeat; animation: ib-bro-strip 3.5s steps(24) infinite; }
+@keyframes ib-bro-strip { to { transform: translateX(-100%); } }
+@media (prefers-reduced-motion: reduce) {
+  .ib-bro .ib-bro-strip { animation: none; }
+}
+.ib-bro .ib-bi-text { position: relative; padding: 24px 26px 0; }
+.ib-bro .ib-bi-text p { margin: 0; font-size: var(--ib-fs-15, 15px); line-height: 1.45; text-wrap: pretty; }
+.ib-bro .ib-bi-acts { position: relative; padding: 20px 22px 22px 16px; }
+.pn-inbox .ib-bro .ib-btn.ib-ghost { color: #fbfaf5; }
+.pn-inbox .ib-bro .ib-btn.ib-ghost:hover { background: #fbfaf51f; }
+.pn-inbox .ib-bro .ib-btn.ib-pri { background: #f69d25; border-color: #f69d25; color: #222222; font-weight: 650; }
+.pn-inbox .ib-bro .ib-btn:focus-visible { outline: 2px solid #fbfaf5; outline-offset: 2px; }
+/* Where it came from: small and quiet, under the line. */
+.ib-bro .ib-bi-text .ib-bro-credit { margin-top: 10px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.5; color: #fbfaf58c; }
+.ib-bro .ib-bro-credit code { padding: 1px 5px; border-radius: 4px; background: #fbfaf51a; color: #fbfaf5c7; font-size: var(--ib-fs-11-5, 11.5px); }
+.ib-bro .ib-bro-credit a { color: inherit; text-decoration: underline; text-decoration-color: #fbfaf54d; text-underline-offset: 2px; }
+.ib-bro .ib-bro-credit a:hover { color: #fbfaf5; text-decoration-color: currentColor; }
+.ib-bro .ib-bro-credit a:focus-visible { outline: 2px solid #fbfaf5; outline-offset: 2px; border-radius: 2px; }
+@media (max-width: 560px) {
+  dialog.ib-dlg.ib-bi.ib-bro { --bro-w: 63px; --bro-h: 72px; }
+  dialog.ib-dlg.ib-bro h2 { font-size: var(--ib-fs-104, 104px); }
+  .ib-bro .ib-bro-tater { left: 233px; top: 64px; }
+}
+@media (max-width: 350px) {
+  dialog.ib-dlg.ib-bi.ib-bro { --bro-w: 52px; --bro-h: 60px; }
+  dialog.ib-dlg.ib-bro h2 { padding: 16px 18px 0; font-size: var(--ib-fs-84, 84px); }
+  .ib-bro .ib-bro-tater { left: 187px; top: 52px; }
+}
+/* BRO-CARD-END */
 /* The List view's one-time choice (ListViewIntro.tsx): Smart groups or Simple list, two columns on the well, each a
    small picture of the person's own rows (the list options dialog's preview, light for everyone, scaled down), its
    name and tags, one line, and its button (Smart groups' the primary one). */
