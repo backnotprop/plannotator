@@ -8,7 +8,10 @@
  *    opening setup; the open project not named on the button;
  *  - the pane: the drawing not drawn, "Open PRs that change this" missing a PR that touches it or naming the wrong
  *    parts, a row not opening that PR's pane, Open full window not asking for the window, the window's "Reviews" not
- *    going back to the pane, a project not drawn yet showing no way to set it up.
+ *    going back to the pane, a project not drawn yet showing no way to set it up;
+ *  - off means off: the projects read while System does not show;
+ *  - focus: the full window leaving what it covers reachable by Tab, closing it (or the drawing) dropping the focus on
+ *    the page instead of the way back in.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -28,16 +31,23 @@ const { SystemPane } = (hasDom ? await import('./SystemPane') : {}) as typeof im
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 const { closeSystemSetup, useSystemSetupRequest } = (hasDom ? await import('./opener') : {}) as typeof import('./opener');
 const { loadFiles } = (hasDom ? await import('@plannotator/system') : {}) as typeof import('@plannotator/system');
+const { useSystemProjects } = (hasDom ? await import('./projects') : {}) as typeof import('./projects');
+const { useState } = (hasDom ? await import('react') : {}) as typeof import('react');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
+/** Every System read the window asked for. */
+let systemReads: string[] = [];
 beforeEach(() => {
   if (!hasDom) return;
   savedFetch = globalThis.fetch;
+  systemReads = [];
   // The pane's own reads, when a test draws it through the Reviews page.
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
+    if (url.includes('/system/')) systemReads.push(url);
+    if (url.includes('/system/projects')) return Response.json({ projects: [APP] });
     if (url.includes('/system/drawing')) return Response.json({ project: APP, model: null });
     if (url.includes('/system/pulls')) return Response.json({ pulls: [], unread: 0 });
     return Response.json({});
@@ -84,10 +94,12 @@ function SetupSpy() {
 }
 
 function mount(node: React.ReactNode) {
-  host = document.createElement('div');
-  host.className = 'pn-inbox';
-  document.body.appendChild(host);
-  root = createRoot(host);
+  if (!root) {
+    host = document.createElement('div');
+    host.className = 'pn-inbox';
+    document.body.appendChild(host);
+    root = createRoot(host);
+  }
   act(() =>
     root!.render(
       <SidebarProvider>
@@ -143,6 +155,7 @@ describe('Settings → Capabilities → System', () => {
     expect($('[data-settings-system]')).toBeNull();
     act(() => root?.unmount());
     host?.remove();
+    root = null;
     draw({ code_review: { on: true }, system: { on: false } }, toggles);
     expect(labels()).toEqual(['Board', 'Code review', 'System']);
     const sw = $('[data-settings-system] button[role="switch"]')!;
@@ -251,6 +264,7 @@ describe('Reviews: the System button', () => {
     expect($('[data-pulls-pane-empty]')).toBeNull();
     act(() => root?.unmount());
     host?.remove();
+    root = null;
     drawReviews({ open: 'prj_app' }, { stackId: 'github.com/acme/app#11' });
     await settle();
     expect($('[data-system-pane]')).toBeNull();
@@ -322,6 +336,7 @@ describe('A project\'s drawing in the pane', () => {
     expect(asked.full).toEqual([true]);
     act(() => root?.unmount());
     host?.remove();
+    root = null;
     const inFull = drawPane({ full: true });
     await settle();
     expect($('[data-system-full]')).not.toBeNull();
@@ -339,5 +354,81 @@ describe('A project\'s drawing in the pane', () => {
     act(() => $$('[data-system-pane-none] button')[0]!.click());
     await settle();
     expect(setupAsked).toEqual({ project: 'prj_app' });
+  });
+});
+
+const frames = async () => {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  });
+};
+
+describe('Off means off, and the focus', () => {
+  test.if(hasDom)('the projects are read only while System shows', async () => {
+    let flip: (on: boolean) => void = () => {};
+    function Reader() {
+      const [on, setOn] = useState(false);
+      flip = setOn;
+      const { projects } = useSystemProjects(on);
+      return <p data-read="">{projects ? projects.length : 'none'}</p>;
+    }
+    mount(<Reader />);
+    await settle();
+    expect(systemReads).toEqual([]);
+    expect($('[data-read]')?.textContent).toBe('none');
+    act(() => flip(true));
+    await settle();
+    expect(systemReads.length).toBe(1);
+    expect($('[data-read]')?.textContent).toBe('1');
+  });
+
+  test.if(hasDom)('the full window makes what it covers inert, and closing it gives the focus back to "Open full window"', async () => {
+    let setFull: (full: boolean) => void = () => {};
+    function Page() {
+      const [full, set] = useState(false);
+      setFull = set;
+      return (
+        <div>
+          <nav>
+            <button type="button" data-behind="">A Reviews row</button>
+          </nav>
+          <SystemPane
+            project="prj_app"
+            sheet={null}
+            full={full}
+            phone={false}
+            pulls={MODEL}
+            onSheet={() => {}}
+            onFull={set}
+            onClose={() => {}}
+            onOpenStack={() => {}}
+            api={{ drawing: async () => ({ project: APP, model: loadFiles(DRAWING).model as never }), pulls: async () => ({ pulls: [], unread: 0 }) }}
+          />
+        </div>
+      );
+    }
+    mount(<Page />);
+    await settle();
+    const behind = () => $('[data-behind]')!.closest('nav')!;
+    expect(behind().inert).toBe(false);
+    act(() => setFull(true));
+    await settle();
+    expect(behind().inert).toBe(true);
+    expect(document.activeElement).toBe($('[data-system-back]'));
+    act(() => $('[data-system-back]')!.click());
+    await settle();
+    expect(behind().inert).toBe(false);
+    expect(document.activeElement?.textContent?.trim()).toBe('Open full window');
+  });
+
+  test.if(hasDom)('the drawing closed: the focus returns to the System button', async () => {
+    drawReviews({ open: 'prj_app' });
+    await settle();
+    $('[data-system-pane]')!.focus();
+    drawReviews({ open: null });
+    await settle();
+    await frames();
+    expect($('[data-system-pane]')).toBeNull();
+    expect(document.activeElement).toBe($('[data-system-button]'));
   });
 });

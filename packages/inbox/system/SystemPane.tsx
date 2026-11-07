@@ -91,9 +91,23 @@ export function SystemPane({ project, sheet, full, phone, pulls, onSheet, onFull
     setReading(next);
   };
   const back = useRef<HTMLButtonElement>(null);
+  const pane = useRef<HTMLElement>(null);
+  const wasFull = useRef(full);
   useEffect(() => {
     if (full) back.current?.focus({ preventScroll: true });
-  }, [full]);
+    else if (wasFull.current && !phone) {
+      // Back from the full window: focus returns to its way in ("Open full window"), else the pane.
+      const el = pane.current;
+      const way = el ? Array.from(el.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Open full window') : null;
+      (way ?? el)?.focus({ preventScroll: true });
+    }
+    wasFull.current = full;
+  }, [full, phone]);
+  // The full window covers the page: what it covers can't take the focus either (Tab stays in the drawing and its PRs).
+  useEffect(() => {
+    if (!full || phone || !pane.current) return;
+    return inertAround(pane.current);
+  }, [full, phone]);
 
   const body = (layout: 'pane' | 'window') => {
     if (error) {
@@ -138,7 +152,7 @@ export function SystemPane({ project, sheet, full, phone, pulls, onSheet, onFull
 
   if (full || phone) {
     return (
-      <section className={`ib-sysfull${phone ? ' ib-sysfull-phone' : ''}`} aria-label={name ? `System: ${name}` : 'System'} data-system-full={phone ? 'phone' : ''} data-system-pane={project}>
+      <section ref={pane} tabIndex={-1} className={`ib-sysfull${phone ? ' ib-sysfull-phone' : ''}`} aria-label={name ? `System: ${name}` : 'System'} data-system-full={phone ? 'phone' : ''} data-system-pane={project}>
         <div className="ib-sysfull-top">
           <button ref={back} type="button" className="ib-sysfull-back" onClick={() => (phone ? onClose() : onFull(false))} data-system-back="">
             <Icon name="back" size={15} />
@@ -153,11 +167,29 @@ export function SystemPane({ project, sheet, full, phone, pulls, onSheet, onFull
     );
   }
   return (
-    <section className="ib-pane ib-syspane" aria-label={name ? `System: ${name}` : 'System'} data-system-pane={project}>
+    <section ref={pane} tabIndex={-1} className="ib-pane ib-syspane" aria-label={name ? `System: ${name}` : 'System'} data-system-pane={project}>
       <div className="ib-syspane-draw">{body('pane')}</div>
       {rows}
     </section>
   );
+}
+
+/**
+ * Makes everything around `el` inert (each sibling of it and of its ancestors up to the body), leaving live regions
+ * so a toast is still heard; gives back exactly what it set.
+ */
+export function inertAround(el: HTMLElement): () => void {
+  const set: HTMLElement[] = [];
+  for (let node: HTMLElement | null = el; node && node !== document.body && node.parentElement; node = node.parentElement) {
+    for (const sibling of Array.from(node.parentElement.children)) {
+      if (sibling === node || !(sibling instanceof HTMLElement) || sibling.inert || sibling.matches('[aria-live], [role="status"], [role="alert"], script, style')) continue;
+      sibling.inert = true;
+      set.push(sibling);
+    }
+  }
+  return () => {
+    for (const sibling of set) sibling.inert = false;
+  };
 }
 
 /** "Open PRs that change this": one row per open PR whose files touch the drawing; a row opens the PR's pane. */

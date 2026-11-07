@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { InboxProject, InboxProjectRepo, InboxPull } from '@plannotator/core/inbox-types';
 import { InboxError } from '@plannotator/shared/inbox/schema';
-import { systemDrawing, systemProjects, systemPullTouches, systemReadRoute } from './inbox-system';
+import { systemDrawing, systemFilesCache, systemProjects, systemPullTouches, systemReadRoute, systemSwitch } from './inbox-system';
 
 let dir = '';
 let dataDir = '';
@@ -127,6 +127,22 @@ describe('the open PRs that change the drawing', () => {
     expect(asked.sort()).toEqual(['github.com/acme/app#1', 'github.com/acme/app#2', 'github.com/acme/app#3']);
   });
 
+  test('a PR is read once per head commit: the pane reading again reads only the PR that moved', async () => {
+    const m = await model();
+    const cache = systemFilesCache();
+    const asked: string[] = [];
+    const patchOf = async (key: string) => {
+      asked.push(key);
+      return patch('src/api/routes.ts');
+    };
+    const one = pull(1, { head_sha: 'a'.repeat(40) });
+    const two = pull(2, { head_sha: 'b'.repeat(40) });
+    await systemPullTouches(m, 'github.com/acme/app', [one, two], patchOf, cache);
+    const again = await systemPullTouches(m, 'github.com/acme/app', [one, { ...two, head_sha: 'c'.repeat(40) }], patchOf, cache);
+    expect(asked.sort()).toEqual(['github.com/acme/app#1', 'github.com/acme/app#2', 'github.com/acme/app#2']);
+    expect(again.pulls.map((touch) => touch.key).sort()).toEqual(['github.com/acme/app#1', 'github.com/acme/app#2']);
+  });
+
   test('a PR whose patch can\'t be read is counted, and the others still show', async () => {
     const answer = await systemPullTouches(await model(), 'github.com/acme/app', [pull(1), pull(2)], async (key) => {
       if (key.endsWith('#2')) throw new Error('too large');
@@ -208,5 +224,55 @@ describe('the routes', () => {
     expect(await call('/api/inbox/system/projects', [a], { headers: { origin: 'https://evil.example' } })).toMatchObject({ status: 403, body: { code: 'cross_origin' } });
     expect(await call('/api/inbox/system/drawing', [a], { query: '?project=prj_nope' })).toMatchObject({ status: 422, body: { code: 'validation_error' } });
     expect(listed).toBe(0);
+  });
+});
+
+describe('the switch (Settings → Capabilities → System)', () => {
+  const make = (state: { codeReview: boolean; saved: boolean; sticks?: boolean }) => {
+    const heard: number[] = [];
+    const sw = systemSwitch({
+      codeReviewOn: () => state.codeReview,
+      saved: () => state.saved,
+      save: (on) => {
+        if (state.sticks !== false) state.saved = on;
+      },
+      changed: () => heard.push(1),
+    });
+    return { sw, heard, state };
+  };
+
+  test('System shows only while it AND Code review are on; the window hears it only while Code review is on', () => {
+    const { sw, state } = make({ codeReview: true, saved: true });
+    expect(sw.on()).toBe(true);
+    expect(sw.wire()).toEqual({ system: { on: true } });
+    state.codeReview = false;
+    expect(sw.on()).toBe(false);
+    expect(sw.wire()).toEqual({});
+    state.codeReview = true;
+    state.saved = false;
+    expect(sw.on()).toBe(false);
+    expect(sw.wire()).toEqual({ system: { on: false } });
+  });
+
+  test('the settings save: a tailnet guest is refused, a malformed value throws, before anything is saved', () => {
+    const { sw, state } = make({ codeReview: true, saved: false });
+    expect(sw.check({ system: { on: true } }, false)).toBe('local_only');
+    expect(sw.check({}, false)).toBeNull();
+    for (const bad of [true, null, [], {}, { on: 'yes' }, { on: true, extra: 1 }]) expect(() => sw.check({ system: bad }, true)).toThrow(InboxError);
+    expect(sw.check({ system: { on: true } }, true)).toBeNull();
+    expect(state.saved).toBe(false);
+  });
+
+  test('the save answers the switch (even with Code review off), tells every window once, and says when config did not take it', () => {
+    const { sw, heard, state } = make({ codeReview: false, saved: false });
+    expect(sw.answer({})).toEqual({});
+    expect(sw.answer({ system: { on: true } })).toEqual({ system: { on: true } });
+    expect(state.saved).toBe(true);
+    expect(heard.length).toBe(1);
+    sw.answer({ system: { on: true } });
+    expect(heard.length).toBe(1);
+    const stuck = make({ codeReview: true, saved: false, sticks: false });
+    expect(() => stuck.sw.answer({ system: { on: true } })).toThrow(InboxError);
+    expect(stuck.heard.length).toBe(0);
   });
 });

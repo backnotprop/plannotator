@@ -105,6 +105,7 @@ import { FeedbackDialog } from './components/FeedbackDialog';
 import { SystemSetupHost } from './system/SetupHost';
 import { systemShown } from './system/gate';
 import { useSystemProjects } from './system/projects';
+import { systemDropped, systemEscapeTo, systemHashOf, systemKept, systemRouteOf } from './system/route';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { cardReport, noteQuestionRows } from './agents';
 import type { InboxAgentRow, InboxAgentsModel, InboxConnectReport, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
@@ -422,7 +423,6 @@ function routeOf(fullHash: string): Route {
   if (fromReviews && !params.get('thread')) {
     const stack = params.get('stack') || null;
     const layer = stack ? params.get('layer') || null : null;
-    const system = params.get('system') || null;
     return {
       page: 'reviews',
       project: params.get('project') || null,
@@ -432,9 +432,7 @@ function routeOf(fullHash: string): Route {
       layer,
       scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer',
       new: params.has('new'),
-      system,
-      sheet: system ? params.get('sheet') || null : null,
-      full: system ? params.get('full') === '1' : false,
+      ...systemRouteOf(params),
     };
   }
   if (params.has('board'))
@@ -487,9 +485,7 @@ function hashOf(route: Route): string {
       (route.view && route.view !== 'all' ? `&view=${route.view}` : '') +
       (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +
       (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}` : '') +
-      (route.system ? `&system=${encodeURIComponent(route.system)}` : '') +
-      (route.system && route.sheet ? `&sheet=${encodeURIComponent(route.sheet)}` : '') +
-      (route.system && route.full ? '&full=1' : '') +
+      systemHashOf(route) +
       (route.new ? '&new' : '');
   else if (route.page === 'tour') hash = `tour=${route.step ?? 1}`;
   else {
@@ -2482,11 +2478,12 @@ function Inbox() {
       // System's drawing in Reviews (approval "system-inbox", 4b: "Reviews, top left, or Esc goes back"): one layer per
       // press, the full window, then the drawing. The drawing's own Escape (a card, a sheet inside) runs first and marks
       // the key used. A PR's pane open over it owns the screen.
-      if (event.key === 'Escape' && routeRef.current.page === 'reviews' && routeRef.current.system && !routeRef.current.stack) {
+      // While System does not show, a leftover `&system=` is not on the ladder: Escape is today's.
+      const systemBack = event.key === 'Escape' ? systemEscapeTo(routeRef.current, systemShown(settingsRef.current) && !tailnetGuest(settingsRef.current)) : null;
+      if (systemBack) {
         const from = keyTarget(event);
         if (event.defaultPrevented || isComposingKey(event) || modalOpen() || (from && (isEditableTarget(from) || inOverlay(from) || from.closest('[role="menu"], [role="listbox"]')))) return;
-        const now = routeRef.current;
-        closeTo(now.full ? { ...now, full: false } : { ...now, system: null, sheet: null, full: false });
+        closeTo(systemBack);
         return;
       }
       // Shape's grid and a board open over it (approval "shape-landing-grid": Esc returns). The board's own Escape
@@ -4729,6 +4726,14 @@ function Inbox() {
   // System in Reviews and in Settings (approval "system-inbox"): only while it shows (System on, Code review on).
   const systemOnHere = systemShown(settings) && !guestPage;
   const systemProjects = useSystemProjects(systemOnHere && (route.page === 'reviews' || (route.page === 'settings' && route.section === 'capabilities')));
+  // A drawing's address while System does not show (turned off, Code review off, a guest's page): dropped in place,
+  // so Reviews is today's. Not before the settings are read: System may be on.
+  useEffect(() => {
+    if (settings === null) return;
+    const clean = systemDropped(route, systemOnHere);
+    if (clean) writeRoute(clean, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings === null, systemOnHere, route.page, route.system, route.sheet, route.full]);
   // A #reviews link on a guest's page (it could not turn Code review on): the Inbox, as if the page were not there.
   useEffect(() => {
     // In place: Back from the Inbox must not land on #reviews and be sent back again.
@@ -5570,7 +5575,7 @@ function Inbox() {
   // The Reviews list: on its own page, or beside a thread opened from it (the thread pane is the Inbox's own).
   const reviewsList = (project: string | null, view: PullFilter, threadId: string | null) => {
     // A PR opened from a project's drawing closes back to it (its own page only).
-    const drawingKept = threadId ? {} : { system: route.system ?? null, sheet: route.sheet ?? null };
+    const drawingKept = systemKept(route, systemOnHere && !threadId);
     return (
     <PullsPage
       state={pulls}

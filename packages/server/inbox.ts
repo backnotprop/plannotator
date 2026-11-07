@@ -178,7 +178,7 @@ import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT } from
 import { guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
 import { systemSetupRoute } from "./inbox-system-setup";
-import { SYSTEM_READ_PATHS, systemReadRoute } from "./inbox-system";
+import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
 import { createRefCards, type RefRunner } from "./ref-cards";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
@@ -2332,23 +2332,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * reading every System route and the settings answer use. `systemSwitchOn` is the person's switch alone
    * (Settings → Capabilities → System, config.json `inboxSystem`), which Settings shows only while Code review is on.
    */
-  const systemSwitchOn = () => options.system ?? loadConfig().inboxSystem === true;
-  const systemOn = () => codeReviewOn() && systemSwitchOn();
-  /** The switch's state for the window: present only while Code review is on (the row shows only then). */
-  const systemWire = (): { system?: { on: boolean } } => (codeReviewOn() ? { system: { on: systemSwitchOn() } } : {});
-  const saveSystem = (input: unknown, validateOnly = false) => {
-    if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
-      throw new InboxError("validation_error", "system: { on: boolean }.", { field: "system" });
-    }
-    const on = (input as { on: boolean }).on;
-    if (validateOnly) return { on: systemSwitchOn() };
-    const was = systemSwitchOn();
-    saveConfig({ inboxSystem: on });
-    if ((loadConfig().inboxSystem === true) !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+  const system = systemSwitch({
+    codeReviewOn,
+    saved: () => loadConfig().inboxSystem === true,
+    fixed: options.system,
+    save: (on) => saveConfig({ inboxSystem: on }),
     // Every window follows at once (its Settings switch, the Reviews System button).
-    if (was !== systemSwitchOn()) for (const listener of capabilityListeners) listener();
-    return { on: systemSwitchOn() };
-  };
+    changed: () => {
+      for (const listener of capabilityListeners) listener();
+    },
+  });
+  const systemOn = system.on;
+  /** The switch's state for the window: present only while Code review is on (the row shows only then). */
+  const systemWire = system.wire;
+  /** The open PRs' files by head commit, for "Open PRs that change this" (read again only for a PR that moved). */
+  const systemFiles = systemFilesCache();
   /**
    * Ask AI is on with PLANNOTATOR_INBOX_ASK_AI, or whenever Code review is on
    * (approval "shape-in-code-review", q-668227a8: Code review brings Ask, and
@@ -4121,6 +4119,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           systemOn,
           listPulls: async () => (await pulls.list((await pullProjects()).wanted)).pulls,
           patchOf: async (key: string) => (await pulls.diff(key, "layer")).patch,
+          filesCache: systemFiles,
           json,
         });
       }
@@ -4418,6 +4417,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.code_review !== undefined && !owner) return localOnly();
         // Shape too (the shape skill, the routes): the owner's to change.
         if (body.shape !== undefined && !owner) return localOnly();
+        // System too (the drawings, and from B9 the jobs that keep them current); a malformed value throws here.
+        if (system.check(body, owner) === "local_only") return localOnly();
         if (body.voice !== undefined && !owner) throw voiceOwnerOnly();
         // Updating changes this computer: the owner's to change.
         if (updateSwitches && !owner) return localOnly();
@@ -4461,7 +4462,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.steps !== undefined) saveSteps(body.steps, true);
         if (body.code_review !== undefined) saveCodeReview(body.code_review, true);
         if (body.shape !== undefined) saveShape(body.shape, true);
-        if (body.system !== undefined) saveSystem(body.system, true);
         if (body.cookie_host !== undefined) saveCookieHostSwitch(body.cookie_host, true);
         if (body.voice !== undefined) voice.save(body.voice, true);
         const tailnet = tailscaleChange === undefined ? tailscale.state() : await tailscale.set(tailscaleChange.on, { via, replaceExposed: tailscaleChange.replaceExposed });
@@ -4483,10 +4483,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const steps = body.steps === undefined ? { on: stepsOn() } : saveSteps(body.steps);
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
         const shape = body.shape === undefined ? { on: shapeOn() } : saveShape(body.shape);
-        const system = body.system === undefined ? systemWire() : { system: saveSystem(body.system) };
+        const systemAnswer = system.answer(body);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...system, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {

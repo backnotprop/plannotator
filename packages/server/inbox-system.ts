@@ -18,6 +18,58 @@ import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { systemRepoOf } from "./inbox-system-setup";
 
+/** What System's switch needs from the running Inbox (inbox.ts passes its own config reads and writes). */
+export interface SystemSwitchDeps {
+  codeReviewOn: () => boolean;
+  /** config.json `inboxSystem` as read now. */
+  saved: () => boolean;
+  /** A value the server was started with, over config (tests). */
+  fixed?: boolean;
+  save: (on: boolean) => void;
+  /** Every window hears it (`event: capabilities`). */
+  changed: () => void;
+}
+
+/**
+ * Settings → Capabilities → System (config.json `inboxSystem`). System shows, and its routes answer, only while it
+ * AND Code review are on (`on`); the window hears the switch only while Code review is on (`wire`), since the row shows
+ * only then. The settings POST's part: `check` before anything is saved (a tailnet guest is refused, like every
+ * capability switch; a malformed value throws), `answer` after the other fields saved.
+ */
+export function systemSwitch(deps: SystemSwitchDeps) {
+  const switchOn = () => deps.fixed ?? deps.saved();
+  const on = () => deps.codeReviewOn() && switchOn();
+  const wire = (): { system?: { on: boolean } } => (deps.codeReviewOn() ? { system: { on: switchOn() } } : {});
+  const parse = (input: unknown): boolean => {
+    if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
+      throw new InboxError("validation_error", "system: { on: boolean }.", { field: "system" });
+    }
+    return (input as { on: boolean }).on;
+  };
+  return {
+    switchOn,
+    on,
+    wire,
+    check(body: { system?: unknown }, owner: boolean): "local_only" | null {
+      if (body.system === undefined) return null;
+      // The drawings, and from B9 the jobs that keep them current: the owner's to change.
+      if (!owner) return "local_only";
+      parse(body.system);
+      return null;
+    },
+    /** The answer's `system`: the saved switch, to the save that set it even while Code review is off; else `wire`. */
+    answer(body: { system?: unknown }): { system?: { on: boolean } } {
+      if (body.system === undefined) return wire();
+      const next = parse(body.system);
+      const was = switchOn();
+      deps.save(next);
+      if (deps.saved() !== next) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+      if (was !== switchOn()) deps.changed();
+      return { system: { on: switchOn() } };
+    },
+  };
+}
+
 export interface SystemReadDeps {
   dataDir: string;
   /** The project's `origin` (the Inbox's repo cache), null when it has none. */
@@ -80,19 +132,45 @@ export function touchedParts(model: SystemModel, files: readonly ChangedFile[]):
     .map((id) => ({ id, name: model.parts[id]!.name }));
 }
 
+/**
+ * Each PR's changed files, kept by its head commit: a PR's files at one head don't change, so a PR is read again only
+ * when it moved (the pane reads every time the pulls list does). Bounded: the oldest kept go first.
+ */
+export interface SystemFilesCache {
+  get(key: string): ChangedFile[] | undefined;
+  set(key: string, files: ChangedFile[]): void;
+}
+
+export function systemFilesCache(max = 400): SystemFilesCache {
+  const kept = new Map<string, ChangedFile[]>();
+  return {
+    get: (key) => kept.get(key),
+    set(key, files) {
+      kept.delete(key);
+      kept.set(key, files);
+      while (kept.size > max) kept.delete(kept.keys().next().value!);
+    },
+  };
+}
+
+/** A PR's place in the cache: its head commit, or (when the list did not say it) its last update. */
+const filesKeyOf = (pull: InboxPull) => `${pull.key}@${pull.head_sha ?? `updated ${pull.updated_at}`}`;
+
 /** The open PRs of a repo in the list, newest first. A PR is read at most once per list here, so a repo with many open PRs reads the newest. */
 export const SYSTEM_PULLS_READ_MAX = 40;
 const READ_AT_ONCE = 4;
 
 /**
  * The open PRs of `repo` (`host/owner/name`) whose changed files touch the drawing. Each PR's files come from its own
- * patch (`patchOf`, the pulls reader's cached diff); a PR whose patch can't be read is counted in `unread`.
+ * patch (`patchOf`, the pulls reader's cached diff), kept by head commit in `cache`; a PR whose patch can't be read
+ * is counted in `unread`.
  */
 export async function systemPullTouches(
   model: SystemModel,
   repo: string,
   pulls: readonly InboxPull[],
   patchOf: (key: string) => Promise<string>,
+  cache: SystemFilesCache = systemFilesCache(),
 ): Promise<SystemPullsAnswer> {
   const wanted = repo.toLowerCase();
   const open = pulls
@@ -107,7 +185,13 @@ export async function systemPullTouches(
       const i = next++;
       const pull = open[i]!;
       try {
-        const parts = touchedParts(model, changedFilesOf(parseDiffToFiles(await patchOf(pull.key))));
+        const at = filesKeyOf(pull);
+        let files = cache.get(at);
+        if (!files) {
+          files = changedFilesOf(parseDiffToFiles(await patchOf(pull.key)));
+          cache.set(at, files);
+        }
+        const parts = touchedParts(model, files);
         if (parts.length > 0) found[i] = { key: pull.key, parts };
       } catch {
         unread += 1;
@@ -130,6 +214,8 @@ export interface SystemRouteDeps extends SystemReadDeps {
   listPulls: () => Promise<readonly InboxPull[]>;
   /** One PR's patch (the pulls reader's cached diff of that layer). */
   patchOf: (key: string) => Promise<string>;
+  /** The PRs' files kept by head commit across reads (inbox.ts keeps one for its life). */
+  filesCache?: SystemFilesCache;
   json: (body: unknown, status?: number) => Response;
 }
 
@@ -156,5 +242,5 @@ export async function systemReadRoute(req: Request, path: string, deps: SystemRo
   if (path === "/api/inbox/system/drawing") return json({ serverSession, ...drawing });
   // The open PRs that change it: none without a drawing or a repo to read them from.
   if (!drawing.model || !drawing.project.repo) return json({ serverSession, pulls: [], unread: 0 } satisfies SystemPullsAnswer & { serverSession: string });
-  return json({ serverSession, ...(await systemPullTouches(drawing.model, drawing.project.repo, await deps.listPulls(), deps.patchOf)) });
+  return json({ serverSession, ...(await systemPullTouches(drawing.model, drawing.project.repo, await deps.listPulls(), deps.patchOf, deps.filesCache)) });
 }

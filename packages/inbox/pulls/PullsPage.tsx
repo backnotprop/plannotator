@@ -140,6 +140,17 @@ export function PullsPage(given: PullsPageProps) {
   const system = props.system ?? null;
   // The drawing shows while no PR's pane does: a PR opened from it closes back to it.
   const systemOpen = system?.open && !open ? system.open : null;
+  // The drawing closed (its ×, Escape, a phone's "Reviews"): the focus it held returns to the System button.
+  const drawingWas = useRef(system?.open ?? null);
+  useEffect(() => {
+    const was = drawingWas.current;
+    drawingWas.current = system?.open ?? null;
+    if (!was || system?.open) return;
+    requestAnimationFrame(() => {
+      const lost = !document.activeElement || document.activeElement === document.body;
+      if (lost) head.current?.querySelector<HTMLElement>('[data-system-button]')?.focus({ preventScroll: true });
+    });
+  }, [system?.open]);
   const projectName = props.project ? (props.projectNames.get(props.project) ?? offered.find((p) => p.id === props.project)?.name ?? null) : null;
 
   const list = (

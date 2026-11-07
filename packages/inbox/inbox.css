@@ -8933,5 +8933,11 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-sysfull-phone .ib-sysprs-row { min-height: 56px; }
 /* A phone is too narrow for the drawing's one-line bar: the sheets take their own row under the name and the tools. */
 .ib-sysfull-phone .sys-bar { height: auto; grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; padding-block: 8px; }
-.ib-sysfull-phone .sys-bar > :nth-child(2) { grid-row: 2; grid-column: 1 / -1; justify-self: start; max-width: 100%; overflow-x: auto; }
+.ib-sysfull-phone .sys-bar > .sys-chips, .ib-sysfull-phone .sys-bar > .sys-kind { grid-row: 2; grid-column: 1 / -1; justify-self: start; max-width: 100%; overflow-x: auto; }
+/* A phone's sheet fills the pane's width, so its bottom row runs into the zoom group at the bottom left: on a phone
+   the group (and the Key it opens) sit at the top right, over the sheet's title band, which leaves that corner empty. */
+.ib-sysfull-phone .sys-zoom { top: 8px; right: 8px; bottom: auto; left: auto; }
+.ib-sysfull-phone .sys-card-pop { top: 48px; right: 8px; bottom: auto; left: auto; max-width: calc(100% - 16px); }
 .ib-sysfull-phone .sys-bar > .sys-tools { grid-row: 1; grid-column: 2; }
+/* The drawing's pane and full window take the focus only as a last resort (the way back when "Open full window" is gone). */
+.ib-syspane:focus, .ib-sysfull:focus { outline: none; }
