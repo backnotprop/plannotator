@@ -1089,6 +1089,17 @@ function wakeName(value: unknown): string {
 export const INBOX_SEND_NOW_POLL_FIELD = 'send_now'
 
 /**
+ * The poll and `state` field (`true`) by which the Claude Code mod says its
+ * session refused the reply it tried to put in, and holds every reply until
+ * the person types there: Claude Code drops a plugin's prompt after the
+ * person stopped the session, until their own next input (#2780). The window
+ * words a waiting reply "Stopped: goes in when you type in that session"
+ * (approval "inbox-stopped-reply"). `false` on a `state` event clears it.
+ * An older Inbox ignores it; an older connection never sends it.
+ */
+export const INBOX_HELD_POLL_FIELD = 'held'
+
+/**
  * On a poll, the connection's tick goes on polling while a steer waits for the running turn. A connection without it
  * (from before that) stops polling until the steer goes in, so the Inbox counts a session it handed one as there.
  * An older Inbox ignores it.
