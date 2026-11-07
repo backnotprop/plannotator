@@ -333,7 +333,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     const block = startPick.machine ? there.reads.get(startPick.machine)?.launch : model?.launch;
     const agent = block?.agents.find((a) => a.agent === startPick.agent);
     // "Another folder…": a folder under that machine's home; the Send names it, and the far side makes it a project.
-    if (agent && startPick.folder && !pulls) {
+    if (agent && startPick.folder && !pulls && !box) {
       return { agent: agent.agent, name: agent.name, project: folderProject(startPick.folder.path, startPick.folder.name), folder: startPick.folder.path, machine: startPick.machine };
     }
     // "New scratch folder": its root stands in for the project; the folder is made when the person sends.
@@ -1088,7 +1088,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
               : null
           }
           onFolder={
-            pulls
+            pulls || box
               ? undefined
               : (folder, name, machine) => {
                   // A folder that is one of that machine's projects already is that project (its trust facts and all).
