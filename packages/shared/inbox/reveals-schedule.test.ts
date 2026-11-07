@@ -15,7 +15,8 @@
  * day after the list grows taller than the screen); a light user getting a heavy-use dialog; two dialogs on one day,
  * or on two page loads in a row (an old tab reading again included); the gap after an offer's Not now; an offer whose
  * moment never comes not retiring after 14 days (an update-day dialog never retires); update-day dialogs coming back to
- * back; an unanswered agent note taking another day.
+ * back; an unanswered agent note taking another day; the "Star the repo" ask (approval "star-ask") not going from the
+ * second day of use (the owner, 2026-11-06), or moving any other dialog's day (it stays outside the line's order).
  */
 import { describe, expect, test } from "bun:test";
 import {
@@ -27,6 +28,7 @@ import {
   revealAgentNoteAgents,
   revealAgentNoteNew,
   revealAhead,
+  revealAsideNow,
   revealDay,
   revealHeavyUse,
   revealLineFree,
@@ -152,7 +154,16 @@ function simulate(user: User, days = 30): Shown[] {
         show(early, true);
         continue;
       }
-      if (next && user.moment(next, day) && revealMayClaim(next, state(), now, TABLE)) show(next, true);
+      if (next && user.moment(next, day) && revealMayClaim(next, state(), now, TABLE)) {
+        show(next, true);
+        continue;
+      }
+      // An `aside` entry (the star ask) at a calm moment the line left free: it stamps nothing of the line.
+      const aside = revealAsideNow(state(), now, TABLE).find((id) => user.moment(id, day));
+      if (aside) {
+        done.add(aside);
+        shown.push({ id: aside, day, at: now });
+      }
     }
   }
   return shown;
@@ -198,10 +209,11 @@ function expectOnePerDay(shown: Shown[]) {
 }
 
 describe("30 days of a heavy user", () => {
-  test("setup on day 0, then one a day: Snooze 2, Bro mode 3, the Board 4; the list outgrows the screen on day 5, so List view goes on 5, ahead of the Checklist (6)", () => {
+  test("setup on day 0, the star ask on day 1 (aside: it moves no one), then one a day: Snooze 2, Bro mode 3, the Board 4; the list outgrows the screen on day 5, so List view goes on 5, ahead of the Checklist (6)", () => {
     const shown = simulate(HEAVY);
     expect(shown.map((s) => [s.id, s.day])).toEqual([
       ["agent_note", 0],
+      ["star", 1],
       ["snooze", 2],
       [BRO, 3],
       ["board", 4],
@@ -215,6 +227,7 @@ describe("30 days of a heavy user", () => {
     const shown = simulate({ ...HEAVY, moment: (id, day) => id !== "snooze" || day >= 1 });
     expect(shown.map((s) => [s.id, s.day])).toEqual([
       ["agent_note", 0],
+      ["star", 1],
       [LIST_VIEW, 2],
       ["snooze", 3],
       [BRO, 4],
@@ -225,7 +238,7 @@ describe("30 days of a heavy user", () => {
 
   test("a Not now on Bro mode: the next offer waits three days, not one", () => {
     const shown = simulate({ ...HEAVY, notNow: [BRO] });
-    expect(days(shown)).toEqual({ agent_note: 0, snooze: 2, [BRO]: 3, [LIST_VIEW]: 6, board: 7, steps: 8 });
+    expect(days(shown)).toEqual({ agent_note: 0, snooze: 2, [BRO]: 3, [LIST_VIEW]: 6, board: 7, steps: 8, star: 1 });
   });
 });
 
@@ -240,6 +253,8 @@ describe("Code review's offer (approval \"code-review-offer-card\": show up abou
       ["board", 4],
       [LIST_VIEW, 5],
       ["steps", 6],
+      // The star ask (aside) waits for the first day the line leaves free, and moves no one.
+      ["star", 7],
     ]);
     // The first load of day 0 shows it: about immediately.
     expect(shown[0]!.at).toEqual(at(0, HEAVY.loads(0)[0]!));
@@ -273,6 +288,9 @@ describe("30 days of a light user", () => {
     const got = days(shown);
     expect(got.agent_note).toBe(0);
     expect(got.snooze).toBe(7);
+    // The star ask on day 4: their first load with the line free (day 2's load comes right after the agent note's),
+    // beside Snooze waiting for its moment, and Snooze's day unmoved.
+    expect(got.star).toBe(4);
     expect(got.steps).toBeGreaterThanOrEqual(20);
     for (const never of [BRO, "board", LIST_VIEW]) expect(got[never]).toBeUndefined();
     expectOnePerDay(shown);
@@ -294,6 +312,7 @@ describe("an update day", () => {
       ["voice", 3],
       [BRO, 4],
       [LIST_VIEW, 5],
+      ["star", 6],
     ]);
     expectOnePerDay(shown);
   });

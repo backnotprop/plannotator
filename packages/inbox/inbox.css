@@ -8242,6 +8242,38 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rvctx .ib-rvctx-link { margin-left: 8px; }
 .ib-rvctx-link { color: var(--foreground); text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
 .ib-rvctx-link:hover { text-decoration-color: currentColor; }
+/* New review: rows above To, in the New message dialog. */
+[data-review-box] .ib-cp-to .ib-cp-tol, [data-review-box] .ib-cp-thread .ib-cp-tol { min-width: 84px; }
+.ib-cp-rvrow { align-items: center; }
+.ib-cp-choices { display: inline-flex; gap: 2px; padding: 3px; border-radius: 9px; background: var(--ib-lane-bg, var(--muted)); min-width: 0; }
+.ib-cp-choice { position: relative; display: inline-flex; align-items: center; height: 28px; padding: 0 11px; border-radius: 7px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); white-space: nowrap; cursor: pointer; }
+.ib-cp-choice input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.ib-cp-choice:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-cp-choice:hover { color: var(--foreground); }
+.ib-cp-choice[data-on] { color: var(--foreground); font-weight: 600; background: var(--background); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+.ib-cp-rvsize { margin-left: auto; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); white-space: nowrap; }
+.ib-cp-rvsize b { font-weight: 500; }
+.ib-cp-rvfrompull { color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-cp-picker.ib-cp-rvpulls:not([data-phone]) { top: calc(100% + 4px); left: 110px; width: min(600px, calc(100% - 124px)); }
+.ib-cp-rvpulls .ib-cp-list { display: block; }
+.ib-cp-rvopt { display: flex; gap: 8px; }
+.ib-cp-rvrow .ib-cp-tobtn .ib-cp-tod { flex: none; }
+/* A long PR title is cut with an ellipsis, so the ▾ stays in the button (a phone's row is the screen's width). */
+.ib-cp-rvrow [data-review-pick] b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-cp-rvlabel { flex: none; color: var(--muted-foreground); }
+.ib-cp-rvopt .ib-cp-op { flex: 1; }
+.ib-cp-rvwhere { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-cp[data-phone] .ib-cp-rvrow { flex-wrap: wrap; row-gap: 4px; }
+.ib-cp[data-phone] .ib-cp-choices { flex: 0 1 auto; }
+.ib-cp[data-phone] .ib-cp-choice { justify-content: center; min-height: 44px; padding: 0 11px; }
+.ib-cp[data-phone] .ib-cp-rvsize { flex: 0 0 100%; margin-left: 0; text-align: right; }
+.ib-cp[data-phone] .ib-cp-rvrow .ib-cp-tol { flex: 0 0 100%; }
+.ib-cp[data-phone][data-review-box] .ib-cp-to .ib-cp-tol { min-width: 64px; }
+.ib-rvasked { margin: 0 0 6px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-rvcurating { margin: 14px 0 0 34px; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-rvcurating { margin-left: 0; }
+}
 .ib-rvfrom { margin: -6px 0 14px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
 .pn-inbox .ib-rvc-link { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
 .pn-inbox .ib-rvc-link:hover { color: var(--foreground); }
@@ -8300,29 +8332,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-pr-thread[data-pulls-thread-line="ended"] .ib-pr-thread-h b { color: var(--foreground); }
 .ib-pr-thread[data-pulls-thread-line="ended"] .ib-atile { opacity: 0.55; }
 .ib-pr-thread-p { margin: 6px 0 0 28px; max-width: 68ch; font-size: var(--ib-fs-14, 14px); line-height: 1.5; color: var(--muted-foreground); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-/* "Review with an agent": inline under the actions (nothing covers the page). The ask, then one list of agents (a
-   radio each, the picked one tinted as an on button is), then Start review thread. */
-.ib-pr-pick { display: grid; gap: 12px; max-width: 520px; margin-top: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
-.ib-pr-pick-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
-.ib-pr-pick-lab { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
-.pn-inbox .ib-pr-askin { width: 100%; height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); }
-.pn-inbox .ib-pr-askin:focus-visible { outline: 2px solid color-mix(in oklch, var(--ring) 25%, transparent); border-color: var(--ring); }
-.ib-pr-pick-list { display: grid; gap: 2px; }
-.ib-pr-pick-sub { padding: 2px 2px 4px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
-.ib-pr-pick-none { padding: 4px 2px; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
-.pn-inbox .ib-pr-opt { position: relative; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 6px 10px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; }
-.pn-inbox .ib-pr-opt input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: inherit; }
-.pn-inbox .ib-pr-opt:hover { background: var(--ib-hover-s, var(--muted)); }
-.pn-inbox .ib-pr-opt[data-on] { border-color: color-mix(in oklab, var(--primary) 45%, transparent); background: color-mix(in oklab, var(--primary) 8%, var(--card)); }
-.pn-inbox .ib-pr-opt:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
-.pn-inbox .ib-pr-opt:has(input:disabled) { cursor: default; opacity: 0.7; }
-.ib-pr-opt > :not(.ib-pr-opt-t):not(input) { flex: none; }
-.ib-pr-opt-t { display: grid; flex: 1; min-width: 0; line-height: 1.3; }
-.ib-pr-opt-t b { font-size: var(--ib-fs-14, 14px); font-weight: 600; }
-.ib-pr-opt-s { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
-.ib-pr-opt-k { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
-.ib-pr-opt-plus { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 6px; border: 1px dashed var(--border); color: var(--muted-foreground); }
-.ib-pr-pick-go { display: flex; flex-wrap: wrap; gap: 8px; }
 .ib-pr-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; }
 .pn-inbox .ib-pr-actions .ib-btn { height: 36px; padding: 0 15px; font-size: var(--ib-fs-14, 14px); }
 .ib-pr-note { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }

@@ -9,7 +9,7 @@ export type ChangeIs = 'added' | 'changed' | 'removed';
 
 export type ChangeMarks = {
   /** Part id to its mark: what the change did, its number in the change (1 up), and its line counts ("frame.ts · +532"). */
-  parts: Record<string, { is: ChangeIs; n: number; lines: string | null }>;
+  parts: Record<string, { is: ChangeIs; n: number; lines: string | null; /** The open PRs that touch it, every one, when several are drawn at rest. */ who?: string[] }>;
   /** Line id to what the change did to it. */
   flows: Record<string, ChangeIs>;
   /** A flow or algorithm sheet's hop or step, by its layout id (`<sheet>.<hop>`): added or changed by the change. */

@@ -486,6 +486,24 @@ export interface PlannotatorConfig {
    */
   inboxSteps?: boolean;
   /**
+   * The "Star the repo" ask (approval "star-ask", 2026-11-06), once across
+   * every surface (packages/shared/star-ask.ts reads and writes it, nothing
+   * else does). `shownAt`: a surface showed it, so none shows it again.
+   * `answer`: `starred` (gh starred it on the click), `opened` (the GitHub
+   * page opened), `not-now`, or `already` (starred before it showed: nothing
+   * showed). `surface`: where. `canStar`: the button starred with gh.
+   * `checkedAt`: the already-starred check ran (a done-screen page at load)
+   * and the ask is still open; later loads reuse it without gh.
+   */
+  starAsk?: {
+    checkedAt?: string;
+    shownAt?: string;
+    answer?: "starred" | "opened" | "not-now" | "already";
+    answeredAt?: string;
+    surface?: "inbox" | "plan" | "review" | "annotate";
+    canStar?: boolean;
+  };
+  /**
    * Code review in the Inbox (approval "inbox-code-review-direction",
    * 2026-11-03): something the person turns on, off by default. On: the
    * review skills in the reply box's "/" list, the review card and its
@@ -543,6 +561,8 @@ export interface PlannotatorConfig {
     code_review?: { shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
+    /** The "Star the repo" ask's claim in the line (config.json `starAsk` is its record across surfaces). */
+    star?: { shownAt?: string; key?: string };
     list_view?: { shownAt?: string; key?: string };
   };
   inboxSound?: {

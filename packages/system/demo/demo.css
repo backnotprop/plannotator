@@ -17,3 +17,6 @@ body { background: var(--background); color: var(--foreground); font-family: var
 .demo-card-head .demo-dim { color: var(--muted-foreground); }
 .demo-card-head .demo-open { margin-left: auto; height: 28px; padding: 0 12px; border-radius: var(--ib-r8-s, 6px); background: var(--primary); color: var(--primary-foreground); border: 0; font: inherit; font-weight: 500; }
 .demo-error { padding: 24px; font-family: var(--font-mono); white-space: pre-wrap; }
+/* the host's "‹ Reviews" control in the bar's leading slot (the Inbox's quiet text button) */
+.demo-back { height: 28px; padding: 0 8px; margin-left: -8px; border: 0; border-radius: var(--ib-r8-s, 6px); background: none; font: inherit; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
+.demo-back:hover { background: var(--ib-fill, var(--muted)); color: var(--foreground); }

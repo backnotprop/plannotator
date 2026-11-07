@@ -213,8 +213,7 @@ function drawReviews(system: Partial<PullsSystem> | null, over: Partial<PullsPag
     onReview: () => {},
     onOpenThread: () => {},
     onNew: () => {},
-    onLaunch: () => {},
-    onStarted: () => {},
+    onNewReview: () => {},
     system: system
       ? { projects: [APP, NEW], open: null, sheet: null, full: false, onOpen: (p) => opened.push(p), onSheet: () => {}, onFull: () => {}, onMenu: () => {}, ...system }
       : null,
