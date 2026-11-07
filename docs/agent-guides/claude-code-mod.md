@@ -606,6 +606,52 @@ Edit/Write while a plan is in review after the user leaves plan mode), the
 is always sent (`$.prompt.submit` waits for idle; draft text in the composer
 is left alone).
 
+**The skip-rm-prompts variable (`skip-rm-prompts.ts`).** Claude Code's
+`CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS` waives, in bypass
+permissions mode, the prompts for removals it cannot prove safe
+(`rm -rf logs/*/*`), but only while no PermissionRequest hook is installed, so
+the plugin's ExitPlanMode hook (and the mod's own) turned it off for every
+session. The plan hook stays; the mod gives the person's setting back instead:
+a `tool.check` hook on Bash only watches each call's verdict, and a
+`classic.PermissionRequest` hook matched on Bash answers the prompt `allow`
+when all of these hold: the variable is on (`1`/`true`/`yes`/`on`), the
+session is not nested (`CLAUDE_CODE_CHILD_SESSION`), the call's loop (main or
+subagent, from the prompt's `permission_mode`) is in bypass mode, the call's
+verdict (kept 5 seconds, read once, by loop and command) is the removal
+check's ask alone (its message `Dangerous <cmd> operation…` or `This command
+passes a shell -c script that runs rm…`, and no `rule`, `hook`, `setting` or
+`plugin` on it, so any PreToolUse hook that asked, and any plugin beneath the
+mod that made or joined the ask, keeps its prompt), `$.settings.read()`
+(every source, managed included) holds no ask/deny rule on Bash, PowerShell,
+Monitor or `rm`, no `blockReadsOutsideWorkingDirectories`, and no PreToolUse
+or PermissionRequest hook whose matcher could select Bash (absent, `*`, a
+regex matching `Bash`, or one that does not compile), and no enabled plugin
+holds such a hook either. The mod answers without the hooks beneath it, so it
+reads every plugin the settings' `enabledPlugins` turn on (anything but
+`false`) from Claude Code's registry
+(`<CLAUDE_CONFIG_DIR or ~/.claude>/plugins/installed_plugins.json`, every
+record's `installPath`): its `hooks/hooks.json` and the `hooks` of its
+`.claude-plugin/plugin.json` (inline, or the files it names). Plannotator's
+own hooks are on EnterPlanMode and ExitPlanMode and never count. Anything
+else, or anything unreadable (a registry or hooks file that does not parse, an
+enabled plugin not in the registry, a hooks file the manifest names that is
+not there), steps aside and the dialog shows as before. Without the variable
+nothing changes, and the debug log gets no line for Bash asks. Plannotator
+judges no removal itself. Not covered: `-p`/SDK runs and a mod turned off (the
+mod is inert there); hooks the mod cannot see: those in an agent's or skill's
+frontmatter (Claude Code keeps them in the session's hooks registry, which no
+mod API reads), plugins loaded with `--plugin-dir` or from a session-only
+source rather than the registry, and another plugin's hooks module with a
+`classic.PermissionRequest` hook beneath the mod (the mod sees what such a
+plugin put on the call's verdict, not what it would answer at the prompt); the waiver's own timing conditions, which Claude Code
+checks and the mod cannot: managed settings sources still loading or failed
+to load, settings changes not yet applied, hook registration still in flight;
+Bash ask/deny rules given as CLI flags (`--disallowedTools` and the like, not
+in `$.settings.read()`); and the Monitor and PowerShell tools. Under a guard
+that sends `classic.*` past the mod (`cc-plugin-sec-default`) the hook never
+runs and the prompt stays. Tests: `skip-rm-prompts.test.ts` (through the real
+hooks, with plugin registries and hooks files in temp folders).
+
 **Plan review off (`PLANNOTATOR_PLAN_REVIEW=0` / `{ "planReview": false }`,
 Claude Code only, #2299).** Read at the first `session.start` like the other
 switches: the `tool.call` and `classic.PermissionRequest` hooks on
