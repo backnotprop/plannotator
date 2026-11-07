@@ -194,6 +194,8 @@ function writeForge(dir: string) {
     'if [ "$1" = api ] && [ "$2" = --hostname ]; then',
     '  echo "gh diff $4" >> "$calls"',
     '  f="$dir/gh-$(name "$4").patch"',
+    // GitHub reads an owner or repository in any case (`Northwind/Payments` is `northwind/payments`); a case-sensitive disk does not.
+    '  [ -f "$f" ] || f="$dir/gh-$(name "$4" | tr A-Z a-z).patch"',
     '  if [ -f "$f" ]; then cat "$f"; exit 0; fi',
     '  echo "HTTP 404: Not Found" >&2; exit 1',
     'fi',
