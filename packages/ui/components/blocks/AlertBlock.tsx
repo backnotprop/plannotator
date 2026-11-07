@@ -1,6 +1,7 @@
 import React from 'react';
 import type { AlertKind } from '../../types';
 import { renderProseBody } from './proseBody';
+import { CalloutBlocks, calloutNeedsBlocks, parseQuoteBody, useAtQuoteDepthCap } from './BlockquoteBlock';
 import { InlineMarkdown } from '../InlineMarkdown';
 import { parseAlertTitleLine } from '../../utils/alertTitle';
 
@@ -71,6 +72,17 @@ export const AlertBlock: React.FC<AlertBlockProps> = ({
   // takes the icon slot. See utils/alertTitle for the exact grammar. A body
   // with no such line renders exactly as before.
   const titleLine = parseAlertTitleLine(body);
+  const bodyText = titleLine ? titleLine.rest : body;
+  // A callout nests through the quote layout, so it stops where quotes stop:
+  // past the cap its body renders as prose text, inner markers included.
+  const atCap = useAtQuoteDepthCap();
+  const inner = React.useMemo(() => (atCap ? [] : parseQuoteBody(bodyText)), [atCap, bodyText]);
+  // Paragraphs and lists render as they always have; a fence, a table, a heading
+  // or a nested quote needs the block layout a plain quote gets.
+  const renderBody = () =>
+    calloutNeedsBlocks(inner)
+      ? <CalloutBlocks inner={inner} className="text-[15px] leading-relaxed text-foreground/90" {...proseProps} />
+      : renderProseBody({ body: bodyText, ...proseProps });
   // The emoji wins outright: the host renderer is consulted only for a title
   // line that carries an icon comment and no emoji (the seam contract).
   const icon = titleLine?.emoji
@@ -109,9 +121,9 @@ export const AlertBlock: React.FC<AlertBlockProps> = ({
         ? (titleLine.rest.trim()
             // Indent the body by the icon's width plus the row gap so it starts
             // at the title's left edge (16px icon + 8px gap = pl-6).
-            ? <div className="alert-body pl-6">{renderProseBody({ body: titleLine.rest, ...proseProps })}</div>
+            ? <div className="alert-body pl-6">{renderBody()}</div>
             : null)
-        : renderProseBody({ body, ...proseProps })}
+        : renderBody()}
     </div>
   );
 };
