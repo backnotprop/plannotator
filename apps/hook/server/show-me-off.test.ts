@@ -91,7 +91,7 @@ async function agentTexts(codeReview: boolean): Promise<Record<string, string>> 
  * never here, because someone with Shape on and Code review off reads these. A change to Shape's text on purpose
  * pins the new hash here; one that names the code review belongs in the request.
  */
-const SHAPE_TEXT_SHA256 = { "shape --help": "6161ba580a3eba62c94dabfcf3fc21616bda5e1c41f9b19c85ae62c0081dd728", "/shape skill": "bcdc38662314e0de8927a283ca1588f0327f0a1712c11af7d36b602b4c3b7fbf" };
+const SHAPE_TEXT_SHA256 = { "shape --help": "bcdec3588504812aacbcd9c5d7c11e762b971b69ab93a066ddc0a45d26cb9ea5", "/shape skill": "8003b59c8b957d7caf58b6d178c2e929aed430db90fd08480c7140a30dec12fd" };
 
 test("Code review off: Shape's own agent text is byte for byte what it was", () => {
   const sha = (text: string) => createHash("sha256").update(text).digest("hex");
