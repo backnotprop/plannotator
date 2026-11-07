@@ -27,6 +27,7 @@ import { startReviewServer as startBunReviewServer } from "./review";
 import { startReviewServer as startPiReviewServer } from "../../apps/pi-extension/server";
 import { getVcsContext, runVcsDiff } from "./vcs";
 import { MAX_REPO_FILE_BYTES } from "@plannotator/shared/repo-files";
+import { useScratchJjConfig } from "../../tests/helpers/jj-scratch-config";
 
 const MINIMAL_HTML = "<html><body>Plannotator</body></html>";
 
@@ -510,11 +511,12 @@ for (const [runtime, startServer] of [
 // provider code both runtimes vendor), so one runtime is enough here.
 describe("All files in a jj workspace", () => {
   const hasJj = Bun.which("jj") !== null;
+  const jjConfig = useScratchJjConfig();
   test.skipIf(!hasJj)("jj-current lists @, jj-last lists @-", async () => {
     const { listVcsFiles } = await import("./vcs");
     const repo = makeTempDir("plannotator-repo-files-jj-");
     const jj = (args: string[]) => {
-      const result = spawnSync("jj", args, { cwd: repo, encoding: "utf-8", env: { ...process.env, JJ_CONFIG: "" } });
+      const result = spawnSync("jj", args, { cwd: repo, encoding: "utf-8", env: jjConfig.env({ JJ_CONFIG: "" }) });
       if (result.status !== 0) throw new Error(result.stderr);
       return result.stdout;
     };
