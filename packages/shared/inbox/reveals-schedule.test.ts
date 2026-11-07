@@ -19,6 +19,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import {
+  CODE_REVIEW_OFFER,
   INBOX_REVEALS,
   REVEAL_RETIRE_MS,
   REVEAL_LOADS_KEPT,
@@ -50,10 +51,11 @@ const at = (day: number, hour: number) => new Date(2026, 10, 2 + day, hour, 0, 0
 const BRO = "bro" as RevealId;
 const LIST_VIEW = "list_view" as RevealId;
 /** The queue with Bro mode and List view registered at their places, as #2693 and #2716 add them. */
+const AFTER_SNOOZE = INBOX_REVEALS.findIndex((entry) => entry.id === "snooze") + 1;
 const TABLE: readonly RevealEntry[] = [
-  ...INBOX_REVEALS.slice(0, 4),
+  ...INBOX_REVEALS.slice(0, AFTER_SNOOZE),
   { id: BRO, kind: "offer", tenureMs: 2 * DAY, minThreads: 0, heavyUse: true, enabled: true },
-  ...INBOX_REVEALS.slice(4),
+  ...INBOX_REVEALS.slice(AFTER_SNOOZE),
   { id: LIST_VIEW, kind: "offer", tenureMs: 2 * DAY, minThreads: 15, ahead: true, enabled: true },
 ];
 
@@ -76,6 +78,8 @@ interface User {
   moment: (id: RevealId, day: number) => boolean;
   /** The dialogs this person closes with Not now. */
   notNow?: readonly RevealId[];
+  /** Code review was never decided (config.json `inboxCodeReview` unset) and is no longer held: its offer is open. */
+  codeReviewOff?: boolean;
 }
 
 interface Shown {
@@ -109,7 +113,9 @@ function simulate(user: User, days = 30): Shown[] {
         afterShowLoad: revealAfterShowLoad(saved.shownLoad, loads, load),
         heavy: revealHeavyUse(reads, now),
         threads: user.threads(day),
-        open: Object.fromEntries(TABLE.map((entry) => [entry.id, !done.has(entry.id) && (entry.kind === "offer" || user.update)])),
+        open: Object.fromEntries(
+          TABLE.map((entry) => [entry.id, !done.has(entry.id) && (entry.id === CODE_REVIEW_OFFER.id ? user.codeReviewOff === true : entry.kind === "offer" || user.update)]),
+        ),
         waitingSince: saved.waitingSince,
       });
       const show = (id: Dialog, spaced: boolean) => {
@@ -126,6 +132,12 @@ function simulate(user: User, days = 30): Shown[] {
       if (next && !saved.waitingSince?.[next]) saved = { ...saved, waitingSince: { ...saved.waitingSince, [next]: now.toISOString() } };
       if (next === "sound") {
         show("sound", true);
+        continue;
+      }
+      // Code review's day-0 offer: at once, once the tour screen is gone and before the agent note, which waits for it
+      // (codeReviewOffer.ts `settled`).
+      if (next === CODE_REVIEW_OFFER.id && revealMayClaim(next, state(), now, TABLE)) {
+        show(next, true);
         continue;
       }
       if (!done.has("agent_note") && revealLineFree("setup", state(), now)) {
@@ -211,6 +223,44 @@ describe("30 days of a heavy user", () => {
   test("a Not now on Bro mode: the next offer waits three days, not one", () => {
     const shown = simulate({ ...HEAVY, notNow: [BRO] });
     expect(days(shown)).toEqual({ agent_note: 0, snooze: 2, [BRO]: 3, [LIST_VIEW]: 6, board: 7, steps: 8 });
+  });
+});
+
+describe("Code review's offer (approval \"code-review-offer-card\": show up about immediately)", () => {
+  test("a new user with Code review off: the offer on day 0, before the agent note, which takes day 1; the offers keep their days", () => {
+    const shown = simulate({ ...HEAVY, codeReviewOff: true });
+    expect(shown.map((s) => [s.id, s.day])).toEqual([
+      ["code_review", 0],
+      ["agent_note", 1],
+      ["snooze", 2],
+      [BRO, 3],
+      ["board", 4],
+      [LIST_VIEW, 5],
+      ["steps", 6],
+    ]);
+    // The first load of day 0 shows it: about immediately.
+    expect(shown[0]!.at).toEqual(at(0, HEAVY.loads(0)[0]!));
+    expectOnePerDay(shown);
+  });
+
+  test("Not now on it is final, and the next offer waits three days", () => {
+    const shown = simulate({ ...HEAVY, codeReviewOff: true, notNow: ["code_review"] });
+    expect(shown.filter((s) => s.id === "code_review")).toHaveLength(1);
+    expect(days(shown)).toMatchObject({ code_review: 0, agent_note: 1, snooze: 3 });
+  });
+
+  test("an update day with Code review off: the offer first, then the update-day dialogs one a day", () => {
+    const shown = simulate({ ...UPGRADER, codeReviewOff: true });
+    expect(shown.slice(0, 3).map((s) => [s.id, s.day])).toEqual([
+      ["code_review", 0],
+      ["sound", 1],
+      ["agent_note", 2],
+    ]);
+    expectOnePerDay(shown);
+  });
+
+  test("Code review decided (on, or switched off by the person) or held: never offered", () => {
+    expect(simulate(HEAVY).some((s) => s.id === "code_review")).toBe(false);
   });
 });
 
@@ -317,6 +367,19 @@ describe("the line's rules", () => {
   test("an update-day dialog needs no tenure and no first use; an offer needs both", () => {
     expect(revealNext(base({ firstUseAt: null, open: { sound: true, snooze: true } }), NOW)).toBe("sound");
     expect(revealNext(base({ firstUseAt: null, open: { snooze: true } }), NOW)).toBeNull();
+  });
+
+  test("Code review's offer is next on day 0, with first use not known yet, ahead of the sound; its Not now is an offer's", () => {
+    const fresh = base({ firstUseAt: null, threads: 0, open: { code_review: true, sound: true, snooze: true } });
+    expect(revealNext(fresh, at(0, 9))).toBe("code_review");
+    expect(revealMayClaim("code_review", fresh, at(0, 9))).toBe(true);
+    // Shown: the agent note waits for the next day; the sound for the next day too.
+    const after = base({ ...fresh, lastShownAt: at(0, 9).toISOString(), dayShownAt: at(0, 9).toISOString(), open: { sound: true } });
+    expect(revealLineFree("setup", after, at(0, 20))).toBe(false);
+    expect(revealNext(after, at(1, 9))).toBe("sound");
+    expect(revealNotNowAllowed("code_review")).toBe(true);
+    // Not open (decided, or held back): nothing on day 0.
+    expect(revealNext(base({ firstUseAt: null, threads: 0, open: { snooze: true } }), at(0, 9))).toBeNull();
   });
 
   test("heavy use: 10 threads read in 7 days, on 2 days or more; reads older than 7 days do not count", () => {
