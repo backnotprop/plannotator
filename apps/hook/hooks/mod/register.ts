@@ -86,7 +86,7 @@
 
 import { PlannotatorMod } from './controller'
 import { resolveAgentToolEnabled, resolveClaudeModEnabled, resolveInboxReminderCustom, resolveInboxReminderEnabled, resolveInboxToolEnabled, resolvePlanReviewEnabled } from './enabled'
-import type { Host, LoadedPluginInfo } from './host'
+import { submitOrThrow, type Host, type LoadedPluginInfo } from './host'
 import {
   claudeTranscriptPaths,
   conversationResumed,
@@ -111,6 +111,7 @@ import { inboxAgentTool, inboxReminderFor, type InboxToolInfo } from './inbox-co
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
 import { COMMANDS, debugAppendArgv, INBOX_COMMAND, isModCommand, resolveDataDir, waitArgv } from './launch'
 import { PLAN_TOOL } from './plan'
+import { disposesOnSessionEnd, healAction, MOD_HEAL_EVERY_MS } from './self-heal'
 import { answerRemovalPrompt, isEnvOn, removalAskKey, RemovalAsks } from './skip-rm-prompts'
 import { answerShellCall, SHELL_TOOL, shellTakeOver } from './take-over'
 import { PLANNOTATOR_TOOL_NAME, PLANNOTATOR_TOOL_TAILSCALE_DESCRIPTION, PLANNOTATOR_TOOL_TAILSCALE_INPUT_SCHEMA } from './tool'
@@ -199,9 +200,8 @@ function hostOf($: Engine, debugPath: string | null): Host {
     },
     storeGet: (key) => $.store.get(key),
     storeSet: (key, value) => $.store.set(key, value),
-    submit: async (text) => {
-      await $.prompt.submit({ text })
-    },
+    // The engine resolves `{ drop }` for a prompt it refused (Host.submit): that rejects, never reads as a turn.
+    submit: (text) => submitOrThrow(() => $.prompt.submit({ text })),
     // Called only where `sessionAppendAvailable` said the engine has it; a refusal stops Send now here (inbox.ts).
     appendUserRow: async (text) => {
       const stored = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
@@ -300,6 +300,17 @@ let mod: PlannotatorMod | null = null
 /** Recent Bash calls' verdicts, read at their permission prompt (skip-rm-prompts.ts). */
 const removalAsks = new RemovalAsks()
 let switching: Promise<PlannotatorMod | null> | null = null
+/**
+ * The self-heal's timer (self-heal.ts), started at the first session.start the
+ * mod runs in, and when it last fired (or was armed): the engine ends an
+ * interval at a refused period, so a turn's end arms it again once it has been
+ * silent for two periods (`startSelfHeal`).
+ */
+let healTimer: { cancel?: () => void } | null = null
+let healFiredAt = 0
+let healing = false
+/** When this session's own `session.end` disposed the instance; null: it did not. */
+let endedAt: number | null = null
 
 /**
  * The reminder is on in this process: the switch, an Inbox that has run here,
@@ -512,7 +523,7 @@ function sessionTitleOf($: Engine, host: Host, sessionId: string): TranscriptTit
  * (restoring that session's open reviews) when it changed. The old one was
  * disposed at `session.end`, so its decisions never land in another session.
  */
-async function currentMod($: Engine): Promise<PlannotatorMod | null> {
+async function currentMod($: Engine, options: { healed?: boolean } = {}): Promise<PlannotatorMod | null> {
   const settings = allowed
   if (!settings) return null
   const sessionId = await $.session.id()
@@ -537,6 +548,7 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
       root: async () => String(await $.session.root()),
       label: async () => (await title.read().catch(() => null)) ?? sessionNameOf($, String(sessionId)),
       ...(inboxTools ? { inboxTools } : {}),
+      ...(options.healed ? { healed: true } : {}),
     })
     // A question queued behind the old session's turn still enters as a turn of the new one: the new instance drops it.
     instance.carryQueued(previous)
@@ -552,6 +564,50 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
   } finally {
     switching = null
   }
+}
+
+/**
+ * The self-heal (self-heal.ts): every MOD_HEAL_EVERY_MS while the mod runs
+ * here, rebuild an instance that is gone or disposed (a quiet one: no touch),
+ * else re-arm its Inbox tick if that stopped. One timer per process: called
+ * again, it arms a new one only when the last has not fired for two periods
+ * (the engine ended it), cancelling that one first.
+ */
+async function startSelfHeal($: Engine): Promise<void> {
+  const armedAt = await $.clock.now()
+  // No await from here to the arm: two callers never both arm.
+  if (healTimer && armedAt - healFiredAt < 2 * MOD_HEAL_EVERY_MS) return
+  if (healTimer) {
+    healTimer.cancel?.()
+    if (allowed?.debugPath) hostOf($, allowed.debugPath).debug('self-heal: its timer had stopped firing; armed again')
+  }
+  healTimer = null
+  healFiredAt = armedAt
+  healTimer = $.clock.every(MOD_HEAL_EVERY_MS, () => {
+    void Promise.resolve($.clock.now()).then(
+      (now) => {
+        healFiredAt = Math.max(healFiredAt, Number(now))
+      },
+      () => undefined,
+    )
+    if (healing || !allowed) return
+    healing = true
+    void (async () => {
+      const action = healAction(mod, endedAt, await $.clock.now())
+      if (action === 'wait') return
+      // Live and still this session's: only its tick is looked at. A session id that moved with no hook is rebuilt.
+      if (action === 'check' && mod && mod.session.sessionId === (await $.session.id())) return await mod.inbox?.ensureTicking()
+      const previous = mod
+      const instance = await currentMod($, { healed: true })
+      if (instance && instance !== previous && allowed?.debugPath) {
+        hostOf($, allowed.debugPath).debug(`self-heal: made the instance for ${instance.session.sessionId} again (${previous ? 'it was disposed' : 'there was none'})`)
+      }
+    })()
+      .catch(() => undefined)
+      .finally(() => {
+        healing = false
+      })
+  })
 }
 
 /** Whether the mod runs here (on unless the user turned it off) and where its data dir is; null: stay inert. */
@@ -684,13 +740,40 @@ export function register(on: On) {
     // Decided once per process, here: the tool list is part of Claude's
     // prompt, so it never changes under a running session.
     if (allowed.agentTool) await registerTool($)
+    // After the commands and the tool, and never holding them: a safety net only (a
+    // refusal leaves no timer, and the next turn's end tries again).
+    void startSelfHeal($).catch(() => undefined)
     return result
   })
 
   on('session.end', async ($: Engine, e: any, next: Next) => {
     // Stop delivering for the session that ended; its open reviews stay in
-    // the store and reattach if it is resumed.
-    mod?.dispose()
+    // the store and reattach if it is resumed. Only this instance's own
+    // session, defensively: an end naming another session or a subagent
+    // (none on 2.1.318, whose session.end names this session) would leave it
+    // disposed with nothing polling the Inbox until the next turn.
+    // Decided from the event first, so the dispose (the lease release, the
+    // hand-off writes) goes out at once, inside the hook's time bound; the
+    // process's own id is asked only when the event names another one.
+    const current = mod && !mod.isDisposed ? mod : null
+    let disposes = disposesOnSessionEnd(current ? current.session : null, e)
+    if (current && !disposes && !e?.agentId && typeof e?.sessionId === 'string') {
+      const processSessionId = await Promise.resolve()
+        .then(() => $.session.id())
+        .then(String, () => '')
+      disposes = disposesOnSessionEnd(current.session, e, processSessionId)
+    }
+    if (current && disposes && !current.isDisposed) {
+      current.dispose()
+      endedAt = await Promise.resolve()
+        .then(() => $.clock.now())
+        .then(Number, () => Date.now())
+    }
+    if (allowed?.debugPath) {
+      hostOf($, allowed.debugPath).debug(
+        `session.end: sessionId ${String(e?.sessionId ?? 'none')}, agentId ${String(e?.agentId ?? 'none')}, reason ${String(e?.reason ?? 'none')}; ${current ? (disposes ? `disposed ${current.session.sessionId}` : `kept ${current.session.sessionId}`) : 'no live instance'}`,
+      )
+    }
     return next(e)
   })
 
@@ -1007,6 +1090,8 @@ export function register(on: On) {
     if (allowed && mod && !mod.isDisposed && !e.agentId && typeof e.turnId === 'string') {
       mod.onTurnComplete(e.turnId, typeof e.answer === 'string' ? e.answer : '', e.isAborted === true)
     }
+    // The session goes idle: a self-heal timer the engine ended is armed again (never a second one).
+    if (allowed && healTimer) void startSelfHeal($).catch(() => undefined)
     return next(e)
   })
 }

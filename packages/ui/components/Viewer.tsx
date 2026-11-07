@@ -419,6 +419,12 @@ export interface ViewerProps {
    */
   textComments?: boolean;
   /**
+   * Opt-in, with `textComments`: the comment-only selection toolbar also
+   * offers Delete (a DELETION on the words selected, as everywhere else).
+   * The label picker stays off. Absent → unchanged.
+   */
+  textDeletions?: boolean;
+  /**
    * Opt-in: words a text-selection comment box opens with, for the selected
    * text (a host's suggested comment, kept with one press or written over).
    * Returning undefined opens an empty box. Absent → unchanged.
@@ -867,6 +873,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   answerOnly = false,
   htmlEmbeds,
   textComments = false,
+  textDeletions = false,
   suggestComment,
   vimModeEnabled = false,
   vimHudEnabled = false,
@@ -2047,6 +2054,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               element={toolbarState.element}
               positionMode="center-above"
               commentOnly={textCommentsOnly || undefined}
+              showDelete={textCommentsOnly && textDeletions ? true : undefined}
               onAnnotate={handleAnnotate}
               onClose={handleToolbarClose}
               onRequestComment={handleRequestComment}

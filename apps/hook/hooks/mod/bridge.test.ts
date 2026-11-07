@@ -5,7 +5,10 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createPullSessionBridge, type PullSessionBridge } from '../../../../packages/ai/session-bridge-pull.ts'
-import { createBridge, OTHER_PLUGIN_INTERRUPT_TEXT, SESSION_GONE_INTERRUPT_TEXT, TAKEN_OVER_INTERRUPT_TEXT, takenOverFallback } from './bridge'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { createBridge, OTHER_PLUGIN_INTERRUPT_TEXT, SESSION_COULD_NOT_ANSWER_TEXT, SESSION_GONE_INTERRUPT_TEXT, TAKEN_OVER_INTERRUPT_TEXT, takenOverFallback } from './bridge'
+import { submitOrThrow } from './host'
 import { fakeHost, type FakeHost } from './testing/fake-host'
 import { TAKEN_OVER_BY_PERSON_TEXT, TurnTracker } from './turns'
 
@@ -97,6 +100,49 @@ describe('Ask this session over the pull bridge', () => {
     live = false
     server.dispose()
     await running
+  })
+
+  // Review of #2780: Claude Code resolves `{ drop }` for a prompt it refuses (after a Stop, until someone types).
+  // Read as taken, the question waited for a turn that never came; it ends `failed`, with words even for an empty reason.
+  for (const [reason, shown] of [
+    ['the session was stopped and nobody has sent input since', 'the session was stopped and nobody has sent input since'],
+    ['  ', SESSION_COULD_NOT_ANSWER_TEXT],
+  ] as const) {
+    test(`a question whose prompt Claude Code drops ends failed, not waiting (${JSON.stringify(reason)})`, async () => {
+      live = true
+      server = createPullSessionBridge({ token: TOKEN, host: 'claude-code', modes: { turn: true, transient: false } })
+      const host = fakeHost()
+      wire(host, server)
+      host.submit = (text) =>
+        submitOrThrow(async () => {
+          host.submits.push(text)
+          return { drop: reason }
+        })
+      const turns = new TurnTracker()
+      const client = createBridge({ host, baseUrl: 'http://127.0.0.1:4321', token: TOKEN, turns, isLive: () => live })
+      const running = client.run()
+
+      await until(() => server!.bridge.status() === 'ready')
+      const { seen, sink } = collector()
+      server.bridge.ask({ askId: 'ask-1', text: '[Plannotator Ask AI] Why step 2?', mode: 'turn' }, sink, new AbortController().signal)
+
+      await until(() => seen.error !== null)
+      expect(host.submits).toHaveLength(1)
+      expect(seen.error).toBe('failed')
+      expect(seen.message).toBe(shown)
+      expect(seen.done).toBeNull()
+      // Nothing waits in the engine for it: no later turn is taken as its answer.
+      expect(turns.queuedPrompts()).toEqual([])
+
+      live = false
+      server.dispose()
+      await running
+    })
+  }
+
+  test("the empty-reason words are the server's own fallback for a failed question", () => {
+    const source = readFileSync(join(import.meta.dir, '../../../../packages/ai/session-bridge.ts'), 'utf8')
+    expect(source).toContain(`message || ${JSON.stringify(SESSION_COULD_NOT_ANSWER_TEXT)}`)
   })
 
   test('Claude mid-turn reads as busy, and an interrupt aborts the running turn', async () => {

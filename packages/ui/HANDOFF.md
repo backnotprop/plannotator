@@ -680,6 +680,7 @@ Nine additive seams so a host can run the raw-HTML annotation surface with the s
 5. **`AnnotationPanel` `unanchoredIds?: ReadonlySet<string>`** renders a small "Unanchored" chip (`data-annotation-unanchored`) on matching cards. Absent, the DOM is unchanged (pinned by comparing the markup against an explicit empty set).
 
 6. **`HtmlViewer` `scrollBehavior?: 'smooth' | 'auto'`** rides `scroll-to { id, behavior? }` so a host can carry its `prefers-reduced-motion` across the iframe boundary. Absent means smooth, as before; anything else fails closed to smooth.
+   **`HtmlViewer` `scrollClear?: () => HtmlScrollClear | null`** rides the same message as `clear: { left, top, bottom }` (frame pixels of a host panel over the frame's right side): a mark under it scrolls just below it where the page can scroll; absent, null or malformed, it is centred as before.
 
 7. **`HtmlViewer` `maxAdditionalTargets?: number`** (0..16, default 16) is the host's product cap on shift-click targets per comment: enforced at the parent trust boundary, on submit and on restore, and carried on `arm-multi-select { key, max }` so the bridge's toggle stops at the same number for that draft (reset with the arm on every draft; a value above 16 never raises the package cap). Absent leaves the arm message unchanged. A host that adopts the package's 16 needs neither this prop nor a message-counting listener. Consequence for a host that passes a smaller cap: because it is enforced upstream at every step (the bridge stops the toggle, the parent boundary trims on submit and on restore, `projectHostThreads` `maxTargets` trims on read), a composed comment never reaches host code with more targets than the cap, so the host's own cap-dropped handling (`capDroppedTargets` from `buildPersistedHtmlAnchor`, or a counting listener) is unreachable in normal operation. Keep it only as a backstop for rows written by an older host build or another writer; the byte-budget drop (`sizeDroppedTargets`) is a different path and remains reachable.
 
@@ -2770,6 +2771,19 @@ Optional seams, so a host can put its own control beside a file a board or a mes
 
 Two small changes come with them. Shape's diff popout gains a row above the patch when a host passes `fileAction`, which also clears the × from the patch's header. Esc on the board does nothing while a menu is open anywhere on the page, so the menu closes alone. Core's `ShapeRecord.project` is now `ShapeProject`, with an optional `worktree`; the JSON only gains that field, on boards written from a linked worktree.
 
+## Shape: What's changed, and a board without its Code view (unreleased; needs the core with `views.changed`; additive)
+
+A new view and two optional `ShapeSurface` props. A host that passes neither prop, showing boards with no `views.changed`, sees no change.
+
+- Core: `ShapeViewId` gains `'changed'`, and `SHAPE_VIEWS` lists it after `how` ("What's changed"). New types `ShapeChanged`, `ShapeChangeItem`, `ShapeChangeKind`, `ShapeChangeFlow`, `ShapeFlowStep`, `ShapeFlowEnd`, `SHAPE_CHANGE_KINDS`; `ShapeBoard.views.changed?`. `checkShapeBoard`'s "not a view" message now lists `changed`. A host that switches over `ShapeViewId` exhaustively needs a case for it.
+- `ShapeChanged` (exported from `components/shape`): the view on its own (`changed`, `marks`, `review?`, `onCode?`).
+- `ShapeSurfaceProps.codeView?: boolean` (default `true`): `false` drops the Code tab.
+- `ShapeSurfaceProps.review?: ShapeSurfaceReview | null`: `{ label?, files?, additions?, deletions?, steps?, open(at: ShapeReviewAt): boolean | Promise<boolean> }`, with `ShapeReviewAt` `{ path?, line?, step?, files? }`. It adds Guided review, Full review and "Guide step N" to What's changed, and a board's `file:line` asks it first after the Code view; `false` falls back to the file viewer (`host.readFile`). `open` may throw or reject: the board takes that as `false`.
+- `ShapeSurfaceReview.steps?: number`: how many guide steps the review has. Pass it and a change's "Guide step N" past it is not drawn; leave it out and every step link shows, and one `open({ step })` answers false to opens the review at its start (`open({})`).
+- Esc and Tab: put `inert` on an ancestor of the board while something of yours covers it (the Inbox does while the review is open over the board). The board then leaves Esc to you: its panel, bubble or Show more do not take the first press.
+- `shape.css`: the call paths beside the changes are sticky only while they fit in the view (`.shp-chg-flows.fits`, set by `ShapeChanged`).
+- `shape.css` gains the `.shp-chg*` classes only.
+
 ## Shape: What to know (ui 0.62.0; not additive)
 
 Plannotator's board reads first now, and What to know replaces Requirements. A host that changes no code keeps the board's behaviour; what could not be kept is listed below.
@@ -2820,6 +2834,12 @@ New classes: `.shp-title-row`, `.shp-head-side`, `.shp-drawing`, `.shp-finished`
 - **`ShapeGrid` / `ShapeThumb`** (approval `shape-landing-grid`): every board as a card (a scaled Picture, the title, `project · when`, a dot while it changed), newest first; `filterShapeItems` is its title-or-project match and `shapeAgo` its time words. `ShapeThumb` fills the box you give it (give it a height). A drawing's `#…` link scrolls inside the drawing and never changes the page's hash; an https link opens a new tab; any other link does nothing.
 - **`@plannotator/ui/shape.css`**: the board's styles (`shp-` classes, theme variables only, light and dark, reduced motion). Plain CSS: import it next to your theme.
 - **Seams it needed, all opt-in (absent = unchanged):** `CommentPopover` `submitLabel`, `askAILabel`; `CodeFileView` `onAskAnnotation`, `commentSubmitLabel`, `commentAskLabel`.
+
+## Delete on an answer-only document's words: `Viewer` `textDeletions`, `AnnotationToolbar` `showDelete` (unreleased; additive, opt-in, no core change)
+
+- **`Viewer` `textDeletions?: boolean`**, with `textComments` (and `answerOnly`, not `readOnly`): the comment-only selection toolbar also offers Delete, in its usual place before Comment. Delete hands `onAddAnnotation` the same `DELETION` row plan review makes (the words selected as `originalText`, no `text`), drawn struck through. The label picker and the Alt+digit label keys stay off. Without `textComments` it does nothing. The Plannotator Inbox passes it on agent messages (approval `inbox-toolbar-delete`).
+- **`AnnotationToolbar` `showDelete?: boolean`**: shows Delete on a `commentOnly` toolbar. Absent: Delete follows `commentOnly` as before.
+- A host that passes neither sees no change.
 
 ## Shape: dark contrast (unreleased; additive)
 

@@ -111,13 +111,24 @@
     },
     {
       "spec": "inbox-code-review.spec.ts",
-      "title": "the top bar holds what the rail held: chapters, the count, files, Overview, Split | Unified, by mouse and by keyboard",
-      "why": "After Enter on the third chapter in the jump menu, the top bar still reads \"1 of 3\" where \"3 of 3\" is expected (line 735, `expect(await jump.textContent()).toBe(place)`).",
+      "title": "the top bar holds what the rail held: chapters, the count, files, Overview, and the diff controls, by mouse and by keyboard",
+      "why": "After Enter on the third chapter in the jump menu, the top bar still reads \"1 of 3\" where \"3 of 3\" is expected (line 698, `expect(await jump.textContent()).toBe(place)`).",
       "firstSeen": "2026-11-05",
       "evidence": [
         42119502727,
         42122455103,
         42133516139
+      ]
+    },
+    {
+      "spec": "inbox-review-jumps.spec.ts",
+      "title": "a jump to a file nearby lands exactly",
+      "why": "After the first jump, to file 100 from the changed-files menu, the file settles 83 px above the top of the reader instead of 16 px below it (line 228, `expect(await settledPlace(page, body, fixture.paths[100])).toBe(PLACE)`: -83, expected 16).",
+      "firstSeen": "2026-11-06",
+      "evidence": [
+        42255709255,
+        42272056744,
+        42307730886
       ]
     }
   ]
