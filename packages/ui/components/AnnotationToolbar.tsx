@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useSyncExternalStore } from "react";
 import { AnnotationType } from "../types";
 import { createPortal } from "react-dom";
 import { useDismissOnOutsideAndEscape } from "../hooks/useDismissOnOutsideAndEscape";
@@ -10,6 +10,42 @@ import { FloatingQuickLabelPicker } from "./FloatingQuickLabelPicker";
 import { FloatingSelectionActionsPicker } from "./SelectionActionsDropdown";
 import { buildSelectionActionContext, type SelectionAction } from "../utils/selectionActions";
 import { HostTitle } from './HostTitle';
+import { TOUCH_PRIMARY_QUERY } from "../utils/touchSelection";
+import {
+  getTouchSelectionToolbar,
+  placeTouchToolbar,
+  readVisibleViewport,
+  TOUCH_TOOLBAR_SIZE_ESTIMATE,
+  type TouchToolbarPlacement,
+} from "../utils/touchToolbarPlacement";
+
+function subscribeTouchPrimary(onChange: () => void): () => void {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {};
+  const mql = window.matchMedia(TOUCH_PRIMARY_QUERY);
+  mql.addEventListener('change', onChange);
+  return () => mql.removeEventListener('change', onChange);
+}
+
+function isTouchPrimary(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(TOUCH_PRIMARY_QUERY).matches;
+}
+
+/**
+ * Touch placement is on when the host opted in (`touchSelectionToolbar`) and
+ * the main pointer is a finger. The media query is not subscribed at all for
+ * a host that did not opt in.
+ */
+function useTouchToolbar(): boolean {
+  const optedIn = getTouchSelectionToolbar();
+  const touch = useSyncExternalStore(
+    optedIn ? subscribeTouchPrimary : noopSubscribe,
+    optedIn ? isTouchPrimary : alwaysFalse,
+    alwaysFalse,
+  );
+  return optedIn && touch;
+}
+const noopSubscribe = () => () => {};
+const alwaysFalse = () => false;
 
 type PositionMode = 'center-above' | 'top-right';
 
@@ -101,7 +137,8 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   onMouseEnter,
   onMouseLeave,
 }) => {
-  const [position, setPosition] = useState<{ top: number; left?: number; right?: number } | null>(null);
+  const [position, setPosition] = useState<{ top: number; left?: number; right?: number; touch?: TouchToolbarPlacement } | null>(null);
+  const touchToolbar = useTouchToolbar();
   const [copied, setCopied] = useState(false);
   const [richCopied, setRichCopied] = useState<RichCopyOutcome | false>(false);
   const richCopyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -169,6 +206,9 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     }
   };
 
+  const updatePositionRef = useRef<() => void>(() => {});
+  const measuredSizeRef = useRef<{ width: number; height: number } | null>(null);
+
   // Update position on scroll/resize
   useEffect(() => {
     const updatePosition = () => {
@@ -176,6 +216,23 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 
       if (closeOnScrollOut && (rect.bottom < 0 || rect.top > window.innerHeight)) {
         onClose();
+        return;
+      }
+
+      if (touchToolbar) {
+        // Touch screens (host opt-in): below the selection, where iOS's own
+        // edit menu does not go, and kept inside the visible screen.
+        const el = toolbarRef.current;
+        const size = el && el.offsetWidth > 0
+          ? { width: el.offsetWidth, height: el.offsetHeight }
+          : TOUCH_TOOLBAR_SIZE_ESTIMATE;
+        const placed = placeTouchToolbar({
+          anchor: rect,
+          toolbar: size,
+          viewport: readVisibleViewport(),
+          mode: positionMode,
+        });
+        setPosition({ top: placed.top, left: placed.left, touch: placed.placement });
         return;
       }
 
@@ -192,15 +249,38 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       }
     };
 
+    updatePositionRef.current = updatePosition;
+    measuredSizeRef.current = null;
     updatePosition();
     window.addEventListener("scroll", updatePosition, true);
     window.addEventListener("resize", updatePosition);
+    // The visible viewport moves on its own on a phone (pinch zoom, the
+    // keyboard); only the touch placement reads it.
+    const vv = touchToolbar ? window.visualViewport : null;
+    vv?.addEventListener("resize", updatePosition);
+    vv?.addEventListener("scroll", updatePosition);
 
     return () => {
       window.removeEventListener("scroll", updatePosition, true);
       window.removeEventListener("resize", updatePosition);
+      vv?.removeEventListener("resize", updatePosition);
+      vv?.removeEventListener("scroll", updatePosition);
     };
-  }, [element, positionMode, closeOnScrollOut, onClose]);
+  }, [element, positionMode, closeOnScrollOut, onClose, touchToolbar]);
+
+  // Touch placement needs the toolbar's real size to keep it inside the
+  // screen: once it has rendered (and whenever its size changes), place it
+  // again before the browser paints.
+  useLayoutEffect(() => {
+    if (!touchToolbar) return;
+    const el = toolbarRef.current;
+    if (!el || el.offsetWidth === 0) return;
+    const size = { width: el.offsetWidth, height: el.offsetHeight };
+    const last = measuredSizeRef.current;
+    if (last && last.width === size.width && last.height === size.height) return;
+    measuredSizeRef.current = size;
+    updatePositionRef.current();
+  });
 
   // Type-to-comment + Alt+N / bare digit quick label shortcuts
   useEffect(() => {
@@ -265,13 +345,15 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     }
   };
 
-  const isCentered = position.left !== undefined;
+  const isCentered = position.left !== undefined && !position.touch;
   const translateX = isCentered ? ' translateX(-50%)' : '';
 
   const style: React.CSSProperties & { '--pn-annotation-toolbar-anchor-x'?: string } = {
     top: position.top,
     '--pn-annotation-toolbar-anchor-x': isCentered ? `${position.left}px` : undefined,
-    ...(isCentered
+    ...(position.touch
+      ? { left: position.left }
+      : isCentered
       ? { left: position.left, transform: 'translateX(-50%)' }
       : { right: position.right }),
     animation: isExiting
@@ -283,6 +365,9 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     <div
       ref={toolbarRef}
       data-pn-annotation-toolbar-centered={isCentered ? 'true' : undefined}
+      // Touch placement (host opt-in, finger pointer): which side of the
+      // selection it took. theme.css sizes the buttons for a thumb here.
+      data-pn-annotation-toolbar-touch={position.touch}
       className="annotation-toolbar fixed z-[100] bg-popover border border-border rounded-lg shadow-2xl"
       style={style}
       onMouseDown={(e) => e.stopPropagation()}

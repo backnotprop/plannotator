@@ -1040,6 +1040,55 @@ html:has([data-pn-compact-touch-layout='true'])
   ) 0;
 }
 
+/* The selection toolbar on a touch screen, for hosts that opt in
+ * (configurePlannotatorUI({ touchSelectionToolbar: true }); the attribute is
+ * absent otherwise, so these rules are inert for every other host and on a
+ * computer). It reaches the Inbox too, which has no compact-touch marker:
+ * thumb-sized buttons with 20px glyphs, a little air between them, and a row
+ * that wraps rather than run off a narrow screen. AnnotationToolbar places it
+ * from its measured size (utils/touchToolbarPlacement). */
+.annotation-toolbar[data-pn-annotation-toolbar-touch] {
+  max-width: calc(100vw - 16px);
+}
+
+.annotation-toolbar[data-pn-annotation-toolbar-touch] [data-pn-annotation-toolbar-row] {
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.375rem;
+}
+
+.annotation-toolbar[data-pn-annotation-toolbar-touch] [data-pn-touch-target] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: var(--pn-touch-target);
+  min-inline-size: var(--pn-touch-target);
+  touch-action: manipulation;
+}
+
+.annotation-toolbar[data-pn-annotation-toolbar-touch] [data-pn-touch-target] > svg,
+.annotation-toolbar[data-pn-annotation-toolbar-touch] [data-pn-touch-target] > span {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.annotation-toolbar[data-pn-annotation-toolbar-touch] [data-pn-touch-target] > span {
+  font-size: 1.125rem;
+  line-height: 1.25rem;
+}
+
+@media (max-width: 359px) {
+  .annotation-toolbar[data-pn-annotation-toolbar-touch] [data-pn-annotation-toolbar-row] {
+    gap: 0.125rem;
+  }
+}
+
+.annotation-toolbar[data-pn-annotation-toolbar-touch]
+  [data-pn-touch-target]:not(:disabled):not([aria-disabled='true']):active {
+  filter: brightness(0.92);
+  transition: filter 100ms ease-out;
+}
+
 html:has([data-pn-compact-touch-layout='true'])
   [data-pn-touch-target]:not(:disabled):not([aria-disabled='true']):active {
   filter: brightness(0.92);
