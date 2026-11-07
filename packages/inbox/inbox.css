@@ -1992,18 +1992,17 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 .ib-contents-phone .ib-contents-list { padding: 0 6px 16px; }
 .ib-contents-phone nav button { min-height: 44px; font-size: var(--ib-fs-15, 15px); padding-top: 10px; padding-bottom: 10px; }
 .ib-htmlframe { position: absolute; inset: 0; }
-/* An HTML page on a phone, part B "Fit the page" (pageSize.ts): one size control in a slim row of its own above the
-   page, so it never covers the page. Desktop size lays the page out at a laptop's width and scales it to the phone's;
-   pinch zoom then zooms the window, and the page redraws sharp at the new zoom. */
-.ib-sizerow { --ib-sizerow-h: 40px; position: absolute; top: 0; left: 0; right: 0; box-sizing: border-box; height: calc(var(--ib-sizerow-h) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) calc(8px + env(safe-area-inset-right)) 0 calc(14px + env(safe-area-inset-left)); display: flex; align-items: center; gap: 10px; background: var(--background); border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent); }
-.ib-sizerow-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
-.ib-sizebtn { position: relative; flex: none; display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px 0 8px; border: 0; border-radius: 999px; background: color-mix(in oklch, var(--muted) 85%, transparent); color: var(--foreground); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; line-height: 1; white-space: nowrap; cursor: pointer; -webkit-tap-highlight-color: transparent; }
-.ib-sizebtn svg { color: var(--muted-foreground); }
+/* An HTML page on a phone, part B "Fit the page" (pageSize.ts): one small icon in the page's top right corner (the
+   owner's pick: "Just the icon no words"), a phone at Phone size, a laptop at Desktop size. It floats like the other
+   tools and gathers with them. Desktop size lays the page out at a laptop's width and scales it to the phone's; pinch
+   zoom then zooms the window, and the page redraws sharp at the new zoom. */
+.ib-sizecorner { position: absolute; top: calc(8px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right)); z-index: 4; }
+.ib-sizebtn { position: relative; display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid color-mix(in oklch, var(--border) 80%, transparent); border-radius: 10px; background: color-mix(in oklch, var(--popover) 90%, transparent); color: color-mix(in oklch, var(--popover-foreground) 82%, transparent); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.18); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+:root.light .ib-sizebtn { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10), 0 1px 2px rgba(0, 0, 0, 0.08); }
 .ib-sizebtn:active { background: var(--muted); }
 .ib-sizebtn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-/* 44 px to press, the pill drawn at 28. */
-.ib-sizebtn::after { content: ''; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: 44px; transform: translate(-50%, -50%); }
-.ib-htmlframe.ib-sized { top: calc(40px + env(safe-area-inset-top)); }
+/* 44 px to press, the button drawn at 34. */
+.ib-sizebtn::after { content: ''; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
 .ib-htmlframe.ib-fitdesk { overflow: hidden; }
 .ib-htmlframe.ib-fitdesk > div:first-child { position: absolute; top: 0; left: 0; width: var(--ib-fit-width) !important; height: calc(100% / var(--ib-fit-scale)) !important; transform: scale(var(--ib-fit-scale)); transform-origin: 0 0; }
 /* The pen's armed ring keeps its 2 px on screen. */
@@ -7356,14 +7355,14 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
    chip stays: it is a fact about the file. GATHERED in FullViewBar.tsx is the same list. The rail's box holds its
    panel to the left of its ticks: it flies by the ticks (the pane measures its dock), scaled about them. */
 .ib-view.ib-fullview .pn-contents-rail { transform-origin: calc(100% - var(--pn-contents-dock-width, 36px) / 2) 50%; }
-.ib-view.ib-fullview :is(.ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail) { transition: var(--ib-gather-back); }
-.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail) { opacity: 0; visibility: hidden; pointer-events: none; transform: translate(var(--ib-gx, 0px), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); transition: var(--ib-gather-go); }
+.ib-view.ib-fullview :is(.ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-sizecorner) { transition: var(--ib-gather-back); }
+.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-sizecorner) { opacity: 0; visibility: hidden; pointer-events: none; transform: translate(var(--ib-gx, 0px), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); transition: var(--ib-gather-go); }
 .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translate(calc(-50% + var(--ib-gx, 0px)), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); }
 .ib-view.ib-fullview.ib-drawer:not(.ib-phone)[data-tools="tucked"] .ib-apanel { opacity: 0; visibility: hidden; pointer-events: none; transform: translate(var(--ib-gx, 0px), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); transition: var(--ib-gather-go); }
 @media (prefers-reduced-motion: reduce) {
   .ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-apanel { animation-name: ib-sp-fade; }
   .ib-view.ib-fullview.ib-drawer:not(.ib-phone)[data-tools="tucked"] .ib-apanel { transform: none; }
-  .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail) { transform: none; }
+  .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-sizecorner) { transform: none; }
   .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translateX(-50%); }
 }
 

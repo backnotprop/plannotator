@@ -6,8 +6,10 @@
  *
  * What it proves, with real layout: a page wider than the phone opens on
  * Desktop size by itself (laid out at 1280 px, scaled to the phone's width,
- * the frame under the control's own row so nothing covers it); a page that
- * fits opens on Phone size and one tap fits it; the tap is remembered for the
+ * the page keeping the window's full height); the control is one small icon
+ * in the page's top right corner with a 44 px target, no words, its name and
+ * tooltip the approved "Desktop size" / "Phone size"; a page that fits opens
+ * on Phone size and one tap fits it; the tap is remembered for the
  * file across a reload; a pin placed with the pen on a fitted page lands on
  * the element under the finger; a desktop shows no control and no scale.
  *
@@ -98,24 +100,33 @@ for (const phone of [
   { name: 'iPhone 15 (WebKit)', engine: 'webkit' as const, device: iPhone },
   { name: 'Pixel 7 (Chromium)', engine: 'chromium' as const, device: pixel },
 ]) {
-  test(`${phone.name}: a wide page opens fitted under the control's row; the other size is one tap and is remembered`, async () => {
+  test(`${phone.name}: a wide page opens fitted at full height, the icon in the corner; the other size is one tap and is remembered`, async () => {
     await withBrowser(phone.engine, phone.device, async (w, page) => {
       await open(w, page, 'wide.html', '#k0');
       await expect(frameBox(page)).toHaveAttribute('data-page-size', 'desktop');
-      await expect(toggle(page)).toHaveText('Phone size');
+      await expect(toggle(page)).toHaveAttribute('aria-label', 'Phone size');
+      await expect(toggle(page)).toHaveAttribute('title', 'Phone size');
+      await expect(toggle(page)).toHaveText('');
+      await expect(toggle(page).locator('svg')).toHaveAttribute('data-icon', 'laptop');
       // Laid out at 1280 and drawn at the phone's width.
       const viewport = page.viewportSize()!;
       const scaled = await frameBox(page).locator(':scope > div').first().boundingBox();
       expect(Math.abs(scaled!.width - viewport.width)).toBeLessThanOrEqual(2);
       expect(await frame(page).locator('body').evaluate(() => document.documentElement.clientWidth)).toBe(1280);
-      // The control is in its own row: the page starts below it.
-      const row = (await page.locator('[data-page-size-row]').boundingBox())!;
-      const pageTop = (await frameBox(page).boundingBox())!.y;
-      expect(pageTop).toBeGreaterThanOrEqual(row.y + row.height - 1);
+      // The page keeps the window's full height; the icon is small, in the top right corner, and easy to press.
+      expect((await frameBox(page).boundingBox())!.y).toBeLessThanOrEqual(1);
+      const icon = (await toggle(page).boundingBox())!;
+      expect(icon.width).toBeLessThanOrEqual(40);
+      expect(viewport.width - (icon.x + icon.width)).toBeLessThanOrEqual(16);
+      expect(icon.y).toBeLessThanOrEqual(16);
+      const target = await toggle(page).evaluate((el) => { const a = getComputedStyle(el, '::after'); return { w: parseFloat(a.width), h: parseFloat(a.height) }; });
+      expect(target.w).toBeGreaterThanOrEqual(44);
+      expect(target.h).toBeGreaterThanOrEqual(44);
 
       await toggle(page).tap();
       await expect(frameBox(page)).toHaveAttribute('data-page-size', 'phone');
-      await expect(toggle(page)).toHaveText('Desktop size');
+      await expect(toggle(page)).toHaveAttribute('aria-label', 'Desktop size');
+      await expect(toggle(page).locator('svg')).toHaveAttribute('data-icon', 'phone');
       await page.reload();
       await expect(frame(page).locator('#k0')).toBeVisible();
       await expect(frameBox(page)).toHaveAttribute('data-page-size', 'phone');
@@ -167,7 +178,7 @@ test('desktop: no size control and no scale, even on a wide page', async () => {
   await withBrowser('chromium', { viewport: { width: 1440, height: 900 } }, async (w, page) => {
     await open(w, page, 'wide.html', '#k0');
     await page.waitForTimeout(600);
-    await expect(page.locator('[data-page-size-row]')).toHaveCount(0);
+    await expect(page.locator('[data-page-size-corner]')).toHaveCount(0);
     await expect(toggle(page)).toHaveCount(0);
     await expect(frameBox(page)).not.toHaveAttribute('data-page-size', /.+/);
     expect(await frameBox(page).locator(':scope > div').first().evaluate((el) => getComputedStyle(el).transform)).toBe('none');

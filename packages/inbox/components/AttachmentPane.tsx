@@ -2130,26 +2130,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               {error}
             </div>
           )}
-          {view && isHtml && view.html !== null && phoneHtml && !linkedTop && (
-            // One size control, in a slim row of its own above the page so it never covers it (pageSize.ts).
-            <div className="ib-sizerow" data-page-size-row="">
-              <span className="ib-sizerow-name">{attachment.name}</span>
-              <button
-                type="button"
-                className="ib-sizebtn"
-                onClick={togglePageSize}
-                data-page-size-toggle={pageSize}
-              >
-                <Icon name={pageSize === 'desktop' ? 'phone' : 'laptop'} size={14} />
-                {pageSize === 'desktop' ? 'Phone size' : 'Desktop size'}
-              </button>
-            </div>
-          )}
           {view && isHtml && view.html !== null && (
             // Kept mounted under a linked page (inert, hidden), so Back finds it as it was left.
             <div
               ref={setFitBox}
-              className={`ib-htmlframe${linkedTop ? ' ib-covered' : ''}${phoneHtml && !linkedTop ? ' ib-sized' : ''}${fitted ? ' ib-fitdesk' : ''}`}
+              className={`ib-htmlframe${linkedTop ? ' ib-covered' : ''}${fitted ? ' ib-fitdesk' : ''}`}
               inert={linkedTop ? true : undefined}
               data-page-size={phoneHtml ? pageSize : undefined}
               style={fitted ? ({ '--ib-fit-scale': String(fitScale), '--ib-fit-width': `${PAGE_DESKTOP_WIDTH}px` } as CSSProperties) : undefined}
@@ -2198,6 +2183,22 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               // Shift-click joins more elements to one comment, as in annotate (the viewer's own cap).
               readOnly={props.readOnly}
             />
+            </div>
+          )}
+          {view && isHtml && view.html !== null && phoneHtml && !linkedTop && (
+            // One size control (pageSize.ts; the owner's pick, 2026-11-07: "Just the icon no words"): a small icon in
+            // the page's top right corner showing the size the page is at. Its name says what a press does.
+            <div className="ib-sizecorner" data-page-size-corner="">
+              <button
+                type="button"
+                className="ib-sizebtn"
+                onClick={togglePageSize}
+                aria-label={pageSize === 'desktop' ? 'Phone size' : 'Desktop size'}
+                title={pageSize === 'desktop' ? 'Phone size' : 'Desktop size'}
+                data-page-size-toggle={pageSize}
+              >
+                <Icon name={pageSize === 'desktop' ? 'laptop' : 'phone'} size={18} />
+              </button>
             </div>
           )}
           {view && linkedTop && (
