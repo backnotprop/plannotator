@@ -72,6 +72,7 @@ import { MAX_REPO_FILE_BYTES } from "@plannotator/shared/repo-file";
 import { compareRepoPaths, MAX_REVIEW_FILE_CONTENT_BYTES, readGitObjectBytes, validateFilePath, type RepoFileListing } from "@plannotator/shared/review-core";
 import { handleRepoFileRequest, handleRepoFilesRequest, type HandlerResult, type RepoFileRead } from "@plannotator/shared/repo-files";
 import { readRepoWorkingTreeFile } from "@plannotator/shared/repo-files-node";
+import { childEnv } from "@plannotator/shared/child-env";
 import { runtime as gitRuntime } from "./git";
 import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
 
@@ -691,7 +692,7 @@ export const pullDiffCliRunner: PullDiffRunner = async (cli, args, maxBytes) => 
   let proc: ReturnType<typeof Bun.spawn>;
   try {
     proc = Bun.spawn([cli, ...args], {
-      env: { ...process.env, GH_PROMPT_DISABLED: "1", NO_COLOR: "1", NO_PROMPT: "1" },
+      env: childEnv({ GH_PROMPT_DISABLED: "1", NO_COLOR: "1", NO_PROMPT: "1" }),
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",

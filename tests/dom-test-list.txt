@@ -152,6 +152,7 @@ packages/inbox/listViewMenu.test.tsx
 packages/inbox/listViewReveal.test.tsx
 packages/inbox/listIntroDialog.test.tsx
 packages/inbox/rowsSettings.test.tsx
+packages/inbox/letterMarksRows.test.tsx
 packages/inbox/relativeTime.test.tsx
 packages/inbox/composeThread.test.tsx
 packages/inbox/sendNow.test.tsx
@@ -426,6 +427,7 @@ packages/ui/components/blocks/AlertBlock.title.test.tsx
 packages/ui/components/blocks/AlertBlock.seam.test.tsx
 packages/ui/hooks/useFenceTheme.seam.test.tsx
 packages/ui/components/blocks/AlertBlock.annotation.test.tsx
+packages/ui/components/blocks/AlertBlock.body.test.tsx
 packages/ui/components/Viewer.driftedRestore.test.tsx
 packages/ui/components/Viewer.crossBlockRestore.test.tsx
 packages/ui/components/Viewer.restoreMovedAnchors.test.tsx
@@ -546,6 +548,7 @@ packages/inbox/shortcuts/useSheetEscape.test.tsx
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/inbox/pulls/pullReviewKept.test.tsx
 packages/ui/components/shape/ShapeDrawn.test.tsx
+packages/ui/components/shape/scene/ScenePlayer.test.tsx
 packages/inbox/shapeEndedLabel.test.tsx
 packages/inbox/review-drawing/ShowMeLayer.test.tsx
 packages/review-editor/components/SelectionChooser.test.tsx

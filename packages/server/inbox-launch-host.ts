@@ -14,7 +14,7 @@
  */
 
 import { join } from "node:path";
-import type { InboxLaunchAgent, InboxLaunchError, InboxLaunchRecord, InboxMessage } from "@plannotator/core/inbox-types";
+import type { InboxLaunchAgent, InboxLaunchError, InboxLaunchNotReady, InboxLaunchRecord, InboxMessage } from "@plannotator/core/inbox-types";
 import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import type { resolveInboxLaunch } from "@plannotator/shared/config";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
@@ -23,8 +23,11 @@ import { INBOX_UPLOADS_DIR } from "@plannotator/shared/inbox/uploads";
 import type { AgentEnvironment } from "./inbox-agents";
 import type { LaunchEnv } from "./inbox-launch-env";
 
-/** Whether To may offer the agent: `missing` when its CLI is not there at all (the run line's screen 15). */
-export type LaunchAvailability = { ok: true; version: string } | { ok: false; missing: boolean; reason: string };
+/**
+ * Whether To may offer the agent: `missing` when its CLI is not there at all (the run line's screen 15). `code`: why,
+ * for a linked machine's window to say it with this machine's name (remote launch); absent from a host that has none.
+ */
+export type LaunchAvailability = { ok: true; version: string } | { ok: false; missing: boolean; reason: string; code?: InboxLaunchNotReady };
 
 /** What one host call did, for the launch's start.log: its exit code and what it printed. */
 export interface LaunchHostResult {
@@ -189,6 +192,8 @@ export interface LaunchHost {
   readonly connector?: string;
   /** The login-shell names it keeps from each read (the rest of the env is never held). */
   readonly shellNames: readonly string[];
+  /** Login-shell names it learns only whether they are set: kept as "1", never their values (a sign-in token). */
+  readonly shellFlags?: readonly string[];
   /** Whether To may offer it. The engine caches it 30 s. */
   available(): Promise<LaunchAvailability>;
   /** How a launch made now in `folder` starts; fixed on the record at Send. */
