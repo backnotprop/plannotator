@@ -402,14 +402,14 @@ test('a selection comment on the plan is saved and listed in the reply box chip'
   await selectText(page, 'retries them one by one');
   await page.locator('.annotation-toolbar button[aria-label="Comment"]').click();
   await composer(page).fill('One by one is right. Keep Retry all out of v1.');
-  await page.getByRole('button', { name: 'Save' }).click();
+  await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
   await expect(pane.locator('.ib-apanel')).toContainText('One by one is right');
 
   await selectText(page, 'at most three times, 2, 4 and 8 seconds apart');
   await page.locator('.annotation-toolbar button[aria-label="Comment"]').click();
   await composer(page).fill('Does Stripe say how long a key stays in flight? If it can be longer than 14 seconds the third retry still collides.');
   await shot('2.2-selection-comment-beside-the-thread');
-  await page.getByRole('button', { name: 'Save' }).click();
+  await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
   await expect(pane.locator('.ib-apanel')).toContainText('Does Stripe say');
 
   // Stored per attachment and version, in the project's annotations.jsonl.
@@ -466,7 +466,7 @@ test('the HTML prototype opens full screen: its image and frame load from its fo
   // Pinpoint is armed: a click on the button pins a comment to it.
   await frame.locator('#retry-all').click();
   await composer(page).fill('Retry all should ask first. Forty charges at once is a lot to undo.');
-  await page.getByRole('button', { name: 'Save' }).click();
+  await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
   await expect(pane.locator('.ib-apanel')).toContainText('Retry all should ask first');
   const model = (await (await inboxFetch(`/api/inbox/threads/${world.threads.billing}/attachments`)).json()) as {
     annotations: { attachment_id: string; annotation: { htmlAnchor?: { tagName: string }; elementContext?: { tag: string } } }[];

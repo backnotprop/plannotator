@@ -838,7 +838,7 @@ test('a selection or a saved comment across the words: resting on them still sho
     await dragAcross(page, span);
     await page.locator('.annotation-toolbar button[aria-label="Comment"]').click();
     await page.locator('[data-comment-popover] textarea[data-pn-mobile-editable="true"]').last().fill('Check the rows.');
-    await page.getByRole('button', { name: 'Save' }).click();
+    await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
     await expect(page.locator('.annotation-toolbar')).toHaveCount(0);
     await page.reload();
     await expect(span).toBeVisible();
@@ -882,7 +882,7 @@ test('a saved comment across a link to a missing file: learning it is missing le
     await dragAcross(page, link);
     await page.locator('.annotation-toolbar button[aria-label="Comment"]').click();
     await page.locator('[data-comment-popover] textarea[data-pn-mobile-editable="true"]').last().fill('Is this one here?');
-    await page.getByRole('button', { name: 'Save' }).click();
+    await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
     await page.reload();
     await expect(link.locator('mark').first()).toBeVisible();
     await link.hover();

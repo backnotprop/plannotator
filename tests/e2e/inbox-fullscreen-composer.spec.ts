@@ -210,13 +210,13 @@ test('an image in full screen: one card at its foot, Comment and Reply as a radi
   // The comment row is the image's own (its field, Mark up, Comment), inside the card; no old band at the foot.
   await expect(card().getByRole('textbox', { name: 'Comment on checkout.png' })).toBeVisible();
   await expect(pane().locator('.ib-imgcompose')).toHaveCount(0);
-  // Bottom centre, 680 px wide, 20 px above the window's foot; the 30 px buttons and 24 px tabs.
+  // Bottom centre, 600 px wide (round 3), 20 px above the window’s foot; the 30 px buttons, the picked tab 32 px (carved into the tray).
   const box = (await card().boundingBox())!;
-  expect(Math.round(box.width)).toBe(680);
+  expect(Math.round(box.width)).toBe(600);
   expect(Math.round(box.x + box.width / 2)).toBe(720);
   expect(Math.round(900 - (box.y + box.height))).toBe(20);
   expect(Math.round((await card().locator('[data-fcomp-minimize]').boundingBox())!.height)).toBe(30);
-  expect(Math.round((await radios.first().boundingBox())!.height)).toBe(24);
+  expect(Math.round((await radios.first().boundingBox())!.height)).toBe(32);
   await page.mouse.move(200, 400);
   await shot(page, '2A-expanded-comment');
 });
@@ -407,7 +407,7 @@ test('a phone (390 px): the card spans the width under the toolbar, Comment and 
     await replyField(page).fill(WORDS);
     const send = card(page).locator('[data-fcomp-send]');
     await expect(send).toHaveAccessibleName('Send to Claude Code');
-    await expect(send).not.toContainText('Send');
+    await expect(send).toHaveText('Send');
     const cardBox = (await card(page).boundingBox())!;
     expect(Math.round(cardBox.x)).toBe(8);
     expect(Math.round(cardBox.width)).toBe(390 - 16);

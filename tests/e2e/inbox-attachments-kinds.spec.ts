@@ -352,7 +352,7 @@ test('the code file opens in the code view and takes a line comment', async () =
   await expect(line).toBeVisible();
   await line.click();
   await page.locator('[data-comment-popover] textarea[data-pn-mobile-editable="true"]').last().fill('Five attempts with doubling means the last retry waits eight minutes. Three is enough.');
-  await page.getByRole('button', { name: 'Save' }).click();
+  await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
   await expect(pane.locator('.ib-apanel')).toContainText('Three is enough');
   await shot('7-code-line-comment');
 });
