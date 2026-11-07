@@ -81,13 +81,13 @@ describe('the kit', () => {
     for (const t of sharp) expect(t).toContain('display="none"');
     // Sharp's line turns square at the elbow; its head is closed and filled by the board in the line's colour.
     expect(sharp[0]).toContain('d="M0 0L100 0L100 80"');
-    expect(sharp[1]).toMatch(/class="head grey"[^>]*/);
+    expect(sharp[1]).toMatch(/class="shp-head grey"[^>]*/);
     expect(sharp[1]).toMatch(/d="M[^"]+Z"/);
     expect(round[0]).toContain('Q100 0');
     const straight = tags(line([[0, 0], [50, 0]]));
     expect(straight).toHaveLength(1);
     expect(straight[0]).not.toMatch(/data-shp-(round|sharp)/);
-    expect(followCss(['a'])).toContain('.on-a path.head.grey { fill: var(--mark); }');
+    expect(followCss(['a'])).toContain('.on-a path.shp-head.grey { fill: var(--mark); }');
   });
 
   test('words are escaped in every helper that takes them', () => {

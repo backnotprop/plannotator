@@ -498,6 +498,40 @@ describe.skipIf(!hasDom)('the board style', () => {
     });
   }
 
+  // Follow an example over a kit arrow (followPainter): the dot travels on the line that shows, the light is as thin
+  // as Sharp's lines, and the filled head lights filled. What regresses: the dot cutting the hidden rounded bend, a
+  // 2.2-unit light over a 1 px line, an outline triangle over a filled head.
+  for (const style of ['sharp', 'rounded'] as const) {
+    test(`Follow an example on ${style === 'sharp' ? 'Sharp' : 'Rounded'}: the dot's line and the light match the arrow that shows`, async () => {
+      const { FollowPainter, followLineOf } = await import('./followPainter');
+      const html = `<svg viewBox="0 0 600 300"><g data-mark="a">${box(40, 40, 120, 60)}</g><g data-edge="e">${arrow([[160, 70], [260, 70], [260, 150]])}</g><g data-mark="b">${box(200, 150, 120, 60)}</g></svg>`;
+      const { board } = await draw({ html, boardStyle: style });
+      board.style.setProperty('--mark', 'rgb(1, 2, 3)');
+      const line = followLineOf(board.querySelector('[data-edge="e"]')!);
+      expect(line?.hasAttribute(style === 'sharp' ? 'data-shp-sharp' : 'data-shp-round')).toBe(true);
+      const painter = new FollowPainter(board, { name: 'x', title: 'x', steps: [{ part: 'a', tag: 'a', text: 'a' }, { part: 'b', arrow: 'e', tag: 'b', text: 'b' }] } as never);
+      try {
+        // The lines that show: the light copies its line's twin attributes, so it shows and hides with it.
+        const twin = style === 'sharp' ? '[data-shp-sharp]' : '[data-shp-round]';
+        const lit = [...board.querySelectorAll(`.shp-ex-lit${twin}`)];
+        expect(lit.every((el) => getComputedStyle(el).display !== 'none')).toBe(true);
+        const head = lit.find((el) => el.classList.contains('shp-ex-head'));
+        const wire = lit.find((el) => !el.classList.contains('shp-ex-head'))!;
+        if (style === 'sharp') {
+          expect(getComputedStyle(wire).strokeWidth).toBe('1.5px');
+          expect(getComputedStyle(wire).getPropertyValue('vector-effect')).toBe('non-scaling-stroke');
+          expect(head).toBeDefined();
+          expect(getComputedStyle(head!).fill).toBe('rgb(1, 2, 3)');
+        } else {
+          expect(getComputedStyle(wire).strokeWidth).not.toBe('1.5px');
+          expect(head).toBeUndefined();
+        }
+      } finally {
+        painter.destroy();
+      }
+    });
+  }
+
   test('a flip reaches a board already drawn, both ways', async () => {
     const { ShapeDrawn } = drawnModule!;
     const { shadow } = await draw({ html: STORED, boardStyle: 'rounded' });

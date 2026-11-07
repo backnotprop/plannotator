@@ -1,4 +1,4 @@
-// Optional helpers for a Shape board: sharp boxes, lines, labels, numbers. They follow the person's theme. No dependencies; run it with node or bun.
+// Optional helpers for a Shape board: boxes, lines, labels, numbers. They follow the person's theme. No dependencies; run it with node or bun.
 // You can do all of this by hand. Same input, same picture: nothing here is random.
 //
 //   plannotator shape kit > kit.mjs
@@ -21,6 +21,10 @@
 //
 // Icons, logos and drawn things by name (the store fills them in): icon('server', x, y), logo('stripe', x, y), thing('database', x, y, w, h, { label: 'Postgres' }),
 // thing('envelope', x, y, 56, 40, { to: [x2, y2] }) travels along a wire. Colour an icon or a thing with { color: 'var(--blue)' }.
+//
+// line() and arrow() draw a bend or an arrowhead twice, one for each board style the person can pick: data-shp-round
+// (shown on Rounded) and data-shp-sharp (a square bend, a small filled head; shown on Sharp). Keep both. To name a line
+// (data-edge, data-mark), wrap its output in a <g> rather than tagging its first <path>.
 //
 // A flow with branches: wrap what belongs to a path in on(['a'], ...), put pick('a', x, y, w, h, 'Case A') and pick('all', x, y, w, h, 'All paths', { of: ['a', 'b'], checked: true })
 // on the board, and give the view followCss(['a', 'b']): how: { ...svg(w, h, body), css: followCss(['a', 'b']) }. Picking one lights its path. No script.
@@ -66,7 +70,7 @@ export function line(points, { tone = 'ink', dash = false, arrow = false, head =
     const wing = (t, l) => `${(end[0] + Math.cos(a + t) * l).toFixed(1)} ${(end[1] + Math.sin(a + t) * l).toFixed(1)}`;
     out += `<path d="M${wing(2.55, head)}L${end[0]} ${end[1]}L${wing(-2.55, head)}" ${paint(tone)} ${ROUND_TWIN}/>`;
     const small = head * 5 / 6;
-    out += `<path d="M${wing(2.76, small)}L${end[0]} ${end[1]}L${wing(-2.76, small)}Z" ${paint(tone).replace('class="', 'class="head ')} ${SHARP_TWIN}/>`;
+    out += `<path d="M${wing(2.76, small)}L${end[0]} ${end[1]}L${wing(-2.76, small)}Z" ${paint(tone).replace('class="', 'class="shp-head ')} ${SHARP_TWIN}/>`;
   }
   return out;
 }
@@ -118,7 +122,7 @@ export const followCss = (paths) => `
 .pick:hover { background: var(--mark-soft); }
 .pick:has(input:checked) { background: var(--mark); border-color: var(--mark); color: var(--paper); }
 .pick:has(input:focus-visible) { outline: 3px solid var(--mark); outline-offset: 2px; }
-${paths.map((p) => `.board:has(.f-${p}:checked) .d:not(.on-${p}) { opacity: .12; }\n.board:has(.f-${p}:checked) .pick:not(.on-${p}):not(:has(input:checked)) { color: var(--grey); border-color: var(--rule); }\n.board:has(.f-${p}:checked) .on-${p} path.grey { stroke: var(--mark); }\n.board:has(.f-${p}:checked) .on-${p} path.head.grey { fill: var(--mark); }`).join('\n')}
+${paths.map((p) => `.board:has(.f-${p}:checked) .d:not(.on-${p}) { opacity: .12; }\n.board:has(.f-${p}:checked) .pick:not(.on-${p}):not(:has(input:checked)) { color: var(--grey); border-color: var(--rule); }\n.board:has(.f-${p}:checked) .on-${p} path.grey { stroke: var(--mark); }\n.board:has(.f-${p}:checked) .on-${p} path.shp-head.grey { fill: var(--mark); }`).join('\n')}
 .board.reduce .d { transition: none; }
 @media (prefers-reduced-motion: reduce) { .d { transition: none; } }
 `;

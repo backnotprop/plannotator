@@ -111,8 +111,8 @@ ${SHARP} svg rect:is(.line, .ink, .grey, .acc, .alert, .acc-fill) { rx: var(--sh
 /* The kit's twins: the square elbow and the filled head show; the rounded elbow and the open head go. */
 ${SHARP} [data-shp-round] { display: none; }
 ${SHARP} [data-shp-sharp] { display: inline; }
-${SHARP} svg path.head:is(.line, .grey, .acc, .alert) { stroke: none; }
-${SHARP} svg .head.line { fill: var(--shp-wire); } ${SHARP} svg .head.grey { fill: var(--grey); } ${SHARP} svg .head.acc { fill: var(--mark); } ${SHARP} svg .head.alert { fill: var(--alert); }
+${SHARP} svg path.shp-head:is(.line, .grey, .acc, .alert) { stroke: none; }
+${SHARP} svg .shp-head.line { fill: var(--shp-wire); } ${SHARP} svg .shp-head.grey { fill: var(--grey); } ${SHARP} svg .shp-head.acc { fill: var(--mark); } ${SHARP} svg .shp-head.alert { fill: var(--alert); }
 /* A zone: a rect the drawing fills with a -soft colour. Small corners, and a 1 px edge in its hue. */
 ${SHARP} svg rect${SHARP_ZONE}:is([style*="-soft"], [fill*="-soft"]) { rx: var(--shp-r); ry: var(--shp-r); stroke-width: 1px; vector-effect: non-scaling-stroke; }
 ${['blue', 'amber', 'green', 'plum', 'alert'].map((z) => `${SHARP} svg rect${SHARP_ZONE}${softIs(z)} { stroke: var(--shp-zone-${z}); }`).join('\n')}
@@ -126,6 +126,8 @@ ${SHARP} svg .obj { filter: none; }
 ${SHARP} svg svg[data-draw] [stroke-width] { stroke-width: 1.25px; vector-effect: non-scaling-stroke; }
 ${SHARP} svg svg[data-draw] rect { rx: 2px; ry: 2px; }
 ${SHARP} svg svg[data-icon] { stroke-width: 1.5; }
+/* Follow an example's light over a line (followPainter): as thin as the line, a touch heavier so it reads. */
+${SHARP} svg .shp-ex-lit { stroke-width: 1.5px; vector-effect: non-scaling-stroke; stroke-linecap: butt; stroke-linejoin: miter; }
 ${SHARP} .pick { border-radius: 3px; border-width: 1px; }
 ${SHARP} .mk { border-radius: 2px; }
 `;
