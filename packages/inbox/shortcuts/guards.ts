@@ -87,7 +87,7 @@ export function isBareBinding(binding: string): boolean {
  * Whether a single key may act now, for every Inbox scope: never while typing
  * (a field, a contenteditable), while an input method composes, on a held
  * key's repeat, with ⌘ / Ctrl / Alt, from inside a dialog, menu, listbox or a
- * file's frame, under a modal, while words selected in a message show their
+ * file's frame or a file tree, under a modal, while words selected in a message show their
  * toolbar (a printable key starts a comment there), after something else used
  * the key, when Single-key shortcuts is off, or on a touch phone (unless
  * `onTouchPhone`: `?`). A scope adds its own rules
@@ -99,7 +99,8 @@ export function bareKeyAllowed(event: KeyboardEvent, prefs: { singleKeys: boolea
   const target = keyTarget(event);
   if (target) {
     if (isEditableTarget(target) || inOverlay(target)) return false;
-    if (target.closest('[role="menu"], [role="listbox"], iframe')) return false;
+    // A focused file tree (the Files pane's folder) keeps its letters: type-ahead and its own arrows.
+    if (target.closest('[role="menu"], [role="listbox"], [role="tree"], iframe')) return false;
   }
   if (modalOpen()) return false;
   if (typeof document !== 'undefined' && selectionToolbarShowing(document)) return false;

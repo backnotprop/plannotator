@@ -3811,7 +3811,7 @@ function Inbox() {
     const target = event.target instanceof HTMLElement ? event.target : null;
     if (target) {
       if (isEditableTarget(target)) return null;
-      if (target.closest('dialog, [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], iframe, .ib-view, [data-step-guard]')) return null;
+      if (target.closest('dialog, [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="tree"], iframe, .ib-view, [data-step-guard]')) return null;
     }
     // With a file open beside the thread, only a key aimed at the thread or the list counts.
     if (routeRef.current.file && !target?.closest('section.ib-pane, .ib-listcol')) return null;
@@ -5265,6 +5265,9 @@ function Inbox() {
 
   // A file beside the thread takes the list's and the sidebar's room (record 2.2).
   const fileOpen = route.page === 'inbox' && !!route.thread && !!route.file;
+  // The Files pane on its Artifacts tab takes the same room beside the thread (approval "inbox-files-tabs"); a phone
+  // and a stacked window keep the Artifacts view in place of the messages.
+  const filesBeside = fileOpen || (route.page === 'inbox' && !!route.thread && route.artifacts === true && !phone && !stack.file);
   // A thread opened from a Board card (`#thread=…&card=crd_…`): it takes the list's place, led by
   // "‹ Board" and a chip naming the card; both go back to the opened card.
   const fromCard = route.page === 'inbox' && route.thread && route.card ? route.card : null;
@@ -5886,8 +5889,8 @@ function Inbox() {
       <>
         {/* In full screen the list stays drawn, hidden (inbox.css `data-thread-full`): J/K and G I read its order, and
             its scroll stays where it was. */}
-        {!fileOpen && !fromCard && route.reviews && pullsShown && reviewsList(route.reviews.project, route.reviews.view, route.thread)}
-        {!fileOpen && !fromCard && !route.reviews && (
+        {!filesBeside && !fromCard && route.reviews && pullsShown && reviewsList(route.reviews.project, route.reviews.view, route.thread)}
+        {!filesBeside && !fromCard && !route.reviews && (
         <InboxList
           scope={route.project}
           // One project's list: its window name, the path beside it.
@@ -6130,6 +6133,19 @@ function Inbox() {
             onOpenGuide={(messageId) => go({ ...route, guide: messageId })}
             artifacts={route.artifacts === true}
             onArtifacts={(open) => (open ? go({ ...routeRef.current, artifacts: true, msg: null }) : close({ ...routeRef.current, artifacts: false }))}
+            // Files tabs (approval "inbox-files-tabs"): a tab's file side by side, the Artifacts tab, or the pane closed.
+            onFilesRoute={(next, options) => {
+              const now = routeRef.current;
+              const to: Route = {
+                ...now,
+                msg: null,
+                artifacts: next.artifacts,
+                file: next.file ? { id: next.file, version: 'current', focus: null, view: 'side' } : null,
+              };
+              if (options?.replace) writeRoute(to, { replace: true });
+              else if (!next.file && !next.artifacts) close(to);
+              else go(to);
+            }}
             // Decision mode's one way in (thread only): from two of this thread's decisions up, and not while a
             // sitting is tucked into its pill (the pill's Resume is the way back to it).
             decide={decideInThread(thread.thread_id)}
@@ -6211,15 +6227,15 @@ function Inbox() {
       <SidebarShell
         className="ib-shell"
         toggleNotice={sidebarToggleNotice}
-        open={route.page === 'settings' ? settingsSidebar : sidebarOpen && !fileOpen && !sidebarHeld && !full}
+        open={route.page === 'settings' ? settingsSidebar : sidebarOpen && !filesBeside && !sidebarHeld && !full}
         onOpenChange={(next) => {
           if (routeRef.current.page === 'settings') {
             setSettingsSidebar(next);
             return;
           }
           // ⌘B in full screen leaves it (the sidebar and the list come back) and keeps the person's stored choice. Not
-          // while a file is open from it: closing the file comes back to the thread in full screen.
-          if (next && full && !fileOpen) {
+          // while a file (or the Files pane) is open from it: closing the pane comes back to the thread in full screen.
+          if (next && full && !filesBeside) {
             leaveFull();
             return;
           }

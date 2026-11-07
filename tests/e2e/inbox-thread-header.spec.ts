@@ -24,7 +24,8 @@
  *    reads "Hide the list";
  *  - a stacked window (1000 px): ‹ Inbox leads, then Mark read and Snooze;
  *    ⋯ More (the copy menu, design record "inbox-copy-message") ends it;
- *  - a file beside the thread: the same, with ‹ Inbox closing the file;
+ *  - a file beside the thread: the same, with ‹ Inbox closing the file; after
+ *    ⋯ More the folder, lit, ends it where the × was (the pane's toggle);
  *  - full screen: the file covers the thread;
  *  - a phone: ‹ Inbox, the subject, Artifacts, Expand, ⋯ More at the right edge, 44 px targets;
  *    Mark read and Snooze lead the ⋯ sheet;
@@ -325,7 +326,7 @@ test('the thread in full screen: the sidebar and the list hide; ‹ Inbox, Escap
   await expect.poll(() => page.evaluate(() => location.hash)).not.toContain('thread=');
 });
 
-test('the thread in full screen with a file: the file opens beside it; closing the file returns to full screen', async () => {
+test('the thread in full screen with a file: the file opens beside it; closing its last tab returns to full screen', async () => {
   const { page, threads } = world;
   await page.goto(`${world.url}#thread=${threads.invoices}`);
   const pane = page.locator(`section.ib-pane[data-thread-id="${threads.invoices}"]`);
@@ -335,19 +336,35 @@ test('the thread in full screen with a file: the file opens beside it; closing t
   const view = page.locator(`[data-attachment-pane="${world.attachment}"]`);
   await expect(view).toBeVisible();
   await expect(view).not.toHaveClass(/ib-full/);
-  // Beside a file the thread drops its measure (the file has the room); the file's ‹ Inbox leads.
+  // Beside a file the thread drops its measure (the file has the room); the file's ‹ Inbox leads and the folder is lit
+  // at the header's end.
   await expect(pane).not.toHaveAttribute('data-full', '');
   await expect(pane.locator('[data-file-back]')).toBeVisible();
   await expect(pane.locator('[data-full-back]')).toHaveCount(0);
-  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'snooze', 'artifacts', 'expand', 'more']);
+  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'snooze', 'expand', 'more', 'artifacts']);
   await shot(page, '1c-thread-full-screen-with-file', ['light', 'dark']);
-  // The file's ×: back to the thread in full screen, not to the list.
-  await view.getByRole('button', { name: 'Close invoice-plan.md' }).click();
+  // The file's last tab closed: back to the thread in full screen, not to the list.
+  await page.locator('[data-tab-close]').first().click({ force: true });
   await expect(view).toHaveCount(0);
   await expect(pane).toHaveAttribute('data-full', '');
   await expect(page.locator('.ib-listcol')).toBeHidden();
   await expect(pane.locator('[data-full-back]')).toBeVisible();
-  // Escape from the file closes the file first, still in full screen.
+  // The same with the folder: it closes the pane, back to full screen.
+  await pane.locator('[data-artifacts-button]').click();
+  await expect(page.locator('[data-files-pane="artifacts"]')).toBeVisible();
+  await pane.locator('[data-artifacts-button]').click();
+  await expect(page.locator('[data-files-pane]')).toHaveCount(0);
+  await expect(pane).toHaveAttribute('data-full', '');
+  // Artifacts first, then a tile's file: closing that last tab still returns to the thread in full screen.
+  await pane.locator('[data-artifacts-button]').click();
+  await page.locator(`[data-files-pane="artifacts"] [data-artifact-tile][aria-label^="invoice-plan.md"]`).first().click();
+  await expect(view).toBeVisible();
+  await page.locator('[data-tab-close]').first().click({ force: true });
+  await expect(view).toHaveCount(0);
+  await expect(page.locator('[data-files-pane]')).toHaveCount(0);
+  await expect(pane).toHaveAttribute('data-full', '');
+  await expect(page.locator('.ib-listcol')).toBeHidden();
+  // Escape beside the file closes the whole pane, still in full screen.
   await pane.getByRole('button', { name: 'Open invoice-plan.md' }).first().click();
   await expect(view).toBeVisible();
   await view.focus();
@@ -355,7 +372,7 @@ test('the thread in full screen with a file: the file opens beside it; closing t
   await expect(view).toHaveCount(0);
   await expect(pane).toHaveAttribute('data-full', '');
   await expect(page.locator('.ib-listcol')).toBeHidden();
-  // The file's own full screen, then back beside the thread, then its ×: still the thread in full screen.
+  // The file's own full screen, then back beside the thread, then its tab's ×: still the thread in full screen.
   await pane.getByRole('button', { name: 'Open invoice-plan.md' }).first().click();
   await expect(view).toBeVisible();
   await view.getByRole('button', { name: 'Full screen' }).click();
@@ -363,7 +380,7 @@ test('the thread in full screen with a file: the file opens beside it; closing t
   await view.locator('[data-full-view-close]').click();
   await expect(view).not.toHaveClass(/ib-full/);
   await expect(pane.locator('[data-file-back]')).toBeVisible();
-  await view.getByRole('button', { name: 'Close invoice-plan.md' }).click();
+  await page.locator('[data-tab-close]').first().click({ force: true });
   await expect(view).toHaveCount(0);
   await expect(pane).toHaveAttribute('data-full', '');
   await expect(page.locator('.ib-listcol')).toBeHidden();
@@ -374,7 +391,7 @@ test('the thread in full screen with a file: the file opens beside it; closing t
   await expect(view).toBeVisible();
   await page.keyboard.press('ControlOrMeta+b');
   await expect(view).toBeVisible();
-  await view.getByRole('button', { name: 'Close invoice-plan.md' }).click();
+  await page.locator('[data-tab-close]').first().click({ force: true });
   await expect(view).toHaveCount(0);
   await expect(pane).toHaveAttribute('data-full', '');
   await expect(page.locator('.ib-listcol')).toBeHidden();
@@ -500,7 +517,7 @@ test('a stacked window: ‹ Inbox, then Mark read and Snooze; ⋯ More ends the 
   }
 });
 
-test('a file beside the thread: ‹ Inbox, then Mark read and Snooze; ⋯ More ends the header; full screen covers it', async () => {
+test('a file beside the thread: ‹ Inbox, then Mark read and Snooze; ⋯ More, then the lit folder ends the header; full screen covers it', async () => {
   const { page, threads } = world;
   await page.goto(`${world.url}#thread=${threads.invoices}&file=${world.attachment}`);
   const pane = page.locator(`section.ib-pane[data-thread-id="${threads.invoices}"]`);
@@ -508,13 +525,15 @@ test('a file beside the thread: ‹ Inbox, then Mark read and Snooze; ⋯ More e
   await expect(view).toBeVisible();
   await expect(pane.locator('[data-file-back]')).toBeVisible();
   await shot(page, '3-file-beside', ['light', 'dark']);
-  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'snooze', 'artifacts', 'expand', 'more']);
+  // The folder is the pane's toggle: lit where the thread's × would be (approval "inbox-files-tabs", 2026-10-30).
+  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'snooze', 'expand', 'more', 'artifacts']);
+  await expect(pane.locator('[data-artifacts-button]')).toHaveAttribute('aria-expanded', 'true');
   await view.getByRole('button', { name: 'Full screen' }).click();
   await expect(view).toHaveClass(/ib-full/);
   await shot(page, '4-file-full-screen');
   await view.getByRole('button', { name: 'Side by side' }).click();
   await expect(view).not.toHaveClass(/ib-full/);
-  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'snooze', 'artifacts', 'expand', 'more']);
+  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'snooze', 'expand', 'more', 'artifacts']);
 });
 
 test('a thread that came back from the archive, and an archived one: the same order, Unarchive in the foot', async () => {
@@ -523,8 +542,10 @@ test('a thread that came back from the archive, and an archived one: the same or
   const backPane = page.locator(`section.ib-pane[data-thread-id="${threads.back}"]`);
   await expect(backPane.locator('[data-came-back]')).toBeVisible();
   await shot(page, '5-came-back');
-  // A thread that came back is not resolved for the window, so Mark read is offered and leads.
-  expect(await headerOrder(backPane)).toEqual(['full', 'mark-read', 'snooze', 'expand', 'more', 'close']);
+  // A thread that came back is not resolved for the window, so Mark read is offered and leads. It has no artifact,
+  // but it has a project folder: the folder button keeps its place (owner, 2026-10-27).
+  await expect(backPane.locator('[data-artifacts-button]')).toHaveAccessibleName('Files');
+  expect(await headerOrder(backPane)).toEqual(['full', 'mark-read', 'snooze', 'artifacts', 'expand', 'more', 'close']);
 
   await page.goto(`${world.url}#thread=${threads.archived}`);
   const archivedPane = page.locator(`section.ib-pane[data-thread-id="${threads.archived}"]`);

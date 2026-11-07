@@ -82,6 +82,10 @@ const PATHS = {
   panelsHide: 'M4.125 4.5h15.75c.621 0 1.125.504 1.125 1.125v12.75c0 .621-.504 1.125-1.125 1.125H4.125A1.125 1.125 0 0 1 3 18.375V5.625C3 5.004 3.504 4.5 4.125 4.5ZM7.5 4.5v15M11.25 4.5v15m6-10.5-3 3 3 3',
   // The two views (fileView.ts): a window split by its divider for Side by side, frame corners for Full screen.
   sideBySide: 'M9.75 4.5v15M4.125 19.5h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125Z',
+  // Files (approval "inbox-files-tabs"): the files panel at the right, the changes toggle (a commit), collapse every folder.
+  panelR: 'M3.75 5.25h16.5v13.5H3.75zM14.25 5.25v13.5',
+  changed: 'M12 15.75a3.75 3.75 0 1 0 0-7.5 3.75 3.75 0 0 0 0 7.5ZM12 3v5.25M12 15.75V21',
+  collapseAll: 'm4.5 12.75 7.5-7.5 7.5 7.5m-15 6 7.5-7.5 7.5 7.5',
   // An open document's Contents list (ContentsPanel.tsx; Heroicons outline list-bullet).
   contents:
     'M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z',

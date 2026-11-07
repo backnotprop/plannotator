@@ -165,7 +165,7 @@ async function openTile(name: string) {
 }
 /** Close the file beside the thread. */
 async function close() {
-  await act(async () => host!.querySelector<HTMLButtonElement>('.ib-vhead [aria-label^="Close "]')!.click());
+  await act(async () => host!.querySelector<HTMLButtonElement>('.ib-vhead [aria-label^="Close "], [data-files-header] [aria-label^="Close "]')!.click());
 }
 
 
@@ -174,8 +174,8 @@ const choice = () => document.cookie.split('; ').find((c) => c.startsWith(`${VIE
 const addressView = () => new URLSearchParams(window.location.hash.slice(1)).get('view');
 const toast = () => host!.querySelector<HTMLElement>('.ib-toast');
 const liveSaid = () => [...host!.querySelectorAll<HTMLElement>('[data-inbox-live]')].map((n) => n.textContent ?? '').join(' ');
-const sideButton = () => host!.querySelector<HTMLButtonElement>('.ib-vhead [data-view-side]');
-const fullButton = () => host!.querySelector<HTMLButtonElement>('.ib-vhead [data-full-screen-toggle]');
+const sideButton = () => host!.querySelector<HTMLButtonElement>('.ib-vhead [data-view-side], [data-files-header] [data-view-side]');
+const fullButton = () => host!.querySelector<HTMLButtonElement>('.ib-vhead [data-full-screen-toggle], [data-files-header] [data-full-screen-toggle]');
 const escapeOnPane = async () => {
   const pane = view()!;
   pane.focus();
@@ -195,7 +195,7 @@ test.skipIf(!hasDom)('the header switch: a press on its pressed half saves side 
   await openTile('plan.md');
   expect(inFullScreen()).toBe(false);
   expect(choice()).toBeNull();
-  const group = el.querySelector('.ib-vhead [data-view-switch]')!;
+  const group = el.querySelector('.ib-vhead [data-view-switch], [data-files-header] [data-view-switch]')!;
   expect(group.getAttribute('role')).toBe('group');
   expect(sideButton()!.getAttribute('aria-pressed')).toBe('true');
   expect(fullButton()!.getAttribute('aria-pressed')).toBe('false');
