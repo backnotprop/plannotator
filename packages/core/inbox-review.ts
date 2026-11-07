@@ -372,4 +372,4 @@ export const INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES = INBOX_GUIDE_FIELD_DESCRI
  * Code review is on. An Ask's answer is never pinned by itself (the owner, 2026-11-07: it stays in the thread).
  */
 export const INBOX_NOTE_BLOCK_LINE =
-  'In a thread with a review, a `:::note path#L42-L48` … `:::` block pins its words to those lines of the newest review (` old` after the lines for removed lines): your note, not the person\'s comment.';
+  'In a thread with a review, a `:::note path#L42-L48` … `:::` block pins its words to those lines of the newest review (` old` after the lines for removed lines): your note, not the person\'s comment. Pin a note only when your words are about those lines; answer the rest in the message.';

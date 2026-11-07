@@ -13,8 +13,8 @@ import { join } from "node:path";
 import { FIXTURE_PATCH_TS_JSON, FIXTURE_V1_LOCAL } from "@plannotator/core/guide-format-fixtures";
 import { buildGuideSnapshot } from "@plannotator/core/guide-format";
 import { INBOX_GUIDE_FIELD_DESCRIPTION, INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES, INBOX_NOTE_BLOCK_LINE, INBOX_REVIEW_NOTES_RULE } from "@plannotator/core/inbox-review";
-import { GUIDE_BRIEF_EXAMPLE_WITH_NOTE, checkInboxGuide } from "./inbox-guides";
-import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
+import { GUIDE_BRIEF_EXAMPLE, GUIDE_BRIEF_EXAMPLE_WITH_NOTE, checkInboxGuide } from "./inbox-guides";
+import { createInboxMcpServer, SEND_BODY_DESCRIPTION, type InboxMcpContext } from "./inbox-mcp";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-context-notes-")));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -38,9 +38,13 @@ describe("submit_guide: the guide author's notes", () => {
     expect(checked.snapshot.guide.sections[0]!.diffs[0]!.notes).toEqual([note]);
   });
 
-  test("the brief's example with a note is a call that works as it is", () => {
-    const checked = checkInboxGuide(GUIDE_BRIEF_EXAMPLE_WITH_NOTE, root, { codeReview: true, review: true });
-    expect(checked.ok && checked.snapshot.version).toBe(4);
+  test("the brief's example with a note is a call that works as it is: a review, its note kept", () => {
+    // As submit_guide reads it: `review` from the call itself, not from the test.
+    const checked = checkInboxGuide(GUIDE_BRIEF_EXAMPLE_WITH_NOTE, root, { codeReview: true, review: GUIDE_BRIEF_EXAMPLE_WITH_NOTE.review === true });
+    expect(checked.ok).toBe(true);
+    if (!checked.ok) return;
+    expect(checked.snapshot.version).toBe(4);
+    expect(checked.snapshot.guide.sections[0]!.diffs[0]!.notes).toEqual(GUIDE_BRIEF_EXAMPLE_WITH_NOTE.guide.sections[0]!.diffs[0]!.notes);
   });
 
   test("a plain guided review (no `review: true`) keeps no notes: only the review draws them", () => {
@@ -113,6 +117,8 @@ describe("the words that tell an agent about notes ride the Code review switch",
   test("send_message's body names the `:::note` block only while Code review is on", () => {
     expect(field(tools(true), "send_message", "body")).toContain(INBOX_NOTE_BLOCK_LINE);
     expect(field(tools(false), "send_message", "body")).not.toContain(":::note");
+    // Off, the body's words are what they were, byte for byte.
+    expect(field(tools(false), "send_message", "body")).toBe(SEND_BODY_DESCRIPTION);
   });
 
   test("submit_guide's guide field names `notes` only while Code review is on", () => {
@@ -128,5 +134,9 @@ describe("the words that tell an agent about notes ride the Code review switch",
     expect(on).toContain("lineStart");
     expect(off).not.toContain("lineStart");
     expect(off).not.toContain(JSON.stringify(INBOX_REVIEW_NOTES_RULE).slice(1, 40));
+    // Off, the worked example is the one it always was (no `review`, no note), byte for byte.
+    const example = async (codeReview: boolean) => ((await tools(codeReview).get_guide_brief!.handler!({}, {})) as { structuredContent?: { example?: unknown } }).structuredContent?.example;
+    expect(JSON.stringify(await example(false))).toBe(JSON.stringify(GUIDE_BRIEF_EXAMPLE));
+    expect(await example(true)).toEqual(GUIDE_BRIEF_EXAMPLE_WITH_NOTE);
   });
 });

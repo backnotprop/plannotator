@@ -95,11 +95,13 @@ export const GUIDE_BRIEF_EXAMPLE = {
 };
 
 /**
- * The worked example while Code review is on: the same call, its one file with one note (context notes, approval
- * "inbox-context-notes"). Off, the brief's example is `GUIDE_BRIEF_EXAMPLE`, byte for byte.
+ * The worked example while Code review is on: the same call as a review (`review: true`), its one file with one note
+ * (context notes, approval "inbox-context-notes"). Off, the brief's example is `GUIDE_BRIEF_EXAMPLE`, byte for byte.
  */
 export const GUIDE_BRIEF_EXAMPLE_WITH_NOTE = {
   ...GUIDE_BRIEF_EXAMPLE,
+  // Notes are kept only on a review: the example sends `review: true` so its note is kept.
+  review: true,
   guide: {
     ...GUIDE_BRIEF_EXAMPLE.guide,
     sections: [

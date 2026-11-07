@@ -51,7 +51,7 @@ test.skipIf(!hasDom)('a row is a button that opens its note in place, and nothin
   const body = el.querySelector(`#${CSS.escape(button.getAttribute('aria-controls')!)}`) as HTMLElement;
   expect(body.hidden).toBe(true);
   expect(button.textContent).toContain('Answer');
-  expect(button.querySelector('.ib-ctxn-peb')).toBeNull();
+  expect(button.querySelector('.ib-ctxn-peb, .ib-ctxn-risk-mark')).toBeNull();
   expect(button.querySelector('.ib-ctxn-h')!.firstElementChild!.textContent).toBe('Answer');
   act(() => button.click());
   expect(button.getAttribute('aria-expanded')).toBe('true');
@@ -88,9 +88,11 @@ test.skipIf(!hasDom)('a risk shows High and the person’s rule; a picture opens
   const [riskRow, pictureRow] = Array.from(el.querySelectorAll<HTMLButtonElement>('button.ib-ctxn-row'));
   expect(riskRow!.textContent).toContain('Risk');
   expect(riskRow!.textContent).toContain('High');
-  // Only a Picture carries Show me's mark (it comes from a board); the other writers start with their name (q-9ad31b4e).
+  // Only a Picture carries Show me's mark (it comes from a board); Risk has its own gauge (q-9ad31b4e and the owner's pick).
   expect(riskRow!.querySelector('.ib-ctxn-peb')).toBeNull();
+  expect(riskRow!.querySelector('.ib-ctxn-risk-mark')).not.toBeNull();
   expect(pictureRow!.querySelector('.ib-ctxn-peb')).not.toBeNull();
+  expect(pictureRow!.querySelector('.ib-ctxn-risk-mark')).toBeNull();
   act(() => riskRow!.click());
   expect(el.querySelector('[data-context-note-row="r-0"]')!.textContent).toContain('your rule “Anything in billing.”');
   act(() => pictureRow!.click());

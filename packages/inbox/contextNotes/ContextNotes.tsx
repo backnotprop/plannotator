@@ -124,14 +124,26 @@ function NoteBy({ note }: { note: ContextNote }) {
   );
 }
 
+/** Risk's own mark (the owner, option A · Gauge): 12 px, in the row's muted colour. */
+function RiskGauge() {
+  return (
+    <svg className="ib-ctxn-risk-mark" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2.5 11.5a5.5 5.5 0 1 1 11 0" />
+      <path d="M8 11.5l3-4" />
+      <circle cx="8" cy="11.5" r="0.9" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 /**
- * The writer's name starts the row (the owner, q-9ad31b4e: no mark, only the writer's name). Only a Picture keeps
- * Show me's mark: it comes from a board, and that mark is drawing's and the board's. Risk has no mark yet.
+ * The writer's name starts the row (the owner, q-9ad31b4e: no mark, only the writer's name). A Picture keeps Show
+ * me's mark (it comes from a board, and that mark is drawing's and the board's); Risk, its own family, has a gauge.
  */
 function NoteHead({ note }: { note: ContextNote }) {
   return (
     <span className="ib-ctxn-h">
       {note.writer === 'picture' && <Pebble alive={false} size={12} className="ib-sm-peb ib-ctxn-peb" />}
+      {note.writer === 'risk' && <RiskGauge />}
       <b>{writerWord(note)}</b>
       {note.writer === 'risk' && (
         <span className="ib-risk ib-ctxn-risk" data-risk="high">

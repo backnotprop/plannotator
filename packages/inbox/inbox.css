@@ -8954,6 +8954,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-ctxn-h { flex: none; display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--ib-fs-12, 12px); line-height: 18px; color: var(--muted-foreground); }
 .ib-ctxn-h b { flex: none; color: var(--foreground); font-weight: 600; }
 .ib-ctxn-peb { flex: none; }
+.ib-ctxn-risk-mark { flex: none; color: var(--muted-foreground); }
 .ib-ctxn-risk { font-size: var(--ib-fs-11-5, 11.5px); line-height: 16px; }
 .ib-ctxn-first { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-ctxn-chev { flex: none; color: var(--muted-foreground); transition: transform 0.15s ease-out; }
