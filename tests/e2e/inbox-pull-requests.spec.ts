@@ -2164,10 +2164,10 @@ test('the expand arrows on the PR page: read from the forge, opening a gap grows
   await expect.poll(() => page.workers().length).toBeGreaterThan(0);
   // Arrows, and no read: a whole file is read and highlighted only when someone opens one.
   expect(forgeCalls()).not.toContain(`gh diff repos/northwind/web-app/contents/${TOKENS_PATH}?ref=${MERGE_BASE}`);
-  // The forge has no whole text of Layout.tsx: its first click takes its arrows away, and nothing is logged.
-  const noText = review.locator('[data-guide-file-shell="src/settings/Layout.tsx"] [data-expand-button]');
-  await noText.first().click();
-  await expect(noText).toHaveCount(0);
+  // Layout.tsx's one hunk holds its whole diff from line 1: its only arrows would be in the row after the hunk, which
+  // the page does not draw (approval pr-view-one-surface, 11-07 19:08), so it shows none. (No text to open taking the
+  // arrows away: guideExpandContext.test.tsx.)
+  await expect(review.locator('[data-guide-file-shell="src/settings/Layout.tsx"] [data-expand-button]').filter({ visible: true })).toHaveCount(0);
   const box = shell.locator('[data-guide-code-view-mounted]');
   const height = async () => (await box.boundingBox())!.height;
   const before = await height();
