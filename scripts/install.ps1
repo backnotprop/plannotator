@@ -1454,7 +1454,7 @@ if (-not (Test-Path $extrasMigration)) {
 # redirected/CI runs never prompt. Flags win over everything.
 $prefsFile = Join-Path $configDir "install-prefs"
 $coreSkillNames = @("plannotator-review", "plannotator-annotate", "plannotator-last")
-$extraSkillNames = @("plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer")
+$extraSkillNames = @("plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer", "plannotator-shape")
 
 $savedExtras = ""
 $savedInvocable = ""
@@ -1467,9 +1467,12 @@ if (Test-Path $prefsFile) {
 
 # Extras already on disk (pre-existing or previously npx-installed)? Then the
 # extras question is moot - they still count toward the checkbox list, and we
-# never launch the npx flow over them.
+# never launch the npx flow over them. Only the extras the one-time migration
+# above removes count here: plannotator-shape was never default-installed, so
+# the migration keeps it, and on its own it must not hide the extras offer
+# from someone whose other extras the migration has just removed.
 $extrasPresent = $false
-foreach ($skill in $extraSkillNames) {
+foreach ($skill in @("plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer")) {
     if ((Test-Path (Join-Path $claudeSkillsDir $skill)) -or (Test-Path (Join-Path $agentsSkillsDir $skill))) {
         $extrasPresent = $true
         break
@@ -1592,7 +1595,7 @@ if ($runWizard) {
         $extrasChoice = if ($Extras) { "yes" } else { "no" }
     } else {
         $defaultExtras = if ($savedExtras) { $savedExtras } else { "no" }
-        $extrasChoice = Read-YesNo "Install the extra skills (compound planning, setup-goal, visual explainer)?" $defaultExtras
+        $extrasChoice = Read-YesNo "Install the extra skills (compound planning, setup-goal, visual explainer, shape)?" $defaultExtras
     }
     $invocableList = $coreSkillNames
     if ($extrasChoice -eq "yes") { $invocableList = $coreSkillNames + $extraSkillNames }
@@ -2591,7 +2594,7 @@ if ($skipSkillsResolved) {
 
 if ((-not $skipSkillsResolved) -and ($extrasChoice -ne "yes")) {
     Write-Host ""
-    Write-Host "Optional skills (compound planning, setup-goal, visual explainer):"
+    Write-Host "Optional skills (compound planning, setup-goal, visual explainer, shape):"
     Write-Host "  npx skills add backnotprop/plannotator/apps/skills/extra --global"
 }
 

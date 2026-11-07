@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shape · TITLE</title>
+<!-- FACT SHEET goes here -->
+<style>
+/* A host's --background, --foreground, --font-sans, --font-mono win; the rest is mixed from paper, ink and mark. */
+:root{color-scheme:light dark;
+  --paper:var(--background,#fbfaf7);--ink:var(--foreground,#1c1c1e);--mark:#c4520f;
+  --ink2:color-mix(in srgb,var(--ink) 78%,var(--paper));--grey:color-mix(in srgb,var(--ink) 48%,var(--paper));
+  --rule:color-mix(in srgb,var(--ink) 12%,var(--paper));--mark-soft:color-mix(in srgb,var(--mark) 16%,var(--paper));
+  --sans:var(--font-sans,ui-sans-serif,-apple-system,"SF Pro Text","Helvetica Neue",Arial,sans-serif);--mono:var(--font-mono,ui-monospace,"SF Mono",Menlo,monospace)}
+/* Fallbacks for engines without light-dark() (iOS before 17.5). */
+@media (prefers-color-scheme:dark){:root{--paper:var(--background,#161618);--ink:var(--foreground,#ececee);--mark:#f08a4b}}
+@supports (color:light-dark(#000,#fff)){:root{--paper:var(--background,light-dark(#fbfaf7,#161618));--ink:var(--foreground,light-dark(#1c1c1e,#ececee));--mark:light-dark(#c4520f,#f08a4b)}}
+@supports not (color:light-dark(#000,#fff)){:root[data-theme=light]{--paper:var(--background,#fbfaf7);--ink:var(--foreground,#1c1c1e);--mark:#c4520f}
+  :root[data-theme=dark]{--paper:var(--background,#161618);--ink:var(--foreground,#ececee);--mark:#f08a4b}}
+:root[data-theme=light]{color-scheme:light} :root[data-theme=dark]{color-scheme:dark}
+*{box-sizing:border-box}html,body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans)}
+main{max-width:1280px;margin:0 auto;padding:28px 40px 32px}
+header{display:flex;flex-direction:column;align-items:flex-start;gap:12px}
+.eyebrow{font:500 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--grey)}
+h1{font-size:28px;line-height:1.15;margin:8px 0 4px;font-weight:650;letter-spacing:-.01em}
+.claim{font-size:16px;color:var(--ink2);margin:0}
+.switch{display:flex;border:1px solid var(--rule);border-radius:8px;padding:2px;flex:none}
+.switch button{font:500 13px var(--sans);color:var(--ink2);background:none;border:0;padding:6px 12px;border-radius:6px;cursor:pointer}
+.switch button[aria-pressed=true]{background:var(--ink);color:var(--paper)}
+.board{margin:12px 0 0;position:relative}
+.board svg{display:block;width:100%;height:auto;max-height:calc(100vh - 372px);min-height:340px}
+.board svg[hidden]{display:none}
+html[data-pn-embed=inline] .board svg{max-height:none}
+.note{columns:3 250px;column-gap:40px;font-size:15.5px;line-height:1.5;color:var(--ink2);margin:14px 0 0;padding-top:14px;border-top:1px solid var(--rule)}
+.note p{margin:0 0 .6em;break-inside:avoid}
+svg text{font-family:var(--sans);fill:var(--ink)}
+svg .cap{font:500 12.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;fill:var(--grey)}
+svg .ink{stroke:var(--ink);fill:var(--paper)} svg .line{stroke:var(--ink);fill:none}
+svg .grey{stroke:var(--grey);fill:none} svg .acc{stroke:var(--mark);fill:none}
+svg .acc-fill{fill:var(--mark-soft);stroke:var(--mark)} svg .dash{stroke-dasharray:6 6}
+svg .t-acc{fill:var(--mark)} svg .t-grey{fill:var(--grey)} svg .t-ink2{fill:var(--ink2)}
+svg .struck{text-decoration:line-through} svg .say{font-style:italic;fill:var(--ink2)} svg .lift{fill:var(--rule);stroke:none}
+svg *{stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+@media (max-width:760px){main{padding:18px 16px;display:flex;flex-direction:column}h1{font-size:23px}
+  .switch{align-self:stretch}.switch button{flex:1;padding:9px 12px;font-size:14px}
+  .board{overflow-x:auto;-webkit-overflow-scrolling:touch}.board svg{width:780px;max-width:none;max-height:none;min-height:0}.note{columns:1}.board::after{content:'Swipe sideways to see all of it';display:block;font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--grey);margin-top:6px;position:sticky;left:0}}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <div class="eyebrow">Shape · as of TIME ZONE · N messages</div>
+      <h1>TITLE: THE SUBJECT IN PLAIN WORDS</h1>
+      <p class="claim">CLAIM: ONE LINE, WHERE IT STANDS.</p>
+    </div>
+    <div class="switch" role="group" aria-label="View">
+      <button data-show="idea" aria-pressed="true">Picture</button>
+      <button data-show="tech" aria-pressed="false">How it works</button>
+    </div>
+  </header>
+  <figure class="board">
+    <svg data-view="idea" viewBox="0 0 1200 640" preserveAspectRatio="xMinYMid meet" role="img" aria-label="DESCRIBE THE PICTURE IN ONE SENTENCE">
+      <!-- <g data-step="1"> ... </g>  <g data-step="2"> ... </g> -->
+    </svg>
+    <svg data-view="tech" viewBox="0 0 1200 640" preserveAspectRatio="xMinYMid meet" role="img" aria-label="DESCRIBE HOW IT WORKS" hidden>
+      <!-- <g data-step="1"> ... </g> -->
+    </svg>
+  </figure>
+  <section class="note"><p>THE NOTE.</p></section>
+</main>
+<script>
+(()=>{const q=new URLSearchParams(location.search),root=document.documentElement;
+if(q.get('theme'))root.dataset.theme=q.get('theme');
+const still=q.has('static')||matchMedia('(prefers-reduced-motion: reduce)').matches;
+const views=[...document.querySelectorAll('svg[data-view]')],btns=[...document.querySelectorAll('.switch button')];
+if(views.length<2)document.querySelector('.switch')?.remove();
+let anims=[],cur=null,gen=0;
+const steps=v=>{const m=new Map();v.querySelectorAll('[data-step]').forEach(g=>{const n=+g.dataset.step;(m.get(n)||m.set(n,[]).get(n)).push(g)});return [...m.keys()].sort((a,b)=>a-b).map(k=>m.get(k))};
+const strokes=g=>[...g.querySelectorAll('path,line,polyline,polygon,rect,circle,ellipse')].filter(e=>{const s=getComputedStyle(e);return s.stroke!=='none'&&s.strokeDasharray==='none'&&e.getTotalLength});
+function play(v,dir,total){const S=steps(v);if(dir<0)S.reverse();const per=total/Math.max(S.length,1);const done=[];
+ S.forEach((gs,i)=>gs.forEach(g=>{const d=Math.max(per*1.6,180),delay=i*per;
+  done.push(g.animate([{opacity:dir>0?0:1},{opacity:dir>0?1:0}],{duration:d*.7,delay:dir>0?delay:delay+d*.3,fill:'both',easing:'ease-out'}).finished);
+  strokes(g).forEach(e=>{const L=e.getTotalLength();if(!L)return;e.style.strokeDasharray=L;
+   const a=e.animate([{strokeDashoffset:dir>0?L:0},{strokeDashoffset:dir>0?0:L}],{duration:d,delay,fill:'both',easing:'cubic-bezier(.3,.6,.2,1)'});
+   a.finished.then(()=>{if(dir>0)e.style.strokeDasharray=''});anims.push(a)})}));
+ anims.push(...v.getAnimations({subtree:true}));return Promise.all(done).catch(()=>{})}
+function skip(){anims.forEach(a=>{try{a.finish()}catch{}});anims=[]}
+function reset(v){v.getAnimations({subtree:true}).forEach(a=>a.cancel());v.querySelectorAll('*').forEach(e=>e.style.strokeDasharray='')}
+// A later switch cancels an earlier one, so the view shown matches the pressed tab.
+function show(name,first){const hid=v=>v.hasAttribute('hidden'),hide=(v,h)=>v.toggleAttribute('hidden',h);
+ const to=views.find(v=>v.dataset.view===name)||views[0];
+ btns.forEach(b=>b.setAttribute('aria-pressed',b.dataset.show===to.dataset.view));
+ if(to===cur&&!first)return;
+ cur=to;const g=++gen;
+ if(still){views.forEach(v=>hide(v,v!==to));return}
+ skip();const from=views.find(v=>v!==to&&!hid(v));
+ const out=(!first&&from)?play(from,-1,420):Promise.resolve();
+ out.then(()=>new Promise(r=>setTimeout(r,first?0:140))).then(()=>{if(g!==gen)return;
+  views.forEach(v=>{if(v!==to){hide(v,true);reset(v)}});reset(to);hide(to,false);return play(to,1,first?1500:1100)}).then(()=>{if(g===gen)anims=[]})}
+btns.forEach(b=>b.onclick=()=>show(b.dataset.show));
+addEventListener('keydown',e=>{if(e.key==='Escape')skip()});document.querySelector('.board').addEventListener('click',skip);
+show(q.get('view')==='tech'?'tech':'idea',true)})();
+</script>
+</body>
+</html>
