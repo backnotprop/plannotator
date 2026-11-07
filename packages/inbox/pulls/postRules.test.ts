@@ -26,4 +26,17 @@ describe("a guided review's comment goes inline only if its lines are the PR's",
     expect(onPullDiff([comment()], GUIDE, [])[0]!.onPullDiff).toBeUndefined();
     expect(onPullDiff([comment({ scope: 'file' })], GUIDE, GUIDE)[0]!.onPullDiff).toBeUndefined();
   });
+  test('a deleted line is read on the old side: inline when the PR deletes the same line, else the body', () => {
+    const guide = parseDiffToFiles(patchOf([' one', '-gone', '+two', ' three']));
+    const onDeleted = comment({ side: 'old', lineStart: 2, lineEnd: 2 });
+    expect(onPullDiff([onDeleted], guide, guide)[0]!.onPullDiff).toBe(true);
+    expect(onPullDiff([onDeleted], guide, parseDiffToFiles(patchOf([' one', '-went', '+two', ' three'])))[0]!.onPullDiff).toBeUndefined();
+  });
+  test('a range of lines: inline only when every line in it reads the same, not just its first', () => {
+    const guide = parseDiffToFiles(patchOf([' a', ' b', '+c', ' d', ' e']));
+    const range = comment({ lineStart: 1, lineEnd: 5 });
+    expect(onPullDiff([range], guide, guide)[0]!.onPullDiff).toBe(true);
+    // Line 5 is past the first line's context: only reading the whole range sees it differ.
+    expect(onPullDiff([range], guide, parseDiffToFiles(patchOf([' a', ' b', '+c', ' d', ' E'])))[0]!.onPullDiff).toBeUndefined();
+  });
 });

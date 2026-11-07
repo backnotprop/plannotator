@@ -184,7 +184,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     inboxApi
       .pullDiff(postKey, 'layer', controller.signal)
       .then((answer) => {
-        if (controller.signal.aborted || typeof answer.patch !== 'string' || !answer.head_sha) return;
+        if (controller.signal.aborted || typeof answer.patch !== 'string' || typeof answer.head_sha !== 'string' || !answer.head_sha) return;
         setPullDiff({ files: parseDiffToFiles(answer.patch), head: answer.head_sha });
       })
       .catch(() => {
