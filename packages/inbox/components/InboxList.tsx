@@ -31,12 +31,13 @@ import { attachPullToRefresh } from '../pullRefresh';
 import { TidyMenu, type TidyController } from './Tidy';
 import { awayLine, type MachinesModel } from '../machines';
 import { listLookClasses, useListLook } from '../listLook';
+import { useListGroups } from '../listGroups';
 import { useInboxTextSize } from '../textSize';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { relativeTime, relativeWords, useRelativeClock } from '../relativeTime';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { isComposingKey, keyTarget, modalOpen } from '../shortcuts/guards';
-import { listMoveIndex, listStops, LIST_STOPS, type ListMove } from '../listKeys';
+import { listKeyTarget, LIST_STOPS, type ListMove } from '../listKeys';
 
 export interface InboxListProps {
   title: string;
@@ -143,8 +144,9 @@ export interface InboxListProps {
   /** The ⋮ menu's thread panel item (threadPanel.ts). Absent (a phone, the tour): no item. */
   threadPanel?: { on: boolean; onChange: (on: boolean) => void };
   /**
-   * The person's look options (listLook.ts) from this browser. False (the onboarding tour): today's list, every
-   * option off, whatever this browser chose, as the tour's sidebar ignores its closed sections.
+   * The person's look options (listLook.ts) and closed groups (listGroups.ts) from this browser. False (the
+   * onboarding tour): today's list, every option off and every group at its default, whatever this browser chose,
+   * as the tour's sidebar ignores its closed sections.
    */
   rememberLook?: boolean;
   /** The ⋮ menu's "Customize rows…": Settings → Rows. Absent (the tour): no item. */
@@ -1018,21 +1020,37 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
   );
 }
 
-/** A folded Snoozed band with an agent stopped or held up inside: the triangle, so a blocker never hides behind the fold. */
-function FoldedBlocker({ rows }: { rows: readonly InboxListRow[] }) {
+/**
+ * A closed group with an agent stopped or held up inside (Stopped on you, Holding up work, the Snoozed band): the
+ * triangle, so a blocker never hides behind the fold.
+ */
+function FoldedBlocker({ rows, group }: { rows: readonly InboxListRow[]; group: InboxListGroupId }) {
   const stopped = rows.some((row) => row.section === 'stopped');
   if (!stopped && !rows.some((row) => row.section === 'holding')) return null;
+  const snoozed = group === 'snoozed';
+  const words = snoozed
+    ? stopped
+      ? 'A snoozed thread is stopped on you'
+      : 'A snoozed thread is holding up work'
+    : stopped
+      ? 'A closed thread is stopped on you'
+      : 'A closed thread is holding up work';
   return (
-    <span className="ib-zband-tri" data-stopped={stopped ? '' : undefined} data-snooze-blocker="" role="img" aria-label={stopped ? 'A snoozed thread is stopped on you' : 'A snoozed thread is holding up work'}>
+    <span className="ib-zband-tri" data-stopped={stopped ? '' : undefined} data-snooze-blocker={snoozed ? '' : undefined} data-folded-blocker="" role="img" aria-label={words}>
       <Icon name="warn" size={14} />
     </span>
   );
 }
 
+/** Something new came into a closed group since it was closed: an unread row whose latest agent message came after. */
+function newSince(rows: readonly InboxListRow[], since: number): boolean {
+  return rows.some((row) => row.unread && Date.parse(row.last_agent_at ?? row.last_at) > since);
+}
+
 export function InboxList(props: InboxListProps) {
-  const [quietOpen, setQuietOpen] = useState(false);
-  // The Snoozed band under Quiet: folded by default, as Quiet is (approval "inbox-snooze").
-  const [snoozedOpen, setSnoozedOpen] = useState(false);
+  // Every group closes by a click on its header, this browser's choice (listGroups.ts). Quiet and the Snoozed band
+  // under it start closed (approval "inbox-snooze"), every other group open.
+  const groups = useListGroups(props.rememberLook !== false);
   // Each linked machine that is away, in the list it shows (every machine, or the one the filter shows).
   const awayLines = (props.machines?.linked ?? []).flatMap((machine) => {
     const text = props.machineScope && props.machineScope !== machine.id ? null : awayLine(machine);
@@ -1056,9 +1074,9 @@ export function InboxList(props: InboxListProps) {
     handle: (event: KeyboardEvent) => {
       const body = bodyRef.current;
       if (!body) return;
-      const stops = listStops(body);
-      const at = listMoveIndex(stops.length, stops.indexOf(keyTarget(event) as HTMLElement), move);
-      const next = at === null ? null : stops[at];
+      // ↓ ↑ stop on the groups' headers too; Home End go to the first or last thread (listKeys.ts).
+      const key = move === 'next' ? 'down' : move === 'previous' ? 'up' : move;
+      const next = listKeyTarget(body, keyTarget(event), key);
       if (!next) return;
       next.focus({ preventScroll: true });
       next.scrollIntoView?.({ block: 'nearest' });
@@ -1127,8 +1145,10 @@ export function InboxList(props: InboxListProps) {
   const visible = props.sections.filter((s) => s.threads.length > 0);
   // The band comes back folded: it shows only while something is snoozed, and each time it is new.
   const bandShown = visible.some((s) => s.id === 'snoozed');
+  const resetGroup = groups.reset;
   useEffect(() => {
-    if (!bandShown) setSnoozedOpen(false);
+    if (!bandShown) resetGroup('snoozed');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bandShown]);
   // The wide rows' pin column (the owner, 2026-10-31: the pin beside the counts): only in a list with a pinned row,
   // Quiet's folded rows included, so a list without pins keeps its columns and opening Quiet moves none.
@@ -1142,18 +1162,20 @@ export function InboxList(props: InboxListProps) {
   // and width, whatever the row's state (hovered, its tooltip open or not yet mounted). A change inside `.ib-cq` that
   // breaks it must add what it depends on to `fitKey`, or the column keeps a stale width.
   const settled = besideThread === props.narrow;
+  const closedKey = props.sections.map((section) => (groups.state(section.id).open ? '' : section.id)).join(',');
   const countsKey = useMemo(() => {
     if (!pinColumn || !settled) return '';
     const keys = new Set<string>();
     for (const section of props.sections) {
-      if (section.id === 'quiet' ? !quietOpen : section.id === 'snoozed' ? !snoozedOpen : false) continue;
+      if (!groups.state(section.id).open) continue;
       for (const row of section.threads) {
         const key = openCountsKey(row);
         if (key) keys.add(key);
       }
     }
     return [...keys].sort().join(' ');
-  }, [pinColumn, settled, props.sections, quietOpen, snoozedOpen]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinColumn, settled, props.sections, closedKey]);
   const textSize = useInboxTextSize();
   // ThemeProvider puts the palette's classes on <html> while it renders, before this list's layout effects run.
   const { colorTheme, resolvedMode } = useTheme();
@@ -1327,24 +1349,32 @@ export function InboxList(props: InboxListProps) {
           {/* The rows' tooltips mount on first use (RowTip.tsx): drawing every row's at once is most of a redraw. */}
           <LazyRowTips.Provider value={true}>
           {visible.map((section) => {
-            const quiet = section.id === 'quiet';
-            const snoozed = section.id === 'snoozed';
-            const open = quiet ? quietOpen : snoozed ? snoozedOpen : true;
-            const folds = quiet || snoozed;
-            const toggle = quiet ? setQuietOpen : setSnoozedOpen;
+            const state = groups.state(section.id);
+            const open = state.open;
+            // Closed, with something new inside since: the count goes bold. The group never opens by itself.
+            const fresh = !state.open && newSince(section.threads, state.since);
             return (
               <div key={section.id} className="ib-group" data-section-id={section.id} role="group" aria-label={section.label}>
-                {folds ? (
-                  <button type="button" className="ib-band" onClick={() => toggle((v) => !v)} aria-expanded={open}>
-                    {section.label} <span className="ib-n">{formatCount(section.threads.length)}</span>
-                    {snoozed && !open && <FoldedBlocker rows={section.threads} />}
-                    <Icon name={open ? 'chevD' : 'chevR'} size={14} />
-                  </button>
-                ) : (
-                  <div className="ib-band">
-                    {section.label} <span className="ib-n">{formatCount(section.threads.length)}</span>
-                  </div>
-                )}
+                {/* The whole header is the toggle, no chevron (approval "inbox-list-groups-close"). */}
+                <button
+                  type="button"
+                  className="ib-band"
+                  aria-expanded={open}
+                  onClick={(event) => {
+                    // Focus in a row of the group that closes goes to its header, not to the page.
+                    const band = event.currentTarget;
+                    const active = document.activeElement;
+                    if (open && active !== band && band.parentElement?.contains(active)) band.focus({ preventScroll: true });
+                    groups.toggle(section.id);
+                  }}
+                >
+                  {section.label}{' '}
+                  <span className="ib-n" data-new={fresh ? '' : undefined}>
+                    {formatCount(section.threads.length)}
+                    {fresh && <span className="ib-sr">, new since closed</span>}
+                  </span>
+                  {!open && <FoldedBlocker rows={section.threads} group={section.id} />}
+                </button>
                 {open &&
                   section.threads.map((row) => (
                     <ListRow
