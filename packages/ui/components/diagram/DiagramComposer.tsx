@@ -8,7 +8,7 @@ import { isCommentSubmitKey } from '../../utils/commentSubmitKey';
 import type { DiagramComposerDraft } from './useDiagramComments';
 import { getCommentCardEnabled } from '../../utils/commentCardPolicy';
 import { Icon } from '../inbox-thread/icons';
-import { CommentDraftScopeContext } from '../commentDraftScope';
+import { CommentDraftScopeContext } from '../../utils/commentDraftScope';
 
 // The comment card (opt-in): the words typed on a part outlive a close, one draft per part of one document (the
 // Viewer's draft scope, the part's id and ends, and the diagram's line), as the text box's draft store keeps them.

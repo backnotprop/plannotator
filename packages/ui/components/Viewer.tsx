@@ -93,7 +93,7 @@ import { rangeInsideExcluded, useAnnotationHighlighter, type AnnotationRestoreRe
 import { getVisibleCommentDrafts } from '../utils/commentCardPolicy';
 import { shelveCommentDraft, shelvedCommentDrafts } from '../utils/commentDraftShelf';
 import { CommentDraftBadges } from './CommentDraftBadges';
-import { CommentDraftScopeContext } from './commentDraftScope';
+import { CommentDraftScopeContext } from '../utils/commentDraftScope';
 import { useVimSelection } from '../hooks/useVimSelection';
 import {
   getScrollViewportIntersectionRoot,

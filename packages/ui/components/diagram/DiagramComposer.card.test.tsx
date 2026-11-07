@@ -14,7 +14,7 @@ import { resetCommentCardPolicy, setCommentCardEnabled } from '../../utils/comme
 
 const hasDom = typeof document !== 'undefined';
 const { DiagramComposer } = hasDom ? await import('./DiagramComposer') : ({} as typeof import('./DiagramComposer'));
-const { CommentDraftScopeContext } = await import('../commentDraftScope');
+const { CommentDraftScopeContext } = await import('../../utils/commentDraftScope');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
