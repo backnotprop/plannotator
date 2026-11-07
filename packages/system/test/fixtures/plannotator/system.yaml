@@ -1,8 +1,9 @@
-# Plannotator, drawn from its own code. System format 1.
+# Plannotator, drawn from its own code. System format 1. A test fixture of
+# @plannotator/system: it does not track the repo, and sources.repos.self.at is
+# fixture data only. People's drawings live in the Inbox data folder.
 # Every part and line names the files it rests on (code:). Paths are relative to
-# this repo's root. The Desktop app and Workspaces are built in other repos: they
+# the repo's root. The Desktop app and Workspaces are built in other repos: they
 # appear on the landing as outside parts, with no window and no code.
-# Check it: bun run --cwd packages/system check
 
 format: 1
 system: Plannotator

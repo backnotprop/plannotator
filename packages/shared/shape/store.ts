@@ -175,6 +175,8 @@ export interface ShapeStore {
   /** One version (the latest when `n` is absent). */
   read(id: string, n?: number): ShapeVersion | null;
   versions(id: string): { n: number; at: string; note: string | null; base: number | null }[];
+  /** When each version was written and the review it took in, for naming the board a Show me made. */
+  versionStamps(id: string): { n: number; at: string; through: string | null }[];
   list(options?: { state?: ShapeState | "all" }): ShapeSummary[];
   /** The newest active shape of a session, else of a project root. For CLI calls that name no shape. */
   latestFor(options: { session?: ShapeSession | null; root?: string | null }): ShapeRecord | null;
@@ -640,6 +642,12 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
     return versionsOf(folder).map((v) => ({ n: v.n, at: v.at, note: v.note ?? null, base: v.base }));
   }
 
+  function versionStamps(id: string) {
+    const folder = shapeDir(id);
+    if (!folder) return [];
+    return versionsOf(folder).map((v) => ({ n: v.n, at: v.at, through: v.through ?? null }));
+  }
+
   function seen(): Record<string, number> {
     const value = readJson<Record<string, unknown>>(seenPath);
     const out: Record<string, number> = {};
@@ -866,5 +874,5 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
     return !!folder && existsSync(join(folder, ".lock"));
   }
 
-  return { dir, locked, update, get, read, versions, list, latestFor, drawing, setState, remove, seen, markSeen, addNote, answer, notes, waiting, markDelivered, filePath };
+  return { dir, locked, update, get, read, versions, versionStamps, list, latestFor, drawing, setState, remove, seen, markSeen, addNote, answer, notes, waiting, markDelivered, filePath };
 }

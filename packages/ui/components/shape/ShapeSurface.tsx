@@ -169,7 +169,7 @@ export function shapeEndedLabel(host: Pick<ShapeHost, 'askWaitsWhenEnded'>): str
   return host.askWaitsWhenEnded ? 'Session ended · your question waits for the agent' : 'Session ended · Ask AI answers; changes wait for the agent';
 }
 
-export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, renderThread, readFirst = false, initialView, initialPanel, onNavigate, headStart, codeView = true, review = null, boxSelect, darkContrast = false }: ShapeSurfaceProps) {
+export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCard, renderThread, readFirst = false, initialView, initialPanel, onNavigate, headStart, codeView = true, review = null, boxSelect, darkContrast = false }: ShapeSurfaceProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
   const attachRoot = useCallback((el: HTMLDivElement | null) => {
@@ -430,18 +430,22 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     [review],
   );
 
-  // A part that names a place in code (a drawn part's `data-code`, a What's changed link): the Code view's whole file
-  // when it has one, else the review's guided review there (a board with no Code view), else the file viewer.
-  const openCodeTarget = useCallback(async (at: ShapeCodeTarget) => {
+  // A part that names a place in code (a drawn part's `data-code`, a What's changed link): a drawn part goes to the
+  // host's own view of the code when it takes it (`onCode`), else the Code view's whole file when it has one, else the
+  // review's guided review there (a board with no Code view; not for a drawn part the host's `onCode` turned down),
+  // else the file viewer.
+  const openCodeTarget = useCallback(async (at: ShapeCodeTarget, el?: HTMLElement) => {
     const v = versionRef.current;
+    if (el && onCode?.(at, el, v)) return;
+    const declined = !!el && !!onCode;
     if (codeView && v?.views.code && host.readFile && (v.views.code.files ?? []).some((f) => f.path === at.path)) {
       openCode(at.path, at.line);
       return;
     }
-    if (boardReview && (await boardReview.open({ path: at.path, line: at.line }))) return;
+    if (!declined && boardReview && (await boardReview.open({ path: at.path, line: at.line }))) return;
     const contents = await readProjectFile(at.path);
     if (contents != null) setViewer({ kind: 'file', path: at.path, contents, line: at.line, token: Date.now() });
-  }, [readProjectFile, host, openCode, codeView, boardReview]);
+  }, [readProjectFile, host, openCode, codeView, boardReview, onCode]);
   /** A `path` and `line` from the board's words (What to know, an answer's `code:` link): the Code view, or as a part's. */
   const showCode = useCallback((path: string, line: number) => {
     if (codeView) openCode(path, line);
@@ -1009,7 +1013,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
                 {finished && <span className="shp-finished">Finished</span>}
                 {!phone && generalButton(null)}
                 {host.refresh && !finished && (
-                  <button type="button" className="shp-quiet-btn" onClick={() => void bringUpToDate()} disabled={busy}>Bring it up to date</button>
+                  <button type="button" className="shp-quiet-btn" onClick={() => void bringUpToDate()} disabled={busy}>{host.refreshLabel ?? 'Bring it up to date'}</button>
                 )}
                 {onClose && (
                   <button type="button" className="shp-icon-btn shp-close" onClick={onClose} aria-label="Close Shape" title="Close Shape">×</button>

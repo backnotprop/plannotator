@@ -21,7 +21,9 @@ import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { INBOX_THREAD_NAME_MAX, inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
-import { INBOX_REVIEW_SKILL_TEXTS } from '@plannotator/core/inbox-review';
+import { forgetUnsentReview, keepUnsentReview } from '../compose/reviewBox';
+import type { ComposeSent } from '../compose/ComposeDialog';
+import type { ReviewBoxPull } from '../compose/reviewBox';
 import type { StartThreadInput } from '../api';
 import { handoffKeys, handoffStack, PULL_HANDOFF_TITLE_MAX, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk, pullTitleLine } from './model';
 import { layerVerdictLink } from './topology';
@@ -135,6 +137,8 @@ let fileAsks: string[] = [];
 let refuse: Record<string, { status: number; body: Record<string, unknown> }> = {};
 /** Thread names another open thread already has: starting a thread with one answers 409 thread_name_taken. */
 let takenNames: string[] = [];
+/** Local changes per project (`/reviews/changes`), changed files by project id; a project not here answers `{}`. */
+let changedFiles: Record<string, number> = {};
 let sessionReads = 0;
 /** While set, starting a thread waits for it: a send still on its way. */
 let holdSend: Promise<void> | null = null;
@@ -162,6 +166,7 @@ beforeEach(() => {
   fileAsks = [];
   refuse = {};
   takenNames = [];
+  changedFiles = {};
   sessionReads = 0;
   holdSend = null;
   window.localStorage.clear();
@@ -180,6 +185,10 @@ beforeEach(() => {
       if (url.pathname.endsWith('/pulls/owner')) return Response.json({ ok: true });
       if (url.pathname.endsWith('/pulls/review')) return Response.json(reviewAnswer.body, { status: reviewAnswer.status });
       return Response.json({ reply: {}, questions: [], replayed: false });
+    }
+    if (url.pathname.endsWith('/reviews/changes')) {
+      const files = changedFiles[url.searchParams.get('project')!];
+      return Response.json(files === undefined ? {} : { git: true, files, additions: files, deletions: 0, branch: 'main', base: 'main' });
     }
     if (url.pathname.endsWith('/api/inbox/sessions')) {
       sessionReads += 1;
@@ -203,6 +212,7 @@ beforeEach(() => {
 
 afterEach(() => {
   if (!hasDom) return;
+  forgetUnsentReview();
   act(() => root?.unmount());
   host?.remove();
   root = null;
@@ -523,44 +533,6 @@ test.skipIf(!hasDom)('a partial post keeps the dialog open on what did not go, w
   expect(document.querySelector('[data-pull-review-posted]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('the list: On you, then the folded group; a stack is one row with its chain', async () => {
-  const opened: string[] = [];
-  mount(
-    <SidebarProvider>
-    <PullsPage
-      state={pullsStateOf(model)}
-      stackId={null}
-      project={null}
-      projects={[]}
-      projectNames={new Map()}
-      phone={false}
-      onNew={() => {}}
-      onOpenStack={(id) => id && opened.push(id)}
-      filter="all"
-      onScope={() => {}}
-      onReview={() => {}}
-      onOpenThread={() => {}}
-      onLaunch={() => {}}
-      onStarted={() => {}}
-    />
-    </SidebarProvider>,
-  );
-  await settle();
-  const rows = () => [...document.querySelectorAll<HTMLElement>('[data-pulls-row]')].filter((r) => r.closest('[hidden]') === null);
-  const moves = rows().map((r) => r.getAttribute('data-pulls-move'));
-  // A teammate's request stays On you; a PR only listed is folded under Open, not reviewed, and opens on a click.
-  expect(moves).toEqual(['on_you']);
-  expect(el('[data-pulls-group="on_you"] .ib-n').textContent).toBe('1');
-  const fold = el('[data-reviews-fold="not_reviewed"]');
-  expect(fold.textContent).toContain('Open, not reviewed');
-  await act(async () => fold.click());
-  await settle();
-  expect(new Set(rows().map((r) => r.getAttribute('data-pulls-move')))).toEqual(new Set(['on_you', 'not_reviewed']));
-  const stackRow = rows().find((r) => r.getAttribute('data-pulls-layers') === '3')!;
-  expect(stackRow.querySelectorAll('.ib-pr-chain svg').length).toBe(3);
-  await act(async () => stackRow.click());
-  expect(opened).toEqual([STACK_ID]);
-});
 
 test.skipIf(!hasDom)("top left is always the author's picture, from the Inbox's own origin; the agent is on the third line", async () => {
   // The person's own stack (as "mara-lee", a login no other test drew), its review thread with Claude; a teammate's PR whose account is gone.
@@ -698,8 +670,7 @@ test.skipIf(!hasDom)('comments kept from before a new push are dropped; the ones
 function Page({
   answer,
   stackId,
-  onLaunch,
-  onStarted,
+  onNewReview,
   onOpenThread,
   onOpenCard,
   onReview,
@@ -707,8 +678,7 @@ function Page({
   answer: InboxPullsAnswer;
   stackId: string;
   onReview?: (stackId: string, key: string, scope: 'layer' | 'stack') => void;
-  onLaunch?: (keys: readonly string[], projects: readonly string[], body: string, askLine: string, threadName: string) => void;
-  onStarted?: (session: string) => void;
+  onNewReview?: (pick: ReviewBoxPull) => void;
   onOpenThread?: (thread: string) => void;
   onOpenCard?: (id: string) => void;
 }) {
@@ -728,220 +698,315 @@ function Page({
         onReview={(id, key, scope) => onReview?.(id, key, scope)}
         onOpenThread={(thread) => onOpenThread?.(thread)}
         {...(onOpenCard ? { onOpenCard } : {})}
-        onLaunch={(keys, projects, body, askLine, _opener, threadName) => onLaunch?.(keys, projects, body, askLine, threadName)}
-        onStarted={(session) => onStarted?.(session)}
+        onNewReview={(pick) => onNewReview?.(pick)}
       />
     </SidebarProvider>
   );
 }
 
-const sentPaths = () => posted.map((p) => p.path.replace(/^.*\/api\/inbox/, ''));
-const pickerSessions = () => [...document.querySelectorAll('[data-pulls-picker-session]')].map((o) => o.getAttribute('data-pulls-picker-session'));
-const pickedSession = () => [...document.querySelectorAll('[data-pulls-picker-session]')].filter((o) => o.querySelector<HTMLInputElement>('input')!.checked).map((o) => o.getAttribute('data-pulls-picker-session'));
-
-/** The one button under the title opens the picker; its agents are read. */
-async function openPicker() {
-  await act(async () => el('[data-pulls-primary]').click());
+test.skipIf(!hasDom)('the list: On you, then the folded group; a stack is one row with its chain', async () => {
+  const opened: string[] = [];
+  mount(
+    <SidebarProvider>
+    <PullsPage
+      state={pullsStateOf(model)}
+      stackId={null}
+      project={null}
+      projects={[]}
+      projectNames={new Map()}
+      phone={false}
+      onNew={() => {}}
+      onOpenStack={(id) => id && opened.push(id)}
+      filter="all"
+      onScope={() => {}}
+      onReview={() => {}}
+      onOpenThread={() => {}}
+      onNewReview={() => {}}
+    />
+    </SidebarProvider>,
+  );
   await settle();
-}
+  const rows = () => [...document.querySelectorAll<HTMLElement>('[data-pulls-row]')].filter((r) => r.closest('[hidden]') === null);
+  const moves = rows().map((r) => r.getAttribute('data-pulls-move'));
+  // A teammate's request stays On you; a PR only listed is folded under Open, not reviewed, and opens on a click.
+  expect(moves).toEqual(['on_you']);
+  expect(el('[data-pulls-group="on_you"] .ib-n').textContent).toBe('1');
+  const fold = el('[data-reviews-fold="not_reviewed"]');
+  expect(fold.textContent).toContain('Open, not reviewed');
+  await act(async () => fold.click());
+  await settle();
+  expect(new Set(rows().map((r) => r.getAttribute('data-pulls-move')))).toEqual(new Set(['on_you', 'not_reviewed']));
+  const stackRow = rows().find((r) => r.getAttribute('data-pulls-layers') === '3')!;
+  expect(stackRow.querySelectorAll('.ib-pr-chain svg').length).toBe(3);
+  await act(async () => stackRow.click());
+  expect(opened).toEqual([STACK_ID]);
+});
 
-/** Pick an agent in the picker, then Start review thread. */
-async function startWith(session: string) {
-  await act(async () => el(`[data-pulls-picker-session="${session}"] input`).click());
-  await act(async () => el('[data-pulls-start]').click());
-}
-
-async function typeWords(value: string) {
-  const input = el<HTMLInputElement>('[data-pulls-ask-words]');
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-}
-
-test.skipIf(!hasDom)("no review thread: one button, Review with an agent; the picker lists only the project's running agents; checked, then sent with the guided review's ask, then kept as the stack's", async () => {
-  const started: string[] = [];
-  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onStarted={(s) => started.push(s)} />);
+test.skipIf(!hasDom)("no review thread: one button, Review with an agent, which hands the New review box that stack; nothing else shows", async () => {
+  const picks: ReviewBoxPull[] = [];
+  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onNewReview={(pick) => picks.push(pick)} />);
   await settle();
   const primary = el('[data-pulls-primary]');
   expect(primary.getAttribute('data-pulls-primary')).toBe('review');
   expect(primary.textContent).toBe('Review with an agent');
-  expect(primary.getAttribute('aria-expanded')).toBe('false');
-  // Nothing is read, sent or shown before the person asks: no picker, no thread line, no Reply.
-  expect(document.querySelector('[data-pulls-picker]')).toBeNull();
   expect(document.querySelector('[data-pulls-thread]')).toBeNull();
   expect(document.querySelector('[data-pulls-reply]')).toBeNull();
-  await openPicker();
-  expect(primary.getAttribute('aria-expanded')).toBe('true');
-  expect(el('[data-pulls-picker]').getAttribute('id')).toBe(primary.getAttribute('aria-controls'));
-  // "Start a new agent" shows only where this Inbox can start one (compose's sessions answer says so).
-  expect(document.querySelector('[data-pulls-picker-new]')).toBeNull();
-  expect(pickerSessions()).toEqual(['ses_billing']);
-  expect(el('[data-pulls-picker-list]').textContent).toContain('Running in billing-svc');
-  expect(el('[data-pulls-ask-choice]').getAttribute('data-pulls-ask-choice')).toBe('guide');
-  await startWith('ses_billing');
-  await settle();
-  // The check runs first, so a PR the Inbox would refuse to keep never reaches the agent.
-  expect(sentPaths()).toEqual(['/pulls/owner', '/messages', '/pulls/owner']);
-  expect(posted[0]!.body).toMatchObject({ keys: stack.map((l) => l.key), project_id: 'prj_1', validate_only: true });
-  const start = posted[1]!;
-  expect(start.body.to).toEqual({ host: 'claude-code', session: 'ses_billing' });
-  // The thread's name is the person's (no `thread_name_auto`): the list shows it and no agent renames it.
-  expect(start.body.thread_name).toBe('Review #412 to #414: Layer 412');
-  expect(start.body.thread_name_auto).toBeUndefined();
-  const body = String(start.body.body);
-  expect(body.split('\n').filter((line) => /^- #/.test(line)).map((line) => line.slice(0, 6))).toEqual(['- #412', '- #413', '- #414']);
-  // The ask: the whole stack's diff through /review-curate, layer by layer, with phase 1's approved instructions as its skills block.
-  expect(body).toContain("\n1. Send me a guided review of the whole stack's diff, from main to retry/dunning, using /review-curate (its instructions are at the end of this message). Walk it layer by layer, in landing order, with what to watch in each.\n");
-  expect(body).toContain(INBOX_REVIEW_SKILL_TEXTS['review-curate']!.body);
-  expect(posted[2]!.body).toMatchObject({ keys: stack.map((l) => l.key), thread_id: 'thr_new', ask: 'guide' });
-  expect(started).toEqual(['ses_billing']);
-  expect(document.querySelector('[data-pulls-picker]')).toBeNull();
-});
-
-test.skipIf(!hasDom)('Cancel and Escape close the picker without sending; focus goes back to the button', async () => {
-  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} />);
-  await settle();
-  await openPicker();
-  await act(async () => el('[data-pulls-picker-cancel]').click());
-  expect(document.querySelector('[data-pulls-picker]')).toBeNull();
-  expect(document.activeElement).toBe(el('[data-pulls-primary]'));
-  await openPicker();
-  await act(async () => el('[data-pulls-picker]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
-  expect(document.querySelector('[data-pulls-picker]')).toBeNull();
-  expect(posted).toEqual([]);
-});
-
-test.skipIf(!hasDom)('Custom curation: the person\'s words ride /review-curate, and the PR keeps that it was asked for', async () => {
-  const single = model.pulls.find((p) => p.number === 869)!;
-  sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_2', name: 'web-app', root: '/home/dana/web-app' }, sessions: [liveSession('ses_web', 'prj_2')] }] };
-  mount(<Page answer={{ ...model, links: {} }} stackId={single.key} />);
-  await settle();
-  await openPicker();
-  await act(async () => el<HTMLInputElement>('[data-pulls-ask-option="custom"] input').click());
-  // No words yet: Start review thread sends nothing.
-  expect(el<HTMLButtonElement>('[data-pulls-start]').disabled).toBe(true);
-  await typeWords('only the fallback chain, and its tests');
-  await startWith('ses_web');
-  await settle();
-  expect(String(posted.find((p) => p.path.endsWith('/messages'))!.body.body)).toContain('/review-curate only the fallback chain, and its tests');
-  expect(posted.at(-1)!.body).toMatchObject({ ask: 'custom' });
-});
-
-test.skipIf(!hasDom)('a stack past the limit of one review thread is refused before anything is sent', async () => {
-  const many = Array.from({ length: 21 }, (_, i) => pull(500 + i, { head: `l${i}`, base: i === 0 ? 'main' : `l${i - 1}` }));
-  mount(<Page answer={{ ...model, pulls: many, links: {} }} stackId={many[20]!.key} />);
-  await settle();
-  await openPicker();
-  await startWith('ses_billing');
-  await settle();
-  expect(posted).toEqual([]);
-  expect(el('[data-pulls-picker] [role="alert"]').textContent).toBe("A stack of more than 20 open pull requests can't go to one review thread.");
-});
-
-test.skipIf(!hasDom)('the limit holds for a new agent too: past it, Start review thread opens no compose', async () => {
-  sessionsAnswer = { ...sessionsAnswer, projects: [], launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [] } };
-  const many = Array.from({ length: 21 }, (_, i) => pull(600 + i, { head: `n${i}`, base: i === 0 ? 'main' : `n${i - 1}` }));
-  const launched: string[] = [];
-  mount(<Page answer={{ ...model, pulls: many, links: {} }} stackId={many[20]!.key} onLaunch={(_keys, _projects, body) => launched.push(body)} />);
-  await settle();
-  await openPicker();
-  expect(el('[data-pulls-start]').getAttribute('data-pulls-start')).toBe('new');
-  await act(async () => el('[data-pulls-start]').click());
-  await settle();
-  expect(launched).toEqual([]);
-  expect(posted).toEqual([]);
-  expect(el('[data-pulls-picker] [role="alert"]').textContent).toContain("can't go to one review thread");
-});
-
-test.skipIf(!hasDom)('one send at a time: Review with an agent waits while a thread starts and until its link arrives, so no second thread starts', async () => {
-  let release = () => {};
-  holdSend = new Promise<void>((done) => (release = done));
-  const started: string[] = [];
-  const page = (answer: InboxPullsAnswer) => <Page answer={answer} stackId={STACK_ID} onStarted={(s) => started.push(s)} />;
-  mount(page({ ...model, links: {} }));
-  await settle();
-  await openPicker();
-  await startWith('ses_billing');
-  await settle();
-  const primary = el<HTMLButtonElement>('[data-pulls-primary]');
-  // The send is on its way: the button that would open a second picker is off, and a click on it opens nothing.
-  expect(primary.disabled).toBe(true);
   await act(async () => primary.click());
-  await act(async () => primary.click());
-  expect(el('[data-pulls-start]').textContent).toBe('Starting…');
-  release();
+  expect(picks).toHaveLength(1);
+  expect(picks[0]!.stack.layers.map((l) => l.key)).toEqual(stack.map((l) => l.key));
+  expect(picks[0]!.projects).toEqual(['prj_1']);
+  // The box must start a thread here, never send the person to another.
+  expect(picks[0]!.thread).toBeNull();
+});
+
+test.skipIf(!hasDom)("a tree: the box takes the chain to its top; once that thread has it, the page offers no second thread", async () => {
+  const tree = TREE();
+  const [l412, , l414] = tree.layers as [InboxPull, InboxPull, InboxPull];
+  const picks: ReviewBoxPull[] = [];
+  mount(<Page answer={{ ...model, pulls: tree.layers, links: {} }} stackId={tree.id} onNewReview={(pick) => picks.push(pick)} />);
   await settle();
-  expect(started).toEqual(['ses_billing']);
-  expect(document.querySelector('[data-pulls-picker]')).toBeNull();
-  // Sent, the list not read again yet: the button still waits.
-  expect(el<HTMLButtonElement>('[data-pulls-primary]').disabled).toBe(true);
   await act(async () => el('[data-pulls-primary]').click());
-  expect(document.querySelector('[data-pulls-picker]')).toBeNull();
-  expect(posted.filter((p) => p.path.endsWith('/messages'))).toHaveLength(1);
-  // The link arrives: the stack has its thread, and the one button opens it.
-  const owned: InboxPullLink = { ...link, thread_id: 'thr_new', via: 'owner', ask: 'guide', last: null, guide: null };
-  act(() => root!.render(<div className="pn-inbox">{page({ ...model, links: { [stack[0]!.key]: owned } })}</div>));
+  expect(picks[0]!.stack.layers.map((l) => l.key)).toEqual([l412.key, l414.key]);
+  act(() => root?.unmount());
+  host?.remove();
+  // #413 was left out of that thread: the page shows the stack's review thread, as for any linked stack, and nothing of its own.
+  const owned: InboxPullLink = { ...link, via: 'owner', ask: 'guide', thread_id: 'thr_a', last: null };
+  mount(<Page answer={{ ...model, pulls: tree.layers, links: { [l412.key]: owned, [l414.key]: owned } }} stackId={tree.id} />);
   await settle();
+  expect(el('[data-pulls-thread]').getAttribute('data-pulls-thread')).toBe('thr_a');
   expect(el('[data-pulls-primary]').getAttribute('data-pulls-primary')).toBe('open');
-  expect(el<HTMLButtonElement>('[data-pulls-primary]').disabled).toBe(false);
 });
 
-test.skipIf(!hasDom)('Start a new agent closes the picker: it does not come back by itself when that agent later ends', async () => {
-  sessionsAnswer = { ...sessionsAnswer, projects: [], launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [] } };
-  const launched: string[] = [];
-  const page = (answer: InboxPullsAnswer) => <Page answer={answer} stackId={STACK_ID} onLaunch={(_keys, _projects, body) => launched.push(body)} />;
-  mount(page({ ...model, links: {} }));
+test.skipIf(!hasDom)('an ended agent stays named: "Claude Code ended"; no Reply; Start a new review thread opens the box, not that thread', async () => {
+  const ended: InboxPullsAnswer = { ...model, links: { [stack[2]!.key]: { ...link, agent: { ...link.agent!, ended: true } } } };
+  const picks: ReviewBoxPull[] = [];
+  mount(<Page answer={ended} stackId={STACK_ID} onNewReview={(pick) => picks.push(pick)} />);
   await settle();
-  await openPicker();
-  await act(async () => el('[data-pulls-start]').click());
-  await settle();
-  expect(launched).toHaveLength(1);
-  expect(document.querySelectorAll('[data-pulls-picker]').length).toBe(0);
-  // Compose started the thread; later its agent ends: the stack offers a new thread, the picker stays closed.
-  const live: InboxPullLink = { ...link, via: 'owner', ask: 'guide' };
-  act(() => root!.render(<div className="pn-inbox">{page({ ...model, links: { [stack[0]!.key]: live } })}</div>));
-  await settle();
-  act(() => root!.render(<div className="pn-inbox">{page({ ...model, links: { [stack[0]!.key]: { ...live, agent: { ...live.agent!, ended: true } } } })}</div>));
-  await settle();
-  expect(el('[data-pulls-primary]').getAttribute('data-pulls-primary')).toBe('again');
-  expect(el('[data-pulls-primary]').getAttribute('aria-expanded')).toBe('false');
-  expect(document.querySelectorAll('[data-pulls-picker]').length).toBe(0);
+  const line = el('[data-pulls-thread-line]');
+  expect(line.getAttribute('data-pulls-thread-line')).toBe('ended');
+  expect(line.textContent).toBe('Claude Code ended');
+  expect(document.querySelector('[data-pulls-reply]')).toBeNull();
+  const primary = el('[data-pulls-primary]');
+  expect(primary.getAttribute('data-pulls-primary')).toBe('again');
+  expect(primary.textContent).toBe('Start a new review thread');
+  await act(async () => primary.click());
+  expect(picks[0]!.thread).toBeNull();
 });
 
-test.skipIf(!hasDom)('a repository with no project: Start a new agent is not offered, since compose would have nowhere to start it', async () => {
-  sessionsAnswer = { ...sessionsAnswer, projects: [], launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [] } };
-  const launched: string[] = [];
-  mount(<Page answer={{ ...model, links: {}, projects: {} }} stackId={STACK_ID} onLaunch={(_k, _p, body) => launched.push(body)} />);
+test.skipIf(!hasDom)('a review thread: "Review thread with Claude Code", the ask on its way, one button that opens the thread; no second agent', async () => {
+  const owned: InboxPullLink = { ...link, via: 'owner', ask: 'guide', last: null, guide: null, agent: { host: 'claude-code', session: 'ses_1', name: null } };
+  // Codex linked a layer higher up: the stack still has one review thread, its lowest linked layer's.
+  const codex: InboxPullLink = { ...linkTo('thr_codex', OTHER_LAST), agent: { host: 'codex', session: 'ses_cx', name: null } };
+  const opened: string[] = [];
+  mount(<Page answer={{ ...model, links: { [stack[0]!.key]: owned, [stack[1]!.key]: codex } }} stackId={STACK_ID} onOpenThread={(t) => opened.push(t)} />);
   await settle();
-  await openPicker();
-  expect(document.querySelector('[data-pulls-picker-new]')).toBeNull();
-  expect(launched).toEqual([]);
+  const line = el('[data-pulls-thread-line]');
+  expect(line.getAttribute('data-pulls-thread-line')).toBe('asked');
+  expect(line.querySelector('.ib-pr-thread-h b')!.textContent).toBe('Claude Code');
+  expect(line.querySelector('[data-pulls-ask]')!.textContent).toBe('Guided review on the way');
+  expect(line.querySelector('.ib-atile, .ib-mk, svg')).not.toBeNull();
+  expect(document.querySelectorAll('[data-pulls-thread]')).toHaveLength(1);
+  expect(document.body.textContent).not.toContain('Codex');
+  const primary = el('[data-pulls-primary]');
+  expect(primary.getAttribute('data-pulls-primary')).toBe('open');
+  expect(primary.textContent).toBe('Open review thread');
+  await act(async () => primary.click());
+  expect(opened).toEqual([owned.thread_id]);
+  act(() => root?.unmount());
+  host?.remove();
+  // The guided review arrived: the thread is still the way in (no button of its own); the line gives the last answer.
+  const arrived: InboxPullLink = { ...owned, guide: { message_id: 'msg_g', title: 'Retries', steps: 3, review: true }, last: { message_id: LAST, preview: 'The guided review is ready.', at: '2026-11-03T09:00:00.000Z' } };
+  mount(<Page answer={{ ...model, links: { [stack[0]!.key]: arrived } }} stackId={STACK_ID} />);
+  await settle();
+  expect(el('[data-pulls-thread-line]').getAttribute('data-pulls-thread-line')).toBe('live');
+  expect(el('[data-pulls-thread-line]').textContent).toContain('The guided review is ready.');
+  expect(document.querySelector('[data-pulls-ask]')).toBeNull();
+  expect([...document.querySelectorAll('.ib-pr-actions button')].map((b) => b.textContent)).toEqual(['Open review thread', 'Open the diff']);
+  expect(document.querySelector('[data-pulls-reply]')).not.toBeNull();
 });
 
-test.skipIf(!hasDom)('Start a new agent shows once the Inbox can start one: it opens compose with the first message, the stack\'s PRs and their project, and the chosen ask', async () => {
-  sessionsAnswer = { ...sessionsAnswer, projects: [], launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }, { agent: 'codex', name: 'Codex' }], projects: [] } };
-  const launched: { keys: readonly string[]; projects: readonly string[]; body: string; askLine: string; threadName: string }[] = [];
-  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onLaunch={(keys, projects, body, askLine, threadName) => launched.push({ keys, projects, body, askLine, threadName })} />);
+const boxTransport = (started: StartThreadInput[], session = 'ses_web') => ({
+  sessions: async () => ({ serverSession: 's', home: '/home/dana', projects: [{ project: { id: 'prj_2', name: 'web-app', root: '/home/dana/web-app' }, sessions: [liveSession(session, 'prj_2')] }, { project: { id: 'prj_9', name: 'other', root: '/home/dana/other' }, sessions: [liveSession('ses_other', 'prj_9')] }] }),
+  startThread: async (input: StartThreadInput) => (started.push(input), { thread_id: 'thr_box' }),
+  drafts: false,
+  uploads: false,
+});
+const boxPick = (keys = 1): ReviewBoxPull => {
+  const pulls = keys === 1 ? [model.pulls.find((p) => p.number === 869)!] : Array.from({ length: keys }, (_, i) => ({ ...model.pulls.find((p) => p.number === 869)!, key: `github.com/o/r#${i + 1}`, number: i + 1, head: `b${i + 1}`, base: i === 0 ? 'main' : `b${i}` }));
+  const single = inboxPullStacks(pulls)[0]!;
+  return { id: single.id, stack: single, label: '#869', title: 'Layer 869', projects: ['prj_2'], thread: null, project: 'web-app' };
+};
+
+test.skipIf(!hasDom)('the box, filled in: To is the PR project\'s agent with no choice to make, and empty words start a guided review tied to that PR', async () => {
+  const started: StartThreadInput[] = [];
+  const sent: ComposeSent[] = [];
+  const pick = boxPick();
+  mount(<ComposeDialog request={{ review: { pick } }} phone={false} current={null} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={(s) => sent.push(s)} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
   await settle();
-  await openPicker();
-  // No agent running: the new one is picked, and the list says why.
-  expect(el('[data-pulls-picker-list]').textContent).toContain('No agent is running in billing-svc.');
-  const fresh = el('[data-pulls-picker-new]');
-  expect(fresh.querySelector<HTMLInputElement>('input')!.checked).toBe(true);
-  expect(fresh.querySelector('b')!.textContent).toBe('Start a new agent');
-  expect(fresh.querySelector('.ib-pr-opt-s')!.textContent).toBe('Claude Code or Codex');
-  await act(async () => el<HTMLInputElement>('[data-pulls-ask-option="custom"] input').click());
-  await typeWords('just the retry loop');
-  await act(async () => el('[data-pulls-start]').click());
-  expect(launched).toHaveLength(1);
-  expect(launched[0]!.keys).toEqual(stack.map((l) => l.key));
-  expect(launched[0]!.projects).toEqual(['prj_1']);
-  // A stack: the person's words take the place of the walk, after /review-curate's sentence.
-  expect(launched[0]!.body).toContain('using /review-curate (its instructions are at the end of this message). just the retry loop\n');
-  expect(launched[0]!.askLine).toStartWith("1. Send me a guided review of the whole stack's diff, from main to retry/dunning,");
-  expect(launched[0]!.threadName).toBe('Review #412 to #414: Layer 412');
+  expect(el('[data-compose-to]').getAttribute('data-compose-to')).toBe('ses_web');
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  // Checked first: a PR the Inbox can't keep for that agent is never sent to it.
+  expect(posted[0]!.body).toMatchObject({ keys: [pick.stack.layers[0]!.key], project_id: 'prj_2', validate_only: true });
+  expect(started).toHaveLength(1);
+  expect(started[0]!.body).toContain('using /review-curate');
+  expect(started[0]!.review).toBeUndefined();
+  expect(started[0]!.thread_name).toBe('Review #869: Layer 869');
+  expect(sent[0]).toMatchObject({ threadId: 'thr_box', pullKeys: [pick.stack.layers[0]!.key], pullAsk: 'guide' });
+});
+
+test.skipIf(!hasDom)("the box: the person's words make it a custom curation, and travel in the hand-off", async () => {
+  const started: StartThreadInput[] = [];
+  const sent: ComposeSent[] = [];
+  mount(<ComposeDialog request={{ review: { pick: boxPick() } }} phone={false} current={null} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={(s) => sent.push(s)} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  await settle();
+  const words = el<HTMLTextAreaElement>('[data-compose-text] textarea');
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(words, 'just the retries');
+    words.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  expect(started[0]!.body).toContain('just the retries');
+  expect(sent[0]!.pullAsk).toBe('custom');
+});
+
+test.skipIf(!hasDom)('the box: the custom words typed for PR A are not sent with PR B, and are still there for PR A', async () => {
+  const started: StartThreadInput[] = [];
+  const sent: ComposeSent[] = [];
+  const pickOf = (id: string): ReviewBoxPull => ({ ...boxPick(), id });
+  const open = (pick: ReviewBoxPull) => mount(<ComposeDialog request={{ review: { pick } }} phone={false} current={null} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={(s) => sent.push(s)} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  const closeIt = () => {
+    act(() => root!.unmount());
+    root = null;
+  };
+  open(pickOf('stack-a'));
+  await settle();
+  await act(async () => {
+    const input = el<HTMLTextAreaElement>('[data-compose-text] textarea');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'just the retries');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  closeIt();
+  open(pickOf('stack-b'));
+  await settle();
+  expect(el<HTMLTextAreaElement>('[data-compose-text] textarea').value).toBe('');
+  closeIt();
+  open(pickOf('stack-a'));
+  await settle();
+  expect(el<HTMLTextAreaElement>('[data-compose-text] textarea').value).toBe('just the retries');
+  expect(sent).toHaveLength(0);
+});
+
+test.skipIf(!hasDom)('the box: a kept pick that has gone into review since is dropped, and its words stay; one that has not stays picked', async () => {
+  const started: StartThreadInput[] = [];
+  const open = (pull: ReviewBoxPull) => mount(<ComposeDialog request={{ review: {} }} reviewPulls={[pull]} phone={false} current={null} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  keepUnsentReview({ body: 'only the sidebar', threadName: null, kind: 'pr', pick: boxPick() });
+  open(boxPick());
+  await settle();
+  expect(el('[data-review-pick]').getAttribute('data-review-pick')).toBe(boxPick().id);
+  act(() => root!.unmount());
+  root = null;
+  keepUnsentReview({ body: 'only the sidebar', threadName: null, kind: 'pr', pick: boxPick() });
+  open({ ...boxPick(), thread: { id: 'msg_elsewhere', agent: 'Claude Code' } });
+  await settle();
+  expect(el('[data-review-pick]').getAttribute('data-review-pick')).toBe('choose');
+  expect(el<HTMLTextAreaElement>('[data-compose-text] textarea').value).toBe('only the sidebar');
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  expect(started).toHaveLength(0);
+  act(() => root!.unmount());
+  root = null;
+  forgetUnsentReview();
+});
+
+test.skipIf(!hasDom)('the box: words typed and left come back when it opens again, with no prompt, and a started review leaves nothing behind', async () => {
+  const started: StartThreadInput[] = [];
+  const sent: ComposeSent[] = [];
+  const open = () => mount(<ComposeDialog request={{ review: { pick: boxPick() } }} phone={false} current={null} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={(s) => sent.push(s)} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  const field = (selector: string, value: string) =>
+    act(async () => {
+      const input = el<HTMLTextAreaElement | HTMLInputElement>(selector);
+      Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  open();
+  await settle();
+  await field('[data-compose-text] textarea', 'just the retries');
+  await field('[data-compose-thread-name] input', 'Retries only');
+  // Closed without a word: the dialog goes at once, nothing asks.
+  act(() => root!.unmount());
+  root = null;
+  expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  open();
+  await settle();
+  expect(el<HTMLTextAreaElement>('[data-compose-text] textarea').value).toBe('just the retries');
+  expect(el<HTMLInputElement>('[data-compose-thread-name] input').value).toBe('Retries only');
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  expect(started[0]!.body).toContain('just the retries');
+  expect(sent).toHaveLength(1);
+  act(() => root!.unmount());
+  root = null;
+  open();
+  await settle();
+  expect(el<HTMLTextAreaElement>('[data-compose-text] textarea').value).toBe('');
+});
+
+test.skipIf(!hasDom)('the box: a stack past the limit of one review thread is refused before anything is sent or checked', async () => {
+  const started: StartThreadInput[] = [];
+  mount(<ComposeDialog request={{ review: { pick: boxPick(21) } }} phone={false} current={null} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  await settle();
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  expect(started).toEqual([]);
   expect(posted).toEqual([]);
+  expect(document.querySelector('[data-review-box]')!.textContent).toContain("can't go to one review thread");
+});
+
+test.skipIf(!hasDom)('the box on local changes: no PR choice needed, a session in another project may be picked, and the Send says what it reviews', async () => {
+  const started: StartThreadInput[] = [];
+  mount(<ComposeDialog request={{ review: {} }} phone={false} current={{ id: 'prj_9', root: '/home/dana/other', name: 'other' }} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  await settle();
+  // The project in view.
+  expect(el('[data-compose-to]').getAttribute('data-compose-to')).toBe('ses_other');
+  await act(async () => el('[data-review-choice="branch"]').click());
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  expect(started[0]!.review).toMatchObject({ kind: 'local', changes: 'branch', ask: 'guide' });
+  expect(started[0]!.body).toContain('the whole branch in other');
+  expect(started[0]!.thread_name_auto).toBe(true);
+  // A second review of the same changes is named "… (2)" by the server, not left unnamed.
+  expect(started[0]!.thread_name_numbered).toBe(true);
+  expect(posted).toEqual([]);
+});
+
+test.skipIf(!hasDom)('the box on local changes: To filled in on a project with no changes moves to an agent with some; with none anywhere, Start stays off and sends nothing', async () => {
+  const started: StartThreadInput[] = [];
+  changedFiles = { prj_9: 0, prj_2: 3 };
+  mount(<ComposeDialog request={{ review: {} }} phone={false} current={{ id: 'prj_9', root: '/home/dana/other', name: 'other' }} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  await settle();
+  expect(el('[data-compose-to]').getAttribute('data-compose-to')).toBe('ses_web');
+  expect(el('[data-review-size]').textContent).toContain('3 files');
+  expect(el('[data-compose-send]').classList.contains('ib-dis')).toBe(false);
+  act(() => root!.unmount());
+  root = null;
+
+  // The person's own pick of an agent with nothing to review stays: Start is off, as before a PR is picked.
+  changedFiles = { prj_9: 0, prj_2: 0 };
+  mount(<ComposeDialog request={{ review: {} }} phone={false} current={{ id: 'prj_9', root: '/home/dana/other', name: 'other' }} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  await settle();
+  expect(el('[data-compose-to]').getAttribute('data-compose-to')).toBe('ses_other');
+  expect(el('[data-review-size]').textContent).toBe('No changes');
+  expect(el('[data-compose-send]').classList.contains('ib-dis')).toBe(true);
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  expect(started).toEqual([]);
+  // Another kind with changes turns Start on again.
+  changedFiles = { prj_9: 1, prj_2: 0 };
+  await act(async () => el('[data-review-choice="last"]').click());
+  await settle();
+  expect(el('[data-compose-send]').classList.contains('ib-dis')).toBe(false);
 });
 
 test.skipIf(!hasDom)("Start a new agent's compose opens with the review thread's name as the person's own, and its Send carries it", async () => {
@@ -971,171 +1036,6 @@ test.skipIf(!hasDom)("Start a new agent's compose opens with the review thread's
   expect(started[0]!.thread_name_auto).toBeUndefined();
 });
 
-test.skipIf(!hasDom)('a thread name another open thread has: the review thread still starts, without the name, with the same key', async () => {
-  takenNames = ['Review #412 to #414: Layer 412'];
-  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} />);
-  await settle();
-  await openPicker();
-  await startWith('ses_billing');
-  await settle();
-  const starts = posted.filter((p) => p.path.endsWith('/messages'));
-  expect(starts.map((p) => p.body.thread_name)).toEqual(['Review #412 to #414: Layer 412', undefined]);
-  expect(starts[0]!.body.idempotency_key).toBe(starts[1]!.body.idempotency_key);
-  expect(sentPaths()).toEqual(['/pulls/owner', '/messages', '/messages', '/pulls/owner']);
-});
-
-test.skipIf(!hasDom)("a tree: the review thread takes the chain to its top; once that thread has it, the page offers no second thread", async () => {
-  const tree = TREE();
-  const [l412, , l414] = tree.layers as [InboxPull, InboxPull, InboxPull];
-  mount(<Page answer={{ ...model, pulls: tree.layers, links: {} }} stackId={tree.id} />);
-  await settle();
-  await openPicker();
-  await startWith('ses_billing');
-  await settle();
-  expect(posted[0]!.body).toMatchObject({ keys: [l412.key, l414.key], validate_only: true });
-  expect(posted[1]!.body.thread_name).toBe('Review #412, #414: Layer 412');
-  act(() => root?.unmount());
-  host?.remove();
-  // #413 was left out of that thread: the page shows the stack's review thread, as for any linked stack, and nothing of its own.
-  const owned: InboxPullLink = { ...link, via: 'owner', ask: 'guide', thread_id: 'thr_a', last: null };
-  mount(<Page answer={{ ...model, pulls: tree.layers, links: { [l412.key]: owned, [l414.key]: owned } }} stackId={tree.id} />);
-  await settle();
-  expect(el('[data-pulls-thread]').getAttribute('data-pulls-thread')).toBe('thr_a');
-  expect(el('[data-pulls-primary]').getAttribute('data-pulls-primary')).toBe('open');
-  expect(document.querySelector('[data-pulls-picker]')).toBeNull();
-});
-
-
-test.skipIf(!hasDom)('the picker picks a running agent that is not working, the last one used first next time; a row only picks', async () => {
-  const busy = { ...liveSession('ses_busy', 'prj_1'), busy: true, label: 'Refactor the ledger' };
-  sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_1', name: 'billing-svc', root: '/home/dana/billing-svc' }, sessions: [busy, liveSession('ses_a', 'prj_1'), liveSession('ses_b', 'prj_1')] }] };
-  const reviewed: string[] = [];
-  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onReview={(_id, key, scope) => reviewed.push(`${key}:${scope}`)} />);
-  await settle();
-  await openPicker();
-  expect(pickedSession()).toEqual(['ses_a']);
-  // Each row says what it is: the agent, its title (or none yet), and whether it is working.
-  const row = (session: string) => {
-    const o = el(`[data-pulls-picker-session="${session}"]`);
-    return [o.querySelector('b')!.textContent, o.querySelector('.ib-pr-opt-s')!.textContent, o.querySelector('.ib-pr-opt-k')!.textContent];
-  };
-  expect(row('ses_busy')).toEqual(['Claude Code', 'Refactor the ledger', 'Working']);
-  const [agentA, titleA, whenA] = row('ses_a');
-  expect([agentA, titleA]).toEqual(['Claude Code', 'No title yet']);
-  expect(whenA).toMatch(/^Started .+ ago$/);
-  // The rows are one radio group.
-  expect(el('[data-pulls-picker-list][role="radiogroup"]').querySelectorAll('input[type="radio"]')).toHaveLength(3);
-  await act(async () => el('[data-pulls-picker-session="ses_b"] input').click());
-  await settle();
-  expect(posted).toEqual([]);
-  expect(pickedSession()).toEqual(['ses_b']);
-  expect(el('[data-pulls-start]').getAttribute('data-pulls-start')).toBe('ses_b');
-  await act(async () => el('[data-pulls-start]').click());
-  await settle();
-  expect(posted.find((p) => p.path.endsWith('/messages'))!.body.to).toEqual({ host: 'claude-code', session: 'ses_b' });
-  expect(reviewed).toEqual([]);
-  act(() => root?.unmount());
-  host?.remove();
-  posted.length = 0;
-  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} />);
-  await settle();
-  await openPicker();
-  expect(pickedSession()).toEqual(['ses_b']);
-});
-
-test.skipIf(!hasDom)('an agent that ended after the picker read it: the running agents are read again, its row goes, a new one is offered', async () => {
-  sessionsAnswer = { ...sessionsAnswer, launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [] } };
-  refuse = { ses_billing: { status: 409, body: { code: 'session_not_live', error: 'That session is not live any more: nothing was sent.' } } };
-  const launched: string[] = [];
-  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onLaunch={(_k, _p, body) => launched.push(body)} />);
-  await settle();
-  await openPicker();
-  expect(el('[data-pulls-start]').getAttribute('data-pulls-start')).toBe('ses_billing');
-  const reads = sessionReads;
-  sessionsAnswer = { ...sessionsAnswer, projects: [] };
-  await act(async () => el('[data-pulls-start]').click());
-  await settle();
-  expect(sessionReads).toBe(reads + 1);
-  expect(el('[data-pulls-picker] [role="alert"]').textContent).toContain('not live');
-  expect(pickerSessions()).toEqual([]);
-  expect(el('[data-pulls-start]').getAttribute('data-pulls-start')).toBe('new');
-  const sends = posted.filter((p) => p.path.endsWith('/messages')).length;
-  await act(async () => el('[data-pulls-start]').click());
-  expect(launched).toHaveLength(1);
-  expect(posted.filter((p) => p.path.endsWith('/messages'))).toHaveLength(sends);
-});
-
-test.skipIf(!hasDom)('the window coming back reads the running agents again', async () => {
-  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} />);
-  await settle();
-  await openPicker();
-  expect(pickerSessions()).toEqual(['ses_billing']);
-  const reads = sessionReads;
-  sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_1', name: 'billing-svc', root: '/home/dana/billing-svc' }, sessions: [liveSession('ses_billing', 'prj_1'), liveSession('ses_new', 'prj_1')] }] };
-  await act(async () => window.dispatchEvent(new Event('focus')));
-  await settle();
-  expect(sessionReads).toBe(reads + 1);
-  expect(pickerSessions()).toEqual(['ses_billing', 'ses_new']);
-});
-
-test.skipIf(!hasDom)('a new pick gets a new idempotency key: the retry to another agent is a new send, not the first one replayed', async () => {
-  sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_1', name: 'billing-svc', root: '/home/dana/billing-svc' }, sessions: [liveSession('ses_a', 'prj_1'), liveSession('ses_b', 'prj_1')] }] };
-  refuse = { ses_a: { status: 503, body: { code: 'busy', error: 'Try again.' } } };
-  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} />);
-  await settle();
-  await openPicker();
-  await startWith('ses_a');
-  await settle();
-  await startWith('ses_a');
-  await settle();
-  await startWith('ses_b');
-  await settle();
-  const keys = posted.filter((p) => p.path.endsWith('/messages')).map((p) => [(p.body.to as { session: string }).session, p.body.idempotency_key]);
-  expect(keys.map(([to]) => to)).toEqual(['ses_a', 'ses_a', 'ses_b']);
-  // The same agent again: the same key (a retry). Another agent: a new one.
-  expect(keys[1]![1]).toBe(keys[0]![1]);
-  expect(keys[2]![1]).not.toBe(keys[0]![1]);
-});
-
-test.skipIf(!hasDom)("one PR's picker stays with it: the custom words typed for PR A are not sent with PR B", async () => {
-  const a = model.pulls.find((p) => p.number === 869)!;
-  const b = model.pulls.find((p) => p.number === 880)!;
-  sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_2', name: 'web-app', root: '/home/dana/web-app' }, sessions: [liveSession('ses_web', 'prj_2'), liveSession('ses_web2', 'prj_2')] }] };
-  mount(<Page answer={{ ...model, links: {} }} stackId={a.key} />);
-  await settle();
-  await openPicker();
-  await act(async () => el('[data-pulls-picker-session="ses_web2"] input').click());
-  await act(async () => el<HTMLInputElement>('[data-pulls-ask-option="custom"] input').click());
-  await typeWords('only the fallback chain for #869');
-  // The person moves to PR B in the same page: its own button, closed.
-  act(() => root!.render(<div className="pn-inbox"><Page answer={{ ...model, links: {} }} stackId={b.key} /></div>));
-  await settle();
-  expect(document.querySelector('[data-pulls-picker]')).toBeNull();
-  await openPicker();
-  expect(el('[data-pulls-ask-choice]').getAttribute('data-pulls-ask-choice')).toBe('guide');
-  expect(document.querySelector('[data-pulls-ask-words]')).toBeNull();
-  expect(el('[data-pulls-start]').getAttribute('data-pulls-start')).toBe('ses_web');
-  await act(async () => el('[data-pulls-start]').click());
-  await settle();
-  const body = String(posted.find((p) => p.path.endsWith('/messages'))!.body.body);
-  expect(body).toContain('#880');
-  expect(body).not.toContain('fallback chain for #869');
-  expect(posted.at(-1)!.body).toMatchObject({ keys: [b.key], ask: 'guide' });
-});
-
-test.skipIf(!hasDom)('once a thread starts, focus moves to the line that names its agent', async () => {
-  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} />);
-  await settle();
-  await openPicker();
-  await act(async () => el('[data-pulls-start]').click());
-  await settle();
-  // The list reads the new thread: the PR is that thread's now.
-  const owned: InboxPullLink = { ...link, via: 'owner', ask: 'guide', thread_id: 'thr_new', last: null, guide: null, agent: { host: 'claude-code', session: 'ses_billing', name: null } };
-  act(() => root!.render(<div className="pn-inbox"><Page answer={{ ...model, links: { [stack[2]!.key]: owned } }} stackId={STACK_ID} /></div>));
-  await settle();
-  expect(document.activeElement?.getAttribute('data-pulls-thread')).toBe('thr_new');
-});
-
 test.skipIf(!hasDom)('Open the diff, in every state, and each open row go straight to the review mode (layer by layer for a stack)', async () => {
   const owned: InboxPullLink = { ...link, via: 'owner', ask: 'guide', last: null, guide: null, agent: { host: 'claude-code', session: 'ses_1', name: null } };
   const arrived: InboxPullLink = { ...owned, guide: { message_id: 'msg_g', title: 'Retries', steps: 3, review: true } };
@@ -1162,54 +1062,6 @@ test.skipIf(!hasDom)('Open the diff, in every state, and each open row go straig
     act(() => root?.unmount());
     host?.remove();
   }
-});
-
-test.skipIf(!hasDom)("a teammate's PR can go to a review thread for discussion: the words name its author and forbid pushing, commenting, approving and merging", async () => {
-  const theirs = model.pulls.find((p) => p.number === 880)!;
-  sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_2', name: 'web-app', root: '/home/dana/web-app' }, sessions: [liveSession('ses_web', 'prj_2')] }] };
-  mount(<Page answer={{ ...model, links: {} }} stackId={theirs.key} />);
-  await settle();
-  await openPicker();
-  await startWith('ses_web');
-  await settle();
-  const body = String(posted.find((p) => p.path.endsWith('/messages'))!.body.body);
-  expect(body).toContain('\n- Author: tomas\n');
-  expect(body).toContain('using /review-curate (its instructions are at the end of this message). Include what I might ask tomas.\n');
-  expect(body).toContain("Don't push to the branch, comment on the pull request, approve it or merge it.");
-});
-
-test.skipIf(!hasDom)('a review thread: "Review thread with Claude Code", the ask on its way, one button that opens the thread; no picker, no second agent', async () => {
-  const owned: InboxPullLink = { ...link, via: 'owner', ask: 'guide', last: null, guide: null, agent: { host: 'claude-code', session: 'ses_1', name: null } };
-  // Codex linked a layer higher up: the stack still has one review thread, its lowest linked layer's.
-  const codex: InboxPullLink = { ...linkTo('thr_codex', OTHER_LAST), agent: { host: 'codex', session: 'ses_cx', name: null } };
-  const opened: string[] = [];
-  mount(<Page answer={{ ...model, links: { [stack[0]!.key]: owned, [stack[1]!.key]: codex } }} stackId={STACK_ID} onOpenThread={(t) => opened.push(t)} />);
-  await settle();
-  const line = el('[data-pulls-thread-line]');
-  expect(line.getAttribute('data-pulls-thread-line')).toBe('asked');
-  expect(line.querySelector('.ib-pr-thread-h b')!.textContent).toBe('Claude Code');
-  expect(line.querySelector('[data-pulls-ask]')!.textContent).toBe('Guided review on the way');
-  expect(line.querySelector('.ib-atile, .ib-mk, svg')).not.toBeNull();
-  expect(document.querySelectorAll('[data-pulls-thread]')).toHaveLength(1);
-  expect(document.body.textContent).not.toContain('Codex');
-  const primary = el('[data-pulls-primary]');
-  expect(primary.getAttribute('data-pulls-primary')).toBe('open');
-  expect(primary.textContent).toBe('Open review thread');
-  await act(async () => primary.click());
-  expect(opened).toEqual([owned.thread_id]);
-  expect(document.querySelector('[data-pulls-picker]')).toBeNull();
-  expect(sessionReads).toBe(0);
-  act(() => root?.unmount());
-  host?.remove();
-  // The guided review arrived: the thread is still the way in (no button of its own); the line gives the last answer.
-  const arrived: InboxPullLink = { ...owned, guide: { message_id: 'msg_g', title: 'Retries', steps: 3, review: true }, last: { message_id: LAST, preview: 'The guided review is ready.', at: '2026-11-03T09:00:00.000Z' } };
-  mount(<Page answer={{ ...model, links: { [stack[0]!.key]: arrived } }} stackId={STACK_ID} />);
-  await settle();
-  expect(el('[data-pulls-thread-line]').getAttribute('data-pulls-thread-line')).toBe('live');
-  expect(el('[data-pulls-thread-line]').textContent).toContain('The guided review is ready.');
-  expect(document.querySelector('[data-pulls-ask]')).toBeNull();
-  expect([...document.querySelectorAll('.ib-pr-actions button')].map((b) => b.textContent)).toEqual(['Open review thread', 'Open the diff']);
-  expect(document.querySelector('[data-pulls-reply]')).not.toBeNull();
 });
 
 test.skipIf(!hasDom)('the Board is optional: no Board chip without a card; a quiet chip when the Board is on and a card links the PR', async () => {
@@ -1255,6 +1107,11 @@ test.skipIf(!hasDom)("a note drafted on one layer does not ride into the next la
 const LOCALE_PR = (fields: Partial<InboxPull> = {}) =>
   pull(869, { repo: 'northwind/web-app', title: 'Fall back to English for missing strings', head: 'locale-fallback', ...fields });
 const handoffOf = (p: InboxPull, ask?: Parameters<typeof pullHandoffMessage>[1]) => pullHandoffMessage(inboxPullStacks([p])[0]!, ask);
+
+test("a teammate's PR: the agent is told to leave it alone: no push, no comment on it, no approval, no merge", () => {
+  const text = handoffOf({ ...model.pulls.find((p) => p.number === 869)!, mine: false, author: 'jun' });
+  for (const forbidden of ['push', 'comment', 'approve', 'merge']) expect(text).toMatch(new RegExp(`Don't[^.]*${forbidden}`));
+});
 
 /** The owner's approved text, word for word (`.product/approved/pull-handoff-pushes/`). */
 const APPROVED_OWN = `You're being asked to help me review and understand a pull request.
@@ -1654,21 +1511,3 @@ test.skipIf(!hasDom)('a long title is kept whole in the review header\'s hover',
   expect(el('[data-pull-review-title]').getAttribute('title')).toBe(`#412 ${long}`);
 });
 
-test.skipIf(!hasDom)('an ended agent stays named: "Claude Code ended"; no Reply; Start a new review thread opens the picker without it', async () => {
-  sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_1', name: 'billing-svc', root: '/home/dana/billing-svc' }, sessions: [liveSession('ses_1', 'prj_1'), liveSession('ses_billing', 'prj_1')] }] };
-  const ended: InboxPullsAnswer = { ...model, links: { [stack[2]!.key]: { ...link, agent: { ...link.agent!, ended: true } } } };
-  mount(<Page answer={ended} stackId={STACK_ID} />);
-  await settle();
-  const line = el('[data-pulls-thread-line]');
-  expect(line.getAttribute('data-pulls-thread-line')).toBe('ended');
-  expect(line.textContent).toBe('Claude Code ended');
-  expect(document.querySelector('[data-pulls-reply]')).toBeNull();
-  const primary = el('[data-pulls-primary]');
-  expect(primary.getAttribute('data-pulls-primary')).toBe('again');
-  expect(primary.textContent).toBe('Start a new review thread');
-  await openPicker();
-  expect(pickerSessions()).toEqual(['ses_billing']);
-  await act(async () => el('[data-pulls-start]').click());
-  await settle();
-  expect(posted.at(-1)!.body).toMatchObject({ thread_id: 'thr_new', ask: 'guide' });
-});

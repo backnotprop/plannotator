@@ -173,12 +173,12 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
     keepFocusHere();
     const shownFor = live?.session;
     try {
-      // A Show me asks again as a Show me: the agent's request to draw, the same lines.
+      // A Show me asks again as a Show me: the agent's request for a Shape, the same lines.
       const posted = await post(
         turn.id,
         turn.question,
         turn.kind === 'show_me' && turn.show_me
-          ? { kind: 'show_me', show_me: turn.show_me, ...(turn.again_of_round !== undefined ? { again_of_round: turn.again_of_round } : {}) }
+          ? { kind: 'show_me', show_me: turn.show_me, ...(turn.again_shape !== undefined ? { again_shape: turn.again_shape } : {}) }
           : undefined,
       );
       // A busy choice holds for the session the person saw busy. A retry goes to the thread's owner now, and

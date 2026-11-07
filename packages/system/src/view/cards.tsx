@@ -13,17 +13,17 @@ const Swatch = ({ is, dashed }: { is?: 'added' | 'changed' | 'removed'; dashed?:
   </svg>
 );
 
-/** What the change on the sheet means: a PR's review, a plan, or only the parts its files touch (the gate). */
-export type KeyChange = 'review' | 'plan' | 'gate' | null;
+/** What the change on the sheet means: a PR's review, a plan, only the parts its files touch (the gate), or several open PRs' touched parts at rest. */
+export type KeyChange = 'review' | 'plan' | 'gate' | 'touches' | null;
 
 export function KeyCard({ notes, sheets, keys, pane, change = null }: { notes: boolean; sheets: boolean; keys: boolean; pane: boolean; change?: KeyChange }) {
   return (
     <div className="sys-card-pop sys-keycard" role="dialog" aria-label="Symbols and keys">
       {change && (
         <>
-          <div className="sys-kc-h">{change === 'plan' ? 'This plan' : 'This change'}</div>
-          {change !== 'gate' && <div className="sys-kc-r"><span className="sys-kc-i"><Swatch is="added" dashed={change === 'plan'} /></span><span>{change === 'plan' ? 'new, not built yet' : 'added'}</span></div>}
-          <div className="sys-kc-r"><span className="sys-kc-i"><Swatch is="changed" dashed={change === 'plan'} /></span><span>{change === 'plan' ? 'changes, not built yet' : change === 'gate' ? 'its files change' : 'changed'}</span></div>
+          <div className="sys-kc-h">{change === 'plan' ? 'This plan' : change === 'touches' ? 'Open pull requests' : 'This change'}</div>
+          {change !== 'gate' && change !== 'touches' && <div className="sys-kc-r"><span className="sys-kc-i"><Swatch is="added" dashed={change === 'plan'} /></span><span>{change === 'plan' ? 'new, not built yet' : 'added'}</span></div>}
+          <div className="sys-kc-r"><span className="sys-kc-i"><Swatch is="changed" dashed={change === 'plan'} /></span><span>{change === 'plan' ? 'changes, not built yet' : change === 'gate' ? 'its files change' : change === 'touches' ? 'their files change it, labelled with each PR' : 'changed'}</span></div>
           {change === 'review' && <div className="sys-kc-r"><span className="sys-kc-i"><Swatch is="removed" /></span><span>removed, struck through</span></div>}
           {change === 'review' && <div className="sys-kc-r"><span className="sys-kc-i"><span className="sys-kc-num">1</span></span><span>its number in the parts list</span></div>}
         </>
