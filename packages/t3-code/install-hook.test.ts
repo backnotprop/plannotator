@@ -118,17 +118,29 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("the compiled installer helper regi
     stdin: Buffer.from(JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "toolu_fixture", session_id: "fixture", cwd: join(file, ".."), tool_input: { command: "plannotator annotate notes.md --gate" } })),
     stdout: "pipe", stderr: "pipe",
   });
-  const hooked = hook("sdk-ts");
-  expect(hooked.exitCode).toBe(0);
-  expect(JSON.parse(hooked.stdout.toString())).toEqual({});
+  for (const entrypoint of ["sdk-ts", "t3-code"]) {
+    const hooked = hook(entrypoint);
+    expect(hooked.exitCode).toBe(0);
+    expect(JSON.parse(hooked.stdout.toString())).toEqual({});
+  }
   const interactive = hook("cli");
   expect(interactive.exitCode).toBe(0);
   expect(interactive.stdout.toString()).toBe("");
   // The binary's own gate, for a hook registered without the shell's: `{}` before any startup work.
-  const direct = Bun.spawnSync([executable, "t3-hook"], { env: { ...env, CLAUDE_CODE_ENTRYPOINT: "cli" }, stdin: Buffer.from("not json"), stdout: "pipe", stderr: "pipe" });
-  expect(direct.exitCode).toBe(0);
-  expect(JSON.parse(direct.stdout.toString())).toEqual({});
-  expect(direct.stderr.toString()).toBe("");
+  // Unparseable input past the gate is logged to t3-code/hook.log, so the log tells the two apart.
+  const hookLog = join(dataDir, "t3-code", "hook.log");
+  mkdirSync(join(dataDir, "t3-code"), { recursive: true });
+  const direct = (entrypoint: string) => Bun.spawnSync([executable, "t3-hook"], { env: { ...env, CLAUDE_CODE_ENTRYPOINT: entrypoint }, stdin: Buffer.from("not json"), stdout: "pipe", stderr: "pipe" });
+  const gated = direct("cli");
+  expect(gated.exitCode).toBe(0);
+  expect(JSON.parse(gated.stdout.toString())).toEqual({});
+  expect(gated.stderr.toString()).toBe("");
+  expect(existsSync(hookLog)).toBe(false);
+  // T3's own entrypoint passes the binary's gate.
+  const t3 = direct("t3-code");
+  expect(t3.exitCode).toBe(0);
+  expect(JSON.parse(t3.stdout.toString())).toEqual({});
+  expect(existsSync(hookLog)).toBe(true);
   const removed = Bun.spawnSync([executable, "t3-hook", "remove", "--settings", file], { env, stdout: "pipe", stderr: "pipe" });
   expect(removed.exitCode).toBe(0);
   expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({});

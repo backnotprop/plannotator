@@ -15,8 +15,12 @@ export function quoteHookWord(value: string): string {
  * The hook runs on every Bash call of every Claude session that loads this
  * settings file, so outside an SDK session the shell answers on its own (no
  * output, no decision) and the Plannotator binary never starts.
+ *
+ * One list, as shell `case` patterns, for the shell gate and
+ * `isAgentSdkEntrypoint` (the binary's own check), so the two cannot drift.
  */
-const T3_HOOK_GATE_OPEN = 'case "$CLAUDE_CODE_ENTRYPOINT" in sdk*|t3-code) ';
+const T3_ENTRYPOINT_PATTERNS = ["sdk*", "t3-code"] as const;
+const T3_HOOK_GATE_OPEN = `case "$CLAUDE_CODE_ENTRYPOINT" in ${T3_ENTRYPOINT_PATTERNS.join("|")}) `;
 /** The gate earlier builds wrote, before T3 named its entrypoint: still read, so reinstall and uninstall clean it up. */
 const T3_HOOK_GATE_OPEN_SDK_ONLY = 'case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) ';
 const T3_HOOK_GATE_CLOSE = ";; esac";
@@ -27,7 +31,8 @@ export function t3HookCommand(executable: string, dataDir: string): string {
 
 /** Whether a Claude session can be T3's: only Agent SDK sessions (T3's own `t3-code` included) are. */
 export function isAgentSdkEntrypoint(value: string | undefined): boolean {
-  return typeof value === "string" && (value.startsWith("sdk") || value === "t3-code");
+  return typeof value === "string"
+    && T3_ENTRYPOINT_PATTERNS.some((pattern) => pattern.endsWith("*") ? value.startsWith(pattern.slice(0, -1)) : value === pattern);
 }
 
 /**
