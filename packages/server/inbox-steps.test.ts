@@ -149,6 +149,62 @@ describe("the Board's cards read", () => {
   });
 });
 
+// The calm row (approval "inbox-checklist-spinners-2026-11-07"): the list row wears the still amber pause only while a
+// checklist waits on the person, and only while the switch is on; never on what an agent reads.
+describe("the list's rows", () => {
+  test("`steps_waiting` while a step waits on the person and the switch is on; absent while the agent works, with the switch off, and on an agent's read", async () => {
+    const w = await world();
+    const row = async () => {
+      const model = (await (await fetch(`${w.base}/api/inbox/threads`)).json()) as { sections: { threads: { thread_id: string; steps_waiting?: true }[] }[] };
+      return model.sections.flatMap((section) => section.threads).find((r) => r.thread_id === w.thread)!;
+    };
+    const waiting = [PLAN[0]!, { step: "Pick the backfill window", status: "waiting" }, PLAN[2]!];
+    w.server.store.setThreadSteps({ thread_id: w.thread, agent: AGENT, steps: waiting });
+    // Off: nothing on the row, whatever the store keeps.
+    expect("steps_waiting" in (await row())).toBe(false);
+    await w.setSteps(true);
+    expect((await row()).steps_waiting).toBe(true);
+    // Agents read rows through the store: never the person's checklist mark.
+    expect("steps_waiting" in (w.server.store.listRow(w.thread) ?? {})).toBe(false);
+    // The agent works on a step and nothing waits on the person: the row stays plain.
+    w.server.store.setThreadSteps({ thread_id: w.thread, agent: AGENT, steps: PLAN });
+    expect("steps_waiting" in (await row())).toBe(false);
+    w.server.store.setThreadSteps({ thread_id: w.thread, agent: AGENT, steps: waiting });
+    expect((await row()).steps_waiting).toBe(true);
+    await w.setSteps(false);
+    expect("steps_waiting" in (await row())).toBe(false);
+  });
+
+  test("the person replied, the flag is gone", async () => {
+    const w = await world();
+    const row = async () => {
+      const model = (await (await fetch(`${w.base}/api/inbox/threads`)).json()) as { sections: { threads: { thread_id: string; steps_waiting?: true }[] }[] };
+      return model.sections.flatMap((section) => section.threads).find((r) => r.thread_id === w.thread)!;
+    };
+    await w.setSteps(true);
+    w.server.store.setThreadSteps({ thread_id: w.thread, agent: AGENT, steps: [PLAN[0]!, { step: "Pick the backfill window", status: "waiting" }, PLAN[2]!] });
+    expect((await row()).steps_waiting).toBe(true);
+    // The person answers in the thread: it waits on the agent now, though its list still says "waiting".
+    w.server.store.sendMessage({ project_id: w.server.store.message(w.thread)!.project_id, author: { kind: "person" }, body: "The last 7 days.", reply_to: w.thread });
+    expect("steps_waiting" in (await row())).toBe(false);
+  });
+
+  test("the person's 👍 Looks good, the flag is gone", async () => {
+    const w = await world();
+    const row = async () => {
+      const model = (await (await fetch(`${w.base}/api/inbox/threads`)).json()) as { sections: { threads: { thread_id: string; steps_waiting?: true }[] }[] };
+      return model.sections.flatMap((section) => section.threads).find((r) => r.thread_id === w.thread)!;
+    };
+    await w.setSteps(true);
+    w.server.store.setThreadSteps({ thread_id: w.thread, agent: AGENT, steps: [PLAN[0]!, { step: "Approve the plan", status: "waiting" }, PLAN[2]!] });
+    expect((await row()).steps_waiting).toBe(true);
+    // A 👍 is a note never listed in the thread: it still answers the waiting step.
+    await new Promise((done) => setTimeout(done, 5));
+    w.server.store.ackMessage(w.thread, true);
+    expect("steps_waiting" in (await row())).toBe(false);
+  });
+});
+
 describe("the event stream", () => {
   test("a steps line names its thread only; the switch tells windows, never an agent's stream", async () => {
     const w = await world();

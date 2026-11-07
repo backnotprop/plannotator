@@ -19,11 +19,20 @@ export type DrawingStatus = {
   drawnAt: string | null;
 };
 
+/**
+ * The wanted sheets not drawn yet: what "still drawing" means, for the Inbox's
+ * status here and for the scheduled tick, which skips a drawing that has any.
+ * A wanted entry whose sheet is drawn does not count (check warns about it).
+ */
+export function stillWanted(model: SystemModel): SystemModel['wanted'] {
+  return model.wanted.filter((w) => !Object.hasOwn(model.sheets, w.code));
+}
+
 export function drawingStatus(result: LoadResult | null): DrawingStatus {
   if (!result || (!result.model && !result.errors.length)) return { state: 'none', sheets: 0, wanted: 0, drawnAt: null };
   const model = result.model;
   if (!model) return { state: 'broken', sheets: 0, wanted: 0, drawnAt: null };
-  const wanted = model.wanted.filter((w) => !Object.hasOwn(model.sheets, w.code)).length;
+  const wanted = stillWanted(model).length;
   return {
     state: wanted ? 'drawing' : result.errors.length ? 'broken' : 'drawn',
     sheets: Object.keys(model.sheets).length,
@@ -37,8 +46,7 @@ export function drawingProgress(model: SystemModel): { sheets: { code: string; t
   const drawn = Object.keys(model.sheets)
     .sort(bySheetOrder(model.sheets))
     .map((code) => ({ code, title: model.sheets[code]!.title, kind: model.sheets[code]!.kind, drawn: true }));
-  const wanted = model.wanted
-    .filter((w) => !Object.hasOwn(model.sheets, w.code))
+  const wanted = stillWanted(model)
     .map((w) => ({ code: w.code, title: w.question, kind: w.kind, drawn: false }));
   return { sheets: [...drawn, ...wanted] };
 }
