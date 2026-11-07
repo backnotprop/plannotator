@@ -68,6 +68,7 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
       ref={panelRef}
       data-pn-dismissable-popover="true"
       data-pn-options-menu={compactEdgeSwipe ? panelId : undefined}
+      data-print-hide={drawer || undefined}
       data-pn-compact-touch-layout={compactEdgeSwipe ? 'true' : undefined}
       role={compactEdgeSwipe ? 'dialog' : undefined}
       aria-label={compactEdgeSwipe ? 'Options' : undefined}

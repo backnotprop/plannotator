@@ -42,7 +42,7 @@ async function settle() {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
 }
 
-async function mount(mode: Mode, compact = true, reduced = false) {
+async function mount(mode: Mode, compact = true, reduced = false, hasHeadings = true) {
   setStorageBackend({
     getItem: key => memory.get(key) ?? null,
     setItem: (key, value) => { memory.set(key, value); },
@@ -74,7 +74,7 @@ async function mount(mode: Mode, compact = true, reduced = false) {
     if (raw.startsWith('https://')) return new Response(null, { status: 404 });
     const { pathname } = new URL(raw, 'http://localhost');
     if (pathname === '/api/plan') return Response.json({
-      plan: '# Swipe test\n\nA document to review.\n\n## Second heading\n\nMore text.',
+      plan: hasHeadings ? '# Swipe test\n\nA document to review.\n\n## Second heading\n\nMore text.' : 'A paragraph without headings.',
       origin: 'codex', sharingEnabled: false, serverConfig: {},
       ...(mode === 'annotate' ? { mode: 'annotate', filePath: '/repo/notes.md' } : {}),
     });
@@ -96,7 +96,7 @@ async function mount(mode: Mode, compact = true, reduced = false) {
     ? !!host?.querySelector('[aria-label="Open review navigation"]')
       || (!compact && !!host?.textContent?.includes('example.ts'))
     : !!document.getElementById('pn-compact-plan-navigator-trigger')
-      || (!compact && !!host?.querySelector('[data-block-id]'));
+      || ((!compact || !hasHeadings) && !!host?.querySelector('[data-block-id]'));
   for (let i = 0; i < 40 && !ready(); i++) await settle();
   expect(ready()).toBe(true);
   await settle();
@@ -156,6 +156,16 @@ afterEach(async () => {
 });
 
 describe.if(hasDom)('mobile edge swipes in real app shells', () => {
+  test('a document with no navigation tabs does not claim the left-edge gesture', async () => {
+    await mount('annotate', true, false, false);
+    expect(document.getElementById('pn-compact-plan-navigator-trigger')).toBeNull();
+    expect(await swipe('left')).toBe(false);
+    expect(navigation('annotate')).toBeNull();
+    expect(document.documentElement.hasAttribute('data-pn-panel-scroll-lock')).toBe(false);
+    expect(await swipe('right')).toBe(true);
+    expect(optionsMenu()).not.toBeNull();
+  });
+
   for (const mode of ['plan', 'annotate', 'review'] as const) {
     test(`${mode}: right swipe opens the same Options menu as the header burger`, async () => {
       await mount(mode);

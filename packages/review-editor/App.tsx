@@ -184,7 +184,7 @@ import { useEdgeSwipe } from '@plannotator/ui/hooks/useEdgeSwipe';
 import { usePanelDrag } from '@plannotator/ui/hooks/usePanelDrag';
 import { usePanelPresence } from '@plannotator/ui/hooks/usePanelPresence';
 import { usePanelScrollLock } from '@plannotator/ui/hooks/usePanelScrollLock';
-import { FileTree } from './components/FileTree';
+import { FileTree, type RepoFolderMemory } from './components/FileTree';
 import { StackedPRLabel } from './components/StackedPRLabel';
 import { PRSelector } from './components/PRSelector';
 import { PRSwitchOverlay } from './components/PRSwitchOverlay';
@@ -752,6 +752,10 @@ const ReviewApp: React.FC = () => {
   // Echoed on every freshness probe so the server can answer per-client:
   // "your snapshot moved" is independent of whether the VCS changed.
   const [snapshotId, setSnapshotId] = useState<string | undefined>(undefined);
+  const allFilesNavigation = useMemo(() => ({
+    folders: { expanded: null } as RepoFolderMemory,
+    positions: new Map<string, number>(),
+  }), [snapshotId]);
   const [localDraftTarget, setLocalDraftTarget] = useState<string | null>(null);
   // A fresh id per mount: a reloaded page no longer holds other targets' comments.
   const [localDraftClientId] = useState(() => `${Date.now()}-${generateId()}`);
@@ -6510,7 +6514,10 @@ const ReviewApp: React.FC = () => {
               resizeHandle={fileTreeResizeHandle}
             >
               <FileTree
-                scrollMemory={isCompactTouchLayout ? { positions: navigationScrollPositions.current, key: `tree:${treeScope}` } : undefined}
+                scrollMemory={isCompactTouchLayout ? treeScope === 'all' && repoFilesSupported
+                  ? { positions: allFilesNavigation.positions, key: 'all' }
+                  : { positions: navigationScrollPositions.current, key: 'tree:changes' } : undefined}
+                repoFolderMemory={isCompactTouchLayout ? allFilesNavigation.folders : undefined}
                 header={panelHeader}
                 treeScope={repoFilesSupported ? treeScope : 'changes'}
                 repoFiles={repoFiles}

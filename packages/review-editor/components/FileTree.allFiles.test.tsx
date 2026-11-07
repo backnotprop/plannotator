@@ -135,6 +135,30 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
     expect(el.querySelector('[data-repo-file-tree]')).not.toBeNull();
   });
 
+  test('reopening All files restores manually opened and closed folders with its scroll position', async () => {
+    const repoFolderMemory = { expanded: null };
+    const scrollMemory = { positions: new Map<string, number>(), key: 'tree:all' };
+    const renderTree = () => <Tree repoFolderMemory={repoFolderMemory} scrollMemory={scrollMemory} />;
+    const el = await mount(renderTree());
+    await act(async () => {
+      el.querySelector<HTMLButtonElement>('[data-repo-folder="apps"]')!.click();
+      el.querySelector<HTMLButtonElement>('[data-repo-folder="packages"]')!.click();
+    });
+    expect(visibleRows(el)).toContain('dir:apps/hook');
+    expect(visibleRows(el)).not.toContain('dir:packages/review-editor');
+    const viewport = () => [...el.querySelectorAll<HTMLElement>('div')].find(node => node.style.overflowY === 'auto')!;
+    viewport().scrollTop = 120;
+    await act(async () => root?.render(null));
+    await act(async () => root?.render(renderTree()));
+    expect(visibleRows(el)).toContain('dir:apps/hook');
+    expect(visibleRows(el)).not.toContain('dir:packages/review-editor');
+    expect(viewport().scrollTop).toBe(120);
+
+    await act(async () => root?.render(<Tree repoFolderMemory={{ expanded: null }} />));
+    expect(visibleRows(el)).not.toContain('dir:apps/hook');
+    expect(visibleRows(el)).toContain('dir:packages/review-editor');
+  });
+
   test('All files opens on the paths that lead to changes; changed rows keep their controls', async () => {
     const el = await mount(<Tree />);
     expect(visibleRows(el)).toEqual([

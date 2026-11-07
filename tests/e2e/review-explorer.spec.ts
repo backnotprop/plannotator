@@ -117,11 +117,14 @@ function buildRepo(root: string): string {
   return repo;
 }
 
-async function openReview(browser: Browser, url: string): Promise<Page> {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+async function openReview(browser: Browser, url: string, mobile = false): Promise<Page> {
+  const context = await browser.newContext(mobile
+    ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }
+    : { viewport: { width: 1440, height: 900 } });
   await context.addCookies(Object.entries(FIRST_RUN).map(([name, value]) => ({ name, value, url })));
   const page = await context.newPage();
   await page.goto(url);
+  if (mobile) await page.getByRole('button', { name: 'Open review navigation' }).tap();
   await expect(page.locator('[data-tree-scope-row]')).toBeVisible();
   return page;
 }
@@ -209,6 +212,49 @@ test('All files: the repository at the diff, remembered, and following the disk 
     await expect(page.locator('[data-tree-scope="changes"]')).toHaveAttribute('aria-pressed', 'true');
     await page.context().close();
   } finally {
+    await stopReview(child, root);
+  }
+});
+
+test('mobile All files restores expanded folders and scroll after closing navigation', async ({ browser }) => {
+  test.skip(!existsSync(binary), `compile the binary first: ${binary}`);
+  const root = mkdtempSync(join(tmpdir(), 'plannotator-review-explorer-'));
+  const repo = buildRepo(root);
+  for (let i = 0; i < 70; i++) write(repo, `apps/web/item-${String(i).padStart(2, '0')}.ts`, 'export const x = 1;\n');
+  git(repo, ['add', 'apps/web']);
+  git(repo, ['commit', '-q', '-m', 'expand test folder']);
+  const readyFile = join(root, 'ready.jsonl');
+  let child: ChildProcess | undefined;
+  let page: Page | undefined;
+  try {
+    child = spawn(binary, ['review', '--diff-type', 'uncommitted'], { env: reviewEnv(root, readyFile), cwd: repo, stdio: 'ignore' });
+    await expect.poll(() => existsSync(readyFile) ? readFileSync(readyFile, 'utf8') : '').toContain('"url"');
+    page = await openReview(browser, JSON.parse(readFileSync(readyFile, 'utf8').trim().split('\n')[0]!).url, true);
+    const panel = page.getByRole('dialog', { name: 'Review navigation' });
+    await panel.locator('[data-tree-scope="all"]').tap();
+    await panel.locator('[data-repo-folder="apps"]').tap();
+    await panel.locator('[data-repo-folder="apps/web"]').tap();
+    const rows = panel.locator('[data-repo-file^="apps/web/item-"]');
+    await expect(rows.first()).toBeVisible();
+    const scrollTop = (position?: number) => panel.locator('[data-repo-file-tree]').evaluate((tree, top) => {
+      for (let parent = tree.parentElement; parent; parent = parent.parentElement) {
+        if (getComputedStyle(parent).overflowY !== 'auto') continue;
+        if (top !== undefined) parent.scrollTop = top;
+        return parent.scrollTop;
+      }
+      throw new Error('File tree scroll viewport not found');
+    }, position);
+    const saved = await scrollTop(950);
+    expect(saved).toBeGreaterThan(500);
+    await panel.getByRole('button', { name: 'Close review navigation' }).tap();
+    // The closing animation hides the dialog from accessibility queries
+    // before it unmounts. Wait for the tree itself to leave the DOM.
+    await expect(page.locator('[data-repo-file-tree]')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Open review navigation' }).tap();
+    await expect.poll(() => scrollTop()).toBeCloseTo(saved, 0);
+    await expect(rows.first()).toBeVisible();
+  } finally {
+    await page?.context().close();
     await stopReview(child, root);
   }
 });

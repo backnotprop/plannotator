@@ -97,7 +97,7 @@ export const OverlayScrollArea = forwardRef<
     const save = () => { positions.set(key, node.scrollTop); };
     node.addEventListener('scroll', save, { passive: true });
     return () => node.removeEventListener('scroll', save);
-  }, [scrollMemory?.positions, scrollMemory?.key]);
+  }, [element, scrollMemory?.positions, scrollMemory?.key]);
 
   const Comp = element as ElementType;
   const mergedStyle: CSSProperties = { overflowX, overflowY, ...style };

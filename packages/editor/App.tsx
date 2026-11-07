@@ -951,7 +951,7 @@ const App: React.FC = () => {
   const navigatorSelector = '#pn-compact-plan-navigator';
   const navigatorDrag = usePanelDrag({
     selector: navigatorSelector,
-    onOpen: () => openSidebarTab(compactNavigatorTab),
+    onOpen: () => openSidebarTab(effectiveCompactNavigatorTab),
     onClose: () => closeCompactNavigator(),
   });
   const navigatorPreview = isCompactTouchLayout && navigatorDrag.active && !isCompactNavigatorOpen;
@@ -1245,17 +1245,6 @@ const App: React.FC = () => {
       focusTarget?.focus({ preventScroll: true });
     }, 0);
   }, []);
-
-  useEdgeSwipe({
-    enabled: isCompactTouchLayout && compactPlanSurface.type !== 'review' && !goalSetupMode,
-    onOpenLeft: () => openSidebarTab(compactNavigatorTab),
-    drag: { left: navigatorDrag.gesture },
-    panel: isCompactNavigatorOpen ? {
-      side: 'left', selector: navigatorSelector, onClose: closeCompactNavigator, trackDrag: true,
-    } : isCompactAnnotationsOpen || isCompactAIOpen ? {
-      side: 'right', selector: `#pn-compact-plan-${compactPlanSurface.type}`, onClose: closeCompactPlanSurface,
-    } : undefined,
-  });
 
   const hideAgentTerminal = useCallback(() => {
     setIsAgentTerminalOpen(false);
@@ -7269,6 +7258,18 @@ const App: React.FC = () => {
   const effectiveCompactNavigatorTab = compactNavigatorTabs.includes(compactNavigatorTab)
     ? compactNavigatorTab
     : (compactNavigatorTabs[0] ?? 'toc');
+
+  useEdgeSwipe({
+    enabled: isCompactTouchLayout && (compactNavigatorAvailable || isCompactAnnotationsOpen || isCompactAIOpen)
+      && compactPlanSurface.type !== 'review' && !goalSetupMode,
+    onOpenLeft: compactNavigatorAvailable ? () => openSidebarTab(effectiveCompactNavigatorTab) : undefined,
+    drag: { left: navigatorDrag.gesture },
+    panel: isCompactNavigatorOpen ? {
+      side: 'left', selector: navigatorSelector, onClose: closeCompactNavigator, trackDrag: true,
+    } : isCompactAnnotationsOpen || isCompactAIOpen ? {
+      side: 'right', selector: `#pn-compact-plan-${compactPlanSurface.type}`, onClose: closeCompactPlanSurface,
+    } : undefined,
+  });
 
   useEffect(() => {
     if (isCompactNavigatorOpen && !compactNavigatorAvailable) {

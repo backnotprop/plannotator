@@ -96,6 +96,13 @@ for (const containment of ['native', 'fallback'] as const) {
       await expect(options.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
       await expect(page.getByRole('dialog', { name: 'Annotations', exact: true })).toHaveCount(0);
       if (containment === 'native') {
+        await page.emulateMedia({ media: 'print' });
+        try {
+          await expect(page.locator('.pn-options-drawer')).toBeHidden({ timeout: 2000 });
+        } finally {
+          await page.emulateMedia({ media: 'screen' });
+        }
+        await expect(options).toBeVisible();
         const restingX = Math.round((await options.boundingBox())!.x);
         // A closing drag follows the finger too; pulling back keeps it open.
         await traceHorizontalDrag(page, [200, 320, 250], async distance => {
