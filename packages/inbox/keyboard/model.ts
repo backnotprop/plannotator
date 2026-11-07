@@ -258,8 +258,9 @@ export function press(state: KeyState, key: ModelKey): KeyState {
       if (fromFile || state.file === 'full') return state;
       return state.artifacts ? { ...state, artifacts: false, focus: 'artifacts-button' } : { ...state, artifacts: true, focus: 'artifacts-heading' };
     case 'H':
-      // The header clock's Snooze times; not from the file, nor while the grid or a full-screen file covers the thread.
-      if (fromFile || state.file === 'full' || state.artifacts) return state;
+      // The header clock's Snooze times, the Artifacts grid included (its header keeps the clock); not from the file,
+      // nor while a full-screen file covers the thread.
+      if (fromFile || state.file === 'full') return state;
       return { ...state, overlay: 'snooze', overlayReturn: state.focus, focus: 'snooze-menu' };
   }
   // The grid stands in for the messages: the reading keys and the file keys stand down there.

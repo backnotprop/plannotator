@@ -19,8 +19,8 @@ export const inboxBoardShortcuts = defineShortcutScope({
   id: 'inbox-board',
   title: 'Board',
   shortcuts: {
-    // BoardPage.tsx: ↑ ↓ within a lane, ← → the nearest card in the lane beside, Home End the lane's first or last.
-    move: { description: 'Move between Board cards', bindings: ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'], section: 'List', preventDefault: true, displayOrder: 8 },
+    // BoardPage.tsx: ← → the nearest card in the lane beside, ↑ ↓ within a lane, Home End the lane's first or last.
+    move: { description: 'Move between Board cards', bindings: ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'], section: 'List', preventDefault: true, displayOrder: 8 },
     ends: { description: 'First or last card in the lane', bindings: ['Home', 'End'], section: 'List', preventDefault: true, displayOrder: 9 },
   },
 });

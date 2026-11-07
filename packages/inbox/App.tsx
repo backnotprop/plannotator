@@ -90,6 +90,7 @@ import { onOpenSearchKey } from './search/searchShortcut';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from './shortcuts/thread.shortcuts';
 import { bareKeyAllowed, inOverlay, isComposingKey, isEditableTarget, isRepeatKey, keyboardFocused, keyTarget, modalOpen, singleKeysLive } from './shortcuts/guards';
+import { appKeyAllowed as appKeyAllowedOn, archiveTarget, newPageKeys } from './keyboard/appKeys';
 import { inboxAppShortcuts } from './shortcuts/app.shortcuts';
 import { ShortcutMap } from './components/ShortcutMap';
 import { EmptyState } from './components/EmptyState';
@@ -3765,17 +3766,14 @@ function Inbox() {
     // row that merely holds focus (clicked, or put there after a mouse close) does not.
     const rowEl = target?.closest('.ib-listcol [data-row]') ?? null;
     const rowId = rowEl && target && keyboardFocused(target) ? rowEl.getAttribute('data-row') : null;
+    if (key === 'archive') {
+      // Shift+E (approval "inbox-keyboard-keys-2026-11-07", item 2): Archive, as the menus' item, Z undoing it.
+      const to = archiveTarget({ keyRow: rowId, open, routeThread: routeRef.current.thread, resolvedOf: (id) => rowOf(id)?.resolved_at });
+      return to ? () => void archive(to.threadId, to.messageId, true) : null;
+    }
     const threadId = rowId ?? (open && open.thread_id === routeRef.current.thread ? open.thread_id : null);
     if (!threadId) return null;
     const row = rowOf(threadId);
-    if (key === 'archive') {
-      // Shift+E (approval "inbox-keyboard-keys-2026-11-07", item 2): Archive, as the menus' item, Z undoing it. The open
-      // thread is archived by its first message's id (the header's Archive thread); a row by its own.
-      if (threadId === rowId) return row && row.resolved_at === null ? () => void archive(threadId, threadId, true) : null;
-      if (!open || open.resolved_at !== null) return null;
-      const root = open.messages[0]?.id;
-      return root ? () => void archive(open.thread_id, root, true) : null;
-    }
     if (!row || !canToggleRead(row, drawnSection(shownRef.current, threadId))) return null;
     return () => void toggle(threadId, !(row.read_at ?? null));
   };
@@ -3855,7 +3853,7 @@ function Inbox() {
   const [mapOpen, setMapOpen] = useState(false);
   /** What G P, G D and C need from later in the render: whether Reviews and Drafts show, and whether compose is up. */
   const pagesRef = useRef({ pulls: false, drafts: false, composing: false });
-  const appKeyAllowed = (event: KeyboardEvent, onTouchPhone = false) => bareKeyAllowed(event, undefined, { onTouchPhone }) && routeRef.current.page !== 'tour';
+  const appKeyAllowed = (event: KeyboardEvent, onTouchPhone = false) => appKeyAllowedOn(event, routeRef.current.page, onTouchPhone);
   /** Focus the first of `selectors` on screen once the page it is on has drawn (two frames: the route, then its layout). */
   const focusSoon = (selectors: readonly string[]) => requestAnimationFrame(() => requestAnimationFrame(() => focusFirst(selectors)));
   /**
@@ -3887,20 +3885,6 @@ function Inbox() {
         },
       },
       // G P and G D (approval "inbox-keyboard-keys-2026-11-07", item 5): only while the sidebar shows their row.
-      goPulls: {
-        when: (event) => appKeyAllowed(event) && pagesRef.current.pulls,
-        handle: () => {
-          if (routeRef.current.page !== 'reviews') leave({ page: 'reviews', project: null, thread: null });
-          focusSoon(['[data-pulls-heading]', '.ib-prlist h1']);
-        },
-      },
-      goDrafts: {
-        when: (event) => appKeyAllowed(event) && pagesRef.current.drafts,
-        handle: () => {
-          if (routeRef.current.page !== 'drafts') leave({ page: 'drafts', project: null, thread: null });
-          focusSoon(['[data-drafts-page] h1']);
-        },
-      },
       goSettings: {
         when: (event) => appKeyAllowed(event),
         handle: () => {
@@ -3909,10 +3893,18 @@ function Inbox() {
         },
       },
       // C (item 4): the sidebar pencil's New message; focus goes back to where it was when it closes.
-      compose: {
-        when: (event) => appKeyAllowed(event) && !pagesRef.current.composing,
-        handle: () => openCompose({}),
-      },
+      // G P, G D and C (keyboard/appKeys.ts has their gates).
+      ...newPageKeys(() => ({ page: routeRef.current.page, ...pagesRef.current }), {
+        goPulls: () => {
+          if (routeRef.current.page !== 'reviews') leave({ page: 'reviews', project: null, thread: null });
+          focusSoon(['[data-pulls-heading]', '.ib-prlist h1']);
+        },
+        goDrafts: () => {
+          if (routeRef.current.page !== 'drafts') leave({ page: 'drafts', project: null, thread: null });
+          focusSoon(['[data-drafts-page] h1']);
+        },
+        compose: () => openCompose({}),
+      }),
     },
   });
 
@@ -5807,6 +5799,7 @@ function Inbox() {
             its scroll stays where it was. */}
         {!fileOpen && !fromCard && (
         <InboxList
+          columnId="ib-list"
           scope={route.project}
           // One project's list: its window name, the path beside it.
           title={listTitle}

@@ -1,18 +1,26 @@
 /**
  * The keys of approval "inbox-keyboard-keys-2026-11-07" that live in one component (DOM_TESTS=1 for the DOM ones).
  * What would regress: an arrow in the Artifacts grid or on the Board landing on the wrong tile (or moving at all from
- * outside one); H opening the header clock's menu without focus in it, or
- * snoozing on its own; Shift+F10 on a message head not opening its ⋯ menu, or opening it from a text field.
+ * outside one); H opening the header clock's menu without focus in it, snoozing on its own, or opening again by
+ * itself when the clock mounts again; H on a row opening another row's menu, or a menu on a row that cannot snooze;
+ * Shift+E archiving the wrong thread; C and G P / G D firing while typing, on the tour, or where their page is
+ * hidden; Shift+F10 on a message head not opening its ⋯ menu, or opening it from a text field.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { GuideArtifact } from './artifacts';
 import { gridStep, laneStep, type Box } from './gridMove';
+import { archiveTarget, newPageKeys, type AppKeyPages } from './keyboard/appKeys';
+import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
 const { ArtifactsView } = (hasDom ? await import('./components/ArtifactsView') : {}) as typeof import('./components/ArtifactsView');
 const { ThreadSnooze, MessageMenu } = (hasDom ? await import('./components/CopyMenus') : {}) as typeof import('./components/CopyMenus');
+const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
+const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
+const { useShortcutScope } = (hasDom ? await import('@plannotator/ui/shortcuts') : {}) as typeof import('@plannotator/ui/shortcuts');
+const { inboxAppShortcuts } = await import('./shortcuts/app.shortcuts');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -108,13 +116,25 @@ test.skipIf(!hasDom)('arrow keys move focus between the Artifacts tiles, and onl
   expect(document.activeElement).toBe(tiles[0]!);
   press(tiles[0]!, 'End');
   expect(document.activeElement).toBe(tiles[4]!);
-  // With a modifier, or from outside a tile (the heading), the arrows are the page's.
+  // With a modifier the arrows are the page's.
   press(tiles[4]!, 'ArrowLeft', { shiftKey: true });
   expect(document.activeElement).toBe(tiles[4]!);
+  // From the heading Shift+O lands on: ↓ → Home go to the first tile, End to the last, ↑ ← stay the page's.
   const heading = el.querySelector<HTMLElement>('#ib-art-h')!;
-  act(() => heading.focus());
-  press(heading, 'ArrowRight');
-  expect(document.activeElement).toBe(heading);
+  for (const [key, to] of [['ArrowDown', 0], ['ArrowRight', 0], ['Home', 0], ['End', 4]] as const) {
+    act(() => heading.focus());
+    press(heading, key);
+    expect(document.activeElement).toBe(tiles[to]!);
+  }
+  for (const key of ['ArrowUp', 'ArrowLeft']) {
+    act(() => heading.focus());
+    press(heading, key);
+    expect(document.activeElement).toBe(heading);
+  }
+  // Outside the section (the page body), nothing moves.
+  act(() => (document.activeElement as HTMLElement).blur());
+  press(document.body, 'ArrowDown');
+  expect(document.activeElement).toBe(document.body);
 });
 
 test.skipIf(!hasDom)('H’s request opens the header clock’s menu with focus on the first time; nothing is snoozed until one is picked', async () => {
@@ -128,6 +148,19 @@ test.skipIf(!hasDom)('H’s request opens the header clock’s menu with focus o
   expect(menu).not.toBeNull();
   expect(document.activeElement).toBe(menu!.querySelector('[data-snooze-choice]'));
   expect(picked).toEqual([]);
+});
+
+test.skipIf(!hasDom)('the clock mounting again with an old request (Z after Shift+E, J/K into a thread) keeps its menu shut; a new one opens it', async () => {
+  const snooze = { snoozed: false, onPick: () => {}, onUnsnooze: () => {} };
+  mount(<ThreadSnooze snooze={snooze} openRequest={1} />);
+  await frames();
+  expect(document.querySelector('[data-thread-snooze-menu]')).toBeNull();
+  act(() => root!.render(<ThreadSnooze snooze={snooze} openRequest={1} />));
+  await frames();
+  expect(document.querySelector('[data-thread-snooze-menu]')).toBeNull();
+  act(() => root!.render(<ThreadSnooze snooze={snooze} openRequest={2} />));
+  await frames();
+  expect(document.querySelector('[data-thread-snooze-menu]')).not.toBeNull();
 });
 
 test.skipIf(!hasDom)('Shift+F10 on a message’s head opens its ⋯ menu with focus in it', async () => {
@@ -155,4 +188,164 @@ test.skipIf(!hasDom)('Shift+F10 on a message’s head opens its ⋯ menu with fo
   const menu = document.querySelector('[data-message-menu="msg_1"]');
   expect(menu).not.toBeNull();
   expect(menu!.contains(document.activeElement)).toBe(true);
+});
+
+test('Shift+E archives the row the keyboard is on, else the open thread by its first message, never an archived one', () => {
+  const open = { thread_id: 'thr_open', resolved_at: null, messages: [{ id: 'msg_root' }, { id: 'msg_2' }] };
+  const resolved: Record<string, string | null> = { thr_open: null, thr_row: null, thr_done: '2026-11-07T10:00:00.000Z' };
+  const resolvedOf = (id: string) => resolved[id];
+  // A row the keyboard is on wins over the thread open beside the list.
+  expect(archiveTarget({ keyRow: 'thr_row', open, routeThread: 'thr_open', resolvedOf })).toEqual({ threadId: 'thr_row', messageId: 'thr_row' });
+  // No keyboard row (a clicked row is passed as none): the open thread, by its first message.
+  expect(archiveTarget({ keyRow: null, open, routeThread: 'thr_open', resolvedOf })).toEqual({ threadId: 'thr_open', messageId: 'msg_root' });
+  // Archived already, as a row or as the open thread: nothing.
+  expect(archiveTarget({ keyRow: 'thr_done', open, routeThread: 'thr_open', resolvedOf })).toBeNull();
+  expect(archiveTarget({ keyRow: null, open: { ...open, resolved_at: '2026-11-07T10:00:00.000Z' }, routeThread: 'thr_open', resolvedOf })).toBeNull();
+  // A row that is not in the list, or a thread the route has left: nothing.
+  expect(archiveTarget({ keyRow: 'thr_gone', open, routeThread: 'thr_open', resolvedOf })).toBeNull();
+  expect(archiveTarget({ keyRow: null, open, routeThread: null, resolvedOf })).toBeNull();
+});
+
+function AppKeys({ pages, calls }: { pages: AppKeyPages; calls: string[] }) {
+  useShortcutScope({
+    scope: inboxAppShortcuts,
+    handlers: newPageKeys(() => pages, { goPulls: () => calls.push('pulls'), goDrafts: () => calls.push('drafts'), compose: () => calls.push('compose') }),
+  });
+  return <input data-test-field="" />;
+}
+
+test.skipIf(!hasDom)('C opens New message and G P / G D go to their pages, only where they apply', () => {
+  const calls: string[] = [];
+  const pages: AppKeyPages = { page: 'inbox', pulls: true, drafts: true, composing: false };
+  const el = mount(<AppKeys pages={pages} calls={calls} />);
+  const key = (k: string, target: Element = document.body) => press(target, k, { code: `Key${k.toUpperCase()}` });
+  key('c');
+  key('g');
+  key('p');
+  key('g');
+  key('d');
+  expect(calls).toEqual(['compose', 'pulls', 'drafts']);
+  calls.length = 0;
+  // Typing in a field: the letters are the field's.
+  const field = el.querySelector<HTMLElement>('[data-test-field]')!;
+  act(() => field.focus());
+  key('c', field);
+  key('g', field);
+  key('p', field);
+  expect(calls).toEqual([]);
+  act(() => field.blur());
+  // New message already open: C stands down. A hidden Pull requests or Drafts row: G P / G D stand down.
+  Object.assign(pages, { composing: true, pulls: false, drafts: false });
+  key('c');
+  key('g');
+  key('p');
+  key('g');
+  key('d');
+  expect(calls).toEqual([]);
+  // On the tour, nothing.
+  Object.assign(pages, { page: 'tour', composing: false, pulls: true, drafts: true });
+  key('c');
+  key('g');
+  key('p');
+  expect(calls).toEqual([]);
+});
+
+function listRow(id: string, over: Partial<InboxListRow> = {}): InboxListRow {
+  return {
+    thread_id: id,
+    project_id: 'prj_a',
+    subject: `Thread ${id}`,
+    author: { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null },
+    created_at: '2026-11-07T10:00:00.000Z',
+    last_at: '2026-11-07T10:00:00.000Z',
+    last_author: 'agent',
+    message_count: 1,
+    resolved_at: null,
+    questions: { open: 0, picked: 0, stopped: false, holds_up: [], prompt: null },
+    waiting_on_person: false,
+    project: { id: 'prj_a', name: 'api' },
+    thread_name: null,
+    section: 'new',
+    unread: false,
+    answered_not_sent: false,
+    waiting_since: null,
+    unseen: 0,
+    sent: null,
+    guide: false,
+    ...over,
+  } as InboxListRow;
+}
+
+test.skipIf(!hasDom)('H on a row opens that row’s menu at the times; an archived row or one that cannot snooze stands down', async () => {
+  const sections: InboxListSection[] = [
+    { id: 'new', label: 'New', threads: [listRow('thr_a'), listRow('thr_b'), listRow('thr_linked')] },
+    { id: 'quiet', label: 'Archived', threads: [listRow('thr_done', { section: 'quiet', resolved_at: '2026-11-07T10:00:00.000Z' })] },
+  ];
+  const snoozed: string[] = [];
+  const el = mount(
+    <SidebarProvider>
+      <InboxList
+        title="Inbox"
+        path={null}
+        sections={sections}
+        filtered={false}
+        narrow={false}
+        selectedThreadId={null}
+        notice={null}
+        onShowNew={() => {}}
+        onOpen={() => {}}
+        phone={false}
+        onRowAction={() => {}}
+        onSnooze={(row, until) => snoozed.push(`${row.thread_id}@${until}`)}
+        snoozesOf={(row) => row.thread_id !== 'thr_linked'}
+      />
+    </SidebarProvider>,
+  );
+  const rowButton = (id: string) => el.querySelector<HTMLElement>(`[data-thread-id="${id}"]`);
+  const menuOf = (id: string) => document.querySelector(`[data-row-menu="${id}"]`);
+  const pressH = async (id: string) => {
+    const button = rowButton(id)!;
+    act(() => button.focus());
+    press(button, 'h', { code: 'KeyH' });
+    await frames();
+  };
+  await pressH('thr_b');
+  expect(menuOf('thr_b')?.querySelector('[data-snooze-view="times"]')).not.toBeNull();
+  expect(menuOf('thr_a')).toBeNull();
+  expect(snoozed).toEqual([]);
+  press(document.activeElement ?? document.body, 'Escape');
+  await frames();
+  expect(menuOf('thr_b')).toBeNull();
+  // A thread whose agent cannot snooze (a linked machine's), and an archived one: no menu.
+  await pressH('thr_linked');
+  expect(menuOf('thr_linked')).toBeNull();
+  const done = rowButton('thr_done');
+  if (done) {
+    await pressH('thr_done');
+    expect(menuOf('thr_done')).toBeNull();
+  }
+});
+
+test.skipIf(!hasDom)('Shift+F10 in a text field inside a message’s head is the field’s, not the ⋯ menu', async () => {
+  const message = { id: 'msg_1', author: { kind: 'agent', host: 'claude-code', name: 'Claude Code' }, created_at: '2026-11-07T11:00:00.000Z', body: 'Hi' } as never;
+  const el = mount(
+    <MessageMenu
+      thread={{ thread_id: 'thr_1', subject: 'S', messages: [message] } as never}
+      message={message}
+      linkOf={() => 'http://x'}
+      phone={false}
+      head={(more) => (
+        <div data-test-head="">
+          <input data-test-field="" />
+          {more}
+        </div>
+      )}
+    />,
+  );
+  const field = el.querySelector<HTMLElement>('[data-test-field]')!;
+  act(() => field.focus());
+  press(field, 'F10', { shiftKey: true });
+  await frames();
+  expect(document.querySelector('[data-message-menu="msg_1"]')).toBeNull();
+  expect(document.activeElement).toBe(field);
 });

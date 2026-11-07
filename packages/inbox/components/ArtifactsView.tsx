@@ -468,18 +468,24 @@ export const ArtifactsView = forwardRef<HTMLHeadingElement, ArtifactsViewProps>(
     if (openId === null) return;
     section.current?.querySelector<HTMLElement>('.ib-art-current')?.scrollIntoView?.({ block: 'nearest' });
   }, [openId, count]);
-  // Arrow keys between the tiles (approval "inbox-keyboard-keys-2026-11-07", item 1; gridMove.ts), only while a tile
-  // has focus: ← → the tile before or after, ↑ ↓ the one above or below, Home End the first or last. Enter opens.
+  // Arrow keys between the tiles (approval "inbox-keyboard-keys-2026-11-07", item 1; gridMove.ts), while a tile has
+  // focus: ← → the tile before or after, ↑ ↓ the one above or below, Home End the first or last. Enter opens. From the
+  // heading (where Shift+O lands), ↓ → Home go into the grid at its first tile and End at its last.
+  const HEADING_ID = 'ib-art-h';
+  const fromHeading = (event: KeyboardEvent) => event.key === 'ArrowDown' || event.key === 'ArrowRight' || event.key === 'Home' || event.key === 'End';
   const tileKey = {
     when: (event: KeyboardEvent) => {
       if (event.defaultPrevented || isComposingKey(event) || modalOpen() || !isGridKey(event.key)) return false;
       const target = keyTarget(event);
-      return !!target && !!section.current?.contains(target) && target.matches('[data-artifact-tile]');
+      if (!target || !section.current?.contains(target)) return false;
+      if (target.id === HEADING_ID) return fromHeading(event) && !!section.current.querySelector('[data-artifact-tile]');
+      return target.matches('[data-artifact-tile]');
     },
     handle: (event: KeyboardEvent) => {
       const tiles = [...(section.current?.querySelectorAll<HTMLElement>('[data-artifact-tile]') ?? [])];
-      const from = tiles.indexOf(keyTarget(event) as HTMLElement);
-      const to = gridStep(tiles.map((tile) => tile.getBoundingClientRect()), from, event.key as GridKey);
+      const target = keyTarget(event);
+      const from = tiles.indexOf(target as HTMLElement);
+      const to = target?.id === HEADING_ID ? (event.key === 'End' ? tiles.length - 1 : 0) : gridStep(tiles.map((tile) => tile.getBoundingClientRect()), from, event.key as GridKey);
       const next = to === null ? null : tiles[to];
       next?.focus({ preventScroll: true });
       next?.scrollIntoView?.({ block: 'nearest' });

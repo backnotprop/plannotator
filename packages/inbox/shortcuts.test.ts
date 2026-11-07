@@ -108,6 +108,14 @@ describe('the Inbox surface', () => {
     expect(hits(inboxThreadShortcuts, 'nextThread', { key: 'ח', code: 'KeyJ' })).toBe(true);
     // ⌘K on the K key of a Cyrillic layout opens search; Л alone does not.
     expect(hits(inboxSearchShortcuts, 'openSearch', { key: 'л', code: 'KeyK', metaKey: true })).toBe(true);
+    expect(hits(inboxSearchShortcuts, 'openSearch', { key: 'л', code: 'KeyK' })).toBe(false);
+    // Punctuation on a letter's key stays punctuation: Dvorak's `>` (Shift+. on KeyE) never archives, its `.` never
+    // marks read, its `;` (KeyZ) never undoes; Hebrew's `/` (KeyQ) is Search and never Q.
+    expect(hits(inboxThreadShortcuts, 'archive', { key: '>', code: 'KeyE', shiftKey: true })).toBe(false);
+    expect(hits(inboxThreadShortcuts, 'markRead', { key: '.', code: 'KeyE' })).toBe(false);
+    expect(hits(inboxThreadShortcuts, 'undo', { key: ';', code: 'KeyZ' })).toBe(false);
+    expect(hits(inboxThreadShortcuts, 'openItems', { key: '/', code: 'KeyQ' })).toBe(false);
+    expect(hits(inboxSearchShortcuts, 'openSearch', { key: '/', code: 'KeyQ' })).toBe(true);
     // AZERTY: the key that types A sits where Q is on a US keyboard. The character wins: it is A, never Q.
     expect(hits(inboxThreadShortcuts, 'openItems', { key: 'a', code: 'KeyQ' })).toBe(false);
     expect(hits(inboxThreadShortcuts, 'undo', { key: 'w', code: 'KeyZ' })).toBe(false);

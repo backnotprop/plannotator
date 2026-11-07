@@ -1088,7 +1088,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           if (isEditableTarget(target) || inOverlay(target)) return false;
           return full || (!!target && !!sectionRef.current?.contains(target));
         },
-        handle: () => {
+        handle: (event) => {
+          // A held chord toggles once: its repeats are swallowed (still cancelled, so the browser's ⌘⇧A stays shut).
+          if (event.repeat) return;
           announce(armed ? 'Interact: clicks reach the page.' : 'Annotate: click or select to comment.');
           setArmed(!armed);
         },

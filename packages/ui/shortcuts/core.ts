@@ -29,8 +29,9 @@ export interface ShortcutScopeDefinition<TAction extends string = string> {
   shortcuts: Record<TAction, ShortcutDefinition>;
   /**
    * Optional, off by default: a letter binding also matches its physical key
-   * (`event.code`, `KeyE` for `E`) when the character typed is not a Latin
-   * letter, so letter keys keep working on Cyrillic, Greek or Hebrew layouts.
+   * (`event.code`, `KeyE` for `E`) when the character typed is one letter
+   * outside A–Z, so letter keys keep working on Cyrillic, Greek or Hebrew
+   * layouts. Punctuation, dead keys and unidentified keys never fall back.
    * A Latin layout still matches by character (AZERTY's A is A), and
    * punctuation (`?`, `/`) is always matched by character.
    */
@@ -434,8 +435,11 @@ function matchesKeyToken(event: ShortcutKeyEvent, token: string, options?: Short
 
   if (isSingleLetter(token)) {
     if (key === token) return true;
-    // Opt-in: a non-Latin character on the letter's physical key (Cyrillic У on KeyE).
-    return options?.lettersByCode === true && !/^[A-Z]$/.test(key) && event.code === `Key${token}`;
+    // Opt-in: a non-Latin letter on the letter's physical key (Cyrillic У on KeyE). Only a single letter outside
+    // A–Z counts: punctuation (Dvorak's `.` on KeyE, Hebrew's `/` on KeyQ), a dead key or an unidentified one never
+    // turns into a letter.
+    const typed = event.key;
+    return options?.lettersByCode === true && typed.length === 1 && /\p{L}/u.test(typed) && !/^[A-Za-z]$/.test(typed) && event.code === `Key${token}`;
   }
 
   if (isSingleDigit(token)) {

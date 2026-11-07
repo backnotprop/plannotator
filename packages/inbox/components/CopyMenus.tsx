@@ -6,6 +6,7 @@ import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { focusAfterSwap, SnoozeTimes, type SnoozeView } from '@plannotator/ui/components/inbox-thread/SnoozeMenu';
 import { matchesShortcutBinding } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
+import { isEditableTarget, keyTarget } from '../shortcuts/guards';
 import { useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { copyAuthor, copyMarkdown, messageMarkdown, threadMarkdown } from '../copyMarkdown';
 import { plural, shortAgentName, whenTime } from '../format';
@@ -84,7 +85,8 @@ export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; h
     return () => cancelAnimationFrame(frame);
   }, [open]);
   const onHeadKey = (event: ReactKeyboardEvent) => {
-    if (event.nativeEvent.isComposing || open || contextOpen) return;
+    // A text field in the head keeps its keys (Shift+F10 there is the field's own menu).
+    if (event.nativeEvent.isComposing || open || contextOpen || isEditableTarget(keyTarget(event.nativeEvent))) return;
     const menuKey = event.key === 'ContextMenu' || inboxThreadShortcuts.shortcuts.messageMenu.bindings.some((binding) => matchesShortcutBinding(event.nativeEvent, binding));
     if (!menuKey) return;
     event.preventDefault();
@@ -420,8 +422,11 @@ export function ThreadSnooze({ snooze, openRequest = 0 }: { snooze: ThreadSnooze
   const popup = useRef<HTMLDivElement>(null);
   const keyOpened = useRef(false);
   const snoozeKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'snooze' });
+  // Only a new request opens it: the clock mounting again (Z after Shift+E, J/K into a thread) keeps it shut.
+  const seenRequest = useRef(openRequest);
   useEffect(() => {
-    if (openRequest === 0) return;
+    if (openRequest === seenRequest.current) return;
+    seenRequest.current = openRequest;
     keyOpened.current = true;
     setView('times');
     setOpen(true);

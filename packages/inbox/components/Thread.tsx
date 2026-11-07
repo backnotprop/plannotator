@@ -3264,9 +3264,10 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
         handle: () => onArtifacts?.(!artifactsOn),
       },
       snooze: {
-        // The clock in the header, where it shows. A row the keyboard is on takes H itself (InboxList.tsx: its menu).
+        // The clock in the header, where it shows (the Artifacts grid keeps it, except on a phone). A row the keyboard
+        // is on takes H itself (InboxList.tsx: its menu).
         when: (event) => {
-          if (!bareKeyAllowed(event) || paneCovered) return false;
+          if (!bareKeyAllowed(event) || covered || fileCovers) return false;
           const origin = keyOrigin(event);
           if (origin === 'row' || origin === 'list') {
             const target = keyTarget(event);

@@ -96,6 +96,8 @@ export interface InboxListProps {
   onSendNow?: (row: InboxListRow) => void;
   /** A phone (phone.ts): the list fills the window and its rows are a mail app's. */
   phone?: boolean;
+  /** The column's id: the Inbox's own list is `ib-list`, the skip link's target (App.tsx). */
+  columnId?: string;
   /**
    * The live stream is dead (liveStream.ts): one quiet muted line under the list, "Reconnecting…", gone with the
    * stream's next frame. The live region says it (App.tsx), so the line itself is not live.
@@ -1158,7 +1160,8 @@ export function InboxList(props: InboxListProps) {
   // main sidebar, which holds its own New message, is closed (the peek does not count as open).
   const headerCompose = isMobile || !sidebarDocked;
   const searchKeys = useShortcutAria({ scope: inboxSearchShortcuts, action: 'openSearch' });
-  const columnId = useId();
+  const generatedColumnId = useId();
+  const columnId = props.columnId ?? generatedColumnId;
   const refreshHintId = useId();
   const resizable = props.narrow && !isMobile;
   const visible = props.sections.filter((s) => s.threads.length > 0);

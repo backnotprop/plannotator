@@ -117,14 +117,18 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
     return focusAfterSwap(() => document.querySelector<HTMLElement>(`[data-row-menu="${target?.thread_id ?? ''}"] [data-row-action="snooze"]`));
   }, [shownView, target?.thread_id]);
   // H: the row's menu, opened as Shift+F10 opens it (a `contextmenu` at the row), straight at the times.
+  // Only a new request opens it, and the times show only when the menu took the `contextmenu` (Base UI cancels the
+  // one it opens on): a row the trigger refuses leaves the next right-click at the menu.
   const request = props.snoozeRequest;
+  const seenRequest = useRef(request?.n ?? 0);
   useEffect(() => {
-    if (!request) return;
+    if (!request || request.n === seenRequest.current) return;
+    seenRequest.current = request.n;
     const button = buttonFor(request.id);
     if (!button) return;
     const rect = button.getBoundingClientRect();
-    button.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: rect.left + 24, clientY: rect.bottom }));
-    setSnoozeView('times');
+    const opened = !button.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: rect.left + 24, clientY: rect.bottom }));
+    if (opened) setSnoozeView('times');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request?.id, request?.n]);
   const item = (action: RowMenuAction) =>
