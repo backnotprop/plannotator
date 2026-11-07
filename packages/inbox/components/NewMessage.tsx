@@ -118,10 +118,24 @@ export function NewMessagePopover({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  /** The New message button the list opened from: where focus goes back when the list closes by key. */
+  const backToButton = () => {
+    const button = ref.current?.closest('section, [data-reply-foot], .ib-pfoot')?.querySelector<HTMLElement>('[data-new-message]') ?? document.querySelector<HTMLElement>('[data-new-message]');
+    onClose();
+    button?.focus();
+  };
+  // The list opens with focus on its first session, as every menu does.
+  const picking = mode?.kind === 'pick' && live !== null;
+  useEffect(() => {
+    if (picking) ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true });
+  }, [picking]);
   useEffect(() => {
     if (mode?.kind !== 'pick' && mode?.kind !== 'none') return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key !== 'Escape') return;
+      // From inside the list, focus goes back to the button (a menu's Escape); otherwise it stays where it is.
+      if (ref.current?.contains(document.activeElement)) backToButton();
+      else onClose();
     };
     const onDown = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
@@ -137,13 +151,40 @@ export function NewMessagePopover({
 
   if (mode?.kind === 'pick' && live) {
     return (
-      <div className="ib-menu ib-nmpop" ref={ref} role="menu" aria-label={pickerHeading(live.sessions, thread.project.name)} data-session-picker="">
+      <div
+        className="ib-menu ib-nmpop"
+        ref={ref}
+        role="menu"
+        aria-label={pickerHeading(live.sessions, thread.project.name)}
+        data-session-picker=""
+        // A menu's keys (audit 2026-11-07, gap 3): focus is in the list once it opens, ↑ ↓ move (wrapping), Home / End
+        // go to the ends, Enter or Space picks (the items are buttons), Escape or Tab closes it back on the button.
+        onKeyDown={(event) => {
+          const items = [...(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+          if (items.length === 0) return;
+          const at = items.indexOf(document.activeElement as HTMLElement);
+          const to =
+            event.key === 'ArrowDown' ? (at + 1) % items.length
+            : event.key === 'ArrowUp' ? (at <= 0 ? items.length - 1 : at - 1)
+            : event.key === 'Home' ? 0
+            : event.key === 'End' ? items.length - 1
+            : null;
+          if (to !== null) {
+            event.preventDefault();
+            items[to]!.focus();
+          } else if (event.key === 'Tab') {
+            event.preventDefault();
+            backToButton();
+          }
+        }}
+      >
         <div className="ib-mh">{pickerHeading(live.sessions, thread.project.name)}</div>
         {live.sessions.map((session, index) => (
           <button
             type="button"
             role="menuitem"
             className={`ib-mi${index === 0 ? ' ib-on' : ''}`}
+            tabIndex={-1}
             key={session.session}
             data-session={session.session}
             onClick={() => onPick(session)}

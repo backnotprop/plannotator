@@ -26,14 +26,24 @@ export type Focus =
   | 'map'
   | 'settings-heading'
   | 'settings-field'
-  | 'board-heading';
+  | 'board-heading'
+  | 'reviews-heading'
+  | 'drafts-heading'
+  | 'artifacts-heading'
+  | 'artifacts-button'
+  | 'compose-field'
+  | 'snooze-menu';
+
+type BasePage = 'inbox' | 'board' | 'reviews' | 'drafts';
 
 export type FileFrame = 'none' | 'side' | 'full';
 
 export interface KeyState {
-  page: 'inbox' | 'board' | 'settings';
+  page: BasePage | 'settings';
   /** A thread open beside the list (inbox only). */
   thread: boolean;
+  /** The thread's Artifacts grid shown in place of its messages (Shift+O; approval "inbox-keyboard-keys-2026-11-07"). */
+  artifacts: boolean;
   file: FileFrame;
   /** What had focus when a key opened the file (O, F from the thread): it has it again when the file closes. */
   fileReturn: Focus | null;
@@ -43,12 +53,12 @@ export interface KeyState {
   box: boolean;
   /** Words kept as a draft (the foot says Edit draft). */
   draft: boolean;
-  /** Overlays: the shortcut map and the search palette (each a modal, at most one). */
-  overlay: 'none' | 'map' | 'search';
+  /** Overlays: the shortcut map, the search palette, a new message (C) and the Snooze times (H); at most one. */
+  overlay: 'none' | 'map' | 'search' | 'compose' | 'snooze';
   /** Where focus goes back to when the overlay closes. */
   overlayReturn: Focus | null;
   /** Where Settings goes back to (Escape, ‹ Inbox). */
-  settingsReturn: { page: 'inbox' | 'board'; thread: boolean; file: FileFrame; fullFrom: 'side' | 'thread' | null } | null;
+  settingsReturn: { page: BasePage; thread: boolean; artifacts: boolean; file: FileFrame; fullFrom: 'side' | 'thread' | null } | null;
   focus: Focus;
   /** Settings → General → Keyboard. */
   singleKeys: boolean;
@@ -72,20 +82,26 @@ export type ModelKey =
   | 'G I'
   | 'G B'
   | 'G S'
+  | 'G P'
+  | 'G D'
+  | 'Shift+O'
+  | 'H'
+  | 'C'
   | 'Mod+K'
   | 'Mod+Enter'
   | 'type'
   | 'singleKeysOff'
   | 'singleKeysOn';
 
-export const MODEL_KEYS: readonly ModelKey[] = ['Escape', 'ArrowDown', 'Enter', 'R', 'O', 'F', 'J', 'Shift+J', 'N', '?', '/', 'G I', 'G B', 'G S', 'Mod+K', 'Mod+Enter', 'type', 'singleKeysOff', 'singleKeysOn'];
+export const MODEL_KEYS: readonly ModelKey[] = ['Escape', 'ArrowDown', 'Enter', 'R', 'O', 'F', 'J', 'Shift+J', 'N', 'Shift+O', 'H', 'C', '?', '/', 'G I', 'G B', 'G S', 'G P', 'G D', 'Mod+K', 'Mod+Enter', 'type', 'singleKeysOff', 'singleKeysOn'];
 
 /** The single keys (Single-key shortcuts turns them off): every model key that is one plain key or a sequence of them. */
-export const MODEL_BARE_KEYS: readonly ModelKey[] = ['R', 'O', 'F', 'J', 'Shift+J', 'N', '?', '/', 'G I', 'G B', 'G S'];
+export const MODEL_BARE_KEYS: readonly ModelKey[] = ['R', 'O', 'F', 'J', 'Shift+J', 'N', 'Shift+O', 'H', 'C', '?', '/', 'G I', 'G B', 'G S', 'G P', 'G D'];
 
 export const START: KeyState = {
   page: 'inbox',
   thread: false,
+  artifacts: false,
   file: 'none',
   fullFrom: null,
   fileReturn: null,
@@ -99,7 +115,10 @@ export const START: KeyState = {
   remembered: 'side',
 };
 
-const TEXT_FIELDS: ReadonlySet<Focus> = new Set(['reply-field', 'search-field', 'settings-field']);
+const TEXT_FIELDS: ReadonlySet<Focus> = new Set(['reply-field', 'search-field', 'settings-field', 'compose-field']);
+
+/** A base page's heading: where G puts focus, and where Escape out of Settings lands. */
+const HEADING: Record<Exclude<BasePage, 'inbox'>, Focus> = { board: 'board-heading', reviews: 'reviews-heading', drafts: 'drafts-heading' };
 
 /** Whether focus is a place to type: single keys are text there. */
 export function typing(state: KeyState): boolean {
@@ -113,6 +132,7 @@ export function depth(state: KeyState): number {
     (state.page === 'settings' ? 1 : 0) +
     (state.box ? 1 : 0) +
     (state.file === 'full' ? (state.fullFrom === 'side' ? 2 : 1) : state.file === 'side' ? 1 : 0) +
+    (state.artifacts ? 1 : 0) +
     (state.thread ? 1 : 0)
   );
 }
@@ -128,7 +148,8 @@ export function press(state: KeyState, key: ModelKey): KeyState {
 
   // ⌘K opens search from anywhere, a field included; with the palette open it goes back to its field.
   if (key === 'Mod+K') {
-    if (state.overlay === 'map') return state;
+    // The map and a new message are modal dialogs, and the Snooze times a menu: each keeps the chord.
+    if (state.overlay === 'map' || state.overlay === 'compose' || state.overlay === 'snooze') return state;
     if (state.overlay === 'search') return { ...state, focus: 'search-field' };
     return { ...state, overlay: 'search', overlayReturn: state.focus, focus: 'search-field' };
   }
@@ -138,10 +159,15 @@ export function press(state: KeyState, key: ModelKey): KeyState {
     if (key === 'Escape' || (key === '?' && state.singleKeys)) return { ...state, overlay: 'none', focus: state.overlayReturn ?? 'row', overlayReturn: null };
     return state;
   }
+  // A new message (C) and the Snooze times (H): Escape closes them, focus back where it was; nothing is sent or snoozed.
+  if (state.overlay === 'compose' || state.overlay === 'snooze') {
+    if (key === 'Escape') return { ...state, overlay: 'none', focus: state.overlayReturn ?? 'row', overlayReturn: null };
+    return state;
+  }
   if (state.overlay === 'search') {
     if (key === 'Escape') return { ...state, overlay: 'none', focus: state.overlayReturn ?? 'row', overlayReturn: null };
     // A result: its thread, focus on the matching message (a fresh thread: no file, no box).
-    if (key === 'Enter') return { ...state, overlay: 'none', overlayReturn: null, page: 'inbox', thread: true, file: 'none', fullFrom: null, fileReturn: null, box: false, focus: 'message' };
+    if (key === 'Enter') return { ...state, overlay: 'none', overlayReturn: null, page: 'inbox', thread: true, artifacts: false, file: 'none', fullFrom: null, fileReturn: null, box: false, focus: 'message' };
     return state;
   }
 
@@ -166,17 +192,24 @@ export function press(state: KeyState, key: ModelKey): KeyState {
       return { ...state, overlay: 'map', overlayReturn: state.focus, focus: 'map' };
     case '/':
       return { ...state, overlay: 'search', overlayReturn: state.focus, focus: 'search-field' };
+    case 'C':
+      // New message, from any page; it opens over what is there, which stays as it was.
+      return { ...state, overlay: 'compose', overlayReturn: state.focus, focus: 'compose-field' };
     case 'G I':
       if (state.page === 'inbox') return { ...state, focus: 'row' };
-      return { ...state, page: 'inbox', thread: false, file: 'none', fullFrom: null, fileReturn: null, box: false, settingsReturn: null, focus: 'row' };
+      return { ...state, page: 'inbox', thread: false, artifacts: false, file: 'none', fullFrom: null, fileReturn: null, box: false, settingsReturn: null, focus: 'row' };
     case 'G B':
-      return { ...state, page: 'board', thread: false, file: 'none', fullFrom: null, fileReturn: null, box: false, settingsReturn: null, focus: 'board-heading' };
+    case 'G P':
+    case 'G D': {
+      const page = key === 'G B' ? 'board' : key === 'G P' ? 'reviews' : 'drafts';
+      return { ...state, page, thread: false, artifacts: false, file: 'none', fullFrom: null, fileReturn: null, box: false, settingsReturn: null, focus: HEADING[page] };
+    }
     case 'G S':
       if (state.page === 'settings') return { ...state, focus: 'settings-heading' };
       return {
         ...state,
         page: 'settings',
-        settingsReturn: { page: state.page as 'inbox' | 'board', thread: state.thread, file: state.file, fullFrom: state.fullFrom },
+        settingsReturn: { page: state.page, thread: state.thread, artifacts: state.artifacts, file: state.file, fullFrom: state.fullFrom },
         box: false,
         focus: 'settings-heading',
       };
@@ -184,21 +217,23 @@ export function press(state: KeyState, key: ModelKey): KeyState {
 
   if (state.page === 'settings') {
     if (key === 'Escape') {
-      const back = state.settingsReturn ?? { page: 'inbox' as const, thread: false, file: 'none' as const, fullFrom: null };
-      const focus: Focus = back.page === 'board' ? 'board-heading' : back.file !== 'none' ? 'file' : back.thread ? 'row' : 'row';
-      return { ...state, page: back.page, thread: back.thread, file: back.file, fullFrom: back.fullFrom, settingsReturn: null, focus };
+      const back = state.settingsReturn ?? { page: 'inbox' as const, thread: false, artifacts: false, file: 'none' as const, fullFrom: null };
+      const focus: Focus = back.page !== 'inbox' ? HEADING[back.page] : back.file !== 'none' ? 'file' : back.thread ? 'row' : 'row';
+      return { ...state, page: back.page, thread: back.thread, artifacts: back.artifacts, file: back.file, fullFrom: back.fullFrom, settingsReturn: null, focus };
     }
     // Tab into a field (the model's one way in): Enter on the heading stands for it.
     if (key === 'Enter') return { ...state, focus: 'settings-field' };
     return state;
   }
 
-  if (state.page === 'board') {
-    // The Board's own keys are its own (cards, panels); the model's are Escape-free at its base.
+  if (state.page !== 'inbox') {
+    // The Board's, Reviews' and Drafts' own keys are their own (cards, panels, rows); the model's are Escape-free at their base.
     return state;
   }
 
   // The inbox page.
+  // H on a row the keyboard is on: its menu at the Snooze times (a thread open or none).
+  if (key === 'H' && state.focus === 'row') return { ...state, overlay: 'snooze', overlayReturn: state.focus, focus: 'snooze-menu' };
   if (!state.thread) {
     // J (and K) with no thread open move along the rows as ↓ ↑ do: the next thread, nothing opened.
     if (key === 'ArrowDown' || (key === 'J' && (state.focus === 'row' || state.focus === 'band'))) return { ...state, focus: 'row' };
@@ -215,7 +250,21 @@ export function press(state: KeyState, key: ModelKey): KeyState {
         return afterFileCloses(state);
       }
       if (state.file === 'side') return afterFileCloses(state);
+      // The grid closes before the thread, focus on its button (App.tsx's ladder: guide, Artifacts, full screen, thread).
+      if (state.artifacts) return { ...state, artifacts: false, focus: 'artifacts-button' };
       return { ...state, thread: false, box: false, focus: 'row' };
+    case 'Shift+O':
+      // The header's Artifacts button, both ways; not from the file, nor under it in full screen.
+      if (fromFile || state.file === 'full') return state;
+      return state.artifacts ? { ...state, artifacts: false, focus: 'artifacts-button' } : { ...state, artifacts: true, focus: 'artifacts-heading' };
+    case 'H':
+      // The header clock's Snooze times; not from the file, nor while the grid or a full-screen file covers the thread.
+      if (fromFile || state.file === 'full' || state.artifacts) return state;
+      return { ...state, overlay: 'snooze', overlayReturn: state.focus, focus: 'snooze-menu' };
+  }
+  // The grid stands in for the messages: the reading keys and the file keys stand down there.
+  if (state.artifacts && (key === 'J' || key === 'Shift+J' || key === 'N' || key === 'O' || key === 'F')) return state;
+  switch (key) {
     case 'ArrowDown':
       return state.focus === 'row' ? state : state;
     case 'Enter':

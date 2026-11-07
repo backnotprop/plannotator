@@ -603,6 +603,24 @@ test.skipIf(!hasDom)("Can't do it asks for the reason; nothing goes without one"
   expect(marks).toEqual([{ outcome: 'cant', note: "I'm not an org owner; ask Dana." }]);
 });
 
+test.skipIf(!hasDom)("Escape or Cancel in the Can't do it reason puts focus back on Can't do it…, never on the page", async () => {
+  const el = mount(<ActionChecklist actions={[record(0)]} agent="Claude Code" onMark={async () => true} />);
+  const panel = panelOf(rowOf(el, 0));
+  click(panel.querySelector('[data-action-cant]')!);
+  const area = panel.querySelector<HTMLTextAreaElement>('textarea')!;
+  expect(document.activeElement).toBe(area);
+  act(() => {
+    area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  });
+  expect(panel.querySelector('textarea')).toBeNull();
+  expect(document.activeElement).toBe(panel.querySelector('[data-action-cant]'));
+  // Cancel does the same.
+  click(panel.querySelector('[data-action-cant]')!);
+  const cancel = [...panel.querySelectorAll('button')].find((b) => b.textContent === 'Cancel')!;
+  click(cancel);
+  expect(document.activeElement).toBe(panel.querySelector('[data-action-cant]'));
+});
+
 test.skipIf(!hasDom)('settled rows: sent, can\'t do it with its reason, the agent saw it done, set aside; none offers Done', () => {
   const at = '2026-10-21T15:12:00.000Z';
   const el = mount(

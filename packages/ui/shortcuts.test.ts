@@ -246,6 +246,21 @@ describe('shortcuts', () => {
     expect(matchesShortcutBinding(wrongEvent, 'Mod+Enter')).toBe(false);
   });
 
+  it('matches a letter by its physical key only in a scope that opts in (lettersByCode)', () => {
+    // Russian layout: the E key types у. Off by default, so plan review and code review match as before.
+    const cyrillicE = { key: 'у', code: 'KeyE', ctrlKey: false, metaKey: false, shiftKey: false, altKey: false } as KeyboardEvent;
+    const plain = defineShortcutScope({ id: 'plain', title: 'Plain', shortcuts: { act: { description: 'Act', bindings: ['E'], section: 'S' } } });
+    const optedIn = defineShortcutScope({ id: 'opted', title: 'Opted', lettersByCode: true, shortcuts: { act: { description: 'Act', bindings: ['E'], section: 'S' } } });
+    const calls: string[] = [];
+    expect(dispatchShortcutEvent(plain, { act: () => calls.push('plain') }, cyrillicE)).toBe(false);
+    expect(dispatchShortcutEvent(optedIn, { act: () => calls.push('opted') }, cyrillicE)).toBe(true);
+    expect(calls).toEqual(['opted']);
+    // A Latin character on another key is that character, opted in or not (AZERTY's A on KeyQ is never Q).
+    const azertyA = { ...cyrillicE, key: 'a', code: 'KeyQ' } as KeyboardEvent;
+    expect(matchesShortcutBinding(azertyA, 'Q', { lettersByCode: true })).toBe(false);
+    expect(matchesShortcutBinding(azertyA, 'A', { lettersByCode: true })).toBe(true);
+  });
+
   it('dispatches matching registry actions', () => {
     const calls: string[] = [];
     const event = { key: 'Enter', ctrlKey: true, metaKey: false, shiftKey: false, altKey: false } as KeyboardEvent;

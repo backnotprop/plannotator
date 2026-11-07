@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
 import type { InboxListGroupId, InboxListRow } from '@plannotator/core/inbox-types';
@@ -19,6 +19,8 @@ export interface ThreadRowMenuProps {
   onSnooze?: (row: InboxListRow, until: string) => void;
   /** Whether this row can be snoozed (a linked machine on an older Inbox keeps no snoozes). Absent: every row can. */
   snoozesOf?: (row: InboxListRow) => boolean;
+  /** H on a row (InboxList.tsx): each new request opens that row's menu at its Snooze times. */
+  snoozeRequest?: { id: string; n: number } | null;
   /**
    * Whether a thread is pinned to the sidebar (approval "inbox-pinned-threads"): Pin thread or Unpin
    * thread leads the menu, in its own group. Absent (an older Inbox keeps no pins): no item.
@@ -114,6 +116,17 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
     backed.current = false;
     return focusAfterSwap(() => document.querySelector<HTMLElement>(`[data-row-menu="${target?.thread_id ?? ''}"] [data-row-action="snooze"]`));
   }, [shownView, target?.thread_id]);
+  // H: the row's menu, opened as Shift+F10 opens it (a `contextmenu` at the row), straight at the times.
+  const request = props.snoozeRequest;
+  useEffect(() => {
+    if (!request) return;
+    const button = buttonFor(request.id);
+    if (!button) return;
+    const rect = button.getBoundingClientRect();
+    button.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: rect.left + 24, clientY: rect.bottom }));
+    setSnoozeView('times');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request?.id, request?.n]);
   const item = (action: RowMenuAction) =>
     action === 'snooze' ? (
       <Menu.Item key={action} className="ib-pmi" label={LABELS.snooze.label} closeOnClick={false} data-row-action="snooze" onClick={() => setSnoozeView('times')}>

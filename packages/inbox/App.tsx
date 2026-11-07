@@ -89,7 +89,7 @@ import { SearchHost, type SearchLanding } from './components/SearchHost';
 import { onOpenSearchKey } from './search/searchShortcut';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from './shortcuts/thread.shortcuts';
-import { bareKeyAllowed, inOverlay, isComposingKey, isEditableTarget, isRepeatKey, keyTarget, modalOpen, singleKeysLive } from './shortcuts/guards';
+import { bareKeyAllowed, inOverlay, isComposingKey, isEditableTarget, isRepeatKey, keyboardFocused, keyTarget, modalOpen, singleKeysLive } from './shortcuts/guards';
 import { inboxAppShortcuts } from './shortcuts/app.shortcuts';
 import { ShortcutMap } from './components/ShortcutMap';
 import { EmptyState } from './components/EmptyState';
@@ -621,20 +621,6 @@ function listCovered(): boolean {
 function rowElement(body: ParentNode, threadId: string): HTMLElement | null {
   // The one on screen: a list draws some rows twice (one hidden), and a row in folded Quiet is not drawn at all.
   return [...body.querySelectorAll<HTMLElement>(`[data-thread-id="${CSS.escape(threadId)}"]`)].find((el) => el.getClientRects().length > 0) ?? null;
-}
-
-/**
- * The element the person aimed a key at on purpose: one with keyboard focus
- * (`:focus-visible`). A row that holds focus because it was clicked, or because
- * the window put focus there after a mouse action, is not.
- */
-function keyboardFocused(el: Element): boolean {
-  try {
-    return el.matches(':focus-visible');
-  } catch {
-    // A DOM without the selector (tests): focus counts.
-    return true;
-  }
 }
 
 /** The tab is visible and has focus: what the tour's replay needs to stand in for notifications with its chip. */
@@ -3757,7 +3743,7 @@ function Inbox() {
    * What E or Z does now, or null when it stands down (the rules: guards.ts
    * for typing, composition and repeat; the rest is the thread's own).
    */
-  const threadKeyAction = (event: KeyboardEvent, key: 'e' | 'z'): (() => void) | null => {
+  const threadKeyAction = (event: KeyboardEvent, key: 'e' | 'z' | 'archive'): (() => void) | null => {
     if (event.defaultPrevented || isRepeatKey(event) || isComposingKey(event) || !singleKeysLive()) return null;
     if (keysRef.current.soundDialog === 'open' || keysRef.current.agentNoteOpen || keysRef.current.feedbackOpen || routeRef.current.guide) return null;
     // Under a dialog (Decide opens over the thread it came from) the letters are the dialog's.
@@ -3782,6 +3768,14 @@ function Inbox() {
     const threadId = rowId ?? (open && open.thread_id === routeRef.current.thread ? open.thread_id : null);
     if (!threadId) return null;
     const row = rowOf(threadId);
+    if (key === 'archive') {
+      // Shift+E (approval "inbox-keyboard-keys-2026-11-07", item 2): Archive, as the menus' item, Z undoing it. The open
+      // thread is archived by its first message's id (the header's Archive thread); a row by its own.
+      if (threadId === rowId) return row && row.resolved_at === null ? () => void archive(threadId, threadId, true) : null;
+      if (!open || open.resolved_at !== null) return null;
+      const root = open.messages[0]?.id;
+      return root ? () => void archive(open.thread_id, root, true) : null;
+    }
     if (!row || !canToggleRead(row, drawnSection(shownRef.current, threadId))) return null;
     return () => void toggle(threadId, !(row.read_at ?? null));
   };
@@ -3845,6 +3839,10 @@ function Inbox() {
         when: (event) => (threadKey.current = threadKeyAction(event, 'z')) !== null,
         handle: () => threadKey.current?.(),
       },
+      archive: {
+        when: (event) => (threadKey.current = threadKeyAction(event, 'archive')) !== null,
+        handle: () => threadKey.current?.(),
+      },
       nextThread: threadStepKey(1),
       previousThread: threadStepKey(-1),
     },
@@ -3855,9 +3853,21 @@ function Inbox() {
   // Single keys, so none while typing or under a dialog (guards.ts), nor over the tour's replay, nor on a touch
   // phone, except `?`: a phone with a hardware keyboard still opens the map (design §5.4).
   const [mapOpen, setMapOpen] = useState(false);
+  /** What G P, G D and C need from later in the render: whether Reviews and Drafts show, and whether compose is up. */
+  const pagesRef = useRef({ pulls: false, drafts: false, composing: false });
   const appKeyAllowed = (event: KeyboardEvent, onTouchPhone = false) => bareKeyAllowed(event, undefined, { onTouchPhone }) && routeRef.current.page !== 'tour';
   /** Focus the first of `selectors` on screen once the page it is on has drawn (two frames: the route, then its layout). */
   const focusSoon = (selectors: readonly string[]) => requestAnimationFrame(() => requestAnimationFrame(() => focusFirst(selectors)));
+  /**
+   * Focus on the list: the open thread's row, else the first row (G I, and the "Skip to the list" link). The list is
+   * hidden under a thread in full screen: it comes back first, so its row can take focus.
+   */
+  const focusTheList = () => {
+    const now = routeRef.current;
+    if (threadFullRef.current) leaveFullRef.current();
+    const open = now.page === 'inbox' ? now.thread : null;
+    focusSoon([...(open ? [`.ib-main .ib-lbody [data-thread-id="${CSS.escape(open)}"]`] : []), '.ib-main .ib-lbody [data-thread-id]', '.ib-main .ib-lbody button.ib-band', '.ib-main .ib-empty h2', '.ib-main h1']);
+  };
   useShortcutScope({
     scope: inboxAppShortcuts,
     handlers: {
@@ -3865,12 +3875,8 @@ function Inbox() {
       goInbox: {
         when: (event) => appKeyAllowed(event),
         handle: () => {
-          const now = routeRef.current;
-          if (now.page !== 'inbox') leave({ page: 'inbox', project: null, thread: null });
-          // The list is hidden under a thread in full screen: the list comes back so its row can take focus.
-          if (threadFullRef.current) leaveFullRef.current();
-          const open = now.page === 'inbox' ? now.thread : null;
-          focusSoon([...(open ? [`.ib-main .ib-lbody [data-thread-id="${CSS.escape(open)}"]`] : []), '.ib-main .ib-lbody [data-thread-id]', '.ib-main .ib-lbody button.ib-band', '.ib-main .ib-empty h2', '.ib-main h1']);
+          if (routeRef.current.page !== 'inbox') leave({ page: 'inbox', project: null, thread: null });
+          focusTheList();
         },
       },
       goBoard: {
@@ -3880,12 +3886,32 @@ function Inbox() {
           focusSoon(['.ib-bpage h1']);
         },
       },
+      // G P and G D (approval "inbox-keyboard-keys-2026-11-07", item 5): only while the sidebar shows their row.
+      goPulls: {
+        when: (event) => appKeyAllowed(event) && pagesRef.current.pulls,
+        handle: () => {
+          if (routeRef.current.page !== 'reviews') leave({ page: 'reviews', project: null, thread: null });
+          focusSoon(['[data-pulls-heading]', '.ib-prlist h1']);
+        },
+      },
+      goDrafts: {
+        when: (event) => appKeyAllowed(event) && pagesRef.current.drafts,
+        handle: () => {
+          if (routeRef.current.page !== 'drafts') leave({ page: 'drafts', project: null, thread: null });
+          focusSoon(['[data-drafts-page] h1']);
+        },
+      },
       goSettings: {
         when: (event) => appKeyAllowed(event),
         handle: () => {
           if (routeRef.current.page !== 'settings') leave({ page: 'settings', project: null, thread: null });
           else focusSoon(['.ib-spage h1']);
         },
+      },
+      // C (item 4): the sidebar pencil's New message; focus goes back to where it was when it closes.
+      compose: {
+        when: (event) => appKeyAllowed(event) && !pagesRef.current.composing,
+        handle: () => openCompose({}),
       },
     },
   });
@@ -4645,6 +4671,7 @@ function Inbox() {
   // this computer's gh / glab).
   const codeReviewOn = settings?.code_review?.on === true;
   const pullsShown = codeReviewOn && !guestPage;
+  pagesRef.current = { pulls: pullsShown, drafts: (drafts?.length ?? 0) + replyDrafts.length > 0, composing: compose !== null };
   const pulls = usePulls(route.page === 'reviews' && pullsShown, pullsShown, route.page === 'reviews' && route.view === 'others');
   // A #reviews link on a guest's page (it could not turn Code review on): the Inbox, as if the page were not there.
   useEffect(() => {
@@ -6094,6 +6121,21 @@ function Inbox() {
           onArrivals={() => endTour(tourRealStep ? 'finish' : 'exit', { page: 'inbox', project: null, thread: tourArrivals.thread })}
           onExit={() => endTour(tourRealStep ? 'finish' : 'exit')}
         />
+      )}
+      {!tourOn && route.page === 'inbox' && (
+        // The page's first stop (approval "inbox-keyboard-keys-2026-11-07", item 6; WCAG 2.4.1): hidden until a Tab
+        // reaches it, it passes the sidebar's stops and lands on the list as G I does, Single-key shortcuts on or off.
+        <a
+          href="#ib-list"
+          className="ib-skip"
+          data-skip-to-list=""
+          onClick={(event) => {
+            event.preventDefault();
+            focusTheList();
+          }}
+        >
+          Skip to the list
+        </a>
       )}
       {/* A file beside the thread takes the sidebar's room (record 2.2): it closes on the same spring, and the person's choice stays as it was. */}
       <SidebarShell

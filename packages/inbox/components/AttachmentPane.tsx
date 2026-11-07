@@ -1077,6 +1077,22 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         when: (event) => isHtml && full && !modalOpen() && !isEditableTarget(keyTarget(event)),
         handle: () => barRef.current?.toggle(),
       },
+      toggleAnnotate: {
+        // ⌘⇧A / Ctrl+Shift+A (approval "inbox-keyboard-keys-2026-11-07", item 6): Annotate ↔ Interact from anywhere in
+        // the open HTML file, as its tooltip says; inside the page the frame's bridge forwards it (onAnnotateModeToggle).
+        // Not while typing, under a modal, on a read-only file, or under a linked page. Beside the thread, only a key
+        // from inside the file (a thread key is the thread's); in full screen the file is all there is.
+        when: (event) => {
+          if (!isHtml || !view || view.html === null || props.readOnly || linkedTop || modalOpen()) return false;
+          const target = keyTarget(event);
+          if (isEditableTarget(target) || inOverlay(target)) return false;
+          return full || (!!target && !!sectionRef.current?.contains(target));
+        },
+        handle: () => {
+          announce(armed ? 'Interact: clicks reach the page.' : 'Annotate: click or select to comment.');
+          setArmed(!armed);
+        },
+      },
     },
   });
   // Escape on a composer holding typed words, before the composer's own Escape drops them (capture): the question row asks.
