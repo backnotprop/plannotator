@@ -80,11 +80,16 @@ export interface ConnectContext {
 }
 
 const SERVER = 'plannotator-inbox';
+/** Plannotator's Cline plugin package (apps/cline-plugin). */
+const CLINE_PLUGIN = '@plannotator/cline';
 /** Plannotator's DeepSeek Harness plugin package (apps/dsh-plugin). */
 const DSH_PLUGIN = '@plannotator/dsh';
 
 /** When a DSH tool switch takes effect: the plugin decides once, when DSH starts, never per session. */
 export const DSH_APPLIES = 'It applies when DeepSeek Harness next starts.';
+
+/** When Cline's tool switch takes effect: the plugin decides at each session's setup, never in a running one. */
+export const CLINE_APPLIES = 'It applies to Cline sessions started from now on.';
 
 /** POSIX single-quoting where a word needs it; plain words stay bare. */
 export function shellWord(word: string): string {
@@ -225,11 +230,13 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
         note: 'Run it in a terminal.',
       };
     case 'cline':
+      // Plannotator's Cline plugin: its tool, and replies as turns (apps/cline-plugin); over MCP alone nothing can
+      // wake a Cline session. The VS Code extension's older ("Legacy") bundle loads no plugins: MCP stays its way.
       return {
-        artefacts: [{ kind: 'code', text: `cline mcp add ${SERVER} --yes -- ${cmd}` }],
-        note: 'Adds it to the Cline CLI.',
+        artefacts: [{ kind: 'code', text: `cline plugin install npm:${CLINE_PLUGIN}` }],
+        note: "Plannotator's Cline plugin. Its Inbox tool starts off: turn it on for Cline in Settings > Agents. Your replies then come back into each Cline session by themselves.",
         another: {
-          summary: 'in the Cline extension: MCP Servers > Configure > Configure MCP Servers then paste this',
+          summary: 'in the Cline extension without the plugin: MCP Servers > Configure > Configure MCP Servers then paste this',
           body: { kind: 'code', text: mcpServersSnippet(ctx) },
         },
       };

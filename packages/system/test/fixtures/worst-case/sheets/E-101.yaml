@@ -1,0 +1,8 @@
+sheet: E-101
+scope: core
+kind: data
+title: Dispatch and billing core
+question: Where each kind of data lives.
+bands:
+  - { id: d, label: Stores, row: [ pg, warehouse, s3, redis ] }
+show: [ load ]

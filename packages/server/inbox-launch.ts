@@ -75,6 +75,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { createClaudeLaunchHost } from "./inbox-launch-claude";
+import { createPiLaunchHost } from "./inbox-launch-pi";
 import { launchPlainEnv, type LaunchEnv } from "./inbox-launch-env";
 import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchTrustOffer } from "./inbox-launch-host";
 import { openPermissionSince } from "./inbox-launch-permission";
@@ -378,6 +379,7 @@ export function createInboxLaunch(options: {
   /** The agents the Inbox can start, one per line. */
   const ownHosts: LaunchHost[] = [
     claude,
+    createPiLaunchHost(context),
   ];
   /** By each host's own `agent`, so the key a record is looked up by is the agent the host writes. */
   const hosts: Record<string, LaunchHost> = Object.fromEntries([...ownHosts, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));
@@ -538,6 +540,7 @@ export function createInboxLaunch(options: {
       respawnUntrusted: respawnUntrustedOf(memo),
       stoppedByPersonAt: memo.stoppedAt,
       stoppedNote: host.stoppedNote?.(launch) ?? null,
+      connector: host.connector,
       attachCommand: host.attach(launch),
       permissionSince: openPermissionSince(store, root.thread_id),
     });
@@ -692,8 +695,10 @@ export function createInboxLaunch(options: {
   const maybeRespawn = (root: InboxMessage) => {
     const launch = root.launch!;
     const host = hostOf(launch);
+    if (!host || launch.deleted_at || launch.error || !launch.session_ref || !root.to || respawning.has(launch.id) || starting.has(launch.id)) return;
     // Only a session that connected once: one that never did is "not connected", and respawning it would not help.
-    if (!host || launch.deleted_at || launch.error || !launch.session_ref || !root.to || !root.delivery || respawning.has(launch.id) || starting.has(launch.id)) return;
+    // A host that owns the process is the exception once that process ended (its line says a reply continues it).
+    if (!root.delivery && host.processEnded?.(launch.session_ref) !== true) return;
     // A Stop or a Delete under way: the session is going, never started again meanwhile (a host's `live` may
     // read null as soon as its stop begins).
     if (stopping.has(launch.id) || deleting.has(launch.id)) return;
@@ -849,6 +854,7 @@ export function createInboxLaunch(options: {
         // `on run argv`: the command is an argument, never part of the script's text.
         const script = ["on run argv", 'tell application "Terminal"', "activate", "do script (item 1 of argv)", "end tell", "end run"];
         const result = await e.run([osascript, ...script.flatMap((line) => ["-e", line]), command], { timeoutMs: 15_000 });
+        if (result.exitCode !== 0) host.terminalFailed?.(launch, command);
         if (result.exitCode !== 0) throw new InboxError("open_unavailable", `Terminal did not open: ${(result.stderr || result.stdout).trim().slice(0, 200)}`);
         return json({ ok: true, command });
       }
@@ -1217,6 +1223,14 @@ export function createInboxLaunch(options: {
           };
       const offer = owner && line?.untrusted ? host.trustOffer?.(root.launch) : null;
       return offer ? { ...line!, trust: { warning: offer.read().warning } } : line;
+    },
+
+    /** The launch ended before its agent wrote: it failed, its CLI is gone, or it was stopped or went away (the thread's own line says which). */
+    didNotStart(threadId: string): boolean {
+      const root = store.message(threadId);
+      if (!enabled() || !root?.launch || root.thread_id !== root.id) return false;
+      const state = runOfRoot(root)?.state;
+      return state === "failed" || state === "missing" || state === "stopped";
     },
 
     /** A launched thread's attach command (the ⋯ menu's Copy, also while the agent rests and has no line), or null. */

@@ -1,0 +1,59 @@
+# Plannotator PR 2543, merged as 303b6725f on 2026-11-03: one anonymous ping per tool per day.
+# SOURCES (git diff --numstat 303b6725f^1 303b6725f):
+#   apps/telemetry/src/handler.ts (+199), migrations/0001_daily.sql (+24), wrangler.toml (+33): the new Worker, +323 with the rest of apps/telemetry
+#   packages/shared/daily-ping.ts (+372, the shared client; no part of its own)
+#   apps/hook/server/index.ts (+6), packages/server/uninstall.ts (+2)
+#   packages/server/inbox.ts (+12), packages/server/inbox-updates.ts (+9 -1), packages/inbox/components/Updates.tsx (+25)
+#   apps/opencode-plugin/daily-ping.ts (+53), apps/pi-extension/server/daily-ping.ts (+63)
+#   .github/workflows/release.yml (+16 -6: only release builds ping)
+revision: PR-2543
+scope: root
+pr: 2543
+repo: github.com/backnotprop/plannotator
+merged: 303b6725f
+title: "Daily ping: one anonymous ping per tool per day"
+date: "2026-11-03"
+add:
+  parts:
+    ping: ~
+  flows:
+    cliping: ~
+    inboxping: ~
+    x-ping: ~
+    x-ping2: ~
+    x-ping-oc: ~
+    x-ping-pi: ~
+    d-ping: ~
+change:
+  cliEntry: { says: "Schedules the day's ping after it starts; uninstall removes ping.json and ping.lock." }
+  iserver: { says: "Checks the ping when it starts, then at most once an hour on its update timer." }
+  iwindow: { says: "Settings, About gains a Privacy section that names NO_ANON_PING=1." }
+  hkopencode: { says: "Its plan, review, annotate and last handlers ping too (published plugin only)." }
+  piSrv: { says: "Pi's servers ping too (published package only)." }
+  hkpi: { says: "Ships release.json, so only a published Pi package pings." }
+  dataDir: { says: "Gains ping.json and ping.lock: which tools pinged today." }
+lines:
+  ping: "apps/telemetry · +323"
+  cliEntry: "index.ts, uninstall.ts · +8"
+  iserver: "inbox.ts, inbox-updates.ts · +21 −1"
+  iwindow: "Updates.tsx · +25"
+  hkopencode: "daily-ping.ts and 2 more · +61"
+  piSrv: "server/daily-ping.ts and 3 more · +73"
+  hkpi: "package.json, vendor.sh · +4 −1"
+steps:
+  title: One ping a day
+  question: "What one tool sends to ping.plannotator.ai on its first run of the day, and what it keeps."
+  lanes: [hkclaude, cliEntry, dataDir, ping]
+  places:
+    - { label: Claude Code, tone: sand, lanes: [hkclaude] }
+    - { label: plannotator, means: this computer, tone: stone, lanes: [cliEntry, dataDir] }
+    - { label: ping.plannotator.ai, means: "a Worker and D1", tone: mist, lanes: [ping] }
+  hops:
+    - { from: hkclaude, to: cliEntry, says: "starts a plan review" }
+    - { on: cliEntry, do: "Picks the tool, plan, and schedules the ping in the background", is: added }
+    - { on: cliEntry, do: "Stops unless a release build, and NO_ANON_PING, DO_NOT_TRACK and CI are unset", is: added }
+    - { from: cliEntry, to: dataDir, says: "read ping.json: sent today?", is: added }
+    - { from: cliEntry, to: dataDir, says: "take ping.lock, read again", is: added }
+    - { from: cliEntry, to: ping, says: "POST /ping, 3 s timeout", is: added, payload: { name: body, lines: ['{ "version", "age_week",', '  "tool", "first" }'] } }
+    - { from: ping, to: cliEntry, reply: true, says: "204: adds 1 to today's count in D1", is: added }
+    - { from: cliEntry, to: dataDir, says: "record the tool as sent today", is: added }

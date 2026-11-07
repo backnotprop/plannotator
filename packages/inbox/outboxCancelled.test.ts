@@ -4,13 +4,17 @@
  */
 import { afterEach, expect, test } from 'bun:test';
 import { InboxApiError, InboxHeldError, inboxApi } from './api';
-import { setSelfMachine } from './inboxUrl';
+import { resetMachineRoutes, selfMachineId, setSelfMachine } from './inboxUrl';
 
 const SELF = 'ibx_01ARZ3NDEKTSV4RRFFQ69G5FAV';
 const MINI = 'ibx_01ARZ3NDEKTSV4RRFFQ69G5FAW';
 const saved = globalThis.fetch;
+const savedSelf = selfMachineId();
 afterEach(() => {
   globalThis.fetch = saved;
+  // setSelfMachine ignores null: back to no id at all when there was none.
+  if (savedSelf === null) resetMachineRoutes();
+  else setSelfMachine(savedSelf);
 });
 
 function answer(state: string) {
@@ -33,4 +37,8 @@ test("a held write taken back with Cancel says it was never sent; one still wait
 
   answer('queued');
   expect(await inboxApi.launchStop('lch_a', MINI).then(() => null, (cause: unknown) => cause)).toBeInstanceOf(InboxHeldError);
+});
+
+test("the test above leaves this machine's id as it found it", () => {
+  expect(selfMachineId()).toBe(savedSelf);
 });

@@ -38,8 +38,11 @@ const PER_SESSION_CLAUDE =
 import { userInfo } from "node:os";
 import { INBOX_LAUNCH_FULL_PERMISSIONS_ENV } from "@plannotator/core/inbox-permission";
 
-/** Never in a spawn: every Plannotator name (markers, data dir, ports, test switches), the other hosts' session markers. */
-const SPAWN_DROP = /^(PLANNOTATOR_.*|CODEX_THREAD_ID)$/;
+/**
+ * Never in a spawn: every Plannotator name (markers, data dir, ports, test switches), the other hosts' session
+ * markers (an Inbox started from inside a Pi session has Pi's: its session, its file, its model).
+ */
+const SPAWN_DROP = /^(PLANNOTATOR_.*|CODEX_THREAD_ID|PI_SESSION_ID|PI_SESSION_FILE|PI_PROVIDER|PI_MODEL|PI_REASONING_LEVEL)$/;
 
 /** Claude Code's own switch for bypass mode without the acceptance dialog. */
 export const CLAUDE_SKIP_PERMISSIONS_ENV = "CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS";

@@ -4,11 +4,11 @@
  * not the Inbox's (Settings, the Board), over a file, document, guided review or Artifacts view (side by side or full
  * screen), over a search or a new message, through the tailnet, on a short list, or before this load's other dialogs
  * are decided; and, since the owner's note (2026-10-31, "it should show if I have a thread open"), a thread open
- * keeping it away.
+ * keeping it away; and the preview offering to turn on an option that is on already (smaller thread names, a default).
  */
 import { describe, expect, test } from 'bun:test';
-import { LIST_INTRO_PREVIEW, listIntroMayAsk, listIntroPageClear, listIntroWanted, type ListIntroLoad } from './listIntro';
-import { LIST_LOOK_OPTIONS } from './listLook';
+import { listIntroMayAsk, listIntroPreview, listIntroPageClear, listIntroWanted, type ListIntroLoad } from './listIntro';
+import { LIST_LOOK_DEFAULT, LIST_LOOK_OFF, LIST_LOOK_OPTIONS } from './listLook';
 
 const ready: ListIntroLoad = {
   due: true,
@@ -85,10 +85,14 @@ describe('the list options dialog: when a load may ask for it', () => {
     expect(listIntroWanted({ ...ready, settled: false, othersSettled: false, updating: true })).toBe(true);
   });
 
-  test('the preview turns on every option of the ⋮ menu, in its order, then all off last', () => {
-    const steps = LIST_INTRO_PREVIEW.map((step) => step.key);
-    expect(steps).toEqual([...LIST_LOOK_OPTIONS.map((option) => option.key), null]);
-    const at = LIST_INTRO_PREVIEW.map((step) => step.at);
+  test('the preview turns on every option of the ⋮ menu that is off, in its order, then goes back last', () => {
+    const all = listIntroPreview(LIST_LOOK_OFF);
+    expect(all.map((step) => step.key)).toEqual([...LIST_LOOK_OPTIONS.map((option) => option.key), null]);
+    const at = all.map((step) => step.at);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
+    // The defaults (smaller names on, since 2026-11-05): never offered as turning on, and no gap where it was.
+    const defaults = listIntroPreview(LIST_LOOK_DEFAULT);
+    expect(defaults.map((step) => step.key)).toEqual(['highlight', 'compact', 'hideAgents', null]);
+    expect(defaults.at(-1)!.at - defaults.at(-2)!.at).toBe(all.at(-1)!.at - all.at(-2)!.at);
   });
 });

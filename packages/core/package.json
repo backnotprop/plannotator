@@ -64,6 +64,7 @@
     "./shape-kit.mjs": "./shape-kit.mjs",
     "./inbox-reply-draft": "./inbox-reply-draft.ts",
     "./inbox-review": "./inbox-review.ts",
+    "./inbox-system-setup": "./inbox-system-setup.ts",
     "./diagram-anchor": "./diagram-anchor.ts",
     "./image-region": "./image-region.ts",
     "./open-in-apps": "./open-in-apps.ts",
