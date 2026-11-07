@@ -1304,33 +1304,34 @@ export function inboxRedirectedLine(asker: string, id: string): string {
 }
 
 /**
- * The emoji and name of a tray reaction as a wake says them (approval
- * "inbox-reaction-tray"): one short emoji (pictographic, a flag or a keycap)
- * with no spaces or controls, and a name with controls made spaces and
- * invisible format characters taken out (the joiner emoji use stays), at most
- * 24 characters. Null when it is no reaction, or 👍 with no name (that is
- * 👍 Looks good).
+ * The person's reaction as a wake and read_thread say it (approval
+ * "inbox-reaction-tray", addendum 2026-11-07T12:20Z: every reaction, 👍
+ * included, is one quick label): one short emoji (pictographic, a flag or a
+ * keycap) with no spaces or controls, and its name with controls made spaces
+ * and invisible format characters taken out (the joiner emoji use stays), at
+ * most 24 characters ('' when it has none). 👍 Looks good when there is no
+ * reaction (an ack from before the tray, an older Inbox), when it is not one,
+ * or for 👍 with no name.
  */
-export function inboxAckReaction(value: unknown): { emoji: string; label: string } | null {
-  if (!value || typeof value !== 'object') return null
+export function inboxAckReaction(value: unknown): { emoji: string; label: string } {
+  const thumbs = { emoji: '👍', label: 'Looks good' }
+  if (!value || typeof value !== 'object') return thumbs
   const { emoji, label } = value as { emoji?: unknown; label?: unknown }
-  if (typeof emoji !== 'string' || emoji.length === 0 || emoji.length > 16 || !/\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20e3/u.test(emoji) || /[\s\p{Cc}\p{Cf}]/u.test(emoji.replace(/[\u200d\ufe0f\u{e0020}-\u{e007f}]/gu, ''))) return null
+  if (typeof emoji !== 'string' || emoji.length === 0 || emoji.length > 16 || !/\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20e3/u.test(emoji) || /[\s\p{Cc}\p{Cf}]/u.test(emoji.replace(/[\u200d\ufe0f\u{e0020}-\u{e007f}]/gu, ''))) return thumbs
   const text = typeof label === 'string' ? label.replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, ' ').replace(/(?!\u200d)\p{Cf}/gu, '').replace(/\s+/g, ' ').trim() : ''
   const name = [...text].slice(0, 24).join('').trim()
-  if (!name && emoji === '👍') return null
+  if (!name && emoji === '👍') return thumbs
   return { emoji, label: name }
 }
 
 /**
- * The whole of a 👍 Looks good wake under its first line, and the body of
- * the note the Inbox stores for it: the person read the message and needs
- * nothing more. With a tray reaction (`inboxAckReaction`), the reaction they
- * ended on, with its name when it has one.
+ * The whole of a reaction's wake under its first line, and the body of the
+ * note the Inbox stores for it: the reaction the person ended on when the
+ * Undo window closed (`inboxAckReaction`), with its name when it has one.
  */
 export function inboxAckLine(messageId: string, reaction?: unknown): string {
   const picked = inboxAckReaction(reaction)
-  if (picked) return `The person reacted ${picked.emoji}${picked.label ? ` ${picked.label}` : ''} to your message (${messageId}). No reply needed unless the reaction asks for one.`
-  return `The person marked your message 👍 Looks good (${messageId}). No reply needed unless you have a question.`
+  return `The person reacted ${picked.emoji}${picked.label ? ` ${picked.label}` : ''} to your message (${messageId}).`
 }
 
 /**

@@ -201,7 +201,7 @@ describe("a reaction from the 👍's tray (approval \"inbox-reaction-tray\")", (
     clock.now += WINDOW;
     const [settled] = store.settleAcks(WINDOW);
     const note = store.message(settled!.ack!.note_id!)!;
-    expect(note.body).toBe(`The person reacted 🚀 Ship it to your message (${sent.id}). No reply needed unless the reaction asks for one.`);
+    expect(note.body).toBe(`The person reacted 🚀 Ship it to your message (${sent.id}).`);
     expect(note.ack_reaction).toEqual({ emoji: "🚀", label: "Ship it" });
     expect(store.pendingReplies("ses_a").map((m) => m.id)).toEqual([note.id]);
     expect(store.agentThread(sent.id)!.messages[0]!.ack).toEqual({ label: "Looks good", at: settled!.ack!.at, reaction: { emoji: "🚀", label: "Ship it" } });
@@ -210,13 +210,13 @@ describe("a reaction from the 👍's tray (approval \"inbox-reaction-tray\")", (
     expect(reopened.message(note.id)!.ack_reaction).toEqual({ emoji: "🚀", label: "Ship it" });
   });
 
-  test("an emoji with no name: the note says the emoji alone; 👍 Looks good keeps today's line and no reaction", () => {
+  test("an emoji with no name: the note says the emoji alone; 👍 Looks good reads as the same quick label", () => {
     const { store, clock, sent } = setup();
     store.ackMessage(sent.id, true, { emoji: "🎉" });
     clock.now += WINDOW;
     const [settled] = store.settleAcks(WINDOW);
     const note = store.message(settled!.ack!.note_id!)!;
-    expect(note.body).toBe(`The person reacted 🎉 to your message (${sent.id}). No reply needed unless the reaction asks for one.`);
+    expect(note.body).toBe(`The person reacted 🎉 to your message (${sent.id}).`);
     expect(note.ack_reaction).toEqual({ emoji: "🎉" });
 
     const plain = setup();
@@ -224,9 +224,10 @@ describe("a reaction from the 👍's tray (approval \"inbox-reaction-tray\")", (
     plain.clock.now += WINDOW;
     const [thumbs] = plain.store.settleAcks(WINDOW);
     const thumbsNote = plain.store.message(thumbs!.ack!.note_id!)!;
-    expect(thumbsNote.body).toBe(`The person marked your message 👍 Looks good (${plain.sent.id}). No reply needed unless you have a question.`);
+    expect(thumbsNote.body).toBe(`The person reacted 👍 Looks good to your message (${plain.sent.id}).`);
     expect(thumbsNote.ack_reaction).toBeUndefined();
-    expect(plain.store.agentThread(plain.sent.id)!.messages[0]!.ack).toEqual({ label: "Looks good", at: thumbs!.ack!.at });
+    // An ack always carries a reaction as an agent reads it, 👍 included (addendum 2026-11-07T12:20Z).
+    expect(plain.store.agentThread(plain.sent.id)!.messages[0]!.ack).toEqual({ label: "Looks good", at: thumbs!.ack!.at, reaction: { emoji: "👍", label: "Looks good" } });
   });
 
   // Owner, 2026-11-07: "Reaction should go away after sending and only come back when I can send a new one".

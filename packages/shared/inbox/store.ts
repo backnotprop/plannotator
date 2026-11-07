@@ -3286,8 +3286,8 @@ export class InboxStore {
 
   /**
    * A thread as an agent reads it (read_thread): an ack shows only once it
-   * settled, as `{ label, at }` and its tray reaction (`reaction`) when it
-   * has one; one still inside its Undo window (or taken back) is not
+   * settled, as `{ label, at, reaction }` (`reaction` always, 👍 Looks good
+   * for an ack without a tray emoji); one still inside its Undo window (or taken back) is not
    * there.
    */
   agentThread(threadId: string, caller: string | null = null): InboxThread | null {
@@ -3301,7 +3301,7 @@ export class InboxStore {
         if (message.from_project) out = { ...out, from_project: { name: message.from_project.name } } as unknown as InboxMessageWire;
         if (message.ack !== undefined) {
           const { ack, ...rest } = out;
-          out = { ...rest, ack: ack && ack.settled_seq != null && !ack.not_sent ? { label: ack.label, at: ack.at, ...(ack.reaction ? { reaction: ack.reaction } : {}) } : null } as InboxMessageWire;
+          out = { ...rest, ack: ack && ack.settled_seq != null && !ack.not_sent ? { label: ack.label, at: ack.at, reaction: ack.reaction ?? { emoji: "👍", label: INBOX_ACK_LABEL } } : null } as InboxMessageWire;
         }
         // Who a reply tagged (approval "inbox-tag-agents"), as an agent reads it: the agents and, for
         // the reader, that it was tagged. Delivery state is the person's view, not the agent's.

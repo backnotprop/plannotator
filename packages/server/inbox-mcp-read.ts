@@ -119,8 +119,8 @@ export interface AgentMessage {
   body_bytes?: number;
   questions?: AgentQuestion[];
   attachments?: { name: string; kind: string; size: number; path: string }[];
-  /** The person's 👍; `reaction`: the tray emoji they reacted with instead (approval "inbox-reaction-tray"). */
-  ack?: { label: string; at: string; reaction?: { emoji: string; label?: string } };
+  /** The person's reaction (approval "inbox-reaction-tray"): always `reaction`, 👍 Looks good included. */
+  ack?: { label: string; at: string; reaction: { emoji: string; label?: string } };
   guide?: { title: string };
   /** A person's message addressed to one agent session (a New message, or a reply sent to another session because the asker ended); on a reply that tags agents, its owner. */
   to?: AgentAddressee;
@@ -168,7 +168,7 @@ export interface AgentMessageLine {
   attachments?: string[];
   guide?: string;
   ack?: true;
-  /** With `ack`: the tray emoji the person reacted with instead of 👍 (approval "inbox-reaction-tray"); the line shows it, never its name. */
+  /** With `ack`: the emoji the person reacted with, 👍 included (approval "inbox-reaction-tray"); the line shows it, never its name. */
   reaction?: string;
   to?: AgentAddressee;
   tagged?: AgentTagged[];
@@ -424,7 +424,7 @@ export function agentMessage(message: InboxMessageWire, form: AgentMessageForm =
     ...(body !== message.body ? { body_bytes: total } : {}),
     ...(message.questions?.length ? { questions: agentQuestions(message.questions) } : {}),
     ...(message.attachments?.length ? { attachments: message.attachments.map((a) => ({ name: a.name, kind: a.kind, size: a.size, path: a.path })) } : {}),
-    ...(ack ? { ack: { label: ack.label, at: ack.at, ...(ack.reaction ? { reaction: ack.reaction } : {}) } } : {}),
+    ...(ack ? { ack: { label: ack.label, at: ack.at, reaction: agentReaction(ack.reaction) } } : {}),
     ...(message.guide ? { guide: { title: message.guide.title } } : {}),
     ...(message.to ? { to: addressee(message, caller) } : {}),
     ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
@@ -456,7 +456,7 @@ export function agentMessageLine(message: InboxMessageWire, caller: string | nul
     ...(message.attachments?.length ? { attachments: message.attachments.map((a) => a.name) } : {}),
     ...(message.guide ? { guide: message.guide.title } : {}),
     ...(message.ack ? { ack: true as const } : {}),
-    ...(message.ack && inboxAckReaction(message.ack.reaction) ? { reaction: inboxAckReaction(message.ack.reaction)!.emoji } : {}),
+    ...(message.ack ? { reaction: inboxAckReaction(message.ack.reaction).emoji } : {}),
     ...(message.to ? { to: addressee(message, caller) } : {}),
     ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
     ...(message.board_request === true ? { board_request: true as const } : {}),
@@ -677,14 +677,18 @@ export function messageLineText(line: AgentMessageLine, context: TranscriptConte
 }
 
 /**
- * The line under a message the person marked: 👍 Looks good, or the tray
- * reaction they reacted with (approval "inbox-reaction-tray"), with its name
- * when it has one.
+ * The person's reaction as an agent reads it (approval "inbox-reaction-tray"): `{ emoji, label? }`, 👍 Looks good
+ * for an ack with none (an older one, or 👍 itself).
  */
+function agentReaction(value: unknown): { emoji: string; label?: string } {
+  const { emoji, label } = inboxAckReaction(value);
+  return label ? { emoji, label } : { emoji };
+}
+
+/** The line under a message the person reacted to: the emoji, its name when it has one, and when. */
 function ackLineText(ack: NonNullable<AgentMessage["ack"]>): string {
-  const reaction = inboxAckReaction(ack.reaction);
-  if (reaction) return `${reaction.emoji}${reaction.label ? ` ${reaction.label}` : ""} (${shortTime(ack.at)}): the person's reaction.`;
-  return `👍 ${ack.label} (${shortTime(ack.at)}): the person read it and needs nothing more.`;
+  const { emoji, label } = inboxAckReaction(ack.reaction);
+  return `${emoji}${label ? ` ${label}` : ""} (${shortTime(ack.at)}): the person's reaction.`;
 }
 
 /** One message in full as text: a heading line, the body, then its questions, files, guide and 👍. */
