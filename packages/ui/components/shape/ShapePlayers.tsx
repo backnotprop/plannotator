@@ -8,7 +8,7 @@
 // slot: the board's frame CSS (`svg text { fill: … }`) and the agent's own
 // drawing CSS (`.node`, `svg`, `button`, …) stop at that boundary, while the
 // board's variables (--ink, --paper, --mark, …) and its font still inherit.
-import React, { Component, Suspense, lazy, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { Component, Suspense, lazy, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { ShapeRun } from '@plannotator/core/shape-run';
 import type { ShapeSteps } from '@plannotator/core/shape-steps';
