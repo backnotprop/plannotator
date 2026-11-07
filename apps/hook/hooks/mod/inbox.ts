@@ -59,6 +59,7 @@ import { bridgeBaseUrl, createBridge, type BridgeHandle } from './bridge'
 import { PromptDropped, type Host, type HttpResult, type LoadedPluginInfo } from './host'
 import {
   INBOX_ASK_POLL_FIELD,
+  INBOX_AUTO_RELOAD_POLL_FIELD,
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
   inboxAskBridgeBase,
@@ -79,9 +80,11 @@ import {
   mcpAnswerOfResponse,
   parseInboxAskWaits,
   parseInboxBridgeCommands,
+  parseInboxReloadOffer,
   parseInboxRegistry,
   parseInboxToolList,
   type InboxRegistryView,
+  type InboxReloadOffer,
   type InboxReplyCommand,
   type InboxToolInfo,
 } from './inbox-contract'
@@ -771,6 +774,20 @@ export interface InboxLinkOptions {
   instanceId: string
   /** The session's turns, which a question from Ask AI runs in. Absent: the connection never offers to answer one. */
   turns?: TurnTracker
+  /**
+   * Plannotator reloads itself after an update (auto-reload.ts): the poll says
+   * so (`auto_reload`), each answered poll hands over the Inbox's word
+   * (`reload`, or null) and is noted, and each tick lets it look. Absent: the
+   * poll never asks, and the Inbox keeps the manual notice.
+   */
+  reload?: InboxLinkReload
+}
+
+/** What the link drives of auto-reload.ts's AutoReload. */
+export interface InboxLinkReload {
+  setOffer(offer: InboxReloadOffer | null): void
+  notePolled(): Promise<void>
+  tick(): Promise<void>
 }
 
 export class InboxLink {
@@ -858,6 +875,16 @@ export class InboxLink {
 
   get isDisposed(): boolean {
     return this.disposed
+  }
+
+  /**
+   * Inbox work this process has in flight: a reply handed out and not settled
+   * here, a delivery or claim under way, a Send now reply its turn has not
+   * read, an Ask AI client. Auto reload waits while any is true, so a reload
+   * never lands in the middle of one.
+   */
+  get hasWorkInFlight(): boolean {
+    return this.pending.size > 0 || this.delivering || this.submitting !== null || this.held.size > 0 || this.sentNow.length > 0 || this.askClient !== null
   }
 
   /**
@@ -1080,6 +1107,9 @@ export class InboxLink {
     for (const id of [...this.unacked]) await this.acknowledge(id)
     if (!this.leader) return
     if (!this.polling && now >= this.retryAt) void this.poll()
+    // Auto reload looks at the same idle state, outside any hook (this is a $.clock timer). Not awaited:
+    // a queued /reload-plugins never holds the tick (it guards itself against a second look meanwhile).
+    if (this.options.reload) void this.options.reload.tick().catch(() => undefined)
     // Send now (the person pressed it in the Inbox): the waiting replies go in without waiting for two
     // idle ticks, oldest first (an urgent reply never overtakes an older one), but only when there is a
     // turn they may go into or the session is idle: never into this session's own Ask question.
@@ -1239,9 +1269,15 @@ export class InboxLink {
       ...(folder ? { session_folder: folder } : {}),
       // Ask AI: a question for this session can run here, and `ask_waits` will be read.
       ...(this.options.turns ? { [INBOX_ASK_POLL_FIELD]: true } : {}),
+      // Auto reload: this connection reloads Plannotator itself when the answer says a reload loads a newer one.
+      ...(this.options.reload ? { [INBOX_AUTO_RELOAD_POLL_FIELD]: true } : {}),
     })
     if (!response || response.status !== 200) return null
     if (parseInboxAskWaits(response.text)) void this.startAskClient()
+    if (this.options.reload) {
+      this.options.reload.setOffer(parseInboxReloadOffer(response.text))
+      void this.options.reload.notePolled().catch(() => undefined)
+    }
     return parseInboxBridgeCommands(response.text)
   }
 
