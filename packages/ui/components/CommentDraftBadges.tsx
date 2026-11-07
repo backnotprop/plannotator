@@ -7,7 +7,7 @@
  * The word is drawn by CSS (`content: attr(data-label)`), so the badge adds no text to the document: a text search,
  * a copy or a restore never meets it. Styles: `comment-card.css`.
  */
-import React, { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import type Highlighter from '@plannotator/web-highlighter';
 import type { CommentPopoverState } from '../hooks/useAnnotationHighlighter';
 import { Icon } from './inbox-thread/icons';

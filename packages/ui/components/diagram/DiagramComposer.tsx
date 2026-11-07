@@ -6,6 +6,12 @@ import { SparklesIcon } from '../SparklesIcon';
 import { Button } from '../ui/button';
 import { isCommentSubmitKey } from '../../utils/commentSubmitKey';
 import type { DiagramComposerDraft } from './useDiagramComments';
+import { getCommentCardEnabled } from '../../utils/commentCardPolicy';
+import { Icon } from '../inbox-thread/icons';
+
+// The comment card (opt-in): the words typed on a part outlive a close, one draft per part, as the text box's draft
+// store keeps them; the bin is the one way to drop them.
+const cardDrafts = new Map<string, string>();
 
 /**
  * The inline composer beside the ring: the part's label as the context
@@ -58,7 +64,16 @@ export function DiagramComposer({
    * Absent: no Ask AI button. */
   onAskAI?: (question: string) => Promise<boolean>;
 }) {
-  const [text, setText] = useState('');
+  // The comment card (opt-in, `configurePlannotatorUI({ commentCard })`): read once, so a box never changes look open.
+  const [card] = useState(getCommentCardEnabled);
+  const cardKey = `${draft.primary.target.kind ?? ''}:${diagramTargetText(draft.primary.target)}`;
+  const [text, setTextState] = useState(() => (card ? cardDrafts.get(cardKey) ?? '' : ''));
+  const setText = (value: string) => {
+    setTextState(value);
+    if (!card) return;
+    if (value.trim() !== '') cardDrafts.set(cardKey, value);
+    else cardDrafts.delete(cardKey);
+  };
   const [asking, setAsking] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   useEffect(() => {
@@ -118,9 +133,79 @@ export function DiagramComposer({
     // the IME guard Safari needs (keyCode 229) and keeps Shift+Enter a newline.
     if (isCommentSubmitKey(event, true)) {
       event.preventDefault();
-      if (canWrite && !asking && text.trim() !== '') onSubmit(text);
+      if (canWrite && !asking && text.trim() !== '') submit();
     }
   };
+  const submit = () => {
+    if (card) cardDrafts.delete(cardKey);
+    onSubmit(text);
+  };
+
+  if (card && disabledReason === undefined) {
+    // The comment card by the ring: the part it is on, the words, then the row (Ask AI at the left, the bin, and a
+    // solid "Comment" at the right end). The chevron closes it and keeps the words (comment-card.css).
+    const on = diagramTargetText(target);
+    return (
+      <div
+        ref={rootRef}
+        data-diagram-composer=""
+        data-comment-card=""
+        data-in-canvas=""
+        role="dialog"
+        aria-label={`Comment on ${on}`}
+        className="pn-cbox"
+        style={{ left, top, width: COMPOSER_WIDTH_PX }}
+        onPointerDown={(event) => event.stopPropagation()}
+        onPointerUp={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
+        <button type="button" className="pn-cbox-close" onClick={onCancel} aria-label="Close (your words are kept)" title="Close (your words are kept)" data-comment-card-close="">
+          <Icon name="chevD" size={16} />
+        </button>
+        <div className="pn-cbox-quote">
+          On {on}{draft.sourceLine !== null && ` · line ${draft.sourceLine[0]}`}{draft.additional.length > 0 && ` · +${draft.additional.length} more`}
+        </div>
+        {unsavedPart && <p className="pn-cbox-note">This part is only in your unsaved draft. Save the diagram to comment on it.</p>}
+        <div className="pn-cbox-field">
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="Comment…"
+            rows={1}
+            disabled={submitting || asking}
+            className="pn-cbox-ta pn-cbox-plain"
+          />
+        </div>
+        {error !== null && <p role="alert" className="pn-cbox-note pn-cbox-err">{error}</p>}
+        <div className="pn-cbox-row">
+          <button type="button" className="pn-cbox-save" disabled={!canWrite || submitting || asking || text.trim() === ''} onClick={submit} data-comment-card-submit="">
+            Comment
+          </button>
+          {onAskAI !== undefined && (
+            <button type="button" data-diagram-ask-ai="" className="pn-cbox-tool pn-cbox-word" onClick={() => void askAI()} disabled={!canAskAI} title={canAskAI ? 'Ask AI this question' : 'Type a question to ask AI'}>
+              <SparklesIcon className="h-3.5 w-3.5" />
+              Ask AI
+            </button>
+          )}
+          <span className="pn-cbox-mid" />
+          {text !== '' && (
+            <button
+              type="button"
+              className="pn-cbox-tool pn-cbox-bin"
+              onClick={() => { cardDrafts.delete(cardKey); setTextState(''); onCancel(); }}
+              aria-label="Discard this comment"
+              title="Discard this comment"
+              data-comment-card-discard=""
+            >
+              <Icon name="trash" size={15} />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -182,7 +267,7 @@ export function DiagramComposer({
             <Button type="button" variant="ghost" size="xs" onClick={onCancel}>
               Cancel
             </Button>
-            <Button type="button" size="xs" disabled={!canWrite || submitting || asking || text.trim() === ''} onClick={() => onSubmit(text)}>
+            <Button type="button" size="xs" disabled={!canWrite || submitting || asking || text.trim() === ''} onClick={submit}>
               Comment
             </Button>
           </div>

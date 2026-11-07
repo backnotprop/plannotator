@@ -84,6 +84,14 @@
 .pn-cbox-back[data-at="above"] { top: 12px; }
 .pn-cbox-back[data-at="below"] { bottom: 12px; }
 
+/* A diagram part's card (DiagramComposer): inside the canvas, which clips, so absolute; a plain textarea. */
+.pn-cbox[data-in-canvas] { position: absolute; z-index: 30; max-height: calc(100% - 16px); pointer-events: auto; }
+.pn-cbox .pn-cbox-plain { display: block; width: 100%; box-sizing: border-box; margin: 0; padding: 4px; border: 0; background: transparent; color: inherit; resize: none; outline: none; box-shadow: none; font: inherit; field-sizing: content; }
+.pn-cbox .pn-cbox-plain::placeholder { color: var(--muted-foreground); }
+.pn-cbox[data-in-canvas] .pn-cbox-ta { min-height: 30px; max-height: 120px; }
+.pn-cbox-note { margin: 0; padding: 4px 15px 0; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }
+.pn-cbox-note.pn-cbox-err { color: var(--destructive); }
+
 @media (prefers-reduced-motion: reduce) { .pn-cbox { animation: none; } }
 
 /*
