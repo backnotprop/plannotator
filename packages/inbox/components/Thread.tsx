@@ -149,7 +149,7 @@ import { openQuestionsShown, placeOf, reaskItemLabel, skipToggledAnswer, threadO
 import { newUuid } from '../uuid';
 import { ShortcutHint, useShortcutAria, useShortcutHintShown, withShortcut } from '../shortcuts/hint';
 import { lastInput, traversedJustNow } from '../lastInput';
-import { bareKeyAllowed, inOverlay, keyTarget, modalOpen } from '../shortcuts/guards';
+import { bareKeyAllowed, inOverlay, keyboardFocused, keyTarget, modalOpen } from '../shortcuts/guards';
 import { INBOX_SHORTCUT_EXTRAS } from '../shortcuts/extras';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
@@ -3137,6 +3137,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     return null;
   };
   const [openItemsRequest, setOpenItemsRequest] = useState(0);
+  // H (approval "inbox-keyboard-keys-2026-11-07", item 3): opens the header clock's menu; it never snoozes by itself.
+  const [snoozeRequest, setSnoozeRequest] = useState(0);
   const readKeysOn = !one && !artifactsOn;
   const readKeyAllowed = (event: KeyboardEvent) => {
     if (!readKeysOn || !bareKeyAllowed(event)) return false;
@@ -3280,6 +3282,31 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           return !!trigger && trigger.isConnected && trigger.getAttribute('aria-expanded') !== 'true' && trigger.getClientRects().length > 0;
         },
         handle: () => setOpenItemsRequest((n) => n + 1),
+      },
+      artifacts: {
+        // Shift+O (item 1): the header's Artifacts button, both ways. Only where it shows: not under a file in full
+        // screen or a guide, and a key from the file beside the thread is the file's.
+        when: (event) => {
+          if (!bareKeyAllowed(event) || !artifactsButton || !onArtifacts || covered || fileCovers) return false;
+          const origin = keyOrigin(event);
+          return origin === 'thread' || origin === 'row';
+        },
+        handle: () => onArtifacts?.(!artifactsOn),
+      },
+      snooze: {
+        // The clock in the header, where it shows (the Artifacts grid keeps it, except on a phone). A row the keyboard
+        // is on takes H itself (InboxList.tsx: its menu).
+        when: (event) => {
+          if (!bareKeyAllowed(event) || covered || fileCovers) return false;
+          const origin = keyOrigin(event);
+          if (origin === 'row' || origin === 'list') {
+            const target = keyTarget(event);
+            if (target?.closest('[data-thread-id]') && keyboardFocused(target)) return false;
+          } else if (origin !== 'thread') return false;
+          const clock = sectionRef.current?.querySelector<HTMLElement>('[data-thread-snooze]');
+          return !!clock && clock.getAttribute('aria-expanded') !== 'true' && clock.getClientRects().length > 0;
+        },
+        handle: () => setSnoozeRequest((n) => n + 1),
       },
       fullScreen: {
         when: (event) => {
@@ -5099,6 +5126,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // So does the checklist button ("3/6"), which arrives after its own read and changes width as steps tick, or as
   // another session's list adds or drops its "+1".
   const replyKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'reply' });
+  const artifactsKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'artifacts' });
   const openItemsKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'openItems' });
   const footSig = [showAskerNote, anyOtherLive, footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, openActions.length, phone, replyKeyShown, openItemsKeyShown, stepLists[0] ? stepsCount(stepLists[0]).text : '', stepLists.length].join('|');
   const rowFittedFor = useRef('');
@@ -5573,7 +5601,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         {phone && artifactsOn ? null : (
           <>
             {markReadButton}
-            {!phone && snoozeProps && <ThreadSnooze snooze={snoozeProps} />}
+            {!phone && snoozeProps && <ThreadSnooze snooze={snoozeProps} openRequest={snoozeRequest} />}
             {one && !artifactsOn && !nameChip ? (
               <span className="ib-sp" />
             ) : (
@@ -5588,12 +5616,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               </Tip>
             )}
             {artifactsButton && (
-              <Tip content={artifactsOn ? 'Back to the thread' : 'Artifacts: every file, image and guided review in this thread'}>
+              <Tip content={withShortcut(artifactsOn ? 'Back to the thread' : 'Artifacts: every file, image and guided review in this thread', { scope: inboxThreadShortcuts, action: 'artifacts' })}>
                 <button
                   ref={artifactsButtonRef}
                   type="button"
                   className="ib-iconbtn ib-artbtn"
                   aria-label={`Artifacts, ${artifactList.length}`}
+                  aria-keyshortcuts={artifactsKeys}
                   aria-pressed={artifactsOn}
                   onClick={() => onArtifacts?.(!artifactsOn)}
                   data-artifacts-button=""

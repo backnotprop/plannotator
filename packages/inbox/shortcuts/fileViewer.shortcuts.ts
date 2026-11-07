@@ -9,6 +9,7 @@ import { defineShortcutScope, htmlAnnotateShortcuts } from '@plannotator/ui/shor
 export const inboxFileViewerShortcuts = defineShortcutScope({
   id: 'inbox-file-viewer',
   title: 'Open file',
+  lettersByCode: true,
   shortcuts: {
     escape: {
       description: 'Close what is open, then leave full screen',
@@ -42,6 +43,15 @@ export const inboxFileViewerShortcuts = defineShortcutScope({
       hint: 'An HTML file in full screen. Works from inside the page too.',
       preventDefault: true,
       displayOrder: 3,
+    },
+    toggleAnnotate: {
+      description: 'Annotate or Interact',
+      // The html-annotate chord, as the tooltip says: from anywhere in the open HTML file, not only inside the page.
+      bindings: htmlAnnotateShortcuts.shortcuts.toggleAnnotateMode.bindings,
+      section: 'Files',
+      hint: 'An HTML file: Annotate takes clicks for comments, Interact hands them to the page.',
+      preventDefault: true,
+      displayOrder: 4,
     },
   },
 });

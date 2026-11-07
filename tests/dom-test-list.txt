@@ -168,6 +168,7 @@ packages/inbox/markRead.test.tsx
 packages/inbox/markUnread.test.tsx
 packages/inbox/ack.test.tsx
 packages/inbox/actionChecklist.test.tsx
+packages/inbox/keyboardKeys.test.tsx
 packages/inbox/actionDraftSend.test.tsx
 packages/inbox/actionNoteRefusal.test.tsx
 packages/inbox/newMessagePicker.test.tsx

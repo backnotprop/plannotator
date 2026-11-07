@@ -3,6 +3,7 @@ import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
 import { shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxSearchShortcuts } from '../search/searchShortcut';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
+import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
 import { agentName, formatCount, fullTime, shortTime, waitCount, whenTime } from '../format';
@@ -37,7 +38,7 @@ import { useInboxTextSize } from '../textSize';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { relativeTime, relativeWords, useRelativeClock } from '../relativeTime';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
-import { isComposingKey, keyTarget, modalOpen } from '../shortcuts/guards';
+import { bareKeyAllowed, isComposingKey, keyboardFocused, keyTarget, modalOpen } from '../shortcuts/guards';
 import { listKeyTarget, LIST_STOPS, type ListMove } from '../listKeys';
 
 export interface InboxListProps {
@@ -95,6 +96,8 @@ export interface InboxListProps {
   onSendNow?: (row: InboxListRow) => void;
   /** A phone (phone.ts): the list fills the window and its rows are a mail app's. */
   phone?: boolean;
+  /** The column's id: the Inbox's own list is `ib-list`, the skip link's target (App.tsx). */
+  columnId?: string;
   /**
    * The live stream is dead (liveStream.ts): one quiet muted line under the list, "Reconnecting…", gone with the
    * stream's next frame. The live region says it (App.tsx), so the line itself is not live.
@@ -1157,7 +1160,8 @@ export function InboxList(props: InboxListProps) {
   // main sidebar, which holds its own New message, is closed (the peek does not count as open).
   const headerCompose = isMobile || !sidebarDocked;
   const searchKeys = useShortcutAria({ scope: inboxSearchShortcuts, action: 'openSearch' });
-  const columnId = useId();
+  const generatedColumnId = useId();
+  const columnId = props.columnId ?? generatedColumnId;
   const refreshHintId = useId();
   const resizable = props.narrow && !isMobile;
   const visible = props.sections.filter((s) => s.threads.length > 0);
@@ -1243,6 +1247,27 @@ export function InboxList(props: InboxListProps) {
   };
   const sectionOf = (threadId: string) => props.sections.find((section) => section.threads.some((r) => r.thread_id === threadId))?.id ?? null;
   const onRowAction = props.onRowAction;
+  // H on a row the keyboard is on (approval "inbox-keyboard-keys-2026-11-07", item 3): its menu opens at the Snooze
+  // times, as Shift+F10 then Snooze would; nothing is snoozed until a time is picked. The open thread's own H is Thread.tsx's.
+  const [snoozeRequest, setSnoozeRequest] = useState<{ id: string; n: number } | null>(null);
+  useShortcutScope({
+    scope: inboxThreadShortcuts,
+    handlers: {
+      snooze: {
+        when: (event) => {
+          if (!onRowAction || !props.onSnooze || !bareKeyAllowed(event)) return false;
+          const target = keyTarget(event);
+          if (!target || !bodyRef.current?.contains(target) || !target.matches('[data-thread-id]') || !keyboardFocused(target)) return false;
+          const row = rowOf(target.getAttribute('data-thread-id') ?? '');
+          return !!row && !inboxRowArchived(row) && (props.snoozesOf?.(row) ?? true);
+        },
+        handle: (event) => {
+          const id = keyTarget(event)?.getAttribute('data-thread-id');
+          if (id) setSnoozeRequest((was) => ({ id, n: (was?.n ?? 0) + 1 }));
+        },
+      },
+    },
+  });
   // Shift+F10 opens a row's menu (the context-menu key too), named on each row for assistive technology.
   const rowKeys = onRowAction ? shortcutAria({ scope: inboxListShortcuts, action: 'rowMenu' }) : undefined;
   // The row callbacks keep one identity for the list's life (they call the latest props), so a row whose
@@ -1347,7 +1372,7 @@ export function InboxList(props: InboxListProps) {
           </Tip>
         )}
         {props.onCompose && headerCompose && (
-          <Tip content="New message">
+          <Tip content={withShortcut('New message', { scope: inboxAppShortcuts, action: 'compose' })}>
             <button
               type="button"
               className="ib-lhead-compose"
@@ -1355,6 +1380,7 @@ export function InboxList(props: InboxListProps) {
               // A wider window with the sidebar closed: the list header's own New message, at its far right.
               data-sidebar-closed={isMobile ? undefined : ''}
               aria-label="New message"
+              aria-keyshortcuts={shortcutAria({ scope: inboxAppShortcuts, action: 'compose' })}
               aria-haspopup="dialog"
               onClick={(event) => props.onCompose?.(event.currentTarget)}
             >
@@ -1395,6 +1421,7 @@ export function InboxList(props: InboxListProps) {
           canMarkRead={props.onMarkRead !== undefined}
           onSnooze={props.onSnooze}
           snoozesOf={props.snoozesOf}
+          snoozeRequest={snoozeRequest}
           pinnedOf={props.pinned ? (threadId) => props.pinned!.has(threadId) : undefined}
           onTarget={setMenuRow}
           onAction={(row, action) => onRowAction?.(row, action)}

@@ -15,6 +15,7 @@
  */
 
 import { forwardRef, useEffect, useRef, useState } from 'react';
+import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import {
   formatInboxVideoTime,
   inboxAttachmentKindLabel,
@@ -33,6 +34,9 @@ import { FileName } from './FileName';
 import { ReuseButton } from '../reuse';
 import { OpenInTileMenu, type OpenInSurface } from './OpenIn';
 import { Tip } from './Tip';
+import { gridStep, isGridKey, type GridKey } from '../gridMove';
+import { inboxArtifactsShortcuts } from '../shortcuts/grid.shortcuts';
+import { isComposingKey, keyTarget, modalOpen } from '../shortcuts/guards';
 
 /** The words under a tile's name: "PNG image, 1280 × 800, 38.4 KB", "Code (.sql), 331 B", "WebM video · 0:03 · 48.2 KB". */
 export function artifactDetail(artifact: Artifact): string {
@@ -464,6 +468,30 @@ export const ArtifactsView = forwardRef<HTMLHeadingElement, ArtifactsViewProps>(
     if (openId === null) return;
     section.current?.querySelector<HTMLElement>('.ib-art-current')?.scrollIntoView?.({ block: 'nearest' });
   }, [openId, count]);
+  // Arrow keys between the tiles (approval "inbox-keyboard-keys-2026-11-07", item 1; gridMove.ts), while a tile has
+  // focus: ← → the tile before or after, ↑ ↓ the one above or below, Home End the first or last. Enter opens. From the
+  // heading (where Shift+O lands), ↓ → Home go into the grid at its first tile and End at its last.
+  const HEADING_ID = 'ib-art-h';
+  const fromHeading = (event: KeyboardEvent) => event.key === 'ArrowDown' || event.key === 'ArrowRight' || event.key === 'Home' || event.key === 'End';
+  const tileKey = {
+    when: (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isComposingKey(event) || modalOpen() || !isGridKey(event.key)) return false;
+      const target = keyTarget(event);
+      if (!target || !section.current?.contains(target)) return false;
+      if (target.id === HEADING_ID) return fromHeading(event) && !!section.current.querySelector('[data-artifact-tile]');
+      return target.matches('[data-artifact-tile]');
+    },
+    handle: (event: KeyboardEvent) => {
+      const tiles = [...(section.current?.querySelectorAll<HTMLElement>('[data-artifact-tile]') ?? [])];
+      const target = keyTarget(event);
+      const from = tiles.indexOf(target as HTMLElement);
+      const to = target?.id === HEADING_ID ? (event.key === 'End' ? tiles.length - 1 : 0) : gridStep(tiles.map((tile) => tile.getBoundingClientRect()), from, event.key as GridKey);
+      const next = to === null ? null : tiles[to];
+      next?.focus({ preventScroll: true });
+      next?.scrollIntoView?.({ block: 'nearest' });
+    },
+  };
+  useShortcutScope({ scope: inboxArtifactsShortcuts, handlers: { move: tileKey, ends: tileKey } });
   return (
     <section ref={section} className="ib-art" aria-labelledby="ib-art-h" data-artifacts-view="">
       <div className="ib-art-top">

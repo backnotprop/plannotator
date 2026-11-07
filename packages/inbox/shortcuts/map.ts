@@ -4,7 +4,7 @@
  * words come from the registry; this says only where they go.
  */
 import type { ShortcutScopeDefinition } from '@plannotator/ui/shortcuts';
-import { inboxAppShortcuts, inboxFileViewerShortcuts, inboxListShortcuts, inboxSearchShortcuts, inboxThreadShortcuts } from './index';
+import { inboxAppShortcuts, inboxArtifactsShortcuts, inboxBoardShortcuts, inboxFileViewerShortcuts, inboxListShortcuts, inboxSearchShortcuts, inboxThreadShortcuts } from './index';
 
 export type Ref = { scope: ShortcutScopeDefinition<any>; action: string; only?: number };
 
@@ -26,8 +26,15 @@ const app = (action: string): Ref => ({ scope: inboxAppShortcuts, action });
 const list = (action: string): Ref => ({ scope: inboxListShortcuts, action });
 const thread = (action: string): Ref => ({ scope: inboxThreadShortcuts, action });
 const file = (action: string, only?: number): Ref => ({ scope: inboxFileViewerShortcuts, action, only });
+const grid = (action: string, only?: number): Ref => ({ scope: inboxArtifactsShortcuts, action, only });
+const board = (action: string, only?: number): Ref => ({ scope: inboxBoardShortcuts, action, only });
+/** The four arrows of a move, each its own keycap with no "or" between them. */
+const arrows = (ref: (action: string, only?: number) => Ref, action: string): Ref[] => [0, 1, 2, 3].map((i) => ref(action, i));
 
-/** Two columns: Everywhere and List on the left, Thread and Open file on the right. */
+/**
+ * Two columns: Everywhere and List on the left, Thread and Files on the right. Every key of an open file or of the
+ * Artifacts grid is in Files (approval "inbox-keyboard-keys-2026-11-07", item 6), so Thread keeps movement and verbs.
+ */
 export const MAP_COLUMNS: MapGroup[][] = [
   [
     {
@@ -35,8 +42,11 @@ export const MAP_COLUMNS: MapGroup[][] = [
       rows: [
         { keys: [{ scope: inboxSearchShortcuts, action: 'openSearch' }] },
         { keys: [app('openMap')] },
+        { keys: [app('compose')] },
         { keys: [app('goInbox')] },
         { keys: [app('goBoard')] },
+        { keys: [app('goPulls')] },
+        { keys: [app('goDrafts')] },
         { keys: [app('goSettings')] },
         { keys: [app('toggleSidebar')] },
       ],
@@ -48,8 +58,12 @@ export const MAP_COLUMNS: MapGroup[][] = [
         { label: 'First or last thread', keys: [list('first'), list('last')] },
         { keys: [list('open')] },
         { keys: [thread('markRead')] },
+        { keys: [thread('archive')] },
+        { keys: [thread('snooze')] },
         { keys: [thread('undo')] },
-        { keys: [list('rowMenu')] },
+        { label: 'Row, card or message menu', keys: [list('rowMenu')], also: [thread('messageMenu')] },
+        { keys: arrows(board, 'move') },
+        { keys: [board('ends')] },
       ],
     },
   ],
@@ -62,17 +76,21 @@ export const MAP_COLUMNS: MapGroup[][] = [
         { label: 'Next or previous thread', keys: [thread('nextThread'), thread('previousThread')] },
         { label: 'Next or previous message', keys: [thread('nextMessage'), thread('previousMessage')] },
         { keys: [thread('firstNew')] },
-        { keys: [thread('openNewest')] },
         { keys: [thread('openItems')] },
-        { keys: [thread('fullScreen')] },
         { keys: [thread('close')], also: [app('leavePage'), file('escape')] },
       ],
     },
     {
-      title: 'Open file',
+      title: 'Files',
       rows: [
+        { keys: [thread('openNewest')] },
+        { keys: [thread('artifacts')] },
+        { keys: arrows(grid, 'move') },
+        { keys: [grid('ends')] },
+        { keys: [thread('fullScreen')] },
         { label: 'Next or previous file', keys: [file('next', 0), file('previous', 0)], also: [file('next'), file('previous')] },
         { keys: [file('toggleTools')] },
+        { keys: [file('toggleAnnotate')] },
       ],
     },
   ],
