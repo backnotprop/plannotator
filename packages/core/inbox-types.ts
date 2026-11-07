@@ -397,11 +397,13 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   qwen: "Qwen Code",
   dsh: "DeepSeek Harness",
   t3: "T3 Code",
+  cline: "Cline",
 };
 
 /**
  * The agent hosts a person's reply wakes as a new turn by itself: Claude Code,
- * Pi, OpenCode 2 and DeepSeek Harness through Plannotator's own connection
+ * Pi, OpenCode 2, DeepSeek Harness and Cline (its plugin: CLI, hub, Kanban,
+ * desktop app, VS Code's new bundle) through Plannotator's own connection
  * (OpenCode 1 has the tool but no wake), and Codex through MCP alone, where the Inbox puts the
  * reply into the Codex thread with `codex queue` (Codex CLI
  * INBOX_CODEX_QUEUE_MIN_VERSION or later; packages/server/inbox-codex-wake.ts),
@@ -413,7 +415,7 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
  * (packages/server/inbox-t3-wake.ts).
  * The one list: wording that names which agents a reply wakes reads it.
  */
-export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "codex", "qwen", "t3"] as const;
+export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "cline", "codex", "qwen", "t3"] as const;
 
 /** Of INBOX_WAKING_HOSTS, the ones an MCP connection alone wakes (no Plannotator plugin): Codex, Qwen Code and T3 Code. */
 export const INBOX_MCP_WAKING_HOSTS: readonly string[] = ["codex", "qwen", "t3"];
@@ -986,10 +988,11 @@ export interface InboxAddressee {
 
 /**
  * Launch (start an agent from compose): the agents the Inbox can start a
- * session of, one per line. PR 1: Claude Code only.
+ * session of, one per line: Claude Code (`claude --bg`), Pi (`pi --mode rpc`, owned by the Inbox).
  */
 export type InboxLaunchAgent =
-  | "claude-code";
+  | "claude-code"
+  | "pi";
 
 /** Why a launch did not start (`InboxLaunchRecord.error`): `untrusted` folder, the CLI `missing`, or anything else. */
 export interface InboxLaunchError {
@@ -2257,6 +2260,42 @@ export type InboxAccountsRead =
  */
 export type InboxMachineAccountsRead = InboxAccountsRead | { state: "offline" } | { state: "needs_update" } | { state: "unreachable" };
 
+/**
+ * Whether Settings → Accounts switches logins. Off until switching is tried
+ * with the owner on two real logins (approval "accounts-page", 2026-11-06):
+ * while off, no row is a switch and the Inbox has no
+ * `POST /api/inbox/accounts/switch` (404 `not_found`, nothing runs). The page
+ * and the server both read this one constant; it is no setting.
+ */
+export const INBOX_ACCOUNT_SWITCHING: boolean = false;
+
+/**
+ * `POST /api/inbox/accounts/switch`: the account a person picked, as the window
+ * showed it. `number` is `cswap`'s on this machine; the address, organization
+ * and alias are only matched against a new read before the switch, so a list
+ * that changed since (`cswap swap`, `cswap remove`) switches nothing. An API
+ * key has no address: its alias is what tells it from another.
+ */
+export interface InboxAccountSwitchTarget {
+  number: number;
+  email: string | null;
+  organizationName: string | null;
+  alias: string | null;
+}
+
+/**
+ * Why a switch did not happen, or may not have: a read's failure, or
+ * `changed`, the list no longer has that login under that number (nothing
+ * ran); `renumbered`, it moved between that read and the switch, which went to
+ * another login (the next read shows which); `busy`, another switch is going.
+ * `timed_out` is the person's wait, not the run's: the switch goes on, and the
+ * next read says how it ended.
+ */
+export type InboxAccountSwitchFailure = InboxAccountsFailure | "changed" | "renumbered" | "busy";
+
+/** The switch's answer. No address and no `cswap` words: `number` is the account in use after it. */
+export type InboxAccountSwitch = { state: "switched"; number: number } | { state: "failed"; reason: InboxAccountSwitchFailure } | { state: "not_installed" };
+
 export interface InboxAgentsModel {
   agents: InboxAgentRow[];
   last_report: (InboxConnectReport & { seen?: boolean }) | null;
@@ -2284,7 +2323,7 @@ export interface InboxAgentsModel {
 }
 
 /** The hosts that connect through Plannotator's own plugin or extension. */
-export type InboxToolHostId = "claude-code" | "pi" | "opencode" | "dsh";
+export type InboxToolHostId = "claude-code" | "pi" | "opencode" | "dsh" | "cline";
 
 /**
  * The runtime a polling session runs in, as the window names its fix: Claude
@@ -2370,7 +2409,7 @@ export interface InboxHostSessions {
 }
 
 /** The hosts whose every request carries the `plannotator_inbox` tool in full once it is on (Claude Code defers it behind tool search). */
-export type InboxToolCostHost = "pi" | "opencode" | "dsh";
+export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline";
 
 /**
  * What turning the Inbox tool on adds to every request on Pi and OpenCode 2,
@@ -2539,6 +2578,8 @@ export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number
   // DeepSeek Harness sends the same JSON Schema with every request; not measured on a real DSH (tests never run
   // it), so Pi's measurement stands in until one is.
   dsh: INBOX_TOOL_COST_NOW,
+  // Cline sends every tool's JSON Schema with each request too; not measured on a real Cline, so Pi's stands in.
+  cline: INBOX_TOOL_COST_NOW,
 };
 
 /** "about 9 KB, roughly 2,500 tokens" for a host's measured cost. */
@@ -2938,17 +2979,24 @@ export interface InboxVoiceStatus {
   plan: string | null;
 }
 
-/** Why a clip came back with no words: the `code` of a `POST /api/inbox/voice/transcribe` failure. */
-export type InboxVoiceFailure =
-  | "voice_off"
-  | "voice_not_ready"
-  | "voice_bad_clip"
-  | "voice_expired"
-  | "voice_refused"
-  | "voice_key_refused"
-  | "voice_unreachable"
-  | "voice_codex_failed"
-  | "voice_empty";
+/**
+ * Every `code` a `POST /api/inbox/voice/transcribe` failure can carry: why a clip came back with no words. The server
+ * sends only these; a page must still take a code it does not know (a newer Inbox may add one) as a generic failure.
+ */
+export const INBOX_VOICE_FAILURES = [
+  "voice_off",
+  "voice_not_ready",
+  "voice_bad_clip",
+  "voice_expired",
+  "voice_refused",
+  "voice_key_refused",
+  "voice_unreachable",
+  "voice_codex_failed",
+  "voice_empty",
+] as const;
+
+/** Why a clip came back with no words: one of `INBOX_VOICE_FAILURES`. */
+export type InboxVoiceFailure = (typeof INBOX_VOICE_FAILURES)[number];
 
 /** The largest clip the Inbox takes: a 2:00 clip at 24 kHz, 16-bit mono is 5.76 MB. */
 export const INBOX_VOICE_MAX_CLIP_BYTES = 6 * 1024 * 1024;

@@ -47,6 +47,19 @@ describe('formatDraftAnnotationsForAsk', () => {
     expect(list).not.toContain('piece');
   });
 
+  test("a label carries its tip, the label's instruction to the agent (#2626)", () => {
+    const tip = 'This seems like an assumption. Verify by reading the actual code before proceeding.';
+    const list = formatDraftAnnotationsForAsk({
+      annotations: [
+        ann('q', { blockId: 'block-1', originalText: 'Step one.', text: '🔍 Verify this', isQuickLabel: true, quickLabelTip: tip }),
+      ],
+      blocks: BLOCKS,
+    });
+    expect(list.split('\n')).toHaveLength(1);
+    expect(list).toContain('label "🔍 Verify this" on "Step one."');
+    expect(list).toContain(tip);
+  });
+
   test('empty when there are no drafts', () => {
     expect(formatDraftAnnotationsForAsk({ annotations: [] })).toBe('');
   });
