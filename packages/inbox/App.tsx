@@ -101,6 +101,7 @@ import { ThreadWait } from './components/ThreadWait';
 import { EmptyThreadPanel } from './components/EmptyThreadPanel';
 import { AgentNoteDialog } from './components/AgentNoteDialog';
 import { FeedbackDialog } from './components/FeedbackDialog';
+import { SystemSetupHost } from './system/SetupHost';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { cardReport, noteQuestionRows } from './agents';
 import type { InboxAgentRow, InboxAgentsModel, InboxConnectReport, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
@@ -6183,6 +6184,8 @@ function Inbox() {
           }}
         />
       )}
+      {/* System → Set up a project: B2's System button and B1's Set up call `openSystemSetup()` (system/opener.ts). */}
+      <SystemSetupHost settings={settings} phone={phone} showToast={showToast} />
       {feedbackOpen && (
         <FeedbackDialog
           version={latest?.version ?? settings?.version ?? 'dev'}
