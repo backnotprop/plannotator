@@ -206,10 +206,14 @@ function LookRow<T extends string>({ id, label, desc, value, choices, onChange }
   );
 }
 
-/** The Show card's switches: on is shown. Each hides with its `ListLook` key. */
+/**
+ * The Show card's switches: on is shown. Each hides with its `ListLook` key. The page's words follow the owner's rule
+ * (2026-11-07: "only necessary labels or words for things that are not intuitive"): a description says only what the
+ * pictures cannot show (a machine, where a picture comes from, a side effect).
+ */
 const SHOW: readonly { key: ListLookKey; label: string; desc?: string }[] = [
   { key: 'hideAgents', label: 'Agent icons' },
-  { key: 'hideProject', label: 'Project', desc: 'With its machine, when you link machines' },
+  { key: 'hideProject', label: 'Project', desc: 'With its machine' },
 ];
 
 /** The notes-list look's switches (all off by default): on is shown, as each one's own `ListLook` key. */
@@ -223,8 +227,8 @@ const NOTES_LOOK: readonly { key: 'dividers' | 'statusMark' | 'boldNames'; label
 
 /** A project's picture instead of its letters. Turning one on turns project marks on (listLook.ts `lookWithChange`). */
 const PICTURES: readonly { key: 'repoLogo' | 'githubPictures'; label: string; desc: string }[] = [
-  { key: 'repoLogo', label: 'Logo from the repo', desc: "A favicon or logo found in the project's folder. Nothing leaves this computer." },
-  { key: 'githubPictures', label: 'GitHub pictures', desc: "A project on GitHub shows its owner's picture. Asks GitHub once a week." },
+  { key: 'repoLogo', label: 'Logo from the repo', desc: 'Stays on this computer' },
+  { key: 'githubPictures', label: 'GitHub pictures', desc: "The owner's picture. Asks GitHub once a week." },
 ];
 
 /** A Show switch that is on while its option is (the notes-list look's, the picture switches), with its words, if any, for a screen reader. */
@@ -336,7 +340,7 @@ export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: 
           <LookRow<MarkStyle>
             id="markstyle"
             label="Mark style"
-            desc={marks.what === 'off' ? 'Picking one turns letter marks on' : undefined}
+            desc={marks.what === 'off' ? 'Turns letter marks on' : undefined}
             value={marks.what === 'off' ? null : marks.style}
             choices={[
               { id: 'inline', label: 'Inline' },
@@ -424,7 +428,6 @@ export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: 
           <LookRow<MarksWhat>
             id="marks"
             label="Letter marks"
-            desc="First and last letter of the name, in its own colour"
             value={marks.what}
             choices={[
               { id: 'off', label: 'Off' },
@@ -445,7 +448,7 @@ export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: 
     <div className="ib-note ib-rws-note">
       <Icon name="info" />
       <span>
-        The time, questions and warnings always show. Full width keeps one line and its columns.{' '}
+        Full width keeps one line.{' '}
         {onGeneral ? (
           <>
             Text size is in{' '}
@@ -464,7 +467,7 @@ export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: 
     <div className="ib-rws" data-settings-rows="">
       {/* Settings draws no lede of its own for Rows: this one has the presets beside it. */}
       <div className="ib-rws-head">
-        <p className="ib-lede">How each thread looks in your list. Changes apply at once, wherever you use the Inbox.</p>
+        <p className="ib-lede">Changes apply everywhere you use the Inbox.</p>
         {presets}
       </div>
       <div className="ib-rws-top">

@@ -186,7 +186,7 @@ describe.if(hasDom)('Settings → Rows', () => {
   test("the Project switch's words describe it to a screen reader", () => {
     const el = render();
     const project = el.querySelector<HTMLElement>('[data-rows-control="hideProject"] [role="switch"]')!;
-    expect(el.querySelector(`#${project.getAttribute('aria-describedby')}`)!.textContent).toBe('With its machine, when you link machines');
+    expect(el.querySelector(`#${project.getAttribute('aria-describedby')}`)!.textContent).toBe('With its machine');
     expect(el.querySelector('[data-rows-control="hideAgents"] [role="switch"]')!.hasAttribute('aria-describedby')).toBe(false);
   });
 
