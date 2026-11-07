@@ -52,7 +52,8 @@ import { listsThread, newRecordBatch, noteRecord, openThreadRead } from './openT
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
 import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, threadAwayLine, threadOutbox } from './machines';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, waitingCount, type OpenThread } from './held';
+import { flatRows, useListView, type ListSort } from './listView';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { deliveriesReadList } from './rowDelivery';
 import {
@@ -121,7 +122,7 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro, VOICE_INTRO_MIN_WORDS, VOICE_INTRO_MOMENT_MS } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
-import { noteRevealThread, openThreadAsks, revealArmed, useBoardReveal, useStepsReveal } from './reveal';
+import { listTallerThanScreen, listViewRevealLeaveCounts, listViewRevealMayClaim, noteRevealThread, openThreadAsks, revealArmed, useBoardReveal, useLineReveal, useStepsReveal } from './reveal';
 import type { InboxRevealId } from './api';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
 import { namesCapability, withCapabilities } from './capabilities';
@@ -168,6 +169,7 @@ import { pullFilterOf, pullGroups, type PullFilter } from './pulls/model';
 import { reviewsAlias } from './reviewsRoute';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
+import { ListViewIntro } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
 import { CodeReviewOffer } from './components/CodeReviewOffer';
 import { useCodeReviewOffer } from './codeReviewOffer';
@@ -825,6 +827,12 @@ function Inbox() {
   const shownRef = useRef(shown);
   shownRef.current = shown;
   /**
+   * When the list on screen was last sorted whole (listView.ts `ListSort`): every settle and adopt moves it on, a
+   * row shown in place or one row moved alone does not. The List view keeps each row's place until it moves.
+   */
+  const [listSort, setListSort] = useState<ListSort>({ epoch: 0, keep: null });
+  const sortedWhole = useCallback((keep: string | null = null) => setListSort((last) => ({ epoch: last.epoch + 1, keep })), []);
+  /**
    * The threads whose opening look is on its way (sent, the list not read
    * again since): their rows on screen and the header read them as looked at
    * (held.ts `lookedRow`), so both offer Mark unread at once. A set: opening
@@ -1322,8 +1330,9 @@ function Inbox() {
       snoozeMoved.current.clear();
       const groups = listGroups(next);
       setShown((current) => (what === 'all' || current === null || !hasRows(current) ? groups : settleOwn(current, groups, openedHere.current, closed)));
+      sortedWhole();
     },
-    [armSlide, cancelSettle],
+    [armSlide, cancelSettle, sortedWhole],
   );
   useEffect(() => cancelSettle, [cancelSettle]);
 
@@ -1376,20 +1385,32 @@ function Inbox() {
               : groups
             : refreshHeldRows(current, groups, heldOpen()),
       );
+      if (adopt) sortedWhole(keep);
       setLoadError(null);
       return next;
     } catch (cause) {
       setLoadError(cause instanceof Error ? cause.message : String(cause));
       return null;
     }
-  }, [armSlide]);
-  /** The list read again after a snooze changed or ran out, whichever said so first (`event: snoozes`, or this window's clock). */
+  }, [armSlide, sortedWhole]);
+  /**
+   * The list read again after a snooze changed or ran out, whichever said so first (`event: snoozes`, or this
+   * window's clock). With no thread open only the rows whose snooze changed move (held.ts `snoozeChangedRows`), each
+   * alone and with the settle's slide; nothing is sorted whole, so the person's pending reads and archives keep their
+   * places (approval "inbox-list-view", R7) and a return by the clock waits behind "N new".
+   */
   const refreshSnoozes = useCallback(async () => {
     const next = await refreshList(false);
     if (next) flushNotifications(next);
     void refreshDecisions();
-    if (!routeRef.current.thread) settleList('own', true);
-  }, [refreshList, flushNotifications, refreshDecisions, settleList]);
+    const drawn = shownRef.current;
+    if (routeRef.current.thread || !next || !drawn) return;
+    const groups = listGroups(next);
+    const moving = snoozeChangedRows(drawn, groups);
+    if (moving.length === 0) return;
+    armSlide();
+    setShown((current) => (current ? moving.reduce((list, threadId) => settleThread(list, groups, threadId), current) : current));
+  }, [refreshList, flushNotifications, refreshDecisions, armSlide]);
 
   /**
    * Seen on sight (seenOnSight.ts): messages that arrived in the open thread
@@ -2618,19 +2639,16 @@ function Inbox() {
     const next = sent.draftId ? draftNeighbour(sent.draftId) : null;
     if (sent.draftId) setDrafts((current) => (current ?? []).filter((d) => d.id !== sent.draftId));
     closeCompose(next);
-    // With no thread open the list adopts what it reads, the new row with it.
-    // While one is open the list holds still, but the thread the person just
-    // started is their own action: it goes into Sent now (held.ts
-    // addOwnThreads), the other rows sliding to make room, never behind "N new".
-    const adopt = !routeRef.current.thread;
+    // The list holds still, a thread open or none (a write never brings in what waits behind "N new"; approval
+    // "inbox-list-view", R7), but the thread the person just started is their own action: it goes into Sent now
+    // (held.ts addOwnThreads), the other rows sliding to make room, never behind "N new".
     const at = routeRef.current;
-    void refreshList(adopt, true).then((next) => {
+    void refreshList(false).then((next) => {
       if (!next) return;
       // The new row may only be drawn by this read: the light starts in the commit that carries it. A person who went elsewhere meanwhile gets none.
       const cur = routeRef.current;
       const stayed = cur.page === at.page && cur.project === at.project && cur.thread === at.thread;
       if (stayed) setSentLight({ thread: sent.threadId });
-      if (adopt) return;
       armSlide();
       const groups = listGroups(next);
       setShown((current) => (current === null ? groups : addOwnThreads(current, groups, [sent.threadId])));
@@ -2807,16 +2825,32 @@ function Inbox() {
     // While a thread is open the person's own writes never reorder the list
     // (owner ruling 2026-10-11): each row shows its new state in place, and
     // the list catches up when the thread closes (settle.ts).
-    if (!paneClosed) void refreshList(!routeRef.current.thread, true);
+    // With none open the same (approval "inbox-list-view", R7): a save shows on its row in place and never brings in
+    // what waits behind "N new".
+    if (!paneClosed) void refreshList(false);
     if (!pickSaves.current.owed) return;
     pickSaves.current.owed = false;
     pickSaves.current.read();
   }, [refreshList]);
 
-  const afterWrite = async () => {
+  /**
+   * The list and the open thread read again after the person's own write. The list never adopts (approval
+   * "inbox-list-view", R7: a hover Mark read with nothing open used to bring in everything behind "N new" and slide
+   * another row under the pointer): every row shows its own state in place (held.ts `refreshHeldRows`), and the rows
+   * written (`written`) take the server's row in place even where an agent's message there waits behind "N new", so
+   * the write always shows. A written row the list on screen lost (Undo of an Archive after the list settled
+   * without it) goes back in at its place (held.ts `addOwnThreads`), never behind "N new". Agent activity anywhere
+   * else keeps waiting for Show.
+   */
+  const afterWrite = async (written: readonly string[] = []) => {
     const open = routeRef.current.thread;
     if (open) await refreshThread(open);
-    await refreshList(!open, true);
+    const next = await refreshList(false);
+    if (!next || written.length === 0) return;
+    const groups = listGroups(next);
+    const rows = new Map(groups.flatMap((section) => section.threads).map((row) => [row.thread_id, row] as const));
+    const fresh = written.flatMap((id) => rows.get(id) ?? []);
+    if (fresh.length > 0) setShown((current) => (current ? addOwnThreads(fresh.reduce(replaceHeldRow, current), groups, written) : current));
   };
 
   const rowOf = (threadId: string): InboxListRow | undefined =>
@@ -2961,7 +2995,7 @@ function Inbox() {
       showError(cause);
       return;
     }
-    await afterWrite();
+    await afterWrite([row.thread_id]);
     say('Sending it now.');
   };
 
@@ -2984,9 +3018,13 @@ function Inbox() {
    * Mark read, or move it back (the pressed button, `E` again, Undo). The
    * thread leaves the top for Quiet with its waiting questions closed; Undo
    * reopens them as they were. An agent stopped or held up on it makes the
-   * toast a warning with Reply.
+   * toast a warning with Reply. `drawnBefore` (the Undo): the list as drawn
+   * when Mark read was pressed; a settle that moved the row since (into folded
+   * Quiet) is undone for it, so it comes back where it was (held.ts
+   * `putReadRowBack`).
    */
-  const markRead = async (threadId: string, read: boolean) => {
+  const markRead = async (threadId: string, read: boolean, drawnBefore: InboxListSection[] | null = null) => {
+    const listAtPress = read ? shownRef.current : null;
     // A look this tab sent and the server has not taken yet: decide on what it gives (a seen update held in New
     // moves locally), whether Mark read came before the look landed or after. Never longer than
     // MARK_READ_LOOK_WAIT_MS: a look that stalls leaves the thread New on the server, so Mark read writes.
@@ -2994,25 +3032,30 @@ function Inbox() {
     const before = rowOf(threadId);
     if (read && before) {
       const drawn = drawnSection(shownRef.current, threadId);
-      if (seenHeldInNew(before, drawn)) return moveSeenToQuiet(threadId, before);
+      if (seenHeldInNew(before, drawn)) return routeRef.current.thread ? moveSeenToQuiet(threadId, before) : seenStaysPut(before);
       // Once the look landed nothing waits here any more (the thread closed and the list settled, say).
       if (looks && !canToggleRead(before, drawn)) return;
     }
-    // With a thread open the list holds still: the row moves to Quiet when the list next settles.
+    // The list holds still, a thread open or not (approval "inbox-list-view", R7): the row stays where it is, not
+    // bold, and moves to Quiet when the list next settles.
     const open = routeRef.current.thread;
-    const deferred = open !== null;
-    const place = threadId === open ? 'open' : deferred ? 'held' : 'list';
+    const place = threadId === open ? 'open' : 'held';
     try {
       await inboxApi.markRead(threadId, read);
     } catch (cause) {
       showError(cause);
       return;
     }
-    await afterWrite();
+    await afterWrite([threadId]);
     if (!read) {
+      const now = rowOf(threadId);
+      if (drawnBefore && now && shownRef.current && putReadRowBack(shownRef.current, drawnBefore, now)) {
+        armSlide();
+        setShown((current) => (current ? (putReadRowBack(current, drawnBefore, now) ?? current) : current));
+      }
       dismissToast();
-      // With a thread open the row has not left its place, so it has nowhere to come back from yet.
-      say(deferred ? 'Moved back.' : 'Moved back to the top.');
+      // The row has not left its place, so it has nowhere to come back from.
+      say('Moved back.');
       return;
     }
     if (!before) return;
@@ -3025,7 +3068,7 @@ function Inbox() {
       onUndo: () => {
         // Mark read ended the snooze: its Undo puts that back too.
         const restoring = restoreSnooze(threadId, before.snoozed);
-        if (!stood) return void restoring.then(() => markRead(threadId, false));
+        if (!stood) return void restoring.then(() => markRead(threadId, false, listAtPress));
         dismissToast();
         void restoring.then(() => markUnread(threadId));
       },
@@ -3033,7 +3076,7 @@ function Inbox() {
         ? {
             onReply: () => {
               void (async () => {
-                await markRead(threadId, false);
+                await markRead(threadId, false, listAtPress);
                 if (routeRef.current.thread !== threadId) go({ page: 'inbox', project: routeRef.current.project, machine: routeRef.current.machine, thread: threadId });
                 setReplyFor(threadId);
               })();
@@ -3044,10 +3087,21 @@ function Inbox() {
   };
 
   /**
+   * Mark read on a seen update the list still holds in New (markRead.ts `seenHeldInNew`) with no thread open: the
+   * thread is already Quiet on the server and its row already reads as read, so nothing is written and nothing moves
+   * (the list holds still, approval "inbox-list-view", R7); it goes to Quiet when the list next settles. The toast
+   * names it, as any row's Mark read does. Nothing to undo.
+   */
+  const seenStaysPut = (row: InboxListRow) => {
+    const { lead, detail } = markReadToast(row, 'held');
+    showToast({ lead, detail, icon: 'check' });
+  };
+
+  /**
    * Mark read on a seen update the list still holds in New (markRead.ts
-   * `seenHeldInNew`): the thread is already Quiet on the server, so nothing is
-   * written; its row moves to Quiet now, sliding as the row's hover Mark read
-   * does. Undo puts it back where it was drawn.
+   * `seenHeldInNew`) beside an open thread: the thread is already Quiet on the
+   * server, so nothing is written; its row moves to Quiet now, with the
+   * settle's slide. Undo puts it back where it was drawn.
    */
   const moveSeenToQuiet = (threadId: string, row: InboxListRow) => {
     const before = shownRef.current;
@@ -3123,13 +3177,15 @@ function Inbox() {
       say('Already unread.');
       return;
     }
-    await afterWrite();
-    if (routeRef.current.thread === threadId) {
+    await afterWrite([threadId]);
+    // The open thread closes and the list settles with its row in New; any other row is bold where it is (R7).
+    const wasOpen = routeRef.current.thread === threadId;
+    if (wasOpen) {
       if (fromCard) backToCard();
       else close({ ...routeRef.current, thread: null, file: null });
     }
     showToast({
-      ...markUnreadToast(before ?? { subject: null }),
+      ...markUnreadToast(before ?? { subject: null }, wasOpen),
       icon: 'unread',
       onUndo: () => {
         dismissToast();
@@ -3140,7 +3196,7 @@ function Inbox() {
             showError(cause);
             return;
           }
-          await afterWrite();
+          await afterWrite([threadId]);
           say('Read again.');
         })();
       },
@@ -3163,7 +3219,7 @@ function Inbox() {
       await afterWrite();
       return;
     }
-    await afterWrite();
+    await afterWrite([threadId]);
     if (!on) {
       dismissToast();
       say('Looks good taken back.');
@@ -3219,12 +3275,13 @@ function Inbox() {
     // The list leaves archived threads out (Settings lists them). While the
     // thread is open its row stays where it is, shown archived; it goes when
     // the person leaves the thread.
-    // A row archived from its menu while another thread is open does the same (the list holds still).
-    if (next && routeRef.current.thread !== null) {
+    // A row archived from its menu does the same, another thread open or none (the list holds still; approval
+    // "inbox-list-view", R7): it goes when the list next settles.
+    if (next) {
       const at = new Date().toISOString();
       setShown((current) => (current ? markHeldRowArchived(current, threadId, at) : current));
     }
-    await afterWrite();
+    await afterWrite([threadId]);
     if (next) {
       // The thread's foot says the next message starts a new thread.
       // From a row's menu, a thread that is not the open one: the subject says which (as Mark read's toast).
@@ -3256,16 +3313,15 @@ function Inbox() {
       showError(cause);
       return;
     }
-    await afterWrite();
+    await afterWrite([threadId]);
   };
 
   /**
    * Snooze a thread, from its row's menu, the thread header's clock or a
    * phone's ⋯ (approval "inbox-snooze"). The row leaves its section at once
    * (the owner, 2026-11-03: "ideally when snoozing they would move in the list
-   * after i snooze it"): with no thread open the write's read moves it, as
-   * Mark read's does; with one open beside the list, only this row moves
-   * (`moveSnoozedRow`) and the rest of the list holds still. The toast says
+   * after i snooze it"): only this row moves (`moveSnoozedRow`), a thread open
+   * beside the list or none, and the rest of the list holds still. The toast says
    * when it comes back; its Undo puts back exactly what was there, an earlier
    * snooze included, and the row with it.
    */
@@ -3298,19 +3354,21 @@ function Inbox() {
     });
   };
   /**
-   * The person's own snooze while a thread is open beside the list: that one
-   * row goes to the Snoozed band now (held.ts `settleThread`), fading from its
-   * place while the rows below slide up (settle.ts; nothing moves under
-   * reduced motion). Every other row holds, and agent activity stays behind
-   * "N new". Nothing to do with no thread open (the write's read adopted the
-   * list) or where the thread covers the list (Back moves it, `settlesOnBack`).
+   * The person's own snooze while the list is on screen (a thread open beside
+   * it, or none): that one row goes to the Snoozed band now (held.ts
+   * `settleThread`), fading from its place while the rows below slide up
+   * (settle.ts; nothing moves under reduced motion). Every other row holds,
+   * and agent activity stays behind "N new" (a write's read never adopts,
+   * approval "inbox-list-view", R7). Nothing to do where the thread covers
+   * the list (Back moves it, `settlesOnBack`).
    * Only a row the read shows snoozed moves: a write a linked machine's outbox
    * holds has not snoozed anything yet. Returns the list as drawn before, for
    * Undo, or null when nothing moved.
    */
   const moveSnoozedRow = (threadId: string): InboxListSection[] | null => {
     const drawn = shownRef.current;
-    if (!routeRef.current.thread || listCovered() || !drawn || !latestRef.current) return null;
+    // With no thread open the list is on screen and a write's read never moves a row (R7), so this one moves here.
+    if ((routeRef.current.thread && listCovered()) || !drawn || !latestRef.current) return null;
     if (drawnSection(drawn, threadId) === null || !rowOf(threadId)?.snoozed) return null;
     const groups = listGroups(latestRef.current);
     armSlide();
@@ -3337,17 +3395,27 @@ function Inbox() {
   };
   /**
    * A row this window's own snooze moved (`moveSnoozedRow`) whose snooze then
-   * changed, the thread still open beside the list: unsnoozed, it goes back
-   * between the neighbours it had (held.ts `putRowBack`), in its state as it is
-   * now; snoozed again, it takes its place in the band. Nothing once the list
-   * has settled since (`snoozeMoved` is emptied then) or with no thread open
-   * (the write's read adopted the list).
+   * changed, the list still on screen: unsnoozed, it goes back between the
+   * neighbours it had (held.ts `putRowBack`), in its state as it is now;
+   * snoozed again, it takes its place in the band. Nothing once the list has
+   * settled since (`snoozeMoved` is emptied then) or where a thread covers it.
    */
   const putSnoozedRowBack = (threadId: string, drawnBefore: InboxListSection[] | null) => {
     const now = rowOf(threadId);
-    if (!drawnBefore || !now || !routeRef.current.thread || listCovered() || drawnSection(shownRef.current, threadId) !== 'snoozed') return;
+    if (!drawnBefore || !now || (routeRef.current.thread && listCovered()) || drawnSection(shownRef.current, threadId) !== 'snoozed') return;
     armSlide();
     setShown((current) => (current ? (now.snoozed ? settleThread(current, listGroups(latestRef.current!), threadId) : putRowBack(replaceHeldRow(current, now), drawnBefore, threadId)) : current));
+  };
+  /**
+   * One row to where the latest read puts it, the rest of the list held (held.ts `settleThread`), with the settle's
+   * slide. False when the list on screen has no row for it.
+   */
+  const moveRowAlone = (threadId: string): boolean => {
+    if (!latestRef.current || drawnSection(shownRef.current, threadId) === null) return false;
+    const groups = listGroups(latestRef.current);
+    armSlide();
+    setShown((current) => (current ? settleThread(current, groups, threadId) : current));
+    return true;
   };
   /**
    * Unsnooze: the thread is back in its section now. A row this window's own
@@ -3367,8 +3435,10 @@ function Inbox() {
       return;
     }
     snoozeMoved.current.delete(threadId);
-    await afterWrite();
+    await afterWrite([threadId]);
     putSnoozedRowBack(threadId, drawnBefore);
+    // With no thread open the row comes back to its section now (a write's read no longer adopts the list, R7).
+    const cameBack = !drawnBefore && !routeRef.current.thread && moveRowAlone(threadId);
     showToast({
       icon: 'clock',
       lead: 'Unsnoozed',
@@ -3377,7 +3447,7 @@ function Inbox() {
         ? () => {
             dismissToast();
             void restoreSnooze(threadId, earlier).then(() => {
-              if (!drawnBefore) return;
+              if (!drawnBefore && !cameBack) return;
               const moved = moveSnoozedRow(threadId);
               if (moved) snoozeMoved.current.set(threadId, moved);
             });
@@ -3524,16 +3594,15 @@ function Inbox() {
    * The project menu (design record "inbox-project-menu", approved
    * 2026-10-14): Mark all as read and Archive all on one project, each one
    * batch on the server, with one Undo for the batch (the toast, `Z`). The
-   * same held-order rules as the single actions: with a thread open the
-   * rows show their new state in place and the list settles when it closes;
-   * with none open the rows slide to their places. A project left with
+   * same held-order rules as the single actions: the rows show their new
+   * state in place, a thread open or none, and take their places when the
+   * list next settles (approval "inbox-list-view", R7). A project left with
    * nothing listed leaves the sidebar (the one the list shows stays until
    * the person leaves it).
    */
   const projectAction = async (projectId: string, action: ProjectAction) => {
     const name = latestRef.current?.projects.find((p) => p.id === projectId)?.name ?? 'the project';
     const before = (latestRef.current?.sections ?? []).flatMap((section) => section.threads).filter((row) => row.project.id === projectId);
-    const openThread = routeRef.current.thread;
     let taken: string[];
     let undo: () => Promise<unknown>;
     /** The batch stopped partway: Undo still covers what it changed, and the toast says the rest did not change. */
@@ -3550,18 +3619,16 @@ function Inbox() {
         taken = [...answer.batch.resolved, ...answer.batch.read];
         incomplete = answer.error?.message ?? null;
         undo = () => inboxApi.unarchiveProject(projectId, answer.batch);
-        // The list leaves archived threads out; while a thread is open each taken row stays where it is,
-        // shown archived, and goes when the person leaves the thread (as the single Archive does).
-        if (openThread) {
-          const at = new Date().toISOString();
-          setShown((current) => (current ? taken.reduce((sections, id) => markHeldRowArchived(sections, id, at), current) : current));
-        }
+        // The list leaves archived threads out; each taken row stays where it is, shown archived, and goes when the
+        // list next settles (as the single Archive does, a thread open or none).
+        const at = new Date().toISOString();
+        setShown((current) => (current ? taken.reduce((sections, id) => markHeldRowArchived(sections, id, at), current) : current));
       }
     } catch (cause) {
       showToast(errorToast(cause, 'The project did not change.'));
       return;
     }
-    await afterWrite();
+    await afterWrite(taken);
     if (taken.length === 0) {
       if (incomplete) showToast({ icon: 'warn', lead: `${name} did not change`, detail: incomplete, wrap: true });
       else say(action === 'read' ? `Nothing in ${name} waits on you.` : `Nothing in ${name} to archive.`);
@@ -3581,7 +3648,7 @@ function Inbox() {
             showToast(errorToast(cause, 'The project did not change.'));
             return;
           }
-          await afterWrite();
+          await afterWrite(taken);
           dismissToast();
           say('Moved back.');
         })();
@@ -4271,6 +4338,11 @@ function Inbox() {
     (sections: readonly InboxListSection[]) => filterMachineRows(filterSections(sections, route.project), machines, filterMachine?.id ?? null, hideAway),
     [route.project, machines, filterMachine, hideAway],
   );
+  /** The list's sections as drawn, kept between renders that change none of it (InboxList's List memo reads them). */
+  const listSections = useMemo(() => {
+    const drawn = listShown ?? shown;
+    return drawn ? filterList(drawn) : null;
+  }, [listShown, shown, filterList]);
   // The list's name: Inbox, or the project's window name (or the machine's); its back buttons read the same.
   const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : 'Inbox';
   const heldNews = shown && latest ? heldNotice(filterList(shown), filterList(latestGroups), openedHere.current, heldOpen(), projectNames) : null;
@@ -4452,6 +4524,41 @@ function Inbox() {
     on: settings?.steps?.on === true,
     onStepsOn: () => setSettings((current) => (current ? { ...current, steps: { on: true } } : current)),
   });
+  // The List view's choice, registered with the line (approval "inbox-one-time-dialogs", the change; reveal.ts
+  // `useLineReveal`): armed while it is `reveal.next`, or in `reveal.ahead` (it goes at its own moment, ahead of the
+  // other offers), back on the list with no thread open, once the list is taller than the screen, on Smart groups.
+  const [listView, setListView] = useListView();
+  const listViewThread = route.page === 'inbox' ? (route.thread ?? null) : null;
+  const listViewReveal = useLineReveal({
+    id: 'list_view',
+    due: snoozeIntroLatch.current?.next === 'list_view' || (snoozeIntroLatch.current?.ahead.includes('list_view') ?? false),
+    blocked: revealBlocked,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: listViewThread,
+    // Only on the list itself: never over a thread (nor a phone's thread) opened after the claim.
+    clear: listIntroClear && listViewThread === null,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    leaveCounts: (_visit, _now, _row, next) => listViewRevealLeaveCounts(next),
+    mayClaim: (pageAge) =>
+      listViewRevealMayClaim(
+        {
+          listLoaded: snoozeIntroLatch.current !== null,
+          firstRun,
+          grouped: listView === 'grouped',
+          taller: listTallerThanScreen(listBody(rootRef.current)),
+        },
+        pageAge,
+      ),
+    // Simple list picked meanwhile (the ⋮ menu): nothing to offer.
+    holds: () => listView === 'grouped',
+  });
+  const listViewIntroOpen = listViewReveal.stage === 'open';
+  const listViewChoiceOpen = listViewIntroOpen && shown !== null;
+  // The choice's two pictures: the person's own list as the groups draw it, and as the Simple list draws it.
+  const listViewChoiceGroups: ListIntroGroup[] = listViewChoiceOpen && shown ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 8) }] : [])) : [];
+  const listViewChoiceFlat = listViewChoiceOpen && shown ? flatRows(filterList(shown), null, { epoch: 0, keep: null }).rows.slice(0, 10) : [];
   /** A reveal's "Turn it on" (revealTurnOn.ts): Settings' own save; not saved, the switch goes back off and a toast says so. */
   const turnOnFromReveal = (feature: RevealFeature, close: () => void) =>
     void turnOnRevealFeature(feature, close, {
@@ -4516,7 +4623,9 @@ function Inbox() {
     boardReveal.stage !== 'open' &&
     boardReveal.stage !== 'claimed' &&
     stepsReveal.stage !== 'open' &&
-    stepsReveal.stage !== 'claimed';
+    stepsReveal.stage !== 'claimed' &&
+    listViewReveal.stage !== 'open' &&
+    listViewReveal.stage !== 'claimed';
   const listIntroGroups: ListIntroGroup[] =
     listIntro === 'open' && shown
       ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 12) }] : []))
@@ -5675,7 +5784,8 @@ function Inbox() {
           // One project's list: its window name, the path beside it.
           title={listTitle}
           path={filterProject ? tildePath(filterProject.root, settings?.home) : null}
-          sections={filterList(listShown ?? shown)}
+          sections={listSections ?? filterList(listShown ?? shown)}
+          sort={listSort}
           filtered={filterProject !== null}
           projectNames={projectNames}
           machines={machines}
@@ -6199,6 +6309,27 @@ function Inbox() {
             stepsReveal.close();
           }}
           onTurnOn={() => turnOnFromReveal('steps', stepsReveal.close)}
+        />
+      )}
+      {listViewChoiceOpen && (
+        <ListViewIntro
+          groups={listViewChoiceGroups}
+          flat={listViewChoiceFlat}
+          look={readListLook()}
+          awayMachines={machines.away}
+          projectNames={projectNames}
+          phone={phone}
+          current={listView}
+          onSmart={listViewReveal.close}
+          onDismiss={() => {
+            // Escape or a click outside: Not now for the line (the next dialog waits three days).
+            void inboxApi.revealNotNow('list_view');
+            listViewReveal.close();
+          }}
+          onSimple={() => {
+            setListView('list');
+            listViewReveal.close();
+          }}
         />
       )}
       {voiceIntro.stage === 'open' && (
