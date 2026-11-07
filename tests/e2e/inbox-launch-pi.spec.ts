@@ -338,7 +338,8 @@ test('Stop, then Copy attach command: the Terminal\'s Pi takes the replies throu
     fake.configure({ hold: false });
     await p.locator('[data-thread-more]').click();
     await page.locator('[data-launch-item="attach"]').click();
-    await expect(page.getByText('the attach command')).toBeVisible();
+    // The toast only: the screen-reader live region repeats its words a moment later.
+    await expect(page.locator('[data-inbox-toast]')).toContainText('the attach command');
     const command = await page.evaluate(() => navigator.clipboard.readText());
     expect(command.startsWith('/bin/sh -c ')).toBe(true);
     // What the person runs in Terminal, run here in their shell: the fake on PATH and none of the Inbox's env.
