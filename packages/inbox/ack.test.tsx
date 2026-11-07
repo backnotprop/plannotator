@@ -24,6 +24,7 @@ import { join, resolve } from 'node:path';
 import type { InboxListSection, InboxMessageWire } from '@plannotator/core/inbox-types';
 import type { RecipientConnection } from './deliveryLine';
 import { tooltipOf } from './testing/tooltip';
+import { resetListGroupsForTests } from './listGroups';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
@@ -133,6 +134,8 @@ afterEach(() => {
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
+  // Which groups are closed is kept for the page (listGroups.ts): each test starts with Quiet and Snoozed closed.
+  resetListGroupsForTests();
   root = null;
   host = null;
   globalThis.fetch = savedFetch;

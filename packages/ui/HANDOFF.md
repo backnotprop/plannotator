@@ -2580,6 +2580,7 @@ Approval "inbox-decision-mode", agent contract lines (2026-10-24). All optional 
 ## `QuestionPictureTiles` (published in ui 0.54.0; additive, the card unchanged)
 
 - **`QuestionPictureTiles`** (exported from `components/blocks/QuestionBlock`): the question card's picture-choice tile grid as a component of its own, so a host that draws its own decision surface draws the same tile (the Plannotator Inbox's decision mode does). Props: `choices` (`QuestionPictureTileChoice`: `label`, `description?`, `recommended?`, `image?`), `urls` (each choice's resolved picture URL, null for none), `selected`, `inputType` (`radio` / `checkbox`), `name`, `readOnly?`, `onPick(label, checked)` (the tile's input changed: the picture and the label pick through it), `onZoom?(url, alt)` (the separate zoom button; absent, no button; it never picks), `onPictureError?`, `heldTitle?`, `renderText(text)`, and host seams `labelProps?(label)`, `inputProps?(label)` (the card passes its drag guard; decision mode answers on a click or Enter) `renderBadges?(choice, index)` (default: the Recommended tag) and `pictureBadge?(choice)` (a label over the picture, see above). New hooks for host CSS: `[data-question-tile-recommended]`, `[data-question-tile-picture]`, `[data-question-tile-caption]`, `[data-question-tile-label]`, `[data-question-tile-description]`. The card draws exactly what it drew before (same classes and attributes, plus those hooks).
+- **Picture choice layout facts (additive).** `QuestionBlock` takes an optional **`pictureSize?: (url) => { width, height } | null`** (`Viewer` / `BlockRenderer` `questionPictureSize`; `QuestionPictureTiles` `pictureSize?(index)`, asked loaded or not, so a picture that fails keeps its shape): a picture's size in pixels when the host knows it before the picture loads. Absent, or null, nothing changes. The tiles now also carry facts a host's CSS can lay them out from, and draw nothing differently without such CSS: on the grid `[data-question-tiles-count]`, `[data-question-tiles-shape]` (`tall` / `pano` / `wide` / `mixed`), `[data-question-tiles-words]` (`short` / `medium` / `long` / `essay`) and `[data-question-tiles-bare]`; on a tile `[data-question-tile-shape]` (`pano` / `wide` / `square` / `tall` / `scroll`, only with a known size, kept when the picture fails) and `[data-question-tile-no-picture]`; on the picture box the custom properties `--question-picture-ratio` and `--question-picture-width`; on a picture that failed to load (not a held one) `[data-question-picture-failed]`. The rules behind them are exported from `components/blocks/questionPictureLayout` (`questionPictureShape`, `questionPicturesShape`, `questionChoiceWords`, `drawnTextColumns`). The Plannotator Inbox passes the size it recorded at send time and draws its "Adaptive" layout from these hooks in `inbox.css` (shipped as `inbox-thread.css`), so a Workspaces thread that uses that stylesheet and passes `questionPictureSize` gets the same layout.
 
 ## Hover cards outside the Inbox: `onlyWithData`, `RefHoverCards`, `refCardRouteTransport` (published in ui 0.54.0; additive, no core change)
 
@@ -2756,7 +2757,14 @@ Optional seams, so a host can put its own control beside a file a board or a mes
 
 - `ShapeHost.fileAction?(id, { path, line? })`: drawn in the References row and bubble, the Code view's file cards and planned files, the whole-file head, the file popout and the diff popout. `ShapeCodeGuideProps.fileAction?(path)` is the same slot on `ShapeCodeGuide`.
 - `CodeFilePopout`'s `headerAction?: ReactNode`, before the line count.
-- `LocalLinkResolution`'s `unavailable` result takes `after?: ReactNode`, drawn after the inert link.
+- `LocalLinkResolution`'s `unavailable` result takes `after?: ReactNode`, drawn after the inert link. It still works as before, and is now marked deprecated.
+- `LocalLinkResolution`'s `unavailable` result also takes `wrap?: (text: ReactNode) => ReactNode`: the host draws the inert link's text itself (a hover of its own), and decides when `title` shows. With `wrap`, the default tooltip is not drawn. `after` is still drawn after it when both are given.
+- `CodeSnippetPreview` takes `actions` (a host's controls in its header), `container` (where it portals; the body by default), `sheet` (a sheet from the bottom edge over a scrim, whose click calls `onDismiss`) and `windowRef`.
+- `CodeSnippetPreview` changes that every host sees, with none of the new props:
+  - Its height is capped at the room on the side it opens to (at most 300 px, as before), so a window near the screen's edge scrolls instead of running off the screen.
+  - Scrolling inside its own code no longer calls `onDismiss`. A scroll anywhere else still does.
+  - A long file name in the header is cut with an ellipsis, and the line count beside it stays whole.
+  - With `actions` (or `sheet`), the window has `role="dialog"` and the file name as its `aria-label`. Without them it has no role, as before.
 - `CodeSpanContext` (in `components/LocalLinkContext`): a `(text, code) => ReactNode` wrap for an inline code span that names a code file, in `InlineMarkdown` and in a board's own text (`ShapeInline`). Without a provider the span draws as before. `ShapeSurface` stops passing it on while the board is annotating.
 - `DropdownMenuContent` takes `anchor`, for a menu opened from something that is not its trigger.
 
@@ -2812,3 +2820,22 @@ New classes: `.shp-title-row`, `.shp-head-side`, `.shp-drawing`, `.shp-finished`
 - **`ShapeGrid` / `ShapeThumb`** (approval `shape-landing-grid`): every board as a card (a scaled Picture, the title, `project · when`, a dot while it changed), newest first; `filterShapeItems` is its title-or-project match and `shapeAgo` its time words. `ShapeThumb` fills the box you give it (give it a height). A drawing's `#…` link scrolls inside the drawing and never changes the page's hash; an https link opens a new tab; any other link does nothing.
 - **`@plannotator/ui/shape.css`**: the board's styles (`shp-` classes, theme variables only, light and dark, reduced motion). Plain CSS: import it next to your theme.
 - **Seams it needed, all opt-in (absent = unchanged):** `CommentPopover` `submitLabel`, `askAILabel`; `CodeFileView` `onAskAnnotation`, `commentSubmitLabel`, `commentAskLabel`.
+
+## Shape: dark contrast (unreleased; additive)
+
+Shape boards can now show any picture: a file on this computer or a web picture, which `plannotator shape update` copies into the board's `files/` (#2756). The board itself still names only `files/<name>`. Nothing changes in the allowlist or in how `resolveSrc` / `assetUrl` resolve a picture.
+
+**`darkContrast` on `ShapeSurface` and `ShapeDrawn` (default off: the board is drawn as written, in both themes, as before).** Plannotator passes it from `ShapeBoard`. It acts on a dark board only. On a light board it sets nothing: the DOM and the pixels are the same as without it. The rule is in `components/shape/darkContrast.ts`.
+
+What it does on a dark board (`.board.dark-hold`):
+- Box borders (`--rule`) reach 3:1 against the paper, a box (`--surface`) and every zone fill (WCAG 1.4.11).
+- A box (`--surface`) reaches 1.25:1 against the paper and every zone fill. It gets lighter, or darker where the palette's box is already darker than its paper.
+- A zone that draws no line of its own (an SVG shape or an HTML box filled with `--blue-soft` and the like) gets a 1.5 px edge in its own hue (`--shp-edge-<zone>`, `data-shp-edge`). The edge is 3:1 against the paper and its fill.
+- Words: the ink and `--grey` keep at least the contrast they had on a box, up to 7:1.
+- Each kept SVG picture (`files/…`) gets a light tile (`rect.shp-pic-tile`, `#e4e6ea`) before it, with its `transform` and `data-step`. An `<img>` gets the same from CSS, with `object-fit: contain`. The tile skips a picture that the drawing clips or masks, a picture inside `defs`/`pattern`/`symbol`/`mask`, one with no plain size, and a `data:` image (a built-in logo's).
+
+How it runs:
+- Each value starts from the colour the board resolves now and moves in OKLab, only as far as it must. A colour that already holds stays as it is.
+- The pass reruns when the html element's `class`, `style` or `data-theme` changes and a theme token really changed, and when the system's light/dark changes. It runs in the next frame, after any other pass on the same mutation.
+- It sets inline variables on `.board` and puts back any inline value it replaced when it is taken back.
+- With #2721 (palette contrast, `holdShapeContrast`): that pass fixes zone colours, `--grey`, `--ink2`, `--mark`, `--alert` and the `-soft` fills against the ink. This pass reads the result as its starting point and adds what #2721 does not cover: `--rule`, `--surface`, zone edges and picture tiles. #2721 lifts `--grey` to 4.5:1, and this pass only lifts it further, so the two never pull a value in opposite directions.

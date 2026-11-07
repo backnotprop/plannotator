@@ -1,4 +1,5 @@
 #!/bin/bash
+# Manual QA: runs with your real HOME and Plannotator config on purpose. For an isolated test run, use `bun run test:sandbox`.
 # Test script for issue #704: loose list items with blank-line-separated
 # continuation content should render indented under their parent bullet.
 #

@@ -325,6 +325,10 @@ export interface ViewerProps {
    *  `QuestionBlock` `onZoomChoice`). Absent: the zoom opens the picture
    *  through `onImageClick`, as before. */
   onQuestionPictureZoom?: (key: string, index: number, url: string, alt: string) => void;
+  /** A picture choice's size in pixels, given the URL its picture loads from,
+   *  when the host knows it before the picture loads (see `QuestionBlock`
+   *  `pictureSize`). Absent: unknown, and nothing changes. */
+  questionPictureSize?: (url: string) => { width: number; height: number } | null;
   /** Makes a question's "Records a decision" tag a toggle button
    *  (`aria-pressed`); a click calls this with the question's key and the
    *  next state, which the host stores and returns from
@@ -847,6 +851,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   questionPictureChoices = true,
   questionPictureBadge,
   onQuestionPictureZoom,
+  questionPictureSize,
   onToggleQuestionDecisionRecording,
   onOpenQuestionDecision,
   questionDecisionLocked,
@@ -2017,6 +2022,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   questionPictureChoices={questionPictureChoices}
                   questionPictureBadge={questionPictureBadge}
                   onQuestionPictureZoom={onQuestionPictureZoom}
+                  questionPictureSize={questionPictureSize}
                 />
               );
               // `textComments`: a question card's words are not commented on

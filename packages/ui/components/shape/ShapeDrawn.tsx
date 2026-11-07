@@ -14,6 +14,7 @@ import DOMPurify from 'dompurify';
 import {
   parseShapeCodeTarget,
   shapeCssProblems,
+  shapeKeepSvgWhole,
   shapeLinkUrl,
   shapePaintAllowed,
   shapeUrlAllowed,
@@ -26,12 +27,16 @@ import {
 } from '@plannotator/core/shape';
 import { useReducedMotion } from './Pebble';
 import { syncKeptBoxes, type KeptBox } from './boxSelect';
+import { holdDarkBoard, releaseDarkBoard } from './darkContrast';
 
-/** A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first. */
-function resolveFiles(html: string, resolve: ((src: string) => string) | undefined): string {
-  if (!resolve) return html;
+/**
+ * A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first.
+ * `tile`: each also carries `data-shp-pic`, for `darkContrast`'s picture tiles.
+ */
+function resolveFiles(html: string, resolve: ((src: string) => string) | undefined, tile = false): string {
+  if (!resolve && !tile) return html;
   const attr = (url: string) => url.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-  return html.replace(/(<(?:img|image)\b[^>]*?\s(?:src|href)=")(files\/[^"]+)"/gi, (_, head: string, src: string) => `${head}${attr(resolve(src))}"`);
+  return html.replace(/(<(?:img|image)\b)([^>]*?\s(?:src|href)=")(files\/[^"]+)"/gi, (_, open: string, head: string, src: string) => `${open}${tile ? ' data-shp-pic' : ''}${head}${resolve ? attr(resolve(src)) : src}"`);
 }
 
 export interface MarkState {
@@ -96,6 +101,15 @@ svg .t-acc { fill: var(--mark); } svg .t-grey { fill: var(--grey); } svg .t-ink2
 a { color: var(--mark); text-decoration: none; }
 img { max-width: 100%; }
 svg .obj { filter: drop-shadow(0 3px 10px rgb(0 0 0 / .18)); }
+/* darkContrast, on a dark board only (.dark-hold, set by holdDarkBoard): a zone with no line of its own gets an edge in its hue, and a kept picture sits on a light tile. A light board gets none of it. */
+.board.dark-hold [data-shp-edge] { stroke-width: 1.5px; box-shadow: inset 0 0 0 1.5px var(--shp-edge); }
+.board.dark-hold [data-shp-edge="blue"] { stroke: var(--shp-edge-blue); --shp-edge: var(--shp-edge-blue); }
+.board.dark-hold [data-shp-edge="amber"] { stroke: var(--shp-edge-amber); --shp-edge: var(--shp-edge-amber); }
+.board.dark-hold [data-shp-edge="green"] { stroke: var(--shp-edge-green); --shp-edge: var(--shp-edge-green); }
+.board.dark-hold [data-shp-edge="plum"] { stroke: var(--shp-edge-plum); --shp-edge: var(--shp-edge-plum); }
+.board.dark-hold [data-shp-edge="alert"] { stroke: var(--shp-edge-alert); --shp-edge: var(--shp-edge-alert); }
+.board.dark-hold .shp-pic-tile { fill: #e4e6ea; stroke: none; }
+.board.dark-hold img[data-shp-pic] { background: #e4e6ea; padding: 6px; border-radius: 10px; box-sizing: border-box; object-fit: contain; }
 .if-dark { opacity: var(--shp-is-dark, 0); } .if-light { opacity: calc(1 - var(--shp-is-dark, 0)); }
 
 /* Draw: parts arrive in step order; lines draw on. */
@@ -160,6 +174,9 @@ svg .obj { filter: drop-shadow(0 3px 10px rgb(0 0 0 / .18)); }
 .shp-rb.own.flash { animation: shp-rb-own-flash 1.2s ease-out; }
 @keyframes shp-rb-own-flash { 0%, 40% { transform: scale(1.3); } 100% { transform: none; } }
 @media (prefers-reduced-motion: reduce) { .shp-rb.own, .shp-rb.own:hover, .shp-rb.own.lit { transform: none; transition: none; } .shp-rb.own.flash { animation: none; } }
+/* A number in an SVG's words. */
+svg tspan.shp-rb { display: inline; fill: var(--mark); }
+svg tspan.shp-rb:hover, svg tspan.shp-rb.lit { text-decoration: underline; }
 /* A finger needs more than 16 px. */
 @media (pointer: coarse) { .shp-rb.own:focus-visible { outline: none; } .board.peek .shp-rb:not(.own) { position: relative; min-width: 22px; height: 22px; font-size: 12px; } .board.peek .shp-rb:not(.own)::after { content: ""; position: absolute; inset: -11px; } }
 `;
@@ -214,7 +231,50 @@ function sanitizer(): ReturnType<typeof DOMPurify> | null {
 /** An agent's drawing, made safe: no script, handlers, outside loads, frames or <style>. Empty when this page cannot sanitize. */
 export function sanitizeShapeHtml(html: string): string {
   const p = sanitizer();
-  return p ? p.sanitize(html, CONFIG) : '';
+  return p ? p.sanitize(shapeKeepSvgWhole(html), CONFIG) : '';
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+// Parts of an SVG that are never drawn where they stand.
+const UNDRAWN = new Set(['defs', 'symbol', 'clippath', 'mask', 'marker', 'pattern', 'lineargradient', 'radialgradient', 'filter']);
+const drawnWords = (root: Element): Element[] =>
+  [root, ...root.querySelectorAll('text')].filter((t) => {
+    if (t.localName !== 'text') return false;
+    for (let at: Element | null = t; at && at.namespaceURI === SVG_NS; at = at.parentElement) if (UNDRAWN.has(at.localName.toLowerCase())) return false;
+    return true;
+  });
+
+/**
+ * In SVG only a `<text>` shows words, so an empty number among the shapes
+ * (`<g data-ref="1"/>`) is drawn at the end of the nearest words: those just
+ * before it, else just after it, in its own group first, then in the groups
+ * around it. With no words in the drawing, it goes just after the SVG, as a
+ * bubble. A shape (`<circle data-ref>`) stays where it is: it is the number.
+ */
+function placeNumber(el: Element): Element {
+  const doc = el.ownerDocument;
+  const copy = (spot: Element) => {
+    for (const a of el.attributes) if (a.name === 'class' || a.name.startsWith('data-')) spot.setAttribute(a.name, a.value);
+    el.remove();
+    return spot;
+  };
+  for (let node: Element | null = el; node && node.parentElement?.namespaceURI === SVG_NS; node = node.parentElement) {
+    let words: Element | undefined;
+    for (let at = node.previousElementSibling; at && !words; at = at.previousElementSibling) words = drawnWords(at).pop();
+    for (let at = node.nextElementSibling; at && !words; at = at.nextElementSibling) words = drawnWords(at)[0];
+    if (!words) continue;
+    const spot = copy(doc.createElementNS(SVG_NS, 'tspan'));
+    spot.setAttribute('dx', '5');
+    words.append(spot);
+    return spot;
+  }
+  let svg = el.closest('svg');
+  while (svg?.parentElement?.namespaceURI === SVG_NS) svg = svg.parentElement.closest('svg');
+  if (!svg) return el;
+  const spot = copy(doc.createElement('span'));
+  svg.after(spot);
+  return spot;
 }
 
 const markOf = (path: EventTarget[]) => path.find((t): t is HTMLElement => t instanceof Element && (t as Element).hasAttribute('data-mark')) as HTMLElement | undefined;
@@ -251,6 +311,8 @@ export interface ShapeDrawnProps {
   onCode?: (target: ShapeCodeTarget, el: HTMLElement) => void;
   /** A `files/…` image's URL. */
   resolveSrc?: (src: string) => string;
+  /** On a dark board only: borders, zone edges, boxes and pictures held to contrast (`ShapeSurfaceProps.darkContrast`). Absent: as drawn. */
+  darkContrast?: boolean;
   /** Pointing at marked parts (Change it / Ask). Board only. */
   pinpoint?: boolean;
   /** Select mode: a text selection inside a mark picks it. Board only. */
@@ -267,6 +329,12 @@ export interface ShapeDrawnProps {
   onHoverMark?: (el: HTMLElement | null) => void;
   /** A marked part was chosen; `text` is the selected words in Select mode. */
   onPickMark?: (el: HTMLElement, text?: string) => void;
+  /**
+   * The drawing's `.board`, each time it is drawn afresh (new content, or the
+   * wide and tall layouts swapping), and null once it is gone. For a layer
+   * that works on the drawing itself ("Follow an example").
+   */
+  onBoard?: (board: HTMLElement | null) => void;
 }
 
 /** How much room the view has, for a fixed canvas. */
@@ -322,14 +390,14 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     const root = rootRef.current ?? host.attachShadow({ mode: 'open' });
     rootRef.current = root;
     const safeCss = shapeCssProblems(css).length ? '' : css;
-    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}${handlers.current.onRefPeek ? ' peek' : ''}">${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc)}</div>`;
+    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}${handlers.current.onRefPeek ? ' peek' : ''}">${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc, !!handlers.current.darkContrast)}</div>`;
     const board = root.querySelector<HTMLElement>('.board')!;
     // Steps: the agent's numbers, in order, become 0, 1, 2… however sparse.
     const steps = [...board.querySelectorAll<HTMLElement | SVGElement>('[data-step]')];
     const order = [...new Set(steps.map((el) => Number(el.getAttribute('data-step')) || 0))].sort((a, b) => a - b);
     for (const el of steps) el.style.setProperty('--i', String(order.indexOf(Number(el.getAttribute('data-step')) || 0)));
     for (const el of board.querySelectorAll<HTMLElement>('[data-mark]')) el.classList.add('mk');
-    for (const el of board.querySelectorAll<HTMLElement>('[data-ref]')) {
+    for (let el of board.querySelectorAll<Element>('[data-ref]')) {
       const n = Number(el.getAttribute('data-ref'));
       const ref = (handlers.current.refs ?? []).find((r) => r.n === n);
       if (!ref) {
@@ -337,8 +405,10 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
         continue;
       }
       // Empty: the board draws the number. Not empty: what the agent drew is the number.
-      if (!el.children.length && !el.textContent?.trim()) el.textContent = String(n);
-      else el.classList.add('own');
+      if (!el.children.length && !el.textContent?.trim()) {
+        if (el.namespaceURI === SVG_NS && (el.localName === 'g' || el.localName === 'tspan') && !el.closest('text')) el = placeNumber(el);
+        el.textContent = String(n);
+      } else el.classList.add('own');
       el.classList.add('shp-rb');
       el.setAttribute('role', ref.kind === 'pr' || ref.kind === 'link' ? 'link' : 'button');
       el.setAttribute('tabindex', '0');
@@ -355,7 +425,9 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       }
     }
     setContentKey((x) => x + 1);
+    handlers.current.onBoard?.(board);
   }, [html, css, scaled]);
+  useEffect(() => () => handlers.current.onBoard?.(null), []);
 
   // The canvas scale.
   useLayoutEffect(() => {
@@ -369,6 +441,40 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       board.style.width = board.style.height = board.style.transform = '';
     }
   }, [scaled, k, drawn.width, drawn.height, contentKey]);
+
+  // darkContrast: held on a dark board, again when the theme changes; a light board is left as drawn.
+  const darkContrast = !!props.darkContrast;
+  useLayoutEffect(() => {
+    const board = rootRef.current?.querySelector<HTMLElement>('.board');
+    if (!board) return;
+    if (!darkContrast) return releaseDarkBoard(board);
+    const tokens = () => {
+      const cs = getComputedStyle(board);
+      return ['--shp-paper', '--background', '--foreground', '--card', '--border', '--muted-foreground', '--primary', '--destructive'].map((t) => cs.getPropertyValue(t)).join('|');
+    };
+    let key = tokens();
+    holdDarkBoard(board);
+    let frame = 0;
+    const again = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const now = tokens();
+        if (now === key) return;
+        key = now;
+        holdDarkBoard(board);
+      });
+    };
+    const watch = new MutationObserver(again);
+    watch.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
+    const scheme = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
+    scheme?.addEventListener?.('change', again);
+    return () => {
+      watch.disconnect();
+      cancelAnimationFrame(frame);
+      scheme?.removeEventListener?.('change', again);
+      releaseDarkBoard(board);
+    };
+  }, [darkContrast, contentKey]);
 
   // Motion and mode.
   useLayoutEffect(() => {

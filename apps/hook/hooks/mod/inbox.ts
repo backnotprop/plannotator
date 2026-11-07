@@ -56,7 +56,7 @@
  */
 
 import { bridgeBaseUrl, createBridge, type BridgeHandle } from './bridge'
-import type { Host, HttpResult, LoadedPluginInfo } from './host'
+import { PromptDropped, type Host, type HttpResult, type LoadedPluginInfo } from './host'
 import {
   INBOX_ASK_POLL_FIELD,
   INBOX_BRIDGE_EVENT_PATH,
@@ -70,6 +70,7 @@ import {
   INBOX_STEER_POLLS_POLL_FIELD,
   INBOX_TAGS_POLL_FIELD,
   INBOX_SESSION_LABEL_INPUT_MAX,
+  INBOX_UNDELIVERED_AFTER_MS,
   inboxSentNowFollowUpText,
   inboxHealthPeeks,
   inboxSessionThreadsParams,
@@ -311,8 +312,8 @@ export const INBOX_TICK_MS = 1_000
 const LEASE_EVERY_MS = 5_000
 /** A lease not renewed for this long belongs to a process that exited, slept or hung. */
 export const INBOX_LEASE_STALE_MS = 20_000
-/** A claimed reply whose claimant stopped saying it is alive for this long is reported as undelivered. */
-export const INBOX_UNDELIVERED_AFTER_MS = 60_000
+/** A claimed reply whose claimant stopped saying it is alive for this long is reported as undelivered (shared with the Inbox). */
+export { INBOX_UNDELIVERED_AFTER_MS }
 /**
  * The longest session start waits for a running Inbox's `tools/list`. The
  * person's first prompt waits for session.start, and `$.http.fetch` gives up
@@ -725,11 +726,6 @@ export interface InboxLinkOptions {
   dataDir: string
   sessionId: string
   tools: readonly InboxToolInfo[]
-  /**
-   * The name the engine registered the tool under (`mcp__<server>__plannotator_inbox`),
-   * named in the wake's closing line so the model can find the tool. Absent: `plannotator_inbox`.
-   */
-  toolName?: string
   /** A turn is running (or a question of Ask this session is in flight). */
   isBusy: () => boolean
   /**
@@ -806,6 +802,12 @@ export class InboxLink {
   /** The `alive` refresh in flight, which `release` waits for so no write lands in a claim it removed. */
   private aliveRefresh: Promise<void> = Promise.resolve()
   private delivering = false
+  /**
+   * Claude Code dropped a wake (`PromptDropped`: the person stopped the
+   * session and nobody has typed since). No delivery is tried until the
+   * person's own prompt or a turn start says input moves again.
+   */
+  private heldForInput = false
   /** When this link started (the session, near enough), and the turn state last told the Inbox (step 8). */
   private startedAt = 0
   /** The last title that was known; what a poll repeats when it is not. */
@@ -899,6 +901,7 @@ export class InboxLink {
    */
   onForeignPrompt(prompt: { turnId?: string; originKind?: string }): void {
     if (!prompt.turnId) this.idleTicks = 0
+    this.heldForInput = false
     if (prompt.originKind === 'composer') void this.touch()
   }
 
@@ -1039,7 +1042,7 @@ export class InboxLink {
       this.idleTicks < 2 &&
       [...this.pending.values()].some((command) => command.now === true && !this.noSteer.has(command.id)) &&
       (this.steerableTurn() !== null || !this.options.isBusy())
-    if (!this.delivering && this.pending.size > 0 && (this.idleTicks >= 2 || urgent)) {
+    if (!this.delivering && !this.heldForInput && this.pending.size > 0 && (this.idleTicks >= 2 || urgent)) {
       this.delivering = true
       void this.deliverNext(urgent).finally(() => {
         this.delivering = false
@@ -1088,6 +1091,11 @@ export class InboxLink {
       engine: this.host.engineVersion ? await this.host.engineVersion().catch(() => null) : null,
     }))()
     return this.loaded
+  }
+
+  /** A main-loop turn started: whatever held this session's input has let go. */
+  onMainTurnStart(): void {
+    this.heldForInput = false
   }
 
   /** A main-loop model request of `turnId` is going out: the replies put into that turn are in it. */
@@ -1294,6 +1302,7 @@ export class InboxLink {
     // another process delivered it.
     const fresh = await this.pendingNow(0)
     if (fresh === null) return
+    // The same reply as this poll words it: a reply that waited through a turn says what the thread holds now.
     // What the Inbox says now is what goes in: a reply can have moved here since it was first handed out.
     const command = fresh.find((candidate) => candidate.id === waiting.id)
     if (!command) {
@@ -1330,7 +1339,7 @@ export class InboxLink {
       if (turn) {
         // Send now while Claude works: a user row in the running turn, read at its next model request.
         try {
-          await this.host.appendUserRow!(inboxWakeText(command, this.options.toolName))
+          await this.host.appendUserRow!(inboxWakeText(command))
         } catch (error) {
           // Refused: nothing entered, so the claim is given back and it is delivered when the session is idle
           // (here or in the process the person moves to), the window reads it as queued again, and Send now
@@ -1352,10 +1361,19 @@ export class InboxLink {
           .catch(() => undefined)
       } else {
         // Resolves once Claude is idle and took the turn.
-        await this.host.submit(inboxWakeText(command, this.options.toolName))
+        await this.host.submit(inboxWakeText(command))
       }
     } catch (error) {
       this.submitting = null
+      if (error instanceof PromptDropped) {
+        // Claude Code refused the turn (the person stopped the session and has not typed since): nothing went
+        // in, so the claim is given back and the reply stays pending, to go in at the idle after their input.
+        // Held BEFORE the release: input that arrives while it runs must clear the hold, not be overwritten by it.
+        this.heldForInput = true
+        this.host.debug(`inbox: ${command.id} was not taken (${error.reason}); it waits for the person's next input`)
+        await this.release(command.id)
+        return
+      }
       this.settle(command.id)
       await this.host.writeFile(`${dir}/reported`, '1').catch(() => undefined)
       this.host.toast(

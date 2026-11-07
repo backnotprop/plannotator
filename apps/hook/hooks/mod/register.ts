@@ -27,6 +27,8 @@
  *   accounts) sends `classic.PermissionRequest` past this mod, the command
  *   hook is reached; it finds the approval the mod recorded for the call in
  *   flight (plan.ts `PLAN_APPROVALS_DIR`) and allows it without a review (#2007).
+ *   With plan review off (`PLANNOTATOR_PLAN_REVIEW=0` / `{ "planReview": false }`),
+ *   the two ExitPlanMode hooks call next and Claude Code shows its own dialog.
  * - `/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`
  *   (`command.run`): the user's skills keep their names; the mod answers the
  *   command itself, starting the CLI detached with the same arguments, and
@@ -83,8 +85,8 @@
  */
 
 import { PlannotatorMod } from './controller'
-import { resolveAgentToolEnabled, resolveClaudeModEnabled, resolveInboxReminderCustom, resolveInboxReminderEnabled, resolveInboxToolEnabled } from './enabled'
-import type { Host, LoadedPluginInfo } from './host'
+import { resolveAgentToolEnabled, resolveClaudeModEnabled, resolveInboxReminderCustom, resolveInboxReminderEnabled, resolveInboxToolEnabled, resolvePlanReviewEnabled } from './enabled'
+import { submitOrThrow, type Host, type LoadedPluginInfo } from './host'
 import {
   claudeTranscriptPaths,
   conversationResumed,
@@ -109,6 +111,7 @@ import { inboxAgentTool, inboxReminderFor, type InboxToolInfo } from './inbox-co
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
 import { COMMANDS, debugAppendArgv, INBOX_COMMAND, isModCommand, resolveDataDir, waitArgv } from './launch'
 import { PLAN_TOOL } from './plan'
+import { answerRemovalPrompt, isEnvOn, removalAskKey, RemovalAsks } from './skip-rm-prompts'
 import { answerShellCall, SHELL_TOOL, shellTakeOver } from './take-over'
 import { PLANNOTATOR_TOOL_NAME, PLANNOTATOR_TOOL_TAILSCALE_DESCRIPTION, PLANNOTATOR_TOOL_TAILSCALE_INPUT_SCHEMA } from './tool'
 
@@ -196,9 +199,8 @@ function hostOf($: Engine, debugPath: string | null): Host {
     },
     storeGet: (key) => $.store.get(key),
     storeSet: (key, value) => $.store.set(key, value),
-    submit: async (text) => {
-      await $.prompt.submit({ text })
-    },
+    // The engine resolves `{ drop }` for a prompt it refused (Host.submit): that rejects, never reads as a turn.
+    submit: (text) => submitOrThrow(() => $.prompt.submit({ text })),
     // Called only where `sessionAppendAvailable` said the engine has it; a refusal stops Send now here (inbox.ts).
     appendUserRow: async (text) => {
       const stored = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
@@ -271,6 +273,8 @@ interface Allowed {
   debugPath: string | null
   /** Register Claude's `plannotator` tool (the agent tool switch, on by default). */
   agentTool: boolean
+  /** Review ExitPlanMode (`planReview`, on by default). Off: Claude Code's own dialog. */
+  planReview: boolean
   /** Connect to the Plannotator Inbox (the inbox tool switch, on by default). */
   inboxTool: boolean
   /** With the Inbox tool: the one-line reminder at the start of each conversation (`inboxReminder`, on by default). */
@@ -292,6 +296,8 @@ let inboxToolName: string | null = null
 /** `inbox/inbox.json` existed at the first session.start: the person has run the Inbox here (the reminder's gate). */
 let inboxRanHere = false
 let mod: PlannotatorMod | null = null
+/** Recent Bash calls' verdicts, read at their permission prompt (skip-rm-prompts.ts). */
+const removalAsks = new RemovalAsks()
 let switching: Promise<PlannotatorMod | null> | null = null
 
 /**
@@ -529,12 +535,7 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
       // and where a plan's history chain is also looked for (#2197).
       root: async () => String(await $.session.root()),
       label: async () => (await title.read().catch(() => null)) ?? sessionNameOf($, String(sessionId)),
-      ...(inboxTools
-        ? {
-            inboxTools,
-            ...(inboxToolName ? { inboxToolName } : {}),
-          }
-        : {}),
+      ...(inboxTools ? { inboxTools } : {}),
     })
     // A question queued behind the old session's turn still enters as a turn of the new one: the new instance drops it.
     instance.carryQueued(previous)
@@ -581,6 +582,7 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
     dataDir,
     debugPath: debug && debug !== '0' ? `${dataDir}/claude-code-mod/debug.log` : null,
     agentTool: resolveAgentToolEnabled(await $.env.get('PLANNOTATOR_AGENT_TOOL'), configText),
+    planReview: resolvePlanReviewEnabled(await $.env.get('PLANNOTATOR_PLAN_REVIEW'), configText),
     inboxTool: resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminder: resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminderCustom: resolveInboxReminderCustom(configText),
@@ -807,7 +809,7 @@ export function register(on: On) {
       return answerShellCall(instance, input)
     }
     // Only the main loop's ExitPlanMode: a subagent's keeps the classic flow.
-    if (!allowed || e.tool !== PLAN_TOOL || e.agentId) return next(e)
+    if (!allowed?.planReview || e.tool !== PLAN_TOOL || e.agentId) return next(e)
     const instance = await currentMod($)
     if (!instance) return next(e)
     const answer = await instance.onPlanCall({ tool_use_id: e.tool_use_id, plan: e.plan, planFilePath: e.planFilePath })
@@ -828,10 +830,50 @@ export function register(on: On) {
   on('classic.PermissionRequest', { tool_name: PLAN_TOOL }, async ($: Engine, e: any, next: Next) => {
     const instance = mod
     // A subagent's ExitPlanMode keeps the classic hook (its tool.call was not ours).
-    if (!instance || instance.isDisposed || e.tool_name !== PLAN_TOOL || e.agent_id) return next(e)
+    if (!instance || instance.isDisposed || !allowed?.planReview || e.tool_name !== PLAN_TOOL || e.agent_id) return next(e)
     const decision = instance.onPlanPermission(typeof e.tool_use_id === 'string' ? e.tool_use_id : undefined, e.tool_input)
     // Answered here, without next(e): the plugin's own classic command hook
     // below never runs for this call, so it cannot open a second review.
+    return decision ? { decision } : next(e)
+  })
+
+  // CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS (skip-rm-prompts.ts):
+  // Plannotator's plan hook turns the variable off, so where it would have
+  // waived a removal prompt in bypass mode, the mod answers that prompt with
+  // allow. The `tool.check` hook only watches the call's own verdict (which
+  // rule, hook or plugin asked); the person's own rules and hooks, and every
+  // enabled plugin's PreToolUse and PermissionRequest hooks, win.
+  on('tool.check', { tool: SHELL_TOOL }, async ($: Engine, e: any, next: Next) => {
+    const verdict = await next(e)
+    if (!allowed || typeof e.tool_use_id !== 'string') return verdict
+    removalAsks.note(removalAskKey(e.agentId, e.input), verdict)
+    if (allowed.debugPath && verdict?.decision === 'ask' && isEnvOn(await $.env.get('CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS'))) {
+      const by = ['rule', 'hook', 'setting', 'plugin'].filter((key) => verdict[key]).map((key) => `${key} ${verdict[key]}`)
+      hostOf($, allowed.debugPath).debug(`Bash ask (${e.agentId ? 'subagent' : 'main'}): ${String(verdict.reason ?? '').slice(0, 80)}${by.length ? ` [${by.join(', ')}]` : ''}`)
+    }
+    return verdict
+  })
+
+  on('classic.PermissionRequest', { tool_name: SHELL_TOOL }, async ($: Engine, e: any, next: Next) => {
+    if (!allowed || e.tool_name !== SHELL_TOOL) return next(e)
+    const decision = await answerRemovalPrompt(e, removalAsks, {
+      variable: () => $.env.get('CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS'),
+      childSession: () => $.env.get('CLAUDE_CODE_CHILD_SESSION'),
+      settings: () => $.settings.read(),
+      configDir: async () => {
+        const home = await $.env.get('HOME')
+        return (await $.env.get('CLAUDE_CONFIG_DIR')) || (typeof home === 'string' && home ? `${home.replace(/\/+$/, '')}/.claude` : null)
+      },
+      readText: async (path) => {
+        if (!(await $.fs.exists(path))) return null
+        const text = await $.fs.read(path)
+        if (typeof text !== 'string') throw new Error(`unreadable: ${path}`)
+        return text
+      },
+    })
+    if (allowed.debugPath && (decision || isEnvOn(await $.env.get('CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS')))) {
+      hostOf($, allowed.debugPath).debug(`removal prompt (${e.agent_id ? 'subagent' : 'main'}, ${String(e.permission_mode)}): ${decision ? 'allowed, as the variable asks' : 'left to the dialog'}`)
+    }
     return decision ? { decision } : next(e)
   })
 

@@ -114,6 +114,8 @@ export function fontsReady(): Promise<void>; // forgets widths measured before t
 - At rest a sheet fits its pane or window, never past 1:1. Below 0.95 the quiet lines lose their words; below 0.3 every
   line does.
 - A part that opens a scope with sheets is drawn as a plate with a "N sheets inside" cue.
+- CI fetches the drawing's pinned commit (`sources.repos.self.at`) one commit deep before the tests, so the cited paths
+  are checked offline. That fetch costs more as the pinned commit ages; a redraw that refreshes `at` keeps it cheap.
 - `bun run --cwd packages/system demo` serves a page that draws this repo's drawing, for screenshots only:
   `?shot=thumb`, or `?shot=view&sheet=C-001&reading=simple&layout=window|pane`, with `&mode=light`. The change view:
   `?shot=card|change&pr=2543|2563` (with `&open=1` for PR 2563 as an open PR, `&gate=1` for the gate's result alone,
@@ -148,7 +150,7 @@ the same scope.
 - A window's cue, a double click on it, or Enter on it dives in: the camera flies into the box while the inside unrolls
   out of it, and lands on the inside sheet at rest. Zooming into a window does the same through its door. Esc, the
   wheel out, or a crumb above climbs. A second input during a dive turns it round from where it is.
-- The chips name the sheets of the scope (the current one shows its kind); a chip or keys 1 to 9 turn to one. The
+- The chips name the sheets of the scope by kind ("Logical", "Data flow"); a chip or keys 1 to 9 turn to one. The
   parts both sheets draw travel to their new places, the rest fades.
 - The Simple / Full switch moves the parts to the other reading's places: into Simple the lines and words fade first,
   into Full they come back after the parts land.

@@ -27,12 +27,14 @@
  * PLANNOTATOR_E2E_VIDEO=1.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { chromium, expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { inflateSync } from 'node:zlib';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { expectNoBlankFiles } from './on-screen-files';
 import { markTourDecided } from '../helpers/tour-decided';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 
@@ -405,6 +407,35 @@ test('the review card, the full-window review with a comment and a Viewed tick, 
   await page.keyboard.press('Escape');
   await box.fill('');
   expect(world.errors).toEqual([]);
+});
+
+test('a review of 21 small files on a tall window: every file on screen draws, all the way down', async ({ browser }) => {
+  const paths = Array.from({ length: 21 }, (_, i) => `src/small/f${String(i).padStart(2, '0')}.ts`);
+  const review = await world.claude.submitGuide({
+    project_path: world.project,
+    guide: {
+      title: 'Twenty-one small files',
+      intent: 'A rename across small files.',
+      sections: [{ title: 'The rename', overview: 'Each file changes one line.', diffs: paths.map((file) => ({ file, summary: 'One line.' })) }],
+      review: { gitRef: 'main...HEAD', base: 'main' },
+      generator: { engine: 'claude-code', model: 'claude-opus-5' },
+    },
+    patch: paths.map((path, i) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1,2 +1,2 @@\n export const a = 1;\n-export const b = ${i};\n+export const b = ${i + 1};\n`).join(''),
+    body: 'A rename across 21 small files.',
+    review: true,
+  } as never);
+  const context = await browser.newContext({ viewport: { width: 1920, height: 1200 }, colorScheme: 'light' });
+  const page = await context.newPage();
+  try {
+    await page.goto(`${world.url}#thread=${review.thread_id}`);
+    await page.locator('[data-review-card]').getByRole('button', { name: 'Start review' }).click();
+    const pane = page.locator('[data-review-message]');
+    await expect(pane.locator('[data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
+    await expect(pane.locator('[data-guide-file-shell]')).toHaveCount(21);
+    await expectNoBlankFiles(pane.locator('.ib-gbody'));
+  } finally {
+    await context.close();
+  }
 });
 
 test('a phone at 390 px: the switch, the "/" list, the card, the review with a comment, the verdict and the outcome', async ({ browser }) => {
@@ -1098,6 +1129,205 @@ test('the chapter menu after a key press: a quiet ring on its button, none round
   expect(ring.style).toBe('solid');
   expect(ring.width).toBeGreaterThan(0);
   expect(ring.width).toBeLessThan(2);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  expect(world.errors).toEqual([]);
+});
+
+/** A real finger on the page, through the browser's own touch input. */
+async function fingerDrag(page: Page, from: { x: number; y: number }, by: { x: number; y: number }, during: () => Promise<void>): Promise<void> {
+  const touch = await page.context().newCDPSession(page);
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [from] });
+  for (let step = 1; step <= 8; step += 1) {
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: from.x + (by.x * step) / 8, y: from.y + (by.y * step) / 8 }] });
+    await page.waitForTimeout(20);
+  }
+  await during();
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await touch.detach();
+}
+
+test('a long line scrolls sideways in the code by wheel or trackpad, and the page stays put', async () => {
+  const { page, pane, body } = await shortReview('native-bar', 800);
+  await page.setViewportSize({ width: 900, height: 800 });
+  const shell = pane.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
+  const code = shell.locator('[data-code]').first();
+  const scrolled = () => code.evaluate((el) => el.scrollLeft);
+  await expect.poll(() => code.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+  await shell.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  await settled(body);
+
+  const line = (await shell.locator('[data-line-type]').first().boundingBox())!;
+  const shellBox = (await shell.boundingBox())!;
+  const top = await body.evaluate((el) => el.scrollTop);
+  await page.mouse.move(shellBox.x + shellBox.width * 0.7, line.y + 30);
+  await page.mouse.wheel(120, 0);
+  await expect.poll(scrolled).toBeGreaterThan(0);
+  expect(await body.evaluate((el) => el.scrollTop)).toBe(top);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  expect(world.errors).toEqual([]);
+});
+
+test('the library\'s own scrollbar sits whole at the bottom of the file\'s code, and dragging it scrolls the code', async () => {
+  // Scrollbars drawn as on Windows or with "always show" (Playwright's headless hides them): Pierre's bar must take
+  // its room under the last row, inside the file's box. A 15px classic bar that the layout did not count was cut off.
+  const review = await world.claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'native-bar-drawn', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
+  const drawn = await chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'], args: ['--disable-features=OverlayScrollbar'] });
+  try {
+    const page = await drawn.newPage({ viewport: { width: 900, height: 800 } });
+    await page.goto(`${world.url}#thread=${review.thread_id}&guide=${review.message_id}`);
+    const shell = page.locator('[data-review-message] [data-guide-file-shell="src/payouts/retry.ts"]');
+    const code = shell.locator('[data-code]').first();
+    await expect.poll(() => code.evaluate((el) => el.scrollWidth > el.clientWidth), { timeout: 30_000 }).toBe(true);
+    await shell.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await settled(page.locator('[data-review-message] .ib-gbody'));
+    const fit = await shell.evaluate((el) => {
+      const code = el.querySelector('diffs-container')!.shadowRoot!.querySelector('[data-code]') as HTMLElement;
+      const box = el.querySelector('[data-guide-code-view-mounted]')!.getBoundingClientRect();
+      const rect = code.getBoundingClientRect();
+      return { bar: code.offsetHeight - code.clientHeight, below: box.bottom - rect.bottom, left: rect.left, bottom: rect.bottom };
+    });
+    expect(fit.bar).toBeGreaterThan(0);
+    expect(fit.below).toBeGreaterThanOrEqual(0);
+    // The thumb starts at the bar's left end: a drag along the bar scrolls the code.
+    await page.mouse.move(fit.left + 12, fit.bottom - fit.bar / 2);
+    await page.mouse.down();
+    await page.mouse.move(fit.left + 80, fit.bottom - fit.bar / 2, { steps: 5 });
+    await page.mouse.up();
+    await expect.poll(() => code.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+  } finally {
+    await drawn.close();
+  }
+});
+
+test('while a wide file\'s own bar is below the screen, a bar pinned to the pane\'s bottom scrolls it; at the file\'s end it goes', async () => {
+  const review = await world.claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'pinned-bar', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
+  const drawn = await chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'], args: ['--disable-features=OverlayScrollbar'] });
+  try {
+    const page = await drawn.newPage({ viewport: { width: 900, height: 320 } });
+    await page.goto(`${world.url}#thread=${review.thread_id}&guide=${review.message_id}`);
+    const body = page.locator('[data-review-message] .ib-gbody');
+    const shell = page.locator('[data-review-message] [data-guide-file-shell="src/payouts/retry.ts"]');
+    const code = shell.locator('[data-code]').first();
+    await expect.poll(() => code.evaluate((el) => el.scrollWidth > el.clientWidth), { timeout: 30_000 }).toBe(true);
+    const pinned = page.locator('[data-diff-bottom-bar]');
+    // The file's top in view, its end below the pane.
+    await shell.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+    await settled(body);
+    await expect(pinned.first()).toBeVisible();
+    const pane = (await body.boundingBox())!;
+    const bar = (await pinned.first().boundingBox())!;
+    expect(Math.abs(bar.y + bar.height - Math.min(pane.y + pane.height, 320))).toBeLessThanOrEqual(1);
+    await page.mouse.move(bar.x + 10, bar.y + bar.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(bar.x + 90, bar.y + bar.height / 2, { steps: 5 });
+    await page.mouse.up();
+    await expect.poll(() => code.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+    // The file's own bar on screen: no pinned one.
+    await shell.evaluate((el) => el.scrollIntoView({ block: 'end' }));
+    await settled(body);
+    await expect(pinned).toHaveCount(0);
+  } finally {
+    await drawn.close();
+  }
+});
+
+test('a phone: a sideways drag on the code scrolls it, and the page does not move', async ({ browser }) => {
+  const { claude } = world;
+  const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'native-bar-phone', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, colorScheme: 'light', hasTouch: true, isMobile: true });
+  const page = await context.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  try {
+    await page.goto(`${world.url}#thread=${review.thread_id}&guide=${review.message_id}`);
+    const pane = page.locator('[data-review-message]');
+    const body = pane.locator('.ib-gbody');
+    const shell = pane.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
+    const code = shell.locator('[data-code]').first();
+    const scrolled = () => code.evaluate((el) => el.scrollLeft);
+    await expect(shell.locator('[data-line-type]').first()).toBeVisible({ timeout: 30_000 });
+    await shell.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+    await settled(body);
+
+    const shellBox = (await shell.boundingBox())!;
+    const line = (await shell.locator('[data-line-type]').nth(4).boundingBox())!;
+    const top = await body.evaluate((el) => el.scrollTop);
+    await fingerDrag(page, { x: shellBox.x + shellBox.width * 0.8, y: line.y + line.height / 2 }, { x: -170, y: 0 }, async () => {
+      await expect.poll(scrolled).toBeGreaterThan(0);
+      expect(await body.evaluate((el) => el.scrollTop)).toBe(top);
+    });
+    expect(errors).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
+
+/** The colour of one screen pixel. A 1x1 PNG's only pixel comes out of every row filter unchanged. */
+async function pixelAt(page: Page, x: number, y: number): Promise<number[]> {
+  const png = await page.screenshot({ clip: { x: Math.round(x), y: Math.round(y), width: 1, height: 1 }, scale: 'css' });
+  const data: Buffer[] = [];
+  for (let at = 8; at < png.length; ) {
+    const length = png.readUInt32BE(at);
+    if (png.toString('ascii', at + 4, at + 8) === 'IDAT') data.push(png.subarray(at + 8, at + 8 + length));
+    at += 12 + length;
+  }
+  return [...inflateSync(Buffer.concat(data)).subarray(1, 4)];
+}
+
+const sameColour = (a: number[], b: number[]) => a.every((v, i) => Math.abs(v - b[i]) <= 2);
+
+test('each file\'s name sits on the page above its code box: no fill at rest, under the pointer or stuck to the top', async () => {
+  // Approval "review-file-title", take B: the name's row shows the chapter's surface, the code is a box of its own.
+  const { page, pane, body } = await shortReview('file-title', 420);
+  const shell = pane.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
+  // Scrolled into the file: the row is stuck to the pane's top with the code going under it, painted with the surface
+  // beside it (the chapter column's padding, or the page in All files), never see-through.
+  const expectStuckRowIsSurface = async (what: string) => {
+    const title = (await shell.locator('[data-file-header]').boundingBox())!;
+    await body.evaluate((el, by) => { el.scrollTop += by; }, title.y - (await body.boundingBox())!.y + 120);
+    await settled(body);
+    await page.mouse.move(5, 5);
+    const stuck = (await shell.locator('[data-file-header]').boundingBox())!;
+    expect(Math.abs(stuck.y - (await body.boundingBox())!.y)).toBeLessThanOrEqual(1);
+    const beside = await pixelAt(page, (await shell.boundingBox())!.x - 4, stuck.y + stuck.height / 2);
+    expect(sameColour(await pixelAt(page, stuck.x + stuck.width * 0.55, stuck.y + stuck.height / 2), beside), what).toBe(true);
+  };
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await shell.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+    await settled(body);
+    const title = (await shell.locator('[data-file-header]').boundingBox())!;
+    // A blank spot in the row, and the surface just above it (between the summary line and the name).
+    const spot = { x: title.x + title.width * 0.55, y: title.y + title.height / 2 };
+    const surface = await pixelAt(page, spot.x, title.y - 3);
+    await page.mouse.move(5, 5);
+    expect(sameColour(await pixelAt(page, spot.x, spot.y), surface), `${scheme}: the name's row at rest`).toBe(true);
+    await page.mouse.move(spot.x, spot.y);
+    await page.waitForTimeout(250);
+    expect(sameColour(await pixelAt(page, spot.x, spot.y), surface), `${scheme}: the name's row under the pointer`).toBe(true);
+    await page.mouse.move(5, 5);
+    // The code's box: its top-left corner is round (the surface shows just inside the corner of its square), and a
+    // line runs down its left edge, unlike both the surface outside and the gutter inside.
+    const code = await shell.evaluate((el) => {
+      const pre = el.querySelector('diffs-container')!.shadowRoot!.querySelector('pre')!.getBoundingClientRect();
+      return { left: pre.left, top: pre.top, middle: pre.top + pre.height / 2 };
+    });
+    expect(sameColour(await pixelAt(page, code.left + 1.5, code.top + 1.5), surface), `${scheme}: the box's round corner`).toBe(true);
+    const edge = await pixelAt(page, code.left, code.middle);
+    expect(sameColour(edge, await pixelAt(page, code.left - 3, code.middle)), `${scheme}: the box's edge against the surface`).toBe(false);
+    expect(sameColour(edge, await pixelAt(page, code.left + 12, code.middle)), `${scheme}: the box's edge against the gutter`).toBe(false);
+    await expectStuckRowIsSurface(`${scheme}: the stuck row`);
+
+    // All files: no chapter card, the page's own surface.
+    await pane.locator('[data-review-mode-choice="files"]').click();
+    await expect(pane).toHaveAttribute('data-review-mode', 'files');
+    await shell.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+    await settled(body);
+    await expectStuckRowIsSurface(`${scheme}: the stuck row in All files`);
+    await pane.locator('[data-review-mode-choice="walkthrough"]').click();
+    await expect(pane).toHaveAttribute('data-review-mode', 'walkthrough');
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
   await page.setViewportSize({ width: 1440, height: 900 });
   expect(world.errors).toEqual([]);
 });

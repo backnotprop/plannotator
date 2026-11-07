@@ -12,7 +12,8 @@
 // The drawing is read from disk here and handed to the page as files; the page
 // loads them with the browser entry's loadFiles. The sheets are served as they
 // are, not bundled: the Inbox's sheet uses CSS that Bun's CSS parser rejects.
-import { dirname, join, normalize } from 'node:path';
+import { readdirSync } from 'node:fs';
+import { dirname, join, sep } from 'node:path';
 import { readFiles } from '../src/node/index.ts';
 import { before2563, OPEN_2563, PLAN, prFiles, REMOVES } from '../test/fixtures/change.ts';
 import page from './index.html';
@@ -22,7 +23,7 @@ const dir = join(pkg, '..', '..', '.plannotator', 'system');
 const port = Number(process.env.PORT || 5893);
 const fontDir = (name: string) => dirname(Bun.resolveSync(`@fontsource-variable/${name}/index.css`, pkg));
 
-/** The folders the page's stylesheets are served from, by prefix. */
+/** The folders the page's stylesheets come from, by URL prefix. */
 const ROOTS: Record<string, string> = {
   '/css/inter/': fontDir('inter'),
   '/css/geist-mono/': fontDir('geist-mono'),
@@ -31,6 +32,16 @@ const ROOTS: Record<string, string> = {
   '/css/system/': join(pkg, 'src'),
   '/css/demo/': import.meta.dir,
 };
+
+/** Every stylesheet and face the page may load, as fixed routes made at start: no path is ever read from a request. */
+const files: Record<string, () => Response> = {};
+for (const [prefix, root] of Object.entries(ROOTS)) {
+  for (const rel of readdirSync(root, { recursive: true }) as string[]) {
+    if (!/\.(css|woff2)$/.test(rel) || rel.split(sep).includes('node_modules')) continue;
+    const abs = join(root, rel);
+    files[prefix + rel.split(sep).join('/')] = () => new Response(Bun.file(abs));
+  }
+}
 
 const server = Bun.serve({
   port,
@@ -44,16 +55,8 @@ const server = Bun.serve({
       const files = (await readFiles(dir)).files;
       return Response.json({ prs: { 2543: prFiles(2543), 2563: prFiles(2563) }, before2563: before2563(files), open2563: OPEN_2563, plan: PLAN, removes: REMOVES });
     },
+    ...files,
   },
-  fetch(req) {
-    const path = decodeURIComponent(new URL(req.url).pathname);
-    for (const [prefix, root] of Object.entries(ROOTS)) {
-      if (!path.startsWith(prefix)) continue;
-      const file = normalize(join(root, path.slice(prefix.length)));
-      if (!file.startsWith(root + '/') || !/\.(css|woff2)$/.test(file)) break;
-      return new Response(Bun.file(file));
-    }
-    return new Response('not found', { status: 404 });
-  },
+  fetch: () => new Response('not found', { status: 404 }),
 });
 console.log(`System demo on ${server.url}`);
