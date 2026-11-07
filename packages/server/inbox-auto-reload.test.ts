@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
-import { INBOX_RELOAD_FIELD, parseInboxReloadOffer } from "@plannotator/shared/inbox/connection";
+import { INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_RELOAD_FIELD, parseInboxReloadOffer } from "@plannotator/shared/inbox/connection";
 import { claudeSessionOutdated, type ClaudePluginInstall, type LoadedPlugin } from "./inbox-restart";
 import { createInboxLiveSessions } from "./inbox-sessions";
 
@@ -61,6 +61,20 @@ describe("which sessions the Inbox tells to reload", () => {
     await live.pollStarted("ses-pi", "pi", { plugin: pluginOf("0.28.50") });
     expect(live.reloadOfferFor("ses-pi")).toBeNull();
     expect(live.reloadOfferFor("ses-never")).toBeNull();
+  });
+});
+
+describe("what a poll answer carries", () => {
+  test("the offer goes only to a connection that said it reloads itself (auto_reload: true)", async () => {
+    const live = liveWith([installAt("0.28.51")], "0.28.51");
+    await live.pollStarted("ses-a", "claude-code", { plugin: pluginOf("0.28.50") });
+    expect(live.reloadAnswerFor("ses-a", { session: "ses-a", [INBOX_AUTO_RELOAD_POLL_FIELD]: true })).toEqual({ [INBOX_RELOAD_FIELD]: { installed: "0.28.51" } });
+    // An older mod (no field), or a field that is not exactly true, is never told: it would not reload, and must not be asked to.
+    expect(live.reloadAnswerFor("ses-a", { session: "ses-a" })).toEqual({});
+    expect(live.reloadAnswerFor("ses-a", { session: "ses-a", [INBOX_AUTO_RELOAD_POLL_FIELD]: "true" })).toEqual({});
+    // Up to date: nothing, even to a connection that asks.
+    await live.pollStarted("ses-a", "claude-code", { plugin: pluginOf("0.28.51") });
+    expect(live.reloadAnswerFor("ses-a", { session: "ses-a", [INBOX_AUTO_RELOAD_POLL_FIELD]: true })).toEqual({});
   });
 });
 

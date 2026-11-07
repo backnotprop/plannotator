@@ -150,8 +150,6 @@ import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_MAX_MS,
   INBOX_BRIDGE_POLL_PATH,
-  INBOX_AUTO_RELOAD_POLL_FIELD,
-  INBOX_RELOAD_FIELD,
   inboxHandedAwayLine,
   inboxReaskItemsOf,
   INBOX_MAX_REQUEST_BYTES,
@@ -3170,11 +3168,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const askWaits = () => (ask.waits(session) ? { [INBOX_ASK_WAITS_FIELD]: true } : {});
     // Auto reload (owner approval "cc-auto-reload"): a Claude Code connection that reloads itself is told,
     // on every answer, the version a /reload-plugins loads while the session is outdated (fix `restart`).
-    const autoReload = body[INBOX_AUTO_RELOAD_POLL_FIELD] === true;
-    const reloadOffer = () => {
-      const offer = autoReload ? live.reloadOfferFor(session) : null;
-      return offer ? { [INBOX_RELOAD_FIELD]: offer } : {};
-    };
+    const reloadOffer = () => live.reloadAnswerFor(session, body);
     const now = commands();
     if (now.length > 0 || waitMs === 0 || ask.waits(session)) {
       answered();
