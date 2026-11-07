@@ -94,6 +94,8 @@ export interface InboxComposerFieldProps {
   escapeClosesMenu?: boolean;
   /** Voice dictation (voice.ts): the host's session, whose button sits in the host's toolbar. */
   voice?: VoiceHandle;
+  /** The voice note opens and closes in one motion (the reply box, approval "inbox-reply-box"). */
+  voiceNoteGlide?: boolean;
   /** Which skills this field offers and paints (skills.ts `inboxSkillFilter`); all by default. Keep its identity stable. */
   skillFilter?: (entry: SkillCatalogEntry) => boolean;
 }
@@ -115,6 +117,7 @@ export function InboxComposerField({
   caretMenu,
   escapeClosesMenu = false,
   voice,
+  voiceNoteGlide = false,
   skillFilter = OUTSIDE_A_REVIEW,
 }: InboxComposerFieldProps) {
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -290,7 +293,7 @@ export function InboxComposerField({
         activeOptionId={activeOption}
         inputProps={{ 'aria-label': ariaLabel, 'aria-describedby': describedBy, rows: 2 }}
       />
-      {voice && <VoiceNote voice={voice} />}
+      {voice && <VoiceNote voice={voice} glide={voiceNoteGlide} />}
       <HumanOnlySkillNotice skills={skills.humanOnlyReferences} destination={destination} />
       {options && showNotes && (tags?.note ? tags.note({ id: notesId, tagged, focusField: () => innerRef.current?.focus() }) : <TagNotes id={notesId} tagged={tagged} owner={owner} />)}
       {options && (
