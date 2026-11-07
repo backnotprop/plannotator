@@ -76,6 +76,8 @@ export type TickDeps = {
   agentCommand?: (setup: SystemSetup, prompt: string) => { command: string[]; stdin: string | null };
   /** The default agent's time bound; TICK_TIMEOUTS_MS.agent unless given. */
   agentTimeoutMs?: number;
+  /** The rename the swap of a checked redraw uses; node's unless given (the tests pass one that fails). */
+  rename?: (from: string, to: string) => Promise<void>;
 };
 
 /**
@@ -222,10 +224,17 @@ const failure = (name: string, r: Run, timeoutMs: number) =>
  * git that never asks on a terminal or opens an editor: launchd has none. The
  * repo's hooks and the person's signing setup run as they normally do; a hook
  * or a signing prompt that waits for a person meets the time bound.
+ * GIT_OPTIONAL_LOCKS=0 (with `--no-optional-locks` on every call): a read never
+ * refreshes an index or takes index.lock, so a read in the person's repo can
+ * not make their own `git commit` fail on "index.lock exists". GIT_LFS_SKIP_SMUDGE:
+ * a checkout in the source clone leaves Git LFS files as their pointer files
+ * (the agent can read those) and downloads nothing, so a large LFS repo is not
+ * downloaded again on every redraw and does not meet the git time bound.
  */
-const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_MERGE_AUTOEDIT: 'no' };
+const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_MERGE_AUTOEDIT: 'no', GIT_OPTIONAL_LOCKS: '0', GIT_LFS_SKIP_SMUDGE: '1' };
 
-const runGit = (cwd: string, args: string[]) => runCommand(['git', '-C', cwd, ...args], { cwd, env: GIT_ENV, timeoutMs: TICK_TIMEOUTS_MS.git });
+const runGit = (cwd: string, args: string[], env?: Record<string, string>) =>
+  runCommand(['git', '--no-optional-locks', '-C', cwd, ...args], { cwd, env: { ...GIT_ENV, ...env }, timeoutMs: TICK_TIMEOUTS_MS.git });
 
 async function git(cwd: string, args: string[]): Promise<string> {
   const r = await runGit(cwd, args);
@@ -354,7 +363,8 @@ const commandAgent = (deps: TickDeps | undefined): RunAgent => async ({ setup, c
 /** The default note: `plannotator inbox call send_message`, the JSON on stdin. */
 const inboxNotify = (plannotator: string): Notify => async ({ project, subject, body, replyTo }) => {
   const message = { body, project_path: project, ...(replyTo ? { reply_to: replyTo } : { subject }) };
-  const r = await runCommand([plannotator, 'inbox', 'call', 'send_message', '-'], { cwd: project, stdin: JSON.stringify(message), timeoutMs: TICK_TIMEOUTS_MS.note });
+  // it runs in the person's repo: what git it runs there takes no optional lock either
+  const r = await runCommand([plannotator, 'inbox', 'call', 'send_message', '-'], { cwd: project, stdin: JSON.stringify(message), env: { GIT_OPTIONAL_LOCKS: '0' }, timeoutMs: TICK_TIMEOUTS_MS.note });
   if (r.code !== 0 || r.timedOut) throw new Error(failure('plannotator inbox call send_message', r, TICK_TIMEOUTS_MS.note));
 };
 
@@ -378,27 +388,136 @@ export async function plannotatorProgram(): Promise<string> {
 const remoteFrom = (root: string, url: string) => (/^\.\.?(\/|$)/.test(url) ? resolve(root, url) : url);
 
 /**
+ * The origin URL as the person's repo has it, before any `url.<base>.insteadOf`
+ * rewrite: the source clone carries the person's rewrite rules (below), so it
+ * turns this URL into the same address once, as the person's repo does. A
+ * rewrite of an already rewritten URL could apply a rule twice.
+ */
+async function originUrl(root: string): Promise<string> {
+  const configured = (await git(root, ['config', '--get-all', 'remote.origin.url']).catch(() => '')).split('\n')[0]!.trim();
+  return remoteFrom(root, configured || (await git(root, ['remote', 'get-url', 'origin'])).trim());
+}
+
+/**
+ * The config that decides how git reaches a remote and signs in to it: the ssh
+ * command, credential helpers, URL rewrites and http settings. The source
+ * clone lives in Plannotator's folder, so it does not read the person's
+ * repo-local config or an `includeIf "gitdir:..."` file that matches only
+ * their checkout (a second GitHub account's key, a work credential helper);
+ * without these a private repo fails every tick.
+ */
+const ACCESS_KEYS = '^(core\\.(sshcommand|askpass|gitproxy)|ssh\\.variant|credential\\..+|url\\..+|http\\..+)$';
+/** Keys whose list of values an empty value resets (credential.helper, http.extraHeader, and their per-URL forms). */
+const resetByEmpty = (key: string) => /^(credential\.(.+\.)?helper|http\.(.+\.)?extraheader)$/.test(key);
+type ConfigEntry = { key: string; value: string | null };
+
+/** The remote-access config in effect in the person's repo, in git's own order (read only). */
+async function remoteAccess(root: string): Promise<ConfigEntry[]> {
+  const r = await runGit(root, ['config', '-z', '--get-regexp', ACCESS_KEYS]);
+  // 1: no key matched
+  if (r.timedOut || (r.code !== 0 && r.code !== 1)) throw new Error(failure('git config', r, TICK_TIMEOUTS_MS.git));
+  return r.stdout.split('\0').filter(Boolean).map((e) => {
+    const nl = e.indexOf('\n');
+    return nl < 0 ? { key: e, value: null } : { key: e.slice(0, nl), value: e.slice(nl + 1) };
+  });
+}
+
+/**
+ * The entries as the source clone must read them after its own config: each
+ * key once, all its values in order; a list an empty value resets starts with
+ * that reset, so the clone ends with the person's list exactly, not the
+ * global list twice.
+ */
+function accessList(entries: ConfigEntry[]): ConfigEntry[] {
+  const byKey = new Map<string, (string | null)[]>();
+  for (const e of entries) {
+    if (!byKey.has(e.key)) byKey.set(e.key, []);
+    byKey.get(e.key)!.push(e.value);
+  }
+  return [...byKey].flatMap(([key, values]) => [...(resetByEmpty(key) ? [{ key, value: '' }] : []), ...values.map((value) => ({ key, value }))]);
+}
+
+/** The same config for one git run (`GIT_CONFIG_COUNT`), after any the environment already gives. */
+function accessEnv(entries: ConfigEntry[]): Record<string, string> {
+  const base = Number(process.env.GIT_CONFIG_COUNT) || 0;
+  const list = accessList(entries);
+  const env: Record<string, string> = { GIT_CONFIG_COUNT: String(base + list.length) };
+  list.forEach((e, i) => {
+    env[`GIT_CONFIG_KEY_${base + i}`] = e.key;
+    env[`GIT_CONFIG_VALUE_${base + i}`] = e.value ?? 'true';
+  });
+  return env;
+}
+
+/** The same config as a git config file. */
+function accessFile(entries: ConfigEntry[]): string {
+  const quote = (s: string) => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\t/g, '\\t')}"`;
+  const lines = ['# Written by Plannotator System on every tick: the remote-access config of the project\'s repo. Edits here are replaced.'];
+  for (const { key, value } of accessList(entries)) {
+    const first = key.indexOf('.');
+    const last = key.lastIndexOf('.');
+    const sub = last > first ? key.slice(first + 1, last) : null;
+    if (sub?.includes('\n')) continue;
+    lines.push(sub === null ? `[${key.slice(0, first)}]` : `[${key.slice(0, first)} ${quote(sub)}]`);
+    lines.push(value === null ? `\t${key.slice(last + 1)}` : `\t${key.slice(last + 1)} = ${quote(value)}`);
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+/** The name, in the source clone's .git, of the file the clone's config includes the person's remote-access config from. */
+const ACCESS_CONFIG = 'plannotator-remote.config';
+
+/** Bring the person's remote-access config into the source clone's own config: rewritten when it changed, included once. */
+async function carryAccess(source: string, entries: ConfigEntry[]): Promise<void> {
+  const file = join(source, '.git', ACCESS_CONFIG);
+  const text = accessFile(entries);
+  if ((await readFile(file, 'utf8').catch(() => null)) !== text) {
+    const tmp = `${file}.${process.pid}.tmp`;
+    await writeFile(tmp, text, { mode: 0o600 });
+    await rename(tmp, file);
+  }
+  const included = (await git(source, ['config', '--local', '--get-all', 'include.path']).catch(() => '')).split('\n').map((l) => l.trim());
+  if (!included.includes(ACCESS_CONFIG)) await git(source, ['config', '--local', '--add', 'include.path', ACCESS_CONFIG]);
+}
+
+/** Keep the newest `keep` of the folders in `dir` whose names start with `prefix` (their names sort by time); remove the rest. */
+async function pruneOld(dir: string, prefix: string, keep: number): Promise<void> {
+  const names = (await readdir(dir).catch(() => [] as string[])).filter((n) => n.startsWith(prefix)).sort();
+  for (const n of names.slice(0, Math.max(0, names.length - keep))) await rm(join(dir, n), { recursive: true, force: true });
+}
+
+/** How many old source clones a re-clone keeps under failed/: the one it moved aside and the one before. */
+const KEEP_OLD_SOURCES = 2;
+
+/**
  * Plannotator's own clone of the project, for the agent to read main's code:
  * `<dataDir>/system/<key>/source`. Made when missing with
  * `git clone --reference <the repo's git folder> <its origin URL>`, so the
  * objects the person already has are borrowed, not copied, and fetched from
  * origin each tick, so the tick sees what merged even when the person has not
- * fetched. Toward the person's repo it only reads: its origin URL, its git
- * folder and its objects. Returns the default branch and its tip.
+ * fetched. Toward the person's repo it only reads: its origin URL, its
+ * remote-access config, its git folder and its objects. That config (the ssh
+ * command, credential helpers, URL rewrites, http settings, as git reads them
+ * in the person's repo, includeIf files included) is given to the clone and
+ * written into the clone's own config, read again on every call, so a private
+ * repo is reached with the person's own account. Returns the default branch
+ * and its tip.
  *
  * Borrowed objects can go away: the person runs `git gc` or prune, or moves
  * or deletes the repo, or a file in its object store is lost. A clone whose
  * alternates folder is gone, whose fetch fails while its last tip no longer
- * reads whole, or whose fetched tip or `need` commits (the drawing's `at`) do
- * not read whole, is moved to `<aside>/source-<stamp>` and cloned again, once
- * per call. When the new borrowing clone is not whole either, the person's
+ * reads whole, whose fetched tip or `need` commits (the drawing's `at`) do
+ * not read whole, or whose commits from the `need` commits to the tip do not
+ * read whole, is moved to `<aside>/source-<stamp>` (the newest two are kept)
+ * and cloned again, once per call. When the new borrowing clone is not whole either, the person's
  * repo itself lacks the objects, so it is made again with its own copy of
  * every object. A fetch that fails on a clone that reads whole is the
  * network: it throws, and nothing moves.
  */
 export async function prepareSource(root: string, source: string,
   o: { need?: (string | null | undefined)[]; aside?: string; stamp?: string } = {}): Promise<{ main: string; tip: string; recloned?: string }> {
-  const url = remoteFrom(root, (await git(root, ['remote', 'get-url', 'origin'])).trim());
+  const url = await originUrl(root);
+  const access = await remoteAccess(root);
   let recloned: string | undefined;
   let borrow = true;
   /** Damage found: move the clone aside (once) or, for a clone made in this call, make it again with its own objects. */
@@ -408,6 +527,7 @@ export async function prepareSource(root: string, source: string,
       await rm(source, { recursive: true, force: true }); // made seconds ago by this call; nothing in it is anyone's
     } else if (!fresh && recloned === undefined && o.aside) {
       recloned = await moveAside(source, join(o.aside, `source-${o.stamp ?? new Date().toISOString().replace(/[:.]/g, '-')}`));
+      await pruneOld(o.aside, 'source-', KEEP_OLD_SOURCES);
     } else {
       throw new Error(why);
     }
@@ -418,13 +538,17 @@ export async function prepareSource(root: string, source: string,
       await mkdir(dirname(source), { recursive: true, mode: 0o700 });
       // --no-local: a local-path origin is fetched like a remote one, so the borrowing is the same as for a URL
       const reference = borrow ? ['--reference', (await git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim()] : [];
-      const cloned = await git(dirname(source), ['clone', '--quiet', '--no-local', '--no-checkout', ...reference, '--', url, source]).then(() => null, (e: Error) => e);
+      const run = await runGit(dirname(source), ['clone', '--quiet', '--no-local', '--no-checkout', ...reference, '--', url, source], accessEnv(access));
+      const cloned = run.code === 0 && !run.timedOut ? null : new Error(failure('git clone', run, TICK_TIMEOUTS_MS.git));
       // a borrowing clone also fails when the person's repo claims an object it lost: try once with its own objects
       if (cloned && borrow) { await damaged(true, cloned.message); continue; }
       if (cloned) throw cloned;
+      await carryAccess(source, access);
     } else {
       if (!(await alternatesPresent(source))) { await damaged(false, 'the source clone lost the folder it borrows objects from'); continue; }
-      if ((await git(source, ['remote', 'get-url', 'origin']).catch(() => '')).trim() !== url) await git(source, ['remote', 'set-url', 'origin', url]);
+      // the person's access config as it is now: a new key or helper is used from this tick on
+      await carryAccess(source, access);
+      if ((await git(source, ['config', '--get', 'remote.origin.url']).catch(() => '')).trim() !== url) await git(source, ['remote', 'set-url', 'origin', url]);
     }
     const main = await defaultBranch(source);
     const fetched = await git(source, ['fetch', '--quiet', 'origin', `+refs/heads/${main}:refs/remotes/origin/${main}`]).then(() => null, (e: Error) => e);
@@ -435,15 +559,21 @@ export async function prepareSource(root: string, source: string,
     }
     const tip = await commitOf(source, `refs/remotes/origin/${main}`);
     if (!tip) throw new Error(`origin has no ${main}`);
-    const broken = (await whole(source, tip)) ? [] : [tip];
+    const broken = (await whole(source, tip)) ? [] : [tip.slice(0, 7)];
     for (const c of o.need ?? []) {
       if (!c || !isRef(c) || (await whole(source, c))) continue;
       // a commit that is there but does not read whole lost objects. One that is not there at all lost them only when
       // main's history has a hole; otherwise it is gone from origin itself (history rewritten), no fault of the clone,
       // and the caller reports it
-      if (await gitOk(source, ['cat-file', '-e', `${c}^{commit}`]) || !(await gitOk(source, ['rev-list', '--quiet', tip]))) broken.push(c);
+      if (await gitOk(source, ['cat-file', '-e', `${c}^{commit}`]) || !(await gitOk(source, ['rev-list', '--quiet', tip]))) broken.push(c.slice(0, 7));
     }
-    if (broken.length) { await damaged(fresh, `the source clone cannot read ${broken.map((c) => c.slice(0, 7)).join(', ')} whole`); continue; }
+    // the commits that landed since the drawing's commit and the gated one: a diff, a log or the agent reads them
+    const since: string[] = [];
+    for (const c of o.need ?? []) if (c && isRef(c) && (await gitOk(source, ['cat-file', '-e', `${c}^{commit}`]))) since.push(c);
+    if (!broken.length && since.length && !(await gitOk(source, ['rev-list', '--objects', '--quiet', '--end-of-options', tip, ...since.map((c) => `^${c}`)]))) {
+      broken.push(`${since.map((c) => c.slice(0, 7)).join(' ')}..${tip.slice(0, 7)}`);
+    }
+    if (broken.length) { await damaged(fresh, `the source clone cannot read ${broken.join(', ')} whole`); continue; }
     // a fresh clone has no checkout yet; a later one keeps what it has until a redraw resets it
     if (fresh) await git(source, ['checkout', '--quiet', '--force', '--detach', tip]);
     return recloned ? { main, tip, recloned } : { main, tip };
@@ -547,8 +677,16 @@ export async function tick(o: { root: string; dataDir: string; key: string; now?
     await writeState(o.dataDir, o.key, current);
   };
   try {
+    await restoreDrawing(paths);
     const model = (await load(paths.drawing)).model;
     if (!model) return { ran: 'nothing', gated: '', why: 'no drawing yet' };
+    // The first draw writes system.yaml first, with every sheet it plans under
+    // wanted:, and takes each out as it draws it (recipe/DRAW.md). Such a
+    // drawing loads clean, but a redraw would copy it half drawn and put the
+    // copy in place under the drawing agent. A finished drawing wants nothing
+    // (a redraw that leaves a sheet wanted is refused below), so this waits for
+    // the first draw however it runs and whether or not it is still running.
+    if (model.wanted.length) return { ran: 'nothing', gated: state.gated ?? '', why: 'the drawing is still being drawn: system.yaml lists sheets under wanted:' };
     const stamp = now().replace(/[:.]/g, '-');
     const { tip: target, recloned } = await prepareSource(o.root, paths.source,
       { need: [model.sources?.repos.self?.at, state.gated], aside: paths.failed, stamp });
@@ -578,6 +716,45 @@ export async function tick(o: { root: string; dataDir: string; key: string; now?
   } finally {
     await release();
   }
+}
+
+/**
+ * Put the checked redraw in place as drawing/ and keep the drawing before it as
+ * previous/. Node has no rename that swaps two folders in one step (Linux's
+ * RENAME_EXCHANGE, macOS's RENAME_SWAP), and a symlinked drawing folder is
+ * refused by the loader, so the swap is two renames on one file system with
+ * nothing between them. The one state a kill or a power loss can leave, no
+ * drawing/ with previous/ there, is put back by `restoreDrawing` at the start
+ * of the next tick, which then redraws again.
+ */
+async function swapIn(paths: ReturnType<typeof systemPaths>, move: (from: string, to: string) => Promise<void> = rename): Promise<void> {
+  await rm(paths.previous, { recursive: true, force: true });
+  await move(paths.drawing, paths.previous);
+  try {
+    await move(paths.redraw, paths.drawing);
+  } catch (e) {
+    // the second rename failed (on Windows a file held open in redraw/: EBUSY, EPERM): put the drawing back
+    // before the failure sets redraw/ aside, or no drawing would be left
+    const first = e as Error;
+    try {
+      await move(paths.previous, paths.drawing);
+    } catch (back) {
+      // both failed: the first failure stays the one reported, with the second beside it
+      throw new AggregateError([first, back], `${first.message}; moving the drawing back from previous/ also failed: ${(back as Error).message}`);
+    }
+    throw first;
+  }
+}
+
+/**
+ * A tick stopped inside `swapIn` left no drawing/, the last good drawing in
+ * previous/ and the checked copy in redraw/: move previous/ back, so the Inbox and every later tick see a drawing.
+ * The checked copy left in redraw/ is set aside as an interrupted redraw.
+ */
+async function restoreDrawing(paths: ReturnType<typeof systemPaths>): Promise<void> {
+  const exists = (p: string) => stat(p).then(() => true, () => false);
+  // both previous/ and redraw/: the mark of a swap cut off between its renames, not of a drawing the person removed
+  if (!(await exists(paths.drawing)) && (await exists(paths.previous)) && (await exists(paths.redraw))) await rename(paths.previous, paths.drawing);
 }
 
 type RedrawInput = {
@@ -673,9 +850,8 @@ async function afterAgent(
 
   // the checked copy becomes the drawing; the one before it is kept as previous/
   const after = (await load(work)).model;
-  await rm(r.paths.previous, { recursive: true, force: true });
-  await rename(drawing, r.paths.previous);
-  await rename(work, drawing);
+  if (after?.wanted.length) return fail(`the redraw does not check clean: system.yaml wanted: still lists ${after.wanted.map((w) => w.code).join(', ')}; a redraw draws every sheet it plans`);
+  await swapIn(r.paths, r.deps?.rename);
 
   const note = redrawNote({ to: r.target, prs, summary, count: after ? changedCount(r.model, after) : { parts: 0, flows: 0 }, also });
   const notify = r.deps?.notify ?? inboxNotify(r.deps?.plannotator ?? (await plannotatorProgram()));
