@@ -11,6 +11,7 @@ import { loadConfig } from "@plannotator/shared/config";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
 import {
   agentHomeAllowed,
+  clinePluginInstalled,
   codexHome,
   geminiDir,
   connectInboxAgents,
@@ -403,6 +404,56 @@ describe("Pi and OpenCode with Plannotator's extension or plugin: the tool switc
     expect(report.added).toEqual([]);
     expect(loadConfig().inboxTool).toBeUndefined();
     expect(fake.calls()).toEqual([]);
+  });
+
+  test("Cline with Plannotator's plugin installed from npm: inboxTool on for it, and cline is never run", async () => {
+    fake.install("cline");
+    const pkg = join(fake.home, ".cline", "plugins", "_installed", "npm", "plannotator-cline-1a2b3c", "package", "node_modules", "@plannotator", "cline");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@plannotator/cline", version: "0.28.51" }));
+    const report = await connect();
+    expect(report.added).toEqual(["cline"]);
+    expect(report.manual).toEqual([]);
+    expect(loadConfig().inboxTool).toEqual({ cline: true });
+    expect(fake.calls()).toEqual([]);
+  });
+
+  test("Cline: a plugin installed from a local folder is found under CLINE_DIR, even with no cline on PATH (the VS Code extension)", async () => {
+    const clineDir = join(fake.root, "elsewhere-cline");
+    const pkg = join(clineDir, "plugins", "_installed", "local", "cline-plugin-9f8e7d", "package");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@plannotator/cline", version: "0.28.51" }));
+    expect((await connect()).added).toEqual([]);
+    expect((await connect({ CLINE_DIR: clineDir })).added).toEqual(["cline"]);
+  });
+
+  test("Cline: the plugin as a plain file in ~/.cline/plugins (a built index.js copied there) is found", async () => {
+    mkdirSync(join(fake.home, ".cline", "plugins"), { recursive: true });
+    writeFileSync(join(fake.home, ".cline", "plugins", "weather.js"), "export default { name: 'weather' };\n");
+    expect((await connect()).added).toEqual([]);
+    writeFileSync(join(fake.home, ".cline", "plugins", "plannotator.js"), 'const pkg = { name: "@plannotator/cline" };\nexport default { name: "plannotator" };\n');
+    expect((await connect()).added).toEqual(["cline"]);
+  });
+
+  test("Cline: a workspace-scope install (<folder>/.cline/plugins) is found for the folder the Inbox runs in, read only", () => {
+    const e = createAgentEnvironmentFor({ platform: process.platform, homeDir: fake.home, env: {} });
+    const workspace = join(fake.root, "ledger");
+    const pkg = join(workspace, ".cline", "plugins", "_installed", "npm", "plannotator-cline-4d5e6f", "package", "node_modules", "@plannotator", "cline");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@plannotator/cline", version: "0.28.51" }));
+    expect(clinePluginInstalled(e, join(fake.root, "other"))).toBe(false);
+    expect(clinePluginInstalled(e, workspace)).toBe(true);
+    expect(fake.calls()).toEqual([]);
+  });
+
+  test("Cline with someone else's plugin only is still left to the person", async () => {
+    fake.install("cline");
+    const pkg = join(fake.home, ".cline", "plugins", "_installed", "npm", "weather-1a2b3c", "package", "node_modules", "weather");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "weather" }));
+    const report = await connect();
+    expect(report.manual).toEqual(["cline"]);
+    expect(loadConfig().inboxTool).toBeUndefined();
   });
 
   test("Claude Code: nothing written; said to be on already", async () => {

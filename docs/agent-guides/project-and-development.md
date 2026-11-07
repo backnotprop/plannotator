@@ -26,6 +26,7 @@ plannotator/
 │   ├── amp-plugin/               # Amp plugin
 │   │   ├── plannotator.ts        # Native Amp command-palette integration
 │   │   └── README.md             # Install and local development notes
+│   ├── cline-plugin/             # Cline plugin (@plannotator/cline): the Inbox tool and the reply wake (inbox.ts), built to dist/index.js
 │   ├── droid-plugin/             # Droid plugin
 │   │   ├── .factory-plugin/plugin.json
 │   │   ├── commands/             # Slash command entrypoints
@@ -290,7 +291,7 @@ These are the flags `.github/workflows/release.yml` compiles with; without the `
 
 **Partial-diff compatibility patch (#2264).** `patches/@pierre%2Fdiffs@1.5.2.patch` lets `FileDiff.loadFilesIfNecessary()` return without hydrating when no `loadDiffFiles` callback is configured. Plannotator already loads and validates full contents through `/api/file-content`; a missing or stale response must leave a readable partial diff, not crash either review surface when `expandUnchanged` is enabled. Pierre still hides expansion controls for partial diffs without a loader, and `prepareForEditing()` still rejects incomplete content. Carry this patch forward when upgrading `@pierre/diffs` until upstream supports externally hydrated partial diffs without throwing.
 
-**Release versions:** a release bumps 9 version files together, `apps/dsh-plugin/package.json` (`@plannotator/dsh`) among them; `scripts/check-release-version.mjs` lists them and fails on a mismatch. The full procedure is [`.agents/skills/release/SKILL.md`](../../.agents/skills/release/SKILL.md). `bun run build` also builds the DeepSeek Harness plugin (`build:dsh`), whose type check and tests run in the release workflow's `test` job with everything else.
+**Release versions:** a release bumps 10 version files together, `apps/dsh-plugin/package.json` (`@plannotator/dsh`) and `apps/cline-plugin/package.json` (`@plannotator/cline`) among them; `scripts/check-release-version.mjs` lists them and fails on a mismatch. The full procedure is [`.agents/skills/release/SKILL.md`](../../.agents/skills/release/SKILL.md). `bun run build` also builds the DeepSeek Harness plugin (`build:dsh`) and the Cline plugin (`build:cline`), whose type checks and tests run in the release workflow's `test` job with everything else.
 
 Running only `build:opencode` will copy stale HTML files.
 

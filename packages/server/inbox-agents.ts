@@ -699,6 +699,73 @@ export function dshPluginInstalled(e: AgentEnvironment): boolean {
   });
 }
 
+/** Plannotator's Cline plugin package (apps/cline-plugin). */
+export const CLINE_PLUGIN_PACKAGE = "@plannotator/cline";
+
+/** Cline's home: `$CLINE_DIR` when set, else `~/.cline` (Cline's own rule; a blank value counts as unset). */
+export function clineDir(e: AgentEnvironment): string {
+  return envDir(e, "CLINE_DIR") ?? join(e.homeDir, ".cline");
+}
+
+/** Whether a package.json (by path) names Plannotator's Cline plugin. */
+function namesClinePlugin(manifest: string): boolean {
+  const read = readAgentFile(manifest);
+  if (read.kind !== "file") return false;
+  try {
+    return (JSON.parse(read.text) as { name?: unknown }).name === CLINE_PLUGIN_PACKAGE;
+  } catch {
+    return false;
+  }
+}
+
+function listDir(path: string): string[] {
+  try {
+    return readdirSync(path);
+  } catch {
+    return [];
+  }
+}
+
+/** Whether one Cline plugins folder holds Plannotator's plugin (see clinePluginInstalled). */
+function clinePluginsFolderHasPlugin(plugins: string): boolean {
+  const installed = join(plugins, "_installed");
+  for (const kind of ["npm", "local"]) {
+    for (const id of listDir(join(installed, kind))) {
+      const root = join(installed, kind, id, "package");
+      if (namesClinePlugin(join(root, "node_modules", "@plannotator", "cline", "package.json")) || namesClinePlugin(join(root, "package.json"))) return true;
+    }
+  }
+  for (const entry of listDir(plugins)) {
+    if (entry === "_installed" || entry === "node_modules") continue;
+    const path = join(plugins, entry);
+    if (/\.(?:[cm]?js|ts)$/.test(entry)) {
+      // A plugin module copied in as a file: the built bundle names its package (it reads its own version by it).
+      const read = readAgentFile(path, 4 * 1024 * 1024);
+      if (read.kind === "file" && read.text.includes(`"${CLINE_PLUGIN_PACKAGE}"`)) return true;
+    } else if (namesClinePlugin(join(path, "package.json"))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether Plannotator's Cline plugin (`@plannotator/cline`) is in a Cline
+ * plugins folder: the global one (`<cline>/plugins`) or the workspace one of
+ * the folder this runs in (`<cwd>/.cline/plugins`, `cline plugin install
+ * --cwd`). In each: as `cline plugin install` writes it,
+ * `_installed/npm/<id>/package/node_modules/@plannotator/cline` for
+ * `npm:@plannotator/cline` and `_installed/local/<id>/package` for a local
+ * folder; or copied in by hand, as a module file naming the package or a
+ * folder whose package.json does. Git, official and remote installs are not
+ * looked for. Read only: Plannotator never runs cline.
+ */
+export function clinePluginInstalled(e: AgentEnvironment, cwd: string = process.cwd()): boolean {
+  const global = join(clineDir(e), "plugins");
+  const workspace = resolve(cwd, ".cline", "plugins");
+  return clinePluginsFolderHasPlugin(global) || (workspace !== global && clinePluginsFolderHasPlugin(workspace));
+}
+
 const CLAUDE_PLUGIN_ID = /^plannotator@/;
 
 /** One Claude Code settings file, parsed (null: missing or unreadable). */
@@ -1057,9 +1124,13 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
   },
   {
     id: "cline",
-    detect: (e) => !!e.which("cline"),
-    // Cline CLI's `mcp add` and its config file are not verified (and a positional word can start a task), so a person adds it.
-    way: async () => ({ kind: "manual", why: "Cline's MCP command is not verified; add it in Cline's MCP settings" }),
+    detect: (e) => clinePluginInstalled(e) || !!e.which("cline"),
+    // With Plannotator's plugin: its tool, and the wake (apps/cline-plugin). Without it, Cline CLI's `mcp add` and its
+    // config file are not verified (and a positional word can start a task), so a person adds the plugin or the server.
+    way: async (e) =>
+      clinePluginInstalled(e)
+        ? { kind: "tool", host: "cline" }
+        : { kind: "manual", why: `add Plannotator's Cline plugin (cline plugin install npm:${CLINE_PLUGIN_PACKAGE}), or the server in Cline's MCP settings` },
     file: () => null,
     raw: () => null,
   },

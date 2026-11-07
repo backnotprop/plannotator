@@ -359,11 +359,13 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   qwen: "Qwen Code",
   dsh: "DeepSeek Harness",
   t3: "T3 Code",
+  cline: "Cline",
 };
 
 /**
  * The agent hosts a person's reply wakes as a new turn by itself: Claude Code,
- * Pi, OpenCode 2 and DeepSeek Harness through Plannotator's own connection
+ * Pi, OpenCode 2, DeepSeek Harness and Cline (its plugin: CLI, hub, Kanban,
+ * desktop app, VS Code's new bundle) through Plannotator's own connection
  * (OpenCode 1 has the tool but no wake), and Codex through MCP alone, where the Inbox puts the
  * reply into the Codex thread with `codex queue` (Codex CLI
  * INBOX_CODEX_QUEUE_MIN_VERSION or later; packages/server/inbox-codex-wake.ts),
@@ -375,7 +377,7 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
  * (packages/server/inbox-t3-wake.ts).
  * The one list: wording that names which agents a reply wakes reads it.
  */
-export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "codex", "qwen", "t3"] as const;
+export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "cline", "codex", "qwen", "t3"] as const;
 
 /** Of INBOX_WAKING_HOSTS, the ones an MCP connection alone wakes (no Plannotator plugin): Codex, Qwen Code and T3 Code. */
 export const INBOX_MCP_WAKING_HOSTS: readonly string[] = ["codex", "qwen", "t3"];
@@ -2283,7 +2285,7 @@ export interface InboxAgentsModel {
 }
 
 /** The hosts that connect through Plannotator's own plugin or extension. */
-export type InboxToolHostId = "claude-code" | "pi" | "opencode" | "dsh";
+export type InboxToolHostId = "claude-code" | "pi" | "opencode" | "dsh" | "cline";
 
 /**
  * The runtime a polling session runs in, as the window names its fix: Claude
@@ -2369,7 +2371,7 @@ export interface InboxHostSessions {
 }
 
 /** The hosts whose every request carries the `plannotator_inbox` tool in full once it is on (Claude Code defers it behind tool search). */
-export type InboxToolCostHost = "pi" | "opencode" | "dsh";
+export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline";
 
 /**
  * What turning the Inbox tool on adds to every request on Pi and OpenCode 2,
@@ -2538,6 +2540,8 @@ export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number
   // DeepSeek Harness sends the same JSON Schema with every request; not measured on a real DSH (tests never run
   // it), so Pi's measurement stands in until one is.
   dsh: INBOX_TOOL_COST_NOW,
+  // Cline sends every tool's JSON Schema with each request too; not measured on a real Cline, so Pi's stands in.
+  cline: INBOX_TOOL_COST_NOW,
 };
 
 /** "about 9 KB, roughly 2,500 tokens" for a host's measured cost. */
