@@ -779,9 +779,6 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         {!phone && title}
         {!phone && readOnlyNote}
         <span className="ib-sp" />
-        {/* Split | Unified in the bar, over the diff's right edge, where the review app's tab row holds it: the files
-            start at the top of the code, with no band of their own above them (approval pr-view-one-surface, 11-07). */}
-        {!phone && <DiffStyleSwitch icons />}
         {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
         {(readerComments || comments.length > 0) && (
           <button
@@ -895,6 +892,13 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             data-pull-rail-handle=""
           />
         )}
+        {/* The review app's muted tab row over the code, its view controls at the right end; no tabs of its own here
+            (approval pr-view-one-surface, 11-07 19:08). */}
+        {!phone && (
+          <div className="ib-prp-tabs" data-pull-tabs="">
+            <DiffStyleSwitch icons />
+          </div>
+        )}
         <div className="ib-gbody" data-repo-open={repoOpen && repoSha ? '' : undefined}>
           {repoOpen && repoSha && (
             <PanePart>
@@ -933,7 +937,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           ) : snapshot ? (
             // Keyed on the code: new code brings a new reader, so a composer left open cannot save onto a moved line; the
             // same code keeps it, whatever the head reads said. The reader is a chunk loaded on first use: one that cannot
-            // arrive says so here (GuidePane).
+            // arrive says so here.
             <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ repo: repoKey ?? '', pull: layerKey }} on={!!repoKey}>
                 <GuideReader bare controlsHost={controlsHost} hostDiffControls snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} fileContents={fileContents} />

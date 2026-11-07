@@ -8,7 +8,7 @@
  * comments (`commentOnly`: nothing else of the review app, which needs its
  * server); without, they are read-only, as on guides.show and the phone.
  *
- * Mounted only through GuidePane's dynamic import (`#guide-reader`,
+ * Mounted only through lazyParts.tsx's dynamic import (`#guide-reader`,
  * tests/entry-assets.test.ts). It is its own chunk, packed in inbox.html and
  * served by the Inbox (build/pack-inbox.ts, #2593): its modules (the guide
  * chain, the diff renderer) load and run on the first Open, never at page load.
@@ -459,7 +459,7 @@ function Reader({
       ...(globalComments ? { globalComments } : {}),
       // What GuideDiff draws (a phone: always Unified), for a file box's first estimate.
       diffStyle: phone ? ('unified' as const) : savedDiffStyle,
-      // The PR page's flush files draw the row after the last hunk only once a file's length shows lines there (flushFiles).
+      // The PR page's flush files draw no row after the last hunk until a file's text is read (flushFiles).
       opensWholeFiles: !!fetchFileContent && !bare,
       // The PR page: files edge to edge, each box exactly its header and code.
       ...(bare ? { flushFiles: true } : {}),

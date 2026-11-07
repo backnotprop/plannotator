@@ -1045,9 +1045,10 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   const sqlBox = (await sqlShell.locator('[data-guide-code-view-mounted]').boundingBox())!;
   const sqlLast = (await sqlShell.locator('[data-line="5"]').first().boundingBox())!;
   expect(sqlBox.y + sqlBox.height - (sqlLast.y + sqlLast.height)).toBeLessThan(24);
-  // Global comment is a quiet mark in the bar, and Split | Unified sits there too: no band above the first file.
+  // Global comment is a quiet mark in the bar; Split | Unified sits in the review app's muted tab row over the code.
   await expect(review.locator('.ib-vhead [data-guide-global-comment-add]')).toBeVisible();
-  await expect(review.locator('.ib-vhead [data-diff-style-switch]')).toBeVisible();
+  await expect(review.locator('[data-pull-tabs] [data-diff-style-switch]')).toBeVisible();
+  await expect(review.locator('.ib-vhead [data-diff-style-switch]')).toHaveCount(0);
   await expect(review.locator('[data-guide-section-tab]')).toHaveCount(0);
   // Flat, as the code review app: a file is its header and its lines, no card, the header in the page's colour with
   // one hairline under it, and the first header at the top of the code.
@@ -1072,13 +1073,22 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   expect(frame.section).toEqual(frame.none);
   expect(frame.box).toEqual(frame.none);
   expect(frame).toMatchObject({ head: { rule: '1px', radius: '0px', pageColour: true }, firstHeadTop: 0, oneSurface: true, railLine: '1px', corner: '0px', cornerRight: '0px', barApart: true });
-  // A 37 px bar over everything; the rail runs to the foot of the page, the code beside it.
+  // A 37 px bar over everything; the rail runs to the foot of the page, the code beside it, the 33 px tab row over the
+  // code alone, in a fill of its own, the first file right under it.
   const layers = await review.evaluate((root) => {
     const box = (selector: string) => root.querySelector(selector)!.getBoundingClientRect();
-    const [bar, rail, body] = ['.ib-vhead', '.ib-rrail', '.ib-gbody'].map(box) as [DOMRect, DOMRect, DOMRect];
-    return { barHeight: bar.height, railTop: rail.top - bar.bottom, railFoot: root.getBoundingClientRect().bottom - rail.bottom, beside: body.left - rail.right };
+    const [bar, rail, body, tabs] = ['.ib-vhead', '.ib-rrail', '.ib-gbody', '[data-pull-tabs]'].map(box) as [DOMRect, DOMRect, DOMRect, DOMRect];
+    const fill = (selector: string) => getComputedStyle(root.querySelector(selector)!).backgroundColor;
+    return {
+      barHeight: bar.height,
+      railTop: rail.top - bar.bottom,
+      railFoot: root.getBoundingClientRect().bottom - rail.bottom,
+      beside: body.left - rail.right,
+      tabs: { height: tabs.height, top: tabs.top - bar.bottom, overCode: [tabs.left, tabs.right, body.top - tabs.bottom].map(Math.round), apart: fill('[data-pull-tabs]') !== fill('.ib-gbody') && fill('[data-pull-tabs]') !== fill('.ib-vhead') },
+    };
   });
-  expect(layers).toEqual({ barHeight: 37, railTop: 0, railFoot: 0, beside: 0 });
+  const codeBox = (await review.locator('.ib-gbody').boundingBox())!;
+  expect(layers).toEqual({ barHeight: 37, railTop: 0, railFoot: 0, beside: 0, tabs: { height: 33, top: 0, overCode: [Math.round(codeBox.x), Math.round(codeBox.x + codeBox.width), 0], apart: true } });
   await shot(page, '7-layer-review');
   // A long title gives way in the header: cut with "…" (whole in its hover); Back and the decision stay in the window.
   const fn = review.locator('[data-pull-review-title]');
@@ -1340,36 +1350,42 @@ test('the next file\'s header right under the last code row, whatever separators
   }
 });
 
-test('the row after the last hunk (approval pr-view-one-surface): "N unmodified lines" once the file\'s length shows lines there, no row when none, never "More unchanged context may be available"', async ({ browser }) => {
+test('the row after the last hunk (approval pr-view-one-surface, 11-07 19:08): no row there, as in the code review app, whatever the file\'s length; nothing read for it; never "More unchanged context may be available"', async ({ browser }) => {
   const OLD = ['one', 'two', 'three', 'four', 'five'];
   const NEW = ['one', 'two', 'THREE', 'four', 'five'];
   const file = (path: string) => `diff --git a/${path} b/${path}\nindex 1111111..2222222 100644\n--- a/${path}\n+++ b/${path}\n@@ -1,5 +1,5 @@\n one\n two\n-three\n+THREE\n four\n five\n`;
   const text = (lines: string[]) => `${lines.join('\n')}\n`;
   // The whole texts the arrows' reader would get: more.ts goes on for two lines after its hunk, ends.ts stops with it.
+  const reads: string[] = [];
   const contents: Record<string, { oldContent: string; newContent: string }> = {
     'more.ts': { oldContent: text([...OLD, 'six', 'seven']), newContent: text([...NEW, 'six', 'seven']) },
     'ends.ts': { oldContent: text(OLD), newContent: text(NEW) },
   };
   const { context, page } = await stubbedReview(browser, 1440, file('more.ts') + file('ends.ts'));
   try {
-    await page.route('**/api/inbox/pulls/file*', (route) => route.fulfill({ status: 200, json: contents[new URL(route.request().url()).searchParams.get('path') ?? ''] ?? { oldContent: null, newContent: null } }));
+    await page.route('**/api/inbox/pulls/file*', (route) => {
+      const path = new URL(route.request().url()).searchParams.get('path') ?? '';
+      reads.push(path);
+      return route.fulfill({ status: 200, json: contents[path] ?? { oldContent: null, newContent: null } });
+    });
     await page.reload();
     const review = page.locator('[data-pull-review]');
     await expect(review.locator('[data-guide-file-shell]')).toHaveCount(2);
-    // The trailing row's words as drawn (Pierre's, or the count laid over them), per file, only where they show.
+    // The trailing row's words as drawn, per file by path (the page draws the files in the rail's order, not the
+    // patch's), only where they show.
     const rows = () =>
       review.locator('[data-guide-file-shell]').evaluateAll((shells) =>
-        shells.map((shell) => {
-          const root = shell.querySelector('diffs-container')?.shadowRoot;
-          const row = root?.querySelector<HTMLElement>('[data-separator-last]');
-          if (!row || !row.checkVisibility()) return null;
-          const content = row.querySelector('[data-separator-content]')!;
-          const over = getComputedStyle(content, '::after').content;
-          return over && over !== 'none' && over !== 'normal' ? JSON.parse(over) : (content as HTMLElement).innerText.trim();
-        }),
+        Object.fromEntries(
+          shells.map((shell) => {
+            const path = (shell as HTMLElement).dataset.guideFileShell;
+            const row = shell.querySelector('diffs-container')?.shadowRoot?.querySelector<HTMLElement>('[data-separator-last]');
+            return [path, row && row.checkVisibility() ? row.innerText.trim() : null];
+          }),
+        ),
       );
-    await expect.poll(rows).toEqual(['2 unmodified lines', null]);
     await expect.poll(() => seams(review)).toEqual([0]);
+    await expect.poll(rows).toEqual({ 'more.ts': null, 'ends.ts': null });
+    expect(reads).toEqual([]);
     expect(await review.evaluate((root) => [...root.querySelectorAll('diffs-container')].some((host) => (host.shadowRoot?.textContent ?? '').includes('More unchanged context') && [...host.shadowRoot!.querySelectorAll<HTMLElement>('[data-separator-last]')].some((row) => row.checkVisibility())))).toBe(false);
   } finally {
     await context.close();
@@ -2151,10 +2167,10 @@ test('the expand arrows on the PR page: read from the forge, opening a gap grows
   await expect.poll(() => page.workers().length).toBeGreaterThan(0);
   // Arrows, and no read: a whole file is read and highlighted only when someone opens one.
   expect(forgeCalls()).not.toContain(`gh diff repos/northwind/web-app/contents/${TOKENS_PATH}?ref=${MERGE_BASE}`);
-  // The forge has no whole text of Layout.tsx: its first click takes its arrows away, and nothing is logged.
-  const noText = review.locator('[data-guide-file-shell="src/settings/Layout.tsx"] [data-expand-button]');
-  await noText.first().click();
-  await expect(noText).toHaveCount(0);
+  // Layout.tsx's one hunk holds its whole diff from line 1: its only arrows would be in the row after the hunk, which
+  // the page does not draw (approval pr-view-one-surface, 11-07 19:08), so it shows none. (No text to open taking the
+  // arrows away: guideExpandContext.test.tsx.)
+  await expect(review.locator('[data-guide-file-shell="src/settings/Layout.tsx"] [data-expand-button]').filter({ visible: true })).toHaveCount(0);
   const box = shell.locator('[data-guide-code-view-mounted]');
   const height = async () => (await box.boundingBox())!.height;
   const before = await height();
