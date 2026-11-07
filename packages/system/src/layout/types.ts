@@ -20,6 +20,8 @@ export type PartBox = Rect & {
   n?: number;
   /** Its line counts in the change ("frame.ts · +532"), drawn as its second line. */
   lines?: string | null;
+  /** The open PRs that touch it, every one, when several are drawn at rest (its line shows two at most). */
+  who?: string[];
   /** A sheet-given second line (a lane's route, a tile's "3 parts"). */
   sub?: string | null;
   /** A box name fitted to its box, when the whole name does not fit. */
