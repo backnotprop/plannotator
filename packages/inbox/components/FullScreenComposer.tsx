@@ -38,7 +38,7 @@
  * shares the toolbar's row instead (left of it), so it is no foot.
  */
 import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
-import { createContext, useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { AnnotationsList, type AnnotationsListProps, type CommentsListAt } from './AnnotationsChip';
 import { InboxComposerField, type InboxComposerTags } from './ComposerField';
 import { VoiceFoot } from './VoiceMic';
@@ -121,6 +121,15 @@ export interface FullScreenComposerValue {
 
 /** Given by the pane in full screen (image, film and HTML only): the views draw the composer from it. */
 export const FullScreenComposerContext = createContext<FullScreenComposerValue | null>(null);
+
+/**
+ * The comment's bin, which the card hands to the file's own comment row: the row draws it just before its Comment
+ * button, so Tab meets the tools, the bin, then Comment, as the row shows them. Outside the card's Comment tab: null.
+ */
+const CommentBinContext = createContext<ReactNode>(null);
+export function FullScreenCommentBin() {
+  return <>{useContext(CommentBinContext)}</>;
+}
 
 /** How long "Sent to …" shows after a Send from the card. */
 export const SENT_SHOWS_MS = 4000;
@@ -361,10 +370,10 @@ export function FullScreenComposer({
    * never dropped, and the pane's unsaved-comment question (`unsavedComposer`) still finds them before a
    * step or a close (its Keep writing brings the Comment tab back: `revealComposerComment`).
    */
-  const keptComment = (shown: boolean) =>
+  const keptComment = (shown: boolean, bin: ReactNode = null) =>
     takesComments ? (
       <div className="ib-fcomp-slot" hidden={!shown || undefined} data-fcomp-comment-slot="">
-        {comment}
+        <CommentBinContext.Provider value={bin}>{comment}</CommentBinContext.Provider>
       </div>
     ) : null;
 
@@ -454,21 +463,24 @@ export function FullScreenComposer({
   };
   const binIcon = <Icon name="trash" size={phone ? 18 : 15} />;
   // The reply's row, as the reply box's (T6): Send first, the paperclip and the mic, what rides the Send, then Open in
-  // thread and the bin. A phone puts Send at the row's right end (inbox.css).
+  // thread and the bin. A phone has Send at the row's right end, last in the markup too, so Tab follows the screen.
+  const send = (
+    <button
+      type="button"
+      className="ib-btn ib-pri ib-fcomp-send"
+      onClick={reply.onSend}
+      disabled={reply.sending || !reply.canSend || voice.busy}
+      aria-busy={reply.sending || undefined}
+      aria-label={phone ? `Send to ${reply.to}` : undefined}
+      data-fcomp-send=""
+    >
+      {reply.sending ? 'Sending…' : 'Send'}
+    </button>
+  );
   const foot =
     mode === 'reply' ? (
       <div className="ib-fcomp-foot" data-fcomp-foot="">
-        <button
-          type="button"
-          className="ib-btn ib-pri ib-fcomp-send"
-          onClick={reply.onSend}
-          disabled={reply.sending || !reply.canSend || voice.busy}
-          aria-busy={reply.sending || undefined}
-          aria-label={phone ? `Send to ${reply.to}` : undefined}
-          data-fcomp-send=""
-        >
-          {reply.sending ? 'Sending…' : 'Send'}
-        </button>
+        {!phone && send}
         <AttachFilesButton
           className="ib-fvb ib-fcomp-clip"
           iconSize={phone ? 18 : 15}
@@ -513,6 +525,7 @@ export function FullScreenComposer({
         >
           {binIcon}
         </button>
+        {phone && send}
       </div>
     ) : null;
 
@@ -602,9 +615,8 @@ export function FullScreenComposer({
         </div>
       )}
       <div className="ib-fcomp-body" data-fcomp-body="">
-        {keptComment(mode === 'comment')}
-        {mode === 'comment' && takesComments && (
-          // The comment's bin, just left of the file's own Comment button (inbox.css places both in the row).
+        {keptComment(mode === 'comment', mode === 'comment' && (
+          // The comment's bin, drawn by the file's row just before its Comment button (inbox.css places both).
           <span className="ib-fcomp-cend">
             <button
               type="button"
@@ -618,7 +630,7 @@ export function FullScreenComposer({
               {binIcon}
             </button>
           </span>
-        )}
+        ))}
         {mode === 'reply' && (
           <div className="ib-fcomp-field" data-fcomp-field="" onPaste={reply.onPaste}>
             <InboxComposerField

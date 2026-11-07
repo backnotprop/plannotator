@@ -417,8 +417,12 @@ test('a phone (390 px): the card spans the width under the toolbar, Comment and 
     expect(barBox.y + barBox.height).toBeLessThanOrEqual(cardBox.y + 1);
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await shot(page, '2A-phone-open');
-    // The phone's paperclip: a 44 px button in the reply's row (Send is at the row's right end); a chosen picture is
-    // a tile in the card.
+    // Send is at the row's right end, and last in the markup too: Tab follows the screen (WCAG 2.4.3).
+    await expect(card(page).locator('[data-fcomp-foot] > :last-child')).toHaveAttribute('data-fcomp-send', '');
+    const sendBox = (await card(page).locator('[data-fcomp-send]').boundingBox())!;
+    const footBox = (await card(page).locator('[data-fcomp-foot]').boundingBox())!;
+    expect(Math.round(footBox.x + footBox.width - (sendBox.x + sendBox.width))).toBeLessThanOrEqual(1);
+    // The phone's paperclip: a 44 px button in the reply's row; a chosen picture is a tile in the card.
     const clip = card(page).locator('[data-fcomp-foot] .ib-fcomp-clip');
     await expect(clip).toHaveAccessibleName('Attach files');
     expect(Math.round((await clip.boundingBox())!.width)).toBe(44);

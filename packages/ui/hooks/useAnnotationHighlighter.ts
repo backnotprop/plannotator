@@ -1850,7 +1850,12 @@ export function useAnnotationHighlighter({
       const source = mathSourceFromElement(mathElement);
       if (!source) return;
 
-      if (pendingSourceRef.current && !isMathAnnotationSource(pendingSourceRef.current)) {
+      // Visible drafts: a composer with words left open stays as a draft mark, as for other words selected.
+      if (
+        pendingSourceRef.current &&
+        !isMathAnnotationSource(pendingSourceRef.current) &&
+        !keepAsDraftMarkRef.current(pendingSourceRef.current.id)
+      ) {
         highlighter.remove(pendingSourceRef.current.id);
       }
       clearPendingSelection();
@@ -2010,7 +2015,12 @@ export function useAnnotationHighlighter({
     if (!source) return;
 
     const highlighter = highlighterRef.current;
-    if (pendingSourceRef.current && highlighter && !isMathAnnotationSource(pendingSourceRef.current)) {
+    if (
+      pendingSourceRef.current &&
+      highlighter &&
+      !isMathAnnotationSource(pendingSourceRef.current) &&
+      !keepAsDraftMarkRef.current(pendingSourceRef.current.id)
+    ) {
       highlighter.remove(pendingSourceRef.current.id);
     }
     clearPendingSelection();

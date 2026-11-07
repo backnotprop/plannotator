@@ -7308,7 +7308,7 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
   .pn-inbox .ib-fcomp.ib-phone .ib-ccard .ib-ta { min-height: 44px; font-size: var(--ib-fs-16-in, 16px); }
 }
 .pn-inbox .ib-fcomp.ib-phone .ib-ccard .ib-btn { height: 44px; min-width: 44px; }
-.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-send { order: 99; height: 44px; padding: 0 18px; border-radius: 22px; margin: 0 0 0 4px; font-size: var(--ib-fs-15, 15px); }
+.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-send { height: 44px; padding: 0 18px; border-radius: 22px; margin: 0 0 0 4px; font-size: var(--ib-fs-15, 15px); }
 .pn-inbox .ib-fcomp.ib-phone .ib-ccard .ib-csave, .pn-inbox .ib-fcomp.ib-phone .ib-htmlcomment .ib-csave { height: 44px; padding: 0 18px; border-radius: 12px; font-size: var(--ib-fs-15, 15px); }
 /* No bin on a phone (the owner's T6 note): the words go by clearing them. */
 .pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-bin, .ib-fcomp-cend) { display: none; }

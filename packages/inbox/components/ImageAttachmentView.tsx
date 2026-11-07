@@ -16,7 +16,7 @@ import { useConfigValue } from '@plannotator/ui/config';
 import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { markupWords, noteOnto } from '../markup';
 import { DRAWING_SCREEN, KeptMarkup, markupAddedToast, OverWindow, type Notice } from './Markup';
-import { FullScreenComposer, FullScreenComposerContext } from './FullScreenComposer';
+import { FullScreenCommentBin, FullScreenComposer, FullScreenComposerContext } from './FullScreenComposer';
 
 /** A fresh annotation id. */
 function newId(): string {
@@ -377,6 +377,7 @@ export function ImageAttachmentView({
           </span>
         </button>
       </Tip>
+      <FullScreenCommentBin />
       <button
         type="button"
         className="ib-btn ib-pri ib-csave"

@@ -196,9 +196,6 @@ export function DiagramComposer({
         </div>
         {error !== null && <p role="alert" className="pn-cbox-note pn-cbox-err">{error}</p>}
         <div className="pn-cbox-row">
-          <button type="button" className="pn-cbox-save" disabled={!canWrite || submitting || asking || text.trim() === ''} onClick={submit} data-comment-card-submit="">
-            Comment
-          </button>
           {onAskAI !== undefined && (
             <button type="button" data-diagram-ask-ai="" className="pn-cbox-tool pn-cbox-word" onClick={() => void askAI()} disabled={!canAskAI} title={canAskAI ? 'Ask AI this question' : 'Type a question to ask AI'}>
               <SparklesIcon className="h-3.5 w-3.5" />
@@ -218,6 +215,9 @@ export function DiagramComposer({
               <Icon name="trash" size={15} />
             </button>
           )}
+          <button type="button" className="pn-cbox-save" disabled={!canWrite || submitting || asking || text.trim() === ''} onClick={submit} data-comment-card-submit="">
+            Comment
+          </button>
         </div>
       </div>
     );

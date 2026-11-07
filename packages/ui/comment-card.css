@@ -49,8 +49,7 @@
 .pn-cbox :is(.pn-cbox-tool, .pn-cbox-close) svg.ib-ic,
 .pn-cbox-back svg.ib-ic,
 .pn-cdraft svg.ib-ic { stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.pn-cbox-mid { flex: 1 1 0; min-width: 0; order: 97; }
-.pn-cbox-bin { order: 98; }
+.pn-cbox-mid { flex: 1 1 0; min-width: 0; }
 .pn-cbox :is(button, [role="button"]) { transition: none !important; }
 .pn-cbox [data-quick-look-good]:hover { background: none; }
 .pn-cbox :focus-visible:not(textarea) { outline: 2px solid var(--ring); outline-offset: 1px; }
@@ -59,7 +58,7 @@
    phone), the word "Comment" and no icon. Empty, only its fill lightens (65% of the primary on the card; the word
    stays solid), so it still clears 3:1 against the card. Hover darkens the fill; nothing fades. */
 .pn-cbox-save {
-  order: 99; flex: none; display: inline-flex; align-items: center; height: 30px; margin: 0 0 0 8px; padding: 0 14px;
+  flex: none; display: inline-flex; align-items: center; height: 30px; margin: 0 0 0 8px; padding: 0 14px;
   border: 0; border-radius: 8px; background: var(--primary); color: var(--primary-foreground);
   font: inherit; font-size: var(--ib-fs-13, 13px); font-weight: 600; white-space: nowrap; cursor: pointer; opacity: 1;
 }

@@ -943,10 +943,8 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             {mentionSource?.renderNotice?.(mentionChipPeople)}
             <MentionAutocompleteMenu id={mentionListboxId} menu={mentionAc.menu} onSelect={mentionAc.select} />
           </div>
+          {/* Screen order is Tab order: the tools, the bin, then Comment at the right end. */}
           <div className="pn-cbox-row">
-            <button type="button" className="pn-cbox-save" onClick={handleSubmit} disabled={!canSubmit} data-comment-card-submit="">
-              {submitLabel ?? 'Comment'}
-            </button>
             {quickLookGoodButton}
             {allowImages && (
               <AttachmentsButton
@@ -983,6 +981,9 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
                 <Icon name="trash" size={15} />
               </button>
             )}
+            <button type="button" className="pn-cbox-save" onClick={handleSubmit} disabled={!canSubmit} data-comment-card-submit="">
+              {submitLabel ?? 'Comment'}
+            </button>
           </div>
         </div>
       </>,
