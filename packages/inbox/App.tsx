@@ -101,6 +101,7 @@ import { ThreadWait } from './components/ThreadWait';
 import { EmptyThreadPanel } from './components/EmptyThreadPanel';
 import { AgentNoteDialog } from './components/AgentNoteDialog';
 import { FeedbackDialog } from './components/FeedbackDialog';
+import { SystemSetupHost } from './system/SetupHost';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { cardReport, noteQuestionRows } from './agents';
 import type { InboxAgentRow, InboxAgentsModel, InboxConnectReport, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
@@ -141,6 +142,7 @@ import { noteStarred } from './starPop';
 import type { PinnedAction } from './components/PinnedRow';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { newBatchId, projectAllArchived, projectBatchToast, projectsWithReadable, shownProjects, type ProjectAction } from './projectMenu';
+import { projectActivity } from './projectSort';
 import { lookBoundary } from './folding';
 import { latestAgentSeq } from './seenOnSight';
 import { isPhone, isTouchPhone, trackKeyboard, usePhone } from './phone';
@@ -167,6 +169,8 @@ import { reviewsAlias } from './reviewsRoute';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
+import { CodeReviewOffer } from './components/CodeReviewOffer';
+import { useCodeReviewOffer } from './codeReviewOffer';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
@@ -179,7 +183,7 @@ import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPa
 import { actedSince, inputMark, lastInput } from './lastInput';
 import { backFocusTargets, focusKept, focusLost } from './backFocus';
 import { askArrivalFocus, listOrder as drawnOrder, threadStep } from './threadStep';
-import { LIST_STOPS, listMoveIndex, listStops } from './listKeys';
+import { LIST_STOPS, listKeyTarget } from './listKeys';
 import { emitAskChange } from './ask/askEvents';
 import { useInboxAsk } from './ask/useInboxAsk';
 import { setSessionLabels } from './sessionLabels';
@@ -188,6 +192,8 @@ import { ShapeGridPage, ShapeLayer, ShapePebbleButton } from './shape/ShapeParts
 import { shapeReplyPart, type ShapeReplyPart } from './shape/addToReply';
 import type { ShapeBoxSelection } from '@plannotator/ui/components/shape';
 import { useInboxShapes } from './shape/useInboxShapes';
+import { shapeReviewAtOf, writeShapeReviewAt } from './shape/review';
+import type { ShapeReviewAt } from '@plannotator/ui/components/shape/types';
 import { filterShapeItems, shapeAgo } from '@plannotator/ui/components/shape/ShapeGrid';
 import type { SearchShape } from './search/model';
 import { connectCommand } from './connectPrompt';
@@ -356,6 +362,11 @@ interface Route {
   /** The message whose guided review is open over the window (`#thread=…&guide=msg_…`). */
   guide?: string | null;
   /**
+   * Where that review opens (a Shape board's link, approval "shape-whats-changed"): `&code=path:line`, `&step=N`
+   * or `&files`. Dropped from the address once the review is there.
+   */
+  guideAt?: ShapeReviewAt | null;
+  /**
    * The thread's Artifacts view (`#thread=…&artifacts`, approval "inbox-thread-artifacts"): the grid of every
    * artifact in place of the messages. A file or a guided review opened from it keeps it, so their Back returns to it.
    */
@@ -412,6 +423,7 @@ function routeOf(fullHash: string): Route {
     thread,
     file: fileId ? { id: fileId, version: params.get('v') === 'sent' ? 'sent' : 'current', focus: params.get('at'), linked: params.get('linked'), view: parseFileView(params.get('view')), set: params.get('set') } : null,
     guide: thread ? params.get('guide') : null,
+    guideAt: thread && params.get('guide') ? shapeReviewAtOf(params) : null,
     shape: thread ? params.get('shape') : null,
     msg: thread ? params.get('msg') : null,
     artifacts: thread ? params.has('artifacts') : false,
@@ -462,14 +474,15 @@ function hashOf(route: Route): string {
       if (route.file.set) params.set('set', route.file.set);
     }
     if (route.thread && route.guide) params.set('guide', route.guide);
+    if (route.thread && route.guide) writeShapeReviewAt(params, route.guideAt);
     if (route.thread && route.shape) params.set('shape', route.shape);
     // A thread opened from a Board card: its way back is the card (`&card=crd_…`).
     if (route.thread && route.card) params.set('card', route.card);
     if (route.thread && route.card && route.board && route.board !== 'lanes') params.set('from', route.board);
     if (route.thread && route.card && route.boardProject) params.set('board-project', route.boardProject);
     if (route.thread && route.card && route.boardInitiative) params.set('board-initiative', route.boardInitiative);
-    // `&artifacts`, a flag: written without its empty `=`.
-    hash = params.toString().replace(/(^|&)artifacts=(?=&|$)/, '$1artifacts');
+    // `&artifacts` and `&files`, flags: written without their empty `=`.
+    hash = params.toString().replace(/(^|&)(artifacts|files)=(?=&|$)/g, '$1$2');
   }
   return hash ? `#${hash}` : '';
 }
@@ -2424,7 +2437,11 @@ function Inbox() {
       // (approval "inbox-thread-artifacts": one more rung before Escape closes the thread).
       // A thread in full screen leaves it before it closes (the sidebar and the list come back, the thread stays).
       const now = routeRef.current;
-      // A board open over the thread closes first, back to the thread.
+      // A review a board opened over itself closes first, back to the board; then the board, back to the thread.
+      if (now.shape && now.guide) {
+        closeTo({ ...now, guide: null, guideAt: null });
+        return;
+      }
       if (now.shape) {
         closeTo({ ...now, shape: null });
         return;
@@ -3707,7 +3724,7 @@ function Inbox() {
    * list as it shows (threadStep.ts), opened as Enter opens a row, replacing the open one in history so Back still
    * goes to the list. From the thread focus lands where N puts it (Thread.tsx takes it); from the list it stays on
    * the rows, on the new one. Not from a file, a guided review or the Artifacts view. With no thread open, on the
-   * list's rows, they move along them as ↓ ↑ do: the next thread there, nothing opened (`listMoveIndex`, no wrap).
+   * list's rows, they move along the threads: the next one there, past the groups' headers, nothing opened (`listKeyTarget`, no wrap).
    */
   const threadStepKey = (dir: 1 | -1) => ({
     when: (event: KeyboardEvent) => {
@@ -3723,9 +3740,8 @@ function Inbox() {
       const body = listBody(rootRef.current);
       if (!body) return;
       if (!now.thread) {
-        const stops = listStops(body);
-        const at = listMoveIndex(stops.length, stops.indexOf(keyTarget(event) as HTMLElement), dir > 0 ? 'next' : 'previous');
-        const next = at === null ? null : stops[at];
+        // Threads only: J K pass over the groups' headers (listKeys.ts), as they step threads with one open.
+        const next = listKeyTarget(body, keyTarget(event), dir > 0 ? 'j' : 'k');
         next?.focus({ preventScroll: true });
         next?.scrollIntoView?.({ block: 'nearest' });
         return;
@@ -4230,6 +4246,7 @@ function Inbox() {
     for (const project of projects) counts.set(project.id, waitingCount(latestSections, project.id));
     return counts;
   }, [projects, latestSections]);
+  const latestProjectActivity = useMemo(() => projectActivity(latestGroups), [latestGroups]);
 
   const context: ConnectContext | null = settings
     ? { command: settings.mcp_command, mcpUrl: settings.mcp_url, platform: platformOf() }
@@ -4438,7 +4455,17 @@ function Inbox() {
   /** A reveal's "Turn it on" (revealTurnOn.ts): Settings' own save; not saved, the switch goes back off and a toast says so. */
   const turnOnFromReveal = (feature: RevealFeature, close: () => void) =>
     void turnOnRevealFeature(feature, close, {
-      save: feature === 'board' ? () => inboxApi.saveBoard(true).then((saved) => saved.board) : () => inboxApi.saveSteps(true).then((saved) => saved.steps),
+      save:
+        feature === 'board'
+          ? () => inboxApi.saveBoard(true).then((saved) => saved.board)
+          : feature === 'steps'
+            ? () => inboxApi.saveSteps(true).then((saved) => saved.steps)
+            : () =>
+                inboxApi.saveCodeReview(true).then((saved) => {
+                  // As Settings' switch: the "/" list gains the review skills.
+                  reloadSkillCatalog();
+                  return saved.code_review;
+                }),
       setSettings,
       showToast,
       dismissToast,
@@ -4930,6 +4957,21 @@ function Inbox() {
       gone = true;
     };
   }, [showTourEntry]);
+  // Code review's one-time offer (approval "code-review-offer-card"; codeReviewOffer.ts): the line's day-0 slot, armed
+  // from `reveal.next`, at once once the tour's screens are gone and the page is clear; the agent note waits for it.
+  const codeReviewOffer = useCodeReviewOffer({
+    due: snoozeIntroLatch.current?.next === 'code_review',
+    blocked: updatingThisLoad.current || soundDialog !== 'none' || agentNote !== 'none' || oneTimeDialogShownThisLoad(),
+    tourScreen: showTourEntry || tourIntroShown || tourOn,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    rows: snoozeIntroRows,
+    clear: listIntroClear && updateDialog === null && !restarting,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    toast: toast !== null,
+    on: settings?.code_review?.on === true,
+  });
+  const offerLinesFree = linesFree && codeReviewOffer.stage !== 'open' && codeReviewOffer.stage !== 'claimed';
   // The agent-note dialog's moment (approval "inbox-one-time-dialogs": day 0 is setup, one after another): once the
   // tour's screens are gone (the entry screen, its intro, the tour itself), and only when the Inbox's line says this
   // load may (`reveal.setup`: never on a day that had another dialog, nor on the load right after one). Then the
@@ -4945,7 +4987,9 @@ function Inbox() {
     route.page !== 'settings' &&
     route.page !== 'tour' &&
     !showTourEntry &&
-    !tourIntroShown;
+    !tourIntroShown &&
+    // Code review's day-0 offer goes first (its claim then keeps the day, so the note waits for the next free one).
+    codeReviewOffer.settled;
   useEffect(() => {
     if (!agentNoteReady || agentNoteDecided.current) return;
     let cancelled = false;
@@ -5069,6 +5113,11 @@ function Inbox() {
   const shapeLayerId = shapeOn && route.shape && (route.page === 'shapes' || (route.page === 'inbox' && !!route.thread)) ? route.shape : null;
   const guideMessage =
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
+  // The review is at the place a board's link named: the address lets it go, so a reload opens it at the top.
+  const landGuide = () => {
+    const now = routeRef.current;
+    if (now.guideAt) writeRoute({ ...now, guideAt: null }, { replace: true });
+  };
   // Linked machines: the open thread's machine is away, so its read failed: "MacBook asleep since …", and the answers
   // held for it. A phone and a stacked window show this in the thread's place too, so a held answer is never out of sight.
   const openOwner = route.thread ? machines.linked.find((m) => m.id === machineOf(route.thread!)) : undefined;
@@ -5643,7 +5692,7 @@ function Inbox() {
           stale={staleNotice}
           ask={
             // The first real thread's inline ask (the tour's, once) stands in for this line while it shows.
-            notifications.ask && linesFree && !(notifyAgain && notifyAgainThread !== null) ? (
+            notifications.ask && offerLinesFree && !(notifyAgain && notifyAgainThread !== null) ? (
               <NotificationAsk
                 kind={notifications.ask}
                 soundOn={sound.settings.enabled}
@@ -5652,7 +5701,7 @@ function Inbox() {
                 onNotNow={notifications.notNow}
                 onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'general' })}
               />
-            ) : notifications.slept && notifications.permission === 'granted' && linesFree ? (
+            ) : notifications.slept && notifications.permission === 'granted' && offerLinesFree ? (
               <TabSleptLine slept={notifications.slept} onDismiss={notifications.dismissSlept} />
             ) : null
           }
@@ -5982,6 +6031,7 @@ function Inbox() {
             }
             projectNames={projectNames}
             projectCounts={projectCounts}
+            projectActivity={latestProjectActivity}
             projectsReadable={projectsReadable}
             onProjectAction={(projectId, action) => void projectAction(projectId, action)}
             onProjectRename={renameProject}
@@ -6044,6 +6094,9 @@ function Inbox() {
               id={shapeLayerId}
               thread={route.page === 'inbox' && thread && thread.thread_id === route.thread ? thread : null}
               onClose={() => close({ ...routeRef.current, shape: null })}
+              // Its review opens over the board, at the place a link names; Back or Esc comes back to the board.
+              onOpenReview={(messageId, at) => go({ ...routeRef.current, guide: messageId, guideAt: at })}
+              covered={!!guideMessage}
               onAddToReply={addShapeReply}
             />
           )}
@@ -6127,6 +6180,17 @@ function Inbox() {
           onTurnOn={() => turnOnFromReveal('board', boardReveal.close)}
         />
       )}
+      {codeReviewOffer.stage === 'open' && (
+        <CodeReviewOffer
+          phone={phone}
+          onClose={() => {
+            // Not now (Escape, a click outside): final, and the line's next offer waits three days.
+            void inboxApi.revealNotNow('code_review');
+            codeReviewOffer.close();
+          }}
+          onTurnOn={() => turnOnFromReveal('code_review', codeReviewOffer.close)}
+        />
+      )}
       {stepsReveal.stage === 'open' && (
         <ChecklistIntro
           phone={phone}
@@ -6180,6 +6244,8 @@ function Inbox() {
           }}
         />
       )}
+      {/* System → Set up a project: B2's System button and B1's Set up call `openSystemSetup()` (system/opener.ts). */}
+      <SystemSetupHost settings={settings} phone={phone} showToast={showToast} />
       {feedbackOpen && (
         <FeedbackDialog
           version={latest?.version ?? settings?.version ?? 'dev'}
@@ -6404,6 +6470,8 @@ function Inbox() {
             onClose={() => close({ ...route, thread: null, guide: null })}
             onSent={afterWrite}
             onAsk={ask.askWith}
+            at={route.guideAt ?? null}
+            onLanded={landGuide}
           />
         ) : (
           <GuidePane
@@ -6411,6 +6479,8 @@ function Inbox() {
             message={guideMessage}
             guest={tailnetGuest(settings)}
             codeReview={settings?.code_review?.on === true}
+            at={route.guideAt ?? null}
+            onLanded={landGuide}
             onBack={() => close({ ...route, guide: null })}
             onClose={() => close({ ...route, thread: null, guide: null })}
           />

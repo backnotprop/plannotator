@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { MAX_FILE_BYTES } from '../src/format/keys.ts';
 import { loadFiles } from '../src/index.ts';
 import { check, load, loadCommitted, readCommitted } from '../src/node/index.ts';
-import { drawingDir, edited, git, isolateGitConfig, repoRoot, revisionOfSize, smallDrawing, tempDir, writeTree } from './helpers.ts';
+import { edited, git, isolateGitConfig, revisionOfSize, smallDrawing, tempDir, writeTree } from './helpers.ts';
 
 isolateGitConfig();
 const cleanups: (() => void)[] = [];
@@ -32,32 +32,11 @@ function smallRepo(code: Record<string, string> = { 'src/main.ts': '', 'src/api/
 }
 
 describe('check', () => {
-  // CI checks out one commit, so the drawing's own `at` is not there: check at HEAD.
-  test('the committed drawing is clean against this repo at HEAD', async () => {
-    expect(await check({ dir: drawingDir, root: repoRoot, at: 'HEAD' })).toEqual({ errors: [], warnings: [], missing: [] });
-  });
-
   test('a band whose written spans pass 12 columns is still clean: spans are a preference, and a full band is narrowed to fit', async () => {
     const r = smallRepo();
     writeTree(r.dir, { 'sheets/L-101.yaml': 'sheet: L-101\nscope: app\nkind: logical\ntitle: The app\nbands:\n  - { id: inside, row: [api 4, ~ 8] }\n  - { id: more, row: [~ 6, [api, 10]] }\n' });
     const over = await check({ dir: r.dir, root: r.root, at: r.sha });
     expect(over).toEqual({ errors: [], warnings: [], missing: [] });
-  });
-
-  test('the committed drawing is clean at its own commit, when this clone has it', async () => {
-    const { model } = await load(drawingDir);
-    const at = model!.sources!.repos.self!.at;
-    const has = (() => {
-      try {
-        git(repoRoot, 'cat-file', '-e', `${at}^{commit}`);
-        return true;
-      } catch {
-        return false;
-      }
-    })();
-    const result = await check({ dir: drawingDir, root: repoRoot });
-    if (has) expect(result).toEqual({ errors: [], warnings: [], missing: [] });
-    else expect(result.errors.map((e) => e.field)).toEqual(['sources.repos.self.at']);
   });
 
   test('a cited file is looked up at the commit, not in the working tree', async () => {

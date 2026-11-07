@@ -286,7 +286,7 @@ for (const phone of PHONES) {
 
     test('the reply box: an attach button on a phone, a picked image uploads and rides the Send', async () => {
       const pane = page.locator('section.ib-pane');
-      await pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ }).first().click();
+      await pane.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
       const box = pane.locator('.ib-rbox');
       await box.getByRole('textbox').fill(`From the ${phone.tag}: the header on my phone.`);
       // The paperclip sits in the box's toolbar, as on a desktop (approval "inbox-reply-attach"): 36 px drawn, a 44 px tap area.

@@ -138,7 +138,7 @@
 - **Limits that must stay.**
   - An honest `User-Agent` and no browser headers, ever. A 403 or a challenge page is an answer: show the failure and stop.
   - The only automatic retry is one token refresh on a 401. Everything else waits for a person's press.
-  - A token, key or clip is never logged, returned or written down (the key's own 0600 file aside). Audio stays in memory for the length of the request. Failures are fixed codes (`InboxVoiceFailure`), never upstream text.
+  - A token, key or clip is never logged, returned or written down (the key's own 0600 file aside). Audio stays in memory for the length of the request. Failures are fixed codes (`INBOX_VOICE_FAILURES` in `packages/core/inbox-types.ts`), never upstream text. A `voice_` code the page does not know (a newer Inbox's) shows the generic "Couldn’t transcribe this clip" note (`failed`) and keeps the clip for Retry, never a crash.
   - The key is set on the computer or by the owner through the tailnet's HTTPS, never on a plain-http path (`403 https_required`), and a page sees its last 4 at most.
 - `account/read` gives the sign-in type and plan and no token. It is what Settings, the dimmed mic and the announcement's audience read. `getAuthStatus` runs only to transcribe.
 - The announcement: `inboxVoiceIntro` decides as `inboxListIntro` does, then the claim (`POST /api/inbox/voice/intro`) refuses when another one-time dialog is due, and checks `account/read` once per Inbox start, only with a `codex` on this computer. Turning voice on anywhere marks it shown.
