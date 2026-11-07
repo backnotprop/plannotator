@@ -67,6 +67,8 @@ test.beforeAll(async () => {
       HOME: home,
       TMPDIR: tmpdir(),
       PLANNOTATOR_DATA_DIR: dataDir,
+      // A release version: never the live daily ping (packages/shared/daily-ping.ts).
+      NO_ANON_PING: '1',
       PLANNOTATOR_BROWSER: NO_BROWSER,
       NO_BROWSER,
       PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',

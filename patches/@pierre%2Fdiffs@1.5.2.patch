@@ -1,0 +1,15 @@
+diff --git a/dist/components/FileDiff.js b/dist/components/FileDiff.js
+index 6f66bd3910315a1c16e37dabd9dd5b8df067661d..489aa3893fffdafbb995c83fe152c5f723718e24 100644
+--- a/dist/components/FileDiff.js
++++ b/dist/components/FileDiff.js
+@@ -510,7 +510,9 @@ var FileDiff = class {
+ 	loadFilesIfNecessary() {
+ 		const { fileDiff, options: { loadDiffFiles } } = this;
+ 		if (fileDiff == null || !canHydrateDiff(fileDiff) || this.pendingFiles?.fileDiff === fileDiff) return;
+-		if (loadDiffFiles == null) throw new Error("FileDiff: loadDiffFiles is required to load full files for a partial diff");
++		// Hosts may hydrate partial diffs externally. Without a loader, keep
++		// rendering the patch; prepareForEditing still requires full contents.
++		if (loadDiffFiles == null) return;
+ 		const promise = this.loadFilesForDiff(fileDiff, loadDiffFiles);
+ 		const pendingFiles = this.pendingFiles = {
+ 			fileDiff,

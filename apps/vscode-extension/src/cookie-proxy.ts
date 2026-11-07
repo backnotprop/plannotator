@@ -344,8 +344,18 @@ export const KEY_BRIDGE_SOURCE = `function(win,doc,post){
         read().then(function(text){if(text)doc.execCommand("insertText",false,text);});
         return;
       }
-      // Undo/redo/select-all stay native; forwarding them would hijack them.
-      if(k==="a"||k==="z"||k==="y")return;
+      if(k==="a"){
+        if(e.defaultPrevented||e.isComposing)return;
+        var el=doc.activeElement;
+        // Native select-all does not reach text fields in the nested webview.
+        if(!e.shiftKey&&el&&(el.tagName==="INPUT"||el.tagName==="TEXTAREA")&&el.selectionStart!=null){
+          el.select();
+          e.preventDefault();
+        }
+        return;
+      }
+      // Undo/redo stay native; forwarding them would hijack them.
+      if(k==="z"||k==="y")return;
     }
     var ev={
       key:e.key,code:e.code,keyCode:e.keyCode,which:e.which,location:e.location,

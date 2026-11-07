@@ -121,3 +121,94 @@ test('a worktrees folder right in a home folder (or with only dot-folders up to 
   ]);
   expect(['mac', 'linux', 'win', 'dot', 'top'].map((id) => names.get(id))).toEqual(['foo', 'bar', 'baz', 'qux', 'quux']);
 });
+
+// Rename… in the project menu: the person's name for a project is drawn as it is.
+test('a renamed project reads its display_name as it is, and the others no longer clash with it', () => {
+  const acme = { id: 'prj_acme', root: '/Users/me/code/acme/main', name: 'acme', display_name: 'acme' };
+  const initech = { id: 'prj_initech', root: '/Users/me/code/initech/main', name: 'main · initech' };
+  const names = shortProjectNames([acme, initech]);
+  expect(names.get(acme.id)).toBe('acme');
+  // Before the rename the two `main` folders named their parents; now the other one is alone.
+  expect(names.get(initech.id)).toBe('main');
+  expect(shortProjectNames([{ ...acme, display_name: undefined }, initech]).get(acme.id)).toBe('main · acme');
+  // A name that is also another project's folder name gets no parent added.
+  const notes = { id: 'prj_notes', root: '/Users/me/code/notes', name: 'notes' };
+  const named = shortProjectNames([{ ...initech, display_name: 'notes' }, notes]);
+  expect(named.get(initech.id)).toBe('notes');
+  expect(named.get(notes.id)).toBe('notes');
+});
+
+test('a display_name that is not a non-empty string is ignored: the folder names the project', () => {
+  const names = shortProjectNames([
+    { id: 'a', root: '/code/acme/main', name: 'main', display_name: 42 },
+    { id: 'b', root: '/code/notes', name: 'notes', display_name: '' },
+  ]);
+  expect(names.get('a')).toBe('main');
+  expect(names.get('b')).toBe('notes');
+});
+
+test('the window-wide names (a pin outside the sidebar included) carry the display_name too', () => {
+  const acme = { id: 'prj_acme', root: '/Users/me/code/acme/main', name: 'acme', display_name: 'acme' };
+  const names = windowProjectNames({ projects: [acme], sidebar: [], sections: [], pins: [{ project: { id: acme.id } }] });
+  expect(names.get(acme.id)).toBe('acme');
+});
+
+// The owner, 2026-11-02: the list's banner read "1 new in appnotes · Users/ramos/workspaces/projects". On disk,
+// `~/workspaces/projects/appnotes` is a plain folder of notes and `appnotes/worktrees/main` the repository's main
+// checkout; a session started in the folder made a folder project beside the repository's. Both name the place
+// `…/projects/appnotes`, so no parent told them apart and the old rule climbed to the filesystem root.
+const APPNOTES = '/Users/ramos/workspaces/projects/appnotes';
+const FOLDER = { id: 'prj_folder', root: APPNOTES, name: 'appnotes' };
+const MAIN = { id: 'prj_main', root: `${APPNOTES}/worktrees/main`, name: 'main' };
+
+test("a plain folder and the checkout in its worktrees folder read as one place: the folder's bare name, the checkout's name added", () => {
+  const names = shortProjectNames([FOLDER, MAIN]);
+  expect(names.get(FOLDER.id)).toBe('appnotes');
+  expect(names.get(MAIN.id)).toBe('appnotes · main');
+  // A repository and its Claude Code agent worktree, both projects: the same rule.
+  const agent = shortProjectNames([REPO, { id: 'prj_agent', root: `${REPO.root}/.claude/worktrees/agent-a4ef845a`, name: 'x' }]);
+  expect([agent.get(REPO.id), agent.get('prj_agent')]).toEqual(['plannotator', 'plannotator · agent-a4ef845a']);
+});
+
+test('that place beside another of the name: one parent for the place, the checkout only where the place holds two', () => {
+  const names = shortProjectNames([FOLDER, MAIN, { id: 'prj_ws', root: '/Users/ramos/workspaces/appnotes', name: 'appnotes' }]);
+  expect(names.get(FOLDER.id)).toBe('appnotes · projects');
+  expect(names.get(MAIN.id)).toBe('appnotes · projects · main');
+  expect(names.get('prj_ws')).toBe('appnotes · workspaces');
+  // The checkout alone at that place: no checkout name.
+  expect(shortProjectNames([MAIN, { id: 'prj_ws', root: '/Users/ramos/workspaces/appnotes', name: 'appnotes' }]).get(MAIN.id)).toBe('appnotes · projects');
+});
+
+test('each project takes its own shortest parents, and never spells out a home folder', () => {
+  const layouts = [
+    [FOLDER, MAIN],
+    [FOLDER, { id: 'x', root: '/Users/ramos/appnotes', name: 'appnotes' }],
+    [FOLDER, { id: 'x', root: '/Users/ramos/projects/appnotes', name: 'appnotes' }, { id: 'y', root: '/Users/ramos/appnotes', name: 'appnotes' }],
+    [FOLDER, { id: 'x', root: '/Users/ramos/.codex/worktrees/d4ed/appnotes', name: 'appnotes' }],
+    [FOLDER, { id: 'x', root: '/Users/ramos/Workspaces/projects/appnotes', name: 'appnotes' }],
+    [{ id: 'l', root: '/home/ramos/work/api', name: 'api' }, { id: 'm', root: '/home/ramos/api', name: 'api' }],
+    [{ id: 'w', root: 'C:\\Users\\ramos\\src\\api', name: 'api' }, { id: 'v', root: 'C:\\Users\\ramos\\api', name: 'api' }],
+  ];
+  for (const projects of layouts) {
+    for (const name of shortProjectNames(projects).values()) expect(name).not.toMatch(/Users|home\//i);
+  }
+  const three = shortProjectNames(layouts[2]!);
+  expect([three.get(FOLDER.id), three.get('x'), three.get('y')]).toEqual(['appnotes · workspaces/projects', 'appnotes · ~/projects', 'appnotes · ~']);
+  expect(shortProjectNames(layouts[6]!).get('v')).toBe('api · ~');
+});
+
+test('the same folder twice (as a person reads it) is one name, not a path to the root', () => {
+  const names = shortProjectNames([FOLDER, { id: 'x', root: '/Users/ramos/Workspaces/projects/appnotes/', name: 'appnotes' }]);
+  expect([names.get(FOLDER.id), names.get('x')]).toEqual(['appnotes', 'appnotes']);
+});
+
+test("a renamed project keeps its name; the folder's checkout then reads alone", () => {
+  const names = shortProjectNames([{ ...FOLDER, display_name: 'appnotes notes' }, MAIN]);
+  expect(names.get(FOLDER.id)).toBe('appnotes notes');
+  expect(names.get(MAIN.id)).toBe('appnotes');
+});
+
+test("macOS's /Users/Shared is no one's home: its parents are spelled out", () => {
+  const names = shortProjectNames([{ id: 's', root: '/Users/Shared/api', name: 'api' }, { id: 'w', root: '/work/api', name: 'api' }]);
+  expect(names.get('s')).toBe('api · Shared');
+});

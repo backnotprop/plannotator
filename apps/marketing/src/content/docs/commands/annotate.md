@@ -13,7 +13,7 @@ The `/plannotator-annotate` command opens files, URLs, or folders in the Plannot
 | Input | Command | What happens |
 |-------|---------|--------------|
 | Markdown file | `plannotator annotate README.md` | Opens the file directly |
-| Plain-text file | `plannotator annotate config.yaml` | Opens the file directly, rendered as plain text |
+| Config or data file | `plannotator annotate config.yaml` | Opens the file directly, shown as its own text with syntax highlighting |
 | Diagram file | `plannotator annotate flow.mmd` | Renders the whole file as one diagram in the diagram viewer |
 | AsciiDoc file | `plannotator annotate docs/guide.adoc` | Renders the AsciiDoc document |
 | HTML file | `plannotator annotate docs/guide.html` | Renders the HTML directly |
@@ -23,7 +23,7 @@ The `/plannotator-annotate` command opens files, URLs, or folders in the Plannot
 
 ### Supported file types
 
-Beyond `.md`, `.mdx`, `.txt`, `.html`, and `.htm`, annotate accepts common plain-text config and data formats: `.yaml`, `.yml`, `.json`, `.jsonc`, `.json5`, `.toml`, `.ini`, `.cfg`, `.conf`, `.properties`, `.csv`, `.tsv`, `.log`, `.xml`, and `.env.example`. These render exactly like `.txt` — as plain text you can select and annotate.
+Beyond `.md`, `.mdx`, `.txt`, `.html`, and `.htm`, annotate accepts common plain-text config and data formats: `.yaml`, `.yml`, `.json`, `.jsonc`, `.json5`, `.toml`, `.ini`, `.cfg`, `.conf`, `.properties`, `.csv`, `.tsv`, `.log`, `.xml`, and `.env.example`. These show as their own text, monospace and line by line, syntax-highlighted in their language (`.cfg` and `.conf` stay plain, since the name doesn't say which syntax is inside). You select and annotate them like any other document, and a `#` comment stays a comment. A file over 128 KB shows without highlighting, so a large log or JSON dump opens quickly.
 
 ### AsciiDoc files
 
@@ -198,6 +198,16 @@ The annotation UI in annotate mode works the same as plan review, with a few cha
 - The completion screen says "Annotations Sent" instead of "Plan Approved"
 
 All annotation types work identically: deletions, comments, global comments, quick labels, "looks good" approvals, image attachments, and [comments on part of an image](/docs/commands/plan-review/#comments-on-part-of-an-image) in a markdown file. HTML and live app surfaces are the exception: they are comment-only, so deletions and quick labels are unavailable there, though deletions saved earlier still restore.
+
+## Naming the tab (`--title`)
+
+The tab names the open document, so several reviews of the same repository stay apart. When the caller knows better what the review is for, `--title` names it instead:
+
+```bash
+plannotator annotate docs/changes/add-refund-flow/ --title "add-refund-flow review"
+```
+
+The text is the whole tab title, exactly as given, with no repository or file name added. The header beside the logo shows the same text, and its tooltip still names the file or folder. It stays put whichever file you open in a folder, and when you follow a link to another document. A blank title is ignored. `plannotator annotate-last` and `plannotator review` take it too.
 
 ## Flags
 

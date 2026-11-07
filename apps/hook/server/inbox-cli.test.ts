@@ -20,11 +20,15 @@ import { startInboxServer } from "@plannotator/server/inbox";
 import { INBOX_DEFAULT_SERVED_TOOLS } from "@plannotator/server/inbox-mcp";
 import { GUIDE_BRIEF_EXAMPLE } from "../../../packages/server/inbox-guides";
 import { runPlannotatorUninstall } from "@plannotator/server/uninstall";
-import { INBOX_MAX_REQUEST_BYTES } from "@plannotator/shared/inbox/connection";
+import { INBOX_MAX_REQUEST_BYTES, INBOX_REMOVED_ACTION_TEXT } from "@plannotator/shared/inbox/connection";
 import { INBOX_BRIDGE_POLL_PATH, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
 import { INBOX_AGENT_NAME, INBOX_HOST } from "../hooks/mod/inbox";
 import { OPENCODE_INBOX_AGENT_NAME, OPENCODE_INBOX_HOST } from "../../opencode-plugin/inbox";
+import { DSH_INBOX_AGENT_NAME, DSH_INBOX_HOST } from "../../dsh-plugin/inbox";
+import { CLINE_INBOX_AGENT_NAME, CLINE_INBOX_HOST } from "../../cline-plugin/inbox";
+import { detachedInboxEnv } from "./inbox-command";
 import { fillInboxToolArguments, inboxCallHostSession, inboxHostSessionFromEnv, inboxQwenShimContext, INBOX_SESSION_HOST_NAMES, runInboxMcpShim } from "./inbox-mcp-shim";
+import { stubbedAgentClis } from "../../../tests/helpers/agent-cli-guard";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { type InboxEntry, inboxEntryOf, mustSignalInbox, signalProvenInbox, stopProvenInboxes } from "../../../tests/helpers/inbox-process";
 
@@ -47,6 +51,8 @@ afterEach(async () => {
   await stopProvenInboxes(started.splice(0), { signal: "SIGKILL" });
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
+// After the cleanup hooks: a stub's failure stops the hooks registered behind it.
+const agents = stubbedAgentClis();
 
 /** Remember the Inbox the sandbox's registry names now, for the teardown. */
 function track(box: Sandbox): void {
@@ -78,7 +84,7 @@ function sandbox(): Sandbox {
     dataDir,
     browserMarker,
     env: {
-      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      ...agents.env,
       HOME: home,
       TMPDIR: tmpdir(),
       PLANNOTATOR_DATA_DIR: dataDir,
@@ -289,7 +295,6 @@ describe("plannotator inbox mcp (the stdio shim)", () => {
     const { thread } = await (await fetch(`${base}/api/inbox/threads/${sent.thread_id}`)).json();
     const question = thread.messages[0].questions[0] as InboxQuestion;
     expect(question.asked_by_agent_id).toMatch(/^ses_[0-9A-Z]{26}$/);
-    const waiting = client.callTool({ name: "wait_for_reply", arguments: { thread_id: sent.thread_id, timeout_seconds: 30 } });
     const answer = { v: 1, key: question.key, kind: question.kind, prompt: question.prompt, selected: ["Yes"] };
     const pick = await fetch(`${base}/api/inbox/messages/${sent.message_id}/picks`, {
       method: "POST",
@@ -303,9 +308,13 @@ describe("plannotator inbox mcp (the stdio shim)", () => {
       body: JSON.stringify({ idempotency_key: "send-1", questions: [{ key: question.key, revision: 1 }] }),
     });
     expect(send.status).toBe(200);
-    const reply = (await waiting).structuredContent as { status: string; reply: { body: string } };
-    expect(reply.status).toBe("replied");
-    expect(reply.reply.body).toContain("Answer: Yes (your recommendation)");
+    const read = (await client.callTool({ name: "read_thread", arguments: { thread_id: sent.thread_id } })).structuredContent as { thread: { messages: { body: string }[] } };
+    expect(read.thread.messages.at(-1)!.body).toContain("Answer: Yes (your recommendation)");
+
+    // An older skill or plugin still calling the removed wait_for_reply through this shim: told what to do, nothing written.
+    const removed = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: sent.thread_id } })) as { isError?: boolean; content: { text: string }[] };
+    expect(removed.isError).toBe(true);
+    expect(removed.content[0]!.text).toBe(INBOX_REMOVED_ACTION_TEXT);
 
     // submit_guide is routed like send_message: no project_path, and it lands in the same project
     // and session (an MCP-only agent has no other way to name them).
@@ -316,6 +325,97 @@ describe("plannotator inbox mcp (the stdio shim)", () => {
     const mineNow = (await client.callTool({ name: "read_thread", arguments: {} })).structuredContent as { threads: { thread_id: string }[] };
     expect(mineNow.threads.map((t) => t.thread_id)).toContain(guide.thread_id);
   }, 90_000);
+});
+
+describe("plannotator inbox mcp inside an agent Ask AI started (PLANNOTATOR_ASK_AI_CHILD=1)", () => {
+  /** A fake Inbox that answers tools/list with one tool, and counts what reached it. */
+  function fakeInbox() {
+    let requests = 0;
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: async (req) => {
+        requests++;
+        const message = (await req.json()) as { id: number };
+        return Response.json({ jsonrpc: "2.0", id: message.id, result: { tools: [{ name: "send_message", inputSchema: { type: "object" } }] } });
+      },
+    });
+    cleanups.push(() => server.stop(true));
+    return { port: server.port, requests: () => requests };
+  }
+
+  async function shim(askAiChild: boolean | undefined, inbox: { port: number }) {
+    let ensured = 0;
+    const lines: string[] = [];
+    const messages = [
+      { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "codex-mcp-client", version: "1" } } },
+      { jsonrpc: "2.0", method: "notifications/initialized" },
+      { jsonrpc: "2.0", id: 2, method: "tools/list" },
+    ];
+    await runInboxMcpShim({
+      dataDir: sandbox().dataDir,
+      cwd: tmpdir(),
+      ensureRunning: async () => {
+        ensured++;
+        return { v: 1, pid: process.pid, port: inbox.port, url: "", version: "test", token: "t", serverSession: "s", startedAt: "" } as never;
+      },
+      input: new Blob([messages.map((m) => `${JSON.stringify(m)}\n`).join("")]).stream(),
+      write: (line) => lines.push(line),
+      ...(askAiChild === undefined ? {} : { askAiChild }),
+    });
+    const replies = lines.map((line) => JSON.parse(line) as { id: number; result?: { tools?: { name: string }[] } });
+    return { ensured, tools: replies.find((r) => r.id === 2)?.result?.tools?.map((t) => t.name) };
+  }
+
+  test("lists no tools and never starts or reaches the Inbox; without the marker it forwards the Inbox's tools", async () => {
+    const inbox = fakeInbox();
+    const off = await shim(true, inbox);
+    expect(off.tools).toEqual([]);
+    expect(off.ensured).toBe(0);
+    expect(inbox.requests()).toBe(0);
+
+    const on = await shim(undefined, inbox);
+    expect(on.tools).toEqual(["send_message"]);
+    expect(on.ensured).toBeGreaterThan(0);
+    expect(inbox.requests()).toBeGreaterThan(0);
+  });
+
+  test("the real `plannotator inbox mcp` reads the marker from its env: no tools, a refused call, no Inbox started", async () => {
+    const box = sandbox();
+    const client = new Client({ name: "shim-test", version: "1.0.0" });
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: ["run", entry, "inbox", "mcp"],
+      cwd: box.root,
+      env: { ...box.env, PLANNOTATOR_ASK_AI_CHILD: "1" },
+      stderr: "pipe",
+    });
+    await client.connect(transport);
+    cleanups.push(() => client.close());
+
+    expect((await client.listTools()).tools).toEqual([]);
+    const call = await client.callTool({ name: "send_message", arguments: { body: "hi" } }).then(
+      () => null,
+      (error: Error) => error,
+    );
+    expect(call?.message).toContain("off in an agent");
+    // Nothing started an Inbox in this sandbox.
+    expect(readInboxRegistry(box.dataDir)).toBeNull();
+    expect(existsSync(box.browserMarker)).toBe(false);
+  }, 60_000);
+
+  test("an Inbox started from that agent's shell drops its switches; a person's own switches pass through", () => {
+    // The detached Inbox outlives the agent: its restarts, "Open in" terminals
+    // and Codex wakes would hand the switches to the person's real sessions.
+    const fromAskAi = detachedInboxEnv({ PATH: "/bin", PLANNOTATOR_ASK_AI_CHILD: "1", PLANNOTATOR_INBOX_TOOL: "0", PLANNOTATOR_AGENT_TOOL: "0" }, "/data");
+    expect(fromAskAi.PATH).toBe("/bin");
+    expect(fromAskAi.PLANNOTATOR_DATA_DIR).toBe("/data");
+    expect(["PLANNOTATOR_ASK_AI_CHILD", "PLANNOTATOR_INBOX_TOOL", "PLANNOTATOR_AGENT_TOOL"].filter((key) => key in fromAskAi)).toEqual([]);
+
+    const fromPerson = detachedInboxEnv({ PATH: "/bin", PLANNOTATOR_INBOX_TOOL: "0", PLANNOTATOR_AGENT_TOOL: "1" }, "/data");
+    expect(fromPerson.PLANNOTATOR_INBOX_TOOL).toBe("0");
+    expect(fromPerson.PLANNOTATOR_AGENT_TOOL).toBe("1");
+  });
 });
 
 describe("plannotator inbox mcp inside an agent session", () => {
@@ -339,6 +439,8 @@ describe("plannotator inbox mcp inside an agent session", () => {
   test("the names it fills are the ones each host's own plannotator_inbox tool sends", () => {
     expect(INBOX_SESSION_HOST_NAMES[INBOX_HOST]).toBe(INBOX_AGENT_NAME);
     expect(INBOX_SESSION_HOST_NAMES[OPENCODE_INBOX_HOST]).toBe(OPENCODE_INBOX_AGENT_NAME);
+    expect(INBOX_SESSION_HOST_NAMES[DSH_INBOX_HOST]).toBe(DSH_INBOX_AGENT_NAME);
+    expect(INBOX_SESSION_HOST_NAMES[CLINE_INBOX_HOST]).toBe(CLINE_INBOX_AGENT_NAME);
     // Pi's constants, read from source: apps/pi-extension/inbox.ts imports its generated/ folder, which exists only after vendor.sh.
     const piSource = readFileSync(resolve(import.meta.dir, "../../pi-extension/inbox.ts"), "utf8");
     const piHost = /export const PI_INBOX_HOST = "([^"]+)";/.exec(piSource)?.[1];
@@ -346,9 +448,9 @@ describe("plannotator inbox mcp inside an agent session", () => {
     expect(piHost).toBe("pi");
     expect(piName).toBeDefined();
     expect(INBOX_SESSION_HOST_NAMES[piHost!]).toBe(piName!);
-    // Codex and Qwen Code have no plannotator_inbox tool: the Inbox wakes them itself (`codex queue`, Qwen's
-    // cross-session messaging), and the shim sends as their session.
-    expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["claude-code", "codex", "opencode", "pi", "qwen"]);
+    // Codex, Qwen Code and T3 Code have no plannotator_inbox tool: the Inbox wakes them itself (`codex queue`, Qwen's
+    // cross-session messaging, T3's MCP API), and the shim sends as their session.
+    expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["claude-code", "cline", "codex", "dsh", "opencode", "pi", "qwen", "t3"]);
     expect(INBOX_SESSION_HOST_NAMES.codex).toBe("Codex");
     expect(INBOX_SESSION_HOST_NAMES.qwen).toBe("Qwen Code");
     // A Qwen session in the tag is a Qwen session id, never anything else.
@@ -396,6 +498,46 @@ describe("plannotator inbox mcp inside an agent session", () => {
     expect(inboxHostSessionFromEnv({})).toBeNull();
   });
 
+  test("a DeepSeek Harness shell sends as its session (DSH_SESSION_ID), last, and never beside another agent's marker", () => {
+    const dsh = "session-0b9c8e4e-63f1-4f8e-9a51-6a1d7d4c2f10";
+    expect(INBOX_SESSION_HOST_NAMES.dsh).toBe("DeepSeek Harness");
+    expect(inboxHostSessionFromEnv({ DSH_SHELL: "1", DSH_SESSION_ID: dsh })).toEqual({ host: "dsh", session: dsh, name: "DeepSeek Harness" });
+    expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: `dsh:${dsh}` })).toEqual({ host: "dsh", session: dsh, name: "DeepSeek Harness" });
+    // Every other host's own variable wins: it was started from the DSH shell, and it is the caller.
+    expect(inboxHostSessionFromEnv({ DSH_SESSION_ID: dsh, PI_SESSION_ID: "pi-1" })?.host).toBe("pi");
+    expect(inboxHostSessionFromEnv({ DSH_SESSION_ID: dsh, PLANNOTATOR_SESSION_TAG: `claude-code:${CLAUDE_SESSION}` })?.host).toBe("claude-code");
+    expect(inboxHostSessionFromEnv({ DSH_SESSION_ID: dsh, CODEX_THREAD_ID: CODEX_THREAD })?.host).toBe("codex");
+    // An agent that names no session of its own, started from a DSH shell, is never the DSH session.
+    for (const marker of ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CURSOR_AGENT", "OPENCODE", "GEMINI_CLI", "COPILOT_CLI", "OMPCODE", "QWEN_CODE"]) {
+      expect(inboxHostSessionFromEnv({ DSH_SHELL: "1", DSH_SESSION_ID: dsh, [marker]: "1" })).toBeNull();
+    }
+    for (const bad of ["", "a b", "../x", "-x", "a".repeat(129)]) expect(inboxHostSessionFromEnv({ DSH_SHELL: "1", DSH_SESSION_ID: bad })).toBeNull();
+  });
+
+  // DSH Web's terminal for the person sets DSH_SESSION_ID without DSH_SHELL: what runs there is not that session.
+  test("DSH_SESSION_ID without DSH_SHELL (the person's own DSH terminal) names no session, and never shadows another", () => {
+    const dsh = "session-0b9c8e4e-63f1-4f8e-9a51-6a1d7d4c2f10";
+    // An agent with no marker of its own (Amp, Goose, Crush...) run there sends as nobody, so no reply goes into the DSH session.
+    expect(inboxHostSessionFromEnv({ DSH_SESSION_ID: dsh })).toBeNull();
+    expect(inboxHostSessionFromEnv({ DSH_SESSION_ID: dsh, AMP_HOME: "/x" })).toBeNull();
+    expect(inboxHostSessionFromEnv({ DSH_SESSION_ID: dsh, DSH_SHELL: "true" })).toBeNull();
+    expect(inboxHostSessionFromEnv({ DSH_SESSION_ID: dsh, PI_SESSION_ID: "pi-1" })?.host).toBe("pi");
+  });
+
+  test("in a DSH subagent's shell, the session Plannotator's plugin names (the parent) is the caller", () => {
+    const parent = "session-parent-1";
+    const child = "session-child-1";
+    const set = { DSH_SHELL: "1", DSH_SESSION_ID: child, DSH_PLANNOTATOR_SESSION_ID: parent, DSH_PLANNOTATOR_SESSION_FOR: child };
+    expect(inboxHostSessionFromEnv(set)).toEqual({ host: "dsh", session: parent, name: "DeepSeek Harness" });
+    // Malformed: the shell's own session.
+    expect(inboxHostSessionFromEnv({ ...set, DSH_PLANNOTATOR_SESSION_ID: "a b" })?.session).toBe(child);
+    // Set for another shell (a DSH started inside a DSH model shell inherits the outer one), or for no shell said: its own session.
+    expect(inboxHostSessionFromEnv({ ...set, DSH_SESSION_ID: "session-inner" })?.session).toBe("session-inner");
+    expect(inboxHostSessionFromEnv({ DSH_SHELL: "1", DSH_SESSION_ID: child, DSH_PLANNOTATOR_SESSION_ID: parent })?.session).toBe(child);
+    // Never outside a model shell.
+    expect(inboxHostSessionFromEnv({ DSH_PLANNOTATOR_SESSION_ID: parent })).toBeNull();
+  });
+
   test("a call from Codex is its thread's: the thread id from _meta, host codex, whatever the environment says", () => {
     const meta = { threadId: CODEX_THREAD, "x-codex-turn-metadata": { turn_started_at_unix_ms: 1 } };
     const fill = (name: string, args: Record<string, unknown>, callMeta: unknown, clientName?: string | null) =>
@@ -411,7 +553,7 @@ describe("plannotator inbox mcp inside an agent session", () => {
     expect(fill("send_message", { body: "hi" }, meta)._meta).toEqual(meta);
     expect(fill("read_thread", {}, meta).arguments).toEqual({ project_path: "/work", agent_session: CODEX_THREAD });
     // Codex's client name alone is enough (a call without turn metadata).
-    expect(fill("wait_for_reply", {}, { threadId: CODEX_THREAD }, "codex-mcp-client").arguments).toEqual({ project_path: "/work", agent_session: CODEX_THREAD });
+    expect(fill("read_thread", {}, { threadId: CODEX_THREAD }, "codex-mcp-client").arguments).toEqual({ project_path: "/work", agent_session: CODEX_THREAD });
     // Not from Codex, or no thread id: the environment's session, as before.
     expect(fill("send_message", { body: "hi" }, { threadId: CODEX_THREAD }).arguments).toMatchObject({ agent_session: CLAUDE_SESSION, agent_host: "claude-code" });
     expect(fill("send_message", { body: "hi" }, { threadId: "nope", "x-codex-turn-metadata": {} }).arguments).toMatchObject({ agent_session: CLAUDE_SESSION });
@@ -425,12 +567,13 @@ describe("plannotator inbox mcp inside an agent session", () => {
       fillInboxToolArguments({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, "/work", "ses_OWN", hostSession).params!
         .arguments as Record<string, unknown>;
     expect(call("send_message", { body: "hi" })).toEqual({ body: "hi", project_path: "/work", agent_session: CLAUDE_SESSION, agent_host: "claude-code", agent_name: "Claude Code" });
-    // read_thread and wait_for_reply have strict schemas without agent_host.
+    // read_thread has a strict schema without agent_host.
     expect(call("read_thread", {})).toEqual({ project_path: "/work", agent_session: CLAUDE_SESSION });
-    expect(call("wait_for_reply", {})).toEqual({ project_path: "/work", agent_session: CLAUDE_SESSION });
     // search takes the project only (strict, no session), and nothing when it searches every project.
     expect(call("search", { query: "retry" })).toEqual({ query: "retry", project_path: "/work" });
     expect(call("search", { query: "retry", all_projects: true })).toEqual({ query: "retry", all_projects: true });
+    // Thread steps are the session's own and name their thread: session and author, no project (the schema is strict).
+    expect(call("steps", { thread_id: "thr_1", steps: [] })).toEqual({ thread_id: "thr_1", steps: [], agent_session: CLAUDE_SESSION, agent_host: "claude-code", agent_name: "Claude Code" });
     // The agent's own choices stand.
     expect(call("send_message", { body: "hi", agent_session: "mine" })).toEqual({ body: "hi", project_path: "/work", agent_session: "mine" });
     // An agent that names another host is not this session: it gets the shim's own id, so a reply to it never wakes the session.
@@ -518,7 +661,7 @@ describe("plannotator inbox mcp inside an agent session", () => {
     expect(await poll("another-session")).toEqual([]);
   }, 90_000);
 
-  test("the shim inside a Claude Code session whose bridge polls now is told the reply arrives by itself; without the poll, to wait_for_reply", async () => {
+  test("the shim inside a Claude Code session whose bridge polls now is told the reply arrives by itself; without the poll, to read the thread later", async () => {
     const box = sandbox();
     const project = gitProject(box);
     const registry = (await background(box)).registry!;
@@ -545,7 +688,7 @@ describe("plannotator inbox mcp inside an agent session", () => {
 
     const after = textOf(await client.callTool({ name: "send_message", arguments: { body: "After the poll.", idempotency_key: "wake-1" } }));
     expect(after).toContain("The person's reply arrives in this session by itself");
-    expect(after).not.toContain("wait_for_reply with this thread_id");
+    expect(after).not.toContain("call read_thread");
   }, 90_000);
 
   test("an explicit agent_session wins; a malformed tag is ignored (one fresh id per process); Pi's PI_SESSION_ID is that session", async () => {

@@ -23,7 +23,14 @@ import type { InboxToastModel } from './components/Toast';
 /** The window's toast after "Prompt your agent to send feedback" (the dialog closes so it is in view). */
 export function feedbackCopiedToast(ok: boolean): Omit<InboxToastModel, 'id'> {
   return ok
-    ? { icon: 'check', lead: 'Prompt copied', phoneLead: 'Copied', detail: 'Paste it into your agent: it asks for your feedback and sends it once you say yes.' }
+    ? {
+        icon: 'check',
+        lead: 'Prompt copied',
+        phoneLead: 'Copied',
+        // One line at 520 px; the live region says the rest.
+        detail: 'Paste it into your agent',
+        speech: 'Prompt copied. Paste it into your agent: it asks for your feedback and sends it once you say yes.',
+      }
     : { icon: 'warn', lead: "Couldn't copy the prompt", wrap: true };
 }
 

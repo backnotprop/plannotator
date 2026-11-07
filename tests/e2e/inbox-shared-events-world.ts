@@ -32,6 +32,7 @@ import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { inboxScratch, rememberInboxOf } from './inbox-scratch';
+import { clearSidebarPeek } from './sidebar-peek';
 
 export const repo = resolve(__dirname, '../..');
 export const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -230,9 +231,13 @@ export async function agent(world: World, name = 'Claude Code', host = 'claude-c
 /** Open a tab at `url` (the world's by default) and wait for the list; answers the tab and how long it took. */
 export async function openTab(world: World, options: { url?: string; timeout?: number } = {}): Promise<{ page: Page; ms: number }> {
   const page = await world.context.newPage();
-  page.on('pageerror', (error) => world.errors.push(error.message));
+  // WebKit reports a read cut off by a tab's reload or close as "… due to access control checks": not an error of the page.
+  page.on('pageerror', (error) => {
+    if (!/due to access control checks/.test(error.message)) world.errors.push(error.message);
+  });
   const started = Date.now();
   await page.goto(options.url ?? world.url, { timeout: options.timeout ?? 30_000 });
+  await clearSidebarPeek(page);
   await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible({ timeout: options.timeout ?? 30_000 });
   const ms = Date.now() - started;
   world.pages.push(page);

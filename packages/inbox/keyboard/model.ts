@@ -155,6 +155,8 @@ export function press(state: KeyState, key: ModelKey): KeyState {
     return state;
   }
 
+  // Mod+Enter here sends the foot's Send when a pick or kept words wait (Thread.tsx `send`); the model holds no picks, so
+  // it changes nothing in what it tracks (view, focus), and that case is the e2e journey's (inbox-q-open-items.spec.ts).
   if (key === 'type' || key === 'Mod+Enter') return state;
   const bare = (MODEL_BARE_KEYS as readonly string[]).includes(key);
   if (bare && !state.singleKeys) return state;

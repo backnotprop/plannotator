@@ -14,6 +14,11 @@
  * session (ids the session already holds are skipped) and re-anchor by text;
  * one whose text is gone gets the Unanchored chip and still exports.
  *
+ * Every request names this page (`?client=<clientId>`), and so does the
+ * decision (App). The server then clears only the copies this page read,
+ * wrote or restored: a copy an earlier page wrote (a tab that was reloaded
+ * or crashed) and this page never saw is not deleted by this page's send.
+ *
  * Inert unless the server advertised `documentDrafts` on /api/plan.
  */
 
@@ -29,6 +34,8 @@ const HIGHLIGHT_REAPPLY_DELAY = 100;
 
 export interface UseDocumentDraftsOptions {
   enabled: boolean;
+  /** This page load's id (`?client=`); the decision sends the same one. */
+  clientId: string;
   /** A decision was sent (or is in flight): stop writing. */
   submitted: boolean;
   /** The open linked/folder document, or null while the root is open. */
@@ -60,11 +67,11 @@ export interface UseDocumentDraftsResult {
       useAnnotationDraft's flushPendingSave). */
   flushPendingWrite: () => void;
   /**
-   * The session draft brought these documents' copies back (Draft Recovered
-   * in a session whose server lists them: plan review, a URL, the last
-   * message). Each copy counts as read, exactly as the server holds it, so
+   * The session draft brought these documents' copies back (Draft
+   * Recovered). Each copy counts as read, exactly as the server holds it, so
    * opening the document does not merge it a second time and an unchanged
-   * copy is not written back.
+   * copy is not written back. Each is also read once more under this page's
+   * id (the body is ignored), so this page's decision clears it.
    */
   adoptRestoredCopies: (documents: ReadonlyArray<DocumentDraftState & { path: string }>) => void;
   /**
@@ -76,7 +83,10 @@ export interface UseDocumentDraftsResult {
 }
 
 export function useDocumentDrafts(options: UseDocumentDraftsOptions): UseDocumentDraftsResult {
-  const { enabled, submitted, activePath, rootPath, getFeedbackDocuments } = options;
+  const { enabled, clientId, submitted, activePath, rootPath, getFeedbackDocuments } = options;
+  const client = `client=${encodeURIComponent(clientId)}`;
+  const clientRef = useRef(client);
+  clientRef.current = client;
   const latest = useRef(options);
   latest.current = options;
 
@@ -138,7 +148,7 @@ export function useDocumentDrafts(options: UseDocumentDraftsOptions): UseDocumen
     if (loadedRef.current.has(activePath) || inFlightRef.current.has(activePath)) return;
     const path = activePath;
     inFlightRef.current.add(path);
-    fetch(`/api/draft/document?path=${encodeURIComponent(path)}`)
+    fetch(`/api/draft/document?path=${encodeURIComponent(path)}&${client}`)
       .then(async (res) => {
         if (res.status === 404) {
           loadedRef.current.add(path);
@@ -165,7 +175,7 @@ export function useDocumentDrafts(options: UseDocumentDraftsOptions): UseDocumen
       .finally(() => {
         inFlightRef.current.delete(path);
       });
-  }, [enabled, activePath, rootPath, mergeSaved]);
+  }, [enabled, activePath, rootPath, mergeSaved, client]);
 
   const writeNow = useCallback((keepalive: boolean) => {
     if (!canWriteRef.current || closedRef.current) return;
@@ -187,7 +197,7 @@ export function useDocumentDrafts(options: UseDocumentDraftsOptions): UseDocumen
     });
     if (writes.length === 0) return;
     writingRef.current = true;
-    fetch('/api/draft/document', {
+    fetch(`/api/draft/document?${clientRef.current}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ documents: writes }),
@@ -257,6 +267,9 @@ export function useDocumentDrafts(options: UseDocumentDraftsOptions): UseDocumen
     for (const doc of documents) {
       loadedRef.current.add(doc.path);
       lastSentRef.current.set(doc.path, JSON.stringify([doc.annotations, doc.globalAttachments]));
+      // The session draft's load names no page: read the copy under this
+      // page's id so this page's decision clears it.
+      fetch(`/api/draft/document?path=${encodeURIComponent(doc.path)}&${clientRef.current}`).catch(() => {});
     }
   }, []);
 
@@ -264,7 +277,7 @@ export function useDocumentDrafts(options: UseDocumentDraftsOptions): UseDocumen
     if (!canWriteRef.current || closedRef.current) return;
     const unread = paths.filter((path) => !loadedRef.current.has(path) && !inFlightRef.current.has(path));
     if (unread.length === 0) return;
-    fetch('/api/draft/document', {
+    fetch(`/api/draft/document?${clientRef.current}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ documents: unread.map((path) => ({ path, annotations: [], globalAttachments: [] })) }),

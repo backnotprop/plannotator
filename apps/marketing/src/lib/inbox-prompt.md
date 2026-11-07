@@ -51,7 +51,7 @@ Plannotator can add a short note about the Inbox to each agent's own instruction
 
 ## 4. Send the first message
 
-If you have a tool whose name ends in `plannotator_inbox`, call it with `action: "send_message"` plus the fields of the `arguments` object below as top-level fields, leaving out `agent_name` and `agent_host` (the tool fills them). Every later call in this setup (`read_thread`, `wait_for_reply`, `resolve_message`) works the same way: `action` set to the MCP tool's name, its fields beside it. Otherwise send through the stdio MCP command, which works from any shell:
+If you have a tool whose name ends in `plannotator_inbox`, call it with `action: "send_message"` plus the fields of the `arguments` object below as top-level fields, leaving out `agent_name` and `agent_host` (the tool fills them). Every later call in this setup (`read_thread`, `resolve_message`) works the same way: `action` set to the MCP tool's name, its fields beside it. Otherwise send through the stdio MCP command, which works from any shell:
 
 1. Write the JSON below to a temporary file as ONE line, for example `/tmp/plannotator-inbox-first.json`. Use your file-writing tool, not `echo` (some shells rewrite `\n`). Replace `AGENT_NAME` (how the person knows you, e.g. "Codex") and `AGENT_HOST` (e.g. `codex`; also in the `idempotency_key`).
 2. From the person's project folder, run `plannotator inbox mcp < /tmp/plannotator-inbox-first.json` (PowerShell: `Get-Content /path/to/file | plannotator inbox mcp`). It prints one JSON-RPC answer. Keep `result.structuredContent.thread_id`.
@@ -64,24 +64,22 @@ If the answer says "Already sent", this setup ran before. Read the thread (`read
 
 Tell the person: "Your Inbox is set up and I sent you a first message there. Pick an answer and press Send."
 
-## 5. Wait for the reply and act on it
+## 5. Get the reply and act on it
 
-Call `wait_for_reply` with the `thread_id`, the same way you sent the message. Through the stdio command, pass `timeout_seconds: 45` (lower it if your shell stops commands sooner):
+The send result says whether the reply arrives in this session by itself. If it does, end your turn. If it does not, ask the person to say "done" when they have sent it and end your turn. Then call `read_thread` with the `thread_id`, the same way you sent the message:
 
 ```json
-{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"wait_for_reply","arguments":{"thread_id":"THREAD_ID","timeout_seconds":45}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_thread","arguments":{"thread_id":"THREAD_ID"}}}
 ```
 
-It returns the reply as soon as the person sends it, or `{ "status": "waiting", "cursor": N }`. Then call it again with `"cursor": N`. After about five minutes without a reply, stop and tell the person to say "done" when they have sent it.
-
-When the reply arrives, quote it back to the person to show the round trip worked. Then resolve the first thread with `resolve_message` (`message_id` = its `thread_id`). It moves to Quiet and nothing is deleted. Your next message starts a new thread.
+When you have the reply, quote it back to the person to show the round trip worked. Then resolve the first thread with `resolve_message` (`message_id` = its `thread_id`). It moves to Quiet and nothing is deleted. Your next message starts a new thread.
 
 - **Yes:** send one or two real messages from what you and the person are actually working on in this project: an open decision written as a `:::question` block (the syntax is in `plannotator inbox --help`), and, if there is one, a plan or document you wrote, attached with `attachments: ["path"]` so they can annotate it. Never send a bare question: give it one to three plain sentences of context (what it affects, what you know, why you recommend what you do), attach the files it points to and link them from it (`[the mock](mock.html)` opens the file beside the thread), and add a screenshot (`![alt](path)`) when it is about something visual. Keep them short and real. Never invent work, and never send secrets or `.env` files. If this session has no work to draw on, say so and send nothing more.
 - **No:** do nothing more.
 
 ## 6. Tell the person, in plain words
 
-- Where replies go: to the session that asked. Claude Code, Pi and OpenCode 2 get the reply as their next turn once idle. Other agents read it when they call `wait_for_reply`.
+- Where replies go: to the session that asked. Claude Code, Pi and OpenCode 2 get the reply as their next turn once idle. Other agents read it when they call `read_thread`.
 - Notifications: the open Inbox page can show a browser notification when a question arrives while its tab is in the background. It asks once. Change it in the Inbox's Settings.
 - Local only: the Inbox listens on `127.0.0.1`. Threads, answers and attached files are files in `~/.plannotator/inbox/`. Nothing leaves the machine.
 - Opening it later: `plannotator inbox`. Agents start a stopped Inbox in the background when they write to it.

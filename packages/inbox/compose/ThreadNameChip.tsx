@@ -58,18 +58,22 @@ export function pasteOverflows(current: string, pasted: string): boolean {
 }
 
 export const THREAD_NAME_OVERFLOW_NOTE = 'Too long for a name, so it went into your message.';
+/** A paste of 32 KB or more into the chip goes to the message as a pasted text tile (approval "inbox-paste-attachment"). */
+export const THREAD_NAME_ATTACHED_NOTE = 'Too long for a name, so it was attached to your message.';
 
 export function ThreadNameChip(props: {
   state: ThreadNameState;
   suggested: string;
+  /** What the name follows until the person types, for a screen reader. Absent: their message. */
+  hint?: string;
   onChange: (state: ThreadNameState) => void;
   onDone: () => void;
-  /** Text pasted into the chip that cannot be a name: the caller puts it in the message. */
-  onOverflow: (text: string) => void;
+  /** Text pasted into the chip that cannot be a name: the caller puts it in the message (and may say how, in the note). */
+  onOverflow: (text: string) => string | void;
   error?: string | null;
   idBase: string;
 }) {
-  const { state, suggested, onChange, onDone, onOverflow, error = null, idBase } = props;
+  const { state, suggested, hint, onChange, onDone, onOverflow, error = null, idBase } = props;
   const [note, setNote] = useState<string | null>(null);
   // Emptied while focused: show it empty until focus leaves, then follow the message again.
   const [clearing, setClearing] = useState(false);
@@ -124,8 +128,7 @@ export function ThreadNameChip(props: {
             // Never cut short: the words go to the message, said beside the chip.
             event.preventDefault();
             event.stopPropagation();
-            setNote(THREAD_NAME_OVERFLOW_NOTE);
-            onOverflow(text);
+            setNote(onOverflow(text) || THREAD_NAME_OVERFLOW_NOTE);
           }}
           onBlur={() => setClearing(false)}
           onKeyDown={(event) => {
@@ -142,7 +145,7 @@ export function ThreadNameChip(props: {
         )}
       </span>
       <span id={hintId} className="ib-sr">
-        {state.edited ? 'Your name for the thread.' : 'Named from your message until you type here.'}
+        {state.edited ? 'Your name for the thread.' : (hint ?? 'Named from your message until you type here.')}
       </span>
       {note && !error && (
         <span className="ib-cp-tname-note" id={noteId} role="status" data-compose-thread-name-note="">

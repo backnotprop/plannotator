@@ -363,15 +363,13 @@ test('Send carries the image comment with its marked-up copy and the code commen
   const tabClose = page.locator('[data-tab-close]');
   while ((await tabClose.count()) > 0) await tabClose.first().click();
   await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
-  const waiting = world.claude.waitForReply(world.threadId, 40);
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' }).click();
-  await expect(page.locator('[data-annotations-chip]')).toHaveText('2 annotations');
+  await expect(page.locator('[data-annotations-chip]')).toHaveText('2 comments');
   await page.getByRole('textbox', { name: 'Reply to Claude Code' }).fill('Two notes, one on the phone shot and one on the worker.');
   await shot('8-reply-with-annotations');
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const reply = await waiting;
-  expect(reply.status).toBe('replied');
-  const body = reply.reply.body as string;
+  const reply = await world.claude.nextReply(world.threadId, 40);
+  const body = reply.body as string;
   expect(body).toContain('## shots/retry-policy-phone.png');
   expect(body).toContain('The on-call note wraps onto three lines');
   const markup = /- \[retry-policy-phone, marked up\] `([^`]+)`/.exec(body);

@@ -107,6 +107,7 @@ import {
 import type { SemanticDiffAvailability, SemanticDiffResponse } from "@plannotator/shared/semantic-diff-types";
 import { CallFlowService } from "@plannotator/shared/call-flow";
 import { CallFlowInstallCoordinator, callFlowInstallOriginAllowed } from "@plannotator/shared/call-flow-install";
+import type { CallFlowInstallCoordinatorOptions } from "@plannotator/shared/call-flow-install";
 import { parseCallFlowInstallRequest, resolveCallFlowInstallTargets } from "@plannotator/shared/call-flow-languages";
 import type { CallFlowResponse } from "@plannotator/shared/call-flow-types";
 import {
@@ -125,7 +126,7 @@ import { createCommitAvatarResolver } from "@plannotator/shared/commit-avatars";
 import { detectGeneratedFiles, detectGeneratedFilesByName } from "@plannotator/shared/generated-files";
 import { getRepoInfo } from "./repo";
 import { createRefCards, refCardRouteResponse, refCardsTailnetAllowed, type RefRunner } from "./ref-cards";
-import { handleImage, handleUpload, handleAgents, handleServerReady, handleApiNotFound, handleFavicon, readDraftGenerationFromBody, readDraftGenerationFromUrl, type OpencodeClient } from "./shared-handlers";
+import { handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleApiNotFound, handleFavicon, readDraftGenerationFromBody, readDraftGenerationFromUrl, type OpencodeClient } from "./shared-handlers";
 import { contentHash } from "./draft";
 import { createReviewDraftSession, localGitDraftTargetKey, localReviewDraftKeys, prDraftTargetKey, type ReviewDraftKeys } from "@plannotator/shared/review-draft";
 import { captureReviewProgress, handleReviewProgress } from "@plannotator/shared/review-progress";
@@ -191,6 +192,7 @@ import {
   PRArtifactDocumentError,
 } from "@plannotator/shared/pr-artifact-document";
 import { agentToolHostForServer, createAIRuntime } from "./ai-runtime";
+import { assertTestHome } from "./test-home-guard";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control";
 import { sessionTailnetAudience, sessionTailnetGate } from "./session-tailnet";
 import { countUnsentDraftComments, hostSessionClosedEvent } from "@plannotator/shared/host-control";
@@ -228,6 +230,8 @@ export interface ReviewServerOptions {
   repoFilesLazyThreshold?: number;
   /** Tests only: how often a polled live listing looks (default `REPO_LIVE_POLL_MS`). */
   repoLivePollMs?: number;
+  /** Tests only: the Call flow install and Node preflight, so a test never starts a real install. */
+  callFlowInstall?: Pick<CallFlowInstallCoordinatorOptions, "install" | "preflight">;
   /** "Ask this session": the host bridge to the agent session that opened this review (see packages/ai/session-bridge.ts). */
   sessionBridge?: SessionBridge;
   /**
@@ -250,6 +254,8 @@ export interface ReviewServerOptions {
   gitRef: string;
   /** Error message if git diff failed */
   error?: string;
+  /** The caller's `--title` (#2289): the whole tab title, in place of `<repo> · Code Review`. Absent: unchanged. */
+  title?: string;
   /** HTML content to serve for the UI */
   htmlContent: string;
   /**
@@ -401,6 +407,7 @@ export interface ReviewServerResult {
 export async function startReviewServer(
   options: ReviewServerOptions
 ): Promise<ReviewServerResult> {
+  assertTestHome();
   const { htmlContent, origin, gitContext, sharingEnabled = true, shareBaseUrl, onReady } = options;
   // Session-constant capability advert; rides every diff payload (see the
   // option's doc). Absent option = false, so old callers advertise honestly.
@@ -709,6 +716,7 @@ export async function startReviewServer(
   // 30 second runtime probe cache so the very next capability advert
   // resolves available without a server restart.
   const callFlowInstall = new CallFlowInstallCoordinator({
+    ...options.callFlowInstall,
     onSettled: (ok) => {
       if (ok) callFlowService.invalidateRuntimeState();
     },
@@ -2649,6 +2657,8 @@ export async function startReviewServer(
               // Mount is the only place the pin matters, so it rides /api/diff
               // alone (not the switch endpoints).
               ...(options.openStatePinned && { openStatePinned: true }),
+              // `--title` (#2289): session-constant, read by the page at mount.
+              ...(options.title && { title: options.title }),
               shareBaseUrl,
               repoInfo,
               isWSL: wslFlag,
@@ -4155,6 +4165,11 @@ export async function startReviewServer(
             } catch {
               return Response.json({ error: "Invalid request" }, { status: 400 });
             }
+          }
+
+          // The "Star the repo" ask on the done screen (packages/shared/star-ask.ts).
+          if (url.pathname.startsWith("/api/star-ask/")) {
+            return (await handleStarAsk(req, url, "review", { remote: isRemote })) ?? handleApiNotFound(url.pathname);
           }
 
           // API: Serve images (local paths or temp uploads)

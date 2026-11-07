@@ -1,4 +1,5 @@
 import { piUpdateAdvert } from "./update-advert.ts";
+import { schedulePiDailyPing } from "./daily-ping.ts";
 import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
 import { randomUUID } from "node:crypto";
 import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
@@ -7,7 +8,7 @@ import { createServer } from "node:http";
 
 import { contentHash, deleteDraft, loadDraft } from "../generated/draft.ts";
 import { createDocumentDraftStore, documentDraftIndexKey, loadSessionDraftWithDocuments } from "../generated/annotate-draft.ts";
-import { getAllowedRootPaths, isPathAllowed } from "../generated/doc-resolve.ts";
+import { getAllowedRootPaths, isDocServeAllowed } from "../generated/doc-resolve.ts";
 import { countUnsentDraftComments, hostSessionClosedEvent, type HostCloseOutcome } from "../generated/host-control.ts";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
@@ -34,6 +35,7 @@ import {
 	handleDraftRequest,
 	handleFavicon,
 	handleImageRequest,
+	handleStarAskRequest,
 	handleReferenceSkillsRequest,
 	handleReferenceSkillContentRequest,
 	readDraftGenerationFromBody,
@@ -64,7 +66,9 @@ import { isFaviconStyle, type FaviconStyle } from "../generated/favicon.ts";
 import { readImprovementHook, getImprovementHookExpectedPath } from "../generated/improvement-hooks.ts";
 import { composeImproveContext } from "../generated/pfm-reminder.ts";
 import { detectProjectName, getRepoInfo } from "./project.ts";
+import { isThisMachineRequest } from "./this-machine.ts";
 import {
+	refuseReferenceRead,
 	handleDocRequest,
 	handleDocExistsRequest,
 	handleFileBrowserRequest,
@@ -161,6 +165,9 @@ export async function startPlanReviewServer(options: {
 	 */
 	approvalNotesSupported?: boolean;
 }): Promise<PlanServerResult> {
+	// The daily ping (server/daily-ping.ts): in the background, never awaited.
+	// The archive browser is not plan review: it sends nothing, as in the CLI.
+	if (options.mode !== "archive") schedulePiDailyPing("plan");
 	const gitUser = detectGitUser();
 	const sharingEnabled =
 		options.sharingEnabled ?? resolveSharingEnabled(loadConfig());
@@ -304,7 +311,7 @@ export async function startPlanReviewServer(options: {
 	// server's /api/doc serves it: inside the project.
 	const planDocumentDrafts = options.mode !== "archive"
 		? createDocumentDraftStore({
-				isAllowed: (path) => isPathAllowed(path, getAllowedRootPaths()),
+				isAllowed: (path, anyPath) => isDocServeAllowed(path, null, getAllowedRootPaths(), anyPath),
 				indexKey: documentDraftIndexKey(draftKey),
 			})
 		: null;
@@ -366,6 +373,7 @@ export async function startPlanReviewServer(options: {
 
 		if (handleHostControl(req, res, url, { token: hostControlToken, getServerPort: () => boundPort, control: hostControl })) return;
 		if (await handleRefCards(req, res, url, refCards, serverSession)) return;
+		if (refuseReferenceRead(req, res, url, getAllowedRootPaths)) return;
 
 		if (url.pathname === "/api/done" && req.method === "POST") {
 			resolveDone?.();
@@ -498,6 +506,9 @@ export async function startPlanReviewServer(options: {
 			} catch {
 				json(res, { error: "Invalid request" }, 400);
 			}
+		} else if (url.pathname.startsWith("/api/star-ask/")) {
+			// The "Star the repo" ask on the done screen (generated/star-ask.ts).
+			if (!(await handleStarAskRequest(req, res, url, "plan", isRemoteSession()))) handleApiNotFound(res, url.pathname);
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);
 		} else if (url.pathname === "/api/upload" && req.method === "POST") {
@@ -523,7 +534,7 @@ export async function startPlanReviewServer(options: {
 					json(res, crossOriginRefusalBody(), 403);
 					return;
 				}
-				const result = planDocumentDrafts.loadDocument(url.searchParams.get("path"));
+				const result = planDocumentDrafts.loadDocument(url.searchParams.get("path"), url.searchParams.get("client"), isThisMachineRequest(req));
 				json(res, result.body, result.status);
 			} else if (req.method === "POST") {
 				let body: unknown;
@@ -533,7 +544,7 @@ export async function startPlanReviewServer(options: {
 					json(res, { ok: false, error: "Invalid JSON" }, 400);
 					return;
 				}
-				const result = planDocumentDrafts.saveDocuments(body);
+				const result = planDocumentDrafts.saveDocuments(body, url.searchParams.get("client"), isThisMachineRequest(req));
 				json(res, result.body, result.status);
 			} else {
 				json(res, { error: "Method not allowed" }, 405);
@@ -545,7 +556,12 @@ export async function startPlanReviewServer(options: {
 		} else if (url.pathname.startsWith("/api/ai/") && await handlePiAIRequest(req, res, url, aiRuntime)) {
 			return;
 		} else if (url.pathname === "/api/doc" && req.method === "GET") {
-			await handleDocRequest(res, url);
+			// A tab on this machine reads any path (#2291), so no other site may.
+			if (!isSameOriginRequest(req)) {
+				json(res, crossOriginRefusalBody(), 403);
+				return;
+			}
+			await handleDocRequest(res, url, { anyPath: isThisMachineRequest(req) });
 		} else if (url.pathname === "/api/doc/exists" && req.method === "POST") {
 			await handleDocExistsRequest(res, req);
 		} else if (url.pathname === "/api/obsidian/vaults") {
@@ -557,7 +573,7 @@ export async function startPlanReviewServer(options: {
 		} else if (url.pathname === "/api/reference/obsidian/files" && req.method === "GET") {
 			handleObsidianFilesRequest(res, url);
 		} else if (url.pathname === "/api/reference/obsidian/doc" && req.method === "GET") {
-			handleObsidianDocRequest(res, url);
+			handleObsidianDocRequest(res, url, isThisMachineRequest(req));
 		} else if (url.pathname === "/api/reference/files" && req.method === "GET") {
 			await handleFileBrowserRequest(res, url);
 		} else if (url.pathname === "/api/reference/files/stream" && req.method === "GET") {
@@ -715,7 +731,7 @@ export async function startPlanReviewServer(options: {
 				feedback,
 			);
 			deleteDraft(draftKey, draftGeneration);
-			planDocumentDrafts?.settle();
+			planDocumentDrafts?.settle(url.searchParams.get("client"));
 			const effectivePermissionMode = requestedPermissionMode || options.permissionMode;
 			publishDecision({
 				approved: true,
@@ -780,7 +796,7 @@ export async function startPlanReviewServer(options: {
 			}
 			archivePlanDecision("denied", feedback);
 			deleteDraft(draftKey, draftGeneration);
-			planDocumentDrafts?.settle();
+			planDocumentDrafts?.settle(url.searchParams.get("client"));
 			publishDecision({ approved: false, feedback, savedPath, ...(answersOnly ? { answersOnly: true } : {}) });
 			json(res, { ok: true, savedPath });
 		} else if (url.pathname.startsWith("/api/")) {

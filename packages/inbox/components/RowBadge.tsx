@@ -24,6 +24,7 @@ import type { InboxListRow, InboxRowWait } from '@plannotator/core/inbox-types';
 import { formatCount } from '../format';
 import { Icon } from '../icons';
 import { Tip } from './Tip';
+import { RowTip } from './RowTip';
 
 /** Heroicons' exclamation-triangle, outline (MIT), drawn in the badge's own colour. */
 export function TriangleIcon({ size = 14 }: { size?: number }) {
@@ -196,7 +197,7 @@ export function WaitCard({ row, agent, mark, time }: { row: InboxListRow; agent:
 }
 
 /**
- * The badge. `card` (the wide and two-line rows): the hover card, opened on
+ * The badge. `card` (the wide and three-line rows): the hover card, opened on
  * hover and, through `open`, while the row has keyboard focus. Without it (a
  * phone) the icons only. `words` (a wide row, the owner's call of 2026-10-29: the
  * full words in full-width mode): the triangle, then the badge's own words as
@@ -271,5 +272,5 @@ export function ActionBadge({ row, tip = false }: { row: InboxListRow; tip?: boo
       <span className="ib-sr">{` ${words} `}</span>
     </span>
   );
-  return tip ? <Tip content={words}>{badge}</Tip> : badge;
+  return tip ? <RowTip content={words}>{badge}</RowTip> : badge;
 }

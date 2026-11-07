@@ -13,6 +13,7 @@ import {
   isUninstallConfirmationAccepted,
   isVersionInvocation,
   parseStrictAnnotateOptions,
+  parseTitleOption,
   parseUninstallOptions,
 } from "./cli";
 
@@ -32,7 +33,7 @@ describe("CLI top-level help", () => {
     expect(output).toContain("plannotator [--browser <name>]");
     // Deliberate literal: the review usage line is API surface for agents
     // probing --help (and for the knowledge-skill freshness guard).
-    expect(output).toContain("plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--patch-file <path | ->] [--tailscale] [--gate] [DIRECTORY | PR_URL]");
+    expect(output).toContain("plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--patch-file <path | ->] [--title <text>] [--tailscale] [--gate] [DIRECTORY | PR_URL]");
     expect(output).toContain("plannotator annotate <file.md | file.txt | file.html | https://... | folder/>");
     expect(output).toContain("[--markdown] [--no-jina]");
     expect(output).toContain("plannotator annotate-last [--stdin]");
@@ -300,6 +301,58 @@ describe("strict annotate CLI options", () => {
   });
 });
 
+describe("--title (#2289)", () => {
+  test("takes the title out of the arguments, wherever it sits", () => {
+    expect(parseTitleOption(["annotate", "docs/", "--title", "add-refund-flow review", "--gate"])).toEqual({
+      title: "add-refund-flow review",
+      remainingArgs: ["annotate", "docs/", "--gate"],
+    });
+    expect(parseTitleOption(["review", "--title", "PR 12", "https://github.com/acme/payments/pull/12"])).toEqual({
+      title: "PR 12",
+      remainingArgs: ["review", "https://github.com/acme/payments/pull/12"],
+    });
+    expect(parseTitleOption(["last", "--title", "Last answer"]).title).toBe("Last answer");
+    expect(parseTitleOption(["annotate-last", "--stdin", "--title", "Notes"]).title).toBe("Notes");
+  });
+
+  test("without --title nothing changes", () => {
+    const args = ["annotate", "plan.md", "--gate", "--json"];
+    expect(parseTitleOption(args)).toEqual({ remainingArgs: args });
+    expect(parseTitleOption(["sessions"])).toEqual({ remainingArgs: ["sessions"] });
+  });
+
+  test("collapses whitespace, trims, and never cuts a long title", () => {
+    expect(parseTitleOption(["annotate", "a.md", "--title", "  add-refund-flow\n  review\t"]).title).toBe("add-refund-flow review");
+    const long = "x".repeat(400);
+    expect(parseTitleOption(["annotate", "a.md", "--title", long]).title).toBe(long);
+  });
+
+  test("a blank title is the same as none", () => {
+    expect(parseTitleOption(["annotate", "a.md", "--title", ""])).toEqual({ remainingArgs: ["annotate", "a.md"] });
+    expect(parseTitleOption(["annotate", "a.md", "--title", "   "])).toEqual({ remainingArgs: ["annotate", "a.md"] });
+  });
+
+  test("a missing value is refused, not filled with the next flag or path", () => {
+    expect(() => parseTitleOption(["annotate", "a.md", "--title"])).toThrow("Missing value for --title");
+    expect(() => parseTitleOption(["annotate", "a.md", "--title", "--gate"])).toThrow("Missing value for --title");
+  });
+
+  test("a second --title is refused", () => {
+    expect(() => parseTitleOption(["annotate", "a.md", "--title", "one", "--title", "two"])).toThrow(
+      "--title may only be specified once",
+    );
+  });
+
+  test("only the commands that open a page take it", () => {
+    for (const command of ["sessions", "archive", "copilot-last", "opencode-review"]) {
+      expect(() => parseTitleOption([command, "--title", "x"])).toThrow(
+        "--title is only supported with: plannotator review, annotate, annotate-last (last)",
+      );
+    }
+    expect(() => parseTitleOption(["--title", "x"])).toThrow("--title is only supported with");
+  });
+});
+
 describe("CLI --version", () => {
   test("recognizes --version and -v", () => {
     expect(isVersionInvocation(["--version"])).toBe(true);
@@ -385,6 +438,39 @@ describe("guide subcommand through the entrypoint", () => {
       }
     } finally {
       host.stop(true);
+      rmSync(workDir, { recursive: true, force: true });
+      removeStubbedHtml(stubbed);
+    }
+  }, 30_000);
+});
+
+describe("--title through the entrypoint (#2289)", () => {
+  // Guards the hand-off in apps/hook/server/index.ts: a misused --title stops
+  // the CLI before any session starts, with the strict gate's usage exit (2)
+  // under --require-approval and 1 otherwise. Stubs the built HTML like the
+  // guide test above.
+  test("refuses a misused --title before starting anything", async () => {
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { removeStubbedHtml, stubHookDistHtml } = await import("../../../tests/helpers/hook-dist-stub");
+    const workDir = mkdtempSync(join(tmpdir(), "plannotator-title-entry-"));
+    const stubbed = stubHookDistHtml();
+    try {
+      const entry = resolve(import.meta.dir, "index.ts");
+      const env = { ...process.env, PLANNOTATOR_DATA_DIR: join(workDir, "data") };
+      const run = async (argv: string[]) => {
+        const proc = Bun.spawn(["bun", "run", entry, ...argv], { cwd: workDir, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+        const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+        return { stderr, code };
+      };
+      const sessions = await run(["sessions", "--title", "x"]);
+      expect(sessions.code).toBe(1);
+      expect(sessions.stderr).toContain("--title is only supported with: plannotator review, annotate, annotate-last (last)");
+      const strict = await run(["annotate", "plan.md", "--gate", "--json", "--require-approval", "--title"]);
+      expect(strict.code).toBe(2);
+      expect(strict.stderr).toContain("Missing value for --title");
+    } finally {
       rmSync(workDir, { recursive: true, force: true });
       removeStubbedHtml(stubbed);
     }

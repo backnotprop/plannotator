@@ -58,8 +58,8 @@ Approved design: "plan-review-decision-control" (owner approval 2026-10-21, desi
 A plan's draft (`/api/draft`) is keyed by the plan's text and holds the PLAN's comments. Comments on the documents the plan links are saved per document, under each file's path, by the same machinery annotate uses (#1710, "Annotate drafts follow the file" in `annotate.md`): both plan servers create a `createDocumentDraftStore` (`packages/shared/annotate-draft.ts`, vendored to Pi), serve `/api/draft/document`, and advertise `documentDrafts: true` on `/api/plan` (not in archive mode). The client is unchanged from annotate: `useDocumentDrafts` writes each linked document's copy, and `composeSessionDraft` keeps the plan's draft on the plan's comments even while a linked document is open, so opening a linked document with no comments never empties (and so deletes) the plan's draft. Before this, the draft held only the open document: opening an empty linked document deleted it, and a reload with a linked document open offered that document's comments as the plan's.
 
 - **Draft Recovered offers every document.** The store also keeps a durable index of the copies the review wrote or read, beside the plan's draft (`documentDraftIndexKey(<plan draft key>)`). GET `/api/draft` adds `documents: [{ path, annotations, globalAttachments }]` for every listed copy (`loadSessionDraftWithDocuments`); with only those, it answers a draft with no plan comments, so the banner still shows. `useAnnotationDraft` counts them (the banner says "including comments on N linked documents", or "on N linked documents" when the plan itself has none) and returns them from `restoreDraft()`; App puts each on its own document with `useLinkedDoc.restoreStoredDocuments` (a cache entry for a document not opened yet, so the comments count, list and reach the feedback at once) and marks the copies as read (`adoptRestoredCopies`), so opening the document does not merge them twice. Dismiss returns them from `dismissDraft()` and App clears their copies (`discardCopies`). A single-document plan's draft is served byte for byte as before.
-- **Allowed paths** are what `/api/doc` serves: inside the project, and on Bun also a document the plan links beside its own plan file (`isPlanLinkedDocPath`, `packages/shared/doc-resolve.ts`). Any other path is refused (`403`) and its comments ride the plan's draft, as before.
-- **Clearing.** Approve and deny clear the plan's draft (unchanged) and every copy the review wrote, read or lists, and drop those entries from the index; later document writes get `409`. The index key comes from the plan's text alone, so the same plan reviewed in two folders (worktrees) shares one index: an entry this server cannot serve (not an existing file, outside its allowed paths) is never offered, counted or cleared, and stays in the index; the index file is deleted only when no entries remain. GET `/api/draft/document` lists the copy it reads, so it has the writes' cross-site guard (`isSameOriginOrNoOrigin`, `403`). Pi's session close keeps them, as it keeps the plan's draft; the host status `unsentAnnotations` counts them. Copies follow the file (#1710): an abandoned review's comments on `docs/design.md` also come back when that file is opened in another session.
+- **Allowed paths** are what `/api/doc` serves the requesting reader: inside the project, for a tab on this machine also a document anywhere (#2291, see the plan server's `/api/doc` row in `server-and-storage.md`), and on Bun also a document the plan links beside its own plan file (`isPlanLinkedDocPath`, `packages/shared/doc-resolve.ts`). Any other path is refused (`403`) and its comments ride the plan's draft, as before. The reload offer of indexed copies stays on the project and the plan's links.
+- **Clearing.** Approve and deny clear the plan's draft (unchanged) and every copy the deciding page read, wrote or restored (`?client=`, see "Clearing" under "Annotate drafts follow the file" in `annotate.md`), and drop those entries from the index; a copy another page left and this page never saw stays listed. Later document writes get `409`. The index key comes from the plan's text alone, so the same plan reviewed in two folders (worktrees) shares one index: an entry this server cannot serve (not an existing file, outside its allowed paths) is never offered, counted or cleared, and stays in the index; the index file is deleted only when no entries remain. GET `/api/draft/document` lists the copy it reads, so it has the writes' cross-site guard (`isSameOriginOrNoOrigin`, `403`). Pi's session close keeps them, as it keeps the plan's draft; the host status `unsentAnnotations` counts them. Copies follow the file (#1710): an abandoned review's comments on `docs/design.md` also come back when that file is opened in another session.
 - Tests: `packages/server/linked-document-drafts.scenarios.ts` (both runtimes: `packages/server/linked-document-drafts.test.ts`, `apps/pi-extension/server/linked-document-drafts.test.ts`), `packages/ui/hooks/useAnnotationDraft.documents.test.tsx`, the DOM test `packages/editor/App.planLinkedDrafts.test.tsx`, and the browser proof `tests/e2e/plan-linked-doc-drafts.spec.ts`.
 
 ### Pi plan review does not block
@@ -152,7 +152,12 @@ come from it, and `parameters` is `PLANNOTATOR_TOOL_INPUT_SCHEMA` itself
 (plain JSON Schema, which Pi validates without a TypeBox Kind since 0.79.1,
 the peer floor; `plannotator-tool.test.ts` runs the installed Pi's
 `validateToolArguments` against it). `executionMode: "sequential"` (#1622: an
-"edit, then open" batch opens the edited file).
+"edit, then open" batch opens the edited file). The parser reads an optional
+field sent empty (`null`, `""`, `[]`, `{}`, also inside `options`) as absent
+(#2292): GitHub Copilot's Responses models treat the function as strict and
+fill every field they mean to omit, e.g. `{"action":"list","target":"",
+"gate":false,"options":{"base":"","markdown":false},"session":""}`. A required
+field sent empty is still missing (annotate's `target`, close's `session`).
 
 **Registration and activation are decided once per session.** The tool is
 OFF by default on Pi and registered only when the agent tool switch turns it on
@@ -218,6 +223,22 @@ spec.md, notes.md`) in the result, list, close and decision heading; feedback
 names every file (`Files:` + `annotateBundleTargetText`). A session without
 UI (print/JSON mode) never has the tool active (see above), and a call that
 reaches it anyway is refused, since nothing could deliver the decision later.
+
+**Tab loss and feedback delivery.** Annotation sessions opened by the
+`plannotator` tool and the slash commands do not enable the blocking CLI's
+client lease, even with `gate: true`: they return at once, so closing a tab or
+losing a tunnel leaves the review open until an explicit decision or close.
+They pass `clientLease: false` to `startMarkdownAnnotationSession` /
+`startLastMessageAnnotationSession`. Callers that await the decision (the
+`plannotator:request` event bus, `openMarkdownAnnotation`,
+`openLastMessageAnnotation`) keep the default, so a gated review whose tab is
+gone still settles as dismissed after 30 s (#1143). Feedback tries the
+opener's `pi.sendUserMessage` first. Only if that throws does it use the
+current-session fallback, so an Oh My Pi in-process subagent cannot take
+feedback from a still-live opener. A known-dead opener (its
+`session_shutdown` ran, or its `ctx` throws) goes to the current session
+first, so a host whose replaced `pi` never throws still delivers to the
+replacement, with the switched-session header.
 
 **Sessions, list and close.** Every review the extension opens (tool,
 commands, `plannotator_submit_plan`) is recorded in ONE process-wide registry
@@ -311,3 +332,54 @@ widget (`InteractiveMode.MAX_WIDGET_LINES`), so `updateWidget` sends
 all items when there are 10 or fewer, else 10 items ending on the first open
 one (the first 10 until it is past them), and the last 10 once everything is
 done. `setWidget` only; the status line keeps the full count.
+
+### DeepSeek Harness: plan review, the `plannotator` tool and commands
+
+`@plannotator/dsh` (`apps/dsh-plugin/`, a Cordis plugin; DSH is never run in
+tests, which use a fake `ctx`).
+
+- **Plan review still blocks.** `exit_plan_mode` asks on the
+  `user-questions/request` waterfall, and the plugin answers it by waiting for
+  `plannotator dsh-plan` (`plan-review.ts`). The session waits inside that tool
+  call until the person decides. A non-blocking plan review (answer at once,
+  then `ctx.planMode.set(agent, false)` and `agent.followup` on approval)
+  changes shipped behavior and is a later step.
+- **The `plannotator` tool** is the shared contract, registered with
+  `ctx.tools.register` in the `inject(['agents', 'tools'])` child
+  (`tool.ts`). It is off by default (`AGENT_TOOL_DEFAULTS.dsh`, owner's
+  call): `PLANNOTATOR_AGENT_TOOL=1` or `{ "agentTool": true }` turns it on,
+  read once when the plugin loads. The `parameters` are
+  `PLANNOTATOR_TOOL_INPUT_SCHEMA` as is (DSH checks only the `output`
+  schema against its JSON Schema subset). In DSH's code-execution (PTC)
+  mode the tool's arguments show as `unknown`: that mode's types use the
+  same subset, which has no `anyOf` or `minItems`. Native mode is unaffected.
+- **`/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`**
+  are registered with `ctx.commands.register` (`inject(['agents',
+  'commands'])`) whatever the tool switch says. DSH runs a registered
+  command instead of sending the line to the model, so the shared skill of
+  the same name no longer runs (and blocks a bash call) for these lines.
+- **Neither waits for the person** (`reviews.ts`). Each review is a CLI child
+  the plugin owns, with `PLANNOTATOR_ORIGIN=dsh`, the top-level session's
+  `DSH_SESSION_ID` and `PLANNOTATOR_SESSION_TAG=dsh:<id>` set explicitly
+  (DSH's process env is shared by every session), `DSH_HOME` from
+  `profileContext.home` (for `last`), and a ready file and host result file
+  under `<data dir>/dsh/<pn-id>/` (`isAllowedHostResultPath` allows `dsh/`).
+  The call answers once the page is up (15 s, 45 s for a review; then
+  "starting"). On exit the plugin sends the decision to the top-level session
+  with `agent.followup`, headed as on the other hosts; a bare approval and a
+  close send nothing unless the review was gated. A CLI that stops without a
+  decision after the call answered sends "Did not open" (it answered
+  "starting") or "Ended with no decision" (the page was up), so the agent
+  never waits forever. A subagent's review runs in the subagent's own
+  working directory, and its decision goes to the session it works for;
+  `last` from a subagent is refused.
+- **`list` and `close`** see only the asking session's reviews. Close stops
+  the plugin's own child, open or still starting (SIGTERM, then SIGKILL a
+  second later; the draft is kept), and `unsent` is unknown: host close
+  needs the session-bridge token, which comes with Ask this session.
+  Cancelling a call while its page is starting stops the child the same way,
+  and the call settles once the child has exited. Unloading the plugin stops
+  every open review.
+- Not in the `headless`, `sdk`, `sdk-minimal` or `acp` profiles; there the
+  shared skills run the CLI. Tests: `apps/dsh-plugin/tool.test.ts` (a fake CLI,
+  `fixtures/fake-cli.ts`).

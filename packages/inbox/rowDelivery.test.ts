@@ -13,7 +13,7 @@ import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { InboxStore } from '../shared/inbox/store';
 import { inboxDeliveryState, type InboxListRow, type InboxListSection, type InboxRowDelivery } from '@plannotator/core/inbox-types';
 import { deliveryLine, waitInputs, type DeliveryLineInput, type RecipientConnection } from './deliveryLine';
-import { hasMovingDelivery, rowDeliveryLine, rowDeliveryName, rowDeliverySpoken, rowTimeIso } from './rowDelivery';
+import { deliveriesReadList, hasMovingDelivery, rowDeliveryLine, rowDeliveryName, rowDeliverySpoken, rowTimeIso } from './rowDelivery';
 
 const time = (iso: string) => `at ${iso.slice(11, 16)}`;
 const AT = '2026-10-20T15:41:00.000Z';
@@ -122,6 +122,17 @@ describe('the row words', () => {
     expect(hasMovingDelivery(section([{ ...base, state: 'saved', reason: 'ended' }]))).toBe(true);
     expect(hasMovingDelivery(section([{ ...base, state: 'saved', reason: 'reads' }]))).toBe(false);
   });
+
+  test('a session that ended or came back reads the list again even when no row has a reply to move', () => {
+    const section = (deliveries: (InboxRowDelivery | null)[]): InboxListSection[] => [
+      { id: 'sent', label: 'Sent', threads: deliveries.map((delivery) => ({ delivery }) as unknown as InboxListRow) },
+    ];
+    const quiet = section([null, { ...base, state: 'delivered' }]);
+    expect(deliveriesReadList({ labels: false, sessions: false }, quiet)).toBe(false);
+    expect(deliveriesReadList({ labels: false, sessions: true }, quiet)).toBe(true);
+    expect(deliveriesReadList({ labels: true, sessions: false }, quiet)).toBe(true);
+    expect(deliveriesReadList(undefined, section([{ ...base, state: 'queued' }]))).toBe(true);
+  });
 });
 
 const roots: string[] = [];
@@ -146,8 +157,15 @@ describe('a thread with two sessions: the row and the thread line agree on who a
     const asking = inboxAskingMessage(thread.messages, statesOf, inboxDefaultSkip(thread.messages.filter((m) => m.author.kind === 'agent'), statesOf));
     const askingSession = asking?.author.kind === 'agent' ? asking.author.session : null;
     const askerEnded = thread.resolved_at === null && asking?.wakes === true && !!askingSession && !live.askerLive(askingSession);
+    // Named for the session the reply goes to (`recipientName`): the agent it answers when that is another
+    // session than the thread's first agent, else the thread's agent.
+    const first = root.author.kind === 'agent' ? root.author : null;
+    const toAnother =
+      repliedTo.author.kind === 'agent' &&
+      !!first &&
+      ((repliedTo.author.session ?? null) !== (first.session ?? null) || (repliedTo.author.host ?? null) !== (first.host ?? null));
     return deliveryLine({
-      name: inboxAgentName(root.author),
+      name: inboxAgentName(toAnother ? repliedTo.author : root.author),
       deliveredAt: sentCheckedAt,
       time,
       wakes: repliedTo.wakes === true || (replySession !== null && connection != null),
@@ -189,8 +207,19 @@ describe('a thread with two sessions: the row and the thread line agree on who a
       expect(row.delivery!.send_now).toBe(line.sendNow === true);
       expect(rowDeliveryLine(row.delivery!, time)).toBe(line.text);
       expect(line.state).toBe(picked ? 'saved' : 'queued');
-      if (picked) expect(line.text).toStartWith('Saved for Pi. The session that asked has ended');
+      if (picked) expect(line.text).toStartWith('Saved for Pi. That session has ended');
+      // The words answer Claude Code's message (ses_b), so they go to it, not to Pi, who started the thread.
+      else expect(line.text).toContain('Claude Code is working');
     });
   }
 });
 
+describe('the row names who read it', () => {
+  const delivered: InboxRowDelivery = { kind: 'reply', state: 'delivered', reason: 'delivered', send_now: false, message_id: 'm', at: '2026-10-20T15:00:00.000Z', host: 'cursor', name: null };
+  const time = () => '6:25 PM';
+
+  test('the same words as the thread: read by another agent, or delivered', () => {
+    expect(rowDeliveryLine({ ...delivered, read_by: 'claude-code' }, time)).toBe('Read by Claude Code, 6:25 PM');
+    expect(rowDeliveryLine(delivered, time)).toBe('Delivered to Cursor, 6:25 PM');
+  });
+});

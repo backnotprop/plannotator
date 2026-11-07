@@ -249,11 +249,13 @@ for (const phone of [
       await page.locator('[data-peek-backdrop]').click({ position: { x: 20, y: 20 } });
       await expect(sheet).toBeHidden();
 
-      // The toolbar still tucks into its handle, and the handle brings it back.
+      // The toolbar still gathers into the corner control, and one tap on it brings the tools back (approval
+      // "inbox-fullscreen-gather").
       await bar(page).locator('[data-full-view-hide]').tap();
       await expect(page.locator('[data-full-view-dock]')).toHaveAttribute('data-bar', 'tucked');
       await page.locator('[data-full-view-handle]').tap();
-      await expect(page.locator('[data-full-view-dock]')).not.toHaveAttribute('data-bar', 'tucked');
+      await expect(page.locator('[data-full-view-dock]')).toHaveAttribute('data-bar', 'pinned');
+      await expect(bar(page)).toBeVisible();
 
       expect(errors).toEqual([]);
       await context.close();

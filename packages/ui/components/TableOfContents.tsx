@@ -1,4 +1,5 @@
 import React, { useMemo, useCallback } from 'react';
+import { basenameFromPath } from '@plannotator/core/source-save';
 import type { Block, Annotation } from '../types';
 import {
   buildTocHierarchy,
@@ -22,6 +23,17 @@ interface TableOfContentsProps {
   linkedDocFilepath?: string | null;
   onLinkedDocBack?: () => void;
   backLabel?: string;
+  /**
+   * The element a click scrolls. Default: the `ScrollViewportProvider`
+   * context's viewport (plan review). A host that draws the list outside the
+   * document's scroll area (the Inbox's comments column) names it here.
+   */
+  scrollViewport?: HTMLElement | null;
+  /**
+   * The deepest heading level listed. Default 3 (plan review's list); the
+   * contents rail's surface (`DocumentContents`) lists 1 to 4, as the rail does.
+   */
+  maxLevel?: number;
 }
 
 // The prototype's TOC is a FLAT list — heading depth is conveyed by indentation
@@ -43,7 +55,7 @@ function flattenToc(items: TocItem[]): TocItem[] {
 // H1 flush + near-full strength, H2/H3 indented and dimmed to muted. Active row
 // is a soft neutral surface tint (not a loud primary fill).
 function itemClasses(level: number, isActive: boolean): string {
-  const indent = level <= 1 ? '' : level === 2 ? 'ml-3' : 'ml-6';
+  const indent = level <= 1 ? '' : level === 2 ? 'ml-3' : level === 3 ? 'ml-6' : 'ml-9';
   const tone = isActive
     ? 'bg-surface-1 text-foreground'
     : level <= 1
@@ -62,6 +74,8 @@ export function TableOfContents({
   linkedDocFilepath,
   onLinkedDocBack,
   backLabel,
+  scrollViewport: scrollViewportProp,
+  maxLevel = 3,
 }: TableOfContentsProps) {
   // Annotation count per section (kept — production feature).
   const annotationCounts = useMemo(
@@ -69,15 +83,16 @@ export function TableOfContents({
     [blocks, annotations]
   );
 
-  // Build the hierarchy (filters to heading levels ≤ 3 and attaches counts),
-  // then flatten to a plain list.
+  // Build the hierarchy (filters to heading levels ≤ maxLevel and attaches
+  // counts), then flatten to a plain list.
   const tocItems = useMemo(
-    () => flattenToc(buildTocHierarchy(blocks, annotationCounts)),
-    [blocks, annotationCounts]
+    () => flattenToc(buildTocHierarchy(blocks, annotationCounts, maxLevel)),
+    [blocks, annotationCounts, maxLevel]
   );
 
   // The real scroll element is the OverlayScrollArea viewport, not <main>.
-  const scrollViewport = useScrollViewport();
+  const contextViewport = useScrollViewport();
+  const scrollViewport = scrollViewportProp === undefined ? contextViewport : scrollViewportProp;
 
   // Smooth scroll-to-heading, accounting for the sticky header.
   const handleNavigate = useCallback(
@@ -132,7 +147,7 @@ export function TableOfContents({
               )}
             </div>
             <p className="text-[11px] text-foreground/70 truncate mt-0.5" title={linkedDocFilepath}>
-              {linkedDocFilepath.split('/').pop()}
+              {basenameFromPath(linkedDocFilepath)}
             </p>
           </div>
         )}

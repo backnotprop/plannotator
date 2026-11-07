@@ -148,16 +148,21 @@ export type InboxAnnotationVersion = string;
  * Where a comment on a guided review's diff sits: a file of the guide's
  * patch, one side of it, and a line range in that side's numbering (the
  * review app's line comment). Set on the record instead of an attachment.
+ * A global comment (on the whole review, `scope: "general"`) has no file and
+ * no lines: `file` is "", `side` "new" and both lines 0, the review app's
+ * own sentinels, so an older reader still finds every field.
  */
 export interface InboxGuideCommentTarget {
   /** The guided review's title, as the message carries it. */
   title: string;
-  /** The file, as the guide's patch names it. */
+  /** The file, as the guide's patch names it ("" for a global comment). */
   file: string;
   /** `new`: the changed file's lines; `old`: the original's. */
   side: "old" | "new";
   line_start: number;
   line_end: number;
+  /** "general": a global comment, on the whole review (additive; absent on a line comment). */
+  scope?: "general";
 }
 
 /**
@@ -282,7 +287,8 @@ function isCodeName(name: string): boolean {
  * window's routes and the phone's door alike. Null when the name passes.
  */
 export function inboxAttachmentNameRefusal(path: string): string | null {
-  const name = baseName(path);
+  // On NTFS `.env::$DATA`, `.env:x` and `.env .` all name the real `.env`.
+  const name = baseName(path).replace(/:.*$/s, "").replace(/[. ]+$/, "");
   if (isDotenvFileName(name)) return ".env files are never attached (they hold secrets).";
   return null;
 }

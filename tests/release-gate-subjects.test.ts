@@ -47,3 +47,24 @@ describe("release.yml npm packages and the security gate", () => {
 		}
 	});
 });
+
+const jobs = (Bun.YAML.parse(workflow) as { jobs: Record<string, { needs?: string | string[]; if?: string }> }).jobs;
+const needsOf = (job: string): string[] => [jobs[job]?.needs ?? []].flat();
+
+describe("release.yml: nothing is attested or published before the gates pass", () => {
+	// Catches: a later edit dropping a smoke (or the security scan, or the viewer check) from a publishing job.
+	// npm-package does not wait for the smokes, so these lists are the only place that wait lives.
+	for (const job of ["npm-publish", "attest"]) {
+		test(`${job} needs every smoke, release-security and viewer-pin-live`, () => {
+			for (const need of ["smoke-binaries", "pi-extension-ai-runtime-windows", "install-script-smoke", "release-security", "viewer-pin-live"]) {
+				expect(needsOf(job)).toContain(need);
+			}
+		});
+
+		// Catches: a status function that would let the job run after a failed or skipped need.
+		test(`${job} runs only when every need succeeded`, () => {
+			expect(jobs[job]?.if).toBeString();
+			expect(jobs[job]!.if!).not.toMatch(/always\(\)|failure\(\)|cancelled\(\)/);
+		});
+	}
+});

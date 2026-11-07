@@ -20,6 +20,8 @@ interface FileHeaderProps {
   /** Chrome preference: false hides the Viewed button (the `V` shortcut and
    *  viewed state are unaffected). */
   showViewedControl?: boolean;
+  /** The review app's keys work here: the Viewed tooltip names its key (V). Off where they do not (the Inbox). */
+  viewedKeyHint?: boolean;
   isStaged?: boolean;
   isStaging?: boolean;
   onStage?: () => void;
@@ -62,6 +64,8 @@ interface FileHeaderProps {
   renderMarkdownView?: (fit: { iconOnly: boolean; touch: boolean }) => React.ReactNode;
   /** A host control drawn before the view menu (code review's Changes | Whole file switch). */
   accessory?: React.ReactNode;
+  /** A host's own "Open in" (the Inbox's, where a read-only header has none), in the place the app's sits. */
+  openIn?: React.ReactNode;
 }
 
 function splitFilePath(filePath: string): { directory: string; name: string } {
@@ -130,6 +134,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   isViewed = false,
   onToggleViewed,
   showViewedControl = true,
+  viewedKeyHint = true,
   isStaged = false,
   isStaging = false,
   onStage,
@@ -149,6 +154,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   isTest = false,
   renderMarkdownView,
   accessory,
+  openIn,
 }) => {
   const [headerWidth, setHeaderWidth] = useState<number>(0);
   const state = useReviewStateOptional();
@@ -186,6 +192,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   return (
     <div
       ref={headerRef}
+      data-file-header=""
       className={`flex-shrink-0 border-b border-border/50 flex items-center justify-between gap-2 transition-colors duration-150 hover:bg-muted/30 ${isCompactTouchLayout ? 'pr-3' : 'px-3'}`}
       style={{ height: isCompactTouchLayout ? '44px' : 'var(--panel-header-h)' }}
     >
@@ -267,7 +274,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
                 ? 'bg-success/15 text-success'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             }`}
-            title={isViewed ? "Mark as not viewed (V)" : "Mark as viewed (V)"}
+            title={`${isViewed ? 'Mark as not viewed' : 'Mark as viewed'}${viewedKeyHint ? ' (V)' : ''}`}
           >
             {isViewed ? (
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -363,6 +370,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             PR has no checkout or a committed GitButler layer is selected. */}
         {/* Icon-only in the header (the picked app's name shows in the dropdown),
             matching the plan/annotate side. */}
+        {openIn}
         {!readOnly && <OpenInAppButton
           filePath={filePath}
           base={state?.agentCwd ?? null}

@@ -288,6 +288,9 @@ export function extractFrontmatter(markdown: string): { frontmatter: Frontmatter
 }
 
 
+/** The most blank lines `keepBlankLines` keeps before a paragraph: a paste of hundreds does not push the text off screen. */
+const MAX_KEPT_BLANK_LINES = 10;
+
 export interface ParseMarkdownOptions {
   /**
    * Strip a leading `--- ... ---` pair as frontmatter (default true).
@@ -296,6 +299,12 @@ export interface ParseMarkdownOptions {
    * with them (see shouldStripFrontmatter in @plannotator/core/annotatable).
    */
   frontmatter?: boolean;
+  /**
+   * Person-typed text (Inbox): a paragraph that follows 2+ blank lines records
+   * the run as `blankLinesBefore`, so the renderer can keep the empty lines
+   * the person typed (as Slack does) instead of folding them into one gap.
+   */
+  keepBlankLines?: boolean;
 }
 
 
@@ -333,6 +342,34 @@ export const diagramDocumentBlocks = (text: string, kind: 'mermaid' | 'graphviz'
 ];
 
 /**
+ * Largest code document highlighted in its language. A whole file is one
+ * Shiki pass on the main thread, and a big log or JSON dump would stall the
+ * page, so past this it shows as plain monospace text, still annotatable.
+ */
+export const CODE_DOCUMENT_HIGHLIGHT_LIMIT = 128 * 1024;
+
+/**
+ * Blocks for a whole-file config or data source (`renderAs: "code"`): ONE code
+ * block over the raw text, in `language` (see `codeDocumentLanguage`), so a
+ * TOML or YAML comment stays a comment instead of becoming a markdown heading.
+ * The file's first line is document line 1, as for a diagram file.
+ */
+export const codeDocumentBlocks = (text: string, language: string | undefined): Block[] => [
+  {
+    id: 'block-0',
+    type: 'code',
+    content: text,
+    language: language && text.length <= CODE_DOCUMENT_HIGHLIGHT_LIMIT ? language : undefined,
+    order: 1,
+    startLine: 1,
+    // A comment names the lines it sits on, not the whole file.
+    contentStartLine: 1,
+    // A trailing newline ends the last line, it does not start another.
+    sourceLineCount: text === '' ? 0 : text.replace(/\n$/, '').split('\n').length,
+  },
+];
+
+/**
  * A simplified markdown parser that splits content into linear blocks.
  * For a production app, we would use a robust AST walker (remark),
  * but for this demo, we want predictable text-anchoring.
@@ -360,11 +397,13 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
   let currentLevel = 0;
   let bufferStartLine = contentStartLine;
   let lastLineWasBlank = false;
+  let bufferBlankRun = 0;
 
   const flush = () => {
     if (buffer.length > 0) {
       const content = buffer.join('\n');
       blocks.push({
+        ...(currentType === 'paragraph' && bufferBlankRun > 1 ? { blankLinesBefore: bufferBlankRun } : {}),
         id: `block-${currentId++}`,
         type: currentType,
         content: content,
@@ -660,6 +699,10 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
     // Accumulate paragraph text
     if (buffer.length === 0) {
       bufferStartLine = currentLineNum;
+      bufferBlankRun = 0;
+      if (options?.keepBlankLines && blocks.length > 0) {
+        for (let j = i - 1; j >= 0 && lines[j].trim() === '' && bufferBlankRun < MAX_KEPT_BLANK_LINES; j--) bufferBlankRun++;
+      }
     }
     buffer.push(line);
   }
@@ -785,6 +828,15 @@ const commentHeadingLine = (ann: any): string => {
   const element = elementSubject(ann);
   return element ? `Feedback on ${element}` : `Feedback on: "${ann.originalText}"`;
 };
+
+/** A quick label's tip, the instruction the agent gets with the label, as
+ *  the feedback export quotes it under the label's heading (`> <tip>`); empty
+ *  for a label without a tip and for every other annotation. The export and
+ *  the Inbox's message comments both write a label's tip through this, so
+ *  the agent reads one format (#2626); Ask's one-line drafts carry the same
+ *  tip text after the label. */
+export const quickLabelTipLine = (ann: any): string =>
+  ann?.isQuickLabel && ann.quickLabelTip ? `> ${ann.quickLabelTip}\n` : '';
 
 /** `the <nav> element — "Primary"` for a text-less pinpoint whose quote is
  *  the bridge's placeholder; null for every other annotation. */
@@ -1006,7 +1058,7 @@ export const exportAnnotationEntry = (ann: any, opts: ElementContextExportOption
         output += `[${ann.text}] ${commentHeadingLine(ann)}\n`;
         const region = imageRegionOf(ann);
         if (region) output += imageRegionExportLines(region);
-        if (ann.quickLabelTip) output += `> ${ann.quickLabelTip}\n`;
+        output += quickLabelTipLine(ann);
       } else {
         output += `${commentHeadingLine(ann)}\n${diagramLocationExportLine(ann)}> ${ann?.text ?? ''}\n`;
       }
@@ -1062,6 +1114,42 @@ const hostLocationExportLine = (ann: any): string => {
   return typeof line === 'string' && line.trim() !== '' ? `${safeInline(line, 300)}\n` : '';
 };
 
+/** The document lines a quote covers inside a block that sets
+ *  `contentStartLine` (a whole-file code document, which is ONE block). The
+ *  `startOffset` measured from the selection is used while it still holds the
+ *  quote; otherwise the quote's only occurrence. `null` when the block has no
+ *  line base, the quote is not in it, or the quote appears more than once
+ *  with no offset to tell the copies apart (naming the first copy would point
+ *  at a line nobody commented on), so the caller falls back to the block's
+ *  span. */
+const quoteLinesInContent = (
+  block: Block,
+  quote: unknown,
+  startOffset?: unknown,
+): { first: number; last: number } | null => {
+  if (typeof block.contentStartLine !== 'number' || typeof quote !== 'string' || quote === '') return null;
+  const content = block.content;
+  let start: number;
+  if (
+    typeof startOffset === 'number' && Number.isInteger(startOffset) && startOffset >= 0
+    && content.startsWith(quote, startOffset)
+  ) {
+    start = startOffset;
+  } else {
+    start = content.indexOf(quote);
+    if (start < 0 || content.indexOf(quote, start + 1) !== -1) return null;
+  }
+  const base = block.contentStartLine;
+  const lineAt = (offset: number) => {
+    let line = base;
+    for (let i = content.indexOf('\n'); i !== -1 && i < offset; i = content.indexOf('\n', i + 1)) line++;
+    return line;
+  };
+  // The quote's last character, so a quote ending in its line's newline
+  // still ends on that line.
+  return { first: lineAt(start), last: lineAt(start + quote.length - 1) };
+};
+
 const lineLabelForAnnotation = (blocks: Block[], ann: any): string | null => {
   if (!ann.blockId || ann.type === 'GLOBAL_COMMENT') return null;
   // A region names the line its image is written on, not its block's span.
@@ -1070,6 +1158,8 @@ const lineLabelForAnnotation = (blocks: Block[], ann: any): string | null => {
   if (typeof ann.blockId === 'string' && ann.blockId.startsWith('diff-block-')) return null;
   const block = blocks.find(b => b.id === ann.blockId);
   if (!block || typeof block.startLine !== 'number') return null;
+  const quoted = quoteLinesInContent(block, ann.originalText, ann.startOffset);
+  if (quoted) return quoted.first === quoted.last ? `line ${quoted.first}` : `lines ${quoted.first}–${quoted.last}`;
   const end = blockEndLine(block);
   if (end <= block.startLine) return `line ${block.startLine}`;
   return `lines ${block.startLine}–${end}`;
@@ -1081,17 +1171,29 @@ const lineLabelForAnnotation = (blocks: Block[], ann: any): string | null => {
  *  the last block's end line, so a selection inside one block names exactly
  *  the span its annotation would export (`(line 41)` / `(lines 41–44)`).
  *  Blocks without a line (diff blocks, unknown ids) are skipped; `null` when
- *  none is left. */
+ *  none is left. In a whole-file code document (one block, see
+ *  `contentStartLine`) the `selectedText` names the lines instead, as its
+ *  annotation's label does; `startOffset` is where the selection starts in
+ *  the first block (the popover's measured offset), which tells repeated
+ *  copies of the same text apart. */
 export const selectionSourceLines = (
   blocks: readonly Block[],
   blockIds: readonly string[],
+  selectedText?: string,
+  startOffset?: number,
 ): { lineStart: number; lineEnd: number } | null => {
   let lineStart = Infinity;
   let lineEnd = -Infinity;
-  for (const id of blockIds) {
+  for (const [index, id] of blockIds.entries()) {
     if (id.startsWith('diff-block-')) continue;
     const block = blocks.find(b => b.id === id);
     if (!block || typeof block.startLine !== 'number' || block.startLine < 1) continue;
+    const quoted = quoteLinesInContent(block, selectedText, index === 0 ? startOffset : undefined);
+    if (quoted) {
+      lineStart = Math.min(lineStart, quoted.first);
+      lineEnd = Math.max(lineEnd, quoted.last);
+      continue;
+    }
     lineStart = Math.min(lineStart, block.startLine);
     lineEnd = Math.max(lineEnd, blockEndLine(block), block.startLine);
   }
@@ -1315,9 +1417,7 @@ const renderAnnotationEntries = (
         if (ann.isQuickLabel) {
           output += `[${ann.text}] ${commentHeadingLine(ann)}\n`;
           output += diagramLocationExportLine(ann);
-          if (ann.quickLabelTip) {
-            output += `> ${ann.quickLabelTip}\n`;
-          }
+          output += quickLabelTipLine(ann);
         } else {
           output += `${commentHeadingLine(ann)}\n`;
           output += diagramLocationExportLine(ann);
@@ -1643,8 +1743,10 @@ export const formatDraftAnnotationsForAsk = (input: DraftAnnotationsForAsk): str
       const target = region
         ? `a region of the image ${quote(region.src)} [${safeInline(imageRegionLocationLines(region).replace('\n', '; '), 300)}]`
         : anchor ? `${subject} [${safeInline(diagramAnchorLocationLine(anchor), 300)}]` : subject;
+      // A label's tip is its instruction to the agent: it takes the place a
+      // comment's words take, on the draft's one line (#2626).
       body = ann.isQuickLabel
-        ? `label ${quote(ann.text)} on ${target}`
+        ? `label ${quote(ann.text)} on ${target}${ann.quickLabelTip ? ` — ${text(ann.quickLabelTip)}` : ''}`
         : `comment on ${target} — ${text(ann.text)}`;
     }
     lines.push(`${head} ${body}${from}${images(ann.images)}`);

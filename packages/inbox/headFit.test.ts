@@ -21,16 +21,25 @@ describe("a phone's thread header", () => {
     expect(phoneHeadFits({ overflow: 0, label: null })).toBe(true);
   });
 
-  test("Mark read's words go before the way back's label, and the count before Mark read's words", () => {
+  test("the count goes before the way back's label, which goes last", () => {
     const first = (step: string) => PHONE_HEAD_FITS.findIndex((fit) => fit.includes(step as never));
-    expect(first('count')).toBeLessThan(first('mark'));
-    expect(first('mark')).toBeLessThan(first('back'));
+    expect(first('count')).toBeGreaterThan(-1);
+    expect(first('count')).toBeLessThan(first('back'));
     // The way back keeps its label in every way but the last.
     expect(PHONE_HEAD_FITS.filter((fit) => fit.includes('back'))).toHaveLength(1);
     expect(PHONE_HEAD_FITS.at(-1)).toContain('back');
   });
 
-  test('the scrolled-away subject is drawn only with room to read it', () => {
+  // The approval "inbox-thread-header": the subject is in the bar at every width with room, so a way that leaves it
+  // a sliver does not fit, and the header gives way further (the subject used to vanish on a phone).
+  test('a way that leaves the subject less than its floor does not fit; the bar with no subject is judged without it', () => {
+    expect(phoneHeadFits({ overflow: 0, label: { shown: 42, whole: 42 }, subject: SUBJECT_FLOOR - 10 })).toBe(false);
+    expect(phoneHeadFits({ overflow: 0, label: { shown: 42, whole: 42 }, subject: SUBJECT_FLOOR })).toBe(true);
+    expect(phoneHeadFits({ overflow: 0, label: null, subject: 140 })).toBe(true);
+    expect(phoneHeadFits({ overflow: 0, label: { shown: 42, whole: 42 }, subject: null })).toBe(true);
+  });
+
+  test('the subject is drawn only with room to read it', () => {
     expect(subjectHasRoom(8)).toBe(false);
     expect(subjectHasRoom(54)).toBe(false);
     expect(subjectHasRoom(SUBJECT_FLOOR)).toBe(true);

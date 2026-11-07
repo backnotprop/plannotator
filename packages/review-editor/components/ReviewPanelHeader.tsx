@@ -1,20 +1,24 @@
 /**
- * The top of the code review sidebar (approved design record
- * "review-sidebar-header", variant "sentence"): three rows, every control one
- * click away.
+ * The top of the code review sidebar (approved design records
+ * "review-sidebar-aligned" and, for the tabs and the sentence,
+ * "review-sidebar-header", variant "sentence"): every control one click away.
  *
- *  1. Tree / Git status / Commits as text tabs (icons under 200 px).
- *  2. The comparison read as one sentence whose words are the controls:
+ *  1. Go to file, a quiet field (⌘P).
+ *  2. Tree / Git status / Commits as underlined tabs (icons under 200 px),
+ *     with the panel's one line under them.
+ *  3. The comparison read as one sentence whose words are the controls:
  *     "All changes ⌄ since main ⌄". Each word opens its existing menu (the
  *     diff type, the base). A long base keeps its start and end
  *     ("feature/very-l…ame-for-a-stack"); the full name is the trigger's title.
- *  3. Changes N / All files N, the All files listing's live dot, and Go to File.
+ *
+ * Changes N / All files N and the All files listing's state are `ScopeSwitch`,
+ * the lead of the list's sticky tools row.
  *
  * One component for the three panels (FileTree, SectionsPanel, CommitsPanel),
  * fed one model built by App, so nothing moves between views.
  */
-import React, { useEffect, useState } from 'react';
-import { ChevronDown, FolderTree, GitCommitHorizontal, Layers3, Search } from 'lucide-react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { ChevronDown, FileSearch, FolderTree, GitCommitHorizontal, Layers3 } from 'lucide-react';
 import { Tooltip } from '@plannotator/ui/components/Tooltip';
 import { isMac } from '@plannotator/ui/utils/platform';
 import { formatShortcutBindingTokens, resolveShortcutBindings, reviewExplorerShortcuts } from '@plannotator/ui/shortcuts';
@@ -126,12 +130,12 @@ function useLiveTooltip(repo: ReadyRepo | null | undefined): string | null {
  * tooltip, the status line under the row (partial) and the polite status
  * region (live), so the button's name stays "All files N".
  */
-const LiveDot: React.FC<{ repo: ReadyRepo | null | undefined }> = ({ repo }) => {
+const LiveDot: React.FC<{ repo: ReadyRepo | null | undefined; className?: string }> = ({ repo, className = 'inline-flex items-center' }) => {
   const text = useLiveTooltip(repo);
   if (!repo || !text) return null;
   return (
     <Tooltip content={text} side="bottom">
-      <span className="inline-flex items-center" aria-hidden="true" data-repo-listing-dot={repo.live ? 'live' : 'partial'}>
+      <span className={className} aria-hidden="true" data-repo-listing-dot={repo.live ? 'live' : 'partial'}>
         <span className={`w-1.5 h-1.5 rounded-full ${repo.live ? 'bg-success' : 'border border-warning'}`} />
       </span>
     </Tooltip>
@@ -205,27 +209,32 @@ export function middleTruncateRef(base: string, width: number): string {
   return `${ref.slice(0, head)}…${ref.slice(ref.length - tail)}`;
 }
 
-const GoToFileButton: React.FC<{ onClick: () => void; showKeys: boolean }> = ({ onClick, showKeys }) => {
+
+/**
+ * Go to File as a quiet field at the top of the panel: a faint fill, no
+ * border, shadow or key boxes. The icon sits on the panel's content edge and
+ * the words on its label edge. Opens the existing palette (⌘P / Ctrl+P).
+ */
+const GoToFileField: React.FC<{ onClick: () => void; showKeys: boolean }> = ({ onClick, showKeys }) => {
   const binding = resolveShortcutBindings(reviewExplorerShortcuts.shortcuts.goToFile)[0] ?? '';
   const keys = formatShortcutBindingTokens(binding);
   return (
-    <Tooltip content={<span>Go to File <span className="opacity-70">{keys.join('')}</span></span>} side="bottom">
-      <button
-        type="button"
-        onClick={onClick}
-        aria-label="Go to File…"
-        aria-keyshortcuts={binding ? ariaKeyShortcut(binding) : undefined}
-        data-go-to-file-button
-        className={`flex-shrink-0 flex items-center gap-1 h-7 px-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors ${FOCUS}`}
-      >
-        <Search className="w-3.5 h-3.5" aria-hidden="true" />
-        {showKeys && (
-          <kbd className="font-mono text-[10px] px-1 rounded bg-muted/70 border border-border/50" aria-hidden="true">
-            {keys.join('')}
-          </kbd>
-        )}
-      </button>
-    </Tooltip>
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="Go to File…"
+      aria-keyshortcuts={binding ? ariaKeyShortcut(binding) : undefined}
+      data-go-to-file-button=""
+      className={`w-full min-w-0 flex items-center gap-1 h-8 px-2 rounded-md bg-[var(--sidebar-fill-faint)] text-[13px] text-muted-foreground hover:bg-[var(--sidebar-fill)] hover:text-foreground transition-colors ${FOCUS}`}
+    >
+      <FileSearch className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+      <span className="truncate">Go to file…</span>
+      {showKeys && keys.length > 0 && (
+        <kbd className="ml-auto pl-2 font-sans text-[12px] tracking-[0.08em] text-[var(--sidebar-text-tertiary)]" aria-hidden="true">
+          {keys.join('')}
+        </kbd>
+      )}
+    </button>
   );
 };
 
@@ -253,177 +262,263 @@ function shownScope(model: ReviewPanelHeaderModel): TreeScope | null {
   return model.view === 'sections' ? 'changes' : model.scope.value;
 }
 
-export const ReviewPanelHeader: React.FC<{ model: ReviewPanelHeaderModel; width: number }> = ({ model, width }) => {
-  const narrow = width < NARROW_HEADER_WIDTH;
-  const views: ReviewPanelView[] = [
+/** The views a session offers, in tab order. */
+function panelViews(model: ReviewPanelHeaderModel): ReviewPanelView[] {
+  return [
     'tree',
     ...(model.showSections ? (['sections'] as const) : []),
     ...(model.showCommits ? (['commits'] as const) : []),
   ];
-  const scope = shownScope(model);
-  const { noun, connector } = diffWords(model);
-  const showScopeRow = !!scope || !!model.onGoToFile;
-  const showSentence = model.view !== 'commits' && (!!model.diff || !!model.base || model.view === 'sections');
-  const token = `inline-flex min-w-0 max-w-full items-center gap-0.5 rounded px-1 -mx-0.5 py-0.5 font-medium text-foreground underline decoration-dotted decoration-muted-foreground/60 underline-offset-[3px] hover:bg-muted hover:decoration-transparent transition-colors disabled:opacity-50 disabled:cursor-wait ${FOCUS}`;
+}
 
-  /* The comparison, read as one sentence. */
-  const sentence = showSentence ? (
-    <div className={`px-3 pt-2 ${showScopeRow ? 'pb-1.5' : 'pb-2'} text-xs leading-6 text-muted-foreground flex flex-wrap items-center gap-x-1`} data-panel-sentence>
-      {model.diff ? (
-        <DiffTypePicker
-          options={model.diff.options}
-          activeDiffType={model.diff.active}
-          onSelect={model.diff.onSelect}
-          isLoading={model.diff.loading}
-          hasBasePicker={model.diff.hasBasePicker}
-          activeBase={model.diff.activeBase}
-          trigger={{
-            className: token,
-            ariaLabel: `Changes shown: ${noun}`,
-            content: (
-              <>
-                <span className="truncate">{noun}</span>
-                <Chevron loading={model.diff.loading} />
-              </>
-            ),
-          }}
-        />
-      ) : (
-        <span className="text-foreground font-medium">{noun}</span>
-      )}
-      {connector && <span>{connector}</span>}
-      {model.base && connector && (
-        <span className="flex min-w-0 max-w-full">
-          <BaseBranchPicker
-            {...model.base}
-            trigger={{
-              className: `${token.replace('max-w-full ', '')} font-mono text-[11.5px]`,
-              ariaLabel: `${model.base.copy.triggerTitlePrefix}: ${model.base.selectedBase}`,
-              content: (
-                <>
-                  <span className="truncate" data-base-ref>{middleTruncateRef(model.base.selectedBase, width)}</span>
-                  <Chevron />
-                </>
-              ),
-            }}
-          />
-        </span>
-      )}
-    </div>
-  ) : null;
+/** The id of the region the view tabs control: the panel's list, below the line. */
+export const REVIEW_PANEL_BODY_ID = 'review-panel-body';
 
-  /* Changes / All files and Go to File. */
-  const scopeRow = showScopeRow ? (
-    <div
-      className={`px-2 pb-2 ${showSentence ? '' : 'pt-2'} flex items-center gap-1`}
-      data-tree-scope-row
-    >
-      {scope && model.scope && (
-        <div className="flex min-w-0 items-center gap-0.5" role="group" aria-label="Files shown in the tree">
-          {(['changes', 'all'] as const).map((key) => {
-            const active = scope === key;
-            const count = key === 'changes' ? model.scope!.changed : model.scope!.all;
-            return (
-              <button
-                key={key}
-                type="button"
-                aria-pressed={active}
-                onClick={() => selectScope(model, key)}
-                data-tree-scope={key}
-                title={key === 'changes' ? 'The files this review changes' : 'Every file of the repository at the revision the diff reads'}
-                className={`min-w-0 flex items-center ${narrow ? 'gap-1 px-1.5' : 'gap-1.5 px-2'} h-6 rounded-full text-xs whitespace-nowrap transition-colors ${FOCUS} ${
-                  active ? 'bg-muted text-foreground font-medium' : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <span className="truncate">{key === 'changes' ? 'Changes' : narrow ? 'All' : 'All files'}</span>
-                {count !== undefined && (
-                  <span className={`tabular-nums font-mono text-[11px] ${active ? 'text-primary' : 'text-muted-foreground'}`}>
-                    {formatCount(count)}
-                  </span>
-                )}
-                {key === 'all' && active && <LiveDot repo={model.repo} />}
-              </button>
-            );
-          })}
-        </div>
-      )}
-      {model.onGoToFile && (
-        <span className="ml-auto flex">
-          <GoToFileButton onClick={model.onGoToFile} showKeys={width >= GO_TO_FILE_KEYS_WIDTH} />
-        </span>
-      )}
-    </div>
-  ) : null;
+/**
+ * The tab panel attributes for the list under the header: a tab panel
+ * labelled by the chosen tab when the header draws tabs, nothing otherwise
+ * (no header, or a session with one view).
+ */
+export function reviewPanelBodyProps(model: ReviewPanelHeaderModel | undefined): {
+  id?: string;
+  role?: 'tabpanel';
+  'aria-labelledby'?: string;
+} {
+  if (!model || panelViews(model).length < 2) return {};
+  return { id: REVIEW_PANEL_BODY_ID, role: 'tabpanel', 'aria-labelledby': `review-panel-tab-${model.view}` };
+}
 
-  // The listing's state in words, for All files while it is on: a visible line
-  // when only part of the repository is listed; for a live listing the
-  // tooltip on the dot and a polite status region.
-  const listing = scope === 'all' ? model.repo : null;
-  const partialLine =
-    listing && !listing.live && listing.truncated ? (
-      <p className="px-3 pb-2 -mt-1 flex items-center gap-1.5 text-[11px] leading-4 text-muted-foreground" data-repo-listing-status="partial">
-        <span className="w-1.5 h-1.5 flex-shrink-0 rounded-full border border-warning" aria-hidden="true" />
-        <span>{PARTIAL_LISTING_TEXT}</span>
-      </p>
-    ) : null;
+/**
+ * Each view is its own panel component, so choosing a tab unmounts the
+ * header that holds it. The tab chosen is remembered here and the same tab in
+ * the new panel's header takes focus when it mounts: focus stays on the tab.
+ */
+let pendingTabFocus: ReviewPanelView | null = null;
+
+/**
+ * Tree / Git status / Commits as underlined tabs with real tab markup
+ * (tablist / tab / aria-selected / aria-controls). The keys are the standard
+ * tabs pattern, handled inside the tablist only (never a page shortcut): the
+ * chosen tab is the one Tab stop; Left and Right move focus between the tabs,
+ * wrapping; Enter or Space chooses the focused tab (manual activation: a view
+ * switch can load a diff, so an arrow never switches by itself). The tabs'
+ * track is the panel's one line: above it stays the same on every tab, below
+ * it belongs to the tab.
+ */
+const ViewTabs: React.FC<{ model: ReviewPanelHeaderModel; views: ReviewPanelView[]; narrow: boolean }> = ({ model, views, narrow }) => {
+  const listRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (pendingTabFocus === null) return;
+    const target = pendingTabFocus;
+    pendingTabFocus = null;
+    if (target !== model.view) return;
+    listRef.current?.querySelector<HTMLButtonElement>(`[data-panel-view="${target}"]`)?.focus({ preventScroll: true });
+  }, [model.view]);
+
+  const choose = (view: ReviewPanelView) => {
+    if (view === model.view) return;
+    pendingTabFocus = view;
+    model.onSelectView(view);
+    // The new panel mounts in this same update. A switch the app refused
+    // must not pull focus onto a tab later, when the view changes by another
+    // route: the wish lasts one frame.
+    requestAnimationFrame(() => {
+      if (pendingTabFocus === view) pendingTabFocus = null;
+    });
+  };
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const tabs = [...(listRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [])];
+    const current = tabs.indexOf(document.activeElement as HTMLButtonElement);
+    if (current === -1) return;
+    event.preventDefault();
+    const step = event.key === 'ArrowRight' ? 1 : -1;
+    tabs[(current + step + tabs.length) % tabs.length]?.focus();
+  };
 
   return (
-    <div className="flex-shrink-0" data-review-panel-header>
-      {/* View tabs: text with an underline, the panel's top level. */}
-      <div
-        className="px-2 flex items-stretch gap-0.5 border-b border-border/50"
-        style={{ height: 'var(--panel-header-h)' }}
-        role={views.length > 1 ? 'group' : undefined}
-        aria-label={views.length > 1 ? 'Panel view' : undefined}
-      >
-        {views.length === 1 ? (
-          <span className="px-1 self-center text-xs font-semibold text-muted-foreground uppercase tracking-wider">Files</span>
+    <div
+      ref={listRef}
+      role="tablist"
+      aria-label="Panel view"
+      data-panel-view-switch=""
+      onKeyDown={onKeyDown}
+      className="-mx-2 px-4 flex items-center gap-4 shadow-[inset_0_-1px_0_var(--sidebar-line)]"
+    >
+      {views.map((view) => {
+        const active = model.view === view;
+        const meta = VIEW_META[view];
+        const tab = (
+          <button
+            key={view}
+            type="button"
+            role="tab"
+            id={`review-panel-tab-${view}`}
+            aria-selected={active}
+            aria-controls={REVIEW_PANEL_BODY_ID}
+            aria-label={narrow ? meta.label : undefined}
+            tabIndex={active ? 0 : -1}
+            title={narrow ? undefined : meta.title}
+            data-panel-view={view}
+            onClick={() => choose(view)}
+            className={`relative h-7 flex items-center rounded-sm text-[13px] font-medium whitespace-nowrap transition-colors ${FOCUS} ${
+              active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {narrow ? <meta.Icon className="w-3.5 h-3.5" aria-hidden="true" /> : meta.label}
+            {active && <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-foreground" />}
+          </button>
+        );
+        return narrow ? (
+          <Tooltip key={view} content={meta.label} side="bottom">
+            {tab}
+          </Tooltip>
         ) : (
-          views.map((view) => {
-            const active = model.view === view;
-            const meta = VIEW_META[view];
-            const button = (
-              <button
-                key={view}
-                type="button"
-                onClick={() => model.onSelectView(view)}
-                aria-pressed={active}
-                aria-label={meta.label}
-                title={narrow ? undefined : meta.title}
-                data-panel-view={view}
-                className={`relative min-w-0 truncate px-2 text-xs transition-colors ${FOCUS} focus-visible:ring-inset focus-visible:ring-offset-0 ${
-                  active ? 'text-foreground font-medium' : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {narrow ? (
-                  <span className="flex items-center h-full">
-                    <meta.Icon className="w-3.5 h-3.5" aria-hidden="true" />
-                  </span>
-                ) : (
-                  meta.label
-                )}
-                {active && <span className="absolute left-2 right-2 -bottom-px h-0.5 rounded-full bg-primary" aria-hidden="true" />}
-              </button>
-            );
-            return narrow ? (
-              <Tooltip key={view} content={meta.label} side="bottom">
-                {button}
-              </Tooltip>
-            ) : (
-              button
-            );
-          })
+          tab
+        );
+      })}
+    </div>
+  );
+};
+
+/**
+ * The top of the panel (approved design record "review-sidebar-aligned";
+ * the tabs and sentence from "review-sidebar-header", variant "sentence").
+ * Containers start on the panel's 8 px edge, content on 16, labels on 34:
+ *
+ *  1. Go to file, a quiet field (⌘P).
+ *  2. Tree / Git status / Commits, and the panel's one line under them.
+ *  3. The comparison as one sentence: "All changes ⌄ since main ⌄".
+ *
+ * Changes N / All files moved down to the list's sticky tools row
+ * (`ScopeSwitch`, drawn by the panel through `PanelControlsRow`).
+ */
+export const ReviewPanelHeader: React.FC<{ model: ReviewPanelHeaderModel; width: number }> = ({ model, width }) => {
+  const narrow = width < NARROW_HEADER_WIDTH;
+  const views = panelViews(model);
+  const { noun, connector } = diffWords(model);
+  const showSentence = model.view !== 'commits' && (!!model.diff || !!model.base || model.view === 'sections');
+  const token = `inline-flex min-w-0 max-w-full items-center gap-0.5 rounded px-1 -mx-0.5 py-0.5 min-h-6 font-medium text-foreground underline decoration-dotted decoration-muted-foreground/60 underline-offset-[3px] hover:bg-[var(--sidebar-fill)] hover:decoration-transparent transition-colors disabled:opacity-50 disabled:cursor-wait ${FOCUS}`;
+
+  return (
+    <div className="flex-shrink-0 flex flex-col px-2 pt-3" data-review-panel-header="">
+      {model.onGoToFile && <GoToFileField onClick={model.onGoToFile} showKeys={width >= GO_TO_FILE_KEYS_WIDTH} />}
+      <div className={model.onGoToFile ? 'mt-2' : ''}>
+        {views.length > 1 ? (
+          <ViewTabs model={model} views={views} narrow={narrow} />
+        ) : (
+          <div className="-mx-2 px-4 h-7 flex items-center shadow-[inset_0_-1px_0_var(--sidebar-line)]">
+            <span className="text-[13px] font-medium text-muted-foreground">Files</span>
+          </div>
         )}
       </div>
-
-      {(showSentence || showScopeRow) && (
-        <div className="border-b border-border/50">
-          {sentence}
-          {scopeRow}
-          {partialLine}
-          {scope && <LiveStatus repo={listing} />}
+      {showSentence ? (
+        <div className="mt-2 mb-1 px-2 text-[13px] leading-6 text-muted-foreground flex flex-wrap items-center gap-x-1" data-panel-sentence="">
+          {model.diff ? (
+            <DiffTypePicker
+              options={model.diff.options}
+              activeDiffType={model.diff.active}
+              onSelect={model.diff.onSelect}
+              isLoading={model.diff.loading}
+              hasBasePicker={model.diff.hasBasePicker}
+              activeBase={model.diff.activeBase}
+              trigger={{
+                className: token,
+                ariaLabel: `Changes shown: ${noun}`,
+                content: (
+                  <>
+                    <span className="truncate">{noun}</span>
+                    <Chevron loading={model.diff.loading} />
+                  </>
+                ),
+              }}
+            />
+          ) : (
+            <span className="text-foreground font-medium">{noun}</span>
+          )}
+          {connector && <span>{connector}</span>}
+          {model.base && connector && (
+            <span className="flex min-w-0 max-w-full">
+              <BaseBranchPicker
+                {...model.base}
+                trigger={{
+                  className: `${token.replace('max-w-full ', '')} font-mono text-[11.5px]`,
+                  ariaLabel: `${model.base.copy.triggerTitlePrefix}: ${model.base.selectedBase}`,
+                  content: (
+                    <>
+                      <span className="truncate" data-base-ref>{middleTruncateRef(model.base.selectedBase, width)}</span>
+                      <Chevron />
+                    </>
+                  ),
+                }}
+              />
+            </span>
+          )}
         </div>
+      ) : (
+        <div className="h-2" aria-hidden="true" />
       )}
+    </div>
+  );
+};
+
+/**
+ * Changes N / All files, the lead of the list's sticky tools row: two pills,
+ * the chosen one a quiet grey fill. All files keeps its count in its name and
+ * tooltip, not on screen, and its live dot sits at its top corner: that way
+ * the pills and the three tools fit on one line at the default 256 px in
+ * either scope, and switching scope never moves the list. While All files is
+ * on, its listing's state follows: the live dot, a visible line for a partial
+ * listing, and a polite status region for a live one. Draws nothing when the
+ * panel shows no scope (Commits, a search, a session without All files).
+ */
+export const ScopeSwitch: React.FC<{ model: ReviewPanelHeaderModel; width: number }> = ({ model, width }) => {
+  const scope = shownScope(model);
+  if (!scope || !model.scope) return null;
+  const narrow = width < NARROW_HEADER_WIDTH;
+  const listing = scope === 'all' ? model.repo : null;
+  const pill = (active: boolean) =>
+    `h-6 flex items-center gap-1 rounded-md text-[13px] font-medium whitespace-nowrap transition-colors ${FOCUS} ${
+      active ? 'bg-[var(--sidebar-fill-strong)] text-foreground' : 'text-muted-foreground hover:bg-[var(--sidebar-fill)] hover:text-foreground'
+    }`;
+  const changed = model.scope.changed;
+  const all = model.scope.all;
+  return (
+    <div className="min-w-0" data-tree-scope-row="">
+      <div className="flex min-w-0 items-center" role="group" aria-label="Files shown in the tree" data-tree-scope-switch="">
+        <button
+          type="button"
+          aria-pressed={scope === 'changes'}
+          onClick={() => selectScope(model, 'changes')}
+          data-tree-scope="changes"
+          title="The files this review changes"
+          className={`flex-shrink-0 ${narrow ? 'px-1.5' : 'px-2'} ${pill(scope === 'changes')}`}
+        >
+          <span>Changes</span>
+          {changed !== undefined && <span className="tabular-nums text-[11px] font-normal text-muted-foreground">{formatCount(changed)}</span>}
+        </button>
+        <button
+          type="button"
+          aria-pressed={scope === 'all'}
+          onClick={() => selectScope(model, 'all')}
+          data-tree-scope="all"
+          title={`Every file of the repository at the revision the diff reads${all !== undefined ? ` (${formatCount(all)} files)` : ''}`}
+          className={`relative min-w-0 ${narrow ? 'pl-1.5 pr-2.5' : 'pl-1.5 pr-3'} ${pill(scope === 'all')}`}
+        >
+          <span className="truncate">{narrow ? 'All' : 'All files'}</span>
+          {all !== undefined && <span className="sr-only">{formatCount(all)}</span>}
+          {scope === 'all' && <LiveDot repo={model.repo} className="absolute top-1 right-1 flex" />}
+        </button>
+      </div>
+      {listing && !listing.live && listing.truncated && (
+        <p className="pt-1 px-2 flex items-center gap-1.5 text-[11px] leading-4 text-muted-foreground" data-repo-listing-status="partial">
+          <span className="w-1.5 h-1.5 flex-shrink-0 rounded-full border border-warning" aria-hidden="true" />
+          <span>{PARTIAL_LISTING_TEXT}</span>
+        </p>
+      )}
+      <LiveStatus repo={listing} />
     </div>
   );
 };

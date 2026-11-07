@@ -49,6 +49,9 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave })
       ref={containerRef}
       className="relative group my-5"
       data-block-id={block.id}
+      // A whole-file code document: its text is the source, so the
+      // highlighter measures a selection's real offset in it.
+      data-content-start-line={typeof block.contentStartLine === 'number' ? block.contentStartLine : undefined}
       onMouseEnter={onHover ? handleMouseEnter : undefined}
       onMouseLeave={onLeave}
     >

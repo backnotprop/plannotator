@@ -1,9 +1,12 @@
-import { cloneElement, useId, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import { cloneElement, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactElement, type ReactNode } from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
+import { INBOX_PROJECT_NAME_MAX } from '@plannotator/core/inbox-types';
 import type { ProjectFolder } from '../api';
 import { formatCount } from '../format';
 import { Icon } from '../icons';
+import { projectNameMatches } from '../projectCombine';
+import type { LabeledProject } from '../projectLabels';
 import type { ProjectAction } from '../projectMenu';
 import { ProjectTipText, Tip } from './Tip';
 
@@ -25,6 +28,17 @@ export interface ProjectRowProps {
   refreshes?: boolean;
   /** A refresh of this project just ran: its ↻ turns once (the key restarts the turn). */
   refreshSpin?: number | null;
+  /**
+   * Rename… and Reset name (this machine's projects only): a name, or null to go back to the folder's
+   * name. Resolves true once the new name is in the list. Absent: neither item is offered.
+   */
+  onRename?: (name: string | null) => Promise<boolean>;
+  /** Says a line in the window's live region (the field's refusals: an empty or too long name). */
+  announce?: (text: string) => void;
+  /** This machine's other projects: a typed name that is one of theirs asks to combine (`projectNameMatches`). */
+  others?: readonly LabeledProject[];
+  /** The warning's Combine: this project goes into `into`. Resolves true once the list shows it. Absent: no warning. */
+  onCombine?: (into: LabeledProject) => Promise<boolean>;
 }
 
 /**
@@ -38,37 +52,96 @@ export interface ProjectRowProps {
  * the project. Base UI's Menu and ContextMenu carry the keys (arrows,
  * Home/End, type-ahead, Escape and Tab close, focus back to ⋯). No new
  * shortcut: the platform's context-menu key reaches the row by itself.
+ *
+ * Rename… (after a separator) turns the row into a field holding its name:
+ * Enter saves, Escape or leaving the field cancels, and an empty name is not
+ * saved. Reset name, offered only once a name is set, goes back to the
+ * folder's name. Focus goes back to ⋯ after Enter, Escape or Reset name; a
+ * click elsewhere keeps focus where it landed.
  */
 export function ProjectRow(props: ProjectRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const more = useRef<HTMLButtonElement>(null);
+  // Rename… was picked: the closing menu leaves focus alone (the field takes it) instead of giving it to ⋯.
+  const toField = useRef(false);
+  // The field closed: ⋯ takes focus once it is drawn again, never the page.
+  const backToMore = useRef(false);
   // The menu is drawn inside the window's root, so the window's styles (and theme) reach it.
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => setPortal(more.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
+  useEffect(() => {
+    if (renaming || !backToMore.current) return;
+    backToMore.current = false;
+    more.current?.focus();
+  }, [renaming]);
   const { project } = props;
-  const items = (
-    <ProjectMenuItems
-      name={project.name}
-      readable={props.readable}
-      onAction={(action) => {
-        setMenuOpen(false);
-        setContextOpen(false);
-        props.onAction(action);
-      }}
-    />
-  );
+  const onRename = props.onRename;
   const row = (children: ReactNode, extra: Record<string, unknown> = {}) => (
     <div
       className="ib-projrow"
       data-project={project.id}
       data-menu={menuOpen || contextOpen ? '' : undefined}
       data-held={props.held ? '' : undefined}
+      data-renaming={renaming ? '' : undefined}
       {...extra}
     >
       {children}
     </div>
   );
+  const items = (
+    <ProjectMenuItems
+      name={project.name}
+      readable={props.readable}
+      rename={onRename !== undefined}
+      named={typeof project.display_name === 'string' && project.display_name !== ''}
+      onAction={(action) => {
+        setMenuOpen(false);
+        setContextOpen(false);
+        if (action === 'rename') {
+          toField.current = true;
+          setRenaming(true);
+          return;
+        }
+        if (action === 'reset') {
+          void onRename?.(null);
+          return;
+        }
+        props.onAction(action);
+      }}
+    />
+  );
+  /** The field closes. `refocus`: after Enter or Escape, ⋯ takes focus; after a click elsewhere, focus stays there. */
+  const doneRenaming = (refocus: boolean) => {
+    toField.current = false;
+    backToMore.current = refocus;
+    setRenaming(false);
+  };
+  if (renaming && onRename) {
+    return row(
+      <ProjectNameField
+        name={project.name}
+        folder={folderName(project.root)}
+        announce={props.announce}
+        others={props.others ?? []}
+        onCombine={
+          props.onCombine &&
+          (async (into) => {
+            const done = await props.onCombine!(into);
+            if (done) doneRenaming(true);
+            return done;
+          })
+        }
+        onCancel={doneRenaming}
+        onSave={async (name) => {
+          const saved = await onRename(name);
+          if (saved) doneRenaming(true);
+          return saved;
+        }}
+      />,
+    );
+  }
   const content = (
     <>
       <ProjectTip name={project.name} root={project.root} refresh={props.refreshes === true}>
@@ -95,7 +168,7 @@ export function ProjectRow(props: ProjectRowProps) {
         <Menu.Portal container={portal ?? undefined}>
           {props.phone && <Menu.Backdrop className="ib-pm-scrim" />}
           <Menu.Positioner className="ib-pm-pos" side="bottom" align="start" sideOffset={4} data-phone={props.phone ? '' : undefined}>
-            <Menu.Popup className="ib-pm" aria-label={project.name} data-project-menu={project.id}>
+            <Menu.Popup className="ib-pm" aria-label={project.name} data-project-menu={project.id} finalFocus={() => !toField.current}>
               {items}
             </Menu.Popup>
           </Menu.Positioner>
@@ -109,8 +182,8 @@ export function ProjectRow(props: ProjectRowProps) {
       <ContextMenu.Trigger render={row(content)} />
       <ContextMenu.Portal container={portal ?? undefined}>
         <ContextMenu.Positioner className="ib-pm-pos">
-          {/* Focus goes back to the row's ⋯, never the page. */}
-          <ContextMenu.Popup className="ib-pm" aria-label={project.name} data-project-menu={project.id} finalFocus={more}>
+          {/* Focus goes back to the row's ⋯, never the page (the field takes it after Rename…). */}
+          <ContextMenu.Popup className="ib-pm" aria-label={project.name} data-project-menu={project.id} finalFocus={() => (toField.current ? false : more.current)}>
             {items}
           </ContextMenu.Popup>
         </ContextMenu.Positioner>
@@ -119,8 +192,21 @@ export function ProjectRow(props: ProjectRowProps) {
   );
 }
 
-/** The two items, no descriptions. The phone's sheet draws its title (the project) above them. */
-function ProjectMenuItems({ name, readable, onAction }: { name: string; readable: boolean; onAction: (action: ProjectAction) => void }) {
+/** The menu's own items beside the batches: Rename… and Reset name stay in the row. */
+type ProjectMenuAction = ProjectAction | 'rename' | 'reset';
+
+/**
+ * The items, no descriptions: the two batches, then (this machine's projects) Rename… and, once a name is
+ * set, Reset name. The phone's sheet draws its title (the project) above them.
+ */
+function ProjectMenuItems(props: {
+  name: string;
+  readable: boolean;
+  rename: boolean;
+  named: boolean;
+  onAction: (action: ProjectMenuAction) => void;
+}) {
+  const { name, readable, onAction } = props;
   return (
     <>
       {/* The popup is named by the project already (aria-label): the title is for the eye only. */}
@@ -135,7 +221,192 @@ function ProjectMenuItems({ name, readable, onAction }: { name: string; readable
         <Icon name="archive" size={15} />
         Archive all
       </Menu.Item>
+      {props.rename && (
+        <>
+          <Menu.Separator className="ib-pm-sep" />
+          <Menu.Item className="ib-pmi" label="Rename…" onClick={() => onAction('rename')} data-project-action="rename">
+            <Icon name="pen" size={15} />
+            Rename…
+          </Menu.Item>
+          {props.named && (
+            <Menu.Item className="ib-pmi" label="Reset name" onClick={() => onAction('reset')} data-project-action="reset">
+              <Icon name="replay" size={15} />
+              Reset name
+            </Menu.Item>
+          )}
+        </>
+      )}
     </>
+  );
+}
+
+/** A folder path's last part: what Reset name goes back to (the field's placeholder). */
+function folderName(root: string): string {
+  const parts = root.split(/[\\/]+/).filter(Boolean);
+  return parts[parts.length - 1] ?? root;
+}
+
+/**
+ * The row's name as a field (Rename…), in the row's own place and size. It opens holding the name, all of
+ * it selected. Enter saves (an empty or too long name is refused, said in the window's live region; the
+ * same name just closes); Escape cancels. Leaving the field cancels too, and focus stays where the person
+ * went (the reply box, search); leaving the window (switching apps) keeps the field. While the save is on its
+ * way the field stays, read only; a refused save leaves it open (the window's toast says why). The cap
+ * counts characters (code points) as the server does, so an emoji name is not cut at half.
+ *
+ * A typed name that is another project's asks instead of making two projects with one name
+ * (approval "project-combine"): one line under the field, Cancel and Combine, no Keep both. Enter combines and
+ * Escape cancels. A name several projects answer to ("acme", two clones) offers one button for each, and
+ * Enter leaves the choice to the person.
+ */
+function ProjectNameField(props: {
+  name: string;
+  folder: string;
+  announce?: (text: string) => void;
+  others: readonly LabeledProject[];
+  onCombine?: (into: LabeledProject) => Promise<boolean>;
+  onSave: (name: string) => Promise<boolean>;
+  onCancel: (refocus: boolean) => void;
+}) {
+  const [value, setValue] = useState(props.name);
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  // Enter or Escape closed the field: a blur as it goes is not "leaving the field".
+  const closing = useRef(false);
+  const hint = useId();
+  useEffect(() => {
+    const field = input.current;
+    if (!field) return;
+    field.focus();
+    field.select();
+  }, []);
+  const typed = value.replace(/\s+/g, ' ').trim();
+  const matches = props.onCombine && typed !== '' && typed !== props.name ? projectNameMatches(typed, props.others) : [];
+  const warning =
+    matches.length === 0
+      ? null
+      : matches.length === 1
+        ? `${matches[0]!.name} already exists. Enter combines them, Escape cancels.`
+        : `${typed} matches ${formatCount(matches.length)} projects. Pick one to combine with, or press Escape to cancel.`;
+  useEffect(() => {
+    if (warning) props.announce?.(warning);
+  }, [warning]);
+  const refuse = (why: string) => {
+    setRefused(why);
+    props.announce?.(why);
+  };
+  const close = (refocus: boolean) => {
+    closing.current = true;
+    props.onCancel(refocus);
+  };
+  const combine = async (into: LabeledProject) => {
+    setBusy(true);
+    closing.current = true;
+    if (!(await props.onCombine?.(into))) {
+      closing.current = false;
+      setBusy(false);
+      input.current?.focus();
+    }
+  };
+  const save = async () => {
+    if (typed === '') return refuse('A name cannot be empty.');
+    if ([...typed].length > INBOX_PROJECT_NAME_MAX) return refuse(`A name can be at most ${INBOX_PROJECT_NAME_MAX} characters.`);
+    if (typed === props.name) return close(true);
+    if (matches.length === 1) return combine(matches[0]!);
+    if (warning) return props.announce?.(warning);
+    setBusy(true);
+    closing.current = true;
+    if (!(await props.onSave(typed))) {
+      closing.current = false;
+      setBusy(false);
+      input.current?.focus();
+    }
+  };
+  /** Keeps the field's focus: a press on Cancel or Combine is not "leaving the field". */
+  const stayFocused = (event: MouseEvent) => event.preventDefault();
+  return (
+    <div
+      ref={box}
+      onBlur={(event) => {
+        // Tab from the field to its buttons stays; anywhere else is leaving.
+        if (box.current?.contains(event.relatedTarget as Node | null)) return;
+        // The window lost focus (another app): the field is still here when the person comes back.
+        if (busy || closing.current || !document.hasFocus()) return;
+        close(false);
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return;
+        // The field's own Escape: nothing above it (the phone's sheet, the list) takes this press.
+        event.preventDefault();
+        event.stopPropagation();
+        if (!busy) close(true);
+      }}
+    >
+      <input
+        ref={input}
+        type="text"
+        className="ib-proj-rename"
+        aria-label="Project name"
+        aria-describedby={hint}
+        aria-invalid={refused ? true : undefined}
+        placeholder={props.folder}
+        spellCheck={false}
+        autoComplete="off"
+        autoCapitalize="none"
+        enterKeyHint="done"
+        dir="auto"
+        value={value}
+        readOnly={busy}
+        onChange={(event) => {
+          setRefused(null);
+          setValue(event.target.value);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            if (!busy) void save();
+          }
+        }}
+        data-project-name-field=""
+      />
+      {matches.length > 0 && (
+        <div className="ib-proj-clash" data-project-clash={matches.map((match) => match.id).join(' ')}>
+          <span>
+            {matches.length === 1 ? (
+              <>
+                <b dir="auto">{matches[0]!.name}</b> already exists. Combine them?
+              </>
+            ) : (
+              <>
+                <b dir="auto">{typed}</b> matches {formatCount(matches.length)} projects. Combine with one?
+              </>
+            )}
+          </span>
+          <button type="button" className="ib-btn ib-sm" disabled={busy} onMouseDown={stayFocused} onClick={() => close(true)} data-project-combine-cancel="">
+            Cancel
+          </button>
+          {matches.length === 1 ? (
+            <button type="button" className="ib-btn ib-pri ib-sm" disabled={busy} onMouseDown={stayFocused} onClick={() => void combine(matches[0]!)} data-project-combine={matches[0]!.id}>
+              Combine
+            </button>
+          ) : (
+            matches.map((match) => (
+              <button key={match.id} type="button" className="ib-btn ib-sm" disabled={busy} onMouseDown={stayFocused} onClick={() => void combine(match)} data-project-combine={match.id}>
+                <span className="ib-name" dir="auto">
+                  {match.name}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+      <span id={hint} hidden>
+        {refused ? `${refused} ` : ''}
+        {warning ?? 'Enter to save, Escape to cancel.'}
+      </span>
+    </div>
   );
 }
 

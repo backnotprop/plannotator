@@ -3,10 +3,10 @@
  * against the compiled binary:
  *
  *  - Mark read's `E` is a keycap inside its borderless button, centred on it;
- *  - a tile's hidden Open holds no room, so a name is never cut more than in
- *    today's look; when Open shows (hover, keyboard focus) it is back in the
- *    row and the name is cut before it, keeping its end, left to right and
- *    right to left; a screen without hover keeps its room;
+ *  - a tile's Open holds no room, at rest or shown (hover, keyboard focus), so
+ *    a name is never cut more than in today's look and never differently when
+ *    Open shows, left to right and right to left; a screen without hover keeps
+ *    its room (inbox-attachment-hover.spec.ts proves nothing moves);
  *  - layout corners one step smaller (panes 10, row pills 8, tiles 10), buttons
  *    unchanged;
  *  - the text size (`--inbox-text-size`, the Text size setting, 14 by default):
@@ -156,41 +156,30 @@ test('beside an open thread the two-line rows have no line either', async () => 
   await shot(page, '2-thread');
 });
 
-test("Mark read's E is a keycap inside its button, centred on it; today's look keeps its outlined key", async () => {
+// The read button is an icon since the approval "inbox-thread-header" (2026-11-02): its E moved into its tooltip.
+test("Mark read's E is a keycap in its tooltip; the icon button fills on hover in both looks", async () => {
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.thread}`);
   const button = page.locator('[data-mark-read]');
   await expect(button).toBeEnabled();
-  const kbd = button.locator('.ib-kbd');
-  const geometry = async () =>
-    button.evaluate((b) => {
-      const k = b.querySelector('.ib-kbd')!;
-      const br = b.getBoundingClientRect();
-      const kr = k.getBoundingClientRect();
-      const cs = getComputedStyle(k);
-      return { inside: kr.left >= br.left && kr.right <= br.right && kr.top >= br.top && kr.bottom <= br.bottom, dy: Math.abs(kr.top + kr.height / 2 - (br.top + br.height / 2)), end: br.right - kr.right, bg: cs.backgroundColor, line: cs.borderTopColor, w: kr.width };
-    });
-  const soft = await geometry();
-  expect(soft.inside).toBe(true);
-  expect(soft.dy).toBeLessThanOrEqual(1);
-  expect(soft.bg).not.toBe('rgba(0, 0, 0, 0)');
-  expect(soft.w).toBeGreaterThanOrEqual(18);
-  // The space after the cap is about the space around its letter: the key ends the control.
-  expect(soft.end).toBeLessThan(8);
+  await expect(button.locator('.ib-kbd')).toHaveCount(0);
   await button.hover();
+  const tip = page.locator('[data-side].bg-popover');
+  await expect(tip).toContainText('Mark read');
+  await expect(tip.locator('kbd')).toHaveText('E');
   await expect.poll(() => button.evaluate((b) => getComputedStyle(b).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
   await page.locator('.ib-phead').screenshot({ path: join(proofDir, '3-mark-read-hover.png') });
   await page.mouse.move(700, 880);
+  // Soft's `hbtns` switch now reaches the header only through the icon buttons' hover (`--ib-hb-hover-s`): the labelled
+  // `.ib-hbtn` buttons are gone.
   const back = await todays(page, 'hbtns');
-  const today = await geometry();
+  await button.hover();
+  await expect.poll(() => button.evaluate((b) => getComputedStyle(b).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
+  await page.mouse.move(700, 880);
   await back();
-  expect(today.line).not.toBe('rgba(0, 0, 0, 0)');
-  // Today: the button's 11 px end padding and its 1 px border.
-  expect(today.end).toBeCloseTo(12, 0);
-  await expect(kbd).toHaveAttribute('data-keycap', 'E');
 });
 
-test("a tile's hidden Open holds no room at rest; when it shows (hover, keyboard focus) the name is cut before it and keeps its end, left to right and right to left", async () => {
+test("a tile's Open holds no room, at rest or shown (hover, keyboard focus): it lies over the tile's end and the name is cut the same either way, left to right and right to left", async () => {
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.thread}`);
   await expect(page.locator('[data-mark-read]')).toBeVisible();
@@ -211,10 +200,9 @@ test("a tile's hidden Open holds no room at rest; when it shows (hover, keyboard
           shown: head.clientWidth,
           position: getComputedStyle(openEl).position,
           opacity: Number(getComputedStyle(openEl).opacity),
-          // The name's end (the extension) and its start are both inside the text box, and Open covers none of it.
+          // The name's end (the extension) and its start are both inside the text box.
           tailInside: tail.left >= text.left - 0.5 && tail.right <= text.right + 0.5,
           nameInside: name.left >= text.left - 0.5 && name.right <= text.right + 0.5,
-          clearOfOpen: name.right <= open.left + 0.5 || name.left >= open.right - 0.5,
           openInside: open.right <= t.getBoundingClientRect().right,
         };
       });
@@ -230,10 +218,10 @@ test("a tile's hidden Open holds no room at rest; when it shows (hover, keyboard
     await tile.hover();
     await expect.poll(async () => (await measure()).opacity).toBe(1);
     const hovered = await measure();
-    expect(hovered.position, name).toBe('static');
-    expect(hovered, `${name} hovered`).toMatchObject({ tailInside: true, nameInside: true, clearOfOpen: true, openInside: true });
-    // Never cut more than today's look while Open shows.
-    expect(hovered.shown, name).toBeGreaterThanOrEqual(today.shown - 0.5);
+    // Out of the row still: the name is cut exactly as at rest (inbox-attachment-hover.spec.ts proves every box).
+    expect(hovered.position, name).toBe('absolute');
+    expect(hovered, `${name} hovered`).toMatchObject({ tailInside: true, nameInside: true, openInside: true });
+    expect(hovered.shown, name).toBe(rest.shown);
     await page.locator('.ib-atts').last().screenshot({ path: join(proofDir, `4-tiles-hover-${name === LONG ? 'ltr' : 'rtl'}.png`) });
     // From the keyboard: focus-visible shows Open the same way.
     await page.mouse.move(700, 880);
@@ -243,7 +231,7 @@ test("a tile's hidden Open holds no room at rest; when it shows (hover, keyboard
     await page.keyboard.press('Tab');
     await expect(tile).toBeFocused();
     await expect.poll(async () => (await measure()).opacity).toBe(1);
-    expect(await measure(), `${name} focused`).toMatchObject({ position: 'static', tailInside: true, nameInside: true, clearOfOpen: true });
+    expect(await measure(), `${name} focused`).toMatchObject({ position: 'absolute', tailInside: true, nameInside: true, shown: rest.shown });
   }
   await page.mouse.move(700, 880);
   await page.locator('.ib-atts').last().screenshot({ path: join(proofDir, '4-tiles-rest.png') });

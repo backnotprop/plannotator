@@ -73,7 +73,7 @@ test.skipIf(!hasDom)('off: no Board row in the sidebar; on: the row, with no cou
 
 test.skipIf(!hasDom)('a #board link while off: the page says so and Turn it on turns it on', () => {
   let turned = 0;
-  const host = mount(<BoardOff via="local" onTurnOn={() => turned++} error={null} />);
+  const host = mount(<BoardOff guest={false} onTurnOn={() => turned++} error={null} />);
   expect(host.querySelector('[data-board-view="off"] h2')?.textContent).toBe('The Board is off');
   // Nothing of the Board is drawn: no lanes, no cards, no New card.
   expect(host.querySelector('.ib-lane, [data-card-id], [data-board-new]')).toBeNull();
@@ -86,12 +86,12 @@ test.skipIf(!hasDom)('a #board link while off: the page says so and Turn it on t
   expect(host.querySelector('[title]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('a refused switch is said; a page from the tailnet gets a note, not the button', () => {
-  let host = mount(<BoardOff via="local" onTurnOn={() => {}} error="The Board was not turned on. Try again." />);
+test.skipIf(!hasDom)('a refused switch is said; a guest over the tailnet gets a note, not the button', () => {
+  let host = mount(<BoardOff guest={false} onTurnOn={() => {}} error="The Board was not turned on. Try again." />);
   expect(host.querySelector('[role="alert"]')?.textContent).toBe('The Board was not turned on. Try again.');
   act(() => root?.unmount());
   document.body.innerHTML = '';
-  host = mount(<BoardOff via="tailnet" onTurnOn={() => {}} error={null} />);
+  host = mount(<BoardOff guest onTurnOn={() => {}} error={null} />);
   expect(host.querySelector('[data-board-turn-on]')).toBeNull();
   expect(host.querySelector('.ib-boff-note')?.textContent).toContain('this computer');
   expect(host.querySelector('[data-board-settings-link]')).toBeNull();

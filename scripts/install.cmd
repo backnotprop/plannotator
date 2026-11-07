@@ -9,7 +9,8 @@ REM Tracks whether a version was explicitly set via --version or positional.
 REM Used to reject mixing --version <tag> with a stray positional token.
 set "VERSION_EXPLICIT=0"
 REM Three-layer opt-in for SLSA provenance verification.
-REM Precedence: CLI flag > env var > %USERPROFILE%\.plannotator\config.json > default.
+REM Precedence: CLI flag > env var > config.json in the Plannotator data folder
+REM (`plannotator data-dir`) > default.
 REM -1 = flag not set (fall through); 0 = disable; 1 = enable.
 set "VERIFY_ATTESTATION_FLAG=-1"
 REM Opt-in install of the pruned CallDiff call-flow core (default off; the
@@ -486,25 +487,46 @@ set "VERIFY_ATTESTATION=0"
 
 REM Layer 3: config file (lowest precedence of the opt-in sources).
 REM Unset PLANNOTATOR_DATA_DIR: an existing %USERPROFILE%\.plannotator
-REM (legacy default) always wins; otherwise an explicitly-set absolute
-REM XDG_DATA_HOME (rare on Windows but honored the same way as the runtime;
-REM drive-rooted or UNC) places the directory at XDG_DATA_HOME\plannotator;
-REM otherwise %USERPROFILE%\.plannotator.
+REM (legacy default) wins, unless it holds none of Plannotator's data while
+REM XDG_DATA_HOME\plannotator does (a stray folder, #2305); otherwise an
+REM explicitly-set absolute XDG_DATA_HOME (rare on Windows but honored the
+REM same way as the runtime, packages/shared/data-dir.ts; drive-rooted or
+REM UNC) places the directory at XDG_DATA_HOME\plannotator; otherwise
+REM %USERPROFILE%\.plannotator.
+REM BEGIN data-dir resolution (windows.yml runs this block: scripts/check-data-dir-windows.ps1)
 if defined PLANNOTATOR_DATA_DIR (
     set "_CONFIG_DIR=!PLANNOTATOR_DATA_DIR!"
 ) else (
     set "_CONFIG_DIR=%USERPROFILE%\.plannotator"
-    if not exist "%USERPROFILE%\.plannotator\" if defined XDG_DATA_HOME (
-        if "!XDG_DATA_HOME:~1,1!"==":" (
-            set "_CONFIG_DIR=!XDG_DATA_HOME!\plannotator"
-        ) else if "!XDG_DATA_HOME:~0,2!"=="\\" (
-            set "_CONFIG_DIR=!XDG_DATA_HOME!\plannotator"
+    set "_XDG_DIR="
+    REM XDG_DATA_HOME is trimmed like the runtime trims it: for /f drops the
+    REM leading spaces and tabs, the loop the trailing ones.
+    set "_XDG_HOME="
+    if defined XDG_DATA_HOME for /f "tokens=*" %%A in ("!XDG_DATA_HOME!") do set "_XDG_HOME=%%A"
+    for /l %%I in (1,1,32) do (
+        if defined _XDG_HOME if "!_XDG_HOME:~-1!"==" " set "_XDG_HOME=!_XDG_HOME:~0,-1!"
+        if defined _XDG_HOME if "!_XDG_HOME:~-1!"=="	" set "_XDG_HOME=!_XDG_HOME:~0,-1!"
+    )
+    if defined _XDG_HOME (
+        if "!_XDG_HOME:~1,1!"==":" set "_XDG_DIR=!_XDG_HOME!\plannotator"
+        if "!_XDG_HOME:~0,2!"=="\\" set "_XDG_DIR=!_XDG_HOME!\plannotator"
+    )
+    if not exist "%USERPROFILE%\.plannotator\" (
+        if defined _XDG_DIR set "_CONFIG_DIR=!_XDG_DIR!"
+    ) else if defined _XDG_DIR if exist "!_XDG_DIR!\" (
+        set "_XDG_DATA=0"
+        set "_LEGACY_DATA=0"
+        for %%M in (history sessions drafts inbox claude-code-mod install-flags.json) do (
+            if exist "!_XDG_DIR!\%%M" set "_XDG_DATA=1"
+            if exist "%USERPROFILE%\.plannotator\%%M" set "_LEGACY_DATA=1"
         )
+        if "!_XDG_DATA!"=="1" if "!_LEGACY_DATA!"=="0" set "_CONFIG_DIR=!_XDG_DIR!"
     )
 )
 if /i "!_CONFIG_DIR!"=="~" set "_CONFIG_DIR=%USERPROFILE%"
 if "!_CONFIG_DIR:~0,2!"=="~\" set "_CONFIG_DIR=%USERPROFILE%\!_CONFIG_DIR:~2!"
 if "!_CONFIG_DIR:~0,2!"=="~/" set "_CONFIG_DIR=%USERPROFILE%\!_CONFIG_DIR:~2!"
+REM END data-dir resolution
 if exist "!_CONFIG_DIR!\config.json" (
     findstr /r /c:"\"verifyAttestation\"[ 	]*:[ 	]*true" "!_CONFIG_DIR!\config.json" >nul 2>&1
     if !ERRORLEVEL! equ 0 set "VERIFY_ATTESTATION=1"
@@ -751,7 +773,7 @@ if "!VERIFY_ATTESTATION!"=="1" (
         echo   - Pin to !MIN_ATTESTED_VERSION! or later: --version !MIN_ATTESTED_VERSION! >&2
         echo   - Install without provenance verification: --skip-attestation >&2
         echo   - Or unset PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation >&2
-        echo     from %USERPROFILE%\.plannotator\config.json >&2
+        echo     from config.json in your Plannotator data folder ^(plannotator data-dir^) >&2
         exit /b 1
     )
 )
@@ -765,9 +787,30 @@ REM don't collide and a same-user pre-placed symlink at a predictable
 REM path can't redirect where curl writes the downloaded executable.
 REM The SHA256 check would pass regardless (content is authentic), but
 REM the install destination would be corrupted.
+REM
+REM The download retries a dropped connection (#2788). --retry-all-errors
+REM (curl 7.71+) also retries what plain --retry treats as final, such as an
+REM HTTP/2 stream error (curl 92); the curl.exe of an older Windows rejects
+REM it, so it gets --retry alone. The probe puts the option before --version,
+REM which ends curl's option parsing. Each attempt must connect within 30 s,
+REM gives up after a minute below 1 byte/s and after six hours (the binary
+REM is about 200 MB, so a link at about 0.08 Mbit/s still finishes; a retry
+REM starts again from zero, so it never helps a slow link), no retry starts
+REM after an hour, and when curl still ends in an HTTP/2 error, one more run
+REM goes over HTTP/1.1.
+set "CURL_RETRY=--retry 3 --retry-delay 2"
+curl --retry-all-errors --version >nul 2>&1
+if !ERRORLEVEL! equ 0 set "CURL_RETRY=!CURL_RETRY! --retry-all-errors"
+set "CURL_LIMITS=--connect-timeout 30 --max-time 21600 --retry-max-time 3600 --speed-limit 1 --speed-time 60"
 set "TEMP_FILE=%TEMP%\plannotator-%RANDOM%.exe"
-curl -fsSL "!BINARY_URL!" -o "!TEMP_FILE!"
-if !ERRORLEVEL! neq 0 (
+curl -fsSL !CURL_RETRY! !CURL_LIMITS! "!BINARY_URL!" -o "!TEMP_FILE!"
+set "DL_STATUS=!ERRORLEVEL!"
+if "!DL_STATUS!"=="92" (
+    echo The download hit an HTTP/2 error; trying again over HTTP/1.1... >&2
+    curl -fsSL --http1.1 !CURL_RETRY! !CURL_LIMITS! "!BINARY_URL!" -o "!TEMP_FILE!"
+    set "DL_STATUS=!ERRORLEVEL!"
+)
+if !DL_STATUS! neq 0 (
     echo Failed to download binary >&2
     if exist "!TEMP_FILE!" del "!TEMP_FILE!"
     exit /b 1
@@ -776,8 +819,15 @@ if !ERRORLEVEL! neq 0 (
 REM Download checksum to a randomized temp path for the same reason as
 REM the binary download above (concurrent collision + symlink pre-placement).
 set "CHECKSUM_FILE=%TEMP%\plannotator-checksum-%RANDOM%.txt"
-curl -fsSL "!CHECKSUM_URL!" -o "!CHECKSUM_FILE!"
-if !ERRORLEVEL! neq 0 (
+set "CURL_SUM_LIMITS=--connect-timeout 30 --max-time 120 --retry-max-time 120"
+curl -fsSL !CURL_RETRY! !CURL_SUM_LIMITS! "!CHECKSUM_URL!" -o "!CHECKSUM_FILE!"
+set "DL_STATUS=!ERRORLEVEL!"
+if "!DL_STATUS!"=="92" (
+    echo The checksum download hit an HTTP/2 error; trying again over HTTP/1.1... >&2
+    curl -fsSL --http1.1 !CURL_RETRY! !CURL_SUM_LIMITS! "!CHECKSUM_URL!" -o "!CHECKSUM_FILE!"
+    set "DL_STATUS=!ERRORLEVEL!"
+)
+if !DL_STATUS! neq 0 (
     echo Failed to download checksum >&2
     REM curl -o creates the output file before receiving data, so a
     REM network failure or HTTP error leaves a 0-byte/partial file
@@ -788,10 +838,30 @@ if !ERRORLEVEL! neq 0 (
     exit /b 1
 )
 
-REM Extract expected checksum (first field)
+REM Extract expected checksum (first field). Cleared first: set /p keeps
+REM the old value when the file is empty.
+set "EXPECTED_CHECKSUM="
 set /p EXPECTED_CHECKSUM=<"!CHECKSUM_FILE!"
 for /f "tokens=1" %%i in ("!EXPECTED_CHECKSUM!") do set "EXPECTED_CHECKSUM=%%i"
 del "!CHECKSUM_FILE!"
+
+REM The value must be 64 hex characters, as install.sh checks: an empty or
+REM garbled .sha256 (a proxy's page, a cut-off file) never gets as far as the
+REM compare. The leading x keeps both variables defined: the loop removes
+REM every hex digit (substitution ignores case), so only the x may be left,
+REM and x plus 64 characters is 65 long.
+set "CHECKSUM_SHAPE=x!EXPECTED_CHECKSUM!"
+set "CHECKSUM_REST=!CHECKSUM_SHAPE!"
+for %%c in (0 1 2 3 4 5 6 7 8 9 a b c d e f) do set "CHECKSUM_REST=!CHECKSUM_REST:%%c=!"
+set "CHECKSUM_OK=1"
+if not "!CHECKSUM_REST!"=="x" set "CHECKSUM_OK="
+if "!CHECKSUM_SHAPE:~64,1!"=="" set "CHECKSUM_OK="
+if not "!CHECKSUM_SHAPE:~65!"=="" set "CHECKSUM_OK="
+if not defined CHECKSUM_OK (
+    echo The checksum file for !BINARY_NAME! !TAG! is not a SHA-256 checksum. Nothing was changed; try again later. >&2
+    del "!TEMP_FILE!"
+    exit /b 1
+)
 
 REM Verify checksum using certutil
 set "ACTUAL_CHECKSUM="
@@ -937,7 +1007,7 @@ if "!VERIFY_ATTESTATION!"=="1" (
         echo Install https://cli.github.com ^(no login is needed when the public >&2
         echo attestation bundle fetch succeeds^), or unset >&2
         echo PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation >&2
-        echo from %USERPROFILE%\.plannotator\config.json / pass --skip-attestation. >&2
+        echo from config.json in your Plannotator data folder ^(plannotator data-dir^) / pass --skip-attestation. >&2
         del "!TEMP_FILE!"
         exit /b 1
     )

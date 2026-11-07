@@ -11,8 +11,8 @@ import { storage } from '@plannotator/ui/utils/storage';
 
 export const SIDEBAR_CLOSED_COOKIE = 'plannotator-inbox-sidebar-closed';
 
-export type SidebarSection = 'pinned' | 'projects';
-const SECTIONS: readonly SidebarSection[] = ['pinned', 'projects'];
+export type SidebarSection = 'pinned' | 'machines' | 'projects';
+const SECTIONS: readonly SidebarSection[] = ['pinned', 'machines', 'projects'];
 
 /** The cookie's value ("pinned", "projects", "pinned,projects") as the closed sections; anything else is ignored. */
 export function parseClosedSections(raw: string | null): ReadonlySet<SidebarSection> {

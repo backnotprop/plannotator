@@ -295,6 +295,24 @@ export const SETTINGS = {
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
+  /**
+   * Hide the owner in the repository's label: `payments-service` (on) instead
+   * of `acme/payments-service`. Default OFF, today's look. Applies beside the
+   * document, in the plan diff, in code review's header and in the tab
+   * titles; hovering the label always shows the full `owner/repo`. Read
+   * through `repoLabel` (`utils/repoLabel`). Cookie-only.
+   */
+  hideRepoOwner: {
+    defaultValue: false as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-hide-repo-owner');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-hide-repo-owner', String(value)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
   vimModeEnabled: {
     // Vim bindings deliberately default OFF. Unmodified letter keys must remain
     // inert for existing users until they explicitly opt into modal document

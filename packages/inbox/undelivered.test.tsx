@@ -146,7 +146,7 @@ for (const shape of ['wide', 'narrow', 'phone'] as const) {
   const wide = shape === 'wide';
   test.skipIf(!hasDom)(`${shape} row: ${wide ? '"Undelivered N min"' : '"Undelivered Nm"'} in place of the count, blue where it can go in now, grey where it cannot`, () => {
     const el = renderList(SECTIONS, { phone: shape === 'phone', narrow: shape === 'narrow' });
-    // A two-line or phone row draws the short form (approval "inbox-row-byline", option A); a wide row the full
+    // A three-line or phone row draws the short form (approval "inbox-row-byline", option A); a wide row the full
     // words (the owner, 2026-10-29).
     expect(badge(el, CAN.thread_id)!.textContent).toBe(wide ? 'Undelivered 3 min' : 'Undelivered 3m');
     expect(badge(el, CAN.thread_id)!.hasAttribute('data-stuck')).toBe(false);

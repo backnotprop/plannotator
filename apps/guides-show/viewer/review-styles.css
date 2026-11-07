@@ -1,7 +1,16 @@
 /* The review app's stylesheet, scanned for what the portable viewer can draw.
    The viewer renders the guide chain, never the review's left panel, so the
-   panel's header is left out of Tailwind's scan: its classes would change the
-   viewer's CSS (and so the pinned /v1 file) without being used here. */
+   panel's components are left out of Tailwind's scan: their classes would
+   change the viewer's CSS (and so the pinned /v1 file) without being used
+   here. */
 @import "@plannotator/review-editor/styles";
 
 @source not "../../../packages/review-editor/components/ReviewPanelHeader.tsx";
+/* The rest of the left panel, which only the review app (App.tsx) draws. */
+@source not "../../../packages/review-editor/components/PanelChrome.tsx";
+@source not "../../../packages/review-editor/components/PanelNavRows.tsx";
+@source not "../../../packages/review-editor/components/FileTree.tsx";
+@source not "../../../packages/review-editor/components/FileTreeNode.tsx";
+@source not "../../../packages/review-editor/components/RepoFileTree.tsx";
+@source not "../../../packages/review-editor/components/SectionsPanel.tsx";
+@source not "../../../packages/review-editor/components/CommitsPanel.tsx";

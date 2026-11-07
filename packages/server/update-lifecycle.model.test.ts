@@ -158,7 +158,8 @@ function uiState(m: Model): string {
   if (m.ib.onDisk && m.ib.onDisk !== m.ib.runs) return "ready";
   if (lockHeldView(m)) return "updating";
   if (m.pendingPerson && m.pendingV > m.ib.runs && m.resultV === m.pendingV && m.resultCode !== 0) return "failed";
-  if (!m.checksOn || !m.latest || m.latest <= m.ib.runs) return "none";
+  // Checks off stop only the automatic checks: a known release is still offered.
+  if (!m.latest || m.latest <= m.ib.runs) return "none";
   return "available";
 }
 
@@ -193,9 +194,13 @@ function notesDue(m: Model, v: number): boolean {
 
 const fetchable = (m: Model, v: number) => v === m.ib.runs || v === m.latest || v === m.ib.onDisk || v === m.pendingV;
 
-/** ensureNotes: claim, ask GitHub for the tag, save what it says (the tests settle every request). */
-function ensureNotes(m: Model, v: number): void {
-  if ((m.notes[v] ?? "none") === "content" || !m.checksOn || !fetchable(m, v) || !notesDue(m, v)) return;
+/**
+ * ensureNotes: claim, ask GitHub for the tag, save what it says (the tests
+ * settle every request). `asked`: the person's Check now, which asks even
+ * with checks off.
+ */
+function ensureNotes(m: Model, v: number, asked = false): void {
+  if ((m.notes[v] ?? "none") === "content" || (!m.checksOn && !asked) || !fetchable(m, v) || !notesDue(m, v)) return;
   const prev = m.nf[v];
   const keep = NOTES_FIX && !!prev && !prev.failed && young(prev, m.now);
   m.nf[v] = { at: m.now, failed: false, pub: keep ? prev!.pub : -1 };
@@ -323,7 +328,7 @@ function startGitHub(real: Real) {
         const v = Number(tag[1]);
         real.tagRequests[v] = (real.tagRequests[v] ?? 0) + 1;
         (real.tagTimes[v] ??= []).push(real.clock);
-        if (!real.checksOn) real.offRequests++;
+        if (!real.checksOn && !real.explicit) real.offRequests++;
         if (v > real.github.published) return Response.json({ message: "Not Found" }, { status: 404 });
         return Response.json({
           tag_name: `v${ver(v)}`,
@@ -515,6 +520,8 @@ class CheckNow implements Cmd {
   check = (m: Model) => m.ib.alive;
   async run(m: Model, r: Real) {
     releaseCheck(m, 10, true);
+    // Check now fetches the newer release's notes too, with checks on or off.
+    if (m.latest > m.ib.runs && m.notes[m.latest] !== "content") ensureNotes(m, m.latest, true);
     r.explicit = true;
     try {
       await r.updates!.checkNow();
@@ -563,9 +570,17 @@ class ToggleChecks implements Cmd {
 class UpdateNow implements Cmd {
   check = (m: Model) => m.ib.alive && (uiState(m) === "available" || uiState(m) === "failed") && m.latest > m.ib.runs;
   async run(m: Model, r: Real) {
+    // With checks off the click asks GitHub once first (the person's own request).
+    if (!m.checksOn) releaseCheck(m, 10, true);
     const launched = launch(m, m.latest, true);
-    const outcome = r.updates!.updateNow();
-    expect(outcome.outcome).toBe(launched ? "launched" : "locked");
+    r.explicit = true;
+    try {
+      const outcome = await r.updates!.updateNow();
+      expect(outcome.outcome).toBe(launched ? "launched" : "locked");
+      await settle(r);
+    } finally {
+      r.explicit = false;
+    }
   }
   toString = () => "UpdateNow";
 }

@@ -336,6 +336,9 @@ test('a phone width: the sidebar is a sheet the toggle opens, a pick and Escape 
   const sheet = page.getByRole('dialog');
   await expect(sheet).toBeVisible();
   await expect(sheet.getByRole('complementary', { name: 'Inbox navigation' })).toBeVisible();
+  // A phone's sheet has no Copy prompt pill (the desktop sidebar keeps it); Settings still ends the foot.
+  await expect(sheet.getByRole('button', { name: 'Settings' })).toBeVisible();
+  await expect(sheet.locator('button[data-connect-prompt]')).toHaveCount(0);
   await page.waitForTimeout(700);
   await shot('narrow-sheet');
   await sheet.getByRole('button', { name: 'Settings' }).click();
@@ -366,7 +369,7 @@ test('Pinned and Projects close like folders: the count, the project on screen k
   await header('pinned').click();
   await expect(header('pinned')).toHaveAttribute('aria-expanded', 'false');
   await expect(side(page).locator('[data-pinned-row]')).toHaveCount(0);
-  await expect(header('pinned')).toHaveAccessibleName('Pinned 1 waiting on you');
+  await expect(header('pinned')).toHaveAccessibleName('Starred 1 waiting on you');
 
   // In a project, Projects closed keeps that project under its header, and nothing else.
   await side(page).getByRole('button', { name: /^docs-site(?: \d+)?$/ }).click();

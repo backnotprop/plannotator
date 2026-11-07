@@ -115,10 +115,10 @@ test('the keyboard reaches ⋯, Enter opens the menu, Escape gives focus back', 
   await page.keyboard.press('Enter');
   const menu = page.locator('[data-project-menu]');
   await expect(menu).toBeVisible();
-  await expect(menu.getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Rename…']);
   await expect(menu.getByRole('menuitem').first()).toBeFocused();
   await page.keyboard.press('ArrowDown');
-  await expect(menu.getByRole('menuitem').last()).toBeFocused();
+  await expect(menu.getByRole('menuitem').nth(1)).toBeFocused();
   await page.screenshot({ path: join(proofDir, '01-menu-keyboard.png') });
   await page.keyboard.press('Escape');
   await expect(menu).toHaveCount(0);
@@ -135,11 +135,22 @@ test('Mark all as read takes every waiting thread, warns, and Z undoes the batch
   await expect(toast.locator('.ib-tdetail')).toHaveText('Claude Code was stopped');
   await expect(page.locator('[data-inbox-live]')).toHaveText('Marked 3 threads read in billing. Claude Code was stopped. Press Z to undo.');
   await page.screenshot({ path: join(proofDir, '02-mark-all-read.png') });
+  // The list holds still (approval "inbox-list-view", R7): every row read in place, none moved.
+  for (const [id, group] of [[threads.worker, 'stopped'], [threads.search, 'waiting'], [threads.news, 'new']] as const) {
+    await expect(page.locator(`.ib-lbody [data-thread-id="${id}"]`)).not.toHaveClass(/\bib-u\b/);
+    expect(await sectionOf(page, id)).toBe(group);
+  }
+  // The list's title tidies it: each in Quiet.
+  await page.locator('[data-list-refresh]').click();
   await page.locator('[data-section-id="quiet"] .ib-band').click();
   for (const id of [threads.worker, threads.search, threads.news]) await expect.poll(() => sectionOf(page, id)).toBe('quiet');
   // The other project is untouched.
   await expect.poll(() => sectionOf(page, threads.docs)).toBe('waiting');
+  await page.locator('body').focus();
   await page.keyboard.press('z');
+  // Undone in place (bold again in Quiet); the next tidy puts each back where it was.
+  await expect(page.locator(`.ib-lbody [data-thread-id="${threads.news}"]`)).toHaveClass(/\bib-u\b/);
+  await page.locator('[data-list-refresh]').click();
   await expect.poll(() => sectionOf(page, threads.worker)).toBe('stopped');
   await expect.poll(() => sectionOf(page, threads.search)).toBe('waiting');
   await expect.poll(() => sectionOf(page, threads.news)).toBe('new');
@@ -155,7 +166,7 @@ test('Archive all hides the project, focus lands on Inbox, and the next reply br
   await expect(page.locator('[data-project-menu]')).toBeVisible();
   // Focus moves into the menu (its first item) a frame after it opens.
   await expect(page.locator('[data-project-action="read"]')).toBeFocused();
-  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowDown');
   await expect(page.locator('[data-project-action="archive"]')).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.locator('[data-inbox-toast]')).toContainText('Archived 3 threads');

@@ -117,15 +117,15 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 
 function panelSegment(label: string): HTMLButtonElement | undefined {
-  const group = document.querySelector<HTMLElement>('[role="group"][aria-label="Panel view"]');
-  return Array.from(group?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+  const group = document.querySelector<HTMLElement>('[role="tablist"][aria-label="Panel view"]');
+  return Array.from(group?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [])
     .find((el) => el.textContent?.trim() === label);
 }
 
-function pressedPanelSegment(): string | undefined {
-  const group = document.querySelector<HTMLElement>('[role="group"][aria-label="Panel view"]');
-  return Array.from(group?.querySelectorAll<HTMLButtonElement>("button") ?? [])
-    .find((el) => el.getAttribute("aria-pressed") === "true")
+function selectedPanelSegment(): string | undefined {
+  const group = document.querySelector<HTMLElement>('[role="tablist"][aria-label="Panel view"]');
+  return Array.from(group?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [])
+    .find((el) => el.getAttribute("aria-selected") === "true")
     ?.textContent?.trim();
 }
 
@@ -166,10 +166,10 @@ async function mount(seed: () => void = () => {}): Promise<void> {
   await act(async () => {
     root?.render(<App />);
   });
-  for (let attempt = 0; attempt < 40 && !pressedPanelSegment(); attempt += 1) {
+  for (let attempt = 0; attempt < 40 && !selectedPanelSegment(); attempt += 1) {
     await settle();
   }
-  if (!pressedPanelSegment()) throw new Error("panel view toggle did not render");
+  if (!selectedPanelSegment()) throw new Error("panel view toggle did not render");
 }
 
 afterEach(async () => {
@@ -192,7 +192,7 @@ describe.if(hasDom)("opening panel view", () => {
   test("a fresh profile opens on Tree with no setup dialog", async () => {
     await mount();
 
-    expect(pressedPanelSegment()).toBe("Tree");
+    expect(selectedPanelSegment()).toBe("Tree");
     expect(panelSegment("Git status")).toBeDefined(); // still one click away
     // No setup chooser interrupts the session. With every UNRELATED one-time
     // announcement retired above, any remaining chain dialog would have to be
@@ -210,7 +210,7 @@ describe.if(hasDom)("opening panel view", () => {
       memory.set("plannotator-review-panel-view", "sections");
     });
 
-    expect(pressedPanelSegment()).toBe("Git status");
+    expect(selectedPanelSegment()).toBe("Git status");
   });
 
   test("the last-used memo still layers over the persisted default", async () => {
@@ -221,6 +221,6 @@ describe.if(hasDom)("opening panel view", () => {
       memory.set("plannotator-review-panel-view-last-used", "sections");
     });
 
-    expect(pressedPanelSegment()).toBe("Git status");
+    expect(selectedPanelSegment()).toBe("Git status");
   });
 });

@@ -106,7 +106,7 @@ describe('ReviewCallFlowPanel install funnel', () => {
     const text = host?.textContent ?? '';
     expect(text).toContain('~32 MB');
     expect(text).toContain('JavaScript and TypeScript');
-    expect(text).toContain('Node.js 22 or newer');
+    expect(text).toContain('Node.js 22.18 or newer');
     expect(text).toContain('setting up in the background');
   });
 
@@ -161,15 +161,15 @@ describe('ReviewCallFlowPanel install funnel', () => {
       advert({ reason: 'runtime-unavailable' }),
       {
         state: 'error',
-        error: 'Call flow requires Node.js 22 or newer, which was not found on PATH.',
+        error: 'Call flow needs Node.js 22.18 or newer, which was not found on PATH.',
         reason: 'node-unavailable',
       },
       () => starts++,
     ));
     const text = host?.textContent ?? '';
     expect(text).toContain('Install failed');
-    expect(text).toContain('Node.js 22 or newer');
-    expect(text).toContain('Install Node.js 22 or newer, make sure it is on PATH, then retry.');
+    expect(text).toContain('Node.js 22.18 or newer');
+    expect(text).toContain('Install Node.js 22.18 or newer, make sure it is on PATH, then retry.');
     const retry = installButton();
     expect(retry?.textContent).toContain('Retry install');
     await act(async () => {
@@ -208,7 +208,7 @@ describe('ReviewCallFlowPanel install funnel', () => {
           status: 'ok',
           snapshotId: 'snapshot',
           provider: 'calldiff',
-          version: '0.4.1',
+          version: '0.6.0',
           from: 'before',
           to: 'after',
           raw: '',
@@ -294,7 +294,7 @@ describe('ReviewCallFlowPanel install funnel', () => {
           status: 'ok',
           snapshotId: 'snapshot',
           provider: 'calldiff',
-          version: '0.4.1',
+          version: '0.6.0',
           from: 'before',
           to: 'after',
           raw: '',
@@ -366,7 +366,7 @@ describe('ReviewCallFlowPanel install funnel', () => {
           status: 'ok',
           snapshotId: 'snapshot',
           provider: 'calldiff',
-          version: '0.4.1',
+          version: '0.6.0',
           from: 'before',
           to: 'after',
           raw: '',

@@ -124,3 +124,49 @@ only lengthen the bounds), snooze, release images, an unwritable state file,
 the clock moving back, and the read-modify-write race on `update-state.json`
 between processes. The PR #2338 description lists that race as a code-read
 suspicion.
+
+# Where a Claude Code session's Inbox messages land, as a state machine
+
+`inbox-project.qnt` models one Claude Code session and one Inbox while the
+agent moves between folders: a shell `cd`, Claude Code's own `/cd`, the mod's
+bridge poll, a send with and without `project_path`, the person's New message
+and a thread list. The folders are shaped like the workspace that showed the
+bug: a plain folder (no `.git`) holding plain subfolders, a repository and its
+subfolder, a linked worktree of that repository elsewhere, another repository
+and a scratch folder.
+
+```sh
+quint test --main onMain         spec/inbox-project.qnt   # the bug's traces
+quint test --main onFix          spec/inbox-project.qnt
+quint test --main onFixStartOnly spec/inbox-project.qnt
+bash spec/simulate-inbox-project.sh                       # every property, every instance (seconds)
+bun test packages/server/inbox-project.model.test.ts      # the model next to the real code (fast-check)
+```
+
+| Module | Code it stands for |
+|---|---|
+| `onMain` | main before the fix: the mod files under `$.session.cwd()`; `read_thread`'s list makes a project |
+| `onFix` | the fix: the mod files under `$.session.root()` (`InboxLink.projectFolder`), which only `/cd` moves |
+| `onFixStartOnly` | the fix with `INBOX_PROJECT_FOLLOWS_SLASH_CD` off: the start folder, even after `/cd` |
+
+| Property | Meaning | `onMain` | `onFix`, `onFixStartOnly` |
+|---|---|---|---|
+| `OneProjectPerSession` | A session's sends and New messages land in one project, its folder's, unless the agent names `project_path`. A shell `cd` never changes it. | violated | holds |
+| `NewMessageAgreesWithSend` | A New message lands where the session's own send would at that moment. | violated | holds |
+| `NoProjectFromCd` | Every project is the start folder's, a `/cd` target's or one the agent named. | violated | holds |
+| `AttachmentsWhereAgentWorks` | Relative attachments resolve against the current working folder; a named `project_path` keeps them relative to it. | holds | holds |
+| `ReadMakesNoProject` | A thread list never makes a project. | violated | holds |
+| `NamedProjectHonoured` | A named `project_path` is the project. | holds | holds |
+
+Known window: a New message in the second between a `/cd` and the next poll
+lands where the session was (the poll is what tells the Inbox). The two
+properties about New messages are stated for a session that polled since its
+last `/cd`.
+
+The fast-check twin (`packages/server/inbox-project.model.test.ts`) drives the
+mod's real `InboxLink` (tool calls and the bridge poll) and a real Inbox over
+real folders and repositories, and checks after every action that the Inbox's
+projects, each message's project, its attachments' files and its `base_path`
+equal the model's. With the mod's project folder put back to the cwd, it fails
+at once (`cd top/repo/src`, `send`); with the Inbox ignoring the working
+folder, it fails on the message's `base_path`.

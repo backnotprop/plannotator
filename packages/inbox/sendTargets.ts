@@ -3,6 +3,8 @@
  * answers, and which reply each waiting annotation rides.
  */
 import { inboxActionInDraft, type InboxAnnotationRecord, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
+import { activeHandoff } from './tags';
+import { isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 
 /**
  * One reply of a Send: the message it answers, its picks and the questions it
@@ -76,8 +78,11 @@ export function sameSession(a: InboxMessageWire, b: InboxMessageWire): boolean {
  * to the agent that wrote most recently, never to an older asker: when the
  * latest agent message's session has a reply, that reply comes last;
  * otherwise the latest agent message comes last, with nothing of its own.
+ * `wordsAt`: the message the words answer instead, when the person aimed the
+ * reply at another agent (the recipient pill, approval "inbox-reply-recipient":
+ * that agent's latest message).
  */
-export function sendTargetsOf(thread: InboxThread, skip: ReadonlySet<string> = new Set()): SendTarget[] {
+export function sendTargetsOf(thread: InboxThread, skip: ReadonlySet<string> = new Set(), wordsAt?: InboxMessageWire): SendTarget[] {
   const groups = new Map<string, SendTarget>();
   for (const m of thread.messages) {
     if (m.author.kind !== 'agent') continue;
@@ -103,7 +108,7 @@ export function sendTargetsOf(thread: InboxThread, skip: ReadonlySet<string> = n
   }));
   const order = new Map(thread.messages.map((m, index) => [m.id, index]));
   targets.sort((a, b) => (order.get(a.message.id) ?? 0) - (order.get(b.message.id) ?? 0));
-  const latest = wordsMessage(thread);
+  const latest = wordsAt ?? wordsMessage(thread);
   const words = targets.findIndex((t) => t.message.id === latest.id || sameSession(t.message, latest));
   if (words < 0) targets.push({ message: latest, questions: [], skip: [], actions: [] });
   else targets = [...targets.slice(0, words), ...targets.slice(words + 1), targets[words]!];
@@ -111,28 +116,43 @@ export function sendTargetsOf(thread: InboxThread, skip: ReadonlySet<string> = n
 }
 
 /**
- * The message the person's words answer: the latest agent message, except
- * in a thread handed to another session (approval "inbox-tag-handoff"): then
- * the new owner's latest message after the hand-off, else the hand-off reply
- * itself (a reply to it is addressed as it is, to the new owner). So the
- * former owner writing again never takes the person's words back.
+ * The person's reply that holds the thread now because a session that ended was replaced (`took_over`, set by the
+ * server), while no agent has written since: that session's latest reply, so moving it or aiming the next one follows.
+ * Null otherwise: a reply aimed elsewhere while the asker is live never takes over.
  */
-export function wordsMessage(thread: InboxThread): InboxMessageWire {
-  let handedAt = -1;
+export function tookOverReply(thread: InboxThread): InboxMessageWire | null {
+  if (activeHandoff(thread)) return null;
   for (let index = thread.messages.length - 1; index >= 0; index--) {
     const m = thread.messages[index]!;
-    if (m.author.kind === 'person' && m.handoff && !m.handoff.undone_at && m.to) {
-      handedAt = index;
-      break;
-    }
+    if (m.author.kind === 'agent' && !isInboxPermissionSession(m.author.session)) return null;
+    if (!m.took_over || !m.to) continue;
+    // That session's latest since (the server's owner too): a stale tab's reply to another session does not take it.
+    const owner = m.to.session;
+    return thread.messages.slice(index + 1).filter((later) => later.to?.session === owner).at(-1) ?? m;
   }
-  if (handedAt >= 0) {
-    const handoff = thread.messages[handedAt]!;
+  return null;
+}
+
+/**
+ * The message the person's words answer: the latest agent message, except
+ * when a session took over from one that ended (`tookOverReply`: that reply,
+ * addressed as it is, until an agent writes), and in a thread handed to
+ * another session (approval "inbox-tag-handoff"): then the new owner's latest
+ * message after the hand-off, else the hand-off reply itself (a reply to it is
+ * addressed as it is, to the new owner). So the former owner writing again
+ * never takes the person's words back.
+ */
+export function wordsMessage(thread: InboxThread): InboxMessageWire {
+  const tookOver = tookOverReply(thread);
+  if (tookOver) return tookOver;
+  const handoff = activeHandoff(thread);
+  if (handoff) {
     const owner = handoff.to!.session;
-    const after = thread.messages.slice(handedAt + 1).filter((m) => m.author.kind === 'agent' && m.author.session === owner);
+    const after = thread.messages.slice(thread.messages.indexOf(handoff) + 1).filter((m) => m.author.kind === 'agent' && m.author.session === owner);
     return after.at(-1) ?? handoff;
   }
-  return thread.messages.filter((m) => m.author.kind === 'agent').at(-1) ?? thread.messages[0]!;
+  // A permission prompt's question (launch, `perm:…`) takes only its own answer: the words go to the agent itself.
+  return thread.messages.filter((m) => m.author.kind === 'agent' && !isInboxPermissionSession(m.author.session)).at(-1) ?? thread.messages[0]!;
 }
 
 /** The reply a message's questions ride: its session's, or its own when it has none. */

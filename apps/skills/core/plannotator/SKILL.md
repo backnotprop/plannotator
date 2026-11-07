@@ -66,7 +66,7 @@ Classify the outcome only by `decision`, never by `message` text. Notes on an `a
 - `--patch-file <path>` reviews a static caller-supplied unified diff with no repository at all (use `-` to read it from stdin): the session serves the patch as-is with no file-system affordances that need a worktree. It cannot be combined with a PR/MR URL, `--base`, `--diff-type`, `--git`/`--gitbutler`, or `--local`/`--no-local`. Every working-tree affordance is off in that session (staging, hunk-context expansion, open-in-editor, code navigation, diff-type/base switching), and the endpoints behind them answer 400.
 - Pass a directory to review another repo or worktree: `plannotator review ../feature-worktree` or `plannotator review ./backend --diff-type last-commit`. Paths resolve relative to the invoking directory; quote paths containing spaces. A directory selects the review workspace, not a file filter. Accepts one directory or PR URL; a directory cannot be combined with `--patch-file`. Invalid targets fail instead of falling back to the current repo.
 - PR review (`plannotator review https://github.com/owner/repo/pull/123`, GitLab MR and Bitbucket Cloud PR URLs too) needs an authenticated `gh` or `glab` CLI; Bitbucket Cloud (`https://bitbucket.org/<workspace>/<repo>/pull-requests/<id>`) instead needs an Atlassian API token in `PLANNOTATOR_BITBUCKET_TOKEN` (plus `PLANNOTATOR_BITBUCKET_EMAIL`). `--local` (the default) builds a local checkout of the PR head in the background for full file access; `--no-local` skips it and reviews the platform diff only.
-- `--no-git-remote-check` stops the session contacting the git remote at all: no `git ls-remote` for the default branch or the "behind GitHub" baseline check. The compare target then comes from local refs only and the staleness banner never shows, which also takes away its one-click Fetch button (the `/api/fetch-base` endpoint stays available); fetching from a terminal is unaffected. Use it when a remote probe is expensive or intrusive — most sharply when SSH authentication is backed by a hardware token, where each probe is a physical touch prompt. The same opt-out is available session-wide as `PLANNOTATOR_GIT_REMOTE_CHECK=0` or `{ "gitRemoteCheck": false }` in `~/.plannotator/config.json` (the flag beats the env var, which beats the config key). Without it the remote is queried when the review opens, on diff load, on a diff-type/base switch, and on Fetch — never on a timer.
+- `--no-git-remote-check` stops the session contacting the git remote at all: no `git ls-remote` for the default branch or the "behind GitHub" baseline check. The compare target then comes from local refs only and the staleness banner never shows, which also takes away its one-click Fetch button (the `/api/fetch-base` endpoint stays available); fetching from a terminal is unaffected. Use it when a remote probe is expensive or intrusive — most sharply when SSH authentication is backed by a hardware token, where each probe is a physical touch prompt. The same opt-out is available session-wide as `PLANNOTATOR_GIT_REMOTE_CHECK=0` or `{ "gitRemoteCheck": false }` in `config.json` in the data directory (`plannotator data-dir` prints it) (the flag beats the env var, which beats the config key). Without it the remote is queried when the review opens, on diff load, on a diff-type/base switch, and on Fetch — never on a timer.
 - `--tailscale` publishes the loopback session over the user's tailnet via `tailscale serve` (HTTPS, never public) and prints the URL with a QR code. A publish failure exits nonzero instead of leaving the server hanging. Use it only when the user asks to open the review on another device (a phone, a tablet) or over Tailscale. With a `plannotator` tool that offers it, pass `tailscale: true` (annotate, review, last) instead: "Ask this session" then keeps working on the tailnet for the Tailscale login that owns this computer.
 - `--gate` says you are waiting for the reviewer's sign-off before going on (committing, opening the PR): a bare Approve then reaches you too. With a `plannotator` tool, pass `gate: true` on the `review` action instead.
 
@@ -154,6 +154,7 @@ plannotator guide export --guide <guide.json> --patch <diff.patch> [--out <file.
 plannotator guide export --snapshot <snapshot.json> [--out <file.html>]
 plannotator guide share --id <savedGuideId> [--public] [--ttl <7d|24h|30m|3600>] [--json]
 plannotator guide unshare <id> --token <deleteToken>
+plannotator guide import --guide <guide.json> --patch <diff.patch> [--pr <url>]
 ```
 
 Guided Reviews are AI-generated walkthroughs of a diff, produced inside the code review UI. The CLI works with saved ones:
@@ -162,6 +163,7 @@ Guided Reviews are AI-generated walkthroughs of a diff, produced inside the code
 - `export` writes one portable, self-contained HTML file (the viewer loads from guides.show). `--guide` + `--patch` exports a guide you authored yourself against a unified diff (`--patch -` reads stdin; validation is strict and names any file the guide references that the patch lacks). `--out -` writes to stdout. `--viewer-url` overrides the pinned viewer base.
 - `share` uploads the guide and prints a link. Encrypted by default: the key lives only in the URL fragment and the host stores ciphertext. `--public` stores it unencrypted so chat apps can unfurl a preview. `--ttl` sets an expiry; otherwise the link stays until `unshare`. A saved guide records its link, and a second `share --id` refuses rather than orphaning the first link's delete token.
 - `unshare <id> --token <t>` removes a link using the delete token printed at share time.
+- `import` saves a guide you authored (`--guide` + `--patch`, checked as for `export`, or `--snapshot`) so the next `plannotator review` of this repository lists it under Guides. `--pr <url>` saves it with that PR's repository and labels it with the PR. Prints the new id; it never replaces a saved guide.
 
 ## plannotator sessions
 
@@ -176,29 +178,41 @@ Lists active Plannotator server sessions, each with its full target (absolute pa
 ```bash
 plannotator inbox [--background | --no-open | --open] [--tailscale]
 plannotator inbox mcp
+plannotator inbox call [--session <id>] <action> [<json> | -]
 plannotator inbox status [--json] | stop | restart
 ```
 
 The Plannotator Inbox is one local window per machine where you leave the person messages, `:::question` blocks they answer with a click, files to annotate and guided reviews. Nothing blocks: you send, then keep working or end your turn.
 
-- Use it for a decision only they can make (a `:::question` block, then go on with work that does not depend on it), long work you finished (one short summary, with the files to look at in `attachments`), or when they ask. A decision you sent to the Inbox stays there: when the person writes in the chat, say there what waits (a short summary and the thread's link), but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Ask in the chat only about something new they raised there that needs no pictures or files, or when they ask. Be proactive about Inbox updates and about replying to the person through the Inbox when you think they would want you to. Don't withhold important updates or decisions, and don't batch updates to send later: proactivity is better than procrastination. Use a review (plan review, `annotate`, `review`) when you need a decision on this document or diff before you go on.
-- If you have a `plannotator_inbox` tool, use it; otherwise use the stdio MCP server `plannotator inbox mcp`. When send_message says the person's reply arrives in this session by itself, end your turn instead of waiting; otherwise call wait_for_reply when you need the answer.
+- Use it for a decision only they can make (a `:::question` block, then go on with work that does not depend on it), long work you finished (one short summary with its pictures in place, `![alt](path)` in the body where you write about each, and the files to look at in `attachments`), or when they ask. One thread per work stream, unless the person says otherwise. A decision you sent to the Inbox stays there: when the person writes in the chat, say there what waits (a short summary and the thread's link), but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Ask in the chat only about something new they raised there that needs no pictures or files, or when they ask. Be proactive about Inbox updates and about replying to the person through the Inbox when you think they would want you to. Don't withhold important updates or decisions, and don't batch updates to send later: proactivity is better than procrastination. Use a review (plan review, `annotate`, `review`) when you need a decision on this document or diff before you go on.
+- If you have a `plannotator_inbox` tool, use it; otherwise use the stdio MCP server `plannotator inbox mcp`. When send_message says the person's reply arrives in this session by itself, end your turn instead of waiting; otherwise go on with your work and read the thread later with read_thread.
+- For many Inbox calls in a row (a tidy above all), `plannotator inbox call` runs any action from a script and prints its result as JSON; `plannotator inbox --help` says how.
 - Run `plannotator inbox --help` once and read it before your first use: it is the full guide (tools and arguments, threads, where replies go, question syntax, replacing questions, connecting other agents).
 - Never run `plannotator inbox` just to send: calls start a stopped Inbox in the background, and bare `plannotator inbox` opens the window for the person. `--tailscale` is the person's choice; never add it. `plannotator inbox status` only reads; never run `plannotator inbox stop` or `restart` unless the person asks.
 - When the person asks where their Inbox is, or to open it (a closed tab), run `plannotator inbox --open`: it opens the window in their browser (starting the Inbox in the background if needed), prints its address on stdout and returns at once. Tell them the address.
 
+## plannotator t3
+
+```bash
+plannotator t3 login --url <T3 MCP URL>
+plannotator t3 logout --url <T3 MCP URL>
+```
+
+If the person uses T3 Code, set it up once so their Inbox replies reach Claude threads in T3 as new turns: run `plannotator t3 --help` and follow its two steps. The person approves T3's sign-in page themselves.
+
 ## plannotator card
 
 ```bash
-plannotator card <create|move|say|link|ship|drop|list> ...
+plannotator card <create|move|say|link|ship|drop|list|initiative_delete> ...
 ```
 
-Only while the person has turned the Inbox's Board on (Settings → Capabilities); it is off by default, and then every call answers `board_off` and writes nothing, so use it only when your inbox tool lists `card` or the person asks. The Board holds one card per piece of work that outlasts a reply, in the column of its stage (backlog, designing, your_look, building, your_review, shipped). Use the `card` action of a `plannotator_inbox` tool when you have one; this CLI is the same call from a shell. `plannotator card --help` gives the arguments, and `plannotator inbox --help` its card section while the Board is on. The icebox is the person's only. A title is 2–5 words naming the work ("Pi update fix"), never a sentence; where it stands goes in `say`. When a card waits on the person, link the Inbox thread where they make the call (`thread_id`), so "You: …" opens it.
+Only while the person has turned the Inbox's Board on (Settings → Capabilities); it is off by default, and then every call answers `board_off` and writes nothing, so use it only when your inbox tool lists `card` or the person asks. The Board holds one card per piece of work that outlasts a reply, in the column of where the work stands (todo, in_progress, in_review, done; backlog for what nobody asked for yet). Use the `card` action of a `plannotator_inbox` tool when you have one; this CLI is the same call from a shell. `plannotator card --help` gives the arguments, and `plannotator inbox --help` its card section while the Board is on. A card the person put in backlog is theirs to move. A title is 2–5 words naming the work ("Pi update fix"), never a sentence; where it stands goes in `say`. Move a card to in_review yourself when you hand your part over, with `you` and the Inbox thread where the person makes the call (`thread_id`), so "You: …" opens it. Ship a card when you see its PR merge (the Board may also move it to done once every PR linked with `--pr` merged). `--initiative <name>` (the card action's `initiative`) puts a card in an initiative. Not all cards need an initiative: put a card in one only when it is part of an extensive effort that spans several cards or PRs, and reuse an initiative that fits (list shows them) instead of making a near-duplicate. Use good judgement; don't overthink it.
 
 ## Other subcommands
 
 ```bash
 plannotator setup-goal <interview|facts> <bundle.json | -> [--json]
+plannotator data-dir
 plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'PLANNOTATOR_FEEDBACK_END'
 <the message, exactly as the person approved it>
 PLANNOTATOR_FEEDBACK_END
@@ -208,6 +222,7 @@ plannotator improve-context
 ```
 
 - `setup-goal` opens the interview or facts-acceptance UI for /goal workflows; it is driven by the `plannotator-setup-goal` skill and takes a bundle JSON (`-` reads stdin). Do not hand-build bundles.
+- `data-dir` prints the absolute path of Plannotator's data directory (plans, history, drafts, `config.json`, `hooks/`) and creates nothing. Run it whenever you need a file in that folder, and use the path it prints. Never write a path such as `~/.plannotator/...` from memory: an install can keep its data under `$XDG_DATA_HOME/plannotator`, and a new `~/.plannotator` can hide that data from Plannotator. If it prints nothing or fails (an older Plannotator, before 0.28.41), use `$PLANNOTATOR_DATA_DIR` when it is set; otherwise the home folder's `.plannotator` if it exists, else `$XDG_DATA_HOME/plannotator` when `XDG_DATA_HOME` is set, else the home folder's `.plannotator`.
 - `feedback` sends the person's feedback about Plannotator to its maintainers and prints `Sent` (the message, the category and contact if given, the version, the OS name and that it came from the CLI; nothing else). Only when the person asks you to send feedback: show them the exact text first and run it only after they say yes. Pass the message on stdin with a quoted heredoc (`<<'PLANNOTATOR_FEEDBACK_END'`, quotes included; pick another end word if a line of the message is exactly that), never inside double quotes in any shell, where `$VAR`, backticks and `$(...)` are expanded and change the approved text. Fill in or leave out the bracketed options (`--category idea`), and put a contact in single quotes. In PowerShell, set `$OutputEncoding = [Text.UTF8Encoding]::new($false)` and pipe a single-quoted here-string (`@'` … `'@ | plannotator feedback --stdin`). Exit 0 sent, 1 not sent, 2 usage.
 - `update` installs the newest release now (the install script, with the choices from the last install); `--check` only reports whether one exists. Run it only when the person asks you to update Plannotator: it replaces the binary. Exit 0 up to date or updated, 1 failed, 2 usage, 130 interrupted.
 - `uninstall` removes Plannotator-installed components (`--purge` also deletes local data; `--yes` is required without a TTY; `--dry-run` previews).
@@ -223,7 +238,7 @@ plannotator improve-context
 | `PLANNOTATOR_ORIGIN` | Override agent-origin detection (`claude-code`, `codex`, `opencode`, `pi`, `oh-my-pi`, `amp`, `droid`, `copilot-cli`, `gemini-cli`, `kiro-cli`, `mistral-vibe`, `qwen-code`, `dsh`). Set it when launching Plannotator from a wrapper the detection cannot see through. |
 | `PLANNOTATOR_AI=disabled` | Disable Ask AI and agent-launched review surfaces in the UI. |
 | `PLANNOTATOR_SHARE=disabled` | Disable URL sharing, including guide share links. |
-| `PLANNOTATOR_DATA_DIR` | Move the data directory (default `~/.plannotator`): plans, history, drafts, config. |
+| `PLANNOTATOR_DATA_DIR` | Move the data directory: plans, history, drafts, config. Unset, the default is `~/.plannotator` or `$XDG_DATA_HOME/plannotator`; `plannotator data-dir` prints which one this install uses. |
 | `PLANNOTATOR_BROWSER` | Open sessions in a specific browser; `none` opens no browser at all (the session URL is always printed on stderr). |
 | `PLANNOTATOR_UPDATE_CHECK=0` | No automatic check for a newer release (and no update notices or auto-update). `plannotator update` still checks when run. |
 
@@ -239,11 +254,11 @@ Ask what only the reviewer can decide as a question block. Answers come back at 
 :::question
 Where should we keep the edit that loses a sync conflict?
 
-When two devices edit one note offline, the later save wins and the other edit is lost. Local storage keeps it with no server work.
+When two devices edit one note offline, the later save wins and the other is lost. Local storage keeps it with no server work.
 
-- [ ] Local only, purged after 30 days — cheap, no server change
+- [ ] Nowhere — silent loss, as today
+- [ ] Local only, purged after 30 days — cheap
 - [ ] Server-side per user — survives reinstall, needs a retention policy
-- [ ] Nowhere — accept silent loss for v1
 
 Recommended: Local only, purged after 30 days
 :::
@@ -255,8 +270,8 @@ Recommended: Local only, purged after 30 days
   - Be terse: one to three short sentences, plain words, no jargon or internal names.
   - Add a screenshot (`![alt](path)`) for anything visual.
   - Link a file that shows it better (a plan, a mock): `[the mock](mock.html)`. In the Inbox, attach it too; the link opens it beside the thread.
-- Choices: `- [ ] label`, optionally `- [ ] label — why`. The reviewer can also answer "Other", add a note, or skip.
-- `Recommended: <label>` marks yours (`A, B and C` on `:::question-multi`); other text is one more answer, tagged Recommended. Keep A, B, C order.
+- Choices: `- [ ] label`, optionally `- [ ] label — why`, in natural order. The reviewer can also answer "Other", add a note, or skip.
+- `Recommended: <label>` marks yours (`A, B and C` on `:::question-multi`); other text is one more answer, tagged Recommended. Never move yours first.
 - Ask only what you cannot decide alone, about 8 a round. Do not ask rhetorical questions or questions the codebase answers.
 - `- [x]` marks a settled choice. On resubmit, check the chosen answer, or drop the block and state the decision in prose.
 - Leave blank lines between the parts so the block reads well on GitHub.

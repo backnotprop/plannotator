@@ -57,11 +57,24 @@ import {
   TAILSCALE_SERVE_TIMEOUT_MS,
   type TailscaleRunner,
 } from "@plannotator/shared/tailscale";
-import { enableTailscaleServe, removeTailscaleServe, TailscaleServeError, takeDownOwnServeMapping } from "./tailscale-serve";
-import { INBOX_TAILNET_HTTPS_PORT } from "./inbox-devices";
+import {
+  enableServeSteps,
+  runTailscaleSteps,
+  runTailscaleStepsAsync,
+  serveOffSteps,
+  TailscaleServeError,
+  takeDownOwnServeMapping,
+  takeDownOwnServeSteps,
+  type TailscaleRunnerAsync,
+  type TailscaleStep,
+  type TailscaleSteps,
+} from "./tailscale-serve";
+import { runTailscaleQuietly } from "./inbox-pairing-checks";
+import { syncSection } from "./inbox-perf";
+import { INBOX_TAILNET_HTTPS_PORTS, INBOX_TAILNET_PORT_RANGE } from "./inbox-tailnet-door";
 
-/** Phones' tailnet HTTPS port (inbox-devices.ts, 8443): the window's mapping never takes it. */
-export const PHONES_TAILNET_HTTPS_PORT = INBOX_TAILNET_HTTPS_PORT;
+/** The ports the device door may take (inbox-tailnet-door.ts, 8443 to 8450): the window's mapping never takes one. */
+export const isDoorTailnetPort = (port: number): boolean => INBOX_TAILNET_HTTPS_PORTS.includes(port);
 
 /** A serve route that points at the window's own port: it hands the tailnet the whole Inbox, `/mcp` included. */
 export interface InboxTailnetExposure {
@@ -97,6 +110,7 @@ export interface InboxTailscaleContext {
   registry: () => InboxRegistryEntry;
   /** The window's handler, for a request that passed the tailnet checks. */
   dispatch: (req: Request) => Promise<Response>;
+  /** Tests: a scripted `tailscale`. Default: the CLI, as a child process on the request paths (never blocking the Inbox). */
   tailscale?: TailscaleRunner;
   /** `plannotator inbox --tailscale`: on for this run unless PLANNOTATOR_INBOX_TAILSCALE turns it off. */
   flag?: boolean;
@@ -131,7 +145,13 @@ function refusal(path: string, status: number, code: string, message: string): R
 }
 
 export function createInboxTailscale(context: InboxTailscaleContext) {
-  const run = context.tailscale ?? runTailscale;
+  // The same command sequences run two ways (tailscale-serve.ts): at once at the start, the stop and the exit, and
+  // without blocking the event loop for the window's switch, `--tailscale` against a running Inbox, and a served
+  // request's exposure scan.
+  const runAtOnce = context.tailscale ?? runTailscale;
+  const run: TailscaleRunner = (args, timeoutMs) => syncSection(`tailscale:${args.slice(0, 2).join(" ")}`, () => runAtOnce(args, timeoutMs));
+  const runAsync: TailscaleRunnerAsync = context.tailscale ?? runTailscaleQuietly;
+  const step = (args: string[], timeoutMs: number): TailscaleStep => ({ args, timeoutMs });
   let runFlag = context.flag === true;
   let listener: ReturnType<typeof Bun.serve> | null = null;
   let servedHostname: string | null = null;
@@ -261,8 +281,8 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
   // ── Routes pointing at the window's own port (the manual workaround) ──
 
   /** Read serve's routes and keep those that land on the window's port. Undefined when serve cannot be read. */
-  const scanExposure = (): InboxTailnetExposure[] | undefined => {
-    const status = run(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
+  const scanExposure = function* (): TailscaleSteps<InboxTailnetExposure[] | undefined> {
+    const status = yield step(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
     if (status.error || status.status !== 0) return undefined;
     const routes = serveStatusRoutes(status.stdout);
     if (!routes) return undefined;
@@ -285,13 +305,23 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
 
   /**
    * The window's port refused a request that came through serve: a mapping
-   * points at it. Find which (serve status) and say so once.
+   * points at it. Find which (serve status) and say so once. The refusal
+   * answers at once; the scan runs after it, one at a time.
    */
+  let scanning = false;
   const noteServedRequest = () => {
-    if (state.exposed.length > 0) return;
-    const found = scanExposure();
-    state.exposed = found && found.length > 0 ? found : [{ https_port: null, target: null }];
-    warnExposure();
+    if (state.exposed.length > 0 || scanning) return;
+    scanning = true;
+    void serial(async () => {
+      if (state.exposed.length > 0) return;
+      const found = await runTailscaleStepsAsync(scanExposure(), runAsync);
+      state.exposed = found && found.length > 0 ? found : [{ https_port: null, target: null }];
+      warnExposure();
+    })
+      .catch(() => {})
+      .finally(() => {
+        scanning = false;
+      });
   };
 
   const failureWords = (error: unknown, port: number): string => {
@@ -303,8 +333,8 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
   };
 
   /** Who may use the published Inbox: the owner of this machine plus the allowlist. Throws the reason when nobody may. */
-  const readAllowed = (): { owner: string | null; allowed: string[] } => {
-    const status = run(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS);
+  const readAllowed = function* (): TailscaleSteps<{ owner: string | null; allowed: string[] }> {
+    const status = yield step(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS);
     if (status.error || status.status !== 0) throw new Error(describeTailscaleFailure(status));
     const identity = parseTailscaleSelfIdentity(status.stdout);
     if (!identity) throw new Error("Could not read `tailscale status --json`.");
@@ -326,10 +356,10 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
    * last run's, dead or about to be). False when it may still exist: the
    * record is kept, with the reason.
    */
-  const reconcile = (): boolean => {
+  const reconcile = function* (): TailscaleSteps<boolean> {
     const kept = record();
     if (!kept?.https_port || !kept.proxy_port || kept.proxy_port === listener?.port) return true;
-    const result = takeDownOwnServeMapping(run, kept.https_port, [`http://127.0.0.1:${kept.proxy_port}`]);
+    const result = yield* takeDownOwnServeSteps(kept.https_port, [`http://127.0.0.1:${kept.proxy_port}`]);
     if (result === "failed") {
       state.error = `Could not remove the tailnet address an earlier run left; it is retried at the next start. Or run "tailscale serve --https=${kept.https_port} off".`;
       keepRecord(state.error);
@@ -340,21 +370,21 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
   };
 
   /** Publish the mapping. Never throws: a failure is kept as `error`. */
-  const publish = (): boolean => {
+  const publish = function* (): TailscaleSteps<boolean> {
     const port = context.port();
-    if (!reconcile()) return false;
+    if (!(yield* reconcile())) return false;
     try {
-      if (port === PHONES_TAILNET_HTTPS_PORT) throw new Error(`Port ${port} is kept for phones.`);
-      const who = readAllowed();
+      if (isDoorTailnetPort(port)) throw new Error(`Port ${port} is kept for the Inbox's door (${INBOX_TAILNET_PORT_RANGE}).`);
+      const who = yield* readAllowed();
       state.owner = who.owner;
       state.allowed = who.allowed;
-      state.exposed = scanExposure() ?? state.exposed;
+      state.exposed = (yield* scanExposure()) ?? state.exposed;
       warnExposure();
       if (state.exposed.some((e) => e.https_port === port)) throw new Error(exposureWarning(state.exposed));
       const proxyPort = openListener();
       // Recorded before it exists, so a crash between here and a clean stop always leaves a record to take down.
       save({ url: null, error: null, https_port: port, proxy_port: proxyPort });
-      const { url } = enableTailscaleServe(proxyPort, run, { httpsPort: port, ownTargets: ownTargets(), persist: true });
+      const { url } = yield* enableServeSteps(proxyPort, { httpsPort: port, ownTargets: ownTargets(), persist: true });
       servedHostname = new URL(url).hostname.toLowerCase();
       httpsPort = port;
       state.url = `${url}/`;
@@ -370,7 +400,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       httpsPort = null;
       guardProcess(false);
       // The mapping may have been made before the failure (no URL in serve's answer): take it down, or keep the record.
-      const taken = record()?.https_port ? takeDownOwnServeMapping(run, port, targets) : "none";
+      const taken = record()?.https_port ? yield* takeDownOwnServeSteps(port, targets) : "none";
       if (taken === "failed") keepRecord(state.error);
       else save({ url: null, error: state.error });
       return false;
@@ -378,9 +408,9 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
   };
 
   /** Take this Inbox's own mapping down (never someone else's). "failed" leaves the listener up and the record kept. */
-  const unpublish = (later = false): "removed" | "none" | "failed" => {
+  const unpublish = function* (later = false): TailscaleSteps<"removed" | "none" | "failed"> {
     const port = httpsPort ?? record()?.https_port ?? null;
-    const result = port === null ? "none" : takeDownOwnServeMapping(run, port, ownTargets());
+    const result = port === null ? "none" : yield* takeDownOwnServeSteps(port, ownTargets());
     if (result === "failed") return result;
     closeListener(later);
     httpsPort = null;
@@ -394,10 +424,36 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
    * then publish when the switch is on. A take-down that fails keeps the
    * record (never forgotten), and nothing is published over it this run.
    */
-  const start = () => {
-    if (!reconcile()) return;
-    if (resolve().on) publish();
-    else if (record()) save(undefined);
+  const start = () =>
+    runTailscaleSteps(
+      (function* () {
+        if (!(yield* reconcile())) return;
+        if (resolve().on) yield* publish();
+        else if (record()) save(undefined);
+      })(),
+      run,
+    );
+
+  // ── The request paths' changes, one at a time ──
+
+  /** Changes made without blocking (the switch, `--tailscale`, a scan), each after the one before. */
+  let queue: Promise<unknown> = Promise.resolve();
+  let pending = 0;
+  let stopped = false;
+  const serial = <T>(change: () => Promise<T>): Promise<T> => {
+    pending += 1;
+    const ran = queue.then(() => {
+      if (stopped) throw new InboxError("tailscale_unavailable", "The Inbox is stopping.");
+      return change();
+    });
+    queue = ran
+      .catch(() => {})
+      .then(() => {
+        pending -= 1;
+        // The stop came while a change ran: what that change published goes down now.
+        if (stopped && pending === 0) stopNow();
+      });
+    return ran;
   };
 
   /**
@@ -408,9 +464,13 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
    * caller with nobody else to tell can print the manual command.
    */
   const stop = (): { failedPort: number | null } => {
+    stopped = true;
+    return stopNow();
+  };
+  const stopNow = (): { failedPort: number | null } => {
     if (httpsPort === null && !listener && !record()) return { failedPort: null };
     const port = httpsPort ?? record()?.https_port ?? null;
-    if (unpublish() === "failed") {
+    if (runTailscaleSteps(unpublish(), run) === "failed") {
       keepRecord(`Could not take the tailnet address down; run "tailscale serve --https=${port} off".`);
       closeListener();
       httpsPort = null;
@@ -418,18 +478,24 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       state.url = null;
       return { failedPort: port };
     }
-    if (record()) save(undefined);
+    // A change still running may publish after this: its record stays for the next start until it is down.
+    if (record()) {
+      if (pending > 0) keepRecord(`Stopped while publishing; the tailnet address is taken down at the next start, or run "tailscale serve --https=${port} off".`);
+      else save(undefined);
+    }
     return { failedPort: null };
   };
 
   /** The window's switch: saved to config.json, applied now. `via`: the request came through the tailnet. */
-  const set = (on: boolean, options: { via?: "local" | "tailnet"; replaceExposed?: boolean } = {}): InboxTailscaleState => {
+  const set = (on: boolean, options: { via?: "local" | "tailnet"; replaceExposed?: boolean } = {}): Promise<InboxTailscaleState> =>
+    serial(() => runTailscaleStepsAsync(setSteps(on, options), runAsync));
+  const setSteps = function* (on: boolean, options: { via?: "local" | "tailnet"; replaceExposed?: boolean }): TailscaleSteps<InboxTailscaleState> {
     const env = parseInboxTailscaleEnv();
     if (env !== undefined) {
       throw new InboxError("tailscale_env_decides", `PLANNOTATOR_INBOX_TAILSCALE is set in this Inbox's environment, so it stays ${env ? "on" : "off"}.`);
     }
     if (!on) {
-      if (unpublish(options.via === "tailnet") === "failed") {
+      if ((yield* unpublish(options.via === "tailnet")) === "failed") {
         throw new InboxError(
           "tailscale_unavailable",
           `Tailscale could not take the Inbox's tailnet address down. Try again, or run "tailscale serve --https=${context.port()} off".`,
@@ -439,10 +505,10 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     }
     if (on && options.replaceExposed) {
       // Only routes that still point at the window's own port, and only because the person asked.
-      const exposed = scanExposure();
+      const exposed = yield* scanExposure();
       if (!exposed) throw new InboxError("tailscale_unavailable", "Tailscale could not say which mapping to replace. Try again.");
       for (const route of exposed) {
-        if (route.https_port !== null && !removeTailscaleServe(route.https_port, run)) {
+        if (route.https_port !== null && !(yield* serveOffSteps(route.https_port))) {
           throw new InboxError("tailscale_unavailable", `Tailscale could not remove the mapping on port ${route.https_port}. Run "tailscale serve --https=${route.https_port} off".`);
         }
       }
@@ -453,17 +519,23 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     if (loadConfig().inboxTailscale !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     // The saved switch decides from now on, not this run's flag.
     runFlag = false;
-    if (on) publish();
+    if (on) yield* publish();
     else save(undefined);
     return snapshot();
   };
 
   /** `plannotator inbox --tailscale` against a running Inbox: on for this run, unless the env var keeps it off. */
-  const enableForRun = (): InboxTailscaleState => {
-    runFlag = true;
-    if (resolve().on && !state.url) publish();
-    return snapshot();
-  };
+  const enableForRun = (): Promise<InboxTailscaleState> =>
+    serial(() =>
+      runTailscaleStepsAsync(
+        (function* () {
+          runFlag = true;
+          if (resolve().on && !state.url) yield* publish();
+          return snapshot();
+        })(),
+        runAsync,
+      ),
+    );
 
   return {
     start,
@@ -479,11 +551,16 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     /**
      * A request the listener let in came from the machine's owner, not a login
      * config.json `inboxTailscaleAllow` added: only the owner may send
-     * Feedback (inbox-feedback.ts).
+     * Feedback (inbox-feedback.ts). A machine Tailscale names no owner for (a
+     * tagged device, or an untagged one whose owner `tailscale status` does
+     * not report) is published only for its allowlist, the person who uses
+     * it: there every allowed login is the owner. "Ask this session" follows
+     * the same rule (`readTailnetOwners` in session-tailnet.ts).
      */
     isOwnerRequest: (headers: Headers): boolean => {
       const identity = checkTailnetIdentity(headers, state.allowed);
-      return identity.ok && state.owner !== null && normalizeTailnetLogin(identity.login) === state.owner;
+      if (!identity.ok) return false;
+      return state.owner === null || normalizeTailnetLogin(identity.login) === state.owner;
     },
   };
 }

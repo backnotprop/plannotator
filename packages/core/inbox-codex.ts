@@ -79,8 +79,8 @@ export function codexTurnTrigger(meta: unknown): string | null {
 /**
  * Whether a Codex tool call comes from a thread the Inbox can wake: it names
  * its thread, and the turn is not a `codex exec` run (exec exits after its
- * turn, so nothing would ever run a queued message; its agent keeps
- * `wait_for_reply`).
+ * turn, so nothing would ever run a queued message; its agent reads the
+ * thread instead).
  */
 export function codexCallWakes(meta: unknown, session: unknown): boolean {
   const thread = codexThreadOfCall(meta);

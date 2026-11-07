@@ -16,6 +16,7 @@
  */
 
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -60,6 +61,30 @@ describe("pi annotate server: folder annotate history", () => {
 		mintedProjects.push(project);
 		return project;
 	}
+
+	test("/api/plan identifies the annotated file's repository, not the launch repository", async () => {
+		const targetRoot = mkdtempSync(join(tmpdir(), "plannotator-pi-annotate-target-repo-"));
+		const filePath = join(targetRoot, "specs", "refunds.md");
+		mkdirSync(join(targetRoot, "specs"), { recursive: true });
+		writeFileSync(filePath, "# Refunds\n", "utf-8");
+		execFileSync("git", ["init", "-q"], { cwd: targetRoot });
+		execFileSync("git", ["remote", "add", "origin", "https://github.com/acme/payments-docs.git"], { cwd: targetRoot });
+		const server = await startAnnotateServer({
+			markdown: "# Refunds\n",
+			filePath,
+			htmlContent: "<html><body>Plannotator</body></html>",
+			project: uniqueProject("repo-info"),
+		});
+		try {
+			const payload = (await (await fetch(`${server.url}/api/plan`)).json()) as {
+				repoInfo?: { display: string };
+			};
+			expect(payload.repoInfo?.display).toBe("acme/payments-docs");
+		} finally {
+			server.stop();
+			rmSync(targetRoot, { recursive: true, force: true });
+		}
+	});
 
 	afterAll(() => {
 		const historyDir = join(getPlannotatorDataDir(), "history");
@@ -369,7 +394,7 @@ describe("pi annotate server: folder annotate history", () => {
 		}
 	});
 
-	test("version endpoints: path param serves that file's versions; without path, single-session binding is unchanged; out-of-root path is rejected", async () => {
+	test("version endpoints: path param serves that file's versions; without path, single-session binding is unchanged; out-of-root path is rejected for a forwarded reader", async () => {
 		const folderPath = mkdtempSync(join(tmpdir(), "plannotator-pi-folder-history-endpoints-"));
 		const docPath = join(folderPath, "note.md");
 		writeFileSync(docPath, "V1\n", "utf-8");
@@ -404,11 +429,16 @@ describe("pi annotate server: folder annotate history", () => {
 			expect(versionAfter.status).toBe(200);
 			expect(await versionAfter.json()).toEqual({ plan: "V1\n", version: 1 });
 
-			// A path outside the folder root is rejected the same way /api/doc rejects it.
+			// A path outside the folder root resolves the way /api/doc resolves it:
+			// a tab on this machine reaches it (#2291), a forwarded reader does not.
 			const outsidePath = join(realpathSync(tmpdir()), "outside.md");
-			const deniedVersions = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(outsidePath)}`);
+			const outsideVersions = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(outsidePath)}`);
+			expect(outsideVersions.status).toBe(200);
+			expect((await outsideVersions.json()).versions).toEqual([]);
+			const forwarded = { headers: { "x-forwarded-for": "100.101.102.103" } };
+			const deniedVersions = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(outsidePath)}`, forwarded);
 			expect(deniedVersions.status).toBe(403);
-			const deniedVersion = await fetch(`${server.url}/api/plan/version?path=${encodeURIComponent(outsidePath)}&v=1`);
+			const deniedVersion = await fetch(`${server.url}/api/plan/version?path=${encodeURIComponent(outsidePath)}&v=1`, forwarded);
 			expect(deniedVersion.status).toBe(403);
 
 			// Without a path param at all, behavior is exactly today's: this

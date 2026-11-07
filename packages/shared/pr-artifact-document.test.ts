@@ -138,6 +138,59 @@ describe('isPRArtifactDocumentUrlAllowed', () => {
       { ...context, body: '[explainer](/uploads/hash/explainer.html)' },
     )).toBe(true);
   });
+
+  // #2328: the browser asks for the attachment by the URL the browser
+  // normalized, while the PR text may write the host in another case or with
+  // the default port. Failure caught: a referenced private image refused.
+  // (A host other than the PR's own: there the full URL is the only needle.)
+  test('a reference with another host case or the default port still names the requested URL', () => {
+    const attachment = 'https://private-user-images.githubusercontent.com/1/shot.png?jwt=abc';
+    for (const written of [
+      'https://Private-User-Images.githubusercontent.com/1/shot.png?jwt=abc',
+      'https://private-user-images.githubusercontent.com:443/1/shot.png?jwt=abc',
+    ]) {
+      expect(isPRArtifactDocumentUrlAllowed(attachment, github, { ...context, body: `![shot](${written})` })).toBe(true);
+    }
+  });
+
+  // Failure caught: the reviewer's token sent to a host the PR's provider
+  // does not own, because the text referenced it.
+  test('refuses a referenced URL on a host that is not one of the provider artifact hosts', () => {
+    for (const url of [
+      'https://evil.example/user-attachments/assets/0f1e2d3c',
+      'https://gist.github.com/user-attachments/assets/0f1e2d3c',
+      'https://objects.githubusercontent.com/acme/widgets/shot.png',
+    ]) {
+      expect(isPRArtifactDocumentUrlAllowed(url, github, { ...context, body: `![shot](${url})` })).toBe(false);
+    }
+  });
+
+  // A github.com attachment is a provider artifact only for a PR on
+  // github.com: a GitLab MR or a GitHub Enterprise PR that embeds one is
+  // refused here, which is why the client loads those images directly.
+  test('refuses a github.com attachment for a GitLab MR or a GitHub Enterprise PR', () => {
+    const attachment = 'https://github.com/user-attachments/assets/0f1e2d3c';
+    const body = { ...context, body: `![shot](${attachment})` };
+    const enterprise: GithubPRMetadata = { ...github, host: 'github.example.com', url: 'https://github.example.com/acme/widgets/pull/1' };
+    expect(isPRArtifactDocumentUrlAllowed(attachment, gitlabMetadata, body)).toBe(false);
+    expect(isPRArtifactDocumentUrlAllowed(attachment, enterprise, body)).toBe(false);
+  });
+
+  // Failure caught: "referenced" meaning "resolves to". A comment holding
+  // `…/main/docs/../secret.txt` must not authorize `…/main/secret.txt`, a URL
+  // the text never names. (The written paths keep the target's path out of
+  // the text: the same-origin path needle matches it literally anywhere.)
+  test('a reference with dot segments or a backslash does not authorize the URL it resolves to', () => {
+    const target = 'https://github.com/acme/widgets/blob/main/secret.txt';
+    for (const written of [
+      'https://github.com/acme/widgets/blob/main/docs/../secret.txt',
+      'https://github.com/acme/widgets/blob/main/docs/%2e%2e/secret.txt',
+      'https://github.com/acme/widgets/blob/main/./secret.txt',
+      'https://github.com/acme/widgets/blob/main/docs\\..\\secret.txt',
+    ]) {
+      expect(isPRArtifactDocumentUrlAllowed(target, github, { ...context, body: `[x](${written})` })).toBe(false);
+    }
+  });
 });
 
 describe('fetchPRArtifactDocument', () => {
@@ -713,5 +766,91 @@ describe('fetchPRArtifactContent', () => {
       context,
       'https://raw.githubusercontent.com/acme/widgets/main/private/secret.png',
     )).rejects.toMatchObject({ status: 403 });
+  });
+
+  const tokenRuntime: PRRuntime = {
+    async runCommand() {
+      return { stdout: 'test-token\n', stderr: '', exitCode: 0 };
+    },
+  };
+
+  // #2328: a private attachment loads through github.com (token), which
+  // redirects to private-user-images (token) and then to a storage host
+  // (no token). Failure caught: the token missing where GitHub needs it, or
+  // sent to a host outside the provider.
+  test('sends the token to github.com and private-user-images only, across the attachment redirects', async () => {
+    const attachment = 'https://github.com/user-attachments/assets/0f1e2d3c';
+    const hops = [
+      'https://private-user-images.githubusercontent.com/1/shot.png?jwt=abc',
+      'https://objects.githubusercontent.com/shot.png?sig=xyz',
+    ];
+    const originalFetch = globalThis.fetch;
+    const seen: Array<[string, string]> = [];
+    globalThis.fetch = async (input, init) => {
+      seen.push([new URL(String(input)).host, new Headers(init?.headers).get('authorization') ?? '']);
+      const next = hops[seen.length - 1];
+      return next
+        ? new Response(null, { status: 302, headers: { location: next } })
+        : new Response(Uint8Array.from([137, 80]), { headers: { 'content-type': 'image/png' } });
+    };
+    try {
+      const result = await fetchPRArtifactContent(tokenRuntime, github, { ...context, body: `![shot](${attachment})` }, attachment);
+      expect(result.contentType).toBe('image/png');
+      expect(seen).toEqual([
+        ['github.com', 'Bearer test-token'],
+        ['private-user-images.githubusercontent.com', 'Bearer test-token'],
+        ['objects.githubusercontent.com', ''],
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('loads public user-images without the token', async () => {
+    const image = 'https://user-images.githubusercontent.com/1/shot.png';
+    const originalFetch = globalThis.fetch;
+    let authorization: string | null = 'unset';
+    globalThis.fetch = async (_input, init) => {
+      authorization = new Headers(init?.headers).get('authorization');
+      return new Response(Uint8Array.from([137, 80]), { headers: { 'content-type': 'image/png' } });
+    };
+    try {
+      await fetchPRArtifactContent(tokenRuntime, github, { ...context, body: `![shot](${image})` }, image);
+      expect(authorization).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  // Failure caught: a provider redirect steering the server (with or without
+  // the token) at the reviewer's own machine or network, or downgrading to
+  // plain http.
+  test('refuses a redirect to a private-network address or to plain http', async () => {
+    const attachment = 'https://github.com/user-attachments/assets/0f1e2d3c';
+    for (const location of [
+      'https://127.0.0.1/shot.png',
+      'https://localhost:8080/shot.png',
+      'https://192.168.1.20/shot.png',
+      'https://10.0.0.5/shot.png',
+      'https://169.254.169.254/latest/meta-data/',
+      'https://[::1]/shot.png',
+      'https://printer.local/shot.png',
+      'http://objects.githubusercontent.com/shot.png',
+    ]) {
+      const originalFetch = globalThis.fetch;
+      const requested: string[] = [];
+      globalThis.fetch = async (input) => {
+        requested.push(String(input));
+        return new Response(null, { status: 302, headers: { location } });
+      };
+      try {
+        await expect(
+          fetchPRArtifactContent(tokenRuntime, github, { ...context, body: `![shot](${attachment})` }, attachment),
+        ).rejects.toMatchObject({ status: 403 });
+        expect(requested).toEqual([attachment]);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    }
   });
 });

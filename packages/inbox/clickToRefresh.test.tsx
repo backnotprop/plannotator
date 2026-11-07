@@ -86,7 +86,7 @@ async function agentSends(body: string, reply_to?: string): Promise<string> {
   return (JSON.parse(await readLine()) as { sent: string }).sent;
 }
 
-const TESTS = 7;
+const TESTS = 8;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -118,6 +118,8 @@ afterAll(async () => {
 
 /** What the window's media queries answer in this test. */
 let media = { phone: false, reduce: false };
+/** The next list read waits for this before it reaches the window (its answer already read from the server). */
+let holdListRead: Promise<void> | null = null;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -132,6 +134,12 @@ beforeEach(() => {
       postedBodies.push({ path: String(input), body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {} });
     }
     const answer = await loopback(String(input), init?.method ?? 'GET', init?.body ? String(init.body) : undefined);
+    // A held list read: answered by the server now, handed to the window only when the test lets it go (a slow network).
+    if (holdListRead && (init?.method ?? 'GET') === 'GET' && String(input).startsWith('/api/inbox/threads?')) {
+      const gate = holdListRead;
+      holdListRead = null;
+      await gate;
+    }
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
@@ -379,4 +387,24 @@ test.skipIf(!hasDom)('the project the list shows offers the refresh as Inbox doe
   await until(() => live().includes('refreshed'), 'the announcement');
   await openRow(el, world.news[0]!);
   expect(projectRow(el).hasAttribute('data-refreshes')).toBe(false);
+}, 30_000);
+
+test.skipIf(!hasDom)('a list read that lands after a newer one never takes its place (a slow catch-up on a bad network)', async () => {
+  const el = await renderApp(`#project=${world.project}`);
+  await wait(300);
+  // A read whose answer is taken now but reaches the window late.
+  let release = () => {};
+  holdListRead = new Promise<void>((done) => {
+    release = done;
+  });
+  act(() => pokeStream!());
+  await until(() => holdListRead === null, 'the held read');
+  // Meanwhile an agent writes, and the next read lands at once: "1 new · Show".
+  await agentSends('Written while the first read was on its way.');
+  act(() => pokeStream!());
+  await until(() => notice(el)?.textContent?.includes('1 new') === true, 'the "1 new" notice');
+  // The older read lands now: the newer list stays, and so does its notice.
+  release();
+  await wait(400);
+  expect(notice(el)?.textContent ?? '').toContain('1 new');
 }, 30_000);

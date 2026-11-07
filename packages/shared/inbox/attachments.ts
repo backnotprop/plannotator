@@ -27,8 +27,9 @@
 
 import { createHash } from "node:crypto";
 import { constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
-import { open, type FileHandle } from "node:fs/promises";
-import { basename, isAbsolute, join, resolve } from "node:path";
+import { lstat, open, realpath, type FileHandle } from "node:fs/promises";
+import { basename, isAbsolute, join, resolve, sep } from "node:path";
+import { isShapeProjectPath } from "@plannotator/core/shape";
 import {
   INBOX_VIEW_MAX_BYTES,
   inboxAttachmentId,
@@ -384,12 +385,11 @@ const changedType = (message: string): { ok: false; unavailable: InboxAttachment
 });
 
 /**
- * The one check before the current file is read, for every route that reads
- * it (the window's and, through it, the phone's door): the recorded realpath
- * still leads to itself, the named symlink still points there, it is a
- * regular file, and its name is not of the dotenv family. Exported for the
- * routes that hand the file to something other than a read: the new-tab
- * page and the "Open in" launcher (packages/server/inbox-open-in.ts).
+ * The one check before the current file is read: the recorded realpath still
+ * leads to itself, the named symlink still points there, it is a regular file,
+ * and its name is not of the dotenv family. The routes use `checkCurrentAsync`,
+ * the same check off the event loop; this synchronous form is its reference
+ * (attachments.test.ts holds the two to the same answers).
  */
 export function checkCurrent(attachment: InboxAttachment): CurrentCheck {
   let real: string;
@@ -414,10 +414,38 @@ export function checkCurrent(attachment: InboxAttachment): CurrentCheck {
   } catch {
     return missing(`${attachment.name} is no longer on disk.`);
   }
+  return checkedStat(attachment, stat);
+}
+
+/** The check's last part, on the file's own stat: a regular file, its name not of the dotenv family. */
+function checkedStat(attachment: InboxAttachment, stat: Stats): CurrentCheck {
   if (!stat.isFile()) return changedType(`${attachment.path} is no longer a regular file.`);
   const refusal = inboxAttachmentNameRefusal(attachment.path);
   if (refusal) return changedType(refusal);
   return { ok: true, stat };
+}
+
+/**
+ * `checkCurrent` off the event loop: the same three reads (the path's realpath, the named path's, the path's
+ * lstat), made at once, judged in the same order with the same answers. Every route that reads the file or hands
+ * it on (the listing, the reads and opens, the new-tab page, the launch check) uses it, so a thread with hundreds
+ * of files lists them without stopping the Inbox for each.
+ */
+export async function checkCurrentAsync(attachment: InboxAttachment): Promise<CurrentCheck> {
+  const settle = <T>(read: Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> => read.then((value) => ({ ok: true as const, value }), () => ({ ok: false as const }));
+  const [real, target, stat] = await Promise.all([
+    settle(realpath(attachment.path)),
+    attachment.named_path ? settle(realpath(attachment.named_path)) : null,
+    settle(lstat(attachment.path)),
+  ]);
+  if (!real.ok) return missing(`${attachment.name} is no longer on disk.`);
+  if (real.value !== attachment.path) return changedType(`${attachment.path} now leads somewhere else (${real.value}).`);
+  if (attachment.named_path && target) {
+    if (!target.ok) return missing(`${attachment.named_path} is no longer on disk.`);
+    if (target.value !== attachment.path) return changedType(`${attachment.named_path} now points somewhere else (${target.value}).`);
+  }
+  if (!stat.ok) return missing(`${attachment.name} is no longer on disk.`);
+  return checkedStat(attachment, stat.value);
 }
 
 /**
@@ -435,7 +463,7 @@ export function checkCurrent(attachment: InboxAttachment): CurrentCheck {
  * or a plain text format, so a swapped-in file still opens by that extension.
  */
 export async function checkInboxAttachmentForLaunch(inboxDirPath: string, attachment: InboxAttachment): Promise<CurrentCheck> {
-  const check = checkCurrent(attachment);
+  const check = await checkCurrentAsync(attachment);
   if (!check.ok) return check;
   const kind = readInboxAttachmentKind(attachment.kind);
   if (kind !== "image" && kind !== "pdf" && kind !== "video") return check;
@@ -443,6 +471,73 @@ export async function checkInboxAttachmentForLaunch(inboxDirPath: string, attach
   if (!opened.ok) return { ok: false, unavailable: { code: opened.code, message: opened.message } };
   await opened.handle.close().catch(() => {});
   return check;
+}
+
+/** What a file in a project is, for "Open in" on a reference to it. */
+/** One place a referenced file may be: a folder and the path from it. */
+export interface InboxProjectFilePlace {
+  root: string;
+  relative: string;
+}
+
+export type InboxProjectFile = { ok: true; path: string; kind: InboxAttachmentKind } | { ok: false; code: "missing" | "refused" };
+
+/**
+ * A file a reference names, relative to a project (Shape's references, a review's diff headers), for "Open in":
+ * the attachment rules with the project in place of a record. The name is a plain project path, the file's realpath
+ * stays inside the root (a symlink out of it is refused), it is a regular file, and neither its own name nor its
+ * target's is of the dotenv family. The kind comes from its name and first bytes, as a send decides it, so the same
+ * per-kind policy applies. The first root holding the file wins (two clones of one repository).
+ */
+export async function checkInboxProjectFile(places: readonly InboxProjectFilePlace[]): Promise<InboxProjectFile> {
+  let refused = false;
+  for (const { root, relative } of places) {
+    if (!isShapeProjectPath(relative) || inboxAttachmentNameRefusal(relative)) {
+      refused = true;
+      continue;
+    }
+    let real: string;
+    let realRoot: string;
+    try {
+      realRoot = realpathSync(root);
+      real = realpathSync(join(realRoot, relative));
+    } catch {
+      continue;
+    }
+    if (!real.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep) || inboxAttachmentNameRefusal(real)) {
+      refused = true;
+      continue;
+    }
+    let handle: FileHandle;
+    try {
+      handle = await open(real, OPEN_FLAGS);
+    } catch {
+      continue;
+    }
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile()) continue;
+      const head = await readHead(handle);
+      const decision = decideInboxAttachmentKind(basename(real), head, isTextHead(head), stat.size);
+      return { ok: true, path: real, kind: decision.kind };
+    } catch {
+      continue;
+    } finally {
+      await handle.close().catch(() => {});
+    }
+  }
+  return { ok: false, code: refused ? "refused" : "missing" };
+}
+
+/** Whether a file's first bytes read as text: no NUL, and UTF-8 (a character cut at the end of the head is fine). */
+function isTextHead(head: Uint8Array): boolean {
+  if (head.includes(0)) return false;
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(head, { stream: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Whether a file's first bytes still read as the kind it was sent as (an image stays an image, a PDF a PDF). */
@@ -460,7 +555,7 @@ function headMatchesKind(attachment: InboxAttachment, head: Uint8Array): string 
  * swap in between, a FIFO or a device is refused without being read.
  */
 async function openCurrent(attachment: InboxAttachment): Promise<{ ok: true; handle: FileHandle; stat: Stats } | { ok: false; unavailable: InboxAttachmentUnavailable }> {
-  const check = checkCurrent(attachment);
+  const check = await checkCurrentAsync(attachment);
   if (!check.ok) return check;
   let handle: FileHandle;
   try {
@@ -515,7 +610,7 @@ function primeCurrentInfo(attachment: InboxAttachment, stat: Stats, result: Curr
  * so a growing log is not re-read on every listing.
  */
 export async function inboxAttachmentCurrentInfo(attachment: InboxAttachment, options: { hash?: "always" | "small" } = {}): Promise<CurrentResult> {
-  const check = checkCurrent(attachment);
+  const check = await checkCurrentAsync(attachment);
   if (!check.ok) return check;
   const key = cacheKey(attachment, check.stat);
   const cached = currentInfoCache.get(attachment.path);

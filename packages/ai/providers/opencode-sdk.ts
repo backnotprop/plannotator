@@ -13,6 +13,7 @@
 import type { OpencodeClient } from "@opencode-ai/sdk";
 import { BaseSession } from "../base-session.ts";
 import { buildSystemPrompt } from "../context.ts";
+import { withAskAiChildEnv } from "./ask-ai-env.ts";
 import type {
 	AIMessage,
 	AIProvider,
@@ -92,11 +93,18 @@ export class OpenCodeProvider implements AIProvider {
 		// port. An explicitly configured port is still honored verbatim.
 		let server: { url: string; close: () => void };
 		try {
-			server = await createOpencodeServer({
-				hostname: this.config.hostname ?? "127.0.0.1",
-				port: this.config.port ?? 0,
-				timeout: 15_000,
-			});
+			// Plannotator's integration off in this `opencode serve`
+			// (ask-ai-env.ts): the Plannotator OpenCode plugin it loads reads
+			// process.env and stands down. The SDK takes no env, so the switches
+			// are set on process.env only for the synchronous part of the call,
+			// where the SDK copies it into the spawn.
+			server = await withAskAiChildEnv(() =>
+				createOpencodeServer({
+					hostname: this.config.hostname ?? "127.0.0.1",
+					port: this.config.port ?? 0,
+					timeout: 15_000,
+				}),
+			);
 		} catch (err: unknown) {
 			// A missing CLI is a spawn error with code ENOENT in every runtime
 			// (Node: "spawn opencode ENOENT"; Bun: "Executable not found in

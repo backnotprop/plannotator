@@ -10,7 +10,7 @@ describe("parseCallDiffWorkerResult", () => {
     const parsed = parseCallDiffWorkerResult({
       protocol: 1,
       ok: true,
-      version: "0.4.1",
+      version: "0.6.0",
       diagnostics: [{ level: "warning", message: "one file was skipped" }],
       result: {
         from: "abc",
@@ -52,7 +52,7 @@ describe("parseCallDiffWorkerResult", () => {
     const parsed = parseCallDiffWorkerResult({
       protocol: 1,
       ok: true,
-      version: "0.4.1",
+      version: "0.6.0",
       result: {
         from: "abc",
         to: "def",
@@ -82,7 +82,7 @@ describe("parseCallDiffWorkerResult", () => {
     const parsed = parseCallDiffWorkerResult({
       protocol: 1,
       ok: true,
-      version: "0.4.1",
+      version: "0.6.0",
       result: {
         from: "abc",
         to: "def",
@@ -110,7 +110,7 @@ describe("parseCallDiffWorkerResult", () => {
     expect(() => parseCallDiffWorkerResult({
       protocol: 1,
       ok: true,
-      version: "0.4.1",
+      version: "0.6.0",
       result: { from: "a", to: "b", ascii: "raw", trees: [{ entry: "x", tree: { status: "changed" } }] },
     })).toThrow("invalid node status");
   });
@@ -119,7 +119,7 @@ describe("parseCallDiffWorkerResult", () => {
     const responseForFile = (file: string) => ({
       protocol: 1,
       ok: true,
-      version: "0.4.1",
+      version: "0.6.0",
       result: {
         from: "a",
         to: "b",
@@ -138,7 +138,7 @@ describe("parseCallDiffWorkerResult", () => {
     const parsed = parseCallDiffWorkerResult({
       protocol: 1,
       ok: true,
-      version: "0.4.1",
+      version: "0.6.0",
       result: { from: "a", to: "b", ascii: "raw", trees: Array.from({ length: 470 }, (_unused, index) => ({ ...tree, entry: `entry-${index}` })) },
     });
     expect(parsed.trees).toHaveLength(470);
@@ -150,7 +150,7 @@ describe("parseCallDiffWorkerResult", () => {
     const parsed = parseCallDiffWorkerResult({
       protocol: 1,
       ok: true,
-      version: "0.4.1",
+      version: "0.6.0",
       result: { from: "a", to: "b", ascii: "raw", trees: Array.from({ length: 2_001 }, (_unused, index) => ({ ...tree, entry: `entry-${index}` })) },
     });
     expect(parsed.trees).toHaveLength(2_000);
@@ -170,7 +170,7 @@ describe("parseCallDiffWorkerResult", () => {
     expect(() => parseCallDiffWorkerResult({
       protocol: 1,
       ok: true,
-      version: "0.4.1",
+      version: "0.6.0",
       result: { from: "a", to: "b", ascii: "raw", trees: [wideTree] },
     })).toThrow("tree limits");
   });
@@ -180,13 +180,13 @@ describe("parseCallDiffWorkerResult", () => {
     expect(() => parseCallDiffWorkerResult({
       protocol: 1,
       ok: true,
-      version: "0.4.1",
+      version: "0.6.0",
       result: { from: "a", to: "b", trees: [tree] },
     })).toThrow("missing its raw diff");
     expect(() => parseCallDiffWorkerResult({
       protocol: 1,
       ok: true,
-      version: "0.4.1",
+      version: "0.6.0",
       result: { from: "a", to: "b", ascii: "x".repeat(1024 * 1024 + 1), trees: [tree] },
     })).toThrow("1 MB limit");
   });

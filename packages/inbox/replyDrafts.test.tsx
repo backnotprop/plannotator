@@ -45,8 +45,12 @@ let savedEventSource: unknown;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
 /** How long the reply route's answer is held back (the delayed-reply probe), in ms. */
 let replyDelay = 0;
+/** This test's fetch calls not answered yet: afterEach waits for none before the real fetch is back. */
+let inflight = 0;
 /** The window's event streams (a stand-in EventSource), to hand it an `event: drafts`. */
 let streams: { listeners: Map<string, ((event: { data: string }) => void)[]> }[] = [];
+/** Records emitted so far: each gets a seq above the last and past the list's cursor, as the server's are. */
+let emitted = 0;
 function emit(type: string, data: unknown) {
   for (const stream of streams) for (const listener of stream.listeners.get(type) ?? []) listener({ data: JSON.stringify(data) });
 }
@@ -119,15 +123,21 @@ beforeEach(() => {
   if (!hasDom) return;
   world = worlds.shift()!;
   savedFetch = globalThis.fetch;
+  inflight = 0;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = String(input);
-    const method = init?.method ?? 'GET';
-    const body = init?.body ? String(init.body) : undefined;
-    if (method === 'POST') posted.push({ path, body: body ? JSON.parse(body) : {} });
-    const answer = await loopback(path, method, body);
-    // Only the reply's answer is held back: the request itself has reached the server.
-    if (replyDelay > 0 && method === 'POST' && path.endsWith('/reply')) await new Promise((r) => setTimeout(r, replyDelay));
-    return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
+    inflight += 1;
+    try {
+      const path = String(input);
+      const method = init?.method ?? 'GET';
+      const body = init?.body ? String(init.body) : undefined;
+      if (method === 'POST') posted.push({ path, body: body ? JSON.parse(body) : {} });
+      const answer = await loopback(path, method, body);
+      // Only the reply's answer is held back: the request itself has reached the server.
+      if (replyDelay > 0 && method === 'POST' && path.endsWith('/reply')) await new Promise((r) => setTimeout(r, replyDelay));
+      return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
+    } finally {
+      inflight -= 1;
+    }
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
   streams = [];
@@ -146,12 +156,16 @@ beforeEach(() => {
   window.location.hash = '';
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
   root = null;
   host = null;
+  // Leaving the thread saves what waits at once: that save (and its read-back) is answered by this test's Inbox
+  // before the real fetch is back. On the real fetch it fails (a relative URL), and a save that did not land
+  // marks its thread "not saved" in module state, so the next test would start with the restart guard asking.
+  await requestsSettled();
   globalThis.fetch = savedFetch;
   (globalThis as Record<string, unknown>).EventSource = savedEventSource;
 });
@@ -162,6 +176,22 @@ async function settle(ms = 40) {
       await new Promise((r) => setTimeout(r, ms));
     });
   }
+}
+
+/**
+ * No request of this test is in flight, on two reads a macrotask apart: the draft's saves chain on microtasks,
+ * so a save queued behind an answer has started its request by the second read.
+ */
+async function requestsSettled() {
+  // About 5 s: a reply held back (`replyDelay`) or a slow runner still settles.
+  for (let i = 0; i < 250; i++) {
+    if (inflight === 0) {
+      await act(async () => void (await new Promise((r) => setTimeout(r, 0))));
+      if (inflight === 0) return;
+    }
+    await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
+  }
+  throw new Error(`timed out waiting for the requests of the test to settle (${inflight} in flight)`);
 }
 
 async function until(check: () => boolean | Promise<boolean>, what: string) {
@@ -372,7 +402,7 @@ test.skipIf(!hasDom)('the list says "Draft" ("Draft · Your reply", "Draft · 1 
   const saved = await loopback(`/api/inbox/threads/${world.waiting}/draft`, 'POST', JSON.stringify({ body: 'Pagefind.', base: null }));
   expect(saved.status).toBe(200);
   const el = await renderApp('');
-  // The full words (`data-count-words`); the row draws them on a wide row, "Draft" on a two-line or phone row
+  // The full words (`data-count-words`); the row draws them on a wide row, "Draft" on a three-line or phone row
   // (approval "inbox-row-byline", option A).
   const label = (id: string) => el.querySelector(`[data-thread-id="${id}"] [data-draft-label]`)?.textContent?.replace(/\s+/g, ' ').trim();
   const full = (id: string) => el.querySelector(`[data-thread-id="${id}"] .ib-c`)?.getAttribute('data-count-words');
@@ -668,7 +698,7 @@ test.skipIf(!hasDom)('after a lost answer, the same words sent later to a new qu
   const first = posted.filter((p) => p.path.endsWith('/reply')).at(-1)!;
   // The agent asks something new in the thread; the person answers "Yes." again.
   const asked = await agentSend(['One more:', '', ':::question', 'Ship it today?', '', '- [ ] Yes', '- [ ] No', ':::'].join('\n'), world.waiting);
-  await act(async () => emit('record', { seq: 1 }));
+  await act(async () => emit('record', { seq: 1_000_000 + ++emitted }));
   leave();
   const again = await renderApp(`#thread=${world.waiting}`);
   await until(() => again.textContent!.includes('Ship it today?'), 'the new question');
@@ -820,7 +850,7 @@ test.skipIf(!hasDom)('an unconfirmed Send that a thread read shows landed is fin
   await until(() => !!el.textContent?.includes('The reply may not have gone.'), 'the error');
   globalThis.fetch = real;
   // The Inbox answers again: the stream's next record reads the thread, and the reply is there.
-  await act(async () => emit('record', { seq: 1 }));
+  await act(async () => emit('record', { seq: 1_000_000 + ++emitted }));
   await until(() => box(el) === null, 'the box closed');
   await until(() => liveText(el).includes('Your reply went.'), 'said in the live region');
   expect(await personReplies('Landed, seen on a read.')).toHaveLength(1);
@@ -843,7 +873,9 @@ test.skipIf(!hasDom)('an unconfirmed Send found by the next Send: a pick made si
   expect(posted.filter((p) => p.path.endsWith('/reply')).length).toBe(before);
   expect(liveText(el)).toContain('Your reply went. Not sent yet: 1 pick.');
   expect(await personReplies('Words first.')).toHaveLength(1);
-  // Send sends the pick as an ordinary reply.
+  // Send sends the pick as an ordinary reply, once the first Send has finished reading the thread (Send is
+  // disabled until then, and a press on it does nothing).
+  await until(() => !button(el, 'Send').disabled, 'Send ready again');
   act(() => button(el, 'Send').click());
   await until(() => posted.filter((p) => p.path.endsWith('/reply')).length === before + 1, 'the pick sent');
   const pickReply = posted.filter((p) => p.path.endsWith('/reply')).at(-1)!;
@@ -875,7 +907,7 @@ test.skipIf(!hasDom)('a thread read finds the lost Send landed: what was added s
   const choice = [...el.querySelectorAll('fieldset[data-question-key] label')].find((l) => l.textContent?.includes('Pagefind')) as HTMLElement;
   act(() => choice.click());
   await until(() => el.textContent!.includes('in your draft'), 'the pick saved');
-  await act(async () => emit('record', { seq: 1 }));
+  await act(async () => emit('record', { seq: 1_000_000 + ++emitted }));
   await until(() => box(el) === null, 'the box closed');
   await until(() => liveText(el).includes('Your reply went. Not sent yet: 1 pick.'), 'the pick said');
 }, 30_000);

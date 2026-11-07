@@ -19,6 +19,7 @@
  * a dead link. A file whose current bytes cannot be opened now (moved,
  * deleted) links to the version that was sent, which always can.
  */
+import { inboxUrl } from './inboxUrl';
 import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { ATTACHMENT_FEEDBACK_HEADING, SENT_VERSION_SUFFIX, exportFileLabel } from './attachments';
 import { inboxMarkupName } from './images';
@@ -161,5 +162,5 @@ export function resolveReplyLink(href: string, files: readonly InboxAttachmentSt
     return attachment ? { kind: 'file', attachment, version: file[2] as 'current' | 'sent' } : null;
   }
   const markup = MARKUP_TOKEN.exec(href);
-  return markup ? { kind: 'markup', src: `/api/inbox/markups/${markup[1]}` } : null;
+  return markup ? { kind: 'markup', src: inboxUrl(`/markups/${markup[1]}`) } : null;
 }

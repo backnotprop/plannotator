@@ -1,3 +1,4 @@
+import { SERVED_FRAME_GONE } from "@plannotator/core/html-embed";
 import {
   forwardRef,
   useCallback,
@@ -22,6 +23,7 @@ import { getRichCopyEnabled } from "../../utils/richCopyPolicy";
 import { elementIdentityForAskAI } from "../../utils/parser";
 import { getIdentity } from "../../utils/identity";
 import { THUMBS_UP_LABEL } from "../../utils/quickLabels";
+import { hashDraftScope } from "../../utils/draftScopeHash";
 import {
   createVimHudCommand,
   getVimHudPhase,
@@ -52,6 +54,7 @@ import {
   rejectsLiveMessage,
   useHtmlAnnotation,
   type HtmlLiveSession,
+  type HtmlScrollClear,
 } from "./useHtmlAnnotation";
 import {
   THEME_TOKENS,
@@ -59,6 +62,7 @@ import {
   buildThemeTokenPayload,
   hasHostThemeOptIn,
   injectIntoHead,
+  injectPrintDefaults,
   resolveBridgeScriptUrl,
 } from "./srcdoc";
 
@@ -326,6 +330,11 @@ export interface HtmlViewerProps {
    *  view inside the page. Default 'smooth'; pass 'auto' to carry the
    *  parent's reduced-motion preference across the iframe boundary. */
   scrollBehavior?: 'smooth' | 'auto';
+  /** Opt-in: where the host's own panel floats over the frame's right side
+   *  (frame pixels: its left edge, top and bottom), read as an annotation is
+   *  selected. A mark under the panel scrolls clear of it, below it, where
+   *  the page can scroll. Absent or null → centred, as before. */
+  scrollClear?: () => HtmlScrollClear | null;
   /** Accessible iframe title. */
   title?: string;
   /**
@@ -377,6 +386,13 @@ export interface HtmlViewerProps {
    */
   onHostDraft?: (draft: HostDraft | null) => void;
   /**
+   * Opt-in: on a touch screen (`pointer: coarse`), a text selection made with
+   * a finger counts, read from `selectionchange` once it rests (a long press
+   * sends no mouseup). The Inbox's phone layout turns it on. Absent → only a
+   * mouseup reports a selection, unchanged.
+   */
+  touchSelection?: boolean;
+  /**
    * Opt-in host capability for a native shell whose web view decides every
    * navigation itself (the Inbox surface in the iPhone app). A link the
    * person taps in Interact opens as a new window (`window.open`, the sandbox
@@ -407,7 +423,25 @@ export interface HtmlViewerProps {
    * example, key it on the value).
    */
   sandbox?: string;
+  /**
+   * Opt-in: frame the document from a URL the host serves instead of as a
+   * srcdoc. The viewer builds the same document (the page, theme, print
+   * defaults, the inline annotation bridge) and hands it here; the host keeps
+   * it and answers the URL of a page it serves under its OWN CSP (the Inbox:
+   * web pictures in an attached page while its window loads none, because a
+   * srcdoc frame inherits the host page's CSP and can only narrow it). The
+   * frame keeps the same `sandbox`, so it is still an opaque origin and the
+   * bridge speaks as before. Called again whenever the document changes, and
+   * once more when the served page says it is gone
+   * (`{ type: "plannotator-frame-gone" }`, a host restart). Null or a failure:
+   * the frame stays empty; never a srcdoc fallback, which would load under
+   * the host's policy. Ignored in live (`src`) mode. Absent → srcdoc, unchanged.
+   */
+  frameUrl?: (document: string) => Promise<string | null>;
 }
+
+/** What a host's served frame document says when it is no longer kept (`frameUrl`). */
+export const HTML_VIEWER_FRAME_GONE = SERVED_FRAME_GONE;
 
 /**
  * Render arbitrary HTML in a sandbox and adapt its validated bridge messages
@@ -456,14 +490,17 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       selectionActionsIcon,
       mentionSource,
       scrollBehavior,
+      scrollClear,
       title = "HTML Plan Viewer",
       bridgeScriptUrl,
       bridgeReadyTimeoutMs = DEFAULT_BRIDGE_READY_TIMEOUT_MS,
       onBridgeUnavailable,
       bridgeErrorDisplay = "banner",
       onHostDraft,
+      touchSelection = false,
       hostNavigates = false,
       sandbox = HTML_VIEWER_SANDBOX,
+      frameUrl,
     },
     ref,
   ) => {
@@ -473,6 +510,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     // Increment on every bridge-ready event so srcdoc navigations re-send
     // state even though the iframe element and its WindowProxy are reused.
     const [iframeReadyVersion, setIframeReadyVersion] = useState(0);
+    const [printReady, setPrintReady] = useState(false);
     const [iframeFocused, setIframeFocused] = useState(false);
     const [vimBridgePhase, setVimBridgePhase] =
       useState<VimSelectionHudContext>("inactive");
@@ -483,6 +521,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     const [globalCommentPopover, setGlobalCommentPopover] = useState<{
       anchorEl: HTMLElement;
       contextText: string;
+      draftKey: string;
     } | null>(null);
 
     // Live proxied-app mode: the iframe navigates a real origin, so the
@@ -553,8 +592,48 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         diffActive: !!diffActive,
         bridgeScriptUrl: bridgeUrl,
       });
-      return injectIntoHead(rawHtml, injection);
+      return injectIntoHead(injectPrintDefaults(rawHtml, { sectionBreaks: hostTheme }), injection);
     }, [liveMode, rawHtml, hostTheme, diffActive, bridgeUrl]);
+
+    useLayoutEffect(() => {
+      setPrintReady(false);
+    }, [srcdoc]);
+
+    // The host-served frame (`frameUrl`): the URL of the document last built.
+    // The previous one stays in the frame until the next is known, as a
+    // srcdoc change reloads in place. A gone page asks again, at most twice
+    // per document: the count resets only when the document changes, never on
+    // the bridge's `ready`, because the page runs in the same frame and could
+    // otherwise post "gone" after every load and re-post forever.
+    const servesFrame = !liveMode && !!frameUrl;
+    const frameUrlRef = useRef(frameUrl);
+    frameUrlRef.current = frameUrl;
+    const [servedUrl, setServedUrl] = useState<string | undefined>(undefined);
+    const [frameAsk, setFrameAsk] = useState(0);
+    const goneAsksRef = useRef(0);
+    const goneAsksDocRef = useRef<string | undefined>(undefined);
+    useEffect(() => {
+      if (!servesFrame || srcdoc === undefined) return;
+      if (goneAsksDocRef.current !== srcdoc) {
+        goneAsksDocRef.current = srcdoc;
+        goneAsksRef.current = 0;
+      }
+      let cancelled = false;
+      void (async () => {
+        let next: string | null = null;
+        try {
+          next = (await frameUrlRef.current?.(srcdoc)) ?? null;
+        } catch {
+          next = null;
+        }
+        if (!cancelled && next !== null) setServedUrl(next);
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [servesFrame, srcdoc, frameAsk]);
+    const servesFrameRef = useRef(servesFrame);
+    servesFrameRef.current = servesFrame;
 
     // Error state for the bridgeScriptUrl path only: the inline path never
     // sets it (no timer, and a version mismatch there can only be a forged
@@ -709,6 +788,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onUnanchoredChange: handleBridgeUnanchored,
       maxAdditionalTargets,
       scrollBehavior,
+      scrollClear,
       onHostDraft: readOnly ? undefined : onHostDraft,
     });
     createdIdsRef.current = hook.createdAnnotationIds;
@@ -790,6 +870,20 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         // Live sessions verify origin + token before reading anything.
         const live = liveSessionRef.current;
         if (live && rejectsLiveMessage(live, e.origin, e.data)) return;
+        if (
+          servesFrameRef.current
+          && typeof e.data === "object"
+          && e.data !== null
+          && (e.data as { type?: unknown }).type === HTML_VIEWER_FRAME_GONE
+        ) {
+          if (goneAsksRef.current < 2) {
+            goneAsksRef.current += 1;
+            // Blank first, so the same URL kept again (the host had pushed it out) still navigates.
+            setServedUrl("about:blank");
+            setFrameAsk((n) => n + 1);
+          }
+          return;
+        }
         if (isBridgeReadyMessage(e.data)) {
           // Protocol stamp: one console warning on drift, naming both
           // versions. The ready is still honored (an older bridge answers
@@ -819,6 +913,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             );
           }
           setIframeReadyVersion((version) => version + 1);
+          setPrintReady(true);
           setVimBridgePhase("inactive");
           setVimHudCommand(null);
           setVimHelpOpen(false);
@@ -1055,6 +1150,15 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       postToBridge({ type: `${PREFIX}set-host-navigates`, active: true });
     }, [iframeReadyVersion, hostNavigates]);
 
+    // Selections made with a finger (`touchSelection`). A viewer that never
+    // asked posts nothing.
+    const touchSelectionAskedRef = useRef(false);
+    useEffect(() => {
+      if (iframeReadyVersion === 0 || (!touchSelection && !touchSelectionAskedRef.current)) return;
+      touchSelectionAskedRef.current = touchSelection;
+      postToBridge({ type: `${PREFIX}set-touch-selection`, active: touchSelection });
+    }, [iframeReadyVersion, touchSelection]);
+
     // The hidden composer's Escape rung: with focus outside the iframe,
     // Escape closes the hidden draft (its text stays in the draft store) and
     // is used, so the next press reaches the rest of the ladder. Capture
@@ -1170,12 +1274,17 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     useImperativeHandle(ref, () => ({
       removeHighlight: hook.removeHighlight,
       clearAllHighlights: hook.clearAllHighlights,
+      print: !liveMode && printReady ? () => postToBridge({ type: `${PREFIX}print` }) : undefined,
       // Shared/draft restores respect the live page filter too.
       applySharedAnnotations: (anns: Annotation[]) =>
         hook.applyAnnotations(forCurrentPage(anns)),
       stepPin: (direction: "parent" | "child") =>
         postToBridge({ type: `${PREFIX}step-pin`, direction }),
-      revealPin: () => postToBridge({ type: `${PREFIX}reveal-pin` }),
+      revealPin: (options?: { clearBottom?: number }) =>
+        postToBridge({
+          type: `${PREFIX}reveal-pin`,
+          ...(options?.clearBottom ? { clearBottom: options.clearBottom } : {}),
+        }),
     }));
 
     const handleGlobalCommentSubmit = useCallback(
@@ -1236,7 +1345,11 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             onClick={() => {
               const anchorEl = globalCommentButtonRef.current;
               if (!anchorEl) return;
-              setGlobalCommentPopover({ anchorEl, contextText: "" });
+              // One kept draft per live-app URL (src), else per document: a
+              // hash of its text, taken only when the composer opens, so two
+              // documents never share a draft.
+              const draftKey = `html:global:${src ? `src:${src}` : `doc:${hashDraftScope(rawHtml)}`}`;
+              setGlobalCommentPopover({ anchorEl, contextText: "", draftKey });
             }}
             className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors cursor-pointer"
             title="Add global comment"
@@ -1253,6 +1366,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     return (
       <>
         <div
+          data-print-html={liveMode ? undefined : ""}
           className={`relative w-full${fullViewport ? " h-full flex flex-col" : ""}`}
           style={fullViewport ? undefined : { maxWidth: maxWidth ?? undefined }}
         >
@@ -1327,13 +1441,20 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             )}
             {/* Live proxied-app mode navigates a real loopback origin: no
                 sandbox (the user's own app needs cookies, storage, and
-                same-origin XHR) and no srcdoc. Srcdoc mode is unchanged. */}
+                same-origin XHR) and no srcdoc. A host-served frame
+                (`frameUrl`) keeps the srcdoc frame's sandbox. Srcdoc mode is
+                unchanged. */}
             <iframe
               ref={iframeRef}
-              {...(src ? { src } : { srcDoc: srcdoc, sandbox: srcdocSandbox(sandbox, hostNavigates) })}
+              {...(src
+                ? { src }
+                : servesFrame
+                  ? { src: servedUrl, sandbox: srcdocSandbox(sandbox, hostNavigates) }
+                  : { srcDoc: srcdoc, sandbox: srcdocSandbox(sandbox, hostNavigates) })}
               style={{
                 width: "100%",
                 height: fullViewport ? "100%" : `${iframeHeight}px`,
+                ...(!liveMode ? { "--pn-html-print-height": `${iframeHeight}px` } : {}),
                 border: "none",
                 display: "block",
                 colorScheme: "auto",
@@ -1451,6 +1572,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               anchorEl={globalCommentPopover.anchorEl}
               contextText={globalCommentPopover.contextText}
               isGlobal={true}
+              // The words typed survive a close (Escape, X) and come back on reopen.
+              draftKey={globalCommentPopover.draftKey}
               onSubmit={handleGlobalCommentSubmit}
               onClose={() => setGlobalCommentPopover(null)}
               mentionSource={mentionSource}

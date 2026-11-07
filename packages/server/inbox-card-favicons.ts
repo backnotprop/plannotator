@@ -1,0 +1,276 @@
+/**
+ * A web link's favicon on the opened card (user feedback #10; the owner's
+ * answer, 2026-11-02: favicons only for links the person added, fetched by
+ * the Inbox, served from its own origin). The window's CSP stays
+ * `img-src 'self' data: blob:`, so it never loads a remote image itself: a
+ * remote image in an agent's text stays blocked, and a link an agent added
+ * never makes this computer ask its host for anything (the route refuses it
+ * before this module is reached).
+ *
+ * What is fetched: `https://<host>/favicon.ico` and nothing else (no page,
+ * no `<link rel=icon>`), with no cookies or credentials, the referrer and
+ * user agent of the Inbox's own fetch only.
+ * - https only, on the link's own host; a redirect may stay on that host
+ *   (same name and port, https), at most 3 hops; any other is a miss.
+ * - Never a host that is an IP literal, `localhost`, a one-label name or
+ *   `.local`, or a name that resolves to a loopback, private, link-local,
+ *   CGNAT, multicast or reserved address. TLS checks the certificate against
+ *   the name, so a name that resolves elsewhere between the check and the
+ *   fetch (rebinding) still fails there.
+ * - One deadline for the whole fetch, redirects and body (3 s); at most
+ *   64 KB, by `content-length` or counted as it streams.
+ * - Only an image: the response's `content-type` must be `image/*`, and its
+ *   bytes must sniff as ICO, PNG, GIF, JPEG, WebP, BMP or AVIF; never SVG
+ *   (served from the Inbox's origin, an SVG opened as a page could run script).
+ * Results are cached per host, misses included: a hit for a day, a miss for
+ * an hour, at most 500 hosts (the oldest dropped first), and one fetch at a
+ * time per host.
+ */
+
+import { lookup as dnsLookup } from "node:dns/promises";
+import { isIP } from "node:net";
+import { sniffImageContentType } from "@plannotator/shared/review-image";
+
+/** Why a favicon is not served. */
+export type CardFaviconMiss = "not_https" | "not_public" | "redirect_off_host" | "too_many_redirects" | "status" | "not_image" | "too_big" | "timeout" | "unavailable";
+
+export type CardFaviconResult = { ok: true; type: string; body: Uint8Array<ArrayBuffer> } | { ok: false; miss: CardFaviconMiss };
+
+export interface CardFaviconOptions {
+  /** Tests: the fetch used (default the runtime's). */
+  fetch?: (url: string, init: RequestInit) => Promise<Response>;
+  /** Tests: a name's addresses (default `dns.lookup`, every address). */
+  lookup?: (hostname: string) => Promise<string[]>;
+  now?: () => number;
+  timeoutMs?: number;
+  maxBytes?: number;
+  hitTtlMs?: number;
+  missTtlMs?: number;
+  maxHosts?: number;
+}
+
+export const CARD_FAVICON_TIMEOUT_MS = 3000;
+export const CARD_FAVICON_MAX_BYTES = 64 * 1024;
+const HIT_TTL_MS = 24 * 60 * 60 * 1000;
+const MISS_TTL_MS = 60 * 60 * 1000;
+const MAX_HOSTS = 500;
+const MAX_REDIRECTS = 3;
+const SERVED_TYPES = new Set(["image/x-icon", "image/png", "image/gif", "image/jpeg", "image/webp", "image/bmp", "image/avif"]);
+
+export interface CardFavicons {
+  /** The favicon of `https://<host>/` (`host` as a URL writes it: name and any port). */
+  get(host: string): Promise<CardFaviconResult>;
+}
+
+export function createCardFavicons(options: CardFaviconOptions = {}): CardFavicons {
+  const fetchImpl = options.fetch ?? ((url, init) => fetch(url, init));
+  const lookup = options.lookup ?? (async (hostname: string) => (await dnsLookup(hostname, { all: true, verbatim: true })).map((entry) => entry.address));
+  const now = options.now ?? Date.now;
+  const timeoutMs = options.timeoutMs ?? CARD_FAVICON_TIMEOUT_MS;
+  const maxBytes = options.maxBytes ?? CARD_FAVICON_MAX_BYTES;
+  const hitTtl = options.hitTtlMs ?? HIT_TTL_MS;
+  const missTtl = options.missTtlMs ?? MISS_TTL_MS;
+  const maxHosts = options.maxHosts ?? MAX_HOSTS;
+  const cache = new Map<string, { at: number; result: CardFaviconResult }>();
+  const inFlight = new Map<string, Promise<CardFaviconResult>>();
+
+  const remember = (host: string, result: CardFaviconResult) => {
+    cache.delete(host);
+    cache.set(host, { at: now(), result });
+    while (cache.size > maxHosts) cache.delete(cache.keys().next().value!);
+  };
+
+  async function load(host: string): Promise<CardFaviconResult> {
+    let start: URL;
+    try {
+      start = new URL(`https://${host}/favicon.ico`);
+    } catch {
+      return { ok: false, miss: "not_https" };
+    }
+    if (start.host !== host || start.username || start.password) return { ok: false, miss: "not_https" };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    // Every wait (the name's lookup, the response, each chunk of its body) ends at the one deadline.
+    const aborted = new Promise<never>((_resolve, reject) => controller.signal.addEventListener("abort", () => reject(new Error("timeout")), { once: true }));
+    aborted.catch(() => {});
+    const deadline = <T,>(work: Promise<T>): Promise<T> => Promise.race([work, aborted]);
+    try {
+      if (!(await deadline(isPublicName(start.hostname, lookup)))) return { ok: false, miss: "not_public" };
+      let url = start;
+      for (let hop = 0; ; hop++) {
+        const response = await deadline(
+          fetchImpl(url.href, {
+            method: "GET",
+            redirect: "manual",
+            credentials: "omit",
+            headers: { accept: "image/*" },
+            signal: controller.signal,
+          }),
+        );
+        if (response.status >= 300 && response.status < 400) {
+          await response.body?.cancel().catch(() => {});
+          const location = response.headers.get("location");
+          if (!location) return { ok: false, miss: "status" };
+          let next: URL;
+          try {
+            next = new URL(location, url);
+          } catch {
+            return { ok: false, miss: "redirect_off_host" };
+          }
+          if (next.protocol !== "https:" || next.host !== start.host || next.username || next.password) return { ok: false, miss: "redirect_off_host" };
+          if (hop + 1 > MAX_REDIRECTS) return { ok: false, miss: "too_many_redirects" };
+          url = next;
+          continue;
+        }
+        if (response.status !== 200) {
+          await response.body?.cancel().catch(() => {});
+          return { ok: false, miss: "status" };
+        }
+        const declared = (response.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+        if (!declared.startsWith("image/") || declared === "image/svg+xml") {
+          await response.body?.cancel().catch(() => {});
+          return { ok: false, miss: "not_image" };
+        }
+        const length = Number(response.headers.get("content-length"));
+        if (Number.isFinite(length) && length > maxBytes) {
+          await response.body?.cancel().catch(() => {});
+          return { ok: false, miss: "too_big" };
+        }
+        const body = await readCapped(response, maxBytes, deadline);
+        if (!body) return { ok: false, miss: "too_big" };
+        const type = sniffImageContentType(body);
+        if (!type || !SERVED_TYPES.has(type)) return { ok: false, miss: "not_image" };
+        return { ok: true, type, body };
+      }
+    } catch {
+      return { ok: false, miss: controller.signal.aborted ? "timeout" : "unavailable" };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  return {
+    async get(host) {
+      const key = host.toLowerCase();
+      const cached = cache.get(key);
+      if (cached && now() - cached.at < (cached.result.ok ? hitTtl : missTtl)) return cached.result;
+      const pending = inFlight.get(key);
+      if (pending) return pending;
+      const run = load(key)
+        .then((result) => {
+          remember(key, result);
+          return result;
+        })
+        .finally(() => inFlight.delete(key));
+      inFlight.set(key, run);
+      return run;
+    },
+  };
+}
+
+/** The body, or null once it passes `max` bytes (the rest is not read). */
+export async function readCapped(response: Response, max: number, deadline: <T>(work: Promise<T>) => Promise<T>): Promise<Uint8Array<ArrayBuffer> | null> {
+  const reader = response.body?.getReader();
+  if (!reader) return new Uint8Array(0);
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    let chunk: Awaited<ReturnType<typeof reader.read>>;
+    try {
+      chunk = await deadline(reader.read());
+    } catch (error) {
+      reader.cancel().catch(() => {});
+      throw error;
+    }
+    const { done, value } = chunk;
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return out;
+}
+
+/** Whether `hostname` is a public DNS name: not an IP literal or a local name, and every address it resolves to public. */
+export async function isPublicName(hostname: string, lookup: (hostname: string) => Promise<string[]>): Promise<boolean> {
+  const name = hostname.replace(/\.$/, "").toLowerCase();
+  if (!name.includes(".") || name.startsWith("[") || isIP(name) !== 0) return false;
+  if (name === "localhost" || name.endsWith(".localhost") || name.endsWith(".local") || name.endsWith(".internal") || name.endsWith(".home.arpa")) return false;
+  let addresses: string[];
+  try {
+    addresses = await lookup(name);
+  } catch {
+    return false;
+  }
+  return addresses.length > 0 && addresses.every(isPublicAddress);
+}
+
+/** Whether an IP address is a public unicast one (not loopback, private, link-local, CGNAT, multicast or reserved). */
+export function isPublicAddress(address: string): boolean {
+  const version = isIP(address);
+  if (version === 4) return isPublicV4(address.split(".").map(Number));
+  if (version !== 6) return false;
+  const bytes = ipv6Bytes(address);
+  if (!bytes) return false;
+  const zeros = (from: number, to: number) => bytes.slice(from, to).every((b) => b === 0);
+  const v4At12 = Array.from(bytes.slice(12, 16));
+  // ::/96: the unspecified address, loopback and IPv4-compatible (`::127.0.0.1`, `::7f00:1`), in any spelling.
+  if (zeros(0, 12)) return false;
+  // ::ffff:0:0/96, IPv4-mapped: only as public as the IPv4 address inside.
+  if (zeros(0, 10) && bytes[10] === 0xff && bytes[11] === 0xff) return isPublicV4(v4At12);
+  const word = (i: number) => (bytes[i * 2]! << 8) | bytes[i * 2 + 1]!;
+  // 64:ff9b::/96 and 64:ff9b:1::/48 (NAT64, IPv4 inside).
+  if (word(0) === 0x64 && word(1) === 0xff9b && (word(2) === 0 || word(2) === 1)) return false;
+  // 2002::/16 (6to4) and 2001::/32 (Teredo): IPv4 inside; 2001:db8::/32 documentation.
+  if (word(0) === 0x2002 || (word(0) === 0x2001 && (word(1) === 0 || word(1) === 0xdb8))) return false;
+  // 100::/64 discard, fc00::/7 unique local, fe80::/10 link-local, ff00::/8 multicast.
+  if (word(0) === 0x100 && zeros(2, 8)) return false;
+  if ((bytes[0]! & 0xfe) === 0xfc || (bytes[0] === 0xfe && (bytes[1]! & 0xc0) === 0x80) || bytes[0] === 0xff) return false;
+  return true;
+}
+
+/** An IPv6 address (any spelling `isIP` accepts: `::`, a dotted IPv4 tail, a zone) as its 16 bytes, or null. */
+function ipv6Bytes(address: string): Uint8Array | null {
+  let text = address.toLowerCase().replace(/%.*$/, "");
+  const tail = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(text);
+  if (tail) {
+    const [a, b, c, d] = tail.slice(1).map(Number) as [number, number, number, number];
+    text = `${text.slice(0, tail.index)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const halves = text.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const rest = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const missing = 8 - head.length - rest.length;
+  if (halves.length === 1 ? missing !== 0 : missing < 1) return null;
+  const groups = [...head, ...Array<string>(halves.length === 2 ? missing : 0).fill("0"), ...rest];
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 8; i++) {
+    const value = Number.parseInt(groups[i]!, 16);
+    if (!/^[0-9a-f]{1,4}$/.test(groups[i]!) || Number.isNaN(value)) return null;
+    bytes[i * 2] = value >> 8;
+    bytes[i * 2 + 1] = value & 0xff;
+  }
+  return bytes;
+}
+
+function isPublicV4([a, b, c]: number[]): boolean {
+  if (a === undefined || b === undefined || c === undefined) return false;
+  if (a === 0 || a === 10 || a === 127 || a >= 224) return false;
+  if (a === 100 && b >= 64 && b <= 127) return false; // CGNAT (Tailscale's addresses among them)
+  if (a === 169 && b === 254) return false;
+  if (a === 172 && b >= 16 && b <= 31) return false;
+  if (a === 192 && (b === 168 || (b === 0 && (c === 0 || c === 2)))) return false;
+  if (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) return false;
+  if (a === 203 && b === 0 && c === 113) return false;
+  return true;
+}

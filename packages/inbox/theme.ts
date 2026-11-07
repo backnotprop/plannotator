@@ -10,8 +10,12 @@
  * Settings' Colors row picks the palette for the light half and the dark half
  * (useInboxPalettes), the same choices as plan review's Theme tab. Only the
  * part the person changed goes to the server: a mode, or one half's palette.
+ *
+ * Every switch lands in one frame, with no colour fade: @plannotator/ui's
+ * ThemeProvider holds `pn-theme-switching` on <html> while it lands (theme.css).
  */
 
+import { perfInteraction } from './perfMarks';
 import { useCallback } from 'react';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { useThemePaletteHalves, type ThemePaletteHalves } from '@plannotator/ui/hooks/useThemePaletteHalves';
@@ -19,6 +23,7 @@ import { themeSupportsHalf, type ThemeHalf } from '@plannotator/ui/utils/themeRe
 import { configStore, type ServerSyncFn } from '@plannotator/ui/config';
 import type { Mode } from '@plannotator/ui/theme-modes';
 import { inboxApi, type InboxThemeConfig } from './api';
+import { diffOptionsToWire } from './diffOptions';
 
 /**
  * The config store's server write-back, for the Inbox: it has no /api/config,
@@ -56,10 +61,9 @@ export const inboxServerSync: ServerSyncFn = (payload) => {
     }
     if (Object.keys(send).length > 0) void inboxApi.saveTheme(send).catch(() => {});
   }
-  const diffStyle = (payload.diffOptions as { diffStyle?: unknown } | undefined)?.diffStyle;
-  if (diffStyle === 'split' || diffStyle === 'unified') {
-    void inboxApi.saveDiffStyle(diffStyle).catch(() => {});
-  }
+  // Every diff setting the Inbox changed (diffOptions.ts), in one POST.
+  const diffOptions = diffOptionsToWire(payload.diffOptions);
+  if (diffOptions) void inboxApi.saveDiffOptions(diffOptions).catch(() => {});
 };
 
 let adopted = false;
@@ -107,18 +111,6 @@ export function resetInboxThemeForTests(): void {
   changedThemeFields.clear();
 }
 
-/**
- * Under reduced motion the switch lands in one frame: the global colour
- * crossfade (theme.css's 150 ms `*` transition) is held off until the new
- * colours are painted. Otherwise it crossfades, as plan review does.
- */
-function landInstantlyIfReducedMotion(): void {
-  if (typeof window === 'undefined' || !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
-  const root = document.documentElement;
-  root.classList.add('ib-theme-instant');
-  requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove('ib-theme-instant')));
-}
-
 export interface InboxTheme {
   /** The stored choice: light, dark, or system (follow this computer). */
   mode: Mode;
@@ -134,7 +126,7 @@ export function useInboxTheme(): InboxTheme {
   const choose = useCallback(
     (next: Mode) => {
       markChosen('mode');
-      landInstantlyIfReducedMotion();
+      perfInteraction('theme');
       setMode(next);
     },
     [setMode],
@@ -162,7 +154,6 @@ export function useInboxPalettes(): InboxPalettes {
       // A palette that cannot draw this half is refused by the provider, so nothing would be written.
       if (!themeSupportsHalf(id, half)) return;
       markChosen(half);
-      landInstantlyIfReducedMotion();
       assign(half, id);
     },
     [assign],
