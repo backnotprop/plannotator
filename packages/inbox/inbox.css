@@ -976,7 +976,7 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-nrow .ib-l1 .ib-from { flex: 1 1 auto; min-width: 0; }
 .ib-nrow .ib-l1 .ib-p { font-size: var(--ib-fs-13, 13px); font-weight: 500; line-height: 17px; color: var(--muted-foreground); }
 .ib-nrow.ib-u:not(.ib-sent) .ib-l1 .ib-p { color: var(--foreground); font-weight: 550; }
-.ib-nrow .ib-l3 .ib-c, .ib-nrow .ib-l1 .ib-t { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; }
+.ib-nrow .ib-l3 .ib-c, .ib-lend .ib-c, .ib-nrow .ib-l1 .ib-t { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; }
 .ib-nrow .ib-l1 .ib-t { flex: none; margin-left: auto; line-height: 17px; }
 /* Line 2: the title, never cut: a long one wraps, a word longer than the line breaks. Read, it is at the row's text
    size and weight, darker than the preview. Unread (approval "inbox-row-unread-bigger", 2026-10-30), it is bigger
@@ -5481,7 +5481,7 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .pn-inbox .ib-badge.ib-b-wait { background: var(--ib-wait-bg); color: var(--ib-wait-fg); border-color: transparent; font-variant-numeric: tabular-nums; }
 .pn-inbox .ib-badge.ib-b-wait[data-stuck] { background: color-mix(in oklch, var(--foreground) 7%, transparent); color: var(--muted-foreground); }
 .ib-row .ib-c:has(.ib-b-wait) { display: flex; justify-content: flex-end; align-items: center; }
-.ib-nrow .ib-l3 .ib-c:has(.ib-b-wait) { display: inline-flex; align-items: center; }
+.ib-nrow .ib-l3 .ib-c:has(.ib-b-wait), .ib-lend .ib-c:has(.ib-b-wait) { display: inline-flex; align-items: center; }
 .pn-inbox .ib-ract[data-row-send-now] svg { color: var(--ib-wait-fg); }
 /* The band under the reply. */
 .pn-inbox .ib-delivered.ib-undl { width: fit-content; max-width: 100%; margin-top: 12px; padding: 6px 6px 6px 11px; gap: 12px; border-radius: var(--ib-lr-sm, 8px); background: var(--ib-wait-band); border: 1px solid color-mix(in oklab, var(--primary) 22%, var(--border)); color: var(--foreground); font-size: var(--ib-fs-13, 13px); }
@@ -7644,12 +7644,14 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 .ib-lend { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: none; margin-left: auto; font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-lend:empty { display: none; }
 .ib-lend > * { flex: none; }
-.ib-lend .ib-c { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; }
-.ib-lend .ib-c:has(.ib-b-wait) { display: inline-flex; align-items: center; }
-/* Its unrendered estimate beside a thread: 62px to 67px (a badge's 22px on line 2), 8px more padding and 2px more
-   gap when roomy. A phone's two-line row is close to its 66px estimate already. */
+/* Its unrendered estimates, measured, each the taller row's (a badge's 22px on line 2). Beside a thread the wrapper
+   (no padding) holds the whole row: 62px to 67px, roomy 72px to 77px. A phone's estimate is the row's content box,
+   inside its padding and rule, as the compact phone row's: 64px to 67px in all, 40px to 43px inside; roomy 73px to
+   78px, 41px to 46px inside. */
 .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow > .ib-l2 > .ib-lend) { contain-intrinsic-size: auto none auto 66px; }
 .ib-lk-roomy .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow > .ib-l2 > .ib-lend) { contain-intrinsic-size: auto none auto 76px; }
+.ib-lbody > .ib-group > .ib-mrow:has(> .ib-m1-lead > .ib-lend) { contain-intrinsic-size: auto none auto 43px; }
+.ib-lk-roomy .ib-lbody > .ib-group > .ib-mrow:has(> .ib-m1-lead > .ib-lend) { contain-intrinsic-size: auto none auto 46px; }
 
 /* Voice dictation: the microphone in the composer (components/VoiceMic.tsx). The button takes the paperclip's size in
    each host. The status shares the toolbar's row, so starting to listen moves nothing. */

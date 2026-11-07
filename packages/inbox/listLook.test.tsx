@@ -665,7 +665,7 @@ describe.if(hasDom)('the rows in each mode', () => {
   // The owner, 2026-11-07: First line "Thread name" with Subject preview off is a true two-line row. Line 3's marks
   // and counts move to line 2's right end, after the agents and the project; no line 3.
   test('name first with no preview: two lines, the badge, pin and count at the end of line 2, on a three-line and a phone row', () => {
-    const stopped = row('msg_stop', { section: 'stopped', questions: { open: 2, picked: 0, stopped: true, holds_up: [], prompt: null } });
+    const stopped = row('msg_stop', { section: 'stopped', guide: true, snoozed: { until: '2026-10-21T12:00:00.000Z', at: '2026-10-20T00:00:00.000Z' }, questions: { open: 2, picked: 0, stopped: true, holds_up: [], prompt: null } });
     const opts = { sections: [{ id: 'stopped', label: 'Stopped on you', threads: [stopped] }, ...SECTIONS] as InboxListSection[], pinned: new Set(['msg_stop']) };
     act(() => adoptSavedRows(['titleFirst', 'hidePreview']));
     const el = remount('narrow', opts);
@@ -673,7 +673,7 @@ describe.if(hasDom)('the rows in each mode', () => {
     expect([...el.querySelector('.ib-nrow[data-thread-id="msg_unread"] .ib-lend')!.children].map(part)).toEqual(['ib-c ib-qn']);
     const stop = el.querySelector<HTMLElement>('.ib-nrow[data-thread-id="msg_stop"]')!;
     expect(stop.querySelector('.ib-l3')).toBeNull();
-    expect([...stop.querySelector('.ib-l2 > .ib-lend')!.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-pinmark', 'ib-badge', 'ib-c']);
+    expect([...stop.querySelector('.ib-l2 > .ib-lend')!.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-att', 'ib-pinmark', 'ib-badge', 'ib-zwhen', 'ib-c']);
     // The pin's and the badge's words still reach a screen reader.
     expect(stop.querySelector(':scope > .ib-sr')!.textContent).toBe(', starred');
     expect(document.getElementById(stop.getAttribute('aria-describedby')!)!.textContent).toBeTruthy();
@@ -684,7 +684,7 @@ describe.if(hasDom)('the rows in each mode', () => {
     // The pin goes with the counts to line 2, never to line 1 before the time.
     const pstop = phone.querySelector<HTMLElement>('.ib-mrow[data-thread-id="msg_stop"]')!;
     expect(pstop.querySelector('.ib-m3')).toBeNull();
-    expect([...pstop.querySelector('.ib-m1-lead > .ib-lend')!.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-pinmark', 'ib-badge', 'ib-c']);
+    expect([...pstop.querySelector('.ib-m1-lead > .ib-lend')!.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-att', 'ib-pinmark', 'ib-badge', 'ib-zwhen', 'ib-c']);
     expect(pstop.querySelector('.ib-m1:not(.ib-m1-lead) > .ib-pinmark')).toBeNull();
   });
 
