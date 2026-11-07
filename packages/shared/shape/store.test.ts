@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { inboxProjectKey } from "../inbox/project-key";
 import { createShapeStore } from "./store";
 import { diffShapeVersions, type ShapeBoard } from "./format";
@@ -195,7 +196,7 @@ describe("cited images", () => {
   test("an image the board cites by relative path is copied into files/ and the ref points at the copy", () => {
     const dataDir = scratch();
     const source = scratch();
-    writeFileSync(join(source, "shot.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    writeFileSync(join(source, "shot.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
     const { store } = storeAt(dataDir);
     const withImage: ShapeBoard = { ...board(), refs: [{ n: 1, kind: "image", title: "Shot", target: "shot.png" }] };
     const result = store.update({ board: withImage, project, sourceDir: source });
@@ -203,7 +204,7 @@ describe("cited images", () => {
     const target = store.read(result.id)!.refs![0]!.target;
     expect(target).toMatch(/^files\/[0-9a-f]{10}-shot\.png$/);
     const path = store.filePath(result.id, target);
-    expect(path && readFileSync(path).length).toBe(4);
+    expect(path && readFileSync(path).length).toBe(8);
     for (const outside of ["../shape.json", "files/../shape.json", "files/a/b.png", "files\\..\\shape.json", "/etc/passwd", ".lock"]) {
       expect([outside, store.filePath(result.id, outside)]).toEqual([outside, null]);
     }
@@ -257,7 +258,7 @@ const r = createShapeStore({ dataDir }).update({ board, id, base: 1, project: ${
 console.log(r.ok ? "OK" : r.code);`,
     );
     const runs = Array.from({ length: count }, (_, i) =>
-      Bun.spawn([process.execPath, worker, dataDir, id, String(i)], { stdout: "pipe", stderr: "pipe", env: { PATH: process.env.PATH ?? "" } }),
+      Bun.spawn([process.execPath, worker, dataDir, id, String(i)], { stdout: "pipe", stderr: "pipe", env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME! } }),
     );
     return Promise.all(runs.map(async (p) => (await new Response(p.stdout).text()).trim()));
   }
@@ -395,7 +396,7 @@ describe("images a drawing names", () => {
     symlinkSync(join(dir, "secret.txt"), join(dir, "link.png"));
     const link = store.update({ board: drawing('<img src="link.png">'), project, session, sourceDir: dir });
     expect(link.ok).toBe(false);
-    if (!link.ok) expect(link.errors.join()).toContain("is not a PNG, JPEG, GIF or WebP image");
+    if (!link.ok) expect(link.errors.join()).toContain("is not a PNG, JPEG, GIF, WebP, SVG, AVIF or ICO image");
     symlinkSync(join(dir, "crop.png"), join(dir, "real.png"));
     expect(store.update({ board: drawing('<img src="real.png">'), project, session, sourceDir: dir }).ok).toBe(true);
 
@@ -404,9 +405,67 @@ describe("images a drawing names", () => {
     const big = store.update({ board: drawing('<img src="big.png">'), project, session, sourceDir: dir });
     expect(big.ok).toBe(false);
     if (!big.ok) expect(big.errors.join()).toContain("at most 10485760");
-    writeFileSync(join(dir, "fits.png"), "");
+    writeFileSync(join(dir, "fits.png"), PNG);
     truncateSync(join(dir, "fits.png"), 10 * 1024 * 1024);
     expect(store.update({ board: drawing('<img src="fits.png">'), project, session, sourceDir: dir }).ok).toBe(true);
+  });
+
+  test("a file: URL, an SVG and an AVIF are copied in like a path", () => {
+    const { dir, store } = withFile();
+    writeFileSync(join(dir, "logo.svg"), '<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2"><rect width="2" height="2"/></svg>');
+    const html = `<img src="${pathToFileURL(join(dir, "crop.png")).href}"><svg><image href="file://localhost${join(dir, "logo.svg")}"/><image href="logo.svg"/></svg>`;
+    const r = store.update({ board: drawing(html), project, session, sourceDir: dir });
+    expect(r).toMatchObject({ ok: true });
+    if (!r.ok) return;
+    const kept = store.read(r.id)!.views.picture!.html;
+    expect(kept).toMatch(/<img src="files\/[0-9a-f]{10}-crop\.png">/);
+    expect(kept.match(/href="files\/[0-9a-f]{10}-logo\.svg"/g)).toHaveLength(2);
+    expect(kept).not.toContain("file:");
+    for (const name of kept.match(/files\/[\w.-]+/g)!) expect(store.filePath(r.id, name)).toBeTruthy();
+  });
+
+  test("a file whose name says picture but whose bytes do not is refused", () => {
+    const { dir, store } = withFile();
+    writeFileSync(join(dir, "fake.png"), "not a picture");
+    writeFileSync(join(dir, "page.svg"), "<html><body>not an svg</body></html>");
+    for (const name of ["fake.png", "page.svg"]) {
+      const r = store.update({ board: drawing(`<img src="${name}">`), project, session, sourceDir: dir });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.errors.join()).toContain(`"${name}" is not a PNG, JPEG, GIF, WebP, SVG, AVIF or ICO image`);
+    }
+    const remote = store.update({ board: drawing('<img src="file://some-host/a.png">'), project, session, sourceDir: dir });
+    expect(remote.ok).toBe(false);
+    if (!remote.ok) expect(remote.errors.join()).toContain("is not a file on this computer");
+  });
+
+  test("a web picture is kept from the bytes shape update fetched, and one it did not fetch is refused", () => {
+    const { dataDir, dir, store } = withFile();
+    const url = "https://example.com/brand/acme.png?v=2&amp;s=1";
+    const webPictures = new Map([[url, { bytes: new Uint8Array(PNG), name: "acme.png" }]]);
+    const r = store.update({
+      board: { ...drawing(`<svg><image href="${url}" width="40" height="40"/></svg>`), refs: [{ n: 1, kind: "image", title: "Acme", target: url, images: [{ src: url, alt: "Acme" }] }] },
+      project,
+      session,
+      sourceDir: dir,
+      webPictures,
+    });
+    expect(r).toMatchObject({ ok: true });
+    if (!r.ok) return;
+    const v = store.read(r.id)!;
+    const name = /href="files\/([0-9a-f]{10}-acme\.png)"/.exec(v.views.picture!.html)?.[1];
+    expect(name).toBeTruthy();
+    expect(v.refs![0]!.target).toBe(`files/${name}`);
+    expect(v.refs![0]!.images![0]!.src).toBe(`files/${name}`);
+    const kept = join(dataDir, "shapes", inboxProjectKey(project.name, project.root), r.id, "files", name!);
+    expect(readFileSync(kept)).toEqual(PNG);
+
+    const missed = store.update({ board: drawing('<img src="https://example.com/other.png">'), project, session, sourceDir: dir, webPictures });
+    expect(missed.ok).toBe(false);
+    if (!missed.ok) expect(missed.errors.join()).toContain("is a web picture that was not fetched");
+    // Any other scheme is still no picture.
+    const ftp = store.update({ board: { ...drawing("<p>x</p>"), refs: [{ n: 1, kind: "image", title: "F", target: "ftp://example.com/a.png" }] }, project, session, sourceDir: dir });
+    expect(ftp.ok).toBe(false);
+    if (!ftp.ok) expect(ftp.errors.join()).toContain("is a URL");
   });
 
   test("a later version copies its images too", () => {
@@ -425,7 +484,8 @@ describe("images a drawing names", () => {
     const cases: [string, string][] = [
       ['<img src="gone.png">', "was not found"],
       ['<img src="notes.txt">', "not a PNG"],
-      ['<image href="https://example.com/a.png"/>', "nothing may load from outside"],
+      ['<image href="https://example.com/a.png"/>', "is a web picture that was not fetched"],
+      ['<image href="//example.com/a.png"/>', "nothing may load from outside"],
       ['<img src="files/../a.png">', "is not one file under files/"],
     ];
     for (const [html, words] of cases) {

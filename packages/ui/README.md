@@ -358,6 +358,10 @@ the composer (0.44.0)" covers the chips, the metric rule, the merged-range
 refactor behind them, and the three inherited limits (duplicate labels,
 restored drafts, and a label that is a prefix of another label).
 
+### Float roots
+
+The floats that portal into `document.body` carry a stable hook on their root, so a host can style or mark them (for example `-webkit-app-region: no-drag` under a window's own buttons) without matching Tailwind classes: `.annotation-toolbar` (`AnnotationToolbar`), `[data-table-toolbar]` (`TableToolbar`), `.code-snippet-preview-window` (`CodeSnippetPreview`), `[data-floating-picker]` (`FloatingQuickLabelPicker`), `[data-comment-popover]` and `[data-popover-layer]` (`CommentPopover`). Attributes only: no look or behaviour changes.
+
 ### Timeline foot seams (`AnnotationPanel`)
 
 Both opt-in and defaulting to today's behavior.
