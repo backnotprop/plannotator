@@ -1,8 +1,10 @@
 /**
  * The list's look options (approval "inbox-list-options", listLook.ts): four checkboxes in the list's ⋮ menu,
- * "Highlight thread subject", "Compact rows", "Hide agent icons" and "Smaller thread names", off by default, and
- * since "inbox-customize-rows" the person's look wherever they use the Inbox (config.json `inboxRows`).
- * What this catches: an option on in a browser that never chose it (today's list must stay today's); a change that
+ * "Highlight thread subject", "Compact rows", "Hide agent icons" and "Smaller thread names" (only the last on by
+ * default, since 2026-11-05), and since "inbox-customize-rows" the person's look wherever they use the Inbox
+ * (config.json `inboxRows`).
+ * What this catches: a browser that never chose getting anything but the defaults, or an old look that is the old
+ * defaults (every option off) read as a choice, or an old chosen look changed by the new defaults; a change that
  * waits for the server, is not saved, or is undone by a read that predates it; saves that land out of order leaving a
  * page on an older look, or more than one on its way; rival options both on; another window's save not reaching an
  * open list; a browser's old cookies not adopted once (or adopted over the server's look, or written again); a menu
@@ -29,7 +31,7 @@ const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as 
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { TourMain } = (hasDom ? await import('./tour/Tour') : {}) as typeof import('./tour/Tour');
 const { parseTourFixture, tourStateAt, TOUR_THREAD } = await import('./tour/model');
-const { LIST_LOOK_COOKIES, LIST_LOOK_OFF, ROWS_COOKIE, adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, resetListLookForTests, writeListLookOption, writeListLookOptions, writeMenuLook } = await import('./listLook');
+const { LIST_LOOK_COOKIES, LIST_LOOK_DEFAULT, LIST_LOOK_OFF, ROWS_COOKIE, adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, resetListLookForTests, writeListLookOption, writeListLookOptions, writeMenuLook } = await import('./listLook');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 // This browser's cookies (Plannotator's storage); a map stands in for them here.
@@ -205,28 +207,49 @@ function reload() {
 
 // The look is the person's, wherever they use the Inbox (the owner, 2026-11-02), kept in config.json `inboxRows`.
 describe('the saved look', () => {
-  test('a browser that never chose, with no saved look: every option off, and nothing is saved', async () => {
-    expect(readListLook()).toEqual(LIST_LOOK_OFF);
+  test('a browser that never chose, with no saved look: the defaults (smaller names only), and nothing is saved', async () => {
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, smallNames: true });
     adoptSavedRows(null);
     await answer();
     expect(saves).toEqual([]);
     expect(stored.size).toBe(0);
   });
 
+  // Smaller thread names became a default (2026-11-05). What an older build kept for every option off was its
+  // defaults, never a choice: today's defaults paint. Any other old look was chosen and stays exactly as it was.
+  test("upgrading: this browser's old defaults paint today's defaults; an old chosen look keeps its larger names", async () => {
+    stored.set(ROWS_COOKIE, 'none');
+    reload();
+    expect(readListLook()).toEqual(LIST_LOOK_DEFAULT);
+    stored.set(ROWS_COOKIE, 'compact');
+    reload();
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, compact: true });
+    // The old per-option cookies, none on: the old defaults too.
+    stored.clear();
+    stored.set(LIST_LOOK_COOKIES.highlight, '0');
+    reload();
+    expect(readListLook()).toEqual(LIST_LOOK_DEFAULT);
+    adoptSavedRows(null, 0);
+    await answer();
+    expect(saves).toEqual([]);
+  });
+
   test('a change shows at once, then is saved; this browser keeps only the look it showed, never the old cookies', async () => {
     held = [];
     void writeListLookOptions({ roomy: true, highlight: true });
     // Before the server answers: on screen, and sent as the whole look in the options' order.
-    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, roomy: true, highlight: true });
-    expect(saves).toEqual([['highlight', 'roomy']]);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_DEFAULT, roomy: true, highlight: true });
+    expect(saves).toEqual([['highlight', 'smallNames', 'roomy']]);
     await answer();
-    expect(Object.fromEntries(stored)).toEqual({ [ROWS_COOKIE]: 'highlight,roomy' });
+    expect(Object.fromEntries(stored)).toEqual({ [ROWS_COOKIE]: 'highlight,smallNames,roomy' });
     void writeListLookOption('roomy', false);
     void writeListLookOption('highlight', false);
+    void writeListLookOption('smallNames', false);
     await answer();
     expect(saves.at(-1)).toEqual([]);
-    expect(Object.fromEntries(stored)).toEqual({ [ROWS_COOKIE]: 'none' });
-    // A reload paints the last look shown (all off), not the defaults' absence of a cookie.
+    // Every option off, chosen today: "off", never the old builds' "none" (their defaults).
+    expect(Object.fromEntries(stored)).toEqual({ [ROWS_COOKIE]: 'off' });
+    // A reload paints the last look shown (all off), not the defaults.
     reload();
     expect(readListLook()).toEqual(LIST_LOOK_OFF);
   });
@@ -264,21 +287,21 @@ describe('the saved look', () => {
   });
 
   test('upgrading offline: the adoption that failed is offered again by the next read, and the look stays meanwhile', async () => {
-    stored.set(LIST_LOOK_COOKIES.smallNames, '1');
+    stored.set(LIST_LOOK_COOKIES.compact, '1');
     reload();
     offline = true;
     adoptSavedRows(null, 0);
     await answer();
-    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, smallNames: true });
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, compact: true });
     offline = false;
     adoptSavedRows(null, 0);
     await answer();
-    expect(saves).toEqual([['smallNames'], ['smallNames']]);
+    expect(saves).toEqual([['compact'], ['compact']]);
     expect(serverRev).toBe(1);
   });
 
   test("a browser whose old cookies differ from the server's look takes the server's and saves nothing", async () => {
-    stored.set(LIST_LOOK_COOKIES.smallNames, '1');
+    stored.set(LIST_LOOK_COOKIES.compact, '1');
     reload();
     adoptSavedRows([], 3);
     await answer();
@@ -292,12 +315,12 @@ describe('the saved look', () => {
     void writeListLookOption('compact', true);
     void writeListLookOption('hideAgents', true);
     // On screen at once, every change; one request.
-    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true, hideAgents: true });
-    expect(saves).toEqual([['highlight']]);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_DEFAULT, highlight: true, compact: true, hideAgents: true });
+    expect(saves).toEqual([['highlight', 'smallNames']]);
     await answer();
-    expect(saves).toEqual([['highlight'], ['highlight', 'compact', 'hideAgents']]);
+    expect(saves).toEqual([['highlight', 'smallNames'], ['highlight', 'compact', 'hideAgents', 'smallNames']]);
     // The first answer (only highlight) never showed over the changes after it.
-    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true, hideAgents: true });
+    expect(readListLook()).toEqual({ ...LIST_LOOK_DEFAULT, highlight: true, compact: true, hideAgents: true });
   });
 
   test("a read that arrives while this page saves waits, and an older one is dropped: the page ends on the server's newest", async () => {
@@ -320,7 +343,7 @@ describe('the saved look', () => {
     void writeListLookOption('compact', true);
     adoptSavedRows(['roomy'], 2);
     // This page's save is still on its way: its change stays on screen meanwhile.
-    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, compact: true });
+    expect(readListLook()).toEqual({ ...LIST_LOOK_DEFAULT, compact: true });
     await answer();
     expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, roomy: true });
     expect(stored.get(ROWS_COOKIE)).toBe('roomy');
@@ -332,7 +355,7 @@ describe('the saved look', () => {
     void writeListLookOption('compact', true);
     adoptSavedRows(['roomy'], 1);
     await answer();
-    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, compact: true });
+    expect(readListLook()).toEqual({ ...LIST_LOOK_DEFAULT, compact: true });
   });
 
   test("the last save's answer is the server's look: shown when it differs from what this page sent", async () => {
@@ -463,7 +486,7 @@ describe('the saved look', () => {
     void writeListLookOption('compact', true);
     await answer();
     hearRowsEvent(['roomy'], 2);
-    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, compact: true });
+    expect(readListLook()).toEqual({ ...LIST_LOOK_DEFAULT, compact: true });
   });
 
   test('an older Inbox (no `rows`) or not a list changes nothing; a name no build knows is dropped', () => {
@@ -477,7 +500,7 @@ describe('the saved look', () => {
 });
 
 describe.if(hasDom)('the ⋮ menu', () => {
-  test('four checkboxes after Refresh, unchecked by default, each a menuitemcheckbox', async () => {
+  test('four checkboxes after Refresh and the view (listView.ts), only Smaller thread names checked by default, each a menuitemcheckbox', async () => {
     const el = render('narrow');
     await openMenu(el);
     const popup = document.querySelector<HTMLElement>('[data-tidy-menu-popup]')!;
@@ -486,12 +509,14 @@ describe.if(hasDom)('the ⋮ menu', () => {
     expect(items.map((i) => [i.getAttribute('role'), i.textContent, i.getAttribute('aria-checked')])).toEqual([
       ['menuitem', 'Tidy', null],
       ['menuitem', 'Refresh', null],
+      ['menuitemradio', 'Smart groups', 'true'],
+      ['menuitemradio', 'Simple list', 'false'],
       ['menuitemcheckbox', 'Highlight thread subject', 'false'],
       ['menuitemcheckbox', 'Compact rows', 'false'],
       ['menuitemcheckbox', 'Hide agent icons', 'false'],
-      ['menuitemcheckbox', 'Smaller thread names', 'false'],
+      ['menuitemcheckbox', 'Smaller thread names', 'true'],
     ]);
-    expect(lookClasses(el)).toEqual([]);
+    expect(lookClasses(el)).toEqual(['ib-lk-small']);
   });
 
   test('a tick changes the list at once, keeps the menu open, and survives a reload', async () => {
@@ -502,10 +527,9 @@ describe.if(hasDom)('the ⋮ menu', () => {
     expect(item('compact').getAttribute('aria-checked')).toBe('true');
     expect(item('compact').querySelector('.ib-pmi-box[data-on] svg')).not.toBeNull();
     expect(document.querySelector('[data-tidy-menu-popup]')).not.toBeNull();
-    expect(lookClasses(el)).toEqual(['ib-lk-compact']);
+    expect(lookClasses(el)).toEqual(['ib-lk-compact', 'ib-lk-small']);
     act(() => item('highlight').click());
     act(() => item('hideAgents').click());
-    act(() => item('smallNames').click());
     await settle();
     expect(lookClasses(el)).toEqual(['ib-lk-pill', 'ib-lk-compact', 'ib-lk-noagents', 'ib-lk-small']);
 
@@ -517,7 +541,7 @@ describe.if(hasDom)('the ⋮ menu', () => {
     await openMenu(again);
     expect(['highlight', 'compact', 'hideAgents', 'smallNames'].map((k) => item(k).getAttribute('aria-checked'))).toEqual(['true', 'true', 'true', 'true']);
 
-    // Turned off again: the list is today's, and that is what is saved.
+    // Turned off again, smaller names too: every option off, and that is what is saved.
     act(() => item('highlight').click());
     act(() => item('compact').click());
     act(() => item('hideAgents').click());
@@ -558,7 +582,7 @@ describe.if(hasDom)('the ⋮ menu', () => {
     let customized = 0;
     stored.set(LIST_LOOK_COOKIES.hideAgents, '1');
     await openMenu(render('narrow', () => customized++));
-    const rows = document.querySelector<HTMLElement>('[data-tidy-menu-popup] [role="group"]')!;
+    const rows = [...document.querySelectorAll<HTMLElement>('[data-tidy-menu-popup] [role="group"]')].find((group) => document.getElementById(group.getAttribute('aria-labelledby') ?? '')?.textContent === 'Rows')!;
     const items = [...rows.querySelectorAll<HTMLElement>('[role^="menuitem"]')];
     expect(items.map((i) => [i.getAttribute('role'), i.textContent])).toEqual([
       ['menuitemcheckbox', 'Highlight thread subject'],
@@ -580,7 +604,7 @@ describe.if(hasDom)('the ⋮ menu', () => {
 });
 
 describe.if(hasDom)('the rows in each mode', () => {
-  test('all off: today\'s three lines, the title plain on its own line', () => {
+  test('the defaults: three lines, the title plain on its own line', () => {
     const el = render('narrow');
     expect(narrowLines(el, 'msg_unread')).toEqual({ 'ib-l1': ['from', 'time'], 'ib-l2': ['title(Name of msg_unread)'], 'ib-l3': ['ib-pv', 'ib-c ib-qn'] });
     expect(phoneLines(remount('phone'), 'msg_unread')).toEqual({ m1: ['from', 'time'], rest: ['ib-m2', 'ib-m3'] });
@@ -666,8 +690,9 @@ describe.if(hasDom)('the rows in each mode', () => {
   test('smaller thread names: the column\'s class only, the rows\' markup as today on every shape', () => {
     // React's generated ids differ per mount; everything else must match.
     const markup = (el: HTMLElement) => el.innerHTML.replace(/_r_[a-z0-9]+_/g, 'id');
+    act(() => adoptSavedRows([], 1));
     const today = { narrow: markup(render('narrow')), phone: markup(remount('phone')) };
-    act(() => adoptSavedRows(['smallNames']));
+    act(() => adoptSavedRows(['smallNames'], 2));
     const el = remount('narrow');
     expect(lookClasses(el)).toEqual(['ib-lk-small']);
     column(el).classList.remove('ib-lk-small');
@@ -679,8 +704,8 @@ describe.if(hasDom)('the rows in each mode', () => {
 });
 
 describe.if(hasDom)('the onboarding tour', () => {
-  test("ignores the saved options: its list is today's, and the person's choice stays", () => {
-    for (const key of ['highlight', 'compact', 'hideAgents', 'smallNames'] as const) writeListLookOption(key, true);
+  test("ignores the saved options: its list has the defaults' look, and the person's choice stays", () => {
+    for (const key of ['highlight', 'compact', 'hideAgents'] as const) writeListLookOption(key, true);
     const fixture = parseTourFixture(JSON.parse(readFileSync(join(import.meta.dir, 'tour/content/fixture.json'), 'utf8')));
     const real = fixture.threads.find((t) => t.id === TOUR_THREAD)!.real_answer!;
     host = document.createElement('div');
@@ -705,7 +730,7 @@ describe.if(hasDom)('the onboarding tour', () => {
       );
     });
     expect(host.querySelector('.ib-listcol')).not.toBeNull();
-    expect(lookClasses(host)).toEqual([]);
+    expect(lookClasses(host)).toEqual(['ib-lk-small']);
     expect(host.querySelector('.ib-rowkey')).toBeNull();
     expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true, hideAgents: true, smallNames: true });
   });

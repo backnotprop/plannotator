@@ -25,6 +25,7 @@
  * window's storage per layer and scope until the verdict goes.
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { parseDiffToFiles, patchBlobIds, type DiffFile } from '@plannotator/core/diff-files';
@@ -42,6 +43,7 @@ import { RefMarkIcon } from '../board/RefMark';
 import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
+import { holdBarAfterClose, usePhoneCommentsSheet } from '../components/phoneCommentsSheet';
 import { VerdictKeys, verdictOf } from '../reviewVerdict';
 import { OpenInCodeSpans, OpenInFile } from '../components/OpenIn';
 import { Tip } from '../components/Tip';
@@ -70,6 +72,8 @@ export interface PullReviewProps {
   onBack: () => void;
   /** The verdict went. */
   onSent: () => void;
+  /** A review went to the PR on the forge: Reviews reads its rows again. */
+  onPosted?: () => void;
 }
 
 const NO_BLOCKS: never[] = [];
@@ -255,7 +259,7 @@ function forPost(comments: readonly KeptComment[], screen: Pick<OnScreen, 'stamp
   });
 }
 
-function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onBack, onSent }: PullReviewProps) {
+function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onBack, onSent, onPosted }: PullReviewProps) {
   const phone = usePhone();
   const item = useMemo(() => (model ? findStack(pullGroups(model, null), stackId) : null), [model, stackId]);
   const stack = item?.stack ?? null;
@@ -453,9 +457,30 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const filesPicker = phone || railFolded;
   const [sheet, setSheet] = useState(false);
   const sheetId = useId();
+  const sheetButtonRef = useRef<HTMLButtonElement>(null);
+  const sheetCloseRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!folded) setSheet(false);
   }, [folded]);
+  const closeSheet = () => {
+    // At once: on a phone the button can take focus only once the page shows again.
+    flushSync(() => setSheet(false));
+    if (!phone) return;
+    sheetButtonRef.current?.focus({ preventScroll: true });
+    holdBarAfterClose(sheetButtonRef.current);
+  };
+  usePhoneCommentsSheet(phone && sheet, sheetCloseRef, closeSheet);
+  const onSheetKey = (event: React.KeyboardEvent) => {
+    if (event.key === 'Escape' && phone && sheet && !event.defaultPrevented) {
+      event.preventDefault();
+      closeSheet();
+    }
+  };
+  // The sheet covers a phone's diff: a comment chosen in it closes it, to show the comment's lines (as ReviewPane).
+  const showFromPanel = (id: string) => {
+    showComment(id);
+    if (phone) setSheet(false);
+  };
   // A global comment chosen in the guide: selected in the panel, and the folded panel opens on it (as ReviewPane).
   const showGlobalComment = (id: string) => {
     setSelectedId(id);
@@ -556,7 +581,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
 
   if (!model || !stack || !layer) {
     return (
-      <section className="ib-viewer ib-review ib-prreview" aria-label="Review" data-pull-review="">
+      <section className="ib-viewer ib-wlayer ib-review ib-prreview" aria-label="Review" data-pull-review="">
         <div className="ib-vhead">
           <button type="button" className="ib-back" onClick={onBack}>
             <Icon name="back" size={15} />
@@ -586,7 +611,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${railFolded ? ' ib-railfold' : ''}`}
+      className={`ib-viewer ib-wlayer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${railFolded ? ' ib-railfold' : ''}`}
       aria-label={`Review ${label}`}
       data-pull-review={layer.key}
       data-pull-scope={scope}
@@ -606,6 +631,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         <span className="ib-sp" />
         {folded && (readerComments || comments.length > 0) && (
           <button
+            ref={sheetButtonRef}
             type="button"
             className={`ib-btn ib-sm ib-vcomments${sheet ? ' ib-on' : ''}`}
             onClick={() => setSheet((v) => !v)}
@@ -651,6 +677,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               // Only what went is cleared: a whole stack's line comments map to no PR's lines and stay.
               forgetWent(result.posted);
               setPosted({ label: result.label, url: result.url, action: result.action });
+              onPosted?.();
             }}
           />
         ) : canDecide ? (
@@ -784,7 +811,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             // same code keeps it, whatever the head reads said. The reader is a chunk loaded on first use: one that cannot
             // arrive says so here (GuidePane).
             <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch}>
-              <OpenInCodeSpans scope={{ repo: repoKey ?? '' }} on={!!repoKey}>
+              <OpenInCodeSpans scope={{ repo: repoKey ?? '', pull: layerKey }} on={!!repoKey}>
                 <GuideReader bare snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} fileContents={fileContents} />
               </OpenInCodeSpans>
             </ReaderPart>
@@ -794,13 +821,13 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             </p>
           )}
         </div>
-        <div className="ib-apanel ib-gpanel" id={sheetId} role={folded ? 'region' : undefined} aria-label={folded ? 'Comments' : undefined}>
+        <div className="ib-apanel ib-gpanel" id={sheetId} onKeyDown={onSheetKey} role={folded ? 'region' : undefined} aria-label={folded ? 'Comments' : undefined}>
           {folded && (
             <div className="ib-sheet-h">
               <b>Comments</b>
               <span className="ib-mut">{comments.length}</span>
               <span className="ib-sp" />
-              <button type="button" className="ib-iconbtn" onClick={() => setSheet(false)} aria-label="Close the comments">
+              <button ref={sheetCloseRef} type="button" className="ib-iconbtn" onClick={closeSheet} aria-label="Close the comments">
                 <Icon name="x" />
               </button>
             </div>
@@ -813,10 +840,10 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             blocks={NO_BLOCKS}
             codeAnnotations={comments}
             codeAnnotationNote={(c) => (here.includes(c) ? null : 'Written on older code')}
-            onSelect={showComment}
+            onSelect={showFromPanel}
             onDelete={remove}
             selectedId={selectedId}
-            onSelectCodeAnnotation={showComment}
+            onSelectCodeAnnotation={showFromPanel}
             onDeleteCodeAnnotation={remove}
             onEditCodeAnnotation={readerComments ? (id, updates) => {
               const before = comments.find((c) => c.id === id);

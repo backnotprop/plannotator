@@ -24,7 +24,7 @@ import { createStandaloneShapeHost } from './host';
 
 const ShapeBoard = lazy(() => import('#shape-board'));
 
-const VIEWS: readonly ShapeViewId[] = ['picture', 'how', 'know', 'code'];
+const VIEWS: readonly ShapeViewId[] = ['picture', 'how', 'changed', 'know', 'code'];
 const PANELS: readonly ShapePanelTab[] = ['ask', 'refs'];
 
 export interface ShapeRoute {

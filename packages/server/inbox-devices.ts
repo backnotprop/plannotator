@@ -62,7 +62,7 @@ import {
 import { readInboxRegistry, updateOwnInboxRegistry, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { INBOX_DEVICE_MARKUP_MAX_BYTES } from "@plannotator/shared/inbox/markups";
-import { INBOX_UPLOAD_MAX_BYTES } from "@plannotator/shared/inbox/uploads";
+import { inboxDiskFullError, INBOX_UPLOAD_MAX_BYTES } from "@plannotator/shared/inbox/uploads";
 import { describeTailscaleFailure, runTailscale, TAILSCALE_SERVE_TIMEOUT_MS, type TailscaleRunner } from "@plannotator/shared/tailscale";
 import { MACHINE_WINDOW_HEADER } from "./inbox-outbox";
 import { INBOX_SNOOZE_HELD } from "./inbox-snooze";
@@ -75,6 +75,7 @@ import {
   type PairingProbes,
   type PairingTailscaleRunner,
 } from "./inbox-pairing-checks";
+import { syncSection } from "./inbox-perf";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { enableTailscaleServe, TailscaleServeError, takeDownOwnServeMapping } from "./tailscale-serve";
 import {
@@ -222,6 +223,8 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^skills$/, window: () => "/api/inbox/skills" },
   { method: "GET", route: /^skills\/content$/, window: () => "/api/inbox/skills/content" },
   // Uploads and drawings (7.48, 7.49): raw bodies, the key in the query; never through the relay.
+  // A file the phone can already see, for the message being written: no bytes, so an ordinary JSON route.
+  { method: "POST", route: /^uploads\/reuse$/, window: () => "/api/inbox/uploads/reuse" },
   { method: "POST", route: /^uploads$/, window: () => "/api/inbox/uploads", raw: { max: INBOX_UPLOAD_MAX_BYTES, code: "upload_too_large", what: "a file" } },
   { method: "POST", route: /^markups$/, window: () => "/api/inbox/markups", raw: { max: INBOX_DEVICE_MARKUP_MAX_BYTES, code: "markup_too_large", what: "a drawing" } },
   // A pending pasted-text upload's words (approval "inbox-paste-attachment"), read only: a linked machine's
@@ -523,7 +526,9 @@ class DoorPortError extends Error {
 
 export function createInboxDevices(context: InboxDevicesContext) {
   const now = () => (context.now ? context.now() : new Date());
-  const tailscale = context.tailscale ?? runTailscale;
+  const runTailscaleAtOnce = context.tailscale ?? runTailscale;
+  // The door's publish still waits on the CLI (Pair a phone, Link a machine): named for the loop watch.
+  const tailscale: TailscaleRunner = (args, timeoutMs) => syncSection(`tailscale:${args.slice(0, 2).join(" ")}`, () => runTailscaleAtOnce(args, timeoutMs));
   const devices = InboxDevices.open(context.dataDir);
   const commandLog = new JsonLines<CommandLine>(join(inboxDir(context.dataDir), INBOX_DEVICE_COMMANDS_FILE));
   const commands = new Map<string, CommandLine>();
@@ -852,6 +857,8 @@ export function createInboxDevices(context: InboxDevicesContext) {
 
   const caught = (error: unknown): Response => {
     if (error instanceof InboxError) return json({ error: error.message, code: error.code, ...error.details }, error.code === "validation_error" ? 422 : 400);
+    const full = inboxDiskFullError(error);
+    if (full) return json({ error: full.message, code: full.code }, 507);
     return refuse(500, "internal_error", "Internal error.");
   };
 

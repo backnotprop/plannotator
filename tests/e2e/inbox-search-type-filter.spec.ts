@@ -16,6 +16,9 @@
  *    closes the menu and focus goes back to the chip;
  *  - a phone: the chip leads the sideways chip row and picks in the bottom
  *    menu sheet.
+ *  - every filter set with the longest project name: one filter line at
+ *    1440, 768, 390 and 320 px (filter row "Up": the order at the search
+ *    box's end on a desktop, pinned at the line's end on a phone).
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * PNGs (desktop 1440×900 @2x, phone 390×844 @3x) land in
@@ -269,6 +272,9 @@ test('by keyboard only: Tab to the chip, Enter, the arrows, Enter; Escape closes
   await expect(input(page)).toBeFocused();
   await page.keyboard.type('relay');
   await answered(page);
+  // With words, the order beside the search box comes first, then the Type chip.
+  await page.keyboard.press('Tab');
+  await expect(palette(page).locator('[data-search-sort] input[type="radio"]:checked')).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(typeChip(page)).toBeFocused();
   await page.keyboard.press('Enter');
@@ -331,33 +337,53 @@ test('a phone: the Type chip leads the sideways chip row and picks in the bottom
 });
 
 // Last: it adds a project, which would change the counts above.
-test('every filter set with a long project name: the one desktop row keeps every chip and Clear filters inside the panel', async () => {
+// Filter row "Up" (approval "inbox-search-calm"): with every filter set and the longest project name, the filters and
+// Clear filters keep ONE line at 1440, 768, 390 and 320 px. On a desktop nothing scrolls or leaves the panel (the
+// project gives way, cut) and Best match | Newest sits at the search box's end; on a phone the filters scroll sideways
+// and the order is pinned, whole, at the line's end.
+test('every filter set with the longest project name: one filter line at 1440, 768, 390 and 320 px', async ({ browser }: { browser: Browser }) => {
   const longName = await world.longProject();
-  await page.reload();
-  await openFromSidebar(page);
-  await input(page).fill('relay');
-  await answered(page);
-  await palette(page).locator('[data-chip="project"]').click();
-  await menu(page).locator('[role="menuitemradio"]').filter({ hasText: longName }).click();
-  await palette(page).locator('[data-chip="status"]').click();
-  await menu(page).locator('[role="menuitemradio"]').filter({ hasText: 'New since you looked' }).click();
-  await palette(page).locator('[data-chip="from"]').click();
-  await menu(page).locator('[role="menuitemradio"]').filter({ hasText: 'Agents' }).click();
-  await pickFromMenu(page, 'Files');
-  await settled(page);
-  await expect(palette(page).locator('[data-unset]')).toHaveCount(4);
-  const row = palette(page).locator('.ib-sp-filters');
-  const clear = row.locator('[data-clear-filters]');
-  await expect(clear).toBeVisible();
-  // One row (every part on the same middle line), no sideways scrolling, nothing past the panel's edge.
-  const fit = await row.evaluate((el) => {
-    const box = el.getBoundingClientRect();
-    const right = box.right - parseFloat(getComputedStyle(el).paddingRight);
-    const parts = [...el.querySelectorAll<HTMLElement>('.ib-sp-fcell, [data-clear-filters]')].map((p) => p.getBoundingClientRect());
-    return { scrolls: el.scrollWidth > el.clientWidth, past: parts.filter((r) => r.right > right + 0.5).length, rows: new Set(parts.map((r) => Math.round(r.top + r.height / 2))).size };
-  });
-  expect(fit).toEqual({ scrolls: false, past: 0, rows: 1 });
-  // The project chip gave way: its name is cut, whole in its tooltip.
-  expect(await palette(page).locator('[data-chip="project"] .ib-sp-fl').evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-  await shot(page, '06-every-filter-set');
+  for (const width of [1440, 768, 390, 320]) {
+    const phone = width < 768;
+    const ctx = await browser.newContext({ viewport: { width, height: 844 }, deviceScaleFactor: phone ? 3 : 2, isMobile: phone, hasTouch: phone, colorScheme: 'light' });
+    try {
+      const p = await ctx.newPage();
+      await p.goto(url);
+      if (phone) await p.locator('.ib-lhead .ib-lhead-search').tap();
+      else await openFromSidebar(p);
+      await expect(palette(p)).toBeVisible();
+      await input(p).fill('relay');
+      await answered(p);
+      for (const [kind, label] of [['project', longName], ['status', 'New since you looked'], ['from', 'Agents']] as const) {
+        await palette(p).locator(`[data-chip="${kind}"]`).click();
+        await menu(p).locator('[role="menuitemradio"]').filter({ hasText: label }).first().click();
+        await expect(menu(p)).toHaveCount(0);
+      }
+      await pickFromMenu(p, 'Files');
+      await settled(p);
+      await expect(palette(p).locator('[data-unset]')).toHaveCount(4);
+      await expect(palette(p).locator('[data-search-filter-bar] [data-clear-filters]')).toHaveCount(1);
+      const fit = await palette(p).evaluate((dialog, isPhone) => {
+        const panel = dialog.getBoundingClientRect();
+        const bar = dialog.querySelector<HTMLElement>('[data-search-filter-bar]')!;
+        const filters = bar.querySelector<HTMLElement>('.ib-sp-filters')!;
+        const sort = dialog.querySelector<HTMLElement>('[data-search-sort]')!;
+        const parts = [...bar.querySelectorAll<HTMLElement>('.ib-sp-fcell, [data-clear-filters], .ib-sp-pin label')].map((el) => el.getBoundingClientRect());
+        const right = filters.getBoundingClientRect().right - parseFloat(getComputedStyle(filters).paddingRight);
+        return {
+          lines: new Set(parts.map((r) => Math.round(r.top + r.height / 2))).size,
+          sortIn: sort.closest('.ib-sp-inrow') ? 'search box' : sort.closest('.ib-sp-pin') ? 'pinned' : 'elsewhere',
+          sortInside: sort.getBoundingClientRect().right <= panel.right + 0.5 && sort.getBoundingClientRect().left >= panel.left - 0.5,
+          // A desktop's filters neither scroll nor pass the row's end; a phone's scroll sideways by design.
+          scrolls: filters.scrollWidth > filters.clientWidth,
+          past: isPhone ? 0 : parts.filter((r) => r.right > right + 0.5).length,
+          projectCut: (() => { const fl = bar.querySelector<HTMLElement>('[data-chip="project"] .ib-sp-fl')!; return fl.scrollWidth > fl.clientWidth; })(),
+        };
+      }, phone);
+      expect(fit).toEqual({ lines: 1, sortIn: phone ? 'pinned' : 'search box', sortInside: true, scrolls: phone, past: 0, projectCut: true });
+      if (width === 1440 || width === 320) await shot(p, `06-every-filter-set-${width}`, phone ? 'dark' : 'light');
+    } finally {
+      await ctx.close();
+    }
+  }
 });

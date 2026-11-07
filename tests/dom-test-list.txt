@@ -149,6 +149,8 @@ packages/inbox/listHeaderCompose.test.tsx
 packages/inbox/tidyMenu.test.tsx
 packages/inbox/listLook.test.tsx
 packages/inbox/threadPanel.test.tsx
+packages/inbox/listViewMenu.test.tsx
+packages/inbox/listViewReveal.test.tsx
 packages/inbox/listIntroDialog.test.tsx
 packages/inbox/rowsSettings.test.tsx
 packages/inbox/relativeTime.test.tsx
@@ -169,6 +171,7 @@ packages/inbox/ack.test.tsx
 packages/inbox/actionChecklist.test.tsx
 packages/inbox/actionDraftSend.test.tsx
 packages/inbox/actionNoteRefusal.test.tsx
+packages/inbox/newMessagePicker.test.tsx
 packages/inbox/wordsOnlyTwoAsks.test.tsx
 packages/inbox/firstRunNotifications.test.tsx
 packages/inbox/tour.test.tsx
@@ -215,6 +218,8 @@ packages/inbox/perfMarks.test.ts
 packages/inbox/themeToggle.test.tsx
 packages/inbox/sidebarUpdateDot.test.tsx
 packages/inbox/sidebarSections.test.tsx
+packages/inbox/listGroups.test.tsx
+packages/inbox/projectSort.test.tsx
 packages/inbox/updateStuck.test.tsx
 packages/inbox/palettePicker.test.tsx
 packages/inbox/textSize.test.tsx
@@ -237,6 +242,7 @@ packages/inbox/commentSubmitKey.test.tsx
 packages/inbox/skillReferences.test.tsx
 packages/inbox/skillListRoom.test.tsx
 packages/inbox/messageComments.test.tsx
+packages/inbox/messageDelete.test.tsx
 packages/inbox/feedbackDialog.test.tsx
 packages/ui/components/HumanOnlySkillNotice.test.tsx
 packages/ui/components/MenuVersionSection.test.tsx
@@ -310,6 +316,7 @@ packages/review-editor/components/TokenHoverAnnouncementDialog.test.tsx
 packages/review-editor/utils/stitchTokenIdentifier.test.ts
 packages/review-editor/utils/diffSelection.test.ts
 packages/review-editor/hooks/useAutoViewed.test.tsx
+packages/review-editor/hooks/useHiddenViewedFiles.hook.test.tsx
 packages/review-editor/hooks/useReviewProgress.test.tsx
 packages/review-editor/hooks/useCallFlowAnalysis.test.tsx
 packages/review-editor/hooks/useCallFlowInstall.test.tsx
@@ -520,6 +527,7 @@ packages/inbox/personLineBreaks.test.tsx
 packages/inbox/aboutPrivacy.test.tsx
 packages/inbox/snoozeIntroDialog.test.tsx
 packages/inbox/boardReveal.test.tsx
+packages/inbox/codeReviewOffer.test.tsx
 packages/review-editor/App.guideGlobalComment.test.tsx
 packages/ui/hooks/skillCatalogReload.test.tsx
 packages/inbox/reviewVerdict.test.ts
@@ -537,7 +545,6 @@ packages/ui/components/shape/ShapeDrawn.test.tsx
 packages/inbox/shapeEndedLabel.test.tsx
 packages/inbox/review-drawing/ShowMeLayer.test.tsx
 packages/review-editor/components/SelectionChooser.test.tsx
-packages/inbox/review-drawing/ShowMeDrag.test.tsx
 packages/inbox/lazyChunkFailure.test.tsx
 packages/inbox/lazyParts.test.tsx
 packages/inbox/shapeBoardHead.test.tsx
@@ -546,6 +553,7 @@ packages/inbox/shapeSidebarToggle.test.tsx
 packages/inbox/shape/standalone/ShapePage.test.tsx
 packages/inbox/shape/ShapeBoard.test.tsx
 packages/ui/components/shape/ShapeSurface.commentDraft.test.tsx
+packages/ui/components/shape/ShapeFollow.test.tsx
 packages/ui/components/shape/ShapeSurface.popoverQuote.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.globalCommentDraft.test.tsx
 packages/ui/components/CodeFilePopout.commentDraft.test.tsx
@@ -556,5 +564,15 @@ packages/inbox/lazyRecovery.test.tsx
 packages/review-editor/components/guide/GuideGlobalCommentPopover.test.tsx
 packages/review-editor/utils/scrollWithPage.test.ts
 packages/ui/components/shape/ShapeSurface.board.test.tsx
+packages/ui/components/shape/ShapeSurface.onCode.test.tsx
 packages/ui/components/AnnotationToolstrip.hideActionModes.test.tsx
+packages/ui/components/shape/ShapeSurface.changed.test.tsx
+packages/inbox/shapeWhatsChanged.test.tsx
+packages/inbox/reviewPaneAt.test.tsx
+packages/inbox/shapeBoardPlace.test.tsx
+packages/inbox/system/setupDialog.test.tsx
+packages/ui/components/html-viewer/HtmlViewer.frameUrl.test.tsx
+packages/ui/components/StarAskCard.test.tsx
+packages/system/test/change.test.tsx
+packages/system/test/render.test.tsx
 packages/inbox/composeRemoteLaunch.test.tsx

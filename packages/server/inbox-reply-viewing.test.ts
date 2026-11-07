@@ -78,6 +78,30 @@ async function post(server: InboxServer, path: string, body: Record<string, unkn
 const reply = (server: InboxServer, messageId: string, body: Record<string, unknown>) =>
   post(server, `/api/inbox/messages/${messageId}/reply`, { idempotency_key: "k1", words: WORDS, questions: [], ...body });
 
+test("the viewing line in the wake: after the words, under the details line, before the closing line, on every client", async () => {
+  const question = [":::question", "Which label set?", "", "- [ ] A", "- [ ] B", ":::"].join("\n");
+  const { server, project, sent, ids } = await world(undefined, question);
+  await reply(server, sent.message_id, { viewing: { attachment_id: ids["b-labels.png"], time: "8:47 PM" } });
+  const [command] = await poll(server, "ses-a", project);
+  const line = `(They sent this while viewing \`b-labels.png\`, from the 8:47 PM message ${sent.message_id}.)`;
+  const expected = [
+    `[Thread ${sent.thread_id}: 2 messages, 1 question open, don't re-ask it. Your last message was just now]`,
+    "",
+    WORDS,
+    "",
+    line,
+    "",
+    "[for context: read_thread (opt: set limit) or search · help: plannotator inbox --help]",
+  ];
+  for (const wake of [inboxWakeText(command!), modWakeText(command!), codexQueueMessage(command!)]) {
+    expect(wake.split("\n").slice(2)).toEqual(expected);
+  }
+  // The same words with the still-open sentence kept for an older connection, the viewing line after it.
+  expect(command!.body).toContain(`${WORDS}\n\n`);
+  expect(command!.body.endsWith(`\n\n${line}`)).toBe(true);
+  expect(command!.body).toContain("still open");
+});
+
 test("the agent reads one line naming the file on every route; the body stays the person's words", async () => {
   const { server, client, project, sent, ids } = await world();
   // A second session, tagged in: the same reply reaches it on the tagged route.
