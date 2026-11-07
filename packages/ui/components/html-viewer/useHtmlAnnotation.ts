@@ -163,6 +163,9 @@ type BridgeMessage =
   | { type: `${typeof PREFIX}mark-click`; id: string }
   | { type: `${typeof PREFIX}unanchored`; ids: string[] }
   | { type: `${typeof PREFIX}resize`; height: number }
+  | { type: `${typeof PREFIX}content-width`; width: number; viewport: number }
+  | { type: `${typeof PREFIX}page-scroll-up` }
+  | { type: `${typeof PREFIX}page-tap`; y: number }
   | { type: `${typeof PREFIX}page-change`; pageUrl: string }
   | { type: `${typeof PREFIX}link-click`; href: string };
 
@@ -243,6 +246,34 @@ export interface UseHtmlAnnotationOptions {
    *  `onHostDraft`): a selection or a pin reports a draft instead of opening
    *  the toolbar or the composer. Absent: unchanged. */
   onHostDraft?: (draft: HostDraft | null) => void;
+  /** How much the host scales the frame on screen (a CSS transform on an
+   *  ancestor, as the Inbox's phone "Desktop size" does). What the bridge
+   *  measures is in the page's own pixels; anything placed in the parent from
+   *  it is multiplied by this, and parent distances sent to the bridge
+   *  (`scrollClear`) are divided by it. Absent: 1, unchanged. */
+  frameScale?: number;
+  /** How wide the page lays out against the frame's width (the bridge's
+   *  `content-width`, in the page's own pixels), each time either changes.
+   *  Delivered in readOnly mode too. Absent: ignored. */
+  onContentWidth?: (report: HtmlContentWidth) => void;
+  /** The person scrolled the page (or a scroller in it) back up. Delivered in
+   *  readOnly mode too. Absent: ignored. */
+  onPageScrollUp?: () => void;
+  /** A tap on the page, with where it landed as a `clientY` in the parent
+   *  (converted through `frameScale`). Delivered in readOnly mode too.
+   *  Absent: ignored. */
+  onPageTap?: (clientY: number) => void;
+}
+
+/** The page's laid-out width and the frame's own width, in the page's pixels. */
+export interface HtmlContentWidth {
+  width: number;
+  viewport: number;
+}
+
+/** A host's frame scale as a usable factor: anything not a positive finite number is 1. */
+export function resolveFrameScale(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 1;
 }
 
 /** Clamp a host cap into the package's bound; anything unusable is the default. */
@@ -486,6 +517,17 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
       return typeof value.height === "number" && Number.isFinite(value.height)
         ? { type: value.type, height: value.height }
         : null;
+    case `${PREFIX}content-width`: {
+      const { width, viewport } = value;
+      const fits = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1_000_000;
+      return fits(width) && fits(viewport) ? { type: value.type, width, viewport } : null;
+    }
+    case `${PREFIX}page-scroll-up`:
+      return { type: value.type };
+    case `${PREFIX}page-tap`:
+      return typeof value.y === "number" && Number.isFinite(value.y) && Math.abs(value.y) <= 1_000_000
+        ? { type: value.type, y: value.y }
+        : null;
     case `${PREFIX}link-click`: {
       // The raw href of a link the framed document just swallowed. It is
       // page-controlled text, so it is bounded and screened here — the trust
@@ -531,6 +573,10 @@ export function useHtmlAnnotation({
   scrollBehavior,
   scrollClear,
   onHostDraft,
+  frameScale,
+  onContentWidth,
+  onPageScrollUp,
+  onPageTap,
 }: UseHtmlAnnotationOptions): Omit<
   UseAnnotationHighlighterReturn,
   "highlighterRef" | "highlightRange" | "highlightMathElement"
@@ -620,6 +666,14 @@ export function useHtmlAnnotation({
   const onLinkClickRef = useRef(onLinkClick);
   onLinkClickRef.current = onLinkClick;
   const onHostDraftRef = useRef(onHostDraft);
+  const frameScaleRef = useRef(resolveFrameScale(frameScale));
+  frameScaleRef.current = resolveFrameScale(frameScale);
+  const onContentWidthRef = useRef(onContentWidth);
+  onContentWidthRef.current = onContentWidth;
+  const onPageScrollUpRef = useRef(onPageScrollUp);
+  onPageScrollUpRef.current = onPageScrollUp;
+  const onPageTapRef = useRef(onPageTap);
+  onPageTapRef.current = onPageTap;
   onHostDraftRef.current = onHostDraft;
   // The id of the draft the host holds, so a stale cancel cannot drop a newer one.
   const hostDraftIdRef = useRef<string | null>(null);
@@ -711,8 +765,10 @@ export function useHtmlAnnotation({
       if (anchorRef.current) anchorRef.current.remove();
       anchorRef.current = null;
       const anchor = getOrCreateAnchor();
-      anchor.style.top = `${iframeRect.top + bridgeRect.top}px`;
-      anchor.style.left = `${iframeRect.left + bridgeRect.left + bridgeRect.width / 2}px`;
+      // The bridge measures in the page's pixels; a scaled frame shows them smaller.
+      const s = frameScaleRef.current;
+      anchor.style.top = `${iframeRect.top + bridgeRect.top * s}px`;
+      anchor.style.left = `${iframeRect.left + (bridgeRect.left + bridgeRect.width / 2) * s}px`;
       return anchor;
     },
     [iframeRef, getOrCreateAnchor],
@@ -738,6 +794,10 @@ export function useHtmlAnnotation({
         && type !== `${PREFIX}mark-click`
         && type !== `${PREFIX}unanchored`
         && type !== `${PREFIX}resize`
+        && type !== `${PREFIX}content-width`
+        // Scrolling and tapping are reading, reported for a host's own controls.
+        && type !== `${PREFIX}page-scroll-up`
+        && type !== `${PREFIX}page-tap`
         // Page identity is navigation state, not an annotation mutation.
         && type !== `${PREFIX}page-change`
         // Following a link is a read action; a read-only document still navigates.
@@ -959,8 +1019,9 @@ export function useHtmlAnnotation({
         if (!iframe || !anchor) return;
         const r = message.rect;
         const iframeRect = iframe.getBoundingClientRect();
-        anchor.style.top = `${iframeRect.top + r.top}px`;
-        anchor.style.left = `${iframeRect.left + r.left + r.width / 2}px`;
+        const s = frameScaleRef.current;
+        anchor.style.top = `${iframeRect.top + r.top * s}px`;
+        anchor.style.left = `${iframeRect.left + (r.left + r.width / 2) * s}px`;
         window.dispatchEvent(new Event("scroll"));
       }
 
@@ -996,6 +1057,19 @@ export function useHtmlAnnotation({
 
       if (type === `${PREFIX}resize`) {
         onResize?.(message.height);
+      }
+
+      if (type === `${PREFIX}content-width`) {
+        onContentWidthRef.current?.({ width: message.width, viewport: message.viewport });
+      }
+
+      if (type === `${PREFIX}page-scroll-up`) {
+        onPageScrollUpRef.current?.();
+      }
+
+      if (type === `${PREFIX}page-tap`) {
+        const top = iframeRef.current?.getBoundingClientRect().top ?? 0;
+        onPageTapRef.current?.(top + message.y * frameScaleRef.current);
       }
 
       if (type === `${PREFIX}page-change`) {
@@ -1034,7 +1108,10 @@ export function useHtmlAnnotation({
   scrollClearRef.current = scrollClear;
   useEffect(() => {
     if (selectedAnnotationId) {
-      const clear = scrollClearRef.current?.() ?? null;
+      const measured = scrollClearRef.current?.() ?? null;
+      // Measured in the parent: a scaled frame's page pixels are larger.
+      const s = frameScaleRef.current;
+      const clear = measured && s !== 1 ? { left: measured.left / s, top: measured.top / s, bottom: measured.bottom / s } : measured;
       post({
         type: `${PREFIX}scroll-to`,
         id: selectedAnnotationId,

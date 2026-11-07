@@ -461,6 +461,98 @@ export const BRIDGE_SCRIPT = `(function() {
   // The frame resizing is what tells the guard its last grow was applied.
   window.addEventListener('resize', postResize, { passive: true });
 
+  // Reports for a host's own controls (HtmlViewer onContentWidth,
+  // onPageScrollUp, onPageTap; the Inbox's size icon on a phone). Opt-in:
+  // nothing here listens or posts until the host asks with set-page-reports,
+  // so a host that never asks gets exactly what it got before.
+  var pageReports = { contentWidth: false, scrollUp: false, tap: false, scale: 1 };
+  var pageReportListeners = { contentWidth: false, motion: false };
+
+  // How wide the page lays out against the frame's own width: a host that can
+  // show the page at another width (the Inbox on a phone: "Desktop size") reads
+  // a page wider than its frame as one made for a wider screen. Posted when
+  // either number changes.
+  var lastContentWidth = '';
+  function postContentWidth() {
+    if (LIVE || !pageReports.contentWidth) return;
+    var root = document.documentElement;
+    if (!root) return;
+    var width = Math.max(root.scrollWidth || 0, document.body ? document.body.scrollWidth || 0 : 0);
+    var viewport = root.clientWidth || window.innerWidth || 0;
+    var key = width + 'x' + viewport;
+    if (key === lastContentWidth) return;
+    lastContentWidth = key;
+    postToParent({ type: PREFIX + 'content-width', width: Math.ceil(width), viewport: Math.ceil(viewport) });
+  }
+
+  // The person scrolling back up, and a tap: a host with a control that fades
+  // over the page shows it again on either. Distances are the person's: on
+  // screen, through the host's scale (a page drawn at 0.3 moves 3 screen px
+  // for 10 of its own). The page or any scroller in it, at least 16 px up in
+  // one go, at most every 200 ms. A tap is a press and a lift within 10 px and
+  // 600 ms, posted with where it landed (the page's own pixels).
+  var scrollTops = typeof WeakMap === 'function' ? new WeakMap() : null;
+  var scrollUpRun = 0;
+  var lastScrollUpPost = 0;
+  function noteScrollForHost(e) {
+    if (LIVE || !pageReports.scrollUp || !scrollTops) return;
+    var t = e.target;
+    var el = t && t.nodeType === 1 ? t : (document.scrollingElement || document.documentElement);
+    if (!el) return;
+    var top = el.scrollTop || 0;
+    var prev = scrollTops.get(el);
+    scrollTops.set(el, top);
+    if (prev === undefined) return;
+    if (top >= prev) { scrollUpRun = 0; return; }
+    scrollUpRun += prev - top;
+    var now = Date.now();
+    if (scrollUpRun * pageReports.scale < 16 || now - lastScrollUpPost < 200) return;
+    scrollUpRun = 0;
+    lastScrollUpPost = now;
+    postToParent({ type: PREFIX + 'page-scroll-up' });
+  }
+  var tapStart = null;
+  function noteTapStart(e) {
+    tapStart = e.isPrimary === false ? null : { x: e.clientX, y: e.clientY, t: Date.now() };
+  }
+  function noteTapEnd(e) {
+    var s = tapStart;
+    tapStart = null;
+    if (LIVE || !pageReports.tap || !s || !e) return;
+    var k = pageReports.scale;
+    if (Math.abs(e.clientX - s.x) * k > 10 || Math.abs(e.clientY - s.y) * k > 10 || Date.now() - s.t > 600) return;
+    postToParent({ type: PREFIX + 'page-tap', y: Math.round(e.clientY) });
+  }
+
+  // The host's set-page-reports: which reports it wants, and how much it
+  // scales the frame on screen. Listeners go on at the first ask and stay
+  // (each report checks its flag), so a repeated ask never stacks them.
+  function setPageReports(data) {
+    var scale = data && data.scale;
+    pageReports.contentWidth = !!data && data.contentWidth === true;
+    pageReports.scrollUp = !!data && data.scrollUp === true;
+    pageReports.tap = !!data && data.tap === true;
+    pageReports.scale = typeof scale === 'number' && isFinite(scale) && scale > 0 ? Math.min(Math.max(scale, 0.05), 20) : 1;
+    if (LIVE) return;
+    if (pageReports.contentWidth && !pageReportListeners.contentWidth) {
+      pageReportListeners.contentWidth = true;
+      window.addEventListener('load', postContentWidth);
+      window.addEventListener('resize', postContentWidth, { passive: true });
+    }
+    if ((pageReports.scrollUp || pageReports.tap) && !pageReportListeners.motion) {
+      pageReportListeners.motion = true;
+      window.addEventListener('scroll', noteScrollForHost, { passive: true, capture: true });
+      window.addEventListener('pointerdown', noteTapStart, { passive: true, capture: true });
+      window.addEventListener('pointercancel', function() { tapStart = null; }, { passive: true, capture: true });
+      window.addEventListener('pointerup', noteTapEnd, { passive: true, capture: true });
+    }
+    if (pageReports.contentWidth) {
+      // A fresh ask always hears the current width, even if it has not changed.
+      lastContentWidth = '';
+      postContentWidth();
+    }
+  }
+
   // --- Selection ---
   var pendingSelection = null;
   var pendingRange = null; // live range for the pending selection (scroll tracking)
@@ -962,6 +1054,10 @@ export const BRIDGE_SCRIPT = `(function() {
 
     else if (type === PREFIX + 'set-host-navigates') {
       hostNavigates = e.data.active === true;
+    }
+
+    else if (type === PREFIX + 'set-page-reports') {
+      setPageReports(e.data);
     }
 
     else if (type === PREFIX + 'set-annotate-mode') {
@@ -6190,6 +6286,7 @@ export const BRIDGE_SCRIPT = `(function() {
     if (typeof ResizeObserver !== 'undefined' && document.body) {
       var resizeObserver = new ResizeObserver(function() {
         postResize();
+        postContentWidth();
         scheduleVimUiUpdate();
         schedulePinpointReconcile();
       });

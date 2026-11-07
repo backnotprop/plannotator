@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
 import {
   formatInboxVideoTime,
@@ -89,6 +89,8 @@ import { escapeRung, type EscapeRung } from '../escapeLadder';
 import { Tip } from './Tip';
 import { CopyFileButton } from './CopyFileButton';
 import { LinkedMarkdown } from './LinkedMarkdown';
+import { PAGE_DESKTOP_WIDTH, desktopFitScale, pageIsWide, readPageSize, shownPageSize, writePageSize, type PageSize } from '../pageSize';
+import { tapNearSizeIcon, useSizeIconFade } from '../sizeIconFade';
 
 /**
  * The pane width below which the 300 px comments panel beside the thread
@@ -366,6 +368,14 @@ interface FileMemory {
 
 const NO_ANNOTATIONS: Annotation[] = [];
 const noop = () => {};
+/** Focus that shows its ring (the keyboard's), not a finger's press. Where `:focus-visible` is unknown, counted as shown. */
+const focusVisible = (el: Element) => {
+  try {
+    return el.matches(':focus-visible');
+  } catch {
+    return true;
+  }
+};
 
 const recordKey = (path: string, version: string) => (version === 'current' ? path : `${path}#${version.slice(0, 12)}`);
 
@@ -1622,6 +1632,52 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // ── An HTML page on a phone (approval "inbox-html-attachments-phone") ──────
   const phoneHtml = full && phone && isHtml;
   const threadId = props.composer?.threadId ?? null;
+  // Part B, "Fit the page" (pageSize.ts): Desktop size lays the page out at a laptop's width and scales it to the
+  // phone's. A press is remembered per file; until then a page wider than the phone opens on Desktop size by itself.
+  const pageKey = `${attachment.id}:${view?.version ?? ''}`;
+  const storedSize = useMemo(() => (isHtml ? readPageSize(attachment.path) : null), [isHtml, attachment.path]);
+  const [pickedNow, setPickedNow] = useState<{ file: string; size: PageSize } | null>(null);
+  const pickedSize = pickedNow?.file === attachment.path ? pickedNow.size : storedSize;
+  /** The page reported itself wider than the phone, for this file as it is open now. */
+  const [widePage, setWidePage] = useState<string | null>(null);
+  const pageSize = shownPageSize(pickedSize, widePage === pageKey);
+  const fitted = phoneHtml && pageSize === 'desktop';
+  const [fitBox, setFitBox] = useState<HTMLDivElement | null>(null);
+  const [fitScale, setFitScale] = useState(1);
+  useLayoutEffect(() => {
+    if (!fitBox || !phoneHtml) return;
+    const measure = () => setFitScale(desktopFitScale(fitBox.clientWidth));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(fitBox);
+    return () => observer.disconnect();
+  }, [fitBox, phoneHtml]);
+  // A pick wins over this flag (shownPageSize), and a frame already at the laptop's width never reports itself wide.
+  const onContentWidth = useCallback(
+    (report: { width: number; viewport: number }) => {
+      if (pageIsWide(report)) setWidePage(pageKey);
+    },
+    [pageKey],
+  );
+  const togglePageSize = () => {
+    const next: PageSize = pageSize === 'desktop' ? 'phone' : 'desktop';
+    writePageSize(attachment.path, next);
+    setPickedNow({ file: attachment.path, size: next });
+    announce(next === 'desktop' ? 'Desktop size' : 'Phone size');
+  };
+  // The icon gets out of the way (sizeIconFade.ts): shown when the page opens, faded after about 3 seconds, back on a
+  // scroll up or a tap near the top. Faded, it takes no taps, so they reach the page.
+  const sizeIconOn = phoneHtml && !linkedTop && !!view && view.html !== null;
+  const sizeIcon = useSizeIconFade(sizeIconOn, pageKey);
+  const sizeBtnRef = useRef<HTMLButtonElement | null>(null);
+  const onPageTap = useCallback(
+    (clientY: number) => {
+      const bottom = sizeBtnRef.current?.getBoundingClientRect().bottom ?? 0;
+      if (tapNearSizeIcon(clientY, bottom)) sizeIcon.wake();
+    },
+    [sizeIcon.wake],
+  );
   // It opens clear, like Markdown: the reply is the pill in the toolbar's row, whatever the last file left open.
   useLayoutEffect(() => {
     if (phoneHtml && threadId) forgetComposerOpened(threadId);
@@ -1659,6 +1715,13 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   useEffect(() => {
     if (shownToolbar === 'pinned') gatheredFrom.current = 'bar';
   }, [shownToolbar]);
+  // The size icon comes back with the other tools (» or a pinch let go), even if it had faded before they went.
+  const toolsWereTucked = useRef(false);
+  useEffect(() => {
+    const tucked = shownToolbar === 'tucked';
+    if (toolsWereTucked.current && !tucked && sizeIconOn) sizeIcon.wake();
+    toolsWereTucked.current = tucked;
+  }, [shownToolbar, sizeIconOn, sizeIcon.wake]);
   // A pinch's tuck does not pass through the toolbar's state: measured as it is committed, before it is drawn. (A tuck
   // by hand is measured in onState; with the tools already gathered there is nothing to fly.)
   const pinchFromShowing = pinchTucks && toolbar === 'pinned';
@@ -2097,13 +2160,24 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           )}
           {view && isHtml && view.html !== null && (
             // Kept mounted under a linked page (inert, hidden), so Back finds it as it was left.
-            <div className={`ib-htmlframe${linkedTop ? ' ib-covered' : ''}`} inert={linkedTop ? true : undefined}>
+            <div
+              ref={setFitBox}
+              className={`ib-htmlframe${linkedTop ? ' ib-covered' : ''}${fitted ? ' ib-fitdesk' : ''}`}
+              inert={linkedTop ? true : undefined}
+              data-page-size={phoneHtml ? pageSize : undefined}
+              style={fitted ? ({ '--ib-fit-scale': String(fitScale), '--ib-fit-width': `${PAGE_DESKTOP_WIDTH}px` } as CSSProperties) : undefined}
+            >
             <HtmlViewer
               ref={viewerRef}
               key={`${attachment.id}:${view.version}:${view.attachment.current?.sha256 ?? ''}`}
               // A phone's comment goes in the composer's card (HtmlPageComment.tsx), and a selection made with a finger counts.
               onHostDraft={phoneHtml && hasComposer ? htmlComment.onHostDraft : undefined}
               touchSelection={phoneHtml && hasComposer}
+              // Desktop size scales the page down: what the page measures converts through it.
+              frameScale={fitted ? fitScale : undefined}
+              onContentWidth={phoneHtml ? onContentWidth : undefined}
+              onPageScrollUp={phoneHtml ? sizeIcon.wake : undefined}
+              onPageTap={phoneHtml ? onPageTap : undefined}
               rawHtml={view.html}
               // Its own document, served under its own policy: web pictures load in the page, never in the window.
               frameUrl={source.pageFrameUrl}
@@ -2139,6 +2213,30 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               // Shift-click joins more elements to one comment, as in annotate (the viewer's own cap).
               readOnly={props.readOnly}
             />
+            </div>
+          )}
+          {view && isHtml && view.html !== null && phoneHtml && !linkedTop && (
+            // One size control (pageSize.ts; the owner's pick, 2026-11-07: "Just the icon no words"): a small icon in
+            // the page's top right corner showing the size the page is at. Its name says what a press does.
+            <div className="ib-sizecorner" data-page-size-corner="" data-faded={sizeIcon.shown ? undefined : ''}>
+              <button
+                ref={sizeBtnRef}
+                type="button"
+                className="ib-sizebtn"
+                onClick={() => {
+                  togglePageSize();
+                  sizeIcon.wake();
+                }}
+                // Keyboard focus holds it shown; a finger's press does not (a tapped button may keep focus), and
+                // leaving lets it fade again only after keyboard focus held it (hold(false) wakes only then).
+                onFocus={(e) => (focusVisible(e.currentTarget) ? sizeIcon.hold(true) : sizeIcon.wake())}
+                onBlur={() => sizeIcon.hold(false)}
+                aria-label={pageSize === 'desktop' ? 'Phone size' : 'Desktop size'}
+                title={pageSize === 'desktop' ? 'Phone size' : 'Desktop size'}
+                data-page-size-toggle={pageSize}
+              >
+                <Icon name={pageSize === 'desktop' ? 'laptop' : 'phone'} size={18} />
+              </button>
             </div>
           )}
           {view && linkedTop && (
