@@ -11,6 +11,7 @@ import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } f
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
+import { learnProjects } from './projectPictures';
 import type { ReplyViewing } from './replyViewing';
 import type {
   InboxCardMark,
@@ -139,6 +140,8 @@ export interface ProjectFolder extends InboxProject {
   machine?: string;
   /** The projects combined into this one: a link to one opens this project. Absent when there are none. */
   combined?: { id: string; name: string; root: string }[];
+  /** When its letter mark's picture was set (Set picture…, ms). Absent when none, and from an older Inbox. */
+  picture?: number;
 }
 
 /** The project menu's batches (POST /api/inbox/projects/:id/read and /resolve): the threads each took. */
@@ -1010,6 +1013,8 @@ function learnMachines(model: ListModel): void {
   rememberLocal(localIdsIn(model));
   for (const row of rows) rememberMachine([row.thread_id], row.machine);
   for (const project of model.projects) rememberMachine([project.id], project.machine);
+  // Letter marks (letterMarks.tsx): the projects' names (a Board card names only an id) and their pictures' keys.
+  learnProjects(model.projects);
 }
 
 /** A file's query: the page session, and for another machine the key its door asks of every write. */
@@ -1340,6 +1345,9 @@ export const inboxApi = {
   /** The project menu's Rename… (a name) and Reset name (null): the project's `display_name`. */
   renameProject: (projectId: string, name: string | null) =>
     post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/name`), { name }),
+  /** Set picture… (letter marks): an image as a data: URL, or null to take it away. Answers the project with its `picture`. */
+  setProjectPicture: (projectId: string, picture: string | null) =>
+    post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/picture`), { picture }),
   /** Combine a project into another, or undo that (null): answers the project the person now sees. */
   combineProject: (projectId: string, into: string | null) =>
     post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/combine`), { into }),

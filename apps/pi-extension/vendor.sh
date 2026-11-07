@@ -49,7 +49,11 @@ mkdir -p generated/shape generated/inbox
 printf '// @generated — DO NOT EDIT. Source: packages/core/ulid.ts\n' | cat - ../../packages/core/ulid.ts > generated/ulid.ts
 printf '// @generated — DO NOT EDIT. Source: packages/core/shape.ts\n' | cat - ../../packages/core/shape.ts \
   | sed -e "s|from ['\"]\./guide['\"]|from '../guide.ts'|g" -e "s|from ['\"]\./ulid['\"]|from '../ulid.ts'|g" \
+    -e "s|from ['\"]\./shape-scene['\"]|from './shape-scene.ts'|g" \
   > generated/shape/core.ts
+# A board's scenes (core/shape checks them; shape-scene reads core/shape's types).
+printf '// @generated — DO NOT EDIT. Source: packages/core/shape-scene.ts\n' | cat - ../../packages/core/shape-scene.ts \
+  | sed "s|from ['\"]\./shape['\"]|from './core.ts'|g" > generated/shape/shape-scene.ts
 printf '// @generated — DO NOT EDIT. Source: packages/shared/shape/format.ts\n' | cat - ../../packages/shared/shape/format.ts \
   | sed "s|from ['\"]@plannotator/core/shape['\"]|from './core.ts'|g" > generated/shape/format.ts
 # One line each (not a loop): tests/parity/vendor-parity.test.ts reads these paths to match Pi's imports.

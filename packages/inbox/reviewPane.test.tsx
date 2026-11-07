@@ -82,6 +82,8 @@ let listHead = 'a'.repeat(40);
 let listReads: string[] = [];
 /** The thread's annotation records (`/attachments`): a guided-review comment when a test writes one. */
 let annotations: Record<string, unknown>[] = [];
+/** `GET /api/inbox/pulls/diff`: the PR's own diff, when a test gives one (else the door answers `{}`, a diff not read). */
+let pullDiffAnswer: Record<string, unknown> | null = null;
 const PR_KEY = 'github.com/acme/ledger#880';
 const PR = {
   key: PR_KEY, platform: 'github', host: 'github.com', repo: 'acme/ledger', number: 880, url: 'https://github.com/acme/ledger/pull/880', title: 'RTL layout',
@@ -98,6 +100,7 @@ beforeEach(() => {
   listHead = 'a'.repeat(40);
   listReads = [];
   annotations = [];
+  pullDiffAnswer = null;
   window.localStorage.clear();
   others = [OTHER];
   backs = 0;
@@ -116,6 +119,7 @@ beforeEach(() => {
       }
       return Response.json({});
     }
+    if (path.includes('/api/inbox/pulls/diff') && pullDiffAnswer) return Response.json(pullDiffAnswer);
     if (/\/api\/inbox\/pulls(\?|$)/.test(path)) {
       listReads.push(path);
       return Response.json({ fetched_at: null, hosts: [], pulls: [{ ...PR, head_sha: listHead }], links: {}, projects: {}, cards: {} });
@@ -317,6 +321,27 @@ test.skipIf(!hasDom)('a comment posted once is never posted again, even after a 
   const last = reviewPosts.at(-1)!;
   expect(last).toMatchObject({ action: 'approve', head_sha: 'b'.repeat(40) });
   expect(JSON.stringify(last)).not.toContain('Mirror the icons.');
+});
+
+test.skipIf(!hasDom)("a guided review's comment on lines that read the same on the PR's own diff posts inline, at that diff's commit; one off it rides the body", async () => {
+  const DIFF_HEAD = 'c'.repeat(40);
+  pullDiffAnswer = { key: PR_KEY, scope: 'layer', base: 'main', head: 'rtl', patch: snapshot.review.rawPatch, head_sha: DIFF_HEAD };
+  const onDiff = { id: 'ann-in', type: 'comment', scope: 'line', filePath: 'src/auth.ts', lineStart: 1, lineEnd: 1, side: 'new', text: 'Refresh earlier.', createdAt: 1 };
+  const offDiff = { id: 'ann-out', type: 'comment', scope: 'line', filePath: 'src/settings/Layout.tsx', lineStart: 3, lineEnd: 3, side: 'new', text: 'Mirror the icons.', createdAt: 2 };
+  annotations = [onDiff, offDiff].map((annotation, i) => ({ id: `rec-${i}`, message_id: REVIEW, created_at: '2026-10-11T10:40:00.000Z', annotation, guide: { line_start: annotation.lineStart, line_end: annotation.lineEnd, file: annotation.filePath, side: 'new' } }));
+  await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY] });
+  await click('[data-review-posts] [data-decision-caret]');
+  const approveWith = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => /Approve with comments/.test(item.textContent ?? ''))!;
+  await act(async () => approveWith.click());
+  await settle();
+  await act(async () => dialogButton('Approve').click());
+  await settle();
+  expect(reviewPosts).toHaveLength(1);
+  const sent = reviewPosts[0]!;
+  expect(sent).toMatchObject({ action: 'approve', head_sha: DIFF_HEAD });
+  expect(sent.fileComments).toEqual([expect.objectContaining({ path: 'src/auth.ts', line: 1, side: 'RIGHT', body: expect.stringContaining('Refresh earlier.') })]);
+  expect(String(sent.body)).not.toContain('Refresh earlier.');
+  expect(String(sent.body)).toContain('Mirror the icons.');
 });
 
 test.skipIf(!hasDom)('a thread that owns the person\'s PR offers both endings: its agent by default, GitHub on a pick', async () => {
