@@ -7637,6 +7637,19 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 .ib-lk-tfirst .ib-nrow .ib-l2-lead .ib-from { flex: 1 1 auto; min-width: 0; }
 .ib-lk-tfirst .ib-nrow .ib-l2-lead .ib-p { font-size: var(--ib-fs-13, 13px); font-weight: 500; line-height: 17px; color: var(--muted-foreground); }
 .ib-lk-tfirst .ib-m1-lead { min-height: 0; }
+/* With Subject preview off too, the row is two lines (InboxList's `twoLines`): line 3's guided review mark, pin,
+   badge, snooze return and count sit at line 2's right end (`.ib-lend`), after the agents and the project. They are
+   never cut: the project gives way with "…" first. */
+:is(.ib-nrow .ib-l2-lead, .ib-m1-lead):has(> .ib-lend) { gap: 8px; }
+.ib-lend { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: none; margin-left: auto; font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-lend:empty { display: none; }
+.ib-lend > * { flex: none; }
+.ib-lend .ib-c { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; }
+.ib-lend .ib-c:has(.ib-b-wait) { display: inline-flex; align-items: center; }
+/* Its unrendered estimate beside a thread: 62px to 67px (a badge's 22px on line 2), 8px more padding and 2px more
+   gap when roomy. A phone's two-line row is close to its 66px estimate already. */
+.ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow > .ib-l2 > .ib-lend) { contain-intrinsic-size: auto none auto 66px; }
+.ib-lk-roomy .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow > .ib-l2 > .ib-lend) { contain-intrinsic-size: auto none auto 76px; }
 
 /* Voice dictation: the microphone in the composer (components/VoiceMic.tsx). The button takes the paperclip's size in
    each host. The status shares the toolbar's row, so starting to listen moves nothing. */

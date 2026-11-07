@@ -933,6 +933,18 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
       <RowTime row={row} relative={relative} />
     </span>
   );
+  // The guided review mark, the pin, the badge, the snooze's return and the count: line 3's end, or line 2's on a
+  // two-line row (`twoLines`).
+  const tail = (
+    <>
+      <GuideMark row={row} />
+      {pinned && <PinMark threadId={row.thread_id} press={!!onUnstar} />}
+      {badge}
+      <SnoozedUntil row={row} />
+      <LineCount row={row} tip />
+    </>
+  );
+  const twoLines = titleFirst && noPreview && !compact;
   return (
     <>
     <button
@@ -964,7 +976,15 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
             {compact && lead}
             {time}
           </div>
-          {!compact && <div className="ib-l2 ib-l2-lead">{lead}</div>}
+          {/* Subject preview off too (`twoLines`): line 3's marks and counts at line 2's right end, and no line 3. */}
+          {twoLines ? (
+            <div className="ib-l2 ib-l2-lead">
+              {lead}
+              <span className="ib-lend">{tail}</span>
+            </div>
+          ) : (
+            !compact && <div className="ib-l2 ib-l2-lead">{lead}</div>
+          )}
         </>
       ) : (
         <>
@@ -983,14 +1003,12 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
       )}
       {/* Line 3: the grey preview, cut first, then the guided review mark, and at the right end the pin, the badge
           and the count (inbox-row-byline's line 2 without the marks). Nothing to show: no line. */}
-      <div className="ib-l3">
-        {!noPreview && <Preview row={row} />}
-        <GuideMark row={row} />
-        {pinned && <PinMark threadId={row.thread_id} press={!!onUnstar} />}
-        {badge}
-        <SnoozedUntil row={row} />
-        <LineCount row={row} tip />
-      </div>
+      {!twoLines && (
+        <div className="ib-l3">
+          {!noPreview && <Preview row={row} />}
+          {tail}
+        </div>
+      )}
       {pinned && <PinnedWords />}
     </button>
     <BadgeWords row={row} id={wordsId} />
@@ -1015,7 +1033,22 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
   // A pin with nothing else for line 3 (no preview, book, badge or count) stays on line 1, before the time, so the
   // row never grows a line for the pin alone.
   const avatarRow = useAvatarRow();
-  const pinOnLine1 = pinned && !preview && !guide && !badge && !row.snoozed && countWords(row, 0) === null && row.questions.open < 1;
+  // First line "Thread name" with Subject preview off: two lines, line 3's book, pin, badge and count at line 2's end.
+  const twoLines = titleFirst && noPreview && !compact;
+  const pinOnLine1 = !twoLines && pinned && !preview && !guide && !badge && !row.snoozed && countWords(row, 0) === null && row.questions.open < 1;
+  const tail = (
+    <>
+      {guide && (
+        <span className="ib-att" data-guide-mark="" role="img" aria-label="Guided review">
+          <Icon name="book" size={13} />
+        </span>
+      )}
+      {pinned && !pinOnLine1 && <PinMark threadId={row.thread_id} press={!!onUnstar} />}
+      {badge}
+      <SnoozedUntil row={row} />
+      <LineCount row={row} />
+    </>
+  );
   return (
     <>
     <button
@@ -1048,6 +1081,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
           {!compact && (
             <span className="ib-m1 ib-m1-lead">
               <LeadLine row={row} project={project} filtered={filtered} tip={false} />
+              {twoLines && <span className="ib-lend">{tail}</span>}
             </span>
           )}
         </>
@@ -1066,22 +1100,16 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
         </>
       )}
       {/* Line 3: the preview (cut first), then the book, the pin, the badge and the count. */}
-      <span className="ib-m3">
-        {preview && (
-          <span className="ib-pv" dir="auto">
-            {preview}
-          </span>
-        )}
-        {guide && (
-          <span className="ib-att" data-guide-mark="" role="img" aria-label="Guided review">
-            <Icon name="book" size={13} />
-          </span>
-        )}
-        {pinned && !pinOnLine1 && <PinMark threadId={row.thread_id} press={!!onUnstar} />}
-        {badge}
-        <SnoozedUntil row={row} />
-        <LineCount row={row} />
-      </span>
+      {!twoLines && (
+        <span className="ib-m3">
+          {preview && (
+            <span className="ib-pv" dir="auto">
+              {preview}
+            </span>
+          )}
+          {tail}
+        </span>
+      )}
       {pinned && <PinnedWords />}
     </button>
     <BadgeWords row={row} id={wordsId} />
