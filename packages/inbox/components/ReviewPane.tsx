@@ -896,6 +896,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
             </div>
           )}
           <AnnotationPanel
+            title="Comments"
             emptyHint={readOnly ? undefined : 'Click a line number, drag across lines, or select code to comment'}
             isOpen
             presentation={folded ? 'embedded' : undefined}
