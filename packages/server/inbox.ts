@@ -1385,6 +1385,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * A checklist still waits on the person (the row's `steps_waiting`): a waiting step, its session not ended, and
+   * the person has not answered in the thread since the list was last written: no message of theirs and no 👍 Looks
+   * good (`store.personAnsweredSince`, which reads the stored messages, 👍 included).
+   */
+  const inboxStepsWaitOnPerson = (list: Parameters<typeof stepsListWaitsOnPerson>[0], now: number): boolean =>
+    stepsListWaitsOnPerson(list, live, now, (threadId, since) => store.personAnsweredSince(threadId, since));
+  /** A row without `steps_waiting` (a linked machine's: this window never shows that machine's checklists). */
+  const withoutStepsWaiting = (row: InboxListRow): InboxListRow => {
+    if (!("steps_waiting" in row)) return row;
+    const { steps_waiting: _dropped, ...rest } = row;
+    return rest;
+  };
+
+  /**
    * The list model: one row per thread, placed in the approved sections, with
    * the project as a label and an optional filter (`?project=prj_...`), which
    * keeps the sections and drops other projects' rows.
@@ -1394,17 +1408,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * machine): every linked machine's rows join this Inbox's, each row with
    * its `machine`, plus the `machines` block. Without it, this Inbox's own.
    */
-  /** The person wrote in the thread after `since` (a list's last write): the thread no longer waits on that list. */
-  const personWroteSince = (threadId: string, since: string): boolean => {
-    const after = Date.parse(since) || 0;
-    return (store.thread(threadId)?.messages ?? []).some((message) => message.author.kind === "person" && Date.parse(message.created_at) >= after);
-  };
-  const inboxStepsWaitOnPerson = (list: Parameters<typeof stepsListWaitsOnPerson>[0], now: number): boolean => stepsListWaitsOnPerson(list, live, now, personWroteSince);
-  const withoutStepsWaiting = (row: InboxListRow): InboxListRow => {
-    if (!("steps_waiting" in row)) return row;
-    const { steps_waiting: _dropped, ...rest } = row;
-    return rest;
-  };
   const listModel = (projectFilter: string | null, archived: "include" | "exclude", merged = false, snoozedMode: "include" | "exclude" = "include") => {
     // One pass over the store feeds both the folders' counts and the sections.
     // `pinned_at` and `snoozed` (additive) on the window's and the phone's rows only: never on anything an agent reads.

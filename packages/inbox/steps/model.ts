@@ -150,24 +150,60 @@ export function pieGeometry(done: number, total: number, size: number): { c: num
 }
 
 /**
- * The foot button's mark (approval "inbox-checklist-spinners-2026-11-07", mock 1): the current step's mark, the amber
- * pause while a step waits on the person, else the spinner while one is worked on; null otherwise (fresh, all done),
- * when the button keeps the pie.
+ * The person answered in the thread since a time (`inboxPersonAnsweredSince` over the thread's messages: a reply of
+ * theirs or a 👍 Looks good). Where the window has no thread (the Board, the intro's picture), nobody answered.
  */
-export function stepsButtonMark(list: Pick<InboxStepsWire, 'steps'>): 'waiting' | 'doing' | null {
-  if (list.steps.some((step) => step.status === 'waiting')) return 'waiting';
+export type StepsAnsweredSince = (since: string) => boolean;
+const nobodyAnswered: StepsAnsweredSince = () => false;
+
+/**
+ * A list still waits on the person, by the server's rule for the row's `steps_waiting` (`inboxStepsWaitOnPerson`): a
+ * step is `waiting`, its session has not ended (an ended session never updates its list), and the person has not
+ * answered since the list was last written. The foot's button, the Board card's words and the row agree by it.
+ */
+export function stepsListWaits(list: Pick<InboxStepsWire, 'steps' | 'presence' | 'updated_at'>, answeredSince: StepsAnsweredSince = nobodyAnswered): boolean {
+  return list.presence !== 'ended' && list.steps.some((step) => step.status === 'waiting') && !answeredSince(list.updated_at);
+}
+
+/**
+ * The foot button's mark (approval "inbox-checklist-spinners-2026-11-07", mock 1): the current step's mark, the amber
+ * pause while the list waits on the person (`stepsListWaits`), else the spinner while a step is worked on; null
+ * otherwise (fresh, all done), when the button keeps the pie.
+ */
+export function stepsButtonMark(list: Pick<InboxStepsWire, 'steps' | 'presence' | 'updated_at'>, answeredSince: StepsAnsweredSince = nobodyAnswered): 'waiting' | 'doing' | null {
+  if (stepsListWaits(list, answeredSince)) return 'waiting';
   if (list.steps.some((step) => step.status === 'doing')) return 'doing';
   return null;
 }
 
 /** The list the foot's button shows: one that waits on the person first (that is what they need to see), else the newest. */
-export function stepsButtonList<T extends Pick<InboxStepsWire, 'steps'>>(lists: readonly T[]): T | null {
-  return lists.find((list) => list.steps.some((step) => step.status === 'waiting')) ?? lists[0] ?? null;
+export function stepsButtonList<T extends Pick<InboxStepsWire, 'steps' | 'presence' | 'updated_at'>>(lists: readonly T[], answeredSince: StepsAnsweredSince = nobodyAnswered): T | null {
+  return lists.find((list) => stepsListWaits(list, answeredSince)) ?? lists[0] ?? null;
 }
 
-/** The lane card's amber pause, read aloud and on hover: "Checklist: 2 of 4 steps done; waiting on you: Pick the window". Null when nothing waits. */
-export function stepsWaitWords(lists: readonly Pick<InboxStepsWire, 'steps'>[]): string | null {
-  const list = lists.find((one) => one.steps.some((step) => step.status === 'waiting'));
+/**
+ * What the foot's button shows, as a key: the list it shows, its count, its mark, "as of" and "+1". The thread's foot
+ * row fits itself again whenever it changes (a session ending mid-read adds "as of"; another list can win).
+ */
+export function stepsButtonSig(lists: readonly InboxStepsWire[], answeredSince: StepsAnsweredSince = nobodyAnswered): string {
+  const shown = stepsButtonList(lists, answeredSince);
+  if (!shown) return '';
+  return [shown.id, stepsCount(shown).text, stepsButtonMark(shown, answeredSince) ?? 'pie', shown.presence === 'ended' ? 'asof' : '', lists.length].join(':');
+}
+
+/**
+ * The words for a list that waits on the person, read aloud and on hover: "Checklist: 2 of 4 steps done; waiting on
+ * you: Pick the window", from the first list that still waits (`stepsListWaits`: never an ended session's). The lane
+ * card's mark; null when nothing waits.
+ */
+export function stepsWaitWords(lists: readonly Pick<InboxStepsWire, 'steps' | 'presence' | 'updated_at'>[], answeredSince: StepsAnsweredSince = nobodyAnswered): string | null {
+  const list = lists.find((one) => stepsListWaits(one, answeredSince));
   const step = list?.steps.find((one) => one.status === 'waiting');
   return list && step ? `Checklist: ${stepsDoneWords(list)}; waiting on you: ${step.step}` : null;
+}
+
+/** The waiting step the button's name adds ("; waiting on you: Pick the window"), while its list waits; else "". */
+export function stepsWaitingNameTail(list: Pick<InboxStepsWire, 'steps' | 'presence' | 'updated_at'>, answeredSince: StepsAnsweredSince = nobodyAnswered): string {
+  const step = stepsListWaits(list, answeredSince) ? list.steps.find((one) => one.status === 'waiting') : undefined;
+  return step ? `; waiting on you: ${step.step}` : '';
 }

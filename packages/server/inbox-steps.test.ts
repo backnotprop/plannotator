@@ -188,6 +188,21 @@ describe("the list's rows", () => {
     w.server.store.sendMessage({ project_id: w.server.store.message(w.thread)!.project_id, author: { kind: "person" }, body: "The last 7 days.", reply_to: w.thread });
     expect("steps_waiting" in (await row())).toBe(false);
   });
+
+  test("the person's 👍 Looks good, the flag is gone", async () => {
+    const w = await world();
+    const row = async () => {
+      const model = (await (await fetch(`${w.base}/api/inbox/threads`)).json()) as { sections: { threads: { thread_id: string; steps_waiting?: true }[] }[] };
+      return model.sections.flatMap((section) => section.threads).find((r) => r.thread_id === w.thread)!;
+    };
+    await w.setSteps(true);
+    w.server.store.setThreadSteps({ thread_id: w.thread, agent: AGENT, steps: [PLAN[0]!, { step: "Approve the plan", status: "waiting" }, PLAN[2]!] });
+    expect((await row()).steps_waiting).toBe(true);
+    // A 👍 is a note never listed in the thread: it still answers the waiting step.
+    await new Promise((done) => setTimeout(done, 5));
+    w.server.store.ackMessage(w.thread, true);
+    expect("steps_waiting" in (await row())).toBe(false);
+  });
 });
 
 describe("the event stream", () => {

@@ -22,7 +22,7 @@ import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import type { InboxAuthor, InboxListRow, InboxMessageWire, InboxProject, InboxQuestion, InboxStepsWire, InboxThread } from '@plannotator/core/inbox-types';
 import type { OpenActionItem, OpenQuestion } from '@plannotator/core/inbox-open-questions';
 import { dispatchInboxFrame, type InboxEventHandlers } from './api';
-import { cardStepLists, pieGeometry, stepMeta, stepsAsOf, stepsButtonList, stepsButtonMark, stepsCount, stepsDoneWords, stepsListLabels, stepsName, stepsWaitTarget, stepsWaitWords, threadBoardCard } from './steps/model';
+import { cardStepLists, pieGeometry, stepMeta, stepsAsOf, stepsButtonList, stepsButtonMark, stepsButtonSig, stepsCount, stepsDoneWords, stepsListLabels, stepsListWaits, stepsName, stepsWaitingNameTail, stepsWaitTarget, stepsWaitWords, threadBoardCard } from './steps/model';
 import { createStepsBus } from './steps/useThreadSteps';
 
 const hasDom = typeof document !== 'undefined';
@@ -207,6 +207,47 @@ describe('the button (steps/model.ts)', () => {
     expect(stepsWaitWords([working])).toBeNull();
     expect(stepsWaitWords([working, waiting])).toBe('Checklist: 0 of 1 steps done; waiting on you: Classify 30 days of failed charges');
   });
+
+  // Review 2 of #2847: the button, the row and the lane card wait by one rule (the server's `steps_waiting`).
+  test('the waiting rule: never an ended session\'s list, never once the person answered (a reply or a 👍) since the list was written', () => {
+    const waiting = withStatuses(['done', 'waiting', 'doing']);
+    const answered = (when: string) => (since: string) => Date.parse(when) >= Date.parse(since);
+    expect(stepsListWaits(waiting)).toBe(true);
+    expect(stepsListWaits({ ...waiting, presence: 'ended' })).toBe(false);
+    expect(stepsListWaits(waiting, answered(at(14, 45)))).toBe(false);
+    expect(stepsListWaits(waiting, answered(at(14, 40)))).toBe(false);
+    expect(stepsListWaits(waiting, answered(at(14, 30)))).toBe(true);
+    // Answered: the spinner of the step still worked on, and no "waiting on you" in the name.
+    expect(stepsButtonMark(waiting, answered(at(14, 45)))).toBe('doing');
+    expect(stepsWaitingNameTail(waiting)).toBe('; waiting on you: Retry worker on pg-boss');
+    expect(stepsWaitingNameTail(waiting, answered(at(14, 45)))).toBe('');
+    expect(stepsButtonMark({ ...waiting, presence: 'ended' })).toBe('doing');
+  });
+
+  test('an ended session\'s old waiting list never beats a live one, on the button or the lane card', () => {
+    const live = { ...withStatuses(['done', 'waiting']), id: 'stp_live', agent: B };
+    const stale = { ...withStatuses(['waiting', 'todo'], 'ended'), id: 'stp_ended' };
+    expect(stepsButtonList([stale, live])?.id).toBe('stp_live');
+    expect(stepsButtonMark(stepsButtonList([stale, live])!)).toBe('waiting');
+    expect(stepsWaitWords([stale, live])).toBe('Checklist: 1 of 2 steps done; waiting on you: Retry worker on pg-boss');
+    // Only the ended one: the newest shows, with no amber, and the lane card says nothing waits.
+    expect(stepsButtonList([stale])?.id).toBe('stp_ended');
+    expect(stepsButtonMark(stale)).toBeNull();
+    expect(stepsWaitWords([stale])).toBeNull();
+  });
+
+  test('the button\'s key changes with what it shows: another list winning, the count, the mark, "as of", "+1"', () => {
+    const one = withStatuses(['done', 'doing', 'todo']);
+    const other = { ...withStatuses(['waiting']), id: 'stp_w' };
+    const sig = stepsButtonSig([one]);
+    expect(stepsButtonSig([one])).toBe(sig);
+    expect(stepsButtonSig([])).toBe('');
+    expect(stepsButtonSig([one, other])).not.toBe(sig);
+    expect(stepsButtonSig([one, { ...other, presence: 'ended' }])).not.toBe(sig);
+    expect(stepsButtonSig([{ ...one, presence: 'ended' }])).not.toBe(sig);
+    expect(stepsButtonSig([withStatuses(['done', 'done', 'doing'])])).not.toBe(sig);
+    expect(stepsButtonSig([withStatuses(['done', 'waiting', 'todo'])])).not.toBe(sig);
+  });
 });
 
 describe('the wire', () => {
@@ -332,7 +373,7 @@ test.skipIf(!hasDom)('on: "3/6" after the open questions, named for whose steps,
   expect(oq).toBeGreaterThanOrEqual(0);
   expect(foot[oq + 1]).toBe(button()!);
   expect(button()!.textContent).toBe('3/6');
-  expect(button()!.getAttribute('aria-label')).toBe("Claude Code's checklist: 3 of 6 steps done");
+  expect(button()!.getAttribute('aria-label')).toBe("Claude Code's checklist: 3 of 6 steps done; waiting on you: Ship it behind a flag");
   // A step waits on the person (and another is worked on): the button wears the amber pause, not the pie.
   expect(button()!.querySelector('[data-step-mark]')!.getAttribute('data-step-mark')).toBe('waiting');
   expect(button()!.querySelector('[data-steps-pie]')).toBeNull();
@@ -391,6 +432,24 @@ test.skipIf(!hasDom)('"Waiting on you ›" closes the list and rings the questio
   await until(() => !panel(), 'the panel to close');
   await until(() => !!el.querySelector(`[data-message-id="${M3}"] [data-question-key].ib-q-target`), "Claude Code's question ringed");
   expect(el.querySelector(`[data-message-id="${M2}"] [data-question-key].ib-q-target`)).toBeNull();
+});
+
+// Review 2 of #2847: the button waits by the row's rule; a 👍 Looks good (or a reply) after the list is an answer.
+test.skipIf(!hasDom)('answered: a 👍 on the agent\'s message after the list was written ends the amber and the name\'s "waiting on you"; one from before does not', async () => {
+  const acked = (when: string): InboxThread => ({
+    ...THREAD,
+    messages: THREAD.messages.map((m, i) => (i === 2 ? { ...m, ack: { label: 'Looks good', at: when, read_seq: 3 } } : m)),
+  });
+  await render({ thread: acked(at(14, 45)) });
+  await until(() => !!button(), 'the steps button');
+  expect(button()!.querySelector('[data-step-mark]')!.getAttribute('data-step-mark')).toBe('doing');
+  expect(button()!.getAttribute('aria-label')).toBe("Claude Code's checklist: 3 of 6 steps done");
+  act(() => root?.unmount());
+  host?.remove();
+  await render({ thread: acked(at(14, 30)) });
+  await until(() => !!button(), 'the steps button');
+  expect(button()!.querySelector('[data-step-mark]')!.getAttribute('data-step-mark')).toBe('waiting');
+  expect(button()!.getAttribute('aria-label')).toBe("Claude Code's checklist: 3 of 6 steps done; waiting on you: Ship it behind a flag");
 });
 
 test.skipIf(!hasDom)('two sessions: each list under its agent\'s name; the button shows the one waiting on the person, else the newest', async () => {

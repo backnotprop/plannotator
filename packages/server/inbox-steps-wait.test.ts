@@ -22,31 +22,35 @@ const live = (connection: { busy: boolean | null } | null, ended = false): Inbox
   lastHeardOf: () => now - 60_000,
   endedOf: () => ended,
 });
-const nobodyWrote = () => false;
+const nobodyAnswered = () => false;
 
 describe("a checklist still waits on the person", () => {
   test("a waiting step, the person silent since the list, the session there: waits", () => {
-    expect(inboxStepsWaitOnPerson(list("waiting"), live({ busy: false }), now, nobodyWrote)).toBe(true);
+    expect(inboxStepsWaitOnPerson(list("waiting"), live({ busy: false }), now, nobodyAnswered)).toBe(true);
   });
 
-  test("the person replied after the list: the flag is gone", () => {
-    const wrote: string[] = [];
-    const personWroteSince = (threadId: string, since: string) => {
-      wrote.push(`${threadId} ${since}`);
-      return true;
+  test("the person answered after the list: the flag is gone; the agent rewriting its list after that: it waits again", () => {
+    // The person answered (a reply or a 👍) two minutes ago; the rule asks about each list's own last write.
+    const answeredAt = now - 2 * 60_000;
+    const asked: string[] = [];
+    const answeredSince = (threadId: string, since: string) => {
+      asked.push(threadId);
+      return answeredAt >= Date.parse(since);
     };
-    expect(inboxStepsWaitOnPerson(list("waiting"), live({ busy: false }), now, personWroteSince)).toBe(false);
-    // Asked about this list's thread, since this list's own last write.
-    expect(wrote).toEqual([`msg_x ${listAt}`]);
+    expect(inboxStepsWaitOnPerson(list("waiting"), live({ busy: false }), now, answeredSince)).toBe(false);
+    expect(asked).toEqual(["msg_x"]);
+    expect(inboxStepsWaitOnPerson(list("waiting", new Date(now - 60_000).toISOString()), live({ busy: false }), now, answeredSince)).toBe(true);
+    // A tie counts as answered: never left amber on the same moment.
+    expect(inboxStepsWaitOnPerson(list("waiting", new Date(answeredAt).toISOString()), live({ busy: false }), now, answeredSince)).toBe(false);
   });
 
   test("the session ended (seen gone, or unheard past the idle bar): the flag is gone", () => {
-    expect(inboxStepsWaitOnPerson(list("waiting"), live(null, true), now, nobodyWrote)).toBe(false);
+    expect(inboxStepsWaitOnPerson(list("waiting"), live(null, true), now, nobodyAnswered)).toBe(false);
     const quiet: InboxStepsLive = { deliveryConnectionOf: () => null, lastHeardOf: () => null, endedOf: () => false };
-    expect(inboxStepsWaitOnPerson(list("waiting", new Date(now - INBOX_STEPS_IDLE_MS - 60_000).toISOString()), quiet, now, nobodyWrote)).toBe(false);
+    expect(inboxStepsWaitOnPerson(list("waiting", new Date(now - INBOX_STEPS_IDLE_MS - 60_000).toISOString()), quiet, now, nobodyAnswered)).toBe(false);
   });
 
   test("no waiting step: never", () => {
-    expect(inboxStepsWaitOnPerson(list("doing"), live({ busy: true }), now, nobodyWrote)).toBe(false);
+    expect(inboxStepsWaitOnPerson(list("doing"), live({ busy: true }), now, nobodyAnswered)).toBe(false);
   });
 });

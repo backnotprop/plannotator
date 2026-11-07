@@ -934,8 +934,9 @@ function BoardCard({
   const mark = markOf(card);
   // The checklist's mark (approval "inbox-checklist-spinners-2026-11-07"): the lane card stays still, with nothing
   // while the agent works and the still amber pause only while a list waits on the person; the opened card has the rest.
-  // "Waits" is the server's rule on the thread's row (`steps_waiting`): not once the person has written since the list,
-  // nor once its session has ended, so the card and the list row always agree.
+  // "Waits" is the server's rule on the thread's row (`steps_waiting`): not once the person has answered since the list
+  // (a reply or a 👍), nor once its session has ended, so the card and the list row always agree; the words come from
+  // the first list that still waits by that rule (`stepsWaitWords`: never an ended session's), as the mark does.
   const planWords = stepsWaitWords(stepsOf(card).filter((list) => rowOf(list.thread_id)?.steps_waiting));
   const label = cardLabel(card, unread, now) + (sent ? `. Sent to ${sent}` : '') + (mark ? `. ${markLabel(mark)}` : '') + (planWords ? `. ${planWords}` : '');
   const thread = line?.you ? youThread(card, rowOf) : null;

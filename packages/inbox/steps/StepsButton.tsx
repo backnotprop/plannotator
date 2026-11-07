@@ -19,7 +19,7 @@ import { agentName } from '../format';
 import { drawStepsFit, fitFootRow, laidOutChildren } from '../footFit';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
-import { presenceClass, stepsAsOf, stepsButtonList, stepsButtonMark, stepsCount, stepsName } from './model';
+import { presenceClass, stepsAsOf, stepsButtonList, stepsButtonMark, stepsCount, stepsName, stepsWaitingNameTail, type StepsAnsweredSince } from './model';
 import { StepGlyph, StepsPie } from './StepsMarks';
 import { StepsLists } from './StepsList';
 
@@ -34,9 +34,14 @@ export interface StepsButtonProps {
    * Board is on and a card links it; null: no icon.
    */
   boardCard?: { title: string; onOpen: () => void } | null;
+  /**
+   * The person answered in the thread since a time (a reply or a 👍; `inboxPersonAnsweredSince` over its messages):
+   * a list they answered no longer waits, by the row's rule, so the button and the row agree.
+   */
+  answeredSince?: StepsAnsweredSince;
 }
 
-export function StepsButton({ lists, phone, onWaiting, boardCard = null }: StepsButtonProps) {
+export function StepsButton({ lists, phone, onWaiting, boardCard = null, answeredSince }: StepsButtonProps) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   /** A jump to the question takes focus there, not back to the button. */
@@ -64,12 +69,12 @@ export function StepsButton({ lists, phone, onWaiting, boardCard = null }: Steps
     observer.observe(buttons);
     return () => observer.disconnect();
   }, [lists.length > 0]);
-  const first = stepsButtonList(lists);
+  const first = stepsButtonList(lists, answeredSince);
   if (!first) return null;
   // Another session's list too: "+1" says it is there (the panel shows them all).
   const more = lists.length - 1;
   const asOf = stepsAsOf(first);
-  const name = `${stepsName(agentName(first.agent), first)}${asOf ? `, as of ${asOf}` : ''}${more > 0 ? `, and ${more} more checklist${more === 1 ? '' : 's'}` : ''}`;
+  const name = `${stepsName(agentName(first.agent), first)}${stepsWaitingNameTail(first, answeredSince)}${asOf ? `, as of ${asOf}` : ''}${more > 0 ? `, and ${more} more checklist${more === 1 ? '' : 's'}` : ''}`;
   const waitingFor = (list: InboxStepsWire) => {
     const go = onWaiting(list);
     return go
@@ -90,7 +95,7 @@ export function StepsButton({ lists, phone, onWaiting, boardCard = null }: Steps
       }}
     >
       <Popover.Trigger ref={trigger} className={`ib-btn ib-st-btn ${presenceClass(first.presence)}`} data-steps-button="" aria-label={name}>
-        <StepsButtonFace list={first} more={more} />
+        <StepsButtonFace list={first} more={more} answeredSince={answeredSince} />
       </Popover.Trigger>
       <Popover.Portal container={portal ?? undefined}>
         {phone && <Popover.Backdrop className="ib-oq-scrim" data-steps-scrim="" />}
@@ -142,9 +147,9 @@ export function StepsButton({ lists, phone, onWaiting, boardCard = null }: Steps
  * spinner, else the pie), the count, "· as of 2:40 PM" once the list's session ended, "+1" for another session's list
  * (the owner said yes to both, approval addendum), and the chevron.
  */
-export function StepsButtonFace({ list, more = 0, now }: { list: Pick<InboxStepsWire, 'steps' | 'presence' | 'updated_at'>; more?: number; now?: Date }) {
+export function StepsButtonFace({ list, more = 0, now, answeredSince }: { list: Pick<InboxStepsWire, 'steps' | 'presence' | 'updated_at'>; more?: number; now?: Date; answeredSince?: StepsAnsweredSince }) {
   const { done, total, text } = stepsCount(list);
-  const mark = stepsButtonMark(list);
+  const mark = stepsButtonMark(list, answeredSince);
   const asOf = stepsAsOf(list, now);
   return (
     <>

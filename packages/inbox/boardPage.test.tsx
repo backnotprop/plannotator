@@ -646,6 +646,15 @@ test.if(hasDom)('the lane card: the still amber pause only while a list waits on
   act(() => root?.unmount());
   root = null;
   document.body.innerHTML = '';
+  // Review 2 of #2847: the thread waits on a live session's list, and an ended session's old list (first in the read)
+  // still says "waiting". The card's words name the live list, the one its mark and the row stand for.
+  const ended = { ...checklist([{ step: 'Approve the old plan', status: 'waiting' }], 'ended'), id: 'stp_old', agent: { ...(CLAUDE as Extract<InboxAuthor, { kind: 'agent' }>), session: 'ses_old' } };
+  draw({ rowOf: autoRow(true), model: { serverSession: 's', cursor: 1, cards: CARDS, dropped_unseen: 0, seen_seq: LOOK, steps: { msg_auto: [ended, AUTO_STEPS] } } });
+  expect($$('.ib-bc-plan')).toHaveLength(1);
+  expect(cardEl('crd_auto')!.querySelector('[data-card-open]')!.getAttribute('aria-label')).toEndWith('. Checklist: 1 of 3 steps done; waiting on you: Pick the updater');
+  act(() => root?.unmount());
+  root = null;
+  document.body.innerHTML = '';
   // The agent works on a step and nothing waits on the person: the card wears nothing.
   const working = checklist([
     { step: 'Read the issue', status: 'done' },

@@ -62,17 +62,17 @@ export function inboxStepsPresenceOf(record: InboxSteps, live: InboxStepsLive, n
 /**
  * A list still waits on the person (the row's and the lane card's amber pause, approval
  * "inbox-checklist-spinners-2026-11-07": "only while the thread waits on the person"): a step is `waiting`, the person
- * has written nothing in the thread since the list was last written, and the session has not ended (an ended session
- * never updates its list, so its "waiting" would stay for good).
+ * has not answered in the thread since the list was last written (no message of theirs, no 👍 Looks good), and the
+ * session has not ended (an ended session never updates its list, so its "waiting" would stay for good).
  */
 export function inboxStepsWaitOnPerson(
   record: InboxSteps,
   live: InboxStepsLive,
   now: number,
-  personWroteSince: (threadId: string, since: string) => boolean,
+  personAnsweredSince: (threadId: string, since: string) => boolean,
 ): boolean {
   if (!record.steps.some((step) => step.status === "waiting")) return false;
-  if (personWroteSince(record.thread_id, record.updated_at)) return false;
+  if (personAnsweredSince(record.thread_id, record.updated_at)) return false;
   return inboxStepsPresenceOf(record, live, now) !== "ended";
 }
 
