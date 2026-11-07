@@ -551,6 +551,7 @@ packages/inbox/shapeChangeFailed.test.tsx
 packages/inbox/shapeSidebarToggle.test.tsx
 packages/inbox/shape/standalone/ShapePage.test.tsx
 packages/inbox/shape/ShapeBoard.test.tsx
+packages/inbox/shape/boardFocus.test.ts
 packages/ui/components/shape/ShapeSurface.commentDraft.test.tsx
 packages/ui/components/shape/ShapeFollow.test.tsx
 packages/ui/components/shape/ShapeSurface.popoverQuote.test.tsx

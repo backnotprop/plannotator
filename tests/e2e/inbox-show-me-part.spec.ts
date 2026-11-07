@@ -209,7 +209,16 @@ const opened = (page: Page) => page.evaluate(() => (window as unknown as { __ope
 const madeSince = (before: Set<string>) => listed().map((s) => s.id).filter((id) => !before.has(id)).sort();
 /** The new board has the focus on its title, and the window's live region says it. */
 const focusedAndSaid = async (page: Page, newTitle: RegExp) => {
-  await expect(board(page).locator('h1')).toBeFocused();
+  try {
+    await expect(board(page).locator('h1')).toBeFocused();
+  } catch (error) {
+    // Where the focus went instead, and whether the title was said, so a failure in CI says why.
+    const where = await page.evaluate(() => {
+      const el = document.activeElement;
+      return `${el?.tagName ?? 'none'} ${el?.outerHTML.slice(0, 200) ?? ''} · said: ${document.querySelector('[data-inbox-live]')?.textContent ?? ''}`;
+    });
+    throw new Error(`${(error as Error).message}\nThe focus is on: ${where}`);
+  }
   await expect(page.locator('[data-inbox-live]')).toHaveText(newTitle);
 };
 /** Annotate, click a part, optional words, Show me; the new board opens by itself. */
