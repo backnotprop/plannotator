@@ -287,6 +287,8 @@ export function holdDarkBoard(board: HTMLElement, paint: ShapeDarkPaint = painte
   for (const el of board.querySelectorAll<HTMLElement | SVGElement>('*')) {
     const svg = el.namespaceURI === SVG_NS;
     if (svg ? !/^(rect|circle|ellipse|path|polygon)$/.test(el.localName) || el.closest(UNDRAWN) : el.closest('svg')) continue;
+    // A run or step player draws itself from the board's variables; its parts are not the drawing's zones.
+    if (el.closest('[data-run], [data-steps]')) continue;
     const cs = getComputedStyle(el);
     const zone = zoneOf(svg ? cs.fill : cs.backgroundColor);
     if (!zone || (svg ? drawsLine(cs) : hasEdge(cs))) continue;

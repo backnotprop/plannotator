@@ -59,6 +59,8 @@
     "./inbox-snooze": "./inbox-snooze.ts",
     "./inbox-list-delta": "./inbox-list-delta.ts",
     "./shape": "./shape.ts",
+    "./shape-run": "./shape-run.ts",
+    "./shape-steps": "./shape-steps.ts",
     "./shape-skill": "./shape-skill.ts",
     "./shape-kit.mjs": "./shape-kit.mjs",
     "./inbox-reply-draft": "./inbox-reply-draft.ts",

@@ -28,6 +28,9 @@ import {
 import { useReducedMotion } from './Pebble';
 import { syncKeptBoxes, type KeptBox } from './boxSelect';
 import { holdDarkBoard, releaseDarkBoard } from './darkContrast';
+import { ShapePlayers } from './ShapePlayers';
+import type { ShapeRun } from '@plannotator/core/shape-run';
+import type { ShapeSteps } from '@plannotator/core/shape-steps';
 
 /**
  * A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first.
@@ -335,6 +338,10 @@ export interface ShapeDrawnProps {
    * that works on the drawing itself ("Follow an example").
    */
   onBoard?: (board: HTMLElement | null) => void;
+  /** The board's runs: a `<div data-run="id">` in the drawing plays `runs[id]` (flat swimlanes; `run/RunPlayer`, loaded lazily). Absent: such a div stays empty. */
+  runs?: Readonly<Record<string, ShapeRun>>;
+  /** The board's step-throughs: a `<div data-steps="id">` plays `steps[id]` (`steps/StepPlayer`, loaded lazily). Absent: such a div stays empty. */
+  steps?: Readonly<Record<string, ShapeSteps>>;
 }
 
 /** How much room the view has, for a fixed canvas. */
@@ -695,6 +702,9 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       <div className="shp-drawn-fit" style={scaled && fit ? { width: drawn.width! * k, height: drawn.height! * k } : undefined}>
         <div ref={hostRef} className="shp-drawn-host" />
       </div>
+      {(props.runs || props.steps) && (
+        <ShapePlayers board={rootRef.current?.querySelector<HTMLElement>('.board') ?? null} drawnKey={contentKey} runs={props.runs} steps={props.steps} reduce={reduce} />
+      )}
     </div>
   );
 }

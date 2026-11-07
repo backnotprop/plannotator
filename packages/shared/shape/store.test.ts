@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { inboxProjectKey } from "../inbox/project-key";
 import { createShapeStore } from "./store";
 import { diffShapeVersions, type ShapeBoard } from "./format";
+import { POOL_RUN, runBoard, SORT_STEPS } from "../../../tests/fixtures/shape-run-player";
 
 // Every test gets its own data dir under the OS temp folder: nothing here
 // touches the person's Plannotator data.
@@ -516,5 +517,29 @@ describe("images a drawing names", () => {
     expect(image.src).toMatch(/^files\/.*crop\.png$/);
     expect(image.crop).toEqual([0, 0, 0.5, 0.5]);
     expect(store.read(r.id)!.refs![0]!.target).toBe("https://github.com/o/r/pull/1");
+  });
+});
+
+describe("a board that plays a run and a step-through", () => {
+  test("both are kept in the version the board reads", () => {
+    const { store } = storeAt(scratch());
+    const r = store.update({ board: runBoard(), project, session });
+    if (!r.ok) throw new Error(JSON.stringify(r));
+    const v = store.read(r.id)!;
+    expect(v.runs?.pool).toEqual(POOL_RUN);
+    expect(v.steps?.sort).toEqual(SORT_STEPS);
+  });
+
+  test("an update with a bad run or step-through stores nothing and names the field", () => {
+    const { store } = storeAt(scratch());
+    const bad = runBoard();
+    bad.runs!.pool!.spans[0]!.lane = "w9";
+    bad.steps!.sort!.frames[2]!.line = 40;
+    const r = store.update({ board: bad, project, session });
+    expect(r.ok).toBe(false);
+    if (r.ok || r.code !== "invalid") throw new Error("expected invalid");
+    expect(r.errors.join("\n")).toContain("runs.pool.spans[0].lane");
+    expect(r.errors.join("\n")).toContain("steps.sort.frames[2].line");
+    expect(store.list()).toEqual([]);
   });
 });
