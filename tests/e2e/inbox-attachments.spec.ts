@@ -688,6 +688,9 @@ test("the reply box's chips wrap inside it beside a file and stacked, a phone's 
       { width: 390, height: 844, phone: true },
       { width: 320, height: 640, phone: true },
     ]) {
+      // Out of the row's middle cell first: the list's Escape puts focus back on its chip, and the row holds its fit
+      // while the person is in that cell (ReplyRow.tsx), so the new size would be fitted only once focus left it.
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
       await page.setViewportSize({ width: size.width, height: size.height });
       await expect(page.locator('section.ib-pane .ib-rbox').filter({ visible: true })).toHaveCount(1);
       // Measure the layout this size settles on, not the frame before the window's own resize reaches React
