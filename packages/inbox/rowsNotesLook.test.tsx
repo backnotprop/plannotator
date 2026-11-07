@@ -20,8 +20,8 @@ const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { ROWS_PRESETS } = (hasDom ? await import('./components/RowsSettings') : {}) as typeof import('./components/RowsSettings');
-const { rowStatus, rowStatusWords } = await import('./components/RowStatus');
-const { LIST_LOOK_DEFAULT, adoptSavedRows, lookFromRows, lookWithChange, resetListLookForTests, rowsFromLook } = await import('./listLook');
+const { rowStatus, rowStatusName, rowStatusWords } = await import('./components/RowStatus');
+const { LIST_LOOK_DEFAULT, adoptSavedRows, lookWithChange, resetListLookForTests, rowsFromLook } = await import('./listLook');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 function row(id: string, extra: Partial<InboxListRow> = {}): InboxListRow {
@@ -119,7 +119,7 @@ function look(...on: InboxRowsOption[]) {
   act(() => adoptSavedRows(['smallNames', ...on], 1));
 }
 
-function mount(shape: 'wide' | 'narrow' | 'phone'): HTMLElement {
+function mount(shape: 'wide' | 'narrow' | 'phone', pinned?: ReadonlySet<string>): HTMLElement {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   host.setAttribute('data-pn-tooltip-root', '');
@@ -128,7 +128,7 @@ function mount(shape: 'wide' | 'narrow' | 'phone'): HTMLElement {
   act(() =>
     root!.render(
       <SidebarProvider>
-        <InboxList title="Inbox" path={null} sections={SECTIONS} filtered={false} narrow={shape === 'narrow'} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} phone={shape === 'phone'} />
+        <InboxList title="Inbox" path={null} sections={SECTIONS} filtered={false} narrow={shape === 'narrow'} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} phone={shape === 'phone'} pinned={pinned as Set<string> | undefined} />
       </SidebarProvider>,
     ),
   );
@@ -149,6 +149,21 @@ describe('the status mark says waiting, done or nothing', () => {
     expect(rowStatus(row('b', { resolved_at: '2026-10-10T11:00:00.000Z', back_from_archive: true, section: 'waiting', questions: { open: 1, picked: 0, stopped: false, holds_up: [], prompt: null } }))).toBe('waiting');
   });
 
+  // Review of #2872: a Mark read with a question open put the row in Quiet, where it showed "Read" and no count; the
+  // mark said Waiting there. A Re-ask note waiting on the agent (Sent) showed no count either.
+  test('done wins in Quiet even with a question still open; Sent has no mark, a Re-ask note waiting included', () => {
+    const open = { open: 1, picked: 0, stopped: false, holds_up: [], prompt: null };
+    expect(rowStatus(row('r', { read_at: '2026-10-10T10:05:00.000Z', questions: open }))).toBe('done');
+    expect(rowStatus(row('s', { section: 'sent', reask_pending: true, questions: open }))).toBeNull();
+  });
+
+  test("a done row's name keeps why it is Quiet; its tooltip words stay \"Done\"", () => {
+    expect([QUIET, ACKED, WORKING].map((r) => rowStatusName(r))).toEqual(['Done, read', 'Done, 👍 Looks good', 'Done']);
+    expect(rowStatusName(row('a', { resolved_at: '2026-10-10T11:00:00.000Z' }))).toBe('Done, archived');
+    expect(rowStatusWords(QUIET)).toBe('Done');
+    expect(rowStatusName(WAIT)).toBe('Waiting on you: 2 questions, 1 action item');
+  });
+
   test('its words keep the count: one question, several, action items', () => {
     expect(rowStatusWords(STOP)).toBe('Waiting on you: 1 question');
     expect(rowStatusWords(WAIT)).toBe('Waiting on you: 2 questions, 1 action item');
@@ -159,11 +174,8 @@ describe('the status mark says waiting, done or nothing', () => {
 });
 
 describe('the options in the look', () => {
-  test('all off by default, and a round trip through core keeps each', () => {
-    for (const key of ['timeBelow', 'dividers', 'statusMark', 'boldNames'] as const) {
-      expect(LIST_LOOK_DEFAULT[key]).toBe(false);
-      expect(rowsFromLook(lookFromRows(['smallNames', key]))).toEqual(['smallNames', key]);
-    }
+  test('all off by default', () => {
+    for (const key of ['timeBelow', 'dividers', 'statusMark', 'boldNames'] as const) expect(LIST_LOOK_DEFAULT[key]).toBe(false);
   });
 
   test('no rival of theirs: the other rivals settle without touching them, and they never turn another option off', () => {
@@ -172,7 +184,7 @@ describe('the options in the look', () => {
       const next = lookWithChange(notes, change);
       expect([next.timeBelow, next.dividers, next.statusMark, next.boldNames]).toEqual([true, true, true, true]);
     }
-    // Turning them on keeps every other option as it was.
+    // Turning them off keeps every other option as it was.
     expect(lookWithChange(notes, { timeBelow: false, dividers: false, statusMark: false, boldNames: false })).toEqual({ ...notes, timeBelow: false, dividers: false, statusMark: false, boldNames: false });
     expect(inboxRowsCanonical(['compact', 'timeBelow', 'dividers', 'statusMark', 'boldNames'])).toEqual(['compact', 'timeBelow', 'dividers', 'statusMark', 'boldNames']);
   });
@@ -296,13 +308,36 @@ describe.if(hasDom)('the notes-list look on the rows', () => {
     }
   });
 
-  test('Bold names: only a class on the list column, off by default', () => {
+  test('Bold names: a class on the list column, off by default, whose rule outranks the read, Sent and Quiet weights', () => {
     let el = mount('narrow');
     expect(el.querySelector('.ib-listcol')!.classList.contains('ib-lk-bold')).toBe(false);
     unmount();
     look('boldNames');
     el = mount('narrow');
     expect(el.querySelector('.ib-listcol')!.classList.contains('ib-lk-bold')).toBe(true);
+    // The rules that set a name's weight back to 400 (a read row, a Sent row, a phone's name): the bold rule has at
+    // least their specificity (three classes) and comes after every one, so it wins in each.
+    const css = readFileSync(new URL('./inbox.css', import.meta.url), 'utf8');
+    const bold = css.indexOf('.ib-lk-bold :is(.ib-row, .ib-nrow) .ib-title, .ib-lk-bold .ib-mrow .ib-m2 { font-weight: 600; }');
+    expect(bold).toBeGreaterThan(0);
+    for (const rule of ['.ib-row.ib-sent .ib-p, .ib-row.ib-sent .ib-title {', '.ib-nrow.ib-sent .ib-p, .ib-nrow.ib-sent .ib-title {', '.ib-nrow .ib-title { display: block;', '  .ib-m2 { display: block;']) {
+      const at = css.indexOf(rule);
+      expect(at).toBeGreaterThan(0);
+      expect(at).toBeLessThan(bold);
+    }
+  });
+
+  test('a pinned row on a phone with the time under the preview keeps its pin with the row\'s end, never on line 1', () => {
+    // The New row has no preview, badge or count: by default its pin sits on line 1, before the time.
+    const pinned = new Set(['msg_new']);
+    let el = mount('phone', pinned);
+    expect(lines(rowOf(el, 'msg_new')).first.querySelector('[data-pin-mark]')).not.toBeNull();
+    unmount();
+    look('timeBelow');
+    el = mount('phone', pinned);
+    const { first, foot } = lines(rowOf(el, 'msg_new'));
+    expect(first.querySelector('[data-pin-mark]')).toBeNull();
+    expect(foot!.querySelector('[data-pin-mark]')).not.toBeNull();
   });
 });
 

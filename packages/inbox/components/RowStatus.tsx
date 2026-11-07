@@ -5,8 +5,11 @@
  *  - Waiting on you: the row has an open question or action item (`questions.open`), whatever its section (Stopped on
  *    you, Holding up work, Waiting on you; a draft too). The counts' words are its name and its tooltip ("Waiting on
  *    you: 2 questions, 1 action item"), so the count is never lost. Stopped and Holds up keep their own triangles.
- *  - Done: nothing waits on anyone, the row is in Quiet (archived, marked read, or read with nothing new).
- *  - Nothing otherwise: New (news, nothing asked) and Sent (the agent's turn).
+ *  - Done: the row is in Quiet (archived, marked read, or read with nothing new), even with a question still open: a
+ *    Mark read put it there, and its counts never showed (review of #2872).
+ *  - Nothing otherwise: New (news, nothing asked) and Sent (the agent's turn, a Re-ask note waiting on it included).
+ *
+ * A done row's mark stands alone on screen (the owner, q-8e0e9490), but its name keeps why it is Quiet: "Done, read".
  *
  * Off (the default), the row draws its counts as before.
  */
@@ -19,9 +22,23 @@ export type RowStatus = 'waiting' | 'done';
 
 /** What the row's status mark says, or null for none. */
 export function rowStatus(row: Pick<InboxListRow, 'questions' | 'section' | 'resolved_at' | 'back_from_archive'>): RowStatus | null {
-  if (inboxRowArchived(row)) return 'done';
-  if (row.questions.open > 0) return 'waiting';
-  return row.section === 'quiet' ? 'done' : null;
+  if (inboxRowArchived(row) || row.section === 'quiet') return 'done';
+  if (row.section === 'sent') return null;
+  return row.questions.open > 0 ? 'waiting' : null;
+}
+
+/** Why a done row is Quiet, in the words its row would show without the mark: "archived", "read", "👍 Looks good". */
+function quietReason(row: InboxListRow): string | null {
+  if (inboxRowArchived(row)) return 'archived';
+  if (row.section !== 'quiet' || (row.read_at ?? null) === null) return null;
+  return row.ack ? `👍 ${row.ack.label}` : 'read';
+}
+
+/** The mark's name for a screen reader: its words, and on a done row why it is Quiet ("Done, read"). */
+export function rowStatusName(row: InboxListRow): string | null {
+  const words = rowStatusWords(row);
+  const reason = rowStatus(row) === 'done' ? quietReason(row) : null;
+  return words && reason ? `${words}, ${reason}` : words;
 }
 
 /** The mark's name and tooltip: "Waiting on you: 1 question", "Waiting on you: 2 questions, 1 action item", "Done". */
@@ -43,7 +60,7 @@ function StatusIcon({ status }: { status: RowStatus }) {
   );
 }
 
-/** The mark, or nothing. Its words are visually hidden text (the row's name) and, with `tip`, its tooltip (a phone has none). */
+/** The mark, or nothing. Its name (`rowStatusName`) is visually hidden text; with `tip`, its words are its tooltip (a phone has none). */
 export function StatusMark({ row, tip = false }: { row: InboxListRow; tip?: boolean }) {
   const status = rowStatus(row);
   const words = rowStatusWords(row);
@@ -52,7 +69,7 @@ export function StatusMark({ row, tip = false }: { row: InboxListRow; tip?: bool
     <span className="ib-stm" data-status={status} data-status-count={status === 'waiting' ? row.questions.open : undefined}>
       <StatusIcon status={status} />
       {/* Spaced, so the row's name never runs it into the words before it. */}
-      <span className="ib-sr">{` ${words} `}</span>
+      <span className="ib-sr">{` ${rowStatusName(row)} `}</span>
     </span>
   );
   return tip ? <RowTip content={words}>{mark}</RowTip> : mark;

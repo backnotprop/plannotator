@@ -393,10 +393,12 @@ function FromLine({ row, project, filtered }: { row: InboxListRow; project: stri
  * row (`FromLine`), not every agent's name first; CSS (`.ib-lead > .ib-atiles`, `order: -1`) draws the tiles first.
  */
 function LeadLine({ row, project, filtered, tip = true }: { row: InboxListRow; project: string; filtered: boolean; tip?: boolean }) {
+  // What it draws is `leadParts`: anything new drawn here goes there too, or a row could fold it away (`leadEmpty`).
+  const { project: withProject } = leadParts(filtered, false);
   return (
     <span className="ib-from ib-lead">
-      {!filtered && <RowProjectMark row={row} />}
-      {!filtered &&
+      {withProject && <RowProjectMark row={row} />}
+      {withProject &&
         (tip ? (
           <ClipText className="ib-p" text={project} />
         ) : (
@@ -751,11 +753,18 @@ function useDevicePixelRatio(): number {
  * A list with a pinned row adds the pin's column just left of the open counts.
  */
 /**
- * A name-first row's second line (the agents and the project) draws nothing: no project on it (Project off, or one
- * project's list) and Agent icons off. Only then is it folded away; with either shown the row is as it always was.
+ * What a row's lead (`LeadLine`: the agents and the project) draws: the project and its mark unless the list leaves
+ * the project out (Project off, or one project's list), and the agents' tiles unless Agent icons is off (the list
+ * column's class hides them, their names stay for a screen reader).
  */
+function leadParts(filtered: boolean, noAgents: boolean): { project: boolean; agents: boolean } {
+  return { project: !filtered, agents: !noAgents };
+}
+
+/** A name-first row's second line draws nothing (`leadParts`): only then is it folded away; otherwise the row is as it always was. */
 function leadEmpty(filtered: boolean, noAgents: boolean): boolean {
-  return filtered && noAgents;
+  const parts = leadParts(filtered, noAgents);
+  return !parts.project && !parts.agents;
 }
 
 /** Settings → Rows' choices a row reads beyond the list column's classes (listLook.ts). */
