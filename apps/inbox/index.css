@@ -16,6 +16,8 @@
 @source "../../packages/inbox/shape/**/*.tsx";
 /* Show me in the code review: the box, the picture over the diff and the Overview's picture (packages/inbox/review-drawing). */
 @source "../../packages/inbox/review-drawing/**/*.tsx";
+/* System: the project setup dialog (packages/inbox/system). */
+@source "../../packages/inbox/system/**/*.tsx";
 
 @import "../../packages/ui/theme.css";
 /* The board's own sheet (shp- classes). */
@@ -27,6 +29,14 @@
 @import "../../packages/inbox/inbox.css";
 /* A launched session's permission prompt (components/PermissionCard.tsx). */
 @import "../../packages/inbox/permissionCard.css";
+
+/* Window controls (inbox-window.md): read-only, for a desktop host, the line the panes' heads centre on while it has
+   set its variables; its buttons go there. A length once computed, so a host reads a number. Here and not in inbox.css:
+   it is the page's own, and the plain sheet inbox.css also ships makes no global name outside ib-. --ib-gutter is
+   declared only on .pn-inbox, so :root takes the 8px fallback and this is a constant 31; the window controls spec holds
+   it to the heads' real centre, and fails if the gutter changes. */
+@property --pn-window-controls-center-y { syntax: '<length>'; inherits: true; initial-value: 0px; }
+:root { --pn-window-controls-center-y: calc(var(--ib-gutter, 8px) + 23px); }
 
 /* The shared chat window (@plannotator/ui/components/chat) keeps its own class names; these are what they mean in
    the Inbox's theme. Here and not in theme.css, which other apps import, nor in inbox.css, which also ships as a

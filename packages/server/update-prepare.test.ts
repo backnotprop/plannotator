@@ -310,7 +310,7 @@ for a in "$@"; do
   prev="$a"
 done
 case "$url" in
-  *.sha256) printf '%s  plannotator\\n' "$(shasum -a 256 "${binarySource}" 2>/dev/null | cut -d' ' -f1 || sha256sum "${binarySource}" | cut -d' ' -f1)" ;;
+  *.sha256) printf '%s  plannotator\\n' "$(shasum -a 256 "${binarySource}" 2>/dev/null | cut -d' ' -f1 || sha256sum "${binarySource}" | cut -d' ' -f1)" > "\${out:-/dev/stdout}" ;;
   */releases/download/*) cat "${binarySource}" > "$out" ;;
   *) exit 22 ;;
 esac

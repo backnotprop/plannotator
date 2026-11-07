@@ -214,6 +214,8 @@ packages/inbox/perfMarks.test.ts
 packages/inbox/themeToggle.test.tsx
 packages/inbox/sidebarUpdateDot.test.tsx
 packages/inbox/sidebarSections.test.tsx
+packages/inbox/listGroups.test.tsx
+packages/inbox/projectSort.test.tsx
 packages/inbox/updateStuck.test.tsx
 packages/inbox/palettePicker.test.tsx
 packages/inbox/textSize.test.tsx
@@ -557,4 +559,6 @@ packages/review-editor/components/guide/GuideGlobalCommentPopover.test.tsx
 packages/review-editor/utils/scrollWithPage.test.ts
 packages/ui/components/shape/ShapeSurface.board.test.tsx
 packages/ui/components/AnnotationToolstrip.hideActionModes.test.tsx
+packages/inbox/system/setupDialog.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.frameUrl.test.tsx
+packages/system/test/render.test.tsx

@@ -101,6 +101,7 @@ import { ThreadWait } from './components/ThreadWait';
 import { EmptyThreadPanel } from './components/EmptyThreadPanel';
 import { AgentNoteDialog } from './components/AgentNoteDialog';
 import { FeedbackDialog } from './components/FeedbackDialog';
+import { SystemSetupHost } from './system/SetupHost';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { cardReport, noteQuestionRows } from './agents';
 import type { InboxAgentRow, InboxAgentsModel, InboxConnectReport, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
@@ -141,6 +142,7 @@ import { noteStarred } from './starPop';
 import type { PinnedAction } from './components/PinnedRow';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { newBatchId, projectAllArchived, projectBatchToast, projectsWithReadable, shownProjects, type ProjectAction } from './projectMenu';
+import { projectActivity } from './projectSort';
 import { lookBoundary } from './folding';
 import { latestAgentSeq } from './seenOnSight';
 import { isPhone, isTouchPhone, trackKeyboard, usePhone } from './phone';
@@ -180,7 +182,7 @@ import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPa
 import { actedSince, inputMark, lastInput } from './lastInput';
 import { backFocusTargets, focusKept, focusLost } from './backFocus';
 import { askArrivalFocus, listOrder as drawnOrder, threadStep } from './threadStep';
-import { LIST_STOPS, listMoveIndex, listStops } from './listKeys';
+import { LIST_STOPS, listKeyTarget } from './listKeys';
 import { emitAskChange } from './ask/askEvents';
 import { useInboxAsk } from './ask/useInboxAsk';
 import { setSessionLabels } from './sessionLabels';
@@ -3724,7 +3726,7 @@ function Inbox() {
    * list as it shows (threadStep.ts), opened as Enter opens a row, replacing the open one in history so Back still
    * goes to the list. From the thread focus lands where N puts it (Thread.tsx takes it); from the list it stays on
    * the rows, on the new one. Not from a file, a guided review or the Artifacts view. With no thread open, on the
-   * list's rows, they move along them as ↓ ↑ do: the next thread there, nothing opened (`listMoveIndex`, no wrap).
+   * list's rows, they move along the threads: the next one there, past the groups' headers, nothing opened (`listKeyTarget`, no wrap).
    */
   const threadStepKey = (dir: 1 | -1) => ({
     when: (event: KeyboardEvent) => {
@@ -3740,9 +3742,8 @@ function Inbox() {
       const body = listBody(rootRef.current);
       if (!body) return;
       if (!now.thread) {
-        const stops = listStops(body);
-        const at = listMoveIndex(stops.length, stops.indexOf(keyTarget(event) as HTMLElement), dir > 0 ? 'next' : 'previous');
-        const next = at === null ? null : stops[at];
+        // Threads only: J K pass over the groups' headers (listKeys.ts), as they step threads with one open.
+        const next = listKeyTarget(body, keyTarget(event), dir > 0 ? 'j' : 'k');
         next?.focus({ preventScroll: true });
         next?.scrollIntoView?.({ block: 'nearest' });
         return;
@@ -4247,6 +4248,7 @@ function Inbox() {
     for (const project of projects) counts.set(project.id, waitingCount(latestSections, project.id));
     return counts;
   }, [projects, latestSections]);
+  const latestProjectActivity = useMemo(() => projectActivity(latestGroups), [latestGroups]);
 
   const context: ConnectContext | null = settings
     ? { command: settings.mcp_command, mcpUrl: settings.mcp_url, platform: platformOf() }
@@ -6035,6 +6037,7 @@ function Inbox() {
             }
             projectNames={projectNames}
             projectCounts={projectCounts}
+            projectActivity={latestProjectActivity}
             projectsReadable={projectsReadable}
             onProjectAction={(projectId, action) => void projectAction(projectId, action)}
             onProjectRename={renameProject}
@@ -6233,6 +6236,8 @@ function Inbox() {
           }}
         />
       )}
+      {/* System → Set up a project: B2's System button and B1's Set up call `openSystemSetup()` (system/opener.ts). */}
+      <SystemSetupHost settings={settings} phone={phone} showToast={showToast} />
       {feedbackOpen && (
         <FeedbackDialog
           version={latest?.version ?? settings?.version ?? 'dev'}

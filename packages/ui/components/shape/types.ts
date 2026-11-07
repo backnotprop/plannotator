@@ -153,4 +153,11 @@ export interface ShapeSurfaceProps {
    * ShapeBoard). Absent: pointing and clicking only, as always.
    */
   boxSelect?: ShapeBoxOptions;
+  /**
+   * On a dark board only (Plannotator, by ShapeBoard): box borders and zone edges at 3:1 against what they sit on, a
+   * box's fill distinct from its zone, words kept at least as readable as they were (up to 7:1), and each picture the
+   * board keeps (`files/…`) on a light tile so a dark logo holds. A light board is drawn exactly as without it. Absent:
+   * the board is drawn as written in both themes, as before. See `darkContrast.ts`.
+   */
+  darkContrast?: boolean;
 }

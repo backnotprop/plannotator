@@ -64,7 +64,7 @@ import { clearLateVoiceMiss, LATE_VOICE_MISSED, noteLateVoiceMiss, useLateVoiceM
 import { landInReplyDraft, landWordsInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
 import { useReplyHasWords, useReplyText, useReplyTextStore, useReplyTextWhile, type ReplyText } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
-import { conflictText, DraftHead, DraftFootNote, DraftStamp } from './DraftLabel';
+import { conflictText, DraftHead, DraftFootNote, DraftStamp, unsentWords } from './DraftLabel';
 import { canMarkUnread, canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
 import { debugNote } from '../debugLog';
@@ -616,6 +616,12 @@ export function MessageBody({
     },
     [imageOf, refOf],
   );
+  /** A picture choice's size, recorded when the message was sent, so its card is laid out before the picture loads. */
+  const pictureSizeOf = useCallback((src: string) => {
+    const image = imageOf(src);
+    return image?.width && image.height ? { width: image.width, height: image.height } : null;
+    // A new identity when the records change (an older message's pictures are captured on its first open).
+  }, [imageOf, message.inline_images]);
   const onImageRef = useRef(onImage);
   onImageRef.current = onImage;
   const onImageClick = useCallback((src: string, alt: string) => (onImageRef.current ? onImageRef.current(src, alt) : void openImage(src, alt)), [openImage]);
@@ -977,6 +983,7 @@ export function MessageBody({
         questionReadOnly={answerLocked}
         questionStatusLabel={statusLabel}
         questionPictureBadge={pictureBadge}
+        questionPictureSize={pictureSizeOf}
         renderQuestionCard={renderReplacedCard ? questionCard : undefined}
         renderQuestionBelowPrompt={renderReplacesLine ? belowPrompt : undefined}
         renderDirectiveBlock={renderActions ? directiveBlock : undefined}
@@ -3637,6 +3644,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const waiting = picksCount > 0 || records.length > 0 || draftActions.length > 0;
   /** The box is closed and its words are kept as a draft (Cancel or Escape kept them): Edit draft brings them back. */
   const draftKept = !box.open && (replyDraft.draft !== null || replyDraft.conflict !== null);
+  /** What a phone's Edit draft counts (approval "reply-bar-pairs"): the picks, comments and marked action items. */
+  const draftCount = picksCount + records.length + draftActions.length;
+  /** The same in words: "your reply, 1 pick, 1 comment". */
+  const draftWords = unsentWords({ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant, cant: draftCant }, false);
 
   // The answers this reply carries, as the cards show them now: a saved pick, or one being
   // saved. The box lists them live (ReplyAnswers); they never go into the words, where a
@@ -4831,8 +4842,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       pick(q.messageId, q.key, skipToggledAnswer(base));
     }
   };
-  // Shown whenever a question or an action item waits, or Re-ask is offered (it lives in the list now, so never out of reach).
-  const openQShown = openQuestionsShown(openQ.questions, reaskShown, openActions.length);
+  // Shown whenever a question is listed (open, or answered in the draft) or an action item waits, or Re-ask or "Decide
+  // these" is offered (they live in the list, so never out of reach). Every question answered in the draft: the icon
+  // alone, "? ⌄" (approval "reply-bar-pairs": the draft counts those), so the list and its Unskip stay in reach.
+  const openQShown = openQuestionsShown(openQ.questions, reaskShown, openActions.length) || decide !== null;
   /** Where each listed card sits now: in a folded message, or above or below the middle of the thread's view. */
   const measureOpenQuestions = (): ReadonlyMap<string, OpenQuestionPlace> => {
     const places = new Map<string, OpenQuestionPlace>();
@@ -4942,7 +4955,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       {!error && lateMissActions}
     </div>
   );
-  // The closed foot's status (draft note, skip chip) describes Send and Edit draft: read with them, though drawn at the row's end.
+  // What describes Send and Edit draft in the closed foot: the draft note (drawn at the row's end on a computer, hidden
+  // text on a phone) and what this Send does with the unanswered questions (hidden text; the list shows it).
   const draftNoteId = `ib-foot-draft-${thread.thread_id}`;
   const skipNoteId = `ib-foot-skip-${thread.thread_id}`;
   const footStatusIds = [draftNoteId, waiting && unanswered.length > 0 ? skipNoteId : null].filter(Boolean).join(' ');
@@ -5050,24 +5064,32 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const footRowRef = useRef<HTMLDivElement>(null);
   /**
    * How far the closed foot shortened so the buttons and the draft status share one line (footFit.ts
-   * `fitWholeFootRow`: the skip chip, Edit, the open questions count, the draft's words, tighter spacing).
+   * `fitWholeFootRow`: Edit, the open questions count, the draft's words, tighter spacing).
    * Null: no status, no layout, or even the shortest form does not fit (the status wraps above).
    */
   const [rowFit, setRowFit] = useState<{ level: number; max: OpenQuestionsLabelForm } | null>(null);
   const rowLevel = rowFit?.level ?? null;
-  const footStatusShown = waiting || draftKept;
+  // A phone draws no status at the row's end (approval "reply-bar-pairs"): Edit draft carries the draft's count.
+  const footStatusShown = (waiting || draftKept) && !phone;
   // What the foot shows in the list's place, in the order the foot draws them. A list opened then would show only later, by itself.
   const listHome = !resolved && !(guard && staleQuestions.length > 0) && newMessage?.kind !== 'compose' && (box.open || !(route.open && asking));
   // The list lives where it opened: another thread, another view, the box opening or closing, or anything taking the foot's place, takes it away.
   useEffect(() => setCommentsList(null), [thread.thread_id, shownFull, box.open, route.open, artifactsOn, listHome]);
-  /** Closes the foot's list. `back`: to the count that shows at this width (the foot's first button once no comment is left). */
+  /**
+   * Closes the foot's list. `back`: to the count that shows at this width; where the foot has none (a phone, approval
+   * "reply-bar-pairs") to the highlight it was opened at; else the foot's first button (no comment left).
+   */
   const closeFootList = (back: boolean) => {
+    const at = commentsList?.at ?? null;
     setCommentsList(null);
     if (!back) return;
     const row = footRowRef.current;
     const links = [...(row?.querySelectorAll<HTMLElement>('[data-comments-link]') ?? [])];
     const link = links.find((el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility === 'visible');
-    (link ?? row?.querySelector<HTMLElement>('button'))?.focus({ preventScroll: true });
+    const mark = !link && at ? bodyRef.current?.querySelector<HTMLElement>(`[data-bind-id="${CSS.escape(at)}"], [data-highlight-id="${CSS.escape(at)}"]`) : null;
+    // A highlight takes no Tab stop of its own: focusable by script only, so the Tab order is unchanged.
+    if (mark && !mark.hasAttribute('tabindex')) mark.setAttribute('tabindex', '-1');
+    (link ?? mark ?? row?.querySelector<HTMLElement>('button'))?.focus({ preventScroll: true });
   };
   const footRowShown = !resolved && !(guard && staleQuestions.length > 0) && newMessage?.kind !== 'compose' && !box.open && !(route.open && asking);
   // What the row shows; a change re-fits it (with its width).
@@ -5085,8 +5107,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const key = `${row.getBoundingClientRect().width}|${footSig}`;
     if (!force && key === rowFittedFor.current) return;
     rowFittedFor.current = key;
-    // The long form first, on a phone too; there, "N open" before the count (fitWholeFootRowForms).
-    const fit = footStatusShown ? fitWholeFootRowForms(row, phone) : null;
+    // Only with the draft status at the row's end (a computer's foot); a phone's buttons fit themselves.
+    const fit = footStatusShown ? fitWholeFootRowForms(row) : null;
     setRowFit((current) => (current?.level === fit?.level && current?.max === fit?.max ? current : fit));
   };
   // Every render (after the open questions button drew itself), and whenever the row's width changes.
@@ -6611,10 +6633,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         ) : (
           <>
           {lineError && errorLine}
-          {/* Buttons on the left in today's order, the draft status and the skip chip at the right end (approval
-              "thread-foot-status-right", option A). Too narrow for one line, the status takes its own line ABOVE the
-              buttons (wrap-reverse; one item per line aligns to the start), so it never wraps between them. */}
-          <div className="ib-acts ib-footrow" data-foot-row="" data-fit={rowLevel ? footRowTokens(rowLevel, phone) : undefined} ref={footRowRef}>
+          {/* Buttons on the left in today's order, the draft status at the right end (approval "thread-foot-status-right",
+              option A). Too narrow for one line, the status takes its own line ABOVE the buttons (wrap-reverse; one item
+              per line aligns to the start), so it never wraps between them. Approval "reply-bar-pairs": one count per
+              thing. The open questions count the unanswered ones and hold the skip for this Send; on a phone Edit draft
+              carries the draft's count ("Draft 2") and no status is drawn. */}
+          <div className="ib-acts ib-footrow" data-foot-row="" data-fit={rowLevel ? footRowTokens(rowLevel) : undefined} ref={footRowRef}>
             <div className="ib-footbtns" data-foot-buttons="">
               {(waiting || draftKept) && (
                 <button type="button" className="ib-btn ib-pri" ref={sendRef} onClick={() => void send()} disabled={sending} aria-describedby={footStatusIds}>
@@ -6628,16 +6652,30 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 onClick={() => openBox()}
                 data-edit-draft={waiting || draftKept ? '' : undefined}
                 data-reply-button=""
+                // Its name starts with what it shows (WCAG 2.5.3): "Draft 2: 1 pick, 1 comment. Edit draft".
+                aria-label={phone && (waiting || draftKept) ? `Draft${draftCount > 0 ? ` ${formatCount(draftCount)}` : ''}: ${draftWords}. Edit draft` : undefined}
                 aria-describedby={waiting || draftKept ? footStatusIds : undefined}
                 aria-keyshortcuts={replyKeys}
               >
                 <Icon name={waiting || draftKept ? 'pen' : 'reply'} size={15} />
-                {/* Short of room, "Edit", and on a phone the pencil alone (footFit.ts): the words stay as hidden text,
-                    so the name is "Edit draft". */}
+                {/* On a phone "Draft 2": the pencil and the draft's count are one button (approval "reply-bar-pairs");
+                    its name says what the count holds ("Draft 2: 1 pick, 1 comment. Edit draft"). On a computer "Edit draft",
+                    short of room "Edit" (footFit.ts): the words stay as hidden text, so the name is "Edit draft". */}
                 {waiting || draftKept ? (
-                  <span>
-                    Edit<span className="ib-fl"> draft</span>
-                  </span>
+                  phone ? (
+                    <>
+                      <span aria-hidden="true">Draft</span>
+                      {draftCount > 0 && (
+                        <span className="ib-draft-n" aria-hidden="true" data-draft-count="">
+                          {formatCount(draftCount)}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span>
+                      Edit<span className="ib-fl"> draft</span>
+                    </span>
+                  )
                 ) : (
                   'Reply'
                 )}
@@ -6665,6 +6703,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   openRequest={openItemsRequest}
                   keyShortcuts={openItemsKeys}
                   keyHint={<ShortcutHint scope={inboxThreadShortcuts} action="openItems" className="ib-kbd ib-btn-kbd" />}
+                  // The foot's skip chip, moved into the list (approval "reply-bar-pairs"; "inbox-explicit-skip").
+                  skip={waiting && unanswered.length > 0 ? { count: keepOpen ? unanswered.length : skipIds.size, keepOpen, onToggle: toggleKeepOpen } : null}
                 />
               )}
               {/* 👍 Looks good beside Reply: sent to the agent after the Undo window; hidden while a question waits.
@@ -6723,7 +6763,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   Its route, door row and code stay; turn SHOW_NEW_MESSAGE_BUTTON on to bring it back. */}
               {SHOW_NEW_MESSAGE_BUTTON && !archived && <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />}
             </div>
-            {(waiting || draftKept) && (
+            {footStatusShown && (
               <div className="ib-footstatus" data-foot-status="">
                 <DraftFootNote
                   id={draftNoteId}
@@ -6731,12 +6771,19 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   onComments={() => setCommentsList((open) => (open ? null : { at: null }))}
                   commentsOpen={commentsList !== null && !commentsList.card}
                 />
-                {waiting && unanswered.length > 0 && (
-                  <span className={keepOpen ? 'ib-keep' : undefined}>
-                    <SkipChip id={skipNoteId} count={keepOpen ? unanswered.length : skipIds.size} keepOpen={keepOpen} onToggle={toggleKeepOpen} />
-                  </span>
-                )}
               </div>
+            )}
+            {/* What Send and Edit draft are described by, now that the skip lives in the open questions list and a
+                phone draws no status: the draft's words (a phone) and what this Send does with the unanswered questions. */}
+            {(waiting || draftKept) && phone && (
+              <span id={draftNoteId} hidden>
+                {`Draft, ${draftWords}`}
+              </span>
+            )}
+            {waiting && unanswered.length > 0 && (
+              <span id={skipNoteId} hidden data-skip-note={keepOpen ? 'keep' : 'skip'}>
+                {keepOpen ? `${plural(unanswered.length, 'question')} ${unanswered.length === 1 ? 'stays' : 'stay'} open when you send` : `${plural(skipIds.size, 'question')} will be skipped when you send`}
+              </span>
             )}
             {/* A phone has no room to float the pill over the messages (it sat on a sender's row): it sits in this
                 row's empty middle, laid over it, so the foot and the thread's view keep their size and Reply stays put.
@@ -6841,34 +6888,27 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
 
 /**
  * What a Send does with the questions left unanswered (approval
- * "inbox-explicit-skip", 2026-10-21): by default "3 questions stay open ·
- * Skip them"; after Skip them, "↷ 3 questions will be skipped · Keep open",
- * for that one Send. Nothing when none is unanswered.
+ * "inbox-explicit-skip", 2026-10-21), in the open reply box on a computer: by
+ * default "3 questions stay open · Skip them"; after Skip them, "↷ 3 questions
+ * will be skipped · Keep open", for that one Send. Nothing when none is
+ * unanswered. The closed foot says the same in the open questions list (approval
+ * "reply-bar-pairs"), and a phone's box in its sheet (ReplyFootPhone.tsx).
  */
-function SkipChip({ count, keepOpen, onToggle, id }: { count: number; keepOpen: boolean; onToggle: () => void; id?: string }) {
+function SkipChip({ count, keepOpen, onToggle }: { count: number; keepOpen: boolean; onToggle: () => void }) {
   if (count === 0) return null;
   const them = count === 1 ? 'it' : 'them';
   return (
     <span className="ib-skipchip" data-skip-chip={keepOpen ? 'keep' : 'skip'}>
       {/* The icon and the sentence are one item, so where the chip wraps (a narrow reply box) the icon stays with its words. */}
-      <span className="ib-skip-s" id={id}>
+      <span className="ib-skip-s">
         {!keepOpen && <Icon name="forward" size={14} />}
-        {/* Short of room, the foot's row drops the middle words ("1 open", "Skip"; footFit.ts, inbox.css): they leave
-            only the eye, so the description and the button's name keep them, and the text reads the same. */}
         <span>
           {formatCount(count)}
-          <span className="ib-fl">{keepOpen ? ` question${count === 1 ? ' stays' : 's stay'}` : ` question${count === 1 ? '' : 's'} will be`}</span>
-          {keepOpen ? ' open' : ' skipped'}
+          {keepOpen ? ` question${count === 1 ? ' stays' : 's stay'} open` : ` question${count === 1 ? '' : 's'} will be skipped`}
         </span>
       </span>
       <button type="button" onClick={onToggle} data-skip-toggle="">
-        {keepOpen ? (
-          <>
-            Skip<span className="ib-fl"> {them}</span>
-          </>
-        ) : (
-          'Keep open'
-        )}
+        {keepOpen ? `Skip ${them}` : 'Keep open'}
       </button>
     </span>
   );
