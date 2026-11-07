@@ -601,8 +601,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (/%2e|%2f|%5c|\\/i.test(route) || segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
       return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     }
-    // Accounts go by `accountsOf` alone: a forward would pass the far answer as it came, past the owner's check.
-    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(route) === "accounts") {
+    // Accounts go by `accountsOf` alone: a forward would pass the far answer as it came, past the owner's check, and
+    // would hold a write such as a switch on disk. Nothing under `accounts/` either: a linked machine's switch is its own step.
+    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(segments[0]!) === "accounts") {
       return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     }
     // This machine's own thread, message, file or project never goes to a peer, whatever the window learned: a
@@ -623,7 +624,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
     // A guest let onto this Inbox's tailnet was never let onto that machine: it writes nothing there. Reads stay as they are.
     if (context.isGuest(req, via)) return json({ error: "Only this computer's owner can act on another machine from this Inbox.", code: "owner_only" }, 403);
-    // Rule 8's table decides, by route: a write it has not classified never reaches another machine.
+    // Rule 8's table decides, by route: a write it has not classified, or calls `local`, never reaches another machine.
     const kind = doorWriteKind(route);
     if (!kind) return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     if (kind === "file") {

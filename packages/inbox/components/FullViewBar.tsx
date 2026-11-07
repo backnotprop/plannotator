@@ -86,6 +86,8 @@ export interface FullViewBarProps {
   } | null;
   /** Ask AI's icon, before ⋯. Absent: nothing there. */
   ask?: ReactNode;
+  /** The button that adds this file to the reply (reuse.tsx). Absent: nothing there. */
+  reuse?: ReactNode;
   /** ⋯: the trigger and its menu (OpenIn.tsx `FullScreenMore`), with whether its menu is open. */
   more: ReactNode;
   moreOpen: boolean;
@@ -313,6 +315,7 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
             </button>
           </Tip>
         )}
+        {props.reuse}
         {comments && (
           <Tip text={comments.open ? 'Close the comments' : 'Comments'} phone={phone}>
             <button

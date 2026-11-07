@@ -313,8 +313,6 @@ export interface SessionInfo {
    * at its first session start (inbox.ts); absent: no Inbox connection.
    */
   inboxTools?: readonly InboxToolInfo[]
-  /** The name the engine registered `plannotator_inbox` under (`mcp__<server>__plannotator_inbox`): the wake's closing line names it. */
-  inboxToolName?: string
   /** The session's working folder, read when asked (the Inbox link's polls say where the session works). */
   cwd?: () => Promise<string>
   /** The session's root folder (`$.session.root()`), read once at the link's start: where `claude --resume` runs. */
@@ -372,7 +370,6 @@ export class PlannotatorMod {
           dataDir: session.dataDir,
           sessionId: session.sessionId,
           tools: session.inboxTools,
-          ...(session.inboxToolName ? { toolName: session.inboxToolName } : {}),
           isBusy: () => this.turns.busy,
           // Send now goes into a running main turn, never into this session's own Ask question, and
           // never into a turn another plugin's prompt started (that plugin may read its answer as its own).

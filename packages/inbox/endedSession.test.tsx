@@ -108,7 +108,7 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
-let sessions: { sessions: ReturnType<typeof live>[]; asker?: { session: string; live: boolean } } = { sessions: [] };
+let sessions: { sessions: ReturnType<typeof live>[]; asker?: { session: string; live: boolean; stuck?: string[] } } = { sessions: [] };
 let replyAnswer: () => Response = () => new Response('{}');
 let annotations: InboxAnnotationRecord[] = [];
 /** Which sessions are still there, by id (answers `?asker=` for any session); null: `sessions.asker` as set. */
@@ -756,6 +756,28 @@ test.skipIf(!hasDom)('a reply saved for a session that ended can move: the plain
   const el = await render(threadOf(asking(), personReply()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
   act(() => (el.querySelector('[data-readdress-open]') as HTMLButtonElement).click());
   await settle();
+  act(() => (el.querySelector('[data-readdress-send]') as HTMLButtonElement).click());
+  await settle();
+  expect(posted.find((p) => p.path.endsWith(`/messages/${R1}/to`))?.body.to).toEqual({ host: 'pi', session: 'ses_other' });
+});
+
+test.skipIf(!hasDom)('a reply its live session took and will never deliver (`asker.stuck`): the line stops saying it is on its way, and it can move', async () => {
+  // Without the claim: the live session gets it, so nothing offers the move.
+  sessions = { sessions: [live('ses_asker', 'claude-code'), live('ses_other', 'pi')], asker: { session: 'ses_asker', live: true } };
+  const waiting = await render(threadOf(asking(), personReply()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  expect(waiting.querySelector('[data-delivery]')?.getAttribute('data-delivery')).not.toBe('undelivered');
+  expect(!!waiting.querySelector('[data-readdress-open]')).toBe(false);
+  act(() => root?.unmount());
+  host?.remove();
+  sessions = { sessions: [live('ses_asker', 'claude-code'), live('ses_other', 'pi')], asker: { session: 'ses_asker', live: true, stuck: [R1] } };
+  const el = await render(threadOf(asking(), personReply()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  const line = el.querySelector('[data-delivery]');
+  expect(line?.getAttribute('data-delivery')).toBe('undelivered');
+  expect(line?.textContent).not.toContain('gets this');
+  expect(line?.textContent).not.toContain('still gets it');
+  act(() => (el.querySelector('[data-readdress-open]') as HTMLButtonElement).click());
+  await settle();
+  expect([...el.querySelectorAll('[data-readdress-session]')].map((row) => row.getAttribute('data-readdress-session'))).toEqual(['ses_other']);
   act(() => (el.querySelector('[data-readdress-send]') as HTMLButtonElement).click());
   await settle();
   expect(posted.find((p) => p.path.endsWith(`/messages/${R1}/to`))?.body.to).toEqual({ host: 'pi', session: 'ses_other' });

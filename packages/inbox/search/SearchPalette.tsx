@@ -22,7 +22,7 @@
  */
 
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { INBOX_SEARCH_GROUPS, middleCutInboxName, type InboxSearchGroupId, type InboxSearchRow } from '@plannotator/core/inbox-search';
+import { INBOX_SEARCH_GROUPS, middleCutInboxName, type InboxSearchGroupId, type InboxSearchRow, type InboxSearchSort } from '@plannotator/core/inbox-search';
 import { inboxApi, saveRecentSearch, searchInbox, type SearchModel } from '../api';
 
 import { HostMark, Icon } from '../icons';
@@ -57,6 +57,7 @@ import {
   type SearchOption,
   type RowThreadChip,
 } from './model';
+import { readSearchSort, SEARCH_SORT_OPTIONS, setSearchSort, useSearchSort } from './searchSort';
 
 /** How long typing settles before a query goes out. */
 export const SEARCH_DEBOUNCE_MS = 120;
@@ -103,6 +104,8 @@ interface Answered {
   model: SearchModel;
   /** The type it was asked for (null: All types). The list draws an answer as its own type, so a pick still on its way never redraws the last answer under the new chip. */
   type: InboxSearchGroupId | null;
+  /** The order it was asked in ("Show all" pages go on in it). */
+  sort: InboxSearchSort;
 }
 
 const FOCUSABLE = 'input:not([disabled]), button:not([disabled]):not([tabindex="-1"])';
@@ -225,6 +228,23 @@ function TimeColumn({ at }: { at: string | null }) {
     <span className="ib-sp-time" data-result-time="">
       <span className="ib-sr">, </span>
       {at}
+    </span>
+  );
+}
+
+/**
+ * "Best match | Newest" (approval "inbox-search-sort"): the Inbox's segmented control (`.ib-seg`), native radios in a
+ * radiogroup, so Tab reaches the chosen one and the arrows choose. The pick is this browser's (searchSort.ts).
+ */
+function SortSwitch({ sort, onChange, name }: { sort: InboxSearchSort; onChange: (sort: InboxSearchSort) => void; name: string }) {
+  return (
+    <span className="ib-seg ib-sp-sort" role="radiogroup" aria-label="Order results by" data-search-sort={sort}>
+      {SEARCH_SORT_OPTIONS.map((option) => (
+        <label key={option.value} className="ib-seg-o" data-on={sort === option.value ? '' : undefined} data-sort={option.value}>
+          <input type="radio" name={name} value={option.value} checked={sort === option.value} onChange={() => onChange(option.value)} />
+          {option.label}
+        </label>
+      ))}
     </span>
   );
 }
@@ -369,6 +389,8 @@ export default function SearchPalette(props: SearchPaletteProps) {
     setTypeState(next);
   };
   const [live, setLive] = useState('');
+  /** Best match or Newest: this browser's pick, kept across opens (searchSort.ts). */
+  const sort = useSearchSort();
   const [fades, setFades] = useState({ top: false, bottom: false });
 
   const names = useMemo(() => projectNames(projects), [projects]);
@@ -432,23 +454,24 @@ export default function SearchPalette(props: SearchPaletteProps) {
       const controller = new AbortController();
       inflight.current = controller;
       const seq = ++requestSeq.current;
-      const key = JSON.stringify([query.trim(), nextFilters, nextType]);
+      const nextSort = readSearchSort();
+      const key = JSON.stringify([query.trim(), nextFilters, nextType, nextSort]);
       // A picked type asks for its group alone, the first page ("Show all"'s request); with no words, the request is today's.
       const one = nextType && query.trim() ? { group: nextType, limit: SEARCH_PAGE } : {};
       setPending(true);
       setError(false);
-      searchInbox({ q: query, ...nextFilters, current: currentProject, ...one }, controller.signal)
+      searchInbox({ q: query, ...nextFilters, current: currentProject, sort: nextSort, ...one }, controller.signal)
         .then((model) => {
           if (seq !== requestSeq.current) return;
           if (model.indexing) {
             // Skeletons and the indexing line until the index is built; ask again.
-            setAnswered({ key, q: query.trim(), model, type: nextType });
+            setAnswered({ key, q: query.trim(), model, type: nextType, sort: nextSort });
             retryTimer.current = setTimeout(() => run(query, nextFilters, nextType), SEARCH_INDEXING_RETRY_MS);
             return;
           }
           setPending(false);
           setExpanded({});
-          setAnswered({ key, q: query.trim(), model, type: nextType });
+          setAnswered({ key, q: query.trim(), model, type: nextType, sort: nextSort });
           setLive(nextType ? typeCountWords(model, query, nextType) : countWords(model, query, filtersSet(nextFilters)));
         })
         .catch((cause) => {
@@ -485,6 +508,12 @@ export default function SearchPalette(props: SearchPaletteProps) {
   const changeFilters = (next: SearchFilters) => {
     setFilters(next);
     run(q, next);
+  };
+  /** Best match or Newest: remembered for this browser, and the words asked again in that order. */
+  const changeSort = (next: InboxSearchSort) => {
+    if (next === sort) return;
+    setSearchSort(next);
+    run(q, filters);
   };
   /** "Clear filters" and "Search everywhere": every chip back to its start (All types too), focus back in the input. */
   const clearFilters = () => {
@@ -558,8 +587,10 @@ export default function SearchPalette(props: SearchPaletteProps) {
     const already = expanded[option.group] ?? (answered.type === option.group ? (answered.model.groups?.[option.group] ?? null) : null);
     const offset = already ? already.length : 0;
     try {
-      const model = await searchInbox({ q: answered.q, ...filters, current: currentProject, group: option.group, offset, limit: SEARCH_PAGE });
-      const more = model.groups?.[option.group] ?? [];
+      const model = await searchInbox({ q: answered.q, ...filters, current: currentProject, sort: answered.sort, group: option.group, offset, limit: SEARCH_PAGE });
+      // A message that came in since the last page moves the next one down: a row already shown is not shown twice.
+      const shown = new Set((already ?? []).map((row) => `${row.type}-${row.id}`));
+      const more = (model.groups?.[option.group] ?? []).filter((row) => !shown.has(`${row.type}-${row.id}`));
       setExpanded((current) => ({ ...current, [option.group]: [...(already ?? []), ...more] }));
       setHl(index);
     } catch {
@@ -663,7 +694,10 @@ export default function SearchPalette(props: SearchPaletteProps) {
     }
     if (event.key === 'Tab') {
       if (menu) setMenu(null);
-      const items = [...(dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])].filter((el) => el.getClientRects().length > 0);
+      // A radio group is one stop (the chosen radio), as a browser's own Tab order has it; its arrows choose.
+      const items = [...(dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])].filter(
+        (el) => el.getClientRects().length > 0 && !(el instanceof HTMLInputElement && el.type === 'radio' && !el.checked),
+      );
       if (items.length === 0) return;
       const at = items.indexOf(document.activeElement as HTMLElement);
       event.preventDefault();
@@ -775,10 +809,13 @@ export default function SearchPalette(props: SearchPaletteProps) {
     if (!menu) return null;
     const items = menuOptions(menu.kind);
     const chipEl = filtersRef.current?.querySelector<HTMLElement>(`[data-chip="${menu.kind}"]`);
-    const left = chipEl?.closest<HTMLElement>('.ib-sp-fcell')?.offsetLeft ?? 10;
+    // Under the chip's own cell: on a desktop the row may wrap, so the row's bottom is not always the chip's.
+    const cell = chipEl?.closest<HTMLElement>('.ib-sp-fcell');
+    const left = cell?.offsetLeft ?? 10;
+    const top = cell ? cell.offsetTop + cell.offsetHeight + 6 : undefined;
     const label = menu.kind === 'type' ? 'Type' : menu.kind === 'project' ? 'Project' : menu.kind === 'status' ? 'Status' : 'From';
     return (
-      <div ref={menuRef} className="ib-sp-menu" role="menu" aria-label={label} style={phone ? undefined : { left }} onKeyDown={onMenuKey}>
+      <div ref={menuRef} className="ib-sp-menu" role="menu" aria-label={label} style={phone ? undefined : { left, top }} onKeyDown={onMenuKey}>
         {items.map((item, i) => {
           const checked = chipValue(menu.kind) === item.value;
           return (
@@ -979,6 +1016,8 @@ export default function SearchPalette(props: SearchPaletteProps) {
   })();
 
   const anyFilter = filtered;
+  // The order only means something for words: the recent view and filters alone keep their own order.
+  const sortSwitch = q.trim() ? <SortSwitch sort={sort} onChange={changeSort} name={`ib-sp-sort-${uid}`} /> : null;
   return (
     <dialog
       ref={dialogRef}
@@ -1046,13 +1085,21 @@ export default function SearchPalette(props: SearchPaletteProps) {
         {chip('project')}
         {chip('status')}
         {chip('from')}
-        {anyFilter && (
-          <button type="button" className="ib-sp-clear" data-clear-filters="" onClick={clearFilters}>
-            Clear filters
-          </button>
+        {/* Clear filters and, on a desktop, the switch: together at the row's end, and together on a second line when
+            the row wraps. A phone's chips scroll sideways, so there the switch has a row of its own, under them. */}
+        {(anyFilter || (!phone && sortSwitch)) && (
+          <span className="ib-sp-end">
+            {anyFilter && (
+              <button type="button" className="ib-sp-clear" data-clear-filters="" onClick={clearFilters}>
+                Clear filters
+              </button>
+            )}
+            {!phone && sortSwitch}
+          </span>
         )}
         {menuEl}
       </div>
+      {phone && sortSwitch && <div className="ib-sp-sortrow">{sortSwitch}</div>}
       <div className="ib-sp-frame">
         <div className="ib-sp-fade ib-sp-top" data-on={fades.top ? '' : undefined} />
         <div

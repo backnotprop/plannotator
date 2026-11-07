@@ -131,6 +131,8 @@ describe("startup, registry and health", () => {
 
     const health = await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/health`)).json();
     expect(health).toMatchObject({ ok: true, app: "plannotator-inbox", serverSession: server.serverSession, pid: process.pid, update: null });
+    // A desktop host reads this before it sets --pn-window-controls-*.
+    expect(health.window_controls).toBe(2);
     expect((await inboxStatus(dataDir)).state).toBe("running");
 
     // Remote mode would have bound 0.0.0.0: no non-loopback address reaches it.
@@ -687,7 +689,7 @@ describe("the window's routes: settings, restart, favicon", () => {
       expect(settings.mcp_url).toBe(`http://127.0.0.1:${server.port}/mcp`);
       expect(settings.port).toBe(server.port);
       // Nothing set: the defaults, on for the Claude Code mod, off on Pi, OpenCode and DeepSeek Harness.
-      expect(settings.inbox_tool).toEqual({ hosts: { "claude-code": true, pi: false, opencode: false, dsh: false }, env: null });
+      expect(settings.inbox_tool).toEqual({ hosts: { "claude-code": true, pi: false, opencode: false, dsh: false, cline: false }, env: null });
 
       const storage = await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings/storage`);
       expect(storage.status).toBe(200);
@@ -736,7 +738,7 @@ describe("the window's routes: settings, restart, favicon", () => {
 
       const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, inbox_tool: { pi: true } });
       expect(saved.status).toBe(200);
-      expect((await saved.json()).inbox_tool.hosts).toEqual({ "claude-code": true, pi: true, opencode: false, dsh: false });
+      expect((await saved.json()).inbox_tool.hosts).toEqual({ "claude-code": true, pi: true, opencode: false, dsh: false, cline: false });
       await post(server, "/api/inbox/settings", { serverSession: server.serverSession, inbox_tool: { "claude-code": false } });
       // Each host keeps its own choice; an unset host keeps its default.
       expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxTool).toEqual({ pi: true, "claude-code": false });
@@ -888,7 +890,7 @@ describe("the window's routes: settings, restart, favicon", () => {
       const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: ["previewTwo", "roomy", "compact", "previewTwo"] });
       expect(saved.status).toBe(200);
       expect(await saved.json()).toMatchObject({ rows: ["compact", "previewTwo"], rows_rev: 1 });
-      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "previewTwo"], inboxRowsRev: 1 });
+      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "previewTwo"], inboxRowsRev: 1, inboxRowsDefaults: 2 });
       expect(await settings()).toMatchObject({ rows: ["compact", "previewTwo"], rows_rev: 1 });
 
       const deadline = Date.now() + 1500;
@@ -910,8 +912,17 @@ describe("the window's routes: settings, restart, favicon", () => {
       // look stays, so no window adopts its old cookies over it. Writing that name is still refused (above).
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: ["sparkles", "unreadDot"], inboxRowsRev: 7 }));
       expect(await settings()).toMatchObject({ rows: ["smallNames", "unreadDot"], rows_rev: 7 });
-      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: ["sparkles"] }));
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: ["sparkles"], inboxRowsDefaults: 2 }));
       expect(await settings()).toMatchObject({ rows: [], rows_rev: 0 });
+      // Smaller thread names became a default (2026-11-05). A look saved before that (no `inboxRowsDefaults`) that is
+      // the old defaults, every option off, was never a choice: it reads as today's defaults. Any other old look is the
+      // person's, kept as it is (smaller names off). One saved since then is read as saved, every option off included.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: [], inboxRowsRev: 3 }));
+      expect(await settings()).toMatchObject({ rows: ["smallNames"], rows_rev: 3 });
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: ["compact"], inboxRowsRev: 3 }));
+      expect(await settings()).toMatchObject({ rows: ["compact"], rows_rev: 3 });
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: [], inboxRowsRev: 3, inboxRowsDefaults: 2 }));
+      expect(await settings()).toMatchObject({ rows: [], rows_rev: 3 });
       // The next save counts on from the file's.
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: [], inboxRowsRev: 7 }));
       const after = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: ["highlight"] });
