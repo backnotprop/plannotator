@@ -1356,19 +1356,23 @@ test('the row after the last hunk (approval pr-view-one-surface): "N unmodified 
     await page.reload();
     const review = page.locator('[data-pull-review]');
     await expect(review.locator('[data-guide-file-shell]')).toHaveCount(2);
-    // The trailing row's words as drawn (Pierre's, or the count laid over them), per file, only where they show.
+    // The trailing row's words as drawn (Pierre's, or the count laid over them), per file by path (the page draws the
+    // files in the rail's order, not the patch's), only where they show.
     const rows = () =>
       review.locator('[data-guide-file-shell]').evaluateAll((shells) =>
-        shells.map((shell) => {
-          const root = shell.querySelector('diffs-container')?.shadowRoot;
-          const row = root?.querySelector<HTMLElement>('[data-separator-last]');
-          if (!row || !row.checkVisibility()) return null;
-          const content = row.querySelector('[data-separator-content]')!;
-          const over = getComputedStyle(content, '::after').content;
-          return over && over !== 'none' && over !== 'normal' ? JSON.parse(over) : (content as HTMLElement).innerText.trim();
-        }),
+        Object.fromEntries(
+          shells.map((shell) => {
+            const path = (shell as HTMLElement).dataset.guideFileShell;
+            const root = shell.querySelector('diffs-container')?.shadowRoot;
+            const row = root?.querySelector<HTMLElement>('[data-separator-last]');
+            if (!row || !row.checkVisibility()) return [path, null];
+            const content = row.querySelector('[data-separator-content]')!;
+            const over = getComputedStyle(content, '::after').content;
+            return [path, over && over !== 'none' && over !== 'normal' ? JSON.parse(over) : (content as HTMLElement).innerText.trim()];
+          }),
+        ),
       );
-    await expect.poll(rows).toEqual(['2 unmodified lines', null]);
+    await expect.poll(rows).toEqual({ 'more.ts': '2 unmodified lines', 'ends.ts': null });
     await expect.poll(() => seams(review)).toEqual([0]);
     expect(await review.evaluate((root) => [...root.querySelectorAll('diffs-container')].some((host) => (host.shadowRoot?.textContent ?? '').includes('More unchanged context') && [...host.shadowRoot!.querySelectorAll<HTMLElement>('[data-separator-last]')].some((row) => row.checkVisibility())))).toBe(false);
   } finally {
