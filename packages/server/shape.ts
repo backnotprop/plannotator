@@ -202,6 +202,11 @@ export interface ShapeServerOptions {
   onIdle?: () => void;
   /** Write `shapes/server.json` (default true). */
   register?: boolean;
+  /**
+   * Serve the boards as stored and change nothing (`plannotator shape frame`'s throwaway server): every write
+   * answers 405, and the event stream 404, so a page reads once and a headless browser is never held open.
+   */
+  readOnly?: boolean;
   heartbeatMs?: number;
   watchMs?: number;
 }
@@ -281,6 +286,10 @@ export async function startShapeServer(options: ShapeServerOptions): Promise<Sha
     if (path === "/api/shapes" || path.startsWith("/api/shapes/")) {
       // Off: as if absent, like the Inbox.
       if (!shapeOn()) return json({ error: "Not found", code: "not_found" }, 404);
+      if (options.readOnly) {
+        if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "read only", code: "read_only" }, 405);
+        if (path === SHAPE_EVENTS_PATH) return json({ error: "Not found", code: "not_found" }, 404);
+      }
       const blocked = crossSite(req);
       if (blocked) return blocked;
       if (req.method === "POST") {
