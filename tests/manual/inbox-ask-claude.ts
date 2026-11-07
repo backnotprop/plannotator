@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+// Manual QA: runs with your real HOME on purpose (the real Claude Code login), with a scratch data dir. For an isolated test run, use `bun run test:sandbox`.
 /**
  * Ask AI against a REAL Claude Code session, with this script as the Inbox
  * window. The first real agent test of Ask AI (step 3 of the build plan). It

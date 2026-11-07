@@ -453,7 +453,10 @@ test('phone (WebKit, iPhone 15): the checklist, 44 px targets', async () => {
     await expect(note).toBeVisible();
     expect((await note.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     expect(await note.evaluate((el) => getComputedStyle(el).fontSize)).toBe('16px');
-    await expect(page.locator('section.ib-pane [data-foot-status] [data-draft-foot]')).toContainText('1 done');
+    // A phone's foot draws no status (approval "reply-bar-pairs"): Edit draft counts it and names it.
+    const draft = page.locator('section.ib-pane .ib-pfoot [data-edit-draft]');
+    await expect(draft).toHaveAccessibleName(/^Draft 1: 1 done\. Edit draft$/);
+    await expect(draft.locator('[data-draft-count]')).toHaveText('1');
     await shot(page, '10b-phone-in-draft');
     await context.close();
   } finally {

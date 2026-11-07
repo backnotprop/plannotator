@@ -85,9 +85,11 @@ function render(narrow: boolean, mode: 'light' | 'dark'): HTMLElement {
       </SidebarProvider>,
     );
   });
-  const band = [...host.querySelectorAll<HTMLButtonElement>('button.ib-band')].find((b) => b.getAttribute('aria-expanded') === 'false');
-  expect(band).toBeDefined();
-  act(() => band!.click());
+  // Quiet starts closed; once opened it stays open for the page (listGroups.ts), so only a closed one is clicked.
+  const band = host.querySelector<HTMLButtonElement>('[data-section-id="quiet"] button.ib-band');
+  expect(band).not.toBeNull();
+  if (band!.getAttribute('aria-expanded') === 'false') act(() => band!.click());
+  expect(band!.getAttribute('aria-expanded')).toBe('true');
   return host;
 }
 

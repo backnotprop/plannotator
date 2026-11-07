@@ -63,6 +63,14 @@ const LATEST = [
   '- [ ] [Beta list](forecast-15.html)',
   '- [ ] `everyone`',
   ':::',
+  '',
+  // Left open: the open questions button shows only while a question is unanswered (approval "reply-bar-pairs").
+  ':::question',
+  'Send it on a Monday?',
+  '',
+  '- [ ] Yes',
+  '- [ ] No',
+  ':::',
 ].join('\n');
 
 interface World {
