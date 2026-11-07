@@ -196,9 +196,10 @@ test('lazy drags pick what a person meant', async ({ browser }) => {
     await expect(composer(page)).toBeVisible();
     await composer(page).locator('textarea').fill('This.');
     await composer(page).getByRole('button', { name: 'Change it' }).click();
-    await expect.poll(() => waiting(id).length).toBe(1);
-    const note = waiting(id)[0] as { part: string | null; quote: string | null };
-    got.push({ name: l.name, want: l.want, parts: note.part ? note.part.split(',') : [], words: note.quote ?? '' });
+    // Read once per try, and kept: a read while the note is still being written finds none.
+    let note: { part: string | null; quote: string | null } | undefined;
+    await expect.poll(() => (note = waiting(id)[0] as typeof note) !== undefined).toBe(true);
+    got.push({ name: l.name, want: l.want, parts: note!.part ? note!.part.split(',') : [], words: note!.quote ?? '' });
     expect(problems).toEqual([]);
     await context.close();
   }
