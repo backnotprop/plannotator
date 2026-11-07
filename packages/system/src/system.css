@@ -56,7 +56,7 @@
 .light .sys {
   --sys-box: var(--card);
   --sys-add-ink: var(--success);
-  --sys-chg-ink: var(--warning);
+  --sys-chg-ink: color-mix(in oklab, var(--warning) 88%, var(--foreground));
 }
 /* resets at zero specificity, so every sys- class wins over them */
 :where(.sys) *, :where(.sys) *::before, :where(.sys) *::after { box-sizing: border-box; }
@@ -134,6 +134,77 @@
 .sys-note-row { display: flex; gap: 9px; align-items: flex-start; }
 .sys-note-row .sys-letter { margin-top: 1px; }
 .sys-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* a change in the view (step A5): the PR, Before / After / Steps and the tally in the bar; the stage and its legend in
+   one column, the parts list beside them in a full window, a 1px gap of hairline between */
+.sys-main { flex: 1; min-height: 0; display: flex; gap: 1px; background: var(--ib-hair, var(--border)); }
+.sys-pane .sys-main { flex: none; }
+.sys-col { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--sys-paper); }
+.sys-aside { flex: none; width: 300px; min-height: 0; overflow: auto; background: var(--sys-paper); }
+.sys-ink-added { color: var(--sys-add-ink); }
+.sys-ink-changed { color: var(--sys-chg-ink); }
+.sys-ink-removed { color: var(--sys-gone-ink); }
+.sys-tally { font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; color: var(--sys-ink3); }
+.sys-tally-sep { color: var(--sys-ink3); }
+.sys-pr { display: inline-flex; align-items: center; gap: 8px; height: 28px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; white-space: nowrap; color: var(--foreground); }
+.sys .sys-pr-b { padding: 0 6px; border-radius: 7px; }
+.sys .sys-pr-b:hover { background: var(--ib-fill, var(--muted)); }
+.sys .sys-pr-b:focus-visible { outline: 1.5px solid color-mix(in oklch, var(--ring) 55%, transparent); outline-offset: -1.5px; }
+.sys-pr-state { display: inline-flex; align-items: center; gap: 5px; font-size: var(--ib-fs-13, 13px); font-weight: 400; }
+.sys-pr-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.sys-pr-open { color: var(--success); }
+.sys-pr-merged { color: color-mix(in oklab, var(--primary) 85%, var(--foreground)); }
+.sys-pr-closed { color: var(--destructive, var(--sys-gone-ink)); }
+.sys-legend { flex: none; list-style: none; margin: 0; padding: 9px 16px 11px; display: flex; flex-wrap: wrap; gap: 5px 20px; border-top: 1px solid var(--ib-hair, var(--border)); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.35; }
+.sys-lg-i { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.sys-lg-n { font-weight: 600; font-variant-numeric: tabular-nums; }
+.sys-lg-f { font-size: var(--ib-fs-11-5, 11.5px); color: var(--sys-ink3); }
+.sys-lg-off { opacity: .6; }
+.sys-lg-gone { text-decoration: line-through; }
+.sys-legend-key { gap: 5px 22px; color: var(--sys-ink2); }
+.sys-legend-key .sys-lg-i { align-items: center; gap: 8px; }
+.sys-sw { width: 24px; height: 14px; border-radius: 2px; border: 1.3px solid var(--sys-line); background: var(--sys-box); flex: none; }
+.sys-sw.sys-sw-added { border: 1.3px dashed var(--sys-add-ink); background: color-mix(in oklab, var(--sys-add-ink) 10%, var(--sys-box)); }
+.sys-sw.sys-sw-changed { border: 1.3px dashed var(--sys-chg-ink); background: color-mix(in oklab, var(--sys-chg-ink) 11%, var(--sys-box)); }
+.sys-kc-num { min-width: 19px; height: 19px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; font-size: var(--ib-fs-11, 11px); font-weight: 600; color: var(--sys-paper); background: var(--sys-chg-ink); }
+/* Steps: the change's one sequence in place of the sheet */
+.sys-steps { flex: 1; min-height: 0; overflow: auto; display: flex; justify-content: center; align-items: flex-start; padding: 12px 24px; outline: none; }
+.sys-steps:focus-visible { box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--ring) 70%, transparent); }
+.sys-steps-sheet { position: relative; flex: none; }
+.sys-pane .sys-steps { flex: none; max-height: 80vh; }
+
+/* the parts list: a row per part, its number and name in its ink, its files under it; a picked row takes the
+   selected-row fill, never an outline */
+.sys-plist { padding: 14px 10px 18px; font-size: var(--ib-fs-13, 13px); color: var(--sys-ink); }
+.sys-plist-h { margin: 0 8px 10px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 600; color: var(--sys-ink3); }
+.sys-plist-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.sys-plist-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: 8px; padding: 6px 8px 7px; border-radius: 7px; }
+.sys-plist-row:hover { background: var(--ib-fill, var(--muted)); }
+.sys-plist-row[aria-current] { background: var(--ib-sel, var(--muted)); }
+.sys .sys-plist-pick { display: flex; align-items: baseline; gap: 0; min-width: 0; text-align: left; }
+.sys-plist-n { width: 22px; flex: none; font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; font-variant-numeric: tabular-nums; }
+.sys-plist-name { min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+.sys-plist-row[data-status="added"] :is(.sys-plist-n, .sys-plist-name) { color: var(--sys-add-ink); }
+.sys-plist-row[data-status="changed"] :is(.sys-plist-n, .sys-plist-name) { color: var(--sys-chg-ink); }
+.sys-plist-row[data-status="removed"] :is(.sys-plist-n, .sys-plist-name) { color: var(--sys-gone-ink); }
+.sys-plist-row[data-status="removed"] .sys-plist-name { text-decoration: line-through; }
+.sys .sys-plist-diff { display: inline-flex; align-items: center; gap: 4px; font-size: var(--ib-fs-12, 12px); color: var(--sys-ink3); border-radius: 4px; padding: 1px 4px; margin: -1px -4px; white-space: nowrap; }
+.sys .sys-plist-diff:hover { color: var(--foreground); }
+.sys-plist-files { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding-left: 22px; margin-top: 2px; }
+.sys .sys-plist-file { font-size: var(--ib-fs-11-5, 11.5px); color: var(--sys-ink2); text-align: left; overflow-wrap: anywhere; border-radius: 3px; }
+.sys button.sys-plist-file:hover { color: var(--foreground); text-decoration: underline; }
+.sys-plist-row[data-status="added"] .sys-plist-c { color: var(--sys-add-ink); }
+.sys-plist-c { color: var(--sys-ink3); }
+.sys :is(.sys-plist-pick, .sys-plist-diff, .sys-plist-file):focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.sys-plist-foot { margin: 14px 8px 0; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--sys-ink3); }
+
+/* the review card's picture: the sheet the PR touches, cropped to its change, and the change in one line */
+.sys.sys-cpic { display: block; width: 100%; margin: 12px 0 2px; text-align: left; border-radius: 9px; cursor: pointer; }
+.sys-cpic-frame { position: relative; display: block; min-height: 40px; overflow: hidden; border-radius: 8px; border: 1px solid var(--ib-line, var(--border)); background: var(--sys-paper); }
+.sys-cpic-frame::after { content: ""; position: absolute; inset: 0; background: var(--foreground); opacity: 0; transition: opacity .15s var(--sys-ease-out); pointer-events: none; }
+.sys-cpic:hover .sys-cpic-frame::after { opacity: .035; }
+.sys .sys-cpic:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.sys-cline { display: block; margin-top: 8px; font-size: var(--ib-fs-13, 13px); font-weight: 550; color: var(--sys-ink3); }
 
 /* the sheet chips: one per sheet of the scope, the one on screen named by its kind */
 .sys-chips { display: inline-flex; align-items: center; gap: 2px; }
@@ -317,6 +388,33 @@
 .sys-fig-pl.sys-schema { border-color: var(--sys-line); padding: 8px 12px; }
 .sys-pl-h { font-size: var(--ib-fs-10-5, 10.5px); line-height: calc(13px * var(--sys-k)); color: var(--sys-ink3); margin-bottom: 4px; font-weight: 500; }
 .sys-pl-b { font-size: var(--ib-fs-11-5, 11.5px); line-height: calc(15.5px * var(--sys-k)); color: var(--sys-ink); white-space: pre; }
+
+/* a change on the sheet (change/apply.ts): added green, changed amber on its wash, removed grey, dashed and struck;
+   a part's number in the change on its corner; its line counts as its second line, in its ink */
+.sys-part.sys-st-added > .sys-pv { border-color: var(--sys-add-ink); }
+.sys-part.sys-st-changed > .sys-pv { border-color: var(--sys-chg-ink); background-color: color-mix(in oklab, var(--sys-chg-ink) 11%, var(--sys-box)); }
+.sys-part.sys-st-removed > .sys-pv { border-color: var(--sys-gone-ink); border-style: dashed; background-color: var(--sys-paper); }
+.sys-part.sys-st-added .sys-nm, .sys-part.sys-st-added .sys-lines { color: var(--sys-add-ink); }
+.sys-part.sys-st-changed .sys-nm, .sys-part.sys-st-changed .sys-lines { color: var(--sys-chg-ink); }
+.sys-part.sys-st-removed .sys-nm, .sys-part.sys-st-removed .sys-rl, .sys-part.sys-st-removed .sys-sub { color: var(--sys-gone-ink); text-decoration: line-through; }
+.sys-num { position: absolute; left: -9px; top: -9px; z-index: 2; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; font-size: var(--ib-fs-11, 11px); font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; color: var(--sys-paper); background: var(--sys-ink2); pointer-events: none; }
+.sys-st-added > .sys-num { background: var(--sys-add-ink); }
+.sys-st-changed > .sys-num { background: var(--sys-chg-ink); }
+.sys-st-removed > .sys-num { background: var(--sys-gone-ink); }
+/* a part picked in the parts list takes the selected-row fill, never an outline */
+.sys-part.sys-picked > .sys-pv { background: color-mix(in oklab, var(--ib-sel, var(--muted)) 75%, var(--sys-box)); }
+.sys-elabel.sys-st-added { color: var(--sys-add-ink); }
+.sys-elabel.sys-st-changed { color: var(--sys-chg-ink); }
+.sys-elabel.sys-st-removed { color: var(--sys-gone-ink); text-decoration: line-through; }
+.sys-fig-step.sys-st-added, .sys-fig-pl.sys-st-added { border-color: var(--sys-add-ink); }
+.sys-fig-step.sys-st-changed, .sys-fig-pl.sys-st-changed { border-color: var(--sys-chg-ink); background-color: color-mix(in oklab, var(--sys-chg-ink) 11%, var(--sys-box)); }
+.sys-fig-step.sys-st-added .sys-st-s, .sys-fig-step.sys-st-added .sys-st-t { color: var(--sys-add-ink); }
+.sys-fig-step.sys-st-changed .sys-st-s, .sys-fig-step.sys-st-changed .sys-st-t { color: var(--sys-chg-ink); }
+/* a plan (Shape's System (plan) tab): what is not built yet is dashed, new on a green wash; nothing is numbered */
+.sys-plan .sys-part.sys-st-added > .sys-pv, .sys-plan .sys-part.sys-st-changed > .sys-pv { border-style: dashed; }
+.sys-plan .sys-part.sys-st-added > .sys-pv { background-color: color-mix(in oklab, var(--sys-add-ink) 10%, var(--sys-box)); }
+.sys-plan .sys-edge.sys-st-added .sys-stroke, .sys-plan .sys-edge.sys-st-changed .sys-stroke { stroke-dasharray: 6 4; }
+.sys-plan .sys-num { display: none; }
 
 /* level of detail: 0 outlines, 1 names, 2 phrases, 3 everything */
 .sys-lod-0 .sys-t-name, .sys-lod-0 .sys-t-phrase, .sys-lod-0 .sys-t-quiet, .sys-lod-0 .sys-pv .sys-marks,

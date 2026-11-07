@@ -23,7 +23,7 @@
 
 import type { InboxListRow } from "@plannotator/core/inbox-types";
 import type { InboxLinkRecord } from "./inbox-links";
-import type { InboxOutbox, OutboxAnswer, OutboxEntry } from "./inbox-outbox";
+import { MACHINE_WINDOW_HEADER, type InboxOutbox, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
 import type { InboxPeerTransport } from "./inbox-transport";
 
 /** The oldest link protocol this Inbox links to: health's `machine_links`. */
@@ -396,7 +396,8 @@ export class PeerLink {
     try {
       const response = await this.options.transport.request(entry.route, "", {
         method: "POST",
-        headers: this.auth({ "Content-Type": "application/json" }),
+        // A press in the person's window here: the other machine's door hands that on (inbox-devices.ts).
+        headers: this.auth({ "Content-Type": "application/json", ...(entry.window ? { [MACHINE_WINDOW_HEADER]: "1" } : {}) }),
         body: JSON.stringify(entry.body),
         signal: AbortSignal.timeout(this.t.sendMs),
       });

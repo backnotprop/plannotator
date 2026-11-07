@@ -5582,30 +5582,45 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-oq-pos[data-phone] .ib-oq-skipwords { font-size: var(--ib-fs-15, 15px); }
 .ib-oq-pos[data-phone] .ib-oq-skipbtn { min-height: 44px; padding: 0 16px; border-radius: 12px; font-size: var(--ib-fs-15, 15px); }
 
-/* ── Thread steps (approval "inbox-thread-steps", A1 "Linear"; the mock's round-3 rules, source/steps.css) ──
-   One text weight; colour only on the step in progress (primary) and the step that waits on the person (amber).
-   Freshness is the in-progress mark alone: it turns while the session works (.ib-st-working), is still and dim
-   while idle, and dashed once ended, when the head adds "as of". Popover on a desktop, sheet on a phone (the open
-   questions' positioner and scrim). */
+/* ── Thread steps (approval "inbox-thread-steps"; the marks are "inbox-checklist-spinners-2026-11-07", mock 1
+   "today's layout with spinners", and its 11:25Z addendum: the bottom bar, next to Reply) ──
+   The foot's button looks like Reply (its .ib-btn surface, text and border, theme tokens only) and shows the
+   current step's mark: the spinner while a step is worked on, the amber pause while one waits on the person, else
+   the pie; then the count. Popover on a desktop, sheet on a phone (the open questions' positioner and scrim). Five
+   marks, each its own shape (ring, spinner, check, amber pause, ×), all 3:1 or better. Freshness is the spinner
+   alone, by the nearest presence class: it turns (0.9 s, linear) while the session works (.ib-st-working), is still
+   with its arc dimmed while idle, and still and grey once ended, when the head adds "as of". Reduced motion: the
+   same arc, still. The list row and the Board's lane card never move: only the still amber pause while the thread
+   waits on the person. */
 .pn-inbox, .ib-st-pos {
+  /* done words and the done check */
   --ib-st-mut: color-mix(in oklch, var(--muted-foreground) 88%, var(--card));
-  --ib-st-faint: color-mix(in oklch, var(--foreground) 28%, transparent);
+  /* the todo ring and the dropped ×: quiet, still 3:1 or better */
+  --ib-st-ring: color-mix(in oklch, var(--muted-foreground) 70%, var(--card));
+  /* a dropped step's strike-through */
+  --ib-st-faint: color-mix(in oklch, var(--muted-foreground) 60%, transparent);
   --ib-st-line: color-mix(in oklch, var(--border) 80%, transparent);
-  --ib-st-amber: var(--ib-badge-hold-fg-soft);
+  /* waiting on the person: warm, and 4.5:1 or better, so it serves as text too */
+  --ib-st-amber: color-mix(in oklab, var(--warning) 80%, var(--foreground));
+  /* the spinner's track: decorative, it only shows the circle the arc runs on */
+  --ib-st-track: color-mix(in oklab, var(--primary) 24%, transparent);
+  --ib-st-turn: 0.9s;
   --ib-st-calm: cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 .pn-inbox .ib-st-btn { gap: 6px; }
 .ib-st-num { font-variant-numeric: tabular-nums; }
 /* Another session's list too: "+1", quieter than the count. */
 .ib-st-more { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); font-variant-numeric: tabular-nums; margin-left: -2px; }
-.ib-st-btn[aria-expanded="true"] .ib-st-more, .ib-st-btn[data-popup-open] .ib-st-more { color: inherit; opacity: 0.8; }
 /* The row's fit (footFit.ts): read only, the checklist gives way first, its chevron gone before the open questions'
    words shorten (the row's `steps` step; `data-steps-fit` from the buttons' own fit); at a phone's `icon` step,
-   the pie and the count alone, closer together. */
+   the pie and the count alone, closer together. An ended session's "· as of 2:40 PM" goes at the same step (the
+   button's name keeps it, and the list's head shows it). */
 .pn-inbox .ib-footrow[data-fit~="steps"] .ib-st-btn .ib-oq-chev,
-.pn-inbox .ib-footbtns[data-steps-fit] .ib-st-btn .ib-oq-chev { display: none; }
+.pn-inbox .ib-footbtns[data-steps-fit] .ib-st-btn .ib-oq-chev,
+.pn-inbox .ib-footrow[data-fit~="steps"] .ib-st-btn .ib-st-asof,
+.pn-inbox .ib-footbtns[data-steps-fit] .ib-st-btn .ib-st-asof { display: none; }
 .pn-inbox .ib-footrow[data-fit~="icon"] .ib-footbtns .ib-st-btn { padding-left: 8px; padding-right: 8px; gap: 4px; }
-.pn-inbox .ib-st-btn[aria-expanded="true"], .pn-inbox .ib-st-btn[data-popup-open] { background: color-mix(in srgb, var(--primary) 11%, var(--card)); color: var(--primary); }
+.pn-inbox .ib-st-btn[aria-expanded="true"], .pn-inbox .ib-st-btn[data-popup-open] { background: var(--ib-bt-hover-s, var(--ib-btn-rest, var(--card))); }
 .ib-st-btn[aria-expanded="true"] .ib-oq-chev, .ib-st-btn[data-popup-open] .ib-oq-chev { transform: none; }
 .ib-stpie { flex: none; }
 .ib-stpie .o { fill: none; stroke: color-mix(in oklch, var(--foreground) 30%, transparent); stroke-width: 1.3; }
@@ -5648,27 +5663,31 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 @media (hover: hover) { .ib-st-jump:hover { text-decoration: underline; text-underline-offset: 2px; } }
 .ib-st-jump:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; border-radius: 4px; }
 
-/* the shapes */
-.ib-stg circle, .ib-stg path, .ib-stg rect { vector-effect: non-scaling-stroke; }
-.ib-stg-todo circle { fill: none; stroke: var(--ib-st-faint); stroke-width: 1.5; }
-.ib-stg-doing .o { fill: none; stroke: var(--primary); stroke-width: 1.5; }
-.ib-stg-doing .p { fill: var(--primary); transform-origin: 7px 7px; }
-.ib-st-working .ib-stg-doing .p { animation: ib-st-turn 3.2s linear infinite; }
+/* the marks: 1.5 strokes with round caps, no fills, glow or gradients */
+.ib-stg { display: block; flex: none; overflow: visible; }
+.ib-stg circle, .ib-stg path { fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.ib-stg-todo circle { stroke: var(--ib-st-ring); }
+.ib-stg-done path { stroke: var(--ib-st-mut); stroke-width: 1.6; }
+.ib-stg-wait circle { stroke: var(--ib-st-amber); }
+.ib-stg-wait path { stroke: var(--ib-st-amber); stroke-width: 1.4; }
+.ib-stg-drop path { stroke: var(--ib-st-ring); stroke-width: 1.4; }
+/* the spinner: the whole SVG turns, so its arc never changes length */
+.ib-stg-spin { transform-origin: 50% 50%; }
+.ib-stg-spin .tr { stroke: var(--ib-st-track); }
+.ib-stg-spin .arc { stroke: var(--primary); }
+.ib-st-working .ib-stg-spin { animation: ib-st-turn var(--ib-st-turn) linear infinite; }
 @keyframes ib-st-turn { to { transform: rotate(360deg); } }
-.ib-st-idle .ib-stg-doing .o { stroke: color-mix(in oklch, var(--primary) 55%, transparent); }
-.ib-st-idle .ib-stg-doing .p { fill: color-mix(in oklch, var(--primary) 55%, transparent); }
-.ib-st-ended .ib-stg-doing .o { stroke: var(--ib-st-faint); stroke-dasharray: 2 2.4; }
-.ib-st-ended .ib-stg-doing .p { fill: var(--ib-st-faint); }
-.ib-stg-done .f { fill: color-mix(in oklch, var(--foreground) 42%, transparent); }
-.ib-stg-done .k { fill: none; stroke: var(--popover); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.ib-stg-wait circle { fill: none; stroke: var(--ib-st-amber); stroke-width: 1.5; }
-.ib-stg-wait rect { fill: var(--ib-st-amber); }
-.ib-stg-drop circle { fill: color-mix(in oklch, var(--foreground) 22%, transparent); }
-.ib-stg-drop path { stroke: var(--popover); stroke-width: 1.5; stroke-linecap: round; }
+.ib-st-idle .ib-stg-spin .arc { stroke: color-mix(in oklab, var(--primary) 70%, var(--card)); }
+.ib-st-ended .ib-stg-spin .arc { stroke: var(--ib-st-ring); }
+.ib-st-ended .ib-stg-spin .tr { stroke: color-mix(in oklch, var(--muted-foreground) 22%, transparent); }
+/* Reduced motion: the arc rests from 12 o'clock to about 4, a partial ring (never the todo ring's full one). */
 @media (prefers-reduced-motion: reduce) {
   .ib-stp { animation: none; }
-  .ib-st-working .ib-stg-doing .p { animation: none; }
+  .ib-st-working .ib-stg-spin { animation: none; }
 }
+
+/* the list row's and the lane card's mark: only the still amber pause, only while the thread waits on the person */
+.ib-strow { flex: none; display: inline-flex; align-items: center; }
 
 /* a phone: the sheet, 44 px rows and targets, a grab handle */
 .ib-oq-pos[data-phone] .ib-stp { width: auto; max-height: 72vh; border-radius: 14px 14px 0 0; border-width: 1px 0 0; padding-bottom: calc(16px + env(safe-area-inset-bottom)); animation: ib-oq-up 240ms var(--ib-st-calm); }
@@ -5689,14 +5708,14 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-oq-pos[data-phone] .ib-st-m { line-height: 22px; }
 .ib-oq-pos[data-phone] .ib-st-jump { margin: -11px 0; }
 
-/* the Board (part 4): the lane card wears the pie alone (the opened card has the number); the opened card lists the
-   steps under a section head like Threads and Links; the panel's head has a Board icon that opens the card */
+/* the Board (part 4): the lane card stays still, with only the amber pause while a list waits on the person; the
+   opened card lists the steps under a section head like Threads and Links; the panel's head has a Board icon that
+   opens the card */
 .ib-bc-plan { flex: none; display: inline-flex; align-items: center; color: var(--ib-st-mut); }
 .ib-crdp-steps .ib-st-head { height: auto; padding: 0; margin: 0 0 4px; }
 .ib-crdp-sec.ib-crdp-steps h3.ib-st-lbl { margin: 0; }
 .ib-crdp-steps .ib-sts { margin: 0 -10px; }
 .ib-crdp-steps .ib-st-group + .ib-st-group { border-top: 0; margin-top: 12px; }
-.ib-crdp-steps .ib-stg-done .k, .ib-crdp-steps .ib-stg-drop path { stroke: var(--card); }
 .ib-crdp-phone .ib-crdp-steps .ib-st-row { min-height: 40px; font-size: var(--ib-fs-15, 15px); }
 .ib-crdp-phone .ib-crdp-steps .ib-st-jump { min-height: 44px; }
 /* The opened card on a phone: two lines too, as the foot's sheet. */
@@ -7944,10 +7963,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rvc-state[data-verdict="approved"] { color: var(--success); }
 .ib-rvc-title { margin-top: 8px; font-size: var(--ib-fs-15, 15px); font-weight: 600; overflow-wrap: anywhere; }
 .ib-rvc-meta { margin-top: 4px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
-.ib-rvc-chapters { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 4px; }
-.ib-rvc-chapters li { display: flex; gap: 10px; font-size: var(--ib-fs-13-5, 13.5px); min-width: 0; }
-.ib-rvc-n { width: 14px; flex: none; text-align: right; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
-.ib-rvc-ct { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .ib-rvc-foot { margin-top: 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .ib-rvc-note { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 
@@ -8235,8 +8250,22 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-pr-empty { padding: 18px 14px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; }
 .ib-pr-empty p { margin: 0 0 4px; }
 .ib-pr-empty-h { color: var(--foreground); font-weight: 600; }
-/* A centred word in the list column, with its one button: Code review off. */
-.ib-pr-off { display: flex; align-items: center; justify-content: center; text-align: center; }
+/* Reviews (ReviewsList.tsx, and a thread opened from it). */
+.ib-prlist .ib-lhead .ib-pr-new { flex: none; margin-right: -6px; }
+.ib-prlist .ib-lhead .ib-pf-slot { margin-right: 0; }
+.ib-pr-mstatus[data-tone='warn'] { color: var(--destructive); }
+.ib-pr-mstatus[data-tone='ok'] { color: var(--success, #16803c); }
+.ib-pr-magent { margin-right: 5px; }
+.ib-rvctx { margin-bottom: 8px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-rvctx svg { display: inline; margin-right: 6px; vertical-align: -2px; }
+.ib-rvctx .ib-rvctx-link { margin-left: 8px; }
+.ib-rvctx-link { color: var(--foreground); text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
+.ib-rvctx-link:hover { text-decoration-color: currentColor; }
+.ib-rvfrom { margin: -6px 0 14px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
+.pn-inbox .ib-rvc-link { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
+.pn-inbox .ib-rvc-link:hover { color: var(--foreground); }
+/* A centred word in the list column, with its one button: Code review off, no reviews yet. */
+.ib-pr-off { display: flex; flex: 1; align-items: center; justify-content: center; text-align: center; }
 .ib-pr-off .ib-btn { margin-top: 14px; }
 .ib-prrow .ib-l3.ib-pr-l3 { justify-content: flex-start; gap: 7px; }
 .ib-prrow .ib-l3.ib-pr-l3 > .ib-pv { margin-right: 0; }
@@ -8589,10 +8618,11 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-noproj .ib-row:has(.ib-rended) { --ib-words-track: max-content; }
 .ib-rended + .ib-c { margin-left: 8px; }
 
-/* Send to another session and Archive beside Reply when the session ended; a phone gives them their own line. */
+/* Send to another session and Archive beside Reply when the session ended; a phone gives them their own line, last
+   in the row's markup too (Thread.tsx), so the tab order is what is on screen. */
 .ib-footended { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  .pn-inbox .ib-footended { flex: 1 0 100%; order: 1; }
+  .pn-inbox .ib-footended { flex: 1 0 100%; }
 }
 
 /* Show me in the code review (approval "shape-in-code-review", mock ac2; packages/inbox/review-drawing). The box, the
@@ -9015,3 +9045,16 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-emo, .ib-emo-pos[data-phone] .ib-emo { clip-path: none; transition: opacity 120ms ease-out; }
   .ib-emo[data-starting-style], .ib-emo[data-ending-style], .ib-emo-pos[data-phone] .ib-emo[data-starting-style], .ib-emo-pos[data-phone] .ib-emo[data-ending-style] { clip-path: none; transform: none; opacity: 0; }
 }
+
+/* The bottom bar, B1 (approval "inbox-reaction-tray", addendum 2026-11-07; footLine.ts). Its line, and a faint 18 px
+   shadow above it, fade in only while thread text scrolls under the bar (`data-under`); with nothing under it (the
+   thread all fits, or it is scrolled to its end) the bar sits on the page. A colour fade with no movement, so reduced
+   motion keeps it. */
+.ib-pfoot { transition: border-color 160ms ease-out, box-shadow 160ms ease-out; }
+.ib-pfoot:not([data-under]) { border-top-color: transparent; }
+.ib-pfoot[data-under] { box-shadow: 0 -12px 18px -16px color-mix(in oklch, var(--ib-shadow-ink) 40%, transparent); }
+/* The actions on the left (Reply, the reaction, an ended session's two), what is open on the right (the open
+   questions, then the checklist): the right group starts at whichever of the two comes first. Same on a phone. */
+.ib-pfoot > .ib-acts.ib-footrow > .ib-footbtns { flex: 1 1 auto; }
+.ib-footbtns[data-foot-buttons] > [data-open-questions],
+.ib-footbtns[data-foot-buttons]:not(:has(> [data-open-questions])) > [data-steps-button] { margin-inline-start: auto; }

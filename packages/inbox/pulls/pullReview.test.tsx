@@ -26,6 +26,7 @@ import type { StartThreadInput } from '../api';
 import { handoffKeys, handoffStack, PULL_HANDOFF_TITLE_MAX, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk, pullTitleLine } from './model';
 import { layerVerdictLink } from './topology';
 
+import { pullsStateOf } from './reviewsTestState';
 const hasDom = typeof document !== 'undefined';
 const shown: { patch: string; title: string }[] = [];
 /** The reader's comment seam as the review last gave it (a test writes a comment through it). */
@@ -522,17 +523,18 @@ test.skipIf(!hasDom)('a partial post keeps the dialog open on what did not go, w
   expect(document.querySelector('[data-pull-review-posted]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('the list: On you, Ready to land, then the waiting ones folded; a stack is one row with its chain', async () => {
+test.skipIf(!hasDom)('the list: On you, then the folded group; a stack is one row with its chain', async () => {
   const opened: string[] = [];
   mount(
     <SidebarProvider>
     <PullsPage
-      state={{ model, error: null, loading: false, refresh: () => {}, reload: () => {} }}
+      state={pullsStateOf(model)}
       stackId={null}
       project={null}
       projects={[]}
       projectNames={new Map()}
       phone={false}
+      onNew={() => {}}
       onOpenStack={(id) => id && opened.push(id)}
       filter="all"
       onScope={() => {}}
@@ -546,18 +548,16 @@ test.skipIf(!hasDom)('the list: On you, Ready to land, then the waiting ones fol
   await settle();
   const rows = () => [...document.querySelectorAll<HTMLElement>('[data-pulls-row]')].filter((r) => r.closest('[hidden]') === null);
   const moves = rows().map((r) => r.getAttribute('data-pulls-move'));
-  expect(moves).toEqual(['on_you', 'on_you', 'ready']);
-  expect(el('[data-pulls-group="on_you"] .ib-n').textContent).toBe('2');
-  const stackRow = rows().find((r) => r.getAttribute('data-pulls-layers') === '3')!;
-  expect(stackRow).toBeDefined();
-  expect(stackRow.querySelectorAll('.ib-pr-chain svg').length).toBe(3);
-  expect(stackRow.textContent).toContain('start at #412');
-  // The waiting one is folded under its count, and opens on a click.
-  const fold = el('.ib-pr-foldbtn');
-  expect(fold.textContent).toContain('1 waiting on others');
+  // A teammate's request stays On you; a PR only listed is folded under Open, not reviewed, and opens on a click.
+  expect(moves).toEqual(['on_you']);
+  expect(el('[data-pulls-group="on_you"] .ib-n').textContent).toBe('1');
+  const fold = el('[data-reviews-fold="not_reviewed"]');
+  expect(fold.textContent).toContain('Open, not reviewed');
   await act(async () => fold.click());
   await settle();
-  expect(rows().map((r) => r.getAttribute('data-pulls-move'))).toEqual(['on_you', 'on_you', 'ready', 'waiting']);
+  expect(new Set(rows().map((r) => r.getAttribute('data-pulls-move')))).toEqual(new Set(['on_you', 'not_reviewed']));
+  const stackRow = rows().find((r) => r.getAttribute('data-pulls-layers') === '3')!;
+  expect(stackRow.querySelectorAll('.ib-pr-chain svg').length).toBe(3);
   await act(async () => stackRow.click());
   expect(opened).toEqual([STACK_ID]);
 });
@@ -592,10 +592,11 @@ test.skipIf(!hasDom)("top left is always the author's picture, from the Inbox's 
   expect(asked.every((u) => u.origin === 'http://inbox.test' && /\/api\/inbox\/pulls\/avatar$/.test(u.pathname))).toBe(true);
   expect(asked.map((u) => `${u.searchParams.get('host')} ${u.searchParams.get('login')}`)).toContain('github.com mara-lee');
   expect(lead.querySelector('.ib-atiles')).toBeNull();
-  // The agent: its mark and name on the third line.
+  // The agent: its mark on the third line, named for a reader, and what it is doing.
   const agent = stackRow.querySelector('.ib-pv [data-pulls-row-agent]')!;
   expect(agent.getAttribute('data-pulls-row-agent')).toBe('claude-code');
-  expect(agent.textContent).toBe('Review thread with Claude Code');
+  expect(agent.getAttribute('aria-label')).toBe('Claude Code');
+  expect(stackRow.querySelector('[data-reviews-status]')!.textContent).toBe('Curating…');
   expect(agent.querySelector('svg, img')).not.toBeNull();
   // The picture failed: the initials stay, no broken image.
   expect(av.querySelector('img')).toBeNull();
@@ -714,12 +715,13 @@ function Page({
   return (
     <SidebarProvider>
       <PullsPage
-        state={{ model: answer, error: null, loading: false, refresh: () => {}, reload: () => {} }}
+        state={pullsStateOf(answer)}
         stackId={stackId}
         project={null}
         projects={[]}
         projectNames={new Map()}
         phone={false}
+        onNew={() => {}}
         onOpenStack={() => {}}
         filter="all"
         onScope={() => {}}

@@ -72,6 +72,18 @@ describe('the text a Send carries', () => {
     expect(fencesBalanced(text)).toBe(true);
   });
 
+  test("a Delete (approval inbox-toolbar-delete) reads as plan review's: Remove this, the words, I don't want this; across lines its words are fenced", () => {
+    const one = record('d1', 'and a 429 waits for Retry-After', '', { type: 'DELETION', text: undefined });
+    const across = record('d2', ACROSS, '', { type: 'DELETION', text: undefined, startOffset: 4 });
+    const text = messageFeedback([one, across], time);
+    expect(text).toContain("I've reviewed this message and have 2 pieces of feedback:");
+    expect(text).toContain('### 1. Remove this: "and a 429 waits for Retry-After"\n> I don\'t want this in your message.\n');
+    expect(text).toContain(['### 2. Remove this:', '````', ACROSS, '````', "> I don't want this in your message."].join('\n'));
+    expect(fencesBalanced(text)).toBe(true);
+    // A Delete the person gave words to (the list's Edit) sends their words instead.
+    expect(messageFeedback([record('d3', 'Retry-After', 'Drop the header talk.', { type: 'DELETION' })], time)).toContain('### 1. Remove this: "Retry-After"\n> Drop the header talk.\n');
+  });
+
   test("a quick label carries its tip under its heading, as the main export writes it (#2626)", () => {
     const tip = 'This seems like an assumption. Verify by reading the actual code before proceeding.';
     const text = messageFeedback([record('q1', 'retries three times', '🔍 Verify this', { isQuickLabel: true, quickLabelTip: tip })], time);
