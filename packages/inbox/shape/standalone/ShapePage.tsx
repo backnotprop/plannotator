@@ -15,7 +15,7 @@
  * answer 404 and the page says Shape is off.
  */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { shapeViewNow, type ShapeViewId } from '@plannotator/core/shape';
+import { isShapeBoardStyle, SHAPE_BOARD_STYLE_DEFAULT, shapeViewNow, type ShapeBoardStyle, type ShapeViewId } from '@plannotator/core/shape';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import { ShapeGrid, type ShapeGridItem } from '@plannotator/ui/components/shape/ShapeGrid';
 import type { ShapePanelTab } from '@plannotator/ui/components/shape';
@@ -98,6 +98,8 @@ export function ShapePage({ api, openEvents, win = window }: ShapePageProps) {
   const [shapes, setShapes] = useState<ShapeSummaryWire[] | null>(null);
   const [route, setRoute] = useState<ShapeRoute>(() => parseShapeHash(win.location.hash));
   const [query, setQuery] = useState('');
+  // The person's Board style (the Inbox's Settings), read once with the server's info; Sharp until it answers.
+  const [boardStyle, setBoardStyle] = useState<ShapeBoardStyle>(SHAPE_BOARD_STYLE_DEFAULT);
   const listeners = useRef(new Set<(ids: string[]) => void>());
   const reading = useRef<AbortController | null>(null);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -140,6 +142,7 @@ export function ShapePage({ api, openEvents, win = window }: ShapePageProps) {
       .info()
       .then((info) => {
         if (closed) return;
+        if (isShapeBoardStyle(info.board_style)) setBoardStyle(info.board_style);
         if (!info.on) {
           setStatus('off');
           return;
@@ -262,6 +265,7 @@ export function ShapePage({ api, openEvents, win = window }: ShapePageProps) {
         query={query}
         onOpen={open}
         assetUrl={host.assetUrl}
+        boardStyle={boardStyle}
         empty={
           query ? undefined : shapes === null ? (
             <span aria-busy="true" />
@@ -311,6 +315,7 @@ export function ShapePage({ api, openEvents, win = window }: ShapePageProps) {
                 initialView={route.view ?? undefined}
                 initialPanel={route.panel}
                 onNavigate={onNavigate}
+                boardStyle={boardStyle}
               />
             </Suspense>
           </section>

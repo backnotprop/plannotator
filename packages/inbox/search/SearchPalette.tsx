@@ -27,6 +27,7 @@ import { inboxApi, saveRecentSearch, searchInbox, type SearchModel } from '../ap
 
 import { HostMark, Icon } from '../icons';
 import { ShapeThumb } from '@plannotator/ui/components/shape/ShapeGrid';
+import { useShapeStyle } from '../shapeStyle';
 import { KeyCaps } from '../shortcuts/hint';
 import { isTextCut, ProjectTipText, Tip } from '../components/Tip';
 import { actionLabel, busyWord, namesActionWord, startedLine, type ComposeAction } from '../compose/model';
@@ -344,6 +345,7 @@ function keepInputFocus(event: ReactMouseEvent): void {
 export default function SearchPalette(props: SearchPaletteProps) {
   const { open, phone, currentProject, projects, onClose, onOpenResult, actions, onAction, shapes } = props;
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const boardStyle = useShapeStyle();
   const inputRef = useRef<HTMLInputElement>(null);
   /** An IME composition is under way in the input (its Escape is not the palette's). */
   const composing = useRef(false);
@@ -942,7 +944,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
               return (
                 <div key={`shape-${shape.id}`} className="ib-sp-row" {...common} data-result="shape" data-result-id={shape.id}>
                   <span className="ib-sp-shape-prev" aria-hidden="true">
-                    <ShapeThumb picture={shape.picture} refs={shape.refs} resolveSrc={(src) => inboxApi.shapeFileUrl(shape.id, src)} />
+                    <ShapeThumb picture={shape.picture} refs={shape.refs} resolveSrc={(src) => inboxApi.shapeFileUrl(shape.id, src)} boardStyle={boardStyle} />
                   </span>
                   <span className="ib-sp-rs">
                     <span className="ib-sp-p">{shape.title}</span>

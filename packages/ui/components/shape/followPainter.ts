@@ -19,6 +19,17 @@ import type { FollowDir } from './followState';
 export const FOLLOW_EASE = 'cubic-bezier(.22, 1, .36, 1)';
 const EASE_TRAVEL = 'cubic-bezier(.65, 0, .35, 1)';
 
+/**
+ * The line the dot travels on for an arrow (`data-edge`): the arrow itself, or the first line in it that shows. A kit
+ * arrow draws its bend twice, one per board style, and hides the one the board's style does not use.
+ */
+export function followLineOf(edge: Element): SVGGeometryElement | null {
+  if (edge.matches(GEOMETRY)) return edge as SVGGeometryElement;
+  const view = edge.ownerDocument.defaultView;
+  const shown = (el: Element) => !view || view.getComputedStyle(el).display !== 'none';
+  return ([...edge.querySelectorAll(`:is(${GEOMETRY}):not(.shp-ex-lit)`)].find(shown) ?? null) as SVGGeometryElement | null;
+}
+
 /** `el.animate`, where the page has it (a test DOM may not): null otherwise. */
 export function animate(el: Element, frames: Keyframe[], options: KeyframeAnimationOptions): Animation | null {
   return typeof (el as HTMLElement).animate === 'function' ? (el as HTMLElement).animate(frames, options) : null;
@@ -35,6 +46,7 @@ export const FOLLOW_DRAWN_CSS = `
 .board.shp-ex-on text[data-edge]:is([data-ex-s="on"], [data-ex-s="now"]) { fill: var(--mark); }
 .board.shp-ex-on [data-edge][data-mark]:is([data-ex-s="on"], [data-ex-s="now"]) { color: var(--ink); }
 .shp-ex-lit { fill: none !important; stroke: var(--mark) !important; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: none !important; opacity: 0; transition: opacity var(--ex-dur, .22s) ease var(--ex-d, 0ms); pointer-events: none; animation: none !important; }
+.shp-ex-lit.shp-ex-head { fill: var(--mark) !important; stroke: none !important; }
 .shp-ex-lit:is([data-s="on"], [data-s="now"]) { opacity: 1; }
 .shp-ex-layer { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 6; pointer-events: none; --ex-inv: 1; }
 .shp-ex-ring { position: absolute; box-shadow: 0 0 0 2px var(--mark); opacity: 0; transition: opacity .22s ease var(--ex-d, 0ms); pointer-events: none; }
@@ -154,7 +166,8 @@ export class FollowPainter {
         for (const p of lines) {
           const lit = p.cloneNode(false) as SVGElement;
           for (const a of ['class', 'style', 'data-step', 'data-mark', 'data-edge', 'data-ex-i', 'id', 'marker-start', 'marker-mid', 'marker-end']) lit.removeAttribute(a);
-          lit.setAttribute('class', 'shp-ex-lit');
+          // A filled arrowhead (the kit's Sharp twin) lights filled, not as an outline.
+          lit.setAttribute('class', p.classList.contains('shp-head') ? 'shp-ex-lit shp-ex-head' : 'shp-ex-lit');
           p.after(lit);
           this.lit.push({ i, el: lit });
         }
@@ -361,7 +374,7 @@ export class FollowPainter {
     const target = this.ex.steps[to]!;
     const pts: { x: number; y: number }[] = [];
     const edge = target.arrow ? this.board.querySelector(byAttr('data-edge', target.arrow)) : null;
-    const line = edge ? ((edge.matches(GEOMETRY) ? edge : edge.querySelector(`:is(${GEOMETRY}):not(.shp-ex-lit)`)) as SVGGeometryElement | null) : null;
+    const line = edge ? followLineOf(edge) : null;
     if (line && typeof line.getTotalLength === 'function') {
       // The arrow's line without its head: a path's first subpath, sampled on its own geometry.
       let probe: SVGGeometryElement = line;

@@ -19,6 +19,7 @@ import { Icon } from '../icons';
 import { MessageBody } from '../components/Thread';
 import { Tip } from '../components/Tip';
 import { SidebarTrigger, useSidebar } from '../shell/sidebar';
+import { useShapeStyle } from '../shapeStyle';
 
 const ShapeBoard = ShapeBoardPart.Part;
 const NO_ANSWERS: ReadonlyMap<string, QuestionAnswer> = new Map();
@@ -71,6 +72,7 @@ export function ShapePebbleButton({ shape, open, onToggle }: { shape: InboxShape
 export function ShapeLayer({ host, id, onClose, thread, onAddToReply }: { host: ShapeHost; id: string; onClose: () => void; thread: InboxThread | null; onAddToReply?: ShapeBoardProps['onAddToReply'] }) {
   // A phone has none: there the sidebar is a sheet and the board covers the window, as before.
   const { isMobile } = useSidebar();
+  const boardStyle = useShapeStyle();
   // The board is a chunk the Inbox serves: one that cannot arrive says so here, with Reload, and the next open
   // (this layer mounted again, or another board in it) asks for the chunk again.
   const [failedOn, setFailedOn] = useState<string | null>(null);
@@ -94,6 +96,7 @@ export function ShapeLayer({ host, id, onClose, thread, onAddToReply }: { host: 
           headStart={isMobile ? undefined : <SidebarTrigger />}
           crosshair
           onAddToReply={thread ? onAddToReply : undefined}
+          boardStyle={boardStyle}
         />
       </PanePart>
     </section>
@@ -123,6 +126,7 @@ export function ShapeGridPage({ shapes, onOpen }: { shapes: InboxShapeSummary[] 
   const items = useMemo(() => (shapes ?? []).filter((s) => s.state === 'active').map(shapeGridItem), [shapes]);
   const byId = useMemo(() => new Map((shapes ?? []).map((s) => [s.id, s])), [shapes]);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const boardStyle = useShapeStyle();
   // The page's heading takes focus, as the Board's does; Find is one Tab away.
   useEffect(() => headingRef.current?.focus({ preventScroll: true }), []);
   return (
@@ -143,6 +147,7 @@ export function ShapeGridPage({ shapes, onOpen }: { shapes: InboxShapeSummary[] 
           items={items}
           query={query}
           assetUrl={inboxApi.shapeFileUrl}
+          boardStyle={boardStyle}
           onOpen={(id) => {
             const s = byId.get(id);
             if (s) onOpen(s);

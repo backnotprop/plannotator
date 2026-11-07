@@ -125,7 +125,7 @@ import type { InboxRevealId } from './api';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
 import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
-import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
+import { hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
 import { ReviewPane } from './components/ReviewPane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
@@ -153,9 +153,9 @@ import { ListColumnEdge } from './shell/ListColumnEdge';
 import { backBy, backTo, pushScreen, settleLanding, whileWritingRoute, withoutClickSignal } from './history';
 import { parseFileView, sameScreenAnyView } from './fileView';
 import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, withFullMark, type FrameMove, type FullMark } from './fullScreenOrigin';
-import { adoptSavedTheme, inboxServerSync } from './theme';
-import { adoptSavedDiffStyle } from './diffStyle';
-import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
+import { inboxServerSync } from './theme';
+import { applyRememberedTextSize } from './textSize';
+import { adoptSavedLooks } from './savedLooks';
 import { parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 import { ComposeDialog, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { DraftsPage } from './compose/DraftsPage';
@@ -1538,11 +1538,7 @@ function Inbox() {
     try {
       const mark = listLookReadMark();
       const next = await inboxApi.settings();
-      adoptSavedTheme(next.theme);
-      adoptSavedTextSize(next.text_size);
-      adoptSavedRows(next.rows, next.rows_rev, mark);
-      adoptSavedDiffStyle(next.diff_style);
-      adoptVoiceSettings(next.voice);
+      adoptSavedLooks(next, mark);
       setSettings(next);
       setSettingsReadFailed(false);
     } catch (cause) {
