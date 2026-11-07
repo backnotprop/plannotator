@@ -8459,8 +8459,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* From REVIEW_FOLD_PANEL_BELOW up the comments are a column beside the diff: the review app's sidebar fill (bg-card/30). Folded, the sheet stays a card over the diff. */
 .ib-prreview:not(.ib-fold) :is(.ib-gpanel, .ib-gpanel > [data-annotation-panel]) { background: color-mix(in oklab, var(--card) 30%, var(--background)); }
 /* What else sits in the pane keeps a row's margin. */
-.ib-prreview [data-guide-section-tab] { margin-inline: 12px; }
-.ib-prreview [data-guide-section-tab] > svg { display: none; }
 .ib-prreview .ib-gbody > .w-full > div:has(> [data-guide-global-comment-add]) { margin-inline: 16px; }
 .ib-prreview [data-guide-global-comments] { margin-inline: 16px; }
 .ib-prreview .ib-prr-posted { margin-inline: 16px; }
@@ -8863,10 +8861,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* Thread's arrow, the guided header's way. */
 .pn-inbox .ib-prreview .ib-vhead .ib-back { gap: 0; padding-inline: 8px; }
 .ib-prreview .ib-vhead .ib-vfiles { gap: 6px; font-variant-numeric: tabular-nums; }
-/* The tab attached on top of the first file: the page's own colour, on a line across the top of the diffs. */
-.ib-prreview [data-guide-section-tab] > svg { display: block; }
-.ib-prreview [data-guide-section-tab] > svg path:first-child { fill: var(--ib-prp-page) !important; }
-.ib-prreview [data-guide-section-tabbed] > [data-guide-section] { border-top: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
 .ib-prreview .ib-gbody > .w-full { padding-top: 6px; }
 .ib-prreview { --ib-prp-page: var(--background); }
 /* Where the verdict goes: the mark lit is the one it goes to, in its colour; the other sits grey and quiet. */
@@ -8968,23 +8962,19 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prp-files .review-change-letter { display: flex; flex-shrink: 0; margin: 0 -2px; }
 .ib-prp-files .ib-prp-fname ~ .ib-prp-c { margin-left: -2px; }
 @media (pointer: coarse) { .pn-inbox .ib-prp-file, .pn-inbox .ib-prp-folder { min-height: 40px; } }
-/* Files: no rule, a tinted head, space between. */
+/* Files as the code review app draws them (approval pr-view-one-surface, 11-07 "fix all four"): one surface, a file its
+   header and its code, edge to edge, in the page's colour, with the header's own hairline under it (FileHeader's) and
+   the next file's header right under the last code row. No band above the first file: Split | Unified is in the bar. */
 .ib-prreview diffs-container { --diffs-bg-separator-override: transparent; }
-.pn-inbox .ib-prreview .ib-gbody > .w-full { padding-top: 4px; }
+.pn-inbox .ib-prreview .ib-gbody > .w-full { padding-top: 0; }
 .ib-prreview [data-guide-section] { border: 0 !important; background: transparent !important; }
-.ib-prreview [data-guide-section-tabbed] > [data-guide-section] { border: 0 !important; }
+/* Each box is exactly its header and code (the guide host's flushFiles: no border, padding or corner). */
 .ib-prreview [data-guide-code-view-mounted] { border: 0 !important; }
-.ib-prreview [data-guide-file-shell] + [data-guide-file-shell] { margin-top: -6px; }
+.ib-prreview [data-guide-file-shell] + [data-guide-file-shell] { margin-top: 0; }
 .ib-prreview [data-guide-file-shell] + [data-guide-file-shell]::before { display: none; }
-.ib-prreview [data-guide-section-tab] { margin-inline: 8px; }
-.ib-prreview [data-guide-section-tab] > svg path:nth-child(2) { stroke: none !important; }
-/* The head of a file: a soft bar, inset, no rule under it. */
-.ib-prreview [data-guide-code-view-mounted] [data-file-header] { margin-inline: 8px; padding-inline: 6px 8px; border-bottom: 0; border-radius: 8px; background: var(--ib-prp-file); }
-.ib-prreview [data-guide-code-view-mounted] [data-file-header]:hover { background: color-mix(in oklab, var(--foreground) 7%, var(--background)); }
-/* The first one grows the Split | Unified tab: the tab is its colour, its corner squared under the tab, the room above it gone. */
-.ib-prreview [data-guide-section-tabbed] > [data-guide-section] [data-guide-file-shell]:first-child { margin-top: -8px; }
-.ib-prreview [data-guide-section-tabbed] > [data-guide-section] [data-guide-file-shell]:first-child [data-file-header] { border-top-right-radius: 0; }
-.ib-prreview [data-guide-section-tabbed] > [data-guide-section] { overflow: visible !important; }
+/* The header: the page's colour (opaque, as it sticks over the code), the review app's hover. */
+.ib-prreview [data-guide-code-view-mounted] [data-file-header] { background: var(--background); }
+.ib-prreview [data-guide-code-view-mounted] [data-file-header]:hover { background: color-mix(in oklab, var(--muted) 30%, var(--background)); }
 /* The end of a layer: the next one. */
 .pn-inbox .ib-prp-next { display: flex; align-items: center; gap: 8px; width: calc(100% - 24px); min-height: 44px; margin: 20px 12px 28px; padding: 0 14px; border-radius: 10px; background: var(--ib-prp-file); font-size: var(--ib-fs-13, 13px); text-align: left; color: var(--foreground); }
 .pn-inbox .ib-prp-next:hover { background: var(--ib-prp-fill); }

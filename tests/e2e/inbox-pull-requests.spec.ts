@@ -1045,11 +1045,12 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   const sqlBox = (await sqlShell.locator('[data-guide-code-view-mounted]').boundingBox())!;
   const sqlLast = (await sqlShell.locator('[data-line="5"]').first().boundingBox())!;
   expect(sqlBox.y + sqlBox.height - (sqlLast.y + sqlLast.height)).toBeLessThan(24);
-  // Global comment is a quiet mark in the bar; Split | Unified a tab on the first file.
+  // Global comment is a quiet mark in the bar, and Split | Unified sits there too: no band above the first file.
   await expect(review.locator('.ib-vhead [data-guide-global-comment-add]')).toBeVisible();
-  await expect(review.locator('[data-guide-section-tab] [data-diff-style-switch]')).toBeVisible();
-  await expect(review.locator('.ib-vhead [data-diff-style-switch]')).toHaveCount(0);
-  // Flat: the code is a sheet on the rail's surface, a file its soft head and its lines, with no card and no rule.
+  await expect(review.locator('.ib-vhead [data-diff-style-switch]')).toBeVisible();
+  await expect(review.locator('[data-guide-section-tab]')).toHaveCount(0);
+  // Flat, as the code review app: a file is its header and its lines, no card, the header in the page's colour with
+  // one hairline under it, and the first header at the top of the code.
   const frame = await review.evaluate((root) => {
     const read = (el: Element) => { const s = getComputedStyle(el); return { border: s.borderTopWidth, radius: s.borderTopLeftRadius, fill: s.backgroundColor }; };
     const none = { border: '0px', radius: '0px', fill: 'rgba(0, 0, 0, 0)' };
@@ -1058,14 +1059,15 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
       none,
       section: read(root.querySelector('[data-guide-section]')!),
       box: read(root.querySelector('[data-guide-code-view-mounted]')!),
-      head: { rule: head.borderBottomWidth, filled: head.backgroundColor !== 'rgba(0, 0, 0, 0)' },
+      head: { rule: head.borderBottomWidth, radius: head.borderTopLeftRadius, pageColour: head.backgroundColor === getComputedStyle(root.querySelector('.ib-gbody')!).backgroundColor },
+      firstHeadTop: Math.round(root.querySelector('[data-file-header]')!.getBoundingClientRect().top - root.querySelector('.ib-gbody')!.getBoundingClientRect().top),
       sameSurface: getComputedStyle(root.querySelector('.ib-vhead')!).backgroundColor === getComputedStyle(root.querySelector('.ib-rsplit')!).backgroundColor,
       sheet: getComputedStyle(root.querySelector('.ib-gbody')!).backgroundColor !== getComputedStyle(root.querySelector('.ib-rsplit')!).backgroundColor,
     };
   });
   expect(frame.section).toEqual(frame.none);
   expect(frame.box).toEqual(frame.none);
-  expect(frame).toMatchObject({ head: { rule: '0px', filled: true }, sameSurface: true, sheet: true });
+  expect(frame).toMatchObject({ head: { rule: '1px', radius: '0px', pageColour: true }, firstHeadTop: 0, sameSurface: true, sheet: true });
   // A 37 px bar over everything; the rail runs to the foot of the page, the code beside it.
   const layers = await review.evaluate((root) => {
     const box = (selector: string) => root.querySelector(selector)!.getBoundingClientRect();
@@ -1073,13 +1075,6 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
     return { barHeight: bar.height, railTop: rail.top - bar.bottom, railFoot: root.getBoundingClientRect().bottom - rail.bottom, beside: body.left - rail.right };
   });
   expect(layers).toEqual({ barHeight: 37, railTop: 0, railFoot: 0, beside: 0 });
-  // Scrolled past the first file, its Split | Unified tab has gone, and the same switch sits in the bar.
-  await page.setViewportSize({ width: 1440, height: 420 });
-  await review.locator('.ib-gbody').evaluate((el) => (el.scrollTop = 300));
-  await expect(review.locator('.ib-vhead [data-diff-style-switch]')).toBeVisible();
-  await review.locator('.ib-gbody').evaluate((el) => (el.scrollTop = 0));
-  await expect(review.locator('.ib-vhead [data-diff-style-switch]')).toHaveCount(0);
-  await page.setViewportSize({ width: 1440, height: 900 });
   await shot(page, '7-layer-review');
   // A long title gives way in the header: cut with "…" (whole in its hover); Back and the decision stay in the window.
   const fn = review.locator('[data-pull-review-title]');
@@ -1325,7 +1320,7 @@ test('the rail: a long path gives way in its middle, on one line, its name whole
   }
 });
 
-test('the same small gap between files, whatever separators a file draws: above its first hunk, between hunks, in Split and Unified', async ({ browser }) => {
+test('the next file\'s header right under the last code row, whatever separators a file draws: above its first hunk, between hunks, in Split and Unified', async ({ browser }) => {
   const hunk = (at: number) => `@@ -${at},3 +${at},3 @@\n ctx\n-old\n+new\n ctx\n`;
   const file = (path: string, ...ats: number[]) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n${ats.map(hunk).join('')}`;
   const patch = [file('one-at-the-top.ts', 1), file('one-further-down.ts', 27), file('two-hunks.ts', 1, 40), file('three-hunks.ts', 10, 40, 80), file('last.ts', 1)].join('');
@@ -1333,9 +1328,9 @@ test('the same small gap between files, whatever separators a file draws: above 
   try {
     const review = page.locator('[data-pull-review]');
     await expect(review.locator('[data-guide-file-shell]')).toHaveCount(5);
-    await expect.poll(() => seams(review)).toEqual([12, 12, 12, 12]);
+    await expect.poll(() => seams(review)).toEqual([0, 0, 0, 0]);
     await review.locator('[data-diff-style-switch] input[value="unified"]').locator('..').click();
-    await expect.poll(() => seams(review)).toEqual([12, 12, 12, 12]);
+    await expect.poll(() => seams(review)).toEqual([0, 0, 0, 0]);
   } finally {
     await context.close();
   }

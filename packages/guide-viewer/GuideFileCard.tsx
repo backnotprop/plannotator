@@ -117,7 +117,10 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   onActivate,
   fitContent = false,
 }) => {
-  const { DiffRenderer, getDiffRendererProps, renderFileActions, diffStyle, opensWholeFiles, collapseAll } = useGuideHost();
+  const { DiffRenderer, getDiffRendererProps, renderFileActions, diffStyle, opensWholeFiles, collapseAll, flushFiles } = useGuideHost();
+  // A flush host's box (host `flushFiles`) has no border or padding: it holds the renderer's height and nothing more.
+  const flush = fitContent && !!flushFiles;
+  const boxChrome = flush ? 0 : FIT_BOX_CHROME;
   const actions = renderFileActions?.(file) ?? null;
   const scrollPositionRef = useRef(0);
   const [collapsed, setCollapsed] = useState(collapseAll && collapseAll.token > 0 ? collapseAll.collapsed : kind === 'generated');
@@ -139,8 +142,11 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   const [opened, setOpened] = useState(false);
   const { mounted, register, requestMount, jumpTo } = useGuideFileWindow(file.path, focused || opened);
   const diffHeight = useMemo(
-    () => (fitContent ? estimateFitDiffHeight(file.patch, diffStyle, !!opensWholeFiles && (file.status === 'modified' || file.status === 'renamed')) : estimateDiffHeight(file.patch)),
-    [fitContent, file.patch, file.status, diffStyle, opensWholeFiles],
+    () =>
+      fitContent
+        ? estimateFitDiffHeight(file.patch, diffStyle, !!opensWholeFiles && (file.status === 'modified' || file.status === 'renamed')) - (FIT_BOX_CHROME - boxChrome)
+        : estimateDiffHeight(file.patch),
+    [fitContent, file.patch, file.status, diffStyle, opensWholeFiles, boxChrome],
   );
   // The content's height as the renderer last reported it (plus the box's border), kept while the CodeView is
   // unmounted so the box does not jump when it leaves the outer window.
@@ -168,7 +174,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
     return stopWaiting;
   }, [mounted, fitContent, stopWaiting]);
   const onContentHeightChange = useCallback((height: number) => {
-    const next = height + FIT_BOX_CHROME;
+    const next = height + boxChrome;
     if (!settledRef.current) {
       if (measuredRef.current !== null && next < measuredRef.current) {
         pendingRef.current = next;
@@ -186,12 +192,14 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
       stopWaiting();
     }
     applyMeasured(next);
-  }, [applyMeasured, stopWaiting]);
+  }, [applyMeasured, stopWaiting, boxChrome]);
   const target = revealTarget?.filePath === file.path ? revealTarget : null;
+  // Folded: the header alone (a flush box has no padding around it).
+  const collapsedHeight = flush ? COLLAPSED_HEIGHT - 16 : COLLAPSED_HEIGHT + (fitContent ? FIT_BOX_CHROME - 16 : 0);
   const renderedHeight = collapsed
-    ? COLLAPSED_HEIGHT + (fitContent ? FIT_BOX_CHROME - 16 : 0)
+    ? collapsedHeight
     : fitContent && measuredHeight !== null
-      ? Math.max(COLLAPSED_HEIGHT, measuredHeight)
+      ? Math.max(flush ? collapsedHeight : COLLAPSED_HEIGHT, measuredHeight)
       : diffHeight;
   // Fitting, a mounted box follows its content by itself; the last height holds it until the viewer has drawn. No
   // `overflow: hidden` there: it would make the box the sticky header's scroller.
@@ -283,7 +291,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
       <div
         ref={boxRef}
         style={followsContent ? { minHeight: renderedHeight } : { height: renderedHeight }}
-        className={`${fitContent ? 'overflow-clip py-2' : 'overflow-hidden'} rounded-lg border border-border/40 bg-background`}
+        className={flush ? 'flow-root overflow-clip' : `${fitContent ? 'overflow-clip py-2' : 'overflow-hidden'} rounded-lg border border-border/40 bg-background`}
         data-guide-code-view-mounted={mounted ? 'true' : 'false'}
         onClickCapture={
           fitContent && !opened

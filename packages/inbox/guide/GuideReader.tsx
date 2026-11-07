@@ -392,8 +392,10 @@ function Reader({
       fetchFileContent?: AllFilesCodeViewProps['fetchFileContent'];
       fileOpenIn?: (filePath: string) => ReactNode;
       flushFiles?: boolean;
+      headerKeepsFolder?: boolean;
     } => ({
-      ...(bare && { flushFiles: true }),
+      // The PR page: files flush, and a narrow header (a phone's) keeps the folder, so two files of one name read apart.
+      ...(bare && { flushFiles: true, headerKeepsFolder: true }),
       ...(phone && { diffStyleOverride: 'unified' as const }),
       ...(fetchFileContent && { fetchFileContent }),
       ...(fileOpenIn ? { fileOpenIn } : {}),
@@ -457,10 +459,13 @@ function Reader({
       ...(globalComments ? { globalComments } : {}),
       // What GuideDiff draws (a phone: always Unified), for a file box's first estimate.
       diffStyle: phone ? ('unified' as const) : savedDiffStyle,
-      opensWholeFiles: !!fetchFileContent,
+      // The PR page's flush files draw no arrow row after the last hunk until a file's text is read (flushFiles).
+      opensWholeFiles: !!fetchFileContent && !bare,
+      // The PR page: files edge to edge, each box exactly its header and code.
+      ...(bare ? { flushFiles: true } : {}),
       ...(collapseAll ? { collapseAll } : {}),
     }),
-    [files, getDiffRendererProps, revealFile, phone, hostDiffControls, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent, collapseAll],
+    [files, getDiffRendererProps, revealFile, phone, hostDiffControls, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent, collapseAll, bare],
   );
 
   // The window's wrap for a code span, for the viewer's own inline parser.

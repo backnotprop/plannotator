@@ -482,27 +482,6 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       // Storage full or off: this visit only.
     }
   };
-  // Once the tab on the first file has scrolled away, the same switch sits in the bar. Nothing floats over the code.
-  const [diffBody, setDiffBody] = useState<HTMLDivElement | null>(null);
-  const [docked, setDocked] = useState(false);
-  useEffect(() => {
-    if (!diffBody || phone) return;
-    let frame = 0;
-    const read = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        const box = diffBody.getBoundingClientRect();
-        const tab = diffBody.querySelector('[data-guide-section-tab] [data-diff-style-switch]')?.getBoundingClientRect();
-        setDocked(!!tab && tab.bottom <= box.top);
-      });
-    };
-    read();
-    diffBody.addEventListener('scroll', read, { passive: true });
-    return () => {
-      cancelAnimationFrame(frame);
-      diffBody.removeEventListener('scroll', read);
-    };
-  }, [phone, diffBody]);
   const [sheet, setSheet] = useState(false);
   const sheetId = useId();
   const sheetCloseRef = useRef<HTMLButtonElement>(null);
@@ -785,7 +764,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         {!phone && title}
         {!phone && readOnlyNote}
         <span className="ib-sp" />
-        {!phone && docked && <DiffStyleSwitch icons name="ib-diff-style-held" />}
+        {/* Split | Unified in the bar, over the diff's right edge, where the review app's tab row holds it: the files
+            start at the top of the code, with no band of their own above them (approval pr-view-one-surface, 11-07). */}
+        {!phone && <DiffStyleSwitch icons />}
         {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
         {folded && (readerComments || comments.length > 0) && (
           <button
@@ -899,7 +880,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             data-pull-rail-handle=""
           />
         )}
-        <div className="ib-gbody" ref={setDiffBody} data-repo-open={repoOpen && repoSha ? '' : undefined}>
+        <div className="ib-gbody" data-repo-open={repoOpen && repoSha ? '' : undefined}>
           {repoOpen && repoSha && (
             <PanePart>
               <PullRepoFilePart.Part key={repoOpen} pullKey={layer.key} sha={repoSha} path={repoOpen} />
@@ -940,7 +921,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             // arrive says so here (GuidePane).
             <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ repo: repoKey ?? '', pull: layerKey }} on={!!repoKey}>
-                <GuideReader bare controlsHost={controlsHost} snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} fileContents={fileContents} />
+                <GuideReader bare controlsHost={controlsHost} hostDiffControls snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} fileContents={fileContents} />
               </OpenInCodeSpans>
             </ReaderPart>
           ) : (
