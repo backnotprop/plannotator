@@ -27,7 +27,7 @@ test('a new Reviews address keeps the drawing as it was (the full window too), o
 });
 
 test('System not shown: a leftover drawing link on Reviews is dropped; anything else is left alone', () => {
-  const route = { page: 'reviews', project: 'prj_9', stack: 'k', system: 'prj_1', sheet: 'L-101', full: true };
+  const route: { page: string; project: string; stack: string; system: string | null; sheet: string | null; full: boolean } = { page: 'reviews', project: 'prj_9', stack: 'k', system: 'prj_1', sheet: 'L-101', full: true };
   expect(systemDropped(route, false)).toEqual({ ...route, system: null, sheet: null, full: false });
   expect(systemDropped(route, true)).toBeNull();
   expect(systemDropped({ page: 'reviews', system: null, sheet: null, full: false }, false)).toBeNull();
@@ -35,7 +35,7 @@ test('System not shown: a leftover drawing link on Reviews is dropped; anything 
 });
 
 test('Escape: the full window, then the drawing, then nothing; never under a PR\'s pane or while System does not show', () => {
-  const full = { page: 'reviews', stack: null, system: 'prj_1', sheet: 'L-101', full: true };
+  const full: { page: string; stack: string | null; system: string | null; sheet: string | null; full: boolean } = { page: 'reviews', stack: null, system: 'prj_1', sheet: 'L-101', full: true };
   const pane = systemEscapeTo(full, true)!;
   expect(pane).toEqual({ ...full, full: false });
   const closed = systemEscapeTo(pane, true)!;
