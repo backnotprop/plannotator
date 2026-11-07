@@ -16,7 +16,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 const hasDom = typeof document !== 'undefined';
 const { RowsSection, ROWS_PRESETS, rowsSummary } = (hasDom ? await import('./components/RowsSettings') : {}) as typeof import('./components/RowsSettings');
-const { LIST_LOOK_OFF, readListLook, resetListLookForTests } = await import('./listLook');
+const { LIST_LOOK_DEFAULT, LIST_LOOK_OFF, readListLook, resetListLookForTests } = await import('./listLook');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 const saves: unknown[][] = [];
@@ -83,14 +83,15 @@ const chosen = (el: HTMLElement, control: string) => {
   return [...scope.querySelectorAll('label')].filter((l) => l.querySelector('input')!.checked).map((l) => l.textContent);
 };
 
-const lookOf = (keys: Partial<typeof LIST_LOOK_OFF>) => ({ ...LIST_LOOK_OFF, ...keys });
+/** The defaults (smaller names on) with some options changed. */
+const lookOf = (keys: Partial<typeof LIST_LOOK_OFF>) => ({ ...LIST_LOOK_DEFAULT, ...keys });
 
 describe.if(hasDom)('Settings → Rows', () => {
-  test('a browser with the defaults: Balanced, every choice at its first, both pictures, no "Custom"', () => {
+  test('a browser with the defaults: Balanced, Bold unread names, every other choice at its first, both pictures, no "Custom"', () => {
     const el = render();
     expect(chosen(el, 'preset')).toEqual(['Balanced']);
     expect(el.querySelector('.ib-rws-custom')).toBeNull();
-    expect(['density', 'first', 'names', 'unread', 'preview', 'time'].map((c) => chosen(el, c)[0])).toEqual(['Comfortable', 'Project', 'Plain', 'Larger', '1 line', 'Clock']);
+    expect(['density', 'first', 'names', 'unread', 'preview', 'time'].map((c) => chosen(el, c)[0])).toEqual(['Comfortable', 'Project', 'Plain', 'Bold', '1 line', 'Clock']);
     expect([...el.querySelectorAll('[data-rows-preview]')].map((p) => p.getAttribute('data-rows-preview'))).toEqual(['narrow', 'wide']);
   });
 
@@ -101,18 +102,18 @@ describe.if(hasDom)('Settings → Rows', () => {
     await pick(el, 'density', 'Compact');
     expect(readListLook()).toEqual(lookOf({ compact: true }));
     await pick(el, 'density', 'Comfortable');
-    expect(readListLook()).toEqual(LIST_LOOK_OFF);
-    expect(saves).toEqual([['roomy'], ['compact'], []]);
+    expect(readListLook()).toEqual(LIST_LOOK_DEFAULT);
+    expect(saves).toEqual([['smallNames', 'roomy'], ['compact', 'smallNames'], ['smallNames']]);
   });
 
   test('Unread: Larger, Bold (the read size, bold), Dot (bold with a dot)', async () => {
     const el = render();
     await pick(el, 'unread', 'Dot');
     expect(readListLook()).toEqual(lookOf({ smallNames: true, unreadDot: true }));
-    await pick(el, 'unread', 'Bold');
-    expect(readListLook()).toEqual(lookOf({ smallNames: true }));
     await pick(el, 'unread', 'Larger');
     expect(readListLook()).toEqual(LIST_LOOK_OFF);
+    await pick(el, 'unread', 'Bold');
+    expect(readListLook()).toEqual(LIST_LOOK_DEFAULT);
     expect(saves).toHaveLength(3);
   });
 
@@ -123,7 +124,7 @@ describe.if(hasDom)('Settings → Rows', () => {
     await pick(el, 'preview', 'None');
     expect(readListLook()).toEqual(lookOf({ hidePreview: true }));
     await pick(el, 'preview', '1 line');
-    expect(readListLook()).toEqual(LIST_LOOK_OFF);
+    expect(readListLook()).toEqual(LIST_LOOK_DEFAULT);
   });
 
   test('the two-way choices and the Show switches (on is shown)', async () => {
@@ -154,7 +155,7 @@ describe.if(hasDom)('Settings → Rows', () => {
     expect(el.querySelector('.ib-rws-custom')!.textContent).toBe('Custom');
     expect(rowsSummary(readListLook())).toBe('Custom');
     await pick(el, 'preset', 'Balanced');
-    expect(readListLook()).toEqual(LIST_LOOK_OFF);
+    expect(readListLook()).toEqual(LIST_LOOK_DEFAULT);
     expect(el.querySelector('.ib-rws-custom')).toBeNull();
   });
 

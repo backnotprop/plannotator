@@ -36,6 +36,7 @@ function focusAfterMove(messageId: string): void {
  */
 export function SendToAnotherSession({
   messageId,
+  stuck = false,
   ended,
   taken = [],
   project,
@@ -44,6 +45,8 @@ export function SendToAnotherSession({
   onMoved,
 }: {
   messageId: string;
+  /** That session's connection took it and stopped while delivering it: a resumed session does not get it either. */
+  stuck?: boolean;
   ended: { host: string; session: string };
   /** The sessions that already took this message through a tag: moving it to one would deliver it twice. */
   taken?: readonly string[];
@@ -147,7 +150,11 @@ export function SendToAnotherSession({
           <fieldset className="ib-route">
             <legend>Send it to another session</legend>
             {others.length === 0 ? (
-              <p className="ib-why">No other session is running in {project}. It waits here; a resumed session still gets it.</p>
+              <p className="ib-why">
+                {stuck
+                  ? `No other session is running in ${project}. It waits here until you send it to one.`
+                  : `No other session is running in ${project}. It waits here; a resumed session still gets it.`}
+              </p>
             ) : (
               <div className="ib-gl">Live sessions in {project}</div>
             )}

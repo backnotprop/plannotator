@@ -294,7 +294,7 @@ function stamp(attrs: Attrs, missing: string[]): string {
     const l = stampLogo(logo);
     if (!l) {
       const close = near(logo, LOGO_NAMES());
-      return miss(`data-logo="${logo}": no logo by that name${close.length ? `; close: ${close.join(', ')}` : ''}. Write the product's name as words, and give it an icon.`);
+      return miss(`data-logo="${logo}": no logo by that name${close.length ? `; close: ${close.join(', ')}` : ''}. Use its real logo as a picture (<image href="https://…"/>, or a file), or write the product's name as words with an icon.`);
     }
     if (!attrs.has('width')) attrs.set('width', '40');
     if (!attrs.has('height')) attrs.set('height', '40');

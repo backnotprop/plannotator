@@ -20,6 +20,9 @@ import { tmpdir } from "node:os";
 import type { GitCommandResult, ReviewGitRuntime } from "./review-core";
 import type { ReviewJjRuntime } from "./jj-core";
 import { createJjProvider, createVcsApi } from "./vcs-core";
+import { useScratchJjConfig } from "../../tests/helpers/jj-scratch-config";
+
+const jjConfig = useScratchJjConfig();
 
 function hasJj(): boolean {
   // Bun.spawnSync throws when the executable is missing entirely (ENOENT),
@@ -54,6 +57,7 @@ const jjRuntime: ReviewJjRuntime = {
   async runJj(args, options): Promise<GitCommandResult> {
     const result = Bun.spawnSync(["jj", ...args], {
       cwd: options?.cwd,
+      env: jjConfig.env(),
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -70,7 +74,7 @@ const vcs = createVcsApi([createJjProvider(jjRuntime, gitRuntime)]);
 let workspace = "";
 
 function jj(args: string[]): string {
-  const result = Bun.spawnSync(["jj", ...args], { cwd: workspace, stdout: "pipe", stderr: "pipe" });
+  const result = Bun.spawnSync(["jj", ...args], { cwd: workspace, env: jjConfig.env(), stdout: "pipe", stderr: "pipe" });
   if (result.exitCode !== 0) throw new Error(result.stderr.toString() || `jj ${args.join(" ")} failed`);
   return result.stdout.toString().trim();
 }

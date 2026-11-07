@@ -1,4 +1,5 @@
 #!/bin/bash
+# Manual QA: starts from your real HOME on purpose (only the agent it sets up gets a scratch HOME). For an isolated test run, use `bun run test:sandbox`.
 # Create a fresh isolated Codex + Plannotator sandbox and open a shell inside it.
 
 set -euo pipefail

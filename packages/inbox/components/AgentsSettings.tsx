@@ -578,7 +578,7 @@ export function AgentsSettings({
           Start new sessions with full permissions: Claude Code you start from New message runs without asking (bypass mode); only a safety check, such as deleting files, still comes to you here. Otherwise it starts in your default mode, or auto mode. Applies to the next session you start.
           {launchState.follows && (
             <span className="block" data-launch-follows={launchState.follows}>
-              {launchState.follows === 'shell' ? "Follows your shell's setting until you change it." : 'Follows your Claude Code settings until you change it.'}
+              {launchState.follows === 'shell' ? "Uses your shell's setting until you change it." : 'Uses your Claude Code settings until you change it.'}
             </span>
           )}
           {launchState.full_permissions && launchState.bypass_off && (
