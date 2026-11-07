@@ -292,7 +292,7 @@ describe("the device door, on the binary", () => {
     const health = await door("health");
     expect(health.status).toBe(200);
     const h = (await health.json()) as Json;
-    expect(Object.keys(h).sort()).toEqual(["app", "event_streams", "inbox_id", "machine_links", "notify_reach", "ok", "peek", "pid", "serverSession", "update", "version", "window_controls"]);
+    expect(Object.keys(h).sort()).toEqual(["app", "event_streams", "inbox_id", "machine_links", "machine_update", "notify_reach", "ok", "peek", "pid", "self_update", "serverSession", "update", "update_no_change", "version", "window_controls"]);
     expect(h).toMatchObject({ ok: true, app: "plannotator-inbox", serverSession });
     expect(await (await door("health", { token: null })).json()).toEqual({ error: "This request needs the phone's token.", code: "device_token_missing" });
   });
@@ -1173,6 +1173,39 @@ describe("the device door, in process", () => {
       expect(((await refused.json()) as Json).code).toBe("device_route_not_found");
     }
     expect(asked).toHaveLength(1);
+  });
+
+  test("a phone never reaches a machine's Update, read or write, on the door or through the relay; nothing there runs", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "plannotator-inbox-devices-update-"));
+    roots.push(dataDir);
+    let reached = 0;
+    const phones = createInboxDevices({
+      dataDir,
+      serverSession: "0".repeat(32),
+      port: () => 1,
+      registry: () => ({ v: 1, pid: process.pid, port: 1, url: "", version: "dev", token: "t".repeat(64), serverSession: "0".repeat(32), startedAt: "" }),
+      readBody: async (req) => (await req.json()) as Record<string, unknown>,
+      dispatch: async () => new Response("{}"),
+      machineUpdate: {
+        read: () => void reached++,
+        start: async () => {
+          reached++;
+          return { outcome: "launched" };
+        },
+      },
+    });
+    const made = (await (await phones.windowRoute(new Request("http://127.0.0.1/api/inbox/pairing", { method: "POST", body: "{}" }), new URL("http://127.0.0.1/api/inbox/pairing"))).json()) as Json;
+    const pairUrl = new URL("http://127.0.0.1/api/inbox/device/pair");
+    const paired = (await (await phones.door(new Request(pairUrl, { method: "POST", body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }) }), pairUrl)).json()) as Json;
+    const url = new URL("http://127.0.0.1/api/inbox/device/update");
+    for (const method of ["GET", "POST"]) {
+      const atDoor = await phones.door(new Request(url, { method, headers: { Authorization: `Bearer ${paired.token}` }, ...(method === "POST" ? { body: "{}" } : {}) }), url);
+      expect(atDoor.status).toBe(404);
+      const relayed = await phones.asDevice(paired.device.id, { method, path: "/api/inbox/device/update", ...(method === "POST" ? { body: "{}" } : {}) });
+      expect(relayed.status).toBe(404);
+      expect(((await relayed.json()) as Json).code).toBe("device_route_not_found");
+    }
+    expect(reached).toBe(0);
   });
 });
 

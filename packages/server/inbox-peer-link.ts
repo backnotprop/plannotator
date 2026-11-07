@@ -63,6 +63,26 @@ export interface PeerList {
   snoozes: boolean;
 }
 
+/** A linked machine's update, picked by name: a version that reads as one, and nothing it could point at (no URL, no command). */
+export interface FarUpdate {
+  state: "available" | "updating" | "ready" | "failed";
+  version: string;
+  action: "script" | "copy";
+}
+
+const FAR_VERSION = /^\d{1,6}\.\d{1,6}\.\d{1,6}$/;
+
+export const farVersion = (value: unknown): string | null => (typeof value === "string" && FAR_VERSION.test(value) ? value : null);
+
+export function parseFarUpdate(value: unknown): FarUpdate | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Json;
+  if (v.state !== "available" && v.state !== "updating" && v.state !== "ready" && v.state !== "failed") return null;
+  const version = farVersion(v.version);
+  if (!version) return null;
+  return { state: v.state, version, action: v.action === "script" ? "script" : "copy" };
+}
+
 export interface PeerLinkOptions {
   link: InboxLinkRecord;
   transport: InboxPeerTransport;
@@ -119,6 +139,17 @@ export class PeerLink {
   reason: string | null = null;
   version: string | null = null;
   list: PeerList | null = null;
+  /** That machine's own update answer (its health and its status frames), and whether its door takes `update`. */
+  farUpdate: FarUpdate | null = null;
+  canUpdate = false;
+  selfUpdate = true;
+  /** The version an Update there was for, when it ended with no error and no new binary. */
+  noChange: string | null = null;
+  /** This Inbox pressed Update there and is waiting for it to come back on a new version. In memory: that machine's own state is the truth. */
+  asked: { from: string | null; at: number } | null = null;
+  /** That machine asked GitHub on a press and answered up to date: the newest version this Inbox knew of then. In memory, like `asked`. */
+  saidUpToDate: string | null = null;
+  updated: { from: string; to: string; at: number } | null = null;
   private cursor: number | null = null;
   private running = false;
   private stream: AbortController | null = null;
@@ -228,7 +259,21 @@ export class PeerLink {
     const body = (await health.json().catch(() => ({}))) as Json;
     if (health.status === 401 && (body.code === "device_revoked" || body.code === "device_token_invalid")) return "revoked";
     if (!health.ok) return `health answered ${health.status}`;
-    this.version = typeof body.version === "string" ? body.version : null;
+    const nextVersion = typeof body.version === "string" ? body.version : null;
+    this.version = nextVersion;
+    this.farUpdate = parseFarUpdate(body.update);
+    this.canUpdate = body.machine_update === 1;
+    this.selfUpdate = body.self_update !== false;
+    this.noChange = farVersion(body.update_no_change);
+    if (this.asked && nextVersion) {
+      if (this.asked.from && nextVersion !== this.asked.from) {
+        this.updated = { from: this.asked.from, to: nextVersion, at: Date.now() };
+        this.asked = null;
+      } else if (this.farUpdate?.state !== "updating" && this.farUpdate?.state !== "ready") {
+        // It came back on the same version with nothing running: this press is over, and its own state says the rest.
+        this.asked = null;
+      }
+    }
     if (body.inbox_id !== this.id) return "a different Inbox answers at this address";
     if (typeof body.machine_links !== "number" || body.machine_links < MACHINE_LINKS_PROTOCOL) {
       this.setState("needs_update", `Update Plannotator on ${this.options.link.name} (it runs ${this.version ?? "an older version"}).`);
@@ -296,6 +341,15 @@ export class PeerLink {
             this.cursor = Math.max(this.cursor ?? 0, seq);
             this.options.onRecord({ machine: this.id, seq, live: helloCursor !== null && seq > helloCursor, record: JSON.parse(parsed.data) });
             this.refreshList();
+          } else if (parsed.event === "status") {
+            // Its update's state, as its own windows hear it. An ending that needs no restart ends this press here.
+            const status = JSON.parse(parsed.data) as Json;
+            if ("update" in status) {
+              this.farUpdate = parseFarUpdate(status.update);
+              this.noChange = farVersion(status.update_no_change);
+              if (this.asked && (this.farUpdate?.state === "failed" || this.noChange)) this.asked = null;
+              this.options.onChange();
+            }
           } else if (parsed.event === "snoozes") {
             // The list's cursor does not move, so the windows are told apart from a list that changes it.
             void this.refreshList().then(() => this.options.onSnoozes?.());
