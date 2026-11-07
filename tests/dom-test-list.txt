@@ -315,6 +315,7 @@ packages/review-editor/components/TokenHoverAnnouncementDialog.test.tsx
 packages/review-editor/utils/stitchTokenIdentifier.test.ts
 packages/review-editor/utils/diffSelection.test.ts
 packages/review-editor/hooks/useAutoViewed.test.tsx
+packages/review-editor/hooks/useHiddenViewedFiles.hook.test.tsx
 packages/review-editor/hooks/useReviewProgress.test.tsx
 packages/review-editor/hooks/useCallFlowAnalysis.test.tsx
 packages/review-editor/hooks/useCallFlowInstall.test.tsx
@@ -543,7 +544,6 @@ packages/ui/components/shape/ShapeDrawn.test.tsx
 packages/inbox/shapeEndedLabel.test.tsx
 packages/inbox/review-drawing/ShowMeLayer.test.tsx
 packages/review-editor/components/SelectionChooser.test.tsx
-packages/inbox/review-drawing/ShowMeDrag.test.tsx
 packages/inbox/lazyChunkFailure.test.tsx
 packages/inbox/lazyParts.test.tsx
 packages/inbox/shapeBoardHead.test.tsx
@@ -563,10 +563,12 @@ packages/inbox/lazyRecovery.test.tsx
 packages/review-editor/components/guide/GuideGlobalCommentPopover.test.tsx
 packages/review-editor/utils/scrollWithPage.test.ts
 packages/ui/components/shape/ShapeSurface.board.test.tsx
+packages/ui/components/shape/ShapeSurface.onCode.test.tsx
 packages/ui/components/AnnotationToolstrip.hideActionModes.test.tsx
 packages/ui/components/shape/ShapeSurface.changed.test.tsx
 packages/inbox/shapeWhatsChanged.test.tsx
 packages/inbox/reviewPaneAt.test.tsx
+packages/inbox/shapeBoardPlace.test.tsx
 packages/inbox/system/setupDialog.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.frameUrl.test.tsx
 packages/ui/components/StarAskCard.test.tsx

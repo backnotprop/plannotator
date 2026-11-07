@@ -232,12 +232,31 @@ function Reader({
     [mode, ticks, onReviewedChange],
   );
 
-  // Line comments: the selection the toolbar opens on, as the review app keeps it (one, on the focused card).
+  // Line comments: the selection the toolbar opens on, as the review app keeps it (one), on the file it was made in:
+  // the next file taking focus has the same line numbers, but not these lines.
   const [pendingSelection, setPendingSelection] = useState<SelectedLineRange | null>(null);
+  const [selectionFile, setSelectionFile] = useState<string | null>(null);
+  const selectionSetters = useRef(new Map<string, (range: SelectedLineRange | null) => void>());
+  const selectionSetter = useCallback((path: string) => {
+    let set = selectionSetters.current.get(path);
+    if (!set) {
+      set = (range) => {
+        setSelectionFile(path);
+        setPendingSelection(range);
+      };
+      selectionSetters.current.set(path, set);
+    }
+    return set;
+  }, []);
   // A host's highlight (a picture's part opened its code): those lines are painted on that file's card, which takes focus.
   useEffect(() => {
-    if (!highlight) return;
+    if (!highlight) {
+      // The host took it back (a part landed where nothing may be painted).
+      setPendingSelection(null);
+      return;
+    }
     setFocusedFile(highlight.path);
+    setSelectionFile(highlight.path);
     setPendingSelection({ start: highlight.start, end: highlight.end, side: 'additions' });
   }, [highlight?.token]); // eslint-disable-line react-hooks/exhaustive-deps
   const commentsRef = useRef(comments);
@@ -357,7 +376,7 @@ function Reader({
   const renderSectionTab = useCallback((index: number) => (index === 0 ? <DiffStyleSwitch /> : null), []);
 
   const getDiffRendererProps = useCallback(
-    ({ file, focused }: GuideDiffRendererContext): {
+    ({ file }: GuideDiffRendererContext): {
       comments?: GuideDiffComments;
       diffStyleOverride?: 'unified';
       viewedFiles?: Set<string>;
@@ -375,9 +394,8 @@ function Reader({
               annotations,
               selectedAnnotationId: comments.selectedId,
               scrollTargetAnnotation: scrollTarget && annotations.some((a) => a.id === scrollTarget.id && a.filePath === file.path) ? scrollTarget : null,
-              // Only the focused card is the selection target, as in the review app.
-              pendingSelection: focused ? pendingSelection : null,
-              onLineSelection: setPendingSelection,
+              pendingSelection: selectionFile === file.path ? pendingSelection : null,
+              onLineSelection: selectionSetter(file.path),
               onAddAnnotationForFile: addComment,
               onEditAnnotation: editComment,
               onSelectAnnotation: selectComment,
@@ -387,7 +405,7 @@ function Reader({
           }
         : {}),
     }),
-    [phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, fileOpenIn],
+    [phone, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, fileOpenIn],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).
