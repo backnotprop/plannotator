@@ -3409,9 +3409,10 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-pals { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: none; overflow: visible; padding: 4px 12px 12px; }
   .ib-pal { min-height: 44px; gap: 7px; padding-left: 8px; font-size: var(--ib-fs-14, 14px); }
   .ib-pal-sw > span + span { margin-left: -5px; }
-  /* Board style on a phone: set in less, the control under its words. */
+  /* Board style on a phone: set in less; the title keeps the control beside it, which goes under it only when both do not fit (320 px, big text). */
   .pn-inbox .ib-prow-child { padding-left: 28px; }
   .ib-bstyle-head { flex-wrap: wrap; row-gap: 8px; }
+  .ib-bstyle-head .ib-txt { flex-basis: auto; }
   /* a phone on its side is about 400 px tall: the projects scroll, the rest keeps its height */
   .ib-sb-sheet-in > .ib-side { overflow-y: auto; }
   .ib-sb-sheet-in .ib-brand, .ib-sb-sheet-in .ib-side-foot { flex: none; }

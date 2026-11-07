@@ -1,7 +1,7 @@
 /**
  * Settings → Capabilities → Shape → Board style (approval "shape-board-style-switch", the Stage take of the 2026-11-07
  * addendum): a child row of the Shape switch, shown only while Shape is on. The Rounded | Sharp segmented control
- * sits beside the title, over one wide board drawn by the board's own renderer in the picked style, so the preview is
+ * sits beside the title (no line under it: the preview shows it), over one wide board drawn by the board's own renderer in the picked style, so the preview is
  * what every board will look like (light, dark and every palette included). A pick shows on every board at once and
  * is saved to config.json (`shapeStyle.ts`).
  */
@@ -31,13 +31,12 @@ export function ShapeStyleRow() {
   return (
     <div className="ib-prow ib-prow-child ib-bstyle" data-settings-shape-style={style}>
       <div className="ib-bstyle-head">
+        {/* No line under the title: the preview shows what a pick does (the owner, q-5dc06b5a). The title names the
+            radio group. */}
         <span className="ib-txt">
           <span className="ib-l" id="ib-shape-style-label">
             Board style
           </span>
-          {/* Proposed copy, awaiting the owner's OK (the approved line was "Every board follows, old ones too", which old
-              boards' bends and heads contradict). */}
-          <span className="ib-desc">Every board follows; older ones keep their curved elbows and open arrowheads until redrawn.</span>
         </span>
         <span className="ib-ctl">
           <span className="ib-seg" role="radiogroup" aria-labelledby="ib-shape-style-label">
