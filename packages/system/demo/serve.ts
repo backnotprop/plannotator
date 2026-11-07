@@ -1,6 +1,6 @@
-// A page for screenshots of the drawing at rest: plannotator's own committed
-// drawing, drawn by SystemThumb and SystemView in the Inbox's tokens. Not
-// shipped; run it with `bun run demo` and open the printed address.
+// A page for screenshots of the drawing at rest: plannotator's own drawing
+// (the test fixture in test/fixtures/plannotator), drawn by SystemThumb and
+// SystemView in the Inbox's tokens. Not shipped; run it with `bun run demo` and open the printed address.
 //
 //   ?shot=thumb                       the card picture in a message card
 //   ?shot=view&sheet=C-001&reading=simple&layout=window|pane
@@ -20,7 +20,7 @@ import { before2563, OPEN_2563, PLAN, prFiles, REMOVES } from '../test/fixtures/
 import page from './index.html';
 
 const pkg = join(import.meta.dir, '..');
-const dir = join(pkg, '..', '..', '.plannotator', 'system');
+const dir = join(pkg, 'test', 'fixtures', 'plannotator');
 const port = Number(process.env.PORT || 5893);
 const fontDir = (name: string) => dirname(Bun.resolveSync(`@fontsource-variable/${name}/index.css`, pkg));
 

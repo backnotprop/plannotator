@@ -1,5 +1,5 @@
 // Changes on plannotator's own drawing, for the change view's tests and the
-// demo page. Every one rests on the committed drawing and on real history:
+// demo page. Every one rests on the plannotator fixture and on real history:
 //
 // - prFiles(n): a merged PR's files as `git diff -M <merge>^1 <merge>` gave
 //   them, --name-status and --numstat (PR 2543: 303b6725f, PR 2563: ab70b560b).
@@ -42,7 +42,7 @@ const swap = (text: string, a: string, b: string) => {
   return text.replace(a, b);
 };
 
-/** The committed drawing as it was before PR 2563: no T3 Code, no lines to it. */
+/** The plannotator fixture as it was before PR 2563: no T3 Code, no lines to it. */
 export function before2563(files: SystemFiles): SystemFiles {
   let sys = files['system.yaml']!;
   sys = cut(sys, '  it3:\n', '  shim:\n');
