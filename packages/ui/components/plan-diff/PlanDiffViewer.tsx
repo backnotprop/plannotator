@@ -13,11 +13,13 @@ import {
   PlanDiffModeSwitcher,
   type PlanDiffMode,
 } from "./PlanDiffModeSwitcher";
-import { PlanCleanDiffView } from "./PlanCleanDiffView";
+import { PlanCleanDiffView, type PlanDiffCodeDocument } from "./PlanCleanDiffView";
 import { PlanRawDiffView } from "./PlanRawDiffView";
 import { PlanDiffBadge } from "./PlanDiffBadge";
 import { VSCodeIcon } from "./VSCodeIcon";
 import { noteServerSessionMismatch, withServerSession } from "../../utils/serverSession";
+import { useConfigValue } from "../../config";
+import { repoLabel } from "../../utils/repoLabel";
 
 interface PlanDiffViewerProps {
   diffBlocks: PlanDiffBlock[];
@@ -42,6 +44,12 @@ interface PlanDiffViewerProps {
    * Default false: the card sizes to its content.
    */
   fillHeight?: boolean;
+  /**
+   * The document is a config or data file (`renderAs: "code"`): the Rendered
+   * and Classic modes show its chunks as code in `language` instead of
+   * parsing them as markdown. Absent, the diff renders as markdown.
+   */
+  codeDocument?: PlanDiffCodeDocument;
 }
 
 const defaultOpenVscodeDiff = async (
@@ -84,7 +92,9 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
   mode,
   onOpenVscodeDiff,
   fillHeight = false,
+  codeDocument,
 }) => {
+  const hideRepoOwner = useConfigValue('hideRepoOwner');
   const [vscodeDiffLoading, setVscodeDiffLoading] = useState(false);
   const [vscodeDiffError, setVscodeDiffError] = useState<string | null>(null);
 
@@ -123,7 +133,7 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
                 className="px-1.5 py-0.5 bg-muted/50 rounded truncate max-w-[140px]"
                 title={repoInfo.display}
               >
-                {repoInfo.display}
+                {repoLabel(repoInfo.display, hideRepoOwner)}
               </span>
               {repoInfo.branch && (
                 <span
@@ -222,6 +232,7 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
             selectedAnnotationId={selectedAnnotationId}
             mode={mode}
             wordLevel={diffMode === "clean"}
+            codeDocument={codeDocument}
           />
         )}
       </article>

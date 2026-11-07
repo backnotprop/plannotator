@@ -10,6 +10,7 @@
  * file; name it `*-webkit.spec.ts` to run it in the `webkit` project only.
  */
 import { defineConfig } from '@playwright/test';
+import { quarantineFilter } from './quarantine';
 
 /** Specs that their own config runs, never this one: the thread parity harness (inbox-thread-parity.config.ts). */
 const OWN_CONFIG = ['inbox-thread-parity.spec.ts'];
@@ -20,6 +21,8 @@ export default defineConfig({
   testDir: '.',
   testMatch: '*.spec.ts',
   testIgnore: OWN_CONFIG,
+  // In CI, the flaky tests in quarantine.json are left out; `bun run test:e2e:quarantine` runs their specs locally.
+  ...quarantineFilter(process.env),
   outputDir: '../../.local/test-results',
   // Feedback never reaches the live Worker, and agent CLI stubs go first on PATH: a stub that is called fails the run (global-setup.ts, agent-cli-stubs.ts).
   globalSetup: './global-setup.ts',
@@ -39,6 +42,6 @@ export default defineConfig({
     // Every spec but the WebKit-only ones, in Chromium. A project's testIgnore replaces the top-level one, so it repeats OWN_CONFIG.
     { name: 'chromium', testIgnore: [...OWN_CONFIG, WEBKIT_ONLY] },
     // The WebKit-only specs, and the toolstrip's right-to-left check in WebKit too. No Chromium flags here: WebKit refuses them.
-    { name: 'webkit', testMatch: [WEBKIT_ONLY, 'toolstrip-rtl.spec.ts', 'inbox-inline-html.spec.ts'], use: { browserName: 'webkit', launchOptions: { args: [] } } },
+    { name: 'webkit', testMatch: [WEBKIT_ONLY, 'toolstrip-rtl.spec.ts', 'inbox-inline-html.spec.ts', 'inbox-debug-log.spec.ts', 'inbox-links-in-place.spec.ts', 'inbox-reuse-attachments.spec.ts'], use: { browserName: 'webkit', launchOptions: { args: [] } } },
   ],
 });

@@ -46,6 +46,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import {
   configuredInboxTool,
+  inboxToolWith,
   loadConfig,
   parseInboxToolEnv,
   resolveClaudeCodeMod,
@@ -58,6 +59,7 @@ import { qwenHome, qwenHomeIsRelative } from "@plannotator/shared/inbox/qwen-ses
 import { INBOX_QWEN_TRUST_ON_CONNECT, QWEN_TRUST_REVOKED_REASON, ensureQwenTrust, retryQwenRevoke, setQwenTrust, type QwenTrustOutcome } from "./inbox-qwen-trust";
 import { addJsonMember, removeJsonMember } from "./json-edit";
 import {
+  agentFileContains,
   describeFsError,
   readAgentFile,
   samePlace,
@@ -98,9 +100,11 @@ export interface AgentEnvironment {
    * Run argv with no stdin, the environment's env, killed (with its process
    * group) after `timeoutMs`, when `signal` aborts, or when this process exits.
    * `cwd`: the folder it runs in (default: this process's). `env`: variables
-   * set on top of the environment's for this run.
+   * set on top of the environment's for this run. `killGroup: false`: on the
+   * limit or exit kill only the CLI itself, never its group (launch: a call
+   * may be the one that starts the person's shared Claude supervisor).
    */
-  run(argv: readonly string[], options: { timeoutMs: number; signal?: AbortSignal; cwd?: string; env?: Readonly<Record<string, string>> }): Promise<AgentRunResult>;
+  run(argv: readonly string[], options: { timeoutMs: number; signal?: AbortSignal; cwd?: string; env?: Readonly<Record<string, string>>; killGroup?: boolean }): Promise<AgentRunResult>;
 }
 
 /** The real boundary: this process's home, environment and PATH. */
@@ -120,7 +124,7 @@ export function createAgentEnvironmentFor(input: {
     homeDir: input.homeDir,
     env,
     which: (command) => Bun.which(command, { PATH: env.PATH ?? "" }),
-    run: (argv, options) => runWithTimeout(argv, options.env ? { ...env, ...options.env } : env, options.timeoutMs, options.signal, options.cwd),
+    run: (argv, options) => runWithTimeout(argv, options.env ? { ...env, ...options.env } : env, options.timeoutMs, options.signal, options.cwd, options.killGroup ?? true),
   };
 }
 
@@ -148,14 +152,49 @@ export function liveAgentRunCount(): number {
  * stdout open cannot hold it. On the time limit, when `signal` aborts, or when
  * this process exits first, the whole group is killed (SIGKILL), so a CLI that
  * hangs never outlives its run. A CLI that exited by itself is left alone (its
- * group may hold a daemon it started on purpose).
+ * group may hold a daemon it started on purpose). `killGroup: false` kills
+ * only the CLI itself, so a daemon it is starting survives even a time-out.
  */
-function runWithTimeout(
+export function runWithTimeout(
   argv: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
   timeoutMs: number,
   signal?: AbortSignal,
   cwd?: string,
+  killGroup = true,
+): Promise<AgentRunResult> {
+  return spawnRun(argv, env, timeoutMs, signal, cwd, false, killGroup);
+}
+
+/**
+ * For a CLI that must not be stopped partway, because it may be holding
+ * something only it can save (`cswap` with a one-time token it just spent).
+ * This process ending, however it ends, leaves the run to finish by itself.
+ * While this process lives, the group is killed only at `hardLimitMs`, a last
+ * resort for one that is truly stuck. Its stderr is not piped: a pipe with
+ * nobody left reading could fail a write in the middle of its work.
+ */
+export function runUntilExit(argv: readonly string[], env: Readonly<Record<string, string | undefined>>, hardLimitMs: number): Promise<AgentRunResult> {
+  return spawnRun(argv, env, hardLimitMs, undefined, undefined, true);
+}
+
+/**
+ * `runUntilExit` with no limit at all: never killed, however long it takes,
+ * and left to finish if this process stops. For a run that writes a login
+ * (`cswap switch`), where a kill at any moment could land mid-write.
+ */
+export function runToExit(argv: readonly string[], env: Readonly<Record<string, string | undefined>>): Promise<AgentRunResult> {
+  return spawnRun(argv, env, Number.POSITIVE_INFINITY, undefined, undefined, true);
+}
+
+function spawnRun(
+  argv: readonly string[],
+  env: Readonly<Record<string, string | undefined>>,
+  timeoutMs: number,
+  signal: AbortSignal | undefined,
+  cwd: string | undefined,
+  outlivesThisProcess: boolean,
+  killGroup = true,
 ): Promise<AgentRunResult> {
   return new Promise((done) => {
     if (signal?.aborted) {
@@ -165,7 +204,7 @@ function runWithTimeout(
     let child: ReturnType<typeof spawnChild>;
     try {
       child = spawnChild(argv[0]!, argv.slice(1), {
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["ignore", "pipe", outlivesThisProcess ? "ignore" : "pipe"],
         env: { ...env } as NodeJS.ProcessEnv,
         ...(cwd ? { cwd } : {}),
         detached: process.platform !== "win32",
@@ -187,7 +226,7 @@ function runWithTimeout(
       // Once it exited, its pid (and group id) may name another process.
       if (exited) return;
       try {
-        if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
+        if (killGroup && process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
         else child.kill("SIGKILL");
       } catch {
         try {
@@ -211,11 +250,19 @@ function runWithTimeout(
       child.stderr?.destroy();
       done(result);
     };
-    const timer = setTimeout(stopRun, timeoutMs);
-    liveRuns.add(kill);
-    if (!exitHandlerInstalled) {
-      exitHandlerInstalled = true;
-      process.on("exit", killLiveRuns);
+    // No limit (`runToExit`): no timer, since setTimeout would take Infinity as 1 ms.
+    const timer = Number.isFinite(timeoutMs) ? setTimeout(stopRun, timeoutMs) : undefined;
+    if (outlivesThisProcess) {
+      // Not in liveRuns, and nothing here keeps this process up for it.
+      timer?.unref?.();
+      child.unref();
+      (child.stdout as { unref?: () => void } | null)?.unref?.();
+    } else {
+      liveRuns.add(kill);
+      if (!exitHandlerInstalled) {
+        exitHandlerInstalled = true;
+        process.on("exit", killLiveRuns);
+      }
     }
     signal?.addEventListener("abort", stopRun, { once: true });
     child.on("error", (error) => {
@@ -283,6 +330,25 @@ export function codexHome(e: AgentEnvironment): string {
 export function claudeConfigDir(e: AgentEnvironment): string {
   return envDir(e, "CLAUDE_CONFIG_DIR") ?? join(e.homeDir, ".claude");
 }
+/**
+ * Claude Code's global config, the file it picks itself (2.1.316): `$CLAUDE_CONFIG_DIR/.claude.json` when that is set,
+ * else `~/.claude.json` (`.claude-custom-oauth.json` with `CLAUDE_CODE_CUSTOM_OAUTH_URL` set). A legacy `.config.json`
+ * in its config folder wins when it has anything in it, or is empty and writable with the usual file absent.
+ */
+export function claudeGlobalConfigPath(e: AgentEnvironment): string {
+  const usual = join(envDir(e, "CLAUDE_CONFIG_DIR") ?? e.homeDir, e.env.CLAUDE_CODE_CUSTOM_OAUTH_URL ? ".claude-custom-oauth.json" : ".claude.json");
+  const legacy = join(claudeConfigDir(e), ".config.json");
+  try {
+    const stat = statSync(legacy);
+    if (stat.isFile() && (stat.size > 0 || ((stat.mode & 0o222) !== 0 && !existsSync(usual)))) return legacy;
+  } catch {
+    // No legacy file: the usual one.
+  }
+  return usual;
+}
+
+/** The most `.claude.json` a read-only lookup reads (it holds per-project history and often passes 1 MiB). */
+export const CLAUDE_JSON_MAX_BYTES = 32 * 1024 * 1024;
 export function piAgentDir(e: AgentEnvironment): string {
   return envDir(e, "PI_CODING_AGENT_DIR") ?? join(e.homeDir, ".pi", "agent");
 }
@@ -350,8 +416,8 @@ export type InboxEntryRead =
   /** It runs this Inbox's stdio entry (or a recorded / Plannotator one; see `ownsEntry`). */
   | { kind: "ours"; argv: string[] }
   | { kind: "other"; argv: string[] | null }
-  /** The file could not be read or parsed; nothing is written to it. */
-  | { kind: "unreadable"; reason: string };
+  /** The file could not be read or parsed; nothing is written to it. `tooBig`: only its size stopped the read. */
+  | { kind: "unreadable"; reason: string; tooBig?: true };
 
 /**
  * Whether argv runs a Plannotator Inbox stdio entry, for uninstall's scan of
@@ -407,16 +473,50 @@ function at(root: unknown, keys: readonly string[]): unknown {
 }
 
 /** The raw `plannotator-inbox` value in a file: absent, a value, or why it cannot be read. */
-type RawEntry = { kind: "absent" } | { kind: "value"; value: unknown } | { kind: "unreadable"; reason: string };
+type RawEntry = { kind: "absent" } | { kind: "value"; value: unknown } | { kind: "unreadable"; reason: string; tooBig?: true };
 
-function rawJsonEntry(path: string, keys: readonly string[], jsonc: boolean, maxBytes?: number): RawEntry {
-  const read = readAgentFile(path, maxBytes);
+/**
+ * How a read-only look reads (uninstall's scan, uninstall-inbox-references.ts);
+ * the Inbox's own reads pass nothing.
+ */
+export type RawReadOptions = {
+  /** The most it reads and parses (readAgentFile's 1 MiB by default). */
+  maxBytes?: number;
+  /** Comments and trailing commas allowed in any agent's JSON, not only the JSONC ones. */
+  lenient?: boolean;
+  /** A file over this size is first searched, raw, for "plannotator-inbox": without it, it is not decoded at all. */
+  searchAbove?: number;
+};
+
+/** A raw search said the entry's name is not in the file, or the file could not be searched. */
+function searchedFirst(path: string, read: RawReadOptions | undefined): RawEntry | null {
+  if (read?.searchAbove === undefined) return null;
+  const found = agentFileContains(path, INBOX_MCP_SERVER_NAME, read.searchAbove);
+  if (found === "absent") return { kind: "absent" };
+  if (typeof found === "object") return { kind: "unreadable", reason: found.refused };
+  return null;
+}
+
+/** Strict JSON; when `lenient`, then with comments and trailing commas too. */
+function parseJsonLeniently(text: string, lenient: boolean): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    if (!lenient) throw error;
+    return JSON.parse(stripJsonComments(text));
+  }
+}
+
+function rawJsonEntry(path: string, keys: readonly string[], jsonc: boolean, options?: RawReadOptions): RawEntry {
+  const searched = searchedFirst(path, options);
+  if (searched) return searched;
+  const read = readAgentFile(path, options?.maxBytes);
   if (read.kind === "missing") return { kind: "absent" };
-  if (read.kind === "refused") return { kind: "unreadable", reason: read.reason };
+  if (read.kind === "refused") return read.tooBig ? { kind: "unreadable", reason: read.reason, tooBig: true } : { kind: "unreadable", reason: read.reason };
   if (!read.text.trim()) return { kind: "absent" };
   let parsed: unknown;
   try {
-    parsed = JSON.parse(jsonc ? stripJsonComments(read.text) : read.text);
+    parsed = jsonc ? JSON.parse(stripJsonComments(read.text)) : parseJsonLeniently(read.text, options?.lenient === true);
   } catch {
     return { kind: "unreadable", reason: "it is not plain JSON" };
   }
@@ -425,10 +525,12 @@ function rawJsonEntry(path: string, keys: readonly string[], jsonc: boolean, max
 }
 
 /** Codex's config.toml, parsed as TOML (every form: tables, inline tables, dotted keys, quoted parts). */
-function rawCodexEntry(path: string): RawEntry {
-  const read = readAgentFile(path);
+function rawCodexEntry(path: string, options?: RawReadOptions): RawEntry {
+  const searched = searchedFirst(path, options);
+  if (searched) return searched;
+  const read = readAgentFile(path, options?.maxBytes);
   if (read.kind === "missing") return { kind: "absent" };
-  if (read.kind === "refused") return { kind: "unreadable", reason: read.reason };
+  if (read.kind === "refused") return read.tooBig ? { kind: "unreadable", reason: read.reason, tooBig: true } : { kind: "unreadable", reason: read.reason };
   let parsed: unknown;
   try {
     parsed = Bun.TOML.parse(read.text);
@@ -479,7 +581,7 @@ interface AgentSpec {
   /** Where its `plannotator-inbox` entry lives (null: unknown, or not a file). */
   file(e: AgentEnvironment): string | null;
   /** The raw entry, read only. Null: the agent's file is not known; the record decides. */
-  raw(e: AgentEnvironment): RawEntry | null;
+  raw(e: AgentEnvironment, read?: RawReadOptions): RawEntry | null;
   /** How uninstall removes it, when not a JSON key. */
   remove?: { bin: string; args: string[] };
 }
@@ -564,6 +666,106 @@ export function openCodePluginInstalled(e: AgentEnvironment): boolean {
   return false;
 }
 
+/** DeepSeek Harness's home: `$DSH_HOME` when set, else `~/.dsh` (DSH's own rule; a blank value counts as unset). */
+export function dshHome(e: AgentEnvironment): string {
+  return envDir(e, "DSH_HOME") ?? join(e.homeDir, ".dsh");
+}
+
+/**
+ * Whether Plannotator's DeepSeek Harness plugin (`@plannotator/dsh`) is in any
+ * DSH profile: `$DSH_HOME/profiles/<name>/package.json` lists it, as `dsh
+ * plugin --profile <name> add` writes it. Read only: Plannotator never runs dsh.
+ */
+export function dshPluginInstalled(e: AgentEnvironment): boolean {
+  const profiles = join(dshHome(e), "profiles");
+  let names: string[];
+  try {
+    names = readdirSync(profiles);
+  } catch {
+    return false;
+  }
+  return names.some((name) => {
+    const read = readAgentFile(join(profiles, name, "package.json"));
+    if (read.kind !== "file") return false;
+    try {
+      const parsed = JSON.parse(read.text) as Record<string, unknown>;
+      return ["dependencies", "devDependencies", "optionalDependencies"].some((key) => {
+        const deps = parsed[key];
+        return !!deps && typeof deps === "object" && Object.hasOwn(deps, "@plannotator/dsh");
+      });
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** Plannotator's Cline plugin package (apps/cline-plugin). */
+export const CLINE_PLUGIN_PACKAGE = "@plannotator/cline";
+
+/** Cline's home: `$CLINE_DIR` when set, else `~/.cline` (Cline's own rule; a blank value counts as unset). */
+export function clineDir(e: AgentEnvironment): string {
+  return envDir(e, "CLINE_DIR") ?? join(e.homeDir, ".cline");
+}
+
+/** Whether a package.json (by path) names Plannotator's Cline plugin. */
+function namesClinePlugin(manifest: string): boolean {
+  const read = readAgentFile(manifest);
+  if (read.kind !== "file") return false;
+  try {
+    return (JSON.parse(read.text) as { name?: unknown }).name === CLINE_PLUGIN_PACKAGE;
+  } catch {
+    return false;
+  }
+}
+
+function listDir(path: string): string[] {
+  try {
+    return readdirSync(path);
+  } catch {
+    return [];
+  }
+}
+
+/** Whether one Cline plugins folder holds Plannotator's plugin (see clinePluginInstalled). */
+function clinePluginsFolderHasPlugin(plugins: string): boolean {
+  const installed = join(plugins, "_installed");
+  for (const kind of ["npm", "local"]) {
+    for (const id of listDir(join(installed, kind))) {
+      const root = join(installed, kind, id, "package");
+      if (namesClinePlugin(join(root, "node_modules", "@plannotator", "cline", "package.json")) || namesClinePlugin(join(root, "package.json"))) return true;
+    }
+  }
+  for (const entry of listDir(plugins)) {
+    if (entry === "_installed" || entry === "node_modules") continue;
+    const path = join(plugins, entry);
+    if (/\.(?:[cm]?js|ts)$/.test(entry)) {
+      // A plugin module copied in as a file: the built bundle names its package (it reads its own version by it).
+      const read = readAgentFile(path, 4 * 1024 * 1024);
+      if (read.kind === "file" && read.text.includes(`"${CLINE_PLUGIN_PACKAGE}"`)) return true;
+    } else if (namesClinePlugin(join(path, "package.json"))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether Plannotator's Cline plugin (`@plannotator/cline`) is in a Cline
+ * plugins folder: the global one (`<cline>/plugins`) or the workspace one of
+ * the folder this runs in (`<cwd>/.cline/plugins`, `cline plugin install
+ * --cwd`). In each: as `cline plugin install` writes it,
+ * `_installed/npm/<id>/package/node_modules/@plannotator/cline` for
+ * `npm:@plannotator/cline` and `_installed/local/<id>/package` for a local
+ * folder; or copied in by hand, as a module file naming the package or a
+ * folder whose package.json does. Git, official and remote installs are not
+ * looked for. Read only: Plannotator never runs cline.
+ */
+export function clinePluginInstalled(e: AgentEnvironment, cwd: string = process.cwd()): boolean {
+  const global = join(clineDir(e), "plugins");
+  const workspace = resolve(cwd, ".cline", "plugins");
+  return clinePluginsFolderHasPlugin(global) || (workspace !== global && clinePluginsFolderHasPlugin(workspace));
+}
+
 const CLAUDE_PLUGIN_ID = /^plannotator@/;
 
 /** One Claude Code settings file, parsed (null: missing or unreadable). */
@@ -609,6 +811,47 @@ export function claudePluginStateFromScopes(
   const decided = scopes.find((scope) => scope.on !== undefined);
   if (decided) return { state: decided.on ? "enabled" : "disabled", managed: decided.scope === "managed" };
   return { state: registered ? "enabled" : "absent", managed: false };
+}
+
+/**
+ * What the person's own Claude Code setup says about permission modes, read-only (the values below only,
+ * nothing else kept), from the same sources Claude Code 2.1.314 reads:
+ * - consent: `skipDangerousModePermissionPrompt` in managed or user `settings.json`, or
+ *   `bypassPermissionsModeAccepted` in the global config (`~/.claude.json`, `$CLAUDE_CONFIG_DIR/.claude.json`).
+ *   Never a project's or a `--settings` file's (Claude says those do not count), and the Inbox never writes it.
+ * - disabled: `permissions.disableBypassPermissionsMode: "disable"` (that value only) in any settings Claude
+ *   merges: managed, the user's `settings.json`, and the launch folder's `.claude/settings{,.local}.json`
+ *   (Claude never reads `~/.claude/settings.local.json` for a session in another folder).
+ * - defaultMode: `permissions.defaultMode`, the strongest scope that sets one (managed, the folder's local and
+ *   shared settings, then the user's); a folder's `bypassPermissions` is skipped, as Claude ignores it.
+ * `folder` is the launch's folder; Settings → Agents passes none (the person's own files only).
+ */
+export function claudeBypassSetup(e: AgentEnvironment, folder: string | null = null): { consent: boolean; disabled: boolean; defaultMode: string | null } {
+  const record = (value: unknown): Record<string, unknown> => (value && typeof value === "object" ? (value as Record<string, unknown>) : {});
+  const permissions = (settings: unknown) => record(record(settings).permissions);
+  const managedPath = claudeManagedSettingsPath(e);
+  const managed = managedPath ? readClaudeSettings(managedPath) : null;
+  const user = readClaudeSettings(join(claudeConfigDir(e), "settings.json"));
+  const projectLocal = folder ? readClaudeSettings(join(folder, ".claude", "settings.local.json")) : null;
+  const project = folder ? readClaudeSettings(join(folder, ".claude", "settings.json")) : null;
+  const disabled = [managed, user, projectLocal, project].some((settings) => permissions(settings).disableBypassPermissionsMode === "disable");
+  const global = readAgentFile(claudeGlobalConfigPath(e));
+  let accepted = false;
+  if (global.kind === "file") {
+    try {
+      accepted = record(JSON.parse(global.text)).bypassPermissionsModeAccepted === true;
+    } catch {
+      accepted = false;
+    }
+  }
+  const consent = accepted || [managed, user].some((settings) => record(settings).skipDangerousModePermissionPrompt === true);
+  const modeOf = (settings: unknown, fromFolder: boolean): string | null => {
+    const mode = permissions(settings).defaultMode;
+    if (typeof mode !== "string" || mode.trim() === "") return null;
+    return fromFolder && mode.trim() === "bypassPermissions" ? null : mode.trim();
+  };
+  const defaultMode = modeOf(managed, false) ?? modeOf(projectLocal, true) ?? modeOf(project, true) ?? modeOf(user, false);
+  return { consent, disabled, defaultMode };
 }
 
 /** Claude Code's managed (enterprise) settings file, per platform. */
@@ -838,7 +1081,7 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     detect: (e) => !!e.which("codex") || codexHomeHasUserConfig(e),
     way: (e, probe) => cliWay(e, "codex", (cmd) => ["mcp", "add", NAME, "--", ...cmd], ["mcp", "remove", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
     file: (e) => join(codexHome(e), "config.toml"),
-    raw: (e) => rawCodexEntry(join(codexHome(e), "config.toml")),
+    raw: (e, read) => rawCodexEntry(join(codexHome(e), "config.toml"), read),
     remove: { bin: "codex", args: ["mcp", "remove", NAME] },
   },
   {
@@ -846,7 +1089,7 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     detect: (e) => !!e.which("gemini") || isDir(geminiDir(e)),
     way: (e, probe) => cliWay(e, "gemini", (cmd) => ["mcp", "add", "-s", "user", NAME, ...cmd], ["mcp", "remove", "-s", "user", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
     file: (e) => join(geminiDir(e), "settings.json"),
-    raw: (e) => rawJsonEntry(join(geminiDir(e), "settings.json"), ["mcpServers"], true),
+    raw: (e, read) => rawJsonEntry(join(geminiDir(e), "settings.json"), ["mcpServers"], true, read),
     remove: { bin: "gemini", args: ["mcp", "remove", "-s", "user", NAME] },
   },
   {
@@ -854,21 +1097,21 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     detect: (e) => !!e.which("qwen") || isDir(qwenDir(e)),
     way: (e, probe) => qwenWay(e, probe === true),
     file: (e) => join(qwenDir(e), "settings.json"),
-    raw: (e) => rawJsonEntry(join(qwenDir(e), "settings.json"), ["mcpServers"], true),
+    raw: (e, read) => rawJsonEntry(join(qwenDir(e), "settings.json"), ["mcpServers"], true, read),
   },
   {
     id: "cursor",
     detect: (e) => isDir(join(e.homeDir, ".cursor")) || !!e.which("cursor") || !!e.which("cursor-agent"),
     way: async () => ({ kind: "json", keys: ["mcpServers"] }),
     file: (e) => join(e.homeDir, ".cursor", "mcp.json"),
-    raw: (e) => rawJsonEntry(join(e.homeDir, ".cursor", "mcp.json"), ["mcpServers"], false),
+    raw: (e, read) => rawJsonEntry(join(e.homeDir, ".cursor", "mcp.json"), ["mcpServers"], false, read),
   },
   {
     id: "windsurf",
     detect: (e) => !!e.which("devin"),
     way: (e, probe) => cliWay(e, "devin", (cmd) => ["mcp", "add", "-s", "user", NAME, "--", ...cmd], ["mcp", "remove", "-s", "user", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
     file: (e) => join(xdgConfigHome(e), "devin", "config.json"),
-    raw: (e) => rawJsonEntry(join(xdgConfigHome(e), "devin", "config.json"), ["mcpServers"], true),
+    raw: (e, read) => rawJsonEntry(join(xdgConfigHome(e), "devin", "config.json"), ["mcpServers"], true, read),
     remove: { bin: "devin", args: ["mcp", "remove", "-s", "user", NAME] },
   },
   {
@@ -876,14 +1119,18 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     detect: (e) => !!e.which("amp"),
     way: (e, probe) => cliWay(e, "amp", (cmd) => ["mcp", "add", NAME, "--", ...cmd], ["mcp", "remove", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
     file: (e) => join(xdgConfigHome(e), "amp", "settings.json"),
-    raw: (e) => rawJsonEntry(join(xdgConfigHome(e), "amp", "settings.json"), ["amp.mcpServers"], true),
+    raw: (e, read) => rawJsonEntry(join(xdgConfigHome(e), "amp", "settings.json"), ["amp.mcpServers"], true, read),
     remove: { bin: "amp", args: ["mcp", "remove", NAME] },
   },
   {
     id: "cline",
-    detect: (e) => !!e.which("cline"),
-    // Cline CLI's `mcp add` and its config file are not verified (and a positional word can start a task), so a person adds it.
-    way: async () => ({ kind: "manual", why: "Cline's MCP command is not verified; add it in Cline's MCP settings" }),
+    detect: (e) => clinePluginInstalled(e) || !!e.which("cline"),
+    // With Plannotator's plugin: its tool, and the wake (apps/cline-plugin). Without it, Cline CLI's `mcp add` and its
+    // config file are not verified (and a positional word can start a task), so a person adds the plugin or the server.
+    way: async (e) =>
+      clinePluginInstalled(e)
+        ? { kind: "tool", host: "cline" }
+        : { kind: "manual", why: `add Plannotator's Cline plugin (cline plugin install npm:${CLINE_PLUGIN_PACKAGE}), or the server in Cline's MCP settings` },
     file: () => null,
     raw: () => null,
   },
@@ -892,7 +1139,7 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     detect: (e) => !!e.which("kiro-cli") || isDir(join(e.homeDir, ".kiro")),
     way: async () => ({ kind: "json", keys: ["mcpServers"] }),
     file: (e) => join(e.homeDir, ".kiro", "settings", "mcp.json"),
-    raw: (e) => rawJsonEntry(join(e.homeDir, ".kiro", "settings", "mcp.json"), ["mcpServers"], false),
+    raw: (e, read) => rawJsonEntry(join(e.homeDir, ".kiro", "settings", "mcp.json"), ["mcpServers"], false, read),
   },
   {
     id: "pi",
@@ -902,7 +1149,7 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
         ? Promise.resolve({ kind: "tool", host: "pi" } as ConnectWay)
         : cliWay(e, "pi", (cmd) => ["mcp", "add", NAME, "--", ...cmd], ["mcp", "remove", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
     file: (e) => join(piAgentDir(e), "mcp.json"),
-    raw: (e) => rawJsonEntry(join(piAgentDir(e), "mcp.json"), ["mcpServers"], true),
+    raw: (e, read) => rawJsonEntry(join(piAgentDir(e), "mcp.json"), ["mcpServers"], true, read),
     remove: { bin: "pi", args: ["mcp", "remove", NAME] },
   },
   {
@@ -914,11 +1161,21 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     raw: () => null,
   },
   {
+    // DeepSeek Harness: only through Plannotator's plugin. Over MCP the Inbox cannot tell its sessions apart
+    // (DSH's MCP client strips every DSH_* variable), so a person adds the plugin; Plannotator never runs dsh.
+    id: "dsh",
+    // DSH's own folder, never `dsh` on PATH: Debian and Ubuntu ship an unrelated `dsh` (distributed shell). Never run.
+    detect: (e) => dshPluginInstalled(e) || isDir(join(dshHome(e), "profiles")),
+    way: async (e) => (dshPluginInstalled(e) ? { kind: "tool", host: "dsh" } : { kind: "manual", why: "add Plannotator's DeepSeek Harness plugin (dsh plugin --profile <profile> add @plannotator/dsh)" }),
+    file: () => null,
+    raw: () => null,
+  },
+  {
     id: "claude-app",
     detect: (e) => isDir(claudeAppDir(e)),
     way: async () => ({ kind: "json", keys: ["mcpServers"] }),
     file: (e) => join(claudeAppDir(e), "claude_desktop_config.json"),
-    raw: (e) => rawJsonEntry(join(claudeAppDir(e), "claude_desktop_config.json"), ["mcpServers"], false),
+    raw: (e, read) => rawJsonEntry(join(claudeAppDir(e), "claude_desktop_config.json"), ["mcpServers"], false, read),
   },
 ];
 
@@ -1192,14 +1449,7 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
     const configured = configuredInboxTool(loadConfig(), way.host);
     if (configured === true) return { kind: "already", record: { state: "found", reach: "tool", path: null, at } };
     if (configured === false) return { kind: "off", record: { state: "off", reach: "tool", path: null, at } };
-    const current = loadConfig().inboxTool;
-    const next: Partial<Record<InboxToolHost, boolean>> = {};
-    for (const host of ["claude-code", "pi", "opencode"] as const) {
-      const value = typeof current === "boolean" ? current : current?.[host];
-      if (typeof value === "boolean") next[host] = value;
-    }
-    next[way.host] = true;
-    saveConfig({ inboxTool: next });
+    saveConfig({ inboxTool: inboxToolWith(loadConfig().inboxTool, { [way.host]: true }) });
     if (configuredInboxTool(loadConfig(), way.host) !== true) {
       return { kind: "failed", reason: "Plannotator's config.json can't be written", path: null };
     }
@@ -1470,6 +1720,16 @@ export interface RemovalPlan {
   items: RemovalPlanItem[];
   /** Entries left with a reason: one Plannotator added that runs something else now, or one no record says it added. */
   skipped: string[];
+  /** The agents whose own entry `skipped` names. */
+  named: InboxAgentId[];
+}
+
+/** How the person removes an agent's `plannotator-inbox` entry themselves. */
+export function inboxEntryRemovalHint(id: InboxAgentId): string {
+  // Claude Code's user scope is in ~/.claude.json, which Claude Code rewrites while it runs.
+  if (id === "claude-code") return `run \`claude mcp remove ${NAME} -s user\``;
+  const remove = agentSpec(id).remove;
+  return jsonFileFor(id) ? "delete that entry by hand" : remove ? `run \`${remove.bin} ${remove.args.join(" ")}\`` : "remove it in the agent's settings";
 }
 
 /**
@@ -1488,7 +1748,8 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
   /** After every agent's own entry, so a caller looking for an agent's item finds that one first. */
   const strays: RemovalPlanItem[] = [];
   const skipped: string[] = [];
-  if (!agentHomeAllowed(e)) return { items, skipped };
+  const named: InboxAgentId[] = [];
+  if (!agentHomeAllowed(e)) return { items, skipped, named };
   for (const spec of AGENT_SPECS) {
     const record = file.agents[spec.id];
     const label = INBOX_AGENT_LABELS[spec.id];
@@ -1524,8 +1785,8 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
       const unrecorded = raw === null ? null : classify(raw, [[...ourCommand]], false);
       if (unrecorded?.kind === "ours") {
         const at = displayPath(spec.file(e), e);
-        const how = jsonFileFor(spec.id) ? "delete that entry by hand" : spec.remove ? `run \`${spec.remove.bin} ${spec.remove.args.join(" ")}\`` : "remove it in the agent's settings";
-        skipped.push(`${label}'s "${NAME}"${at ? ` in ${at}` : ""} runs this Plannotator, but no record says Plannotator added it, so it may be yours (to remove it, ${how})`);
+        skipped.push(`${label}'s "${NAME}"${at ? ` in ${at}` : ""} runs this Plannotator, but no record says Plannotator added it, so it may be yours (to remove it, ${inboxEntryRemovalHint(spec.id)})`);
+        named.push(spec.id);
       }
       continue;
     }
@@ -1533,6 +1794,7 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
     const read = raw === null ? null : classify(raw, ours, false);
     if (read?.kind === "other") {
       skipped.push(`${label}'s "${NAME}" now runs something else (changed by hand), so it is yours`);
+      named.push(spec.id);
       continue;
     }
     if (read && read.kind !== "ours") continue;
@@ -1556,6 +1818,7 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
     const bin = e.which(remove.bin);
     if (!bin) {
       skipped.push(`${label}'s "${NAME}"${shown ? ` in ${shown}` : ""}: ${remove.bin} is not on PATH; run \`${remove.bin} ${remove.args.join(" ")}\``);
+      named.push(spec.id);
       continue;
     }
     items.push({
@@ -1569,7 +1832,7 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
       },
     });
   }
-  return { items: [...items, ...strays], skipped };
+  return { items: [...items, ...strays], skipped, named };
 }
 
 /** The agents whose JSON file Plannotator edits itself: where their entry is and how the file is edited. */
@@ -1626,14 +1889,14 @@ export interface InboxAgentReachState {
  * `~/.claude.json`. Read only, never written: Claude Code is connected through
  * its plugin, and this only says that one added by hand already reaches the Inbox.
  */
-function claudeCodeMcpEntry(e: AgentEnvironment, ours: readonly (readonly string[])[]): InboxEntryRead {
-  const dir = envDir(e, "CLAUDE_CONFIG_DIR");
-  // .claude.json holds Claude Code's per-project history and often passes 1 MiB; this read only looks.
-  return classify(rawJsonEntry(join(dir ?? e.homeDir, ".claude.json"), ["mcpServers"], false, CLAUDE_JSON_MAX_BYTES), ours, true);
+export function claudeCodeMcpPath(e: AgentEnvironment): string {
+  return join(envDir(e, "CLAUDE_CONFIG_DIR") ?? e.homeDir, ".claude.json");
 }
 
-/** The most `.claude.json` the read-only MCP lookup reads. */
-const CLAUDE_JSON_MAX_BYTES = 32 * 1024 * 1024;
+export function claudeCodeMcpEntry(e: AgentEnvironment, ours: readonly (readonly string[])[], read: RawReadOptions = { maxBytes: CLAUDE_JSON_MAX_BYTES }): InboxEntryRead {
+  // .claude.json holds Claude Code's per-project history and often passes 1 MiB; this read only looks.
+  return classify(rawJsonEntry(claudeCodeMcpPath(e), ["mcpServers"], false, read), ours, true);
+}
 
 /** Claude Code reaches the Inbox through Plannotator's plugin (its mod registers the tool); without the plugin only a person can connect it. */
 function claudeCodeWay(e: AgentEnvironment): ConnectWay {
@@ -1681,7 +1944,7 @@ export async function inboxAgentReach(id: InboxAgentId, options: ConnectOptions)
   // Claude Code connected by hand through MCP, where the plugin gives it no tool (not installed, disabled, or its mod off):
   // it reaches the Inbox (without the wake). Checked before the agent is called off.
   if (id === "claude-code" && (way.kind === "manual" || !claudeCodeModOn(e)) && claudeCodeMcpEntry(e, ourCommands(options, record)).kind === "ours") {
-    return { kind: "mcp", on: true, state: "connected", path: displayPath(join(envDir(e, "CLAUDE_CONFIG_DIR") ?? e.homeDir, ".claude.json"), e), locked: false, reason: null };
+    return { kind: "mcp", on: true, state: "connected", path: displayPath(claudeCodeMcpPath(e), e), locked: false, reason: null };
   }
   // Connected in another file than the environment names (`QWEN_HOME` differs): off here, the switch moves it.
   if (record && recordedElsewhere(spec, e, record)) {
@@ -1713,14 +1976,7 @@ export async function inboxAgentReach(id: InboxAgentId, options: ConnectOptions)
 /** Turn a host's `plannotator_inbox` tool on or off in config.json (the old Settings switch). Returns an error reason, or null. */
 export function setInboxTool(host: InboxToolHost, on: boolean, e: AgentEnvironment): string | null {
   if (parseInboxToolEnv(e.env as NodeJS.ProcessEnv) !== undefined) return "PLANNOTATOR_INBOX_TOOL decides this";
-  const current = loadConfig().inboxTool;
-  const next: Partial<Record<InboxToolHost, boolean>> = {};
-  for (const name of ["claude-code", "pi", "opencode"] as const) {
-    const value = typeof current === "boolean" ? current : current?.[name];
-    if (typeof value === "boolean") next[name] = value;
-  }
-  next[host] = on;
-  saveConfig({ inboxTool: next });
+  saveConfig({ inboxTool: inboxToolWith(loadConfig().inboxTool, { [host]: on }) });
   return configuredInboxTool(loadConfig(), host) === on ? null : "Plannotator's config.json can't be written";
 }
 

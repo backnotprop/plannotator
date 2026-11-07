@@ -18,7 +18,7 @@ const MARK_GATHER_MS = 200;
  * `MARK_FRESH_MS` for its current link; the cards in view are asked again
  * when the window gets its focus back (at most every `MARK_FOCUS_MS`). One
  * request for every card in view; the server batches by repository. Off
- * (`enabled` false: a page opened over the tailnet), nothing is asked and
+ * (`enabled` false: a tailnet guest's page), nothing is asked and
  * every mark stays the quiet neutral one.
  */
 export function useCardMarks(cards: readonly InboxCardWire[], enabled: boolean, root: RefObject<HTMLElement | null>, layout: string): ReadonlyMap<string, InboxCardMark> {

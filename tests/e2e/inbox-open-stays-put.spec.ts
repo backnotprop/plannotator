@@ -558,7 +558,8 @@ test('desktop, the mouse: a close hands no row focus, no Mark read action shows,
 });
 
 // A plain update the person opened: Quiet on the server (the look), still drawn in New while the thread is
-// open. Mark read stays on it (the header, the row's hover action, E) and moves the row to Quiet now.
+// open. Mark read stays on it (the row menu, E) and moves the row to Quiet now; the row's hover action and the
+// header's button are Mark unread (the owner, 2026-11-02: the person read it).
 test('desktop: a seen update held in New keeps Mark read; it moves the row to Quiet now, and Undo puts it back', async ({ browser }: { browser: Browser }) => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
   const page = await context.newPage();
@@ -568,6 +569,10 @@ test('desktop: a seen update held in New keeps Mark read; it moves the row to Qu
   page.on('request', (request) => {
     if (request.method() === 'POST' && /\/(read|unread)$/.test(request.url())) written.push(request.url());
   });
+  const markedUnread: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/mark-unread')) markedUnread.push(request.url());
+  });
   const { id } = world.projects.seen;
   await page.goto(`${world.url}/#project=${id}`);
   await expect(page.locator('[data-section-id="new"] [data-thread-id]')).toHaveCount(4);
@@ -575,27 +580,38 @@ test('desktop: a seen update held in New keeps Mark read; it moves the row to Qu
   const first = before[0]!;
   const row = page.locator(`.ib-lbody [data-thread-id="${first}"]`);
   const header = page.locator('section.ib-pane [data-mark-read]');
+  const headerUnread = page.locator('section.ib-pane [data-mark-unread]');
+  const more = page.locator('section.ib-pane [data-thread-more]');
   const quietCount = page.locator('[data-section-id="quiet"] .ib-n');
   await openWithKeyboard(page, first);
   expect(await sectionOf(page, first)).toBe('new');
   await page.locator(`.ib-lbody [data-row="${first}"]`).hover();
   await shot(page, 'seen-held-01-opened');
-  await expect(header).toBeEnabled();
-  await expect(page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-read]`)).toBeVisible();
+  // Read by opening it: the header says Mark unread in Mark read's place, as the row does.
+  await expect(headerUnread).toBeEnabled();
+  await expect(header).toHaveCount(0);
+  await expect(page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-unread]`)).toBeVisible();
+  await expect(page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-read]`)).toHaveCount(0);
+  const markUnreadBox = (await headerUnread.boundingBox())!;
+  const moreBox = (await more.boundingBox())!;
 
-  // The header: the row moves to Quiet now, the toast says so with Undo.
-  await header.click();
+  // E: the row moves to Quiet now, the toast says so with Undo; nothing in the header moves.
+  await page.locator('section.ib-pane h2.ib-subject').click();
+  await page.keyboard.press('e');
   await expect(row).toHaveCount(0);
   await expect(quietCount).toHaveText('1');
   await expect(page.locator('[data-inbox-toast]')).toContainText('Moved to Quiet');
   await expect(page.locator('[data-toast-undo]')).toBeVisible();
-  await expect(header).toBeDisabled();
+  await expect(headerUnread).toBeEnabled();
+  expect(await headerUnread.boundingBox()).toEqual(markUnreadBox);
+  expect(await more.boundingBox()).toEqual(moreBox);
   await shot(page, 'seen-held-02-moved');
   // Undo: back between the same neighbours.
   await page.locator('[data-toast-undo]').click();
   await expect.poll(() => sectionOf(page, first)).toBe('new');
   expect(await rowsOf(page)).toEqual(before);
-  await expect(header).toBeEnabled();
+  await expect(headerUnread).toBeEnabled();
+  expect(await headerUnread.boundingBox()).toEqual(markUnreadBox);
   await shot(page, 'seen-held-03-undone');
 
   // E, then Z.
@@ -605,15 +621,13 @@ test('desktop: a seen update held in New keeps Mark read; it moves the row to Qu
   await page.keyboard.press('z');
   await expect.poll(() => sectionOf(page, first)).toBe('new');
   expect(await rowsOf(page)).toEqual(before);
+  expect(markedUnread).toEqual([]);
 
-  // The row's hover action. It is drawn only while the mouse is on the row (display: none
-  // otherwise), and an action waits with no time limit: on CI this test twice hung here to its
-  // 4-minute timeout (the shots stop at 03-undone), the action never shown to the click, as when
-  // the row is still settling back from the Undo as the mouse arrives. Hover until the action
-  // shows (each try bounded, all tries within 15 s: toPass has no limit of its own), then click it.
-  const rowMarkRead = page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-read]`);
+  // The row menu's Mark read (the hover action is Mark unread here). Bounded tries: on CI the row once
+  // was still settling back from the Undo as the pointer arrived, and an action waits with no time limit.
+  const rowMarkRead = page.locator(`[data-row-menu="${first}"] [data-row-action="read"]`);
   await expect(async () => {
-    await page.locator(`.ib-lbody [data-row="${first}"]`).hover({ timeout: 2_000 });
+    await row.click({ button: 'right', timeout: 2_000 });
     await expect(rowMarkRead).toBeVisible({ timeout: 1_000 });
   }).toPass({ timeout: 15_000 });
   await rowMarkRead.click({ timeout: 5_000 });

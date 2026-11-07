@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { createContext, useContext, useState, useMemo } from "react";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
 import { findCrossRepoRef, forgeRefLinks, matchCrossRepoRef, type CrossRepoRef } from "@plannotator/core/forge-refs";
 import { CodeSnippetPreview } from "./CodeSnippetPreview";
@@ -8,7 +8,7 @@ import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
 import { UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
-import { isLocalLinkTarget, isNewTabClick, useLocalLinkResolver } from "./LocalLinkContext";
+import { CodeSpan, isLocalLinkTarget, isNewTabClick, useLocalLinkResolver } from "./LocalLinkContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
 import { CodeFilePicker } from "./CodeFilePicker";
 import { normalizeMathTex, renderMathToHtml } from "../utils/math";
@@ -422,6 +422,13 @@ const HostResolvedImage: React.FC<{
  */
 let digitHexIssueRefs = false;
 
+/**
+ * Forge comment text (a GitHub issue, PR or comment body) shows every newline
+ * as a line break. Provided by `RenderedMarkdown`'s `softLineBreaks` prop;
+ * absent (false), a bare newline stays a soft break (a space), as in files.
+ */
+export const SoftLineBreaksContext = createContext<boolean>(false);
+
 export function setDigitHexIssueRefs(on: boolean): void {
   digitHexIssueRefs = on;
 }
@@ -472,6 +479,7 @@ export const InlineMarkdown: React.FC<{
 }> = ({ text, onOpenLinkedDoc, resolveLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo, repoHost }) => {
   const validation = useCodePathValidation();
   const resolveLocalLink = useLocalLinkResolver();
+  const softLineBreaks = useContext(SoftLineBreaksContext);
   const resolveImage = useImageResolver();
   const refLinks = forgeRefLinks({ display: githubRepo, host: repoHost });
   // Cross-repo `owner/repo#123` refs: only for a caller that names its
@@ -796,12 +804,11 @@ export const InlineMarkdown: React.FC<{
         );
       } else {
         parts.push(
-          <code
-            key={key++}
-            className="px-1.5 py-0.5 rounded bg-muted text-sm font-mono"
-          >
-            {codeContent}
-          </code>,
+          <CodeSpan key={key++} text={codeContent}>
+            <code className="px-1.5 py-0.5 rounded bg-muted text-sm font-mono">
+              {codeContent}
+            </code>
+          </CodeSpan>,
         );
       }
       remaining = remaining.slice(match[0].length);
@@ -1120,13 +1127,17 @@ export const InlineMarkdown: React.FC<{
           </HostTitle>,
         );
       } else if (localLink?.kind === 'unavailable') {
-        parts.push(
-          <HostTitle key={key++} title={localLink.title}>
-            <span className="text-muted-foreground underline decoration-dotted underline-offset-2" data-local-link="unavailable">
-              {linkText}
-            </span>
-          </HostTitle>,
+        const inert = (
+          <span className="text-muted-foreground underline decoration-dotted underline-offset-2" data-local-link="unavailable">
+            {linkText}
+          </span>
         );
+        parts.push(
+          localLink.wrap
+            ? <React.Fragment key={key++}>{localLink.wrap(inert)}</React.Fragment>
+            : <HostTitle key={key++} title={localLink.title}>{inert}</HostTitle>,
+        );
+        if (localLink.after) parts.push(<React.Fragment key={key++}>{localLink.after}</React.Fragment>);
       } else if (isInPageAnchor) {
         parts.push(
           <a
@@ -1215,6 +1226,14 @@ export const InlineMarkdown: React.FC<{
       continue;
     }
 
+    // Forge text: a bare newline is a line break too.
+    if (softLineBreaks && remaining[0] === "\n") {
+      parts.push(<br key={key++} />);
+      remaining = remaining.slice(1);
+      previousChar = "\n";
+      continue;
+    }
+
     // Hard line break: two+ trailing spaces + newline, or backslash + newline
     match = remaining.match(/ {2,}\n|\\\n/);
     if (match && match.index !== undefined) {
@@ -1246,7 +1265,7 @@ export const InlineMarkdown: React.FC<{
     // `h` mid-word (e.g. ":heart:", "hello"), and splitting on it breaks
     // multi-char patterns like emoji shortcodes. Bare URLs are instead
     // detected inline via emitPlainTextWithBareUrls() below.
-    const nextSpecial = remaining.slice(1).search(/[\*_`\[!~\\<#@$]/);
+    const nextSpecial = remaining.slice(1).search(softLineBreaks ? /[\*_`\[!~\\<#@$\n]/ : /[\*_`\[!~\\<#@$]/);
     // A bare URL that starts inside this plain-text chunk and runs past its
     // end would be cut there, and `_`, `~`, `#`, `@`, `$` and `!` all end a
     // chunk (`…/w/ws_01…` rendered a link to `…/w/ws`). Stop the chunk where

@@ -1,8 +1,8 @@
 import { piUpdateAdvert } from "./update-advert.ts";
+import { schedulePiDailyPing } from "./daily-ping.ts";
 import { createPackageChangesService, MAX_PACKAGE_FILE_BYTES, PACKAGE_CHECKOUT_WAIT_MS, prSettingsSource, REMOTE_PACKAGE_READS, waitAtMost } from "../generated/package-changes-service.ts";
 import { parseDiffToFiles } from "../generated/diff-files.ts";
 import { isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
-import { spawn } from "node:child_process";
 import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
 import { openPackedApp } from "../generated/packed-app.ts";
 import {
@@ -154,6 +154,7 @@ import {
 	handleReviewDraftRequest,
 	handleFavicon,
 	handleImageRequest,
+	handleStarAskRequest,
 	readDraftGenerationFromBody,
 	readDraftGenerationFromUrl,
 	handleUploadRequest,
@@ -231,14 +232,13 @@ import {
 import { resolveWorkspaceFilePath } from "../generated/review-workspace-node.ts";
 import {
 	type CodeNavRequest,
-	type CodeNavRuntime,
-	CODE_NAV_MAX_FILE_BYTES,
 	resolveCodeNav,
 	resolveCodeNavHover,
 	validateCodeNavRequest,
 	extractChangedFiles,
 } from "../generated/code-nav.ts";
-import { readFileCapped, readRepoFile, repoFileErrorBody, REPO_FILE_ERROR_STATUS } from "../generated/repo-file.ts";
+import { readRepoFile, repoFileErrorBody, REPO_FILE_ERROR_STATUS } from "../generated/repo-file.ts";
+import { piCodeNavRuntime } from "./code-nav-runtime.ts";
 import { readRepoWorkingTreeFile } from "../generated/repo-files-node.ts";
 import {
 	createDefaultSemanticDiffRuntime,
@@ -252,6 +252,7 @@ import {
 import type { SemanticDiffAvailability, SemanticDiffResponse } from "../generated/semantic-diff-types.ts";
 import { CallFlowService } from "../generated/call-flow.ts";
 import { CallFlowInstallCoordinator, callFlowInstallOriginAllowed } from "../generated/call-flow-install.ts";
+import type { CallFlowInstallCoordinatorOptions } from "../generated/call-flow-install.ts";
 import { parseCallFlowInstallRequest, resolveCallFlowInstallTargets } from "../generated/call-flow-languages.ts";
 import type { CallFlowResponse } from "../generated/call-flow-types.ts";
 import { discoverCuratedSkills, resolveRequestedReviewProfile, listAllSkills, enableReviewSkill } from "../generated/review-skill-loader.ts";
@@ -280,44 +281,6 @@ import {
 	vcsSupportsSnapshot,
 } from "./vcs.ts";
 
-const piCodeNavRuntime: CodeNavRuntime = {
-	runCommand(command, args, options) {
-		return new Promise((resolve) => {
-			const proc = spawn(command, args, {
-				cwd: options?.cwd,
-				stdio: ["ignore", "pipe", "pipe"],
-			});
-			let timer: ReturnType<typeof setTimeout> | undefined;
-			if (options?.timeoutMs) {
-				timer = setTimeout(() => proc.kill(), options.timeoutMs);
-			}
-			const stdoutChunks: Buffer[] = [];
-			const stderrChunks: Buffer[] = [];
-			proc.stdout!.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
-			proc.stderr!.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
-			proc.on("close", (code: number | null) => {
-				if (timer) clearTimeout(timer);
-				resolve({
-					stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
-					stderr: Buffer.concat(stderrChunks).toString("utf-8"),
-					exitCode: code ?? 1,
-				});
-			});
-			proc.on("error", () => {
-				if (timer) clearTimeout(timer);
-				resolve({ stdout: "", stderr: "command not found", exitCode: 1 });
-			});
-		});
-	},
-
-	async readFile(path, options) {
-		// Capped at what rg searches, non-blocking (repo-file.ts).
-		const read = await readFileCapped(options?.cwd ? resolvePath(options.cwd, path) : path, {
-			maxBytes: CODE_NAV_MAX_FILE_BYTES,
-		});
-		return read.ok ? read.content : null;
-	},
-};
 
 // Review ingestion completion semantics (REVIEW_OUTPUT_FAILED,
 // markJobReviewFailed) now live in the shared agent-jobs module.
@@ -376,6 +339,8 @@ export async function startReviewServer(options: {
 	repoFilesLazyThreshold?: number;
 	/** Tests only: how often a polled live listing looks (default `REPO_LIVE_POLL_MS`). */
 	repoLivePollMs?: number;
+	/** Tests only: the Call flow install and Node preflight, so a test never starts a real install. */
+	callFlowInstall?: Pick<CallFlowInstallCoordinatorOptions, "install" | "preflight">;
 	/** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
 	refRunner?: RefRunner;
 	/** "Ask this session": the in-process bridge to the Pi session that opened this review. */
@@ -473,6 +438,8 @@ export async function startReviewServer(options: {
 	/** Called when server starts with the URL, remote status, and port */
 	onReady?: (url: string, isRemote: boolean, port: number) => void;
 }): Promise<ReviewServerResult> {
+	// The daily ping (server/daily-ping.ts): in the background, never awaited.
+	schedulePiDailyPing("review");
 	const gitUser = detectGitUser(options.workspace?.root ?? options.gitContext?.cwd);
 	const aiEnabled = resolveAIEnabled();
 	const submitPlatformReview = options.prReviewSubmitter ?? submitPRReview;
@@ -709,6 +676,7 @@ export async function startReviewServer(options: {
 	// invalidates the service's 30 second runtime probe cache so the very
 	// next capability advert resolves available without a server restart.
 	const callFlowInstall = new CallFlowInstallCoordinator({
+		...options.callFlowInstall,
 		onSettled: (ok) => {
 			if (ok) callFlowService.invalidateRuntimeState();
 		},
@@ -3985,6 +3953,9 @@ export async function startReviewServer(options: {
 			} catch {
 				json(res, { error: "Invalid request" }, 400);
 			}
+		} else if (url.pathname.startsWith("/api/star-ask/")) {
+			// The "Star the repo" ask on the done screen (generated/star-ask.ts).
+			if (!(await handleStarAskRequest(req, res, url, "review", isRemoteSession()))) handleApiNotFound(res, url.pathname);
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);
 		} else if (url.pathname === "/api/upload" && req.method === "POST") {

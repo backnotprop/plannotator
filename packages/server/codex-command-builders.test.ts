@@ -18,10 +18,12 @@ import { buildTourCodexCommand, TOUR_SCHEMA_JSON } from "./tour/tour-review";
 
 import { createTestEnvironment } from "../../tests/helpers/environment";
 
-const env = createTestEnvironment(["PLANNOTATOR_DATA_DIR"], "plannotator-codex-builders-");
+// HOME and CODEX_HOME too: the builders read Codex's config.toml (for the
+// Inbox override), and a test never reads the real ~/.codex.
+const env = createTestEnvironment(["PLANNOTATOR_DATA_DIR", "HOME", "CODEX_HOME"], "plannotator-codex-builders-");
 
 const OPTIONS = {
-  cwd: "/tmp/project",
+  cwd: "",
   outputPath: "/tmp/output.json",
   prompt: "Review these changes.",
 };
@@ -29,6 +31,9 @@ const OPTIONS = {
 beforeEach(() => {
   env.reset();
   process.env.PLANNOTATOR_DATA_DIR = env.makeTempDir();
+  process.env.HOME = env.makeTempDir();
+  process.env.CODEX_HOME = env.makeTempDir();
+  OPTIONS.cwd = env.makeTempDir();
 });
 
 afterEach(() => env.restore());

@@ -5,10 +5,10 @@
  * (scripts/inbox-sim.ts):
  *
  *  - words dragged across in an agent's message open the comment-only
- *    toolbar (Comment and 👍, no Delete); Escape closes it, not the thread;
+ *    toolbar (Delete, Comment and 👍); Escape closes it, not the thread;
  *  - Comment opens the composer; ⌘↵ saves; the passage keeps a light
  *    highlight; the reply box's chip counts it and lists it under the message;
- *  - Send carries it, and the agent's wait_for_reply returns the quote and the
+ *  - Send carries it, and the agent's read_thread returns the quote and the
  *    comment under "Feedback on your message from <time> (<message id>)";
  *  - the person's own message and a question card's words open no toolbar;
  *  - on a phone-wide window (390 px) the same, and the toolbar stays in the window.
@@ -156,12 +156,13 @@ test("a comment on words in an agent's message: toolbar, composer, highlight, ch
   await page.goto(`${world.url}#thread=${sent.thread_id}`);
   await expect(page.locator(`[data-message-id="${id}"]`)).toContainText('dead-letter queue');
 
-  // The comment-only toolbar: Comment and 👍, no Delete.
+  // Delete, Comment and 👍 (approval "inbox-toolbar-delete"), no label picker.
   await dragSelect(page, id, 'two, four and eight seconds');
   await expect(toolbar(page)).toBeVisible();
+  await expect(toolbar(page).getByRole('button', { name: 'Delete' })).toBeVisible();
   await expect(toolbar(page).getByRole('button', { name: 'Comment' })).toBeVisible();
   await expect(toolbar(page).getByRole('button', { name: 'Looks good' })).toBeVisible();
-  await expect(toolbar(page).getByRole('button', { name: 'Delete' })).toHaveCount(0);
+  await expect(toolbar(page).getByRole('button', { name: 'Quick label' })).toHaveCount(0);
   await shot(page, '01-desktop-selected');
   // Escape closes the toolbar, never the thread.
   await page.keyboard.press('Escape');
@@ -192,9 +193,9 @@ test("a comment on words in an agent's message: toolbar, composer, highlight, ch
   await page.mouse.click(5, 5);
 
   // The reply box's chip lists them under the message.
-  await page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ }).first().click();
+  await page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
   const chip = page.locator('[data-annotations-chip]');
-  await expect(chip).toHaveText('2 annotations');
+  await expect(chip).toHaveText('2 comments');
   await chip.click();
   const row = page.locator('.ib-annpop [data-annotation-row]').filter({ hasText: 'two, four and eight seconds' });
   await expect(row).toContainText("Claude Code's message, ");
@@ -207,9 +208,8 @@ test("a comment on words in an agent's message: toolbar, composer, highlight, ch
   await page.locator('.ib-rbox textarea').fill('One note on the backoff.');
   await page.locator('section.ib-pane').getByRole('button', { name: 'Send', exact: true }).click();
   await expect(page.locator('.ib-rbox')).toHaveCount(0);
-  const answer = await claude.waitForReply(sent.thread_id as string, 10);
-  expect(answer.status).toBe('replied');
-  const body = (answer.reply as { body: string }).body;
+  const answer = await claude.nextReply(sent.thread_id as string, 10);
+  const body = answer.body as string;
   expect(body).toContain('One note on the backoff.');
   expect(body).toContain('# Feedback on your messages');
   expect(body).toMatch(new RegExp(`## Feedback on your message from \\d{1,2}:\\d{2} [AP]M \\(${id}\\)`));
@@ -287,15 +287,16 @@ test('on a phone-wide window: the same toolbar, composer, highlight and chip, in
     await shot(page, '07-phone-composer');
     await composer.press('ControlOrMeta+Enter');
     await expect(page.locator(`[data-message-id="${id}"] mark.annotation-highlight`)).toHaveText('dead-letter queue');
-    await page.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ }).first().click();
+    await page.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
     await shot(page, '08-phone-highlighted');
-    await page.locator('[data-annotations-chip]').click();
+    // A phone's reply box names its comments in one line, which opens their list (approval "inbox-reply-foot-phone").
+    await page.locator('section.ib-pane .ib-rfoot [data-foot-summary]').click();
     await expect(page.locator('.ib-annpop [data-annotation-row]')).toContainText('"dead-letter queue"');
     await shot(page, '09-phone-chip');
     await page.locator('.ib-annpop').getByRole('button', { name: 'Close the list' }).click();
     await page.locator('section.ib-pane').getByRole('button', { name: 'Send', exact: true }).click();
-    const answer = await claude.waitForReply(sent.thread_id as string, 10);
-    const body = (answer.reply as { body: string }).body;
+    const answer = await claude.nextReply(sent.thread_id as string, 10);
+    const body = answer.body as string;
     expect(body).toContain('Feedback on: "dead-letter queue"');
     await renderReceived(page, body, '10-phone-agent-received');
   } finally {
@@ -303,9 +304,9 @@ test('on a phone-wide window: the same toolbar, composer, highlight and chip, in
   }
 });
 
-/** The reply as the agent receives it (wait_for_reply's body), drawn as plain text for the screenshots. */
+/** The reply as the agent receives it (read_thread's body), drawn as plain text for the screenshots. */
 async function renderReceived(page: Page, body: string, name: string): Promise<void> {
-  const html = (dark: boolean) => `<!doctype html><meta charset="utf-8"><body style="margin:0;padding:24px;font:13px/1.5 ui-monospace,Menlo,monospace;background:${dark ? '#16181d' : '#fafafa'};color:${dark ? '#e6e6e6' : '#1d1d1f'}"><div style="font:600 12px system-ui;opacity:.6;margin-bottom:12px">What Claude Code receives (wait_for_reply)</div><pre style="white-space:pre-wrap;margin:0"></pre></body>`;
+  const html = (dark: boolean) => `<!doctype html><meta charset="utf-8"><body style="margin:0;padding:24px;font:13px/1.5 ui-monospace,Menlo,monospace;background:${dark ? '#16181d' : '#fafafa'};color:${dark ? '#e6e6e6' : '#1d1d1f'}"><div style="font:600 12px system-ui;opacity:.6;margin-bottom:12px">What Claude Code receives (read_thread)</div><pre style="white-space:pre-wrap;margin:0"></pre></body>`;
   // Its own tab, so the Inbox's tab keeps its page.
   const tab = await page.context().newPage();
   try {

@@ -15,8 +15,8 @@
  *     ico apng, `isReviewImagePath`), before anything is read.
  *  3. A relative path resolves against the folder the agent sent from
  *     (`base_path`, kept on the message when it is a subfolder of the
- *     project or a linked worktree of its repository), else the project
- *     root; an absolute one is taken as it is. It may lead anywhere the
+ *     project or a linked worktree of its repository, or the working folder
+ *     its connection named, wherever it is), else the project root; an absolute one is taken as it is. It may lead anywhere the
  *     person's user can read, as an attachment may (owner ruling
  *     2026-10-16: no project boundary), except (`403 image_hidden`), judged
  *     on the path as named AND on its realpath, so a symlink into `~/.ssh`
@@ -247,9 +247,11 @@ function isInside(path: string, root: string): boolean {
 
 /**
  * The filesystem paths a src may mean, in order: as written, without a
- * `?query` / `#fragment`, and percent-decoded (`my%20shot.png`).
+ * `?query` / `#fragment`, and percent-decoded (`my%20shot.png`). Exported
+ * for send_message's attached-pictures advice (attached-images.ts), which
+ * must count a picture as shown exactly when the window would find it.
  */
-function pathCandidates(src: string): string[] {
+export function pathCandidates(src: string): string[] {
   const out = [src];
   const stripped = src.replace(/[?#].*$/s, "");
   if (stripped && stripped !== src) out.push(stripped);
@@ -468,6 +470,32 @@ export async function readInboxMessageImageAsync(input: InboxMessageImageInput):
   const read = await readImageFileAsync(located.real);
   if (!read.ok) return read;
   return finishImage(read.bytes, located, read.mtime);
+}
+
+/**
+ * One picture by its absolute path, wherever it is on this computer: an
+ * attached HTML page's picture outside its folder (packages/server/html-assets.ts,
+ * `pictures`). `refused` is judged on the path as named and on its realpath,
+ * so a symlink into a hidden folder is refused too (`403 image_hidden`); then
+ * rule 4: one descriptor, a regular file within the caps, the bytes sniffed
+ * as an image (an SVG by its `<svg>` root), never the name's type. Never throws.
+ */
+const HIDDEN_ANYWHERE = "That image is a .env file, or in a hidden folder.";
+
+export async function readInboxPictureAsync(named: string, refused: (path: string) => boolean): Promise<InboxMessageImageResult> {
+  if (!isAbsolute(named) || /[\u0000-\u001f\u007f]/.test(named)) return refuse(400, "validation_error", "path: not a usable image path.");
+  if (refused(named)) return refuse(403, "image_hidden", HIDDEN_ANYWHERE);
+  let real: string;
+  try {
+    real = realpathSync(named);
+  } catch (error) {
+    if (isPermissionError(error)) return failRead(403, "image_unreadable", UNREADABLE);
+    return { ...failRead(404, "image_missing", "That image is not on disk."), notYet: true };
+  }
+  if (refused(real)) return refuse(403, "image_hidden", HIDDEN_ANYWHERE);
+  const read = await readImageFileAsync(real);
+  if (!read.ok) return read;
+  return finishImage(read.bytes, { real, named }, read.mtime);
 }
 
 const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);

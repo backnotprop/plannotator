@@ -10,7 +10,7 @@ import { buildFileKindBlocks, kindFolderPath, type FileKindBlock } from '../util
 import { fileKind, type FileKind } from '@plannotator/core/file-kind';
 import { FileKindIcon, FILE_KIND_LABELS } from '@plannotator/guide-viewer/FileKindIcon';
 import { useDiffFileTreeExpansion } from '@plannotator/ui/hooks/useDiffFileTreeExpansion';
-import { FileTreeNodeItem } from './FileTreeNode';
+import { FileTreeNodeItem, alignedTreeIndent, maxTreeIndent } from './FileTreeNode';
 import { EvoLogPicker } from './EvoLogPicker';
 import { WorktreePicker } from './WorktreePicker';
 import { getReviewSearchSideLabel, type ReviewSearchFileGroup, type ReviewSearchMatch } from '../utils/reviewSearch';
@@ -19,7 +19,7 @@ import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea'
 import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
 import { Paperclip } from 'lucide-react';
 import { RepoFileTree } from './RepoFileTree';
-import { ReviewPanelHeader, type ReviewPanelHeaderModel } from './ReviewPanelHeader';
+import { ReviewPanelHeader, ScopeSwitch, reviewPanelBodyProps, type ReviewPanelHeaderModel } from './ReviewPanelHeader';
 
 import type { TreeScope } from '../hooks/useTreeScope';
 import type { RepoFiles } from '../hooks/useRepoFiles';
@@ -27,8 +27,9 @@ import { initialRepoExpansion, repoAncestors } from '../utils/repoTree';
 import type { OverlayScrollAreaHandle } from '@plannotator/ui/components/OverlayScrollArea';
 
 import { SidebarActionRow, SemanticDiffRow, CallFlowRow, AllChangesRow } from './PanelNavRows';
-import { PanelControlsRow, PanelSearchField } from './PanelChrome';
-import { PanelSectionHeader, DiffCounts } from './FileRowBits';
+import { PanelControlsRow, PanelSearchField, TOOLS_ONE_ROW_WIDTH } from './PanelChrome';
+import { PanelSectionHeader, CountColumns, countColumnVars, compactRowsProps } from './FileRowBits';
+import { useHiddenViewedFiles } from '../hooks/useHiddenViewedFiles';
 
 interface FileTreeProps {
   /** The top of the panel (views, the comparison sentence, Changes | All
@@ -44,7 +45,7 @@ interface FileTreeProps {
   /** A file of the listing open outside the diff, highlighted in All files. */
   activeRepoPath?: string | null;
   /** Split the tree into Code / Tests / Generated blocks when the change holds
-   *  two or more kinds ("Group by kind" in Tree controls). */
+   *  two or more kinds ("Group by kind" in the list options menu). */
   groupByKind?: boolean;
   onToggleGroupByKind?: () => void;
   /** The server's generated set: which files form the Generated block. */
@@ -383,11 +384,21 @@ export const FileTree: React.FC<FileTreeProps> = ({
   const scrollAreaRef = useRef<OverlayScrollAreaHandle>(null);
   const getScrollElement = useCallback(() => scrollAreaRef.current?.getViewport() ?? null, []);
 
+  const panelWidth = width ?? 256;
+  const totalAdditions = files.reduce((sum, file) => sum + file.additions, 0);
+  const totalDeletions = files.reduce((sum, file) => sum + file.deletions, 0);
+  const treeIndentCap = maxTreeIndent(panelWidth);
+  const treeIndent = useCallback((depth: number) => alignedTreeIndent(depth, treeIndentCap), [treeIndentCap]);
+  const { hiddenFiles, panelPointerProps } = useHiddenViewedFiles(viewedFiles, hideViewedFiles);
+
   const panelControls = (
     <PanelControlsRow
+      scope={header ? <ScopeSwitch model={header} width={panelWidth} /> : undefined}
       stagedCount={stagedFiles.size}
       isSearchVisible={isSearchVisible}
       onOpenSearch={onOpenSearch}
+      onCloseSearch={searchQuery.trim() ? onSearchClear : onSearchClose}
+      oneRow={panelWidth >= TOOLS_ONE_ROW_WIDTH}
       onToggleAllFolders={showAllFiles ? toggleAllRepoFolders : handleToggleAllFolders}
       areAllFoldersExpanded={showAllFiles ? !repoAllCollapsed : areAllFoldersExpanded}
       collapseDisabled={showAllFiles ? !repoReady : allFolderPaths.length === 0}
@@ -418,6 +429,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
       <FileTreeNodeItem
         key={node.type === 'file' ? node.path : `folder:${node.path}`}
         node={node}
+        indent={treeIndent}
         expandedFolders={expandedFolders}
         onToggleFolder={handleToggleFolder}
         activeFileIndex={rowActiveIndex}
@@ -428,6 +440,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
         onToggleViewed={onToggleViewed}
         showViewedControls={showViewedControls}
         hideViewedFiles={hideViewedFiles}
+        hiddenFiles={hiddenFiles}
         getAnnotationCount={getAnnotationCount}
         stagedFiles={stagedFiles}
         repoRoot={repoRoot}
@@ -472,10 +485,13 @@ export const FileTree: React.FC<FileTreeProps> = ({
 
   return (
     <aside
-      className="border-r border-border/50 bg-card/30 flex flex-col flex-shrink-0 overflow-hidden"
-      style={{ width: width ?? 256 }}
+      data-review-sidebar=""
+      {...compactRowsProps(panelWidth)}
+      {...panelPointerProps}
+      className="review-sidebar border-r flex flex-col flex-shrink-0 overflow-hidden"
+      style={{ width: panelWidth }}
     >
-      {header && <ReviewPanelHeader model={header} width={width ?? 256} />}
+      {header && <ReviewPanelHeader model={header} width={panelWidth} />}
 
       {/* Worktree picker */}
       {worktrees && worktrees.length > 0 && onSelectWorktree && (
@@ -513,9 +529,23 @@ export const FileTree: React.FC<FileTreeProps> = ({
           </div>
         )}
 
-      {/* File tree or search results */}
+      {/* The list: the nav rows scroll with it; the tools and progress rows
+          stick to its top. Then the file tree, All files or search results. */}
       <OverlayScrollArea ref={scrollAreaRef} className="flex-1 min-h-0">
-        <div className="px-1 py-1">
+        <div
+          {...reviewPanelBodyProps(header)}
+          className="px-2 pb-2"
+          style={countColumnVars(totalAdditions, totalDeletions)}
+        >
+          <nav aria-label="Review views" className="pb-3 flex flex-col empty:hidden" data-review-views-nav="">
+          {onSelectAllFiles && (
+            <AllChangesRow
+              active={isAllFilesActive}
+              onClick={onSelectAllFiles}
+              additions={totalAdditions}
+              deletions={totalDeletions}
+            />
+          )}
           {prOverviewNumber && prOverviewTitle && onSelectPROverview && (
             <SidebarActionRow
               active={isPROverviewActive}
@@ -540,6 +570,9 @@ export const FileTree: React.FC<FileTreeProps> = ({
               </span>
             </SidebarActionRow>
           )}
+          {semanticDiffAvailable && onSelectSemanticDiff && (
+            <SemanticDiffRow active={isSemanticDiffActive} onClick={onSelectSemanticDiff} />
+          )}
           {callFlowEnabled && onSelectCallFlow && (
             <CallFlowRow
               active={isCallFlowActive}
@@ -549,17 +582,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
               error={callFlowError}
             />
           )}
-          {semanticDiffAvailable && onSelectSemanticDiff && (
-            <SemanticDiffRow active={isSemanticDiffActive} onClick={onSelectSemanticDiff} />
-          )}
-          {onSelectAllFiles && (
-            <AllChangesRow
-              active={isAllFilesActive}
-              onClick={onSelectAllFiles}
-              additions={files.reduce((sum, file) => sum + file.additions, 0)}
-              deletions={files.reduce((sum, file) => sum + file.deletions, 0)}
-            />
-          )}
+          </nav>
           {panelControls}
           {searchField}
 
@@ -616,16 +639,18 @@ export const FileTree: React.FC<FileTreeProps> = ({
                     const folded = foldedKinds.has(block.kind);
                     // Hide-viewed hides a viewed row unless it is the active
                     // one; a block with no row left hides its header too.
-                    if (hideViewedFiles && block.paths.every((path) => viewedFiles.has(path) && path !== files[rowActiveIndex]?.path)) {
+                    if (hideViewedFiles && block.paths.every((path) => hiddenFiles.has(path) && path !== files[rowActiveIndex]?.path)) {
                       return null;
                     }
                     return (
-                      <div key={block.kind} className="mb-1" data-file-kind-block={block.kind}>
+                      <div key={block.kind} className="review-panel-group" data-file-kind-block={block.kind}>
                         <PanelSectionHeader
                           label={FILE_KIND_LABELS[block.kind]}
                           collapsed={folded}
                           onToggle={() => setKindFolded(block.kind, !folded)}
                           icon={<FileKindIcon kind={block.kind} />}
+                          tooltip={KIND_COVERS[block.kind]}
+                          ariaLabel={kindHeadingName(block, viewedFiles)}
                         >
                           <KindBlockCounts block={block} viewedFiles={viewedFiles} />
                         </PanelSectionHeader>
@@ -667,18 +692,37 @@ const RepoListingPlaceholder: React.FC<{ state: RepoFiles['state'] | undefined; 
   return null;
 };
 
-/** A kind block header's tail: file count, then viewed/total and +/-. */
+/** What each kind block holds (`fileKind` in packages/core/file-kind.ts),
+ *  for its heading's tooltip and spoken name. The label stays "Code"
+ *  (approved design record "review-file-kinds"); this says what it means. */
+const KIND_COVERS: Record<FileKindBlock['kind'], string> = {
+  code: 'Everything that is not a test or a generated file, docs and config included',
+  test: 'Test files (such as *.test.ts, *_test.go, test_*.py) and files in test folders (tests, __tests__, spec, e2e, fixtures)',
+  generated: 'Generated files: lockfiles, minified and source-map files, and files marked linguist-generated in .gitattributes',
+};
+
+/** A kind heading's spoken name: "Code: 9 files, 0 viewed, 66 lines added,
+ *  9 removed. Everything that is not a test …" (the numbers the heading
+ *  draws, in words, then what the group holds). */
+function kindHeadingName(block: FileKindBlock, viewedFiles: Set<string>): string {
+  const total = block.paths.length;
+  const viewed = block.paths.filter((path) => viewedFiles.has(path)).length;
+  const files = `${total} file${total === 1 ? '' : 's'}`;
+  return `${FILE_KIND_LABELS[block.kind]}: ${files}, ${viewed} viewed, ${block.additions} lines added, ${block.deletions} removed. ${KIND_COVERS[block.kind]}.`;
+}
+
+/** A kind heading's numbers: viewed/total as a third column, then +/- in the
+ *  panel's two number columns. No bare file count: "0/9" already says 9. */
 const KindBlockCounts: React.FC<{ block: FileKindBlock; viewedFiles: Set<string> }> = ({ block, viewedFiles }) => {
   const total = block.paths.length;
   const viewed = block.paths.filter((path) => viewedFiles.has(path)).length;
   return (
-    <>
-      <span className="text-[11px] tabular-nums text-muted-foreground/70">{total}</span>
-      <span className="ml-auto flex items-center gap-1.5 text-[10px] tabular-nums">
-        <span title={`${viewed} of ${total} viewed`}>{viewed}/{total}</span>
-        <DiffCounts additions={block.additions} deletions={block.deletions} />
+    <span className="ml-auto flex items-center gap-2 pl-2" data-kind-counts="">
+      <span className="review-kind-viewed" data-kind-viewed="" title={`${viewed} of ${total} viewed`}>
+        {viewed}/{total}
       </span>
-    </>
+      <CountColumns additions={block.additions} deletions={block.deletions} tone="quiet" />
+    </span>
   );
 };
 
@@ -784,7 +828,7 @@ const SearchMatchRow: React.FC<{
   return (
     <button
       className={`w-full text-left px-2 py-1 rounded-sm text-xs font-mono transition-colors flex items-start gap-1.5 ${
-        isActive ? 'bg-primary/15 text-foreground' : 'hover:bg-muted/50 text-muted-foreground'
+        isActive ? 'bg-[var(--sidebar-fill-strong)] text-foreground' : 'hover:bg-muted/50 text-muted-foreground'
       }`}
       onClick={onSelect}
     >

@@ -15,6 +15,7 @@
  */
 
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "os";
@@ -86,6 +87,30 @@ describe("annotate server: /api/save-notes wiring", () => {
       expect(await response.text()).toContain("Plannotator");
     } finally {
       server.stop();
+    }
+  });
+
+  test("/api/plan identifies the annotated file's repository, not the launch repository", async () => {
+    const targetRoot = mkdtempSync(join(tmpdir(), "plannotator-annotate-target-repo-"));
+    const filePath = join(targetRoot, "specs", "refunds.md");
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, "# Refunds\n", "utf-8");
+    execFileSync("git", ["init", "-q"], { cwd: targetRoot });
+    execFileSync("git", ["remote", "add", "origin", "https://github.com/acme/payments-docs.git"], { cwd: targetRoot });
+
+    const server = await startAnnotateServer({
+      markdown: "# Refunds\n",
+      filePath,
+      htmlContent: MINIMAL_HTML,
+    });
+    try {
+      const payload = (await (await fetch(`${server.url}/api/plan`)).json()) as {
+        repoInfo?: { display: string };
+      };
+      expect(payload.repoInfo?.display).toBe("acme/payments-docs");
+    } finally {
+      server.stop();
+      rmSync(targetRoot, { recursive: true, force: true });
     }
   });
 });
@@ -170,6 +195,8 @@ describe("annotate server: /api/share-html symlink containment", () => {
   // containment check, so a symlinked *.html inside the doc directory pointing
   // outside it leaked the target's contents into the share payload. (Completes
   // the #927 symlink fix, which hardened the asset sinks but missed this one.)
+  // Since #2291 a page on this machine shares an HTML document from anywhere,
+  // as /api/doc serves it; the containment holds for a reader off this machine.
   test("rejects a symlinked .html that escapes the document directory", async () => {
     const docDir = mkdtempSync(join(tmpdir(), "plannotator-sharehtml-"));
     const secretDir = mkdtempSync(join(tmpdir(), "plannotator-secret-"));
@@ -190,6 +217,7 @@ describe("annotate server: /api/share-html symlink containment", () => {
     try {
       const response = await fetch(
         `${server.url}/api/share-html?path=${encodeURIComponent(join(docDir, "evil.html"))}`,
+        { headers: { "X-Forwarded-For": "192.0.2.10" } },
       );
       expect(response.status).toBe(403);
       expect(await response.text()).not.toContain("SECRET_OUTSIDE_CONTENT");
@@ -933,6 +961,38 @@ describe("annotate server: folder annotate history", () => {
     }
   });
 
+  test("a config file is served as code and still keeps per-file version history", async () => {
+    // The failure: a new render kind left out of the history gate, so a .toml
+    // in a folder lost its +N/−M badge the day it stopped rendering as markdown.
+    const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-history-code-"));
+    const docPath = join(folderPath, "config.toml");
+    writeFileSync(docPath, "# Config\n[server]\nport = 8080\n", "utf-8");
+    const project = uniqueProject("code");
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: folderPath,
+      folderPath,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+      project,
+    });
+
+    try {
+      const res = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}&doc=1`);
+      const json = await res.json() as {
+        renderAs?: string;
+        markdown?: string;
+        versionInfo?: { version: number; totalVersions: number; project: string };
+      };
+      expect(json.renderAs).toBe("code");
+      expect(json.markdown).toBe("# Config\n[server]\nport = 8080\n");
+      expect(json.versionInfo).toEqual({ version: 1, totalVersions: 1, project });
+    } finally {
+      server.stop();
+    }
+  });
+
   test("content matching the latest stored version dedupes (mints nothing) and still serves correct previous-version fields", async () => {
     const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-history-dedupe-"));
     const docPath = join(folderPath, "note.md");
@@ -1289,11 +1349,16 @@ describe("annotate server: folder annotate history", () => {
       expect(versionAfter.status).toBe(200);
       expect(await versionAfter.json()).toEqual({ plan: "V1\n", version: 1 });
 
-      // A path outside the folder root is rejected the same way /api/doc rejects it.
+      // A path outside the folder root resolves the way /api/doc resolves it:
+      // a tab on this machine reaches it (#2291), a forwarded reader does not.
       const outsidePath = join(realpathSync(tmpdir()), "outside.md");
-      const deniedVersions = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(outsidePath)}`);
+      const outsideVersions = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(outsidePath)}`);
+      expect(outsideVersions.status).toBe(200);
+      expect((await outsideVersions.json()).versions).toEqual([]);
+      const forwarded = { headers: { "x-forwarded-for": "100.101.102.103" } };
+      const deniedVersions = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(outsidePath)}`, forwarded);
       expect(deniedVersions.status).toBe(403);
-      const deniedVersion = await fetch(`${server.url}/api/plan/version?path=${encodeURIComponent(outsidePath)}&v=1`);
+      const deniedVersion = await fetch(`${server.url}/api/plan/version?path=${encodeURIComponent(outsidePath)}&v=1`, forwarded);
       expect(deniedVersion.status).toBe(403);
 
       // Without a path param at all, behavior is exactly today's: this

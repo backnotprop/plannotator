@@ -1,7 +1,7 @@
 /**
  * Pi event mapping — shared between Bun and Node.js Pi providers.
  *
- * Pure function, no runtime-specific dependencies.
+ * Pure functions, no runtime-specific dependencies.
  */
 
 import type { AIMessage } from "../types.ts";

@@ -555,6 +555,32 @@ test.skipIf(!hasDom)("Done from the open row's button moves focus to the next ro
   expect(document.activeElement).toBe(toggleOf(rowOf(el, 1)));
 });
 
+test.skipIf(!hasDom)('a field the person went to while Done saved keeps focus; the toggle does not take it', async () => {
+  let release: (ok: boolean) => void = () => {};
+  const onMark = () => new Promise<boolean>((resolve) => (release = resolve));
+  const el = mount(<ActionChecklist actions={[record(0), record(1)]} agent="Claude Code" onMark={onMark} />);
+  const note = document.createElement('textarea');
+  el.appendChild(note);
+  click(panelOf(rowOf(el, 0)).querySelector('[data-action-done]')!);
+  act(() => note.focus());
+  await act(async () => {
+    release(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(document.activeElement).toBe(note);
+});
+
+test.skipIf(!hasDom)('what held focus at the press still holds it after Done (WebKit: the message, on a click): focus still moves to the toggle', async () => {
+  const el = mount(<ActionChecklist actions={[record(0), record(1)]} agent="Claude Code" onMark={async () => true} />);
+  const message = document.createElement('div');
+  message.tabIndex = -1;
+  el.appendChild(message);
+  act(() => message.focus());
+  click(panelOf(rowOf(el, 0)).querySelector('[data-action-done]')!);
+  await settle();
+  expect(document.activeElement).toBe(toggleOf(rowOf(el, 1)));
+});
+
 test.skipIf(!hasDom)("Can't do it asks for the reason; nothing goes without one", async () => {
   const marks: unknown[] = [];
   const el = mount(<ActionChecklist actions={[record(0)]} agent="Claude Code" onMark={async (_a, mark) => (marks.push(mark), true)} />);
@@ -575,6 +601,30 @@ test.skipIf(!hasDom)("Can't do it asks for the reason; nothing goes without one"
   click(panel.querySelector('[data-action-cant-send]')!);
   await settle();
   expect(marks).toEqual([{ outcome: 'cant', note: "I'm not an org owner; ask Dana." }]);
+});
+
+test.skipIf(!hasDom)("Escape or Cancel in Can't do it's note puts focus back on Can't do it…, never on the page", async () => {
+  const el = mount(<ActionChecklist actions={[record(0)]} agent="Claude Code" onMark={async () => true} />);
+  const panel = panelOf(rowOf(el, 0));
+  const cant = () => panel.querySelector<HTMLButtonElement>('[data-action-cant]')!;
+  act(() => cant().focus());
+  click(cant());
+  const area = panel.querySelector<HTMLTextAreaElement>('textarea')!;
+  expect(document.activeElement).toBe(area);
+  const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  act(() => {
+    area.dispatchEvent(escape);
+  });
+  // One rung: the note closes and the key stops there.
+  expect(escape.defaultPrevented).toBe(true);
+  expect(panel.querySelector('textarea')).toBeNull();
+  expect(document.activeElement).toBe(cant());
+  // Cancel does the same.
+  click(cant());
+  expect(document.activeElement).toBe(panel.querySelector('textarea'));
+  click(panel.querySelector('[data-action-cant-cancel]')!);
+  expect(panel.querySelector('textarea')).toBeNull();
+  expect(document.activeElement).toBe(cant());
 });
 
 test.skipIf(!hasDom)('settled rows: sent, can\'t do it with its reason, the agent saw it done, set aside; none offers Done', () => {
@@ -754,11 +804,23 @@ test.skipIf(!hasDom)('the row draws open action items as the box pill and open q
   const named = rowOf('.ib-row', 'msg_b').cloneNode(true) as Element;
   named.querySelectorAll('[aria-hidden="true"]').forEach((n) => n.remove());
   expect(named.textContent).toContain(' 1 action to do 2 questions');
-  // Beside a thread and on a phone: at line 2's end, the action pill then `?N`, after the marks and the badge.
-  for (const [narrow, phone, shape, line] of [[true, false, '.ib-nrow', '.ib-l2'], [false, true, '.ib-mrow', '.ib-ml2']] as const) {
+  // Beside a thread and on a phone: at line 3's end, the action pill then `?N`, after the badge.
+  for (const [narrow, phone, shape, line] of [[true, false, '.ib-nrow', '.ib-l3'], [false, true, '.ib-mrow', '.ib-m3']] as const) {
     rerender(list(narrow, phone));
     for (const [id, want] of Object.entries(expected)) expect(counts(rowOf(shape, id))).toEqual(want as never);
     const tail = [...rowOf(shape, 'msg_b').querySelector(line)!.children].slice(-3).map((c) => (c.matches('[data-row-badge]') ? 'badge' : c.matches('[data-action-count]') ? 'action' : c.classList.contains('ib-qn') ? 'question' : c.className));
     expect(tail).toEqual(['badge', 'action', 'question']);
   }
+});
+
+test.skipIf(!hasDom)('a message stored before the reader dropped a task box from the first line still draws its card (matched by its place)', () => {
+  const body = ":::action\n- [ ] Let this MacBook's key into the Mac mini\n\n  ```\n  ssh-copy-id user@host\n  ```\n:::";
+  const [parsed] = parseInboxActionBlocks(body);
+  expect(parsed!.prompt).toBe("Let this MacBook's key into the Mac mini");
+  // The record kept the key its first line had then ("[ ] Let this…").
+  const stored = { ...record(0), key: 'a-0badc0de', position: 0, prompt: "[ ] Let this MacBook's key into the Mac mini" };
+  expect(actionForBlock(body, [stored], { startLine: parsed!.startLine, content: '' })?.key).toBe('a-0badc0de');
+  // A record with its own key wins over one at the same place.
+  const fresh = { ...record(0), key: parsed!.key, position: 0 };
+  expect(actionForBlock(body, [stored, fresh], { startLine: parsed!.startLine, content: '' })?.key).toBe(parsed!.key);
 });

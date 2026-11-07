@@ -54,8 +54,18 @@ body:
         - Plan review
         - Code review
         - Annotate
+        - Inbox
+        - Inbox on a phone
         - Install / CLI
         - VS Code extension
         - Other
     validations:
       required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser
+      description: For the Inbox or any page that opens in a browser. Which browser and version?
+      placeholder: Chrome 142, Safari on iPhone
+    validations:
+      required: false

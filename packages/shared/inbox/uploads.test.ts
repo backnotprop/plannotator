@@ -60,7 +60,7 @@ describe("uploads", () => {
       body: "files",
       to: { host: "pi", session: "s" },
       idempotency_key: "k",
-      attachments: inboxUploadAttachments(inbox, [sentBytes.upload_id], at(old)),
+      attachments: await inboxUploadAttachments(inbox, [sentBytes.upload_id], at(old)),
     });
     const swept = sweepInboxUploads(inbox, { keep: new Set([drafted.upload_id]), usedBlobs: store.usedBlobs(), now });
     expect(swept.sort()).toEqual([forgotten.upload_id, sentBytes.upload_id].sort());
@@ -75,7 +75,7 @@ describe("uploads", () => {
     const project = store.ensureProject({ name: "repo", root: "/work/repo" });
     const pending = await receiveInboxUpload(inbox, "pending.txt", stream("not sent yet"), { at: at(Date.now()) });
     const sent = await receiveInboxUpload(inbox, "sent.txt", stream("sent with the thread"), { at: at(Date.now()) });
-    const attachments = inboxUploadAttachments(inbox, [sent.upload_id], at(Date.now()));
+    const attachments = await inboxUploadAttachments(inbox, [sent.upload_id], at(Date.now()));
     const { message } = store.startPersonThread({ project_id: project.id, body: "files", to: { host: "pi", session: "s" }, idempotency_key: "k", attachments });
     expect(existsSync(attachments[0]!.path)).toBe(true);
     store.deleteThread(message.thread_id);

@@ -75,6 +75,53 @@ describe("getPlannotatorDataDir", () => {
     expect(dir).toBe(join(fakeHome, ".plannotator"));
   });
 
+  // #2305: an agent following old skill text made ~/.plannotator on an XDG
+  // install, and every process then switched to that near-empty folder.
+  test("a stray ~/.plannotator does not hide an XDG folder that holds the data", () => {
+    const xdg = join(fakeHome, "xdg-data");
+    mkdirSync(join(xdg, "plannotator", "history"), { recursive: true });
+    // Exactly what the compound skill and old help text could leave behind.
+    mkdirSync(join(fakeHome, ".plannotator", "hooks", "compound"), { recursive: true });
+    writeFileSync(join(fakeHome, ".plannotator", "hooks", "compound", "enterplanmode-improve-hook.txt"), "1. x\n");
+    mkdirSync(join(fakeHome, ".plannotator", "plans"));
+    writeFileSync(join(fakeHome, ".plannotator", "plans", "compound-planning-report.html"), "<html>");
+    writeFileSync(join(fakeHome, ".plannotator", "config.json"), "{}");
+
+    expect(resolveDataDir({ XDG_DATA_HOME: xdg })).toBe(join(xdg, "plannotator"));
+  });
+
+  test("an empty ~/.plannotator does not hide an XDG folder that holds the data", () => {
+    const xdg = join(fakeHome, "xdg-data");
+    mkdirSync(join(xdg, "plannotator", "sessions"), { recursive: true });
+    mkdirSync(join(fakeHome, ".plannotator"));
+
+    expect(resolveDataDir({ XDG_DATA_HOME: xdg })).toBe(join(xdg, "plannotator"));
+  });
+
+  test("~/.plannotator still wins when it holds Plannotator data, even if the XDG folder does too", () => {
+    const xdg = join(fakeHome, "xdg-data");
+    mkdirSync(join(xdg, "plannotator", "history"), { recursive: true });
+    mkdirSync(join(fakeHome, ".plannotator"));
+    writeFileSync(join(fakeHome, ".plannotator", "install-flags.json"), "{}");
+
+    expect(resolveDataDir({ XDG_DATA_HOME: xdg })).toBe(join(fakeHome, ".plannotator"));
+  });
+
+  test("~/.plannotator still wins when the XDG folder exists but holds no data", () => {
+    const xdg = join(fakeHome, "xdg-data");
+    mkdirSync(join(xdg, "plannotator", "hooks"), { recursive: true });
+    mkdirSync(join(fakeHome, ".plannotator"));
+
+    expect(resolveDataDir({ XDG_DATA_HOME: xdg })).toBe(join(fakeHome, ".plannotator"));
+  });
+
+  test("an XDG folder with data is ignored when XDG_DATA_HOME is unset", () => {
+    mkdirSync(join(fakeHome, ".local", "share", "plannotator", "history"), { recursive: true });
+    mkdirSync(join(fakeHome, ".plannotator"));
+
+    expect(resolveDataDir({})).toBe(join(fakeHome, ".plannotator"));
+  });
+
   test("defaults to ~/.plannotator when nothing is set", () => {
     const dir = resolveDataDir({});
 

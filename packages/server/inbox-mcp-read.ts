@@ -29,12 +29,14 @@
  * text alone; an older one appends this trimmed JSON as well.
  */
 
-import { INBOX_HOST_NAMES, inboxAgentName, inboxBoardRequestBlock, isInboxNote, type InboxMessageWire, type InboxQuestion } from "@plannotator/core/inbox-types";
+import { INBOX_DECISION_ASK_BLOCK, INBOX_HOST_NAMES, inboxAgentName, inboxBoardRequestBlock, isInboxNote, type InboxMessageWire, type InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxAnswersSectionEnd } from "@plannotator/core/inbox-questions";
 import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from "@plannotator/core/question-block";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSearchBodyText, inboxSearchReplyText } from "@plannotator/shared/inbox/search";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { INBOX_TIDY_WITHDRAWN_HOST } from "@plannotator/shared/inbox/tidy";
+import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
 
 /** Messages read_thread shows in full by default: the newest six. */
 export const INBOX_THREAD_WINDOW = 6;
@@ -129,8 +131,12 @@ export interface AgentMessage {
    * the person's words.
    */
   board_request?: true;
-  /** With `board_request`: the cards in flight that link this thread already (not shipped, not dropped), for `messageText`. */
+  /** Asked from Decision data: `messageText` puts `INBOX_DECISION_ASK_BLOCK` after the body; `body` stays the person's words. */
+  decision_ask?: true;
+  /** With `board_request`: the cards in flight that link this thread already (not done, not dropped), for `messageText`. */
   board_cards?: { id: string; title: string }[];
+  /** `inboxViewingLine`, on a reply sent from full screen's floating box. `body` stays the person's words. */
+  viewing?: string;
 }
 
 /** One agent session a person's reply tags, as an agent reads it. */
@@ -163,6 +169,7 @@ export interface AgentMessageLine {
   to?: AgentAddressee;
   tagged?: AgentTagged[];
   board_request?: true;
+  viewing?: string;
 }
 
 export interface ThreadReadInput {
@@ -348,15 +355,14 @@ export function agentQuestions(questions: readonly InboxQuestion[]): AgentQuesti
 
 /**
  * One question in words: `Q1 q-abc sent: "Yes"`, `Q2 q-def open`, `Q3 q-… replaced by msg_…/q-…`.
- * `withPrompt` names the prompt (a one-line message); `withAnswer` false
- * leaves the answer out (wait_for_reply, whose reply body words it).
+ * `withPrompt` names the prompt (a one-line message).
  */
-export function questionWords(q: AgentQuestionRef, withPrompt = false, withAnswer = true): string {
+export function questionWords(q: AgentQuestionRef, withPrompt = false): string {
   // An action item (key `a-…`) reads A1, A2…: the reply's "Action items you asked for" numbers it so.
   const head = `${q.key.startsWith("a-") ? "A" : "Q"}${q.q} ${q.key}${withPrompt && q.prompt ? ` (${JSON.stringify(q.prompt)})` : ""}`;
   if (q.result) return `${head} ${q.result}`;
   if (q.state === "superseded") return `${head} ${q.superseded_by?.includes("/") ? `replaced by ${q.superseded_by}` : "no longer applies"}`;
-  const answer = withAnswer ? answerWords(q.answer) : "";
+  const answer = answerWords(q.answer);
   if (q.state === "picked") return `${head} picked, not sent${answer ? `: ${answer}` : ""}`;
   if (q.state === "sent") return `${head} sent${answer ? `: ${answer}` : ""}`;
   if (q.state === "closed") return `${head} closed${answer ? ` (${answer})` : ""}`;
@@ -419,6 +425,8 @@ export function agentMessage(message: InboxMessageWire, form: AgentMessageForm =
     ...(message.to ? { to: addressee(message, caller) } : {}),
     ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
     ...(message.board_request === true ? { board_request: true as const } : {}),
+    ...(message.decision_ask === true ? { decision_ask: true as const } : {}),
+    ...(inboxViewingLine(message) ? { viewing: inboxViewingLine(message) } : {}),
   };
 }
 
@@ -447,6 +455,7 @@ export function agentMessageLine(message: InboxMessageWire, caller: string | nul
     ...(message.to ? { to: addressee(message, caller) } : {}),
     ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
     ...(message.board_request === true ? { board_request: true as const } : {}),
+    ...(inboxViewingLine(message) ? { viewing: inboxViewingLine(message) } : {}),
   };
 }
 
@@ -474,7 +483,12 @@ export function windowedThread(
   const thread = store.agentThread(threadId, input.caller ?? null);
   if (!thread) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
   // A reply that tags agents names its owner as `to` (the session it goes to anyway), so the transcript says who it is for.
-  const all = thread.messages.map((message) => {
+  // A Tidy run whose wake to a session was withdrawn (steps turned off, only steps listed) asked it nothing: its notes are left out.
+  const withdrawn = thread.messages.some((m) => m.tidy)
+    ? new Set(store.tidyNotes().filter((m) => m.tidy?.wake && m.to && m.delivery?.host === INBOX_TIDY_WITHDRAWN_HOST).map((m) => `${m.tidy!.id}|${m.to!.session}`))
+    : null;
+  const listed = withdrawn && withdrawn.size > 0 ? thread.messages.filter((m) => !(m.tidy && m.to && withdrawn.has(`${m.tidy.id}|${m.to.session}`))) : thread.messages;
+  const all = listed.map((message) => {
     // A Tidy note reads as one line here: its session had the whole list in its wake.
     if (message.tidy) return { ...message, body: `Tidy: the person asked ${INBOX_HOST_NAMES[message.to?.host ?? ""] ?? "the agent"} to tidy its threads; this one was listed.` };
     if (message.to || !(message as { tagged?: unknown }).tagged) return message;
@@ -527,12 +541,12 @@ export function windowedThread(
   const formOf = (id: string): AgentMessageForm => (whole.has(id) ? "whole" : personEarlier.has(id) ? "earlier" : "window");
   const caller = input.caller ?? null;
   // A Board request in full names the cards that link the thread already (review of #2249: no second card on a re-read).
-  // Only cards still in flight: a shipped card is done (new work in the thread gets a new card), and the card
-  // list op hides shipped and dropped cards by default, so the agent's list agrees with this line.
+  // Only cards still in flight: a card in Done is finished (new work in the thread gets a new card), and the card
+  // list op hides done and dropped cards by default, so the agent's list agrees with this line.
   const linkedCards = () =>
     store
       .listCards({ projectIds: new Set([thread.project.id]) })
-      .filter((card) => card.column !== "dropped" && card.column !== "shipped" && card.threads.includes(threadId))
+      .filter((card) => card.column !== "dropped" && card.column !== "done" && card.threads.includes(threadId))
       .map((card) => ({ id: card.id, title: card.title }));
   const messages = all
     .filter((m) => full.has(m.id))
@@ -647,6 +661,7 @@ export function messageLineText(line: AgentMessageLine, context: TranscriptConte
   const tagged = taggedWords(line.tagged);
   if (tagged) parts.push(tagged);
   parts.push(`"${line.words}" (${sizeText(line.bytes)})`);
+  if (line.viewing) parts.push(line.viewing);
   if (line.questions?.length) parts.push(line.questions.map((q) => questionWords(q, true)).join("; "));
   if (line.attachments?.length) parts.push(`files: ${line.attachments.join(", ")}`);
   if (line.guide) parts.push(`guided review: ${line.guide}`);
@@ -664,6 +679,7 @@ export function messageText(message: AgentMessage, context: TranscriptContext): 
   const tagged = taggedWords(message.tagged);
   if (tagged) head.push(tagged);
   const lines = [`[${head.join(" · ")}]`, message.body.trimEnd()];
+  if (message.viewing) lines.push(message.viewing);
   if (message.questions?.length) lines.push(`Questions: ${message.questions.map((q) => questionWords(q)).join("; ")}`);
   if (message.attachments?.length) {
     lines.push(`Files: ${message.attachments.map((a) => `${a.name} (${a.kind}, ${sizeText(a.size)}): ${a.path}`).join("; ")}`);
@@ -678,11 +694,12 @@ export function messageText(message: AgentMessage, context: TranscriptContext): 
       lines.push(`Already on the Board for this thread: ${message.board_cards.map((c) => `${c.id} (${c.title})`).join("; ")}. Keep ${message.board_cards.length === 1 ? "it" : "them"} current; make no other.`);
     }
   }
+  if (message.decision_ask) lines.push("", INBOX_DECISION_ASK_BLOCK);
   return lines.join("\n");
 }
 
 /** The whole windowed read as text: complete for an agent (the JSON adds nothing it needs). */
-export function windowedThreadText(result: ThreadWindowResult, order: readonly string[], extra = ""): string {
+export function windowedThreadText(result: ThreadWindowResult, order: readonly string[], extra = "", steps: readonly string[] = []): string {
   const { thread, window } = result;
   const persons = thread.participants.filter((p) => p.kind === "person").reduce((sum, p) => sum + p.messages, 0);
   const out: string[] = [];
@@ -718,6 +735,8 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
   if (thread.questions?.length) {
     out.push(`Questions of messages not shown: ${thread.questions.map((q) => `${q.message_id}/${questionWords(q, true)}`).join("; ")}`);
   }
+  // Thread steps (approval "inbox-thread-steps"): given only while the person has them on.
+  out.push(...steps);
   const range = window.after !== undefined || window.before !== undefined
     ? ` Range:${window.after !== undefined ? ` after ${window.after}` : ""}${window.before !== undefined ? ` before ${window.before}` : ""}; ${window.left_out} other message${window.left_out === 1 ? "" : "s"} left out.`
     : "";

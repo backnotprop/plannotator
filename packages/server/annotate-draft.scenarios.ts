@@ -106,15 +106,22 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       servers.splice(servers.indexOf(server), 1);
     }
 
-    const post = (server: DraftScenarioServer, path: string, body: unknown) =>
+    const post = (server: DraftScenarioServer, path: string, body: unknown, headers: Record<string, string> = {}) =>
       fetch(`${server.url}${path}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...headers },
         body: JSON.stringify(body),
       });
 
-    const saveDocuments = (server: DraftScenarioServer, documents: { path: string; annotations: unknown[] }[]) =>
-      post(server, "/api/draft/document", { documents });
+    const saveDocuments = (
+      server: DraftScenarioServer,
+      documents: { path: string; annotations: unknown[] }[],
+      headers: Record<string, string> = {},
+    ) => post(server, "/api/draft/document", { documents }, headers);
+
+    // A reader that keeps the session's roots (#2291): a tab on this machine
+    // may keep copies of documents anywhere, as /api/doc serves it them.
+    const FORWARDED = { "X-Forwarded-For": "192.0.2.10" };
 
     test("a comment comes back after the file is edited and the review reopened", async () => {
       const first = await openFile("notes.md", "# Notes\n\nBody v1\n");
@@ -301,6 +308,122 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       expect(idsOf(await kept.json())).toEqual(["keep"]);
     });
 
+    // A page names itself with `?client=` (one id per page load), as the
+    // editor does; a reload is a new page with a new id.
+    const savePageDocuments = (server: DraftScenarioServer, page: string, documents: { path: string; annotations: unknown[] }[]) =>
+      post(server, `/api/draft/document?client=${page}`, { documents });
+    const readPageDocument = (server: DraftScenarioServer, page: string, path: string) =>
+      fetch(`${server.url}/api/draft/document?path=${encodeURIComponent(path)}&client=${page}`);
+    const copyIds = async (server: DraftScenarioServer, path: string) => {
+      const res = await fetch(`${server.url}/api/draft/document?path=${encodeURIComponent(path)}`);
+      return res.status === 200 ? idsOf(await res.json()) : res.status;
+    };
+    const offeredPaths = async (server: DraftScenarioServer) => {
+      const res = await fetch(`${server.url}/api/draft`);
+      if (res.status !== 200) return [];
+      const body = (await res.json()) as { documents?: { path: string; annotations: { id: string }[] }[] };
+      return (body.documents ?? []).map((d) => [d.path, idsOf(d)]);
+    };
+    const threeFiles = () => {
+      const files = ["alpha.md", "beta.md", "gamma.md"].map((name) => join(docDir, name));
+      for (const file of files) writeFileSync(file, `# ${file}\n\nBody\n`);
+      return files;
+    };
+
+    // The reported loss: a comment on each of three files, the tab reloads
+    // (or crashes and is reopened), only one file is opened again, and the
+    // feedback is sent. Upstream offered nothing on the reload and the send
+    // then deleted the two unopened files' copies.
+    test("a folder reload offers every file's comments, and sending from the new page keeps the ones it never opened", async () => {
+      const [alpha, beta, gamma] = threeFiles();
+      const folder = await openFolder();
+      await savePageDocuments(folder, "page-1", [
+        { path: alpha, annotations: [comment("on-alpha")] },
+        { path: beta, annotations: [comment("on-beta")] },
+        { path: gamma, annotations: [comment("on-gamma")] },
+      ]);
+
+      // The reload: the new page's session draft load offers all three.
+      expect(await offeredPaths(folder)).toEqual([
+        [alpha, ["on-alpha"]],
+        [beta, ["on-beta"]],
+        [gamma, ["on-gamma"]],
+      ]);
+
+      // The new page opens gamma alone and sends.
+      expect(idsOf(await (await readPageDocument(folder, "page-2", gamma)).json())).toEqual(["on-gamma"]);
+      expect((await post(folder, "/api/feedback?client=page-2", { feedback: "x", annotations: [comment("on-gamma")] })).ok).toBe(true);
+      close(folder);
+
+      // Gamma was sent and is gone; alpha and beta were never sent: their
+      // copies stay, and the next session offers them again.
+      const next = await openFolder();
+      expect(await copyIds(next, gamma)).toBe(404);
+      expect(await copyIds(next, alpha)).toEqual(["on-alpha"]);
+      expect(await copyIds(next, beta)).toEqual(["on-beta"]);
+      expect(await offeredPaths(next)).toEqual([
+        [alpha, ["on-alpha"]],
+        [beta, ["on-beta"]],
+      ]);
+    });
+
+    test("a folder page that restores every file's comments and sends clears them all", async () => {
+      const files = threeFiles();
+      const folder = await openFolder();
+      await savePageDocuments(folder, "page-1", files.map((path, i) => ({ path, annotations: [comment(`c${i}`)] })));
+      // Draft Recovered's Restore reads each copy under the new page's id.
+      for (const path of files) expect((await readPageDocument(folder, "page-2", path)).status).toBe(200);
+      expect((await post(folder, "/api/feedback?client=page-2", { feedback: "x", annotations: [] })).ok).toBe(true);
+      close(folder);
+
+      const next = await openFolder();
+      expect((await fetch(`${next.url}/api/draft`)).status).toBe(404);
+      for (const path of files) {
+        expect((await fetch(`${next.url}/api/draft/document?path=${encodeURIComponent(path)}`)).status).toBe(404);
+      }
+    });
+
+    test("one tab's decision keeps the comments another tab of the same session wrote", async () => {
+      const [alpha, beta] = threeFiles();
+      const folder = await openFolder();
+      await savePageDocuments(folder, "tab-a", [{ path: alpha, annotations: [comment("from-a")] }]);
+      await savePageDocuments(folder, "tab-b", [{ path: beta, annotations: [comment("from-b")] }]);
+      expect((await post(folder, "/api/feedback?client=tab-b", { feedback: "x", annotations: [comment("from-b")] })).ok).toBe(true);
+      close(folder);
+
+      const next = await openFolder();
+      expect(await copyIds(next, beta)).toBe(404);
+      expect(await copyIds(next, alpha)).toEqual(["from-a"]);
+    });
+
+    test("the reviewer's Close from a reloaded page keeps what an earlier page wrote", async () => {
+      const [alpha, beta] = threeFiles();
+      const folder = await openFolder();
+      await savePageDocuments(folder, "page-1", [{ path: alpha, annotations: [comment("kept")] }]);
+      await savePageDocuments(folder, "page-2", [{ path: beta, annotations: [comment("closed")] }]);
+      expect((await fetch(`${folder.url}/api/exit?client=page-2`, { method: "POST" })).ok).toBe(true);
+      close(folder);
+
+      const next = await openFolder();
+      expect(await copyIds(next, beta)).toBe(404);
+      expect(await copyIds(next, alpha)).toEqual(["kept"]);
+    });
+
+    test("a single-file session's reload offers its linked documents' comments", async () => {
+      const linked = join(docDir, "linked.md");
+      writeFileSync(linked, "# Linked\n");
+      const session = await openFile("root.md", "# Root\n\n[linked](linked.md)\n");
+      await savePageDocuments(session, "page-1", [{ path: linked, annotations: [comment("on-linked")] }]);
+      // The root itself has no comments: the offer still comes back.
+      expect(await offeredPaths(session)).toEqual([[linked, ["on-linked"]]]);
+      expect((await post(session, "/api/feedback?client=page-2", { feedback: "x", annotations: [] })).ok).toBe(true);
+      close(session);
+
+      // Never opened by the deciding page, so never deleted by it.
+      const reopened = await openFile("root.md", "# Root\n\n[linked](linked.md)\n");
+      expect(await copyIds(reopened, linked)).toEqual(["on-linked"]);
+    });
+
     test("sending a document with no comments clears its copy", async () => {
       const filePath = join(docDir, "cleared.md");
       writeFileSync(filePath, "# Cleared\n");
@@ -314,13 +437,13 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       const outside = join(root, "elsewhere.md");
       writeFileSync(outside, "# Elsewhere\n");
       const folder = await openFolder();
-      expect((await fetch(`${folder.url}/api/draft/document?path=${encodeURIComponent(outside)}`)).status).toBe(403);
+      expect((await fetch(`${folder.url}/api/draft/document?path=${encodeURIComponent(outside)}`, { headers: FORWARDED })).status).toBe(403);
       const inside = join(docDir, "inside.md");
       writeFileSync(inside, "# Inside\n");
       const res = await saveDocuments(folder, [
         { path: outside, annotations: [comment("x")] },
         { path: inside, annotations: [comment("y")] },
-      ]);
+      ], FORWARDED);
       const body = await res.json();
       expect(body.rejected).toEqual([outside]);
       expect(body.written).toBe(1);

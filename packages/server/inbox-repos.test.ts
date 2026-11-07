@@ -133,6 +133,27 @@ test("an Inbox that starts on an existing store resolves its projects' remotes; 
   expect(await settledRepo(second, threadId)).toEqual({ display: "group/sub/platform", host: "gitlab.example.com" });
 });
 
+test("peek answers what the cache holds, however old, and never reads", async () => {
+  let clock = 0;
+  const reads: string[] = [];
+  const cache = createInboxRepoCache({
+    ttlMs: 1_000,
+    now: () => clock,
+    read: async (root) => {
+      reads.push(root);
+      return { display: "acme/one", host: "github.com" };
+    },
+  });
+  expect(cache.peek("/one")).toBeNull();
+  await Bun.sleep(5);
+  expect(reads).toEqual([]);
+  await cache.refresh("/one");
+  clock = 5_000;
+  expect(cache.peek("/one")).toEqual({ display: "acme/one", host: "github.com" });
+  await Bun.sleep(5);
+  expect(reads).toEqual(["/one"]);
+});
+
 test("the cache runs at most four reads at once and queues the rest", async () => {
   let active = 0;
   let peak = 0;

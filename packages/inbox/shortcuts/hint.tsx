@@ -12,7 +12,7 @@
  */
 import type { ReactNode } from 'react';
 import { formatShortcutBindingTokens, getShortcutPlatform, type ShortcutScopeDefinition } from '@plannotator/ui/shortcuts';
-import { isTouchPhone, usePhone } from '../phone';
+import { isTouchPhone, usePhone, useTouchPhone } from '../phone';
 import { inboxAppShortcuts } from './app.shortcuts';
 import { isBareBinding } from './guards';
 import { shortcutPrefs, useShortcutPrefs, type ShortcutPrefs } from './prefs';
@@ -117,17 +117,38 @@ export function useShortcutHintShown(ref: ShortcutRef): boolean {
 
 /**
  * A keycap on a button, from the registry: `<kbd data-shortcut-hint="scope.action" data-keycap="R">`.
- * `className` keeps each place's own look (`ib-kbd`, the toast's, the chip's).
+ * `className` keeps each place's own look (`ib-kbd`, the toast's, the chip's). `touchOnly`: hidden on a touch phone
+ * only, so a narrow desktop window (the phone layout, a mouse and keys) still shows it (the toast's Undo, break 15 of
+ * design record "inbox-toasts-break-fixes").
  */
-export function ShortcutHint({ className = 'ib-kbd', ...ref }: ShortcutRef & { className?: string }) {
+export function ShortcutHint({ className = 'ib-kbd', touchOnly = false, ...ref }: ShortcutRef & { className?: string; touchOnly?: boolean }) {
   const prefs = useShortcutPrefs();
   const phone = usePhone();
-  const text = hintShown(ref, { prefs, phone });
+  const touchPhone = useTouchPhone();
+  const text = hintShown(ref, { prefs, phone: touchOnly ? touchPhone : phone });
   if (text === null) return null;
   return (
     // The keycap's text is drawn by CSS from `data-keycap` (inbox.css), so it is no part of the button's own text: a
     // button reads "Reply", not "ReplyR", to anything that reads its words (its name is aria-hidden-free either way).
     <kbd className={className || undefined} aria-hidden="true" data-shortcut-hint={`${ref.scope.id}.${ref.action}`} data-keycap={text} />
+  );
+}
+
+/**
+ * Keycaps for keys a surface handles itself, outside the registry's scopes (the search palette's ↑ ↓ ↵ ⌘↵ Esc): one
+ * `<kbd>` per binding, spelled by the registry's formatter as every other keycap is (⌘↵ on macOS, Ctrl ↵ elsewhere, as
+ * Send reads). Always drawn: these keys act whatever the settings say. `data-keycap-binding` names the binding.
+ */
+export function KeyCaps({ bindings, className }: { bindings: readonly string[]; className?: string }) {
+  const platform = getShortcutPlatform();
+  return (
+    <>
+      {bindings.map((binding, i) => (
+        <kbd key={`${binding}-${i}`} className={className} data-keycap-binding={binding}>
+          {bindingText(binding, platform)}
+        </kbd>
+      ))}
+    </>
   );
 }
 

@@ -23,8 +23,11 @@ name: Inbox window e2e
 # listed: these specs drive only the compiled Bun binary, and test.yml runs the
 # Pi mirrors of the same scenarios.
 #
-# The specs run as 8 parallel shards of whole spec files, balanced by
+# The specs run as 16 parallel shards of whole spec files, balanced by
 # measured time (scripts/ci-e2e-shard.ts, tests/e2e/shard-times.json).
+# One of them is the window's memory soak (inbox-memory-soak.spec.ts: a large
+# store, 300 agent messages, the JS heap sampled over raw CDP), so a memory
+# creep or a hung window fails the heavy tier before a merge.
 
 on:
   # Manual runs on a branch, e.g. a stacked PR whose base is not main.
@@ -85,6 +88,7 @@ on:
       - 'packages/shared/data-dir.ts'
       - 'tests/helpers/pinned-phone.ts'
       - 'scripts/inbox-sim.ts'
+      - 'scripts/inbox-large-store.ts'
       - 'scripts/ci-e2e-shard.ts'
       - 'apps/vscode-extension/src/guides/webview/**'
       - 'apps/vscode-extension/src/guides/core/**'
@@ -92,72 +96,18 @@ on:
       - 'apps/vscode-extension/scripts/esbuild.config.ts'
       - 'apps/vscode-extension/package.json'
       - '.github/workflows/inbox-e2e.yml'
-  push:
-    branches:
-      - main
-    paths:
-      - 'packages/inbox/**'
-      - 'apps/inbox/**'
-      - 'packages/server/inbox*'
-      - 'packages/server/ref-cards*'
-      - 'packages/shared/ref-cards*'
-      - 'packages/editor/**'
-      - 'packages/core/forge-ref*'
-      - 'packages/shared/inbox/**'
-      - 'packages/core/inbox*'
-      - 'packages/shared/config.ts'
-      - 'packages/shared/update-check.ts'
-      - 'packages/server/auto-update.ts'
-      - 'packages/server/html-assets.ts'
-      - 'packages/server/tailscale-serve.ts'
-      - 'packages/server/request-host-guard.ts'
-      - 'packages/server/index.ts'
-      - 'packages/server/annotate.ts'
-      - 'packages/shared/annotate*'
-      - 'packages/shared/draft.ts'
-      - 'packages/shared/review-draft.ts'
-      - 'packages/shared/doc-resolve.ts'
-      - 'packages/shared/tailscale.ts'
-      - 'packages/shared/html-assets.ts'
-      - 'packages/shared/html-assets-node.ts'
-      - 'packages/ui/**'
-      - 'packages/editor/**'
-      - 'packages/guide-viewer/**'
-      - 'packages/review-editor/**'
-      - 'packages/shared/repo-files.ts'
-      - 'packages/server/review*.ts'
-      - 'packages/server/guide/**'
-      - 'packages/core/guide*'
-      - 'apps/hook/server/index.ts'
-      - 'apps/hook/package.json'
-      - 'apps/hook/server/inbox*'
-      - 'build/**'
-      - 'package.json'
-      - 'bun.lock'
-      - 'tests/e2e/**'
-      - 'tests/helpers/inbox-world.ts'
-      - 'tests/helpers/inbox-process.ts'
-      - 'tests/helpers/real-data-dir.ts'
-      - 'tests/helpers/hook-dist-stub.ts'
-      - 'tests/setup/sandbox-data-dir.ts'
-      - 'packages/shared/data-dir.ts'
-      - 'tests/helpers/pinned-phone.ts'
-      - 'scripts/inbox-sim.ts'
-      - 'scripts/ci-e2e-shard.ts'
-      - 'apps/vscode-extension/src/guides/webview/**'
-      - 'apps/vscode-extension/src/guides/core/**'
-      - 'apps/vscode-extension/src/guides/webview-csp.ts'
-      - 'apps/vscode-extension/scripts/esbuild.config.ts'
-      - 'apps/vscode-extension/package.json'
-      - '.github/workflows/inbox-e2e.yml'
+  # Main is not run after every merge: the merge train already ran this
+  # workflow on the tree it merges. A nightly run on main catches a hand
+  # merge, and a release dispatches it on main before the tag.
+  schedule:
+    - cron: "17 7 * * *"
 
 permissions:
   contents: read
 
-# One run per PR, and one per main: a newer push cancels the older run (main
-# included: only its newest commit needs the heavy suites). Adding any other
-# label starts a run that skips every job; it gets a group of its own so it
-# cannot cancel the real one.
+# One run per PR: a newer push cancels the older run. Adding any other label
+# starts a run that skips every job; it gets a group of its own so it cannot
+# cancel the real one. Nightly and manual runs each get a group of their own.
 concurrency:
   group: inbox-e2e-${{ github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name != 'ci:full' && format('run-{0}', github.run_id) || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref || format('run-{0}', github.run_id) }}
   cancel-in-progress: true
@@ -170,10 +120,17 @@ jobs:
     if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full'))
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    outputs:
+      playwright: ${{ steps.playwright.outputs.version }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+
+      # The shards run in the Playwright image of exactly this version.
+      - name: Read the pinned Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('./package.json').devDependencies['@playwright/test']")" >> "$GITHUB_OUTPUT"
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -199,50 +156,82 @@ jobs:
   # The specs, split into whole spec files by measured time
   # (scripts/ci-e2e-shard.ts). Each shard is its own runner with one worker,
   # as the single job was.
+  #
+  # Each shard runs in the official Playwright image of the pinned version
+  # (the build job reads it from package.json), which already holds Chromium,
+  # WebKit and their system libraries. Installing those with apt on the runner
+  # (`playwright install-deps`, 181 packages) hung on a slow Ubuntu mirror often
+  # enough to fail shards before a spec ran. The image runs as the runner's own
+  # user (uid 1001, its pwuser), not root, so the workspace stays the runner's
+  # and the specs that rely on file permissions still see them. `--init` puts an
+  # init first in the container: an Inbox started with `--background` is
+  # reparented to PID 1 when its launcher exits, and the runner's own PID 1
+  # (`tail -f /dev/null`) never reaps it, so a stopped Inbox stays a zombie and
+  # the specs that stop one (stopScratchInbox) see it still there.
+  # `--ipc=host` shares the host's memory for IPC: Docker's default 64 MB
+  # /dev/shm is too small for Chromium, which then crashes at launch or runs
+  # the shard out of memory (exit 137). Playwright's Docker docs ask for it.
   inbox-window-e2e:
-    name: Inbox window (Playwright against the compiled binary, ${{ matrix.shard }}/8)
+    name: Inbox window (Playwright against the compiled binary, ${{ matrix.shard }}/16)
     needs: build
-    runs-on: ubuntu-24.04
+    # The repo variable E2E_RUNNER picks the machine for the shards (e.g. a
+    # Namespace label); unset, they run on GitHub's own ubuntu-24.04. Setting
+    # it moves them without a PR, and deleting it moves them back.
+    runs-on: ${{ vars.E2E_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 30
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.build.outputs.playwright }}-noble
+      options: --user 1001 --init --ipc=host
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.4.4
+      # setup-bun unpacks with `unzip`, which the image lacks; the same release
+      # zip setup-bun fetches, checked against its published SHA-256.
+      - name: Install Bun 1.4.4
+        env:
+          BUN_ZIP_SHA256: bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c
+        run: |
+          set -eu
+          dir="$RUNNER_TEMP/bun"
+          mkdir -p "$dir"
+          curl -fsSL --retry 5 -o "$dir/bun.zip" https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip
+          echo "$BUN_ZIP_SHA256  $dir/bun.zip" | sha256sum -c -
+          python3 -I -m zipfile -e "$dir/bun.zip" "$dir"
+          chmod +x "$dir/bun-linux-x64/bun"
+          ln -s bun "$dir/bun-linux-x64/bunx"
+          echo "$dir/bun-linux-x64" >> "$GITHUB_PATH"
+          "$dir/bun-linux-x64/bun" --version
 
+      # Without the packages' install scripts: the image has no C++ toolchain,
+      # and node-pty (the agent terminal, which no spec drives) has no linux-x64
+      # prebuild, so it would compile from source. The repo's own postinstall
+      # (the fallback guide-viewer pin) still runs.
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          bun run postinstall
 
-      - name: Read the pinned Playwright version
-        id: playwright
-        run: echo "version=$(node -p "require('./package.json').devDependencies['@playwright/test']")" >> "$GITHUB_OUTPUT"
-
-      - name: Cache the Playwright browser
-        id: browser-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-webkit-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-
-      - name: Install Chromium and WebKit
-        if: steps.browser-cache.outputs.cache-hit != 'true'
-        run: bunx playwright install --with-deps chromium webkit
-
-      - name: Install the browsers' system libraries
-        if: steps.browser-cache.outputs.cache-hit == 'true'
-        run: bunx playwright install-deps chromium webkit
-
-      # Code review's Go to Definition (review-explorer.spec.ts) searches with ripgrep.
+      # Code review's Go to Definition (review-explorer.spec.ts) searches with
+      # ripgrep, which the image lacks: the release's static build, checked.
       - name: Install ripgrep
-        run: command -v rg || (sudo apt-get update -q && sudo apt-get install -y -q ripgrep)
+        env:
+          RG_SHA256: 4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e
+        run: |
+          set -eu
+          dir="$RUNNER_TEMP/rg"
+          mkdir -p "$dir"
+          curl -fsSL --retry 5 -o "$dir/rg.tar.gz" https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz
+          echo "$RG_SHA256  $dir/rg.tar.gz" | sha256sum -c -
+          tar -xzf "$dir/rg.tar.gz" -C "$dir" --strip-components=1
+          echo "$dir" >> "$GITHUB_PATH"
+          "$dir/rg" --version
 
       - name: Get the built apps
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1

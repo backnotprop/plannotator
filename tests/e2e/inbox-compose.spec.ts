@@ -235,7 +235,7 @@ test('no agent is running: compose says so, Send sends nothing, a file attaches,
   await page.keyboard.press('Escape');
   await dialog.locator('[data-compose-keep]').click();
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator('[data-inbox-toast]')).toContainText('It waits under Drafts and never sends itself.');
+  await expect(page.locator('[data-inbox-toast]')).toContainText('It never sends itself');
   const nav = page.locator('[data-drafts-nav]');
   await expect(nav).toContainText('Drafts1');
   await nav.click();
@@ -255,10 +255,9 @@ test('no agent is running: compose says so, Send sends nothing, a file attaches,
     const sheet = mobile.locator('dialog[data-compose]');
     await expect(sheet.locator('[data-compose-to="none"]')).toBeVisible();
     await expect(sheet.locator('.ib-cp-bar [data-compose-save]')).toHaveCount(0);
-    await expect(sheet.locator('.ib-cp-bar [data-compose-send]')).toHaveAttribute('aria-disabled', 'true');
+    await expect(sheet.locator('.ib-cp-foot [data-compose-send]')).toHaveAttribute('aria-disabled', 'true');
     await sheet.getByRole('textbox', { name: 'Message' }).fill('Idea: let the Inbox list show which agent session wrote each thread.');
     await expect(sheet.locator('.ib-cp-bar [data-compose-save]')).toHaveText('Save draft');
-    await expect(sheet.locator('.ib-cp-bar [data-compose-send]')).toHaveCount(0);
     await sheet.getByRole('textbox', { name: 'Message' }).blur();
     await shot(mobile, '10b-phone-no-agent', ['dark', 'light']);
     await sheet.locator('[data-compose-cancel]').click();
@@ -319,8 +318,8 @@ test('an agent connects: the draft (saved with nobody in To) reopens with To emp
   await expect(pane.locator('[data-delivery="sending"]')).toHaveText('Sending to Claude Code…');
   const listRow = page.locator(`.ib-listcol [data-thread-id="${command.thread_id}"]`).first();
   await expect(listRow).toContainText('To Claude Code');
-  // The chip as compose showed it.
-  await expect(listRow.locator('.ib-key').first()).toContainText('Inbox list');
+  // The thread's name as compose showed it, the row's title (approval "list-rows-mail-icons").
+  await expect(listRow.locator('.ib-title, .ib-m2').first()).toContainText('Inbox list');
   await claude.deliver(command.id);
   await expect(pane.locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Claude Code, (?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2} [AP]M$/);
   await shot(page, '07-thread-delivered');
@@ -401,10 +400,10 @@ test('⌘K: the Actions group opens compose for "Message <agent> in <project>"; 
     await mobile.locator('.ib-lhead [data-open-compose]').click();
     const sheet = mobile.locator('dialog[data-compose]');
     await expect(sheet.locator('.ib-cp-bar h2')).toHaveText('New message');
-    // Empty: no Save draft in Send's place, the Send there is disabled.
+    // Empty: no Save draft, and Send at the foot is disabled.
     await expect(sheet.locator('.ib-cp-tobtn')).not.toHaveAttribute('data-loading', /.*/);
     await expect(sheet.locator('.ib-cp-bar [data-compose-save]')).toHaveCount(0);
-    await expect(sheet.locator('.ib-cp-bar [data-compose-send]')).toHaveAttribute('aria-disabled', 'true');
+    await expect(sheet.locator('.ib-cp-foot [data-compose-send]')).toHaveAttribute('aria-disabled', 'true');
     await sheet.getByRole('textbox', { name: 'Message' }).fill('Rename the Quiet section to “Done”? Quiet reads like “muted” to me.');
     // To starts empty: the top bar offers Save draft until a session is picked.
     await expect(sheet.locator('.ib-cp-tobtn')).toHaveAttribute('data-compose-to', 'choose');
@@ -412,7 +411,7 @@ test('⌘K: the Actions group opens compose for "Message <agent> in <project>"; 
     await sheet.locator('.ib-cp-tobtn').click();
     await sheet.locator('[data-compose-session="ses-claude"]').click();
     await shot(mobile, '10-phone-compose', ['dark', 'light']);
-    await sheet.locator('.ib-cp-bar [data-compose-send]').click();
+    await sheet.locator('.ib-cp-foot [data-compose-send]').click();
     await expect(sheet).toHaveCount(0);
     await mobile.goto(`${world.url}#drafts`);
     await expect(mobile.locator('[data-drafts-page]')).toBeVisible();

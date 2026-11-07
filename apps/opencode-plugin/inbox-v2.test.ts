@@ -19,7 +19,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
-import { INBOX_NAME_THREAD_LINE, INBOX_NEW_THREAD_INSTRUCTION, INBOX_REMINDER_TEXT, INBOX_WAKE_INSTRUCTION, inboxWakeText } from "@plannotator/shared/inbox/connection";
+import { INBOX_NAME_THREAD_LINE, INBOX_NEW_THREAD_INSTRUCTION, INBOX_REMINDER_TEXT, INBOX_WAKE_CLOSING_LINE, INBOX_WAKE_INSTRUCTION, inboxWakeText } from "@plannotator/shared/inbox/connection";
 import {
   createInboxWorld,
   destroyInboxWorld,
@@ -317,7 +317,7 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2 ↔ Plannotator Inbox (the
     const tool = sent.toolDefinitions.find((definition) => definition.name === "plannotator_inbox")!;
     const actions = (tool.parameters as { properties: { action: { enum: string[] } } }).properties.action.enum;
     expect(actions).toContain("send_message");
-    expect(tool.description).toContain("Plannotator Inbox: <subject> (<reply id>)");
+    expect(tool.description).toContain("Plannotator Inbox: <title> (<reply id>)");
     w.proof(`Inbox running (port ${registry(w).port}), switch on for opencode: plannotator_inbox sent with actions ${JSON.stringify(actions)}`);
 
     // The reminder: one fixed system line from the first request, the same bytes on the next one.
@@ -452,12 +452,17 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2 ↔ Plannotator Inbox (the
 
     const wake = await waitFor("the wake turn at the model", () => wakeRequests(m)[0], 60_000);
     const lines = wake.split("\n");
-    expect(lines[0]).toBe(`Plannotator Inbox: ${SUBJECT} (${replyId})`);
+    // A plain reply in a thread with no short name: the subject stays out of the wake (#2464).
+    expect(lines[0]).toBe(`Plannotator Inbox: a reply (${replyId})`);
+    expect(wake).not.toContain(SUBJECT);
     expect(lines[1]).toBe(INBOX_WAKE_INSTRUCTION);
     const reply = (await thread(w, asked.thread_id)).messages.find((message) => message.id === replyId)!;
-    expect(wake).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: SUBJECT, body: reply.body }));
-    // The closing line: the thread and the tool as this host registered it (plannotator_inbox).
-    expect(lines.at(-1)).toBe(`[thread ${asked.thread_id} · more: plannotator_inbox read_thread · how it works: plannotator inbox --help]`);
+    expect(wake).toContain(`\n[Thread ${asked.thread_id}: 2 messages, `);
+    expect(wake).toContain(words);
+    // The stored body keeps the still-open sentence; the wake's details line says it instead.
+    expect(reply.body).toContain("still open");
+    expect(wake).not.toContain("still open");
+    expect(lines.at(-1)).toBe(INBOX_WAKE_CLOSING_LINE);
     const rows = wakeRows(host, session);
     expect(rows).toHaveLength(1);
     expect(rows[0]!.delivery).toBe("queue");

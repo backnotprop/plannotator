@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { CallFlowNode, CallFlowTree } from '@plannotator/shared/call-flow-types';
-import { Search } from 'lucide-react';
+import { ChevronRight, Search } from 'lucide-react';
 import { CommentPopover, type CommentTargetChip } from '@plannotator/ui/components/CommentPopover';
 import type { CallFlowAnnotationTarget, SelectedLineRange } from '@plannotator/ui/types';
 import {
@@ -8,7 +8,7 @@ import {
   distanceToRect,
   type ComposerYieldState,
 } from '@plannotator/ui/utils/composerYield';
-import { splitCallFlowFilePath } from '../utils/callFlowPresentation';
+import { splitCallFlowFilePath, splitCallFlowSignature } from '../utils/callFlowPresentation';
 import { CallFlowSearchControls } from './CallFlowSearchControls';
 import { CodeSnippetPreview } from '@plannotator/ui/components/CodeSnippetPreview';
 import { useHoverPreview } from '@plannotator/ui/hooks/useHoverPreview';
@@ -61,32 +61,75 @@ export function annotationTargetForCallFlowNode(
   return target;
 }
 
-function statusGlyph(status: CallFlowNode['status']): string {
-  if (status === 'added') return '+';
-  if (status === 'removed') return '−';
-  return '·';
+/** Case-insensitive, non-overlapping `[start, end)` ranges of `query` in `text`. */
+function searchRanges(text: string, query: string): Array<readonly [number, number]> {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  if (!normalizedQuery) return [];
+  const lowerText = text.toLocaleLowerCase();
+  const ranges: Array<readonly [number, number]> = [];
+  let index = lowerText.indexOf(normalizedQuery);
+  while (index !== -1) {
+    ranges.push([index, index + normalizedQuery.length]);
+    index = lowerText.indexOf(normalizedQuery, index + normalizedQuery.length);
+  }
+  return ranges;
+}
+
+/** `text.slice(start, end)` with the parts inside `ranges` marked as search matches. */
+function highlightSlice(
+  text: string,
+  ranges: ReadonlyArray<readonly [number, number]>,
+  start: number,
+  end: number,
+): React.ReactNode[] {
+  const content: React.ReactNode[] = [];
+  let cursor = start;
+  for (const [from, to] of ranges) {
+    if (to <= cursor || from >= end) continue;
+    const matchStart = Math.max(from, cursor);
+    const matchEnd = Math.min(to, end);
+    if (matchStart > cursor) content.push(text.slice(cursor, matchStart));
+    content.push(
+      <mark className="call-flow-tree-match" key={matchStart}>{text.slice(matchStart, matchEnd)}</mark>,
+    );
+    cursor = matchEnd;
+  }
+  if (cursor < end) content.push(text.slice(cursor, end));
+  return content;
 }
 
 function CallFlowSearchText({ text, query }: { readonly text: string; readonly query: string }) {
-  const normalizedQuery = query.trim();
-  if (!normalizedQuery) return text;
-  const lowerText = text.toLocaleLowerCase();
-  const lowerQuery = normalizedQuery.toLocaleLowerCase();
-  const content: React.ReactNode[] = [];
-  let cursor = 0;
-  let matchIndex = lowerText.indexOf(lowerQuery);
-  while (matchIndex !== -1) {
-    content.push(text.slice(cursor, matchIndex));
-    content.push(
-      <mark className="call-flow-tree-match" key={`${matchIndex}:${cursor}`}>
-        {text.slice(matchIndex, matchIndex + normalizedQuery.length)}
-      </mark>,
-    );
-    cursor = matchIndex + normalizedQuery.length;
-    matchIndex = lowerText.indexOf(lowerQuery, cursor);
-  }
-  content.push(text.slice(cursor));
-  return content;
+  return highlightSlice(text, searchRanges(text, query), 0, text.length);
+}
+
+/**
+ * A call label with the called name leading: receiver muted, arguments muted
+ * further and truncated first. Search matches are found on the whole label, so
+ * a match that spans the receiver and the name is still marked.
+ */
+function CallFlowSignature({ label, query }: { readonly label: string; readonly query: string }) {
+  const parts = splitCallFlowSignature(label);
+  const ranges = searchRanges(label, query);
+  const nameStart = parts.receiver.length;
+  const restStart = nameStart + parts.name.length;
+  return (
+    <span className="call-flow-signature">
+      {parts.receiver && (
+        <span className="call-flow-signature-receiver">{highlightSlice(label, ranges, 0, nameStart)}</span>
+      )}
+      <span className="call-flow-signature-name">{highlightSlice(label, ranges, nameStart, restStart)}</span>
+      {parts.rest && (
+        <span className="call-flow-signature-rest">{highlightSlice(label, ranges, restStart, label.length)}</span>
+      )}
+    </span>
+  );
+}
+
+/** Screen-reader word for a changed step; unchanged context says nothing. */
+function statusAnnouncement(status: CallFlowNode['status']): string | null {
+  if (status === 'added') return 'New: ';
+  if (status === 'removed') return 'Removed: ';
+  return null;
 }
 
 interface CallFlowNodeRowProps {
@@ -113,8 +156,9 @@ interface CallFlowNodeRowProps {
   readonly currentSearchPath?: string;
   readonly showAllContext: boolean;
   readonly collapsedPaths: ReadonlySet<string>;
-  readonly fileBoundaryPaths: ReadonlySet<string>;
   readonly onToggleNode: (treePath: string) => void;
+  /** File of the nearest calling step that has one; a different file here is a file jump. */
+  readonly callerFile?: string;
 }
 
 function CallFlowNodeRow({
@@ -134,8 +178,8 @@ function CallFlowNodeRow({
   currentSearchPath,
   showAllContext,
   collapsedPaths,
-  fileBoundaryPaths,
   onToggleNode,
+  callerFile,
 }: CallFlowNodeRowProps) {
   // Complete CallDiff trees can contain thousands of unchanged context nodes.
   // Keep every subtree available, but only open paths that lead to an actual
@@ -152,7 +196,11 @@ function CallFlowNodeRow({
   const selected = selectedTargetKeys.has(treePath);
   const focused = node.status !== 'same' && Boolean(node.file && focusFiles?.has(node.file));
   const path = node.file ? splitCallFlowFilePath(node.file) : null;
-  const startsFileSection = Boolean(path && fileBoundaryPaths.has(treePath));
+  // The location chip is strong where the call moves into another file and
+  // faint where it stays in its caller's file. An entry's first step has no
+  // caller, so it shows the file the path starts in.
+  const crossFile = Boolean(node.file && node.file !== callerFile);
+  const announcement = statusAnnouncement(node.status);
   const location = node.file ? `${node.file}${node.line ? `:${node.line}` : ''}` : '';
   const sourcePreview = useHoverPreview<CallFlowNodeSource>(
     () => loadNodeSource?.(node) ?? Promise.resolve(null),
@@ -167,24 +215,9 @@ function CallFlowNodeRow({
         : node.label;
 
   return (
-    <li className="call-flow-node">
-      {startsFileSection && path && node.file && (
-        <div
-          className="call-flow-file-boundary"
-          style={{ '--call-flow-depth': depth } as React.CSSProperties}
-          aria-label={`File boundary: ${node.file}`}
-          title={node.file}
-        >
-          <span className="call-flow-file-boundary-label">File</span>
-          <span className="call-flow-file-boundary-name">{path.name}</span>
-          {path.directory && (
-            <span className="call-flow-file-boundary-directory">{path.directory}</span>
-          )}
-        </div>
-      )}
+    <li className="call-flow-node" style={{ '--call-flow-depth': depth } as React.CSSProperties}>
       <div
         className={`call-flow-row call-flow-row-${node.status}${focused ? ' call-flow-row-focused' : ''}${annotatable ? ' call-flow-row-selectable' : ''}${selected ? ' call-flow-row-selected' : ''}${currentSearchPath === treePath ? ' call-flow-row-search-current' : ''}`}
-        style={{ '--call-flow-depth': depth } as React.CSSProperties}
         data-call-flow-target={treePath}
       >
         {hasChildren ? (
@@ -195,13 +228,13 @@ function CallFlowNodeRow({
             aria-expanded={expanded}
             onClick={() => onToggleNode(treePath)}
           >
-            <span aria-hidden="true">{expanded ? '⌄' : '›'}</span>
+            <ChevronRight aria-hidden="true" size={12} strokeWidth={2} className="call-flow-chevron" />
           </button>
         ) : (
-          <span className="call-flow-expand" aria-hidden="true" />
+          <span className="call-flow-expand call-flow-expand-leaf" aria-hidden="true" />
         )}
-        <span className={`call-flow-status call-flow-status-${node.status}`} aria-label={node.status}>
-          {statusGlyph(node.status)}
+        <span className="call-flow-status" aria-hidden="true">
+          <span className={`call-flow-marker call-flow-marker-${node.status}`} />
         </span>
         <button
           type="button"
@@ -218,13 +251,18 @@ function CallFlowNodeRow({
           }}
           title={targetTitle}
         >
-          <span className="call-flow-node-label"><CallFlowSearchText text={node.label} query={searchQuery} /></span>
+          {announcement && <span className="sr-only">{announcement}</span>}
+          <span className="call-flow-node-label">
+            {node.kind === 'branch'
+              ? <span className="call-flow-node-branch-label"><CallFlowSearchText text={node.label} query={searchQuery} /></span>
+              : <CallFlowSignature label={node.label} query={searchQuery} />}
+          </span>
           {node.kind === 'branch' && <span className="call-flow-node-kind">branch</span>}
         </button>
         {path && node.line ? (
           <button
             type="button"
-            className="call-flow-node-location"
+            className={`call-flow-node-location${crossFile ? ' call-flow-node-location-cross-file' : ''}`}
             ref={(element) => { sourcePreview.anchorRef.current = element; }}
             disabled={!navigable}
             onMouseEnter={sourcePreview.onEnter}
@@ -238,13 +276,10 @@ function CallFlowNodeRow({
             title={navigable ? `Open ${location}` : 'Outside the reviewed patch'}
             aria-label={navigable ? `Open ${location}` : `Source ${location} is outside the reviewed patch`}
           >
-            <span className="call-flow-node-location-main">
+            <span className="call-flow-node-chip">
               <span className="call-flow-node-file"><CallFlowSearchText text={path.name} query={searchQuery} /></span>
               <span className="call-flow-node-line">:{node.line}</span>
             </span>
-            {path.directory && (
-              <span className="call-flow-node-directory"><CallFlowSearchText text={path.directory} query={searchQuery} /></span>
-            )}
           </button>
         ) : (
           <span className="call-flow-node-location-placeholder" aria-hidden="true" />
@@ -285,8 +320,8 @@ function CallFlowNodeRow({
                 currentSearchPath={currentSearchPath}
                 showAllContext={showAllContext}
                 collapsedPaths={collapsedPaths}
-                fileBoundaryPaths={fileBoundaryPaths}
                 onToggleNode={onToggleNode}
+                callerFile={node.file ?? callerFile}
               />
             )
           ))}
@@ -345,7 +380,6 @@ function CallFlowEntrySection({
   focused,
   canInteractWithNode,
   collapsedPaths,
-  fileBoundaryPaths,
   onToggleNode,
   expanded,
   onToggleEntry,
@@ -365,7 +399,6 @@ function CallFlowEntrySection({
   readonly focused?: ReadonlySet<string>;
   readonly canInteractWithNode?: (node: CallFlowNode) => boolean;
   readonly collapsedPaths: ReadonlySet<string>;
-  readonly fileBoundaryPaths: ReadonlySet<string>;
   readonly onToggleNode: (treePath: string) => void;
   readonly expanded: boolean;
   readonly onToggleEntry: (treePath: string) => void;
@@ -379,10 +412,11 @@ function CallFlowEntrySection({
         aria-expanded={expanded}
         onClick={() => onToggleEntry(treePath)}
       >
-        <span className="call-flow-entry-mark" aria-hidden="true">{expanded ? '⌄' : '›'}</span>
+        <ChevronRight aria-hidden="true" size={13} strokeWidth={2} className="call-flow-entry-mark call-flow-chevron" />
+        <span className="call-flow-entry-kicker">Entry</span>
         <span className="call-flow-entry-label">{entry.entry}</span>
         <span className="call-flow-entry-meta">
-          {changedCount.toLocaleString()} changed · entry path
+          {changedCount.toLocaleString()} changed
         </span>
       </button>
       {expanded && (
@@ -404,7 +438,6 @@ function CallFlowEntrySection({
             currentSearchPath={currentSearchPath}
             showAllContext={showAllContext}
             collapsedPaths={collapsedPaths}
-            fileBoundaryPaths={fileBoundaryPaths}
             onToggleNode={onToggleNode}
           />
         </ol>
@@ -631,23 +664,6 @@ export function CallFlowTreeView({
       return next;
     });
   }, []);
-  const fileBoundaryPaths = useMemo<ReadonlySet<string>>(() => {
-    const boundaries = new Set<string>();
-    for (const [entryIndex, entry] of trees.entries()) {
-      let previousFile: string | undefined;
-      const visit = (node: CallFlowNode, treePath: string) => {
-        if (node.file && node.file !== previousFile) boundaries.add(treePath);
-        if (node.file) previousFile = node.file;
-        if (collapsedPaths.has(treePath)) return;
-        node.children.forEach((child, childIndex) => {
-          if (!showAllContext && !defaultSubtrees.has(child) && !searchSubtrees.has(child)) return;
-          visit(child, `${treePath}/${child.key}:${childIndex}`);
-        });
-      };
-      visit(entry.tree, `${entry.entry}:${entryIndex}`);
-    }
-    return boundaries;
-  }, [collapsedPaths, defaultSubtrees, searchSubtrees, showAllContext, trees]);
   const treeInstanceId = useId();
   const [draftTargets, setDraftTargets] = useState<CallFlowAnnotationTarget[]>([]);
   const [refocusToken, setRefocusToken] = useState(0);
@@ -827,7 +843,6 @@ export function CallFlowTreeView({
             focused={focused}
             canInteractWithNode={canInteractWithNode}
             collapsedPaths={collapsedPaths}
-            fileBoundaryPaths={fileBoundaryPaths}
             onToggleNode={toggleNode}
             expanded={expandedEntryPaths.has(`${entry.entry}:${index}`)}
             onToggleEntry={toggleEntry}

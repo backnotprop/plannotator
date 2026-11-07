@@ -17,7 +17,7 @@ import { FEEDBACK_HEREDOC_END, FEEDBACK_UNAVAILABLE } from '@plannotator/core/pr
 import { FEEDBACK_PROMPT_TEXT_LINE, feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 
 const hasDom = typeof document !== 'undefined';
-const { FeedbackDialog } = (hasDom ? await import('./components/FeedbackDialog') : {}) as typeof import('./components/FeedbackDialog');
+const { FeedbackDialog, forgetUnsentFeedback } = (hasDom ? await import('./components/FeedbackDialog') : {}) as typeof import('./components/FeedbackDialog');
 const { Sidebar } = (hasDom ? await import('./components/Sidebar') : {}) as typeof import('./components/Sidebar');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { inboxApi } = (hasDom ? await import('./api') : {}) as typeof import('./api');
@@ -31,6 +31,7 @@ afterEach(() => {
   if (root) act(() => root?.unmount());
   root = null;
   if (hasDom) document.body.innerHTML = '';
+  forgetUnsentFeedback?.();
   while (restorers.length > 0) restorers.pop()!();
 });
 
@@ -108,11 +109,10 @@ describe.skipIf(!hasDom)('the Feedback dialog', () => {
     const dialog = render();
     // The box takes focus on open: the person types at once.
     expect(document.activeElement).toBe(dialog.box());
-    // The line says what is sent, naming this version (the data it must keep truthful).
+    // The line says what is sent, naming this version (the data it must keep truthful), the OS and the agents.
     expect(dialog.what().textContent).toContain('0.28.33');
-    // It names every field the Inbox adds, the surface (that it came from the Inbox) included.
     expect(dialog.what().textContent).toMatch(/\bOS\b/);
-    expect(dialog.what().textContent).toMatch(/\bInbox\b/);
+    expect(dialog.what().textContent).toMatch(/\bagents\b/);
     expect(calls).toHaveLength(0);
 
     type(dialog.box(), '  Reload loses my place in the list  ');

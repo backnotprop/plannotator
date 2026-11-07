@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { storage } from '@plannotator/ui/utils/storage';
 
 /**
- * The Tree controls' "Group by kind" switch (approved design record
+ * The list options menu's "Group by kind" switch (approved design record
  * "review-file-kinds"): on by default, remembered in a cookie when turned off.
  * Cookie-only on purpose, like `plannotator-markdown-view`: the settings
  * registry is bundled into the pinned guides.show viewer, so a registry entry

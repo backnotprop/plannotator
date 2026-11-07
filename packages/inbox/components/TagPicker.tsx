@@ -13,7 +13,7 @@
  * woken). Plain text, linked to the field by `aria-describedby`; they never
  * block Send.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import type { MentionMenuState } from '@plannotator/ui/hooks/useMentionAutocomplete';
 import { inboxApi, type TaggableModel } from '../api';
 import type { RecipientConnection } from '../deliveryLine';
@@ -72,6 +72,41 @@ import { HostMark, Icon } from '../icons';
 import { TAG_READERS_GROUP, TAG_UPDATE_WORDS, tagHeadsUp, tagModeLine, type TagOption } from '../tags';
 import type { TagMode } from '../api';
 
+/**
+ * An iPhone with the keyboard up (`data-ib-keyboard-pin`): the thread's foot is a short box that scrolls, and the
+ * picker drawn above the field opened behind the header, cut off (approval "inbox-reply-recipient", "fix with it").
+ * There it is placed on the screen instead: as wide as the field, above it up to the header, never past it; with no
+ * room above the field, over the box from Send's row up. Elsewhere it keeps its place in the page.
+ */
+function useKeyboardSpot(): { ref: RefObject<HTMLDivElement | null>; style: CSSProperties | undefined } {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [style, setStyle] = useState<CSSProperties | undefined>(undefined);
+  // Every commit (the field grows as the person types); the equality guard converges.
+  useLayoutEffect(() => {
+    const menu = ref.current;
+    const foot = menu?.closest('.ib-pfoot');
+    const field = menu?.parentElement?.getBoundingClientRect();
+    if (!menu || !foot || !field || !document.documentElement.hasAttribute('data-ib-keyboard-pin')) {
+      setStyle((current) => (current === undefined ? current : undefined));
+      return;
+    }
+    const headBottom = foot.closest('.ib-pane')?.querySelector('.ib-phead')?.getBoundingClientRect().bottom ?? 0;
+    // Room above the field: there. With the keyboard leaving ~257 px the field starts under the header, so the list
+    // covers the box instead, from just above Send's row up to the header (as the recipient list does).
+    const above = Math.round(field.top - 10);
+    const row = foot.querySelector('[data-reply-row] .ib-footbtns')?.getBoundingClientRect();
+    const top = above - headBottom - 8 >= 120 || !row ? above : Math.round(row.top - 6);
+    const left = Math.round(field.left);
+    const room = Math.max(88, top - headBottom - 8);
+    setStyle((current) =>
+      current && current.top === top && current.left === left && current.maxHeight === room
+        ? current
+        : { position: 'fixed', top, left, width: Math.round(field.width), right: 'auto', bottom: 'auto', margin: 0, transform: 'translateY(-100%)', maxHeight: room },
+    );
+  });
+  return { ref, style };
+}
+
 export function TagPicker({
   id,
   menu,
@@ -84,8 +119,9 @@ export function TagPicker({
   onSelect: (index: number) => void;
 }) {
   const byId = new Map(options.map((o) => [o.id, o]));
+  const spot = useKeyboardSpot();
   return (
-    <div className="ib-tg-menu" data-tag-picker="" id={id} role="listbox" aria-label="Tag an agent">
+    <div ref={spot.ref} className="ib-tg-menu" data-tag-picker="" id={id} role="listbox" aria-label="Tag an agent" style={spot.style}>
       {menu.items.length === 0 ? (
         <p className="ib-tg-empty">{menu.emptyNotice ?? 'No agent matches.'}</p>
       ) : (
@@ -138,12 +174,13 @@ export function TagPicker({
 /**
  * Several agents on one thread (Lines): their marks overlapping, the first
  * agent first. Decorative: the words beside it (or the row's label) name them.
- * At most four marks; more read as "+N". `fold` (a two-line or phone list
- * row, approval "inbox-row-byline"): up to that many marks, and past it two
- * marks and "+N".
+ * At most four marks; more read as "+N". (A list row draws its agents its
+ * own way: `RowAgents` on a wide row, approval "list-rows-mail-icons", and
+ * `RowAgentTiles`, one tile per agent, on a three-line or phone row, approval
+ * "inbox-list-row-v2".)
  */
-export function TagStack({ participants, fold }: { participants: readonly { host: string | null; session: string }[]; fold?: number }) {
-  const shown = fold === undefined ? participants.slice(0, 4) : participants.length > fold ? participants.slice(0, 2) : participants;
+export function TagStack({ participants }: { participants: readonly { host: string | null; session: string }[] }) {
+  const shown = participants.slice(0, 4);
   const more = participants.length - shown.length;
   return (
     <span className="ib-tg-stack" aria-hidden="true" data-tag-stack={participants.length}>

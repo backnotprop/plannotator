@@ -93,8 +93,11 @@ describe('projectBatchToast', () => {
     expect(stopped.icon).toBe('warn');
     expect(stopped.detail).toBe('Claude Code was stopped');
     expect(stopped.speech).toBe('Marked 2 threads read in pando. Claude Code was stopped.');
+    // A phone: what happened first, so the line's "…" only ever cuts the name; other warnings name no agent.
+    expect(stopped.phoneDetail).toBe('Stopped · Claude Code');
     const two = projectBatchToast('archive', 'pando', 2, [row({ section: 'stopped', questions: asks({ stopped: true }) }), row({ section: 'stopped', questions: asks({ stopped: true }) })]);
     expect(two.detail).toContain('2 agents were stopped');
+    expect(two.phoneDetail).toBeUndefined();
     const held = projectBatchToast('read', 'pando', 1, [row({ section: 'holding', questions: asks({ holds_up: ['deploy', 'billing'] }) })]);
     expect(held.icon).toBe('warn');
     expect(held.detail).toContain('2 things');

@@ -21,16 +21,18 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { build, transformWithEsbuild, type Plugin, type PluginOption } from 'vite';
+import { build, normalizePath, transformWithEsbuild, type Plugin, type PluginOption } from 'vite';
 import react from '@vitejs/plugin-react';
 import {
   DIAGRAM_ENGINE_HOST_KEY,
   DIAGRAM_ENGINE_SHARED_MODULES,
 } from '../../../packages/review-editor/utils/diagramEngineContract';
 
-const here = import.meta.dir;
-const repoRoot = path.resolve(here, '../../..');
-const uiRoot = path.join(repoRoot, 'packages/ui');
+// Vite's module ids use `/` on every platform; every path compared with one
+// goes through normalizePath, or nothing matches on Windows.
+const here = normalizePath(import.meta.dir);
+const repoRoot = normalizePath(path.resolve(here, '../../..'));
+const uiRoot = normalizePath(path.join(repoRoot, 'packages/ui'));
 const outDir = path.resolve(here, '../dist/diagram-engine');
 
 const HOST = `globalThis[${JSON.stringify(DIAGRAM_ENGINE_HOST_KEY)}]`;
@@ -39,7 +41,7 @@ const VIRTUAL = '\0pn-diagram-host:';
 const BARE_SHARED = new Set<string>(DIAGRAM_ENGINE_SHARED_MODULES.filter((key) => !key.startsWith('ui:')));
 /** Absolute path of a ui file (no extension) → its shared key. */
 const UI_SHARED = new Map<string, string>(
-  DIAGRAM_ENGINE_SHARED_MODULES.filter((key) => key.startsWith('ui:')).map((key) => [path.join(uiRoot, key.slice(3)), key]),
+  DIAGRAM_ENGINE_SHARED_MODULES.filter((key) => key.startsWith('ui:')).map((key) => [normalizePath(path.join(uiRoot, key.slice(3))), key]),
 );
 
 const stripExt = (id: string) => id.replace(/\?.*$/, '').replace(/\.(tsx?|jsx?|mjs)$/, '');
@@ -85,8 +87,8 @@ function hostModules(): Plugin {
  * the build fails (a moved import must not silently bundle a runtime). */
 function runtimeUrls(): Plugin {
   const sites: Record<string, { runtime: 'mermaid' | 'graphviz'; pattern: RegExp }> = {
-    [path.join(uiRoot, 'utils/mermaid.ts')]: { runtime: 'mermaid', pattern: /(?<![`'"])import\(\s*['"]mermaid['"]\s*\)/g },
-    [path.join(uiRoot, 'utils/graphviz.ts')]: { runtime: 'graphviz', pattern: /(?<![`'"])import\(\s*['"]@viz-js\/viz['"]\s*\)/g },
+    [normalizePath(path.join(uiRoot, 'utils/mermaid.ts'))]: { runtime: 'mermaid', pattern: /(?<![`'"])import\(\s*['"]mermaid['"]\s*\)/g },
+    [normalizePath(path.join(uiRoot, 'utils/graphviz.ts'))]: { runtime: 'graphviz', pattern: /(?<![`'"])import\(\s*['"]@viz-js\/viz['"]\s*\)/g },
   };
   const seen = new Set<string>();
   return {
@@ -112,7 +114,7 @@ function runtimeUrls(): Plugin {
 /** Code review never edits a diagram's source (no `onSave`), so the Source
  * pane and its CodeMirror (~280 KB) stay out of the engine. */
 function noSourcePane(): Plugin {
-  const pane = path.join(uiRoot, 'components/diagram/DiagramSourcePane');
+  const pane = normalizePath(path.join(uiRoot, 'components/diagram/DiagramSourcePane'));
   const STUB = '\0pn-diagram-no-source-pane';
   return {
     name: 'pn-diagram-no-source-pane',
@@ -137,16 +139,16 @@ function noSourcePane(): Plugin {
  * (anchorClaims) is provided and read inside the engine only. React and the
  * runtimes must not be bundled either. */
 function guardBundle(): Plugin {
-  const ownContexts = new Set([path.join(uiRoot, 'components/diagram/anchorClaims.ts')]);
+  const ownContexts = new Set([normalizePath(path.join(uiRoot, 'components/diagram/anchorClaims.ts'))]);
   const stateful = [
-    path.join(uiRoot, 'config') + path.sep,
-    path.join(uiRoot, 'utils/storage.ts'),
-    path.join(uiRoot, 'utils/themeRegistry.ts'),
-    path.join(uiRoot, 'utils/identity.ts'),
-    path.join(uiRoot, 'utils/generateIdentity.ts'),
-    path.join(uiRoot, 'utils/math.ts'),
-    path.join(uiRoot, 'components/ThemeProvider.tsx'),
-  ];
+    'config/',
+    'utils/storage.ts',
+    'utils/themeRegistry.ts',
+    'utils/identity.ts',
+    'utils/generateIdentity.ts',
+    'utils/math.ts',
+    'components/ThemeProvider.tsx',
+  ].map((entry) => normalizePath(path.join(uiRoot, entry)));
   return {
     name: 'pn-diagram-guard',
     generateBundle() {
@@ -158,9 +160,9 @@ function guardBundle(): Plugin {
           problems.push(`${file} (React and the runtimes come from the page and the runtime files)`);
           continue;
         }
-        if (!file.startsWith(repoRoot + path.sep) || file.includes(`${path.sep}node_modules${path.sep}`)) continue;
+        if (!file.startsWith(`${repoRoot}/`) || file.includes('/node_modules/')) continue;
         const rel = path.relative(repoRoot, file);
-        if (stateful.some((entry) => (entry.endsWith(path.sep) ? file.startsWith(entry) : file === entry))) {
+        if (stateful.some((entry) => (entry.endsWith('/') ? file.startsWith(entry) : file === entry))) {
           problems.push(`${rel} (stateful: share it, DIAGRAM_ENGINE_SHARED_MODULES)`);
           continue;
         }
@@ -196,7 +198,7 @@ function runtimeFromUi(): Plugin {
  * renderer (shared `ui:utils/math`, filled by the page's math-eager), so the
  * runtime file carries no second KaTeX. */
 function mermaidKatexFromPage(): Plugin {
-  const slot = path.join(uiRoot, 'utils/mermaid-math-slot.ts');
+  const slot = normalizePath(path.join(uiRoot, 'utils/mermaid-math-slot.ts'));
   return {
     name: 'pn-mermaid-katex-from-page',
     enforce: 'pre',

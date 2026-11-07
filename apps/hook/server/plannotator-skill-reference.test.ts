@@ -32,7 +32,10 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_CONFIG } from "@plannotator/shared/agents";
+import { INBOX_CARD_INITIATIVE_RULE } from "@plannotator/core/inbox-types";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/shared/question-block";
+import { SHAPE_SKILL_DESCRIPTION_PHRASE, SHAPE_SKILL_SECTION } from "@plannotator/core/shape-skill";
+import { renderSkillSections, skillSectionOf } from "../../../scripts/gen-skill-sections";
 import {
   formatTopLevelHelp,
   HIDDEN_SUBCOMMANDS,
@@ -130,12 +133,23 @@ for (const m of indexSource.matchAll(/args\[0\] === "([a-z][a-z0-9-]*)"/g)) {
 const skillDoc = readFileSync(SKILL_MD_PATH, "utf-8");
 const annotateSkillDoc = readFileSync(ANNOTATE_SKILL_MD_PATH, "utf-8");
 
-const documentedSubcommands = new Set<string>();
-for (const fence of skillDoc.matchAll(/```[a-z]*\n([\s\S]*?)```/g)) {
-  for (const m of fence[1].matchAll(/^\s*plannotator\s+([a-z][a-z0-9-]*)/gm)) {
-    documentedSubcommands.add(m[1]);
+// A fenced usage line documents a subcommand, and so does an inline pointer to
+// its own help (`plannotator shape --help`), for a section that hands the whole
+// guide to that help.
+function documentedSubcommandsOf(doc: string): Set<string> {
+  const subs = new Set<string>();
+  for (const fence of doc.matchAll(/```[a-z]*\n([\s\S]*?)```/g)) {
+    for (const m of fence[1].matchAll(/^\s*plannotator\s+([a-z][a-z0-9-]*)/gm)) {
+      subs.add(m[1]);
+    }
   }
+  for (const m of doc.matchAll(/(?<!`)`plannotator ([a-z][a-z0-9-]*) --help`/g)) {
+    subs.add(m[1]);
+  }
+  return subs;
 }
+
+const documentedSubcommands = documentedSubcommandsOf(skillDoc);
 
 const documentedFlags = new Set<string>();
 for (const m of skillDoc.matchAll(/(?<![\w-])--[a-z][a-z0-9-]*/g)) {
@@ -318,4 +332,92 @@ describe("plannotator skill: question authoring section", () => {
       expect(QUESTION_AUTHORING_GUIDE).toContain(fact);
     }
   });
+});
+
+/**
+ * The "## plannotator shape" section and the description's Shape phrase are the
+ * owner's approved words (approval "shape-skill"), kept in
+ * packages/core/shape-skill.ts and written into SKILL.md by `bun run gen:skills`
+ * (scripts/gen-skill-sections.ts). What regresses: someone edits the copy in
+ * SKILL.md (or the source) by hand and the two drift, or the skill names Shape
+ * while `plannotator shape` is still unreleased.
+ */
+describe("plannotator skill: Shape section", () => {
+  const shapeReleased = !HIDDEN_SUBCOMMANDS.has("shape");
+  const heading = SHAPE_SKILL_SECTION.split("\n", 1)[0]!;
+  const descriptionOf = (doc: string) => doc.split("\n").find((line) => line.startsWith("description: ")) ?? "";
+  const phraseIn = (doc: string) => descriptionOf(doc).includes(`Guided Reviews, ${SHAPE_SKILL_DESCRIPTION_PHRASE} and the Plannotator Inbox`);
+  const sectionText = (doc: string) => {
+    const at = skillSectionOf(doc, heading);
+    return at ? doc.slice(at.start, at.end) : null;
+  };
+
+  test("SKILL.md is exactly what `bun run gen:skills` writes", () => {
+    expect(
+      renderSkillSections(skillDoc, { shapeReleased }) === skillDoc,
+      "apps/skills/core/plannotator/SKILL.md is out of date with packages/core/shape-skill.ts — run `bun run gen:skills`",
+    ).toBe(true);
+  });
+
+  test("the section equals SHAPE_SKILL_SECTION byte for byte once shape is released, and is absent while it is hidden", () => {
+    if (shapeReleased) {
+      expect(sectionText(skillDoc), "run `bun run gen:skills`").toBe(`${SHAPE_SKILL_SECTION}\n`);
+      expect(phraseIn(skillDoc), "run `bun run gen:skills`").toBe(true);
+    } else {
+      expect(sectionText(skillDoc)).toBeNull();
+      expect(skillDoc).not.toContain(SHAPE_SKILL_DESCRIPTION_PHRASE);
+    }
+  });
+
+  test("released, the generator writes the approved words byte for byte, and the skill then documents shape", () => {
+    const released = renderSkillSections(skillDoc, { shapeReleased: true });
+    expect(sectionText(released)).toBe(`${SHAPE_SKILL_SECTION}\n`);
+    expect(phraseIn(released)).toBe(true);
+    // Before "## Other subcommands", once, and a second run changes nothing.
+    expect(released.indexOf(`\n${heading}\n`)).toBeLessThan(released.indexOf("\n## Other subcommands\n"));
+    expect(released.split(`\n${heading}\n`)).toHaveLength(2);
+    expect(renderSkillSections(released, { shapeReleased: true })).toBe(released);
+    // The release test above then finds shape documented (through its --help pointer).
+    expect(documentedSubcommandsOf(released).has("shape")).toBe(true);
+    for (const flag of SHAPE_SKILL_SECTION.match(/(?<![\w-])--[a-z][a-z0-9-]*/g) ?? []) expect(cliFlags.has(flag)).toBe(true);
+    // Hiding it again takes both out and gives back the skill without them.
+    const hidden = renderSkillSections(released, { shapeReleased: false });
+    expect(hidden).not.toContain(SHAPE_SKILL_DESCRIPTION_PHRASE);
+    expect(hidden.toLowerCase()).not.toContain("plannotator shape");
+  });
+
+  test("an old copy with other words (a source change since the last run) is replaced, not kept beside the new one", () => {
+    const released = renderSkillSections(skillDoc, { shapeReleased: true });
+    const stale = released
+      // Two old copies one after another (two runs that each failed to take the last one out).
+      .replace(SHAPE_SKILL_DESCRIPTION_PHRASE, "Shape boards (an older wording), Shape boards (an even older one),")
+      .replace(SHAPE_SKILL_SECTION, "## plannotator shape\n\nAn older section.\n\n```bash\nplannotator shape --help\n```\n");
+    expect(stale).not.toBe(released);
+    expect(renderSkillSections(stale, { shapeReleased: true })).toBe(released);
+    expect(renderSkillSections(stale, { shapeReleased: false })).toBe(renderSkillSections(skillDoc, { shapeReleased: false }));
+  });
+});
+
+// Thread steps (approval "inbox-thread-steps") are off by default, and an optional feature's instructions reach an
+// agent only while it is on: the tool text and `plannotator inbox --help` teach steps then. A skill is shipped text
+// every agent reads whatever the person chose, so no shipped skill may name the feature. (The bare word stays fine
+// elsewhere: "follow its two steps" for T3, a plan's "Ordered steps".)
+test("no shipped skill teaches thread steps, which are off by default", () => {
+  const root = join(import.meta.dir, "../../skills");
+  const skills = [...new Bun.Glob("**/SKILL.md").scanSync({ cwd: root })];
+  expect(skills).toContain(join("core", "plannotator", "SKILL.md"));
+  const feature = /`steps`|inbox steps|thread steps|steps action|steps_off|steps field|\bsteps\s*:\s*\[/i;
+  for (const skill of skills) {
+    const text = readFileSync(join(root, skill), "utf-8");
+    expect({ skill, mentions: text.match(feature)?.[0] ?? null }).toEqual({ skill, mentions: null });
+  }
+});
+
+// The initiative rule lives once (INBOX_CARD_INITIATIVE_RULE); the skill is markdown, so it pastes the rule. An edit
+// to the constant that misses the skill (or the reverse) would teach agents two different rules.
+test("the skill's card section carries the initiative rule word for word", () => {
+  expect(skillDoc).toContain(INBOX_CARD_INITIATIVE_RULE);
+  expect(skillDoc).toContain("--initiative <name>");
+  // Clearing out is in `plannotator card --help` and the nudge only (the owner: "Try not to bloat main instruction").
+  expect(skillDoc).not.toMatch(/work is done, delete|\bdelete it \(/);
 });

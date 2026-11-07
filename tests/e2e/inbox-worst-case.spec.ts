@@ -30,6 +30,7 @@ import { join, resolve } from 'node:path';
 import { LiveSessions, seedWorstCase, type WorstCaseWorld } from '../../scripts/inbox-worst-case';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { INBOX_ASKER_RESTART_GRACE_MS } from '../../packages/server/inbox-sessions';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -205,12 +206,12 @@ test('the names: real folder names, a parent folder for two "api", days and year
     await page.waitForSelector(`[data-thread-id="${world.seed.threads.lastYear}"]`);
     await expect(page.locator(`[data-thread-id="${world.seed.threads.lastYear}"] .ib-t`)).toHaveText(new RegExp(`, ${new Date().getFullYear() - 1}$`));
     // No subject is cut inside a character (row 26).
-    for (const subject of await page.locator('.ib-lbody .ib-st').allTextContents()) expect(subject).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
-    // Hovered, what the list cuts with "…" (the subject, the thread label, the project) shows its full text in
+    for (const subject of await page.locator('.ib-lbody :is(.ib-title, .ib-pv)').allTextContents()) expect(subject).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
+    // Hovered, what the list cuts with "…" (the title, the preview, the project) shows its full text in
     // ui's tooltip, only while cut, and nothing in the list carries a native title (row 23; inbox-polish, item 3;
     // the owner's "an actual component tooltip", 2026-10-17).
     const items = await page.evaluate(() =>
-      [...document.querySelectorAll<HTMLElement>('.ib-lbody .ib-st, .ib-lbody .ib-keyt, .ib-lbody .ib-p')].map((el) => ({
+      [...document.querySelectorAll<HTMLElement>('.ib-lbody .ib-title, .ib-lbody .ib-pv, .ib-lbody .ib-p')].map((el) => ({
         project: el.classList.contains('ib-p'),
         cut: el.scrollWidth > el.clientWidth + 1,
         text: el.textContent,
@@ -222,8 +223,8 @@ test('the names: real folder names, a parent folder for two "api", days and year
     for (const project of [false, true]) {
       const cutIndex = items.findIndex((t) => t.project === project && t.cut);
       if (project && cutIndex < 0) continue;
-      expect(cutIndex, 'a cut subject or label').toBeGreaterThanOrEqual(0);
-      await page.locator('.ib-lbody :is(.ib-st, .ib-keyt, .ib-p)').nth(cutIndex).hover();
+      expect(cutIndex, 'a cut title, preview or label').toBeGreaterThanOrEqual(0);
+      await page.locator('.ib-lbody :is(.ib-title, .ib-pv, .ib-p)').nth(cutIndex).hover();
       // ui's tooltip (portaled into the window's root, out of the row) holds the whole text.
       await expect(page.locator('[data-pn-tooltip]').getByText(items[cutIndex]!.text!, { exact: true })).toBeVisible();
       await page.mouse.move(1, 1);
@@ -240,8 +241,8 @@ test('the names: real folder names, a parent folder for two "api", days and year
 });
 
 test('things that grow: the reply chooser with 50 sessions, the compose To picker, a long draft', async ({ browser }) => {
-  // The session that asked counts as live for a minute after the Inbox starts.
-  await new Promise((r) => setTimeout(r, Math.max(0, world.startedAt + 70_000 - Date.now())));
+  // The session that asked counts as live for a while after the Inbox starts.
+  await new Promise((r) => setTimeout(r, Math.max(0, world.startedAt + INBOX_ASKER_RESTART_GRACE_MS + 10_000 - Date.now())));
   for (const [w, thread] of [
     [WIDTHS[2]!, world.seed.threads.ended],
     [WIDTHS[6]!, world.seed.threads.ended2],
@@ -252,11 +253,14 @@ test('things that grow: the reply chooser with 50 sessions, the compose To picke
       await page.locator('.ib-pfoot .ib-btn', { hasText: 'Reply' }).first().click();
       await page.locator('.ib-rtext').fill('Wait for Monday.');
       await page.locator('.ib-pfoot .ib-btn.ib-pri', { hasText: 'Send' }).click();
-      await page.waitForSelector('[data-route-choice]');
-      await page.locator('.ib-route .ib-more').click();
+      // The recipient pill's list takes the old chooser's place (approval "inbox-reply-recipient").
+      await page.waitForSelector('[data-recipient-list]');
       await page.waitForTimeout(300);
-      // Send stays in the window (row 6).
-      const send = (await page.locator('[data-route-send]').boundingBox())!;
+      // The list starts inside the window and scrolls; Send stays in the window (row 6).
+      const list = (await page.locator('[data-recipient-list]').boundingBox())!;
+      expect(list.y).toBeGreaterThanOrEqual(0);
+      expect(await page.locator('[data-recipient-list]').evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+      const send = (await page.locator('.ib-pfoot .ib-btn.ib-pri', { hasText: 'Send' }).boundingBox())!;
       expect(send.y + send.height).toBeLessThanOrEqual(w.height);
       expect(await shapes(page)).toEqual([]);
       await shot(page, `chooser-${w.name}`);

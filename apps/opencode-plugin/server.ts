@@ -6,6 +6,7 @@ import { loadConfig, resolveAgentTool, resolveInboxReminder, resolveInboxReminde
 import { INBOX_COMMAND_BRIEFING, INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_WAKE, INBOX_TOOL_NAME } from "@plannotator/shared/inbox/connection";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
+import { isAskAiChild } from "@plannotator/shared/child-env";
 import { composeSystemPrompt, stripConflictingPlanModeRules } from "./plan-mode";
 import { replacePlanModeReminders } from "./plan-reminder";
 import {
@@ -86,6 +87,9 @@ type EmbeddedRuntimeModule = {
 const serverPlugin = {
   id: "plannotator",
   setup: async (ctx) => {
+    // An OpenCode Plannotator's Ask AI started (PLANNOTATOR_ASK_AI_CHILD=1):
+    // no submit_plan, planning prompts, commands, Inbox or agent tool in it.
+    if (isAskAiChild(process.env)) return;
     // Ends what this plugin generation started that would outlive it: OpenCode 2 unloads a generation
     // (on `opencode2 reload`, a plugin update, a config change, an hour idle) and calls the cleanup
     // setup returns. Without it the old generation's Inbox wakes kept polling with a dead context.
@@ -237,7 +241,7 @@ const serverPlugin = {
       if (inboxConfig && resolveInboxReminder(inboxConfig, process.env, "opencode")) {
         try {
           // A host without session.prompt registers the tool without the wake
-          // (registerInboxOpenCode2): its line names wait_for_reply instead.
+          // (registerInboxOpenCode2): its line says to read the thread instead.
           // The person's own line (config.json prompts.inbox) replaces either.
           const reminder = openCode2InboxReminder(v2, inboxConfig);
           await ctx.session.hook("context", async (event) => {

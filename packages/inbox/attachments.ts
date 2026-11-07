@@ -4,9 +4,12 @@
  * and the feedback text a Send carries after the picks.
  */
 
+import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE, inboxReviewTitleLine } from '@plannotator/core/inbox-review';
+import { inboxUrl, machineOf } from './inboxUrl';
 import { shouldStripFrontmatter } from '@plannotator/core/annotatable';
+import { diagramAnchorLocationLine, parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
 import { codeFenceFor } from '@plannotator/core/markdown-structure';
-import { cutText } from '@plannotator/core/inbox-questions';
+import { cutText, sliceText } from '@plannotator/core/inbox-questions';
 import {
   formatInboxVideoTime,
   INBOX_VIDEO_BLOCK_ID,
@@ -17,7 +20,7 @@ import {
   type InboxAttachmentState,
 } from '@plannotator/core/inbox-types';
 import { AnnotationType, type Annotation, type Block, type CodeAnnotation, type ImageAttachment } from '@plannotator/ui/types';
-import { diagramDocumentBlocks, exportLinkedDocAnnotations, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
+import { diagramDocumentBlocks, exportLinkedDocAnnotations, parseMarkdownToBlocks, quickLabelTipLine } from '@plannotator/ui/utils/parser';
 import { whenTime } from './format';
 
 /** Plannotator's blocks for a file: one diagram block for a diagram source, one code block for code, the markdown pipeline for text, none for HTML or a binary kind. */
@@ -121,6 +124,14 @@ export function annotationTag(annotation: Annotation): string | null {
   return tag ? tag.toLowerCase() : null;
 }
 
+/** A quote as a sheet's title or a comment card names it: one line, cut at a word. */
+export function shortLabel(text: string): string {
+  const line = text.replace(/\s+/g, ' ').trim();
+  if (line.length <= 60) return line;
+  const cut = line.slice(0, 60);
+  return `${cut.lastIndexOf(' ') > 30 ? cut.slice(0, cut.lastIndexOf(' ')) : sliceText(line, 60)}…`;
+}
+
 /** The quoted text a row shows: the selection, or the element or part it names. */
 export function annotationQuote(annotation: Annotation): string {
   return annotation.originalText ?? '';
@@ -136,21 +147,21 @@ export function attachmentLabel(attachment: Pick<InboxAttachmentState, 'path' | 
 
 /** Where an attachment's bytes are served: an image for `<img src>`, and any kind as a download. By id only. */
 export function attachmentImageUrl(attachment: Pick<InboxAttachmentState, 'id'>, version: 'current' | 'sent' = 'current'): string {
-  return `/api/inbox/attachments/${encodeURIComponent(attachment.id)}/image${version === 'sent' ? '?version=sent' : ''}`;
+  return inboxUrl(`/attachments/${encodeURIComponent(attachment.id)}/image${version === 'sent' ? '?version=sent' : ''}`, undefined, machineOf(attachment.id));
 }
 
 /** A video's bytes for `<video src>` (HTTP Range, by id only). */
 export function attachmentVideoUrl(attachment: Pick<InboxAttachmentState, 'id'>, version: 'current' | 'sent' = 'current'): string {
-  return `/api/inbox/attachments/${encodeURIComponent(attachment.id)}/video${version === 'sent' ? '?version=sent' : ''}`;
+  return inboxUrl(`/attachments/${encodeURIComponent(attachment.id)}/video${version === 'sent' ? '?version=sent' : ''}`, undefined, machineOf(attachment.id));
 }
 
 export function attachmentDownloadUrl(attachment: Pick<InboxAttachmentState, 'id'>, version: 'current' | 'sent' = 'current'): string {
-  return `/api/inbox/attachments/${encodeURIComponent(attachment.id)}/download${version === 'sent' ? '?version=sent' : ''}`;
+  return inboxUrl(`/attachments/${encodeURIComponent(attachment.id)}/download${version === 'sent' ? '?version=sent' : ''}`, undefined, machineOf(attachment.id));
 }
 
 /** An attached HTML page in a tab of its own, sandboxed, from its own folder ("Open in" → Browser). */
 export function attachmentPageUrl(attachment: Pick<InboxAttachmentState, 'id'>, version: 'current' | 'sent' = 'current'): string {
-  return `/api/inbox/attachments/${encodeURIComponent(attachment.id)}/page${version === 'sent' ? '?version=sent' : ''}`;
+  return inboxUrl(`/attachments/${encodeURIComponent(attachment.id)}/page${version === 'sent' ? '?version=sent' : ''}`, undefined, machineOf(attachment.id));
 }
 
 /** Wider than this width-to-height ratio, an image is a panorama: the gallery crops it from the left, the viewer scrolls it sideways. */
@@ -351,10 +362,17 @@ function lineRangeLabel(start: number, end: number): string {
   return start === end ? `line ${start}` : `lines ${start}-${end}`;
 }
 
-/** The small tag beside a row in the chip's list: the element, diagram part, or a guided-review comment's lines. */
+/** A global comment on a guided review: on the whole review, not a line or a file. */
+export function isGuideGlobalComment(record: InboxAnnotationRecord): boolean {
+  return record.guide?.scope === 'general';
+}
+
+/** The small tag beside a row in the chip's list: the element, diagram part, or a guided-review comment's lines ("global" for a global comment). */
 export function recordTag(record: InboxAnnotationRecord): string | null {
+  if (isGuideGlobalComment(record)) return 'global';
   if (record.guide) return lineRangeLabel(record.guide.line_start, record.guide.line_end);
-  if (record.message) return null;
+  // A comment on a message's words has no tag; one on a diagram part in the message names the part.
+  if (record.message && annotationOf(record).diagramAnchor == null) return null;
   return annotationTag(annotationOf(record));
 }
 
@@ -362,18 +380,39 @@ export function recordTag(record: InboxAnnotationRecord): string | null {
 export function recordQuote(record: InboxAnnotationRecord): string {
   const comment = guideCommentOf(record);
   if (!comment) return annotationQuote(annotationOf(record));
-  const lines = (comment.selectedText ?? comment.originalCode ?? '').split('\n');
+  const lines = (comment.selectedText ?? comment.anchorText ?? comment.originalCode ?? '').split('\n');
   const first = lines.find((line) => line.trim() !== '')?.trim() ?? '';
   return `${cutText(first, 120)}${lines.length > 1 && first ? ' …' : ''}`;
 }
 
-export const GUIDE_FEEDBACK_TITLE = 'Feedback on the guided review';
+export const GUIDE_FEEDBACK_TITLE = INBOX_GUIDE_FEEDBACK_TITLE;
 
 /** Quoted code in a fence no line of it can close (the review app's `fenced`). */
 function fenced(code: string): string {
   const fence = codeFenceFor(code);
   return `${fence}\n${code}\n${fence}\n`;
 }
+
+/**
+ * The review app's conventional prefix ("**issue (blocking):** "). Read
+ * defensively: a record written before the store checked its fields may hold
+ * a label or decorations of another kind, and must not break a Send.
+ */
+function conventionalPrefix(comment: CodeAnnotation): string {
+  const label = comment.conventionalLabel;
+  if (typeof label !== 'string' || label === '') return '';
+  const decorations = Array.isArray(comment.decorations) ? comment.decorations.filter((d) => typeof d === 'string') : [];
+  return `**${label}${decorations.length ? ` (${decorations.join(', ')})` : ''}:** `;
+}
+
+/** Heading suffix of a comment on lines outside the diff, as the review app's export writes it. */
+/** The lines an expand arrow opened, as a comment on them quotes: its own side's text, since the two sides number apart. */
+export function openedLinesQuote(contents: { oldContent: string | null; newContent: string | null }, side: 'old' | 'new', lineStart: number, lineEnd: number): string {
+  const text = side === 'new' ? contents.newContent : contents.oldContent;
+  return text ? text.split('\n').slice(lineStart - 1, lineEnd).join('\n') : '';
+}
+
+const OUTSIDE_DIFF_LABEL = '(not in the diff)';
 
 /**
  * One comment as the review app's export writes it (exportReviewFeedback in
@@ -386,23 +425,51 @@ function guideCommentEntry(comment: CodeAnnotation, heading: string): string {
   const token = comment.tokenText
     ? ` — \`\`${comment.tokenText.replace(/`/g, '\\`')}\`\`${comment.charStart != null ? ` (chars ${comment.charStart}-${comment.charEnd})` : ''}`
     : '';
-  const prefix = comment.conventionalLabel
-    ? `**${comment.conventionalLabel}${comment.decorations?.length ? ` (${comment.decorations.join(', ')})` : ''}:** `
-    : '';
-  let output = `${heading} ${range} (${comment.side})${token}\n`;
+  const prefix = conventionalPrefix(comment);
+  let output = `${heading} ${range} (${comment.side})${token}${comment.outsideDiff ? ` ${OUTSIDE_DIFF_LABEL}` : ''}\n`;
+  if (comment.outdated) output += '[Outdated — the code changed after this comment]\n';
   if (comment.text) output += `${prefix}${comment.text}\n`;
   else if (prefix) output += `${prefix.trimEnd()}\n`;
   if (comment.selectedText) output += `\n**Highlighted text:**\n${fenced(comment.selectedText)}`;
+  const opened = comment.outsideDiff ? (comment.anchorText ?? comment.originalCode) : '';
+  if (opened) output += `\n**Code:**\n${fenced(opened)}`;
+  // The code block already quotes the lines; a suggestion still shows what it replaces.
+  if (comment.outsideDiff && !comment.suggestedCode) return `${output}\n`;
   if ((comment.suggestedCode || comment.text) && comment.originalCode) output += `\n**Replaces:**\n${fenced(comment.originalCode)}`;
   if (comment.suggestedCode) output += `\n**Suggested code:**\n${fenced(comment.suggestedCode)}`;
   return `${output}\n`;
 }
 
-/** The review app's per-file sections for a set of line comments: `## path`, then each comment by line. */
+/** The heading the global comments go under, ahead of the per-file sections (the review app's `GLOBAL_COMMENTS_HEADING`). */
+export const GUIDE_GLOBAL_COMMENTS_HEADING = 'Global comments';
+
+/** A comment on the whole review (the review app's `scope: 'general'`), not a line or a file. */
+function isGlobalComment(comment: CodeAnnotation): boolean {
+  return comment.scope === 'general';
+}
+
+/**
+ * The review app's sections for a set of comments: the global comments first,
+ * under "Global comments", in the order they were made; then `## path` for
+ * each file, each comment by line.
+ */
 export function guideCommentSections(comments: readonly CodeAnnotation[]): string {
+  const global = comments.filter(isGlobalComment).sort((a, b) => a.createdAt - b.createdAt);
   const byFile = new Map<string, CodeAnnotation[]>();
-  for (const comment of comments) byFile.set(comment.filePath, [...(byFile.get(comment.filePath) ?? []), comment]);
+  for (const comment of comments) {
+    if (isGlobalComment(comment)) continue;
+    byFile.set(comment.filePath, [...(byFile.get(comment.filePath) ?? []), comment]);
+  }
   let output = '';
+  if (global.length > 0) {
+    output += `## ${GUIDE_GLOBAL_COMMENTS_HEADING}\n\n`;
+    for (const comment of global) {
+      const prefix = conventionalPrefix(comment);
+      if (comment.text) output += `${prefix}${comment.text}\n`;
+      else if (prefix) output += `${prefix.trimEnd()}\n`;
+      output += '\n';
+    }
+  }
   for (const [file, list] of byFile) {
     output += `## ${file}\n\n`;
     for (const comment of [...list].sort((a, b) => a.lineStart - b.lineStart)) output += guideCommentEntry(comment, '###');
@@ -421,16 +488,29 @@ export function guideFeedback(records: readonly InboxAnnotationRecord[]): string
   for (const record of records) {
     const comment = guideCommentOf(record);
     if (!comment || !record.guide) continue;
-    const entry = byMessage.get(record.message_id) ?? { title: record.guide.title, comments: [] };
+    // The agent's title, as one line of at most 120 characters: it can never add lines to the person's reply.
+    const entry = byMessage.get(record.message_id) ?? { title: inboxReviewTitleLine(record.guide.title), comments: [] };
     entry.comments.push(comment);
     byMessage.set(record.message_id, entry);
   }
   return [...byMessage.values()]
-    .map(
-      ({ title, comments }) =>
-        `# ${GUIDE_FEEDBACK_TITLE}\n\nThe following comments are on the diffs of the guided review "${title}" you sent, one section per file. Line numbers are the file's own: (new) the changed file, (old) the original.\n\n${guideCommentSections(comments)}`.trim(),
-    )
+    .map(({ title, comments }) => `# ${GUIDE_FEEDBACK_TITLE}\n\n${guideFeedbackIntro(title, comments)}\n\n${guideCommentSections(comments)}`.trim())
     .join('\n\n');
+}
+
+const LINE_NUMBERS_NOTE = "Line numbers are the file's own: (new) the changed file, (old) the original.";
+
+/**
+ * The line under the heading. Without global comments it is as it always was;
+ * with them it says they come first and are on the whole review, and keeps
+ * the line-number note only when there are comments on lines.
+ */
+function guideFeedbackIntro(title: string, comments: readonly CodeAnnotation[]): string {
+  const global = comments.some(isGlobalComment);
+  const onLines = comments.some((comment) => !isGlobalComment(comment));
+  if (!global) return `The following comments are on the diffs of the guided review "${title}" you sent, one section per file. ${LINE_NUMBERS_NOTE}`;
+  if (!onLines) return `The following comments are on the guided review "${title}" you sent, under "${GUIDE_GLOBAL_COMMENTS_HEADING}": they are on the whole review, not on a line or a file.`;
+  return `The following comments are on the guided review "${title}" you sent: first the ${GUIDE_GLOBAL_COMMENTS_HEADING.toLowerCase()}, on the whole review, then the comments on its diffs, one section per file. ${LINE_NUMBERS_NOTE}`;
 }
 
 /**
@@ -481,9 +561,24 @@ export function isFileComment(record: InboxAnnotationRecord): boolean {
 }
 
 export const MESSAGE_FEEDBACK_HEADING = {
-  title: 'Feedback on your messages',
+  title: INBOX_MESSAGE_FEEDBACK_TITLE,
   intro: 'The following feedback is on the text of your messages in this thread, one section per message. Each quote is the words I selected (as shown on screen) in your message.',
+  /** Added to the intro only when a comment is on a diagram part. */
+  diagrams: 'A quote with a "Diagram" line under it is a part of a diagram in the message; its lines count from the top of the message.',
 };
+
+/** A Delete on a message's words, as plan review's export words one ("Remove this", "I don't want this in the plan."). */
+export const MESSAGE_DELETION = {
+  heading: 'Remove this',
+  line: "I don't want this in your message.",
+};
+
+/** The location a comment on a diagram part prints: core's line on one line, as ui's export writes it. A malformed anchor prints none. */
+function messageDiagramLocation(annotation: Annotation): string | null {
+  const anchor = annotation.diagramAnchor === undefined ? null : parseDiagramAnchor(annotation.diagramAnchor);
+  if (anchor === null) return null;
+  return cutText(diagramAnchorLocationLine(anchor).replace(/\s+/g, ' ').trim().replace(/`+/g, "'"), 600);
+}
 
 /** A message comment's section heading: "Feedback on your message from 2:58 PM (msg_…)", the time in the person's own time zone. */
 export function messageFeedbackLabel(record: Pick<InboxAnnotationRecord, 'message_id' | 'message'>, time: (iso: string) => string = whenTime): string {
@@ -498,18 +593,26 @@ export function messageFeedbackLabel(record: Pick<InboxAnnotationRecord, 'messag
  * line starting with `#`): words on one line sit inline in quotes, words on
  * several lines go in a fenced block no line of theirs can close
  * (`codeFenceFor`, as the guided-review export quotes code), so nothing in
- * them reads as a heading or leaves a fence open.
+ * them reads as a heading or leaves a fence open. A comment on a diagram part
+ * has the part's label for its words, and its location line under them.
  */
 function messageCommentEntry(annotation: Annotation, number: number): string {
   const words = annotation.originalText ?? '';
+  // A Delete on the words (approval "inbox-toolbar-delete"): plan review's "Remove this", and its "I don't want this" line.
+  const deletion = annotation.type === AnnotationType.DELETION;
   const label = annotation.isQuickLabel && annotation.text ? `[${annotation.text}] ` : '';
   const multiline = /[\r\n]/.test(words);
-  let out = `### ${number}. ${label}Feedback on${multiline ? ':' : `: "${words}"`}\n`;
+  let out = `### ${number}. ${label}${deletion ? MESSAGE_DELETION.heading : 'Feedback on'}${multiline ? ':' : `: "${words}"`}\n`;
   if (multiline) {
     const fence = codeFenceFor(words);
     out += `${fence}\n${words.replace(/\r\n?/g, '\n')}\n${fence}\n`;
   }
-  if (!annotation.isQuickLabel && annotation.text) out += `${annotation.text.split(/\r\n|\r|\n/).map((line) => `> ${line}`).join('\n')}\n`;
+  const location = messageDiagramLocation(annotation);
+  if (location !== null) out += `${location}\n\n`;
+  // A label's words are its heading; its tip is quoted under it, as the main export writes it (#2626).
+  if (annotation.isQuickLabel) out += quickLabelTipLine(annotation);
+  else if (annotation.text) out += `${annotation.text.split(/\r\n|\r|\n/).map((line) => `> ${line}`).join('\n')}\n`;
+  else if (deletion) out += `> ${MESSAGE_DELETION.line}\n`;
   return `${out}\n`;
 }
 
@@ -535,7 +638,8 @@ export function messageFeedback(records: readonly InboxAnnotationRecord[], time:
     byMessage.set(record.message_id, entry);
   }
   const ordered = [...byMessage].sort(([idA, a], [idB, b]) => a.at.localeCompare(b.at) || idA.localeCompare(idB));
-  let out = `# ${MESSAGE_FEEDBACK_HEADING.title}\n\n${MESSAGE_FEEDBACK_HEADING.intro}\n\n`;
+  const onDiagrams = ordered.some(([, entry]) => entry.annotations.some((annotation) => messageDiagramLocation(annotation) !== null));
+  let out = `# ${MESSAGE_FEEDBACK_HEADING.title}\n\n${MESSAGE_FEEDBACK_HEADING.intro}${onDiagrams ? ` ${MESSAGE_FEEDBACK_HEADING.diagrams}` : ''}\n\n`;
   for (const [id, entry] of ordered) {
     const list = [...entry.annotations].sort(compareInMessage);
     out += `## ${messageFeedbackLabel({ message_id: id, message: { at: entry.at } }, time)}\n\n`;
@@ -548,7 +652,7 @@ export function messageFeedback(records: readonly InboxAnnotationRecord[], time:
 }
 
 export const ATTACHMENT_FEEDBACK_HEADING = {
-  title: 'Feedback on the attached files',
+  title: INBOX_ATTACHMENT_FEEDBACK_TITLE,
   intro: 'The following feedback is on the files you attached, one section per file and version.',
 };
 

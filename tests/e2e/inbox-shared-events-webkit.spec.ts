@@ -143,6 +143,13 @@ test('WebKit: a long script in an attached page stalls the leader (no freeze); t
   await setFront(front, true, true);
   const sender = keepSending(w.agents[0]!, w.project, 40);
   await new Promise((done) => setTimeout(done, 600));
+  // A heartbeat on the old leader's main thread: its longest silence is when the script really ran. The page takes
+  // seconds to load on a busy runner, so the time since the click says little about the stall.
+  await leader!.evaluate(() => {
+    const beats: number[] = [];
+    (window as unknown as { __beats: number[] }).__beats = beats;
+    setInterval(() => beats.push(Date.now()), 50);
+  });
   const at = Date.now();
   // The leader opens the page: the script starts, the leader stops answering.
   void leader!.evaluate(([thread, file]) => {
@@ -159,34 +166,55 @@ test('WebKit: a long script in an attached page stalls the leader (no freeze); t
       return null;
     },
     (v) => v !== null,
-    10_000,
+    // Up to about four seconds for the page to load, five for the check, and room.
+    15_000,
   );
   while (Date.now() - at < 9000) {
     streamSamples.push(await streams(w));
     await new Promise((done) => setTimeout(done, 100));
   }
-  await sender.stop();
-  // The script ended: the old leader learns its lock was taken and follows.
+  // The script ended: the old leader learns its lock was taken and follows. The agent writes until then, so the
+  // front tab's gap below covers the whole stall, however late the page started the script.
   const rejoin = await waitFor(
     async () => (await logOf(leader!)).filter((e) => e.at >= at).map((e) => e.type),
     (types) => types.includes('stolen') && types.includes('step-down'),
     10_000,
   );
+  await sender.stop();
+  const senderStoppedAt = Date.now();
   await expect.poll(() => streams(w)).toBe(1);
   expect((await leaders(w.pages)).includes(leader!)).toBe(false);
   await sendSome(w, 3);
   const checked = await expectEveryRecordOnce(w, w.pages, { exact: false });
-  const frontRecords = (await logOf(front)).filter((e) => e.type === 'record' && e.at >= at - 1000).map((e) => e.at);
-  const frontLongestGapMs = Math.max(frontRecords[0]! - at, ...frontRecords.slice(1).map((t, i) => t - frontRecords[i]!));
+  // While the agent was writing: the quiet between its last line and the three above is not a gap.
+  const frontRecords = (await logOf(front)).filter((e) => e.type === 'record' && e.at >= at - 1000 && e.at <= senderStoppedAt).map((e) => e.at);
+  const frontLongestGapMs = Math.max(frontRecords[0]! - at, ...frontRecords.slice(1).map((t, i) => t - frontRecords[i]!), senderStoppedAt - frontRecords.at(-1)!);
+  const stall = await waitFor(
+    () =>
+      leader!.evaluate(() => {
+        const beats = (window as unknown as { __beats: number[] }).__beats;
+        const silences = beats.slice(1).map((beat, i) => ({ startedAt: beats[i]!, ms: beat - beats[i]! }));
+        return silences.reduce((longest, silence) => (silence.ms > longest.ms ? silence : longest), { startedAt: 0, ms: 0 });
+      }),
+    (s) => s.ms >= 8000,
+  );
   // The old leader learned it lost the lock only when the script let go (about eight seconds in): it was stopped all along.
   const stolenAtMs = (await logOf(leader!)).find((e) => e.type === 'stolen' && e.at >= at)!.at - at;
   expect(stolenAtMs).toBeGreaterThan(7000);
-  // The check every 3 s, no answer in 2 s, and room for a slow machine.
-  expect(takeover.value!).toBeLessThan(7000);
-  expect(frontLongestGapMs).toBeLessThan(7500);
+  // Counted from the script's start, the last beat before it. The next check comes within 3 s and gets no answer in 2 s,
+  // so takeover lands two to five seconds in, plus any delay on the machine.
+  // The bound is the script's eight: inside it the old leader cannot have let go, so this is a takeover, not the script ending.
+  const takeoverIntoStallMs = at + takeover.value! - stall.value.startedAt;
+  expect(takeoverIntoStallMs).toBeGreaterThan(0);
+  expect(takeoverIntoStallMs).toBeLessThan(8000);
+  // The tab in front never waited out the script: a real freeze is the whole stall, so the bound sits well below it.
+  expect(frontLongestGapMs).toBeLessThan(stall.value.ms - 1000);
   expect(Math.max(...streamSamples)).toBeLessThanOrEqual(2);
   results.stallLeader = {
     takeoverMs: takeover.value,
+    scriptStartedAtMs: stall.value.startedAt - at,
+    stallMs: stall.value.ms,
+    takeoverIntoStallMs,
     frontLongestGapMs,
     rejoinAfterScriptMs: rejoin.ms,
     oldLeaderLearnedAtMs: stolenAtMs,

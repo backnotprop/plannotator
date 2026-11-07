@@ -356,13 +356,11 @@ test('beside the thread a document keeps its frame, and the peek opens over it',
 test('Send carries the comment on the image in the message, named by its path and its message', async () => {
   const page = world.page;
   await pane().getByRole('button', { name: /^Close / }).click();
-  const waiting = world.claude.waitForReply(world.threadId, 40);
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' }).click();
   await page.getByRole('textbox', { name: /^Reply to / }).fill('One note on B.');
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const reply = await waiting;
-  expect(reply.status).toBe('replied');
-  const body = reply.reply.body as string;
+  const reply = await world.claude.nextReply(world.threadId, 40);
+  const body = reply.body as string;
   expect(body).toContain('the images your messages showed');
   expect(body).toMatch(/## design\/checkout-b-steps\.png \(image in your \d{1,2}:\d{2} [AP]M message\)/);
   expect(body).toContain('Make step 1 bold');
@@ -939,9 +937,14 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
   expect(Math.abs((ink.minY + ink.maxY) / 2 - target.v * 760)).toBeLessThan(3);
   expect(Math.abs((ink.maxX - ink.minX) / 2 - reach * 1200)).toBeLessThan(8);
 
-  /** Where the drawing's colour is on the screen, inside the stage, in page pixels. */
+  /**
+   * Where the drawing's colour is on the screen, inside the stage, in page pixels. The open comments panel floats
+   * over the stage's right side, and its card shows the drawing too: only the stage left of the panel is read.
+   */
   const inkOnScreen = async () => {
-    const box = (await pane().locator('[data-image-zoom-stage]').boundingBox())!;
+    const stageBox = (await pane().locator('[data-image-zoom-stage]').boundingBox())!;
+    const panelBox = await pane().locator('[data-comments-drawer="open"]').boundingBox();
+    const box = panelBox && panelBox.x < stageBox.x + stageBox.width ? { ...stageBox, width: panelBox.x - stageBox.x } : stageBox;
     const shotPng = await page.screenshot({ clip: box });
     const found = await page.evaluate(async ({ data, color }) => {
       // The window's CSP lets images load data: URLs (connect-src does not).

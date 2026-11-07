@@ -250,6 +250,52 @@ test("the reminder switch per host, and the tool switch for Pi's extension", asy
   expect(loadConfig()).toMatchObject({ inboxTool: { pi: true }, inboxReminder: { pi: false } });
 });
 
+// DSH has no slot for a hidden reminder yet (a context message would read as the person's own words).
+test("DeepSeek Harness: the tool switch turns its plugin's tool on, and it has no reminder switch", async () => {
+  mkdirSync(join(fake.home, ".dsh", "profiles", "web"), { recursive: true });
+  writeFileSync(join(fake.home, ".dsh", "profiles", "web", "package.json"), JSON.stringify({ dependencies: { "@plannotator/dsh": "^0.28.0" } }));
+  const s = await start();
+  expect(row(await get(s), "dsh")).toMatchObject({ detected: true, reach: { kind: "tool", on: false }, reminder: null });
+  await post(s, "/api/inbox/agents", { agent: "dsh", reach: true });
+  expect(row(await get(s), "dsh")).toMatchObject({ reach: { kind: "tool", on: true }, reminder: null });
+  const refused = await post(s, "/api/inbox/agents", { agent: "dsh", reminder: true });
+  expect(refused.status).toBe(422);
+  expect(loadConfig()).toMatchObject({ inboxTool: { dsh: true } });
+  expect(loadConfig().inboxReminder).toBeUndefined();
+  // Another agent's switch keeps this one.
+  mkdirSync(join(fake.home, ".pi", "agent"), { recursive: true });
+  writeFileSync(join(fake.home, ".pi", "agent", "settings.json"), JSON.stringify({ packages: ["npm:@plannotator/pi-extension"] }));
+  await post(s, "/api/inbox/agents", { agent: "pi", reach: true });
+  expect(loadConfig().inboxTool).toEqual({ dsh: true, pi: true });
+  expect(fake.calls().filter((call) => call.name === "dsh")).toEqual([]);
+});
+
+// An older or newer Plannotator may share this config.json: saving one switch keeps a host this version does not know.
+test("saving a tool switch (Agents, or Settings' inbox_tool) keeps every other host's key, unknown hosts included", async () => {
+  mkdirSync(join(fake.home, ".pi", "agent"), { recursive: true });
+  writeFileSync(join(fake.home, ".pi", "agent", "settings.json"), JSON.stringify({ packages: ["npm:@plannotator/pi-extension"] }));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTool: { dsh: true, "next-host": false } }));
+  const s = await start();
+  await post(s, "/api/inbox/agents", { agent: "pi", reach: true });
+  expect(loadConfig().inboxTool as Record<string, boolean>).toEqual({ dsh: true, "next-host": false, pi: true });
+  expect((await post(s, "/api/inbox/settings", { inbox_tool: { opencode: true } })).status).toBe(200);
+  expect(loadConfig().inboxTool as Record<string, boolean>).toEqual({ dsh: true, "next-host": false, pi: true, opencode: true });
+});
+
+// The readers count "true" / "1" as on: saving another switch must not turn such a host off.
+test("a switch written as a string (\"true\", \"1\") stays on when another switch is saved", async () => {
+  mkdirSync(join(fake.home, ".dsh", "profiles", "web"), { recursive: true });
+  writeFileSync(join(fake.home, ".dsh", "profiles", "web", "package.json"), JSON.stringify({ dependencies: { "@plannotator/dsh": "^0.28.0" } }));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTool: { pi: "true", opencode: "0" } }));
+  const s = await start();
+  await post(s, "/api/inbox/agents", { agent: "dsh", reach: true });
+  expect(loadConfig().inboxTool).toEqual({ pi: true, opencode: false, dsh: true });
+  // One string for every host: each host this version knows keeps it.
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTool: "1" }));
+  expect((await post(s, "/api/inbox/settings", { inbox_tool: { dsh: false } })).status).toBe(200);
+  expect(loadConfig().inboxTool).toEqual({ "claude-code": true, pi: true, opencode: true, dsh: false, cline: true });
+});
+
 test("PLANNOTATOR_INBOX_TOOL locks the tool and reminder switches", async () => {
   const s = await start({ PLANNOTATOR_INBOX_TOOL: "0" });
   const model = (await (await post(s, "/api/inbox/agents", { agent: "claude-code", reminder: true })).json()) as Model;

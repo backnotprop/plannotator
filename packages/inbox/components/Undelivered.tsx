@@ -33,7 +33,7 @@ export function useMinuteClock(active: boolean): number {
 type Wait = NonNullable<DeliveryLine['wait']>;
 
 /**
- * The row's badge, in place of the count: blue while it can go in now, grey when it cannot. On a two-line or phone
+ * The row's badge, in place of the count: blue while it can go in now, grey when it cannot. On a three-line or phone
  * row it says the short form, "Undelivered 3m", "2h", "1d" (approval "inbox-row-byline", option A), and the row
  * (InboxList's `CountWords`, which keeps the clock) puts "Undelivered 3 min" in the tooltip and its name; on a wide
  * row (`full`) the full words.

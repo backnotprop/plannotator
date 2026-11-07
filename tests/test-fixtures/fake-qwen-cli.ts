@@ -3,7 +3,7 @@
  * script path as the executable). It never runs Qwen Code.
  *
  * Every run appends one JSON line to `log`: its argv, the prompt it read from
- * stdin, its cwd, $QWEN_HOME, its pid and when it started (`at`, ms). What it does next comes from the
+ * stdin, its cwd, $QWEN_HOME, Plannotator's switches, its pid and when it started (`at`, ms). What it does next comes from the
  * file `mode` in `dir` (read at each run, so a test can change it between
  * questions):
  *
@@ -31,7 +31,7 @@ import { join } from "node:path";
 export interface FakeQwen {
   /** The `qwen` launcher to put on PATH or pass as the executable path. */
   bin: string;
-  /** One JSON line per run: `{ args, stdin, cwd, qwenHome, pid, at }`. */
+  /** One JSON line per run: `{ args, stdin, cwd, qwenHome, switches, pid, at }`. */
   log: string;
   /** Write the mode the next run uses. */
   setMode(mode: "answer" | "wall-time" | "silent" | "no-session" | "hang" | "linger" | "resume-fails" | "resume-startup-fails"): void;
@@ -44,6 +44,8 @@ export interface FakeQwenRun {
   stdin: string;
   cwd: string;
   qwenHome: string | null;
+  /** Plannotator's integration switches in the run's env (ask-ai-env.ts). */
+  switches: Record<string, string | null>;
   pid: number;
   at: number;
 }
@@ -64,6 +66,11 @@ process.stdin.on("end", () => {
     stdin: Buffer.concat(chunks).toString("utf8"),
     cwd: process.cwd(),
     qwenHome: process.env.QWEN_HOME ?? null,
+    switches: {
+      PLANNOTATOR_ASK_AI_CHILD: process.env.PLANNOTATOR_ASK_AI_CHILD ?? null,
+      PLANNOTATOR_INBOX_TOOL: process.env.PLANNOTATOR_INBOX_TOOL ?? null,
+      PLANNOTATOR_AGENT_TOOL: process.env.PLANNOTATOR_AGENT_TOOL ?? null,
+    },
     pid: process.pid,
     at: Date.now(),
   }) + "\\n");

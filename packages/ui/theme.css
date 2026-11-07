@@ -5,6 +5,7 @@
 /* Theme files — each defines .theme-{name} (dark) and .theme-{name}.light */
 @import "./themes/plannotator.css";
 @import "./themes/plannotator-graphite.css";
+@import "./themes/plannotator-modern.css";
 @import "./themes/claude-plus.css";
 @import "./themes/soft-pop.css";
 @import "./themes/adwaita.css";
@@ -24,6 +25,7 @@
 @import "./themes/solar-dusk.css";
 @import "./themes/terminal.css";
 @import "./themes/tokyo-night.css";
+@import "./themes/tokyo-night-moon.css";
 @import "./themes/tinacious.css";
 @import "./themes/cursor.css";
 @import "./themes/cursor-hc.css";
@@ -1239,6 +1241,35 @@ html:has([data-pn-compact-touch-layout='true'])
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
+/* Except a diff: Pierre (@pierre/diffs) draws its own bar at the bottom of each file's code with ::-webkit-scrollbar,
+ * sized to the room its layout keeps. scrollbar-color is inherited into its shadow root, and Chrome drops
+ * ::-webkit-scrollbar styles under it (a 15px classic bar the layout does not count, cut off at the file's edge). */
+diffs-container {
+  scrollbar-color: auto;
+}
+/* A wide file's bar pinned to the bottom of its pane while its own is below the screen (DiffBottomBar): Pierre's look.
+ * The dock is the pane's last child, stuck to its bottom edge and taking no room. */
+.pn-diff-bottom-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  height: 0;
+}
+.pn-diff-bottom-bar {
+  position: absolute;
+  bottom: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+  background: var(--background);
+  --pn-diff-bar-thumb: color-mix(in srgb, var(--foreground) 28%, var(--background));
+}
+.pn-diff-bottom-bar::-webkit-scrollbar { height: 6px; }
+.pn-diff-bottom-bar::-webkit-scrollbar-thumb { background-color: var(--pn-diff-bar-thumb); border-radius: 3px; }
+@supports (-moz-appearance: none) {
+  .pn-diff-bottom-bar { scrollbar-width: thin; scrollbar-color: var(--pn-diff-bar-thumb) transparent; }
+}
 
 /* Selection */
 ::selection {
@@ -1261,6 +1292,20 @@ html:not(.transitions-ready) * {
   transition-property: color, background-color, border-color, box-shadow;
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   transition-duration: 150ms;
+}
+
+/* A theme switch lands in one frame. ThemeProvider holds .pn-theme-switching
+   on <html> from the moment it swaps the theme classes until two frames after
+   the redraw commits. Without it, the rule above starts a colour transition on
+   every element at once, which froze the page before it faded. Only timing
+   changes here: a transition already running (a sheet sliding, a menu fading)
+   keeps going, and hover fades come back with the class gone. */
+html.pn-theme-switching,
+html.pn-theme-switching *,
+html.pn-theme-switching *::before,
+html.pn-theme-switching *::after {
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
 }
 
 /* Focus states */

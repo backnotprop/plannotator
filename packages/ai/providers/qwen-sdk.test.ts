@@ -108,6 +108,21 @@ describe("QwenSDKProvider", () => {
 		expect(run2!.stdin).toContain("And step 3?");
 	});
 
+	// The Inbox MCP server Plannotator adds to Qwen's settings.json inherits
+	// Qwen's env: with the marker it lists no tools, so an Ask AI question can
+	// never post to the person's Inbox.
+	test.if(posix)("every qwen run starts with Plannotator's integration off", async () => {
+		const { fake, provider } = setup();
+		const session = await newSession(provider);
+		await ask(session, "What does step 2 do?");
+		await ask(session, "And step 3?");
+		const runs = fakeQwenRuns(fake.log);
+		expect(runs).toHaveLength(2);
+		for (const run of runs) {
+			expect(run.switches).toEqual({ PLANNOTATOR_ASK_AI_CHILD: "1", PLANNOTATOR_INBOX_TOOL: "0", PLANNOTATOR_AGENT_TOOL: "0" });
+		}
+	});
+
 	test.if(posix)("a run stopped by qwen's wall-time budget reports it with qwen's stderr", async () => {
 		const { fake, provider } = setup();
 		fake.setMode("wall-time");

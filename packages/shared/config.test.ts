@@ -42,11 +42,33 @@ import {
   resolveSharingEnabled,
   resolveDefaultDiffType,
   resolveDefaultDiffTypeFor,
+  resolveInboxLaunch,
   DEFAULT_GUIDE_SHARE_URL,
   __setConfigLockTimingsForTest,
   __setConfigSaveMergeWindowHookForTest,
 } from "./config";
 import type { PlannotatorConfig } from "./config";
+
+describe("resolveInboxLaunch", () => {
+  test("off unless enabled; the model only when it is a plain model name, never settings of another shape", () => {
+    // fullPermissions null: never set (a launch follows the login shell); a value once set, either way.
+    expect(resolveInboxLaunch({})).toEqual({ enabled: false, fullPermissions: null, model: null, scratchDir: null });
+    expect(resolveInboxLaunch({ inboxLaunch: { enabled: true, model: "haiku" } })).toEqual({ enabled: true, fullPermissions: null, model: "haiku", scratchDir: null });
+    expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: false } }).fullPermissions).toBe(false);
+    expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: true } }).fullPermissions).toBe(true);
+    expect(resolveInboxLaunch({ inboxLaunch: { model: "opus[1m]" } }).model).toBe("opus[1m]");
+    for (const model of ["haiku --dangerously-skip-permissions", "a\"b", "", { hooks: {} }, "x".repeat(65)]) {
+      expect(resolveInboxLaunch({ inboxLaunch: { model } } as unknown as PlannotatorConfig).model).toBeNull();
+    }
+  });
+
+  test("the scratch root only as an absolute path other than /; a relative path or / is the default", () => {
+    expect(resolveInboxLaunch({ inboxLaunch: { scratchDir: "/tmp/scratch/../work" } }).scratchDir).toBe("/tmp/work");
+    for (const scratchDir of ["scratch", "~/scratch", "", "/", "//", 42]) {
+      expect(resolveInboxLaunch({ inboxLaunch: { scratchDir } } as unknown as PlannotatorConfig).scratchDir).toBeNull();
+    }
+  });
+});
 
 describe("resolveDefaultDiffType", () => {
   test("accepts local-vs-remote as a persisted review default", () => {
@@ -585,9 +607,9 @@ describe("resolveReviewProgress env handling", () => {
 describe("resolveAgentTool", () => {
   // The failure this guards: a user who turned the tool on (or off) gets the
   // other answer, so the agent's tool list does not match their setting.
-  test("unset: the host's default (owner's call: on for the Claude Code mod and Oh My Pi, off on Pi and OpenCode 2)", () => {
-    expect(AGENT_TOOL_DEFAULTS).toEqual({ "claude-code": true, pi: false, "oh-my-pi": true, opencode: false });
-    for (const host of ["claude-code", "pi", "oh-my-pi", "opencode"] as const) {
+  test("unset: the host's default (owner's call: on for the Claude Code mod and Oh My Pi, off on Pi, OpenCode 2 and DeepSeek Harness)", () => {
+    expect(AGENT_TOOL_DEFAULTS).toEqual({ "claude-code": true, pi: false, "oh-my-pi": true, opencode: false, dsh: false });
+    for (const host of ["claude-code", "pi", "oh-my-pi", "opencode", "dsh"] as const) {
       expect(resolveAgentTool({}, {}, host)).toBe(AGENT_TOOL_DEFAULTS[host]);
       // An empty or unrecognized env value counts as unset.
       expect(resolveAgentTool({}, { PLANNOTATOR_AGENT_TOOL: "" }, host)).toBe(AGENT_TOOL_DEFAULTS[host]);

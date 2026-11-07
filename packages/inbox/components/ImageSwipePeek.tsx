@@ -1,8 +1,9 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { fitViewport, paddingInset, type FitAxis, type ZoomSize } from '@plannotator/ui/components/imageZoom';
+import { fitViewport, paddingInset, type FitAxis, type ZoomClear, type ZoomSize } from '@plannotator/ui/components/imageZoom';
 import { readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { WIDE_IMAGE_RATIO } from '../attachments';
 import { SWIPE_PEEK_GAP, useSwipePhase, type FileSwipe } from '../fileSwipe';
+import { useClearRows } from '../imageClear';
 import type { AttachmentStep } from '../stepping';
 
 /** Where a neighbour is drawn beside the image: just past either edge, or over it while the step lands. */
@@ -17,14 +18,15 @@ interface StageBox {
   pad: number;
 }
 
-/** Fit's place of an image on a stage, as the image view lays it out (ImageAttachmentView: `fitAxis`, the stage's padding). */
-export function peekFit(natural: ZoomSize, stage: StageBox): { left: number; top: number; width: number; height: number } {
+/** Fit's place of an image on a stage, as the image view lays it out (ImageAttachmentView: `fitAxis`, the stage's padding, its clear rows). */
+export function peekFit(natural: ZoomSize, stage: StageBox, clear?: ZoomClear): { left: number; top: number; width: number; height: number } {
   const wide = natural.width > natural.height * WIDE_IMAGE_RATIO;
   const tall = natural.height > natural.width * 2;
   const axis: FitAxis = wide ? 'height' : tall ? 'width' : 'contain';
-  const size = { width: stage.width, height: stage.height };
+  const top = clear?.top ?? 0;
+  const size = { width: stage.width, height: stage.height - top - (clear?.bottom ?? 0) };
   const view = fitViewport(natural, size, paddingInset(size, stage.pad), axis);
-  return { left: view.x, top: view.y, width: natural.width * view.scale, height: natural.height * view.scale };
+  return { left: view.x, top: view.y + top, width: natural.width * view.scale, height: natural.height * view.scale };
 }
 
 /** A step a swipe can draw whole beside the image: an image. */
@@ -77,6 +79,7 @@ export function ImageSwipePeek({
   const cover = progress?.phase === 'handoff' ? incoming.current : null;
 
   const [stage, setStage] = useState<StageBox | null>(null);
+  const { probe, clear } = useClearRows();
   const swiping = progress !== null;
   const read = () => {
     const next = readStage(area.current);
@@ -105,17 +108,18 @@ export function ImageSwipePeek({
   if (!stage || shown.length === 0) return null;
   return (
     <div className="ib-imgpeeks" aria-hidden="true" data-image-peeks="" style={{ left: stage.left, top: stage.top, width: stage.width, height: stage.height }}>
+      <div className="ib-imgclear" ref={probe} />
       {shown.map(({ step, place }) => (
-        <PeekImage key={step.attachment.id} src={urlOf(step.attachment)} place={place} stage={stage} />
+        <PeekImage key={step.attachment.id} src={urlOf(step.attachment)} place={place} stage={stage} clear={clear} />
       ))}
     </div>
   );
 }
 
-function PeekImage({ src, place, stage }: { src: string; place: PeekPlace; stage: StageBox }) {
+function PeekImage({ src, place, stage, clear }: { src: string; place: PeekPlace; stage: StageBox; clear?: ZoomClear }) {
   const [natural, setNatural] = useState<ZoomSize | null>(null);
   const left = place === 'cover' ? 0 : place === 'next' ? `calc(100% + ${SWIPE_PEEK_GAP}px)` : `calc(-100% - ${SWIPE_PEEK_GAP}px)`;
-  const box = natural ? peekFit(natural, stage) : null;
+  const box = natural ? peekFit(natural, stage, clear) : null;
   return (
     <div className="ib-imgpeek" data-image-peek={place} style={{ left, height: stage.height }}>
       <img

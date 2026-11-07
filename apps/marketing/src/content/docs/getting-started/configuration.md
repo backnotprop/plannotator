@@ -16,12 +16,14 @@ Plannotator is configured through environment variables, hook/plugin configurati
 | `PLANNOTATOR_PORT` | random (local) / `19432` (remote) | Fixed server port or inclusive range. A range selects the first available port. Useful for forwarding or concurrent remote sessions. |
 | `PLANNOTATOR_PUBLIC_URL` | unset | Full HTTP(S) origin advertised in remote mode behind a reverse proxy. The local runtime port is not appended. For a port range, this origin applies only to the first port; later ports use `PLANNOTATOR_URL_HOST` or `localhost`. On the port it fronts, it wins over `PLANNOTATOR_URL_HOST`. Binding is unaffected and local sessions ignore the override. Can also be set via `~/.plannotator/config.json` (`{ "publicUrl": "https://plannotator.example.com" }`). |
 | `PLANNOTATOR_URL_HOST` | unset (`localhost`) | Hostname for advertised session URLs. Local sessions accept `localhost` and `*.localhost`, e.g. `plannotator.localhost` to isolate preference cookies. Other hosts (e.g. a Tailscale MagicDNS name) require remote mode, and remote mode ignores `*.localhost` names. Used when `PLANNOTATOR_PUBLIC_URL` is unset or does not apply. The runtime-chosen port is always appended; binding is unaffected. Can also be set via `~/.plannotator/config.json` (`{ "urlHost": "host" }`). |
+| `PLANNOTATOR_TAILSCALE` | unset (off) | Set to `1` / `true` to publish every `review`, `annotate` and `last` session started through the `plannotator` CLI (including the ones your agent starts) over your tailnet, as if `--tailscale` were passed, so your agent does not need the flag. `0` / `false` runs one session locally. Can also be set via `~/.plannotator/config.json` (`{ "tailscale": true }`); the env var wins. |
 | `PLANNOTATOR_BROWSER` | system default | Custom browser or script to open the UI. `none` opens no browser. |
 | `PLANNOTATOR_AI` | enabled | Set to `disabled` to disable Ask AI, Review Agents, and Guided Review. External agents can still open reviews and submit annotations; the annotate agent terminal is separate. |
 | `PLANNOTATOR_SHARE` | enabled | Set to `disabled` to turn off URL sharing entirely. Can also be set via `~/.plannotator/config.json` (`{ "share": "disabled" }`). |
 | `PLANNOTATOR_SHARE_URL` | `https://share.plannotator.ai` | Point share links at a self-hosted portal. |
 | `PLANNOTATOR_CLAUDE_MOD` | on | Set to `0` to turn off the [Plannotator mod](/docs/guides/claude-code/#the-plannotator-mod) for Claude Code and use the classic hook, where Claude waits for your decision. Can also be set via `~/.plannotator/config.json` (`{ "claudeCodeMod": false }`). |
-| `PLANNOTATOR_AGENT_TOOL` | on for Claude Code and Oh My Pi, off on Pi and OpenCode 2 | Set to `1` to give the agent a `plannotator` tool, `0` to keep it out of the tool list (the slash commands are unchanged). Read when a session starts. Can also be set via `~/.plannotator/config.json` (`{ "agentTool": true }`). |
+| `PLANNOTATOR_PLAN_REVIEW` | on | Claude Code only. Set to `0` to turn off plan review and use Claude Code's own plan approval dialog. The rest of Plannotator is unchanged. Can also be set via `~/.plannotator/config.json` (`{ "planReview": false }`). |
+| `PLANNOTATOR_AGENT_TOOL` | on for Claude Code and Oh My Pi, off on Pi, OpenCode 2 and DeepSeek Harness | Set to `1` to give the agent a `plannotator` tool, `0` to keep it out of the tool list (the slash commands are unchanged). Read when a session starts. Can also be set via `~/.plannotator/config.json` (`{ "agentTool": true }`). |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | Respected by the install script when placing hooks. |
 
 See the [environment variables reference](/docs/reference/environment-variables/) for full details, port resolution order, and examples.
@@ -167,7 +169,7 @@ You can customize the messages Plannotator sends to the agent when you approve, 
 
 ## Remote mode
 
-When working over SSH, in a devcontainer, or in Docker, set `PLANNOTATOR_REMOTE=1` (or `true`) and `PLANNOTATOR_PORT` to a port you'll forward. Set `PLANNOTATOR_REMOTE=0` / `false` if you need to force local behavior even when SSH env vars are present. See the [remote & devcontainers guide](/docs/guides/remote-and-devcontainers/) for setup instructions.
+Over SSH, remote mode turns on by itself, so you only need to forward port `19432` (or your `PLANNOTATOR_PORT` if you set one). Devcontainers and Docker are not detected, so set `PLANNOTATOR_REMOTE=1` (or `true`) and `PLANNOTATOR_PORT` to a port you'll forward; in a VS Code devcontainer you need this only if the browser does not open by itself. Set `PLANNOTATOR_REMOTE=0` / `false` if you need to force local behavior even when SSH env vars are present. See the [remote & devcontainers guide](/docs/guides/remote-and-devcontainers/) for setup instructions.
 
 ## Custom browser
 

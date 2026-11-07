@@ -31,13 +31,14 @@ const SKIP = 'pre, code, [data-skills-line], [data-fold-head], [data-open-head],
  * attached files' or a guided review's). Those quote agent text, so a `$name`
  * there is not the person's. A sent reply drawn in the person's words
  * (sentReply.ts) ends them at its answers list or, without one, at the rest
- * of the body (`[data-sent-rest]`, the feedback), whatever its headings say.
+ * of the body (`[data-sent-rest]`), or at its feedback (`[data-reply-feedback]`,
+ * replyFeedback.ts), whatever its headings say.
  */
 const SECTION_HEADINGS = [QUESTION_ANSWERS_HEADING, MESSAGE_FEEDBACK_HEADING.title, ATTACHMENT_FEEDBACK_HEADING.title, GUIDE_FEEDBACK_TITLE];
 
 function wordsEnd(root: Node): Element | null {
   if (!(root instanceof Element)) return null;
-  const sent = root.querySelector('[data-sent-answers], [data-sent-rest]');
+  const sent = root.querySelector('[data-sent-answers], [data-sent-rest], [data-reply-feedback]');
   if (sent) return sent;
   for (const heading of root.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
     const text = heading.textContent?.trim() ?? '';

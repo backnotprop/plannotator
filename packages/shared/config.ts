@@ -6,7 +6,7 @@
  */
 
 import { childEnv } from "./child-env";
-import { join } from "path";
+import { isAbsolute, join, resolve } from "path";
 import { getPlannotatorDataDir } from "./data-dir";
 import {
   readFileSync,
@@ -330,14 +330,21 @@ export interface PlannotatorConfig {
   /**
    * The `plannotator` agent tool (packages/shared/plannotator-tool.ts) on the
    * hosts that register it: the Claude Code mod, Pi (and the Pi extension in
-   * Oh My Pi) and OpenCode 2. `true` puts it in the agent's tool list, `false`
-   * keeps it out (the slash commands are unchanged either way). Read once when
-   * a session starts, so a change applies to the next session.
-   * PLANNOTATOR_AGENT_TOOL wins over this key. Unset: the host's default,
-   * AGENT_TOOL_DEFAULTS (on for the Claude Code mod and Oh My Pi, off on Pi
-   * and OpenCode 2).
+   * Oh My Pi), OpenCode 2 and DeepSeek Harness. `true` puts it in the agent's
+   * tool list, `false` keeps it out (the slash commands are unchanged either
+   * way). Read once when a session starts, so a change applies to the next
+   * session. PLANNOTATOR_AGENT_TOOL wins over this key. Unset: the host's
+   * default, AGENT_TOOL_DEFAULTS (on for the Claude Code mod and Oh My Pi, off
+   * on Pi, OpenCode 2 and DeepSeek Harness).
    */
   agentTool?: boolean;
+  /**
+   * Plan review of Claude Code's ExitPlanMode (Claude Code only: Pi and
+   * OpenCode have no such hook). `false` leaves plan approval to Claude
+   * Code's own dialog. The rest of Plannotator is unchanged.
+   * PLANNOTATOR_PLAN_REVIEW wins over this key. Default: true.
+   */
+  planReview?: boolean;
   /**
    * The Plannotator Inbox's `plannotator_inbox` tool on the hosts that will
    * register it (the Claude Code mod, Pi, OpenCode 2), set from the Inbox's
@@ -359,6 +366,11 @@ export interface PlannotatorConfig {
    * out): on wherever the tool is on.
    */
   inboxReminder?: boolean | Partial<Record<InboxToolHost, boolean>>;
+  /**
+   * The Plannotator Inbox's debug log (`inbox/debug.log` in the data dir), as
+   * `PLANNOTATOR_INBOX_DEBUG=1`. Config-only, read when the Inbox starts.
+   */
+  inboxDebug?: boolean;
   /**
    * The Plannotator Inbox's browser notifications, set from the Inbox page
    * (its one-time ask and its Settings), kept here rather than in the page's
@@ -392,6 +404,21 @@ export interface PlannotatorConfig {
    */
   inboxTextSize?: number;
   /**
+   * How the Inbox list's rows look: the names of the row options that are on
+   * (core `INBOX_ROWS_OPTIONS`), every other one off. Unset: none written yet
+   * (a window adopts its browser's old cookies once). Written by the Inbox's ⋮
+   * menu and Settings → Rows through POST /api/inbox/settings `{ rows }`. A
+   * name this build does not know is dropped on read.
+   */
+  inboxRows?: string[];
+  /** How many times `inboxRows` was saved: windows take a look only when it is newer than the last they took. */
+  inboxRowsRev?: number;
+  /**
+   * The defaults `inboxRows` was saved under (core `INBOX_ROWS_DEFAULTS_VERSION`, 2: smaller thread names on).
+   * Unset: saved before that, so an empty `inboxRows` is read as today's defaults (core `inboxRowsSaved`).
+   */
+  inboxRowsDefaults?: number;
+  /**
    * The Inbox's onboarding tour, per machine (approval "inbox-onboarding-tour"):
    * when it was started, finished or skipped, and whether the first real thread
    * offers notifications once more. Written by the server only, through POST
@@ -409,18 +436,135 @@ export interface PlannotatorConfig {
   experimental?: { decisionMode?: boolean };
   /**
    * The Board's one-time first-visit dialog (approval "inbox-board", intro
-   * amendment): `shownAt` once a page on this computer claimed it
+   * amendment): `shownAt` once a page on this computer or the owner's phone
+   * claimed it (or the Board reveal showed it)
    * (`POST /api/inbox/board/intro`, a compare-and-set), once per machine.
    */
   inboxBoardIntro?: { shownAt?: string };
   /**
+   * The Inbox's one-time list options dialog (approval "inbox-list-options-intro"): decided at the first release
+   * start that knows it. Someone who used an Inbox before gets `dueAt`; a fresh install is marked `shownAt` and never
+   * sees it. `shownAt` once a page on this computer claimed it (`POST /api/inbox/list-intro`, a compare-and-set):
+   * once per machine.
+   */
+  inboxListIntro?: { dueAt?: string; shownAt?: string };
+  /**
+   * Inbox voice dictation (approval "inbox-voice"), off unless turned on. Written by Settings → Voice and the
+   * announcement (`POST /api/inbox/settings` `{ voice }`).
+   */
+  inboxVoice?: { on?: boolean; phonesOnly?: boolean; engine?: "codex" | "api" };
+  /** The voice announcement: the list intro's rule (`dueAt`, or `shownAt` on a fresh install), claimed with `POST /api/inbox/voice/intro`. `skippedAt`: the check found no ChatGPT login, so it never asks again. */
+  inboxVoiceIntro?: { dueAt?: string; shownAt?: string; skippedAt?: string };
+  /**
+   * The one-time Snooze announcement (approval "inbox-snooze-announce"; rules in packages/server/inbox-snooze-intro.ts). Written
+   * only by a release build. `firstUseAt`: the oldest record of the event log, rebuilt once at the first release start
+   * that knows this key (and filled in later when the log was empty then). `snoozedAt`: the person snoozed something
+   * (the window, the phone, a linked machine's forward), so it never shows. `shownAt`: a page claimed it (`POST
+   * /api/inbox/snooze-intro`, a compare-and-set), once per machine.
+   */
+  inboxSnoozeIntro?: { firstUseAt?: string; snoozedAt?: string; shownAt?: string };
+  /**
    * The Board (approval "inbox-board", 2026-10-26 amendment): something the
-   * person turns on, off by default. On: the sidebar's Board row and page,
-   * and the Inbox serves the agents' `card` tool. Off: neither, every card
-   * kept. Written by the Inbox's Settings → Capabilities (`POST
-   * /api/inbox/settings` `{ board: { on } }`), read on every request.
+   * person turns on. On: the sidebar's Board row and page, and the Inbox
+   * serves the agents' `card` tool. Off: neither, every card kept. Written by
+   * the Inbox's Settings → Capabilities (`POST /api/inbox/settings`
+   * `{ board: { on } }`), read on every request. Three readings (approval
+   * "inbox-feature-reveal"): unset = not decided yet (off, and the only state
+   * the reveal offers it in), `true` = on, `false` = the person switched it
+   * off. Nothing writes it automatically: the reveal's claim turns nothing
+   * on, and only its dialog's "Turn it on" writes `true` (opt-in, the owner
+   * 2026-11-04).
    */
   inboxBoard?: boolean;
+  /**
+   * Thread steps (approval "inbox-thread-steps", 2026-11-03): something the
+   * person turns on, off by default. On: the thread's steps button, the
+   * steps in the Board's opened card, and the agents' `steps` tool, wake
+   * line, compaction line and Tidy rule. Off: none of it, every list kept.
+   * Written by the Inbox's Settings → Capabilities (`POST
+   * /api/inbox/settings` `{ steps: { on } }`), read on every request.
+   */
+  inboxSteps?: boolean;
+  /**
+   * The "Star the repo" ask (approval "star-ask", 2026-11-06), once across
+   * every surface (packages/shared/star-ask.ts reads and writes it, nothing
+   * else does). `shownAt`: a surface showed it, so none shows it again.
+   * `answer`: `starred` (gh starred it on the click), `opened` (the GitHub
+   * page opened), `not-now`, or `already` (starred before it showed: nothing
+   * showed). `surface`: where. `canStar`: the button starred with gh.
+   * `checkedAt`: the already-starred check ran (a done-screen page at load)
+   * and the ask is still open; later loads reuse it without gh.
+   */
+  starAsk?: {
+    checkedAt?: string;
+    shownAt?: string;
+    answer?: "starred" | "opened" | "not-now" | "already";
+    answeredAt?: string;
+    surface?: "inbox" | "plan" | "review" | "annotate";
+    canStar?: boolean;
+  };
+  /**
+   * Code review in the Inbox (approval "inbox-code-review-direction",
+   * 2026-11-03): something the person turns on, off by default. On: the
+   * review skills in the reply box's "/" list, the review card and its
+   * full-window review with Approve / Send feedback, and submit_guide's
+   * `review` field. Off: none of it; guided reviews and `plannotator review`
+   * stay as they are. Three readings, like the Board's: unset = not decided
+   * yet (off), `true` = on, `false` = the person switched it off. Written by
+   * the Inbox's Settings → Capabilities (`POST /api/inbox/settings`
+   * `{ code_review: { on } }`), read on every request.
+   */
+  inboxCodeReview?: boolean;
+  /**
+   * Shape in the Inbox (approval "shape-inbox-placement"): living boards an
+   * agent draws and keeps current. Off unless the person turns it on. On: the
+   * thread header's Pebble, the sidebar's Shape row (3+ boards), the Shape
+   * group in the search, the `/api/shapes` routes and the shape skill in the
+   * reply box's "/" list. Off: none of it, and no agent is told of it. Three
+   * readings, like the Board's: unset (off), `true`, `false`. Written by
+   * Settings → Capabilities (`POST /api/inbox/settings` `{ shape: { on } }`).
+   */
+  inboxShape?: boolean;
+  /**
+   * System in the Inbox (approval "system-inbox"): a drawing of each project's code, kept current by an agent.
+   * Shown only while Code review is on. Off unless turned on; config only until Settings → Capabilities' switch
+   * lands. Read on every request.
+   */
+  inboxSystem?: boolean;
+  /**
+   * The queue of one-time reveals for returning users (approval
+   * "inbox-feature-reveal"; rules in packages/shared/inbox/reveals.ts). Written
+   * only by the server. `lastShownAt`: the last one-time announcement claimed
+   * on this machine (list options, voice, Snooze, the Board), the one-day
+   * spacing's clock. `waitingSince`: when each reveal first became next, for
+   * the 3-day patience. `board.shownAt`: the Board reveal was claimed.
+   * `steps.shownAt`: the Checklist reveal was claimed. `key` beside either:
+   * the claiming page's own key, so that page's retry after a lost answer is
+   * shown it again (any other key is not). The schedule (approval
+   * "inbox-one-time-dialogs"): `dayShownAt`, the last dialog of the line on
+   * any day (the agent note included: one a day); `notNowAt`, the last offer
+   * closed with Not now (three days before the next); `shownLoad`, the page
+   * load that showed the last dialog (never on two loads in a row; the loads
+   * seen since are kept in memory). `agentNote.shownFor`: the agents the
+   * agent note was shown for (once each, so an unanswered note never takes
+   * another day). `waitingSince` also counts the 14 days after which an offer
+   * retires (an update-day dialog never does).
+   */
+  inboxReveals?: {
+    lastShownAt?: string;
+    dayShownAt?: string;
+    notNowAt?: string;
+    shownLoad?: string;
+    agentNote?: { shownFor?: string[] };
+    waitingSince?: { code_review?: string; sound?: string; list_intro?: string; voice?: string; snooze?: string; board?: string; steps?: string; list_view?: string };
+    /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
+    code_review?: { shownAt?: string; key?: string };
+    board?: { shownAt?: string; key?: string };
+    steps?: { shownAt?: string; key?: string };
+    /** The "Star the repo" ask's claim in the line (config.json `starAsk` is its record across surfaces). */
+    star?: { shownAt?: string; key?: string };
+    list_view?: { shownAt?: string; key?: string };
+  };
   inboxSound?: {
     enabled?: boolean;
     volume?: number;
@@ -467,6 +611,20 @@ export interface PlannotatorConfig {
    * a tagged machine, which has no owner. Config only. Default: none.
    */
   inboxTailscaleAllow?: string[];
+  /**
+   * Launch agents from the Inbox (compose's "New Claude Code session";
+   * packages/server/inbox-launch.ts). `enabled`: config only, default false,
+   * off, compose, the thread and every route are as before.
+   * `fullPermissions`: Settings → Agents' "Start new sessions with full
+   * permissions" (bypass mode); never set, a launch follows the person's
+   * login shell (CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS). `model`: config only, a model name such as
+   * `haiku` for each launch's settings file (the manual smoke); anything that
+   * is not a plain model name is ignored. `scratchDir`: Settings → Agents'
+   * "Scratch folders", where "New scratch folder" makes each new folder (an
+   * absolute path; default `<dataDir>/scratch`). Moving it applies to new
+   * folders only.
+   */
+  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string; scratchDir?: string };
   /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
@@ -576,6 +734,14 @@ export interface PlannotatorConfig {
    */
   urlHost?: string;
   /**
+   * Publish every `plannotator review`, `annotate` and `annotate-last`/`last`
+   * session over the tailnet, as if `--tailscale` were passed, so a host or
+   * agent need not add the flag each time. PLANNOTATOR_TAILSCALE wins over
+   * this key; the flag turns it on for one run. Other subcommands ignore it.
+   * The Inbox has its own key (`inboxTailscale`). Default: false.
+   */
+  tailscale?: boolean;
+  /**
    * Mirror the approved plan checklist into an editable todo provider during
    * execution (issue #484). "auto" (default) syncs whenever a provider is
    * detected — currently pi-todos. Detection checks the configured todo
@@ -649,9 +815,11 @@ function getConfigPath(): string {
 
 /**
  * Load config from ~/.plannotator/config.json.
- * Returns {} on missing file or malformed JSON.
+ * Returns {} on missing file or malformed JSON. `quiet`: no warning for a
+ * malformed file (a read that must not add a line to what a command printed
+ * before it existed: a later read in the same command still warns).
  */
-export function loadConfig(): PlannotatorConfig {
+export function loadConfig(options: { quiet?: boolean } = {}): PlannotatorConfig {
   try {
     const configPath = getConfigPath();
     if (!existsSync(configPath)) return {};
@@ -660,7 +828,7 @@ export function loadConfig(): PlannotatorConfig {
     const parsed = JSON.parse(raw);
     return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
   } catch (e) {
-    process.stderr.write(`[plannotator] Warning: failed to read config.json: ${e}\n`);
+    if (!options.quiet) process.stderr.write(`[plannotator] Warning: failed to read config.json: ${e}\n`);
     return {};
   }
 }
@@ -1116,6 +1284,24 @@ export function resolveDefaultDiffTypeFor(
   return v === 'jj-current' || v === 'jj-last' || v === 'jj-line' || v === 'jj-evolog' || v === 'jj-all' ? v : 'jj-current';
 }
 
+/** A model name as Claude Code takes it (`haiku`, `claude-opus-4-1`, `opus[1m]`): letters, digits, `.`, `_`, `-`, `[`, `]`. */
+const LAUNCH_MODEL = /^[\w.\-[\]]{1,64}$/;
+
+/**
+ * config.inboxLaunch, coerced: off unless `enabled` is true; `model` only when it is a plain model name;
+ * `scratchDir` only when it is an absolute path other than `/` (null: the default, `<dataDir>/scratch`).
+ */
+export function resolveInboxLaunch(config: PlannotatorConfig): { enabled: boolean; fullPermissions: boolean | null; model: string | null; scratchDir: string | null } {
+  const value = config.inboxLaunch && typeof config.inboxLaunch === "object" ? config.inboxLaunch : {};
+  return {
+    enabled: coerceConfigBoolean(value.enabled, false),
+    // null: the person never set the switch (a launch follows their login shell).
+    fullPermissions: parseConfigBoolean(value.fullPermissions) ?? null,
+    model: typeof value.model === "string" && LAUNCH_MODEL.test(value.model) ? value.model : null,
+    scratchDir: typeof value.scratchDir === "string" && isAbsolute(value.scratchDir) && resolve(value.scratchDir) !== resolve("/") ? resolve(value.scratchDir) : null,
+  };
+}
+
 /**
  * Coerce a config.json value that should be a boolean. JSON parsing preserves
  * whatever type the user typed, so a hand-edited `"false"` (quoted) arrives as
@@ -1262,6 +1448,31 @@ export function resolveUpdateCheck(
   return coerceConfigBoolean(config.updateCheck, true);
 }
 
+/** What in the environment turns the daily ping off (it can only turn it off). */
+export type TelemetryEnvOff = "DO_NOT_TRACK" | "NO_ANON_PING" | "CI";
+
+/** The CI variables that turn the daily ping off when set (CI itself: unless "0" or "false"). */
+export const TELEMETRY_CI_VARS = ["CI", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE", "CIRCLECI", "JENKINS_URL", "TF_BUILD", "CODEBUILD_BUILD_ID"] as const;
+
+/**
+ * The environment's hard off for the daily ping, or undefined. In order:
+ * DO_NOT_TRACK set to anything but empty, 0, false, no or off (donottrack.sh);
+ * NO_ANON_PING set to any non-empty value other than "0" (the NO_COLOR
+ * convention); a CI variable. No value turns the ping on.
+ */
+export function parseTelemetryEnvOff(env: NodeJS.ProcessEnv = process.env): TelemetryEnvOff | undefined {
+  // DO_NOT_TRACK is the shared developer convention (donottrack.sh): honoured quietly, never named to users.
+  const dnt = env.DO_NOT_TRACK?.trim().toLowerCase();
+  if (dnt && !["0", "false", "no", "off"].includes(dnt)) return "DO_NOT_TRACK";
+  const noPing = env.NO_ANON_PING;
+  if (noPing !== undefined && noPing !== "" && noPing.trim() !== "0") return "NO_ANON_PING";
+  for (const name of TELEMETRY_CI_VARS) {
+    const v = env[name]?.trim().toLowerCase();
+    if (v && v !== "0" && v !== "false") return "CI";
+  }
+  return undefined;
+}
+
 /** The PLANNOTATOR_UPDATE_CHECK override, or undefined when it does not decide. */
 export function parseUpdateCheckEnv(env: NodeJS.ProcessEnv = process.env): boolean | undefined {
   const v = env.PLANNOTATOR_UPDATE_CHECK?.trim().toLowerCase();
@@ -1297,7 +1508,7 @@ export function resolveClaudeCodeMod(
  * from plain Pi itself (`apps/pi-extension/pi-host.ts`): it is the same
  * extension and the same session bridge (host `pi`), with its own default.
  */
-export type AgentToolHost = "claude-code" | "pi" | "oh-my-pi" | "opencode";
+export type AgentToolHost = "claude-code" | "pi" | "oh-my-pi" | "opencode" | "dsh";
 
 /**
  * Whether each host registers the `plannotator` agent tool when nothing is
@@ -1305,8 +1516,10 @@ export type AgentToolHost = "claude-code" | "pi" | "oh-my-pi" | "opencode";
  * mod (the tool is deferred behind tool search there, so it costs only its
  * name until used) and for Oh My Pi (owner's call 2026-10-12: OMP lists an
  * extension tool as one line in its system prompt, about 50 tokens, and loads
- * the schema only when the model reads it); off on Pi and OpenCode 2 (a full
- * tool definition, about 800 tokens, in every request). The mod's mirror
+ * the schema only when the model reads it); off on Pi, OpenCode 2 and
+ * DeepSeek Harness (`dsh`, the `@plannotator/dsh` plugin; owner's call
+ * 2026-11-02): a full tool definition, about 800 tokens, in every request,
+ * and DSH keeps its tool list fixed for request caching. The mod's mirror
  * (`apps/hook/hooks/mod/enabled.ts`) is kept equal to the claude-code entry by
  * `enabled.test.ts`.
  */
@@ -1315,6 +1528,7 @@ export const AGENT_TOOL_DEFAULTS: Readonly<Record<AgentToolHost, boolean>> = {
   pi: false,
   "oh-my-pi": true,
   opencode: false,
+  dsh: false,
 };
 
 /**
@@ -1360,26 +1574,57 @@ export function resolveAgentTool(
   return parseAgentToolEnv(env) ?? parseConfigBoolean(config.agentTool) ?? AGENT_TOOL_DEFAULTS[host];
 }
 
+/** The PLANNOTATOR_PLAN_REVIEW override, or undefined when it does not decide. */
+export function parsePlanReviewEnv(env: NodeJS.ProcessEnv = process.env): boolean | undefined {
+  const v = env.PLANNOTATOR_PLAN_REVIEW?.trim().toLowerCase();
+  if (v === "1" || v === "true" || v === "on") return true;
+  if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
+  return undefined;
+}
+
+/**
+ * Whether Plannotator reviews Claude Code's ExitPlanMode.
+ * Priority: PLANNOTATOR_PLAN_REVIEW → config.planReview → on.
+ */
+export function resolvePlanReview(config: PlannotatorConfig, env: NodeJS.ProcessEnv): boolean {
+  return parsePlanReviewEnv(env) ?? parseConfigBoolean(config.planReview) ?? true;
+}
+
 /**
  * The hosts that register the Inbox's `plannotator_inbox` tool. The Pi
  * extension registers it as `pi` in Oh My Pi too: OMP has no Inbox host key
  * of its own (yet), so `inboxTool.pi` and the Pi default decide there.
+ * `dsh` is the DeepSeek Harness plugin (`@plannotator/dsh`), `cline` the
+ * Cline plugin (`@plannotator/cline`).
  */
-export type InboxToolHost = "claude-code" | "pi" | "opencode";
+export type InboxToolHost = "claude-code" | "pi" | "opencode" | "dsh" | "cline";
 
 /**
  * Whether each host registers the Inbox's `plannotator_inbox` tool when
  * nothing is set: the agent tool's rule (on for the Claude Code mod, where
- * tools are deferred behind tool search; off on Pi and OpenCode 2, which send
- * every tool's full definition with each request).
+ * tools are deferred behind tool search; off on Pi, OpenCode 2 and DeepSeek
+ * Harness, which send every tool's full definition with each request; DSH
+ * also keeps its tool list fixed for request caching). Cline sends every
+ * tool's definition too and has no `plannotator` agent tool, so its entry is
+ * its own, off like Pi's.
  */
 export const INBOX_TOOL_DEFAULTS: Readonly<Record<InboxToolHost, boolean>> = {
   "claude-code": AGENT_TOOL_DEFAULTS["claude-code"],
   pi: AGENT_TOOL_DEFAULTS.pi,
   opencode: AGENT_TOOL_DEFAULTS.opencode,
+  dsh: AGENT_TOOL_DEFAULTS.dsh,
+  cline: false,
 };
 
-export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode"];
+export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode", "dsh", "cline"];
+
+/**
+ * The hosts that give a session the Inbox reminder (INBOX_REMINDER_TEXT) with
+ * the tool. DeepSeek Harness does not yet: it has no hidden-message slot like
+ * Pi's, and a context message there shows as the person's own words. Nor does
+ * Cline (its plugin has no hidden-message slot either).
+ */
+export const INBOX_REMINDER_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode"];
 
 /** The PLANNOTATOR_INBOX_TOOL override, or undefined when it does not decide. */
 export function parseInboxToolEnv(env: NodeJS.ProcessEnv = process.env): boolean | undefined {
@@ -1387,6 +1632,30 @@ export function parseInboxToolEnv(env: NodeJS.ProcessEnv = process.env): boolean
   if (v === "1" || v === "true" || v === "on") return true;
   if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
   return undefined;
+}
+
+/**
+ * `inboxTool` with `changes` applied, for saving. Every per-host entry already
+ * there is kept, a host this version does not know included (a newer
+ * Plannotator's), so saving one switch never drops another's. One boolean for
+ * every host becomes that value for each host this version knows.
+ */
+export function inboxToolWith(
+  current: PlannotatorConfig["inboxTool"],
+  changes: Partial<Record<InboxToolHost, boolean>>,
+): Partial<Record<InboxToolHost, boolean>> {
+  // The readers' rule (configuredInboxTool): "true", "1", "false", "0" count too, so they are kept as booleans.
+  const next: Record<string, boolean> = {};
+  if (current && typeof current === "object" && !Array.isArray(current)) {
+    for (const [host, value] of Object.entries(current)) {
+      const parsed = parseConfigBoolean(value);
+      if (parsed !== undefined) next[host] = parsed;
+    }
+  } else {
+    const shared = parseConfigBoolean(current);
+    if (shared !== undefined) for (const host of INBOX_TOOL_HOSTS) next[host] = shared;
+  }
+  return { ...next, ...changes } as Partial<Record<InboxToolHost, boolean>>;
 }
 
 /** config.inboxTool for one host: the shared boolean, the host's own entry, or undefined. */
@@ -1433,7 +1702,7 @@ export function resolveInboxReminder(
   env: NodeJS.ProcessEnv,
   host: InboxToolHost,
 ): boolean {
-  return resolveInboxTool(config, env, host) && (configuredInboxReminder(config, host) ?? true);
+  return INBOX_REMINDER_HOSTS.includes(host) && resolveInboxTool(config, env, host) && (configuredInboxReminder(config, host) ?? true);
 }
 
 /**
@@ -1471,6 +1740,17 @@ export function resolveInboxPhones(
   if (v === "1" || v === "true" || v === "on") return true;
   if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
   return coerceConfigBoolean(config.inboxPhones, false);
+}
+
+/**
+ * Whether the Plannotator Inbox offers Ask AI: an environment switch, off by
+ * default, until the owner has used it. Off, the ask routes answer 404, no
+ * question can wait and no agent connects for one. Same words as
+ * PLANNOTATOR_INBOX_PHONES; anything else counts as off.
+ */
+export function resolveInboxAskAi(env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = env.PLANNOTATOR_INBOX_ASK_AI?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "on";
 }
 
 /**
@@ -1553,6 +1833,46 @@ export function resolveInboxTailscale(
   const fromConfig = parseConfigBoolean(config.inboxTailscale);
   if (fromConfig !== undefined) return { on: fromConfig, source: "config" };
   return { on: false, source: "default" };
+}
+
+export type SessionTailscaleSource = "flag" | "env" | "config" | "default";
+
+/**
+ * Resolve whether a review / annotate / annotate-last session is published
+ * over the tailnet (the per-session `--tailscale` transport, not the Inbox's).
+ *
+ * Priority (highest wins):
+ *   `--tailscale`  →  PLANNOTATOR_TAILSCALE  →  config.tailscale  →  default false
+ *
+ * The flag only turns it on. The env var takes the same words as
+ * PLANNOTATOR_INBOX_TAILSCALE: `1` / `true` / `on` turn it on, `0` / `false` /
+ * `off` / `disabled` keep it off against the config key (a one-run opt-out);
+ * an empty or unrecognized value counts as unset.
+ */
+export function resolveSessionTailscale(
+  config: PlannotatorConfig,
+  env: NodeJS.ProcessEnv = process.env,
+  flag = false,
+): { on: boolean; source: SessionTailscaleSource } {
+  if (flag) return { on: true, source: "flag" };
+  const v = env.PLANNOTATOR_TAILSCALE?.trim().toLowerCase();
+  if (v === "1" || v === "true" || v === "on") return { on: true, source: "env" };
+  if (v === "0" || v === "false" || v === "off" || v === "disabled") return { on: false, source: "env" };
+  const fromConfig = parseConfigBoolean(config.tailscale);
+  if (fromConfig !== undefined) return { on: fromConfig, source: "config" };
+  return { on: false, source: "default" };
+}
+
+/**
+ * How to run one session without the tailnet, worded for what turned it on:
+ * dropping the flag does nothing when the env var or config key decided.
+ */
+export function sessionTailscaleOptOut(source: SessionTailscaleSource): string {
+  return source === "flag"
+    ? "run the same command without --tailscale"
+    : source === "env"
+      ? "run the same command with PLANNOTATOR_TAILSCALE unset or set to 0"
+      : "run the same command with PLANNOTATOR_TAILSCALE=0 (config.json's \"tailscale\" key turned it on)";
 }
 
 /**

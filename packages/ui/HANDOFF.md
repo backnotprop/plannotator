@@ -221,6 +221,7 @@ We deliberately did **not** restructure the exports map in this PR (move-don't-r
 | `components/TableOfContents` | Pure — renders from `blocks`; pair with `useActiveSection` for scroll-spy. *(Blessed in 0.24.0.)* |
 | `components/ResizeHandle` + `hooks/useResizablePanel` | Layout pair for draggable panel widths; persists the width through the `storageBackend` seam. *(Blessed in 0.24.0.)* |
 | `hooks/useActiveSection` | Scroll-spy over rendered headings; no backend. *(Blessed in 0.24.0.)* |
+| `components/MarkdownContentsRail` + `components/DeferredMarkdownContentsRail` | Workspaces' document contents rail (ticks in the right gutter, the Contents panel on click), moved here; no backend. Its styles are their own sheet, `@plannotator/ui/contents-rail.css`: import it outside any CSS layer. Its scroll math is `utils/headingScrollSpy` (+ `hooks/useHeadingScrollSpy` for a list, `components/DocumentContents`). See README "Document contents rail" and "Scroll-spies: one per surface". |
 | `hooks/useScrollViewport` | Resolves the scrolling element for viewport-aware UI; no backend. *(Blessed in 0.24.0.)* |
 | `utils/annotationHelpers` | Pure annotation utilities (`getAnnotationCountBySection`, `buildTocHierarchy` + `TocItem`). *(Blessed in 0.24.0.)* |
 | `components/html-viewer` (`HtmlViewer`, `projectHostThreads`, `buildPersistedHtmlAnchor`) | The raw-HTML annotation viewer: overlay-projected placed markers, pinpoint anchors, multi-target comments. Props + validated bridge protocol; no backend of its own. See "Raw-HTML annotation viewer + syntax-highlighting migration (0.29.0)" and "HTML annotation parity seams". *(Blessed in 0.29.0.)* |
@@ -234,6 +235,7 @@ We deliberately did **not** restructure the exports map in this PR (move-don't-r
 | `utils/codeHighlight` / `utils/codeBlockMark` / `utils/syntaxTheme` | The Shiki-based fence highlighter, swap-surviving annotation marks, and palette→Shiki theme mapping. Replaces all `.hljs` styling. *(Blessed in 0.29.0.)* |
 | `utils/math` (`loadMathRenderer`, `getMathRenderer`, `getMathRendererSource`, `setMathRenderer`, `setMathRendererLoader`, `getMathRendererLoader`, `resetMathRenderer`) and `utils/math-eager` | The math renderer slot and its eager KaTeX registration. Import `utils/math-eager` for synchronous typesetting on the first commit; call `loadMathRenderer()` to pre-warm the lazy path. `resetMathRenderer()` empties the slot and keeps the registered loader; `setMathRendererLoader(null)` drops it. See "Lazy renderers and eager entries". |
 | `utils/mermaid-math-slot` | Alias target only: what a host redirects Mermaid's own `katex` import to, so `$$` labels in diagrams typeset through the math slot and the host build carries one KaTeX chunk. Never import it yourself. See "Lazy renderers and eager entries", item 2. |
+| `components/chat` (`ChatFrame`, `ChatFrameLauncher`, `ChatWindowStore`, `ChatTranscript`, `ChatMarkdown`, `ChatComposer` and the hooks and types beside them) | The shared floating chat window: screen code only. The host owns the conversation, the transport and anything saved. `richMarkdown` opts in to images and the rest of what `marked` writes for GFM (README "Floating chat window"). Add the folder and `components/ui/{button,textarea}.tsx` to your `@source`, and define the theme tokens listed in `components/chat/index.ts`. See "Floating chat window" in `README.md`. *(Published in ui 0.56.0.)* |
 | `utils/identity-tater` | Side-effect entry that registers the full username dictionary into the identity generator slot. Import it only if you rely on the default tater names and want the full dictionary; a host with `identityProvider` should not. |
 | `utils/mermaid` (`loadMermaidRuntime`, `getMermaidRuntime`, `getMermaidRuntimeSource`, `setMermaidRuntime`, `MERMAID_CONFIG`) and `utils/mermaid-eager` | The Mermaid runtime slot and its eager registration. Omit `utils/mermaid-eager` for the lazy path with retry, which is what Plannotator itself does since 0.40.0 (Mermaid 12); import it to register the runtime in your entry chunk at startup. See "Lazy renderers and eager entries" and "Mermaid 12 (0.40.0)". |
 | `utils/mermaidTheme` (`buildMermaidThemeVariables`, `readThemeTokens`, `applyMermaidTheme`, `mermaidThemeKey`, `buildMermaidConfig`, `ensureContrast`, `buildMermaidShadow`, `DEFAULT_MERMAID_SHADOW_AMOUNT`), `utils/diagramShadow` and `utils/cssColor` | Theme-aware diagram configuration: the pure token-to-`themeVariables` mapping with its contrast guard, the palette-derived node shadow (`options.shadowAmount`, default 0.7 of Mermaid's own), the document token reader, and the cached per-`(palette, mode, shadow amount)` `initialize` step `MermaidBlock` runs before each render. Additive; with no theme tokens on the document the static `MERMAID_CONFIG` stays in force. See "Theme-aware Mermaid diagrams (0.40.0)". |
@@ -679,6 +681,7 @@ Nine additive seams so a host can run the raw-HTML annotation surface with the s
 5. **`AnnotationPanel` `unanchoredIds?: ReadonlySet<string>`** renders a small "Unanchored" chip (`data-annotation-unanchored`) on matching cards. Absent, the DOM is unchanged (pinned by comparing the markup against an explicit empty set).
 
 6. **`HtmlViewer` `scrollBehavior?: 'smooth' | 'auto'`** rides `scroll-to { id, behavior? }` so a host can carry its `prefers-reduced-motion` across the iframe boundary. Absent means smooth, as before; anything else fails closed to smooth.
+   **`HtmlViewer` `scrollClear?: () => HtmlScrollClear | null`** rides the same message as `clear: { left, top, bottom }` (frame pixels of a host panel over the frame's right side): a mark under it scrolls just below it where the page can scroll; absent, null or malformed, it is centred as before.
 
 7. **`HtmlViewer` `maxAdditionalTargets?: number`** (0..16, default 16) is the host's product cap on shift-click targets per comment: enforced at the parent trust boundary, on submit and on restore, and carried on `arm-multi-select { key, max }` so the bridge's toggle stops at the same number for that draft (reset with the arm on every draft; a value above 16 never raises the package cap). Absent leaves the arm message unchanged. A host that adopts the package's 16 needs neither this prop nor a message-counting listener. Consequence for a host that passes a smaller cap: because it is enforced upstream at every step (the bridge stops the toggle, the parent boundary trims on submit and on restore, `projectHostThreads` `maxTargets` trims on read), a composed comment never reaches host code with more targets than the cap, so the host's own cap-dropped handling (`capDroppedTargets` from `buildPersistedHtmlAnchor`, or a counting listener) is unreachable in normal operation. Keep it only as a backstop for rows written by an older host build or another writer; the byte-budget drop (`sizeDroppedTargets`) is a different path and remains reachable.
 
@@ -1305,7 +1308,11 @@ Three inherited limitations are worth stating rather than fixing here:
   `survivingMentions` keeps reporting Ann, because it asks
   `text.includes('@Ann')`. So the id list can outlive the chip. That is
   0.43.x behavior in `survivingMentions`, unchanged here — the chips only
-  make it visible.
+  make it visible. *(Fixed later: an occurrence of `@Ann` that is the start
+  of a longer TAGGED token (`@Anna Lee`, with Anna Lee picked) belongs to that
+  token, so deleting `@Ann` untags Ann while `@Anna Lee` stays. Nothing else
+  changed: whatever follows a token (`@Ann2`, `@Annさん`, `@Anns`) it still
+  counts, as it did.)*
 
 ### The no-op guarantee, and how it is pinned
 
@@ -1770,6 +1777,7 @@ Additive, one optional `Viewer` prop; Plannotator passes none, so its render is 
 Additive, one optional `Viewer` prop; Plannotator's plan review and annotate pass none, so their render is unchanged. Added for the Plannotator Inbox (approval "inbox-message-comments", 2026-10-19), where the person comments on the words of an agent's message.
 
 - **`textComments?: boolean`** on `Viewer`, with `answerOnly`: a text selection opens the selection toolbar again, comment-only (the toolbar's `commentOnly`: Comment and the one-click 👍, no Delete, no label picker), with its comment composer, and `annotations` are drawn as highlights (the highlighter is enabled). Question cards (and a host's `renderQuestionCard`) are wrapped `annotation-exclude`, so their words are never commented on. Nothing else of authoring comes back: no pinpoint, code-block toolbar, Global comment, Copy or Vim. Ignored without `answerOnly` and under `readOnly`. Inside, `selectionCommentsOn = !authoringOff || (answerOnly && textComments && !readOnly)` replaces `!authoringOff` for the highlighter and the selection toolbar, its composer and its label picker only.
+- **Diagrams follow it (ui 0.56.0; no API change).** Under the same condition a Mermaid or Graphviz fence takes comments on its parts, inline and in the popout, and a host's `onAskAI` reaches its composer as it reaches the text composer: `onAddAnnotation` gets the row `DiagramBlock` has always made (`diagramAnchor`, the fence's `blockId`, the part's label as `originalText`). A host that passes `textComments` must keep that row and pass it back in `annotations`; plain `answerOnly` and `readOnly` documents stay read-only, unchanged. Two touch fixes reach every host that comments on diagrams: a second finger cancels the press (it opened a composer), and the composer lifts to stay inside a canvas that would clip it.
 
 ## Dependency bumps: KaTeX 0.18, @pierre/diffs 1.5.2, Mermaid 12.2 (published in ui 0.54.0)
 
@@ -1845,6 +1853,45 @@ Everything below is opt-in and byte-identical when a host passes none of it.
 
 ## Publishing & versioning
 
+- **Unreleased: core 0.25.21 (launch-agents stack, #2376 to #2407).** Core adds three `exports` subpaths: `./inbox-run-line` (a launched thread's run line), `./inbox-permission` (a launched session's permission question; ui imports it in `components/inbox-thread/reask.ts`) and `./inbox-scratch` (scratch folders). ui pins core `0.25.21` exactly so `smoke:package` matches the source manifest. Core 0.25.19 went out from `main` (#2582) and core 0.25.20 is on `main` (#2612), both without these subpaths, so the stack takes 0.25.21. Core 0.25.21 is published from `main` after the stack merges there, never from a stack branch; publish core before the next ui.
+- **Unreleased: core 0.25.20 (#2612).** Core adds one `exports` subpath, `./stack-layers` (which layer of a stack wrote each line: `mapStackLines`, `lineOrigin` and their types). ui does not import it; ui pins core `0.25.20` exactly only so `smoke:package` matches the source manifest. Publish core 0.25.20 before the next ui.
+- **Unreleased, in the same ui 0.62.0 and core 0.25.20 (#2660).** Not additive for a Shape host: see "Shape: What to know (ui 0.62.0; not additive)" below. A new opt-in prop, `readFirst`, holds the behaviour; the Requirements view is gone with no seam. The UI imports `shapeViewContent`, `shapeViewNow` and `shapeKnowParagraphs` from core. If either version publishes before #2660 merges, it needs its own bump.
+- **Unreleased: ui 0.62.0 (#2596), on core 0.25.20 (#2596 itself changed no core; ui pins 0.25.20 for #2612, line above).** Minor, and **not additive**: the Shape board's header changed (approval `shape-board-look`, q-a9a1bf61). See "Shape: the board header (ui 0.62.0)" below before you upgrade a host that styles or queries the board's header. No `exports` subpath is added, removed or renamed, and no export is removed. Three opt-in seams, each a no-op when absent: `CommentPopover`'s `errorText` (a `role="alert"` line under the header, `data-comment-popover-error`), `DocumentAIChatPanel`'s `hideProviderBar`, and `ShapeHost.sessionless` (no session line in the board's Ask panel). Not opt-in, for every host of `ShapeSurface`: a Change it the host did not take opens the composer again with the person's words and Shape's own line, `SHAPE_CHANGE_NOT_SENT`; an Ask the host did not take stays in the Ask panel with `SHAPE_ASK_NOT_SENT` (fixed English; a host cannot pass its own). Both are exported from `@plannotator/ui/components/shape`.
+- **Published: ui 0.61.0 (#2585), after core 0.25.19.** Minor: two `exports` subpaths are added, `./components/shape` and `./shape.css` (see "Shape" below), and core 0.25.19 gains `./shape`. Nothing is removed or renamed. `smoke:package` imports both new subpaths.
+- **Published: core 0.25.19 (#2582).** Core adds one `exports` subpath, `./inbox-review` (the Inbox's code review: the review skills' texts, the verdict words, `inboxThreadHadReview`, `inboxReviewTitleLine`); `inbox-types` gains `InboxMessage.review_verdict`, `review_comments_of`, `guide_viewed` and `InboxGuideRef.review` / `chapters`. ui does not import it; ui pins core `0.25.19` exactly only so `smoke:package` matches the source manifest. Additive ui changes in the same PR, for the next ui's notes: `DecisionControl` takes optional host-held notes (`drafts`, `onDraftsChange`; absent, unchanged), and `utils/skillCatalog` adds `reloadSkillCatalog()` and `onSkillCatalogReload(listener)` (`useSkillReferenceAutocomplete` reads the catalog again on a reload).
+- **ui 0.60.0 + core 0.25.18: publish core first, then ui.** ui pins `@plannotator/core` `0.25.18` exactly. **Minor, not patch** (0.59.0 → 0.60.0): a host gains one new prop. Additive: no `exports` subpath is added, removed or renamed in either package, and no export is removed. The only `package.json` edits are the two versions and the core pin; no dependency or peer range changed. Cut from `main` plus this change. Against the npm tarballs, ui 0.59.0 differs from `main` only in this change, and core 0.25.17 only in the three files below.
+  - **core 0.25.18** carries the data side of the Inbox's reply recipient (#2557) and two smaller changes; ui imports none of them and pins `0.25.18` only so `smoke:package` matches the source manifest.
+    - `@plannotator/core/inbox-reply-draft`: `ReplyDraftSaveInput.recipients?: readonly string[]` (session ids, the first the one the reply answers, the rest tags; `[]` none chosen; absent, the draft keeps its recipients).
+    - `@plannotator/core/inbox-types`: `InboxReplyDraft.recipients?: string[]`, `INBOX_REPLY_DRAFT_RECIPIENTS_MAX` (`INBOX_TAGS_MAX + 1`), `INBOX_SESSION_ID_PATTERN`, `InboxMessage.from_project?: { name; root } | null` (#2557); `INBOX_REPO_TTL_MS` (#2549); the DeepSeek Harness host `dsh` in `INBOX_HOST_NAMES`, `INBOX_WAKING_HOSTS`, `InboxAgentId`, `InboxToolHostId` and `InboxToolCostHost` (#2529).
+    - `@plannotator/core/question-block`: `forEachTopLevelLine`, marked `@internal` (#2542).
+  - Re-run the `curl -I` check on the guides.show viewer pin in the packed `guide-viewer-manifest.ts` before publishing core.
+
+  What is new for a host since ui 0.59.0:
+  1. **The person's chat text as typed.** `ChatTranscript` `keepUserBlankLines` (also on `ChatMessageView`, and `ChatMarkdown` `keepBlankLines` with `literalHtml`): each line break in the person's messages stays a line break, and a paragraph after 2 or more blank lines keeps them (up to 10), as the Inbox draws a person's reply (`keepBlankLines` with `SoftLineBreaksContext`). The gap is drawn as one `<br>` per blank line past the first, before the paragraph, so nothing new reaches the sanitizer. Off by default: the person's text renders as before, and the agent's text is never affected. See README "Floating chat window", "The person's text as typed".
+- **ui 0.59.0 + core 0.25.17: core first (published), then ui.** ui pins `@plannotator/core` `0.25.17` exactly. **Minor, not patch** (0.58.0 → 0.59.0): a host gains new API (a parse option, a `Block` field, a setting, a `Settings` prop, theme switch exports and new modules, listed below). Additive: no `exports` subpath is removed or renamed, and no export is removed. The only `package.json` dependency edits are the core pin and `@plannotator/web-highlighter` `^0.8.2`; no peer range changed. Cut from `main` plus the version bump.
+  - **core 0.25.17 is on npm** (published 2026-11-03; the npm tarball matches `packages/core` on `main` file for file, apart from the generated `guide-viewer-manifest.ts`). It adds two `exports` subpaths: `./inbox-project-labels` (#2526, the project label naming the Inbox window uses) and `./inbox-reply-draft` (#2525, the reply draft's file rules, `mapAnchor` for a long paste's place, and the `ReplyDraftStore` / `DraftFileUploader` seam the Inbox window's reply box uses). `inbox-types` gains the Customize rows names (#2516: `INBOX_ROWS_OPTIONS`, `InboxRowsOption`, `inboxRowsCanonical`, `inboxRowsList`, `inboxRowsRead`), and the Board's card helpers in `inbox-cards` changed (#2522, #2530, #2540). ui imports none of these; it pins `0.25.17` only so `smoke:package` matches the source manifest. **core 0.25.16 was never published**: 0.25.17 carries its subpath.
+  - core 0.25.17's guides.show viewer pin (`viewer.BfflE3Ru.js`, `viewer.b_pZ_mPX.css`) answered 200 on `https://guides.show/v1/` and matched the manifest's SRI hashes when this was written.
+
+  What is new for a host since ui 0.58.0:
+  1. **The person's own line breaks** (#2527). `parseMarkdownToBlocks(text, { keepBlankLines: true })` records the blank lines (2 or more, capped at 10) typed before a paragraph as `Block.blankLinesBefore`, and `BlockRenderer` keeps that gap. With `SoftLineBreaksContext` (already exported in 0.58.0), text shows as typed. Opt-in: without the option, blocks and DOM are unchanged. See "`keepBlankLines` and `SoftLineBreaksContext`".
+  2. **Hide the repository owner** (#2391). A new `hideRepoOwner` setting (cookie-only, default off), `utils/repoLabel`, and the repository chip in `DocBadges` and `PlanDiffViewer` reads it. **A host that renders `Settings` gets a new row in General by default**; pass `hideRepoOwnerSetting` to hide it. See "Hide the repository owner".
+  3. **Theme switches are instant** (#2545). `ThemeProvider` holds `pn-theme-switching` (`THEME_SWITCHING_CLASS`) on `<html>` for 2 to 3 frames after each light/dark or palette switch, and a `theme.css` rule zeroes every transition on the page under it. New exports from `components/ThemeProvider`: `THEME_SWITCHING_CLASS`, `holdThemeSwitch()` (call it just before a host swaps the theme classes on `<html>` itself) and `extendThemeSwitch()`. A host that renders `ThemeProvider` has nothing to do, but **its own transitions are also zeroed for those frames** (an animated sun/moon toggle jumps). See "Instant theme switch".
+  4. **`@plannotator/web-highlighter` `^0.8.2`** (#2544), the dispose leak fix. `dispose()` now removes the highlighter's handler from the module-wide error emitter, so a closed document's highlighter and the DOM it held can be garbage collected. Before, every open of a document leaked its DOM tree. No API change and nothing to do. The floor makes 0.8.2 certain; `^0.8.1` already allowed it.
+  5. **Smaller, no action:** `SnoozeTimes` `onBack` is optional (#2523; absent, "Snooze until" is the menu's title, for a host that opens the times straight from a button); new `components/StartCutPath` (#2392, a path cut from its start with the last name whole); new `utils/uuid` `newUuid()` (#2509, a v4 UUID outside a secure context; `ImageAnnotator` uses it, so drawing no longer throws over plain http on another address); `inbox-thread/icons` gains `arrowRight`, `mailOpen` and `mail`. The contents rail did not change since 0.56.0.
+- **ui 0.58.0 + core 0.25.15: publish core first, then ui.** Core 0.25.15 adds one `exports` subpath, `./inbox-snooze`, and ui 0.58.0 imports it, so ui pins `@plannotator/core` `0.25.15` exactly; `smoke:package` fails on a ui that names a core subpath its pinned published core lacks. Additive: no `exports` subpath is removed or renamed, no export is removed, and no dependency or peer range changed (the only `package.json` dependency edit is the core pin). Cut from `main` plus the version bump; 0.57.0 was cut from `f049d1088` on core 0.25.14 and is superseded by this release. Core 0.25.15's guides.show viewer pin (`viewer.D8s5nXA_.js`, `viewer.CfyK-nt_.css`) was served by guides.show when this was written; re-run the `curl -I` check on the pin you pack before publishing. What is new for a host:
+  1. **Snooze menu** (#2497), `@plannotator/ui/components/inbox-thread/SnoozeMenu`: `SnoozeTimes` and `SnoozePicker`, host-neutral (props only, no fetch). Render `SnoozeTimes` inside your own Base UI `Menu.Popup` and post the `until` it gives you to your own backend; its look is the `ib-z*` rules in the generated `inbox-thread.css`. The presets, the Pick a time lists and the return rule come from the new `@plannotator/core/inbox-snooze`. `inbox-types` gains optional row fields (`snoozed`, `snooze_back`) and the `InboxListGroupId` type.
+  2. **HTML viewer touch fixes** (#2494, `bridge-script.ts`): a tap pins on WebKit's touch model (the bridge puts a no-op click listener and a transparent tap highlight on `<body>` while armed in pinpoint; every HTML frame gets this, a mouse is unchanged), plus the opt-in `HtmlViewer` `touchSelection` prop and `ViewerHandle.revealPin({ clearBottom })`. See the `HtmlViewer` `touchSelection` section below. A host that passes neither sees no other change.
+  3. **Smaller, no action:** the Inbox paste and reply-draft PRs (#2499, #2500) and the accounts and session-label work changed no file in the ui package.
+- **ui 0.57.0: ui only. `@plannotator/core` stays at 0.25.14, and ui keeps pinning it exactly.** Additive: no `exports` subpath is removed and no dependency or peer range changed. Core files under `packages/core` changed since 0.56.0 (`inbox-codex.ts`, `inbox-types.ts`), but only comments and the Inbox tool-cost constants, and every `@plannotator/core` subpath ui imports exists in 0.25.14. Cut from `main` at `f049d1088` plus the version bump. What is new:
+  1. **Chat transcript parity** (#2492): `richMarkdown` on `ChatTranscript`, `ChatMessageView` and `ChatMarkdown`, with bounded images that the transcript follows as they load. See README "Floating chat window", "Rich markdown".
+  2. **Plannotator Modern theme** (#2498): a new palette, with syntax themes mapped to its code ground, a calmer dark Approve green, and BoardUI's MIT notice and credit.
+  3. **Smaller, no action:** the Inbox option card fix (#2476) and the ref preview card's single-newline line breaks (#2488).
+- **ui 0.56.0: ui only. `@plannotator/core` stays at 0.25.14, and ui keeps pinning it exactly.** Additive: no `exports` subpath is removed, no dependency or peer range changed (`postcss` is a devDependency for the sheet generator). Core files under `packages/core` did change since v0.28.37 (Inbox voice, projects, `shortAgentName`), but every `@plannotator/core` subpath ui imports exists in the tag, and ui imports none of the names those changes added. Cut from `main` at `a5707a547` plus the version bump. What is new, and what a host does:
+  1. **Floating chat window** (#2452), `@plannotator/ui/components/chat`: `ChatFrame`, `ChatFrameLauncher`, `ChatWindowStore`, `ChatTranscript`, `ChatMarkdown`, `ChatComposer`, `chatMarkdownHtml`, `personMarkdownHtml`, and the hooks and types beside them. Required of a host that uses it: define the nine theme tokens listed in `components/chat/index.ts`, and add `components/chat` and `components/ui/{button,textarea}.tsx` to Tailwind `@source`. See README "Floating chat window".
+  2. **Inbox thread parts** (`components/inbox-thread/*`: `GuideCard`, `ReaskNote`, `SkillsLine`, `FileName`, `Tip`, `icons`, `reask`) and the generated **`@plannotator/ui/inbox-thread.css`**. Import the sheet outside any cascade layer, after the base reset, and wrap the parts in `<div className="pn-inbox" data-pn-tooltip-root="">`. See "Inbox thread stylesheet". The parts are unstable until the set is complete.
+  3. **Contents rail** (`components/MarkdownContentsRail`, `DeferredMarkdownContentsRail`, `DocumentContents`, `hooks/useHeadingScrollSpy`) and **`@plannotator/ui/contents-rail.css`**, moved from Workspaces. A host that has its own copy of the rail switches to these and imports the sheet outside any layer.
+  4. **Diagram comments** (#2469, no API change): with `Viewer` `textComments`, a Mermaid or Graphviz fence takes comments on its parts. A host that passes `textComments` must keep the `DiagramBlock` annotation row and pass it back in `annotations`.
+  5. **Smaller, no action:** `Viewer` `#anchor` and badge fixes, Windows path names, Tokyo Night Moon palette, Ask AI output sanitizing, `CodeSnippetPreview` and `useHoverPreview` extracted from `InlineMarkdown`.
 - **ui 0.55.0: ui only. `@plannotator/core` is unchanged at 0.25.14** (nothing under `packages/core` moved since v0.28.37), so ui publishes alone and keeps pinning core `0.25.14` exactly. No guides.show deploy is needed. It is cut from `main` at `f103b6703` plus the version bump, and packed with `bun pm pack` from a clean `bun install --frozen-lockfile` at Bun 1.4.4. **No export name is removed** (checked name by name against ui 0.54.0 on npm), and peer ranges are unchanged. Hosts must act on these:
   1. **KaTeX 0.19.** `katex` is `^0.19.0` (was `^0.18.11`, which npm marks deprecated). Rendering is unchanged, but a host that serves its own `katex.min.css` should move it to 0.19. Mermaid 12.2.0 still declares `katex ^0.18.0`, so without action the install holds two KaTeX copies. Add a root override `"katex": "^0.19.0"` (`pnpm.overrides`, `overrides` or `resolutions`), or point Mermaid's `katex` at `utils/mermaid-math-slot`. See "KaTeX 0.19".
   2. **`HtmlViewer` `sandbox?: string`, for Workspaces.** The srcdoc frame's whole `sandbox` attribute. Workspaces passes `sandbox="allow-scripts"` so a shared document's `alert` / `confirm` / `prompt` cannot draw over its origin, and can drop its pnpm patch. Absent, the default stays `"allow-scripts allow-modals"`. See "`HtmlViewer` `sandbox`".
@@ -1891,7 +1938,7 @@ Everything below is opt-in and byte-identical when a host passes none of it.
 - The HTML annotation seams also changed the guides.show viewer **stylesheet** (five utility rules from `HtmlSurfaceControls`; the viewer JS is unchanged), so `packages/core/guide-viewer-manifest.ts` now pins a CSS hash that exists on guides.show only after the deploy workflow has published this build's `/v1/` assets. A guide exported from this build before that deploy would pin a stylesheet the host does not serve yet: **deploy guides.show before any release that ships this manifest.**
 - UI declares the already published core version exactly in its source manifest. Do not replace it with `workspace:*`: direct publication can preserve that protocol and make the package impossible to install outside this repository. Bun links the local core workspace whenever its version matches the exact dependency. Before publishing, run `bun run --cwd packages/ui smoke:package`; it checks the source and packed manifests, required tarball subpaths, local Bun linking, and a real pnpm install in an external temporary consumer. When both packages change, publish **`core` first, then `ui`**.
 - **`--provenance` only works from a supported CI environment (GitHub Actions OIDC)** — a local publish fails with `Automatic provenance generation not supported for provider: null`. Until a CI publish job exists for these two packages, local publishes drop the flag. Publishing under `--tag next` first lets the consumer preflight before `npm dist-tag add <pkg>@<version> latest` promotes it.
-- `styles.css` is built by the `prepack` script (`bun run build:css`) so the published tarball always carries fresh precompiled CSS; since 0.33.0 `prepack` also runs `build:bridge-assets`, which generates the gitignored `bridge-script.asset.js` and `bridge-script.lite.ts` beside their source. Both are in `files`, so a tarball built without `prepack` (a hand-rolled `npm pack --ignore-scripts`) would ship export subpaths that resolve to nothing; always build with `bun pm pack`.
+- `styles.css` is built by the `prepack` script (`bun run build:css`) so the published tarball always carries fresh precompiled CSS; since 0.33.0 `prepack` also runs `build:bridge-assets`, which generates the gitignored `bridge-script.asset.js` and `bridge-script.lite.ts` beside their source, and it now runs `build:inbox-thread-css`, which generates the gitignored `inbox-thread.css` from `packages/inbox/inbox.css`. All of them are in `files`, so a tarball built without `prepack` (a hand-rolled `npm pack --ignore-scripts`) would ship export subpaths that resolve to nothing; always build with `bun pm pack`. `smoke:package` fails if the sheet is missing from the tarball or a consumer cannot import it.
 - There is **no CI publish job for these two packages yet** — first publish is manual from `main` after merge. (Wiring a CI publish job is a follow-up.)
 
 ---
@@ -1935,8 +1982,18 @@ was rebuilt.
 The `file-tree-item` CSS was already in `theme.css`. The new pieces are the
 `DiffFileTree` component itself and its ARIA/keyboard handling.
 
+**Since the aligned sidebar (approved design record "review-sidebar-aligned"),
+the review draws its own rows.** Its Changes tree has its own folder row and
+file row (`FileTreeNode.tsx`: 12 px indent steps on the panel's edges, `+`/`−`
+in two aligned columns, `CountColumns` in `FileRowBits.tsx`); it no longer
+renders `DiffFileTreeFolderRow`, `DiffFileTreeFileRowContent` or `DiffCounts`.
+It still shares `buildDiffFileTree`, `useDiffFileTreeExpansion`,
+`ChangeTypeLetter`, and `diffFileTreeIndent` (All files keeps that indent).
+The atoms below are unchanged and stay the host's starting point for a custom
+row; they no longer show what the review's rows look like.
+
 **Review-only, and why.** The review's `FileTree` keeps its own wrapper and
-renders its rows from the shared atoms, adding: the viewed checkbox and the
+rows, adding: the viewed checkbox and the
 hide-viewed filter, stage controls and the staged/committed/untracked marks,
 the annotation badge and `has-annotations` tint, the scroll-highlight row, the
 "Copy path" context menu, the double-click handler, the panel header, view toggle,
@@ -1944,8 +2001,8 @@ diff-type / base / worktree / evolog pickers, search results, the nav rows
 (PR overview, artifacts, call flow, semantic diff, all files), and its
 **window-wide** j/k/arrow/Home/End shortcut (an app shortcut, gated on inputs,
 menus and dialogs). None of those is a host concern, so `DiffFileTree` takes no
-props for them; a host that needs any of them builds its own row from the atoms,
-as the review does. The review rows also keep their current DOM: no ARIA tree
+props for them; a host that needs any of them builds its own row from the atoms
+(the review now goes further and draws its own rows, above). The review rows also keep their current DOM: no ARIA tree
 roles were added there (that would be a behavior change to Plannotator's app,
 out of scope here).
 
@@ -2525,6 +2582,7 @@ Approval "inbox-decision-mode", agent contract lines (2026-10-24). All optional 
 ## `QuestionPictureTiles` (published in ui 0.54.0; additive, the card unchanged)
 
 - **`QuestionPictureTiles`** (exported from `components/blocks/QuestionBlock`): the question card's picture-choice tile grid as a component of its own, so a host that draws its own decision surface draws the same tile (the Plannotator Inbox's decision mode does). Props: `choices` (`QuestionPictureTileChoice`: `label`, `description?`, `recommended?`, `image?`), `urls` (each choice's resolved picture URL, null for none), `selected`, `inputType` (`radio` / `checkbox`), `name`, `readOnly?`, `onPick(label, checked)` (the tile's input changed: the picture and the label pick through it), `onZoom?(url, alt)` (the separate zoom button; absent, no button; it never picks), `onPictureError?`, `heldTitle?`, `renderText(text)`, and host seams `labelProps?(label)`, `inputProps?(label)` (the card passes its drag guard; decision mode answers on a click or Enter) `renderBadges?(choice, index)` (default: the Recommended tag) and `pictureBadge?(choice)` (a label over the picture, see above). New hooks for host CSS: `[data-question-tile-recommended]`, `[data-question-tile-picture]`, `[data-question-tile-caption]`, `[data-question-tile-label]`, `[data-question-tile-description]`. The card draws exactly what it drew before (same classes and attributes, plus those hooks).
+- **Picture choice layout facts (additive).** `QuestionBlock` takes an optional **`pictureSize?: (url) => { width, height } | null`** (`Viewer` / `BlockRenderer` `questionPictureSize`; `QuestionPictureTiles` `pictureSize?(index)`, asked loaded or not, so a picture that fails keeps its shape): a picture's size in pixels when the host knows it before the picture loads. Absent, or null, nothing changes. The tiles now also carry facts a host's CSS can lay them out from, and draw nothing differently without such CSS: on the grid `[data-question-tiles-count]`, `[data-question-tiles-shape]` (`tall` / `pano` / `wide` / `mixed`), `[data-question-tiles-words]` (`short` / `medium` / `long` / `essay`) and `[data-question-tiles-bare]`; on a tile `[data-question-tile-shape]` (`pano` / `wide` / `square` / `tall` / `scroll`, only with a known size, kept when the picture fails) and `[data-question-tile-no-picture]`; on the picture box the custom properties `--question-picture-ratio` and `--question-picture-width`; on a picture that failed to load (not a held one) `[data-question-picture-failed]`. The rules behind them are exported from `components/blocks/questionPictureLayout` (`questionPictureShape`, `questionPicturesShape`, `questionChoiceWords`, `drawnTextColumns`). The Plannotator Inbox passes the size it recorded at send time and draws its "Adaptive" layout from these hooks in `inbox.css` (shipped as `inbox-thread.css`), so a Workspaces thread that uses that stylesheet and passes `questionPictureSize` gets the same layout.
 
 ## Hover cards outside the Inbox: `onlyWithData`, `RefHoverCards`, `refCardRouteTransport` (published in ui 0.54.0; additive, no core change)
 
@@ -2551,6 +2609,39 @@ Slice 1 of the Inbox thread extract (plan record, not in this repo). These pure 
 
 Publish core first, then ui, as always. These subpaths need no ui bump until ui imports them.
 
+## Inbox thread stylesheet: `@plannotator/ui/inbox-thread.css` (ui 0.56.0; additive, no core change)
+
+The parts in `components/inbox-thread/` draw with the Inbox's `ib-` classes. `packages/inbox/inbox.css` stays their only source. `scripts/build-inbox-thread-css.ts` generates `inbox-thread.css` from it at `prepack`, the pattern of `bridge-script.asset.js`: gitignored, in `files`, exported as `./inbox-thread.css`. It is the whole sheet in the source's order, about 560 KB raw and 79 KB gzipped (511 KB and 78 KB after a host's bundler minifies it). A thread-only subset can come later.
+
+**What generation changes.** The comments go, and whatever would reach a host page outside `.pn-inbox`. `tests/inbox-thread-css.test.ts` runs the generator over the real `inbox.css` and checks each of these from the outside:
+
+| In `inbox.css` | Reach | In the sheet |
+|---|---|---|
+| `html, body, #root` (`@layer base`) | height and margin of the page | dropped |
+| `html:has(.pn-inbox), body:has(.pn-inbox)` (phone block) | the page's background | dropped |
+| `:root[data-ib-keyboard-pin]:has(.pn-inbox)` (phone block) | `overflow: hidden` on the page while the Inbox pins the keyboard | dropped |
+| `body:has(.pn-inbox) :is(input…, textarea, select)` (phone block) | every field on the page at `16px !important` | scoped |
+| `pre code.pn-code`, `[data-local-link="unavailable"]`, `kbd[data-keycap]::after`, `[data-open-in-menu] …`, `[data-comment-popover] …`, `[data-full-view-menu] …`, `[data-thread-owner] b` | ui's own elements and attributes, anywhere on the page | scoped |
+| `.tp`, `.tp-*`, `.pm-*` | unprefixed classes a host may also use | scoped |
+| `.ib-*`, `dialog.ib-*`, `::highlight(ib-*)` and the rest | prefixed, but matching outside the root | scoped |
+| `@keyframes tp-draw` | a global name without the prefix | `ib-tp-draw`, with its use |
+| `:root` and `:root.light` token blocks | `--ib-*` only, checked rule by rule | kept |
+
+Scoping prefixes `:where(.pn-inbox)`, after any leading page element (`:root.light :where(.pn-inbox) .ib-linknote`). It adds no specificity, so the sheet's own cascade is the source's, rule for rule. The sheet has no `@font-face`, no `@import` and no `url()` but one inline `data:` mask. It names two layers, Tailwind's `base` and its own `ib-type`. A new at-rule in `inbox.css` that the generator does not know fails `prepack`, so someone decides what it does in a host first. So do nested CSS, `body > x`, and a renamed keyframe name held in a custom property, which the rename cannot follow. The generator reads the sheet with postcss, a devDependency of this package only: it runs at `prepack` and nothing at runtime needs it.
+
+**What a host does.**
+
+1. Import the sheet **outside any cascade layer, after the host's base reset**, as with `contents-rail.css`. In Workspaces that is next to `contents-rail.css` in `src/styles.css`, not in `src/plannotator/plannotator.css`: inside `layer(plannotator)` the sheet would lose to Tailwind's preflight in `base`.
+2. Keep `styles.css`. The sheet reads the theme tokens (`--background`, `--card`, `--muted`, `--border`, `--primary`, `--ring`, `--font-sans`, `--font-mono` and the rest) and defines none of them.
+3. Wrap the parts in one root: `<div className="pn-inbox" data-pn-tooltip-root="">`. Both on the same element, or a `Tip` portals outside the root and loses its look. The root sets `height: 100%`, `position: relative`, the type and `background: var(--ib-ground)`. The Inbox's pane paints `--card` over that, so a host matches it with `background: var(--card)` on its root, or uses its panel's own surface. In a scrolling panel `height: 100%` stops the background short of tall content: set `height: auto` on the root, or make the root the scroller.
+4. Load the fonts, as for `styles.css`: Inter and Geist Mono, or your own under `--font-sans` and `--font-mono`. A Tailwind host sets both on its root: Tailwind's `theme` layer defines them too, and it beats `styles.css` in `layer(plannotator)`, so without this the parts draw in the system font.
+5. Set the mode on `<html>` the way `ThemeProvider` does: the light half of the tokens reads `:root.light`. `styles.css` also holds every transition at 0 s until `<html>` has `.transitions-ready`, which `ThemeProvider` adds after mount. A theme switch lands in one frame: while `<html>` has `.pn-theme-switching` (`THEME_SWITCHING_CLASS`), `styles.css` sets every transition's duration and delay to 0 s. `ThemeProvider` holds it on every switch, from the class swap until two frames after the redraw commits. A host that swaps the theme classes on `<html>` itself calls `holdThemeSwitch()` (from `components/ThemeProvider`) just before its swap: it adds the class and removes it two frames later. A part that redraws in the new theme a frame later (it reads the new tokens in `requestAnimationFrame`, as the Pierre diff parts do) calls `extendThemeSwitch()` just before that redraw, which restarts the two frames while a switch is landing and does nothing otherwise. The rule covers the whole page with `!important`: for those 2 to 3 frames after each switch, every transition on the page lands at once, the host's own included (an animated sun/moon icon jumps instead of turning, and the host's colour fades are instant). A transition already running finishes normally. See "Instant theme switch".
+6. Portal into the root. The `ib-` rules match only inside `.pn-inbox`, so a popup a part sends to `document.body` has no look.
+
+**What the Inbox's window owns and a host does not get.** `--ib-vvh`, `--inbox-text-size`, `--sidebar-width`, `data-view`, `data-ib-keyboard` and `.ib-phone` come from the Inbox's own code. Their rules ship, inert, with fallbacks where the source has them. `@container ib-thread` needs the Inbox's `.ib-pbody` around the parts, and `@container ib-ask` its `.ib-askline`; without them those rules do not apply.
+
+**Viewport queries.** The sheet keeps the Inbox's media queries, and they measure the window, not the panel. For the parts in the folder today the one that matters is the phone block, `@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse)`. Under it `.ib-att-t` takes the full width and 56 px of height, and `.pn-inbox` paints `--card`. Most of its 712 selectors belong to the Inbox's window or to parts that have not moved yet.
+
 ## Document font (#1657; published in ui 0.54.0; additive, no core change)
 
 Settings → Display can show a **Document font** row beside Text size. Inert until a host opts in, like Text size.
@@ -2564,6 +2655,25 @@ Settings → Display can show a **Document font** row beside Text size. Inert un
 ## AsciiDoc documents (#1009; published in ui 0.54.0 and core 0.25.14; additive, one widened setter)
 
 `@plannotator/core/annotatable` gains `DocumentRenderKind` (`DiagramRenderKind | "asciidoc"`), `documentRenderKindForPath`, `isDocumentRenderKind` and `annotateDocumentRenderKind`; `.adoc`/`.asciidoc` join the annotatable sets. `@plannotator/ui` gains `utils/asciidocParser` (`parseAsciidocToBlocks`, the same Block model as the markdown parser), `DocumentRenderAs` widens to include `'asciidoc'`, and share payloads may carry `r: 'asciidoc'`. `useSharing` takes an optional trailing `renderAs` and its `setRenderAs` parameter widens to `DocumentRenderAs`, so a host whose state is typed `'markdown' | 'html'` must widen its setter. Publish core first.
+
+## Instant theme switch (ui 0.59.0; additive, no core change)
+
+A light/dark or palette switch used to freeze the page, then fade: `styles.css` gives every element a 150 ms colour transition, and a switch changes every colour, so the browser started one transition per element at once. Now the new colours paint in one frame.
+
+- **`THEME_SWITCHING_CLASS`** (`'pn-theme-switching'`): while `<html>` has it, `styles.css` sets `transition-duration` and `transition-delay` to 0 s on `html`, every element and their `::before`/`::after`, with `!important`. Only timing changes: a transition already running finishes normally.
+- **`ThemeProvider`** holds it on every switch (a mode or palette pick, Match system following the computer, config arriving, printing), from the class swap until two frames after the redraw commits. A host that renders `ThemeProvider` has nothing to do.
+- **`holdThemeSwitch()`**: for a host that swaps the theme classes on `<html>` itself. Call it just before the swap; it adds the class and removes it two frames later (a later call restarts the two frames).
+- **`extendThemeSwitch()`**: for a part that redraws in the new theme a frame later (it reads the new tokens in `requestAnimationFrame`, as `usePierreTheme`, `DiffHunkPreview` and `CodeFilePopout` do). Call it just before that redraw: while a switch is landing it restarts the two frames, otherwise it does nothing.
+- **What a host sees:** for those 2 to 3 frames after each switch, every transition on the page is zeroed, the host's own included. A host's animated sun/moon toggle jumps instead of turning, and its own colour fades are instant. Hover fades come back when the class goes.
+
+## Hide the repository owner (ui 0.59.0; additive, no core change)
+
+Settings → General gains a **Hide the repository owner** switch, off by default (today's `owner/repo`). On, the repository chip names the repository alone; its hover keeps `owner/repo`.
+
+- **`utils/repoLabel`** (new, import-free): **`repoLabel(display, hideOwner)`** returns `display`, or its last `/` segment when `hideOwner` is true.
+- **Setting `hideRepoOwner`** (`config/settings.ts`, cookie-only `plannotator-hide-repo-owner`, default false).
+- **`DocBadges`** and **`PlanDiffViewer`** read the setting for the repository chip's text. `repoInfo` is unchanged, and so is the chip at the default.
+- **`Settings`** gains **`hideRepoOwnerSetting?: boolean`** (default false) to hide the row.
 
 ## The law (guardrails for anyone editing `@plannotator/ui`)
 
@@ -2630,3 +2740,123 @@ These did not change: `@codemirror/autocomplete` `^6.20.3`, `lang-javascript` `^
   - Add the same override: `pnpm.overrides` for pnpm, `overrides` for npm, or `resolutions` for Yarn.
   - Point Mermaid's `katex` import at `utils/mermaid-math-slot` (see "Lazy renderers and eager entries", item 2).
 - **0.19.1** (2026-10-23) fixes a `%` inside a raw argument. `^0.19.0` accepts it. This repo's lockfile records 0.19.0, because `bunfig.toml`'s seven-day `minimumReleaseAge` holds 0.19.1 back until 2026-10-30.
+
+## `HtmlViewer` `touchSelection` and `revealPin({ clearBottom })` (published in ui 0.58.0; additive, no core change)
+
+- **`HtmlViewer` `touchSelection?: boolean`**: a selection made with a finger reaches the host as a mouse selection does. A long press and its handles send no mouseup, so the bridge reads `selectionchange` after the Markdown viewer's 400 ms rest, only where the host asks and `(pointer: coarse)` matches. Absent: the viewer posts nothing and the bridge listens to nothing, so Plannotator's plan, review and annotate frames are unchanged.
+- **`ViewerHandle.revealPin(options?: { clearBottom?: number })`**: for a panel floating over the frame instead of beside it. The pin moves only if it is out of the clear part of the frame, and scrollable ancestors take the move. Absent: the pin scrolls to the centre as before. A page cannot use this: the host posts it, and the bridge bounds it by the frame's height.
+- **`utils/touchSelection`**: `TOUCH_PRIMARY_QUERY` and `TOUCH_SELECTION_SETTLE_MS`, shared by `useAnnotationHighlighter`. The bridge writes them out (it is vendored whole and imports nothing); `bridgeTouchSelection.test.tsx` fails if they drift.
+- **A tap pins on WebKit's touch model.** WebKit (iOS, and Playwright's WebKit on Linux) turns a tap into a click only on an element that, or whose ancestor up to `<body>`, listens for clicks; the bridge's listeners sit on `document` and `window`, which do not count, so a tap on plain text while armed pinned nothing. While armed in pinpoint the bridge now puts a no-op click listener on `<body>` (and `-webkit-tap-highlight-color: transparent` on it, so no grey flash covers the page). Every HTML frame gets this, on every surface; nothing changes with a mouse. `tests/e2e/inbox-html-phone.spec.ts`'s WebKit pin tests fail without it on Linux (macOS WebKit clicks either way).
+
+## `keepBlankLines` and `SoftLineBreaksContext` (ui 0.59.0; Inbox person text; additive, opt-in, no core change)
+
+- **`parseMarkdownToBlocks(text, { keepBlankLines: true })`**: a paragraph that follows 2+ blank lines carries `Block.blankLinesBefore` (capped at 10), and `BlockRenderer` gives it a top margin of that many lines. Absent: nothing is set and no style is emitted, so plan, review and annotate blocks and DOM are unchanged.
+- **`SoftLineBreaksContext`** (exported from `components/InlineMarkdown`; `RenderedMarkdown`'s `softLineBreaks` provides it): inside it a bare newline is a `<br>`. Together the two show text as typed (single breaks and blank lines), as Slack does. Workspaces can wrap a Viewer holding the person's own text in the provider and pass the option; a document or an agent's text should not.
+
+## Shape and links: a slot for a file's action (unreleased; additive)
+
+Optional seams, so a host can put its own control beside a file a board or a message names. A host that passes none of them sees no change. Plannotator's Inbox uses them for "Open in".
+
+- `ShapeHost.fileAction?(id, { path, line? })`: drawn in the References row and bubble, the Code view's file cards and planned files, the whole-file head, the file popout and the diff popout. `ShapeCodeGuideProps.fileAction?(path)` is the same slot on `ShapeCodeGuide`.
+- `CodeFilePopout`'s `headerAction?: ReactNode`, before the line count.
+- `LocalLinkResolution`'s `unavailable` result takes `after?: ReactNode`, drawn after the inert link. It still works as before, and is now marked deprecated.
+- `LocalLinkResolution`'s `unavailable` result also takes `wrap?: (text: ReactNode) => ReactNode`: the host draws the inert link's text itself (a hover of its own), and decides when `title` shows. With `wrap`, the default tooltip is not drawn. `after` is still drawn after it when both are given.
+- `CodeSnippetPreview` takes `actions` (a host's controls in its header), `container` (where it portals; the body by default), `sheet` (a sheet from the bottom edge over a scrim, whose click calls `onDismiss`) and `windowRef`.
+- `CodeSnippetPreview` changes that every host sees, with none of the new props:
+  - Its height is capped at the room on the side it opens to (at most 300 px, as before), so a window near the screen's edge scrolls instead of running off the screen.
+  - Scrolling inside its own code no longer calls `onDismiss`. A scroll anywhere else still does.
+  - A long file name in the header is cut with an ellipsis, and the line count beside it stays whole.
+  - With `actions` (or `sheet`), the window has `role="dialog"` and the file name as its `aria-label`. Without them it has no role, as before.
+- `CodeSpanContext` (in `components/LocalLinkContext`): a `(text, code) => ReactNode` wrap for an inline code span that names a code file, in `InlineMarkdown` and in a board's own text (`ShapeInline`). Without a provider the span draws as before. `ShapeSurface` stops passing it on while the board is annotating.
+- `DropdownMenuContent` takes `anchor`, for a menu opened from something that is not its trigger.
+
+Two small changes come with them. Shape's diff popout gains a row above the patch when a host passes `fileAction`, which also clears the × from the patch's header. Esc on the board does nothing while a menu is open anywhere on the page, so the menu closes alone. Core's `ShapeRecord.project` is now `ShapeProject`, with an optional `worktree`; the JSON only gains that field, on boards written from a linked worktree.
+
+## Shape: What's changed, and a board without its Code view (unreleased; needs the core with `views.changed`; additive)
+
+A new view and two optional `ShapeSurface` props. A host that passes neither prop, showing boards with no `views.changed`, sees no change.
+
+- Core: `ShapeViewId` gains `'changed'`, and `SHAPE_VIEWS` lists it after `how` ("What's changed"). New types `ShapeChanged`, `ShapeChangeItem`, `ShapeChangeKind`, `ShapeChangeFlow`, `ShapeFlowStep`, `ShapeFlowEnd`, `SHAPE_CHANGE_KINDS`; `ShapeBoard.views.changed?`. `checkShapeBoard`'s "not a view" message now lists `changed`. A host that switches over `ShapeViewId` exhaustively needs a case for it.
+- `ShapeChanged` (exported from `components/shape`): the view on its own (`changed`, `marks`, `review?`, `onCode?`).
+- `ShapeSurfaceProps.codeView?: boolean` (default `true`): `false` drops the Code tab.
+- `ShapeSurfaceProps.review?: ShapeSurfaceReview | null`: `{ label?, files?, additions?, deletions?, steps?, open(at: ShapeReviewAt): boolean | Promise<boolean> }`, with `ShapeReviewAt` `{ path?, line?, step?, files? }`. It adds Guided review, Full review and "Guide step N" to What's changed, and a board's `file:line` asks it first after the Code view; `false` falls back to the file viewer (`host.readFile`). `open` may throw or reject: the board takes that as `false`.
+- `ShapeSurfaceReview.steps?: number`: how many guide steps the review has. Pass it and a change's "Guide step N" past it is not drawn; leave it out and every step link shows, and one `open({ step })` answers false to opens the review at its start (`open({})`).
+- Esc and Tab: put `inert` on an ancestor of the board while something of yours covers it (the Inbox does while the review is open over the board). The board then leaves Esc to you: its panel, bubble or Show more do not take the first press.
+- `shape.css`: the call paths beside the changes are sticky only while they fit in the view (`.shp-chg-flows.fits`, set by `ShapeChanged`).
+- `shape.css` gains the `.shp-chg*` classes only.
+
+## Shape: What to know (ui 0.62.0; not additive)
+
+Plannotator's board reads first now, and What to know replaces Requirements. A host that changes no code keeps the board's behaviour; what could not be kept is listed below.
+
+**Behind `readFirst` on `ShapeSurface` (default off, your board stays as it is).** Pass it to get Plannotator's board:
+- Annotation starts off behind an Annotate button in the dock, on phones too. Off: a click on a part does nothing, and the strip has only Select and Pinpoint (`AnnotationToolstrip`'s new `hideActionModes`).
+- A number pops out a bubble on hover or focus; on touch the first tap pins it and the second opens it. **A file reference calls `host.readFile` on hover**, with no cache on the UI's side, so cache it in your host if a read costs anything. Esc closes the bubble first.
+- A PR or link reference with `images` opens the picture; its page is one more click, in the bubble.
+- On a touch screen, a drawing's numbers grow from 16 to 22 px with a larger hit area. `ShapeDrawn` does this whenever it has `onRefPeek`.
+- A fixed canvas under 700 px stops at scale 0.55 and scrolls sideways. `ShapeDrawn` takes this as its own `pan` prop. `ShapeDiagram` never pans, so a diagram in a side panel still fits.
+
+**What changes with no seam:**
+- **`ShapeViewId`:** `reqs` became `know`, so TypeScript breaks if your code names it, and `onNavigate` reports `know`. A saved `initialView: 'reqs'` and saved notes with `view: "reqs"` still open as `know`; `shapeViewNow` from core does the same for your own store. Old versions holding `views.reqs` still render every line in the new view.
+- **`checkShapeBoard`:** refuses `views.reqs` on a new board and takes `views.know`, a string of at most 2 paragraphs and 1,200 characters.
+- **Removed:** `ShapeRequirements.tsx` (reachable through the `./components/*` export), the classes `.shp-reqs` and `.shp-req-*`. New: `ShapeKnow.tsx`, `.shp-know`, `.shp-more`, `.shp-peek*`.
+- **`SHAPE_FRAME_CSS`:** nested `svg` clips, a `.dash` with no `fill` is an outline and with no `stroke` is grey (attributes win), new classes `.alert`, `.t-alert`, `.t-mono`, `.obj` (a drop shadow), `.if-dark`, `.if-light` and the variable `--alert`.
+- **`data-ref` with content inside:** what the agent drew is now the number, in its own look. Empty or blank still gets the board's bubble.
+- **`ShapeThumb`:** a board with a fixed canvas drops the 1.11 zoom, so all of it shows. It takes an optional `resolveSrc`, and `ShapeGrid` an optional `assetUrl`, so kept pictures load.
+- **`views.picture.more`:** a board with one gets a Show more button; Esc comes back from it before anything closes. Only boards that carry it.
+- **`ShapeInline`:** bold renders inline markup inside it, so `` **a `b`** `` shows code.
+- **`SHAPE_LIMITS`:** `groups` and `items` are removed, with Requirements; `know` and `knowParagraphs` are new. TypeScript breaks if your code names the old ones.
+- **`ShapeRef.images[].crop`:** a new optional field, `[x, y, width, height]` from 0 to 1, for the part of a picture a bubble shows.
+- **Hover ring:** it no longer clears on every other pointer move, and it clears when the board scrolls.
+- **`.shp-tstrip`:** now `inline-flex` with a 6 px gap.
+
+**Fixes that reach every host:**
+- `<image href="files/…">` in a drawing now loads through `resolveSrc`. Before, the bare name stayed and the picture was broken.
+- Clicking a part inside an SVG now opens the comment box. Before, it threw and opened nothing.
+
+## Shape: the board header (ui 0.62.0; not additive)
+
+`ShapeSurface`'s header no longer has the eyebrow row above the title (owner feedback 2026-11-04, approval `shape-board-look`, q-a9a1bf61). The title comes first; the group at its right holds, in order: "<agent> is drawing v<n>…" with a small reshaping Pebble while the agent draws (`.shp-drawing`, `role="status"`; the Pebble only on a phone, the words for screen readers), "Finished" (`.shp-finished`), the global comment button, Bring it up to date (a host with `refresh`) and, only when the host passes `onClose`, a × button (`.shp-close`, `aria-label` "Close Shape").
+
+Removed, with nothing in their place:
+- the classes `.shp-hb`, `.shp-top`, `.shp-eyebrow` and `.shp-versions`, and the `shp-dot-in` keyframe;
+- the eyebrow's words: `<project> · Shape · as of <date, time UTC>` and the version dots;
+- the Pebble mark at the header's left. A host that passes no `onClose` now shows no Pebble in the header at all (before, it got a non-button Pebble); a host that passes `onClose` gets the × instead of a Pebble button.
+
+New classes: `.shp-title-row`, `.shp-head-side`, `.shp-drawing`, `.shp-finished`, `.shp-close`. A host that styled or queried the removed classes, or showed its own close beside the board, should check its header after the upgrade.
+
+## Shape: `components/shape` and `shape.css` (ui 0.61.0, published; needs core 0.25.19; additive)
+
+**Publish core first.** core 0.25.19 adds `@plannotator/core/shape` (the Shape board format: views, references, parts, version diffing, notes); the UI pins it exactly. The package smoke reads the registry and fails a UI publish until that core is out.
+
+- **`@plannotator/ui/components/shape`**: `ShapeSurface` (the living board: four views with fades, the dock, marking with Change it / Ask, global comments, numbered references opening in the real viewers, the Ask · Thread · References panel floating over the board, the 390 px bottom sheet). Host-neutral: everything comes through a `ShapeHost` you pass (`load`, `version`, `note`, `ask`, `seen`, `events`, and optional `refresh`, `assetUrl`, `readFile`, `codeHover`, `resumePrompt`, `copy`, and `askWaitsWhenEnded`: a host with no Ask AI fallback, so the Ask panel says "Session ended · your question waits for the agent" once the session ended). It makes no request and reads no address, cookie or storage (`tests/shape-surface-host-neutral.test.ts`). The Code view's Guided Review comes in as a prop (`CodeGuide`; Plannotator passes `@plannotator/guide-viewer/ShapeCodeGuide`), and so does the code hover card (`CodeHoverCard`; code review's `TokenHoverCard` fits), so the UI never depends on the guide chain or code review.
+- **`ShapeDiagram` / `ShapeDrawn`**: one drawing on its own, outside the board. A part with `data-code="path#L42"` calls the host's `onCode({ path, line })`; a bubble calls `onRefOpen`. The agent's HTML is sanitized (DOMPurify) inside a shadow root, so its CSS reaches nothing else, and the frame has `contain: layout` and `clip-path: inset(-24px)` inline, so `:host { position: fixed }` (or a huge transform) stays within 24px of it.
+- **Nothing loads from outside a drawing.** One allowlist, in core (`shapeUrlAllowed`, `shapeCssProblems`, `shapePaintAllowed`), used by the store's `checkShapeBoard` and by the sanitizer: a URL attribute may be `files/<name>`, `#id` or a `data:image/` PNG, JPEG, GIF or WebP (an `<a href>` may also be https); `srcset`, `poster`, `ping`, `<source>`, `<animate>`/`<set>` and an image input's `src` are dropped; nothing may open in the top layer (`popover`, `popovertarget(action)`, `command(for)`, `interestfor`/`interesttarget`, `<dialog>`, `<select>`, `base-select`/`::picker`); a `style` attribute and the view css are read with their escapes decoded and comments dropped outside strings (and read again with comments kept) and may not `@import`, `@font-face`, `image-set()` or `url()` anything but a fragment or a data image; any other attribute may use only `url(#id)`. Paths in a board (file and diff refs, a requirement's code, the Code view's files, a step's diffs, `data-code`) must be project-relative (`isShapeProjectPath`), and the board checks again before it asks `host.readFile`. A ref's URL opens only as http(s) (`shapeLinkUrl`).
+- **`ShapeGrid` / `ShapeThumb`** (approval `shape-landing-grid`): every board as a card (a scaled Picture, the title, `project · when`, a dot while it changed), newest first; `filterShapeItems` is its title-or-project match and `shapeAgo` its time words. `ShapeThumb` fills the box you give it (give it a height). A drawing's `#…` link scrolls inside the drawing and never changes the page's hash; an https link opens a new tab; any other link does nothing.
+- **`@plannotator/ui/shape.css`**: the board's styles (`shp-` classes, theme variables only, light and dark, reduced motion). Plain CSS: import it next to your theme.
+- **Seams it needed, all opt-in (absent = unchanged):** `CommentPopover` `submitLabel`, `askAILabel`; `CodeFileView` `onAskAnnotation`, `commentSubmitLabel`, `commentAskLabel`.
+
+## Delete on an answer-only document's words: `Viewer` `textDeletions`, `AnnotationToolbar` `showDelete` (unreleased; additive, opt-in, no core change)
+
+- **`Viewer` `textDeletions?: boolean`**, with `textComments` (and `answerOnly`, not `readOnly`): the comment-only selection toolbar also offers Delete, in its usual place before Comment. Delete hands `onAddAnnotation` the same `DELETION` row plan review makes (the words selected as `originalText`, no `text`), drawn struck through. The label picker and the Alt+digit label keys stay off. Without `textComments` it does nothing. The Plannotator Inbox passes it on agent messages (approval `inbox-toolbar-delete`).
+- **`AnnotationToolbar` `showDelete?: boolean`**: shows Delete on a `commentOnly` toolbar. Absent: Delete follows `commentOnly` as before.
+- A host that passes neither sees no change.
+
+## Shape: dark contrast (unreleased; additive)
+
+Shape boards can now show any picture: a file on this computer or a web picture, which `plannotator shape update` copies into the board's `files/` (#2756). The board itself still names only `files/<name>`. Nothing changes in the allowlist or in how `resolveSrc` / `assetUrl` resolve a picture.
+
+**`darkContrast` on `ShapeSurface` and `ShapeDrawn` (default off: the board is drawn as written, in both themes, as before).** Plannotator passes it from `ShapeBoard`. It acts on a dark board only. On a light board it sets nothing: the DOM and the pixels are the same as without it. The rule is in `components/shape/darkContrast.ts`.
+
+What it does on a dark board (`.board.dark-hold`):
+- Box borders (`--rule`) reach 3:1 against the paper, a box (`--surface`) and every zone fill (WCAG 1.4.11).
+- A box (`--surface`) reaches 1.25:1 against the paper and every zone fill. It gets lighter, or darker where the palette's box is already darker than its paper.
+- A zone that draws no line of its own (an SVG shape or an HTML box filled with `--blue-soft` and the like) gets a 1.5 px edge in its own hue (`--shp-edge-<zone>`, `data-shp-edge`). The edge is 3:1 against the paper and its fill.
+- Words: the ink and `--grey` keep at least the contrast they had on a box, up to 7:1.
+- Each kept SVG picture (`files/…`) gets a light tile (`rect.shp-pic-tile`, `#e4e6ea`) before it, with its `transform` and `data-step`. An `<img>` gets the same from CSS, with `object-fit: contain`. The tile skips a picture that the drawing clips or masks, a picture inside `defs`/`pattern`/`symbol`/`mask`, one with no plain size, and a `data:` image (a built-in logo's).
+
+How it runs:
+- Each value starts from the colour the board resolves now and moves in OKLab, only as far as it must. A colour that already holds stays as it is.
+- The pass reruns when the html element's `class`, `style` or `data-theme` changes and a theme token really changed, and when the system's light/dark changes. It runs in the next frame, after any other pass on the same mutation.
+- It sets inline variables on `.board` and puts back any inline value it replaced when it is taken back.
+- With #2721 (palette contrast, `holdShapeContrast`): that pass fixes zone colours, `--grey`, `--ink2`, `--mark`, `--alert` and the `-soft` fills against the ink. This pass reads the result as its starting point and adds what #2721 does not cover: `--rule`, `--surface`, zone edges and picture tiles. #2721 lifts `--grey` to 4.5:1, and this pass only lifts it further, so the two never pull a value in opposite directions.

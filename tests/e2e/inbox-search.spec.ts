@@ -20,6 +20,10 @@
  *    "Search everywhere" clears it; focus returns to the Search entry;
  *  - long, right-to-left and CJK text never overflows the palette;
  *  - ⌘/Ctrl+Enter opens a new tab and keeps the palette open;
+ *  - every result starts with its mark (the agent's for a message, an outline
+ *    otherwise), the selected row is lighter than the panel in dark and
+ *    darker in light, the text keeps AA, and the key footer's keys work
+ *    (approval "inbox-search-contrast", option B);
  *  - searched from a project, a result keeps the list on it; the same thread
  *    again replaces its entry; a stray msg= leaves the address;
  *  - a phone: the list header's search icon opens a full-screen sheet with
@@ -68,6 +72,14 @@ async function openFromSidebar(p: Page): Promise<void> {
 async function settled(p: Page): Promise<void> {
   await expect(palette(p).locator('.ib-sp-list')).not.toHaveAttribute('data-dim', '');
   await expect(palette(p).locator('[data-search-indexing]')).toHaveCount(0);
+}
+
+/** The answer to the words just typed is the one drawn: the recent view (or the last query's answer) can still show,
+ *  undimmed, before the new one lands, so wait for a message row with this query's matched word, then settle. */
+async function answered(p: Page, word: string): Promise<void> {
+  await expect(palette(p).locator('[data-search-group="recent"]')).toHaveCount(0);
+  await expect(palette(p).locator('[data-search-group="messages"] [data-result="message"] .ib-sp-m').filter({ hasText: new RegExp(`^${word}$`, 'i') }).first()).toBeVisible();
+  await settled(p);
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -308,7 +320,10 @@ test('filters: a chip menu by keyboard, Escape closes the menu before the palett
   // The open thread of the same quality ranks above the archived one.
   const order = await palette(page).locator('[data-search-group="threads"] [data-result]').evaluateAll((r) => r.map((x) => x.getAttribute('data-result-id')));
   expect(order.indexOf(world.threads.cliPagination)).toBeLessThan(order.indexOf(world.threads.pagination));
-  // Tab reaches the chips; the Status menu opens; arrows and Enter pick Archived.
+  // Tab reaches the order beside the search box (there are words), then the chips (Type, Project, then Status); the Status menu opens; arrows and Enter pick Archived.
+  await page.keyboard.press('Tab');
+  await expect(palette(page).locator('[data-search-sort] input[type="radio"]:checked')).toBeFocused();
+  await page.keyboard.press('Tab');
   await page.keyboard.press('Tab');
   await page.keyboard.press('Tab');
   await expect(palette(page).locator('[data-chip="status"]')).toBeFocused();
@@ -371,7 +386,8 @@ test('a message and a file draw their thread’s chip; every second line keeps i
     await page.mouse.move(1, 1);
   }
   await shot(page, '09a-thread-on-row');
-  // Every part of the second line stays inside its row: the time is drawn whole, at desktop and phone widths.
+  // Every part of the second line stays inside its row, and the time is drawn whole inside the row (its own
+  // column on a desktop, the end of the second line on a phone), at desktop and narrow widths.
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
     for (const q of ['deploy', 'CDN cache key', 'spike']) {
@@ -379,8 +395,9 @@ test('a message and a file draw their thread’s chip; every second line keeps i
       await settled(page);
       const bad = await palette(page).evaluate((dialog) =>
         [...dialog.querySelectorAll<HTMLElement>('.ib-sp-tl')].filter((line) => {
-          const at = line.querySelector('.ib-sp-at') ?? line.lastElementChild!;
-          return line.scrollWidth > line.clientWidth + 1 || at.getBoundingClientRect().right > line.getBoundingClientRect().right + 1;
+          const row = line.closest<HTMLElement>('[role="option"]')!;
+          const at = row.querySelector('[data-result-time]') ?? line.querySelector('.ib-sp-at') ?? line.lastElementChild!;
+          return line.scrollWidth > line.clientWidth + 1 || at.getBoundingClientRect().right > row.getBoundingClientRect().right + 1;
         }).length,
       );
       expect(bad, `${q} at ${width}px`).toBe(0);
@@ -403,16 +420,14 @@ test('long, right-to-left and CJK text stays inside the palette', async () => {
     return { list: list.scrollWidth - list.clientWidth, rows: rows.filter((r) => r.scrollWidth > r.clientWidth + 1).length };
   });
   expect(overflow).toEqual({ list: 0, rows: 0 });
-  // The truncating line carries dir="auto"; its full text is a component tooltip while cut, never a native title.
+  // The first line carries dir="auto" and no native title.
   const arabic = palette(page).locator(`[data-result="thread"][data-result-id="${world.threads.arabic}"] .ib-sp-p`);
   await expect(arabic).toHaveAttribute('dir', 'auto');
   await expect(arabic).not.toHaveAttribute('title', /./);
-  // Cut it (a narrow box, as on a phone): hovered, the component tooltip holds the whole right-to-left text.
+  // In a narrow box (as on a phone) the words wrap whole, never cut (the owner, 2026-11-06: show why it matched).
   await arabic.evaluate((el) => ((el as HTMLElement).style.maxWidth = '140px'));
-  expect(await arabic.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-  await arabic.hover();
-  await expect(palette(page).locator('[data-side].bg-popover')).toHaveText('تقرير أخطاء الدفع بعد آخر deploy على الخادم الثاني');
-  await page.mouse.move(1, 1);
+  expect(await arabic.evaluate((el) => ({ cut: el.scrollWidth > el.clientWidth + 1, lines: Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)) > 1 }))).toEqual({ cut: false, lines: true });
+  await expect(arabic).toHaveText('تقرير أخطاء الدفع بعد آخر deploy على الخادم الثاني');
   await arabic.evaluate((el) => ((el as HTMLElement).style.maxWidth = ''));
   await shot(page, '09-stress-long-rtl');
 });
@@ -427,6 +442,179 @@ test('⌘/Ctrl+Enter opens the result in a new tab and keeps the palette open', 
   await tab.close();
   await page.keyboard.press('Escape');
   await expect(palette(page)).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+/** The look of the palette's first named thread chip (border, corners, fill, padding, face), and whether it is drawn as a box. */
+async function chipBoxes(p: Page): Promise<{ search: string | null; boxed: boolean }> {
+  return p.evaluate(() => {
+    const box = (el: Element | null | undefined) => {
+      if (!el) return null;
+      const s = getComputedStyle(el);
+      return [s.borderTopWidth, s.borderTopStyle, s.borderTopColor, s.borderTopLeftRadius, s.backgroundColor, s.paddingLeft, s.fontFamily].join(' | ');
+    };
+    const chip = document.querySelector('dialog.ib-sp .ib-sp-tl .ib-key[data-result-thread="name"]');
+    // Drawn as a box: padded, and filled or outlined (the default style fills it; others outline it).
+    const clear = (c: string) => c === 'transparent' || /\/ 0\)$|, 0\)$/.test(c);
+    const s = chip ? getComputedStyle(chip) : null;
+    const boxed = Boolean(s && parseFloat(s.paddingLeft) > 0 && (!clear(s.backgroundColor) || (parseFloat(s.borderTopWidth) > 0 && s.borderTopStyle !== 'none' && !clear(s.borderTopColor))));
+    return { search: box(chip), boxed };
+  });
+}
+
+/** WCAG contrast of two CSS colours, the first composited over the second (canvas-resolved, so oklch and color-mix work). */
+async function contrastOf(p: Page, fg: string, bg: string, under?: string): Promise<{ ratio: number; fgLum: number; bgLum: number }> {
+  return p.evaluate(
+    ([fg, bg, under]) => {
+      const c = document.createElement('canvas');
+      c.width = c.height = 1;
+      const x = c.getContext('2d', { willReadFrequently: true })!;
+      const rgba = (css: string): number[] => {
+        x.clearRect(0, 0, 1, 1);
+        x.fillStyle = '#000';
+        x.fillStyle = css;
+        x.fillRect(0, 0, 1, 1);
+        const d = x.getImageData(0, 0, 1, 1).data;
+        return [d[0]!, d[1]!, d[2]!, d[3]! / 255];
+      };
+      const over = (top: number[], base: number[]) => top.slice(0, 3).map((v, i) => v * top[3]! + base[i]! * (1 - top[3]!));
+      const lum = (rgb: number[]) => {
+        const l = rgb.map((v) => {
+          const s = v / 255;
+          return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * l[0]! + 0.7152 * l[1]! + 0.0722 * l[2]!;
+      };
+      const base = under ? over(rgba(bg), rgba(under)) : rgba(bg).slice(0, 3);
+      const top = over(rgba(fg), base);
+      const [a, b] = [lum(top), lum(base)];
+      return { ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05), fgLum: a, bgLum: b };
+    },
+    [fg, bg, under ?? ''] as const,
+  );
+}
+
+test('every result starts with its mark; the selected row stands apart from the panel; text keeps AA; the key footer’s keys work', async () => {
+  await openFromSidebar(page);
+  await input(page).fill('retry');
+  await answered(page, 'retry');
+  const rows = palette(page).locator('[role="option"][data-result]');
+  await expect(rows.first()).toBeVisible();
+  // Each result's first child is its mark, drawn (a visible icon), and hidden from a screen reader.
+  const marks = await rows.evaluateAll((all) =>
+    all.map((row) => {
+      const mark = row.firstElementChild as HTMLElement;
+      const box = mark.querySelector('svg, img')?.getBoundingClientRect();
+      return { type: row.getAttribute('data-result'), id: row.getAttribute('data-result-id'), isMark: mark.classList.contains('ib-sp-mark'), mark: mark.getAttribute('data-row-mark'), hidden: mark.getAttribute('aria-hidden'), drawn: Boolean(box && box.width >= 14 && box.height >= 14) };
+    }),
+  );
+  expect(marks.length).toBeGreaterThan(3);
+  for (const m of marks) expect(m, JSON.stringify(m)).toMatchObject({ isMark: true, hidden: 'true', drawn: true });
+  const want: Record<string, string> = { thread: 'comment', file: 'doc', guide: 'book', project: 'folder' };
+  for (const m of marks.filter((r) => r.type !== 'message')) expect(m.mark).toBe(want[m.type!]);
+  expect(new Set(marks.map((m) => m.type))).toEqual(new Set(['thread', 'message', 'file']));
+  // A message shows its writer's mark: Claude Code's for Claude Code, the person's outline for a reply.
+  const byWriter = await palette(page)
+    .locator('[data-result="message"]')
+    .evaluateAll((all) =>
+      all.map((r) => {
+        // The writer's words, without the "·" and the screen reader's ", " the part holds after them.
+        const lead = r.querySelector('.ib-sp-tl .ib-sp-lead')!.cloneNode(true) as HTMLElement;
+        lead.querySelectorAll('.ib-sp-sep, .ib-sr').forEach((el) => el.remove());
+        return [lead.textContent, r.querySelector('.ib-sp-mark')!.getAttribute('data-row-mark')];
+      }),
+    );
+  const hostOf: Record<string, string> = { 'Claude Code': 'agent:claude-code', Pi: 'agent:pi', OpenCode: 'agent:opencode', You: 'user' };
+  expect(byWriter.map(([who]) => who)).toEqual(expect.arrayContaining(['Claude Code', 'You']));
+  for (const [who, mark] of byWriter) expect(mark, who!).toBe(hostOf[who!]);
+
+  // The selected row against the panel, and the text against both, in each theme.
+  for (const scheme of ['dark', 'light'] as const) {
+    await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
+    await expect.poll(() => page.evaluate(() => document.documentElement.classList.contains('light'))).toBe(scheme === 'light');
+    // Every element eases its colours over 150 ms on a theme switch (packages/ui/theme.css, `*`): measure once no
+    // colour transition runs, or a slow machine reads the panel and the row half-way between the themes.
+    await expect.poll(() => page.evaluate(() => document.getAnimations().filter((a) => a instanceof CSSTransition && a.playState === 'running').length)).toBe(0);
+    const look = await palette(page).evaluate((dialog) => {
+      const panel = getComputedStyle(dialog).backgroundColor;
+      const selected = dialog.querySelector<HTMLElement>('[role="option"][aria-selected="true"]')!;
+      const other = dialog.querySelector<HTMLElement>('[role="option"][data-result="message"]:not([aria-selected="true"])')!;
+      return {
+        panel,
+        selectedBg: getComputedStyle(selected).backgroundColor,
+        otherBg: getComputedStyle(other).backgroundColor,
+        title: getComputedStyle(other.querySelector('.ib-sp-p')!).color,
+        meta: getComputedStyle(other.querySelector('.ib-sp-tl')!).color,
+        time: getComputedStyle(other.querySelector('[data-result-time]')!).color,
+        selectedTitle: getComputedStyle(selected.querySelector('.ib-sp-p')!).color,
+        selectedMeta: getComputedStyle(selected.querySelector('.ib-sp-s')!).color,
+        heading: getComputedStyle(dialog.querySelector('.ib-sp-gh')!).color,
+      };
+    });
+    // An unselected row has no fill; the selected one does, lighter than the panel in dark and darker in light (it was darker in dark: 1.05:1).
+    const fill = await contrastOf(page, look.selectedBg, look.panel);
+    expect((await contrastOf(page, look.otherBg, look.panel)).ratio).toBeCloseTo(1, 2);
+    expect(fill.ratio, `${scheme} selected fill`).toBeGreaterThanOrEqual(1.2);
+    expect(fill.fgLum > fill.bgLum, `${scheme}: selected lighter than the panel`).toBe(scheme === 'dark');
+    for (const [name, fg, bg] of [
+      ['title', look.title, look.panel],
+      ['meta', look.meta, look.panel],
+      ['time', look.time, look.panel],
+      ['heading', look.heading, look.panel],
+    ] as const) {
+      expect((await contrastOf(page, fg, bg)).ratio, `${scheme} ${name}`).toBeGreaterThanOrEqual(4.5);
+    }
+    for (const [name, fg] of [
+      ['selected title', look.selectedTitle],
+      ['selected meta', look.selectedMeta],
+    ] as const) {
+      expect((await contrastOf(page, fg, look.selectedBg, look.panel)).ratio, `${scheme} ${name}`).toBeGreaterThanOrEqual(4.5);
+    }
+    // The thread's name is plain words in the row's face, no box (approval "inbox-search-calm"), in each theme.
+    const chip = await chipBoxes(page);
+    expect(chip.search, `${scheme}: the thread chip is in the row`).not.toBeNull();
+    expect(chip.boxed, `${scheme}: the thread chip is plain words, no box`).toBe(false);
+    await page.screenshot({ path: join(proofDir, `10-marks-${scheme}.png`) });
+  }
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+
+  // The footer names only keys the palette handles, and each does what it says.
+  const foot = palette(page).locator('[data-search-keys]');
+  await expect(foot).toBeVisible();
+  // Each keycap names its binding and is spelled by the registry (as Send's ⌘↵ / Ctrl ↵ is); each binding is pressed below.
+  const keys = await foot.locator('kbd').evaluateAll((all) => all.map((k) => [k.getAttribute('data-keycap-binding'), k.textContent]));
+  expect(keys.map(([binding]) => binding)).toEqual(['ArrowUp', 'ArrowDown', 'Enter', 'Mod+Enter', 'Escape']);
+  const caps = keys.map(([, text]) => text!);
+  expect(caps.slice(0, 3)).toEqual(['↑', '↓', '↵']);
+  expect(caps[3]).toMatch(/^(⌘↵|Ctrl ↵)$/);
+  expect(caps[4]).toBe('Esc');
+  await expect(foot).toContainText('Move');
+  await expect(foot).toContainText('Open in new tab');
+  await expect(foot).toContainText('Close');
+  const active = () => input(page).getAttribute('aria-activedescendant');
+  const optionIds = await palette(page).locator('[role="option"]').evaluateAll((all) => all.map((o) => o.id));
+  expect(await active()).toBe(optionIds[0]);
+  await page.keyboard.press('ArrowDown');
+  expect(await active()).toBe(optionIds[1]);
+  await page.keyboard.press('ArrowUp');
+  expect(await active()).toBe(optionIds[0]);
+  // The new-tab chord as the footer names it.
+  const opened = context.waitForEvent('page');
+  await page.keyboard.press(caps[3]!.startsWith('⌘') ? 'Meta+Enter' : 'Control+Enter');
+  const tab = await opened;
+  await tab.waitForLoadState();
+  expect(tab.url()).toContain('#thread=');
+  await tab.close();
+  await expect(palette(page)).toBeVisible();
+  // Enter opens the highlighted result and closes the palette.
+  await page.keyboard.press('Enter');
+  await expect(palette(page)).toBeHidden();
+  await expect.poll(() => page.evaluate(() => location.hash)).toContain('thread=');
+  // Esc closes it.
+  await openFromSidebar(page);
+  await page.keyboard.press('Escape');
+  await expect(palette(page)).toBeHidden();
+  // A phone has no footer (checked with the sheet below).
   expect(errors).toEqual([]);
 });
 
@@ -450,6 +638,20 @@ test('a phone: the list header opens a full-screen sheet; a result opens the thr
     await settled(p);
     const rowHeight = await palette(p).locator('[role="option"]').first().evaluate((el) => el.getBoundingClientRect().height);
     expect(rowHeight).toBeGreaterThanOrEqual(56);
+    // A phone: each result keeps its mark, the time stays on the second line (no column), and there is no key footer.
+    const relayRow = palette(p).locator(`[data-result="thread"][data-result-id="${world.threads.relay}"]`);
+    await expect(relayRow.locator(':scope > .ib-sp-mark')).toHaveAttribute('data-row-mark', 'comment');
+    await expect(relayRow.locator('[data-result-time]')).toHaveCount(0);
+    await expect(relayRow.locator('.ib-sp-tl .ib-sp-at')).toBeVisible();
+    await expect(palette(p).locator('[data-search-keys]')).toHaveCount(0);
+    // A phone draws the thread chip as plain words too.
+    await input(p).fill('retry');
+    await answered(p, 'retry');
+    const chip = await chipBoxes(p);
+    expect(chip.search, 'phone: the thread chip is in the row').not.toBeNull();
+    expect(chip.boxed, 'phone: the thread chip is plain words, no box').toBe(false);
+    await input(p).fill('rate lim');
+    await settled(p);
     await shot(p, '22-phone-typing');
     await palette(p).locator(`[data-result="thread"][data-result-id="${world.threads.relay}"]`).tap();
     await expect(palette(p)).toBeHidden();

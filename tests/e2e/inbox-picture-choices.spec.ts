@@ -10,8 +10,8 @@
  * the Shows chip and Why; the choices are picture tiles whose pictures load
  * from the message image route; the zoom button opens the thread's viewer
  * without picking; a click on a picture picks it; Send; the agent's
- * wait_for_reply gets the plain label. Then an iPhone 15 in WebKit does the
- * same on a second question. Last, images the Inbox refuses to serve (a
+ * read_thread gets the plain label. Then an iPhone 15 in WebKit does the
+ * same on a second question (its two choices one a row). Last, images the Inbox refuses to serve (a
  * hidden folder of the home folder: 403 image_hidden; a missing file: 404)
  * show as their alt text, never a broken-image icon, and a card whose
  * pictures are refused falls back to text rows, on the desktop and on the
@@ -23,55 +23,16 @@
 
 import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { deflateSync } from 'node:zlib';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { png } from './test-png';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const proofDir = resolve(process.env.PLANNOTATOR_QUESTION_CONTRACT_SHOTS ?? join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'question-contract'));
-
-/** A real PNG of `w` x `h` px: a coloured frame on a light ground (so the tiles differ at a glance). */
-function png(w: number, h: number, rgb: [number, number, number]): Buffer {
-  const crcTable = Array.from({ length: 256 }, (_, n) => {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    return c >>> 0;
-  });
-  const crc = (buf: Buffer) => {
-    let c = 0xffffffff;
-    for (const byte of buf) c = crcTable[(c ^ byte) & 0xff]! ^ (c >>> 8);
-    return (c ^ 0xffffffff) >>> 0;
-  };
-  const chunk = (type: string, data: Buffer) => {
-    const len = Buffer.alloc(4);
-    len.writeUInt32BE(data.length);
-    const td = Buffer.concat([Buffer.from(type, 'ascii'), data]);
-    const sum = Buffer.alloc(4);
-    sum.writeUInt32BE(crc(td));
-    return Buffer.concat([len, td, sum]);
-  };
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(w, 0);
-  ihdr.writeUInt32BE(h, 4);
-  ihdr[8] = 8;
-  ihdr[9] = 2;
-  const rows: Buffer[] = [];
-  for (let y = 0; y < h; y++) {
-    const row = Buffer.alloc(1 + w * 3);
-    for (let x = 0; x < w; x++) {
-      const edge = x < 12 || y < 12 || x >= w - 12 || y >= h - 12;
-      const bar = y > h * 0.7 && y < h * 0.82 && x > w * 0.15 && x < w * 0.85;
-      const [r, g, b] = edge || bar ? rgb : [244, 244, 240];
-      row.set([r, g, b], 1 + x * 3);
-    }
-    rows.push(row);
-  }
-  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(Buffer.concat(rows))), chunk('IEND', Buffer.alloc(0))]);
-}
 
 const DRAWERS = [
   'Two drawer designs for checkout.',
@@ -120,6 +81,13 @@ let world: World;
 
 function registry(): { port: number } {
   return JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8'));
+}
+
+/** What the person sent on the thread's newest answered question, as the agent reads it. */
+async function sentSelection(agent: SimAgent, threadId: string): Promise<string[]> {
+  const thread = await agent.readThread(threadId);
+  const questions = (thread.messages as { questions?: { state: string; answer?: { selected?: string[] } }[] }[]).flatMap((m) => m.questions ?? []);
+  return questions.findLast((q) => q.state === 'sent')!.answer!.selected!;
 }
 
 async function shot(page: Page, name: string, target?: ReturnType<Page['locator']>): Promise<void> {
@@ -209,18 +177,15 @@ test('desktop: tiles pick, zoom is separate, the contract lines show, and the ag
   await expect(pane.locator('[data-foot-status] [data-draft-foot]')).toContainText('1 pick');
   await shot(page, 'desktop-picked', card);
 
-  const waiting = claude.waitForReply(threadId, 40);
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const answer = await waiting;
-  const body = String((answer.reply as { body: string }).body);
+  const body = String((await claude.nextReply(threadId, 40)).body);
   expect(body).toContain('Answer: B · Total pinned with Pay (your recommendation)');
   expect(body).not.toContain('![');
-  const questions = answer.questions as { answer: { selected: string[] } }[];
-  expect(questions[0]!.answer.selected).toEqual(['B · Total pinned with Pay']);
+  expect(await sentSelection(claude, threadId)).toEqual(['B · Total pinned with Pay']);
   expect(world.errors).toEqual([]);
 });
 
-test('iPhone (WebKit): two tiles across, a tap picks, Send, the agent gets the labels', async () => {
+test('iPhone (WebKit): one tile a row, a tap picks, Send, the agent gets the labels', async () => {
   const { claude, project } = world;
   const sent = await claude.send({ project_path: project, subject: 'Settings layouts', body: LAYOUTS }, { wakes: true });
   const threadId = sent.thread_id as string;
@@ -233,8 +198,10 @@ test('iPhone (WebKit): two tiles across, a tap picks, Send, the agent gets the l
     await expect(card).toBeVisible();
     const tiles = card.locator('[data-question-tile]');
     await expect(tiles).toHaveCount(2);
-    const [a, b] = await Promise.all([tiles.nth(0).boundingBox(), tiles.nth(1).boundingBox()]);
-    expect(Math.abs(a!.y - b!.y)).toBeLessThanOrEqual(1);
+    // Under 560 px of room the choices stack (approval "picture-choices-layout"), each the grid's full width.
+    const [a, b, grid] = await Promise.all([tiles.nth(0).boundingBox(), tiles.nth(1).boundingBox(), card.locator('[data-question-tiles]').boundingBox()]);
+    expect(b!.y).toBeGreaterThanOrEqual(a!.y + a!.height);
+    expect(Math.abs(a!.width - grid!.width)).toBeLessThanOrEqual(1);
     for (const i of [0, 1]) {
       await expect.poll(() => tiles.nth(i).locator('img[data-question-picture]').evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(640);
     }
@@ -262,12 +229,10 @@ test('iPhone (WebKit): two tiles across, a tap picks, Send, the agent gets the l
       await page.waitForTimeout(300);
       await page.screenshot({ path: join(proofDir, `phone-picked-${scheme}.png`) });
     }
-    const waiting = claude.waitForReply(threadId, 40);
     await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).tap();
-    const answer = await waiting;
-    const questions = answer.questions as { answer: { selected: string[] } }[];
-    expect(questions[0]!.answer.selected).toEqual(['Tabs', 'Sidebar']);
-    expect(String((answer.reply as { body: string }).body)).not.toContain('![');
+    const answer = await claude.nextReply(threadId, 40);
+    expect(await sentSelection(claude, threadId)).toEqual(['Tabs', 'Sidebar']);
+    expect(String(answer.body)).not.toContain('![');
     await context.close();
   } finally {
     await own.close();

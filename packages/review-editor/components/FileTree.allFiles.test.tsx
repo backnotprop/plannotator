@@ -109,7 +109,7 @@ afterEach(async () => {
 });
 
 describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
-  test('the tree draws the shared header; Changes is the changed tree', async () => {
+  test('the tree draws the shared header and the scope leads its sticky tools; Changes is the changed tree', async () => {
     const onScope = mock((_scope: string) => {});
     const header = {
       view: 'tree' as const,
@@ -119,7 +119,9 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
       scope: { value: 'changes' as const, onSelect: onScope, changed: changed.length, all: LISTING.length },
     };
     const el = await mount(<Tree header={header} treeScope="changes" repoFiles={repo(ready())} />);
-    const all = el.querySelector<HTMLButtonElement>('[data-review-panel-header] [data-tree-scope="all"]')!;
+    expect(el.querySelector('[data-review-panel-header]')).not.toBeNull();
+    // The scope stays in view while the list scrolls: it is in the sticky block.
+    const all = el.querySelector<HTMLButtonElement>('[data-review-sticky-tools] [data-tree-scope="all"]')!;
     expect(all.textContent).toBe('All files8');
     // Changes is today's tree: no repository list.
     expect(el.querySelector('[data-repo-file-tree]')).toBeNull();

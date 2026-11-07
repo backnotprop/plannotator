@@ -29,6 +29,7 @@ import { inboxApi, type InboxEvent, type ListModel, type NotificationSettings } 
 import { agentName, plural } from './format';
 import { pageInFront } from './sound';
 import { inboxEventsServedBy } from './sharedEvents';
+import { signalNotificationClick } from './history';
 
 /** The one tag every Inbox notification carries: a new one replaces the last. */
 export const NOTIFICATION_TAG = 'plannotator-inbox';
@@ -125,6 +126,21 @@ export interface NotifyItem {
   fresh: boolean;
   /** What brought it (`thread:<id>`, `<message id>/<question key>`): what tabs claim, so one tab raises each. */
   keys: string[];
+}
+
+/**
+ * Threads this tab saw snoozed that are back now with a question open: a return
+ * follows the rule for a new question (approval "inbox-snooze"), and plain
+ * news stays quiet. A thread that came back while no tab was open, or that this
+ * tab never saw snoozed, is simply there. One key per return, so one tab
+ * raises it.
+ */
+export function returnedItems(rows: readonly InboxListRow[], wasSnoozed: ReadonlySet<string>): NotifyItem[] {
+  return rows.flatMap((row) =>
+    row.snooze_back && wasSnoozed.has(row.thread_id) && row.questions.open > 0
+      ? [{ threadId: row.thread_id, author: row.author, asks: true, fresh: false, keys: [`back:${row.thread_id}:${row.snooze_back}`] }]
+      : [],
+  );
 }
 
 /** Several Inbox tabs: each item is raised by the first tab to claim it (`claimNotices`). */
@@ -353,6 +369,8 @@ export function useInboxNotifications(options: {
   const counted = useRef(new Set<string>());
   /** Every thread a list read showed this page: a later line of one of those roots is never a new thread. */
   const known = useRef(new Set<string>());
+  /** The threads snoozed at the last list read: only their return can ring. */
+  const snoozedSeen = useRef<ReadonlySet<string>>(new Set());
   /** New questions (message id and claim key), waiting for the list read. */
   const pending = useRef<{ messageId: string; key: string }[]>([]);
   /** New threads an agent started, waiting for the list read. */
@@ -521,6 +539,7 @@ export function useInboxNotifications(options: {
         burst.current.clear();
         lastNotice.current = null;
         open();
+        signalNotificationClick();
       };
     } catch {
       // A browser that only notifies through a service worker: nothing to show.
@@ -534,18 +553,26 @@ export function useInboxNotifications(options: {
       pending.current = [];
       pendingThreads.current = [];
       const rowList = list.sections.flatMap((section) => section.threads);
+      // Snoozed threads (approval "inbox-snooze") are in no section. They are known threads all the same, and
+      // nothing notifies for them; what they asked rings when they come back, by the rule below.
+      const snoozed = new Set((list.snoozed ?? []).map((row) => row.thread_id));
       for (const row of rowList) known.current.add(row.thread_id);
-      if (rowList.length > 0 || (list.projects ?? []).some((project) => project.threads > 0)) setHasThreads(true);
-      if (questions.length === 0 && fresh.length === 0) return;
+      for (const threadId of snoozed) known.current.add(threadId);
+      if (rowList.length > 0 || snoozed.size > 0 || (list.projects ?? []).some((project) => project.threads > 0)) setHasThreads(true);
+      const back = returnedItems(rowList, snoozedSeen.current);
+      snoozedSeen.current = snoozed;
+      if (questions.length === 0 && fresh.length === 0 && back.length === 0) return;
       // The threads these items landed in, newest last, with the agent that wrote.
       const threads = new Map<string, NotifyItem>();
+      for (const item of back) threads.set(item.threadId, item);
       for (const threadId of fresh) {
+        if (snoozed.has(threadId)) continue;
         const root = messages.current.get(threadId);
         if (root) threads.set(threadId, { threadId, author: root.author, asks: false, fresh: true, keys: [`thread:${threadId}`] });
       }
       for (const { messageId, key } of questions) {
         const message = messages.current.get(messageId);
-        if (!message) continue;
+        if (!message || snoozed.has(message.threadId)) continue;
         const before = threads.get(message.threadId);
         threads.delete(message.threadId);
         threads.set(message.threadId, {
@@ -625,6 +652,7 @@ export function useInboxNotifications(options: {
       notification.onclick = () => {
         window.focus();
         notification.close();
+        signalNotificationClick();
       };
       return 'sent';
     } catch {

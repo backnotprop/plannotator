@@ -1,7 +1,7 @@
 /**
  * The control-visibility preferences (#1277) must gate the per-file diff
  * header too: a reviewer who turned the Viewed / Git Add controls off in the
- * Tree controls popover should not see them anywhere. Guards the flag
+ * list options ("…") menu should not see them anywhere. Guards the flag
  * threading DiffViewer -> FileHeader (each flag hides only its own button,
  * and a visible button still fires its handler). The V / A shortcuts bypass
  * these buttons by design and are not exercised here.

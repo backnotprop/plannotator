@@ -213,6 +213,7 @@ export interface Block {
   directiveKind?: string; // For directive containers (e.g. ':::note' → 'note')
   order: number; // Sorting order
   startLine: number; // 1-based line number in source
+  blankLinesBefore?: number; // Paragraph only, with parse option keepBlankLines: the blank lines (2+) typed before it
   sourceLineCount?: number; // Number of source lines consumed when it differs from content lines
   /**
    * Line offset a diagram comment's `sourceLine` is measured from, when it
@@ -224,6 +225,14 @@ export interface Block {
    * `(lines a–b)` label.
    */
   diagramSourceLineOffset?: number;
+  /**
+   * Set on a whole-file code document (`renderAs: "code"`, see
+   * `codeDocumentBlocks`): the document line of `content`'s first character.
+   * The file is ONE block, so a comment's line label is counted from its
+   * position inside `content`, not the block's span (which would name every
+   * line). Unset everywhere else, so other labels stay as they were.
+   */
+  contentStartLine?: number;
 }
 
 export interface DiffResult {
