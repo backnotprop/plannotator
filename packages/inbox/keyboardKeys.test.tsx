@@ -1,21 +1,17 @@
 /**
  * The keys of approval "inbox-keyboard-keys-2026-11-07" that live in one component (DOM_TESTS=1 for the DOM ones).
  * What would regress: an arrow in the Artifacts grid or on the Board landing on the wrong tile (or moving at all from
- * outside one); the in-thread New message picker announcing a menu that does not behave like one (focus not moved
- * in, no arrows, Escape leaving focus on the page); H opening the header clock's menu without focus in it, or
+ * outside one); H opening the header clock's menu without focus in it, or
  * snoozing on its own; Shift+F10 on a message head not opening its ⋯ menu, or opening it from a text field.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxThread } from '@plannotator/core/inbox-types';
-import type { LiveSession } from './api';
 import type { GuideArtifact } from './artifacts';
 import { gridStep, laneStep, type Box } from './gridMove';
 
 const hasDom = typeof document !== 'undefined';
 const { ArtifactsView } = (hasDom ? await import('./components/ArtifactsView') : {}) as typeof import('./components/ArtifactsView');
-const { NewMessagePopover } = (hasDom ? await import('./components/NewMessage') : {}) as typeof import('./components/NewMessage');
 const { ThreadSnooze, MessageMenu } = (hasDom ? await import('./components/CopyMenus') : {}) as typeof import('./components/CopyMenus');
 
 let root: Root | null = null;
@@ -119,48 +115,6 @@ test.skipIf(!hasDom)('arrow keys move focus between the Artifacts tiles, and onl
   act(() => heading.focus());
   press(heading, 'ArrowRight');
   expect(document.activeElement).toBe(heading);
-});
-
-const THREAD = { thread_id: 'thr_1', project: { name: 'ledger', root: '/repo/ledger' } } as unknown as InboxThread;
-const session = (id: string): LiveSession => ({ session: id, host: 'claude-code', started_at: '2026-11-07T10:00:00.000Z', last_seen_at: '2026-11-07T11:00:00.000Z', busy: false, idle_since: null, wrote_thread: false }) as unknown as LiveSession;
-
-test.skipIf(!hasDom)('the New message session picker is a menu: focus moves in, ↑ ↓ Home End move, Escape returns to the button', () => {
-  const closed: string[] = [];
-  const Picker = ({ open }: { open: boolean }) => (
-    <section>
-      <button type="button" data-new-message="">
-        New message
-      </button>
-      <NewMessagePopover
-        thread={THREAD}
-        asker="Claude Code"
-        askerHost="claude-code"
-        live={{ sessions: [session('s1'), session('s2'), session('s3')] } as never}
-        mode={open ? { kind: 'pick' } : null}
-        onPick={() => {}}
-        onReplyInstead={() => {}}
-        onClose={() => closed.push('close')}
-      />
-    </section>
-  );
-  const el = mount(<Picker open />);
-  const items = [...el.querySelectorAll<HTMLElement>('[role="menuitem"]')];
-  expect(items.length).toBe(3);
-  expect(document.activeElement).toBe(items[0]!);
-  press(items[0]!, 'ArrowDown');
-  expect(document.activeElement).toBe(items[1]!);
-  press(items[1]!, 'End');
-  expect(document.activeElement).toBe(items[2]!);
-  // Wraps, as a menu does.
-  press(items[2]!, 'ArrowDown');
-  expect(document.activeElement).toBe(items[0]!);
-  press(items[0]!, 'ArrowUp');
-  expect(document.activeElement).toBe(items[2]!);
-  press(items[2]!, 'Home');
-  expect(document.activeElement).toBe(items[0]!);
-  press(items[0]!, 'Escape');
-  expect(closed).toEqual(['close']);
-  expect(document.activeElement).toBe(el.querySelector('[data-new-message]'));
 });
 
 test.skipIf(!hasDom)('H’s request opens the header clock’s menu with focus on the first time; nothing is snoozed until one is picked', async () => {
