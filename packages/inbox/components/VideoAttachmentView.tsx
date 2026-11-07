@@ -566,7 +566,6 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
           imageSrc={frame?.url ?? ''}
           isOpen={annotating && frame !== null}
           escapeCancels={DRAWING_SCREEN.escapeCancels}
-          askBeforeDiscard={DRAWING_SCREEN.askBeforeDiscard}
           hint={DRAWING_SCREEN.hint}
           onClose={() => {
             setAnnotating(false);

@@ -513,7 +513,6 @@ export function ImageAttachmentView({
           imageSrc={src}
           isOpen={annotating}
           escapeCancels={DRAWING_SCREEN.escapeCancels}
-          askBeforeDiscard={DRAWING_SCREEN.askBeforeDiscard}
           hint={DRAWING_SCREEN.hint}
           onClose={() => {
             setAnnotating(false);
