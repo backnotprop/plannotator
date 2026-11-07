@@ -6,11 +6,16 @@
  * captures; this guards the decisions.
  */
 import { afterEach, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	AUTO_RELOAD_COMMAND,
 	INPUT_GRACE_MS,
+	INSTALL_STUCK_MS,
 	QUIET_MS,
 	STABLE_MS,
+	TREE_HOLD_MAX_MS,
 	autoReloadedText,
 	piSupportsAutoReload,
 	reloadBlockedBy,
@@ -19,6 +24,7 @@ import {
 	type QuietState,
 } from "./auto-reload.ts";
 import { AUTO_RELOAD_DEFAULT, resolveAutoReload } from "../../packages/shared/config.ts";
+import { packageInstallSettled } from "./package-version.ts";
 
 const MARKER_KEY = "__plannotatorAutoReload_v1";
 const NOTICED_KEY = "__plannotatorUpdateNoticed_v1";
@@ -121,6 +127,8 @@ function fakePi() {
 	const commands = new Map<string, { handler: (args: string, ctx: any) => Promise<void> }>();
 	const sent: Array<{ text: string; options: unknown }> = [];
 	let sendThrows = false;
+	/** What Pi's getCommands() returns; undefined: a Pi without it. */
+	let listed: Array<{ name: string; source: string }> | undefined;
 	const pi = {
 		on(event: string, handler: Handler) {
 			handlers.set(event, [...(handlers.get(event) ?? []), handler]);
@@ -132,17 +140,33 @@ function fakePi() {
 			if (sendThrows) throw new Error("session closed");
 			sent.push({ text, options });
 		},
+		getCommands() {
+			if (!listed) throw new Error("not bound");
+			return listed;
+		},
 	};
 	const emit = (event: string, payload: any = {}, ctx?: any) => {
 		for (const h of handlers.get(event) ?? []) h(payload, ctx);
 	};
+	/** Pi's `input` step: the first handler that returns `handled` ends it; otherwise the text goes to the model. */
+	const emitInput = (text: string, ctx?: any): "handled" | "to the model" => {
+		for (const h of handlers.get("input") ?? []) {
+			const result = h({ type: "input", text, source: "extension" }, ctx) as { action?: string } | undefined;
+			if (result?.action === "handled") return "handled";
+		}
+		return "to the model";
+	};
 	return {
 		pi,
 		emit,
+		emitInput,
 		commands,
 		sent,
 		failSends() {
 			sendThrows = true;
+		},
+		listCommands(names: string[] | undefined) {
+			listed = names?.map((name) => ({ name, source: "extension" }));
 		},
 	};
 }
@@ -202,6 +226,7 @@ async function world(opts: WorldOptions = {}) {
 	freshProcess();
 	let t = 0;
 	let onDisk: string | null = "1.0.0";
+	let settled = true;
 	const f = fakePi();
 	const { ctx, notes } = fakeCtx({ hasUI: opts.hasUI });
 	const controller = setupAutoReload(f.pi, {
@@ -213,6 +238,7 @@ async function world(opts: WorldOptions = {}) {
 			return opts.piVersion === undefined ? "0.84.4" : opts.piVersion;
 		},
 		readOnDisk: () => onDisk,
+		installSettled: () => settled,
 		loaded: "1.0.0",
 		now: () => t,
 		poll: false,
@@ -234,6 +260,10 @@ async function world(opts: WorldOptions = {}) {
 		},
 		install(version: string | null) {
 			onDisk = version;
+		},
+		/** npm still writing (its retired copy beside the package, a dependency missing), or done. */
+		installing(still: boolean) {
+			settled = !still;
 		},
 		/** The new version lands and stays on disk long enough. */
 		landStable(version = "1.1.0") {
@@ -276,6 +306,40 @@ describe("setupAutoReload: when it reloads", () => {
 		expect(w.sent).toEqual([]);
 		w.advance(1);
 		expect(w.sent).toHaveLength(1);
+	});
+
+	test("an install still writing files holds it; the stable time counts from when it looks finished", async () => {
+		const w = await world();
+		w.installing(true);
+		w.install("1.1.0");
+		w.advance(0);
+		w.advance(STABLE_MS * 3);
+		expect(w.sent).toEqual([]);
+		w.installing(false);
+		w.advance(1);
+		w.advance(STABLE_MS - 2);
+		expect(w.sent).toEqual([]);
+		w.advance(1);
+		expect(w.sent).toHaveLength(1);
+	});
+
+	test("an install that never looks finished is never loaded: the note, once, and a reload once it finishes", async () => {
+		const w = await world();
+		w.installing(true);
+		w.install("1.1.0");
+		w.advance(0);
+		w.advance(INSTALL_STUCK_MS - 1);
+		expect(w.notes).toEqual([]);
+		w.advance(1);
+		w.advance(STABLE_MS * 3);
+		expect(w.sent).toEqual([]);
+		expect(w.texts()).toHaveLength(1);
+		expect(w.texts()[0]).toContain("/reload");
+		w.installing(false);
+		w.advance(1);
+		w.advance(STABLE_MS);
+		expect(w.sent).toHaveLength(1);
+		expect(w.texts()).toHaveLength(1);
 	});
 
 	test("files gone or unreadable on disk, or back to the loaded version: nothing happens", async () => {
@@ -364,6 +428,32 @@ describe("setupAutoReload: what holds it", () => {
 			);
 			expect(w.sent).toHaveLength(1);
 		}
+	});
+
+	test("a /tree branch summary (Pi counts it as a compaction), until session_tree or its abort", async () => {
+		const w = await heldUntil(
+			(w) => w.emit("session_before_tree", { preparation: {} }),
+			(w) => w.emit("session_tree"),
+		);
+		expect(w.sent).toHaveLength(1);
+		const abort = new AbortController();
+		const a = await heldUntil(
+			(w) => w.emit("session_before_tree", { preparation: {}, signal: abort.signal }),
+			() => abort.abort(),
+		);
+		expect(a.sent).toHaveLength(1);
+	});
+
+	test("a branch summary that failed (Pi sends no event then) stops holding after the time limit", async () => {
+		const w = await world();
+		w.install("1.1.0");
+		w.advance(0);
+		w.emit("session_before_tree", { preparation: {} });
+		w.advance(STABLE_MS);
+		w.advance(TREE_HOLD_MAX_MS - STABLE_MS - 1);
+		expect(w.sent).toEqual([]);
+		w.advance(1);
+		expect(w.sent).toHaveLength(1);
 	});
 
 	test("another extension's dialog, until every open one is answered", async () => {
@@ -471,6 +561,7 @@ describe("setupAutoReload: the command checks again, the last moment before the 
 		["a dialog opened meanwhile", (w) => w.emit("ui_prompt_start")],
 		["a prompt submitted meanwhile", (w) => w.emit("input", { text: "x" })],
 		["a message queued meanwhile", (w) => (w.ctx.pending = true)],
+		["a /tree branch summary started meanwhile", (w) => w.emit("session_before_tree", { preparation: {} })],
 	];
 	for (const [what, start] of lateStarts) {
 		test(`${what}: no reload, and the try is not spent`, async () => {
@@ -509,6 +600,57 @@ describe("setupAutoReload: the command checks again, the last moment before the 
 	});
 });
 
+describe("setupAutoReload: two loaded copies (Pi renames the command plannotator-reload:1 and :2)", () => {
+	test("Pi lists no `plannotator-reload`: nothing is sent; the note with /reload instead, once", async () => {
+		const w = await world();
+		w.listCommands([`${AUTO_RELOAD_COMMAND}:1`, `${AUTO_RELOAD_COMMAND}:2`]);
+		w.landStable();
+		w.advance(STABLE_MS * 3);
+		expect(w.sent).toEqual([]);
+		expect(w.texts()).toHaveLength(1);
+		expect(w.texts()[0]).toContain("/reload");
+	});
+
+	test("the send goes out but Pi runs no command: the text never reaches the model, and the note follows", async () => {
+		const w = await world();
+		w.landStable();
+		expect(w.sent).toHaveLength(1);
+		// Pi found no command by that name, so it passes the text to the `input` handlers.
+		expect(w.emitInput(w.sent[0]!.text, w.ctx)).toBe("handled");
+		expect(w.ctx.reloads).toBe(0);
+		expect(w.texts()).toHaveLength(1);
+		expect(w.texts()[0]).toContain("1.1.0");
+		expect(w.texts()[0]).toContain("/reload");
+		// One try: no second send, no second note.
+		w.advance(STABLE_MS * 5);
+		expect(w.sent).toHaveLength(1);
+		expect(w.texts()).toHaveLength(1);
+	});
+
+	test("`/plannotator-reload` typed by hand with no command by that name is kept from the model too, silently", async () => {
+		const w = await world();
+		expect(w.emitInput(`/${AUTO_RELOAD_COMMAND}`, w.ctx)).toBe("handled");
+		expect(w.emitInput(`  /${AUTO_RELOAD_COMMAND} auto `, w.ctx)).toBe("handled");
+		expect(w.notes).toEqual([]);
+	});
+
+	test("other text is the person's prompt: it goes on, and holds the reload as before", async () => {
+		const w = await world();
+		for (const text of ["hello", `/${AUTO_RELOAD_COMMAND}x`, `please run /${AUTO_RELOAD_COMMAND}`]) {
+			expect(w.emitInput(text, w.ctx)).toBe("to the model");
+		}
+		w.landStable();
+		expect(w.sent).toEqual([]);
+	});
+
+	test("Pi lists the command under its own name: it is sent as before", async () => {
+		const w = await world();
+		w.listCommands([AUTO_RELOAD_COMMAND, "other"]);
+		w.landStable();
+		expect(w.sent).toHaveLength(1);
+	});
+});
+
 /** Pi's reload: the old context goes stale and the instance Pi loads starts (same process). */
 function reloadInto(w: Awaited<ReturnType<typeof world>>, loaded: string, onDisk = loaded) {
 	const next = fakePi();
@@ -522,6 +664,7 @@ function reloadInto(w: Awaited<ReturnType<typeof world>>, loaded: string, onDisk
 			plannotatorBusy: () => null,
 			piVersion: async () => "0.84.4",
 			readOnDisk: () => onDisk,
+			installSettled: () => true,
 			loaded,
 			now: () => w.now,
 			poll: false,
@@ -619,6 +762,7 @@ describe("setupAutoReload: what the person sees", () => {
 			plannotatorBusy: () => null,
 			piVersion: async () => "0.84.4",
 			readOnDisk: () => "1.1.0",
+			installSettled: () => true,
 			loaded: "1.1.0",
 			now: () => w.now + 120_000,
 			poll: false,
@@ -680,6 +824,7 @@ describe("claimNotice (the Inbox's update note)", () => {
 			plannotatorBusy: () => null,
 			piVersion: () => new Promise<string>((r) => (resolveVersion = r)),
 			readOnDisk: () => "1.1.0",
+			installSettled: () => true,
 			loaded: "1.0.0",
 			poll: false,
 		});
@@ -701,5 +846,55 @@ describe("claimNotice (the Inbox's update note)", () => {
 	test("a session without a UI: auto mode will not run there, so the Inbox may say it", async () => {
 		const w = await world({ hasUI: false });
 		expect(w.controller.claimNotice("1.1.0")).toBe(true);
+	});
+});
+
+describe("packageInstallSettled (npm finished writing the package)", () => {
+	/** `<prefix>/node_modules/@plannotator/pi-extension`, installed whole. */
+	function installed() {
+		const prefix = mkdtempSync(join(tmpdir(), "plannotator-install-settled-"));
+		const scope = join(prefix, "node_modules", "@plannotator");
+		const dir = join(scope, "pi-extension");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "package.json"),
+			JSON.stringify({ name: "@plannotator/pi-extension", version: "1.1.0", pi: { extensions: ["./"] }, dependencies: { diff: "^8", "@pierre/diffs": "1" } }),
+		);
+		writeFileSync(join(dir, "index.ts"), "export default () => {};\n");
+		for (const dep of ["diff", "@pierre/diffs"]) {
+			mkdirSync(join(prefix, "node_modules", dep), { recursive: true });
+			writeFileSync(join(prefix, "node_modules", dep, "package.json"), "{}");
+		}
+		return { prefix, scope, dir };
+	}
+
+	test("a whole install is finished", () => {
+		expect(packageInstallSettled(installed().dir)).toBe(true);
+	});
+
+	test("npm's retired copy still beside the package: not finished", () => {
+		const { scope, dir } = installed();
+		mkdirSync(join(scope, ".pi-extension-a1B2c3"));
+		expect(packageInstallSettled(dir)).toBe(false);
+	});
+
+	test("the entry not written yet: not finished", () => {
+		const { dir } = installed();
+		const bare = join(dir, "..", "bare");
+		mkdirSync(bare);
+		writeFileSync(join(bare, "package.json"), JSON.stringify({ version: "1.1.0", pi: { extensions: ["./"] } }));
+		expect(packageInstallSettled(bare)).toBe(false);
+	});
+
+	test("a dependency not on disk yet: not finished; one nested in the package counts", () => {
+		const { dir } = installed();
+		writeFileSync(
+			join(dir, "package.json"),
+			JSON.stringify({ version: "1.1.0", pi: { extensions: ["./"] }, dependencies: { diff: "^8", chokidar: "^5" } }),
+		);
+		expect(packageInstallSettled(dir)).toBe(false);
+		mkdirSync(join(dir, "node_modules", "chokidar"), { recursive: true });
+		writeFileSync(join(dir, "node_modules", "chokidar", "package.json"), "{}");
+		expect(packageInstallSettled(dir)).toBe(true);
 	});
 });
