@@ -135,11 +135,22 @@ test('Mark all as read takes every waiting thread, warns, and Z undoes the batch
   await expect(toast.locator('.ib-tdetail')).toHaveText('Claude Code was stopped');
   await expect(page.locator('[data-inbox-live]')).toHaveText('Marked 3 threads read in billing. Claude Code was stopped. Press Z to undo.');
   await page.screenshot({ path: join(proofDir, '02-mark-all-read.png') });
+  // The list holds still (approval "inbox-list-view", R7): every row read in place, none moved.
+  for (const [id, group] of [[threads.worker, 'stopped'], [threads.search, 'waiting'], [threads.news, 'new']] as const) {
+    await expect(page.locator(`.ib-lbody [data-thread-id="${id}"]`)).not.toHaveClass(/\bib-u\b/);
+    expect(await sectionOf(page, id)).toBe(group);
+  }
+  // The list's title tidies it: each in Quiet.
+  await page.locator('[data-list-refresh]').click();
   await page.locator('[data-section-id="quiet"] .ib-band').click();
   for (const id of [threads.worker, threads.search, threads.news]) await expect.poll(() => sectionOf(page, id)).toBe('quiet');
   // The other project is untouched.
   await expect.poll(() => sectionOf(page, threads.docs)).toBe('waiting');
+  await page.locator('body').focus();
   await page.keyboard.press('z');
+  // Undone in place (bold again in Quiet); the next tidy puts each back where it was.
+  await expect(page.locator(`.ib-lbody [data-thread-id="${threads.news}"]`)).toHaveClass(/\bib-u\b/);
+  await page.locator('[data-list-refresh]').click();
   await expect.poll(() => sectionOf(page, threads.worker)).toBe('stopped');
   await expect.poll(() => sectionOf(page, threads.search)).toBe('waiting');
   await expect.poll(() => sectionOf(page, threads.news)).toBe('new');

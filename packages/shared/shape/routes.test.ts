@@ -97,7 +97,7 @@ describe("shape routes", () => {
   test("only an image in the shape's files/ is served", async () => {
     const w = world();
     const source = scratch();
-    writeFileSync(join(source, "shot.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    writeFileSync(join(source, "shot.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
     writeFileSync(join(source, "notes.txt"), "x");
     const r = w.store.update({ id: w.id, base: 1, board: { ...board(), refs: [{ n: 1, kind: "image", title: "Shot", target: "shot.png" }] }, project, sourceDir: source });
     if (!r.ok) throw new Error(JSON.stringify(r));
@@ -107,6 +107,16 @@ describe("shape routes", () => {
     for (const outside of ["..%2Fshape.json", "%2E%2E%2F%2E%2E%2Fseen.json", "shape.json", ".lock"]) {
       expect((await w.call("GET", `/api/shapes/${w.id}/files/${outside}`)).status).toBe(404);
     }
+  });
+
+  test("an SVG or AVIF picture the board keeps is served as its type", async () => {
+    const w = world();
+    const source = scratch();
+    writeFileSync(join(source, "logo.svg"), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2"><rect width="2" height="2"/></svg>');
+    const r = w.store.update({ id: w.id, base: 1, board: { ...board(), views: { picture: { html: '<img src="logo.svg">' } } }, project, sourceDir: source });
+    if (!r.ok) throw new Error(JSON.stringify(r));
+    const name = /files\/([^"]+)/.exec(w.store.read(w.id)!.views.picture!.html)![1]!;
+    expect(await w.call("GET", `/api/shapes/${w.id}/files/${name}`)).toMatchObject({ status: 200, file: { contentType: "image/svg+xml" } });
   });
 });
 

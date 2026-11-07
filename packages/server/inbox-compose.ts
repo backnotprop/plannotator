@@ -36,9 +36,9 @@
 import { homedir } from "node:os";
 import { basename } from "node:path";
 import { inboxHasUnsent, inboxRowArchived } from "@plannotator/shared/inbox/list";
-import { INBOX_CROSS_SITE_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
+import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import type { InboxReplyDraftRow } from "@plannotator/core/inbox-types";
-import type { InboxComposeProject, InboxComposeSession, InboxDraft, InboxDraftStatus, InboxProject } from "@plannotator/core/inbox-types";
+import type { InboxComposeProject, InboxComposeSession, InboxDraft, InboxDraftStatus, InboxLaunchFrom, InboxProject } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { deleteInboxDraft, inboxDraftUploadIds, listInboxDrafts, saveInboxDraft } from "@plannotator/shared/inbox/drafts";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -69,6 +69,14 @@ const iso = (ms: number) => new Date(ms).toISOString();
 function inboxPressesTrust(to: unknown): boolean {
   const launch = to && typeof to === "object" && "launch" in to ? (to as { launch: unknown }).launch : null;
   return !!launch && typeof launch === "object" && "trust" in launch;
+}
+
+/** A linked machine's request through the device door (inbox-devices.ts `InboxDoorCaller`), as compose needs it. */
+export interface InboxComposeDoor {
+  machine: boolean;
+  window: boolean;
+  /** The machine, as this Inbox knows it: the launch record's `from`. */
+  from: InboxLaunchFrom | null;
 }
 
 export function createInboxCompose(options: {
@@ -146,7 +154,7 @@ export function createInboxCompose(options: {
   const withStatus = (draft: InboxDraft) => ({ ...draft, status: draftStatus(draft) });
 
   /** A new thread the person writes, addressed to one live session (compose's Send). */
-  const startThread = async (body: Record<string, unknown>, guest: boolean): Promise<Response> => {
+  const startThread = async (body: Record<string, unknown>, guest: boolean, from: InboxLaunchFrom | null = null): Promise<Response> => {
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
     // A replayed Send answers the thread it wrote, whatever the session's state now.
@@ -170,7 +178,7 @@ export function createInboxCompose(options: {
     if (launchTarget && guest) throw new InboxError("owner_only", "Only this computer's owner can start an agent from this Inbox.");
     // A scratch launch makes its folder here, named from the thread's name (`abandon` removes it if no thread is written).
     const prepared = launchTarget
-      ? await options.launch!.prepare(launchTarget, { name: typeof body.thread_name === "string" ? body.thread_name : null, body: body.body, resolveProject: options.resolveProject })
+      ? await options.launch!.prepare(launchTarget, { name: typeof body.thread_name === "string" ? body.thread_name : null, body: body.body, resolveProject: options.resolveProject, from })
       : null;
     const target = prepared ? { ...prepared.to, root: prepared.project.root } : live.composeTarget(body.to);
     if (!target) {
@@ -281,18 +289,20 @@ export function createInboxCompose(options: {
    * call, the device door or a guest (another site's page is refused for every POST before it gets here). Null: it may
    * go on. Launch off: the route's own 404.
    */
-  const trustRefused = (req: Request, body: Record<string, unknown>, owner: boolean): Response | null => {
+  const trustRefused = (req: Request, body: Record<string, unknown>, owner: boolean, door: InboxComposeDoor | null): Response | null => {
     if (!options.launch?.enabled() || !inboxPressesTrust(body.to)) return null;
-    if (!isWindowRequest(req, body, serverSession)) return json(INBOX_WINDOW_ONLY_BODY, 403);
+    if (!(door?.machine && door.window) && !isWindowRequest(req, body, serverSession)) return json(INBOX_WINDOW_ONLY_BODY, 403);
     if (!owner) throw new InboxError("owner_only", "Only this computer's owner can trust a folder.");
     return null;
   };
 
   /**
-   * `owner`: this computer's window or the owner's own login over the tailnet; never a guest, or the device door.
-   * `via`: where the request came in; a guest (`isGuest`) never starts an agent.
+   * `owner`: this computer's window or the owner's own login over the tailnet, or a linked machine (the owner's other
+   * computer); never a guest, or a phone through the device door. `via`: where the request came in; a guest
+   * (`isGuest`) never starts an agent. `door`: a linked machine asked through the device door (remote launch): it
+   * starts an agent only for a press in a window there (`window`), and the launch records which machine (`from`).
    */
-  const route = async (req: Request, url: URL, owner: boolean = false, via: "local" | "tailnet" = "local"): Promise<Response | null> => {
+  const route = async (req: Request, url: URL, owner: boolean = false, via: "local" | "tailnet" = "local", door: InboxComposeDoor | null = null): Promise<Response | null> => {
     const path = url.pathname;
     if (path === "/api/inbox/sessions") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -310,7 +320,9 @@ export function createInboxCompose(options: {
     if (path === "/api/inbox/messages") {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
       const body = await options.readBody(req);
-      return staleTab(body) ?? trustRefused(req, body, owner) ?? (await startThread(body, options.isGuest?.(req, via) ?? false));
+      // Another machine starts an agent here only for what the person pressed in a window there: never an agent's call.
+      if (door?.machine && !door.window && body.to && typeof body.to === "object" && "launch" in body.to) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
+      return staleTab(body) ?? trustRefused(req, body, owner, door) ?? (await startThread(body, options.isGuest?.(req, via) ?? false, door?.machine ? door.from : null));
     }
     const toMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/to$/.exec(path);
     if (toMatch) {

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { citations } from '../format/cited.ts';
 import { MAX_FILE_BYTES, MAX_TOTAL_BYTES } from '../format/keys.ts';
 import { loadFiles } from '../format/load.ts';
+import { stillWanted } from '../format/status.ts';
 import type { LoadIssue, LoadResult, SystemFiles } from '../format/types.ts';
 import { decodeUtf8, git, gitBytes, isGitRepo, lsTree, resolveCommit } from './git.ts';
 
@@ -231,7 +232,22 @@ export async function check(o: { dir: string; root: string; roots?: Record<strin
   for (const alias of unchecked) {
     warnings.push({ file: 'system.yaml', field: `sources.repos.${alias}`, message: `paths in repo "${alias}" were not checked: no checkout of it was given` });
   }
+  // a check is the end of a draw: a sheet still wanted is one the drawer forgot, and while one is the
+  // scheduled check never redraws the drawing (it reads it as still being drawn)
+  for (const w of stillWanted(model)) {
+    warnings.push({ file: 'system.yaml', field: 'wanted', message: `Sheet ${w.code} is listed under wanted, but no file draws it yet. Draw it, then remove it from wanted.` });
+  }
   return { errors, warnings, missing };
 }
 
 export { gateRepo, parseNameStatus } from './gate-repo.ts';
+
+// The recipes, the agents and the scheduled check (step A6).
+export { firstDrawPrompt, recipes, reviewPrompt, updatePrompt, type ReviewPromptInput, type UpdatePromptInput } from '../recipe/prompts.ts';
+export { parseSetup, SYSTEM_AGENTS, type SystemAgent, type SystemSetup } from '../agent/setup.ts';
+export { agentModel } from '../agent/model.ts';
+export { unattendedDocs, unattendedDocUrl, type DocUrlCheck } from '../agent/docs.ts';
+export { redrawCommand, SYSTEM_COMMANDS, type SystemSubcommand } from '../agent/command.ts';
+export { checkKey, EMPTY_STATE, readSetup, readState, systemPaths, takeLock, writeState, type TickState } from './state.ts';
+export { changedCount, mergedPrs, plannotatorProgram, prepareSource, redrawNote, runCommand, tick, TICK_TIMEOUTS_MS, type Notify, type Run, type RunAgent, type TickDeps, type TickResult } from './tick.ts';
+export { install, LABEL_PREFIX, launchAgentsDir, list, plist, remove, schedule, scheduleLabel, SYSTEM_TICK_INTERVAL_SECONDS, type CommandRunner, type ScheduleOptions } from './schedule.ts';

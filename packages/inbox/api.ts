@@ -6,6 +6,7 @@
  */
 
 import type { InboxReviewDrawing, InboxShowMeTarget } from '@plannotator/core/inbox-review';
+import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
@@ -57,10 +58,12 @@ import type { RecipientConnection } from './deliveryLine';
 import { parseRestartAgents } from './restartAgents';
 import type { PatchBlobIds } from '@plannotator/core/diff-files';
 import type { InboxFileContents, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullRiskAnswer, InboxPullRiskModels, InboxPullsAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotator/core/inbox-types';
-import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchStatus } from '@plannotator/core/inbox-search';
+import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchSort, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
   InboxAgentId,
   InboxAccountsRead,
+  InboxAccountSwitch,
+  InboxAccountSwitchTarget,
   InboxMachineAccountsRead,
   InboxAgentsModel,
   InboxAnnotationRecord,
@@ -84,7 +87,7 @@ import { newUuid } from './uuid';
  * A dialog of the line of one-time dialogs, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server
  * side): the update-day dialogs, then the offers. A registered dialog (Bro mode, List view) adds its id here.
  */
-export type InboxRevealId = 'sound' | 'list_intro' | 'voice' | 'snooze' | 'board' | 'steps';
+export type InboxRevealId = 'code_review' | 'sound' | 'list_intro' | 'voice' | 'snooze' | 'board' | 'steps' | 'list_view';
 /** An offer of the line (not an update-day dialog): only an offer's Not now stamps the four-day gap. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
 /** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, or the agent note. */
@@ -114,7 +117,7 @@ function noteReplySent(words: string): void {
   for (const listener of replyListeners) listener(lastReply);
 }
 
-export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh';
+export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh' | 'cline';
 
 /** The browser notifications as the Inbox keeps them (config.json, so they survive a port change). */
 export interface NotificationSettings {
@@ -398,6 +401,22 @@ export interface TailscaleSettings {
 /** Split (old beside new) or Unified (one column): the diff layout code review and guided reviews share. */
 export type InboxDiffStyle = 'split' | 'unified';
 
+/**
+ * How diffs are drawn (config.json `diffOptions`, shared with code review), by
+ * the wire's names: each null when never chosen. Whole file, Hide whitespace
+ * and the fonts are code review's alone.
+ */
+export interface InboxDiffOptions {
+  diff_style: InboxDiffStyle | null;
+  overflow: 'scroll' | 'wrap' | null;
+  indicators: 'bars' | 'classic' | 'none' | null;
+  line_diff_type: 'word-alt' | 'word' | 'char' | 'none' | null;
+  line_numbers: boolean | null;
+  background: boolean | null;
+  background_intensity: 'subtle' | 'normal' | 'strong' | null;
+  tab_size: number | null;
+}
+
 /** Settings → General's cookie switch (SettingsModel.cookie_host). */
 export interface InboxCookieHost {
   on: boolean;
@@ -466,6 +485,8 @@ export interface SettingsModel {
    * shared with code review: null when never chosen. Absent from an older Inbox.
    */
   diff_style?: InboxDiffStyle | null;
+  /** How diffs are drawn (config.json `diffOptions`, shared with code review). Absent from an older Inbox. */
+  diff_options?: InboxDiffOptions;
   /** Experimental features, each off unless switched on (`env`: PLANNOTATOR_EXPERIMENTAL decides). Absent from an older Inbox. */
   experimental?: InboxExperimentalSettings;
   /** The Board (config.json `inboxBoard`): off unless the person turned it on. Absent from an Inbox before the switch (the Board is then always there). */
@@ -476,6 +497,8 @@ export interface SettingsModel {
   code_review?: { on: boolean };
   /** Shape (Settings → Capabilities): the boards agents draw. Absent from an older Inbox. */
   shape?: { on: boolean };
+  /** System (config.json `inboxSystem`, approval "system-inbox"): present only while on. Read through `systemShown()` (system/gate.ts). */
+  system?: { on: boolean };
   /**
    * Settings → General: "Open Plannotator at plannotator.localhost" (#2184): config.json
    * `urlHost: "plannotator.localhost"`. `env` is PLANNOTATOR_URL_HOST and `url_host`
@@ -1046,6 +1069,8 @@ export interface SearchRequest {
   limit?: number;
   /** The project open in the list: a tie boost, never a filter. */
   current?: string | null;
+  /** Newest first instead of best match (sent only for `newest`, so a best-match request is what it was). */
+  sort?: InboxSearchSort | null;
 }
 
 /** GET /api/inbox/sessions: every live session, grouped by project (compose). */
@@ -1149,6 +1174,7 @@ export async function searchInbox(request: SearchRequest, signal?: AbortSignal):
   if (request.offset) query.set('offset', String(request.offset));
   if (request.limit) query.set('limit', String(request.limit));
   if (request.current) query.set('current', request.current);
+  if (request.sort === 'newest') query.set('sort', 'newest');
   return readJson<SearchModel>(await fetch(inboxUrl(`/search?${query}`), { headers: { Accept: 'application/json' }, cache: 'no-store', signal }));
 }
 
@@ -1241,6 +1267,9 @@ export const inboxApi = {
   /** Code review on or off (Settings → Capabilities, approval "inbox-code-review-direction"): every window hears `event: capabilities`. */
   saveCodeReview: (on: boolean) => post<{ code_review: { on: boolean } }>(inboxUrl('/settings'), { code_review: { on } }),
   saveShape: (on: boolean) => post<{ shape: { on: boolean } }>(inboxUrl('/settings'), { shape: { on } }),
+  /** System's setup dialog (System on only): the projects found on this Mac with a git remote, and one project's save. */
+  systemSetup: () => get<SystemSetupAnswer>(inboxUrl('/system/setup')),
+  saveSystemSetup: (input: SystemSetupInput) => post<{ setup: SystemSetup }>(inboxUrl('/system/setup'), { ...input }),
   // Shape (packages/server/shape-routes.ts): this computer's boards only, never another machine's.
   shapes: (signal?: AbortSignal) => get<{ shapes: InboxShapeSummary[] }>('/api/shapes?preview=1', signal),
   /** Where a board's kept picture loads from. */
@@ -1461,8 +1490,9 @@ export const inboxApi = {
   saveTextSize: (textSize: InboxTextSize) => post<{ text_size: InboxTextSize }>(inboxUrl('/settings'), { text_size: textSize }),
   /** How the list's rows look, written to config.json `inboxRows`: every window open hears it (`event: rows`). */
   saveRows: (rows: readonly InboxRowsOption[]) => post<{ rows: InboxRowsOption[]; rows_rev: number }>(inboxUrl('/settings'), { rows }),
-  /** The diff layout, written to config.json `diffOptions.diffStyle` (shared with code review). */
-  saveDiffStyle: (diffStyle: InboxDiffStyle) => post<{ diff_style: InboxDiffStyle | null }>(inboxUrl('/settings'), { diff_style: diffStyle }),
+  /** How diffs are drawn, written to config.json `diffOptions` (shared with code review): only the fields given. */
+  saveDiffOptions: (change: Partial<InboxDiffOptions>) =>
+    post<{ diff_style: InboxDiffStyle | null; diff_options: InboxDiffOptions }>(inboxUrl('/settings'), { diff_options: change }),
   saveTailscale: (on: boolean, replaceExposed = false) =>
     post<{ tailscale: TailscaleSettings }>(inboxUrl('/settings'), { tailscale: replaceExposed ? { on, replace_exposed: true } : { on } }),
   // Step 2: attachments (by id only), annotations, deleting.
@@ -1727,6 +1757,8 @@ export const inboxApi = {
   /** Settings → Accounts (packages/server/inbox-accounts.ts): this computer's Claude accounts, read through `cswap`. */
   /** `fresh`: skip the answer the Inbox keeps 30 s (Refresh). */
   accounts: (fresh = false) => get<InboxAccountsRead>(inboxUrl('/accounts', fresh ? 'fresh=1' : undefined)),
+  /** Switch this computer's Claude Code account (step 3). The answer has no address; a read after it shows the account in use. */
+  switchAccount: (target: InboxAccountSwitchTarget) => post<InboxAccountSwitch>(inboxUrl('/accounts/switch'), { ...target }),
   /** A linked machine's, through its door. One call per machine, so a slow one holds up only itself. */
   machineAccounts: (machine: string, fresh = false) => get<InboxMachineAccountsRead>(inboxUrl(`/accounts/${encodeURIComponent(machine)}`, fresh ? 'fresh=1' : undefined)),
   /** Settings → Agents and the agent-note dialog (packages/server/inbox-agents.ts, inbox-agent-notes.ts). */

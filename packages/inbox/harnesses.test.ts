@@ -59,6 +59,15 @@ describe('connect snippets', () => {
     expect(text).not.toContain('/opt/plannotator');
   });
 
+  test("the Cline panel installs Plannotator's plugin first, and keeps the MCP server for the extension's Legacy version", () => {
+    expect(HARNESSES.some((h) => h.id === 'cline' && h.label === 'Cline')).toBe(true);
+    const panel = harnessPanel('cline', ctx('/opt/plannotator'));
+    expect(panel.artefacts[0]).toEqual({ kind: 'code', text: 'cline plugin install npm:@plannotator/cline' });
+    const another = JSON.stringify(panel.another);
+    expect(another).toContain('mcpServers');
+    expect(another).toContain('/opt/plannotator');
+  });
+
   test('every harness has a panel, and every JSON snippet parses', () => {
     for (const harness of HARNESSES) {
       const panel = harnessPanel(harness.id, ctx('/opt/plannotator'));
