@@ -557,6 +557,10 @@ Details that surprise people:
   `annotate-bundle` (additive), no `target.filePath`, and the additive
   `target.documents: [{ path, annotationCount }]` in review order; every
   comment on a file carries its `documentPath`.
+- **A quick label is marked as one** (#2626). Its record carries the additive
+  `isQuickLabel: true` and, when the label has one, `quickLabelTip` (the
+  instruction the agent got with it). Its `text` is the label itself
+  ("🔍 Verify this"), not the person's words.
 - **URL-session records store the full URL, query string included**, because
   that is the page that was reviewed. A URL carrying a token in its query is
   therefore written to disk; the opt-out is the control for that.

@@ -72,6 +72,14 @@ describe('the text a Send carries', () => {
     expect(fencesBalanced(text)).toBe(true);
   });
 
+  test("a quick label carries its tip under its heading, as the main export writes it (#2626)", () => {
+    const tip = 'This seems like an assumption. Verify by reading the actual code before proceeding.';
+    const text = messageFeedback([record('q1', 'retries three times', '🔍 Verify this', { isQuickLabel: true, quickLabelTip: tip })], time);
+    expect(text).toContain(`### 1. [🔍 Verify this] Feedback on: "retries three times"\n> ${tip}\n`);
+    // The label's own words stay in the heading only; they are not repeated as a comment.
+    expect(text).not.toContain('> 🔍 Verify this');
+  });
+
   test('a comment on a diagram part names the part under the label, and the intro says what the label is', () => {
     const anchor = { v: 1, family: 'flowchart', kind: 'node', id: 'B', label: 'Tests pass?', sourceLine: [5, 5] };
     const text = messageFeedback([record('d1', 'Tests pass?', 'Run the integration suite.', { diagramAnchor: anchor, startOffset: 0, endOffset: 0 })], time);
