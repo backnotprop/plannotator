@@ -39,7 +39,8 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNod
 import { flushSync } from 'react-dom';
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import type { InboxMessageWire, InboxPull, InboxThread } from '@plannotator/core/inbox-types';
-import { parseDiffToFiles } from '@plannotator/core/diff-files';
+import { parseDiffToFiles, type DiffFile } from '@plannotator/core/diff-files';
+import type { CodeAnnotation } from '@plannotator/ui/types';
 import { groupByFileKind } from '@plannotator/core/file-kind';
 import { plural } from '@plannotator/core/inbox-format';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
@@ -70,7 +71,7 @@ import { holdBarAfterClose, usePhoneCommentsSheet } from './phoneCommentsSheet';
 import { clearReviewNotes, readReviewNotes, saveReviewNotes, VerdictKeys, verdictOf, verdictReply } from '../reviewVerdict';
 import { useGuideState } from './GuidePane';
 import { PostEnding, reviewEnding, useReviewDestination } from '../pulls/PostEnding';
-import { postedWords } from '../pulls/postRules';
+import { onPullDiff, postedSignature, postedWords } from '../pulls/postRules';
 import { useLiveSessions } from './NewMessage';
 import {
   AskerEndedNote,
@@ -149,8 +150,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   const postKey = !state.readOnly && thread.pull_keys?.length === 1 ? thread.pull_keys[0]! : null;
   const [postPull, setPostPull] = useState<InboxPull | null>(null);
   // A post refused at its commit (`pull_commit_gone` on GitHub after a force-push, `pull_moved` on GitLab after any push;
-  // GitHub takes a commit still on the PR). Read again from the forge, then offered at its new
-  // head (the review's comments ride the body, so they do not depend on the commit).
+  // GitHub takes a commit still on the PR). Read again from the forge, then offered at its new head.
   const [moved, setMoved] = useState<'reading' | 'read' | 'failed' | null>(null);
   const [reread, setReread] = useState(0);
   useEffect(() => {
@@ -174,6 +174,24 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     setMoved(null);
     setReread(0);
   }, [postKey]);
+  // The PR's own diff, read with the PR: a comment whose lines read the same there goes inline, at that diff's commit.
+  // Kept only with the commit it is of (`head_sha`): lines read on a diff of no known commit vouch for none.
+  const [pullDiff, setPullDiff] = useState<{ files: DiffFile[]; head: string } | null>(null);
+  useEffect(() => {
+    setPullDiff(null);
+    if (!postKey || !postPull) return;
+    const controller = new AbortController();
+    inboxApi
+      .pullDiff(postKey, 'layer', controller.signal)
+      .then((answer) => {
+        if (controller.signal.aborted || typeof answer.patch !== 'string' || typeof answer.head_sha !== 'string' || !answer.head_sha) return;
+        setPullDiff({ files: parseDiffToFiles(answer.patch), head: answer.head_sha });
+      })
+      .catch(() => {
+        // Not read: every comment in the review body, as with a PR of another diff.
+      });
+    return () => controller.abort();
+  }, [postKey, postPull?.head_sha, reread]);
   const [picked, pick] = useReviewDestination();
   const ending = reviewEnding(postPull, verdict, picked);
   const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
@@ -212,6 +230,12 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   useEffect(() => setViewed(message.guide_viewed ?? []), [message.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const files = useMemo(() => (snapshot ? parseDiffToFiles(snapshot.review.rawPatch) : []), [snapshot]);
+  const commentsForPost = useMemo(() => (pullDiff ? onPullDiff(comments, files, pullDiff.files) : comments), [comments, files, pullDiff]);
+  // What the forge took is on the forge: it leaves here, so a verdict to the agent doesn't send it again.
+  const forgetWent = (went: readonly CodeAnnotation[]) => {
+    const sent = new Set(went.map(postedSignature));
+    for (const c of comments) if (sent.has(postedSignature(c))) remove(c.id);
+  };
   const chapters = snapshot?.guide.sections ?? [];
 
   const move = (path: string) => setReveal((was) => ({ path, token: (was?.token ?? 0) + 1 }));
@@ -766,13 +790,16 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
                   }
                 : null
             }
-            comments={comments}
+            comments={commentsForPost}
             anchor="guide"
+            {...(pullDiff ? { headSha: pullDiff.head } : {})}
             busy={sending || route.open}
             picked={picked}
             onPick={pick}
+            onWent={forgetWent}
             onPosted={(result) => {
               setMoved(null);
+              forgetWent(result.posted);
               setPosted({ label: result.label, url: result.url, action: result.action });
               onPosted?.();
             }}
