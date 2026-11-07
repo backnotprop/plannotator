@@ -23,6 +23,7 @@ interface SidebarContainerProps {
   /** Desktop preserves the incumbent sticky rail. Compact Plan uses the same
    * content as a safe, visible-viewport-bounded foreground surface. */
   presentation?: "desktop" | "overlay";
+  previewing?: boolean;
   closing?: boolean;
   scrollPositions?: Map<string, number>;
   activeTab: SidebarTab;
@@ -84,6 +85,7 @@ interface SidebarContainerProps {
 export const SidebarContainer: React.FC<SidebarContainerProps> = ({
   presentation = "desktop",
   closing = false,
+  previewing = false,
   scrollPositions,
   activeTab,
   onTabChange,
@@ -138,8 +140,8 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
   const closeButtonRef = React.useRef<HTMLButtonElement>(null);
 
   React.useEffect(() => {
-    if (compact) closeButtonRef.current?.focus({ preventScroll: true });
-  }, [compact]);
+    if (compact && !previewing && !closing) closeButtonRef.current?.focus({ preventScroll: true });
+  }, [compact, previewing, closing]);
 
   const handleCompactKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     if (!compact) return;
@@ -173,8 +175,8 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
       data-pn-plan-navigator={compact ? "true" : undefined}
       data-pn-panel-side={compact ? 'left' : undefined}
       data-pn-panel-state={compact ? closing ? 'closed' : 'open' : undefined}
-      aria-hidden={compact && closing || undefined}
-      inert={compact && closing || undefined}
+      aria-hidden={compact && (closing || previewing) || undefined}
+      inert={compact && (closing || previewing) || undefined}
       // The compact navigator (Contents / Versions / Archive) is the same kind
       // of full-viewport transient surface as CompactPlanStage, so it must not
       // print over the document either. Desktop rail printing is unchanged.

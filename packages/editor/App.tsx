@@ -160,6 +160,7 @@ import { useScrollKeyRouting } from '@plannotator/ui/hooks/useScrollKeyRouting';
 import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
 import { useCompactTouchLayout, useIsMobile } from '@plannotator/ui/hooks/useIsMobile';
 import { useEdgeSwipe } from '@plannotator/ui/hooks/useEdgeSwipe';
+import { usePanelDrag } from '@plannotator/ui/hooks/usePanelDrag';
 import { usePanelPresence } from '@plannotator/ui/hooks/usePanelPresence';
 import { usePanelScrollLock } from '@plannotator/ui/hooks/usePanelScrollLock';
 import { useViewportEnvironment } from '@plannotator/ui/hooks/useViewportEnvironment';
@@ -947,7 +948,14 @@ const App: React.FC = () => {
   const isCompactAnnotationsOpen = isCompactTouchLayout && compactPlanSurface.type === 'annotations';
   const isCompactAIOpen = isCompactTouchLayout && compactPlanSurface.type === 'ai';
   const isCompactReviewOpen = isCompactTouchLayout && compactPlanSurface.type === 'review';
-  const navigatorPresence = usePanelPresence(isCompactNavigatorOpen, isCompactTouchLayout);
+  const navigatorSelector = '#pn-compact-plan-navigator';
+  const navigatorDrag = usePanelDrag({
+    selector: navigatorSelector,
+    onOpen: () => openSidebarTab(compactNavigatorTab),
+    onClose: () => closeCompactNavigator(),
+  });
+  const navigatorPreview = isCompactTouchLayout && navigatorDrag.active && !isCompactNavigatorOpen;
+  const navigatorPresence = usePanelPresence(isCompactNavigatorOpen || navigatorPreview, isCompactTouchLayout);
   const annotationsPresence = usePanelPresence(isCompactAnnotationsOpen, isCompactTouchLayout);
   const aiPresence = usePanelPresence(isCompactAIOpen, isCompactTouchLayout);
   usePanelScrollLock(isCompactTouchLayout && (
@@ -1241,9 +1249,9 @@ const App: React.FC = () => {
   useEdgeSwipe({
     enabled: isCompactTouchLayout && compactPlanSurface.type !== 'review' && !goalSetupMode,
     onOpenLeft: () => openSidebarTab(compactNavigatorTab),
-    onOpenRight: () => openCompactPlanSurface('annotations'),
+    drag: { left: navigatorDrag.gesture },
     panel: isCompactNavigatorOpen ? {
-      side: 'left', selector: '#pn-compact-plan-navigator', onClose: closeCompactNavigator,
+      side: 'left', selector: navigatorSelector, onClose: closeCompactNavigator, trackDrag: true,
     } : isCompactAnnotationsOpen || isCompactAIOpen ? {
       side: 'right', selector: `#pn-compact-plan-${compactPlanSurface.type}`, onClose: closeCompactPlanSurface,
     } : undefined,
@@ -7334,6 +7342,7 @@ const App: React.FC = () => {
       <SidebarContainer
         presentation={presentation}
         closing={compact && navigatorPresence.closing}
+        previewing={compact && navigatorPreview}
         scrollPositions={compact ? navigationScrollPositions.current : undefined}
         activeTab={compact ? effectiveCompactNavigatorTab : sidebar.activeTab}
         onTabChange={handleNavigatorTabChange}

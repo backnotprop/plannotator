@@ -181,6 +181,7 @@ import { useSidebar } from '@plannotator/ui/hooks/useSidebar';
 import { useViewportEnvironment } from '@plannotator/ui/hooks/useViewportEnvironment';
 import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
 import { useEdgeSwipe } from '@plannotator/ui/hooks/useEdgeSwipe';
+import { usePanelDrag } from '@plannotator/ui/hooks/usePanelDrag';
 import { usePanelPresence } from '@plannotator/ui/hooks/usePanelPresence';
 import { usePanelScrollLock } from '@plannotator/ui/hooks/usePanelScrollLock';
 import { FileTree } from './components/FileTree';
@@ -387,6 +388,7 @@ const reviewItemId = (item: { id: string }): string => item.id;
 
 interface CompactReviewOverlayProps {
   closing?: boolean;
+  previewing?: boolean;
   title: string;
   onClose: () => void;
   context?: React.ReactNode;
@@ -394,14 +396,18 @@ interface CompactReviewOverlayProps {
 }
 
 /** Full-stage transient surface used for review navigation on touch layouts. */
-function CompactReviewOverlay({ title, onClose, context, children, closing = false }: CompactReviewOverlayProps) {
+function CompactReviewOverlay({ title, onClose, context, children, closing = false, previewing = false }: CompactReviewOverlayProps) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!previewing && !closing) closeRef.current?.focus({ preventScroll: true });
+  }, [previewing, closing]);
   return (
     <section
       data-pn-review-transient-overlay
       data-pn-panel-side="left"
       data-pn-panel-state={closing ? 'closed' : 'open'}
-      aria-hidden={closing || undefined}
-      inert={closing || undefined}
+      aria-hidden={(closing || previewing) || undefined}
+      inert={(closing || previewing) || undefined}
       role="dialog"
       aria-label={title}
       className="absolute inset-0 z-40 flex min-w-0 flex-col bg-background"
@@ -412,7 +418,7 @@ function CompactReviewOverlay({ title, onClose, context, children, closing = fal
         <button
           data-pn-touch-target
           data-pn-touch-target-icon
-          autoFocus
+          ref={closeRef}
           type="button"
           onClick={onClose}
           className="ml-auto inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -432,6 +438,7 @@ function CompactReviewOverlay({ title, onClose, context, children, closing = fal
 
 interface ReviewNavigatorContainerProps {
   closing?: boolean;
+  previewing?: boolean;
   isCompactTouchLayout: boolean;
   onClose: () => void;
   context?: React.ReactNode;
@@ -441,6 +448,7 @@ interface ReviewNavigatorContainerProps {
 
 function ReviewNavigatorContainer({
   closing = false,
+  previewing = false,
   isCompactTouchLayout,
   onClose,
   context,
@@ -449,7 +457,7 @@ function ReviewNavigatorContainer({
 }: ReviewNavigatorContainerProps) {
   if (isCompactTouchLayout) {
     return (
-      <CompactReviewOverlay title="Review navigation" onClose={onClose} context={context} closing={closing}>
+      <CompactReviewOverlay title="Review navigation" onClose={onClose} context={context} closing={closing} previewing={previewing}>
         {children}
       </CompactReviewOverlay>
     );
@@ -626,7 +634,14 @@ const ReviewApp: React.FC = () => {
   const [isCompactNavigatorOpen, setIsCompactNavigatorOpen] = useState(false);
   const navigationScrollPositions = useRef(new Map<string, number>());
   const isNavigatorOpen = isCompactTouchLayout ? isCompactNavigatorOpen : isFileTreeOpen;
-  const navigatorPresence = usePanelPresence(isCompactNavigatorOpen, isCompactTouchLayout);
+  const navigatorSelector = '[data-pn-review-transient-overlay][aria-label="Review navigation"]';
+  const navigatorDrag = usePanelDrag({
+    selector: navigatorSelector,
+    onOpen: () => setIsCompactNavigatorOpen(true),
+    onClose: () => setIsCompactNavigatorOpen(false),
+  });
+  const navigatorPreview = isCompactTouchLayout && navigatorDrag.active && !isCompactNavigatorOpen;
+  const navigatorPresence = usePanelPresence(isCompactNavigatorOpen || navigatorPreview, isCompactTouchLayout);
   const sidebarPresence = usePanelPresence(reviewSidebar.isOpen, isCompactTouchLayout);
   usePanelScrollLock(isCompactTouchLayout && (navigatorPresence.present || sidebarPresence.present));
   const isNavigatorPresented = isCompactTouchLayout ? navigatorPresence.present : isFileTreeOpen;
@@ -1277,9 +1292,9 @@ const ReviewApp: React.FC = () => {
   useEdgeSwipe({
     enabled: isCompactTouchLayout && (!guideOpen || isCompactTransientSurfaceOpen),
     onOpenLeft: shouldShowFileTree ? () => setIsCompactNavigatorOpen(true) : undefined,
-    onOpenRight: () => reviewSidebar.open('annotations'),
+    drag: { left: navigatorDrag.gesture },
     panel: isCompactNavigatorOpen ? {
-      side: 'left', selector: '[data-pn-review-transient-overlay][aria-label="Review navigation"]',
+      side: 'left', selector: navigatorSelector, trackDrag: true,
       onClose: () => setIsCompactNavigatorOpen(false),
     } : reviewSidebar.isOpen ? {
       side: 'right', selector: '[data-pn-review-transient-overlay][aria-label="Review sidebar"]',
@@ -6396,6 +6411,7 @@ const ReviewApp: React.FC = () => {
           {!guideOpen && shouldShowFileTree && isNavigatorPresented && sectionsAvailable && panelView === 'sections' && (
             <ReviewNavigatorContainer
               closing={navigatorPresence.closing}
+              previewing={navigatorPreview}
               isCompactTouchLayout={isCompactTouchLayout}
               onClose={() => setIsCompactNavigatorOpen(false)}
               context={compactNavigatorContext}
@@ -6461,6 +6477,7 @@ const ReviewApp: React.FC = () => {
           {!guideOpen && shouldShowFileTree && isNavigatorPresented && showCommitsPanel && (
             <ReviewNavigatorContainer
               closing={navigatorPresence.closing}
+              previewing={navigatorPreview}
               isCompactTouchLayout={isCompactTouchLayout}
               onClose={() => setIsCompactNavigatorOpen(false)}
               resizeHandle={fileTreeResizeHandle}
@@ -6486,6 +6503,7 @@ const ReviewApp: React.FC = () => {
           {!guideOpen && shouldShowFileTree && isNavigatorPresented && !(sectionsAvailable && panelView === 'sections') && !showCommitsPanel && (
             <ReviewNavigatorContainer
               closing={navigatorPresence.closing}
+              previewing={navigatorPreview}
               isCompactTouchLayout={isCompactTouchLayout}
               onClose={() => setIsCompactNavigatorOpen(false)}
               context={compactNavigatorContext}

@@ -1,14 +1,21 @@
 import { useEffect, useRef } from 'react';
 import { sidewaysOwner } from './useSwipeStep';
 
+interface EdgeDrag {
+  onMove: (distance: number, closing: boolean) => void;
+  onEnd: (distance: number | null, closing: boolean) => void;
+}
+
 interface EdgeSwipeOptions {
   enabled: boolean;
   onOpenLeft?: () => void;
   onOpenRight?: () => void;
+  drag?: Partial<Record<'left' | 'right', EdgeDrag>>;
   panel?: {
     side: 'left' | 'right';
     selector: string;
     onClose: () => void;
+    trackDrag?: boolean;
   };
 }
 
@@ -29,11 +36,16 @@ export function useEdgeSwipe(options: EdgeSwipeOptions): void {
       panel: Element | null;
       path: EventTarget[];
       claimed: boolean;
+      drag?: EdgeDrag;
     } | null = null;
-    const reset = () => { gesture = null; };
+    const reset = () => {
+      const current = gesture;
+      gesture = null;
+      if (current?.claimed) current.drag?.onEnd(null, !!current.panel);
+    };
     const hasSelection = () => !!window.getSelection()?.toString();
     const hasBlockingModal = (panel: Element | null) => Array.from(
-      document.querySelectorAll('[aria-modal="true"], dialog[open]'),
+      document.querySelectorAll('[aria-modal="true"], dialog[open], [data-pn-panel-side]'),
     ).some(modal => modal !== panel && modal.getAttribute('aria-hidden') !== 'true');
 
     const start = (event: TouchEvent) => {
@@ -53,7 +65,8 @@ export function useEdgeSwipe(options: EdgeSwipeOptions): void {
       if (!side || (!panel && !(side === 'left' ? latest.current.onOpenLeft : latest.current.onOpenRight))) return;
       const direction = panel ? (side === 'left' ? -1 : 1) : (side === 'left' ? 1 : -1);
       if (sidewaysOwner(path, direction === 1 ? -1 : 1)) return;
-      gesture = { id: touch.identifier, x: touch.clientX, y: touch.clientY, side, direction, panel, path, claimed: false };
+      const drag = !panel || panelOptions?.trackDrag ? latest.current.drag?.[side] : undefined;
+      gesture = { id: touch.identifier, x: touch.clientX, y: touch.clientY, side, direction, panel, path, claimed: false, drag };
     };
 
     const move = (event: TouchEvent) => {
@@ -69,17 +82,22 @@ export function useEdgeSwipe(options: EdgeSwipeOptions): void {
         if (dx <= dy * 1.5 || sidewaysOwner(gesture.path, gesture.direction === 1 ? -1 : 1)) return reset();
         gesture.claimed = true;
       }
-      if (event.cancelable) event.preventDefault();
-      else reset(); // The browser already owns this gesture (e.g. scrolling/history).
+      if (!event.cancelable) return reset(); // The browser already owns this gesture.
+      event.preventDefault();
+      gesture.drag?.onMove(Math.max(0, dx), !!gesture.panel);
     };
 
     const end = (event: TouchEvent) => {
       const current = gesture;
-      reset();
-      if (!current?.claimed || event.touches.length || hasSelection() || hasBlockingModal(current.panel)) return;
+      if (!current?.claimed || event.touches.length || hasSelection() || hasBlockingModal(current.panel)) return reset();
       const touch = Array.from(event.changedTouches).find(t => t.identifier === current.id);
-      if (!touch) return;
+      if (!touch) return reset();
+      gesture = null;
       const dx = (touch.clientX - current.x) * current.direction;
+      if (current.drag) {
+        current.drag.onEnd(Math.max(0, dx), !!current.panel);
+        return;
+      }
       if (dx < 48 || dx <= Math.abs(touch.clientY - current.y) * 1.5) return;
       const callback = current.panel ? latest.current.panel?.onClose
         : current.side === 'left' ? latest.current.onOpenLeft : latest.current.onOpenRight;
@@ -91,6 +109,7 @@ export function useEdgeSwipe(options: EdgeSwipeOptions): void {
     document.addEventListener('touchend', end);
     document.addEventListener('touchcancel', reset);
     return () => {
+      reset();
       document.removeEventListener('touchstart', start);
       document.removeEventListener('touchmove', move);
       document.removeEventListener('touchend', end);

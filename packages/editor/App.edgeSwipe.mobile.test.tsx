@@ -108,8 +108,10 @@ async function swipe(
   closing = false,
 ) {
   expect(target).not.toBeNull();
-  const start = closing ? 200 : side === 'left' ? 8 : window.innerWidth - 8;
-  const end = closing ? (side === 'left' ? 100 : 300) : side === 'left' ? 90 : window.innerWidth - 90;
+  const width = window.innerWidth;
+  const start = closing ? width / 2 : side === 'left' ? 8 : width - 8;
+  const distance = side === 'left' ? width * 0.4 : 120;
+  const end = start + distance * ((side === 'left') !== closing ? 1 : -1);
   let preventedScroll = false;
   await act(async () => {
     for (const [type, x] of [['touchstart', start], ['touchmove', end], ['touchend', end]] as const) {
@@ -130,7 +132,10 @@ async function swipe(
 const navigation = (mode: Mode) => document.querySelector(
   `[role="dialog"][aria-label="${mode === 'review' ? 'Review navigation' : 'Plan navigator'}"]:not([aria-hidden="true"])`,
 );
-const annotations = (mode: Mode) => document.querySelector(
+const optionsMenu = () => document.querySelector(
+  '[data-pn-options-menu]:not([aria-hidden="true"])',
+);
+const annotationSurface = (mode: Mode) => document.querySelector(
   `[role="dialog"][aria-label="${mode === 'review' ? 'Review sidebar' : 'Annotations'}"]:not([aria-hidden="true"])`,
 );
 
@@ -152,6 +157,41 @@ afterEach(async () => {
 
 describe.if(hasDom)('mobile edge swipes in real app shells', () => {
   for (const mode of ['plan', 'annotate', 'review'] as const) {
+    test(`${mode}: right swipe opens the same Options menu as the header burger`, async () => {
+      await mount(mode);
+      const trigger = host!.querySelector<HTMLButtonElement>('button[aria-label="Options"]')!;
+      await act(async () => trigger.click());
+      const clickedMenu = host!.querySelector('[data-pn-dismissable-popover]')!;
+      expect(clickedMenu).not.toBeNull();
+      expect(clickedMenu.querySelector('[aria-label="Close options"]')).toBeNull();
+      const contents = clickedMenu.querySelector('[data-pn-options-content]')!.textContent;
+      await act(async () => trigger.click());
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, PANEL_TRANSITION_MS + 30)); });
+      expect(await swipe('right')).toBe(true);
+      expect(trigger.getAttribute('aria-expanded')).toBe('true');
+      const swipedMenu = document.querySelector('[data-pn-options-menu]:not([aria-hidden="true"])');
+      expect(swipedMenu).not.toBeNull();
+      expect(swipedMenu!.querySelector('[data-pn-options-content]')!.textContent).toBe(contents);
+      expect(swipedMenu!.querySelector('[aria-label="Close options"]')).not.toBeNull();
+      await act(async () => swipedMenu!.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+      expect(optionsMenu()).toBe(swipedMenu);
+      expect(annotationSurface(mode)).toBeNull();
+    });
+
+    test(`${mode}: annotations remain available from Options and dismiss by outward swipe`, async () => {
+      await mount(mode);
+      await swipe('right');
+      const item = Array.from(optionsMenu()!.querySelectorAll<HTMLButtonElement>('button'))
+        .find(button => button.textContent?.trim() === 'Annotations')!;
+      expect(item).toBeDefined();
+      await act(async () => item.click());
+      expect(optionsMenu()).toBeNull();
+      const panel = annotationSurface(mode)!;
+      expect(panel).not.toBeNull();
+      expect(await swipe('right', panel, true)).toBe(true);
+      expect(annotationSurface(mode)).toBeNull();
+    });
+
     test(`${mode}: navigation restores scroll position after its exit and remount`, async () => {
       await mount(mode);
       await swipe('left');
@@ -183,9 +223,9 @@ describe.if(hasDom)('mobile edge swipes in real app shells', () => {
       await act(async () => { await new Promise(resolve => setTimeout(resolve, PANEL_TRANSITION_MS + 30)); });
       expect(left.isConnected).toBe(false);
       await swipe('right');
-      const right = annotations(mode)!;
+      const right = optionsMenu()!;
       expect(right.getAttribute('data-pn-panel-side')).toBe('right');
-      await act(async () => right.querySelector<HTMLButtonElement>('button[aria-label^="Close"]')!.click());
+      await act(async () => right.querySelector<HTMLButtonElement>('button[aria-label="Close options"]')!.click());
       expect(right.isConnected).toBe(true);
       expect(right.hasAttribute('inert')).toBe(true);
       await act(async () => { await new Promise(resolve => setTimeout(resolve, PANEL_TRANSITION_MS + 30)); });
@@ -195,12 +235,12 @@ describe.if(hasDom)('mobile edge swipes in real app shells', () => {
     test(`${mode}: reopening during exit keeps the same interactive panel mounted`, async () => {
       await mount(mode);
       await swipe('right');
-      const panel = annotations(mode)!;
+      const panel = optionsMenu()!;
       await swipe('right', panel, true);
       expect(panel.isConnected).toBe(true);
       expect(await swipe('right')).toBe(true);
       await act(async () => { await new Promise(resolve => setTimeout(resolve, PANEL_TRANSITION_MS + 30)); });
-      expect(annotations(mode)).toBe(panel);
+      expect(optionsMenu()).toBe(panel);
       expect(panel.hasAttribute('inert')).toBe(false);
       expect(panel.getAttribute('data-pn-panel-state')).toBe('open');
     });
@@ -211,39 +251,43 @@ describe.if(hasDom)('mobile edge swipes in real app shells', () => {
       const panel = navigation(mode)!;
       await swipe('left', panel, true);
       expect(panel.isConnected).toBe(false);
+      await swipe('right');
+      const menu = optionsMenu()!;
+      await swipe('right', menu, true);
+      expect(menu.isConnected).toBe(false);
     });
 
     test(`${mode}: inward swipes open panels and outward swipes inside them close and allow reopening`, async () => {
       await mount(mode);
       expect(navigation(mode)).toBeNull();
-      expect(annotations(mode)).toBeNull();
+      expect(optionsMenu()).toBeNull();
       expect(await swipe('left')).toBe(true);
       expect(navigation(mode)).not.toBeNull();
-      expect(annotations(mode)).toBeNull();
+      expect(optionsMenu()).toBeNull();
       expect(navigation(mode)!.textContent).toContain(mode === 'review' ? 'example.ts' : 'Second heading');
       await swipe('right');
       expect(navigation(mode)).not.toBeNull();
-      expect(annotations(mode)).toBeNull();
+      expect(optionsMenu()).toBeNull();
       expect(await swipe('left', navigation(mode)!, true)).toBe(true);
       expect(navigation(mode)).toBeNull();
       expect(await swipe('right')).toBe(true);
-      expect(annotations(mode)).not.toBeNull();
+      expect(optionsMenu()).not.toBeNull();
       expect(navigation(mode)).toBeNull();
-      expect(annotations(mode)!.textContent).toContain('Annotations');
-      expect(await swipe('right', annotations(mode)!, true)).toBe(true);
-      expect(annotations(mode)).toBeNull();
+      expect(optionsMenu()!.textContent).toContain('Annotations');
+      expect(await swipe('right', optionsMenu()!, true)).toBe(true);
+      expect(optionsMenu()).toBeNull();
       expect(await swipe('left')).toBe(true);
       expect(navigation(mode)).not.toBeNull();
     });
 
-    test(`${mode}: an open annotations panel retains ownership of edge gestures`, async () => {
+    test(`${mode}: an open Options menu retains ownership of edge gestures`, async () => {
       await mount(mode);
       await swipe('right');
-      const panel = annotations(mode);
+      const panel = optionsMenu();
       expect(panel).not.toBeNull();
       await swipe('left');
       expect(await swipe('right', panel!)).toBe(false);
-      expect(annotations(mode)).toBe(panel);
+      expect(optionsMenu()).toBe(panel);
       expect(navigation(mode)).toBeNull();
     });
 
@@ -252,7 +296,7 @@ describe.if(hasDom)('mobile edge swipes in real app shells', () => {
       expect(await swipe('left')).toBe(false);
       expect(await swipe('right')).toBe(false);
       expect(navigation(mode)).toBeNull();
-      expect(annotations(mode)).toBeNull();
+      expect(optionsMenu()).toBeNull();
     });
   }
 });
