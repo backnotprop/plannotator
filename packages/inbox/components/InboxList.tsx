@@ -127,6 +127,9 @@ export interface InboxListProps {
   onSnooze?: (row: InboxListRow, until: string) => void;
   /** Whether a row can be snoozed (a linked machine on an older Inbox keeps no snoozes). Absent: every row can. */
   snoozesOf?: (row: InboxListRow) => boolean;
+  /** The machine that must update before this row can be snoozed: Snooze stays, and says so. */
+  snoozeBlockedOf?: (row: InboxListRow) => { name: string } | null;
+  onSnoozeBlocked?: (row: InboxListRow) => void;
   /**
    * The threads pinned to the sidebar (approval "inbox-pinned-threads"): their
    * rows carry a small pin, and the row menu offers Pin or Unpin. Absent (an
@@ -1395,6 +1398,8 @@ export function InboxList(props: InboxListProps) {
           canMarkRead={props.onMarkRead !== undefined}
           onSnooze={props.onSnooze}
           snoozesOf={props.snoozesOf}
+          snoozeBlockedOf={props.snoozeBlockedOf}
+          onSnoozeBlocked={props.onSnoozeBlocked}
           pinnedOf={props.pinned ? (threadId) => props.pinned!.has(threadId) : undefined}
           onTarget={setMenuRow}
           onAction={(row, action) => onRowAction?.(row, action)}
