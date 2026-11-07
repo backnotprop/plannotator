@@ -393,13 +393,19 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   const [narrow, setNarrow] = useState<(ShapeReviewNarrow & { chapter: number }) | null>(null);
   /** A place in the review (a Shape board's link): a file at a line, a file, a chapter, or All files. */
   // Narrowing gives the reader a new snapshot: the jump waits for it to draw, or the move is lost with the old one.
-  const narrowJump = useRef<{ file: string } | { step: number } | null>(null);
+  const narrowJump = useRef<{ chapter: number; file: string | null } | null>(null);
+  const narrowBack = useRef<HTMLButtonElement>(null);
+  // The bar stays over the narrowed chapter: a jump lands below it (`--ib-rv-narrow-h`, read by the file's scroll margin).
+  const narrowBar = useRef<HTMLDivElement>(null);
   const goTo = (to: ShapeReviewAt) => {
     if (to.narrow) {
       const chapter = to.step && to.step <= chapters.length ? to.step - 1 : chapterOf(chapters, to.narrow.files[0]!);
       if (chapter !== null) {
         setNarrow({ ...to.narrow, chapter });
-        narrowJump.current = to.step ? { step: to.step } : { file: to.narrow.files.find((f) => files.some((file) => file.path === f)) ?? to.narrow.files[0]! };
+        // The chapter's first file that is kept: its first file may be one the narrowing leaves out.
+        const kept = to.narrow.files;
+        const first = chapters[chapter]?.diffs.find((ref) => kept.includes(ref.file) && files.some((file) => file.path === ref.file));
+        narrowJump.current = { chapter, file: first?.file ?? null };
         return;
       }
     }
@@ -494,6 +500,19 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     return { snapshot: { ...snapshot, guide: { ...snapshot.guide, sections } }, shown: new Set(kept.map((d) => d.file)).size, total };
   }, [snapshot, narrow]);
   const readerSnapshot = narrowed?.snapshot ?? snapshot;
+  useEffect(() => {
+    const bar = narrowBar.current;
+    const pane = paneRef.current;
+    if (!bar || !pane) return;
+    const set = () => pane.style.setProperty('--ib-rv-narrow-h', `${bar.offsetHeight}px`);
+    set();
+    const seen = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(set);
+    seen?.observe(bar);
+    return () => {
+      seen?.disconnect();
+      pane.style.removeProperty('--ib-rv-narrow-h');
+    };
+  }, [narrow, narrowed]);
   // The move to the narrowed chapter (or file) waits for the reader to draw: the reader loads lazily, and a move made
   // before it mounts reads as one it has already seen (a review opened from the board over the thread).
   useEffect(() => {
@@ -508,8 +527,14 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
       const pending = narrowJump.current;
       narrowJump.current = null;
       if (!pending) return;
-      if ('file' in pending) showFile(pending.file);
-      else jump({ step: pending.step });
+      if (pending.file) {
+        jumped.current = true;
+        setCurrent(pending.chapter);
+        if (mode !== 'walkthrough') setMode('walkthrough');
+        move(pending.file);
+      } else jump({ step: pending.chapter + 1 });
+      // The card that sent the person here is gone behind the review: focus starts on the way back.
+      narrowBack.current?.focus({ preventScroll: true });
     };
     go();
     return () => cancelAnimationFrame(frame);
@@ -724,6 +749,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
       aria-label="Review"
       data-review-message={message.id}
       data-review-mode={mode}
+      {...(narrow && narrowed ? { 'data-review-narrowed': '' } : {})}
     >
       <div className="ib-vhead">
         <Tip content="Thread">
@@ -912,8 +938,8 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
             // The reader is a chunk loaded on first use: one that cannot arrive says so here (GuidePane).
             <div ref={contentRef}>
             {narrow && narrowed && (
-              <div className="ib-rv-narrow" role="region" aria-label="Opened from the board" data-review-narrow={narrow.pr}>
-                <button type="button" className="ib-rv-narrow-back" onClick={backToBoard} data-review-narrow-back="">
+              <div ref={narrowBar} className="ib-rv-narrow" role="region" aria-label="Opened from the board" data-review-narrow={narrow.pr}>
+                <button ref={narrowBack} type="button" className="ib-rv-narrow-back" onClick={backToBoard} data-review-narrow-back="">
                   <Icon name="chevL" size={15} />
                   Back to the board
                 </button>
@@ -921,12 +947,16 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
                   <b>{narrow.part}</b>
                   <span className="ib-mut">in</span>
                   <a className="ib-rv-narrow-pr" data-c={narrow.colour ?? 0} {...(narrow.url ? { href: narrow.url, target: '_blank', rel: 'noreferrer noopener' } : {})}>
-                    <span className="ib-rv-narrow-n">#{narrow.pr}</span>
+                    <span className="ib-rv-narrow-n">
+                      <Icon name="pullRequest" size={12} />#{narrow.pr}
+                    </span>
                     {narrow.title && <b>{narrow.title}</b>}
                   </a>
-                  <span className="ib-mut">
-                    · {narrowed.shown} of the {narrowed.total} files in this chapter
-                  </span>
+                  {narrowed.shown < narrowed.total && (
+                    <span className="ib-mut">
+                      · {narrowed.shown} of the {narrowed.total} files in this chapter
+                    </span>
+                  )}
                 </span>
                 <button type="button" className="ib-rv-narrow-all" onClick={() => setNarrow(null)} data-review-narrow-all="">
                   Show the whole stack

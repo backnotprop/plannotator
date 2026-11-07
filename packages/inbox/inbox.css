@@ -8036,9 +8036,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* A stack badge's "Read it in the review" (ReviewPane `narrow`): the bar over the narrowed chapter, kept in view. */
 .ib-rv-narrow { position: sticky; top: 0; z-index: 6; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 12px; padding: 8px 12px 8px 8px; border-radius: 12px;
   background: color-mix(in oklab, var(--foreground) 6%, var(--background)); font-size: var(--ib-fs-14, 14px);
-  --ib-pr1: color-mix(in oklab, #0f8a80 78%, var(--foreground)); --ib-pr1-soft: color-mix(in oklab, #0f8a80 15%, var(--background));
-  --ib-pr2: color-mix(in oklab, #b87a12 78%, var(--foreground)); --ib-pr2-soft: color-mix(in oklab, #d9971f 18%, var(--background));
-  --ib-pr3: color-mix(in oklab, #b23a6e 76%, var(--foreground)); --ib-pr3-soft: color-mix(in oklab, #b23a6e 13%, var(--background)); }
+  --ib-pr1: color-mix(in oklab, #0f8a80 74%, var(--foreground)); --ib-pr1-soft: color-mix(in oklab, #0f8a80 15%, var(--background));
+  --ib-pr2: color-mix(in oklab, #b87a12 70%, var(--foreground)); --ib-pr2-soft: color-mix(in oklab, #d9971f 18%, var(--background));
+  --ib-pr3: color-mix(in oklab, #b23a6e 70%, var(--foreground)); --ib-pr3-soft: color-mix(in oklab, #b23a6e 13%, var(--background)); }
 .ib-rv-narrow-back { appearance: none; border: 0; margin: 0; display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 10px 0 6px; border-radius: 8px;
   background: var(--background); color: var(--foreground); font: inherit; font-weight: 600; cursor: pointer; transition: background-color .15s ease; }
 @media (hover: hover) { .ib-rv-narrow-back:hover { background: color-mix(in oklab, var(--foreground) 8%, var(--background)); } }
@@ -8048,7 +8048,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 @media (max-width: 640px) { .ib-rv-narrow-what { order: 2; flex-basis: 100%; padding: 0 4px 2px; } .ib-rv-narrow-all { margin-left: auto; } }
 .ib-rv-narrow-pr { display: inline-flex; align-items: center; gap: 6px; color: var(--foreground); text-decoration: none; }
 a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-offset: 3px; }
-.ib-rv-narrow-n { display: inline-flex; align-items: center; height: 22px; padding: 0 6px; border-radius: 6px; font: 600 var(--ib-fs-13, 13px)/1 var(--font-mono, ui-monospace, monospace);
+.ib-rv-narrow-n { display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 6px 0 5px; border-radius: 6px; font: 600 var(--ib-fs-13, 13px)/1 var(--font-mono, ui-monospace, monospace);
   background: color-mix(in oklab, var(--foreground) 8%, transparent); color: var(--foreground); }
 .ib-rv-narrow-pr[data-c="1"] .ib-rv-narrow-n { background: var(--ib-pr1-soft); color: var(--ib-pr1); }
 .ib-rv-narrow-pr[data-c="2"] .ib-rv-narrow-n { background: var(--ib-pr2-soft); color: var(--ib-pr2); }
@@ -8195,6 +8195,10 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-rv-walk[data-review-mode='files'] [data-guide-file-shell] { scroll-margin-top: 16px; }
 /* A jump to a chapter lands on its first file, with the chapter's tab above it in view. */
 .ib-rv-walk [data-guide-section-tabbed] [data-guide-file-shell]:first-child { scroll-margin-top: 62px; }
+/* Narrowed from a stack badge: the bar stays over the reader, so a jump lands below it (ReviewPane sets the height). */
+.ib-rv-walk[data-review-narrowed] [data-guide-section] { scroll-margin-top: calc(var(--ib-rv-narrow-h, 48px) + 12px); }
+.ib-rv-walk[data-review-narrowed] [data-guide-file-shell] { scroll-margin-top: calc(var(--ib-rv-narrow-h, 48px) + 30px); }
+.ib-rv-walk[data-review-narrowed] [data-guide-section-tabbed] [data-guide-file-shell]:first-child { scroll-margin-top: calc(var(--ib-rv-narrow-h, 48px) + 62px); }
 /* All files: every changed file in one full-width column, no chapter card (the menu lists them). */
 .ib-rv-walk[data-review-mode='files'] [data-guide-section] { border: 0; border-radius: 0; background: transparent; overflow: visible; }
 .ib-rv-walk[data-review-mode='files'] [data-guide-section-grid] { display: block; }

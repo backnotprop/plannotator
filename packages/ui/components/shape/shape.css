@@ -729,9 +729,9 @@ code.shp-ex-fn, span.shp-ex-line { cursor: default; text-decoration: none; }
  * The popup is drawn outside the board, so its bar carries the colours too.
  */
 .shp-root, .shp-stk-nav {
-  --shp-pr1: color-mix(in oklab, #0f8a80 78%, var(--foreground)); --shp-pr1-soft: color-mix(in oklab, #0f8a80 15%, var(--shp-paper, var(--background)));
-  --shp-pr2: color-mix(in oklab, #b87a12 78%, var(--foreground)); --shp-pr2-soft: color-mix(in oklab, #d9971f 18%, var(--shp-paper, var(--background)));
-  --shp-pr3: color-mix(in oklab, #b23a6e 76%, var(--foreground)); --shp-pr3-soft: color-mix(in oklab, #b23a6e 13%, var(--shp-paper, var(--background)));
+  --shp-pr1: color-mix(in oklab, #0f8a80 74%, var(--foreground)); --shp-pr1-soft: color-mix(in oklab, #0f8a80 15%, var(--shp-paper, var(--background)));
+  --shp-pr2: color-mix(in oklab, #b87a12 70%, var(--foreground)); --shp-pr2-soft: color-mix(in oklab, #d9971f 18%, var(--shp-paper, var(--background)));
+  --shp-pr3: color-mix(in oklab, #b23a6e 70%, var(--foreground)); --shp-pr3-soft: color-mix(in oklab, #b23a6e 13%, var(--shp-paper, var(--background)));
 }
 :is(.shp-stk-chip, .shp-stk-pr)[data-c="1"] { --c: var(--shp-pr1); --c-soft: var(--shp-pr1-soft); }
 :is(.shp-stk-chip, .shp-stk-pr)[data-c="2"] { --c: var(--shp-pr2); --c-soft: var(--shp-pr2-soft); }
@@ -785,8 +785,8 @@ button.shp-stk-pr { cursor: pointer; transition: background-color .15s ease, col
 .shp-stk-fname { flex: none; font: 500 var(--ib-fs-13, 13px)/1.2 var(--font-mono, ui-monospace, monospace); }
 .shp-stk-fdir { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--ib-fs-12, 12px)/1.2 var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); }
 .shp-stk-counts { flex: none; display: inline-flex; gap: 6px; font: 500 var(--ib-fs-13, 13px)/1 var(--font-mono, ui-monospace, monospace); font-variant-numeric: tabular-nums; }
-.shp-stk-counts .add { color: color-mix(in oklab, #1a7f37 85%, var(--foreground)); }
-.shp-stk-counts .del { color: color-mix(in oklab, #cf222e 85%, var(--foreground)); }
+.shp-stk-counts .add { color: color-mix(in oklab, #1a7f37 64%, var(--foreground)); }
+.shp-stk-counts .del { color: color-mix(in oklab, #cf222e 64%, var(--foreground)); }
 .shp-stk-card-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-top: 10px; padding-top: 10px; box-shadow: inset 0 1px 0 var(--border); }
 .shp-stk-also { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); }
 .shp-stk-read { appearance: none; border: 0; margin: 0 0 0 auto; padding: 4px 2px; background: none; color: var(--primary); font: inherit; font-size: var(--ib-fs-14, 14px); font-weight: 500; cursor: pointer; }

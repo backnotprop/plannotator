@@ -20,9 +20,9 @@ export const PR_ICON_SVG =
  * board's zone colours, so light and dark both hold. Shared by the drawing's tags and the board's row and card.
  */
 export const STACK_COLOUR_VARS = `
-  --shp-pr1: color-mix(in oklab, #0f8a80 78%, var(--foreground)); --shp-pr1-soft: color-mix(in oklab, #0f8a80 15%, var(--shp-paper, var(--background)));
-  --shp-pr2: color-mix(in oklab, #b87a12 78%, var(--foreground)); --shp-pr2-soft: color-mix(in oklab, #d9971f 18%, var(--shp-paper, var(--background)));
-  --shp-pr3: color-mix(in oklab, #b23a6e 76%, var(--foreground)); --shp-pr3-soft: color-mix(in oklab, #b23a6e 13%, var(--shp-paper, var(--background)));
+  --shp-pr1: color-mix(in oklab, #0f8a80 74%, var(--foreground)); --shp-pr1-soft: color-mix(in oklab, #0f8a80 15%, var(--shp-paper, var(--background)));
+  --shp-pr2: color-mix(in oklab, #b87a12 70%, var(--foreground)); --shp-pr2-soft: color-mix(in oklab, #d9971f 18%, var(--shp-paper, var(--background)));
+  --shp-pr3: color-mix(in oklab, #b23a6e 70%, var(--foreground)); --shp-pr3-soft: color-mix(in oklab, #b23a6e 13%, var(--shp-paper, var(--background)));
 `;
 
 /** The layer's CSS, in the drawing's own scope (a shadow root does not see the page's). */
@@ -110,7 +110,9 @@ export class StackBadgeLayer {
         tag.className = 'shp-stk-b';
         tag.setAttribute('data-c', String(options.colour(n)));
         tag.setAttribute('data-shp-stack-pr', String(n));
-        tag.setAttribute('aria-label', `Changed in #${n}: open its lines`);
+        tag.setAttribute('aria-label', `#${n} changed this part: open its card`);
+        tag.setAttribute('aria-haspopup', 'dialog');
+        tag.setAttribute('aria-expanded', 'false');
         tag.innerHTML = PR_ICON_SVG;
         tag.append(doc.createTextNode(`#${n}`));
         tag.addEventListener('click', (e) => {
@@ -185,8 +187,7 @@ export class StackBadgeLayer {
         const open = !!this.open && this.open.pr === n && this.open.part === g.getAttribute('data-shp-stack-part');
         tag.classList.toggle('on', open || (pick !== null && n === pick));
         tag.classList.toggle('off', pick !== null && n !== pick);
-        if (open) tag.setAttribute('aria-expanded', 'true');
-        else tag.removeAttribute('aria-expanded');
+        tag.setAttribute('aria-expanded', open ? 'true' : 'false');
       }
     }
     // Picked: every part with none of the PR's changes, in it or inside it, fades (once: not under a faded one).
@@ -236,9 +237,10 @@ export class StackBadgeLayer {
       } else {
         left = x(r.left) + 14 * inv;
         top = y(r.bottom) - h / 2;
-        // A step number on the bottom edge: the tags take the top-left edge.
-        const box = { left: b.left + left * k, top: b.top + top * k, right: b.left + (left + w) * k, bottom: b.top + (top + h) * k };
-        if (steps.some((t) => t.width > 0 && t.left < box.right && box.left < t.right && t.top < box.bottom && box.top < t.bottom)) top = y(r.top) - h / 2;
+        // A step number anywhere on this part's bottom edge: the tags take the top-left edge.
+        const edgeTop = b.top + top * k;
+        const edgeBottom = b.top + (top + h) * k;
+        if (steps.some((t) => t.width > 0 && t.left < r.right && r.left < t.right && t.top < edgeBottom && edgeTop < t.bottom)) top = y(r.top) - h / 2;
       }
       g.style.transform = `scale(${inv})`;
       g.style.left = `${left}px`;

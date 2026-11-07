@@ -31,11 +31,17 @@ if (hasDom) {
       reader = props;
       // The painted row, as Pierre marks it, in its file's box.
       const lit = props.highlight;
-      return lit ? (
-        <div data-guide-file-shell={lit.path}>
-          <div data-line={lit.start} data-selected-line="" />
-        </div>
-      ) : null;
+      return (
+        <>
+          {/* A heading per chapter, as the reader draws them: a jump waits for these. */}
+          {props.snapshot?.guide.sections.map((_, i) => <div key={i} data-guide-section={i} />)}
+          {lit && (
+            <div data-guide-file-shell={lit.path}>
+              <div data-line={lit.start} data-selected-line="" />
+            </div>
+          )}
+        </>
+      );
     },
   }));
 }
@@ -272,6 +278,10 @@ test.skipIf(!hasDom)("a stack badge's \"Read it in the review\" shows the PR's c
   expect(bar?.textContent).toContain('Back to the board');
   expect(bar?.textContent).toContain('The timer');
   expect(bar?.textContent).toContain('1 of the 2 files in this chapter');
+  // The jump to the chapter's narrowed file holds (the reader drew first), and focus starts on the way back.
+  for (let i = 0; i < 20 && reader?.reveal?.path !== 'src/timer.ts'; i++) await act(async () => new Promise((r) => setTimeout(r, 20)));
+  expect(reader?.reveal?.path).toBe('src/timer.ts');
+  expect(document.activeElement).toBe(document.querySelector('[data-review-narrow-back]'));
   await act(async () => (document.querySelector('[data-review-narrow-all]') as HTMLButtonElement).click());
   expect(document.querySelector('[data-review-narrow]')).toBeNull();
   expect(files()).toEqual([['src/kettle.ts'], ['src/settings.ts', 'src/timer.ts']]);

@@ -154,11 +154,12 @@ export function useShapeStack({
     }
   }, [on, stack, pick, open]);
 
-  const close = useCallback(() => {
+  // Closed in place, focus goes back to its tag; closed by leaving for the review, the review takes it.
+  const close = useCallback((focus: boolean = true) => {
     const tag = openNow.current?.tag;
     setOpen(null);
     setFile(null);
-    if (tag?.isConnected) tag.focus({ preventScroll: true });
+    if (focus && tag?.isConnected) tag.focus({ preventScroll: true });
   }, []);
 
   const row = on ? (
@@ -214,7 +215,7 @@ export function useShapeStack({
             review={review}
             readFile={readFile}
             onBack={() => setFile(null)}
-            onClose={close}
+            onClose={() => close()}
             onGo={setFile}
           />
         );
@@ -282,7 +283,7 @@ function StackCard({
   root: HTMLElement | null;
   phone: boolean;
   review: ShapeSurfaceReview | null;
-  onClose: () => void;
+  onClose: (focus?: boolean) => void;
   onFile: (i: number) => void;
   onSwitch: (n: number) => void;
 }) {
@@ -363,7 +364,7 @@ function StackCard({
       {phone && <div className="shp-stk-grip" aria-hidden="true" />}
       <div className="shp-stk-card-h">
         <PrName stack={stack} n={pull.n} />
-        <button type="button" className="shp-icon-btn shp-stk-x" onClick={onClose} aria-label="Close">
+        <button type="button" className="shp-icon-btn shp-stk-x" onClick={() => onClose()} aria-label="Close">
           ×
         </button>
       </div>
@@ -407,7 +408,7 @@ function StackCard({
                 void Promise.resolve()
                   .then(() => review!.open(reviewAt))
                   .then((ok) => {
-                    if (ok) onClose();
+                    if (ok) onClose(false);
                   }, () => {});
               }}
             >

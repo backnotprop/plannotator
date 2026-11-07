@@ -135,7 +135,9 @@ describe.if(hasDom)('Stack badges', () => {
     await mount(board(STACK));
     expect(tags().map((t) => `${t.closest('[data-shp-stack-part]')!.getAttribute('data-shp-stack-part')}#${t.getAttribute('data-shp-stack-pr')}`)).toEqual(['how-a#11', 'how-b#12', 'how-b#13']);
     expect(tag('how-b', 12).getAttribute('data-c')).toBe('2');
-    expect(tag('how-b', 12).getAttribute('aria-label')).toBe('Changed in #12: open its lines');
+    // A tag says it opens a dialog, and is closed until its card opens.
+    expect(tag('how-b', 12).getAttribute('aria-haspopup')).toBe('dialog');
+    expect(tag('how-b', 12).getAttribute('aria-expanded')).toBe('false');
     expect(document.querySelector('[data-shp-stack-row]')?.textContent).toContain('Stack of 3');
     act(() => root!.unmount());
     document.body.innerHTML = '';
@@ -192,6 +194,18 @@ describe.if(hasDom)('Stack badges', () => {
     // A second click on the open tag closes its card.
     await click(tag('how-b', 12));
     expect(card()).toBeNull();
+    expect(tag('how-b', 12).getAttribute('aria-expanded')).toBe('false');
+
+    // Esc closes the card and gives focus back to its tag.
+    await click(tag('how-a', 11));
+    expect(card()).not.toBeNull();
+    await act(async () => {
+      document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    await wait();
+    expect(card()).toBeNull();
+    expect(tag('how-a', 11).getAttribute('aria-expanded')).toBe('false');
+    expect(drawing()!.activeElement ?? document.activeElement).toBe(tag('how-a', 11));
   });
 
   test("picking a PR keeps its parts bright and fades the rest; a second click restores them", async () => {
