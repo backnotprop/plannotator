@@ -136,6 +136,8 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
   return messages.some((message) => message.author.kind === "agent" && (seqOf(message.id) ?? 0) > seenThroughSeq);
 }
 
+export type DoorWriteKind = "append" | "set" | "file" | "now";
+
 /**
  * Rule 8, scoped by one table: every write the device door takes, and why a
  * second copy of it is safe. A copy can reach the owner twice when the door's
@@ -158,10 +160,13 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *   later run for nobody, perhaps on bytes the person never saw. A second copy
  *   at the door mints a second id; nothing names that upload, and the 24-hour
  *   sweep takes it (the blob stays while anything else uses it).
+ * - `now` acts on the machine itself (a linked machine's account switch):
+ *   never held, sent once while online or answered offline. A second copy
+ *   re-lists there and finds the account already in use, so it runs nothing.
  *
  * inbox-outbox.test.ts fails when a door write has no entry here.
  */
-export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "local">> = {
+export const DOOR_WRITES: Readonly<Record<string, DoorWriteKind | "local">> = {
   "POST threads/:id/seen": "set",
   "POST threads/:id/read": "set",
   "POST threads/:id/unread": "set",
@@ -198,9 +203,10 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "l
   "POST launch/:id/delete": "set",
   "POST link-back": "set",
   "POST unlink": "set",
+  "POST accounts/switch": "now",
 };
 
-const DOOR_WRITE_ROUTES = Object.entries(DOOR_WRITES).flatMap(([name, kind]) =>
+const DOOR_WRITE_ROUTES = Object.entries(DOOR_WRITES).flatMap(([name, kind]): { kind: DoorWriteKind; route: RegExp }[] =>
   kind === "local" ? [] : [{ kind, route: new RegExp(`^${name.slice("POST ".length).replaceAll(":id", "[^/]+")}$`) }],
 );
 
@@ -211,7 +217,7 @@ const DOOR_WRITE_ROUTES = Object.entries(DOOR_WRITES).flatMap(([name, kind]) =>
  * never forwarded (a write rule 8 has not classified, or calls `local`, cannot
  * reach another machine).
  */
-export function doorWriteKind(route: string): "append" | "set" | "file" | null {
+export function doorWriteKind(route: string): DoorWriteKind | null {
   return DOOR_WRITE_ROUTES.find((entry) => entry.route.test(route))?.kind ?? null;
 }
 

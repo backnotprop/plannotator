@@ -219,9 +219,9 @@ test('Settings: one block per machine, this one first, each with its own list, a
   await expect(rowOf(page, 'Mini').locator('.ib-acct-r').filter({ has: page.locator('.ib-acct-name', { hasText: /^team$/ }) }).locator('.ib-acct-n')).not.toContainText(/most room/i);
   await expect(rowOf(page, 'Mini').locator('.ib-acct-r').filter({ has: page.locator('.ib-acct-name', { hasText: /^team$/ }) })).toHaveAttribute('title', /Most room/);
   await expect(rowOf(page, 'Mini').locator('[data-in-use] [data-l="hot"]')).toHaveCount(1);
-  // This machine's other rows are the switch while switching is on; a linked machine's rows are not, in this build.
+  // While switching is on, every row not in use is the switch, on every machine; while it is off, none is.
   await expect(rowOf(page, 'Studio').locator('button[data-account]')).toHaveCount(INBOX_ACCOUNT_SWITCHING ? 1 : 0);
-  await expect(rowOf(page, 'Mini').locator('button[data-account]')).toHaveCount(0);
+  await expect(rowOf(page, 'Mini').locator('button[data-account]')).toHaveCount(INBOX_ACCOUNT_SWITCHING ? 2 : 0);
 
   // The usage lines up down the page, every machine's rows in one column.
   const left = await page.locator('[data-account-use="bars"]').evaluateAll((els) => [...new Set(els.map((el) => Math.round(el.getBoundingClientRect().left)))]);

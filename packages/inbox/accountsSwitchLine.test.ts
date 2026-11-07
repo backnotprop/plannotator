@@ -6,7 +6,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxAccount } from '@plannotator/core/inbox-types';
-import { switchLine, type AccountsView } from './useAccounts';
+import { SELF, switchLine, switchOffered, type AccountsView, type MachineAccounts } from './useAccounts';
 
 const PERSONAL = { number: 1, email: 'a@fake.test', organizationName: 'Home', alias: 'personal' };
 const row = (fields: Partial<InboxAccount>): InboxAccount => ({ number: 1, email: null, organizationName: null, alias: null, isOrganization: false, active: false, usageStatus: 'ok', usage: null, ...fields }) as InboxAccount;
@@ -45,5 +45,24 @@ describe('switchLine', () => {
     for (const reason of ['changed', 'renumbered', 'busy', 'run_failed', 'bad_output', 'unknown_schema', 'owner_only', 'unreachable'] as const) {
       expect(switchLine({ state: 'failed', reason }, notShown, PERSONAL)).toBe(reason);
     }
+  });
+});
+
+describe('switchOffered', () => {
+  const mini = (read: MachineAccounts['read']): MachineAccounts => ({ id: 'ibx_mini', name: 'Mac mini', read });
+  const listed = { state: 'accounts' as const, accounts: [row({ active: true })] };
+  test('nothing while this Inbox does not switch, whatever a linked machine says', () => {
+    expect(switchOffered(SELF, false, [])).toBe(false);
+    expect(switchOffered('ibx_mini', false, [mini({ ...listed, switching: true })])).toBe(false);
+  });
+
+  test('this machine when it switches; a linked one only when its read says it switches too', () => {
+    expect(switchOffered(SELF, true, [])).toBe(true);
+    expect(switchOffered('ibx_mini', true, [mini({ ...listed, switching: true })])).toBe(true);
+    // An older Plannotator there, or one with switching off, never says: its rows stay plain.
+    expect(switchOffered('ibx_mini', true, [mini(listed)])).toBe(false);
+    expect(switchOffered('ibx_mini', true, [mini({ state: 'offline' })])).toBe(false);
+    expect(switchOffered('ibx_mini', true, [mini(null)])).toBe(false);
+    expect(switchOffered('ibx_gone', true, [mini({ ...listed, switching: true })])).toBe(false);
   });
 });
