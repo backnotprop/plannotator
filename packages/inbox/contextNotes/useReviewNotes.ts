@@ -13,7 +13,7 @@ import type { InboxMessageWire } from '@plannotator/core/inbox-types';
 import { parseShapeCodeTarget, type ShapeVersion } from '@plannotator/core/shape';
 import { inboxApi } from '../api';
 import { agentName } from '../format';
-import { partLanding, partName, reviewDrawnOn, reviewLines } from '../review-drawing/showMeModel';
+import { anchorLines, partLanding, partName, reviewDrawnOn, reviewLines } from '../review-drawing/showMeModel';
 import { guideNotes, orderNotes, pictureNotes, threadNotes, type ContextNote, type NoteFile, type PicturePart } from './model';
 
 /** Each earlier review's files, read once (an empty list when it can't be read: it anchors nothing). */
@@ -48,7 +48,14 @@ export function codeParts(html: string): { code: string; name: string; words: st
   const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
   return [...doc.querySelectorAll('[data-code]')].map((el) => {
     const name = partName(el);
-    const all = (el.textContent ?? '').replace(/\s+/g, ' ').trim();
+    // Each text node is its own words (an SVG's <text> lines sit side by side with no space between them).
+    const pieces: string[] = [];
+    const walk = doc.createTreeWalker(el, 4 /* NodeFilter.SHOW_TEXT */);
+    for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+      const text = (node.textContent ?? '').replace(/\s+/g, ' ').trim();
+      if (text) pieces.push(text);
+    }
+    const all = pieces.join(' ');
     const rest = all.startsWith(name.replace(/…$/, '')) ? all.slice(name.replace(/…$/, '').length).trim() : all;
     return { code: el.getAttribute('data-code') ?? '', name, words: rest.replace(/^[·:,.\-–—\s]+/, '') };
   });
@@ -143,7 +150,19 @@ export function useReviewNotes(input: {
         const earlierFiles = drawnOn && drawnOn !== message.id ? earlier[drawnOn] : undefined;
         const landing = partLanding(target, now, drawnOn === message.id ? undefined : drawnOn ? { lines: earlierFiles ? reviewLines(earlierFiles) : undefined } : null);
         if (!Array.isArray(landing)) continue;
-        parts.push({ board: id, title: board.title, part: part.name, words: part.words, lines: landing, path: target.path, agent: board.agent });
+        // Drawn on an earlier review and its code changed since (found only by the code around it): stale, as a thread note is.
+        const was: [number, number] = [target.line, target.lineEnd ?? target.line];
+        const changed = earlierFiles && drawnOn && !anchorLines(was, reviewLines(earlierFiles).get(target.path), now.get(target.path));
+        parts.push({
+          board: id,
+          title: board.title,
+          part: part.name,
+          words: part.words,
+          lines: landing,
+          path: target.path,
+          agent: board.agent,
+          ...(changed ? { stale: { round: inboxReviewRound(messages, drawnOn), lines: was } } : {}),
+        });
       }
     }
     return orderNotes([...guide, ...thread, ...pictureNotes(parts, files)], files);

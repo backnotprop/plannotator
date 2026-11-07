@@ -137,6 +137,11 @@ function NoteActions({ note, api }: { note: ContextNote; api: NotesApi }) {
             Ask again
           </button>
         )}
+        {note.writer === 'picture' && api.onOpenPicture && (
+          <button type="button" className="ib-ctxn-link" onClick={() => api.onOpenPicture?.(note)} data-context-note-open-picture="">
+            Open the picture
+          </button>
+        )}
       </div>
     );
   }

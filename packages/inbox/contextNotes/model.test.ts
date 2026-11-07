@@ -89,6 +89,12 @@ describe('the other writers', () => {
     expect(notes.map((n) => [n.writer, n.lineStart, n.text, n.picture?.board])).toEqual([['picture', 2, 'Retries once.', 'b1']]);
   });
 
+  test('a part drawn on an earlier round whose code changed is stale, in the picture’s words', () => {
+    const part = { board: 'b1', title: 'Flow', part: 'Retry', words: 'Retries once.', lines: [2, 2] as [number, number], path: 'a.ts', agent: 'Claude', stale: { round: 1, lines: [2, 2] as [number, number] } };
+    const [note] = pictureNotes([part], ROUND_3);
+    expect(staleWords(note!)).toBe('The code here changed after this picture (drawn on round 1, lines 2).');
+  });
+
   test('the PR page’s ask for the places is taken once, by that PR only', () => {
     askRiskPlaces('github.com/a/b#1');
     expect(takeRiskPlaces('github.com/a/b#2')).toBe(false);

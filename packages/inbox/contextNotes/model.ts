@@ -220,6 +220,8 @@ export interface PicturePart {
   lines: [number, number];
   path: string;
   agent: string;
+  /** Drawn on an earlier review whose code here changed since. */
+  stale?: { round: number; lines: [number, number] };
 }
 
 /** Show me boards' parts on their lines (new side), one note per part; the same lines twice draw once. */
@@ -240,6 +242,7 @@ export function pictureNotes(parts: readonly PicturePart[], files: readonly Note
       text: part.words || part.part,
       agent: part.agent,
       picture: { board: part.board, title: part.title, part: part.part },
+      ...(part.stale ? { stale: part.stale } : {}),
     });
   });
   return out;
@@ -268,7 +271,8 @@ export function noteTime(iso: string | undefined, now = new Date()): string | nu
 /** The stale line, as Show me's corner card words it. */
 export function staleWords(note: ContextNote): string | null {
   if (!note.stale) return null;
-  return `The code here changed after this ${note.writer === 'thread' ? 'answer' : 'note'} (written on round ${note.stale.round}, lines ${rangeWord(note.stale.lines)}).`;
+  const what = note.writer === 'thread' ? 'answer' : note.writer === 'picture' ? 'picture' : 'note';
+  return `The code here changed after this ${what} (${note.writer === 'picture' ? 'drawn' : 'written'} on round ${note.stale.round}, lines ${rangeWord(note.stale.lines)}).`;
 }
 
 /** What the Ask box starts with for "Ask again": the file and the lines where they are now. */
