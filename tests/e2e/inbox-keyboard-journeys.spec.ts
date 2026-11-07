@@ -699,8 +699,8 @@ test('J1: triage the list and open the newest thread', async () => {
   await viewIs('list');
   await press('End', 'Home');
   await at('End Home', { focus: row(stopped), address: addr(null), view: 'list' });
-  // No thread open: J and K move along the rows as ↓ ↑ do (the next thread there), and open nothing.
-  const second = page.locator('.ib-main .ib-lbody').locator('[data-thread-id], button.ib-band').filter({ visible: true }).nth(1);
+  // No thread open: J and K move along the threads (the next one there, past the groups' headers), and open nothing.
+  const second = page.locator('.ib-main .ib-lbody').locator('[data-thread-id]').filter({ visible: true }).nth(1);
   await press('j');
   await at('J on the list', { focus: second, address: addr(null), view: 'list' });
   await press('k', 'k');

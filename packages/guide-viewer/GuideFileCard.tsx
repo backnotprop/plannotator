@@ -314,7 +314,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
           />
         ) : (
           <div className="flex h-full flex-col" aria-hidden="true">
-            <div className="flex h-[33px] flex-shrink-0 items-center border-b border-border/40 px-3 font-mono text-[11px] text-muted-foreground/70">
+            <div data-file-header="" className="flex h-[33px] flex-shrink-0 items-center border-b border-border/40 px-3 font-mono text-[11px] text-muted-foreground/70">
               <span className="min-w-0 truncate">{file.path}</span>
               {kind === 'test' && <FileKindIcon kind="test" className="ml-1.5 flex-shrink-0" />}
               <span className="flex-1" />
@@ -323,7 +323,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
                 {file.deletions > 0 && <span className="ml-1 text-red-600/80 dark:text-red-400/80">-{file.deletions}</span>}
               </span>
             </div>
-            {!collapsed && <div className="min-h-0 flex-1 bg-muted/[0.06]" />}
+            {!collapsed && <div data-guide-code-placeholder="" className="min-h-0 flex-1 bg-muted/[0.06]" />}
           </div>
         )}
       </div>

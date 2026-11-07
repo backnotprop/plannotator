@@ -31,6 +31,7 @@ import { chromium, expect, test, type Browser, type BrowserContext, type Locator
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { inflateSync } from 'node:zlib';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { expectNoBlankFiles } from './on-screen-files';
@@ -1140,6 +1141,76 @@ test('a phone: a sideways drag on the code scrolls it, and the page does not mov
   } finally {
     await context.close();
   }
+});
+
+/** The colour of one screen pixel. A 1x1 PNG's only pixel comes out of every row filter unchanged. */
+async function pixelAt(page: Page, x: number, y: number): Promise<number[]> {
+  const png = await page.screenshot({ clip: { x: Math.round(x), y: Math.round(y), width: 1, height: 1 }, scale: 'css' });
+  const data: Buffer[] = [];
+  for (let at = 8; at < png.length; ) {
+    const length = png.readUInt32BE(at);
+    if (png.toString('ascii', at + 4, at + 8) === 'IDAT') data.push(png.subarray(at + 8, at + 8 + length));
+    at += 12 + length;
+  }
+  return [...inflateSync(Buffer.concat(data)).subarray(1, 4)];
+}
+
+const sameColour = (a: number[], b: number[]) => a.every((v, i) => Math.abs(v - b[i]) <= 2);
+
+test('each file\'s name sits on the page above its code box: no fill at rest, under the pointer or stuck to the top', async () => {
+  // Approval "review-file-title", take B: the name's row shows the chapter's surface, the code is a box of its own.
+  const { page, pane, body } = await shortReview('file-title', 420);
+  const shell = pane.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
+  // Scrolled into the file: the row is stuck to the pane's top with the code going under it, painted with the surface
+  // beside it (the chapter column's padding, or the page in All files), never see-through.
+  const expectStuckRowIsSurface = async (what: string) => {
+    const title = (await shell.locator('[data-file-header]').boundingBox())!;
+    await body.evaluate((el, by) => { el.scrollTop += by; }, title.y - (await body.boundingBox())!.y + 120);
+    await settled(body);
+    await page.mouse.move(5, 5);
+    const stuck = (await shell.locator('[data-file-header]').boundingBox())!;
+    expect(Math.abs(stuck.y - (await body.boundingBox())!.y)).toBeLessThanOrEqual(1);
+    const beside = await pixelAt(page, (await shell.boundingBox())!.x - 4, stuck.y + stuck.height / 2);
+    expect(sameColour(await pixelAt(page, stuck.x + stuck.width * 0.55, stuck.y + stuck.height / 2), beside), what).toBe(true);
+  };
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await shell.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+    await settled(body);
+    const title = (await shell.locator('[data-file-header]').boundingBox())!;
+    // A blank spot in the row, and the surface just above it (between the summary line and the name).
+    const spot = { x: title.x + title.width * 0.55, y: title.y + title.height / 2 };
+    const surface = await pixelAt(page, spot.x, title.y - 3);
+    await page.mouse.move(5, 5);
+    expect(sameColour(await pixelAt(page, spot.x, spot.y), surface), `${scheme}: the name's row at rest`).toBe(true);
+    await page.mouse.move(spot.x, spot.y);
+    await page.waitForTimeout(250);
+    expect(sameColour(await pixelAt(page, spot.x, spot.y), surface), `${scheme}: the name's row under the pointer`).toBe(true);
+    await page.mouse.move(5, 5);
+    // The code's box: its top-left corner is round (the surface shows just inside the corner of its square), and a
+    // line runs down its left edge, unlike both the surface outside and the gutter inside.
+    const code = await shell.evaluate((el) => {
+      const pre = el.querySelector('diffs-container')!.shadowRoot!.querySelector('pre')!.getBoundingClientRect();
+      return { left: pre.left, top: pre.top, middle: pre.top + pre.height / 2 };
+    });
+    expect(sameColour(await pixelAt(page, code.left + 1.5, code.top + 1.5), surface), `${scheme}: the box's round corner`).toBe(true);
+    const edge = await pixelAt(page, code.left, code.middle);
+    expect(sameColour(edge, await pixelAt(page, code.left - 3, code.middle)), `${scheme}: the box's edge against the surface`).toBe(false);
+    expect(sameColour(edge, await pixelAt(page, code.left + 12, code.middle)), `${scheme}: the box's edge against the gutter`).toBe(false);
+    await expectStuckRowIsSurface(`${scheme}: the stuck row`);
+
+    // All files: no chapter card, the page's own surface.
+    await pane.locator('[data-review-mode-choice="files"]').click();
+    await expect(pane).toHaveAttribute('data-review-mode', 'files');
+    await shell.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+    await settled(body);
+    await expectStuckRowIsSurface(`${scheme}: the stuck row in All files`);
+    await pane.locator('[data-review-mode-choice="walkthrough"]').click();
+    await expect(pane).toHaveAttribute('data-review-mode', 'walkthrough');
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  expect(world.errors).toEqual([]);
 });
 
 test('Code review off: the same review opens in the guide pane, with no top bar of chapters and the diff controls before Close', async () => {
