@@ -46,6 +46,8 @@ export interface GuideDiffRendererProps {
    * height its content needs (AllFilesCodeView does). A renderer that ignores it keeps the estimated box.
    */
   onContentHeightChange?: (height: number) => void;
+  /** No scroller of its own: as tall as its content, against the page's scroller (a `fitFileHeights` host). */
+  scrollsWithPage?: boolean;
 }
 
 export interface GuideDiffRendererContext {
@@ -168,8 +170,19 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    * which the renderer's measured height then corrects).
    */
   diffStyle?: 'split' | 'unified';
-  /** The renderer's files sit flush (no spacing around a separator): a content-fit box's estimate counts it so. */
+  /** The renderer can read a changed file's whole text: it draws an arrow row after the last hunk. For the same estimate. */
+  opensWholeFiles?: boolean;
+  /**
+   * Files sit flush, edge to edge (the Inbox's PR page): a content-fit box has no border, padding or corner of its own,
+   * and holds exactly its renderer's height, so one file's header meets the last code row of the file above. Absent:
+   * the bordered box, as before.
+   */
   flushFiles?: boolean;
+  /**
+   * Fold or open every file's diff at once (a host bar's Collapse all). Each new `token` applies `collapsed` to every
+   * card again; a file folded or opened by hand after that keeps its own state. Absent: each card keeps its own.
+   */
+  collapseAll?: { collapsed: boolean; token: number };
 }
 
 // The context erases the renderer's extra-prop generic; hosts recover typing at the provider site.

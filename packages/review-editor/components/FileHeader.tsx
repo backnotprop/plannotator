@@ -66,6 +66,11 @@ interface FileHeaderProps {
   accessory?: React.ReactNode;
   /** A host's own "Open in" (the Inbox's, where a read-only header has none), in the place the app's sits. */
   openIn?: React.ReactNode;
+  /**
+   * A narrow header keeps the folder, dimmed and cut from its start, before the whole name, so two files of one name
+   * read apart (the Inbox's PR page on a phone). Off: a narrow header shows the name alone, as before.
+   */
+  keepsFolder?: boolean;
 }
 
 function splitFilePath(filePath: string): { directory: string; name: string } {
@@ -155,6 +160,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   renderMarkdownView,
   accessory,
   openIn,
+  keepsFolder = false,
 }) => {
   const [headerWidth, setHeaderWidth] = useState<number>(0);
   const state = useReviewStateOptional();
@@ -164,7 +170,10 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   const { directory, name } = splitFilePath(filePath);
   const isCompact = headerWidth > 0 && headerWidth < 760;
   const isVeryTight = headerWidth > 0 && headerWidth < 480;
-  const showFilenameOnly = headerWidth > 0 && headerWidth < 560;
+  const narrow = headerWidth > 0 && headerWidth < 560;
+  // Narrow, with keepsFolder: the folder gives way first, from its start (`direction: rtl` puts the ellipsis there).
+  const foldedFolder = narrow && keepsFolder && !!directory;
+  const showFilenameOnly = narrow && !foldedFolder;
   const truncatedName = showFilenameOnly
     ? frontEllipsize(
         name,
@@ -192,8 +201,8 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   return (
     <div
       ref={headerRef}
-      className={`flex-shrink-0 border-b border-border/50 flex items-center justify-between gap-2 transition-colors duration-150 hover:bg-muted/30 ${isCompactTouchLayout ? 'pr-3' : 'px-3'}`}
       data-file-header=""
+      className={`flex-shrink-0 border-b border-border/50 flex items-center justify-between gap-2 transition-colors duration-150 hover:bg-muted/30 ${isCompactTouchLayout ? 'pr-3' : 'px-3'}`}
       style={{ height: isCompactTouchLayout ? '44px' : 'var(--panel-header-h)' }}
     >
       <div className="min-w-0 flex flex-1 items-center" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
@@ -204,7 +213,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
         >
           {/* Rename: dimmed old path → new path (diffshub treatment). Dropped
               under tight widths — the icon + tooltip still carry it. */}
-          {status === 'renamed' && oldPath && !showFilenameOnly && !isCompactTouchLayout && (
+          {status === 'renamed' && oldPath && !narrow && !isCompactTouchLayout && (
             <>
               <span className="min-w-0 overflow-hidden text-ellipsis text-muted-foreground/60">
                 {oldPath}
@@ -230,6 +239,13 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             >
               <bdi>{filePath}</bdi>
             </span>
+          ) : foldedFolder ? (
+            <>
+              <span data-file-header-folder="" className="min-w-0 shrink-[1000] overflow-hidden text-ellipsis whitespace-nowrap text-muted-foreground/70 [direction:rtl]">
+                <bdi>{directory}</bdi>
+              </span>
+              <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-foreground">{name}</span>
+            </>
           ) : (
             <>
               {!showFilenameOnly && directory && (

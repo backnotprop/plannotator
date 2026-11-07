@@ -16,6 +16,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { jjRuntime } from "./vcs.ts";
+import { useScratchJjConfig } from "../../../tests/helpers/jj-scratch-config.ts";
+
+const jjConfig = useScratchJjConfig();
 
 describe("pi jj runtime output ceiling", () => {
 	const testIfJj = spawnSync("jj", ["--version"], { encoding: "utf-8" }).status === 0
@@ -31,7 +34,7 @@ describe("pi jj runtime output ceiling", () => {
 	testIfJj("stops reading and flags truncation once maxOutputBytes is passed", async () => {
 		workspace = mkdtempSync(join(tmpdir(), "plannotator-pi-jj-cap-"));
 		const jj = (args: string[]) => {
-			const result = spawnSync("jj", args, { cwd: workspace, encoding: "utf-8" });
+			const result = spawnSync("jj", args, { cwd: workspace, encoding: "utf-8", env: jjConfig.env() });
 			if (result.status !== 0) throw new Error(result.stderr || `jj ${args.join(" ")} failed`);
 		};
 		jj(["git", "init", "."]);

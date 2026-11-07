@@ -5,14 +5,17 @@
  * width" (the one-line row, zoomed down when the page is narrower than a wide list). On a phone one picture, the
  * phone's rows. Round 2 (the owner, 2026-11-02: "Couldn't customization go a bit further"): three presets beside the
  * lede (Minimal, Balanced = the defaults, Detailed) as starting points, then beside the narrow picture Look (density,
- * first line, thread names, unread, subject preview, time) and Show (agent icons, project).
+ * first line, thread names, unread, subject preview, time) and Show (agent icons, project). Letter marks (approval
+ * "inbox-letter-marks", 2026-11-07, all off by default): Look → Mark style, and Show → Letter marks with its two
+ * picture switches, in the same cards; Detailed turns them on (Both, Avatar, no pictures).
  *
  * Every control is the list's look (listLook.ts): a change shows at once and is saved for the person (config.json `inboxRows`), and every list in every window
  * takes it (`useListLook` listens). The pictures follow the person's mode, light or dark.
  */
 import { useLayoutEffect, useRef, useState } from 'react';
+import { RowMarksScope } from '../letterMarks';
 import type { InboxListRow, InboxSectionId } from '@plannotator/core/inbox-types';
-import { LIST_LOOK_KEYS, LIST_LOOK_OFF, listLookClasses, useListLook, type ListLook, type ListLookKey } from '../listLook';
+import { LIST_LOOK_DEFAULT, LIST_LOOK_KEYS, LIST_LOOK_OFF, listLookClasses, lookMarks, markStyleLook, marksWhatLook, useListLook, type ListLook, type ListLookKey, type MarkStyle, type MarksWhat } from '../listLook';
 import { ListRow } from './InboxList';
 import { Icon } from '../icons';
 
@@ -99,39 +102,42 @@ function sampleGroups(): { id: InboxSectionId; label: string; rows: InboxListRow
 function PreviewList({ look, shape, className }: { look: ListLook; shape: 'narrow' | 'wide' | 'phone'; className: string }) {
   const [groups] = useState(sampleGroups);
   return (
-    <section className={`ib-listcol ib-rws-list ${className}${look.hideProject ? ' ib-noproj' : ''}${listLookClasses(look)}`} aria-hidden="true">
-      {/* The rows alone, no bands: nothing here changes a band, and the page keeps both pictures in one screen. */}
-      <div className="ib-lbody">
-        <div className="ib-group">
-          {groups.flatMap((group) =>
-            group.rows.map((row) => (
-              <ListRow
-                key={row.thread_id}
-                row={row}
-                project={row.project.name}
-                away={false}
-                drawn={group.id}
-                shape={shape}
-                full={false}
-                filtered={look.hideProject}
-                selected={false}
-                lit={false}
-                onOpen={noop}
-                day=""
-                menu={false}
-                pinned={false}
-                pinColumn={false}
-                pill={look.highlight}
-                compact={look.compact}
-                noPreview={look.hidePreview}
-                relative={look.relativeTime}
-                titleFirst={look.titleFirst}
-              />
-            )),
-          )}
+    // The sample projects have no pictures: their marks are letters (`pictures` off asks the Inbox for none).
+    <RowMarksScope look={look} pictures={false}>
+      <section className={`ib-listcol ib-rws-list ${className}${look.hideProject ? ' ib-noproj' : ''}${listLookClasses(look)}`} aria-hidden="true">
+        {/* The rows alone, no bands: nothing here changes a band, and the page keeps both pictures in one screen. */}
+        <div className="ib-lbody">
+          <div className="ib-group">
+            {groups.flatMap((group) =>
+              group.rows.map((row) => (
+                <ListRow
+                  key={row.thread_id}
+                  row={row}
+                  project={row.project.name}
+                  away={false}
+                  drawn={group.id}
+                  shape={shape}
+                  full={false}
+                  filtered={look.hideProject}
+                  selected={false}
+                  lit={false}
+                  onOpen={noop}
+                  day=""
+                  menu={false}
+                  pinned={false}
+                  pinColumn={false}
+                  pill={look.highlight}
+                  compact={look.compact}
+                  noPreview={look.hidePreview}
+                  relative={look.relativeTime}
+                  titleFirst={look.titleFirst}
+                />
+              )),
+            )}
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+    </RowMarksScope>
   );
 }
 
@@ -159,7 +165,7 @@ function WidePreview({ look }: { look: ListLook }) {
 }
 
 /** A row's two- or three-way choice, as Settings → General's Theme and Text size. */
-function Seg<T extends string>({ name, labelledBy, value, choices, onChange }: { name: string; labelledBy: string; value: T; choices: readonly { id: T; label: string }[]; onChange: (next: T) => void }) {
+function Seg<T extends string>({ name, labelledBy, value, choices, onChange }: { name: string; labelledBy: string; value: T | null; choices: readonly { id: T; label: string }[]; onChange: (next: T) => void }) {
   return (
     <span className="ib-seg" role="radiogroup" aria-labelledby={labelledBy}>
       {choices.map((choice) => (
@@ -173,7 +179,7 @@ function Seg<T extends string>({ name, labelledBy, value, choices, onChange }: {
 }
 
 /** A Look row: its title (naming the choice for a screen reader) and its segmented choice. */
-function LookRow<T extends string>({ id, label, desc, value, choices, onChange }: { id: string; label: string; desc?: string; value: T; choices: readonly { id: T; label: string }[]; onChange: (next: T) => void }) {
+function LookRow<T extends string>({ id, label, desc, value, choices, onChange }: { id: string; label: string; desc?: string; value: T | null; choices: readonly { id: T; label: string }[]; onChange: (next: T) => void }) {
   return (
     <div className="ib-prow" data-rows-control={id}>
       <span className="ib-txt">
@@ -195,16 +201,26 @@ const SHOW: readonly { key: ListLookKey; label: string; desc?: string }[] = [
   { key: 'hideProject', label: 'Project', desc: 'With its machine, when you link machines' },
 ];
 
+/** A project's picture instead of its letters. Turning one on turns project marks on (listLook.ts `lookWithChange`). */
+const PICTURES: readonly { key: 'repoLogo' | 'githubPictures'; label: string; desc: string }[] = [
+  { key: 'repoLogo', label: 'Logo from the repo', desc: "A favicon or logo found in the project's folder. Nothing leaves this computer." },
+  { key: 'githubPictures', label: 'GitHub pictures', desc: "A project on GitHub shows its owner's picture. Asks GitHub once a week." },
+];
+
 export type RowsPreset = 'minimal' | 'balanced' | 'detailed';
 
 /**
- * The presets: starting points, each a whole look. Balanced is the defaults (every option off), so choosing it is
- * also how to reset. A look that matches none reads "Custom".
+ * The presets: starting points, each a whole look. Balanced is the defaults (smaller thread names on, every other
+ * option off), so choosing it is also how to reset. Detailed keeps the larger unread names it had before smaller
+ * names became the default. A look that matches none reads "Custom": a look saved as Detailed before Detailed turned
+ * letter marks on (approval "inbox-letter-marks") now reads Custom until Detailed is picked again.
  */
+// Letter marks (approval "inbox-letter-marks"): Minimal and Balanced keep them off (Balanced is the defaults); Detailed
+// turns them on, both kinds as Avatar (no style option on), with the picture switches off.
 export const ROWS_PRESETS: readonly { id: RowsPreset; label: string; look: ListLook }[] = [
   { id: 'minimal', label: 'Minimal', look: { ...LIST_LOOK_OFF, compact: true, hideAgents: true, hidePreview: true, smallNames: true, unreadDot: true, relativeTime: true } },
-  { id: 'balanced', label: 'Balanced', look: LIST_LOOK_OFF },
-  { id: 'detailed', label: 'Detailed', look: { ...LIST_LOOK_OFF, roomy: true, highlight: true, previewTwo: true } },
+  { id: 'balanced', label: 'Balanced', look: LIST_LOOK_DEFAULT },
+  { id: 'detailed', label: 'Detailed', look: { ...LIST_LOOK_OFF, roomy: true, highlight: true, previewTwo: true, marksThreads: true, marksProjects: true } },
 ];
 
 export function rowsPreset(look: ListLook): RowsPreset | null {
@@ -214,6 +230,7 @@ export function rowsPreset(look: ListLook): RowsPreset | null {
 export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: () => void }) {
   // A choice that turns one option on turns its rival off (Compact and Roomy; no preview and two lines), in one write.
   const [look, set] = useListLook();
+  const marks = lookMarks(look);
   const preset = rowsPreset(look);
   // Buttons, not radios: a radio group's arrow keys choose as they move, so one stray key would wipe a Custom look.
   // Tab reaches each preset, and only Enter, Space or a click applies one; the pressed one is the look's.
@@ -273,6 +290,20 @@ export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: 
             ]}
             onChange={(next) => set({ highlight: next === 'pill' })}
           />
+          {/* Where a letter mark lives. Nothing is picked while marks are off; picking one turns thread marks on, so
+              the choice never does nothing. */}
+          <LookRow<MarkStyle>
+            id="markstyle"
+            label="Mark style"
+            desc={marks.what === 'off' ? 'Picking one turns letter marks on' : undefined}
+            value={marks.what === 'off' ? null : marks.style}
+            choices={[
+              { id: 'inline', label: 'Inline' },
+              { id: 'avatar', label: 'Avatar' },
+              { id: 'dot', label: 'Dot' },
+            ]}
+            onChange={(style) => set(markStyleLook(style, look))}
+          />
           <LookRow
             id="unread"
             label="Unread"
@@ -330,6 +361,42 @@ export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: 
                   aria-checked={!look[item.key]}
                   aria-labelledby={`ib-rows-${item.key}`}
                   aria-describedby={item.desc ? `ib-rows-${item.key}-desc` : undefined}
+                  onClick={() => set({ [item.key]: !look[item.key] })}
+                />
+              </span>
+            </div>
+          ))}
+          <LookRow<MarksWhat>
+            id="marks"
+            label="Letter marks"
+            desc="First and last letter of the name, in its own colour"
+            value={marks.what}
+            choices={[
+              { id: 'off', label: 'Off' },
+              { id: 'threads', label: 'Threads' },
+              { id: 'projects', label: 'Projects' },
+              { id: 'both', label: 'Both' },
+            ]}
+            onChange={(what) => set(marksWhatLook(what))}
+          />
+          {PICTURES.map((item) => (
+            <div className="ib-prow" key={item.key} data-rows-control={item.key}>
+              <span className="ib-txt">
+                <span className="ib-l" id={`ib-rows-${item.key}`}>
+                  {item.label}
+                </span>
+                <span className="ib-desc" id={`ib-rows-${item.key}-desc`}>
+                  {item.desc}
+                </span>
+              </span>
+              <span className="ib-ctl">
+                <button
+                  type="button"
+                  role="switch"
+                  className="ib-sw"
+                  aria-checked={look[item.key]}
+                  aria-labelledby={`ib-rows-${item.key}`}
+                  aria-describedby={`ib-rows-${item.key}-desc`}
                   onClick={() => set({ [item.key]: !look[item.key] })}
                 />
               </span>

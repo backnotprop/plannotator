@@ -7,9 +7,10 @@
  * bun tests drive this class with a host made of memory.
  */
 
+import { AutoReload } from './auto-reload'
 import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeEnd, type BridgeHandle } from './bridge'
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
-import type { Host, HttpResult } from './host'
+import { PromptDropped, type Host, type HttpResult } from './host'
 import { InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder } from './inbox'
 import { inboxCommandBriefing, type InboxToolInfo } from './inbox-contract'
 import {
@@ -313,14 +314,17 @@ export interface SessionInfo {
    * at its first session start (inbox.ts); absent: no Inbox connection.
    */
   inboxTools?: readonly InboxToolInfo[]
-  /** The name the engine registered `plannotator_inbox` under (`mcp__<server>__plannotator_inbox`): the wake's closing line names it. */
-  inboxToolName?: string
   /** The session's working folder, read when asked (the Inbox link's polls say where the session works). */
   cwd?: () => Promise<string>
   /** The session's root folder (`$.session.root()`), read once at the link's start: where `claude --resume` runs. */
   root?: () => Promise<string>
   /** The name the person gave the session, read for each Inbox poll (`InboxLinkOptions.label`). */
   label?: () => string | Promise<string>
+  /**
+   * Made by the self-heal (self-heal.ts), not by anything the person did: the
+   * Inbox link starts without a touch, so a live lease another process holds stands.
+   */
+  healed?: boolean
 }
 
 export class PlannotatorMod {
@@ -340,6 +344,8 @@ export class PlannotatorMod {
   private classicPlanReview = false
   private timer: { cancel: () => void } | null = null
   private delivering: Promise<void> = Promise.resolve()
+  /** Decisions Claude Code dropped (`PromptDropped`), waiting for the next prompt, turn start or dispose to try again. */
+  private inputWaiters: (() => void)[] = []
   private sequence = 0
   private disposed = false
   /** Launch ids this instance settled or dropped: kept out of the store even if another process re-adds them. */
@@ -360,19 +366,45 @@ export class PlannotatorMod {
   private tickCount = 0
   /** This session's connection to the Plannotator Inbox (the tool and the reply wake); null without one. */
   readonly inbox: InboxLink | null
+  /**
+   * Plannotator reloads itself after an update (auto-reload.ts), told by the
+   * Inbox link's polls; null without an Inbox link, or a host that cannot read
+   * the prompt box or run a command.
+   */
+  readonly autoReload: AutoReload | null
 
   constructor(
     private readonly host: Host,
     readonly session: SessionInfo,
   ) {
     this.instanceId = host.randomHex(8)
+    const { readPrompt, runReload, loadedPlugin } = host
+    this.autoReload =
+      session.inboxTools && readPrompt && runReload && loadedPlugin
+        ? new AutoReload({
+            sessionId: session.sessionId,
+            now: () => host.now(),
+            storeGet: (key) => host.storeGet(key),
+            storeSet: (key, value) => host.storeSet(key, value),
+            loaded: () => loadedPlugin.call(host),
+            promptText: () => readPrompt.call(host),
+            run: () => runReload.call(host),
+            busyReason: () => this.reloadBusyReason(),
+            after: (ms, fn) => {
+              const timer = host.every(ms, () => {
+                timer.cancel()
+                fn()
+              })
+            },
+            debug: (text) => host.debug(text),
+          })
+        : null
     this.inbox = session.inboxTools
       ? new InboxLink({
           host,
           dataDir: session.dataDir,
           sessionId: session.sessionId,
           tools: session.inboxTools,
-          ...(session.inboxToolName ? { toolName: session.inboxToolName } : {}),
           isBusy: () => this.turns.busy,
           // Send now goes into a running main turn, never into this session's own Ask question, and
           // never into a turn another plugin's prompt started (that plugin may read its answer as its own).
@@ -385,9 +417,30 @@ export class PlannotatorMod {
           ...(session.label ? { label: session.label } : {}),
           instanceId: this.instanceId,
           turns: this.turns,
+          ...(this.autoReload ? { reload: this.autoReload } : {}),
         })
       : null
-    this.inbox?.start()
+    this.inbox?.start({ touch: !session.healed })
+  }
+
+  /**
+   * Why Plannotator should not reload itself now, or null: a main-loop turn
+   * or this session's own Ask question, an open review or a decision waiting
+   * to go in, Inbox work in flight. The prompt box is read by AutoReload
+   * itself. Background agents and subagents never hold it: `/reload-plugins`
+   * leaves them running (owner, "it should never stop work").
+   */
+  reloadBusyReason(): string | null {
+    if (this.disposed) return 'the instance was disposed'
+    if (this.turns.busy) return 'a turn runs'
+    if (this.launches.size > 0 || this.awaitingIdle.size > 0) return 'a Plannotator review is open'
+    if (this.inbox?.hasWorkInFlight) return 'Inbox work is in flight'
+    return null
+  }
+
+  /** The first instance of a freshly loaded module: if this session's reload made it, say so (auto-reload.ts). */
+  async checkInAfterReload(): Promise<boolean> {
+    return (await this.autoReload?.checkIn().catch(() => null)) != null
   }
 
   /** The PLANNOTATOR_SESSION_PROJECT value last exported (null: none yet, or the write failed). */
@@ -577,9 +630,11 @@ export class PlannotatorMod {
    */
   dispose(): void {
     this.disposed = true
+    this.autoReload?.dispose()
     this.timer?.cancel()
     this.timer = null
     this.inbox?.dispose()
+    this.inputMoved()
     this.host.status(undefined)
     // Hand the launches this instance watched to any other process on the session at once.
     for (const launch of this.launches.values()) {
@@ -1503,8 +1558,9 @@ export class PlannotatorMod {
       if (launch.kind === 'plan' && (await this.lacksModPlan(launch))) {
         await this.fallBackToClassicPlans(launch)
         this.delivering = this.delivering
-          .then(() => this.host.submit(`Plannotator: ${launch.subject} — not opened.\n\n${CLASSIC_PLAN_RETRY_TEXT}`))
-          .catch(() => undefined)
+          // Dropped (Claude Code holds plugins' input): tried again after the next input, as a decision is.
+          .then(() => this.submitDecision(launch.subject, `Plannotator: ${launch.subject} — not opened.\n\n${CLASSIC_PLAN_RETRY_TEXT}`, { quiet: true }))
+          .then(() => undefined, () => undefined)
         await this.delivering
         return
       }
@@ -1654,6 +1710,7 @@ export class PlannotatorMod {
       ...(launch.target !== undefined ? { target: launch.target } : {}),
     })
     // Several decisions are delivered one by one, in the order they arrived.
+    let delivered = true
     this.delivering = this.delivering.then(async () => {
       if (delivery.action === 'log') {
         this.host.log(delivery.text)
@@ -1662,13 +1719,13 @@ export class PlannotatorMod {
       }
       if (delivery.overflow) await this.host.writeFile(delivery.overflow.path, delivery.overflow.text)
       this.host.toast(`${launch.subject} — feedback received`)
-      await this.host.submit(delivery.text).catch((error: unknown) => {
-        this.host.log(`Could not send the ${launch.subject} decision to Claude (${error instanceof Error ? error.message : String(error)}).`)
-      })
+      delivered = await this.submitDecision(launch.subject, delivery.text)
     }).catch(() => undefined)
     // `$.prompt.submit` resolves once Claude was idle and took the turn: a long
     // turn means a long wait, which this process may not survive (quit, crash).
     await this.delivering
+    // Ended while a dropped decision waited for input: the claim stays undelivered, and a restore reports it.
+    if (!delivered) return
     await this.markDelivered(launch.dir)
     this.awaitingIdle.delete(launch.id)
     await this.persist()
@@ -1676,6 +1733,36 @@ export class PlannotatorMod {
     // The launch's copies of the plan/message and feedback are not kept once
     // delivered (feedback.md stays: Claude reads it after this turn).
     await this.host.run(cleanupArgv(launch.dir), { timeoutMs: 5_000 }).catch(() => undefined)
+  }
+
+  /**
+   * A decision's turn. One Claude Code dropped (`PromptDropped`: the person
+   * stopped the session and nobody has typed since) is tried again after the
+   * next prompt or turn start, so it goes in at the idle after the person's
+   * input. False: the instance was disposed while it waited, nothing went in.
+   * `quiet`: a failure is not logged (the classic-plan retry never logged one).
+   */
+  private async submitDecision(subject: string, text: string, options: { quiet?: boolean } = {}): Promise<boolean> {
+    for (;;) {
+      try {
+        await this.host.submit(text)
+        return true
+      } catch (error) {
+        if (!(error instanceof PromptDropped)) {
+          if (!options.quiet) this.host.log(`Could not send the ${subject} decision to Claude (${error instanceof Error ? error.message : String(error)}).`)
+          return true
+        }
+        if (this.disposed) return false
+        this.host.debug(`decision for ${subject} was not taken (${error.reason}); it waits for the next input`)
+        await new Promise<void>((resolve) => this.inputWaiters.push(resolve))
+        if (this.disposed) return false
+      }
+    }
+  }
+
+  /** Input moved (a prompt entered, a turn started) or the instance ended: dropped decisions try again. */
+  private inputMoved(): void {
+    for (const resolve of this.inputWaiters.splice(0)) resolve()
   }
 
   private async forget(launch: LiveLaunch): Promise<void> {
@@ -1738,7 +1825,11 @@ export class PlannotatorMod {
     )
     const wasOurs = !!turnId && this.turns.ownsTurn(turnId)
     this.turns.onPromptEntered(prompt)
+    // Auto reload: a prompt into a turn already running gets no turn.start of its own (that turn keeps the
+    // session busy); a new one counts as on its way in until its turn.start.
+    this.autoReload?.notePromptLeft(turnId ? 'into-turn' : 'new-turn')
     if (!fromUs) this.inbox?.onForeignPrompt(prompt)
+    if (!fromUs) this.inputMoved()
     if (wasOurs && turnId && this.turns.isTakenOver(turnId)) this.host.debug(`ask turn ${turnId} taken over`)
     // The person typed here: decisions should arrive in this conversation.
     if (originKind === 'composer') void this.touchLaunches()
@@ -1747,11 +1838,14 @@ export class PlannotatorMod {
   /** A prompt reached prompt.submit, before the hooks beneath it ran, from register.ts. */
   onPromptSubmitting(prompt: Omit<EnteredPrompt, 'text'>): void {
     this.turns.onPromptSubmitting(prompt)
+    // Between Enter and turn.start no turn is counted yet: auto reload waits while the prompt is submitted.
+    this.autoReload?.notePromptSubmitting()
   }
 
   /** A prompt announced by onPromptSubmitting did not enter, from register.ts. */
   onPromptDropped(prompt: Omit<EnteredPrompt, 'text'>): void {
     this.turns.onPromptDropped(prompt)
+    this.autoReload?.notePromptLeft('dropped')
   }
 
   /** A main-loop model request is about to go out (every turn.step without an agent id), from register.ts. */
@@ -1775,8 +1869,12 @@ export class PlannotatorMod {
     // background one included), but its end is not counted (register.ts
     // filters turn.complete by agent id), so counting the start left the
     // session busy after the main turn ended, and the Inbox's replies waited.
+    // Auto reload does not wait for subagents either.
     if (agentId) return
     this.host.debug(`turn.start ${turnId}: ${JSON.stringify(text.slice(0, 160))}`)
+    this.inbox?.onMainTurnStart()
+    this.autoReload?.onInputMoved()
+    this.inputMoved()
     const drop = this.turns.onTurnStart(turnId, text)
     if (drop) await this.host.abortTurn(drop).catch(() => undefined)
     this.pushBridgeStatus()

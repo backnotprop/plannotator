@@ -1032,11 +1032,14 @@ jobs:
             esac
           done
 
+          # Like real curl, the .sha256 goes to the -o file when one is given
+          # (install.sh downloads it to a file since #2788).
           if [[ "$url" == *.sha256 ]]; then
+            dest="${out:-/dev/stdout}"
             if command -v sha256sum >/dev/null 2>&1; then
-              sha256sum "$ARTIFACT"
+              sha256sum "$ARTIFACT" > "$dest"
             else
-              shasum -a 256 "$ARTIFACT"
+              shasum -a 256 "$ARTIFACT" > "$dest"
             fi
             exit 0
           fi
@@ -1220,6 +1223,7 @@ jobs:
             npm-packages/plannotator-opencode.tgz
             npm-packages/plannotator-pi-extension.tgz
             npm-packages/plannotator-dsh.tgz
+            npm-packages/plannotator-cline.tgz
           sbom-path: release-sbom/${{ needs.release-security.outputs.sbom-name }}
 
   # The binaries and the npm packages pin the guides.show viewer their own job
@@ -1375,6 +1379,7 @@ jobs:
           bun run build:opencode
           bun run --cwd apps/pi-extension build
           bun run build:dsh
+          bun run build:cline
 
       # The daily ping counts only a build release CI marks (packages/shared/daily-ping.ts):
       # a local `bun run build:opencode` or Pi `bun pm pack` has no mark and is a dev build. The binaries get
@@ -1400,6 +1405,10 @@ jobs:
       - name: Pack @plannotator/dsh
         working-directory: apps/dsh-plugin
         run: bun pm pack --filename "$GITHUB_WORKSPACE/npm-packages/plannotator-dsh.tgz"
+
+      - name: Pack @plannotator/cline
+        working-directory: apps/cline-plugin
+        run: bun pm pack --filename "$GITHUB_WORKSPACE/npm-packages/plannotator-cline.tgz"
 
       - name: Upload npm package artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1536,6 +1545,10 @@ jobs:
         continue-on-error: true
         timeout-minutes: 10
         run: npm publish ./npm-packages/plannotator-dsh.tgz --ignore-scripts --provenance --access public
+
+      - name: Publish @plannotator/cline
+        timeout-minutes: 10
+        run: npm publish ./npm-packages/plannotator-cline.tgz --ignore-scripts --provenance --access public
 
   # The merge script merges a PR only when every `Full CI (all green)` check on
   # its head succeeded. A skipped job counts as passed elsewhere, so this job

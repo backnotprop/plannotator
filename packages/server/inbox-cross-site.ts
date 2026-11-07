@@ -9,6 +9,8 @@ import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 
 export const INBOX_CROSS_SITE_BODY = { error: "Cross-origin requests are not accepted.", code: "cross_origin" } as const;
 export const INBOX_WINDOW_ONLY_BODY = { error: "A folder is trusted in the Inbox window.", code: "window_only" } as const;
+/** Remote launch: an agent on another machine is started, stopped or trusted only by a press in the Inbox window. */
+export const INBOX_MACHINE_WINDOW_ONLY_BODY = { error: "An agent on another machine is started, stopped or trusted from the Inbox window only.", code: "window_only" } as const;
 
 export function isCrossSiteRequest(req: Request): boolean {
   const site = req.headers.get("sec-fetch-site")?.trim().toLowerCase();

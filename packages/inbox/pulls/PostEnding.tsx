@@ -124,8 +124,9 @@ export function PostEnding({ pull, agent, comments: all, readComments, anchor, b
     setOpen(mode);
   }, []);
   // The review that went: shown done (never posted twice) until the PR's head moves or a new comment is written. A
-  // comment already posted on this PR is never posted again, at any head (Start review keeps its comments after a
-  // post); a follow-up carries only what is new (or a main comment).
+  // comment already posted on this PR is never posted again, at any head (a guard for a host whose comments outlive a
+  // post, or come back before it drops them: Start review drops what went); a follow-up carries only what is new (or a
+  // main comment).
   const [done, setDone] = useState<{ key: string; head: string; action: PlatformAction; ids: ReadonlySet<string> } | null>(null);
   const sameKey = !!done && !!target && done.key === target.key;
   const sameHead = sameKey && done!.head === target!.head_sha;

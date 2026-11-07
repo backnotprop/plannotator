@@ -1,0 +1,262 @@
+# Worst case (break-ui fixture, dev only). A plausible freight company,
+# written in the same DSL as the Plannotator set, with every field pushed to
+# a realistic extreme: a 48-character part name and a 2-character one,
+# Japanese, Arabic and Vietnamese names, emoji, unbreakable routes and
+# hostnames, raw numbers, vendors with no drawn logo, a part with no
+# description, a part with no name, 14 lines into one part, a band of 12,
+# 9 notes on one sheet and 0 on another, 9 kinds of sheet, 30 revisions.
+# Domains are example.com. Nothing here is real.
+
+format: 1
+system: Northwind Freight dispatch and billing platform
+root: C-001
+scopes:
+  root: Northwind Freight
+  core: Dispatch and billing core
+wanted:
+  - { code: R-101, kind: threat model, question: "Where can a stolen driver token reach, and what stops it before it gets to the card vault?" }
+  - { code: K-101, kind: cost, question: "What each part costs per month at 1,284,003 shipments." }
+
+parts:
+  # ---------------------------------------------------------------- C-001
+  platform:
+    name: Dispatch and billing core
+    kind: product
+    role: Plans every route, bills every stop, and settles with 1,284 carriers across 31 countries.
+    marks: [ kubernetes, kotlin, postgres ]
+    child: core
+    facts:
+      Shipments per day: 1284003
+      Carriers: 1284
+      Open incidents: 0
+      Error budget left: 0.5
+      Sheets drawn: L-101, D-101, S-101, F-101, T-101, Q-101, X-101, E-101
+  ops:
+    name: Operations control room and night-shift desk
+    kind: surface
+    role: Supervisors watch every late stop and reassign drivers by hand when the router gives up.
+    marks: [ grafana, pagerduty, slack ]
+  ui:
+    name: UI
+    kind: client
+    role: Kiosk
+  jp:
+    name: 配車管理センター
+    kind: client
+    role: 全国の配送ルートを計画し、ドライバーへ指示を送ります。夜間は自動で再計画します。
+    sub: 東京・大阪
+  ar:
+    name: بوابة العملاء
+    kind: client
+    role: يطلب العملاء الشحنات ويتابعونها من هنا حتى التسليم.
+    sub: عربي، من اليمين إلى اليسار
+  vn:
+    name: Ứng dụng tài xế Việt Nam
+    kind: client
+    role: Nhận chuyến, quét mã và xác nhận giao hàng tận nơi.
+    sub: Đặng Thị Ngọc Hân, Hà Nội
+    marks: [ swift ]
+  fleet:
+    name: 🚚 Fleet tracker 👩🏽‍💻
+    kind: client
+    role: Live position of every truck, every 5 seconds.
+    marks: [ react ]
+  legacy:
+    name: Legacy AS/400 billing
+    kind: store
+  partners:
+    name: Carrier partner network
+    kind: vendors
+    role: EDI 214 and 990 messages from carriers that will never use an API.
+    marks: [ sap, oracle-transportation-management, descartes ]
+  kafka:
+    name: Kafka
+    kind: vendor
+    role: event backbone
+    marks: [ kafka ]
+  snow:
+    name: Snowflake
+    kind: vendor
+    role: warehouse
+    marks: [ snowflake ]
+  twilio:
+    name: Twilio
+    kind: vendor
+    role: SMS and voice
+    marks: [ twilio ]
+    wordmark: true
+  sfsl:
+    name: Salesforce Field Service Lightning
+    kind: vendor
+    role: field crews
+    marks: [ salesforce ]
+  sap:
+    name: SAP S/4HANA
+    kind: vendor
+    marks: [ sap ]
+
+  # ---------------------------------------------------------------- core: clients (a band of 12)
+  web: { in: core, name: Shipper web, kind: client, role: Book and track., sub: React SPA, marks: [ react ] }
+  ios: { in: core, name: iOS, kind: client, role: Drivers., sub: Swift, marks: [ swift ] }
+  android: { in: core, name: Android driver app for regional subcontractors, kind: client, role: Drivers who are not employees., sub: Kotlin, marks: [ kotlin ] }
+  kiosk: { in: core, name: UI, kind: client, sub: kiosk }
+  partnerapi: { in: core, name: Partner API, kind: client, role: Carriers with an integration team., sub: REST, marks: [ openapi ] }
+  edi: { in: core, name: EDI, kind: client, sub: X12 214 / 990 }
+  sftp: { in: core, name: SFTP drop, kind: client, sub: sftp.partners.northwind-holdings.example.com }
+  email: { in: core, name: 電子メール受付, kind: client, role: メールで届いた注文を読み取ります。 }
+  sms: { in: core, name: SMS, kind: client, marks: [ twilio ] }
+  voice: { in: core, name: Voice, kind: client, sub: IVR }
+  rtl: { in: core, name: تطبيق السائق, kind: client, role: للسائقين في الخليج. }
+  slackbot: { in: core, name: "🤖 Slack bot", kind: client, marks: [ slack ] }
+
+  # ---------------------------------------------------------------- core: doors
+  gateway:
+    in: core
+    name: API gateway
+    kind: worker
+    role: Every request from every client, partner and carrier comes through here first.
+    marks: [ kong, kotlin ]
+    card:
+      runtime: Kotlin · Ktor · Kubernetes · Kong
+      entry:
+        - /v1/orgs/:orgId/shipments/:shipmentId/stops/:stopId/proofs-of-delivery
+        - /v1/shipments
+        - /edi/x12/214
+        - /
+      binds: [ PG_PRIMARY eu-central-1.read-replica.pg.internal.northwind-holdings.example.com, REDIS sessions, KAFKA shipment-events-v2-compacted-retention-30d ]
+      scale: 1284003 requests per day
+      note: p99 under 250 ms
+      runs: eu-central-1, us-east-1, ap-northeast-1, me-south-1, sa-east-1
+      config: deploy/k8s/overlays/production/eu-central-1/gateway/kustomization.yaml
+    facts:
+      Requests per day: 1284003
+      Routes: 0
+      Error rate: 0.5
+      Host: eu-central-1.read-replica.pg.internal.northwind-holdings.example.com
+    code:
+      services/gateway/src/main/kotlin/com/northwind/gateway/routing/ProofOfDeliveryRouteConfiguration.kt: proof of delivery routes
+      services/gateway/src/main/kotlin/com/northwind/gateway/App.kt: entry
+  auth:
+    in: core
+    name: Auth
+    kind: worker
+    role: Sign-in for shippers, drivers and carriers.
+    marks: [ keycloak ]
+  webhooks:
+    in: core
+    name: Webhooks
+    kind: worker
+    role: Carrier callbacks.
+
+  # ---------------------------------------------------------------- core: services
+  dispatch:
+    in: core
+    name: Dispatch
+    kind: service
+    role: Assigns every stop to a driver.
+    marks: [ kotlin ]
+    card:
+      runtime: Kotlin
+      entry: [ assign(), reassign() ]
+      binds: [ PG stops ]
+      scale: 0.5 per region
+      note: leader elected
+      runs: eu-central-1
+      config: dispatch.yaml
+  recon:
+    in: core
+    name: Cross-border freight reconciliation and exporter
+    kind: service
+    role: Matches every carrier invoice to the stops it bills for, in 31 currencies, and exports the result for the ledger.
+    marks: [ python, airflow, snowflake ]
+    card:
+      runtime: Python · Airflow
+      entry: [ reconcile_daily(), export_to_ledger(currency, period, carrier_id, include_disputed_lines) ]
+      binds: [ SNOWFLAKE warehouse, S3 exports ]
+      scale: 0 failed runs
+      note: nightly, 02:00 UTC
+      runs: eu-central-1
+      config: dags/recon.py
+  routing:
+    in: core
+    name: 経路最適化
+    kind: service
+    role: 配送ルートを最適化します。
+    sub: OR-Tools
+  notify:
+    in: core
+    name: Notify
+    kind: service
+    sub: SMS, voice, email, push
+  ledger:
+    in: core
+    name: Ledger
+    kind: service
+    role: Double entry, never deletes.
+    card:
+      runtime: Go
+      entry: [ /post ]
+      binds: [ PG ledger ]
+      scale: 1,284,003 entries
+      note: append only
+      runs: eu-central-1
+      config: ledger.toml
+  unnamed:
+    in: core
+    kind: service
+    role: A part the agent added before anyone gave it a name.
+
+  # ---------------------------------------------------------------- core: storage
+  pg:
+    in: core
+    name: Postgres
+    kind: store
+    role: Shipments, stops, drivers, carriers.
+    sub: eu-central-1.read-replica.pg.internal.northwind-holdings.example.com
+    marks: [ postgres ]
+  s3: { in: core, name: S3, kind: store, role: Proof-of-delivery photos., marks: [ aws-s3 ] }
+  redis: { in: core, name: Redis, kind: store, sub: sessions, marks: [ redis ] }
+  warehouse: { in: core, name: Snowflake warehouse, kind: store, marks: [ snowflake ] }
+  scheduler: { in: core, name: Scheduler, kind: worker, role: Cron. }
+
+flows:
+  # root
+  watch: { from: ops, to: platform, says: "“reassign by hand when the router gives up on a stop”", carries: Manual reassignments. }
+  kiosk1: { from: ui, to: platform, says: x }
+  jpflow: { from: jp, to: platform, says: 配送指示を送る, carries: 配送指示 }
+  arflow: { from: ar, to: platform, says: طلبات الشحن, carries: طلبات الشحن من العملاء }
+  vnflow: { from: vn, to: platform, says: "xác nhận giao hàng, ảnh và chữ ký", carries: Bằng chứng giao hàng }
+  fleetflow: { from: fleet, to: platform, says: "positions every 5 s", carries: GPS. }
+  legacyflow: { from: platform, to: legacy, says: "nightly batch, 0 rows on holidays" }
+  partnerflow: { from: partners, to: platform, both: true, says: "EDI 214 status and 990 tender responses" }
+  events: { from: [ kafka, snow, twilio, sfsl, sap ], to: platform, says: "“events, warehouse loads, SMS receipts, field crews, invoices”" }
+
+  # core: 14 lines into the gateway
+  g1: { from: web, to: gateway, says: HTTPS }
+  g2: { from: ios, to: gateway, says: HTTPS }
+  g3: { from: android, to: gateway, says: "HTTPS over flaky 3G" }
+  g4: { from: kiosk, to: gateway }
+  g5: { from: partnerapi, to: gateway, says: "REST, OAuth client credentials" }
+  g6: { from: edi, to: gateway, says: X12 }
+  g7: { from: sftp, to: gateway, says: "files, every 15 min" }
+  g8: { from: email, to: gateway, says: 注文メール }
+  g9: { from: sms, to: gateway, says: "“STOP” replies" }
+  g10: { from: voice, to: gateway, says: DTMF }
+  g11: { from: rtl, to: gateway, says: طلبات }
+  g12: { from: slackbot, to: gateway, says: "/dispatch commands" }
+  g13: { from: webhooks, to: gateway, says: "“carrier callback, signed, retried with backoff for 72 h”" }
+  g14: { from: auth, to: gateway, both: true, says: tokens }
+  # core: the rest
+  assign: { from: gateway, to: dispatch, says: "“assign this stop to the nearest driver who still has hours”", carries: A stop and its time window. }
+  bill: { from: gateway, to: recon, says: carrier invoices }
+  route: { from: dispatch, to: routing, says: 最適化リクエスト }
+  tell: { from: dispatch, to: notify, says: "driver and shipper updates" }
+  post: { from: recon, to: ledger, says: "journal entries, 31 currencies" }
+  stops: { from: dispatch, to: pg, says: "every stop, every status change, every reassignment" }
+  photos: { from: gateway, to: s3, says: proof-of-delivery photos }
+  sessions: { from: auth, to: redis, says: sessions }
+  load: { from: recon, to: warehouse, says: nightly load }
+  sendsms: { from: notify, to: twilio, says: SMS }
+  ledgerpg: { from: ledger, to: pg, says: rows }
+  cron: { from: scheduler, to: recon, says: "02:00 UTC" }
+  orphan: { from: unnamed, to: pg }

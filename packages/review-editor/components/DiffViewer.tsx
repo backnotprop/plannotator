@@ -24,7 +24,7 @@ import { fileViewOfRendered, renderedViewOf, type MarkdownPreviewView } from '..
 import { MarkdownViewMenu } from './MarkdownViewMenu';
 import { BinaryFileNotice } from './BinaryFileNotice';
 import { FileCommentBanner } from './FileCommentBanner';
-import { DiffHScrollbar } from './DiffHScrollbar';
+import { DiffBottomBar } from './DiffBottomBar';
 import { OversizedFileNotice } from './OversizedFileNotice';
 import { isContentlessBinaryPatch, isImagePreviewCandidate, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
 import { ImageDiffPreview } from './ImageDiffPreview';
@@ -1077,9 +1077,6 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
   return (
     <div className="h-full flex flex-col">
-      {/* `relative` anchors this file's horizontal scrollbar to the header's
-          bottom edge (#1048) — same placement as the all-files surface. */}
-      <div className="relative flex-none">
       <FileHeader
         filePath={filePath}
         patch={patch}
@@ -1125,10 +1122,6 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           )
           : undefined}
       />
-      {!collapsed && !markdownPreviewEnabled && diffOverflow !== 'wrap' && (
-        <DiffHScrollbar className="absolute inset-x-2 bottom-0 z-30" />
-      )}
-      </div>
 
       {!collapsed && bodyOverride ? (
         <div className="flex-1 min-h-0 relative flex flex-col" data-diff-body-override>{bodyOverride}</div>
@@ -1264,6 +1257,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           )}
         </OverlayScrollArea>
       )}
+      {!collapsed && !bodyOverride && !markdownPreviewEnabled && diffOverflow !== 'wrap' && <DiffBottomBar root={viewport} />}
 
       {/* The header's Comment button works in every view (diff, preview,
           collapsed), so its composer is mounted outside them. */}

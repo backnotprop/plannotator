@@ -3,7 +3,7 @@
  *
  * A shape is one thing being worked out with one agent session. Each time the
  * agent draws it, the store keeps a full snapshot: a version. A version holds
- * four views (Picture, How it works, What to know, Code), the numbered
+ * its views (Picture, How it works, What's changed, What to know, Code), the numbered
  * references the views cite, and the parts the person can point at.
  *
  * Browser-safe and dependency-free: the store (packages/shared/shape), the
@@ -12,26 +12,33 @@
  *  - `checkShapeBoard` validates what an agent writes (`plannotator shape
  *    update --file`) and names the exact field that is wrong.
  *  - `shapeParts` lists the parts of a board: every `data-mark` of a drawn
- *    view, every paragraph of What to know, every Code step, the title and the claim. Ids
+ *    view, every change and call path of What's changed, every paragraph of What to know,
+ *    every Code step, the title and the claim. Ids
  *    stay the same across versions, which is what lets the board redraw only
  *    what changed.
  *  - `diffShapeVersions` compares two snapshots by those ids ("what changed
  *    since you looked"). The agent never writes what changed; it is worked
  *    out here.
+ *  - A board may carry `scenes` (`./shape-scene`): the agent's own SVG in a
+ *    drawn view's `<div data-scene="id">…</div>`, whose `data-part` pieces the
+ *    board's player moves by the scene's keyframes. Data only, never a script.
  *
  * Spec: the approved Shape design record ("shape-living-board"), sections 3 and 4.
  */
 import type { CodeGuideOutput } from './guide';
 import { ulid } from './ulid';
+import { checkShapeScene, shapeHtmlParts, shapeHtmlSceneSlots, shapeHtmlScenes, shapeScenePieceRefs, type ShapeScene } from './shape-scene';
+export type { ShapeScene } from './shape-scene';
 
 export const SHAPE_FORMAT_VERSION = 1;
 
-export type ShapeViewId = 'picture' | 'how' | 'know' | 'code';
+export type ShapeViewId = 'picture' | 'how' | 'changed' | 'know' | 'code';
 
-/** The four views, in the dock's order. Their labels are the product's words. */
+/** The views, in the dock's order. Their labels are the product's words. */
 export const SHAPE_VIEWS: readonly { id: ShapeViewId; label: string }[] = [
   { id: 'picture', label: 'Picture' },
   { id: 'how', label: 'How it works' },
+  { id: 'changed', label: "What's changed" },
   { id: 'know', label: 'What to know' },
   { id: 'code', label: 'Code' },
 ];
@@ -71,6 +78,81 @@ export interface ShapeDrawnView {
    * that must be drawn. It flows and scrolls like a page. Most boards have none.
    */
   more?: { html: string; css?: string };
+  /**
+   * How it works only: examples a person can follow through the drawing
+   * ("Follow an example"), one per way it can go. Each step names the parts it
+   * lights by the drawing's own ids: `data-mark` for a part, `data-edge` for
+   * an arrow (put `data-edge="id"` on the arrow and on its words).
+   */
+  examples?: ShapeExample[];
+}
+
+/**
+ * One example, followed through How it works: a real case, read from the code
+ * (nothing is run). Named by where it ends ("It opens", "Nothing shows").
+ */
+export interface ShapeExample {
+  /** Where it ends, for the switch: "It opens". */
+  name: string;
+  /** The case, in a line: "You leave a thread you just read". */
+  title: string;
+  /** What happens, in a sentence, shown before stepping. */
+  lead?: string;
+  steps: ShapeExampleStep[];
+}
+
+/** Where a value going into a step came from: a line of code, an earlier step's output (1-based), or a few words. */
+export type ShapeExampleSource = { path: string; line: number } | { step: number } | string;
+
+export interface ShapeExampleInput {
+  /** As the code names it: `gate.pageAge`. */
+  name: string;
+  /** As the code holds it: `240_000`, `true`, `'open'`. */
+  value: string;
+  /** Its type: `number`. */
+  type?: string;
+  /** The value in plain words, when the literal is hard to read: `4 min`. */
+  reading?: string;
+  from: ShapeExampleSource;
+}
+
+export type ShapeExampleResult = 'pass' | 'fail' | 'not-reached';
+
+export interface ShapeExampleCheck {
+  /** The expression as the code writes it: `gate.pageAge >= SNOOZE_INTRO_TIMES.pageAgeMs`. */
+  code: string;
+  /** The constant's value, shown as a comment: `60_000`. */
+  constant?: string;
+  /** The value the check saw (absent when it was not reached). */
+  saw?: string;
+  result: ShapeExampleResult;
+  /** The check that decided which way the step went. One per step. */
+  decides?: boolean;
+  /** A failing check's shortfall: `20_000 short (20 s)`. */
+  short?: string;
+}
+
+export interface ShapeExampleStep {
+  /** The part it lights (`data-mark`). */
+  part?: string;
+  /** The arrow it takes to get there (`data-edge`). */
+  arrow?: string;
+  /** The example's value at this step, written on the part: `9 s, past the 5 s it needs`. */
+  tag: string;
+  /** Where the tag sits on its part: its top edge (default) or its bottom edge. */
+  tagAt?: 'top' | 'bottom';
+  /** What happens, in a plain sentence. */
+  text: string;
+  /** The example's numbers against the rule, in words, when they explain the tag. */
+  detail?: string;
+  inputs: ShapeExampleInput[];
+  /** The function, as declared: `snoozeIntroMayClaim(gate: …, now: Date = new Date()): boolean`. */
+  signature: string;
+  /** In code order. */
+  checks: ShapeExampleCheck[];
+  output: { name: string; value: string; type: string; note?: string };
+  /** The function's line: the card's link into the code. */
+  code: { path: string; line: number };
 }
 
 // An old board's Requirements. Nothing new writes them (`checkShapeBoard` refuses them); a saved version keeps them and What to know shows them.
@@ -122,6 +204,81 @@ export interface ShapeCodeView {
   files?: { path: string; line?: number }[];
 }
 
+/**
+ * What's changed: the change read as a patch, after How it works. The agent
+ * that draws the board writes it, and keeps it in agreement with the Picture
+ * and How it works.
+ *
+ * Text fields are inline Markdown (`code`, **bold**, links, `[^n]`), except
+ * `was` and `now`, which are diff lines: plain words, with `code` for names.
+ * A place in code is `path:line` (or `path#L42`), a path in the project; a
+ * guide step is the review's chapter number, from 1.
+ */
+export type ShapeChangeKind = 'behaviour' | 'contract' | 'moved' | 'removed' | 'check';
+export const SHAPE_CHANGE_KINDS: readonly ShapeChangeKind[] = ['behaviour', 'contract', 'moved', 'removed', 'check'];
+
+export interface ShapeChangeItem {
+  /** Stable across versions: a part the person can point at. */
+  id: string;
+  /**
+   * behaviour: what a person or a program sees happen; contract: a name, an
+   * address, a format others rely on; moved: code that moved unchanged;
+   * removed: what is gone; check: something to look at, with a note.
+   */
+  kind: ShapeChangeKind;
+  title: string;
+  /** The − lines: what it was. One line, or several. */
+  was?: string | string[];
+  /** The + lines: what it is now. */
+  now?: string | string[];
+  /** moved: from where, to where (paths or names), and how many lines. */
+  from?: string;
+  to?: string;
+  lines?: number;
+  /** A sentence under the lines; required on check. */
+  note?: string;
+  /** Where it is in the code: `path:line`. */
+  code?: string[];
+  /** The review's guide step (chapter) that walks through it, from 1. */
+  step?: number;
+}
+
+/** A step on a call path, marked as it changed. `same` is context. */
+export interface ShapeFlowStep {
+  call: string;
+  is: 'new' | 'gone' | 'changed' | 'same';
+  note?: string;
+  /** `path:line`. */
+  at?: string;
+}
+
+/** Where a path ends: before and after (the same words when it did not change). */
+export interface ShapeFlowEnd {
+  was?: string;
+  now: string;
+}
+
+/** One path through the change, read as a unified diff: it starts, steps, forks and ends. */
+export interface ShapeChangeFlow {
+  id: string;
+  title: string;
+  start: string;
+  steps?: ShapeFlowStep[];
+  /** Branches after the steps, each with its own steps and end. */
+  forks?: { when: string; steps?: ShapeFlowStep[]; end?: ShapeFlowEnd }[];
+  end?: ShapeFlowEnd;
+}
+
+export interface ShapeChanged {
+  /** One sentence: what is different now. */
+  summary?: string;
+  items: ShapeChangeItem[];
+  /** The call paths the change moves. Most changes have one or none. */
+  flows?: ShapeChangeFlow[];
+  /** One line for the rest (renames that stay, tests, docs). */
+  also?: string;
+}
+
 export type ShapeRefKind = 'message' | 'image' | 'file' | 'pr' | 'diff' | 'link';
 export const SHAPE_REF_KINDS: readonly ShapeRefKind[] = ['message', 'image', 'file', 'pr', 'diff', 'link'];
 
@@ -157,6 +314,8 @@ export interface ShapeBoard {
   views: {
     picture?: ShapeDrawnView;
     how?: ShapeDrawnView;
+    /** What's changed: the change as a patch (items, call paths). */
+    changed?: ShapeChanged;
     /** What the person needs to know: at most two short paragraphs of prose. Inline Markdown. */
     know?: string;
     /** Only on a version saved before What to know. */
@@ -164,6 +323,8 @@ export interface ShapeBoard {
     code?: ShapeCodeView;
   };
   refs?: ShapeRef[];
+  /** Scenes the agent draws and the board's player plays, by id (`./shape-scene`): where a drawn view puts `<div data-scene="id">…</div>`. */
+  scenes?: Record<string, ShapeScene>;
 }
 
 // ───────────────────────────── what the store keeps ─────────────────────────────
@@ -245,6 +406,22 @@ export interface ShapeNote {
   re: string | null;
   /** When an agent picked it up (`shape read`); null while it waits. */
   delivered: string | null;
+  /** A box dragged over the board: where it sits. `part` then names every part inside it, comma-separated. */
+  box?: ShapeNoteBox;
+  /** The `data-code` places inside the box ("src/a.ts#L42"). */
+  code?: string[];
+  /** A picture of the box, grown to the whole of the parts it picked, the box drawn on it: `files/…` in the store, its full path in `shape read --notes`. */
+  picture?: string;
+}
+
+/** Where a box sits, as fractions of its drawing (or of What to know). `tall` and `more`: on that layout of the view. */
+export interface ShapeNoteBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  tall?: true;
+  more?: true;
 }
 
 /** A Change it that no agent has picked up: "1 change waits for the agent". */
@@ -277,6 +454,8 @@ export function isShapeNoteId(value: unknown): value is string {
 
 /** The most a board may hold. A refusal names the field and the limit. */
 export const SHAPE_LIMITS = {
+  /** Scenes a board holds (`./shape-scene`). */
+  scenes: 8,
   title: 140,
   claim: 400,
   note: 280,
@@ -296,6 +475,18 @@ export const SHAPE_LIMITS = {
   images: 12,
   noteText: 4000,
   quote: 600,
+  /** What's changed: items, lines per side, call paths, steps and forks per path. */
+  changes: 40,
+  changeLines: 12,
+  flows: 6,
+  flowSteps: 40,
+  forks: 12,
+  examples: 6,
+  exampleSteps: 12,
+  exampleRows: 12,
+  exampleCode: 600,
+  /** A box's picture, as a data: URL. */
+  notePicture: 6_000_000,
 } as const;
 
 const PART_ID_RE = /^[A-Za-z][\w.-]{0,63}$/;
@@ -563,7 +754,7 @@ export function shapeHtmlProblems(html: string): string[] {
       else if (SHAPE_URL_ATTRS.includes(name)) {
         const link = tag === 'a' && (name === 'href' || name === 'xlink:href');
         if (!shapeUrlAllowed(value, link)) {
-          add(`<${tag} ${name}="${shown}">: nothing may load from outside the board; use a file on this computer, files/<name>, #id or a data:image${link ? ' (a link may be https://)' : ''}`);
+          add(`<${tag} ${name}="${shown}">: nothing may load from outside the board; use files/<name>, #id or a data:image (a picture on this computer or the web goes in <img src> or <image href>, and shape update copies it in)${link ? ' (a link may be https://)' : ''}`);
         }
       } else if (name === 'style') {
         for (const p of shapeCssProblems(value)) add(`<${tag} style>: ${p}`);
@@ -647,6 +838,148 @@ export function shapeHtmlDataCodes(html: string): string[] {
     }
   }
   return out;
+}
+
+// HTML start tags that end an <svg> where they stand (the spec's "breakout" tags in foreign content);
+// `font` only with color, face or size. Of them, the ones with no end tag and no picture.
+const SVG_BREAKOUT_TAGS = new Set(['b', 'big', 'blockquote', 'body', 'br', 'center', 'code', 'dd', 'div', 'dl', 'dt', 'em', 'embed', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'hr', 'i', 'img', 'li', 'listing', 'menu', 'meta', 'nobr', 'ol', 'p', 'pre', 'ruby', 's', 'small', 'span', 'strong', 'strike', 'sub', 'sup', 'table', 'tt', 'u', 'ul', 'var']);
+const SVG_BREAKOUT_VOID = new Set(['br', 'embed', 'hr', 'meta']);
+// Inside these SVG parts the page reads HTML again.
+const SVG_HTML_POINTS = new Set(['foreignobject', 'desc', 'title']);
+// Outside SVG, the page reads these elements' content as text: an `<svg` in it is no drawing.
+const HTML_RAW_TEXT = new Set(['script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes']);
+
+/**
+ * The drawing with the HTML tags the page would let end an `<svg>` renamed to
+ * SVG ones where they stand, so the page keeps the rest of the drawing in the
+ * SVG instead of dropping it. Inside a `<text>` such a tag becomes a `tspan`,
+ * which still shows its words. Elsewhere only a tag that holds nothing (an
+ * empty `<span data-ref="1"></span>` among the shapes, a `<br>`) becomes a
+ * `g`, keeping its attributes (a `data-ref` stays a number): SVG would not
+ * show the words of a `<div>Legend</div>` or the picture of an `<img>`, so
+ * those are left as written and the page shows them as HTML, as it always
+ * did. Everything else, HTML inside a foreignObject included, is left as
+ * written.
+ */
+export function shapeKeepSvgWhole(html: string): string {
+  if (!/<svg/i.test(html)) return html;
+  const n = html.length;
+  const lower = html.toLowerCase();
+  // What is open inside the outermost <svg>, as written (`name`) and as now written (`as`).
+  const open: { name: string; as: string }[] = [];
+  const inSvg = () => open.length > 0 && !SVG_HTML_POINTS.has(open[open.length - 1]!.name);
+  const inText = () => {
+    for (let k = open.length - 1; k >= 0 && open[k]!.name !== 'svg'; k--) if (open[k]!.as === 'text') return true;
+    return false;
+  };
+  let out = '';
+  let copied = 0;
+  for (let lt = html.indexOf('<'); lt >= 0 && lt < n; lt = html.indexOf('<', lt + 1)) {
+    // Deeper than any page nests a drawing: the rest stays as written.
+    if (open.length > 512) break;
+    if (html.startsWith('<!--', lt)) {
+      // A comment ends at `-->` or `--!>`; `<!-->` and `<!--->` end at once.
+      if (html.startsWith('>', lt + 4) || html.startsWith('->', lt + 4)) {
+        lt = html.indexOf('>', lt + 4);
+        continue;
+      }
+      let e = html.indexOf('--', lt + 4);
+      while (e >= 0 && html[e + 2] !== '>' && !html.startsWith('!>', e + 2)) e = html.indexOf('--', e + 1);
+      lt = e < 0 ? n : html.indexOf('>', e);
+      continue;
+    }
+    if (inSvg() && html.startsWith('<![CDATA[', lt)) {
+      const e = html.indexOf(']]>', lt + 9);
+      lt = e < 0 ? n : e + 2;
+      continue;
+    }
+    const at = lt;
+    const end = html[lt + 1] === '/';
+    const start = end ? lt + 2 : lt + 1;
+    // `<!…>`, `<?…>` and `</` with no name are comments to the next `>`.
+    if (html[lt + 1] === '!' || html[lt + 1] === '?' || (end && !isAsciiAlpha(html[start]))) {
+      const e = html.indexOf('>', lt + 1);
+      lt = e < 0 ? n : e;
+      continue;
+    }
+    if (!isAsciiAlpha(html[start])) continue;
+    let i = start;
+    while (i < n && !isHtmlSpace(html[i]) && html[i] !== '/' && html[i] !== '>') i++;
+    const nameEnd = i;
+    const name = html.slice(start, nameEnd).toLowerCase();
+    // The tag's attributes, read as the page reads them, up to its `>`.
+    for (;;) {
+      while (i < n && (isHtmlSpace(html[i]) || html[i] === '/')) i++;
+      if (i >= n || html[i] === '>') break;
+      i++;
+      while (i < n && !isHtmlSpace(html[i]) && html[i] !== '/' && html[i] !== '>' && html[i] !== '=') i++;
+      while (i < n && isHtmlSpace(html[i])) i++;
+      if (html[i] !== '=') continue;
+      i++;
+      while (i < n && isHtmlSpace(html[i])) i++;
+      if (html[i] === '"' || html[i] === "'") {
+        const q = html.indexOf(html[i]!, i + 1);
+        i = q < 0 ? n : q + 1;
+      } else while (i < n && !isHtmlSpace(html[i]) && html[i] !== '>') i++;
+    }
+    const gt = i;
+    const selfClosing = html[gt - 1] === '/' && gt - 1 >= nameEnd;
+    lt = gt;
+    if (!inSvg()) {
+      const point = open[open.length - 1];
+      if (!end && name === 'svg') {
+        if (!selfClosing) open.push({ name, as: name });
+      } else if (end && point && name === point.name) open.pop();
+      else if (!end && HTML_RAW_TEXT.has(name)) {
+        const close = lower.indexOf(`</${name}`, gt);
+        lt = close < 0 ? n : close;
+      } else if (!end && name === 'plaintext') break;
+      continue;
+    }
+    if (!end) {
+      const breakout =
+        SVG_BREAKOUT_TAGS.has(name) || (name === 'font' && /[\s/](?:color|face|size)(?=[\s/=>]|$)/i.test(html.slice(nameEnd, gt)));
+      if (!breakout) {
+        if (!selfClosing) open.push({ name, as: name });
+        continue;
+      }
+      const words = inText();
+      let empty = selfClosing || SVG_BREAKOUT_VOID.has(name);
+      if (!empty && !words && name !== 'img') {
+        let k = gt + 1;
+        while (k < n && isHtmlSpace(html[k])) k++;
+        empty = lower.startsWith(`</${name}`, k) && /^[\s/>]?$/.test(html[k + 2 + name.length] ?? '');
+      }
+      if (name === 'img' || (!words && !empty)) {
+        // Left as written, it ends the SVG here: what follows is HTML again.
+        while (inSvg()) open.pop();
+        continue;
+      }
+      const as = words ? 'tspan' : 'g';
+      const close = SVG_BREAKOUT_VOID.has(name) && !selfClosing;
+      out += html.slice(copied, start) + as + html.slice(nameEnd, gt) + (close ? ' /' : '');
+      copied = gt;
+      if (!selfClosing && !close) open.push({ name, as });
+      continue;
+    }
+    // An end tag closes the nearest part of its name, as written or as now written.
+    let k = open.length - 1;
+    while (k >= 0 && open[k]!.name !== name && open[k]!.as !== name) k--;
+    if (k < 0) {
+      // `</p>` or `</br>` with nothing to close would end the SVG too: an empty part instead.
+      if (name !== 'p' && name !== 'br') continue;
+      out += html.slice(copied, at) + `<${inText() ? 'tspan' : 'g'}/>`;
+      copied = Math.min(gt + 1, n);
+      continue;
+    }
+    const as = open[k]!.as;
+    if (as !== name) {
+      out += html.slice(copied, at) + `</${as}>`;
+      copied = Math.min(gt + 1, n);
+    }
+    open.length = open.map((o) => o.as).lastIndexOf(as);
+  }
+  return copied ? out + html.slice(copied) : html;
 }
 
 /**
@@ -733,7 +1066,7 @@ class Checker {
   }
 }
 
-function checkDrawn(c: Checker, value: unknown, field: string): ShapeDrawnView | undefined {
+function checkDrawn(c: Checker, value: unknown, field: string, withExamples = false): ShapeDrawnView | undefined {
   if (value === undefined || value === null) return undefined;
   if (!isRecord(value)) {
     c.fail(field, 'must be an object with html');
@@ -759,6 +1092,11 @@ function checkDrawn(c: Checker, value: unknown, field: string): ShapeDrawnView |
       if (th !== undefined) tall = { html: th, ...(tc ? { css: tc } : {}) };
     }
   }
+  let examples: ShapeExample[] | undefined;
+  if (value.examples !== undefined && value.examples !== null) {
+    if (!withExamples) c.fail(`${field}.examples`, 'examples go on views.how (How it works), the drawing they are followed through');
+    else if (html !== undefined) examples = checkExamples(c, value.examples, `${field}.examples`, html, tall?.html);
+  }
   let more: ShapeDrawnView['more'];
   if (value.more !== undefined && value.more !== null) {
     if (!isRecord(value.more)) c.fail(`${field}.more`, 'must be an object with html');
@@ -776,8 +1114,178 @@ function checkDrawn(c: Checker, value: unknown, field: string): ShapeDrawnView |
     ...(css ? { css } : {}),
     ...(width !== undefined && height !== undefined ? { width, height } : {}),
     ...(tall ? { tall } : {}),
+    ...(examples?.length ? { examples } : {}),
     ...(more ? { more } : {}),
   };
+}
+
+/** The ids of a drawing's arrows: every `data-edge` value. */
+export function shapeHtmlEdges(html: string): Set<string> {
+  const out = new Set<string>();
+  for (const m of html.matchAll(/\sdata-edge\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+    const id = (m[1] ?? m[2] ?? m[3] ?? '').trim();
+    if (id) out.add(id);
+  }
+  return out;
+}
+
+const EXAMPLE_RESULTS: readonly ShapeExampleResult[] = ['pass', 'fail', 'not-reached'];
+
+/**
+ * How it works' examples. Each step lights a part (`data-mark`) or an arrow
+ * (`data-edge`) the drawing has, in the wide drawing and in the tall one when
+ * there is one (a phone follows the same path). A value handed on names an
+ * earlier step; a step's checks are in code order, with the one that decided
+ * it marked, and none after a failing check ran.
+ */
+function checkExamples(c: Checker, value: unknown, field: string, html: string, tallHtml: string | undefined): ShapeExample[] | undefined {
+  const list = c.list(value, field, SHAPE_LIMITS.examples);
+  if (!list) return undefined;
+  const drawings = [{ name: 'html', marks: new Set(shapeHtmlMarks(html).map((m) => m.id)), edges: shapeHtmlEdges(html) }];
+  if (tallHtml !== undefined) drawings.push({ name: 'tall.html', marks: new Set(shapeHtmlMarks(tallHtml).map((m) => m.id)), edges: shapeHtmlEdges(tallHtml) });
+  const view = field.replace(/\.examples$/, '');
+  const out: ShapeExample[] = [];
+  const names = new Set<string>();
+  list.forEach((ex, ei) => {
+    const ef = `${field}[${ei}]`;
+    if (!isRecord(ex)) return c.fail(ef, 'must be { name, title, steps }');
+    const name = c.text(ex.name, `${ef}.name`, 40);
+    if (name && names.has(name)) c.fail(`${ef}.name`, `"${name}" is used twice; name each example by where it ends`);
+    if (name) names.add(name);
+    const title = c.text(ex.title, `${ef}.title`, 140);
+    const lead = c.text(ex.lead, `${ef}.lead`, SHAPE_LIMITS.line, false);
+    const steps = c.list(ex.steps, `${ef}.steps`, SHAPE_LIMITS.exampleSteps);
+    if (!steps) {
+      if (ex.steps === undefined) c.fail(`${ef}.steps`, 'is required');
+      return;
+    }
+    if (!steps.length) c.fail(`${ef}.steps`, 'needs at least one step');
+    const outSteps: ShapeExampleStep[] = [];
+    steps.forEach((st, si) => {
+      const step = checkExampleStep(c, st, `${ef}.steps[${si}]`, si, drawings, view);
+      if (step) outSteps.push(step);
+    });
+    if (name && title && outSteps.length === steps.length && steps.length) out.push({ name, title, ...(lead ? { lead } : {}), steps: outSteps });
+  });
+  return out;
+}
+
+function checkExampleStep(
+  c: Checker,
+  st: unknown,
+  f: string,
+  index: number,
+  drawings: { name: string; marks: Set<string>; edges: Set<string> }[],
+  view: string,
+): ShapeExampleStep | undefined {
+  if (!isRecord(st)) {
+    c.fail(f, 'must be { part or arrow, tag, text, inputs, signature, checks, output, code }');
+    return undefined;
+  }
+  const before = c.errors.length;
+  const part = st.part === undefined || st.part === null ? undefined : c.id(st.part, `${f}.part`);
+  const arrow = st.arrow === undefined || st.arrow === null ? undefined : c.id(st.arrow, `${f}.arrow`);
+  if (st.part == null && st.arrow == null) c.fail(f, 'needs a part (a data-mark) or an arrow (a data-edge) to light');
+  for (const d of drawings) {
+    if (part && !d.marks.has(part)) c.fail(`${f}.part`, `"${part}" is not a data-mark in ${view}.${d.name}`);
+    if (arrow && !d.edges.has(arrow)) c.fail(`${f}.arrow`, `"${arrow}" is not a data-edge in ${view}.${d.name}; put data-edge="${arrow}" on the arrow`);
+  }
+  const tag = c.text(st.tag, `${f}.tag`, 60);
+  let tagAt: ShapeExampleStep['tagAt'];
+  if (st.tagAt !== undefined && st.tagAt !== null) {
+    if (st.tagAt !== 'top' && st.tagAt !== 'bottom') c.fail(`${f}.tagAt`, 'must be "top" or "bottom"');
+    else tagAt = st.tagAt;
+  }
+  const text = c.text(st.text, `${f}.text`, 200);
+  const detail = c.text(st.detail, `${f}.detail`, SHAPE_LIMITS.line, false);
+  const signature = c.text(st.signature, `${f}.signature`, SHAPE_LIMITS.exampleCode);
+  if (signature && !/^[\w$.]+\s*\(/.test(signature)) c.fail(`${f}.signature`, 'must start with the function\'s name and its parameters: name(a: A): R');
+
+  const inputs: ShapeExampleInput[] = [];
+  const ins = c.list(st.inputs, `${f}.inputs`, SHAPE_LIMITS.exampleRows);
+  (ins ?? []).forEach((v, i) => {
+    const vf = `${f}.inputs[${i}]`;
+    if (!isRecord(v)) return c.fail(vf, 'must be { name, value, type, reading, from }');
+    const name = c.text(v.name, `${vf}.name`, 80);
+    const val = c.text(v.value, `${vf}.value`, 200);
+    const type = c.text(v.type, `${vf}.type`, 120, false);
+    const reading = c.text(v.reading, `${vf}.reading`, 60, false);
+    const from = checkExampleSource(c, v.from, `${vf}.from`, index);
+    if (name && val !== undefined && from !== undefined) inputs.push({ name, value: val, ...(type ? { type } : {}), ...(reading ? { reading } : {}), from });
+  });
+
+  const checks: ShapeExampleCheck[] = [];
+  const cl = c.list(st.checks, `${f}.checks`, SHAPE_LIMITS.exampleRows);
+  let failed = false;
+  (cl ?? []).forEach((k, i) => {
+    const kf = `${f}.checks[${i}]`;
+    if (!isRecord(k)) return c.fail(kf, 'must be { code, constant, saw, result, decides, short }');
+    const code = c.text(k.code, `${kf}.code`, SHAPE_LIMITS.exampleCode);
+    const constant = c.text(k.constant, `${kf}.constant`, 60, false);
+    const result = EXAMPLE_RESULTS.includes(k.result as ShapeExampleResult) ? (k.result as ShapeExampleResult) : undefined;
+    if (!result) c.fail(`${kf}.result`, 'must be "pass", "fail" or "not-reached"');
+    const saw = c.text(k.saw, `${kf}.saw`, 120, result !== 'not-reached');
+    if (k.decides !== undefined && k.decides !== null && typeof k.decides !== 'boolean') c.fail(`${kf}.decides`, 'must be true or false');
+    const decides = k.decides === true;
+    if (decides && result === 'not-reached') c.fail(`${kf}.decides`, 'a check that was not reached cannot decide the step');
+    const short = c.text(k.short, `${kf}.short`, 80, false);
+    if (short && result !== 'fail') c.fail(`${kf}.short`, 'only a failing check has a shortfall');
+    if (failed && result && result !== 'not-reached') c.fail(`${kf}.result`, 'must be "not-reached": an earlier check failed, so the code never got here');
+    if (result === 'fail') failed = true;
+    if (code && result) checks.push({ code, ...(constant ? { constant } : {}), ...(saw ? { saw } : {}), result, ...(decides ? { decides } : {}), ...(short ? { short } : {}) });
+  });
+  const deciding = (cl ?? []).filter((k) => isRecord(k) && k.decides === true).length;
+  if (cl?.length && deciding !== 1) c.fail(`${f}.checks`, `mark exactly one check "decides": true, the one that settled the step (${deciding} are marked)`);
+
+  let output: ShapeExampleStep['output'] | undefined;
+  if (!isRecord(st.output)) c.fail(`${f}.output`, 'must be { name, value, type }');
+  else {
+    const name = c.text(st.output.name, `${f}.output.name`, 80);
+    const val = c.text(st.output.value, `${f}.output.value`, 200);
+    const type = c.text(st.output.type, `${f}.output.type`, 120);
+    const note = c.text(st.output.note, `${f}.output.note`, 120, false);
+    if (name && val !== undefined && type) output = { name, value: val, type, ...(note ? { note } : {}) };
+  }
+  let code: ShapeExampleStep['code'] | undefined;
+  if (!isRecord(st.code)) c.fail(`${f}.code`, "must be { path, line }: the function's line");
+  else {
+    const path = c.path(st.code.path, `${f}.code.path`);
+    const line = c.int(st.code.line, `${f}.code.line`, 1, 10_000_000);
+    if (path && line) code = { path, line };
+  }
+  if (c.errors.length > before || !tag || !text || !signature || !output || !code) return undefined;
+  return {
+    ...(part ? { part } : {}),
+    ...(arrow ? { arrow } : {}),
+    tag,
+    ...(tagAt ? { tagAt } : {}),
+    text,
+    ...(detail ? { detail } : {}),
+    inputs,
+    signature,
+    checks,
+    output,
+    code,
+  };
+}
+
+function checkExampleSource(c: Checker, from: unknown, f: string, index: number): ShapeExampleSource | undefined {
+  if (typeof from === 'string') return c.text(from, f, 80);
+  if (!isRecord(from)) {
+    c.fail(f, 'must be { path, line } (where it is read in the code), { step: n } (an earlier step\'s output) or a few words');
+    return undefined;
+  }
+  if (from.step !== undefined) {
+    if (!index) {
+      c.fail(`${f}.step`, 'the first step has no earlier step; name the code it is read from: { path, line }');
+      return undefined;
+    }
+    const step = c.int(from.step, `${f}.step`, 1, index);
+    return step === undefined ? undefined : { step };
+  }
+  const path = c.path(from.path, `${f}.path`);
+  const line = c.int(from.line, `${f}.line`, 1, 10_000_000);
+  return path && line ? { path, line } : undefined;
 }
 
 /** What to know's paragraphs: blank lines part them. */
@@ -882,6 +1390,184 @@ function checkCode(c: Checker, value: unknown, field: string): ShapeCodeView | u
   };
 }
 
+/** A place in code, `path:line` or `path#L42`, kept as written. */
+function checkCodePlace(c: Checker, value: unknown, field: string): string | undefined {
+  const text = c.text(value, field, 520);
+  if (text === undefined) return undefined;
+  if (!parseShapeCodeTarget(text)) {
+    c.fail(field, `"${text.slice(0, 80)}" must be path:line (src/a.ts:42), a path in the project`);
+    return undefined;
+  }
+  return text;
+}
+
+const CITE_RE = /\[\^\d{1,3}\]/;
+
+/**
+ * Words What's changed draws as they are (diff lines, a call path's steps and ends, a move's from and to): a `[^n]`
+ * there would show as written, so it is refused, naming the field.
+ */
+function plainText(c: Checker, value: string | undefined, field: string): string | undefined {
+  if (value !== undefined && CITE_RE.test(value)) {
+    c.fail(field, 'shows a [^n] as written: cite a reference in a title, a note, the summary or also');
+    return undefined;
+  }
+  return value;
+}
+
+/** `was` or `now`: one line, or a list of lines. Kept as written. */
+function checkDiffLines(c: Checker, value: unknown, field: string): string | string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (Array.isArray(value)) {
+    const lines = c.list(value, field, SHAPE_LIMITS.changeLines);
+    if (!lines) return undefined;
+    if (!lines.length) {
+      c.fail(field, 'is empty');
+      return undefined;
+    }
+    const out = lines.map((line, i) => plainText(c, c.text(line, `${field}[${i}]`, SHAPE_LIMITS.line), `${field}[${i}]`));
+    return out.every((line): line is string => line !== undefined) ? out : undefined;
+  }
+  return plainText(c, c.text(value, field, SHAPE_LIMITS.line), field);
+}
+
+function checkFlowEnd(c: Checker, value: unknown, field: string): ShapeFlowEnd | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isRecord(value)) {
+    c.fail(field, 'must be { was?, now }');
+    return undefined;
+  }
+  const was = plainText(c, c.text(value.was, `${field}.was`, SHAPE_LIMITS.line, false), `${field}.was`);
+  const now = plainText(c, c.text(value.now, `${field}.now`, SHAPE_LIMITS.line), `${field}.now`);
+  return now === undefined ? undefined : { ...(was !== undefined ? { was } : {}), now };
+}
+
+const FLOW_IS: readonly ShapeFlowStep['is'][] = ['new', 'gone', 'changed', 'same'];
+
+function checkFlowSteps(c: Checker, value: unknown, field: string): ShapeFlowStep[] | undefined {
+  const steps = c.list(value, field, SHAPE_LIMITS.flowSteps);
+  if (!steps) return undefined;
+  return steps.flatMap((s, i) => {
+    const f = `${field}[${i}]`;
+    if (!isRecord(s)) {
+      c.fail(f, 'must be { call, is, note?, at? }');
+      return [];
+    }
+    const call = plainText(c, c.text(s.call, `${f}.call`, 200), `${f}.call`);
+    const is = FLOW_IS.includes(s.is as ShapeFlowStep['is']) ? (s.is as ShapeFlowStep['is']) : undefined;
+    if (!is) c.fail(`${f}.is`, `must be one of ${FLOW_IS.join(', ')}`);
+    const note = plainText(c, c.text(s.note, `${f}.note`, SHAPE_LIMITS.line, false), `${f}.note`);
+    const at = s.at === undefined || s.at === null ? undefined : checkCodePlace(c, s.at, `${f}.at`);
+    return call !== undefined && is ? [{ call, is, ...(note !== undefined ? { note } : {}), ...(at !== undefined ? { at } : {}) }] : [];
+  });
+}
+
+/** The fields of a change the board draws only for some kinds, and what each kind shows instead. */
+const CHANGE_FIELDS_NOT_DRAWN: Record<ShapeChangeKind, readonly ('was' | 'now' | 'from' | 'to' | 'lines')[]> = {
+  behaviour: ['from', 'to', 'lines'],
+  contract: ['from', 'to', 'lines'],
+  removed: ['from', 'to', 'lines'],
+  moved: ['was', 'now'],
+  check: ['was', 'now', 'from', 'to', 'lines'],
+};
+const CHANGE_FIELDS_DRAWN: Record<ShapeChangeKind, string> = {
+  behaviour: 'it shows was and now',
+  contract: 'it shows was and now',
+  removed: 'it shows was and now',
+  moved: 'it shows from, to and lines',
+  check: 'it shows its note',
+};
+
+function checkChanged(c: Checker, value: unknown, field: string): ShapeChanged | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isRecord(value)) {
+    c.fail(field, 'must be an object with items');
+    return undefined;
+  }
+  const ids = new Set<string>();
+  const ownId = (v: unknown, f: string) => {
+    const id = c.id(v, f);
+    if (id !== undefined && ids.has(id)) c.fail(f, `"${id}" is used twice`);
+    if (id !== undefined) ids.add(id);
+    return id;
+  };
+  const summary = c.text(value.summary, `${field}.summary`, SHAPE_LIMITS.line, false);
+  const also = c.text(value.also, `${field}.also`, 600, false);
+  const list = c.list(value.items, `${field}.items`, SHAPE_LIMITS.changes);
+  if (value.items === undefined || value.items === null) c.fail(`${field}.items`, 'is required');
+  const items: ShapeChangeItem[] = [];
+  (list ?? []).forEach((it, i) => {
+    const f = `${field}.items[${i}]`;
+    if (!isRecord(it)) return c.fail(f, 'must be { id, kind, title, … }');
+    const id = ownId(it.id, `${f}.id`);
+    const kind = SHAPE_CHANGE_KINDS.includes(it.kind as ShapeChangeKind) ? (it.kind as ShapeChangeKind) : undefined;
+    if (!kind) c.fail(`${f}.kind`, `must be one of ${SHAPE_CHANGE_KINDS.join(', ')}`);
+    const title = c.text(it.title, `${f}.title`, 200);
+    const was = checkDiffLines(c, it.was, `${f}.was`);
+    const now = checkDiffLines(c, it.now, `${f}.now`);
+    const from = plainText(c, c.text(it.from, `${f}.from`, 500, false), `${f}.from`);
+    const to = plainText(c, c.text(it.to, `${f}.to`, 500, false), `${f}.to`);
+    const lines = c.int(it.lines, `${f}.lines`, 1, 10_000_000, false);
+    const note = c.text(it.note, `${f}.note`, 1000, false);
+    // A kind's own rule only on a field the agent left out: one that is there but wrong already has its error.
+    const absent = (name: string) => it[name] === undefined || it[name] === null;
+    if (kind === 'moved' && (absent('from') || absent('to'))) c.fail(f, 'a moved change needs from and to');
+    if (kind === 'removed' && absent('was')) c.fail(`${f}.was`, 'a removed change needs was: what is gone');
+    if (kind === 'check' && absent('note')) c.fail(`${f}.note`, 'a check needs a note: what to look at, and why');
+    if ((kind === 'behaviour' || kind === 'contract') && absent('was') && absent('now')) c.fail(f, `a ${kind} change needs was, now or both`);
+    // A field the board does not draw for this kind is refused, not stored unseen.
+    if (kind) {
+      for (const name of CHANGE_FIELDS_NOT_DRAWN[kind]) if (!absent(name)) c.fail(`${f}.${name}`, `is not shown on a ${kind} change (${CHANGE_FIELDS_DRAWN[kind]})`);
+    }
+    const codeList = c.list(it.code, `${f}.code`, 8);
+    // The same place twice is one link.
+    const code = codeList && [...new Set(codeList.map((p, j) => checkCodePlace(c, p, `${f}.code[${j}]`)).filter((p): p is string => p !== undefined))];
+    const step = c.int(it.step, `${f}.step`, 1, SHAPE_LIMITS.sections, false);
+    if (id === undefined || !kind || title === undefined) return;
+    items.push({
+      id,
+      kind,
+      title,
+      ...(was !== undefined ? { was } : {}),
+      ...(now !== undefined ? { now } : {}),
+      ...(from !== undefined ? { from } : {}),
+      ...(to !== undefined ? { to } : {}),
+      ...(lines !== undefined ? { lines } : {}),
+      ...(note !== undefined ? { note } : {}),
+      ...(code?.length ? { code } : {}),
+      ...(step !== undefined ? { step } : {}),
+    });
+  });
+  if (list && !list.length) c.fail(`${field}.items`, 'is empty: name at least one change');
+  const flowList = c.list(value.flows, `${field}.flows`, SHAPE_LIMITS.flows);
+  const flows: ShapeChangeFlow[] = [];
+  (flowList ?? []).forEach((fl, i) => {
+    const f = `${field}.flows[${i}]`;
+    if (!isRecord(fl)) return c.fail(f, 'must be { id, title, start, steps?, forks?, end? }');
+    const id = ownId(fl.id, `${f}.id`);
+    const title = c.text(fl.title, `${f}.title`, 200);
+    const start = plainText(c, c.text(fl.start, `${f}.start`, SHAPE_LIMITS.line), `${f}.start`);
+    const steps = checkFlowSteps(c, fl.steps, `${f}.steps`);
+    const forkList = c.list(fl.forks, `${f}.forks`, SHAPE_LIMITS.forks);
+    const forks = (forkList ?? []).flatMap((k, j) => {
+      const ff = `${f}.forks[${j}]`;
+      if (!isRecord(k)) {
+        c.fail(ff, 'must be { when, steps?, end? }');
+        return [];
+      }
+      const when = plainText(c, c.text(k.when, `${ff}.when`, 200), `${ff}.when`);
+      const kSteps = checkFlowSteps(c, k.steps, `${ff}.steps`);
+      const end = checkFlowEnd(c, k.end, `${ff}.end`);
+      return when === undefined ? [] : [{ when, ...(kSteps ? { steps: kSteps } : {}), ...(end ? { end } : {}) }];
+    });
+    const end = checkFlowEnd(c, fl.end, `${f}.end`);
+    if (id === undefined || title === undefined || start === undefined) return;
+    flows.push({ id, title, start, ...(steps ? { steps } : {}), ...(forkList ? { forks } : {}), ...(end ? { end } : {}) });
+  });
+  if (!list) return undefined;
+  return { ...(summary !== undefined ? { summary } : {}), items, ...(flowList ? { flows } : {}), ...(also !== undefined ? { also } : {}) };
+}
+
 function checkRefs(c: Checker, value: unknown): ShapeRef[] | undefined {
   const refs = c.list(value, 'refs', SHAPE_LIMITS.refs);
   if (!refs) return undefined;
@@ -939,6 +1625,65 @@ export function checkShapeDrawnView(input: unknown, field = 'view'): ShapeCheck<
   return { ok: true, value: view };
 }
 
+const SHAPE_SCENE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
+
+/**
+ * A board's scenes, by id, each checked by its own format; then the drawings: a `data-scene` slot
+ * must name a scene the board has, and a scene's pieces (its tracks, `to` and `along`) must be
+ * `data-part` names in a drawing, so a typo is named here instead of a piece that never moves.
+ * Ids are matched with `Object.hasOwn`, so `constructor` and other prototype keys never resolve.
+ */
+function checkScenes(c: Checker, input: unknown, views: ShapeBoard['views']): Record<string, ShapeScene> | undefined {
+  const htmlOf = (v: 'picture' | 'how') => {
+    const view = views[v];
+    return view ? [view.html, view.tall?.html ?? '', view.more?.html ?? ''] : [];
+  };
+  // Which views play each scene (a slot is a <div data-scene>; the player finds pieces in the view that holds it).
+  const playedIn = new Map<string, ('picture' | 'how')[]>();
+  for (const v of ['picture', 'how'] as const) {
+    const slots = htmlOf(v).flatMap(shapeHtmlSceneSlots);
+    for (const slot of slots) {
+      if (slot.tag !== 'div') c.fail(`views.${v}.html`, `data-scene="${slot.id}" is on a <${slot.tag}>; put it on a <div> around your SVG: <div data-scene="${slot.id}"><svg>…</svg></div>`);
+    }
+    for (const id of new Set(slots.filter((s) => s.tag === 'div').map((s) => s.id))) {
+      playedIn.set(id, [...(playedIn.get(id) ?? []), v]);
+      if (isRecord(input) && Object.hasOwn(input, id)) continue;
+      c.fail(`views.${v}.html`, `has data-scene="${id}", but ${isRecord(input) ? `scenes has no "${id}"` : 'the board has no scenes'}`);
+    }
+  }
+  if (input === undefined || input === null) return undefined;
+  if (!isRecord(input)) {
+    c.fail('scenes', 'must be an object of scenes by id: { "pool": { … } }');
+    return undefined;
+  }
+  const entries = Object.entries(input);
+  if (entries.length > SHAPE_LIMITS.scenes) c.fail('scenes', `has ${entries.length}; at most ${SHAPE_LIMITS.scenes}`);
+  const partsOf = { picture: new Set(htmlOf('picture').flatMap(shapeHtmlParts)), how: new Set(htmlOf('how').flatMap(shapeHtmlParts)) };
+  const out: Record<string, ShapeScene> = {};
+  for (const [id, value] of entries.slice(0, SHAPE_LIMITS.scenes)) {
+    if (!SHAPE_SCENE_ID.test(id)) {
+      c.fail(`scenes.${id}`, 'the id must be a short word: letters, digits, _ and -, starting with a letter or digit, at most 40');
+      continue;
+    }
+    const checked = checkShapeScene(value, `scenes.${id}`);
+    if (checked.ok === false) {
+      c.errors.push(...checked.errors);
+      continue;
+    }
+    const where = playedIn.get(id) ?? [];
+    if (where.length === 0) {
+      c.fail(`scenes.${id}`, `no drawing plays it; put <div data-scene="${id}"><svg>…</svg></div> in the Picture or How it works`);
+      continue;
+    }
+    for (const ref of shapeScenePieceRefs(checked.value, `scenes.${id}`)) {
+      // Every view that plays the scene needs the piece: the player looks for it in that view only.
+      if (where.some((v) => !partsOf[v].has(ref.id))) c.fail(ref.at, `the drawing has no data-part="${ref.id}"; put data-part="${ref.id}" on that piece of your SVG in <div data-scene="${id}">`);
+    }
+    out[id] = checked.value;
+  }
+  return entries.length ? out : undefined;
+}
+
 export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
   const c = new Checker();
   if (!isRecord(input)) return { ok: false, errors: ['the board must be a JSON object: { title, claim, views, refs }'] };
@@ -955,21 +1700,24 @@ export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
   else {
     for (const key of Object.keys(input.views)) {
       if (key === 'reqs') c.fail('views.reqs', 'Requirements are gone. Put what the person needs to know in views.know, as at most two short paragraphs');
-      else if (!SHAPE_VIEWS.some((v) => v.id === key)) c.fail(`views.${key}`, 'is not a view (picture, how, know, code)');
+      else if (!SHAPE_VIEWS.some((v) => v.id === key)) c.fail(`views.${key}`, 'is not a view (picture, how, changed, know, code)');
     }
     const picture = checkDrawn(c, input.views.picture, 'views.picture');
-    const how = checkDrawn(c, input.views.how, 'views.how');
+    const how = checkDrawn(c, input.views.how, 'views.how', true);
+    const changed = checkChanged(c, input.views.changed, 'views.changed');
     const know = checkKnow(c, input.views.know, 'views.know');
     const code = checkCode(c, input.views.code, 'views.code');
     if (picture) views.picture = picture;
     if (how) views.how = how;
+    if (changed) views.changed = changed;
     if (know) views.know = know;
     if (code) views.code = code;
-    if (!input.views.picture && !input.views.how && !input.views.know && !input.views.reqs && !input.views.code) c.fail('views', 'needs at least one view');
+    if (!input.views.picture && !input.views.how && !input.views.changed && !input.views.know && !input.views.reqs && !input.views.code) c.fail('views', 'needs at least one view');
   }
   const refs = checkRefs(c, input.refs);
+  const scenes = checkScenes(c, input.scenes, views);
   if (c.errors.length || !title || !claim) return { ok: false, errors: c.errors.length ? c.errors : ['title and claim are required'] };
-  const board: ShapeBoard = { title, claim, ...(asOf ? { asOf } : {}), ...(note ? { note } : {}), views, ...(refs?.length ? { refs } : {}) };
+  const board: ShapeBoard = { title, claim, ...(asOf ? { asOf } : {}), ...(note ? { note } : {}), views, ...(refs?.length ? { refs } : {}), ...(scenes ? { scenes } : {}) };
   // Every cited reference must exist.
   const known = new Set((refs ?? []).map((r) => r.n));
   const cited = shapeCitedRefs(board);
@@ -1069,6 +1817,12 @@ export function shapeParts(board: ShapeBoard): ShapePart[] {
       }
     }
   }
+  const changed = board.views.changed;
+  for (const item of changed?.items ?? []) {
+    const lines = [item.was, item.now].flatMap((l) => (l === undefined ? [] : Array.isArray(l) ? l : [l]));
+    parts.push({ view: 'changed', id: item.id, text: fold([item.kind, item.title, ...lines, item.from, item.to, item.note, ...(item.code ?? [])].filter(Boolean).join(' ')) });
+  }
+  for (const flow of changed?.flows ?? []) parts.push({ view: 'changed', id: flow.id, text: fold(JSON.stringify([flow.title, flow.start, flow.steps ?? [], flow.forks ?? [], flow.end ?? null])) });
   shapeKnowParagraphs(board.views.know ?? '').forEach((text, i) => parts.push({ view: 'know', id: `know-${i + 1}`, text: fold(text) }));
   for (const group of board.views.reqs?.groups ?? []) {
     for (const item of group.items) parts.push({ view: 'know', id: item.id, text: fold(`${group.label}: ${item.text}`) });
@@ -1118,6 +1872,13 @@ export function shapeCitedRefs(board: ShapeBoard): Set<number> {
     fromHtml(board.views[view]?.tall?.html);
     fromHtml(board.views[view]?.more?.html);
   }
+  fromText(board.views.changed?.summary);
+  fromText(board.views.changed?.also);
+  for (const item of board.views.changed?.items ?? []) {
+    fromText(item.title);
+    fromText(item.note);
+  }
+  for (const flow of board.views.changed?.flows ?? []) fromText(flow.title);
   fromText(board.views.know);
   for (const group of board.views.reqs?.groups ?? []) for (const item of group.items) fromText(item.text);
   for (const foot of board.views.reqs?.foot ?? []) fromText(foot.text);
@@ -1218,6 +1979,24 @@ export interface ShapeNoteInput {
   part?: string | null;
   quote?: string | null;
   text: string;
+  box?: ShapeNoteBox;
+  code?: string[];
+  /** A PNG as a data: URL; the store keeps it as a file. */
+  picture?: string;
+}
+
+const NOTE_PICTURE_RE = /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/;
+
+function checkNoteBox(c: Checker, input: unknown): ShapeNoteBox | undefined {
+  if (input === undefined) return undefined;
+  const b = isRecord(input) ? input : {};
+  const at = [b.x, b.y, b.w, b.h];
+  if (!at.every((n) => typeof n === 'number' && n >= 0 && n <= 1)) {
+    c.fail('box', 'must be x, y, w and h, each from 0 to 1');
+    return undefined;
+  }
+  const [x, y, w, h] = at as number[];
+  return { x: x!, y: y!, w: w!, h: h!, ...(b.tall === true ? { tall: true as const } : {}), ...(b.more === true ? { more: true as const } : {}) };
 }
 
 /** Validate a person's Change it or Ask. No part: a general comment (on a view, or the whole board). */
@@ -1241,8 +2020,14 @@ export function checkShapeNoteInput(input: unknown): ShapeCheck<ShapeNoteInput> 
   if (part && !view) c.fail('view', 'is required with a part');
   const quote = c.text(input.quote, 'quote', SHAPE_LIMITS.quote, false) ?? null;
   const text = c.text(input.text, 'text', SHAPE_LIMITS.noteText);
+  const box = checkNoteBox(c, input.box);
+  if (box && !view) c.fail('view', 'is required with a box');
+  const code = input.code === undefined ? undefined : Array.isArray(input.code) && input.code.length <= 40 && input.code.every((t) => typeof t === 'string' && parseShapeCodeTarget(t)) ? (input.code as string[]) : undefined;
+  if (input.code !== undefined && !code) c.fail('code', 'must be up to 40 data-code places');
+  const picture = input.picture === undefined ? undefined : typeof input.picture === 'string' && input.picture.length <= SHAPE_LIMITS.notePicture && NOTE_PICTURE_RE.test(input.picture) ? input.picture : undefined;
+  if (input.picture !== undefined && !picture) c.fail('picture', 'must be a PNG data: URL within the limit');
   if (c.errors.length || !kind || !v || !text) return { ok: false, errors: c.errors };
-  return { ok: true, value: { kind, v, view, part, quote, text } };
+  return { ok: true, value: { kind, v, view, part, quote, text, ...(box ? { box } : {}), ...(code ? { code } : {}), ...(picture ? { picture } : {}) } };
 }
 
 /** The words a person reads on a drawing. */
@@ -1277,8 +2062,12 @@ export function shapeBoardNotes(board: Pick<ShapeBoard, 'views' | 'refs'>): stri
   const picture = board.views.picture;
   if (!picture) return notes;
   const words = shapeDrawnWords(picture.html);
-  if (words > 80) notes.push(`The Picture has ${words} words. Nobody writes that on a whiteboard: about 60 is the aim. Move the rest behind numbers (a ref's sub and images) or to views.know.`);
-  if (picture.width === undefined) notes.push('The Picture has no width and height, so it scrolls like a page. Give it a fixed canvas: it then always fits one screen.');
+  if (words > 240) notes.push(`The Picture has ${words} words. Read at a glance, about 200 is the most. Move the rest behind numbers (a ref's sub and images) or to views.know.`);
+  // A Picture that plays a scene: the player sizes the drawing and its controls to the screen, so it wants no canvas.
+  const scene = shapeHtmlScenes(picture.html).length > 0;
+  if (scene) {
+    if (picture.width !== undefined) notes.push('The Picture plays a scene, so leave its width and height off: the player fits the drawing and its controls to the screen.');
+  } else if (picture.width === undefined) notes.push('The Picture has no width and height, so it scrolls like a page. Give it a fixed canvas: it then always fits one screen.');
   else if (!picture.tall) notes.push('The Picture has no tall drawing, so a phone pans it sideways. That works. For a board you expect on a phone, add views.picture.tall.');
   const cited = [...picture.html.matchAll(/\sdata-ref\s*=\s*["']?(\d{1,3})/g)].map((m) => Number(m[1]));
   const onPicture = (board.refs ?? []).filter((r) => cited.includes(r.n));
@@ -1289,6 +2078,14 @@ export function shapeBoardNotes(board: Pick<ShapeBoard, 'views' | 'refs'>): stri
   if (!/\sdata-mark\s*=/.test(picture.html)) notes.push('The Picture has no data-mark, so the person cannot point at a part. Put data-mark="id" on each part.');
   const seen = shapeDrawingSpan(picture.html);
   if (seen && (seen.w < 0.6 || seen.h < 0.6)) notes.push(`The drawing fills ${Math.round(seen.w * 100)}% of the canvas's width and ${Math.round(seen.h * 100)}% of its height. Spread it out, or make the viewBox fit it.`);
+  // A name `shape update` has no icon, logo or drawn thing for (shared/shape/stamps.ts leaves it empty with data-missing),
+  // in any drawing, the phone's and the more's too; each once.
+  const how = board.views.how;
+  for (const view of [picture, picture.tall, picture.more, how, how?.tall, how?.more])
+    for (const m of (view?.html ?? '').matchAll(/\sdata-missing="([^"]*)"/g)) {
+      const note = m[1]!.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+      if (!notes.includes(note)) notes.push(note);
+    }
   // A real logo keeps its own colours: the kit's marks say so with data-brand.
   const colours = [picture.html.replace(/<svg data-brand\b.*?<\/svg>/gs, ''), picture.css ?? ''].join(' ').match(/#[0-9a-f]{3,8}\b(?=[^<>]*[;"'}])|\brgba?\(/gi);
   if (colours?.length) notes.push(`The Picture has ${colours.length} fixed colours (such as ${colours[0]}), which break in light or dark. Use var(--ink), var(--grey), var(--mark) and the rest.`);
