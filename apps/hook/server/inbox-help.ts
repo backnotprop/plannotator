@@ -181,7 +181,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       `steps: ${INBOX_STEPS_LEAD}`,
       "- `thread_id`: the thread (or a message id in it), from send_message's result. `steps`: the whole list, `[{ \"step\": \"Replay the failures in staging\", \"status\": \"doing\", \"note\": \"38 of 40 recovered\" }, ...]`; `[]` clears it. At most 12 steps, 80 characters per step and per note, one line each; past that nothing is written (`validation_error` naming the step).",
       "- The list is your session's own in that thread; another session's list there is its own. send_message takes the same `steps`, so a message and its list go together.",
-      "- A reply in that thread wakes you with one line, \"Your steps here: 3 of 6 done; doing: X. Update them if that changed.\" Read_thread shows the lists. From a shell: `plannotator inbox steps <thread> --json '<list>'`.",
+      "- A reply in that thread wakes you with one line, \"Your checklist here: 3 of 6 done; doing: X. If you're still working on this, keep it current.\" Read_thread shows the lists. From a shell: `plannotator inbox steps <thread> --json '<list>'`.",
       "- The person turns steps on and off (Settings → Capabilities in the Inbox). Off, the Inbox lists no `steps`, and a call answers `steps_off` and writes nothing.",
     ],
   },

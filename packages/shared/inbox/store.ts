@@ -99,6 +99,7 @@ import {
   INBOX_HOST_NAMES,
   INBOX_MCP_WAKING_HOSTS,
   INBOX_TAGS_MAX,
+  INBOX_THREAD_NAME_MAX,
   INBOX_SESSION_ID_PATTERN,
   type InboxParticipant,
   type InboxSentRecipient,
@@ -5320,7 +5321,9 @@ export class InboxStore {
    * of one still waiting; approval "inbox-message-comments", 2026-10-19):
    * Plannotator's text-selection annotation, `originalText` the exact words
    * the person selected, or a comment on a rendered diagram part, with
-   * `diagramAnchor` and the part's label as `originalText`. Only an agent's
+   * `diagramAnchor` and the part's label as `originalText`, or a Delete on
+   * selected words (`type` "DELETION", no words of its own needed; approval
+   * "inbox-toolbar-delete"). Only an agent's
    * message takes one, and only while it can be answered (an archive closes
    * the messages before its line). The
    * record's key is the message: `path` is its id, `version` "current", and
@@ -5338,15 +5341,19 @@ export class InboxStore {
     const fields = annotation as Record<string, unknown>;
     const id = fields.id;
     if (!isInboxAnnotationId(id)) throw new InboxError("validation_error", "annotation.id: a short id.", { field: "annotation.id" });
-    // A comment on selected words (a quick label such as 👍 is a comment too); never a deletion or a general comment.
-    if (fields.type !== "COMMENT") throw new InboxError("validation_error", 'annotation.type: "COMMENT" (a comment on the words selected).', { field: "annotation.type" });
+    // A comment on selected words (a quick label such as 👍 is a comment too), or a Delete on them (approval
+    // "inbox-toolbar-delete": the toolbar's Delete, as in plan review); never a general comment.
+    const deletion = fields.type === "DELETION";
+    if (fields.type !== "COMMENT" && !deletion) throw new InboxError("validation_error", 'annotation.type: "COMMENT" (a comment on the words selected) or "DELETION" (remove them).', { field: "annotation.type" });
     const quote = fields.originalText;
     if (typeof quote !== "string" || quote.trim() === "" || quote.length > INBOX_MESSAGE_COMMENT_QUOTE_MAX) {
       throw new InboxError("validation_error", `annotation.originalText: the words selected (1 to ${INBOX_MESSAGE_COMMENT_QUOTE_MAX} characters).`, { field: "annotation.originalText" });
     }
     // The comment itself: a quick label (👍) carries its label as its text, so every comment has words to send.
+    // A deletion's words are the ones selected; it may carry none of its own.
     const text = fields.text;
-    if (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX) {
+    const noText = text === undefined || text === null || text === "";
+    if (!(deletion && noText) && (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX)) {
       throw new InboxError("validation_error", `annotation.text: the comment (1 to ${INBOX_MESSAGE_COMMENT_TEXT_MAX} characters).`, { field: "annotation.text" });
     }
     // A comment on a message's words is words: no images, no element or page it points at, no reply thread.
@@ -6381,6 +6388,11 @@ export class InboxStore {
      */
     thread_name_auto?: unknown;
     /**
+     * `true` with `thread_name_auto` (New review's box): a suggestion another open thread already has is numbered,
+     * "Review web-app: uncommitted on main (2)", rather than dropped, so a second review of the same changes is named.
+     */
+    thread_name_numbered?: unknown;
+    /**
      * Compose's Board chip was on (approval "inbox-compose-board-chip"): the
      * root carries `board_request`, and what the agent receives for it asks it
      * to track the work on the Board. Only `true` sets it; a replay keeps the
@@ -6414,7 +6426,7 @@ export class InboxStore {
     // Words or files: a message of attached files alone (a long paste) is the person's too, as a reply of files is.
     if (!body && !(input.attachments && input.attachments.length > 0)) throw new InboxError("validation_error", "body: write a message.", { field: "body" });
     if (!this.projectsById.has(input.project_id)) throw new InboxError("project_not_found", `No project ${input.project_id}.`);
-    threadName = this.freeThreadName(input.project_id, threadName, auto);
+    threadName = this.freeThreadName(input.project_id, threadName, auto, input.thread_name_numbered === true);
     const at = this.stamp();
     const id = inboxId("msg");
     const message: InboxMessage = {
@@ -6451,17 +6463,32 @@ export class InboxStore {
     return null;
   }
 
-  /** The name a thread would get in this project: a suggestion another open thread has is dropped; a typed one is refused. */
-  private freeThreadName(projectId: string, name: string | null, auto: boolean): string | null {
+  /**
+   * The name a thread would get in this project: a suggestion another open thread has is dropped, or with `numbered`
+   * given the first free " (2)", " (3)"…; a typed one is refused.
+   */
+  private freeThreadName(projectId: string, name: string | null, auto: boolean, numbered = false): string | null {
     if (!name || !this.threadNameTaken(projectId, name, null)) return name;
+    if (auto && numbered) return this.numberedThreadName(projectId, name);
     if (auto) return null;
     throw new InboxError("thread_name_taken", `Another open thread in this project is already named "${name}". Pick another name, or leave it empty.`, { field: "thread_name" });
   }
 
+  /** `name (n)` for the first n from 2 no open thread in the project has, cut to fit the name limit; null past 99. */
+  private numberedThreadName(projectId: string, name: string): string | null {
+    for (let n = 2; n < 100; n++) {
+      const suffix = ` (${n})`;
+      const base = [...name].slice(0, INBOX_THREAD_NAME_MAX - suffix.length).join("").trimEnd();
+      const checked = checkInboxThreadName(`${base}${suffix}`);
+      if (checked.ok && !this.threadNameTaken(projectId, checked.name, null)) return checked.name;
+    }
+    return null;
+  }
+
   /** What `startPersonThread` would refuse about a thread's name, with nothing written: for a Send with work to do before the write. */
-  checkPersonThreadName(input: { project_id: string; thread_name?: unknown; thread_name_auto?: unknown }): void {
+  checkPersonThreadName(input: { project_id: string; thread_name?: unknown; thread_name_auto?: unknown; thread_name_numbered?: unknown }): void {
     const auto = input.thread_name_auto === true;
-    this.freeThreadName(input.project_id, this.sentThreadName(input.thread_name, auto), auto);
+    this.freeThreadName(input.project_id, this.sentThreadName(input.thread_name, auto), auto, input.thread_name_numbered === true);
   }
 
   /** The thread the person started with this idempotency key, for a replayed Send. */

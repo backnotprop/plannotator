@@ -7,7 +7,7 @@ export type Rect = { x: number; y: number; w: number; h: number };
 /** How a part is drawn on a sheet. */
 export type Variant = 'plate' | 'box' | 'node' | 'chip' | 'card' | 'bar' | 'row' | 'rowx' | 'lane' | 'tile' | 'tilefor' | 'window';
 
-/** A change's mark on a part or a line (step A5 sets it; at rest it is null). */
+/** A change's mark on a part or a line: null when the sheet carries no change, or the thing is untouched. */
 export type ChangeStatus = 'added' | 'changed' | 'removed' | null;
 
 export type PartBox = Rect & {
@@ -16,6 +16,12 @@ export type PartBox = Rect & {
   side?: string;
   marks: string[];
   status: ChangeStatus;
+  /** Its number in the change (1 up), drawn on its corner, when the change marks it. */
+  n?: number;
+  /** Its line counts in the change ("frame.ts · +532"), drawn as its second line. */
+  lines?: string | null;
+  /** The open PRs that touch it, every one, when several are drawn at rest (its line shows two at most). */
+  who?: string[];
   /** A sheet-given second line (a lane's route, a tile's "3 parts"). */
   sub?: string | null;
   /** A box name fitted to its box, when the whole name does not fit. */

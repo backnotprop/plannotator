@@ -145,6 +145,13 @@ describe('the palette\'s Actions', () => {
     expect(composeActions('', targets, 'ses-gone').map(actionLabel)).toEqual(['New message…']);
   });
 
+  test('with Code review off, a word about reviews still offers New message…, as if there were no reviews at all', () => {
+    for (const query of ['new review', 'send review', 'new pull']) {
+      expect(composeActions(query, targets, null, false).map((action) => action.kind)).toEqual(['new']);
+      expect(composeActions(query, targets, null, true).map((action) => action.kind)).toContain('review');
+    }
+  });
+
   test('typed words: the action words offer New message…; a host or project names the sessions; other words offer nothing', () => {
     expect(composeActions('new', targets, null).map(actionLabel)).toEqual(['New message…']);
     expect(composeActions('idea', targets, null).map(actionLabel)).toEqual(['New message…']);
