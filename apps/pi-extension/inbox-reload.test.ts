@@ -287,6 +287,8 @@ async function prove(c: HostCase): Promise<void> {
 		npm_config_cache: join(w.root, "npm-cache"),
 		BUN_INSTALL_CACHE_DIR: join(w.root, "bun-cache"),
 		PLANNOTATOR_GLIMPSE: "0",
+		// This proof is the person typing the reload; Pi's own reload (auto-reload.ts) would get there first.
+		PLANNOTATOR_AUTO_RELOAD: "0",
 		TERM: "xterm-256color",
 	};
 	const { command, install, update } = c.setup(w, env, m);

@@ -146,6 +146,12 @@ export interface MachineView {
   list_cursor: number | null;
   /** Its Inbox keeps snoozes (approval "inbox-snooze"): a write there would land. False until its list is read, and for an older Inbox. */
   snoozes: boolean;
+  /**
+   * Remote launch, from its health when the line connected: agents can start there (true), launch is off there
+   * (false: "Starting agents is off on Mini"), or its Inbox is too old to say (null: "Update Plannotator on Mini to
+   * start agents there"). Null for this Inbox, whose own launch block says.
+   */
+  launch: boolean | null;
 }
 
 /** An agent's snooze of a linked machine's thread: its answer there, or `held`, the words for a write that waits. */
@@ -314,6 +320,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       waiting: 0,
       list_cursor: null,
       snoozes: true,
+      launch: null,
     },
     ...links.list().map((link) => {
       const peer = peers.get(link.id);
@@ -330,6 +337,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         waiting: outbox.list(link.id, "pending").length,
         list_cursor: peer?.list?.cursor ?? null,
         snoozes: peer?.list?.snoozes ?? false,
+        launch: peer?.launch ?? null,
       } satisfies MachineView;
     }),
   ];

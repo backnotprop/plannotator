@@ -1,10 +1,12 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
+import { ProjectMark, showsProjects, useRowMarks } from '../letterMarks';
+import { knownProjectName, useKnownProjects } from '../projectPictures';
 import { INBOX_CARD_COLUMN_LABELS, INBOX_CARD_LIVE_COLUMNS, displayInboxSubject, inboxCardMarkRef, type InboxCardColumn, type InboxCardMark, type InboxCardHistoryEntry, type InboxCardRef, type InboxCardWire, type InboxListRow, type InboxProjectRepo, type InboxInitiative } from '@plannotator/core/inbox-types';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { inboxApi, type CardsModel, type ComposeSessionsModel, type ProjectFolder } from '../api';
 import { formatCount, fullTime, whenTime } from '../format';
 import { AuthorMark, Icon } from '../icons';
-import { Tip, isTextCut } from '../components/Tip';
+import { ProjectTipText, Tip, isTextCut } from '../components/Tip';
 import { DeliveryTick } from '../components/DeliveryTick';
 import { SidebarTrigger } from '../shell/sidebar';
 import { pageInFront } from '../sound';
@@ -152,6 +154,9 @@ export function BoardPage(props: BoardPageProps) {
   const names = useMemo(() => projectNames(props.projects), [props.projects]);
   const offered = boardProjects(allCards, props.projects, project);
   const projectName = project ? (names.get(project) ?? null) : null;
+  // A card names its project while the Board spans projects and none is picked, the Project button's own rule
+  // (owner, 2026-11-05): on a row of its own above the title, with the marks and the age.
+  const cardsShowProject = project === null && offered.length > 1;
   const initiatives = useMemo(() => liveInitiatives(model?.initiatives), [model?.initiatives]);
   const cards = cardsInInitiative(projectCards, initiative, initiatives);
   const initiativeName = initiativeLabel(initiatives, initiative);
@@ -481,6 +486,11 @@ export function BoardPage(props: BoardPageProps) {
     rowOf: props.rowOf,
     markOf,
     stepsOf,
+    projectOfCard: (card) => {
+      if (!cardsShowProject) return null;
+      const name = names.get(card.project_id);
+      return name ? { name, root: projectOf(card)?.root ?? '' } : null;
+    },
     onOpen: (card) => props.onOpenCard(card.id),
     onOpenThread: props.onOpenThread,
   };
@@ -762,6 +772,8 @@ interface CardCommon {
   markOf: (card: InboxCardWire) => InboxCardMark | null;
   /** The card's checklists, the latest first (none while the switch is off): the first one's pie is on the card. */
   stepsOf: (card: InboxCardWire) => InboxStepsWire[];
+  /** The card's project for its head row, or null while the Board shows one project's cards. */
+  projectOfCard: (card: InboxCardWire) => { name: string; root: string } | null;
   onOpen: (card: InboxCardWire) => void;
   /** The "You: …" line's way in: the thread where the person makes the call (`youThread`). */
   onOpenThread: (card: InboxCardWire, threadId: string) => void;
@@ -905,7 +917,9 @@ const titleCut = (trigger: Element) => isTextCut(trigger.closest('.ib-bc-main'))
  * is the button that opens the card (a click anywhere else on the card does
  * too); "You: …" is its own button, to the thread where the person makes the
  * call (`youThread`); with no thread linked it is plain words, and a click on
- * it opens the card.
+ * it opens the card. While the Board spans projects (`projectOfCard`), the
+ * project's name gets a row of its own above the title, with the marks and the
+ * age at its right, and the title takes the card's whole width.
  */
 function BoardCard({
   card,
@@ -919,6 +933,7 @@ function BoardCard({
   rowOf,
   markOf,
   stepsOf,
+  projectOfCard,
   onOpen,
   onOpenThread,
   draggable = false,
@@ -936,7 +951,8 @@ function BoardCard({
   const plan = stepsOf(card)[0] ?? null;
   const planCount = plan ? stepsCount(plan) : null;
   const planWords = plan ? `Checklist: ${stepsDoneWords(plan)}` : null;
-  const label = cardLabel(card, unread, now) + (sent ? `. Sent to ${sent}` : '') + (mark ? `. ${markLabel(mark)}` : '') + (planWords ? `. ${planWords}` : '');
+  const cardProject = projectOfCard(card);
+  const label = cardLabel(card, unread, now, cardProject?.name ?? null) + (sent ? `. Sent to ${sent}` : '') + (mark ? `. ${markLabel(mark)}` : '') + (planWords ? `. ${planWords}` : '');
   const thread = line?.you ? youThread(card, rowOf) : null;
   // "Waiting on you" (columns v2, display only): a card before In review whose linked thread waits on the person.
   const waiting = line?.you ? null : waitingThread(card, rowOf);
@@ -956,6 +972,7 @@ function BoardCard({
           </span>
         </Tip>
       )}
+      <BoardProjectMark projectId={card.project_id} />
       <Tip content={owner === 'You' ? 'Your card' : owner}>
         <span className="ib-bc-who" data-host={card.agent?.kind === 'agent' ? card.agent.host : 'you'}>
           {card.agent ? <AuthorMark author={card.agent} /> : <span className="ib-lane-dot ib-bc-yourdot" data-col="backlog" aria-hidden="true" />}
@@ -990,9 +1007,19 @@ function BoardCard({
       }}
       onDragEnd={onDragEnd}
     >
+      {cardProject && (
+        <span className="ib-bc-head">
+          <Tip content={cardProject.root ? <ProjectTipText name={cardProject.name} root={cardProject.root} /> : cardProject.name}>
+            <bdi className="ib-bc-proj" data-card-project="">
+              {cardProject.name}
+            </bdi>
+          </Tip>
+          {meta}
+        </span>
+      )}
       <span className="ib-bc-top">
         <button type="button" className="ib-bc-main" aria-label={label} aria-current={openId === card.id || undefined} aria-keyshortcuts={menuKeys} data-card-open="" onClick={() => onOpen(card)}>
-          {meta}
+          {!cardProject && meta}
           {/* The clamp (three lines) is on the button, not on the inline title: measure the button. */}
           <Tip content={card.title} when={titleCut}>
             <span className="ib-bc-t" dir="auto">
@@ -1472,5 +1499,20 @@ function OpenedCard({
       onOpenThread={onOpenThread}
       onCreateThread={(opener) => onCreateThread(askTarget?.session ?? null, opener)}
     />
+  );
+}
+
+/** Letter marks (letterMarks.tsx): the card's project mark (16 px) in its meta, while project marks show. */
+function BoardProjectMark({ projectId }: { projectId: string }) {
+  const { marks } = useRowMarks();
+  useKnownProjects();
+  const name = knownProjectName(projectId);
+  if (!showsProjects(marks.what) || !name) return null;
+  return (
+    <Tip content={name}>
+      <span className="ib-bc-proj">
+        <ProjectMark projectId={projectId} name={name} size={16} solid={marks.style === 'avatar'} />
+      </span>
+    </Tip>
   );
 }
