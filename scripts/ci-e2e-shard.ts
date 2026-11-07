@@ -71,7 +71,12 @@ export function fileFilter(file: string): string {
 
 if (import.meta.main) {
   const planFile = process.env.E2E_PLAN;
-  const plan = planFile && existsSync(planFile) ? (JSON.parse(readFileSync(planFile, 'utf8')) as { count: number; specs: string[] | null }) : null;
+  // A missing plan would mean the 16-shard split on a smaller matrix, which drops specs: fail instead.
+  if (planFile && !existsSync(planFile)) {
+    console.error(`e2e shard: no plan at ${planFile}`);
+    process.exit(2);
+  }
+  const plan = planFile ? (JSON.parse(readFileSync(planFile, 'utf8')) as { count: number; specs: string[] | null }) : null;
   const k = Number(process.argv[2]);
   const count = plan?.specs ? plan.count : E2E_SHARDS;
   if (!Number.isInteger(k) || k < 1 || k > count) {

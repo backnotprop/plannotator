@@ -33,8 +33,10 @@ name: Inbox window e2e
 # main to pick up a fix or a quarantine after a red run, or a run cancelled
 # half way) leaves out the specs that passed there, at the same blob, and runs
 # the rest on as many shards as they need (the plan job,
-# scripts/ci-e2e-reuse.ts). The nightly and manual runs, PRs from forks and a
-# PR with the `ci:e2e-all` label always run every spec.
+# scripts/ci-e2e-reuse.ts). A pass counts for a day from the run that really
+# ran the spec, and only with the same quarantine entries. The nightly and
+# manual runs, PRs from forks and a PR with the `ci:e2e-all` label (which, like
+# every PR run, also needs `ci:full`) always run every spec.
 
 on:
   # Manual runs on a branch, e.g. a stacked PR whose base is not main.
@@ -113,8 +115,9 @@ on:
 permissions:
   contents: read
 
-# One run per PR: a newer push cancels the older run. Adding `ci:e2e-all`
-# starts a full run in the PR's group. Adding any other label starts a run
+# One run per PR: a newer push cancels the older run. Adding `ci:e2e-all` to
+# a PR that has `ci:full` starts a full run in the PR's group (on a PR without
+# `ci:full` it does nothing, as every label does). Adding any other label starts a run
 # that skips every job; it gets a group of its own so it cannot cancel the
 # real one. Nightly and manual runs each get a group of their own.
 concurrency:
@@ -208,7 +211,7 @@ jobs:
       - name: Keep the reuse key
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: e2e-reuse
+          name: e2e-reuse-${{ github.run_attempt }}
           path: .local/e2e-plan/reuse.json
           if-no-files-found: error
           retention-days: 7
