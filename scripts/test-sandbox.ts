@@ -15,8 +15,9 @@
  *   Bun's `os.homedir()` (fixed at startup), `$HOME` and every grandchild agree.
  *   This process keeps its own env.
  * - Opens no browser (PLANNOTATOR_BROWSER from tests/helpers/no-browser.ts), sends
- *   no ping or feedback, connects no agents. Drops the calling agent's markers
- *   (every variable apps/hook/server/detect-origin.ts reads, its session
+ *   no ping or feedback, connects no agents, and keeps git and gh off the macOS
+ *   Keychain (SANDBOX_NO_KEYCHAIN_ENV: the scratch home has none). Drops the
+ *   calling agent's markers (every variable apps/hook/server/detect-origin.ts reads, its session
  *   variables), SSH_* and PLANNOTATOR_REMOTE (remote mode), and GIT_DIR and its
  *   kin (a test's temp-repo git would act on the outer repo).
  *   PLAYWRIGHT_BROWSERS_PATH keeps pointing at the real browser cache, by path.
@@ -39,6 +40,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { SANDBOX_NO_KEYCHAIN_ENV } from "../packages/shared/child-env";
 import { NO_BROWSER } from "../tests/helpers/no-browser";
 import { DOM_GATE_SELF, DOM_LIST, domListFiles, isDomGated, ownProcessDomStepFiles, WORKFLOW } from "./dom-gating";
 import { accountHome, isScratchDataDir } from "../tests/helpers/real-data-dir";
@@ -167,6 +169,8 @@ export function makeSandbox(parentEnv: Readonly<Record<string, string | undefine
     NO_ANON_PING: "1",
     PLANNOTATOR_FEEDBACK_URL: "http://127.0.0.1:9/feedback",
     PLANNOTATOR_INBOX_CONNECT: "0",
+    // The scratch home has no macOS keychain: git and gh must never reach for one.
+    ...SANDBOX_NO_KEYCHAIN_ENV,
     XDG_CONFIG_HOME: mk(home, ".config"),
     XDG_DATA_HOME: mk(home, ".local", "share"),
     XDG_CACHE_HOME: mk(home, ".cache"),
