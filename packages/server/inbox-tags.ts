@@ -22,6 +22,7 @@
 import { basename } from "node:path";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { syncSection } from "./inbox-perf";
 import type { createInboxLiveSessions } from "./inbox-sessions";
 
 /** One session the person may tag, as the window reads it. */
@@ -138,7 +139,7 @@ export function createInboxTagsRoute(options: {
     const match = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/taggable$/.exec(path);
     if (!match) return null;
     if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-    return json({ serverSession: options.serverSession, ...taggable(match[1]!, owner) });
+    return json({ serverSession: options.serverSession, ...syncSection("taggable", () => taggable(match[1]!, owner)) });
   };
 
   return { route, taggable, ownerOf };
