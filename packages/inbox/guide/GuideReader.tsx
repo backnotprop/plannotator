@@ -459,7 +459,7 @@ function Reader({
       ...(globalComments ? { globalComments } : {}),
       // What GuideDiff draws (a phone: always Unified), for a file box's first estimate.
       diffStyle: phone ? ('unified' as const) : savedDiffStyle,
-      // The PR page's flush files draw no arrow row after the last hunk until a file's text is read (flushFiles).
+      // The PR page's flush files draw the row after the last hunk only once a file's length shows lines there (flushFiles).
       opensWholeFiles: !!fetchFileContent && !bare,
       // The PR page: files edge to edge, each box exactly its header and code.
       ...(bare ? { flushFiles: true } : {}),

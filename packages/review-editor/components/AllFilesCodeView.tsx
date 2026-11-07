@@ -37,6 +37,7 @@ import { getFileKindOrder } from '../utils/fileKindTree';
 import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
 import { getDiffSelection, getLineNumberFromNode, getSideFromNode, snapshotDiffSelection, rangeForGutterClick, type DiffSelectionSnapshot } from '../utils/diffSelection';
 import { isContentConsistentWithPatch } from '../utils/patchConsistency';
+import { linesAfterLastHunk, unmodifiedLinesLabel } from '../utils/trailingLines';
 import { isLineRangeInPatch } from '../utils/patchParser';
 import { hashString } from '../utils/hashString';
 import {
@@ -424,9 +425,10 @@ export interface AllFilesCodeViewProps {
   /**
    * Files that sit flush, a header's own hairline the only seam (the Inbox's PR page, one file per viewer that scrolls
    * with the page). Every list counts no spacing around a hunk separator (#2713). Here a file whose whole text is not
-   * read yet also draws no "More unchanged context may be available" row after its last hunk, and gives back the room
-   * it is laid out in, so the next file's header sits right under the last code row; once the text is read (an arrow
-   * above it), what is left below shows as "N unmodified lines". The header draws its hairline whether stuck or not.
+   * read yet draws no "More unchanged context may be available" row after its last hunk: when it renders, its length
+   * is read with `fetchFileContent`, and the row shows "N unmodified lines" when N > 0 (an arrow there opens them);
+   * unknown or none, it is hidden and its room given back, so the next file's header sits right under the last code
+   * row. The header draws its hairline whether stuck or not.
    */
   flushFiles?: boolean;
   /** A narrow header keeps the folder before the name (FileHeader `keepsFolder`). */
@@ -703,10 +705,13 @@ const STUCK_HEADER_LINE_CSS = `
     [data-diffs-header]::after { content: ''; position: absolute; left: 0; bottom: -1px; width: 100%; height: 1px; background: var(--border); }
   }
 `;
-// Flush files (`flushFiles`): the header's own hairline is the seam, and an unread file's trailing "More unchanged
-// context" row is not drawn (the viewer gives its room back, HUNK_SEPARATOR_HEIGHT).
+// Flush files (`flushFiles`): the header's own hairline is the seam. An unread file's trailing "More unchanged context"
+// row is not drawn while the lines after its last hunk are unknown or none (the viewer gives its room back,
+// HUNK_SEPARATOR_HEIGHT); with some, it shows their count, as Pierre words it once it has the whole file.
 const FLUSH_FILES_CSS = `
   :host([data-trailing-unread]) [data-separator][data-separator-last] { display: none; }
+  :host([data-trailing-count]) [data-separator][data-separator-last] [data-unmodified-lines] { display: none; }
+  :host([data-trailing-count]) [data-separator][data-separator-last] [data-separator-content]::after { content: var(--pn-trailing-label); }
 `;
 
 // How long the scroller must be quiet before queued augmentation applies
@@ -1961,6 +1966,45 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     item.fileDiff.isPartial &&
     (item.fileDiff.type === 'change' || item.fileDiff.type === 'rename-changed') &&
     item.fileDiff.hunks.length > 0;
+  // The lines after that file's last hunk, counted from the arrows' own reader (cached there, so an arrow's first click
+  // reads nothing again) once the file renders, which is when its box nears the viewport. null: not known yet.
+  const trailingCountRef = useRef<{ key: string; count: number | null; controller: AbortController } | null>(null);
+  useEffect(() => () => trailingCountRef.current?.controller.abort(), []);
+  const syncTrailingRow = useStableCallback((node: HTMLElement, item: CodeViewItem<DiffAnnotationMetadata>) => {
+    const unread = hidesTrailingRow(item);
+    const key = `${fileSetKeyRef.current}\u0000${item.id}`;
+    const kept = trailingCountRef.current;
+    const count = unread && kept?.key === key ? kept.count : null;
+    const shows = count !== null && count > 0;
+    node.toggleAttribute('data-trailing-unread', unread && !shows);
+    node.toggleAttribute('data-trailing-count', shows);
+    if (shows) node.style.setProperty('--pn-trailing-label', JSON.stringify(unmodifiedLinesLabel(count)));
+    else node.style.removeProperty('--pn-trailing-label');
+    setTrailingUnread(unread && !shows);
+    if (!unread || kept?.key === key) return;
+    const file = itemIdToFileRef.current.get(item.id);
+    const read = fetchFileContentRef.current;
+    if (!file || !read) return;
+    kept?.controller.abort();
+    const controller = new AbortController();
+    const entry: { key: string; count: number | null; controller: AbortController } = { key, count: null, controller };
+    trailingCountRef.current = entry;
+    read(file, controller.signal).then(
+      (data) => {
+        if (trailingCountRef.current !== entry || controller.signal.aborted) return;
+        const live = viewerRef.current?.getItem(item.id);
+        // Text that is not this patch's file (the tree moved on) says nothing: the row stays hidden.
+        entry.count =
+          live?.type === 'diff' && data?.oldContent != null && data.newContent != null && isContentConsistentWithPatch(file.patch, data.oldContent, data.newContent)
+            ? linesAfterLastHunk(live.fileDiff.hunks, data.newContent)
+            : 0;
+        const shown = viewerRef.current?.getInstance()?.getRenderedItems().find((candidate: { id: string }) => candidate.id === item.id);
+        if (live && shown?.element) syncTrailingRow(shown.element as HTMLElement, live);
+      },
+      // A failed read: the row stays hidden, and this file is not asked again until the diff changes.
+      () => {},
+    );
+  });
 
   // A comment on a line an arrow opened, after a reload: the gap is closed again. Open what holds it (a first read if
   // need be), then scroll, once the rows are there. Answers whether it took the jump on.
@@ -2048,11 +2092,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // selection's shadow-root host. Registered on every mount/update because
       // CodeView recycles elements across items.
       nodeToItemIdRef.current.set(node, context.id);
-      if (flushesFiles) {
-        const unread = hidesTrailingRow(context);
-        node.toggleAttribute('data-trailing-unread', unread);
-        setTrailingUnread(unread);
-      }
+      if (flushesFiles) syncTrailingRow(node, context);
       augmentItem(context.id);
       const itemId = context.id;
       requestAnimationFrame(() => applyItemHighlights(node, itemId));

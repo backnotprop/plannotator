@@ -1061,13 +1061,16 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
       box: read(root.querySelector('[data-guide-code-view-mounted]')!),
       head: { rule: head.borderBottomWidth, radius: head.borderTopLeftRadius, pageColour: head.backgroundColor === getComputedStyle(root.querySelector('.ib-gbody')!).backgroundColor },
       firstHeadTop: Math.round(root.querySelector('[data-file-header]')!.getBoundingClientRect().top - root.querySelector('.ib-gbody')!.getBoundingClientRect().top),
-      sameSurface: getComputedStyle(root.querySelector('.ib-vhead')!).backgroundColor === getComputedStyle(root.querySelector('.ib-rsplit')!).backgroundColor,
-      sheet: getComputedStyle(root.querySelector('.ib-gbody')!).backgroundColor !== getComputedStyle(root.querySelector('.ib-rsplit')!).backgroundColor,
+      // One surface: the rail and the code one colour, a hairline between them, no corner; the bar the strip that stands out.
+      oneSurface: getComputedStyle(root.querySelector('.ib-gbody')!).backgroundColor === getComputedStyle(root.querySelector('.ib-rsplit')!).backgroundColor,
+      railLine: getComputedStyle(root.querySelector('.ib-rrail')!).borderRightWidth,
+      corner: getComputedStyle(root.querySelector('.ib-gbody')!).borderTopLeftRadius,
+      barApart: getComputedStyle(root.querySelector('.ib-vhead')!).backgroundColor !== getComputedStyle(root.querySelector('.ib-gbody')!).backgroundColor,
     };
   });
   expect(frame.section).toEqual(frame.none);
   expect(frame.box).toEqual(frame.none);
-  expect(frame).toMatchObject({ head: { rule: '1px', radius: '0px', pageColour: true }, firstHeadTop: 0, sameSurface: true, sheet: true });
+  expect(frame).toMatchObject({ head: { rule: '1px', radius: '0px', pageColour: true }, firstHeadTop: 0, oneSurface: true, railLine: '1px', corner: '0px', barApart: true });
   // A 37 px bar over everything; the rail runs to the foot of the page, the code beside it.
   const layers = await review.evaluate((root) => {
     const box = (selector: string) => root.querySelector(selector)!.getBoundingClientRect();

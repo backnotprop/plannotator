@@ -8889,6 +8889,13 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prreview .ib-gbody { background: var(--background); }
 .ib-prr-wide .ib-gbody { border-top-left-radius: 12px; }
 .ib-prr-wide:not(.ib-fold) .ib-gbody { border-top-right-radius: 12px; }
+/* One surface, as the code review app (approval pr-view-one-surface, follow-up): every width but a phone's, the rail
+   and the code share the page's colour with a hairline between them, no sheet and no corner; the bar is the one strip
+   that stands out, a hairline under it. The comments column keeps its fill. */
+.ib-prr-wide .ib-rsplit { background: var(--background); }
+.ib-prr-wide .ib-vhead { border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
+.ib-prr-wide:not(.ib-railfold) .ib-rrail { border-right: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
+.ib-prr-wide .ib-gbody { border-radius: 0; }
 .ib-review.ib-prreview.ib-prr-wide:not(.ib-railfold) .ib-rsplit { grid-template-columns: var(--ib-rail-w, 280px) minmax(0, 1fr) 300px; }
 .ib-review.ib-prreview.ib-prr-wide.ib-fold:not(.ib-railfold) .ib-rsplit { grid-template-columns: var(--ib-rail-w, 280px) minmax(0, 1fr); }
 .ib-prp-handle { position: absolute; top: 0; bottom: 0; left: calc(var(--ib-rail-w, 280px) - 4px); width: 8px; z-index: 4; cursor: col-resize; touch-action: none; }

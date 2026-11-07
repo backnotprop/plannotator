@@ -292,6 +292,7 @@ packages/review-editor/edit/useEditSession.recovery.test.tsx
 packages/review-editor/edit/discardRestoreRender.test.tsx
 packages/review-editor/edit/selectionActionPopover.test.ts
 packages/review-editor/components/AllFilesCodeView.lifecycle.test.tsx
+packages/review-editor/components/AllFilesCodeView.flushTrailing.test.tsx
 packages/review-editor/components/AllFilesCodeView.generated.test.tsx
 packages/review-editor/components/AllFilesCodeView.autoViewed.test.tsx
 packages/review-editor/components/AllFilesCodeView.imagePreview.test.tsx
