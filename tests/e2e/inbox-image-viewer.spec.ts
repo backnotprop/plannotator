@@ -941,9 +941,14 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
   expect(Math.abs((ink.minY + ink.maxY) / 2 - target.v * 760)).toBeLessThan(3);
   expect(Math.abs((ink.maxX - ink.minX) / 2 - reach * 1200)).toBeLessThan(8);
 
-  /** Where the drawing's colour is on the screen, inside the stage, in page pixels. */
+  /**
+   * Where the drawing's colour is on the screen, inside the stage, in page pixels. The open comments panel floats
+   * over the stage's right side, and its card shows the drawing too: only the stage left of the panel is read.
+   */
   const inkOnScreen = async () => {
-    const box = (await pane().locator('[data-image-zoom-stage]').boundingBox())!;
+    const stageBox = (await pane().locator('[data-image-zoom-stage]').boundingBox())!;
+    const panelBox = await pane().locator('[data-comments-drawer="open"]').boundingBox();
+    const box = panelBox && panelBox.x < stageBox.x + stageBox.width ? { ...stageBox, width: panelBox.x - stageBox.x } : stageBox;
     const shotPng = await page.screenshot({ clip: box });
     const found = await page.evaluate(async ({ data, color }) => {
       // The window's CSP lets images load data: URLs (connect-src does not).

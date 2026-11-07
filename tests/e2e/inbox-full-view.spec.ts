@@ -14,8 +14,8 @@
  * opening the drawer; Hide gathers the tools into one control in the bottom
  * right corner (approval "inbox-fullscreen-gather") and one press, by pointer
  * or keyboard, brings everything back; a pointer resting in a corner reveals
- * nothing; the count opens the comments drawer and the page narrows beside it
- * (remembered across a reload); ⋯ holds Open in and Download; Side by side
+ * nothing; the count opens the comments panel over the page, which keeps its width
+ * (closed again after a reload); ⋯ holds Open in and Download; Side by side
  * puts the file beside the thread and Full screen brings the toolbar back
  * showing; × leaves full screen as Escape's last step does (HTML, markdown and
  * the image), its tooltip showing Esc; Escape climbs one rung per press (a draft, typed words asked about, the drawer, Annotate, the
@@ -309,27 +309,26 @@ test('Hide gathers the tools into one control in the bottom right corner; one pr
   await expect(dock()).toHaveAttribute('data-bar', 'pinned');
 });
 
-test('the count opens the comments drawer: the page narrows beside it, its foot rides the next Send; Escape closes it; it is remembered', async () => {
+test('the count opens the comments panel over the page: the page keeps its width, its foot rides the next Send; Escape closes it; it is not remembered', async () => {
   const page = world.page;
   await count().click();
   await expect(pane()).toHaveClass(/ib-drawer/);
-  // Not covered: the page narrows by the drawer's width.
+  // It floats: the page keeps the whole window, the panel sits under the toolbar at the right.
   const frameBox = (await pane().locator('iframe').first().boundingBox())!;
-  const drawer = (await pane().locator('.ib-apanel').boundingBox())!;
-  expect(frameBox.width).toBe(1280 - 320);
-  expect(drawer.x).toBe(960);
-  // The toolbar sits left of it.
+  expect(frameBox.width).toBe(1280);
   const barBox = (await bar().boundingBox())!;
-  expect(barBox.x + barBox.width).toBeLessThanOrEqual(drawer.x);
+  await expect.poll(async () => (await pane().locator('.ib-apanel').boundingBox())!.y).toBeGreaterThanOrEqual(barBox.y + barBox.height);
   const foot = pane().locator('[data-full-view-foot]');
   await expect(foot).toContainText('1 annotation rides your next Send to Claude.');
   await expect(foot.getByRole('button', { name: 'Write the reply' })).toBeVisible();
-  // Remembered across a reload.
+  // Closed again when the file closes: a reload opens it closed.
   await page.goto(`${world.url}#thread=${world.threadId}`);
   await page.reload();
   await page.getByRole('button', { name: 'Open turnkey.html' }).click();
-  await expect(pane()).toHaveClass(/ib-drawer/);
   await expect(dock()).toHaveAttribute('data-bar', 'pinned');
+  await expect(pane()).not.toHaveClass(/ib-drawer/);
+  await count().click();
+  await expect(pane()).toHaveClass(/ib-drawer/);
   await count().focus();
   await page.keyboard.press('Escape');
   await expect(pane()).not.toHaveClass(/ib-drawer/);

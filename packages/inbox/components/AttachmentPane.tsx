@@ -88,7 +88,6 @@ import { ShortcutHint, withShortcut } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { inOverlay, isComposingKey, isEditableTarget, keyTarget, modalOpen } from '../shortcuts/guards';
 import { escapeRung, type EscapeRung } from '../escapeLadder';
-import { storage } from '@plannotator/ui/utils/storage';
 import { Tip } from './Tip';
 import { CopyFileButton } from './CopyFileButton';
 import { LinkedMarkdown } from './LinkedMarkdown';
@@ -98,7 +97,7 @@ import { LinkedMarkdown } from './LinkedMarkdown';
  * folds into the header's Comments button and opens over the file (as a
  * phone's sheet does): beside it the file would keep under 480 px. A file
  * beside the thread at 1280 px and wider keeps the panel docked; full screen
- * has its own drawer.
+ * has its own panel, floating over the page.
  */
 export const FOLD_PANEL_BELOW = 780;
 
@@ -148,12 +147,6 @@ const SELF_CLOSING_DRAFTS = '[data-pn-annotation-toolbar-row], [data-quick-label
 /** Escapes the pane sends to a composer itself (to close it): never a rung of their own. */
 const paneEscapes = new WeakSet<Event>();
 
-/**
- * Whether full screen's comments drawer was left open (approval
- * "inbox-one-fullscreen": remembered, never opened by itself). Cookie only.
- */
-export const COMMENTS_DRAWER_COOKIE = 'plannotator-inbox-file-comments';
-
 export interface AttachmentPaneProps {
   attachment: InboxAttachmentState;
   /** The file is in the person's own message (an image their reply shows): the header and the changed line say "You", not the agent. */
@@ -179,7 +172,7 @@ export interface AttachmentPaneProps {
   /**
    * Full screen (approval "inbox-one-fullscreen"): the file fills the window
    * and one floating toolbar is left (FullViewBar), with the comments in a
-   * drawer beside the page. Otherwise the file sits beside the thread with
+   * panel floating over the page. Otherwise the file sits beside the thread with
    * its header.
    */
   full: boolean;
@@ -591,7 +584,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const [moreOpen, setMoreOpen] = useState(false);
   /** Beside the thread in a narrow pane: the header's button opens the panel as a sheet over the file (inbox.css). */
   const folded = !full && (phone || narrowPane);
-  /** Full screen on a desktop: the comments are a drawer beside the page, which narrows (not covered). */
+  /** Full screen on a desktop: the comments float over the page at its right (the page keeps its width). */
   const drawerMode = full && !phone;
   /** Where the panel is a sheet over the file: folded beside the thread, or full screen on a phone (a bottom sheet). */
   const sheetMode = folded || (full && phone);
@@ -599,13 +592,14 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   useEffect(() => {
     if (!sheetMode) setSheet(false);
   }, [sheetMode]);
-  /** The drawer: remembered open or closed, never opened by itself (a new comment only bumps the count). */
-  const [drawer, setDrawerOpen] = useState(() => storage.getItem(COMMENTS_DRAWER_COOKIE) === 'open');
-  const setDrawer = (open: boolean) => {
-    setDrawerOpen(open);
-    storage.setItem(COMMENTS_DRAWER_COOKIE, open ? 'open' : 'closed');
-  };
-  /** The panel is open: the drawer in full screen on a desktop, else the sheet. */
+  /**
+   * Full screen's floating comments panel: never opened by itself (a new comment only bumps the count), and closed
+   * again when the person leaves the file: full screen ends, another file opens, or the file closes (the pane goes).
+   */
+  const [drawer, setDrawer] = useState(false);
+  /** A comment on another file picked in the open panel: the panel stays open there, focus on that comment's card. */
+  const keepPanelFor = useRef<string | null>(null);
+  /** The panel is open: the floating panel in full screen on a desktop, else the sheet. */
   const panelOpen = drawerMode ? drawer : sheetMode && sheet;
   const sheetButtonRef = useRef<HTMLButtonElement>(null);
   const sheetId = useId();
@@ -622,6 +616,15 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     focusPanelButton();
     // A phone's toolbar is hidden under its open sheet: focus lands once it shows again.
     if (phone) requestAnimationFrame(focusPanelButton);
+  };
+  /** Where the open floating panel covers the HTML page, in the frame's pixels (null when it is not on screen). */
+  const panelOverFrame = () => {
+    const section = sectionRef.current;
+    if (!section?.classList.contains('ib-drawer') || section.getAttribute('data-tools') === 'tucked') return null;
+    const panel = section.querySelector<HTMLElement>('.ib-apanel')?.getBoundingClientRect();
+    const frame = section.querySelector<HTMLElement>('.ib-htmlframe iframe')?.getBoundingClientRect();
+    if (!panel || !frame || !panel.width) return null;
+    return { left: panel.left - frame.left, top: panel.top - frame.top, bottom: panel.bottom - frame.top };
   };
   const togglePanel = () => {
     setMenuOpen(false);
@@ -764,6 +767,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       setMoreOpen(false);
       // Leaving full screen forgets a tucked toolbar: the next entry draws it showing from its first frame (no tucked frame, no slide-in, focus never lands on something inert).
       setToolbar('pinned');
+      // The comments panel floats over full screen only: it closes as full screen ends.
+      setDrawer(false);
     }
   }, [full]);
   // An image's or a film's comment row (a phone's "Comment at" button for a film) stays at the file's foot in full screen: the chip and a phone's toolbar sit above it.
@@ -870,6 +875,15 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     setArmed(!phone);
     setEndNote(null);
     setSheet(false);
+    // The comments panel was about the file left: the next one opens without it, unless a pick in it opened this file.
+    const kept = keepPanelFor.current;
+    keepPanelFor.current = null;
+    if (kept === null) setDrawer(false);
+    else
+      requestAnimationFrame(() => {
+        const card = sectionRef.current?.querySelector<HTMLElement>(`.ib-apanel [data-annotation-id="${CSS.escape(kept)}"]`);
+        (card ?? sheetButtonRef.current)?.focus({ preventScroll: true });
+      });
     const source = pendingStep.current;
     pendingStep.current = null;
     if (!source) return;
@@ -1099,7 +1113,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       popoverOpen: menuOpen || moreOpen || !!props.composer?.reply.comments.list,
       composerOpen: !props.readOnly && openComposer() !== null,
       inField,
-      panelOpen: panelOpen,
+      // Gathered with the tools, the panel is not on screen: Escape has nothing of it to close.
+      panelOpen: panelOpen && !(drawerMode && toolbar === 'tucked'),
       linkedOpen: linkedTop !== null,
       annotating: isHtml && armed && !props.readOnly,
     });
@@ -1856,7 +1871,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         if (isCode && codeRangeOf(annotationOf(record))) setCodeReopenEdit({ id: draft.id, text: draft.text });
         else {
           setPanelReopenEdit({ id: draft.id, text: draft.text });
-          if (drawerMode) setDrawerOpen(true);
+          if (drawerMode) setDrawer(true);
           else if (sheetMode) setSheet(true);
         }
         trackReopen(draft, () => editShown(draft.id));
@@ -2066,7 +2081,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     if (recordKey(record.path, record.version) === currentKey) setSelectedId(id);
     else {
       const owner = props.attachments.find((a) => a.id === record.attachment_id);
-      leave(owner?.name ?? 'that file', () => props.onOpenAt(record.attachment_id, record.version === 'current' ? 'current' : 'sent', id));
+      leave(owner?.name ?? 'that file', () => {
+        // Picked in the open floating panel: the person is using it, so it stays open on the file it opens.
+        if (drawerMode && drawer) keepPanelFor.current = id;
+        props.onOpenAt(record.attachment_id, record.version === 'current' ? 'current' : 'sent', id);
+      });
     }
   };
 
@@ -2313,7 +2332,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           onExitFull={props.fullLocked ? undefined : exitCloses ? close : exitFull}
           exitCloses={exitCloses}
           chord={isHtml ? TOOLS_CHORD : null}
-          shifted={drawerMode && drawer && hasPanel}
         />
       ) : (
         <div className="ib-vhead">
@@ -2442,6 +2460,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               onAddAnnotation={(annotation) => void save(annotation)}
               onSelectAnnotation={setSelectedId}
               selectedAnnotationId={selectedId}
+              // The floating comments panel covers the page's right side: a comment picked there scrolls its mark clear of it.
+              scrollClear={panelOverFrame}
               mentionSource={props.mentionSource}
               mode="selection"
               inputMethod="pinpoint"
@@ -2729,6 +2749,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           role={folded || full ? 'region' : undefined}
           aria-label={folded || full ? 'Comments' : undefined}
           data-comments-drawer={drawerMode ? (drawer ? 'open' : 'closed') : undefined}
+          // The floating panel gathers into the corner control with the tools (inbox.css), and comes back with them.
+          inert={drawerMode && drawer && shownToolbar === 'tucked' ? true : undefined}
           onKeyDown={(event) => {
             // Escape closes the open sheet or drawer, unless something inside (an edit box) already used it.
             if (event.key === 'Escape' && panelOpen && (folded || full) && !event.defaultPrevented) {
@@ -2737,7 +2759,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             }
           }}
         >
-          {/* The sheet's (and full screen's drawer's) own title and close (a phone's touch presentation has neither). */}
+          {/* The sheet's (and full screen's floating panel's) own title and close (a phone's touch presentation has neither). */}
           {(folded || full) && (
             <div className="ib-sheet-h">
               <b>Comments</b>
@@ -2750,7 +2772,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             </div>
           )}
           <AnnotationPanel
-            // The sheet and the drawer draw the timeline under their own title and close (and a phone's window-wide overlay below 768 px would have no close here).
+            // The sheet and the floating panel draw the timeline under their own title and close (and a phone's window-wide overlay below 768 px would have no close here).
             presentation={folded || full ? 'embedded' : undefined}
             // An edit kept when the file closed, back in its card's edit box.
             reopenEdit={panelReopenEdit}
@@ -2847,7 +2869,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             onDeleteInDocument={(_path, id) => void remove(id)}
             onEditInDocument={(_path, id, updates) => edit(id, updates)}
           />
-          {/* Full screen has no bottom bar: the drawer's foot says where the comments go, and the way to the reply (a phone's position lives here too). */}
+          {/* Full screen has no bottom bar: the panel's foot says where the comments go, and the way to the reply (a phone's position lives here too). */}
           {full && (
             <div className="ib-fvfoot" data-full-view-foot="">
               {phone && multi && (

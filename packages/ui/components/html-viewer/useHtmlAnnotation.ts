@@ -121,6 +121,14 @@ interface BridgeRichCopyMessage {
 /** How long the rich-text Copy waits for the bridge before copying the quote as plain text. */
 export const RICH_COPY_TIMEOUT_MS = 1500;
 
+/** A host panel floating over the frame's right side, in frame pixels: from
+ *  `left` to the frame's right edge, between `top` and `bottom`. */
+export interface HtmlScrollClear {
+  left: number;
+  top: number;
+  bottom: number;
+}
+
 /** One draft target in an in-flight multi-select comment. Index 0 is primary. */
 export interface HtmlDraftTarget {
   key: string;
@@ -231,6 +239,11 @@ export interface UseHtmlAnnotationOptions {
   /** scrollIntoView behavior for scroll-to (selecting an annotation).
    *  Absent: smooth, as before; pass 'auto' to honor reduced motion. */
   scrollBehavior?: 'smooth' | 'auto';
+  /** Where a host's own panel floats over the frame's right side, in frame
+   *  pixels (the panel's left edge, top and bottom), read when an annotation
+   *  is selected: a mark under it scrolls clear of it where the page can
+   *  scroll. Absent or null: centred, as before. */
+  scrollClear?: () => HtmlScrollClear | null;
   /** The composer handed to the host (see `HostDraft` and HtmlViewer's
    *  `onHostDraft`): a selection or a pin reports a draft instead of opening
    *  the toolbar or the composer. Absent: unchanged. */
@@ -531,6 +544,7 @@ export function useHtmlAnnotation({
   onUnanchoredChange,
   maxAdditionalTargets,
   scrollBehavior,
+  scrollClear,
   onHostDraft,
 }: UseHtmlAnnotationOptions): Omit<
   UseAnnotationHighlighterReturn,
@@ -1059,14 +1073,18 @@ export function useHtmlAnnotation({
     post({ type: `${PREFIX}cancel-selection` });
   }, [enabled, post]);
 
+  const scrollClearRef = useRef(scrollClear);
+  scrollClearRef.current = scrollClear;
   useEffect(() => {
     if (selectedAnnotationId) {
+      const clear = scrollClearRef.current?.() ?? null;
       post({
         type: `${PREFIX}scroll-to`,
         id: selectedAnnotationId,
         // Only an explicit host preference rides along; the default message
         // is unchanged and the bridge scrolls smoothly as before.
         ...(scrollBehavior ? { behavior: scrollBehavior } : {}),
+        ...(clear ? { clear } : {}),
       });
     } else {
       post({

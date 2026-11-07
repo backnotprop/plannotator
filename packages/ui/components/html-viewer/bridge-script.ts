@@ -930,7 +930,9 @@ export const BRIDGE_SCRIPT = `(function() {
       // first fragment of a multi-paragraph selection. The optional
       // behavior lets the parent pass its reduced-motion preference across
       // the boundary; absent means smooth, as before.
-      scrollToAnnotation(e.data.id, e.data.behavior === 'auto' ? 'auto' : 'smooth');
+      // clear: a host panel floats over the frame's right side (HtmlViewer
+      // scrollClear); a mark under it goes below it where the page scrolls.
+      scrollToAnnotation(e.data.id, e.data.behavior === 'auto' ? 'auto' : 'smooth', panelClear(e.data.clear));
     }
 
     else if (type === PREFIX + 'scroll-to-fragment') {
@@ -2864,25 +2866,71 @@ export const BRIDGE_SCRIPT = `(function() {
     }
   }
 
-  function scrollToAnnotation(id, behavior) {
+  function scrollToAnnotation(id, behavior, clear) {
     var record = findAnnRecord(id);
     if (!record) return;
     beginDeadSearchPass(Infinity); // user-initiated one-shot: never budget-starved
     refreshRecordTargets(record);
     var scrollEl = null;
+    var box = null;
     for (var i = 0; i < record.targets.length && !scrollEl; i++) {
       var target = record.targets[i];
       if (target.kind === 'element' && target.element && target.element.isConnected) {
         scrollEl = target.element;
+        box = scrollEl.getBoundingClientRect();
       } else if (target.kind === 'range' && rangeAlive(target.range)) {
         var node = target.range.startContainer;
         scrollEl = node.nodeType === 1 ? node : node.parentElement;
+        try { box = target.range.getBoundingClientRect(); } catch (ex) { box = null; }
       }
     }
     if (scrollEl) {
-      try { scrollEl.scrollIntoView({ behavior: behavior || 'smooth', block: 'center' }); } catch (ex) {}
+      var by = clear && box ? clearOfPanelBy(box, clear) : null;
+      if (by === null) {
+        try { scrollEl.scrollIntoView({ behavior: behavior || 'smooth', block: 'center' }); } catch (ex) {}
+      } else if (by !== 0) {
+        scrollPageBy(scrollEl, by, behavior || 'smooth');
+      }
     }
     focusAnnotationRecord(id, true);
+  }
+
+  // A host's panel over the frame's right side: { left, top, bottom } in frame
+  // pixels, or null when the message carries none (or a malformed one).
+  function panelClear(value) {
+    if (!value || typeof value !== 'object') return null;
+    var left = value.left, top = value.top, bottom = value.bottom;
+    if (typeof left !== 'number' || typeof top !== 'number' || typeof bottom !== 'number') return null;
+    if (!isFinite(left) || !isFinite(top) || !isFinite(bottom) || bottom <= top) return null;
+    return { left: left, top: top, bottom: bottom };
+  }
+
+  // How far to scroll so a mark is not under the host's panel: null to
+  // centre it as before (it is clear of the panel there, or there is no room
+  // below the panel), 0 to leave it where it is (on screen and clear), else
+  // the distance that puts it just below the panel.
+  function clearOfPanelBy(box, clear) {
+    var shown = window.innerHeight;
+    var under = function (top) { return top < clear.bottom && top + box.height > clear.top; };
+    if (box.right <= clear.left) return null;
+    if (!under((shown - box.height) / 2)) return null;
+    if (box.top >= 0 && box.bottom <= shown && !under(box.top)) return 0;
+    var below = clear.bottom + 16;
+    if (below + box.height > shown - 16) return null;
+    return box.top - below;
+  }
+
+  // Scroll the mark's scrolling ancestors by that distance, as far as each can go.
+  function scrollPageBy(el, by, behavior) {
+    var root = document.scrollingElement;
+    for (var node = el.parentElement; node && by; node = node.parentElement) {
+      if (node !== root && !/auto|scroll/.test(getComputedStyle(node).overflowY)) continue;
+      var before = node.scrollTop;
+      var to = Math.max(0, Math.min(node.scrollHeight - node.clientHeight, before + by));
+      if (to === before) continue;
+      try { node.scrollTo({ top: to, behavior: behavior }); } catch (ex) { node.scrollTop = to; }
+      by -= to - before;
+    }
   }
 
   // --- Element anchors: verified-unique CSS selectors for restoration ---

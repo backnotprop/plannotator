@@ -4,7 +4,7 @@
 /** The format number this package reads and writes. */
 export const FORMAT = 1;
 
-/** A drawing's files by their path inside `.plannotator/system/`: 'system.yaml', 'sheets/C-001.yaml', 'revisions/PR-2543.yaml'. */
+/** A drawing's files by their path inside the drawing folder: 'system.yaml', 'sheets/C-001.yaml', 'revisions/PR-2543.yaml'. */
 export type SystemFiles = Record<string, string>;
 
 /** One problem in one file. `field` is where in the file (`parts.api.in`, `bands[0].row`), or '' for the whole file. */

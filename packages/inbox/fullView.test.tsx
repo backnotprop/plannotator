@@ -4,12 +4,14 @@
  * floating toolbar (pen on HTML, the comment count, `N/M ⌄`, ⋯, Side by
  * side, × Exit full screen, » Hide tools); the header, the changed line and
  * the bar under the file are gone, and there is no eye. Hide gathers the tools into one corner
- * control and one press brings them back. The count opens the
- * comments drawer beside the page, remembered and never opened by itself.
+ * control and one press brings them back. The count opens the comments
+ * panel floating over the page, never opened by itself; it gathers with the
+ * tools and closes when the person leaves the file.
  *
  * What is proved here, on the pane as the thread drives it: the single mode
  * and focus both ways; the gather and its way back, with focus never lost; no
- * hover reveal; the drawer and its remembered state; a new comment only
+ * hover reveal; the floating panel gathering with the tools and closing on
+ * leaving the file (full screen ends, a step, a new mount); a new comment only
  * bumping the count; the toolbar always starting out; ⌘⇧X on HTML only; the
  * ⋯ menu; the peek and a step keeping full screen with its chip; Escape's
  * ladder (one thing per press, full screen last; nothing asks about typed words); the changed chip and dot; a phone and a stacked window. The
@@ -26,7 +28,7 @@ import { attachmentSequence, type AttachmentStep } from './stepping';
 import { tooltipOf } from './testing/tooltip';
 
 const hasDom = typeof document !== 'undefined';
-const { AttachmentPane, COMMENTS_DRAWER_COOKIE } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');
+const { AttachmentPane } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');
 const { getShortcutPlatform } = (hasDom ? await import('@plannotator/ui/shortcuts') : {}) as typeof import('@plannotator/ui/shortcuts');
 const { storage } = (hasDom ? await import('@plannotator/ui/utils/storage') : {}) as typeof import('@plannotator/ui/utils/storage');
 
@@ -34,13 +36,16 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 const realFetch = globalThis.fetch;
 
+/** The cookie that once remembered the comments drawer open: a browser may still hold it. */
+const OLD_DRAWER_COOKIE = 'plannotator-inbox-file-comments';
+
 beforeAll(() => {
   // A page on localhost, as the Inbox is served: about:blank keeps no readable cookies (the drawer's choice is one).
   if (hasDom) (window as unknown as { happyDOM: { setURL: (url: string) => void } }).happyDOM.setURL('http://localhost:4000/');
 });
 
 beforeEach(() => {
-  if (hasDom) storage.removeItem(COMMENTS_DRAWER_COOKIE);
+  if (hasDom) storage.removeItem(OLD_DRAWER_COOKIE);
 });
 
 afterEach(() => {
@@ -50,7 +55,7 @@ afterEach(() => {
   host = null;
   globalThis.fetch = realFetch;
   for (const stray of document.querySelectorAll('[data-test-stray]')) stray.remove();
-  if (hasDom) storage.removeItem(COMMENTS_DRAWER_COOKIE);
+  if (hasDom) storage.removeItem(OLD_DRAWER_COOKIE);
 });
 
 const M1 = 'msg_01K7M1MMMMMMMMMMMMMMMMMMMM';
@@ -394,7 +399,7 @@ test.skipIf(!hasDom)('back into full screen after leaving it tucked (Hide, the d
   expect(document.activeElement).not.toBe(document.body);
 });
 
-test.skipIf(!hasDom)('the count opens the comments drawer beside the page (it narrows; not covered); its foot says what rides the next Send; Escape and its close shut it, focus back on the count', async () => {
+test.skipIf(!hasDom)('the count opens the floating comments panel; its foot says what rides the next Send; Escape and its close shut it, focus back on the count', async () => {
   stubViews();
   const harness = harnessOf();
   await render(<Pane start={notes} harness={harness} records={[RECORD, record('ann_2', page)]} />);
@@ -406,9 +411,6 @@ test.skipIf(!hasDom)('the count opens the comments drawer beside the page (it na
   expect(pane().classList.contains('ib-panel-open')).toBe(false);
   expect(host!.querySelector('[data-comments-drawer]')!.getAttribute('data-comments-drawer')).toBe('open');
   expect(count.getAttribute('aria-expanded')).toBe('true');
-  expect(storage.getItem(COMMENTS_DRAWER_COOKIE)).toBe('open');
-  // The dock sits left of the drawer.
-  expect(dock()!.classList.contains('ib-shift')).toBe(true);
   const foot = host!.querySelector<HTMLElement>('[data-full-view-foot]')!;
   expect(foot.textContent).toContain('2 annotations ride your next Send to Claude Code. 1 is on other files.');
   const buttons = [...foot.querySelectorAll<HTMLButtonElement>('button')];
@@ -419,7 +421,6 @@ test.skipIf(!hasDom)('the count opens the comments drawer beside the page (it na
   await key(host!.querySelector('.ib-apanel')!, { key: 'Escape' });
   expect(pane().classList.contains('ib-drawer')).toBe(false);
   expect(document.activeElement).toBe(count);
-  expect(storage.getItem(COMMENTS_DRAWER_COOKIE)).toBe('closed');
   expect(bar()).not.toBeNull();
 
   await click(count);
@@ -428,12 +429,13 @@ test.skipIf(!hasDom)('the count opens the comments drawer beside the page (it na
   expect(document.activeElement).toBe(count);
 });
 
-test.skipIf(!hasDom)('the drawer remembers being left open; a new comment never opens it and only bumps the count', async () => {
+test.skipIf(!hasDom)('a new comment never opens the floating panel and only bumps the count; a browser that kept the old drawer cookie does not open it either', async () => {
   stubViews();
+  storage.setItem(OLD_DRAWER_COOKIE, 'open');
   const harness = harnessOf();
   await render(<Pane start={notes} harness={harness} />);
   expect(pane().classList.contains('ib-drawer')).toBe(false);
-  // A comment saved with the drawer closed: the count bumps, the drawer stays shut.
+  // A comment saved with the panel closed: the count bumps, the panel stays shut.
   await act(async () => harness.setRecords!([RECORD, record('ann_9')]));
   await settle();
   expect(pane().classList.contains('ib-drawer')).toBe(false);
@@ -443,16 +445,74 @@ test.skipIf(!hasDom)('the drawer remembers being left open; a new comment never 
   // The handle carries the count too.
   await click(hideButton());
   expect(handle().getAttribute('aria-label')).toBe('Show tools, 2 comments');
+});
 
-  // Left open: the next full screen (another file, another mount) opens with it.
-  await press(handle());
+test.skipIf(!hasDom)('the floating panel goes with the tools when they gather and comes back with them; Escape does not spend a press on it while it is away', async () => {
+  stubViews();
+  await render(<Pane start={notes} harness={harnessOf()} />);
+  const panel = () => host!.querySelector<HTMLElement>('.ib-apanel')!;
   await click(host!.querySelector('[data-full-view-comments]'));
-  await rerender(<Pane start={page} harness={harnessOf()} />);
   expect(pane().classList.contains('ib-drawer')).toBe(true);
-  // With the toolbar tucked, closing the drawer from inside puts focus on the handle.
+  expect(panel().inert).toBe(false);
+  // Focus inside the panel when » gathers: it goes to the corner control, never left on something inert.
+  panel().querySelector<HTMLButtonElement>('.ib-sheet-h button')!.focus();
   await click(hideButton());
-  await click(host!.querySelector('.ib-apanel .ib-sheet-h button'));
+  expect(pane().getAttribute('data-tools')).toBe('tucked');
+  expect(panel().inert).toBe(true);
   expect(document.activeElement).toBe(handle());
+  // Gathered, not closed: one press on the corner control brings it back open with the toolbar.
+  await press(handle());
+  expect(pane().getAttribute('data-tools')).toBe('pinned');
+  expect(pane().classList.contains('ib-drawer')).toBe(true);
+  expect(panel().inert).toBe(false);
+  // Gathered again, Escape skips the panel it cannot see: the next rung (here, leaving full screen) is taken.
+  await click(hideButton());
+  await key(document.body, { key: 'Escape' });
+  expect(pane().hasAttribute('data-full-view')).toBe(false);
+});
+
+test.skipIf(!hasDom)('⌘⇧X with focus in the floating panel (HTML) gathers it with the tools and puts focus on the corner control, never on something gone inert', async () => {
+  stubViews();
+  await render(<Pane start={page} harness={harnessOf()} />);
+  await click(host!.querySelector('[data-full-view-comments]'));
+  expect(pane().classList.contains('ib-drawer')).toBe(true);
+  const close = host!.querySelector<HTMLButtonElement>('.ib-apanel .ib-sheet-h button')!;
+  close.focus();
+  expect(document.activeElement === close).toBe(true);
+  const event = await key(close, chord());
+  await settle();
+  expect(event.defaultPrevented).toBe(true);
+  expect(pane().getAttribute('data-tools')).toBe('tucked');
+  expect(host!.querySelector<HTMLElement>('.ib-apanel')!.inert).toBe(true);
+  expect(document.activeElement === handle()).toBe(true);
+});
+
+test.skipIf(!hasDom)('the floating panel closes when the person leaves the file: full screen ends, a step to another file, the file closing', async () => {
+  stubViews();
+  const harness = harnessOf();
+  await render(<Pane start={notes} harness={harness} />);
+  const isOpen = () => pane().classList.contains('ib-drawer');
+  const openPanel = async () => {
+    await click(host!.querySelector('[data-full-view-comments]'));
+    expect(isOpen()).toBe(true);
+  };
+  // Full screen ends (Side by side), and comes back: closed.
+  await openPanel();
+  await click(host!.querySelector('[data-full-view-exit="exit"]'));
+  await click(host!.querySelector('.ib-vhead [data-full-screen-toggle]'));
+  expect(bar()).not.toBeNull();
+  expect(isOpen()).toBe(false);
+  // A step to the next file keeps full screen; the panel closes.
+  await openPanel();
+  await key(pane(), { key: ']' });
+  await settle();
+  expect(pane().getAttribute('data-attachment-pane')).toBe(page.id);
+  expect(bar()).not.toBeNull();
+  expect(isOpen()).toBe(false);
+  // The file closed and opened again (a new pane): closed.
+  await openPanel();
+  await rerender(<Pane start={notes} harness={harnessOf()} />);
+  expect(isOpen()).toBe(false);
 });
 
 test.skipIf(!hasDom)('⌘⇧X on an HTML file tucks and shows the toolbar; on markdown and beside the thread it does nothing; never while typing', async () => {

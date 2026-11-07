@@ -19,7 +19,11 @@ import { AsyncLocalStorage } from "node:async_hooks";
 export const INBOX_SLOW_REQUEST_MS = 200;
 /** A timer at least this late writes a `loop_stall` line (debug log on only). */
 export const INBOX_LOOP_STALL_MS = 100;
-const LOOP_TICK_MS = 250;
+/**
+ * How often the loop watch ticks. A block is measured from the tick it delays, so a block only counts as a stall
+ * when it runs `INBOX_LOOP_STALL_MS` past the next tick: up to this many ms of a block can go unseen.
+ */
+export const INBOX_LOOP_TICK_MS = 250;
 
 interface Phase {
   name: string;
@@ -207,11 +211,11 @@ export function runningLoopWatches(): number {
 export function watchLoopStalls(onStall: (ms: number, cause: StallCause) => void): () => void {
   loopWatches++;
   let stopped = false;
-  let expected = performance.now() + LOOP_TICK_MS;
+  let expected = performance.now() + INBOX_LOOP_TICK_MS;
   const timer = setInterval(() => {
     const now = performance.now();
     const late = now - expected;
-    expected = now + LOOP_TICK_MS;
+    expected = now + INBOX_LOOP_TICK_MS;
     const cause = takeStallCause();
     if (late >= INBOX_LOOP_STALL_MS) {
       try {
@@ -220,7 +224,7 @@ export function watchLoopStalls(onStall: (ms: number, cause: StallCause) => void
         // Never in the way.
       }
     }
-  }, LOOP_TICK_MS);
+  }, INBOX_LOOP_TICK_MS);
   (timer as { unref?: () => void }).unref?.();
   return () => {
     if (stopped) return;

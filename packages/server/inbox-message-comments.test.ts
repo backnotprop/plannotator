@@ -141,7 +141,7 @@ test("a comment on an agent's message is kept with the thread's annotations, edi
   expect(((await reopen.json()) as { code: string }).code).toBe("annotation_closed");
 });
 
-test("refused: the person's own message, an unknown message, a deletion or empty quote, an id used on a file, another site and a stale tab", async () => {
+test("refused: the person's own message, an unknown message, a general comment or empty quote, an id used on a file, another site and a stale tab", async () => {
   const { project, dataDir } = world();
   const server = await start(dataDir);
   const client = await agent(server);
@@ -152,7 +152,8 @@ test("refused: the person's own message, an unknown message, a deletion or empty
     expect([path, answer.status, ((await answer.json()) as { code: string }).code]).toEqual([path, status, code]);
   };
 
-  await refused(route, comment({ type: "DELETION" }), 422, "validation_error");
+  // A Delete needs the words it removes, as a comment does.
+  await refused(route, comment({ type: "DELETION", text: undefined, originalText: "  " }), 422, "validation_error");
   await refused(route, comment({ type: "GLOBAL_COMMENT" }), 422, "validation_error");
   await refused(route, comment({ originalText: "   " }), 422, "validation_error");
   await refused(route, comment({ originalText: "x".repeat(20_001) }), 422, "validation_error");
@@ -317,6 +318,34 @@ test("over the tailnet a comment on a diagram part goes as a comment on words do
     else process.env.PLANNOTATOR_DATA_DIR = previous.data;
     if (previous.ts !== undefined) process.env.PLANNOTATOR_INBOX_TAILSCALE = previous.ts;
   }
+});
+
+test("a Delete on words (the toolbar's Delete, approval inbox-toolbar-delete) is stored without words of its own, and Send tells the agent to remove them", async () => {
+  const { project, dataDir } = world();
+  const server = await start(dataDir);
+  const client = await agent(server);
+  const sent = await sendMessage(client, project);
+  const route = `/api/inbox/messages/${sent.message_id}/annotations`;
+  // As the window's viewer makes it: plan review's DELETION, no text.
+  const deletion = comment({ id: "ann-msg-del", type: "DELETION", text: undefined, originalText: "and a 429 waits for Retry-After" });
+  expect((await post(server, route, { annotation: deletion })).status).toBe(200);
+  expect((await post(server, route, { annotation: comment() })).status).toBe(200);
+  const records = await pending(server, sent.thread_id);
+  expect(records.map((r) => (r.annotation as { type: string }).type).sort()).toEqual(["COMMENT", "DELETION"]);
+
+  const feedback = attachmentFeedback(records, [], new Map(), project);
+  const reply = await post(server, `/api/inbox/messages/${sent.message_id}/reply`, {
+    idempotency_key: "send-del",
+    words: "One cut.",
+    feedback,
+    annotation_ids: records.map((r) => r.id),
+  });
+  expect(reply.status).toBe(200);
+  const body = ((await reply.json()) as { reply: { body: string } }).reply.body;
+  expect(body).toContain("I've reviewed this message and have 2 pieces of feedback:");
+  expect(body).toContain('Remove this: "and a 429 waits for Retry-After"\n> I don\'t want this in your message.');
+  expect(body).toContain('Feedback on: "2, 4 and 8 seconds"\n> Cap the total wait too.');
+  expect(await pending(server, sent.thread_id)).toHaveLength(0);
 });
 
 test("Send carries the comments quoted under 'Feedback on your message from <time>', before the files'; the agent's read_thread returns it, and a sent comment is closed", async () => {
