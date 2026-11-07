@@ -66,12 +66,30 @@ describe('placeTouchToolbar', () => {
     expect(pos.top).toBeGreaterThan(anchor.bottom);
   });
 
-  test('flips above only when there is no room below, and stays on screen', () => {
+  test('flips above only when there is no room below, over the band where iOS draws its menu', () => {
     const anchor = word(100, 800);
     const pos = placeTouchToolbar({ anchor, toolbar, viewport: phone, mode: 'center-above' });
     expect(pos.placement).toBe('above');
+    // iOS's menu sits about 8px above the selection and is about 44px tall: the toolbar clears it.
+    expect(anchor.top - (pos.top + toolbar.height)).toBeGreaterThanOrEqual(52);
+    expect(pos.top).toBeGreaterThanOrEqual(TOUCH_TOOLBAR_EDGE_MARGIN);
+  });
+
+  test('near the bottom of a short screen without room for both, it goes right above the selection', () => {
+    const short = { left: 0, top: 0, width: 390, height: 140 };
+    const anchor = word(100, 80);
+    const pos = placeTouchToolbar({ anchor, toolbar, viewport: short, mode: 'center-above' });
+    expect(pos.placement).toBe('above');
     expect(pos.top + toolbar.height).toBeLessThanOrEqual(anchor.top);
     expect(pos.top).toBeGreaterThanOrEqual(TOUCH_TOOLBAR_EDGE_MARGIN);
+  });
+
+  test('with room neither below nor above, it is pinned inside the bottom edge', () => {
+    const short = { left: 0, top: 0, width: 390, height: 100 };
+    const anchor = { left: 100, right: 200, top: 20, bottom: 70 };
+    const pos = placeTouchToolbar({ anchor, toolbar, viewport: short, mode: 'center-above' });
+    expect(pos.placement).toBe('pinned');
+    expect(pos.top + toolbar.height).toBe(short.height - TOUCH_TOOLBAR_EDGE_MARGIN);
   });
 
   test('a selection taller than the screen pins the toolbar inside the bottom edge', () => {

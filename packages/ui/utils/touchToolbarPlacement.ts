@@ -17,7 +17,8 @@
  *
  * The toolbar always stays inside the visible screen, with a margin and the
  * device's safe-area insets on every side; it flips above the selection only
- * when there is no room below, and when neither fits (a selection taller than
+ * when there is no room below, and then goes above the band where iOS draws
+ * its menu when there is room for both; when neither fits (a selection taller than
  * the screen) it rests at the bottom edge. While the selection is scrolled
  * out of sight it is hidden, not stuck to an edge.
  *
@@ -59,7 +60,7 @@ export const TOUCH_TOOLBAR_GAP_ABOVE = 8;
  * The menu is about 44px tall and sits about 8px off the selection.
  */
 export const IOS_MENU_ROOM_ABOVE = 60;
-/** Extra room left below such a selection, so the toolbar sits under iOS's menu. */
+/** Extra room left for iOS's menu: below a selection near the top, above one near the bottom. */
 export const IOS_MENU_CLEARANCE = 52;
 /** Size used before the toolbar has rendered once and can be measured. */
 export const TOUCH_TOOLBAR_SIZE_ESTIMATE = { width: 280, height: 54 };
@@ -158,8 +159,13 @@ export function placeTouchToolbar(input: {
     // Selection scrolled up past the top edge: keep the toolbar on screen.
     if (below <= maxTop) return { ...base, top: Math.max(below, minTop), placement: 'below' };
   }
-  const above = anchor.top - TOUCH_TOOLBAR_GAP_ABOVE - toolbar.height;
-  if (above >= minTop) return { ...base, top: Math.min(above, maxTop), placement: 'above' };
+  // No room below (a selection near the bottom): above, but over the band
+  // where iOS draws its menu (centered above the selection), then right above
+  // the selection, then pinned to the bottom edge.
+  for (const gap of [TOUCH_TOOLBAR_GAP_ABOVE + IOS_MENU_CLEARANCE, TOUCH_TOOLBAR_GAP_ABOVE]) {
+    const above = anchor.top - gap - toolbar.height;
+    if (above >= minTop) return { ...base, top: Math.min(above, maxTop), placement: 'above' };
+  }
   return { ...base, top: maxTop, placement: 'pinned' };
 }
 
@@ -189,13 +195,19 @@ export function readVisibleViewport(): ToolbarViewport {
 
 let insetCache: { key: string; insets: ViewportEdgeInsets } | null = null;
 
+/** Insets change with the device's orientation, not with pinch zoom (which resizes the window's inner size). */
+function insetCacheKey(): string {
+  const landscape = typeof window.matchMedia === 'function' && window.matchMedia('(orientation: landscape)').matches;
+  return `${window.screen?.width ?? 0}x${window.screen?.height ?? 0}:${landscape ? 'l' : 'p'}`;
+}
+
 /**
  * The device's safe-area insets (notch, rounded corners, home indicator),
- * read once per window size through a hidden probe: env() is only readable
+ * read once per orientation through a hidden probe: env() is only readable
  * from CSS. Zero where the browser has none.
  */
 export function readSafeAreaInsets(): ViewportEdgeInsets {
-  const key = `${window.innerWidth}x${window.innerHeight}`;
+  const key = insetCacheKey();
   if (insetCache?.key === key) return insetCache.insets;
   const probe = document.createElement('div');
   probe.style.cssText = 'position:fixed;top:0;left:0;visibility:hidden;pointer-events:none;'

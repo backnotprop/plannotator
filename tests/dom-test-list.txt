@@ -466,6 +466,7 @@ packages/ui/components/Settings.agentTool.test.tsx
 packages/ui/components/settings/QuickLabelsTab.test.tsx
 packages/ui/components/AnnotationToolbar.touchTargets.test.tsx
 packages/ui/components/AnnotationToolbar.touchPlacement.test.tsx
+packages/ui/components/touchAnchorWiring.test.tsx
 packages/ui/components/AnnotationToolbar.modeShortcutGuard.test.tsx
 packages/ui/components/PermissionModeSetup.mobile.test.tsx
 packages/ui/components/html-viewer/useHtmlAnnotation.mintedIds.test.tsx

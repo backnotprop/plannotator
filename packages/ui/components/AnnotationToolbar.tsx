@@ -221,22 +221,26 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   const touchAnchorRectRef = useRef(touchAnchorRect);
   touchAnchorRectRef.current = touchAnchorRect;
   const measuredSizeRef = useRef<{ width: number; height: number } | null>(null);
+  // Touch placement only: the selection is scrolled out of sight and the
+  // toolbar hidden, so its keys act on nothing until it is back.
+  const hiddenRef = useRef(false);
 
   // Update position on scroll/resize
   useEffect(() => {
     const updatePosition = () => {
       const rect = element.getBoundingClientRect();
+      // Touch screens (host opt-in) place and close by the WHOLE selection,
+      // not its first piece; elsewhere `element` alone, as before.
+      const anchor = touchToolbar ? touchAnchorRectRef.current?.() ?? rect : rect;
 
-      if (closeOnScrollOut && (rect.bottom < 0 || rect.top > window.innerHeight)) {
+      if (closeOnScrollOut && (anchor.bottom < 0 || anchor.top > window.innerHeight)) {
         onClose();
         return;
       }
 
       if (touchToolbar) {
-        // Touch screens (host opt-in): below the selection, where iOS's own
-        // edit menu does not go, and kept inside the visible screen.
-        // Below the WHOLE selection, not its first piece.
-        const anchor = touchAnchorRectRef.current?.() ?? rect;
+        // Below the selection, where iOS's own edit menu does not go, and
+        // kept inside the visible screen.
         const placed = placeTouchToolbar({
           anchor,
           toolbar: measuredSizeRef.current ?? TOUCH_TOOLBAR_SIZE_ESTIMATE,
@@ -244,10 +248,12 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           insets: readSafeAreaInsets(),
           mode: positionMode,
         });
+        hiddenRef.current = placed.placement === 'hidden';
         setPosition({ top: placed.top, left: placed.left, touch: placed.placement, maxWidth: placed.maxWidth });
         return;
       }
 
+      hiddenRef.current = false;
       if (positionMode === 'center-above') {
         setPosition({
           top: rect.top - 48,
@@ -312,6 +318,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing) return;
+      if (hiddenRef.current) return;
       if (isEditableElement(e.target) || isEditableElement(document.activeElement)) return;
 
       // When a picker is open, let it own all keyboard input

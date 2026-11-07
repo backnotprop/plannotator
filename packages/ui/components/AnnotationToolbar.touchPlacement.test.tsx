@@ -73,8 +73,11 @@ async function mount(opts: {
   coarse: boolean;
   rect: { left: number; top: number; width: number; height: number };
   touchAnchorRect?: () => { top: number; bottom: number; left: number; right: number } | null;
+  closeOnScrollOut?: boolean;
+  onClose?: () => void;
+  onRequestComment?: (initialChar?: string) => void;
 }) {
-  originalMatchMedia = window.matchMedia;
+  originalMatchMedia ??= window.matchMedia;
   window.matchMedia = pointerMatchMedia(opts.coarse) as typeof window.matchMedia;
   if (opts.optIn) setTouchSelectionToolbar(true);
   anchor = document.createElement('span');
@@ -93,10 +96,11 @@ async function mount(opts: {
         element={anchor!}
         positionMode="center-above"
         onAnnotate={() => {}}
-        onClose={() => {}}
-        onRequestComment={() => {}}
+        onClose={opts.onClose ?? (() => {})}
+        onRequestComment={opts.onRequestComment ?? (() => {})}
         onQuickLabel={() => {}}
         touchAnchorRect={opts.touchAnchorRect}
+        closeOnScrollOut={opts.closeOnScrollOut}
       />,
     );
   });
@@ -140,6 +144,47 @@ describe.if(hasDom)('AnnotationToolbar touch placement', () => {
     const toolbar = await mount({ optIn: true, coarse: true, rect: { left: 100, top: -300, width: 30, height: 22 } });
     expect(toolbar.dataset.pnAnnotationToolbarTouch).toBe('hidden');
     expect(toolbar.style.visibility).toBe('hidden');
+  });
+
+  test('a tall selection whose first line scrolled above the top stays open: it closes by the whole selection', async () => {
+    phoneScreen(276);
+    let closes = 0;
+    const toolbar = await mount({
+      optIn: true,
+      coarse: true,
+      closeOnScrollOut: true,
+      onClose: () => { closes += 1; },
+      // The first mark is above the screen; the selection runs down to 400.
+      rect: { left: 40, top: -100, width: 200, height: 22 },
+      touchAnchorRect: () => ({ left: 16, right: 370, top: -100, bottom: 400 }),
+    });
+    expect(closes).toBe(0);
+    expect(toolbar.dataset.pnAnnotationToolbarTouch).toBe('below');
+    expect(parseFloat(toolbar.style.top)).toBeGreaterThanOrEqual(400 + 28);
+  });
+
+  test('while hidden its keys act on nothing; shown, a typed letter starts a comment', async () => {
+    phoneScreen(276);
+    const typed: Array<string | undefined> = [];
+    await mount({
+      optIn: true,
+      coarse: true,
+      onRequestComment: (c) => { typed.push(c); },
+      rect: { left: 100, top: -300, width: 30, height: 22 },
+    });
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true })); });
+    expect(typed).toEqual([]);
+    if (root) await act(async () => root?.unmount());
+    root = null;
+    document.body.replaceChildren();
+    await mount({
+      optIn: true,
+      coarse: true,
+      onRequestComment: (c) => { typed.push(c); },
+      rect: { left: 100, top: 300, width: 30, height: 22 },
+    });
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true })); });
+    expect(typed).toEqual(['a']);
   });
 
   test('opted in with a mouse: the desktop toolbar, centered above', async () => {
