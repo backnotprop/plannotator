@@ -190,7 +190,8 @@ the model, or send the files and let the window call `loadFiles()`.
   one commit), so an untracked, ignored or symlinked file does not count. Outside git it reads the disk, and a symlink
   anywhere on the path does not count. Paths are matched with their exact case, so a check on macOS agrees with one
   on Linux. Paths in another repo alias are checked only when `roots` gives a checkout of it, else a warning names the
-  alias. Spans are a preference: a band whose written spans add up to more than 12 columns is clean, and the
+  alias. A sheet still under `wanted:` that no file draws is a warning naming it: a check is the end of a draw, and
+  a drawing that still wants a sheet is never redrawn (see the tick, step 2). Spans are a preference: a band whose written spans add up to more than 12 columns is clean, and the
   renderer narrows every part in it to fit.
 - Limits: a drawing file is at most 1 MiB and a drawing at most 8 MiB; a file over either is an error, not read. A
   drawing file must be a plain file (not a symlink), UTF-8, and end in `.yaml` (a `.yml` file is an error that names
@@ -386,10 +387,28 @@ Replaced 2026-11-06 by the owner's ruling (row 7689, q-122e6577). Everything is 
 `tick({ root, dataDir, key })` is one run of `plannotator system tick --project <root> --key <key>`. It never throws.
 Replaced 2026-11-06 by the owner's ruling (row 7689, q-122e6577): no branch, commit, push or pull request.
 
-1. No setup.json: `nothing`. A live tick holds `tick.lock`: `nothing` (a dead pid's lock is taken over).
+1. No setup.json: `nothing`. Someone else holds `tick.lock`: `nothing`. A lock that cannot be taken at all is
+   `failed`, recorded in `state.json`'s `last_error`. The lock is `{ token, pid }`, made whole in one step (a temp
+   file linked to its name, or an exclusive create when the link fails for any reason but EEXIST, as on a file system
+   with no hard links: FAT, exFAT, many SMB mounts), its mtime a heartbeat the holder touches every 10 seconds. A taker breaks it only when the holder's pid
+   is dead or the heartbeat is over a minute old, and only when a second look shows the same holder that way (1 second
+   later for a dead pid, 25 seconds, two and a half beats, for a stale heartbeat, so a holder made late by a sleep or
+   a clock jump has touched it), under a second lock (`tick.lock.break`) so two takers never both run. A release
+   deletes the lock only while it holds its own token. A holder whose lock was broken anyway is told: the lock's
+   `lost` turns true and its `signal` aborts (only when the lock is gone or names another holder; a read that fails
+   otherwise keeps it until the next beat). The tick checks before it sets a cut-off redraw aside, as soon as its
+   agent returns, before the swap and before each `state.json` save, and stops there (`failed`, "lost tick.lock"), leaving the folders to the new
+   holder.
+   **The Inbox's first draw holds `tick.lock` for its whole run** (`takeLock` from `@plannotator/system/node`):
+   DRAW.md step 6 fixes files in `drawing/` after `wanted:` is empty, and a tick must not redraw or swap the drawing
+   then. The holder is the process that runs the drawing agent: it takes the lock before it starts the agent, stops
+   the agent when the lock's `signal` aborts (pass it as the spawn's `signal`), and lets the lock go when the agent
+   ends. A longer-lived process (the Inbox server) must not hold it for the agent, because a restart mid-draw would
+   leave the agent running with no lock.
 2. A tick stopped between the swap's two renames (step 9) left no `drawing/`, with `previous/` and `redraw/`: put
    `previous/` back as `drawing/` (step 6 then sets `redraw/` aside). No drawing in `drawing/` yet: `nothing`. A
-   drawing that still lists sheets under `wanted:` is still being drawn: `nothing`, and nothing is fetched.
+   drawing that still wants a sheet no file draws is still being drawn, read as `drawingStatus` reads it
+   (`stillWanted`): `nothing`, and nothing is fetched.
 3. `prepareSource`: make the source clone when missing, then `git fetch origin <default>` into it with the person's
    own credentials; the default branch is the clone's `origin/HEAD`, else `main` or `master`.
 4. From: the newer of `sources.repos.self.at` and `state.json`'s `gated`. If main has not moved past it: `nothing`.
@@ -405,12 +424,12 @@ Replaced 2026-11-06 by the owner's ruling (row 7689, q-122e6577): no branch, com
    requests, the summary file and the allowed doc sites.
 8. Files the agent changed in the source clone, its own commits included, are kept under `changed/<commit>/` and the
    clone is put back at the tip. Refuse the redraw (`failed`, the copy kept under `failed/<commit>/drawing/`, the
-   drawing as it was) when the agent failed, threw or hit its time bound, or the copy does not check clean or still
-   lists a sheet under `wanted:`. If the
-   copy is the drawing unchanged: `gated`. A failure before the agent ran (no network, no origin) marks nothing, so
+   drawing as it was) when the agent failed, threw or hit its time bound, or the copy does not check clean (a sheet
+   still wanted is a check warning). If the copy is the drawing unchanged: `gated`. A failure before the agent ran (no network, no origin) marks nothing, so
    the next tick tries again.
-9. Set `sources.repos.self.at` to the tip (only that value's text), move `drawing/` to `previous/` and the checked copy
-   to `drawing/`, and send one note through `<plannotator> inbox call send_message` (`plannotatorProgram()` unless
+9. Set `sources.repos.self.at` to the tip (only that value's text), fsync the copy's files, move `drawing/` to
+   `previous/` and the checked copy to `drawing/` (when that second rename fails, `previous/` is moved back first),
+   fsync the project folder, and send one note through `<plannotator> inbox call send_message` (`plannotatorProgram()` unless
    `deps.plannotator` names the program), as a reply to setup.json's `thread_message` ("Main moved to 9c41e07. PR 1335
    landed: <the agent's sentences> 1 part changed. This redraw also changed: src/main.ts."). `redrew`.
 

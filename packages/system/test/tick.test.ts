@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { mergedPrs, readState, redrawNote, runCommand, systemPaths, tick, type Notify, type RunAgent, type TickDeps } from '../src/node/index.ts';
 import { git, isolateGitConfig, smallDrawing, tempDir, writeTree } from './helpers.ts';
 import { gitBytes } from '../src/node/git.ts';
+import { drawingStatus } from '../src/index.ts';
+import { load } from '../src/node/index.ts';
 
 // A real project: a bare origin in a temp folder (a local path, no network),
 // a teammate's clone that lands commits on main, and the person's clone that
@@ -589,13 +591,22 @@ echo changed > src/main.ts`);
     expect((await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, ...fakes() } })).ran).toBe('redrew');
   });
 
+  test('a wanted entry whose sheet is drawn is not "still drawing": the tick reads it as the Inbox\'s status does', async () => {
+    const p = project();
+    const files = drawing(p.drawnAt);
+    files['system.yaml'] += 'wanted:\n  - { code: L-101, kind: logical, question: "The app." }\n';
+    writeTree(p.paths.drawing, files);
+    expect(drawingStatus(await load(p.paths.drawing)).state).toBe('drawn');
+    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).toMatchObject({ ran: 'nothing', why: 'main has not moved' });
+  });
+
   test('a redraw that leaves a sheet under wanted: is refused, so a finished drawing never stops later redraws', async () => {
     const p = project();
     const before = drawingFiles(p.paths.drawing);
     p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
     const agent = scriptAgent(`${ADD_JOBS}\nprintf 'wanted:\\n  - { code: F-201, kind: flow, question: "How a job runs." }\\n' >> "$DRAWING/system.yaml"`);
     const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: agent.runAgent, ...fakes() } });
-    expect(r).toMatchObject({ ran: 'failed', error: expect.stringContaining('wanted: still lists F-201') });
+    expect(r).toMatchObject({ ran: 'failed', error: expect.stringContaining('Sheet F-201 is listed under wanted') });
     expect(drawingFiles(p.paths.drawing)).toEqual(before);
   });
 
@@ -703,6 +714,56 @@ echo changed > src/main.ts`);
     expect(oldClones(p.paths.failed).sort()).toEqual(['source-2026-03-01T00-00-00-000Z', 'source-2026-11-07T10-00-00-000Z']);
     // other things set aside are not touched
     expect(existsSync(join(p.paths.failed, 'interrupted-2026-01-01T00-00-00-000Z'))).toBe(true);
+  });
+
+  test('a tick whose lock another holder broke stops before the swap: it swaps, saves and moves nothing more', async () => {
+    const p = project();
+    const before = drawingFiles(p.paths.drawing);
+    p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
+    // while the agent runs, another holder breaks the tick's lock and takes it (its heartbeat looked stale)
+    const other = JSON.stringify({ token: 'another-holder', pid: process.pid });
+    const agent = scriptAgent(`${ADD_JOBS}\nprintf '%s' '${other}' > '${p.paths.lock}'`);
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: agent.runAgent, ...fakes() } });
+    expect(r).toMatchObject({ ran: 'failed', error: expect.stringContaining('lost tick.lock') });
+    expect(drawingFiles(p.paths.drawing)).toEqual(before);
+    expect(existsSync(p.paths.redraw)).toBe(true); // the other holder's to deal with
+    expect(await readState(p.dataDir, KEY)).toMatchObject({ gated: null, failed: null, last_error: null });
+    expect(readFileSync(p.paths.lock, 'utf8')).toBe(other);
+  });
+
+  for (const [what, extra, check] of [
+    ['changes nothing', '', (p: ReturnType<typeof project>) => {
+      // redraw/ is the new holder's now: not deleted
+      expect(existsSync(p.paths.redraw)).toBe(true);
+    }],
+    ['leaves a file in the source clone', `\necho stray > stray.txt`, (p: ReturnType<typeof project>) => {
+      // source/ is the new holder's now: not set aside or reset
+      expect(readFileSync(join(p.paths.source, 'stray.txt'), 'utf8')).toBe('stray\n');
+      expect(existsSync(p.paths.changed)).toBe(false);
+    }],
+  ] as const) {
+    test(`a tick whose lock was broken while its agent ran, an agent that ${what}, touches nothing after the agent`, async () => {
+      const p = project();
+      const before = drawingFiles(p.paths.drawing);
+      p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
+      const other = JSON.stringify({ token: 'another-holder', pid: process.pid });
+      const agent = scriptAgent(`printf '%s' '${other}' > '${p.paths.lock}'${extra}`);
+      const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: agent.runAgent, ...fakes() } });
+      expect(r).toMatchObject({ ran: 'failed', error: expect.stringContaining('lost tick.lock') });
+      check(p);
+      expect(drawingFiles(p.paths.drawing)).toEqual(before);
+      expect(await readState(p.dataDir, KEY)).toMatchObject({ gated: null, failed: null, last_error: null });
+    });
+  }
+
+  test('a lock that cannot be taken (a file system that refuses it) is a failed tick recorded in state.json, never a throw', async () => {
+    const p = project();
+    const takeLock: TickDeps['takeLock'] = async () => {
+      throw Object.assign(new Error('EIO: i/o error, link'), { code: 'EIO' });
+    };
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { ...NONE, takeLock } });
+    expect(r).toMatchObject({ ran: 'failed', error: expect.stringContaining('EIO') });
+    expect(await readState(p.dataDir, KEY)).toMatchObject({ last_error: expect.stringContaining('tick.lock could not be taken: EIO') });
   });
 
   test('a live tick holds the lock; a dead one is taken over', async () => {
