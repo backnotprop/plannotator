@@ -7484,7 +7484,8 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
   .ib-lk-small .ib-mrow.ib-u:not(.ib-sent) .ib-m2 { font-size: var(--ib-fs-14, 14px); letter-spacing: 0; }
 }
 
-/* The one-time list options dialog (approval "inbox-list-options-intro"; components/ListLookIntro.tsx): the Board
+/* The one-time dialogs that draw the person's rows (first the list options dialog, approval "inbox-list-options-intro";
+   now ListViewIntro's and VoiceIntro's frame, and the words and actions of "Choose how your list looks", .ib-rl below): the Board
    intro's width and well. The picture is the person's own rows in a column the list's width, centred, its bottom
    fading out so no row is ever cut mid-line; the words, the four switches stacked, the actions.
    The dialog follows the person's mode. Only the picture (.ib-lo-frame, the example rows) is light for everyone (the
@@ -7541,6 +7542,157 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
   .ib-lo-phone .ib-lo-opt { min-height: 44px; font-size: var(--ib-fs-15, 15px); }
   .ib-lo-phone .ib-lo-acts { flex-direction: column-reverse; align-items: stretch; padding-top: 14px; }
   .pn-inbox .ib-lo-phone .ib-lo-acts .ib-btn, dialog.ib-lo-phone .ib-lo-acts .ib-btn { min-height: 44px; justify-content: center; }
+}
+
+/* "Choose how your list looks" (approval "inbox-rows-dialog", round 7b; components/ListLookIntro.tsx,
+   RowsIntroPicture.tsx). The .ib-lo dialog's words and actions, 720 px wide. Over them: the picture of an Inbox with
+   example projects (drawn 620 wide and scaled to the frame, --rl-s), the notes look stacked at its bottom right, and,
+   once a look is picked, a card with the person's rows in that look over the blurred picture. Everything follows the
+   window's mode (the owner, q-fd707b9e). The picked look is a light tint, no border. */
+dialog.ib-dlg.ib-lo.ib-rl { width: min(720px, calc(100vw - 32px)); }
+.ib-rl { --rl-band: color-mix(in oklch, var(--muted) 80%, var(--card)); --rl-sel: color-mix(in oklab, var(--primary) 22%, var(--card));
+  --rl-raised: color-mix(in oklab, var(--card) 94%, var(--foreground)); }
+:root.light .ib-rl { --rl-band: color-mix(in oklch, var(--muted) 62%, var(--card)); --rl-sel: color-mix(in oklab, var(--primary) 13%, var(--card)); --rl-raised: var(--card); }
+.ib-rl-art { position: relative; background: var(--lo-well); padding: 32px 18px 0; }
+:root:not(.light) .ib-rl-art { padding-bottom: 18px; }
+.ib-rl-cap { position: relative; width: 620px; max-width: 100%; height: 0; margin: 0 auto; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-rl-cap > span { position: absolute; left: 2px; bottom: 7px; white-space: nowrap; opacity: 0; transition: opacity 220ms var(--ib-ease-enter); }
+.ib-rl-cap > span[data-on] { opacity: 1; }
+.ib-rl-frame { position: relative; width: 620px; max-width: 100%; height: var(--rl-fh, 400px); margin: 0 auto; overflow: hidden; border-radius: 10px 10px 0 0; text-align: left;
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); transition: filter 300ms var(--ib-ease-enter);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 64px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 64px), transparent); }
+:root:not(.light) .ib-rl-frame { border-radius: 10px; -webkit-mask-image: none; mask-image: none; }
+:root:not(.light) .ib-rl-frame::after { content: ""; position: absolute; inset: auto 0 0; height: 64px; z-index: 3; background: linear-gradient(to bottom, color-mix(in oklch, var(--background) 0%, transparent), var(--background)); pointer-events: none; }
+/* The window, at the Inbox's own sizes. */
+.ib-rl-comp { position: absolute; left: 0; top: 0; width: 620px; height: calc(var(--rl-fh, 400px) / var(--rl-s, 1)); transform-origin: 0 0; transform: scale(var(--rl-s, 1));
+  display: grid; grid-template-columns: 224px minmax(0, 1fr); padding: 8px 8px 0 0; background: var(--background); color: var(--foreground); }
+.ib-rl-sb { padding: 4px 12px 0; min-width: 0; }
+.ib-rl-brand { display: flex; align-items: center; gap: 6px; height: 42px; padding-left: 2px; font-size: var(--ib-fs-16, 16px); font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; }
+.ib-rl-brand > span { color: var(--muted-foreground); font-weight: 500; }
+.ib-rl-search { display: flex; gap: 7px; margin-top: 8px; }
+.ib-rl-box { flex: 1; min-width: 0; height: 34px; display: flex; align-items: center; gap: 7px; padding: 0 9px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
+.ib-rl-box > .ib-rl-kbd { margin-left: auto; }
+.ib-rl-new { width: 34px; height: 34px; flex: none; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--muted-foreground); }
+.ib-rl-nav { display: flex; align-items: center; gap: 9px; height: 36px; margin-top: 10px; padding: 0 10px; border-radius: 9px; background: var(--rl-sel); color: color-mix(in oklab, var(--primary) 85%, var(--foreground)); font-size: var(--ib-fs-14-5, 14.5px); font-weight: 600; }
+.ib-rl-nav > .ib-rl-n { margin-left: auto; }
+.ib-rl-phead { display: flex; align-items: center; gap: 9px; height: 28px; margin-top: 14px; padding: 0 10px; font-size: var(--ib-fs-14-5, 14.5px); }
+.ib-rl-prow { display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 10px; font-size: var(--ib-fs-14-5, 14.5px); white-space: nowrap; min-width: 0; }
+.ib-rl-pn { overflow: hidden; text-overflow: ellipsis; }
+.ib-rl-prow > .ib-rl-n { margin-left: auto; padding-left: 8px; font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-rl-lp { min-width: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--border); border-bottom: 0; border-radius: 12px 12px 0 0; }
+.ib-rl-lhead { display: flex; align-items: center; gap: 12px; height: 52px; flex: none; padding: 0 12px 0 16px; color: var(--muted-foreground); }
+.ib-rl-lhead > .ib-rl-h { color: var(--foreground); font-size: var(--ib-fs-20, 20px); font-weight: 700; letter-spacing: -0.01em; }
+.ib-rl-lhead > :last-child { margin-left: auto; }
+.ib-rl-lbody { display: flex; flex-direction: column; gap: 2px; padding: 0 8px; }
+.ib-rl-band { display: flex; align-items: center; gap: 8px; height: 34px; flex: none; margin-top: 6px; padding: 0 12px; border-radius: 8px; background: var(--rl-band); font-size: var(--ib-fs-13, 13px); font-weight: 600; }
+.ib-rl-band:first-child { margin-top: 0; }
+.ib-rl-band > .ib-rl-n { color: var(--muted-foreground); font-weight: 500; }
+.ib-rl-row { position: relative; min-width: 0; padding: 10px 12px 11px; border-radius: 10px; }
+.ib-rl-l1 { display: flex; align-items: center; gap: 6px; height: 19px; min-width: 0; font-size: var(--ib-fs-13, 13px); font-weight: 600; }
+.ib-rl-proj { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-rl-time { margin-left: auto; padding-left: 10px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 400; white-space: nowrap; }
+.ib-rl-l2 { margin-top: 3px; min-width: 0; font-size: var(--ib-fs-14, 14px); font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-rl-l3 { display: flex; align-items: center; gap: 8px; margin-top: 2px; min-width: 0; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
+.ib-rl-prev { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-rl-q { display: inline-flex; align-items: center; gap: 3px; flex: none; color: var(--foreground); font-size: var(--ib-fs-12, 12px); }
+/* The marks (letterMarks.tsx's rules): the stacked look is the thread's letters with the project's on its corner;
+   "projects" turns each row's mark over to the project's. A logo covers the letters once logos are on. */
+.ib-rl-av { display: none; position: absolute; left: 14px; top: 12px; width: 30px; height: 30px; perspective: 240px; }
+.ib-rl-comp:not([data-marks="off"]) .ib-rl-av { display: block; }
+.ib-rl-comp:not([data-marks="off"]) .ib-rl-row { padding-left: 56px; }
+.ib-rl-pop, .ib-rl-flip { position: absolute; inset: 0; transform-style: preserve-3d; }
+.ib-rl-flip > .ib-rl-face { position: absolute; inset: 0; backface-visibility: hidden; }
+.ib-rl-flip > .ib-rl-back { transform: rotateY(180deg); }
+.ib-rl-comp[data-marks="projects"] .ib-rl-flip { transform: rotateY(180deg); }
+.ib-rl-av > .ib-rl-badge { position: absolute; inset: auto -4px -4px auto; box-shadow: 0 0 0 2px var(--card); }
+.ib-rl-comp:not([data-marks="both"]) .ib-rl-badge { display: none; }
+.ib-rl-comp[data-marks="off"] .ib-rl-sbm { display: none; }
+.ib-rl-logo > img { transform: scale(1.35); }
+.ib-rl-comp[data-logos] .ib-rl-logo { background: var(--muted); color: transparent; }
+.ib-rl-comp[data-logos] .ib-rl-logo > img { opacity: 1; transform: none; }
+.ib-rl-comp[data-moving] :is(.ib-rl-pop, .ib-rl-sbm) { animation: ib-rl-pop 360ms cubic-bezier(0.34, 1.5, 0.64, 1) both; animation-delay: calc(var(--i, 0) * 55ms); }
+@keyframes ib-rl-pop { from { transform: scale(0.35); opacity: 0; } 55% { opacity: 1; } to { transform: none; opacity: 1; } }
+.ib-rl-comp[data-moving] .ib-rl-flip { transition: transform 460ms cubic-bezier(0.3, 1.25, 0.5, 1); transition-delay: calc(var(--i, 0) * 60ms); }
+.ib-rl-comp[data-moving] .ib-rl-logo { transition: color 120ms ease-out, background-color 120ms ease-out; transition-delay: calc(var(--i, 0) * 45ms); }
+.ib-rl-comp[data-moving] .ib-rl-logo > img { transition: opacity 200ms ease-out, transform 340ms cubic-bezier(0.34, 1.4, 0.64, 1); transition-delay: calc(var(--i, 0) * 45ms); }
+/* The notes look on the picture's bottom right: name first and bold, preview, the time under it, hairlines, a status
+   mark at the end. It rises in as the demo lands (2.2 s), its rows 70 ms apart, then the marks pop. */
+.ib-rl-stack { position: absolute; right: 22px; bottom: 16px; z-index: 4; width: 272px; padding: 2px 0; border-radius: 12px; background: var(--rl-raised); color: var(--foreground);
+  transform-origin: 100% 100%; transform: scale(var(--rl-cs, 1)); --rl-warn: var(--warning, oklch(0.75 0.15 85)); --rl-ok: var(--success, oklch(0.72 0.17 150));
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 85%, transparent), 0 2px 4px -1px oklch(0 0 0 / 0.35), 0 16px 32px -8px oklch(0 0 0 / 0.55), 0 32px 64px -16px oklch(0 0 0 / 0.55);
+  transition: opacity 240ms var(--ib-ease-enter), transform 420ms var(--ib-ease-enter), filter 300ms var(--ib-ease-enter); }
+:root.light .ib-rl-stack { box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 80%, transparent), 0 2px 4px -1px oklch(0.2 0.02 260 / 0.08), 0 14px 28px -8px oklch(0.2 0.02 260 / 0.2), 0 28px 56px -16px oklch(0.2 0.02 260 / 0.22); }
+.ib-rl-nrow { padding: 11px 14px 10px; }
+.ib-rl-nrow + .ib-rl-nrow { border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent); }
+.ib-rl-nt { font-size: var(--ib-fs-14, 14px); font-weight: 650; letter-spacing: -0.005em; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-rl-nrow[data-status="done"] .ib-rl-nt { color: color-mix(in oklab, var(--foreground) 72%, var(--card)); }
+.ib-rl-np { margin-top: 2px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.4; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.ib-rl-nb { display: flex; align-items: center; height: 18px; margin-top: 5px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-rl-stm { margin-left: auto; display: inline-flex; line-height: 0; }
+.ib-rl-nrow[data-status="waiting"] .ib-rl-stm { color: color-mix(in oklab, var(--rl-warn) 85%, var(--foreground)); }
+.ib-rl-nrow[data-status="done"] .ib-rl-stm { color: color-mix(in oklab, var(--rl-ok) 85%, var(--foreground)); }
+.ib-rl-stack[data-off] { opacity: 0; transform: translateY(14px) scale(var(--rl-cs, 1)); }
+.ib-rl-stack[data-off] .ib-rl-nrow { opacity: 0; transform: translateY(6px); }
+.ib-rl-stack[data-off] .ib-rl-stm { opacity: 0; transform: scale(0.4); }
+.ib-rl-stack[data-moving] .ib-rl-nrow { transition: opacity 260ms var(--ib-ease-enter), transform 380ms var(--ib-ease-enter); }
+.ib-rl-stack[data-moving] .ib-rl-nrow:nth-child(1) { transition-delay: 90ms; }
+.ib-rl-stack[data-moving] .ib-rl-nrow:nth-child(2) { transition-delay: 160ms; }
+.ib-rl-stack[data-moving] .ib-rl-stm { transition: opacity 180ms var(--ib-ease-enter) 360ms, transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1) 360ms; }
+.ib-rl-stack[data-moving] .ib-rl-nrow:nth-child(2) .ib-rl-stm { transition-delay: 430ms; }
+/* A look picked: the picture steps back (blurred, dimmed; the notes card a touch smaller) and the card rises into
+   its middle with the person's rows in that look. A change of look crossfades the rows; the card stays. */
+.ib-rl-veil { position: absolute; inset: 0; z-index: 5; pointer-events: none; opacity: 0; background: color-mix(in oklch, var(--lo-well) 40%, transparent); transition: opacity 300ms var(--ib-ease-enter); }
+.ib-rl-art[data-preview] .ib-rl-veil { opacity: 1; }
+.ib-rl-art[data-preview] :is(.ib-rl-frame, .ib-rl-stack) { filter: blur(5px) saturate(0.8); }
+.ib-rl-art[data-preview] .ib-rl-stack:not([data-off]) { transform: translateY(6px) scale(calc(var(--rl-cs, 1) * 0.96)); }
+.ib-rl-card { position: absolute; z-index: 6; left: 0; right: 0; margin: 0 auto; overflow: hidden; border-radius: 14px; pointer-events: none; text-align: left;
+  background: var(--rl-raised); color: var(--foreground); opacity: 0; transform: translateY(18px) scale(0.965);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 85%, transparent), 0 2px 6px -1px oklch(0 0 0 / 0.4), 0 18px 36px -10px oklch(0 0 0 / 0.6), 0 36px 72px -20px oklch(0 0 0 / 0.6);
+  transition: opacity 220ms var(--ib-ease-enter), transform 360ms var(--ib-ease-enter); }
+:root.light .ib-rl-card { box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 80%, transparent), 0 2px 6px -1px oklch(0.2 0.02 260 / 0.1), 0 18px 36px -10px oklch(0.2 0.02 260 / 0.24), 0 36px 72px -20px oklch(0.2 0.02 260 / 0.26); }
+.ib-rl-art[data-preview] .ib-rl-card { opacity: 1; transform: none; }
+.ib-rl-ch { display: flex; align-items: center; height: 46px; padding: 0 18px; font-size: var(--ib-fs-17, 17px); font-weight: 700; letter-spacing: -0.01em; }
+.ib-rl-cls { position: absolute; inset: 46px 0 0; -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); }
+.ib-rl-cl { position: absolute; inset: 0; padding: 0 6px; opacity: 0; transition: opacity 110ms ease-out; }
+.ib-rl-cl[data-on] { opacity: 1; transition: opacity 200ms var(--ib-ease-enter) 70ms; }
+/* The person's rows are the list's own (ListRow), on the card: always drawn, whatever hides the list behind. */
+dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: auto; visibility: visible; width: auto; height: auto; border-right: 0; background: transparent; --background: var(--rl-raised); }
+.ib-rl-card .ib-lbody { overflow: hidden; padding-top: 0; }
+.ib-rl-card .ib-lbody > .ib-group > :is(.ib-rw, .ib-mrow) { content-visibility: visible; }
+.ib-rl-card :is(.ib-nrow .ib-l2 > .ib-title, .ib-mrow > .ib-m2) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+/* The words' link and the three looks: filled cards, each with a sketch of its density. */
+.ib-rl-link { font: inherit; color: var(--foreground); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-decoration-color: color-mix(in oklch, var(--foreground) 35%, transparent); text-underline-offset: 2px; }
+.ib-rl-link:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 3px; }
+.ib-rl-looks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 14px 22px 0; }
+.ib-rl-look { position: relative; display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 10px 12px; border-radius: 10px; cursor: pointer; background: var(--lo-well); transition: background-color 150ms ease-out; -webkit-tap-highlight-color: transparent; }
+@media (hover: hover) { .ib-rl-look:hover { background: color-mix(in oklch, var(--muted) 85%, var(--card)); } }
+.ib-rl-look[data-on], .ib-rl-look[data-on]:hover { background: color-mix(in oklab, var(--primary) 20%, var(--popover)); }
+:root.light .ib-rl-look[data-on], :root.light .ib-rl-look[data-on]:hover { background: color-mix(in oklab, var(--primary) 12%, var(--card)); }
+.ib-rl-look > input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.ib-rl-look:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-rl-gl { flex: none; width: 44px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; background: var(--popover); color: color-mix(in oklch, var(--foreground) 62%, var(--card)); box-shadow: 0 1px 2px oklch(0.2 0.02 260 / 0.1); transition: color 150ms ease-out; }
+:root.light .ib-rl-gl { background: var(--card); }
+.ib-rl-look[data-on] .ib-rl-gl { color: var(--primary); }
+.ib-rl-ln { display: flex; flex-direction: column; min-width: 0; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 550; line-height: 1.3; }
+.ib-rl-cur { color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); font-weight: 400; }
+.pn-inbox .ib-rl .ib-btn:disabled, dialog.ib-rl .ib-btn:disabled { opacity: 0.45; cursor: default; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* A phone: the bottom sheet (.ib-lo-phone), the same window drawn smaller, the notes card at 0.7 tucked into the
+     corner; the three looks stay in one row, the sketch above the name. */
+  .ib-lo-phone .ib-rl-art { padding: 30px 14px 0; }
+  :root:not(.light) .ib-lo-phone .ib-rl-art { padding-bottom: 14px; }
+  .ib-lo-phone .ib-rl-frame { width: auto; }
+  .ib-lo-phone .ib-rl-stack { --rl-cs: 0.7; right: 10px; bottom: 10px; width: 240px; }
+  .ib-lo-phone.ib-rl .ib-lo-text h2 { font-size: var(--ib-fs-17, 17px); }
+  .ib-lo-phone.ib-rl .ib-lo-text p { font-size: var(--ib-fs-14, 14px); }
+  .ib-lo-phone .ib-rl-looks { gap: 6px; padding: 14px 14px 0; }
+  .ib-lo-phone .ib-rl-look { flex-direction: column; justify-content: center; gap: 7px; min-height: 84px; padding: 10px 4px; text-align: center; }
+  .ib-lo-phone .ib-rl-ln { align-items: center; font-size: var(--ib-fs-15, 15px); }
+  .ib-lo-phone .ib-rl-cur { font-size: var(--ib-fs-12-5, 12.5px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ib-rl :is(.ib-rl-cap > span, .ib-rl-frame, .ib-rl-stack, .ib-rl-nrow, .ib-rl-stm, .ib-rl-veil, .ib-rl-card, .ib-rl-cl, .ib-rl-look, .ib-rl-gl, .ib-rl-flip, .ib-rl-logo, .ib-rl-logo > img) { transition: none !important; }
+  .ib-rl :is(.ib-rl-pop, .ib-rl-sbm) { animation: none !important; }
 }
 
 /* Settings → Rows (components/RowsSettings.tsx): the narrow picture and the controls side by side (the controls drop

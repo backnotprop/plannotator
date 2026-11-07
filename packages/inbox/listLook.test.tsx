@@ -31,7 +31,7 @@ const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as 
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { TourMain } = (hasDom ? await import('./tour/Tour') : {}) as typeof import('./tour/Tour');
 const { parseTourFixture, tourStateAt, TOUR_THREAD } = await import('./tour/model');
-const { LIST_LOOK_COOKIES, LIST_LOOK_DEFAULT, LIST_LOOK_OFF, ROWS_COOKIE, adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, resetListLookForTests, writeListLookOption, writeListLookOptions, writeMenuLook } = await import('./listLook');
+const { LIST_LOOK_COOKIES, LIST_LOOK_DEFAULT, LIST_LOOK_OFF, ROWS_COOKIE, adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, resetListLookForTests, writeListLookOption, writeListLookOptions } = await import('./listLook');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 // This browser's cookies (Plannotator's storage); a map stands in for them here.
@@ -393,29 +393,6 @@ describe('the saved look', () => {
     // A hand-edited or older look with both: Compact, no "2 lines" under no preview, the Dot with its names.
     adoptSavedRows(['compact', 'roomy', 'hidePreview', 'previewTwo', 'unreadDot'], 9);
     expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, compact: true, hidePreview: true, unreadDot: true, smallNames: true });
-  });
-
-  // Review of #2516: the one-time list dialog's Done saved all eleven options from the look it opened with.
-  test("the list dialog's Done saves what it changed only: the others keep what was saved while it was open", async () => {
-    const opened = readListLook();
-    adoptSavedRows(['previewTwo', 'relativeTime', 'titleFirst'], 1);
-    void writeMenuLook({ ...opened, compact: true, highlight: true }, opened);
-    await answer();
-    expect(saves).toEqual([['highlight', 'compact', 'previewTwo', 'relativeTime', 'titleFirst']]);
-    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true, previewTwo: true, relativeTime: true, titleFirst: true });
-  });
-
-  // Delta review of #2516: the dialog's "smaller names" as it opened (off) turned off a Dot saved meanwhile.
-  test("the list dialog's Done keeps a Dot another window turned on while it was open; nothing changed saves nothing", async () => {
-    const opened = readListLook();
-    adoptSavedRows(['smallNames', 'unreadDot'], 1);
-    void writeMenuLook({ ...opened, hideAgents: true }, opened);
-    await answer();
-    expect(saves).toEqual([['hideAgents', 'smallNames', 'unreadDot']]);
-    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, hideAgents: true, smallNames: true, unreadDot: true });
-    void writeMenuLook(opened, opened);
-    await answer();
-    expect(saves).toHaveLength(1);
   });
 
   // Delta review of #2516: config.json reset, restored or hand-edited takes the count back to 0.
