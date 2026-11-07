@@ -23,7 +23,7 @@ This file is a map. The full guidance lives in focused guides under [`docs/agent
 
 ## Topic guides
 
-- [`project-and-development.md`](docs/agent-guides/project-and-development.md): repository map, server runtimes, installation, development, Testing Rules, build, [local binary installation](docs/agent-guides/project-and-development.md#local-binary-installation), marketing site.
+- [`project-and-development.md`](docs/agent-guides/project-and-development.md): repository map, server runtimes, installation, development, Testing Rules, build, marketing site.
 - [`environment.md`](docs/agent-guides/environment.md): every environment variable and config-only setting.
 - [`plan-review.md`](docs/agent-guides/plan-review.md): plan review flow, Guides in VS Code, Pi plan review and the Pi `plannotator` tool.
 - [`claude-code-mod.md`](docs/agent-guides/claude-code-mod.md): the Claude Code hooks module (non-blocking flows, the `plannotator` tool, its Ask this session client and Inbox wake, version skew).
