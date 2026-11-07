@@ -9,7 +9,7 @@ import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { INBOX_SLOW_REQUEST_MS, perfPhase, retainPerfPhases, runningLoopWatches, withServerTiming, watchLoopStalls, type SlowRequest } from "./inbox-perf";
+import { INBOX_SLOW_REQUEST_MS, perfPhase, retainPerfPhases, runningLoopWatches, syncSection, withServerTiming, watchLoopStalls, type SlowRequest, type StallCause } from "./inbox-perf";
 
 const busy = (ms: number) => {
   const until = performance.now() + ms;
@@ -212,4 +212,45 @@ test("watchLoopStalls hears a blocked event loop, and stops", async () => {
   busy(450);
   await Bun.sleep(300);
   expect(stalls.length).toBe(seen);
+});
+
+test("a stall names what held the loop: the slowest section since the last tick, and the request it ran for", async () => {
+  const stalls: { ms: number; cause: StallCause }[] = [];
+  const stop = watchLoopStalls((ms, cause) => stalls.push({ ms, cause }));
+  const release = retainPerfPhases();
+  try {
+    await Bun.sleep(300);
+    // Outside any request: a timer's body.
+    syncSection("timer:quick", () => busy(5));
+    syncSection("timer:slow", () => busy(300));
+    await Bun.sleep(300);
+    const timer = stalls.find((stall) => stall.ms >= 100);
+    expect(timer?.cause).toMatchObject({ in: "timer:slow", route: null });
+    expect(timer!.cause.in_ms!).toBeGreaterThanOrEqual(250);
+
+    // Inside a request: a phase, with the request's route, and the handler's own synchronous part.
+    const served = withServerTiming(
+      async () => {
+        perfPhase("rows", () => busy(300));
+        return new Response("ok");
+      },
+      (pathname) => pathname,
+      null,
+    );
+    stalls.length = 0;
+    await served(new Request("http://127.0.0.1/api/inbox/threads"), "local");
+    await Bun.sleep(300);
+    const request = stalls.find((stall) => stall.ms >= 100);
+    expect(request?.cause).toMatchObject({ in: "rows", route: "/api/inbox/threads", handler_route: "/api/inbox/threads" });
+    expect(request!.cause.handler_ms!).toBeGreaterThanOrEqual(250);
+
+    // Nothing measured ran: the line still names the section entered last.
+    stalls.length = 0;
+    busy(300);
+    await Bun.sleep(300);
+    expect(stalls.find((stall) => stall.ms >= 100)?.cause).toMatchObject({ in: null, last: "rows" });
+  } finally {
+    release();
+    stop();
+  }
 });
