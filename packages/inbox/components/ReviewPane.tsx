@@ -7,9 +7,10 @@
  * - The agent's walkthrough is the spine. There is no left rail (approval
  *   "review-deslop", r7): the top bar holds the "Walkthrough | All files"
  *   switch, the menu of chapters or changed files (ReviewJump) and the review's
- *   title in quiet grey. Split | Unified is a tab on each chapter, and sits in
- *   the bar while no tab is in view. A phone's bar is one row: the same menu
- *   holds its title and switch.
+ *   title in quiet grey. The diff controls (one Split / Unified button,
+ *   Collapse all, the "Diff display" gear: DiffControls, approval
+ *   "diff-controls-headers") sit in the bar only, never on the chapters. A
+ *   phone's bar is one row: the same menu holds its title and switch.
  * - The diff is Plannotator's own (`GuideReader` over review-editor's
  *   `AllFilesCodeView`): line comments as in code review, and a Viewed tick on
  *   each file's header, kept on the message.
@@ -79,7 +80,7 @@ import {
   type AskingSession,
   type RouteState,
 } from './ReplyRoute';
-import { DiffStyleSwitch } from './DiffStyleSwitch';
+import { DiffControls, nextCollapseAll, type CollapseAllState } from './DiffControls';
 import { DropdownMenuRadioGroup, DropdownMenuRadioItem } from '@plannotator/ui/components/ui/dropdown-menu';
 import { chapterInView, fileInView, ReviewJump } from './ReviewJump';
 import { OpenInCodeSpans, OpenInFile } from './OpenIn';
@@ -200,9 +201,8 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   // last chapter too short to reach the top of the scroll keeps its name.
   const [fileSpot, setFileSpot] = useState<string | null>(null);
   const jumped = useRef(false);
-  // No chapter's tab is in view: Split | Unified docks in the top bar, where it covers nothing (a phone has neither).
-  const [docked, setDocked] = useState(false);
-  const dockRef = useRef<HTMLSpanElement>(null);
+  // The top bar's Collapse all (DiffControls): every file's diff, this view only.
+  const [collapseAll, setCollapseAll] = useState<CollapseAllState | null>(null);
   useEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
@@ -210,15 +210,6 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     const read = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        const box = body.getBoundingClientRect();
-        const tabs = [...body.querySelectorAll('[data-guide-section-tab] [data-diff-style-switch]')];
-        const inView = tabs.find((tab) => {
-          const at = tab.getBoundingClientRect();
-          return at.bottom > box.top && at.top < box.bottom;
-        });
-        // One at a time. Focus in the docked one goes with it, to the tab that takes over.
-        if (inView && dockRef.current?.contains(document.activeElement)) inView.querySelector<HTMLElement>('input:checked')?.focus({ preventScroll: true });
-        setDocked(tabs.length > 0 && !inView);
         if (jumped.current) return;
         if (mode === 'walkthrough') setCurrent(chapterInView(body, chapters.length));
         else setFileSpot(fileInView(body));
@@ -231,7 +222,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     read();
     body.addEventListener('scroll', read, { passive: true });
     for (const kind of HAND) body.addEventListener(kind, release, { passive: true });
-    // Which tabs are in view changes with no scroll too: a taller or shorter window, and a file or chapter that folds.
+    // Where the person is changes with no scroll too: a taller or shorter window, and a file or chapter that folds.
     const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(read);
     resized?.observe(body);
     if (contentRef.current) resized?.observe(contentRef.current);
@@ -664,11 +655,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
           </Tip>
         )}
         <span className="ib-sp" />
-        {docked && !phone && (
-          <span ref={dockRef} className="ib-rv-docked" data-review-diff-style-docked="">
-            <DiffStyleSwitch icons name="ib-diff-style-docked" label="Diff layout, top bar" />
-          </span>
-        )}
+        {snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
         {folded && (
           <button
             type="button"
@@ -803,6 +790,8 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
                 renderHeadActions={renderHeadActions}
                 highlight={highlight}
                 threadHeading
+                hostDiffControls
+                {...(collapseAll ? { collapseAll } : {})}
               />
               </OpenInCodeSpans>
             </ReaderPart>

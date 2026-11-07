@@ -15,11 +15,16 @@
  * and in the reply's "N annotations", and rides the next Send as the review
  * app's export under "Feedback on the guided review". A resolved thread
  * shows the guide read-only.
+ *
+ * The header carries the diff controls before Close (DiffControls, approval
+ * "diff-controls-headers"): one Split / Unified button, Collapse all and the
+ * "Diff display" gear, shared with code review.
  */
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import { parseGuideSnapshot, type GuideSnapshot } from '@plannotator/core/guide-format';
+import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import type { InboxAnnotationRecord, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import type { CodeAnnotation } from '@plannotator/ui/types';
@@ -31,6 +36,7 @@ import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
 import { OpenInCodeSpans, OpenInFile } from './OpenIn';
 import { Tip } from './Tip';
+import { DiffControls, nextCollapseAll, type CollapseAllState } from './DiffControls';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 const GuideReader = GuideReaderPart.Part;
@@ -209,6 +215,9 @@ export function GuidePane({ thread, message, onBack, onClose, guest = false, cod
   const [paneRef, folded] = useNarrowerThan<HTMLElement>(GUIDE_FOLD_PANEL_BELOW, false);
   /** The folded panel, open over the guide. */
   const [sheet, setSheet] = useState(false);
+  // The bar's diff controls (DiffControls): Collapse all shows with more than one file, and is this view's only.
+  const fileCount = useMemo(() => (snapshot ? parseDiffToFiles(snapshot.review.rawPatch).length : 0), [snapshot]);
+  const [collapseAll, setCollapseAll] = useState<CollapseAllState | null>(null);
   useEffect(() => {
     if (!folded) setSheet(false);
   }, [folded]);
@@ -273,6 +282,7 @@ export function GuidePane({ thread, message, onBack, onClose, guest = false, cod
             {comments.length}
           </button>
         )}
+        {snapshot && <DiffControls files={fileCount} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
         <Tip content="Close">
           <button type="button" className="ib-iconbtn" onClick={onClose} aria-label="Close the guided review">
             <Icon name="x" />
@@ -302,6 +312,8 @@ export function GuidePane({ thread, message, onBack, onClose, guest = false, cod
                   reveal={reveal}
                   highlight={highlight}
                   {...(guest ? {} : { fileContents })}
+                  hostDiffControls
+                  {...(collapseAll ? { collapseAll } : {})}
                 />
               </OpenInCodeSpans>
             </ReaderPart>

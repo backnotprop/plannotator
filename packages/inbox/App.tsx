@@ -155,7 +155,7 @@ import { backBy, backTo, pushScreen, settleLanding, whileWritingRoute, withoutCl
 import { parseFileView, sameScreenAnyView } from './fileView';
 import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, withFullMark, type FrameMove, type FullMark } from './fullScreenOrigin';
 import { adoptSavedTheme, inboxServerSync } from './theme';
-import { adoptSavedDiffStyle } from './diffStyle';
+import { adoptSavedDiffOptions } from './diffOptions';
 import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
 import { parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 import { ComposeDialog, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
@@ -1553,7 +1553,7 @@ function Inbox() {
       adoptSavedTheme(next.theme);
       adoptSavedTextSize(next.text_size);
       adoptSavedRows(next.rows, next.rows_rev, mark);
-      adoptSavedDiffStyle(next.diff_style);
+      adoptSavedDiffOptions(next.diff_options, next.diff_style);
       adoptVoiceSettings(next.voice);
       setSettings(next);
       setSettingsReadFailed(false);
