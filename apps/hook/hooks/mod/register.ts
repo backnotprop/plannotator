@@ -233,11 +233,6 @@ function hostOf($: Engine, debugPath: string | null): Host {
     },
     // From the Inbox tick's timer only (auto-reload.ts): never from a hook a turn waits on, never --force.
     runReload: () => $.command.run({ command: AUTO_RELOAD_COMMAND, args: AUTO_RELOAD_ARGS }),
-    listAgents: async () => {
-      const agents: unknown = await $.agent.list()
-      if (!Array.isArray(agents)) throw new Error('the agent list did not read as a list')
-      return agents.map((agent) => ({ status: String((agent as { status?: unknown } | null)?.status) }))
-    },
     suggest: async (text) => {
       await $.prompt.suggest({ text })
     },
@@ -1121,8 +1116,6 @@ export function register(on: On) {
     if (allowed && mod && !mod.isDisposed && !e.agentId && typeof e.turnId === 'string') {
       mod.onTurnComplete(e.turnId, typeof e.answer === 'string' ? e.answer : '', e.isAborted === true)
     }
-    // A subagent's turn ended: auto reload counts the ones running (it never reloads under one).
-    if (allowed && mod && !mod.isDisposed && typeof e.agentId === 'string' && typeof e.turnId === 'string') mod.onAgentTurnComplete(e.agentId, e.turnId)
     // The session goes idle: a self-heal timer the engine ended is armed again (never a second one).
     if (allowed && healTimer) void startSelfHeal($).catch(() => undefined)
     return next(e)
