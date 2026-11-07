@@ -152,7 +152,7 @@ async function openReply(page: Page, thread = world.thread) {
   await page.goto(`${world.url}#thread=${thread}`);
   const pane = page.locator('section.ib-pane');
   const box = pane.locator('.ib-pfoot textarea').first();
-  const open = pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
+  const open = pane.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ });
   await expect(box.or(open).first()).toBeVisible();
   await expect(async () => {
     if (!(await box.isVisible())) await open.click({ timeout: 2_000 });

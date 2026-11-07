@@ -308,6 +308,41 @@ describe("ranking", () => {
     expect(messageIds(search(index, "retry budget", { current: a.id }))).toEqual([inA.id, inB.id, better.id]);
   });
 
+  test("Newest: every group by its latest message, whatever the match; Best match stays the default; Show all pages follow it", async () => {
+    const store = open();
+    const project = store.ensureProject({ name: "api", root: "/w/api" });
+    const phrase = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Notes", thread: "a", body: "The rate limit holds." }).message;
+    const prefix = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Notes", thread: "b", body: "The limits of the rate card." }).message;
+    const whole = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Notes", thread: "c", body: "A limit on the rate of retries." }).message;
+    // A thread whose subject matches, then a later reply in the oldest thread: its latest message makes it the newest thread.
+    const titled = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Rate limit decided", thread: "d", body: "Nothing here." }).message;
+    const late = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Notes", thread: "a", body: "Rate cards again." }).message;
+    const index = await built(store);
+    expect(messageIds(search(index, "rate limit"))).toEqual([phrase.id, whole.id, prefix.id]);
+    expect(messageIds(search(index, "rate limit", { sort: "best" }))).toEqual([phrase.id, whole.id, prefix.id]);
+    expect(messageIds(search(index, "rate limit", { sort: "newest" }))).toEqual([whole.id, prefix.id, phrase.id]);
+    expect(messageIds(search(index, "rate", { sort: "newest" }))).toEqual([late.id, whole.id, prefix.id, phrase.id]);
+    // Threads: by their latest message (thread a's late reply), not by when they started.
+    expect(threadIds(search(index, "rate", { sort: "best" }))).toEqual([titled.id]);
+    expect(threadIds(search(index, "notes", { sort: "newest" }))).toEqual([phrase.id, whole.id, prefix.id]);
+    // "Show all" pages go on in the same order.
+    const page = search(index, "rate", { sort: "newest", group: "messages", offset: 1, limit: 2 });
+    expect(messageIds(page)).toEqual([whole.id, prefix.id]);
+  });
+
+  test("Newest: a project by its threads' latest message, not by when it was added", async () => {
+    const store = open();
+    const older = store.ensureProject({ name: "billing", root: "/w/billing" });
+    store.sendMessage({ project_id: older.id, author: CLAUDE, subject: "Notes", thread: "a", body: "First." });
+    const newer = store.ensureProject({ name: "billing-web", root: "/w/billing-web" });
+    store.sendMessage({ project_id: newer.id, author: CLAUDE, subject: "Notes", thread: "b", body: "Once." });
+    store.sendMessage({ project_id: older.id, author: CLAUDE, subject: "Notes", thread: "c", body: "Busy again." });
+    const index = await built(store);
+    const projectIds = (answer: InboxSearchAnswer) => (answer.groups?.projects ?? []).map((r) => r.id);
+    expect(projectIds(search(index, "billing"))).toEqual([newer.id, older.id]);
+    expect(projectIds(search(index, "billing", { sort: "newest" }))).toEqual([older.id, newer.id]);
+  });
+
 });
 
 describe("identifiers", () => {
@@ -489,6 +524,15 @@ describe("filters", () => {
     expect(messageIds(agents)).not.toContain(w.sentReply.id);
     // A thread counts for Me when the person wrote in it.
     expect(threadIds(search(w.index, "deploy", { from: "me" }))).toEqual([w.sent.id]);
+  });
+
+  test("a filter with Newest: the filtered set, by its latest message", async () => {
+    const w = await world();
+    const filtered = { project: w.api.id, from: "agent" } as const;
+    // Best match puts the archived thread's message last; Newest puts it first, as the latest.
+    expect(messageIds(search(w.index, "deploy", filtered))).toEqual([w.quiet.id, w.waiting.id, w.archived.id]);
+    expect(messageIds(search(w.index, "deploy", { ...filtered, sort: "newest" }))).toEqual([w.archived.id, w.quiet.id, w.waiting.id]);
+    expect(messageIds(search(w.index, "deploy", { status: "new", sort: "newest" }))).toEqual([w.fresh.id]);
   });
 });
 

@@ -20,7 +20,7 @@ import {
   type InboxAttachmentState,
 } from '@plannotator/core/inbox-types';
 import { AnnotationType, type Annotation, type Block, type CodeAnnotation, type ImageAttachment } from '@plannotator/ui/types';
-import { diagramDocumentBlocks, exportLinkedDocAnnotations, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
+import { diagramDocumentBlocks, exportLinkedDocAnnotations, parseMarkdownToBlocks, quickLabelTipLine } from '@plannotator/ui/utils/parser';
 import { whenTime } from './format';
 
 /** Plannotator's blocks for a file: one diagram block for a diagram source, one code block for code, the markdown pipeline for text, none for HTML or a binary kind. */
@@ -609,7 +609,9 @@ function messageCommentEntry(annotation: Annotation, number: number): string {
   }
   const location = messageDiagramLocation(annotation);
   if (location !== null) out += `${location}\n\n`;
-  if (!annotation.isQuickLabel && annotation.text) out += `${annotation.text.split(/\r\n|\r|\n/).map((line) => `> ${line}`).join('\n')}\n`;
+  // A label's words are its heading; its tip is quoted under it, as the main export writes it (#2626).
+  if (annotation.isQuickLabel) out += quickLabelTipLine(annotation);
+  else if (annotation.text) out += `${annotation.text.split(/\r\n|\r|\n/).map((line) => `> ${line}`).join('\n')}\n`;
   else if (deletion) out += `> ${MESSAGE_DELETION.line}\n`;
   return `${out}\n`;
 }
