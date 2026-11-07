@@ -392,15 +392,21 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
    */
   const [narrow, setNarrow] = useState<(ShapeReviewNarrow & { chapter: number }) | null>(null);
   /** A place in the review (a Shape board's link): a file at a line, a file, a chapter, or All files. */
+  // Narrowing gives the reader a new snapshot: the jump waits for it to draw, or the move is lost with the old one.
+  const narrowJump = useRef<{ file: string } | { step: number } | null>(null);
   const goTo = (to: ShapeReviewAt) => {
     if (to.narrow) {
       const chapter = to.step && to.step <= chapters.length ? to.step - 1 : chapterOf(chapters, to.narrow.files[0]!);
-      setNarrow(chapter === null ? null : { ...to.narrow, chapter });
-      if (!to.step && chapter !== null) {
-        showFile(to.narrow.files.find((f) => files.some((file) => file.path === f)) ?? to.narrow.files[0]!);
+      if (chapter !== null) {
+        setNarrow({ ...to.narrow, chapter });
+        narrowJump.current = to.step ? { step: to.step } : { file: to.narrow.files.find((f) => files.some((file) => file.path === f)) ?? to.narrow.files[0]! };
         return;
       }
-    } else setNarrow(null);
+    }
+    setNarrow(null);
+    jump(to);
+  };
+  const jump = (to: ShapeReviewAt) => {
     if (to.path && to.line) openCode({ path: to.path, line: to.line });
     else if (to.path && files.some((file) => file.path === to.path)) toFile(to.path);
     else if (to.step && to.step <= chapters.length) {
@@ -488,6 +494,28 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     return { snapshot: { ...snapshot, guide: { ...snapshot.guide, sections } }, shown: new Set(kept.map((d) => d.file)).size, total };
   }, [snapshot, narrow]);
   const readerSnapshot = narrowed?.snapshot ?? snapshot;
+  // The move to the narrowed chapter (or file) waits for the reader to draw: the reader loads lazily, and a move made
+  // before it mounts reads as one it has already seen (a review opened from the board over the thread).
+  useEffect(() => {
+    if (!narrowJump.current) return;
+    let tries = 0;
+    let frame = 0;
+    const go = () => {
+      if (!bodyRef.current?.querySelector('[data-guide-section]') && tries++ < 120) {
+        frame = requestAnimationFrame(go);
+        return;
+      }
+      const pending = narrowJump.current;
+      narrowJump.current = null;
+      if (!pending) return;
+      if ('file' in pending) showFile(pending.file);
+      else jump({ step: pending.step });
+    };
+    go();
+    return () => cancelAnimationFrame(frame);
+    // Runs once per narrowing; the jump reads this render's state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [narrow]);
   const backToBoard = () => {
     setNarrow(null);
     if (board) setLanded(null);

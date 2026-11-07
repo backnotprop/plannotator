@@ -8043,7 +8043,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   background: var(--background); color: var(--foreground); font: inherit; font-weight: 600; cursor: pointer; transition: background-color .15s ease; }
 @media (hover: hover) { .ib-rv-narrow-back:hover { background: color-mix(in oklab, var(--foreground) 8%, var(--background)); } }
 .ib-rv-narrow-back:active { transform: scale(.97); }
-.ib-rv-narrow-what { flex: 1; min-width: 0; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ib-rv-narrow-what { flex: 1 1 18em; min-width: 0; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+/* On a phone: both buttons on the first line, what was opened on its own line below them. */
+@media (max-width: 640px) { .ib-rv-narrow-what { order: 2; flex-basis: 100%; padding: 0 4px 2px; } .ib-rv-narrow-all { margin-left: auto; } }
 .ib-rv-narrow-pr { display: inline-flex; align-items: center; gap: 6px; color: var(--foreground); text-decoration: none; }
 a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-offset: 3px; }
 .ib-rv-narrow-n { display: inline-flex; align-items: center; height: 22px; padding: 0 6px; border-radius: 6px; font: 600 var(--ib-fs-13, 13px)/1 var(--font-mono, ui-monospace, monospace);

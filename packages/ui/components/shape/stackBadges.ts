@@ -140,7 +140,14 @@ export class StackBadgeLayer {
       });
       this.mo.observe(board, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-ex-dim', 'data-s', 'style', 'class'] });
     }
+    // Parts drawing in (they rise into place) and the example's tags sliding in end where nothing is observed.
+    board.addEventListener('animationend', this.settled);
+    board.addEventListener('transitionend', this.settled);
   }
+
+  private settled = (e: Event) => {
+    if (!(e.target instanceof Node) || !this.layer.contains(e.target)) this.later();
+  };
 
   /** The tags of one part (tests, the host's focus return). */
   tagsOf(part: string): HTMLButtonElement[] {
@@ -241,6 +248,8 @@ export class StackBadgeLayer {
   }
 
   destroy() {
+    this.board.removeEventListener('animationend', this.settled);
+    this.board.removeEventListener('transitionend', this.settled);
     this.ro?.disconnect();
     this.mo?.disconnect();
     if (this.frame) this.board.ownerDocument.defaultView?.cancelAnimationFrame?.(this.frame);
