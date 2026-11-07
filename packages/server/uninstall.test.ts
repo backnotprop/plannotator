@@ -18,7 +18,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, parse } from "node:path";
-import { t3HookCommand } from "@plannotator/shared/t3-hook-command";
+import { quoteHookWord, t3HookCommand } from "@plannotator/shared/t3-hook-command";
 import {
   formatPurgeWarning,
   runPlannotatorUninstall,
@@ -362,6 +362,8 @@ describe("default uninstall", () => {
       theme: "dark",
       hooks: { PreToolUse: [{ matcher: "Bash", hooks: [
         { type: "command", command: t3HookCommand(binary, fixture.dataDir), timeout: 10 },
+        // A hook from an earlier build, with the old SDK-only gate (before `t3-code`): removed too.
+        { type: "command", command: `case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) PLANNOTATOR_DATA_DIR=${quoteHookWord(fixture.dataDir)} ${quoteHookWord(binary)} t3-hook;; esac`, timeout: 10 },
         ...customHooks,
       ] }] },
     });
