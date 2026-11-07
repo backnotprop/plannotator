@@ -76,7 +76,7 @@ import { authorWithLabel, labelOf, shortLabel, useSessionLabels } from '../sessi
 import { ROW_LABEL_MAX } from './RowAgents';
 import { attachmentImageUrl, readableVersion } from '../attachments';
 import { pickComposerMode } from '../fullScreenComposer';
-import { InlineReuseLayer, ReuseContext, sourceOf, type ReuseApi } from '../reuse';
+import { InlineReuseLayer, ReuseContext, sourceOf, type ReuseApi, type ReuseSource } from '../reuse';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, pastedSignature, useComposeFiles, useFileDrop } from '../compose/ComposeFiles';
 import {
   AskerEndedNote,
@@ -1038,6 +1038,10 @@ export interface ThreadPaneProps {
    * The meta line under the subject names it, or says it is away since when.
    */
   machine?: MachineView | null;
+  /** This thread's files, for New message opened over it; null when it has none to offer and when it goes. */
+  onThreadFiles?: (files: readonly InboxAttachmentState[] | null) => void;
+  /** An archived thread's reuse button: New message with this file. Absent: an archived thread offers no button. */
+  onNewMessageWith?: (source: ReuseSource) => void;
   /**
    * Writes held for that machine about this thread (machines.ts `threadOutbox`): the person's words still on their
    * way ("Sending to MacBook…", "Will send when MacBook is back"), or a write that did not land, with Dismiss.
@@ -1473,7 +1477,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread, threadSteps = null, codeReview = false, machine = null, onThreadFiles, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   // Thread steps (approval "inbox-thread-steps"): the lists with steps, newest first; none while the switch is off.
@@ -2155,7 +2159,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const filesRevision = useRef(thread);
   if (!onlyQuestionsChanged(filesRevision.current, thread)) filesRevision.current = thread;
   const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, filesRevision.current, filesChanged);
-  const attachments: InboxAttachmentState[] = files?.attachments ?? [];
+  const attachments: InboxAttachmentState[] = useMemo(() => files?.attachments ?? [], [files]);
   // The images the messages' text shows, captured as files (approval "inbox-image-viewer"): opened, stepped and commented like attachments.
   const inlineImages: InboxAttachmentState[] = useMemo(() => files?.inline_images ?? [], [files]);
   /** Every file the viewer opens: the attached files and the images in the text. */
@@ -5440,6 +5444,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const reuseToggle = useRef<ReuseApi['toggle']>(() => {});
   reuseToggle.current = (f, version) => {
     const source = sourceOf(f, version ?? readableVersion(f), attachmentImageUrl);
+    if (resolved) {
+      onNewMessageWith?.(source);
+      return;
+    }
     if (boxRef.current.open && replyFiles.holding(source.sha256)) {
       replyFiles.removeHolding(source.sha256);
       announce(`${source.name} taken out of your reply`);
@@ -5458,18 +5466,25 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     .flatMap((f) => [f.reuse?.sha256, f.upload?.sha256, f.upload?.shown_sha256])
     .filter(Boolean)
     .join();
-  const reuseOffered = !resolved && newMessage?.kind !== 'compose' && replyFiles.canReuse;
+  const reuseOffered = newMessage?.kind !== 'compose' && replyFiles.canReuse && (!resolved || Boolean(onNewMessageWith));
   const reuseApi = useMemo<ReuseApi | null>(
     () =>
       reuseOffered
         ? {
+            target: resolved ? 'new' : 'reply',
             fileOf: (id) => allFiles.find((f) => f.id === id),
-            isAdded: (f, version) => box.open && reuseHeld.split(',').includes(sourceOf(f, version ?? readableVersion(f), attachmentImageUrl).sha256),
+            isAdded: (f, version) => !resolved && box.open && reuseHeld.split(',').includes(sourceOf(f, version ?? readableVersion(f), attachmentImageUrl).sha256),
             toggle: (f, version) => reuseToggle.current(f, version),
           }
         : null,
-    [reuseOffered, allFiles, box.open, reuseHeld],
+    [reuseOffered, resolved, allFiles, box.open, reuseHeld],
   );
+  // New message opened over this thread offers its files. Another machine's thread: not this Inbox's to offer.
+  const offerFiles = files && replyFiles.canReuse ? allFiles : null;
+  useEffect(() => {
+    onThreadFiles?.(offerFiles);
+    return () => onThreadFiles?.(null);
+  }, [offerFiles, onThreadFiles]);
   return (
     <ReuseContext.Provider value={reuseApi}>
     <>
