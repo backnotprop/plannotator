@@ -139,7 +139,7 @@ export function LineThread({ placed, layer, memory, headSha }: { placed: PlacedT
   const forge = layer.platform === 'gitlab' ? 'GitLab' : 'GitHub';
   const first = thread.comments[0]!;
   const count = thread.comments.length;
-  const whyWord = why === 'resolved' ? 'Resolved' : null;
+  const whyWord = why === 'resolved' ? 'Resolved' : why === 'bot' ? 'Bots only' : null;
   const whereWords = WHERE_WORDS[where];
   const span = thread.start_line !== null && thread.line !== null && where === 'line' ? `Lines ${thread.start_line}–${thread.line}` : null;
   const common = { 'data-pull-thread': thread.id, 'data-pull-thread-where': where, 'data-voice': why === 'bot' ? 'bot' : 'person' };
@@ -171,7 +171,7 @@ export function LineThread({ placed, layer, memory, headSha }: { placed: PlacedT
           {why && (
             <button type="button" className="ib-lt-refold" aria-expanded onClick={() => setOpen(false)} data-pull-thread-refold="">
               <Icon name="chevD" size={13} />
-              {whyWord ?? 'Fold'}
+              {whyWord}
             </button>
           )}
           {whereWords ? <span>{whereWords}</span> : thread.outdated ? <span>Outdated</span> : null}

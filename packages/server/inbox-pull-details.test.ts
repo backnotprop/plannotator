@@ -270,12 +270,15 @@ describe("reading them through the list", () => {
           { ...thread("t1", { nodes: [noted("t1-1"), { ...noted("t1-2"), author: { __typename: "Bot", login: "lint[bot]" }, isMinimized: true, minimizedReason: "OFF_TOPIC" }] }), line: 9, startLine: 7, diffSide: "LEFT", isResolved: true },
           { ...thread("t2", { nodes: [noted("t2-1")] }), line: null, startLine: null, isOutdated: true },
           { ...thread("empty", { nodes: [] }) },
+          // From a removed line to an added one: the two numbers are from two files, so only its end line is kept.
+          { ...thread("t3", { nodes: [noted("t3-1")] }), line: 9, startLine: 3, startDiffSide: "LEFT", diffSide: "RIGHT" },
         ]);
       }),
     });
     await pulls.list(repos);
     const answer = await pulls.details(KEY);
     expect(asked).toContain("isMinimized");
+    expect(asked).toContain("startDiffSide");
     expect(answer.threads).toEqual([
       {
         id: "t1", file: "src/a.ts", line: 9, start_line: 7, side: "old", resolved: true, outdated: false,
@@ -287,6 +290,10 @@ describe("reading them through the list", () => {
       {
         id: "t2", file: "src/a.ts", line: null, start_line: null, side: "new", resolved: false, outdated: true,
         comments: [{ id: "t2-1", author: "kim", at: "2026-11-01T00:00:00Z", body: "t2-1", url: "u", file: "src/a.ts" }],
+      },
+      {
+        id: "t3", file: "src/a.ts", line: 9, start_line: null, side: "new", resolved: false, outdated: false,
+        comments: [{ id: "t3-1", author: "kim", at: "2026-11-01T00:00:00Z", body: "t3-1", url: "u", file: "src/a.ts", line: 9 }],
       },
     ]);
     // The flat list keeps them too, with the hidden mark.

@@ -24,6 +24,8 @@ export function patchLines(patch: string): { old: Set<number>; new: Set<number>;
   let oldAt = 0;
   let newAt = 0;
   let inHunk = false;
+  // Removed lines come in order: the first one read is the lowest.
+  let firstOld: number | null = null;
   for (const row of patch.split('\n')) {
     const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(row);
     if (hunk) {
@@ -41,6 +43,7 @@ export function patchLines(patch: string): { old: Set<number>; new: Set<number>;
       newAt++;
     } else if (row[0] === '-') {
       out.old.add(oldAt);
+      firstOld ??= oldAt;
       oldAt++;
     } else if (row[0] === ' ') {
       out.new.add(newAt);
@@ -51,7 +54,7 @@ export function patchLines(patch: string): { old: Set<number>; new: Set<number>;
     }
   }
   // A deleted file draws only removed lines.
-  if (!out.first && out.old.size > 0) out.first = { line: Math.min(...out.old), side: 'old' };
+  if (!out.first && firstOld !== null) out.first = { line: firstOld, side: 'old' };
   return out;
 }
 
@@ -75,16 +78,22 @@ export function placeThreads(
     if (patch === undefined || thread.comments.length === 0) continue;
     let drawn = lines.get(thread.file);
     if (!drawn) lines.set(thread.file, (drawn = patchLines(patch)));
-    if (!thread.resolved) open.set(thread.file, (open.get(thread.file) ?? 0) + 1);
+    // Counted only when drawn: a file with no line to carry it (a binary file, a bare rename) shows no count, and the
+    // thread is in the Details panel.
+    const count = () => {
+      if (!thread.resolved) open.set(thread.file, (open.get(thread.file) ?? 0) + 1);
+    };
     const sideLines = thread.side === 'old' ? drawn.old : drawn.new;
     const onLine = thread.line !== null && sideLines.has(thread.line) && !(scope === 'stack' && thread.side === 'old');
     if (onLine) {
       placed.push({ thread, line: thread.line!, side: thread.side, where: 'line' });
+      count();
       continue;
     }
     if (!drawn.first) continue;
     const where: ThreadWhere = thread.outdated ? 'outdated' : thread.line === null ? 'file' : 'elsewhere';
     placed.push({ thread, line: drawn.first.line, side: drawn.first.side, where });
+    count();
   }
   return { placed, open };
 }

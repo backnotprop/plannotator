@@ -429,6 +429,7 @@ query($owner: String!, $repo: String!, $number: Int!, $withComments: Boolean = t
           startLine
           path
           diffSide
+          startDiffSide
           comments(first: 50) {
             pageInfo { hasNextPage endCursor }
             nodes {
@@ -562,6 +563,7 @@ function threadOf(t: any, comments: PRThreadComment[]): PRReviewThread {
     line: typeof t.line === 'number' ? t.line : null,
     startLine: typeof t.startLine === 'number' ? t.startLine : null,
     diffSide: t.diffSide === 'LEFT' || t.diffSide === 'RIGHT' ? t.diffSide : null,
+    ...(t.startDiffSide === 'LEFT' || t.startDiffSide === 'RIGHT' ? { startDiffSide: t.startDiffSide } : {}),
     comments,
   };
 }

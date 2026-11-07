@@ -66,6 +66,13 @@ describe('placing', () => {
     expect(open.get('src/a.ts')).toBe(30);
     expect(open.has('src/other.ts')).toBe(false);
   });
+
+  test('a file the diff draws no line of (a binary file): its thread is not drawn, so not counted', () => {
+    const binary = [{ path: 'img/logo.png', patch: 'diff --git a/img/logo.png b/img/logo.png\nBinary files differ\n' }];
+    const { placed, open } = placeThreads([thread('b', { file: 'img/logo.png', line: null })], binary, 'layer');
+    expect(placed).toEqual([]);
+    expect(open.has('img/logo.png')).toBe(false);
+  });
 });
 
 describe('folding', () => {
@@ -100,4 +107,11 @@ test("a patch's drawn lines on each side", () => {
   expect([...lines.new]).toEqual([1, 2, 3, 4, 5]);
   expect([...lines.old]).toEqual([1, 2, 3, 4, 5]);
   expect(lines.first).toEqual({ line: 1, side: 'new' });
+});
+
+test('a very long deleted file: its first removed line, with no limit on how many', () => {
+  const rows = Array.from({ length: 1_000_000 }, (_, i) => `-row ${i}`).join('\n');
+  const lines = patchLines(`diff --git a/big b/big\ndeleted file mode 100644\n--- a/big\n+++ /dev/null\n@@ -1,1000000 +0,0 @@\n${rows}\n`);
+  expect(lines.first).toEqual({ line: 1, side: 'old' });
+  expect(lines.old.size).toBe(1_000_000);
 });

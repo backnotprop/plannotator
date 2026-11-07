@@ -64,23 +64,28 @@ test.if(hasDom)('resolved: one line that says so, who, the first words and how m
   expect(row.tagName).toBe('BUTTON');
   expect(row.getAttribute('aria-expanded')).toBe('false');
   expect(row.getAttribute('data-pull-thread-folded')).toBe('resolved');
-  expect(row.querySelector('[data-pull-thread-why]')!.textContent).toBe('Resolved');
+  const why = row.querySelector('[data-pull-thread-why]')!.textContent;
+  expect(why).toBeTruthy();
   expect(row.textContent).toContain('theo');
   expect(row.textContent).toContain('Why 202');
   expect(row.querySelector('[aria-label="2 comments"]')!.textContent).toBe('2');
   act(() => (row as HTMLButtonElement).click());
   expect(comments()).toEqual(['c1', 'c2']);
   const refold = host.querySelector('[data-pull-thread-refold]') as HTMLButtonElement;
-  expect(refold.textContent).toBe('Resolved');
+  expect(refold.textContent).toBe(why);
   act(() => refold.click());
   expect(box().tagName).toBe('BUTTON');
 });
 
-test.if(hasDom)('only bots speaking: one line, marked bot; a bot in a person\'s thread leaves it open', () => {
+test.if(hasDom)('only bots speaking: one line, marked bot, that says why; a bot in a person\'s thread leaves it open', () => {
   draw(at(thread({ comments: [said('b1', { author: 'coderabbitai[bot]', bot: true })] })));
   expect(box().getAttribute('data-pull-thread-folded')).toBe('bot');
+  expect(box().getAttribute('data-voice')).toBe('bot');
   expect(box().textContent).toContain('coderabbitai');
-  expect(box().textContent).toContain('bot');
+  const why = box().querySelector('[data-pull-thread-why]')?.textContent;
+  expect(why).toBeTruthy();
+  act(() => (box() as HTMLButtonElement).click());
+  expect((host.querySelector('[data-pull-thread-refold]') as HTMLElement).textContent).toBe(why!);
   draw(at(thread({ id: 'T2', comments: [said('b1', { bot: true }), said('p1')] })));
   expect(box().hasAttribute('data-open')).toBe(true);
 });
@@ -88,16 +93,22 @@ test.if(hasDom)('only bots speaking: one line, marked bot; a bot in a person\'s 
 test.if(hasDom)('an outdated thread stays open and says a push moved its lines; one on the whole file says so', () => {
   draw(at(thread({ outdated: true, line: null }), 'outdated'));
   expect(box().hasAttribute('data-open')).toBe(true);
-  expect(box().textContent).toContain('Outdated: a later push changed its lines');
+  expect(box().getAttribute('data-pull-thread-where')).toBe('outdated');
+  expect(box().querySelector('.ib-lt-top')!.textContent).toBeTruthy();
   draw(at(thread({ id: 'T3', line: null }), 'file'));
-  expect(box().textContent).toContain('On the whole file');
+  expect(box().getAttribute('data-pull-thread-where')).toBe('file');
+  expect(box().querySelector('.ib-lt-top')!.textContent).toBeTruthy();
+  // On its line, with nothing to say: no line above the comments.
+  draw(at(thread({ id: 'T4' })));
+  expect(box().querySelector('.ib-lt-top')).toBeNull();
 });
 
 test.if(hasDom)('a long thread: its first and last comment and "N more", which shows the rest', () => {
   draw(at(thread({ comments: Array.from({ length: 9 }, (_, i) => said(`c${i + 1}`)) })));
   expect(comments()).toEqual(['c1', 'c9']);
   const more = host.querySelector('[data-pull-thread-between]') as HTMLButtonElement;
-  expect(more.textContent).toBe('7 more');
+  expect(more.getAttribute('data-pull-thread-between')).toBe('7');
+  expect(more.textContent).toContain('7');
   act(() => more.click());
   expect(comments()).toHaveLength(9);
 });
@@ -105,7 +116,7 @@ test.if(hasDom)('a long thread: its first and last comment and "N more", which s
 test.if(hasDom)('a comment the forge hides is one line with its reason, and shows on a click', () => {
   draw(at(thread({ comments: [said('c1'), said('c2', { hidden: 'off-topic', body: 'secret words' })] })));
   const hidden = host.querySelector('[data-pull-thread-hidden]') as HTMLButtonElement;
-  expect(hidden.textContent).toBe('Hidden on GitHub as off topic. Show');
+  expect(hidden.getAttribute('data-pull-thread-hidden')).toBe('off-topic');
   expect(host.textContent).not.toContain('secret words');
   act(() => hidden.click());
   expect(host.textContent).toContain('secret words');

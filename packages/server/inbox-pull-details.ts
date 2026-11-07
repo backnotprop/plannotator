@@ -110,7 +110,8 @@ function threadsOf(context: PRContext): InboxPullThread[] {
       id: thread.id,
       file: thread.path,
       line: thread.line,
-      start_line: thread.startLine !== null && thread.line !== null && thread.startLine < thread.line ? thread.startLine : null,
+      // A range across the two sides has numbers from two files: its end line alone says where it is.
+      start_line: thread.startLine !== null && thread.line !== null && thread.startLine < thread.line && (!thread.startDiffSide || thread.startDiffSide === thread.diffSide) ? thread.startLine : null,
       side: thread.diffSide === "LEFT" ? "old" : "new",
       resolved: thread.isResolved,
       outdated: thread.isOutdated,
