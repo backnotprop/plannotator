@@ -122,13 +122,14 @@ describe("hooks.json's SessionStart compact hook", () => {
   // Claude Code runs a Windows hook in Git Bash, else PowerShell (-NoProfile);
   // there `$PLANNOTATOR_INBOX_REMINDER` is a PowerShell variable, always empty
   // (the mod never runs on Windows anyway). The line must parse and exit 0.
+  // One test per value: each cold-starts pwsh once, so three starts no longer share one 5 s budget.
   const pwsh = spawnSync('pwsh', ['-NoProfile', '-Command', 'exit 0'], { encoding: 'utf8' })
-  test.skipIf(pwsh.status !== 0)('PowerShell: prints only whitespace and exits 0, set or not', () => {
-    for (const value of [undefined, text, HOSTILE]) {
+  for (const [label, value] of [['unset', undefined], ['set to the text', text], ['set to the hostile text', HOSTILE]] as const) {
+    test.skipIf(pwsh.status !== 0)(`PowerShell: prints only whitespace and exits 0, ${label}`, () => {
       const result = run('pwsh', ['-NoProfile', '-NonInteractive', '-Command'], value)
       expect(result.status).toBe(0)
       expect(result.stdout.trim()).toBe('')
       expect(result.stderr).toBe('')
-    }
-  })
+    })
+  }
 })

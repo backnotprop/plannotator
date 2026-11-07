@@ -126,7 +126,7 @@ import { createCommitAvatarResolver } from "@plannotator/shared/commit-avatars";
 import { detectGeneratedFiles, detectGeneratedFilesByName } from "@plannotator/shared/generated-files";
 import { getRepoInfo } from "./repo";
 import { createRefCards, refCardRouteResponse, refCardsTailnetAllowed, type RefRunner } from "./ref-cards";
-import { handleImage, handleUpload, handleAgents, handleServerReady, handleApiNotFound, handleFavicon, readDraftGenerationFromBody, readDraftGenerationFromUrl, type OpencodeClient } from "./shared-handlers";
+import { handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleApiNotFound, handleFavicon, readDraftGenerationFromBody, readDraftGenerationFromUrl, type OpencodeClient } from "./shared-handlers";
 import { contentHash } from "./draft";
 import { createReviewDraftSession, localGitDraftTargetKey, localReviewDraftKeys, prDraftTargetKey, type ReviewDraftKeys } from "@plannotator/shared/review-draft";
 import { captureReviewProgress, handleReviewProgress } from "@plannotator/shared/review-progress";
@@ -4165,6 +4165,11 @@ export async function startReviewServer(
             } catch {
               return Response.json({ error: "Invalid request" }, { status: 400 });
             }
+          }
+
+          // The "Star the repo" ask on the done screen (packages/shared/star-ask.ts).
+          if (url.pathname.startsWith("/api/star-ask/")) {
+            return (await handleStarAsk(req, url, "review", { remote: isRemote })) ?? handleApiNotFound(url.pathname);
           }
 
           // API: Serve images (local paths or temp uploads)

@@ -359,37 +359,37 @@
   padding: 0.5rem;
 }
 
-/* A host's selection chooser (SelectionChooser): Comment · Ask · Show me, before the comment box. */
+/* A host's selection chooser (SelectionChooser): the words Comment | Ask | Show me, before the comment box. */
 .review-selpop {
   display: inline-flex;
-  gap: 2px;
-  padding: 3px;
   background: var(--popover);
   color: var(--popover-foreground, var(--foreground));
-  border-radius: 9px;
-  box-shadow: var(--ib-float-shadow, 0 0 0 1px color-mix(in oklch, var(--foreground) 8%, transparent), 0 16px 40px -10px rgba(0, 0, 0, 0.35));
-  font-size: 13px;
+  border-radius: 7px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 13%, transparent), 0 6px 16px -10px color-mix(in oklch, var(--foreground) 30%, transparent);
+  font-size: 12.5px;
   white-space: nowrap;
 }
 .review-selpop-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 10px;
+  height: 28px;
+  padding: 0 11px;
   border: 0;
-  border-radius: 7px;
   background: transparent;
   color: inherit;
   font: inherit;
+  font-weight: 500;
   cursor: pointer;
 }
+.review-selpop-btn + .review-selpop-btn { border-left: 1px solid color-mix(in oklch, var(--foreground) 11%, transparent); }
 .review-selpop-btn:hover { background: color-mix(in oklch, var(--foreground) 7%, transparent); }
-.review-selpop-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
-.review-selpop-btn.review-selpop-show { background: var(--primary); color: var(--primary-foreground); font-weight: 600; padding: 0 12px 0 9px; }
-.review-selpop-btn.review-selpop-show:hover { background: color-mix(in oklch, var(--primary) 88%, var(--foreground)); }
-.review-selpop-btn.review-selpop-show .shp-pebble path { stroke: currentColor; fill: color-mix(in oklab, currentColor 28%, transparent); }
+.review-selpop-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.review-selpop-btn.review-selpop-show { color: var(--primary); font-weight: 600; }
+.review-selpop-btn.review-selpop-show:hover { background: color-mix(in oklch, var(--primary) 9%, transparent); }
 @media (pointer: coarse) { .review-selpop-btn { height: 44px; padding: 0 12px; } }
+/* The diff's + mark offers the same thing as Comment: gone while the bar is open. Custom properties reach into the diff's shadow root (usePierreTheme). */
+html:has([data-selection-chooser]) { --review-selection-plus: none; }
 
 .review-toolbar-btn {
   display: flex;

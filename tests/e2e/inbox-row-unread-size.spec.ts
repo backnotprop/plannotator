@@ -1,6 +1,8 @@
 /**
  * The unread thread name is bigger in the list (approval
- * "inbox-row-unread-bigger", 2026-10-30), proved in a real Chromium against
+ * "inbox-row-unread-bigger", 2026-10-30), now Settings → Rows' Unread
+ * "Larger" (smaller names are the default since 2026-11-05, so the spec
+ * saves every row option off first), proved in a real Chromium against
  * the compiled binary under a temp HOME and PLANNOTATOR_DATA_DIR; agents write
  * through `plannotator inbox mcp` (scripts/inbox-sim.ts). Nothing is mocked.
  *
@@ -66,6 +68,11 @@ test.beforeAll(async () => {
     const res = await fetch(new URL(`/api/inbox/threads/${id}/read`, url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession: health.serverSession }) });
     expect(res.ok, `mark ${id} read`).toBe(true);
   }
+  // The bigger unread name is Settings → Rows' Unread "Larger" since smaller names became the default (2026-11-05):
+  // every option off, saved as the person's look.
+  const health = (await (await fetch(new URL('/api/inbox/health', url))).json()) as { serverSession: string };
+  const rows = await fetch(new URL('/api/inbox/settings', url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession: health.serverSession, rows: [] }) });
+  expect(rows.ok, 'every row option off').toBe(true);
 });
 
 test.afterAll(async () => {
