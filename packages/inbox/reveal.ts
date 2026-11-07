@@ -436,3 +436,35 @@ export function useLineReveal(input: LineRevealInput) {
     atOnce: input.atOnce,
   });
 }
+
+/**
+ * List view's moment, as registered with the line (approval "inbox-one-time-dialogs", the change): leaving a thread
+ * for the list itself (not for another thread).
+ */
+export function listViewRevealLeaveCounts(next: string | null): boolean {
+  return next === null;
+}
+
+/** What List view's need reads at a settled moment. */
+export interface ListViewRevealGate {
+  listLoaded: boolean;
+  firstRun: boolean;
+  /** The list draws its groups (Smart groups): the choice is for someone who has not picked Simple list. */
+  grouped: boolean;
+  /** The list on screen is taller than the screen (`listTallerThanScreen`). */
+  taller: boolean;
+}
+
+/**
+ * List view's need (approval "inbox-one-time-dialogs": "once the person's list has grown taller than the screen, on
+ * Grouped, at the next calm moment"): the list loaded and not the first-run screen, the page old enough, on Smart
+ * groups, and taller than the screen. The line decides the day (`reveal.next`, or `reveal.ahead` at its moment).
+ */
+export function listViewRevealMayClaim(gate: ListViewRevealGate, pageAge: number): boolean {
+  return gate.listLoaded && !gate.firstRun && gate.grouped && gate.taller && pageAge >= REVEAL_TIMES.pageAgeMs;
+}
+
+/** The list's scrolling body holds more than it shows: the list is taller than the screen. */
+export function listTallerThanScreen(body: Element | null): boolean {
+  return body !== null && body.scrollHeight > body.clientHeight;
+}

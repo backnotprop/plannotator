@@ -31,6 +31,7 @@ import { attachPullToRefresh } from '../pullRefresh';
 import { TidyMenu, type TidyController } from './Tidy';
 import { awayLine, type MachinesModel } from '../machines';
 import { listLookClasses, useListLook } from '../listLook';
+import { flatRows, useListView, type ListPlaces, type ListSort } from '../listView';
 import { useListGroups } from '../listGroups';
 import { useInboxTextSize } from '../textSize';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
@@ -63,6 +64,11 @@ export interface InboxListProps {
    * one. Always one line: a long project name is cut with "…", the whole line then in a tooltip.
    */
   notice: { count: number; project?: string | null } | null;
+  /**
+   * When the list on screen was last sorted whole (listView.ts `ListSort`): List keeps each row's place between
+   * sorts, as the groups do. Absent: every render is a sort (a list that never holds, the tour).
+   */
+  sort?: ListSort;
   /** This page is older than the Inbox (StalePageNotice, stalePage.ts): at the list's top, above the notifications line. */
   stale?: ReactNode;
   /** The one-time notifications line (record 6.1), above everything else. */
@@ -378,6 +384,13 @@ function countWords(row: InboxListRow, now: number): { short: ReactNode; long: R
   if (row.run) return same(row.run === 'starting' ? 'Starting' : 'Working');
   if (row.section === 'sent' && row.addressee) return same(`To ${agentName(rowAgent(row))}`);
   return null;
+}
+
+/** A group's count: its rows but those archived and waiting for the list to settle without them, as the sidebar counts. */
+function liveCount(rows: readonly InboxListRow[]): number {
+  let n = 0;
+  for (const row of rows) if (!inboxRowArchived(row)) n += 1;
+  return n;
 }
 
 /**
@@ -779,6 +792,8 @@ function RowWithAction({
     <div
       className="ib-rw"
       data-row={row.thread_id}
+      // Archived, waiting for the list to settle without it (approval "inbox-list-view", R7): faded in place.
+      data-archived={inboxRowArchived(row) ? '' : undefined}
       data-menu={menu ? '' : undefined}
       onPointerEnter={(event) => {
         if (!actionTip && opensTips(event)) setActionTip(true);
@@ -1058,6 +1073,9 @@ export function InboxList(props: InboxListProps) {
   });
   // The list's look options in its ⋮ menu (listLook.ts): smaller thread names on by default, the others off.
   const [look, setLook] = useListLook(props.rememberLook !== false);
+  // Grouped (the default) or List (listView.ts), this browser's choice in the same ⋮ menu.
+  const [view, setView] = useListView(props.rememberLook !== false);
+  const asList = view === 'list';
   // Settings → Rows' "Project" off: every row drawn as one project's list draws it (no project, its columns).
   const noProject = props.filtered || look.hideProject;
   // Another project on a phone: the list starts at its top. The list itself stays mounted (its Quiet fold and,
@@ -1143,6 +1161,21 @@ export function InboxList(props: InboxListProps) {
   const refreshHintId = useId();
   const resizable = props.narrow && !isMobile;
   const visible = props.sections.filter((s) => s.threads.length > 0);
+  // List's rows (listView.ts): every group's but the Snoozed band's, newest first, each keeping its place until the
+  // list is sorted whole (`props.sort`), as the groups keep theirs. Only while List shows: a switch to List is a
+  // sort of the whole list (the held list's rows, so nothing behind "N new" comes in).
+  const places = useRef<ListPlaces | null>(null);
+  const sortEpoch = props.sort?.epoch;
+  const sortKeep = props.sort?.keep ?? null;
+  const flat = useMemo(
+    () => (asList ? flatRows(props.sections, sortEpoch === undefined ? null : places.current, { epoch: sortEpoch ?? 0, keep: sortKeep }) : null),
+    [asList, props.sections, sortEpoch, sortKeep],
+  );
+  useLayoutEffect(() => {
+    places.current = flat?.places ?? null;
+  }, [flat]);
+  // List draws the Snoozed band as the groups do: folded, under the rows.
+  const listBand = asList ? (visible.find((s) => s.id === 'snoozed') ?? null) : null;
   // The band comes back folded: it shows only while something is snoozed, and each time it is new.
   const bandShown = visible.some((s) => s.id === 'snoozed');
   const resetGroup = groups.reset;
@@ -1167,7 +1200,8 @@ export function InboxList(props: InboxListProps) {
     if (!pinColumn || !settled) return '';
     const keys = new Set<string>();
     for (const section of props.sections) {
-      if (!groups.state(section.id).open) continue;
+      // List draws every row but the Snoozed band's (no groups to close); the band folds in both views.
+      if (asList ? section.id === 'snoozed' && !groups.state(section.id).open : !groups.state(section.id).open) continue;
       for (const row of section.threads) {
         const key = openCountsKey(row);
         if (key) keys.add(key);
@@ -1175,7 +1209,7 @@ export function InboxList(props: InboxListProps) {
     }
     return [...keys].sort().join(' ');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pinColumn, settled, props.sections, closedKey]);
+  }, [pinColumn, settled, props.sections, closedKey, asList]);
   const textSize = useInboxTextSize();
   // ThemeProvider puts the palette's classes on <html> while it renders, before this list's layout effects run.
   const { colorTheme, resolvedMode } = useTheme();
@@ -1226,6 +1260,38 @@ export function InboxList(props: InboxListProps) {
   const unstar = useCallback((row: InboxListRow) => latest.current.onUnstar?.(row), []);
   // A row's time reads "8:22 PM" today and "Oct 19" after midnight: a new day renders every row again.
   const day = new Date().toDateString();
+  /** One row, the same in both views; `drawn` is the group the held list draws it in. */
+  const renderRow = (row: InboxListRow, drawn: InboxListGroupId) => (
+    <ListRow
+      key={row.thread_id}
+      row={row}
+      project={props.projectNames?.get(row.project.id) ?? row.project.name}
+      away={!!row.machine && (props.machines?.away.has(row.machine) ?? false)}
+      drawn={drawn}
+      // A phone's row has no hover action (a hover on a touch screen is a first tap): Mark read is in the thread's header there.
+      shape={props.phone ? 'phone' : twoLine ? 'narrow' : 'wide'}
+      full={fullWords}
+      filtered={noProject}
+      selected={row.thread_id === props.selectedThreadId}
+      lit={lit(row)}
+      onOpen={openRow}
+      onMarkRead={props.onMarkRead ? markRead : undefined}
+      onMarkUnread={props.onMarkUnread ? markUnread : undefined}
+      onSendNow={props.onSendNow ? sendNow : undefined}
+      // Pins are this Inbox's own: another machine's thread has no star to press here.
+      onUnstar={props.onUnstar && !(row.machine && props.machines?.names.has(row.machine)) ? unstar : undefined}
+      day={day}
+      menu={menuRow === row.thread_id}
+      pinned={props.pinned?.has(row.thread_id) === true}
+      pinColumn={pinColumn}
+      keys={rowKeys}
+      pill={look.highlight}
+      compact={look.compact}
+      noPreview={look.hidePreview}
+      relative={look.relativeTime}
+      titleFirst={look.titleFirst}
+    />
+  );
   return (
     <section
       ref={listEl}
@@ -1308,6 +1374,7 @@ export function InboxList(props: InboxListProps) {
             onLook={(key, on) => setLook({ [key]: on })}
             threadPanel={props.threadPanel}
             onCustomize={props.onCustomizeRows}
+            view={props.rememberLook !== false ? { value: view, onChange: setView } : undefined}
           />
         )}
       </div>
@@ -1345,10 +1412,18 @@ export function InboxList(props: InboxListProps) {
           ))}
           {props.notice && <HeldNoticeLine count={props.notice.count} project={props.notice.project ?? null} onShow={props.onShowNew} />}
           {/* The band alone is an empty list with a band under it: nothing else says the list is clear. */}
-          {visible.every((section) => section.id === 'snoozed') && props.empty}
+          {/* So is a list whose rows are all archived, waiting for the list to settle without them (Archive all). */}
+          {visible.every((section) => section.id === 'snoozed' || section.threads.every(inboxRowArchived)) && props.empty}
           {/* The rows' tooltips mount on first use (RowTip.tsx): drawing every row's at once is most of a redraw. */}
           <LazyRowTips.Provider value={true}>
-          {visible.map((section) => {
+          {flat && flat.rows.length > 0 && (
+            // List: one run of rows, newest first, no bands; each row keeps the group it is drawn in for its actions.
+            <div className="ib-group" data-section-id="list" data-flat-list="">
+              {flat.rows.map(({ row, drawn }) => renderRow(row, drawn))}
+            </div>
+          )}
+          {/* List draws only the Snoozed band, folded under the rows as the groups draw it. */}
+          {(asList ? (listBand ? [listBand] : []) : visible).map((section) => {
             const state = groups.state(section.id);
             const open = state.open;
             // Closed, with something new inside since: the count goes bold. The group never opens by itself.
@@ -1370,43 +1445,12 @@ export function InboxList(props: InboxListProps) {
                 >
                   {section.label}{' '}
                   <span className="ib-n" data-new={fresh ? '' : undefined}>
-                    {formatCount(section.threads.length)}
+                    {formatCount(liveCount(section.threads))}
                     {fresh && <span className="ib-sr">, new since closed</span>}
                   </span>
                   {!open && <FoldedBlocker rows={section.threads} group={section.id} />}
                 </button>
-                {open &&
-                  section.threads.map((row) => (
-                    <ListRow
-                      key={row.thread_id}
-                      row={row}
-                      project={props.projectNames?.get(row.project.id) ?? row.project.name}
-                      away={!!row.machine && (props.machines?.away.has(row.machine) ?? false)}
-                      drawn={section.id}
-                      // A phone's row has no hover action (a hover on a touch screen is a first tap): Mark read is in the thread's header there.
-                      shape={props.phone ? 'phone' : twoLine ? 'narrow' : 'wide'}
-                      full={fullWords}
-                      filtered={noProject}
-                      selected={row.thread_id === props.selectedThreadId}
-                      lit={lit(row)}
-                      onOpen={openRow}
-                      onMarkRead={props.onMarkRead ? markRead : undefined}
-                      onMarkUnread={props.onMarkUnread ? markUnread : undefined}
-                      onSendNow={props.onSendNow ? sendNow : undefined}
-                      // Pins are this Inbox's own: another machine's thread has no star to press here.
-                      onUnstar={props.onUnstar && !(row.machine && props.machines?.names.has(row.machine)) ? unstar : undefined}
-                      day={day}
-                      menu={menuRow === row.thread_id}
-                      pinned={props.pinned?.has(row.thread_id) === true}
-                      pinColumn={pinColumn}
-                      keys={rowKeys}
-                      pill={look.highlight}
-                      compact={look.compact}
-                      noPreview={look.hidePreview}
-                      relative={look.relativeTime}
-                      titleFirst={look.titleFirst}
-                    />
-                  ))}
+                {open && section.threads.map((row) => renderRow(row, section.id))}
               </div>
             );
           })}

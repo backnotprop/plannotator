@@ -10,7 +10,7 @@ bands:
     label: Agents
     means: the first two wake through their plugin; the Inbox wakes Codex, Qwen and T3 itself
     tone: sand
-    row: [iclaude 2, iplugins 2, imcp 2, icodex 2, iqwen 2, it3 2]
+    row: [iclaude 2, iplugins 3, imcp 4, icodex 2, iqwen 2, it3 2]
   - id: ways
     label: Ways in
     means: started by the agent or by plannotator inbox

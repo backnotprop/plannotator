@@ -27,8 +27,10 @@ export type SheetProps = {
   lod?: Lod;
   /** Takes the pointer and the keyboard (hover lights a part's lines, a note's letter shows its words). */
   live?: boolean;
-  /** A window's "N sheets inside" cue: the first sheet of the scope it opens. */
+  /** A window's "N sheets inside" cue: the first sheet of the scope it opens (when onEnter is not given). */
   onNavigate?: (sheet: string) => void;
+  /** A window's cue, or Enter on a window: the person asked to go inside the part (the view dives). */
+  onEnter?: (part: string) => void;
 };
 
 // A part's second line is prose, set in the sans; only the code names in it (a
@@ -418,7 +420,7 @@ function Figures({ list, under, focus }: { list: Figure[]; under: boolean; focus
 }
 
 // ---------------------------------------------------------------- the sheet
-function SheetImpl({ layout: L, model, lod = 2, live = false, onNavigate }: SheetProps) {
+function SheetImpl({ layout: L, model, lod = 2, live = false, onNavigate, onEnter }: SheetProps) {
   const [hover, setHover] = useState<string | null>(null);
   const focus = live ? focusOf(hover, L) : null;
   const P = model.parts;
@@ -456,15 +458,23 @@ function SheetImpl({ layout: L, model, lod = 2, live = false, onNavigate }: Shee
             const lit = !!focus?.parts.has(id);
             const dim = focus && !lit ? 0.45 : 1;
             const first = box.cw && box.opens ? model.byScope[box.opens]?.[0] : undefined;
+            const opens = !!(first && (onEnter || onNavigate));
             return (
               <div
                 key={id}
                 className={'sys-part' + (lit ? ' sys-lit' : '') + (hover === id ? ' sys-hov' : '')}
                 data-part={id}
+                data-opens={opens ? '' : undefined}
                 title={p.name}
                 style={{ left: box.x, top: box.y, width: box.w, height: box.h, opacity: dim < 1 ? dim : undefined }}
+                // a live sheet's parts take the keyboard: Tab walks them in reading
+                // order, the view moves between them with the arrows and dives on Enter
+                tabIndex={live ? 0 : undefined}
+                aria-label={live ? [p.name, p.role, opens ? `${plural(box.cw!, 'sheet')} inside, Enter opens it` : ''].filter(Boolean).join('. ') : undefined}
                 onPointerEnter={() => onHover(id)}
                 onPointerLeave={() => onHover(null)}
+                onFocus={live ? () => onHover(id) : undefined}
+                onBlur={live ? () => onHover(null) : undefined}
               >
                 <PartBody p={p} box={box} simple={L.simple} />
                 {box.ov && (
@@ -479,8 +489,8 @@ function SheetImpl({ layout: L, model, lod = 2, live = false, onNavigate }: Shee
                   // bottom-right corner, like a stack of sheets
                   <>
                     <span className="sys-win-stack" aria-hidden="true" />
-                    {live && first && onNavigate ? (
-                      <button type="button" className="sys-win-cue sys-go sys-t-phrase" onClick={(e) => { e.stopPropagation(); onNavigate(first); }} aria-label={`Open ${p.name}: ${plural(box.cw, 'sheet')} inside`}>
+                    {live && opens ? (
+                      <button type="button" tabIndex={-1} className="sys-win-cue sys-go sys-t-phrase" onClick={(e) => { e.stopPropagation(); if (onEnter) onEnter(id); else onNavigate!(first!); }} aria-label={`Open ${p.name}: ${plural(box.cw, 'sheet')} inside`}>
                         {plural(box.cw, 'sheet') + ' inside'}
                         <Chevron />
                       </button>

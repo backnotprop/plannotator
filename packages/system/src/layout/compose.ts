@@ -183,8 +183,11 @@ function naturalWidth(p: WPart, v: Variant, marks: string[]): number {
     return p._cw || p._win || v === 'window' ? Math.max(pl, minWidth(p, 'window', marks)) : pl;
   }
   if (v === 'box' || v === 'node') {
-    const sub = subOf(p, v), s = sub || p.role;
-    return Math.max(minWidth(p, v, marks), comfortWidth(p, v, marks), s ? Math.min(lineW(textWidth(s, sub ? FONTS.mono : FONTS.boxRole), 40), 360) : 0);
+    const sub = subOf(p, v), s = sub || p.role, font = sub ? FONTS.mono : FONTS.boxRole;
+    // never narrower than the line's longest word (a path, a host): the text
+    // runs in w - 27, and a word wider than that breaks inside itself
+    // ("inbox.js" / "on"), which reads as cut off
+    return Math.max(minWidth(p, v, marks), comfortWidth(p, v, marks), s ? Math.min(lineW(textWidth(s, font), 40), 360) : 0, s ? Math.ceil(longestWord(s, font)) + 28 : 0);
   }
   if (v === 'chip') return minWidth(p, v, marks);
   return 0;

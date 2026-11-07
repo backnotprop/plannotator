@@ -319,6 +319,11 @@ export interface SessionInfo {
   root?: () => Promise<string>
   /** The name the person gave the session, read for each Inbox poll (`InboxLinkOptions.label`). */
   label?: () => string | Promise<string>
+  /**
+   * Made by the self-heal (self-heal.ts), not by anything the person did: the
+   * Inbox link starts without a touch, so a live lease another process holds stands.
+   */
+  healed?: boolean
 }
 
 export class PlannotatorMod {
@@ -386,7 +391,7 @@ export class PlannotatorMod {
           turns: this.turns,
         })
       : null
-    this.inbox?.start()
+    this.inbox?.start({ touch: !session.healed })
   }
 
   /** The PLANNOTATOR_SESSION_PROJECT value last exported (null: none yet, or the write failed). */
