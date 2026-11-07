@@ -8,7 +8,7 @@ import { formatBytes, formatCount, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon, type IconName } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
-import { AccountsSection } from './Accounts';
+import { AccountsRefresh, AccountsSection } from './Accounts';
 import { AgentsSettings, agentsNeedRestart } from './AgentsSettings';
 import { PromptsSection, promptsSummary } from './PromptsSettings';
 import type { InboxPromptsSettings } from '@plannotator/core/inbox-types';
@@ -34,6 +34,7 @@ const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'pi', name: 'Pi' },
   { host: 'opencode', name: 'OpenCode' },
   { host: 'dsh', name: 'DeepSeek Harness' },
+  { host: 'cline', name: 'Cline' },
 ];
 
 const SECTION_ICON: Record<SettingsSection, IconName> = {
@@ -286,7 +287,7 @@ function GeneralSection({
   onTestNotification?: () => Promise<TestResult>;
   sound?: InboxSound;
 }) {
-  const { mode, shown, choose } = useInboxTheme();
+  const { mode, choose } = useInboxTheme();
   const textSize = useInboxTextSize();
   const notificationsOn = settings.notifications.enabled && permission === 'granted';
   const status = notifyStatusKind(settings.notifications.enabled, permission);
@@ -329,7 +330,7 @@ function GeneralSection({
                 Theme
               </span>
               <span className="ib-desc">
-                {mode === 'system' ? `Follows this computer, ${shown} now. Also plan review, code review and annotate.` : 'Also plan review, code review and annotate.'}
+                Also plan review, code review and annotate.
               </span>
             </span>
             <span className="ib-ctl">
@@ -538,7 +539,7 @@ function CapabilitiesSection({
                     Code review
                   </span>
                   <span className="ib-desc">
-                    Review your agents' code changes in the thread: type / in a reply to ask for a review, then approve it or send feedback from the review itself. Off, agents are not offered reviews and the review skills leave the / list; guided reviews and <code>plannotator review</code> work as before either way. Agents pick this up in their next session.
+                    Review your agents' code changes and your pull requests from GitHub and GitLab: type / in a reply to ask for a review, then approve it, send feedback to the agent, or post it on the pull request. Off, agents are not offered reviews and the review skills leave the / list; guided reviews and <code>plannotator review</code> work as before either way. Agents pick this up in their next session.
                   </span>
                 </span>
                 <span className="ib-ctl">
@@ -630,7 +631,7 @@ function AgentsSection({
       <section className="ib-sgroup" aria-labelledby="ib-g-tool">
         <h2 id="ib-g-tool">The Inbox in your agent&apos;s tools</h2>
         <p>
-          Lets an agent send, read and wait for replies from its own tool list. Pi, OpenCode and DeepSeek Harness send every tool&apos;s definition with each request, so they start
+          Lets an agent send, read and wait for replies from its own tool list. Pi, OpenCode, DeepSeek Harness and Cline send every tool&apos;s definition with each request, so they start
           off.
         </p>
         {env !== null && (
@@ -1158,9 +1159,19 @@ export function SettingsPage(props: SettingsPageProps) {
             </a>
           </div>
         )}
-        <h1 ref={heading} tabIndex={-1}>
-          {section ? SETTINGS_SECTION_LABEL[section] : 'General'}
-        </h1>
+        {section === 'accounts' && settings ? (
+          // Accounts' Refresh reads every machine, so it sits by the page's title (approval "accounts-page").
+          <div className="ib-spg-h">
+            <h1 ref={heading} tabIndex={-1}>
+              {SETTINGS_SECTION_LABEL[section]}
+            </h1>
+            <AccountsRefresh />
+          </div>
+        ) : (
+          <h1 ref={heading} tabIndex={-1}>
+            {section ? SETTINGS_SECTION_LABEL[section] : 'General'}
+          </h1>
+        )}
         {loadFailed ? (
           <>
             <LoadError error={error} onRetry={onRetry} />

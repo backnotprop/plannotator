@@ -341,7 +341,7 @@ describe('GuideView per-file windowing', () => {
     expect(targetProps?.isActive).toBe(true);
   });
 
-  test.skipIf(!hasDom)('updates the bounded fallback window while scrolling without IntersectionObserver', async () => {
+  test.skipIf(!hasDom)('updates the fallback window while scrolling without IntersectionObserver', async () => {
     const originalObserver = globalThis.IntersectionObserver;
     Object.defineProperty(globalThis, 'IntersectionObserver', { configurable: true, value: undefined });
 
@@ -379,7 +379,8 @@ describe('GuideView per-file windowing', () => {
       });
 
       expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${files[19].path}"]`)).not.toBeNull();
-      expect(host!.querySelectorAll('[data-testid="file-code-view"]').length).toBeLessThanOrEqual(8);
+      // Far from the view: no CodeView, count or no count.
+      expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${files[10].path}"]`)).toBeNull();
     } finally {
       Object.defineProperty(globalThis, 'IntersectionObserver', {
         configurable: true,
@@ -442,7 +443,8 @@ describe('GuideView per-file windowing', () => {
 
       expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${files[0].path}"]`)).toBe(focusedBefore);
       expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${files[1].path}"]`)).toBeNull();
-      expect(host!.querySelectorAll('[data-testid="file-code-view"]').length).toBeLessThanOrEqual(8);
+      // The eight in the window, and the focused file beside them.
+      expect(host!.querySelectorAll('[data-testid="file-code-view"]').length).toBe(9);
 
       await act(async () => {
         observer!.trigger(shells.map((target, index) => ({
@@ -594,6 +596,19 @@ describe('GuideView bare (the Inbox PR page)', () => {
     expect(boxHeight('m.sql')).toBe('40018px');
     expect(box('m.sql').className).not.toContain('overflow-hidden');
     expect(latestCodeViewProps.at(-1)!.scrollsWithPage).toBe(true);
+  });
+
+  // Guards the PR page's seam (approval pr-view-one-surface): a flush host's box holds the renderer's height and nothing
+  // more, so the next file's header meets the last code row with no strip of box padding between.
+  test.skipIf(!hasDom)('a flush host: the box is exactly what the renderer reports, with no border or padding', async () => {
+    const guide = makeGuide({ sections: [{ title: 'Every changed file', overview: '', diffs: [{ file: 'm.sql' }] }] });
+    await renderView(guide, { bare: true, state: { ...makeState({ files: [addedFile('m.sql', 5)] }), flushFiles: true } });
+    // Before a measure: 5 rows of 20px and the 33px header, without the bordered box's 18px.
+    expect(boxHeight('m.sql')).toBe('133px');
+    const report = latestCodeViewProps.at(-1)!.onContentHeightChange as (h: number) => void;
+    await act(async () => report(300));
+    expect(boxHeight('m.sql')).toBe('300px');
+    expect(box('m.sql').className).not.toMatch(/\b(border|py-2|rounded-lg)\b/);
   });
 
   // Guards the Inbox's guided review in a thread (not bare) getting the fit through the opt-in.

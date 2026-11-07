@@ -9,6 +9,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createVoiceSession, VOICE_ASKING_GIVE_UP_MS, VOICE_CAP_MS, VOICE_OPENING_GIVE_UP_MS, VOICE_OPENING_SLOW_MS, VOICE_QUIET_STOP_MS, type VoiceAnswer, type VoiceLate, type VoiceDeps, type VoiceField, type VoiceSession } from './voiceSession';
 import { openVoiceRecorder, type VoiceRecorder } from './voiceRecorder';
+import { INBOX_VOICE_FAILURES, type InboxVoiceFailure } from '@plannotator/core/inbox-types';
 
 const LOUD = -20;
 const ROOM = -70;
@@ -666,6 +667,8 @@ describe('failures', () => {
     [{ code: 'voice_codex_failed' }, 'codexfailed'],
     [new Error('the Inbox went away'), 'inboxgone'],
     [{ code: null }, 'inboxgone'],
+    // A newer Inbox's code: never a crash, a plain failure that keeps the clip.
+    [{ code: 'voice_from_a_newer_inbox' as string as InboxVoiceFailure }, 'failed'],
   ] as const)('%p keeps the clip: only a press retries, and the same clip goes again', async (answer, trouble) => {
     const w = world();
     w.answer(answer as VoiceAnswer | Error, { text: 'second try' });
@@ -682,6 +685,20 @@ describe('failures', () => {
     expect(w.posted[1]).toBe(w.posted[0]!);
     expect(w.value()).toBe('Draft second try');
     expect(w.session.view()).toMatchObject({ trouble: null, kept: false });
+  });
+
+  test('every code the server can send has its own reason, not the unknown-code fallback', async () => {
+    for (const code of INBOX_VOICE_FAILURES) {
+      const w = world();
+      w.answer({ code });
+      await held(w);
+      w.session.release();
+      await settle();
+      expect(w.session.view().phase).toBe('idle');
+      expect(w.session.view().trouble, code).not.toBeNull();
+      expect(w.session.view().trouble, code).not.toBe('failed');
+      w.detach();
+    }
   });
 
   test('Discard drops the clip, and Retry then does nothing', async () => {

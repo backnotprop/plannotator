@@ -339,6 +339,21 @@ export interface PlannotatorConfig {
    */
   agentTool?: boolean;
   /**
+   * Plan review of Claude Code's ExitPlanMode (Claude Code only: Pi and
+   * OpenCode have no such hook). `false` leaves plan approval to Claude
+   * Code's own dialog. The rest of Plannotator is unchanged.
+   * PLANNOTATOR_PLAN_REVIEW wins over this key. Default: true.
+   */
+  planReview?: boolean;
+  /**
+   * Pi only: when the Plannotator extension on disk is newer than the one this
+   * Pi loaded, Pi reloads itself once the session is quiet (no run, no open
+   * review, question or dialog, nothing typed for a while, an empty editor).
+   * `false` turns it off: Pi then shows the one-line note with `/reload`.
+   * PLANNOTATOR_AUTO_RELOAD wins over this key. Unset: AUTO_RELOAD_DEFAULT.
+   */
+  autoReload?: boolean;
+  /**
    * The Plannotator Inbox's `plannotator_inbox` tool on the hosts that will
    * register it (the Claude Code mod, Pi, OpenCode 2), set from the Inbox's
    * own Settings: `true` / `false` for every host, or one boolean per host
@@ -407,6 +422,11 @@ export interface PlannotatorConfig {
   /** How many times `inboxRows` was saved: windows take a look only when it is newer than the last they took. */
   inboxRowsRev?: number;
   /**
+   * The defaults `inboxRows` was saved under (core `INBOX_ROWS_DEFAULTS_VERSION`, 2: smaller thread names on).
+   * Unset: saved before that, so an empty `inboxRows` is read as today's defaults (core `inboxRowsSaved`).
+   */
+  inboxRowsDefaults?: number;
+  /**
    * The Inbox's onboarding tour, per machine (approval "inbox-onboarding-tour"):
    * when it was started, finished or skipped, and whether the first real thread
    * offers notifications once more. Written by the server only, through POST
@@ -474,6 +494,24 @@ export interface PlannotatorConfig {
    */
   inboxSteps?: boolean;
   /**
+   * The "Star the repo" ask (approval "star-ask", 2026-11-06), once across
+   * every surface (packages/shared/star-ask.ts reads and writes it, nothing
+   * else does). `shownAt`: a surface showed it, so none shows it again.
+   * `answer`: `starred` (gh starred it on the click), `opened` (the GitHub
+   * page opened), `not-now`, or `already` (starred before it showed: nothing
+   * showed). `surface`: where. `canStar`: the button starred with gh.
+   * `checkedAt`: the already-starred check ran (a done-screen page at load)
+   * and the ask is still open; later loads reuse it without gh.
+   */
+  starAsk?: {
+    checkedAt?: string;
+    shownAt?: string;
+    answer?: "starred" | "opened" | "not-now" | "already";
+    answeredAt?: string;
+    surface?: "inbox" | "plan" | "review" | "annotate";
+    canStar?: boolean;
+  };
+  /**
    * Code review in the Inbox (approval "inbox-code-review-direction",
    * 2026-11-03): something the person turns on, off by default. On: the
    * review skills in the reply box's "/" list, the review card and its
@@ -496,21 +534,44 @@ export interface PlannotatorConfig {
    */
   inboxShape?: boolean;
   /**
+   * System in the Inbox (approval "system-inbox"): a drawing of each project's code, kept current by an agent.
+   * Shown only while Code review is on. Off unless turned on; config only until Settings → Capabilities' switch
+   * lands. Read on every request.
+   */
+  inboxSystem?: boolean;
+  /**
    * The queue of one-time reveals for returning users (approval
    * "inbox-feature-reveal"; rules in packages/shared/inbox/reveals.ts). Written
    * only by the server. `lastShownAt`: the last one-time announcement claimed
-   * on this machine (list options, voice, Snooze, the Board), the 48 h
+   * on this machine (list options, voice, Snooze, the Board), the one-day
    * spacing's clock. `waitingSince`: when each reveal first became next, for
    * the 3-day patience. `board.shownAt`: the Board reveal was claimed.
    * `steps.shownAt`: the Checklist reveal was claimed. `key` beside either:
    * the claiming page's own key, so that page's retry after a lost answer is
-   * shown it again (any other key is not).
+   * shown it again (any other key is not). The schedule (approval
+   * "inbox-one-time-dialogs"): `dayShownAt`, the last dialog of the line on
+   * any day (the agent note included: one a day); `notNowAt`, the last offer
+   * closed with Not now (three days before the next); `shownLoad`, the page
+   * load that showed the last dialog (never on two loads in a row; the loads
+   * seen since are kept in memory). `agentNote.shownFor`: the agents the
+   * agent note was shown for (once each, so an unanswered note never takes
+   * another day). `waitingSince` also counts the 14 days after which an offer
+   * retires (an update-day dialog never does).
    */
   inboxReveals?: {
     lastShownAt?: string;
-    waitingSince?: { snooze?: string; board?: string; steps?: string };
+    dayShownAt?: string;
+    notNowAt?: string;
+    shownLoad?: string;
+    agentNote?: { shownFor?: string[] };
+    waitingSince?: { code_review?: string; sound?: string; list_intro?: string; voice?: string; snooze?: string; board?: string; steps?: string; list_view?: string };
+    /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
+    code_review?: { shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
+    /** The "Star the repo" ask's claim in the line (config.json `starAsk` is its record across surfaces). */
+    star?: { shownAt?: string; key?: string };
+    list_view?: { shownAt?: string; key?: string };
   };
   inboxSound?: {
     enabled?: boolean;
@@ -1501,6 +1562,30 @@ export function parseAgentToolEnv(env: NodeJS.ProcessEnv = process.env): boolean
 }
 
 /**
+ * Whether Pi reloads itself for an updated Plannotator when neither the env
+ * var nor config.json decides (owner's call 2026-10-29: on). The one place to
+ * flip the default.
+ */
+export const AUTO_RELOAD_DEFAULT = true;
+
+/**
+ * Whether Pi reloads itself to load an updated Plannotator extension (see
+ * `autoReload`, apps/pi-extension/auto-reload.ts).
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_AUTO_RELOAD env var  →  config.autoReload  →  AUTO_RELOAD_DEFAULT
+ *
+ * Env `1` / `true` / `on` and `0` / `false` / `off` / `disabled` decide; an
+ * empty or unrecognized value counts as unset.
+ */
+export function resolveAutoReload(config: PlannotatorConfig, env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = env.PLANNOTATOR_AUTO_RELOAD?.trim().toLowerCase();
+  if (v === "1" || v === "true" || v === "on") return true;
+  if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
+  return parseConfigBoolean(config.autoReload) ?? AUTO_RELOAD_DEFAULT;
+}
+
+/**
  * Resolve whether `host` registers the `plannotator` agent tool.
  *
  * Priority (highest wins):
@@ -1521,34 +1606,55 @@ export function resolveAgentTool(
   return parseAgentToolEnv(env) ?? parseConfigBoolean(config.agentTool) ?? AGENT_TOOL_DEFAULTS[host];
 }
 
+/** The PLANNOTATOR_PLAN_REVIEW override, or undefined when it does not decide. */
+export function parsePlanReviewEnv(env: NodeJS.ProcessEnv = process.env): boolean | undefined {
+  const v = env.PLANNOTATOR_PLAN_REVIEW?.trim().toLowerCase();
+  if (v === "1" || v === "true" || v === "on") return true;
+  if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
+  return undefined;
+}
+
+/**
+ * Whether Plannotator reviews Claude Code's ExitPlanMode.
+ * Priority: PLANNOTATOR_PLAN_REVIEW → config.planReview → on.
+ */
+export function resolvePlanReview(config: PlannotatorConfig, env: NodeJS.ProcessEnv): boolean {
+  return parsePlanReviewEnv(env) ?? parseConfigBoolean(config.planReview) ?? true;
+}
+
 /**
  * The hosts that register the Inbox's `plannotator_inbox` tool. The Pi
  * extension registers it as `pi` in Oh My Pi too: OMP has no Inbox host key
  * of its own (yet), so `inboxTool.pi` and the Pi default decide there.
- * `dsh` is the DeepSeek Harness plugin (`@plannotator/dsh`).
+ * `dsh` is the DeepSeek Harness plugin (`@plannotator/dsh`), `cline` the
+ * Cline plugin (`@plannotator/cline`).
  */
-export type InboxToolHost = "claude-code" | "pi" | "opencode" | "dsh";
+export type InboxToolHost = "claude-code" | "pi" | "opencode" | "dsh" | "cline";
 
 /**
  * Whether each host registers the Inbox's `plannotator_inbox` tool when
  * nothing is set: the agent tool's rule (on for the Claude Code mod, where
  * tools are deferred behind tool search; off on Pi, OpenCode 2 and DeepSeek
  * Harness, which send every tool's full definition with each request; DSH
- * also keeps its tool list fixed for request caching).
+ * also keeps its tool list fixed for request caching). Cline sends every
+ * tool's definition too and has no `plannotator` agent tool, so its entry is
+ * its own, off like Pi's.
  */
 export const INBOX_TOOL_DEFAULTS: Readonly<Record<InboxToolHost, boolean>> = {
   "claude-code": AGENT_TOOL_DEFAULTS["claude-code"],
   pi: AGENT_TOOL_DEFAULTS.pi,
   opencode: AGENT_TOOL_DEFAULTS.opencode,
   dsh: AGENT_TOOL_DEFAULTS.dsh,
+  cline: false,
 };
 
-export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode", "dsh"];
+export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode", "dsh", "cline"];
 
 /**
  * The hosts that give a session the Inbox reminder (INBOX_REMINDER_TEXT) with
  * the tool. DeepSeek Harness does not yet: it has no hidden-message slot like
- * Pi's, and a context message there shows as the person's own words.
+ * Pi's, and a context message there shows as the person's own words. Nor does
+ * Cline (its plugin has no hidden-message slot either).
  */
 export const INBOX_REMINDER_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode"];
 

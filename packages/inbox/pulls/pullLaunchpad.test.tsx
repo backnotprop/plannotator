@@ -3,9 +3,10 @@
  *  - a single open PR opening the stack page, or a stack of several opening the launchpad;
  *  - a door going anywhere but its own place: the guided review (its thread and message), the PR's diff (this layer),
  *    the review thread, the Shape board;
- *  - Start a guided review missing when there is none and a thread can start, not opening the picker, or offered beside
- *    a live thread (one review thread at a time); an ended agent's guide leaving no way to start a new one;
- *  - focus not landing on the Review thread card once a thread starts;
+ *  - Start a guided review missing when there is none and a thread can start, not opening the New review box filled in
+ *    with this PR, or offered beside a live thread (one review thread at a time); an ended agent's guide leaving no way
+ *    to start a new one;
+ *  - a thread that only named the PR (the Reviews page's rule) taken for its review thread: no way to start one;
  *  - a guide the agent has not sent as a review (`review: false`) counted as one (the stack page's rule);
  *  - the facts losing "by you" on the person's own PR, or "Draft" on a draft;
  *  - the Shape board door offering a board that is not there, or showing while Shape is off;
@@ -25,6 +26,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxPull, InboxPullLink, InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import type { InboxShapeSummary } from '../api';
 import type { PullsPageProps } from './PullsPage';
+import { pullsStateOf } from './reviewsTestState';
 
 const hasDom = typeof document !== 'undefined';
 const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof import('./PullsPage');
@@ -147,7 +149,8 @@ async function settle() {
 
 function page(stackId: string, model: InboxPullsAnswer, extra: Partial<PullsPageProps> = {}) {
   const props: PullsPageProps = {
-    state: { model, error: null, loading: false, refresh: () => {}, reload: () => {} },
+    // The rows as the server's rule makes them: a PR handed to a thread is in review there, one a thread only named is not.
+    state: pullsStateOf(model),
     stackId,
     project: null,
     filter: 'all',
@@ -158,8 +161,8 @@ function page(stackId: string, model: InboxPullsAnswer, extra: Partial<PullsPage
     onScope: () => {},
     onReview: (stack, key, scope) => went.push(`diff ${stack} ${key} ${scope}`),
     onOpenThread: (thread) => went.push(`thread ${thread}`),
-    onLaunch: () => {},
-    onStarted: () => {},
+    onNew: () => went.push('new'),
+    onNewReview: (pick, opener) => went.push(`new review ${pick.id} ${pick.thread ? 'in review' : 'none'} ${opener.getAttribute('data-launch-go')}`),
     onOpenGuide: (thread, message) => went.push(`guide ${thread} ${message}`),
     onOpenShape: (shape) => went.push(`shape ${shape.id}`),
     ...extra,
@@ -271,22 +274,30 @@ test.skipIf(!hasDom)("each door goes to its own place: the guide's message, this
   await click('[data-launch-go="thread"]');
   await click('[data-launch-go="shape"]');
   expect(went).toEqual([`guide thr_review msg_guide`, `diff ${single.key} ${single.key} layer`, 'thread thr_review', 'shape shp_1']);
-  // A guide is there: nothing to start, and no picker.
+  // A guide is there: nothing to start.
   expect(!!$('[data-launch-go="start"]')).toBe(false);
 });
 
-test.skipIf(!hasDom)('no guided review and no thread: Start a guided review opens the picker; nothing starts until a pick', async () => {
+test.skipIf(!hasDom)('no guided review and no thread: Start a guided review opens the New review box filled in with this PR', async () => {
   mount(single.key, answer());
   await settle();
-  const start = $<HTMLButtonElement>('[data-launch-door="guide"] [data-launch-go="start"]')!;
-  expect(start.getAttribute('aria-expanded')).toBe('false');
-  expect(!!$('[data-pulls-picker]')).toBe(false);
-  await click('[data-launch-go="start"]');
-  expect(start.getAttribute('aria-expanded')).toBe('true');
-  expect(!!$('[data-launch-door="guide"] [data-pulls-picker]')).toBe(true);
+  expect($('[data-launch-door="guide"] [data-launch-go="start"]')!.getAttribute('data-pulls-primary')).toBe('review');
   // No thread yet: the Review thread door has nothing to open.
   expect(!!$('[data-launch-go="thread"]')).toBe(false);
-  expect(went).toEqual([]);
+  await click('[data-launch-go="start"]');
+  expect(went).toEqual([`new review ${single.key} none start`]);
+});
+
+test.skipIf(!hasDom)('a thread that only named the PR is no review thread: a guided review can start, and that thread opens as it is', async () => {
+  // The agent's own thread named the PR in a message (`url`): nobody handed it the review.
+  mount(single.key, answer({ [single.key]: { ...live, via: 'url', ask: undefined, guide: null } }));
+  await settle();
+  expect(!!$('[data-launch-go="guide-thread"]')).toBe(false);
+  expect($('[data-launch-door="guide"] [data-launch-go="start"]')!.getAttribute('data-pulls-primary')).toBe('review');
+  expect($('[data-launch-door="thread"]')!.textContent).toContain('Thread with');
+  await click('[data-launch-door="thread"] [data-pulls-open-thread]');
+  await click('[data-launch-go="start"]');
+  expect(went).toEqual(['thread thr_review', `new review ${single.key} none start`]);
 });
 
 test.skipIf(!hasDom)("a live thread with no guide yet: no second thread to start; its thread opens from the wide card and its own", async () => {
@@ -307,7 +318,7 @@ test.skipIf(!hasDom)('a guide the agent did not send as a review is none yet (th
   expect(!!$('[data-launch-go="guide-thread"]')).toBe(true);
 });
 
-test.skipIf(!hasDom)("an agent that ended after its guide: the guide opens, and a new guided review can start from the picker", async () => {
+test.skipIf(!hasDom)("an agent that ended after its guide: the guide opens, and a new guided review can start from the New review box", async () => {
   mount(single.key, answer({ [single.key]: { ...live, agent: { ...live.agent!, ended: true } } }));
   await settle();
   const open = $('[data-launch-door="guide"] [data-launch-go="guide"]')!;
@@ -316,21 +327,8 @@ test.skipIf(!hasDom)("an agent that ended after its guide: the guide opens, and 
   expect(again.classList.contains('ib-pri')).toBe(false);
   expect(again.getAttribute('data-pulls-primary')).toBe('again');
   await click('[data-launch-go="start"]');
-  expect(!!$('[data-launch-door="guide"] [data-pulls-picker]')).toBe(true);
   await click('[data-launch-go="guide"]');
-  expect(went).toEqual(['guide thr_review msg_guide']);
-});
-
-test.skipIf(!hasDom)('once a thread starts from the picker, focus lands on the Review thread card that names its agent', async () => {
-  mount(single.key, answer());
-  await settle();
-  await click('[data-launch-go="start"]');
-  await click('[data-pulls-start]');
-  const owned: InboxPullLink = { ...live, thread_id: 'thr_new', last: null, guide: null };
-  act(() => root!.render(page(single.key, answer({ [single.key]: owned }))));
-  await settle();
-  expect(document.activeElement?.getAttribute('data-launch-door')).toBe('thread');
-  expect(document.activeElement?.getAttribute('data-pulls-thread')).toBe('thr_new');
+  expect(went).toEqual([`new review ${single.key} none start`, 'guide thr_review msg_guide']);
 });
 
 test.skipIf(!hasDom)('the facts say "by you" on your own PR and "Draft" on a draft; a teammate\'s ready PR says neither', async () => {

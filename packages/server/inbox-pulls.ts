@@ -59,6 +59,7 @@ import {
   type InboxPullDiffAnswer,
   type InboxPullDiffScope,
   type InboxPullHost,
+  inboxPullLabel,
   inboxPullSafeBranch,
   type InboxPullCard,
   type InboxPullLink,
@@ -66,12 +67,14 @@ import {
   type InboxPullState,
 } from "@plannotator/core/inbox-types";
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
-import { fetchPRContextWithReviewers, fetchPRFileBytes, fetchPRTree, reconstructGitlabPatch, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
+import { fetchPRContextWithReviewers, fetchPRFileBytes, fetchPRFileContent, fetchPRTree, reconstructGitlabPatch, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
 import type { PRRef, PRRuntime } from "@plannotator/shared/pr-types";
 import { pullDetailsOf, type PullDetailsRead } from "./inbox-pull-details";
+import { MAX_REPO_FILE_BYTES } from "@plannotator/shared/repo-file";
 import { compareRepoPaths, MAX_REVIEW_FILE_CONTENT_BYTES, readGitObjectBytes, validateFilePath, type RepoFileListing } from "@plannotator/shared/review-core";
 import { handleRepoFileRequest, handleRepoFilesRequest, type HandlerResult, type RepoFileRead } from "@plannotator/shared/repo-files";
 import { readRepoWorkingTreeFile } from "@plannotator/shared/repo-files-node";
+import { childEnv } from "@plannotator/shared/child-env";
 import { runtime as gitRuntime } from "./git";
 import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
 
@@ -680,6 +683,11 @@ export interface InboxPulls {
   details(key: string): Promise<InboxPullDetailsAnswer>;
   /** The head commit of the last patch read for this PR, either scope (`diff`'s `head_sha`), or null. */
   readHead(key: string): string | null;
+  /**
+   * A file as this PR has it at its head commit, read from the forge with the person's own CLI, so it needs no checkout.
+   * Null when the PR is not in the last list, has no known head, or has no such text file there. Never throws.
+   */
+  file(key: string, path: string, repos?: InboxPullRepo[]): Promise<InboxPullFile | null>;
   /** Whether a GitHub PR still has this commit (a force-push takes it off); null when the forge did not say. */
   hasCommit(key: string, sha: string): Promise<boolean | null>;
   /**
@@ -703,6 +711,19 @@ export interface InboxPulls {
 
 /** The most listings All files keeps (one per PR and head). */
 const REPO_LISTINGS_KEPT = 8;
+
+/** A file at a PR's head commit: its text, and its address on the forge. */
+export interface InboxPullFile {
+  contents: string;
+  label: string;
+  platform: InboxPull["platform"];
+  url: string;
+}
+
+/** The files read at a head commit, kept while the Inbox runs: a commit never changes, so nor do they. */
+const INBOX_PULL_FILES_KEPT = 64;
+/** A file's read stops here: the local limit, as the base64 GitHub answers with. */
+const INBOX_PULL_FILE_READ_BYTES = Math.ceil((MAX_REPO_FILE_BYTES * 4) / 3) + 1024 * 1024;
 
 /** A local clone's read of one file at one commit (`<sha>:<path>`), capped. Null: this clone can't say. "none": it has the commit but no usable text. */
 export type PullFileGitReader = (root: string, sha: string, path: string, maxBytes: number) => Promise<string | "none" | null>;
@@ -758,7 +779,7 @@ export const pullDiffCliRunner: PullDiffRunner = async (cli, args, maxBytes) => 
   let proc: ReturnType<typeof Bun.spawn>;
   try {
     proc = Bun.spawn([cli, ...args], {
-      env: { ...process.env, GH_PROMPT_DISABLED: "1", NO_COLOR: "1", NO_PROMPT: "1" },
+      env: childEnv({ GH_PROMPT_DISABLED: "1", NO_COLOR: "1", NO_PROMPT: "1" }),
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
@@ -816,6 +837,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   const readHeads = new Map<string, string>();
   /** One read a PR, while it is fresh; the people's pictures it named stay allowed while the PR is on the list. */
   const detailReads = new Map<string, { at: number; updated: string; read: Promise<PullDetailsRead>; avatars?: Record<string, string>; partial?: boolean }>();
+  const headFiles = new Map<string, string | null>();
   let known = new Map<string, InboxPull>();
   let lastRepos = new Set<string>();
   let avatars = new Map<string, Record<string, string>>();
@@ -1261,6 +1283,47 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       }
     },
     readHead: (key) => readHeads.get(key) ?? null,
+    async file(key, path, repos) {
+      // The PR may have moved since the last read of the list: its head is what the code is read at.
+      if (repos) await this.list(repos, { refresh: false }).catch(() => {});
+      const pull = known.get(key);
+      const sha = pull ? (pull.head_sha ?? readHeads.get(key)) : null;
+      const parts = pull ? splitPath(pull.repo) : null;
+      if (!pull || !sha || !parts) return null;
+      const kept = `${pull.host}/${pull.repo}@${sha}:${path}`;
+      let contents = headFiles.get(kept);
+      if (contents === undefined) {
+        if (now() < (holdUntil.get(pull.host) ?? 0)) return null;
+        const ref: PRRef =
+          pull.platform === "github"
+            ? { platform: "github", host: pull.host, owner: parts.owner, repo: parts.repo, number: pull.number }
+            : { platform: "gitlab", host: pull.host, projectPath: pull.repo, iid: pull.number };
+        // Only a real answer is kept: a read that failed says nothing about the file, and asks again next time.
+        let failed = false;
+        // The host always named, as for every read here: neither GH_HOST nor a folder's remote picks it.
+        const runtime: PRRuntime = {
+          runCommand: async (cli, args) => {
+            const result = await diffRun(cli as RefCli, args.includes("--hostname") ? args : [...args, "--hostname", pull.host], INBOX_PULL_FILE_READ_BYTES);
+            if (result.exitCode !== 0 && !result.tooLarge && !/\b404\b/.test(`${result.stderr} ${result.stdout}`)) failed = true;
+            return result;
+          },
+        };
+        const read = await fetchPRFileContent(runtime, ref, sha, path).catch(() => {
+          failed = true;
+          return null;
+        });
+        // Text only, and no larger than a file on this computer: what is not, the preview cannot show.
+        contents = read === null || read.includes("\0") || Buffer.byteLength(read, "utf8") > MAX_REPO_FILE_BYTES ? null : read;
+        if (!failed) {
+          headFiles.set(kept, contents);
+          while (headFiles.size > INBOX_PULL_FILES_KEPT) headFiles.delete(headFiles.keys().next().value!);
+        }
+      }
+      if (contents === null) return null;
+      const encoded = path.split("/").map(encodeURIComponent).join("/");
+      const url = `https://${pull.host}/${pull.repo}/${pull.platform === "gitlab" ? "-/" : ""}blob/${sha}/${encoded}`;
+      return { contents, label: inboxPullLabel(pull), platform: pull.platform, url };
+    },
     async hasCommit(key, sha) {
       const pull = known.get(key);
       const parts = pull ? splitPath(pull.repo) : null;
@@ -1542,6 +1605,8 @@ export interface InboxPullLinkStore {
   threadProject(threadId: string): string | null;
   /** Whether an agent session polls now (the live sessions); absent: every agent is taken as live. */
   sessionLive?(session: string): boolean;
+  /** A launched thread whose start failed, or whose agent never connected. */
+  launchDead?(threadId: string): boolean;
 }
 
 /**
@@ -1589,6 +1654,21 @@ function threadFacts(store: InboxPullLinkStore, threadId: string) {
  * every Inbox project whose origin is that repository (two clones are two
  * projects). Nothing else ties a PR to a thread: no branch guess, no Board card.
  */
+/**
+ * The agent working in a thread. A thread the person just handed over: its agent has not written yet, so it is the
+ * session the first message went to. Ended: a session that sent with a wake polls while it runs, so one not polling now
+ * has ended; the session a hand-off went to was live then. An agent that only reads the Inbox (no wake) is never called ended.
+ */
+export function threadAgent(store: InboxPullLinkStore, threadId: string): InboxPullLink["agent"] {
+  const { last } = threadFacts(store, threadId);
+  const root = store.message(threadId);
+  const to = last ? null : (root?.to ?? null);
+  const ended = (session: string | null, wakes: boolean): boolean => !!store.sessionLive && !!session && wakes && !store.sessionLive(session);
+  if (last && last.author.kind === "agent") return { host: last.author.host, session: last.author.session, name: last.author.name, ...(ended(last.author.session, last.wakes === true) ? { ended: true } : {}) };
+  // A session the Inbox launched polls only once it has started: until it writes, not polling isn't ended, its run state is.
+  return to ? { host: to.host, session: to.session, name: null, ...((root?.launch ? store.launchDead?.(threadId) : ended(to.session, true)) ? { ended: true } : {}) } : null;
+}
+
 export function linkInboxPulls(
   pulls: readonly InboxPull[],
   store: InboxPullLinkStore,
@@ -1626,23 +1706,13 @@ export function linkInboxPulls(
   const linkOf = (via: InboxPullLink["via"], threadId: string, projectId: string): InboxPullLink => {
     const { last, guide } = threadFacts(store, threadId);
     const root = store.message(threadId)?.to ?? null;
-    // A thread the person just handed over: its agent has not written yet, so it is the session the first message went to.
-    const to = last ? null : root;
-    // Ended: a session that sent with a wake polls while it runs, so one not polling now has ended; the session a
-    // hand-off went to was live then. An agent that only reads the Inbox (no wake) is never called ended.
-    const ended = (session: string | null, wakes: boolean): boolean => !!store.sessionLive && !!session && wakes && !store.sessionLive(session);
     return {
       via,
       ...(via === "owner" && root?.session ? { handed_to: root.session } : {}),
       thread_id: threadId,
       thread_subject: store.threadSubject(threadId),
       project_id: projectId,
-      agent:
-        last && last.author.kind === "agent"
-          ? { host: last.author.host, session: last.author.session, name: last.author.name, ...(ended(last.author.session, last.wakes === true) ? { ended: true } : {}) }
-          : to
-            ? { host: to.host, session: to.session, name: null, ...(ended(to.session, true) ? { ended: true } : {}) }
-            : null,
+      agent: threadAgent(store, threadId),
       last: last ? { message_id: last.id, preview: previewOf(last.body), at: last.created_at } : null,
       guide: guide?.guide ? { message_id: guide.id, title: guide.guide.title, steps: guide.guide.sections, review: guide.guide.review === true } : null,
     };

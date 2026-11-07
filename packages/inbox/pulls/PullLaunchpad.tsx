@@ -4,9 +4,10 @@
  * size, checks), then the ways into it: Guided review (wide, the primary), The diff, Review thread, Shape board (while
  * Shape is on) and System (coming, from Workspaces, no button). Then the PR's Details (`PullDetails`, laid in the page),
  * and Reply to the agent at the foot. A stack of several PRs keeps the stack page (`PullsPage` `StackView`), which owns
- * the hand-off (the picker, one thread at a time) and passes it in. No keyboard shortcuts of its own.
+ * the hand-off (the New review box filled in with the PR, one review thread at a time) and passes it in. No keyboard
+ * shortcuts of its own.
  */
-import { useId, useRef, type ReactNode, type Ref, type RefObject } from 'react';
+import { useId, useRef, type ReactNode, type RefObject } from 'react';
 import { usePhoneHeadFit } from '../headFit';
 import { useInboxTextSize } from '../textSize';
 import type { InboxPull, InboxPullLink, InboxPullStack } from '@plannotator/core/inbox-types';
@@ -21,22 +22,17 @@ import { PullDetails, usePullDetails } from './PullDetails';
 import { checksWords, inboxPullLabel, linkAgentName } from './model';
 import { forgeName } from './labels';
 
-/** The Start button and its picker, as the stack page's hand-off gives them. Null: no thread can start now. */
+/** The Start button, as the stack page's hand-off gives it. Null: no review thread can start now (one at a time). */
 export interface LaunchpadStart {
-  id: string;
-  pickerId: string;
-  ref: Ref<HTMLButtonElement>;
-  /** A thread is starting, or its link is awaited: one at a time. */
-  waits: boolean;
-  picking: boolean;
   /** `again`: the last review thread's agent ended. */
   kind: 'review' | 'again';
-  onToggle: () => void;
+  /** The New review box, filled in with this PR; focus comes back to `opener` when it closes. */
+  onStart: (opener: HTMLElement) => void;
 }
 
-function Door({ kind, icon, title, sub, soon, wide, box, thread, children }: { kind: string; icon: ReactNode; title: string; sub: ReactNode; soon?: boolean; wide?: boolean; box?: Ref<HTMLDivElement>; thread?: string; children?: ReactNode }) {
+function Door({ kind, icon, title, sub, soon, wide, thread, children }: { kind: string; icon: ReactNode; title: string; sub: ReactNode; soon?: boolean; wide?: boolean; thread?: string; children?: ReactNode }) {
   return (
-    <div ref={box} tabIndex={box ? -1 : undefined} className="ib-lp-door" role="listitem" data-soon={soon ? '' : undefined} data-wide={wide ? '' : undefined} data-launch-door={kind} data-pulls-thread={thread}>
+    <div className="ib-lp-door" role="listitem" data-soon={soon ? '' : undefined} data-wide={wide ? '' : undefined} data-launch-door={kind} data-pulls-thread={thread}>
       <div className="ib-lp-door-h">
         <span className="ib-lp-ic" aria-hidden="true">
           {icon}
@@ -87,14 +83,13 @@ export function PullPaneBack({ phone, stacked, onClose }: { phone: boolean; stac
 export function PullLaunchpad({
   stack,
   pr,
-  link,
+  link: given,
+  mentioned = false,
   phone,
   stacked = false,
   now,
   heading,
-  said,
   start,
-  picker,
   shapes,
   onClose,
   onDiff,
@@ -106,16 +101,15 @@ export function PullLaunchpad({
   stack: InboxPullStack;
   pr: InboxPull;
   link: InboxPullLink | null;
+  /** The thread only named the PR (the Reviews page's rule): no review thread yet; that thread is offered as it is. */
+  mentioned?: boolean;
   phone: boolean;
   /** The pane covers the list (stack.ts): it leads with `‹ Reviews` and has no Close, as a covering thread. */
   stacked?: boolean;
   now: number;
   /** The title: it takes focus when the page opens on a phone. */
   heading: RefObject<HTMLHeadingElement | null>;
-  /** Where focus goes once a review thread has started: the door that names its agent. */
-  said: RefObject<HTMLDivElement | null>;
   start: LaunchpadStart | null;
-  picker: ReactNode;
   /** Shape boards by thread; null while Shape is off (no Shape board door then). */
   shapes: ReadonlyMap<string, InboxShapeSummary> | null;
   onClose: () => void;
@@ -129,7 +123,9 @@ export function PullLaunchpad({
   const titleId = useId();
   const panel = useRef<HTMLElement>(null);
   const details = usePullDetails(pr.key, `${pr.head_sha ?? ''}\u0000${pr.updated_at}`);
-  const agent = linkAgentName(link) ?? 'the agent';
+  // A thread that only named the PR is no review thread: the doors read as before one, and its own door offers it.
+  const link = mentioned ? null : given;
+  const agent = linkAgentName(given) ?? 'the agent';
   const ended = link?.agent?.ended === true;
   // A guided review is there once the agent's arrives (the stack page's rule, `ThreadLine`).
   const guide = link?.guide?.review ? link.guide : null;
@@ -138,7 +134,9 @@ export function PullLaunchpad({
   const shape = shapes && link ? (shapes.get(link.thread_id) ?? null) : null;
   const repo = stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`;
   const checks = checksWords(pr);
-  const agentMark = <HostMark host={link?.agent?.host ?? null} />;
+  const agentMark = <HostMark host={given?.agent?.host ?? null} />;
+  // The thread door's thread: the review thread, or the one that only named the PR.
+  const named = mentioned ? given : null;
   // A phone's bar gives way as a thread's header does (headFit.ts): `‹ Reviews` shows its chevron alone before the
   // PR's number and repository (its subject) lose their room.
   const bar = useRef<HTMLDivElement>(null);
@@ -237,14 +235,9 @@ export function PullLaunchpad({
                   )}
                   {start && (
                     <button
-                      ref={start.ref}
-                      id={start.id}
                       type="button"
                       className={guide ? 'ib-btn' : 'ib-btn ib-pri'}
-                      disabled={start.waits}
-                      onClick={start.onToggle}
-                      aria-expanded={start.picking}
-                      aria-controls={start.picking ? start.pickerId : undefined}
+                      onClick={(event) => start.onStart(event.currentTarget)}
                       data-pulls-primary={start.kind}
                       data-launch-go="start"
                     >
@@ -261,7 +254,6 @@ export function PullLaunchpad({
                   )}
                 </div>
               ) : null}
-              {picker}
             </Door>
             <Door kind="diff" icon={<Icon name="code" size={18} />} title="The diff" sub={<>Every file, with your comments, Viewed and Approve.</>}>
               <div className="ib-lp-go">
@@ -272,12 +264,22 @@ export function PullLaunchpad({
             </Door>
             <Door
               kind="thread"
-              box={said}
-              thread={link?.thread_id}
+              thread={(link ?? named)?.thread_id}
               icon={<Icon name="questionBubble" size={18} />}
               title="Review thread"
               sub={
-                link ? (
+                named ? (
+                  <>
+                    <>Thread with {agentMark} {agent}</>
+                    {named.last ? (
+                      <span className="ib-lp-said" dir="auto">
+                        “{named.last.preview}”
+                      </span>
+                    ) : (
+                      <>{'\u00a0· '}No answer yet</>
+                    )}
+                  </>
+                ) : link ? (
                   <>
                     {ended ? (
                       <>
@@ -303,6 +305,13 @@ export function PullLaunchpad({
                 <div className="ib-lp-go">
                   <button type="button" className="ib-btn" onClick={() => onThread(link.thread_id)} data-launch-go="thread">
                     Open review thread
+                  </button>
+                </div>
+              )}
+              {named && (
+                <div className="ib-lp-go">
+                  <button type="button" className="ib-btn" onClick={() => onThread(named.thread_id)} data-launch-go="thread" data-pulls-open-thread="">
+                    Open thread
                   </button>
                 </div>
               )}

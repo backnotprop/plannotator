@@ -38,10 +38,11 @@ import { homedir } from "node:os";
 import { basename } from "node:path";
 import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { INBOX_ASK_POLL_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
+import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { graphemesOf, inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { inboxClaimAbandoned } from "./inbox-stuck-delivery";
 import { parseEngine, parseLoadedPlugin, parseSessionFolder, runtimeOf, tagUpdateFix, type LoadedPlugin } from "./inbox-restart";
 
 /** One live session as the window reads it. */
@@ -116,6 +117,8 @@ interface SeenSession {
   /** The project root its `project_path` resolved to; null when it sent none. */
   root: string | null;
   startedAt: number;
+  /** The `started_at` its last poll said (when its wake started); absent when the poll said none. */
+  wakeStartedAt?: number | null;
   lastSeen: number;
   /** Polls held open now. */
   holding: number;
@@ -507,6 +510,7 @@ export function createInboxLiveSessions(options: {
     if (folder) entry.folder = folder;
     if (root !== null) entry.root = root;
     entry.startedAt = finiteMs(body.started_at) ?? entry.startedAt;
+    entry.wakeStartedAt = finiteMs(body.started_at);
     entry.lastSeen = at;
     entry.holding += 1;
     entry.polls = (entry.polls ?? 0) + 1;
@@ -609,6 +613,18 @@ export function createInboxLiveSessions(options: {
     const steered = steering.get(session);
     if (steered !== undefined && now() - steered <= INBOX_ASKER_STEER_GRACE_MS) return true;
     return now() - startedAt <= INBOX_ASKER_RESTART_GRACE_MS;
+  };
+
+  /**
+   * Whether `session`'s connection claimed item `itemId` and will never deliver it (its wake was killed while it
+   * delivered: packages/server/inbox-stuck-delivery.ts). It never goes to that session again; the person may move it.
+   */
+  const stuck = (session: string, itemId: string): boolean =>
+    inboxClaimAbandoned(store.dir, itemId, session, { there: askerLive(session), startedAt: sessions.get(session)?.wakeStartedAt ?? null }, now());
+  /** The thread's latest person item `session` owes, when that session claimed it and will never deliver it (`stuck`). */
+  const stuckField = (threadId: string, session: string): { stuck?: string[] } => {
+    const owed = (store.thread(threadId)?.messages ?? []).filter((m) => m.author.kind === "person" && store.isOwner(m, session)).at(-1);
+    return owed && !owed.delivery && stuck(session, owed.id) ? { stuck: [owed.id] } : {};
   };
 
   /**
@@ -939,7 +955,7 @@ export function createInboxLiveSessions(options: {
     extra: (host: InboxToolHostId) => { installed: string | null; update_command: string | null },
   ): Partial<Record<InboxToolHostId, InboxHostSessions>> => {
     const out: Partial<Record<InboxToolHostId, InboxHostSessions>> = {};
-    const hosts: readonly InboxToolHostId[] = ["claude-code", "pi", "opencode", "dsh"];
+    const hosts: readonly InboxToolHostId[] = ["claude-code", "pi", "opencode", "dsh", "cline"];
     for (const [session, entry] of [...sessions].sort((a, b) => b[1].startedAt - a[1].startedAt)) {
       if (!isLive(entry) || !(hosts as readonly string[]).includes(entry.host)) continue;
       const host = entry.host as InboxToolHostId;
@@ -963,6 +979,30 @@ export function createInboxLiveSessions(options: {
       group.sessions.push(row);
     }
     return out;
+  };
+
+  /**
+   * The version a `/reload-plugins` loads for this Claude Code session, when
+   * the Inbox judges it outdated with a reload as the fix (`restart`): what a
+   * poll answer tells a connection that reloads itself (INBOX_RELOAD_FIELD).
+   * Null for any other session, or one that is up to date. The same judgment
+   * as Settings → Agents and the sidebar, so the two never disagree.
+   */
+  const reloadOfferFor = (session: string): { installed: string | null } | null => {
+    const entry = sessions.get(session);
+    if (!entry || entry.host !== "claude-code") return null;
+    const outdated = outdatedOf(entry);
+    return outdated?.fix === "restart" ? { installed: outdated.installed ?? null } : null;
+  };
+
+  /**
+   * What a poll answer carries about auto reload: `{ reload: offer }` only to
+   * a connection that said it reloads itself (INBOX_AUTO_RELOAD_POLL_FIELD
+   * `true` in the poll body) while reloadOfferFor has an offer; else nothing.
+   */
+  const reloadAnswerFor = (session: string, body: Record<string, unknown>): { [INBOX_RELOAD_FIELD]?: { installed: string | null } } => {
+    const offer = body[INBOX_AUTO_RELOAD_POLL_FIELD] === true ? reloadOfferFor(session) : null;
+    return offer ? { [INBOX_RELOAD_FIELD]: offer } : {};
   };
 
   /** Live Claude Code sessions a restart brings up to date: the sidebar's "Reload Claude Code N". */
@@ -1069,7 +1109,8 @@ export function createInboxLiveSessions(options: {
         project: live.project,
         sessions: live.sessions,
         // `connection` (additive): how that session is connected now, for the line under the person's message ("Queued", "Sending", Send now).
-        ...(asker ? { asker: { session: asker, live: askerLive(asker), connection: connectionOf(asker) } } : {}),
+        // `stuck` (additive, absent when none): its items that session claimed and will never deliver.
+        ...(asker ? { asker: { session: asker, live: askerLive(asker), connection: connectionOf(asker), ...stuckField(sessionsMatch[1]!, asker) } } : {}),
         // `recipients` (additive, "inbox-tag-agents"): how each session a reply tags is connected now, for its own line.
         ...(recipients.length > 0 ? { recipients: Object.fromEntries(recipients.map((session) => [session, connectionOf(session)])) } : {}),
       });
@@ -1168,6 +1209,7 @@ export function createInboxLiveSessions(options: {
     seenWakeOnly,
     liveFor,
     askerLive,
+    stuck,
     replyTarget,
     seenOverMcp,
     route,
@@ -1192,6 +1234,8 @@ export function createInboxLiveSessions(options: {
     steerDone,
     hostOf: (session: string): string | null => sessions.get(session)?.host ?? mcpSeen.get(session)?.host ?? null,
     hostSessions,
+    reloadOfferFor,
+    reloadAnswerFor,
     restartCount,
     restartAgents,
     mcpAgents,

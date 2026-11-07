@@ -1,6 +1,7 @@
 /**
  * The thread list's look options (approval "inbox-list-options", 2026-10-30): four checkboxes in the list's ⋮
- * menu, under Tidy and Refresh. All are off by default, so the list is today's until someone turns one on.
+ * menu, under Tidy and Refresh. Smaller thread names is on by default (the owner, 2026-11-05: "I feel like we should
+ * make it the default"); every other option is off until someone turns it on.
  *
  * - Highlight thread subject: the row's title sits in the thread chip's grey pill (`.ib-key`), cut to one line.
  * - Compact rows: two lines instead of three (agents, project, title and time; then the preview).
@@ -17,9 +18,14 @@
  * (`ROWS_COOKIE`) keeps the last look this browser showed, so a reload paints it before the settings read answers.
  * The four per-option cookies of "inbox-list-options" are read, never written: the first window to find no
  * `inboxRows` saves them once (`adoptSavedRows`), and from then on the server's look wins.
+ *
+ * Until 2026-11-05 every option was off by default. A look kept from then that is exactly those old defaults (every
+ * option off: the server's `inboxRows` saved before `inboxRowsDefaults`, this cookie's "none", or no old per-option
+ * cookie on) was never a choice, so it is read as today's defaults; any other old look is the person's and stays as
+ * it is, smaller names off included. Every option off chosen today is saved as such, and this cookie says "off".
  */
 import { useSyncExternalStore } from 'react';
-import { INBOX_ROWS_OPTIONS, inboxRowsRead, type InboxRowsOption } from '@plannotator/core/inbox-types';
+import { INBOX_ROWS_DEFAULT, INBOX_ROWS_OPTIONS, inboxRowsRead, type InboxRowsOption } from '@plannotator/core/inbox-types';
 import { storage } from '@plannotator/ui/utils/storage';
 import { inboxApi } from './api';
 
@@ -42,6 +48,18 @@ export interface ListLook {
   relativeTime: boolean;
   /** Settings → Rows only: First line "Thread name": the name and the time on line 1, the agents and project under it (three-line and phone rows). */
   titleFirst: boolean;
+  /** Settings → Rows only: Show → Letter marks "Threads" or "Both", a thread's mark from its name (letterMarks.tsx). */
+  marksThreads: boolean;
+  /** Settings → Rows only: Show → Letter marks "Projects" or "Both", a project's mark (its picture, else its letters). */
+  marksProjects: boolean;
+  /** Settings → Rows only: Look → Mark style "Inline" (neither this nor `markDot`: "Avatar"). Only while marks show. */
+  markInline: boolean;
+  /** Settings → Rows only: Look → Mark style "Dot". Only while marks show. */
+  markDot: boolean;
+  /** Settings → Rows only: Show → Logo from the repo, a favicon or logo found in the project's folder. Only with project marks. */
+  repoLogo: boolean;
+  /** Settings → Rows only: Show → GitHub pictures, the owner's picture for a project on GitHub. Only with project marks. */
+  githubPictures: boolean;
 }
 
 export type ListLookKey = keyof ListLook;
@@ -61,7 +79,16 @@ export const LIST_LOOK_OFF: ListLook = {
   previewTwo: false,
   relativeTime: false,
   titleFirst: false,
+  marksThreads: false,
+  marksProjects: false,
+  markInline: false,
+  markDot: false,
+  repoLogo: false,
+  githubPictures: false,
 };
+
+/** The look for someone who chose none (core `INBOX_ROWS_DEFAULT`): smaller thread names on, every other option off. */
+export const LIST_LOOK_DEFAULT: ListLook = { ...LIST_LOOK_OFF, ...Object.fromEntries(INBOX_ROWS_DEFAULT.map((key) => [key, true])) };
 
 /** Every option: the ⋮ menu's four, then Settings → Rows' others. */
 export const LIST_LOOK_KEYS: readonly ListLookKey[] = INBOX_ROWS_OPTIONS;
@@ -77,8 +104,13 @@ export const LIST_LOOK_COOKIES: Readonly<Record<MenuLookKey, string>> = {
   smallNames: 'plannotator-inbox-list-small-names',
 };
 
-/** The last look this browser showed: the names that are on, with commas, or "none". Paints a reload; never the truth. */
+/**
+ * The last look this browser showed: the names that are on, with commas, or "off" when none is. Paints a reload;
+ * never the truth. "none" is what a build before the new defaults wrote for every option off: today's defaults.
+ */
 export const ROWS_COOKIE = 'plannotator-inbox-rows';
+const ROWS_COOKIE_NONE = 'off';
+const ROWS_COOKIE_OLD_DEFAULTS = 'none';
 
 /** The ⋮ menu's checkboxes, in order (no icons, the owner 2026-11-02: "those could all just be check boxes"). */
 export const LIST_LOOK_OPTIONS: ReadonlyArray<{ key: MenuLookKey; label: string }> = [
@@ -109,29 +141,76 @@ export function lookWithChange(look: ListLook, change: Partial<ListLook>): ListL
   if (change.previewTwo) next.hidePreview = false;
   if (change.unreadDot) next.smallNames = true;
   if (change.smallNames === false) next.unreadDot = false;
+  if (change.markInline) next.markDot = false;
+  if (change.markDot) next.markInline = false;
+  // A picture switch turned on while no project marks show turns them on (Off becomes Projects, Threads becomes
+  // Both), so the switch never does nothing.
+  if (change.repoLogo || change.githubPictures) next.marksProjects = true;
   return lookFromRows(rowsFromLook(next));
+}
+
+/** Show → Letter marks: which marks draw. */
+export type MarksWhat = 'off' | 'threads' | 'projects' | 'both';
+/** Look → Mark style: where the mark lives. */
+export type MarkStyle = 'inline' | 'avatar' | 'dot';
+export interface MarksChoice {
+  what: MarksWhat;
+  style: MarkStyle;
+  /** Logo from the repo (only with project marks). */
+  logo: boolean;
+  /** GitHub pictures (only with project marks). */
+  github: boolean;
+}
+
+/** The letter marks a look draws (all off by default; with marks off the style reads Avatar, the first one shown). */
+export function lookMarks(look: Pick<ListLook, 'marksThreads' | 'marksProjects' | 'markInline' | 'markDot' | 'repoLogo' | 'githubPictures'>): MarksChoice {
+  const what: MarksWhat = look.marksThreads ? (look.marksProjects ? 'both' : 'threads') : look.marksProjects ? 'projects' : 'off';
+  const on = what !== 'off';
+  const projects = what === 'projects' || what === 'both';
+  return {
+    what,
+    style: on && look.markInline ? 'inline' : on && look.markDot ? 'dot' : 'avatar',
+    logo: projects && look.repoLogo,
+    github: projects && look.githubPictures,
+  };
+}
+
+/** Show → Letter marks as the look's options. */
+export function marksWhatLook(what: MarksWhat): Pick<ListLook, 'marksThreads' | 'marksProjects'> {
+  return { marksThreads: what === 'threads' || what === 'both', marksProjects: what === 'projects' || what === 'both' };
+}
+
+/** Look → Mark style as the look's options. Picked while marks are off, it turns thread marks on, so a click never does nothing. */
+export function markStyleLook(style: MarkStyle, look: ListLook): Partial<ListLook> {
+  const change: Partial<ListLook> = { markInline: style === 'inline', markDot: style === 'dot' };
+  if (lookMarks(look).what === 'off') change.marksThreads = true;
+  return change;
 }
 
 export function rowsFromLook(look: ListLook): InboxRowsOption[] {
   return LIST_LOOK_KEYS.filter((key) => look[key]);
 }
 
-/** This browser's look: the last one shown, else the old per-option cookies ("1" is on), else every option off. */
+/**
+ * This browser's look: the last one shown, else the old per-option cookies ("1" is on), else the defaults. The old
+ * defaults (the cookie's "none", or no old cookie on) were never a choice: they read as today's defaults.
+ */
 function readBrowserLook(): ListLook {
   try {
     const shown = storage.getItem(ROWS_COOKIE);
+    if (shown === ROWS_COOKIE_OLD_DEFAULTS) return LIST_LOOK_DEFAULT;
     if (shown !== null) return lookFromRows(shown.split(','));
     const look = { ...LIST_LOOK_OFF };
     for (const key of Object.keys(LIST_LOOK_COOKIES) as MenuLookKey[]) look[key] = storage.getItem(LIST_LOOK_COOKIES[key]) === '1';
-    return look;
+    return LIST_LOOK_KEYS.some((key) => look[key]) ? look : LIST_LOOK_DEFAULT;
   } catch {
-    return LIST_LOOK_OFF;
+    return LIST_LOOK_DEFAULT;
   }
 }
 
-/** Every option at its default (all off): Settings → Rows' "Balanced". */
+/** Every option at its default (smaller names on, the others off): Settings → Rows' "Balanced". */
 export function isDefaultListLook(look: ListLook): boolean {
-  return LIST_LOOK_KEYS.every((key) => !look[key]);
+  return LIST_LOOK_KEYS.every((key) => look[key] === LIST_LOOK_DEFAULT[key]);
 }
 
 const sameLook = (a: ListLook, b: ListLook) => LIST_LOOK_KEYS.every((key) => a[key] === b[key]);
@@ -156,7 +235,7 @@ const shown = (): ListLook => (current ??= readBrowserLook());
 
 function show(look: ListLook): void {
   try {
-    storage.setItem(ROWS_COOKIE, rowsFromLook(look).join(',') || 'none');
+    storage.setItem(ROWS_COOKIE, rowsFromLook(look).join(',') || ROWS_COOKIE_NONE);
   } catch {
     // A page with no cookies still shows the look; a reload only paints the defaults until the settings read.
   }
@@ -295,7 +374,7 @@ function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
-const off = () => LIST_LOOK_OFF;
+const defaults = () => LIST_LOOK_DEFAULT;
 const ignore = () => () => {};
 const noChange = () => {};
 const change = (changes: Partial<ListLook>) => void writeListLookOptions(changes);
@@ -303,10 +382,10 @@ const change = (changes: Partial<ListLook>) => void writeListLookOptions(changes
 /**
  * The list's look and a setter for one change or several (a Settings → Rows preset), which every list on screen
  * takes together. `remember` false (the onboarding tour, as its sidebar ignores the person's closed sections):
- * every option off, nothing read or written.
+ * the defaults, nothing read or written.
  */
 export function useListLook(remember = true): [ListLook, (changes: Partial<ListLook>) => void] {
-  const look = useSyncExternalStore(remember ? subscribe : ignore, remember ? shown : off, off);
+  const look = useSyncExternalStore(remember ? subscribe : ignore, remember ? shown : defaults, defaults);
   return [look, remember ? change : noChange];
 }
 

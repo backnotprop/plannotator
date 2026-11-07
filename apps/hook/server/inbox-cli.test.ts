@@ -25,6 +25,7 @@ import { INBOX_BRIDGE_POLL_PATH, parseInboxBridgeCommands } from "@plannotator/s
 import { INBOX_AGENT_NAME, INBOX_HOST } from "../hooks/mod/inbox";
 import { OPENCODE_INBOX_AGENT_NAME, OPENCODE_INBOX_HOST } from "../../opencode-plugin/inbox";
 import { DSH_INBOX_AGENT_NAME, DSH_INBOX_HOST } from "../../dsh-plugin/inbox";
+import { CLINE_INBOX_AGENT_NAME, CLINE_INBOX_HOST } from "../../cline-plugin/inbox";
 import { detachedInboxEnv } from "./inbox-command";
 import { fillInboxToolArguments, inboxCallHostSession, inboxHostSessionFromEnv, inboxQwenShimContext, INBOX_SESSION_HOST_NAMES, runInboxMcpShim } from "./inbox-mcp-shim";
 import { stubbedAgentClis } from "../../../tests/helpers/agent-cli-guard";
@@ -439,6 +440,7 @@ describe("plannotator inbox mcp inside an agent session", () => {
     expect(INBOX_SESSION_HOST_NAMES[INBOX_HOST]).toBe(INBOX_AGENT_NAME);
     expect(INBOX_SESSION_HOST_NAMES[OPENCODE_INBOX_HOST]).toBe(OPENCODE_INBOX_AGENT_NAME);
     expect(INBOX_SESSION_HOST_NAMES[DSH_INBOX_HOST]).toBe(DSH_INBOX_AGENT_NAME);
+    expect(INBOX_SESSION_HOST_NAMES[CLINE_INBOX_HOST]).toBe(CLINE_INBOX_AGENT_NAME);
     // Pi's constants, read from source: apps/pi-extension/inbox.ts imports its generated/ folder, which exists only after vendor.sh.
     const piSource = readFileSync(resolve(import.meta.dir, "../../pi-extension/inbox.ts"), "utf8");
     const piHost = /export const PI_INBOX_HOST = "([^"]+)";/.exec(piSource)?.[1];
@@ -448,7 +450,7 @@ describe("plannotator inbox mcp inside an agent session", () => {
     expect(INBOX_SESSION_HOST_NAMES[piHost!]).toBe(piName!);
     // Codex, Qwen Code and T3 Code have no plannotator_inbox tool: the Inbox wakes them itself (`codex queue`, Qwen's
     // cross-session messaging, T3's MCP API), and the shim sends as their session.
-    expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["claude-code", "codex", "dsh", "opencode", "pi", "qwen", "t3"]);
+    expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["claude-code", "cline", "codex", "dsh", "opencode", "pi", "qwen", "t3"]);
     expect(INBOX_SESSION_HOST_NAMES.codex).toBe("Codex");
     expect(INBOX_SESSION_HOST_NAMES.qwen).toBe("Qwen Code");
     // A Qwen session in the tag is a Qwen session id, never anything else.
