@@ -238,6 +238,9 @@
      own). Phone inputs never go under 16 px (iOS zooms under it). Used as font-size: var(--ib-fs-N, Npx).
      Row and control heights keep today's pitch, so phones keep their 44 px targets. */
   --ib-type: var(--inbox-text-size, 14);
+  --ib-fs-7: max(7px, calc(7px * var(--ib-type) / 14));
+  --ib-fs-7-5: max(7.5px, calc(7.5px * var(--ib-type) / 14));
+  --ib-fs-8-5: max(8.5px, calc(8.5px * var(--ib-type) / 14));
   --ib-fs-9: max(9px, calc(9px * var(--ib-type) / 14));
   --ib-fs-10: max(10px, calc(10px * var(--ib-type) / 14));
   --ib-fs-10-5: max(10.5px, calc(10.5px * var(--ib-type) / 14));
@@ -6377,6 +6380,10 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-bstack .ib-bc-bot:has(.ib-bc-youlink) { align-items: center; margin: -4px 0 -10px; }
 .ib-bstack .ib-bc-youlink { display: flex; align-items: center; width: 100%; min-height: 44px; }
 .ib-bc-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* While the Board spans projects (owner, 2026-11-05): the project's name on a row of its own, the marks and the age
+   at its right, so the title under it keeps the card's whole width. */
+.ib-bc-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.4; color: var(--muted-foreground); }
+.ib-bc-proj { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-bc-t { min-width: 0; flex: 0 1000000 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--ib-fs-14, 14px); font-weight: 500; color: color-mix(in oklab, var(--foreground) 72%, var(--card)); }
 .ib-bcard[data-unread] .ib-bc-t { font-weight: 650; color: var(--foreground); }
 .ib-bc-bot { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
@@ -6400,6 +6407,7 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
   .ib-bpage .ib-bcard .ib-bc-main { display: block; max-height: calc(1.4em * 3); }
 }
 .ib-bpage .ib-bcard .ib-bc-meta { float: right; display: inline-flex; height: calc(var(--ib-fs-14, 14px) * 1.4); margin: 0 0 0 8px; gap: 5px; }
+.ib-bpage .ib-bcard .ib-bc-head .ib-bc-meta { float: none; height: auto; margin: 0 0 0 auto; }
 .ib-bpage .ib-bcard .ib-bc-age { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 @media (hover: hover) and (pointer: fine) {
   .ib-bpage .ib-bcard .ib-bc-youlink > svg { display: none; }
@@ -8598,6 +8606,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-main[data-shape-open] { position: relative; }
 .ib-shape-layer { position: absolute; inset: var(--ib-gutter); z-index: 19; display: flex; flex-direction: column; background: var(--background); border-radius: inherit; overflow: hidden; }
 .ib-shape-layer > * { flex: 1; min-height: 0; }
+.ib-shape-layer[hidden] { display: none; }
+.ib-review > .ib-shape-layer { inset: 0; }
 .ib-shape-loading { flex: 1; }
 /* The board's sidebar toggle sits alone in the gutter, 22px from the pane's edge where every full page's head has it;
    the title and the claim share one left edge after it (the board's own phone layout: 10px, its padding). */
@@ -8717,20 +8727,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-sm-line b { color: var(--foreground); font-weight: 550; }
 .ib-sm-answer { margin: 0; white-space: pre-wrap; }
 .ib-sm-problem { margin: 0; color: var(--destructive); font-size: var(--ib-fs-12-5, 12.5px); }
-.ib-sm-sheet { position: absolute; left: 290px; right: 36px; top: 58px; max-height: calc(100% - 76px); z-index: 12; display: flex; flex-direction: column; overflow: hidden; border-radius: 14px; background: var(--popover); color: var(--popover-foreground, var(--foreground)); box-shadow: 0 0 0 1px var(--border), 0 30px 70px -24px color-mix(in oklch, var(--ib-shadow-ink, #000) 70%, transparent); animation: ib-sm-in .38s cubic-bezier(.2, .8, .2, 1) both; }
-@keyframes ib-sm-in { from { opacity: 0; transform: translateY(14px) scale(.98); } }
-.ib-sm-sheet-h { display: flex; align-items: center; gap: 10px; padding: 12px 12px 12px 16px; border-bottom: 1px solid var(--ib-hair); }
-.ib-sm-tx { min-width: 0; flex: 1; }
-.ib-sm-sheet-h .ib-sm-tx b { display: block; font-size: var(--ib-fs-15, 15px); font-weight: 650; }
-.ib-sm-sheet-h .ib-sm-tx span { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
-.ib-sm-sheet-b { flex: 1 1 auto; min-height: 0; overflow: auto; background: var(--shp-paper); padding: 16px 26px 12px; }
-.ib-sm-sheet-b .shp-diagram { height: auto; }
-.ib-sm-sheet-f { display: flex; align-items: flex-start; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--ib-hair); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; }
-.ib-sm-sheet-f .ib-sm-tx { color: color-mix(in oklch, var(--foreground) 88%, transparent); white-space: pre-wrap; }
-.ib-sm-sheet-f:has(.ib-sm-again) { flex-wrap: wrap; }
-.ib-sm-sheet-f:has(.ib-sm-again) .ib-sm-tx { flex: 1 1 220px; min-width: 0; }
-.ib-sm-sheet-f .ib-sm-again { flex: none; gap: 6px; margin-left: auto; }
-.ib-sm-mark { flex: none; margin-top: 1px; }
 .ib-sm-pip { width: 320px; max-width: calc(100% - 20px); border-radius: 12px; transform-origin: 100% 100%; animation: ib-sm-pip-in .42s cubic-bezier(.2, .8, .2, 1) both; }
 @keyframes ib-sm-pip-in { from { transform: scale(2.4) translate(-30%, -20%); opacity: .2; } }
 .ib-sm-pip-h { display: flex; align-items: center; gap: 7px; padding: 7px 7px 7px 11px; font-size: var(--ib-fs-12-5, 12.5px); }
@@ -8739,6 +8735,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-sm-pip-b { display: block; height: 190px; padding: 6px 8px; background: var(--shp-paper); border-top: 1px solid var(--ib-hair); border-bottom: 1px solid var(--ib-hair); cursor: pointer; }
 .ib-sm-pip-f { padding: 7px 11px; font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-sm-pip-f b { font-weight: 600; }
+.ib-sm-pip-n { display: flex; align-items: center; gap: 10px; justify-content: space-between; margin-top: 6px; color: var(--muted-foreground); }
+.ib-sm-pip-n .ib-btn { flex: none; }
 .ib-sm-pip-f span { font: var(--ib-fs-11-5, 11.5px) var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); }
 .ib-ov-fig { margin: 18px 0 4px; border-radius: 12px; background: var(--shp-paper); box-shadow: 0 0 0 1px var(--ib-line); overflow: hidden; }
 .ib-ov-fig-h { display: flex; align-items: center; gap: 8px; padding: 10px 12px 0 14px; font-size: var(--ib-fs-13, 13px); }
@@ -8747,28 +8745,16 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-ov-fig-b { padding: 10px 18px 6px; }
 .ib-ov-fig-b .shp-diagram { height: auto; }
 .ib-ov-fig-f { padding: 0 14px 10px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
-@media (prefers-reduced-motion: reduce) { .ib-sm-sheet, .ib-sm-pip { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .ib-sm-pip { animation: none; } }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-sm-box, .ib-sm-pip { left: 10px; right: 10px; width: auto; max-width: none; }
-  .ib-sm-sheet { left: 0; right: 0; top: 46px; bottom: 0; max-height: none; border-radius: var(--ib-sheet-corner, 12px) var(--ib-sheet-corner, 12px) 0 0; }
-  .ib-sm-sheet-b { padding: 10px 8px; }
-  .ib-sm-sheet-h .ib-sm-tx span { font-size: var(--ib-fs-11-5, 11.5px); }
-  .ib-sm-sheet-f { font-size: var(--ib-fs-13, 13px); }
   .ib-ov-fig-m { display: none; }
   .ib-ov-fig-b { padding: 8px 8px 4px; }
-  .pn-inbox .ib-sm-h .ib-iconbtn, .pn-inbox .ib-sm-sheet-h .ib-iconbtn { min-width: 44px; min-height: 44px; }
+  .pn-inbox .ib-sm-h .ib-iconbtn { min-width: 44px; min-height: 44px; }
 }
-.ib-sm-banner { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; background: color-mix(in oklab, var(--warning) 12%, var(--card)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning) 40%, transparent); font-size: var(--ib-fs-13-5, 13.5px); }
-.ib-sm-banner b { font-weight: 650; }
-.ib-sm-banner .ib-btn { flex: none; gap: 6px; }
-@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) { .ib-sm-banner { flex-wrap: wrap; } }
 .ib-sm-pip-b { position: relative; overflow: hidden; }
 .ib-sm-pip-in { position: absolute; top: 6px; left: 8px; transform-origin: 0 0; pointer-events: none; }
 .ib-sm-h .ib-sp, .ib-sm-pip-h .ib-sp, .ib-ov-fig-h .ib-sp { flex: 1; }
-/* The picture moves by its header, like the Ask window (useSheetDrag); not on a phone, where it is a sheet. */
-.ib-sm-sheet-h[data-show-me-drag] { cursor: grab; touch-action: none; user-select: none; }
-.ib-sm-sheet-h[data-show-me-drag="dragging"] { cursor: grabbing; }
-.ib-sm-sheet-h[data-show-me-drag] button { cursor: pointer; }
 /*
  * Hashtags (approval "board-hashtags"): the skill list's own menu (ui SkillReferenceMenu, unchanged), restyled here
  * for `#` only. A light popover as wide as its names, hung under the `#` (`--ib-hash-x`, hashtags.ts), not a slab
@@ -8961,3 +8947,67 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-sys-phone .ib-sys-x, .pn-inbox .ib-sys-phone .ib-sys-x { width: 32px; height: 32px; }
   .ib-sys-phone .ib-sys-acts .ib-btn { height: 44px; }
 }
+
+/* ── Letter marks (approval "inbox-letter-marks", 2026-11-07; letterMarks.tsx), all off by default ──
+   Eight hues turned from the theme's --primary (45° apart), lightness and chroma fixed so every theme and mode
+   gets the same contrast. Soft: a tint of the hue on the page, letters the hue mixed toward the text colour.
+   Solid: the hue itself, letters in the page's lightest. Mixed in oklab: in oklch the hue drifts to the page's. */
+.ib-lm { --lm-rot: 0; --lm-c: oklch(from var(--primary) 0.62 0.14 calc(h + var(--lm-rot)));
+  position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; overflow: hidden;
+  width: var(--ib-mark-20); height: var(--ib-mark-20); border-radius: var(--ib-mark-20-r);
+  background: color-mix(in oklab, var(--lm-c) 22%, var(--background));
+  color: color-mix(in oklab, var(--lm-c) 58%, var(--foreground));
+  font-family: var(--font-sans); font-weight: 650; line-height: 1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums;
+  font-size: var(--ib-fs-10, 10px); user-select: none; white-space: nowrap; }
+.ib-lm[data-hue="1"] { --lm-rot: 45; } .ib-lm[data-hue="2"] { --lm-rot: 90; } .ib-lm[data-hue="3"] { --lm-rot: 135; }
+.ib-lm[data-hue="4"] { --lm-rot: 180; } .ib-lm[data-hue="5"] { --lm-rot: 225; } .ib-lm[data-hue="6"] { --lm-rot: 270; } .ib-lm[data-hue="7"] { --lm-rot: 315; }
+.ib-lm[data-solid] { background: oklch(from var(--lm-c) 0.5 0.13 h); color: oklch(from var(--background) 0.985 0.005 h); }
+.ib-lm[data-size="12"] { width: 12px; height: 12px; border-radius: 4px; font-size: var(--ib-fs-7, 7px); }
+.ib-lm[data-size="14"] { width: 14px; height: 14px; border-radius: 4px; font-size: var(--ib-fs-7-5, 7.5px); }
+.ib-lm[data-size="16"] { width: var(--ib-mark-16); height: var(--ib-mark-16); border-radius: var(--ib-mark-16-r); font-size: var(--ib-fs-8-5, 8.5px); }
+.ib-lm[data-size="24"] { width: var(--ib-mark-24); height: var(--ib-mark-24); border-radius: var(--ib-mark-24-r); font-size: var(--ib-fs-11, 11px); }
+.ib-lm[data-size="30"] { width: var(--ib-mark-30); height: var(--ib-mark-30); border-radius: var(--ib-mark-30-r); font-size: var(--ib-fs-13, 13px); }
+/* One letter (one-letter names, CJK, Arabic) a step larger; an emoji-only name shows its emoji. */
+.ib-lm[data-n="1"][data-size="12"], .ib-lm[data-n="1"][data-size="14"] { font-size: var(--ib-fs-8-5, 8.5px); }
+.ib-lm[data-n="1"][data-size="16"] { font-size: var(--ib-fs-10, 10px); }
+.ib-lm[data-n="1"]:not([data-size]), .ib-lm[data-n="1"][data-size="20"] { font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-lm[data-n="1"][data-size="24"] { font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-lm[data-n="1"][data-size="30"] { font-size: var(--ib-fs-16, 16px); }
+.ib-lm[data-kind="emoji"] { letter-spacing: 0; }
+/* A project's picture covers its letters once it has loaded (until then, or with none, the letters show). */
+.ib-lm > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0; }
+.ib-lm[data-pic] { background: var(--muted); color: transparent; }
+.ib-lm[data-pic] > img { opacity: 1; }
+
+/* Take "inline": the thread's 20 px tile before its title; the project's 16 px one before its name. */
+.ib-lm-tt { display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; }
+.ib-lm-tt > :last-child { min-width: 0; }
+.ib-row .ib-subj > .ib-lm-tt { flex: 0 1 auto; }
+.ib-mrow .ib-lm-tt, .ib-nrow .ib-l2 > .ib-lm-tt { align-items: flex-start; }
+.ib-mrow .ib-lm-tt > .ib-lm, .ib-nrow .ib-l2 > .ib-lm-tt > .ib-lm { margin-top: 1px; }
+.ib-lm-rowp { margin-right: -2px; }
+.ib-proj > .ib-lm-side { margin-left: -2px; }
+
+/* Take "dot": the hue alone, 8 px, before the title. */
+.ib-lm-dot { --lm-rot: 0; flex: none; width: 8px; height: 8px; border-radius: 50%; background: oklch(from var(--primary) 0.72 0.15 calc(h + var(--lm-rot))); }
+.light .ib-lm-dot { background: oklch(from var(--primary) 0.56 0.15 calc(h + var(--lm-rot))); }
+.ib-lm-dot[data-hue="1"] { --lm-rot: 45; } .ib-lm-dot[data-hue="2"] { --lm-rot: 90; } .ib-lm-dot[data-hue="3"] { --lm-rot: 135; }
+.ib-lm-dot[data-hue="4"] { --lm-rot: 180; } .ib-lm-dot[data-hue="5"] { --lm-rot: 225; } .ib-lm-dot[data-hue="6"] { --lm-rot: 270; } .ib-lm-dot[data-hue="7"] { --lm-rot: 315; }
+.ib-lm-tt[data-take="dot"] { gap: 8px; }
+.ib-mrow .ib-lm-tt[data-take="dot"] > .ib-lm-dot, .ib-nrow .ib-l2 > .ib-lm-tt[data-take="dot"] > .ib-lm-dot { margin-top: 6px; }
+.ib-lm-hero { display: flex; align-items: flex-end; gap: 0; margin: 0 0 10px; }
+.ib-lm-hero > .ib-lm-heroP { margin-left: -6px; box-shadow: 0 0 0 2px var(--background); }
+
+/* Take "avatar": one mark per row in a column of its own (30 px in three-line and phone rows, 24 px in a wide row),
+   the project's on its corner, cut out of the row by a ring in the page's colour. */
+.ib-lm-av { position: relative; display: inline-flex; flex: none; }
+.ib-lm-av > .ib-lm-badge, .ib-lm-head > .ib-lm-badge { position: absolute; right: -4px; bottom: -4px; box-shadow: 0 0 0 2px var(--background); }
+.ib-row .ib-from > .ib-lm-av { order: -2; margin-right: 4px; }
+.ib-nrow[data-lm-av], .ib-mrow[data-lm-av] { padding-left: 56px; }
+.ib-nrow[data-lm-av] > .ib-lm-av, .ib-mrow[data-lm-av] > .ib-lm-av { position: absolute; left: 14px; top: 12px; }
+.ib-mrow[data-lm-av] { position: relative; }
+.ib-sel .ib-lm-badge, .ib-row:hover .ib-lm-badge { box-shadow: 0 0 0 2px var(--ib-row-fill, var(--background)); }
+
+/* Header: the bar's title leads with the mark. */
+.ib-lm-head { position: relative; display: inline-flex; vertical-align: -5px; margin-right: 8px; }
+.ib-bc-proj { display: inline-flex; }

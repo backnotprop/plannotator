@@ -5,12 +5,13 @@
  * writing into a store it did not read.
  */
 
-import type { InboxReviewDrawing, InboxShowMeTarget } from '@plannotator/core/inbox-review';
+import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
+import { learnProjects } from './projectPictures';
 import type { ReplyViewing } from './replyViewing';
 import type {
   InboxCardMark,
@@ -139,6 +140,8 @@ export interface ProjectFolder extends InboxProject {
   machine?: string;
   /** The projects combined into this one: a link to one opens this project. Absent when there are none. */
   combined?: { id: string; name: string; root: string }[];
+  /** When its letter mark's picture was set (Set picture…, ms). Absent when none, and from an older Inbox. */
+  picture?: number;
 }
 
 /** The project menu's batches (POST /api/inbox/projects/:id/read and /resolve): the threads each took. */
@@ -1003,6 +1006,8 @@ function learnMachines(model: ListModel): void {
   rememberLocal(localIdsIn(model));
   for (const row of rows) rememberMachine([row.thread_id], row.machine);
   for (const project of model.projects) rememberMachine([project.id], project.machine);
+  // Letter marks (letterMarks.tsx): the projects' names (a Board card names only an id) and their pictures' keys.
+  learnProjects(model.projects);
 }
 
 /** A file's query: the page session, and for another machine the key its door asks of every write. */
@@ -1333,6 +1338,9 @@ export const inboxApi = {
   /** The project menu's Rename… (a name) and Reset name (null): the project's `display_name`. */
   renameProject: (projectId: string, name: string | null) =>
     post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/name`), { name }),
+  /** Set picture… (letter marks): an image as a data: URL, or null to take it away. Answers the project with its `picture`. */
+  setProjectPicture: (projectId: string, picture: string | null) =>
+    post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/picture`), { picture }),
   /** Combine a project into another, or undo that (null): answers the project the person now sees. */
   combineProject: (projectId: string, into: string | null) =>
     post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/combine`), { into }),
@@ -1792,8 +1800,6 @@ export const inboxApi = {
   askRead: (threadId: string) => get<InboxAskModel>(inboxUrl(`/threads/${threadId}/ask`)),
   askSend: (threadId: string, turnId: string, question: string, showMe?: InboxShowMeAsk) =>
     post<InboxAskPosted>(inboxUrl(`/threads/${threadId}/ask`), { turn_id: turnId, question, ...(showMe ?? {}) }),
-  /** Show me's pictures of one review (code review in the Inbox; packages/server/inbox-review-drawings.ts). */
-  reviewDrawings: (messageId: string) => get<InboxReviewDrawingsRead>(inboxUrl(`/reviews/${encodeURIComponent(messageId)}/drawings`)),
   askSeen: (threadId: string, seenAt: string) => post<unknown>(inboxUrl(`/threads/${threadId}/ask/seen`), { seen_at: seenAt }),
   askStop: (threadId: string, turnId: string) => post<{ stopped: boolean }>(inboxUrl(`/threads/${threadId}/ask/stop`), { turn_id: turnId }),
   deleteProject: (projectId: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/delete`), {}),
@@ -1811,28 +1817,20 @@ export interface InboxAskTurnWire {
   answered_at?: string;
   stopped?: boolean;
   failure?: 'gone' | 'taken_over' | 'failed';
-  /** A Show me (code review in the Inbox): the agent was asked to draw these lines of a review. */
+  /** A Show me (code review in the Inbox): the agent was asked for a Shape of these lines of a review. */
   kind?: 'show_me';
   show_me?: InboxShowMeTarget;
-  /** Show me again: the round of the picture it asked to redraw. */
-  again_of_round?: number;
-  /** The picture the agent sent for this Show me (`plannotator review draw`), by id. */
-  drawing?: string;
+  /** Show me again: the board it asked to bring up to date. */
+  again_shape?: string;
+  /** The board this Show me made, once it has one. */
+  shape?: string;
 }
 
 /** What a Show me sends beside its question on `POST …/ask`. */
 export interface InboxShowMeAsk {
   kind: 'show_me';
   show_me: InboxShowMeTarget;
-  again_of_round?: number;
-}
-
-/** `GET /api/inbox/reviews/:msg/drawings`. */
-export interface InboxReviewDrawingsRead {
-  title?: string;
-  round?: number;
-  overview?: { round: number; codes: string[] } | null;
-  drawings: InboxReviewDrawing[];
+  again_shape?: string;
 }
 
 export interface InboxAskConversationWire {

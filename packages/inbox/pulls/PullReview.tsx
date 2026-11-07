@@ -840,6 +840,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             </div>
           )}
           <AnnotationPanel
+            title="Comments"
             emptyHint={readerComments ? 'Click a line number, drag across lines, or select code to comment' : undefined}
             isOpen
             presentation={folded ? 'embedded' : undefined}

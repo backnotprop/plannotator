@@ -69,6 +69,7 @@ import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
 import { fetchPRFileContent, ghEntryMissingContent, glEntryMissingContent, parsePaginatedArray, reconstructGhPatch, reconstructGitlabPatch, type GitHubFileEntry, type GitLabDiffEntry, type PRRef, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { MAX_REPO_FILE_BYTES } from "@plannotator/shared/repo-file";
 import { MAX_REVIEW_FILE_CONTENT_BYTES, prepareGitCommand, readGitObjectBytes, validateFilePath } from "@plannotator/shared/review-core";
+import { childEnv } from "@plannotator/shared/child-env";
 import { killGitTree, runtime as gitRuntime, trackIsolatedGitGroup } from "./git";
 import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
 
@@ -712,7 +713,7 @@ export function pullRemoteMayPrompt(url: string): boolean {
  * `signal` stop what it started too (ssh, git-remote-https), and no window opens on Windows. `environment`: tests
  * give git a scratch HOME.
  */
-export function createPullGitRunner(environment: () => Readonly<Record<string, string | undefined>> = () => process.env): PullGitRunner {
+export function createPullGitRunner(environment: () => Readonly<Record<string, string | undefined>> = () => childEnv()): PullGitRunner {
   return async (root, args, reading) => {
     if (reading.signal?.aborted) return { stdout: "", stderr: "git: stopped", exitCode: 130 };
     const prepared = prepareGitCommand(args, { interaction: "forbid", timeoutMs: reading.timeoutMs, config: { "maintenance.auto": "false", "gc.auto": "0" } }, environment());
@@ -785,7 +786,7 @@ export const pullDiffCliRunner: PullDiffRunner = async (cli, args, maxBytes, rea
   let proc: ReturnType<typeof Bun.spawn>;
   try {
     proc = Bun.spawn([cli, ...args], {
-      env: { ...process.env, GH_PROMPT_DISABLED: "1", NO_COLOR: "1", NO_PROMPT: "1" },
+      env: childEnv({ GH_PROMPT_DISABLED: "1", NO_COLOR: "1", NO_PROMPT: "1" }),
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",

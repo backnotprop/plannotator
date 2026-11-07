@@ -29,6 +29,7 @@ import type { OverlayScrollAreaHandle } from '@plannotator/ui/components/Overlay
 import { SidebarActionRow, SemanticDiffRow, CallFlowRow, AllChangesRow } from './PanelNavRows';
 import { PanelControlsRow, PanelSearchField, TOOLS_ONE_ROW_WIDTH } from './PanelChrome';
 import { PanelSectionHeader, CountColumns, countColumnVars, compactRowsProps } from './FileRowBits';
+import { useHiddenViewedFiles } from '../hooks/useHiddenViewedFiles';
 
 interface FileTreeProps {
   /** The top of the panel (views, the comparison sentence, Changes | All
@@ -388,6 +389,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   const totalDeletions = files.reduce((sum, file) => sum + file.deletions, 0);
   const treeIndentCap = maxTreeIndent(panelWidth);
   const treeIndent = useCallback((depth: number) => alignedTreeIndent(depth, treeIndentCap), [treeIndentCap]);
+  const { hiddenFiles, panelPointerProps } = useHiddenViewedFiles(viewedFiles, hideViewedFiles);
 
   const panelControls = (
     <PanelControlsRow
@@ -438,6 +440,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
         onToggleViewed={onToggleViewed}
         showViewedControls={showViewedControls}
         hideViewedFiles={hideViewedFiles}
+        hiddenFiles={hiddenFiles}
         getAnnotationCount={getAnnotationCount}
         stagedFiles={stagedFiles}
         repoRoot={repoRoot}
@@ -484,6 +487,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
     <aside
       data-review-sidebar=""
       {...compactRowsProps(panelWidth)}
+      {...panelPointerProps}
       className="review-sidebar border-r flex flex-col flex-shrink-0 overflow-hidden"
       style={{ width: panelWidth }}
     >
@@ -635,7 +639,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
                     const folded = foldedKinds.has(block.kind);
                     // Hide-viewed hides a viewed row unless it is the active
                     // one; a block with no row left hides its header too.
-                    if (hideViewedFiles && block.paths.every((path) => viewedFiles.has(path) && path !== files[rowActiveIndex]?.path)) {
+                    if (hideViewedFiles && block.paths.every((path) => hiddenFiles.has(path) && path !== files[rowActiveIndex]?.path)) {
                       return null;
                     }
                     return (
