@@ -24,7 +24,8 @@
  * folder, packages/server/html-assets.ts), whose answers carry the
  * `sandbox allow-scripts allow-modals` CSP, inside Plannotator's sandboxed HtmlViewer, so
  * its relative images and frames load from the file's own folder and never
- * draw the Inbox inside itself (#1554).
+ * draw the Inbox inside itself (#1554); the pictures it names outside that
+ * folder load too (`createInboxHtmlAssets`).
  */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
@@ -33,16 +34,16 @@ import { constants as fsConstants } from "node:fs";
 import { lstat, open, readlink, realpath } from "node:fs/promises";
 import { basename, dirname, relative as relativeTo, resolve as resolvePath, sep } from "node:path";
 import { htmlAssetPathRefused, isWithinDirectory } from "@plannotator/shared/html-assets-node";
-import { HTML_ASSET_DOCUMENT_CSP, htmlAssetDocumentHeaders, MAX_HTML_ASSET_DOCUMENT_BYTES, refusesHiddenHtmlAssetPath } from "@plannotator/shared/html-assets";
+import { HTML_ASSET_DOCUMENT_CSP, htmlAssetDocumentHeaders, htmlAssetHeaders, MAX_HTML_ASSET_DOCUMENT_BYTES, refusesHiddenHtmlAssetPath } from "@plannotator/shared/html-assets";
 import { INBOX_ANNOTATION_CURRENT, isInboxTextKind, readInboxAttachmentKind, type InboxAttachment } from "@plannotator/core/inbox-types";
 import {
-  checkCurrent,
+  checkCurrentAsync,
   inboxAttachmentState,
   isPdfHead,
   openInboxAttachmentVersion,
   readInboxAttachmentText,
 } from "@plannotator/shared/inbox/attachments";
-import { INBOX_MESSAGE_IMAGE_CSP, readInboxMessageImageAsync } from "@plannotator/shared/inbox/message-images";
+import { INBOX_MESSAGE_IMAGE_CSP, readInboxMessageImageAsync, readInboxPictureAsync } from "@plannotator/shared/inbox/message-images";
 import { inboxImageResponse } from "./inbox-message-images";
 import { readInboxMarkup, readInboxMarkupBody, writeInboxMarkup } from "@plannotator/shared/inbox/markups";
 import { readImageDimensions, sniffImageContentType } from "@plannotator/shared/review-image";
@@ -94,8 +95,49 @@ function handleStream(handle: FileHandle, idleMs?: number): ReadableStream<Uint8
  */
 export const inboxRefusesAssetPath = refusesHiddenHtmlAssetPath;
 
-/** A nested document in an attached page runs scripts but reaches no network. */
+/**
+ * A nested document in an attached page runs scripts but reaches no network
+ * (`connect-src 'none'`). It names no `img-src`, so its pictures load from
+ * anywhere, the web included; in the window the page itself is a document of
+ * its own under `INBOX_PAGE_CSP` (inbox-pages.ts: web pictures over https).
+ */
 export const INBOX_HTML_DOCUMENT_CSP = `${HTML_ASSET_DOCUMENT_CSP}; connect-src 'none'`;
+
+/** The pictures an attached page may show from outside its folder, by name: what the bytes must then confirm. */
+const INBOX_PAGE_PICTURE_RE = /\.(?:png|jpe?g|gif|webp|svg|avif|ico)$/i;
+
+/**
+ * One picture an attached HTML page names outside its folder (`../shots/a.png`,
+ * `/Users/me/a.png`): read only when it is an image by its bytes, never from a
+ * path with a hidden segment or a dotenv name (`inboxRefusesAssetPath`, as named
+ * and by realpath). Served as the type its bytes sniff as, with nosniff and the
+ * asset route's sandbox CSP, so an SVG opened directly runs no script.
+ */
+async function inboxPagePictureResponse(path: string, req: Request): Promise<Response> {
+  if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Use GET." }, 405);
+  const read = INBOX_PAGE_PICTURE_RE.test(path) ? await readInboxPictureAsync(path, inboxRefusesAssetPath) : null;
+  if (!read?.ok) {
+    // A refused picture reads as missing: the page learns nothing about the file.
+    return Response.json({ error: "Not found" }, { status: 404, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+  }
+  return new Response(req.method === "HEAD" ? null : new Uint8Array(read.bytes), { headers: htmlAssetHeaders(read.contentType) });
+}
+
+/**
+ * The Inbox's HTML asset registry: annotate's serving path, minus hidden paths
+ * and secret names, nested documents with no network, and pictures from
+ * anywhere on this computer (`pictures`).
+ */
+export function createInboxHtmlAssets() {
+  return createHtmlAssetRegistry({
+    refuseAssetPath: inboxRefusesAssetPath,
+    documentCsp: INBOX_HTML_DOCUMENT_CSP,
+    pictures: {
+      allows: (path) => INBOX_PAGE_PICTURE_RE.test(path) && !inboxRefusesAssetPath(path),
+      serve: inboxPagePictureResponse,
+    },
+  });
+}
 
 /**
  * The document `relativePath` names in the folder of the attached document at
@@ -243,7 +285,7 @@ async function readVersion(store: InboxStore, attachment: InboxAttachment, versi
 
 export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContext) {
   const { store, serverSession } = context;
-  const htmlAssets = createHtmlAssetRegistry({ refuseAssetPath: inboxRefusesAssetPath, documentCsp: INBOX_HTML_DOCUMENT_CSP });
+  const htmlAssets = createInboxHtmlAssets();
 
   const guardedBody = async (req: Request): Promise<Record<string, unknown> | Response> => {
     const body = await context.readBody(req);
@@ -334,7 +376,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       }
       const version = versionOf(url);
       if (version === "current") {
-        const check = checkCurrent(attachment);
+        const check = await checkCurrentAsync(attachment);
         if (!check.ok) throw new InboxError(check.unavailable.code, check.unavailable.message);
         // The file at its own folder's asset URL: relative assets, #anchors and frames
         // resolve natively, with the document CSP. A name the asset route refuses
@@ -438,7 +480,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       if (route === "image" && kind !== "image") throw new InboxError("attachment_not_image", `${attachment.name} is not an image; download it instead.`);
       // An image a message shows: refused by its size before the image route hashes it whole.
       if ("ref" in attachment && versionOf(url) === "current") {
-        const check = checkCurrent(attachment);
+        const check = await checkCurrentAsync(attachment);
         if (check.ok && check.stat.size > MAX_REVIEW_IMAGE_PREVIEW_BYTES) {
           return json({ error: `${attachment.name} is larger than 10 MB; open the version it sent.`, code: "image_too_large" }, 413);
         }

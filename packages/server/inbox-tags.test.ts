@@ -535,14 +535,15 @@ describe("the Pi and OpenCode wake (agent-link) for a reply that tags", () => {
       const sent = ((await response.json()) as { reply: { id: string; body: string } }).reply;
       for (let i = 0; i < 200 && toOc.length === 0; i++) await Bun.sleep(50);
       expect(toOc).toHaveLength(1);
-      expect(toOc[0]!.text).toBe(inboxWakeText({ id: sent.id, thread_id: asked.thread_id, subject: "Should the queue own retries?", body: sent.body, tagged: { owner: "Pi" } }));
+      const withoutDetails = (text: string) => text.replace(/^\[Thread (msg_[0-9A-Za-z]+):.*\]$/m, "[Thread $1]");
+      expect(withoutDetails(toOc[0]!.text)).toBe(inboxWakeText({ id: sent.id, thread_id: asked.thread_id, subject: "Should the queue own retries?", body: sent.body, tagged: { owner: "Pi" } }));
       // OpenCode reads the thread before Pi's turn ends: Pi is still woken.
       await client.callTool({ name: "read_thread", arguments: { thread_id: asked.thread_id, agent_session: "ses-oc" } });
       expect(toPi).toHaveLength(0);
       piBusy = false;
       for (let i = 0; i < 200 && toPi.length === 0; i++) await Bun.sleep(50);
       expect(toPi).toHaveLength(1);
-      expect(toPi[0]!.text).toBe(inboxWakeText({ id: sent.id, thread_id: asked.thread_id, subject: null, body: sent.body, also_tagged: ["OpenCode"] }));
+      expect(withoutDetails(toPi[0]!.text)).toBe(inboxWakeText({ id: sent.id, thread_id: asked.thread_id, subject: null, body: sent.body, also_tagged: ["OpenCode"] }));
       let message: InboxThread["messages"][number] | undefined;
       for (let i = 0; i < 100; i++) {
         message = (await thread(server, asked.thread_id)).messages.find((m) => m.id === sent.id);

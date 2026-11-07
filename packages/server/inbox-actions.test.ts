@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { inboxActionTime } from "@plannotator/core/inbox-actions";
 import type { InboxListRow, InboxListSection, InboxQuestion } from "@plannotator/core/inbox-types";
-import { INBOX_BRIDGE_POLL_PATH, INBOX_WAKE_INSTRUCTION, inboxWakeText, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
+import { INBOX_BRIDGE_POLL_PATH, INBOX_WAKE_CLOSING_LINE, INBOX_WAKE_INSTRUCTION, inboxWakeText, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
 
 const roots: string[] = [];
@@ -151,7 +151,7 @@ describe("the person's Done", () => {
       "Note: Approved. I also fixed the preview env var while I was there.",
     ].join("\n");
     expect(command).toMatchObject({ type: "reply", reply_to: sent.message_id, body });
-    expect(inboxWakeText(command)).toBe(`Plannotator Inbox: a reply (${command.id})\n${INBOX_WAKE_INSTRUCTION}\n\n${body}\n\n[thread ${command.thread_id} · more: plannotator_inbox read_thread · how it works: plannotator inbox --help]`);
+    expect(inboxWakeText(command)).toBe(`Plannotator Inbox: a reply (${command.id})\n${INBOX_WAKE_INSTRUCTION}\n[Thread ${command.thread_id}: 2 messages, nothing open. Your last message was just now]\n\n${body}\n\n${INBOX_WAKE_CLOSING_LINE}`);
 
     const replied = (await client.callTool({ name: "read_thread", arguments: { thread_id: sent.thread_id, agent_session: SESSION } })) as {
       content: { text: string }[];

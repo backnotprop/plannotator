@@ -380,6 +380,30 @@ describe("a scratch folder", () => {
     world.nothingHappened();
   });
 
+  test("a Send refused for its files removes the folder it made and its project: two presses with one upload, and one with an upload that isn't there", async () => {
+    const world = await setup();
+    const uploaded = (await (await fetch(`${world.base}/api/inbox/uploads?name=notes.md&serverSession=${world.server.serverSession}`, { method: "POST", headers: { Origin: world.base }, body: "# Notes\n" })).json()) as { upload: { upload_id: string } };
+    const projects = world.store.listProjects().length;
+    const scratchPress = (uploads: string[]) =>
+      fetch(`${world.base}/api/inbox/messages`, { method: "POST", headers: world.window, body: JSON.stringify(world.sendBody({ scratch: true, trust: { folder: world.folder, facts: HOOKS.facts } }, { uploads })) });
+
+    const refusedAlone = await codeOf(await scratchPress(["upl_missing"]));
+    expect(refusedAlone[0]).toBe(404);
+    expect(scratchDirs(world)).toEqual([]);
+    world.nothingHappened();
+    expect(world.store.listProjects().length).toBe(projects);
+
+    const answers = await Promise.all([scratchPress([uploaded.upload.upload_id]), scratchPress([uploaded.upload.upload_id])]);
+    expect(answers.map((answer) => answer.status).sort()).toEqual([200, 404]);
+    const refused = answers.find((answer) => answer.status === 404)!;
+    expect(((await refused.json()) as { code?: string }).code).toBe("upload_not_found");
+    // One thread, one folder, one project: the refused press left neither of its own behind.
+    expect(world.threads()).toBe(1);
+    expect(scratchDirs(world)).toHaveLength(1);
+    expect(world.store.listProjects().length).toBe(projects + 1);
+    expect(world.offer.steps.filter((step) => step.startsWith("start"))).toHaveLength(1);
+  });
+
   test("`trust_failed` removes the folder it made, and its project", async () => {
     const world = await setup();
     world.offer.acceptFails = "locked";
