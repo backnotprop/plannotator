@@ -190,14 +190,14 @@ describe.skipIf(!hasDom)('Choose how your list looks', () => {
     expect(dialog.querySelector('[data-moving]')).toBeNull();
   });
 
-  test('the picture and the card are out of reach: inert and hidden from a screen reader; focus starts on the looks', () => {
+  test('the picture and the card are out of reach: inert and hidden from a screen reader; focus starts on the looks\' group', () => {
     motion(true);
     const { dialog } = render();
     for (const part of [dialog.querySelector('[data-list-intro-picture]')!, dialog.querySelector('.ib-rl-card')!]) {
       expect(part.hasAttribute('inert')).toBe(true);
       expect(part.getAttribute('aria-hidden')).toBe('true');
     }
-    expect(document.activeElement).toBe(looks(dialog)[0]!);
+    expect(document.activeElement).toBe(dialog.querySelector('[role="radiogroup"]'));
   });
 
   test("lightScope (the List view's and voice dialogs' light picture): the person's light palette, else Plannotator's", () => {

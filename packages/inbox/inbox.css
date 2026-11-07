@@ -7550,6 +7550,10 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
    once a look is picked, a card with the person's rows in that look over the blurred picture. Everything follows the
    window's mode (the owner, q-fd707b9e). The picked look is a light tint, no border. */
 dialog.ib-dlg.ib-lo.ib-rl { width: min(720px, calc(100vw - 32px)); }
+/* The dialog is a flex column that starts its items: the inner box takes the whole width, not the picture's. */
+.ib-rl > .ib-dlg-in { align-self: stretch; min-width: 0; }
+/* It opens on the looks' group (focus with no ring); Tab then reaches each look. */
+.ib-rl-looks:focus { outline: none; }
 .ib-rl { --rl-band: color-mix(in oklch, var(--muted) 80%, var(--card)); --rl-sel: color-mix(in oklab, var(--primary) 22%, var(--card));
   --rl-raised: color-mix(in oklab, var(--card) 94%, var(--foreground)); }
 :root.light .ib-rl { --rl-band: color-mix(in oklch, var(--muted) 62%, var(--card)); --rl-sel: color-mix(in oklab, var(--primary) 13%, var(--card)); --rl-raised: var(--card); }
@@ -7656,7 +7660,7 @@ dialog.ib-dlg.ib-lo.ib-rl { width: min(720px, calc(100vw - 32px)); }
 .ib-rl-cl { position: absolute; inset: 0; padding: 0 6px; opacity: 0; transition: opacity 110ms ease-out; }
 .ib-rl-cl[data-on] { opacity: 1; transition: opacity 200ms var(--ib-ease-enter) 70ms; }
 /* The person's rows are the list's own (ListRow), on the card: always drawn, whatever hides the list behind. */
-dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: auto; visibility: visible; width: auto; height: auto; border-right: 0; background: transparent; --background: var(--rl-raised); }
+dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: auto; visibility: visible; width: auto; height: auto; border-right: 0; background: transparent; --background: var(--rl-raised); --card: var(--rl-raised); }
 .ib-rl-card .ib-lbody { overflow: hidden; padding-top: 0; }
 .ib-rl-card .ib-lbody > .ib-group > :is(.ib-rw, .ib-mrow) { content-visibility: visible; }
 .ib-rl-card :is(.ib-nrow .ib-l2 > .ib-title, .ib-mrow > .ib-m2) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
@@ -7679,6 +7683,7 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   /* A phone: the bottom sheet (.ib-lo-phone), the same window drawn smaller, the notes card at 0.7 tucked into the
      corner; the three looks stay in one row, the sketch above the name. */
+  dialog.ib-dlg.ib-lo.ib-rl.ib-lo-phone { width: calc(100vw - 16px); }
   .ib-lo-phone .ib-rl-art { padding: 30px 14px 0; }
   :root:not(.light) .ib-lo-phone .ib-rl-art { padding-bottom: 14px; }
   .ib-lo-phone .ib-rl-frame { width: auto; }

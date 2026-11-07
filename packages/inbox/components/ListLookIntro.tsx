@@ -270,7 +270,7 @@ export function ListLookIntro({ groups, initial, projectNames, awayMachines, pho
   const choose = (id: RowsPreset) => setPick(id);
   const chosen = pick ? ROWS_PRESETS.find((preset) => preset.id === pick)! : null;
   return (
-    <Modal labelledBy="ib-lo-title" describedBy="ib-lo-desc" testId="list-look-intro" onClose={onKeep} ownKeys initialFocus=".ib-rl-look input" className={`ib-lo ib-rl${phone ? ' ib-lo-phone' : ''}`}>
+    <Modal labelledBy="ib-lo-title" describedBy="ib-lo-desc" testId="list-look-intro" onClose={onKeep} ownKeys initialFocus=".ib-rl-looks" className={`ib-lo ib-rl${phone ? ' ib-lo-phone' : ''}`}>
       <div className="ib-rl-art" data-preview={pick ?? undefined} data-moving={moving ? '' : undefined} style={{ '--rl-s': fit.s, '--rl-fh': `${fit.h}px` } as CSSProperties}>
         <p className="ib-rl-cap" aria-hidden="true">
           <span data-on={pick ? undefined : ''}>Example projects</span>
@@ -303,7 +303,7 @@ export function ListLookIntro({ groups, initial, projectNames, awayMachines, pho
           , from ⋮ above the list.
         </p>
       </div>
-      <div className="ib-rl-looks" role="radiogroup" aria-labelledby="ib-lo-title">
+      <div className="ib-rl-looks" role="radiogroup" aria-labelledby="ib-lo-title" tabIndex={-1}>
         {ROWS_PRESETS.map((preset) => (
           <label key={preset.id} className="ib-rl-look" data-on={pick === preset.id ? '' : undefined} data-list-intro-look={preset.id}>
             <input type="radio" name="ib-rl-look" value={preset.id} checked={pick === preset.id} onChange={() => choose(preset.id)} />
