@@ -5079,6 +5079,23 @@ export class InboxStore {
     return next;
   }
 
+  /**
+   * A file an agent's message names, made one of its attachments because the person commented on it (approval
+   * "inbox-file-refs-open-viewer"): one more line for the message, its latest snapshot with `attachment` after the ones
+   * it has. A file the message already carries (by its real path) is never added twice: that attachment is returned.
+   * Only an agent's message, and not in a resolved thread (as a comment would be refused there).
+   */
+  attachReferencedFile(messageId: string, attachment: InboxAttachment): InboxAttachment {
+    const message = this.messages.get(messageId);
+    if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
+    if (message.author.kind !== "agent") throw new InboxError("validation_error", "message_id: only an agent's message takes a file it names.", { field: "message_id" });
+    if (this.closedByArchive(message)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
+    const held = (message.attachments ?? []).find((file) => file.path === attachment.path);
+    if (held) return held;
+    this.appendMessage({ ...message, attachments: [...(message.attachments ?? []), attachment] }, this.stamp());
+    return attachment;
+  }
+
   /** The person's annotations in a thread still waiting for a Send (not removed, not sent). */
   pendingAnnotations(threadId: string): InboxAnnotationRecord[] {
     const out: InboxAnnotationRecord[] = [];

@@ -371,8 +371,8 @@ interface Route {
    */
   file?: { id: string; version: 'current' | 'sent'; focus: string | null; linked?: string | null; view?: 'full' | 'side' | null; set?: string | null } | null;
   /**
-   * Design prototype "file-refs-open-pane": a file a message names, beside the thread, read only. `ref=` its path as
-   * written, `in=` the message, `line=` / `to=` its lines. Never with `file`.
+   * A file an agent's message names, beside the thread, read only until a comment attaches it (approval
+   * "inbox-file-refs-open-viewer"). `ref=` its path as written, `in=` the message, `line=` / `to=` its lines. Never with `file`.
    */
   ref?: { path: string; messageId: string; line?: number; lineEnd?: number } | null;
   /** The message whose guided review is open over the window (`#thread=…&guide=msg_…`). */

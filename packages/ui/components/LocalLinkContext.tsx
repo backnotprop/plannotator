@@ -49,6 +49,17 @@ export const CodeSpanContext = createContext<CodeSpanRenderer | null>(null);
  */
 export const CodeSpanMatchContext = createContext<((text: string) => boolean) | null>(null);
 
+/**
+ * Opt-in: file paths written as plain words (outside code spans, links and code), as a host finds them. `find` gives
+ * each path's start and end in a run of words; `wrap` draws one (a focusable control, say). Absent, plain words stay
+ * plain words, exactly as always.
+ */
+export interface BarePathWrap {
+  find: (text: string) => readonly { start: number; end: number }[];
+  wrap: (text: string) => ReactNode;
+}
+export const BarePathContext = createContext<BarePathWrap | null>(null);
+
 /** An inline code span as drawn (`children`), through the host's wrap when it names a code file (or what the host's test takes). */
 export function CodeSpan({ text, children }: { text: string; children: ReactNode }) {
   const wrap = useContext(CodeSpanContext);

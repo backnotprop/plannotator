@@ -1,0 +1,191 @@
+/**
+ * A file an agent's message names, opened in the pane and attached when commented on (approval
+ * "inbox-file-refs-open-viewer"): the view, raw and attach routes of packages/server/inbox-open-in.ts, called on the
+ * route itself with a scratch store. No Inbox starts and nothing launches; every file, the home folder included, is a
+ * fixture under a temp folder (never the real home).
+ */
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { InboxStore } from "@plannotator/shared/inbox/store";
+import { InboxError } from "@plannotator/shared/inbox/schema";
+import { createInboxOpenInRoute, type InboxOpenInLauncher } from "./inbox-open-in";
+
+type Json = Record<string, any>;
+
+const roots: string[] = [];
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a1b00000000049454e44ae426082", "hex");
+
+const launcher: InboxOpenInLauncher = {
+  platform: "darwin",
+  apps: () => [],
+  reveal: async () => {
+    throw new Error("nothing launches here");
+  },
+  openWithApp: async () => {
+    throw new Error("nothing launches here");
+  },
+  openWithSystemDefault: async () => {
+    throw new Error("nothing launches here");
+  },
+};
+
+const SESSION = "srv-session";
+
+function world() {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-refs-")));
+  roots.push(root);
+  const home = join(root, "home");
+  const project = join(root, "project");
+  const elsewhere = join(root, "elsewhere");
+  for (const dir of [home, join(home, ".ssh"), join(home, ".aws"), join(home, "notes"), project, join(project, "docs"), elsewhere]) mkdirSync(dir, { recursive: true });
+  writeFileSync(join(project, "docs", "plan.md"), "# Plan\n\nShip it.\n");
+  writeFileSync(join(project, ".env"), "TOKEN=secret\n");
+  writeFileSync(join(project, "shot.png"), PNG);
+  writeFileSync(join(project, "logo.svg"), '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+  writeFileSync(join(elsewhere, "out.log"), "line one\nline two\n");
+  writeFileSync(join(home, "notes", "todo.md"), "- one\n");
+  writeFileSync(join(home, ".ssh", "id_ed25519"), "-----BEGIN OPENSSH PRIVATE KEY-----\n");
+  writeFileSync(join(home, ".ssh", "id_rsa"), "-----BEGIN RSA PRIVATE KEY-----\n");
+  writeFileSync(join(home, ".aws", "credentials"), "[default]\n");
+  symlinkSync(join(project, ".env"), join(project, "settings.txt"));
+  symlinkSync(join(home, ".ssh", "id_rsa"), join(elsewhere, "key.txt"));
+
+  const store = InboxStore.open(join(root, "data"));
+  const prj = store.ensureProject({ name: "project", root: project });
+  const sent = store.sendMessage({ project_id: prj.id, author: { kind: "agent", host: "claude-code", session: "ses_a", name: "Claude Code" }, body: "See docs/plan.md and /tmp/x." });
+  const message = sent.message;
+  const route = createInboxOpenInRoute({
+    store,
+    serverSession: SESSION,
+    readBody: async (req) => (await req.json()) as Record<string, unknown>,
+    json: (body, status = 200) => Response.json(body, { status }),
+    localOnly: () => Response.json({ code: "local_only" }, { status: 403 }),
+    launcher,
+    // Off: opening a file a message names never needs Code review.
+    codeReviewOn: () => false,
+    shapeRoot: () => null,
+    repoRoots: () => [],
+    threadPulls: () => [],
+    pullFile: async () => null,
+    ownerOrLocal: (_req, via) => via === "local",
+    home,
+  });
+  const call = async (req: Request, via: "local" | "tailnet" = "local"): Promise<Response> => {
+    const path = new URL(req.url).pathname;
+    try {
+      return (await route(req, path, via))!;
+    } catch (error) {
+      if (error instanceof InboxError) return Response.json({ code: error.code, error: error.message }, { status: 400 });
+      throw error;
+    }
+  };
+  const query = (path: string) => new URLSearchParams({ thread: message.thread_id, message: message.id, path });
+  const view = async (path: string, via: "local" | "tailnet" = "local") => {
+    const response = await call(new Request(`http://127.0.0.1/api/inbox/open-in/file/view?${query(path)}`), via);
+    return { status: response.status, body: (await response.json()) as Json };
+  };
+  const raw = (path: string) => call(new Request(`http://127.0.0.1/api/inbox/open-in/file/raw?${query(path)}`));
+  const attach = async (path: string, messageId = message.id, threadId = message.thread_id) => {
+    const response = await call(
+      new Request("http://127.0.0.1/api/inbox/open-in/file/attach", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ thread: threadId, message: messageId, path, serverSession: SESSION }),
+      }),
+    );
+    return { status: response.status, body: (await response.json()) as Json };
+  };
+  return { root, home, project, elsewhere, store, message, prj, view, raw, attach };
+}
+
+describe("a file a message names: the view", () => {
+  test("opens without Code review: a relative path from the project, an absolute path outside it, and a ~ path", async () => {
+    const w = world();
+    const plan = await w.view("docs/plan.md");
+    expect(plan.body).toMatchObject({ found: true, kind: "markdown", contents: "# Plan\n\nShip it.\n" });
+    const outside = await w.view(join(w.elsewhere, "out.log"));
+    expect(outside.body).toMatchObject({ found: true, contents: "line one\nline two\n" });
+    const home = await w.view("~/notes/todo.md");
+    expect(home.body).toMatchObject({ found: true, contents: "- one\n" });
+    expect((await w.view(join(w.elsewhere, "gone.md"))).body).toMatchObject({ found: false, reason: "missing" });
+  });
+
+  test("never a secret: .env, SSH keys and credential stores are refused, as named and through a symlink, and nothing of them is sent", async () => {
+    const w = world();
+    for (const path of [".env", join(w.project, ".env"), "~/.ssh/id_ed25519", join(w.home, ".ssh", "id_rsa"), "~/.aws/credentials", "settings.txt", join(w.elsewhere, "key.txt")]) {
+      const { body } = await w.view(path);
+      expect([path, body.found, body.reason, body.contents]).toEqual([path, false, "refused", undefined]);
+    }
+  });
+
+  test("through the tailnet only the owner reads it", async () => {
+    const w = world();
+    expect((await w.view("docs/plan.md", "tailnet")).status).toBe(403);
+  });
+});
+
+describe("a file a message names: the bytes of an image", () => {
+  test("an image is served by its bytes' type, sandboxed, never sniffed or cached; a secret or a document is not", async () => {
+    const w = world();
+    const png = await w.raw("shot.png");
+    expect(png.status).toBe(200);
+    expect(png.headers.get("content-type")).toBe("image/png");
+    expect(png.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(png.headers.get("content-security-policy")).toContain("sandbox");
+    expect(png.headers.get("cache-control")).toBe("no-store");
+    expect(Buffer.from(await png.arrayBuffer()).equals(PNG)).toBe(true);
+    // An SVG shows as a picture and never runs: its CSP is a sandbox with no script source.
+    const svg = await w.raw("logo.svg");
+    expect(svg.headers.get("content-type")).toBe("image/svg+xml");
+    expect(svg.headers.get("content-security-policy")).toMatch(/^sandbox; default-src 'none'/);
+    expect(svg.headers.get("content-security-policy")).not.toContain("script");
+    expect((await w.raw("~/.ssh/id_ed25519")).status).toBe(404);
+    expect((await w.raw("docs/plan.md")).status).toBe(404);
+  });
+});
+
+describe("a file a message names: attached when commented on", () => {
+  test("looking attaches nothing; the comment's attach adds exactly one attachment, once, and the view then names it", async () => {
+    const w = world();
+    await w.view("docs/plan.md");
+    expect(w.store.message(w.message.id)!.attachments ?? []).toEqual([]);
+
+    const first = await w.attach("docs/plan.md");
+    expect(first.status).toBe(200);
+    expect(first.body.attachment).toMatchObject({ name: "plan.md", kind: "markdown", path: join(w.project, "docs", "plan.md"), message_id: w.message.id });
+    const again = await w.attach("./docs/plan.md");
+    expect(again.body.attachment.id).toBe(first.body.attachment.id);
+
+    const attachments = w.store.message(w.message.id)!.attachments ?? [];
+    expect(attachments.map((a) => a.id)).toEqual([first.body.attachment.id]);
+    // Its sent version is kept, as an agent's attachment's is.
+    expect(attachments[0]!.sent_sha256).toMatch(/^[0-9a-f]{64}$/);
+    // A comment on it is saved like any attachment's.
+    const record = w.store.saveAnnotation({ attachment_id: first.body.attachment.id, version: "current", annotation: { id: "ann-1", blockId: "b1", type: "COMMENT", text: "Why?", originalText: "Ship it." } });
+    expect(record.attachment_id).toBe(first.body.attachment.id);
+    expect((await w.view("docs/plan.md")).body.attachment_id).toBe(first.body.attachment.id);
+    // Reopened from disk, still one.
+    expect(InboxStore.open(join(w.root, "data")).message(w.message.id)!.attachments!.length).toBe(1);
+  });
+
+  test("a file outside the project attaches; a secret, a missing file and the person's own message do not", async () => {
+    const w = world();
+    expect((await w.attach(join(w.elsewhere, "out.log"))).body.attachment).toMatchObject({ name: "out.log" });
+    expect((await w.attach(".env")).body.code).toBe("attachment_missing");
+    expect((await w.attach("~/.ssh/id_rsa")).body.code).toBe("attachment_missing");
+    expect((await w.attach("settings.txt")).body.code).toBe("attachment_missing");
+    expect((await w.attach("docs/nope.md")).body.code).toBe("attachment_missing");
+    const person = w.store.startPersonThread({ project_id: w.prj.id, body: "Mine: docs/plan.md", to: { host: "claude-code", session: "ses_a" }, idempotency_key: "k-1" }).message;
+    // The person's own words keep their links as they are: never an attachment of their message.
+    expect((await w.attach("docs/plan.md", person.id, person.thread_id)).body.code).toBe("validation_error");
+    // A message named with another thread brings nothing.
+    expect((await w.attach("docs/plan.md", person.id)).body.code).toBe("message_not_found");
+    expect((w.store.message(w.message.id)!.attachments ?? []).map((a) => a.name)).toEqual(["out.log"]);
+  });
+});

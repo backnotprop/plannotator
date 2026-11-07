@@ -11,7 +11,7 @@ import { CommentPopover } from './CommentPopover';
 import { ImageThumbnail } from './ImageThumbnail';
 import type { CodeAnnotation, ImageAttachment } from '../types';
 import { copyTextToClipboard } from '../utils/clipboard';
-import { whenCodeLineRendered } from '../utils/codeLineScroll';
+import { scrollCodeLineIntoView, whenCodeLineRendered } from '../utils/codeLineScroll';
 import { hashDraftScope } from '../utils/draftScopeHash';
 
 export interface CodeFileAnnotationInput {
@@ -462,19 +462,9 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     const find = () => {
       const root = fileAreaRef.current?.querySelector('diffs-container')?.shadowRoot;
       const row = root?.querySelector(`[data-line="${revealLine.line}"]`);
-      if (row) {
-        // Vertically only: scrollIntoView would also scroll a long line sideways.
-        let node: Element | null = fileAreaRef.current;
-        while (node) {
-          if (node instanceof HTMLElement && node.scrollHeight > node.clientHeight && /(auto|scroll)/.test(getComputedStyle(node).overflowY)) {
-            const box = node.getBoundingClientRect();
-            const rect = row.getBoundingClientRect();
-            node.scrollTop += rect.top - (box.top + box.height / 2) + rect.height / 2;
-            return;
-          }
-          node = node.parentElement;
-        }
-        row.scrollIntoView({ block: 'center', inline: 'nearest' });
+      if (row instanceof HTMLElement) {
+        // Vertically only: scrollIntoView alone would also slide a long line sideways.
+        scrollCodeLineIntoView(row);
         return;
       }
       attempts += 1;
@@ -507,7 +497,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     const area = fileAreaRef.current;
     if (line == null || !area || selectedAnnotationIdRef.current) return;
     return whenCodeLineRendered(area, line, (lineEl) => {
-      lineEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      scrollCodeLineIntoView(lineEl, { smooth: true });
     }, { lineCount });
   }, [line, filepath, lineCount, revealKey]);
 

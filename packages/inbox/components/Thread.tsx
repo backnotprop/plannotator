@@ -34,7 +34,7 @@ import { AttachmentTiles, AttachmentsCount, changedCount } from './AttachmentTil
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import { OpenInCodeHover, OpenInCodeSpans, type OpenInSurface } from './OpenIn';
 import { FileRefCodeSpans } from './FileRefSpan';
-import { paintBarePaths, type FileRef } from '../fileRefs';
+import type { FileRef } from '../fileRefs';
 import { ReferencedFilePane, type OpenFileRef } from './ReferencedFilePane';
 import { stepsOf } from '../stepping';
 import { optionOf, optionSetId, optionSetOf } from '../optionSets';
@@ -393,7 +393,7 @@ export function MessageBody({
   onOpenFileRef,
 }: {
   /**
-   * Design prototype "file-refs-open-pane": a file this agent message names (a link that is not attached, a code span
+   * A file this agent message names (approval "inbox-file-refs-open-viewer": a link that is not attached, a code span
    * that is a path, a bare path, a picture that did not load) opens beside the thread. Absent: as before.
    */
   onOpenFileRef?: (ref: FileRef) => void;
@@ -618,7 +618,7 @@ export function MessageBody({
       if (!src || refOf(src) === null) return false;
       // An image that failed to load (outside the project, gone) opens nothing: an empty lightbox helps no one.
       if ([...(bodyRef.current?.querySelectorAll<HTMLImageElement>('img[data-ib-broken]') ?? [])].some((img) => img.getAttribute('src') === src)) {
-        // Design prototype: the pane says why it is not here.
+        // The pane says why it is not here.
         const named = openFileRefRef.current ? refOf(src) : null;
         if (named) openFileRefRef.current?.({ path: named });
         return true;
@@ -733,8 +733,15 @@ export function MessageBody({
   openReplyFileRef.current = replyFiles?.onOpen;
   // The person's own words keep their links as they are: only an agent's message opens what it names.
   const refsOn = !!onOpenFileRef && message.author.kind === 'agent';
-  const openFileRefRef = useRef(refsOn ? onOpenFileRef : undefined);
-  openFileRefRef.current = refsOn ? onOpenFileRef : undefined;
+  const openFileRefRef = useRef<((ref: FileRef) => void) | undefined>(undefined);
+  // A file the message carries opens as that attachment (comments and all); any other file read only.
+  openFileRefRef.current = refsOn
+    ? (ref) => {
+        const attached = attachmentForLink(ref.path, { attachments: message.attachments ?? [], root: projectRoot, base: message.base_path ?? null });
+        if (attached) openRef.current(attached);
+        else onOpenFileRef?.(ref);
+      }
+    : undefined;
   const resolveLocalLink = useCallback<LocalLinkResolver>(
     (href) => {
       // A file the person's reply commented on (its feedback heading), or a drawing it carried.
@@ -784,12 +791,6 @@ export function MessageBody({
     },
     [message.attachments, message.base_path, message.thread_id, message.id, projectRoot, replyFileList, openInFiles, refsOn],
   );
-  // Bare paths in the text (fileRefs.ts): painted, and a click opens the file beside the thread.
-  useEffect(() => {
-    const body = bodyRef.current;
-    if (!body || !refsOn) return;
-    return paintBarePaths(`${message.id}:paths`, body, (ref) => openFileRefRef.current?.(ref));
-  }, [message.id, refsOn]);
   const renderFooter = useCallback(
     (question: IndexedQuestion) => {
       const text = footerFor(question.question.key);
@@ -1219,7 +1220,7 @@ export interface ThreadPaneProps {
   stacked?: boolean;
   /** A window too narrow for a file beside the thread (stack.ts): an open file takes the whole window. */
   fileStacked?: boolean;
-  /** Design prototype "file-refs-open-pane": the file a message names, open beside the thread (the route's `ref=`). */
+  /** A file a message names, open beside the thread, read only (the route's `ref=`; approval "inbox-file-refs-open-viewer"). */
   namedFile?: OpenFileRef | null;
   /** Open (or, with null, close) a file a message names beside the thread. Absent: references stay as before. */
   onOpenNamedFile?: (ref: OpenFileRef | null) => void;
@@ -2627,7 +2628,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     if (pane && file && file.id !== attachment.id) pane.leave(attachment.name ?? allFiles.find((a) => a.id === attachment.id)?.name ?? 'that file', go);
     else go();
   };
-  /** Design prototype: a file a message names, beside the thread; an open file with a comment not saved yet asks first. */
+  /** A file a message names, beside the thread; an open file with a comment not saved yet asks first. */
   const openRefFromMessage = (ref: OpenFileRef) => {
     const go = () => onOpenNamedFile?.(ref);
     const pane = paneRef.current;
@@ -6215,7 +6216,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   repo={thread.project.repo ?? null}
                   onOpenAttachment={openFromMessage}
                   onOpenInlineImage={(image) => openFromMessage(image)}
-                  onOpenFileRef={onOpenNamedFile ? (ref) => openRefFromMessage({ ...ref, messageId: message.id }) : undefined}
+                  // The owner's: a tailnet guest reads no file a message names (the routes are owner only).
+                  onOpenFileRef={onOpenNamedFile && !guest ? (ref) => openRefFromMessage({ ...ref, messageId: message.id }) : undefined}
                   onOpenOptionSet={(key, image) => openOptionSet(message.id, key, image)}
                   readOnly={!isAgent || !liveMessage(message) || questions.length === 0 || allSent}
                   answers={answersOf(message)}
@@ -6938,6 +6940,14 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         full={phone || fileStacked}
         onOpen={(ref) => onOpenNamedFile?.(ref)}
         onClose={() => onOpenNamedFile?.(null)}
+        // A comment made it an attachment of its message (or it already was one): that attachment opens in its place.
+        onAttached={async (attachmentId, focus) => {
+          await reloadFiles();
+          void onChanged();
+          onOpenFile({ id: attachmentId, version: 'current', focus, view: null }, { replace: true });
+        }}
+        // Another machine's thread: its files are read there, and a comment never attaches through the forward.
+        commentable={!machineOf(thread.thread_id)}
       />
     )}
     </>

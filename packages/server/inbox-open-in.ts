@@ -9,6 +9,12 @@
  *   GET  /api/inbox/open-in/file  ?path=&<scope>  a referenced file: is it here, and what kind
  *   POST /api/inbox/open-in/file  { path, line?, <scope>, app_id, serverSession }
  *   GET  /api/inbox/open-in/file/code  ?path=&<scope>  a referenced file's text, for its hover
+ *   GET  /api/inbox/open-in/file/view  ?path=&thread=&message=  a file a message names, for the pane (any kind)
+ *   GET  /api/inbox/open-in/file/raw   ?path=&thread=&message=  that file's bytes, when it is an image or a film
+ *   POST /api/inbox/open-in/file/attach  { path, thread, message, serverSession }  attach it to the message (a comment)
+ *
+ * The view, raw and attach routes (approval "inbox-file-refs-open-viewer") are not behind Code review and not held to
+ * the project: any file on this computer the Inbox can read, but never a secret (`secretOrSystem`, the dotenv family).
  *
  * The last only reads, so it also answers the owner through the tailnet (a phone's tap). A thread that owns a pull
  * request, and a PR page (`pull`), read the file at that PR's head commit from the forge (`InboxPulls.file`), so it needs
@@ -40,12 +46,22 @@ import { getOpenInApp, type OpenInApp, type OpenInPlatform } from "@plannotator/
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, posix, relative, sep } from "node:path";
-import { checkInboxAttachmentForLaunch, checkInboxProjectFile, type InboxProjectFilePlace } from "@plannotator/shared/inbox/attachments";
+import {
+  checkInboxAttachmentForLaunch,
+  checkInboxProjectFile,
+  checkInboxReadableFile,
+  inboxAttachmentState,
+  inboxStatEtag,
+  recordInboxAttachments,
+  type InboxProjectFilePlace,
+} from "@plannotator/shared/inbox/attachments";
 import { readFileCapped } from "@plannotator/shared/repo-file";
 import { sniffImageContentType } from "@plannotator/shared/review-image";
 import { sniffInboxVideo } from "@plannotator/shared/inbox/video";
-import { open as openFile } from "node:fs/promises";
-import { inboxAttachmentNameRefusal, isInboxTextKind } from "@plannotator/core/inbox-types";
+import { constants, type FileHandle, open as openFile } from "node:fs/promises";
+import { INBOX_UPLOAD_MAX_BYTES, INBOX_VIEW_MAX_BYTES, inboxAttachmentKind, inboxAttachmentNameRefusal, isInboxAnnotatableKind, isInboxTextKind } from "@plannotator/core/inbox-types";
+import { byteRangeResponse, decideByteRange } from "./inbox-byte-range";
+import { INBOX_MESSAGE_IMAGE_CSP } from "@plannotator/shared/inbox/message-images";
 import { isShapeProjectPath } from "@plannotator/core/shape";
 import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -66,14 +82,14 @@ export const INBOX_OPEN_IN_PATH = "/api/inbox/open-in";
 export const INBOX_OPEN_IN_APPS_PATH = "/api/inbox/open-in/apps";
 export const INBOX_OPEN_IN_FILE_PATH = "/api/inbox/open-in/file";
 export const INBOX_OPEN_IN_CODE_PATH = "/api/inbox/open-in/file/code";
-/** Design prototype (file-refs-open-pane): a referenced file for the pane, and an image's or a film's bytes. */
+/**
+ * A file an agent's message names, for the pane (approval "inbox-file-refs-open-viewer"): its text or kind, an image's
+ * or a film's bytes, and making it one of the message's attachments when the person comments on it. Not behind Code
+ * review, and not held to the project: any file on this computer the Inbox can read, but never a secret.
+ */
 export const INBOX_OPEN_IN_VIEW_PATH = "/api/inbox/open-in/file/view";
 export const INBOX_OPEN_IN_RAW_PATH = "/api/inbox/open-in/file/raw";
-/**
- * Whether the pane's read of a referenced file sits behind Code review, as the hover's does. Off in the prototype (an
- * owner call): the roots, the path rule and the credential refusals are the same either way.
- */
-const VIEW_NEEDS_CODE_REVIEW = false;
+export const INBOX_OPEN_IN_ATTACH_PATH = "/api/inbox/open-in/file/attach";
 
 /** How the Inbox launches: the host's real launcher, or a test's stub. */
 export interface InboxOpenInLauncher {
@@ -162,7 +178,7 @@ interface FileScope {
   from?: unknown;
 }
 
-const CREDENTIAL_FOLDERS = new Set([".ssh", ".gnupg", ".aws", ".docker", ".kube", ".git"]);
+const CREDENTIAL_FOLDERS = new Set([".ssh", ".gnupg", ".aws", ".azure", ".docker", ".kube", ".git", ".password-store", "keychains"]);
 const CREDENTIAL_FILES = new Set([
   ".netrc",
   ".npmrc",
@@ -177,7 +193,7 @@ const CREDENTIAL_FILES = new Set([
   "id_ed25519",
 ]);
 /** A run of folders and names that holds a CLI's sign-in, anywhere in the path. */
-const CREDENTIAL_RUNS = [".config/gh", ".config/glab-cli", ".config/gcloud", ".codex/auth.json", ".claude/.credentials.json"];
+const CREDENTIAL_RUNS = [".config/gh", ".config/glab-cli", ".config/gcloud", ".config/op", ".local/share/keyrings", ".codex/auth.json", ".claude/.credentials.json", ".claude.json"];
 
 /**
  * A path a hover never shows, as if the file were missing: a thread sent from the home folder makes all of it a project.
@@ -193,6 +209,17 @@ function holdsCredentials(path: string): boolean {
     /\.(pem|key)$/.test(name) ||
     CREDENTIAL_RUNS.some((run) => joined.includes(`/${run}/`))
   );
+}
+
+/** Opened without following a last symlink, and without waiting on a pipe. */
+const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+
+/**
+ * A path a referenced file's view never shows or attaches, wherever it is: a secret (`holdsCredentials`; the dotenv
+ * family is refused by `checkInboxReadableFile` itself), or a live system file (`/proc`, `/sys`, `/dev`).
+ */
+function secretOrSystem(path: string): boolean {
+  return holdsCredentials(path) || /^\/(?:proc|sys|dev)(?:\/|$)/.test(path.replace(/\\/g, "/"));
 }
 
 /** A PR file's kind by its name (its bytes are text: the forge's read is text only). */
@@ -307,31 +334,36 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     return json(read.ok && !read.content.includes("\0") ? { found: true, contents: read.content } : { found: false });
   };
 
-  const scopeOf = (params: URLSearchParams): FileScope => ({ thread: params.get("thread"), message: params.get("message"), pull: params.get("pull") });
+  const scopeOf = (params: URLSearchParams | Record<string, unknown>): FileScope =>
+    params instanceof URLSearchParams ? { thread: params.get("thread"), message: params.get("message") } : { thread: params.thread, message: params.message };
 
-  /** The first bytes of a file, to say what type its bytes are (never its name alone). */
-  const headOf = async (path: string): Promise<Uint8Array | null> => {
-    try {
-      const handle = await openFile(path, "r");
-      try {
-        const buffer = new Uint8Array(4096);
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-        return buffer.subarray(0, bytesRead);
-      } finally {
-        await handle.close().catch(() => {});
-      }
-    } catch {
-      return null;
-    }
+  /**
+   * Where a path a message names may be, as absolute paths to try in order (approval "inbox-file-refs-open-viewer": no
+   * project boundary). `~/…` is in the home folder; an absolute path is itself; a relative one starts where the hover's
+   * starts (the agent's folder, its checkout, the thread's projects: `placesOf`), and may lead anywhere from there. A
+   * message of another thread brings no folder.
+   */
+  const candidatesOf = (scope: FileScope, named: string): string[] => {
+    if (typeof named !== "string" || named === "" || named.length > 4096) return [];
+    if (/^~(?:[\\/]|$)/.test(named)) return [join(givenHome, named.slice(2))];
+    if (isAbsolute(named)) return [named];
+    return [...new Set(placesOf(scope, named).map((place) => join(place.root, place.relative)))];
+  };
+
+  /** The message's own attachment of that file (by its real path), when it carries one. */
+  const attachedTo = (scope: FileScope, real: string): string | null => {
+    const message = typeof scope.message === "string" ? store.message(scope.message) : null;
+    if (!message || message.thread_id !== scope.thread) return null;
+    return (message.attachments ?? []).find((file) => file.path === real)?.id ?? null;
   };
 
   /**
-   * A referenced file for the pane (design prototype): the hover's read, every kind. A PR's text first where the scope
-   * has one; else the file here under `checkInboxProjectFile` and the credential refusals. Text comes back whole (under
-   * the read cap); an image or a film comes back as the raw route's address, which checks it all again.
+   * A referenced file for the pane. A PR's text first where the thread owns one and the path is relative (what the
+   * message talks about is that commit); else the file on this computer, wherever it is, never a secret
+   * (`checkInboxReadableFile` with `secretOrSystem`). Text comes back whole, under the view cap; an image or a film is
+   * read by the raw route, which checks it all again; any other kind by name only.
    */
   const viewRoute = async (req: Request): Promise<Response> => {
-    if (VIEW_NEEDS_CODE_REVIEW && !codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
     if (req.method !== "GET") return json({ error: "Use GET." }, 405);
     const url = new URL(req.url);
     if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) return json(crossOriginRefusalBody(), 403);
@@ -340,10 +372,9 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     const named = params.get("path") ?? "";
     const clean = posix.normalize(named.replace(/\\/g, "/")).replace(/^\.\//, "");
     const name = clean.split("/").pop() || clean;
-    const places = placesOf(scope, named);
-    const pulls = typeof scope.pull === "string" ? [scope.pull] : typeof scope.thread === "string" ? threadPulls(scope.thread) : [];
+    const pulls = typeof scope.thread === "string" && !isAbsolute(named) && !named.startsWith("~") ? threadPulls(scope.thread) : [];
     if (pulls.length > 0) {
-      const paths = [...new Set([...places.map((place) => place.relative), clean])].filter((path) => isShapeProjectPath(path) && !inboxAttachmentNameRefusal(path) && !holdsCredentials(path));
+      const paths = [...new Set([...placesOf(scope, named).map((place) => place.relative), clean])].filter((path) => isShapeProjectPath(path) && !inboxAttachmentNameRefusal(path) && !holdsCredentials(path));
       for (const pull of pulls) {
         for (const path of paths) {
           const file = await pullFile(pull, path);
@@ -351,45 +382,91 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
         }
       }
     }
-    const file = await checkInboxProjectFile(places);
+    const file = await checkInboxReadableFile(candidatesOf(scope, named), secretOrSystem);
     if (!file.ok) return json({ found: false, name, path: clean, reason: file.code });
-    if (holdsCredentials(file.path)) return json({ found: false, name, path: clean, reason: "missing" });
+    const attached = attachedTo(scope, file.path);
+    const found = { found: true, name, path: clean, ...(attached ? { attachment_id: attached } : {}) };
     if (isInboxTextKind(file.kind)) {
-      const read = await readFileCapped(file.path);
-      if (!read.ok) return json({ found: true, name, path: clean, kind: file.kind, tooLarge: true });
-      if (read.content.includes("\0")) return json({ found: true, name, path: clean, kind: "file" });
-      return json({ found: true, name, path: clean, kind: file.kind, contents: read.content });
+      const read = await readFileCapped(file.path, { maxBytes: INBOX_VIEW_MAX_BYTES });
+      if (!read.ok) return json({ ...found, kind: "file", tooLarge: true });
+      if (read.content.includes("\0")) return json({ ...found, kind: "file" });
+      return json({ ...found, kind: file.kind, contents: read.content });
     }
-    if (file.kind === "image" || file.kind === "video") {
-      const raw = new URLSearchParams();
-      for (const key of ["thread", "message", "path"]) {
-        const value = params.get(key);
-        if (value) raw.set(key, value);
-      }
-      return json({ found: true, name, path: clean, kind: file.kind, raw: `${INBOX_OPEN_IN_RAW_PATH}?${raw}` });
-    }
-    return json({ found: true, name, path: clean, kind: file.kind });
+    // A text file past the view cap is a `file` by its kind decision: too large, rather than a kind that never shows.
+    const tooLarge = file.kind === "file" && file.size > INBOX_VIEW_MAX_BYTES && inboxAttachmentKind(name) !== "file";
+    return json({ ...found, kind: file.kind, ...(tooLarge ? { tooLarge: true } : {}) });
   };
 
   /**
-   * An image's or a film's bytes, for the pane (design prototype). The same scope, roots and path rule as the view, and
-   * the type is the one its first bytes say (an image by its signature, a film by its container); anything else is
-   * refused. Sandboxed and never sniffed, so the address opened on its own runs nothing.
+   * An image's or a film's bytes, for the pane: the same candidates and refusals as the view, at most the upload cap,
+   * and the type its first bytes say (an image by its signature, an SVG by its root, a film by its container); anything
+   * else is refused. Sandboxed (an SVG never runs), never sniffed, same-origin only, never cached; a film seeks by Range.
    */
   const rawRoute = async (req: Request): Promise<Response> => {
-    if (VIEW_NEEDS_CODE_REVIEW && !codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
     if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Use GET." }, 405);
     const url = new URL(req.url);
     if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) return json(crossOriginRefusalBody(), 403);
     const params = url.searchParams;
-    const file = await checkInboxProjectFile(placesOf(scopeOf(params), params.get("path") ?? ""));
-    if (!file.ok || holdsCredentials(file.path) || (file.kind !== "image" && file.kind !== "video")) return json({ found: false }, 404);
-    const head = await headOf(file.path);
-    const type = head ? (file.kind === "image" ? sniffImageContentType(head) : sniffInboxVideo(head)) : null;
-    if (!type) return json({ found: false }, 415);
-    return new Response(Bun.file(file.path), {
-      headers: { "Content-Type": type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox; default-src 'none'" },
-    });
+    const file = await checkInboxReadableFile(candidatesOf(scopeOf(params), params.get("path") ?? ""), secretOrSystem);
+    if (!file.ok || (file.kind !== "image" && file.kind !== "video")) return json({ found: false }, 404);
+    if (file.size > INBOX_UPLOAD_MAX_BYTES) return json({ found: false, code: "too_large" }, 413);
+    let handle: FileHandle;
+    try {
+      handle = await openFile(file.path, OPEN_FLAGS);
+    } catch {
+      return json({ found: false }, 404);
+    }
+    let handed = false;
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile()) return json({ found: false }, 404);
+      const head = new Uint8Array(4096);
+      const { bytesRead } = await handle.read(head, 0, head.length, 0);
+      const bytes = head.subarray(0, bytesRead);
+      const type = file.kind === "image" ? sniffImageContentType(bytes) : sniffInboxVideo(bytes);
+      if (!type) return json({ found: false }, 415);
+      const etag = inboxStatEtag(stat);
+      const headers = {
+        "Content-Type": type,
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": INBOX_MESSAGE_IMAGE_CSP,
+        "Cross-Origin-Resource-Policy": "same-origin",
+        ETag: etag,
+      };
+      const decision = decideByteRange(req.headers.get("range"), stat.size, { ifRange: req.headers.get("if-range"), etag });
+      handed = true;
+      return await byteRangeResponse(handle, stat.size, decision, headers, { head: req.method === "HEAD" });
+    } finally {
+      if (!handed) await handle.close().catch(() => {});
+    }
+  };
+
+  /**
+   * The person commented on a file an agent's message names: it becomes one of that message's attachments, recorded
+   * as an agent's attachment is (`recordInboxAttachments`: its realpath, a regular file, never the dotenv family, the
+   * bytes kept as the sent version), after the view's refusals. Only a kind the window takes comments on, at most the
+   * upload cap. A file the message already carries answers that attachment; nothing is written twice.
+   */
+  const attachRoute = async (req: Request): Promise<Response> => {
+    if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+    const body = await readBody(req);
+    if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+    const scope = scopeOf(body);
+    if (typeof scope.thread !== "string" || typeof scope.message !== "string") throw new InboxError("validation_error", "thread and message: the message that names the file.", { field: "message" });
+    const message = store.message(scope.message);
+    if (!message || message.thread_id !== scope.thread) throw new InboxError("message_not_found", `No message ${scope.message} in that thread.`);
+    if (typeof body.path !== "string" || body.path === "") throw new InboxError("validation_error", "path: the file the message names.", { field: "path" });
+    const file = await checkInboxReadableFile(candidatesOf(scope, body.path), secretOrSystem);
+    if (!file.ok) throw new InboxError("attachment_missing", `${body.path} is not on this computer.`);
+    const held = attachedTo(scope, file.path);
+    if (!held) {
+      if (!isInboxAnnotatableKind(file.kind)) throw new InboxError("annotation_not_allowed", `${body.path} takes no comments here.`, { field: "path" });
+      if (file.size > INBOX_UPLOAD_MAX_BYTES) throw new InboxError("validation_error", `${body.path} is too large to attach.`, { field: "path" });
+    }
+    const [recorded] = held ? [null] : await recordInboxAttachments(store.dir, [file.path], { base: dirname(file.path), at: new Date().toISOString() });
+    const attachment = recorded ? store.attachReferencedFile(message.id, recorded) : (store.message(message.id)?.attachments ?? []).find((a) => a.id === held)!;
+    return json({ attachment: await inboxAttachmentState(attachment, message.id) });
   };
 
   /** Launch what the per-kind policy allows and this computer has: the app first, nothing is opened for a refusal. */
@@ -415,8 +492,10 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
 
   return async function handle(req: Request, path: string, via: "local" | "tailnet"): Promise<Response | null> {
     if (path === INBOX_OPEN_IN_CODE_PATH) return ownerOrLocal(req, via) ? codeRoute(req) : localOnly();
+    // A file a message names: read only, and attached when commented on. This computer, or its owner through the tailnet.
     if (path === INBOX_OPEN_IN_VIEW_PATH) return ownerOrLocal(req, via) ? viewRoute(req) : localOnly();
     if (path === INBOX_OPEN_IN_RAW_PATH) return ownerOrLocal(req, via) ? rawRoute(req) : localOnly();
+    if (path === INBOX_OPEN_IN_ATTACH_PATH) return ownerOrLocal(req, via) ? attachRoute(req) : localOnly();
     if (path !== INBOX_OPEN_IN_PATH && path !== INBOX_OPEN_IN_APPS_PATH && path !== INBOX_OPEN_IN_FILE_PATH) return null;
     // Launching an app changes this computer: never through the tailnet.
     if (via === "tailnet") return localOnly();

@@ -529,6 +529,54 @@ export async function checkInboxProjectFile(places: readonly InboxProjectFilePla
   return { ok: false, code: refused ? "refused" : "missing" };
 }
 
+export type InboxReadableFile = { ok: true; path: string; kind: InboxAttachmentKind; size: number } | { ok: false; code: "missing" | "refused" };
+
+/**
+ * A file a message names, wherever it is on this computer (approval "inbox-file-refs-open-viewer": no project
+ * boundary). Each candidate is an absolute path, tried in order; the first regular file wins. A dotenv-family name, or
+ * a path `refused` takes (a secret: SSH keys, credential stores), is refused as named and again at its realpath, before
+ * anything is read, so a symlink to a secret is refused too. The kind comes from its name and first bytes, as a send
+ * decides it (a text file past the view cap is a `file`).
+ */
+export async function checkInboxReadableFile(candidates: readonly string[], refused: (path: string) => boolean): Promise<InboxReadableFile> {
+  let refusedAny = false;
+  for (const named of candidates) {
+    if (!isAbsolute(named) || /[\u0000-\u001f\u007f]/.test(named)) continue;
+    if (inboxAttachmentNameRefusal(named) || refused(named)) {
+      refusedAny = true;
+      continue;
+    }
+    let real: string;
+    try {
+      real = realpathSync(named);
+    } catch {
+      continue;
+    }
+    if (inboxAttachmentNameRefusal(real) || refused(real)) {
+      refusedAny = true;
+      continue;
+    }
+    let handle: FileHandle;
+    try {
+      handle = await open(real, OPEN_FLAGS);
+    } catch {
+      continue;
+    }
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile()) continue;
+      const head = await readHead(handle);
+      const decision = decideInboxAttachmentKind(basename(real), head, isTextHead(head), stat.size);
+      return { ok: true, path: real, kind: decision.kind, size: stat.size };
+    } catch {
+      continue;
+    } finally {
+      await handle.close().catch(() => {});
+    }
+  }
+  return { ok: false, code: refusedAny ? "refused" : "missing" };
+}
+
 /** Whether a file's first bytes read as text: no NUL, and UTF-8 (a character cut at the end of the head is fine). */
 function isTextHead(head: Uint8Array): boolean {
   if (head.includes(0)) return false;

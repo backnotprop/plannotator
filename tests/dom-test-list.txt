@@ -345,6 +345,7 @@ packages/ui/components/ImageAnnotator/ImageAnnotator.shortcuts.test.tsx
 packages/ui/utils/undoHistory.dom.test.ts
 packages/ui/utils/codeBlockMark.test.ts
 packages/ui/components/InlineMarkdown.seam.test.tsx
+packages/ui/components/InlineMarkdown.barePaths.test.tsx
 packages/ui/components/ImageThumbnail.seam.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.test.tsx
 packages/ui/hooks/annotationRestoreVerify.test.tsx
@@ -574,3 +575,4 @@ packages/ui/components/html-viewer/HtmlViewer.frameUrl.test.tsx
 packages/ui/components/StarAskCard.test.tsx
 packages/system/test/change.test.tsx
 packages/system/test/render.test.tsx
+packages/inbox/fileRefs.dom.test.tsx

@@ -1,24 +1,31 @@
 /**
- * Design prototype "file-refs-open-pane": a file an agent's message names, opened beside the thread in the artifact
- * pane's frame, read only. The pane's own viewers draw it (ui's Viewer for a document, CodeFileView for code at its
- * line, HtmlViewer for a page, the picture, the film). A file that is not here, or not one the Inbox opens, says so
- * calmly in the pane.
+ * A file an agent's message names, opened beside the thread in the artifact pane's frame (approval
+ * "inbox-file-refs-open-viewer"). The pane's own viewers draw it (ui's Viewer for a document, CodeFileView for code at
+ * its line, HtmlViewer for a page, the image and video views). A file that is not here, or that the Inbox never shows,
+ * says so calmly in the pane.
  *
- * Not attached, so no comments: the same rule and words as a page an attached page links to.
+ * It opens read only and attaches nothing. The person's first comment on it makes it an attachment of that message
+ * (`inboxApi.attachReferencedFile`), saves the comment there, and the attachment opens in its place: from then on it is
+ * commented, counted and sent like any attachment. A file the message already carries opens as that attachment.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { CodeFileView } from '@plannotator/ui/components/CodeFilePopout';
 import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
+import { HtmlSurfaceControls } from '@plannotator/ui/components/HtmlSurfaceControls';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { ScrollViewportProvider } from '@plannotator/ui/hooks/useScrollViewport';
-import { inboxApi, type ReferencedFileView } from '../api';
-import { attachmentBlocks } from '../attachments';
-import { useInboxFileSource } from '../fileSource';
+import type { Annotation } from '@plannotator/ui/types';
+import { inboxApi, InboxApiError, referencedFileRawUrl, type ReferencedFileScope, type ReferencedFileView } from '../api';
+import { attachmentBlocks, codeCommentAnnotation } from '../attachments';
+import { InboxFileSourceProvider, useInboxFileSource, type InboxFileSource } from '../fileSource';
 import { Icon } from '../icons';
 import { FileName } from './FileName';
 import { CopyFileButton } from './CopyFileButton';
+import { ImageAttachmentView } from './ImageAttachmentView';
+import { VideoAttachmentView } from './VideoAttachmentView';
 import { Tip } from './Tip';
 import type { FileRef } from '../fileRefs';
 
@@ -26,7 +33,7 @@ const noop = () => {};
 const NO_ANNOTATIONS: [] = [];
 
 export interface OpenFileRef extends FileRef {
-  /** The message that names it: where its path starts (its folder, its checkout). */
+  /** The message that names it: where its path starts (its folder, its checkout), and the message it attaches to. */
   messageId: string;
 }
 
@@ -35,9 +42,9 @@ function folderOfPath(path: string): string {
   return at < 0 ? '' : path.slice(0, at + 1);
 }
 
-/** A link in a referenced document, from that document's folder (a `..` stays as written; the server holds the root). */
+/** A link in a referenced document, from that document's folder (an absolute or `~` path stays as written). */
 function joinPath(folder: string, href: string): string {
-  if (href.startsWith('/') || /^[a-z]:[\\/]/i.test(href)) return href;
+  if (href.startsWith('/') || href.startsWith('~/') || /^[a-z]:[\\/]/i.test(href)) return href;
   return `${folder}${href}`;
 }
 
@@ -46,13 +53,34 @@ function linesLabel(ref: FileRef): string {
   return ref.lineEnd && ref.lineEnd !== ref.line ? ` · lines ${ref.line}–${ref.lineEnd}` : ` · line ${ref.line}`;
 }
 
+/** What the viewers take as the file, before it is one: no record yet, so no sent version and nothing changed. */
+function standIn(view: Extract<ReferencedFileView, { found: true }>, messageId: string): InboxAttachmentState {
+  return {
+    id: `ref:${messageId}:${view.path}`,
+    path: view.path,
+    named_path: null,
+    name: view.name,
+    kind: view.kind as InboxAttachmentState['kind'],
+    sent_sha256: '',
+    size: 0,
+    sent_at: '',
+    sent_mtime: '',
+    message_id: messageId,
+    current: null,
+    changed_since_sent: false,
+    unavailable: null,
+  };
+}
+
 export function ReferencedFilePane({
   threadId,
   fileRef,
   phone,
   full,
+  commentable = true,
   onOpen,
   onClose,
+  onAttached,
 }: {
   threadId: string;
   fileRef: OpenFileRef;
@@ -60,21 +88,35 @@ export function ReferencedFilePane({
   phone: boolean;
   /** The window has room for the file only (a phone, a narrow window): it covers the thread. */
   full: boolean;
+  /** False: read only (another machine's thread; a comment never attaches through the forward). */
+  commentable?: boolean;
   /** A link in a referenced document: open that file in this pane. */
   onOpen: (ref: OpenFileRef) => void;
   onClose: () => void;
+  /** It is an attachment of its message now (a comment made it one, or it already was): open that, `focus` its comment. */
+  onAttached: (attachmentId: string, focus: string | null) => void | Promise<void>;
 }) {
   const source = useInboxFileSource();
   const [view, setView] = useState<ReferencedFileView | null>(null);
   const [failed, setFailed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const scope = useMemo<ReferencedFileScope>(() => ({ thread: threadId, message: fileRef.messageId }), [threadId, fileRef.messageId]);
   const key = `${fileRef.messageId}\u0000${fileRef.path}`;
+  const attachedRef = useRef(onAttached);
+  attachedRef.current = onAttached;
   useEffect(() => {
     let live = true;
     setView(null);
     setFailed(false);
+    setError(null);
     inboxApi
-      .referencedFile({ thread: threadId, message: fileRef.messageId }, fileRef.path)
-      .then((answer) => live && setView(answer))
+      .referencedFile(scope, fileRef.path)
+      .then((answer) => {
+        if (!live) return;
+        // The message carries this file already: it opens as that attachment, comments and all.
+        if (answer.found && answer.attachment_id) void attachedRef.current(answer.attachment_id, null);
+        else setView(answer);
+      })
       .catch(() => live && setFailed(true));
     return () => {
       live = false;
@@ -98,27 +140,47 @@ export function ReferencedFilePane({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  /** The first comment: attach the file to its message, keep the comment there, and open the attachment. Once at a time. */
+  const saving = useRef<Promise<boolean> | null>(null);
+  const save = useCallback(
+    (annotation: Annotation | object): Promise<boolean> => {
+      if (saving.current) return saving.current;
+      const answer = (async () => {
+        try {
+          const { attachment } = await inboxApi.attachReferencedFile(scope, fileRef.path);
+          const { annotation: record } = await inboxApi.saveAnnotation(attachment.id, 'current', annotation);
+          await attachedRef.current(attachment.id, record.id);
+          return true;
+        } catch (cause) {
+          setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not saved.');
+          return false;
+        } finally {
+          saving.current = null;
+        }
+      })();
+      saving.current = answer;
+      return answer;
+    },
+    [scope, fileRef.path],
+  );
+  const writes = commentable && source.writes;
+
   const name = view?.name ?? fileRef.path.split('/').pop() ?? fileRef.path;
-  const kind = view?.found ? view.kind : null;
+  const found = view?.found ? view : null;
+  const kind = found?.kind ?? null;
   const folder = folderOfPath(view?.path ?? fileRef.path);
   const openFromDoc = useCallback((href: string) => onOpen({ messageId: fileRef.messageId, path: joinPath(folder, href.replace(/[?#].*$/s, '')) }), [onOpen, fileRef.messageId, folder]);
 
-  // ui's line reveal falls back to scrollIntoView, which slides a long row sideways by the gutter's width: put it back
-  // (prototype only; the fix belongs in CodeFileView's fallback).
-  const codeRef = useRef<HTMLDivElement>(null);
-  const loaded = view?.found ? view.path : null;
-  useEffect(() => {
-    if (!fileRef.line || !loaded) return;
-    let frames = 0;
-    let id = 0;
-    const settle = () => {
-      const root = codeRef.current?.querySelector('diffs-container')?.shadowRoot;
-      for (const el of root?.querySelectorAll<HTMLElement>('code, pre') ?? []) if (el.scrollLeft > 0) el.scrollLeft = 0;
-      if (++frames < 90) id = requestAnimationFrame(settle);
-    };
-    id = requestAnimationFrame(settle);
-    return () => cancelAnimationFrame(id);
-  }, [loaded, fileRef.line]);
+  // An image or a film: the attachment views, reading this file's bytes until it is one.
+  const media = found && (kind === 'image' || kind === 'video') ? standIn(found, fileRef.messageId) : null;
+  const mediaSource = useMemo<InboxFileSource>(() => {
+    const raw = () => referencedFileRawUrl(scope, fileRef.path);
+    return { ...source, imageUrl: raw, videoUrl: raw, downloadUrl: raw, posterUrl: undefined, saveAnnotation: async () => Promise.reject(new Error('unused')), writes };
+  }, [source, scope, fileRef.path, writes]);
+
+  // A page: comments go on with the pinpoint, as on an attached page (a click on a link follows it with them off).
+  const [armed, setArmed] = useState(!phone);
+  const htmlComments = writes && !phone && kind === 'html';
 
   const missing = failed || (view !== null && !view.found);
   const reason = view && !view.found ? view.reason : 'missing';
@@ -143,9 +205,10 @@ export function ReferencedFilePane({
           <FileName name={name} />
         </span>
         <span className="ib-from" data-header-from="">
-          {view?.found && view.pull ? `${view.pull.label}${linesLabel(fileRef)}` : `${fileRef.path}${linesLabel(fileRef)}`}
+          {found?.pull ? `${found.pull.label}${linesLabel(fileRef)}` : `${fileRef.path}${linesLabel(fileRef)}`}
         </span>
         <span className="ib-sp" />
+        {htmlComments && <HtmlSurfaceControls armed={armed} onToggleArmed={() => setArmed((v) => !v)} />}
         {!full && (
           <Tip content="Close">
             <button type="button" className="ib-iconbtn" onClick={onClose} aria-label={`Close ${name}`}>
@@ -154,18 +217,14 @@ export function ReferencedFilePane({
           </Tip>
         )}
       </div>
-      {view?.found ? (
-        <div className="ib-refnote" data-ref-note="">
-          <Icon name="info" size={13} />
-          <span>
-            <b>{name}</b> is not attached, so comments are off.
-          </span>
-        </div>
-      ) : (
-        <div />
-      )}
+      <div />
       <div className="ib-vbody">
         <div className={`ib-docarea${kind === 'html' ? ' ib-html' : ''}`}>
+          {error && (
+            <div className="ib-error ib-view-error" role="alert">
+              {error}
+            </div>
+          )}
           {!view && !failed && <div className="ib-refwait" aria-hidden="true" />}
           {missing && (
             <div className="ib-refmissing" role="status" data-ref-missing={reason}>
@@ -173,69 +232,84 @@ export function ReferencedFilePane({
                 <Icon name="doc" size={22} />
               </span>
               <span className="ib-refmissing-name">{fileRef.path}</span>
-              <span className="ib-refmissing-t">{reason === 'refused' ? 'is not a file of this project.' : 'is not on this computer.'}</span>
+              <span className="ib-refmissing-t">{reason === 'refused' ? 'does not show here.' : 'is not on this computer.'}</span>
             </div>
           )}
-          {view?.found && view.contents !== undefined && (kind === 'markdown' || kind === 'text') && (
-            <RefDocument key={key} text={view.contents} name={name} kind={kind} scope={{ thread: threadId, message: fileRef.messageId }} folder={folder} onOpenLink={openFromDoc} />
+          {found && found.contents !== undefined && (kind === 'markdown' || kind === 'text') && (
+            <RefDocument key={key} text={found.contents} name={name} kind={kind} scope={scope} folder={folder} onOpenLink={openFromDoc} onComment={writes ? save : undefined} />
           )}
-          {view?.found && view.contents !== undefined && (kind === 'code' || kind === 'mermaid' || kind === 'graphviz') && (
-            <div className="ib-codeview" data-code-view="" ref={codeRef}>
+          {found && found.contents !== undefined && (kind === 'code' || kind === 'mermaid' || kind === 'graphviz') && (
+            <div className="ib-codeview" data-code-view="">
               <div className="ib-codehint" data-code-row="">
-                <CopyFileButton text={view.contents} name={name} sent={false} announce={noop} />
+                <CopyFileButton text={found.contents} name={name} sent={false} announce={noop} />
+                {writes && <span className="ib-codehint-t">{phone ? 'Tap a line to comment.' : 'Click a line number, drag across lines, or select code to comment.'}</span>}
               </div>
               <CodeFileView
                 key={key}
-                filepath={view.path}
-                contents={view.contents}
+                filepath={found.path}
+                contents={found.contents}
                 line={fileRef.line}
                 lineEnd={fileRef.lineEnd}
-                // A line near the top is on screen already; ui's reveal scrolls a short file's long row sideways (its fallback).
                 revealLine={fileRef.line ? { line: fileRef.line, token: 1 } : undefined}
+                onAddAnnotation={
+                  writes
+                    ? (input) =>
+                        void save(
+                          codeCommentAnnotation({
+                            id: `ann-code-${typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Date.now().toString(36)}`,
+                            lineStart: input.lineStart,
+                            lineEnd: input.lineEnd,
+                            text: input.text,
+                            code: input.originalCode,
+                          }),
+                        )
+                    : undefined
+                }
                 allowImages={false}
                 className="ib-codebody"
               />
             </div>
           )}
-          {view?.found && view.contents !== undefined && kind === 'html' && (
+          {found && found.contents !== undefined && kind === 'html' && (
             <div className="ib-htmlframe">
               <HtmlViewer
                 key={key}
-                rawHtml={view.contents}
+                rawHtml={found.contents}
                 frameUrl={source.pageFrameUrl}
                 title={name}
                 annotations={NO_ANNOTATIONS}
-                onAddAnnotation={noop}
+                onAddAnnotation={htmlComments ? (annotation) => void save(annotation) : noop}
                 onSelectAnnotation={noop}
                 selectedAnnotationId={null}
                 mode="selection"
                 inputMethod="pinpoint"
-                annotateModeActive={false}
+                annotateModeActive={htmlComments && armed}
+                onAnnotateModeExit={() => setArmed(false)}
+                onAnnotateModeToggle={htmlComments ? () => setArmed((v) => !v) : undefined}
                 onOpenLink={openFromDoc}
                 fullViewport
                 hideControls
-                maxAdditionalTargets={0}
-                readOnly
+                maxAdditionalTargets={htmlComments ? undefined : 0}
+                readOnly={!htmlComments}
               />
             </div>
           )}
-          {view?.found && kind === 'image' && view.raw && (
-            <div className="ib-refmedia" data-ref-image="">
-              <img src={view.raw} alt={name} />
-            </div>
+          {media && (
+            <InboxFileSourceProvider source={mediaSource}>
+              {kind === 'image' ? (
+                <ImageAttachmentView key={key} attachment={media} version="current" annotations={NO_ANNOTATIONS} selectedId={null} readOnly={!writes} onSave={save} onError={setError} />
+              ) : (
+                <VideoAttachmentView key={key} attachment={media} version="current" annotations={NO_ANNOTATIONS} selectedId={null} onSelect={noop} readOnly={!writes} onSave={save} onError={setError} phone={phone} />
+              )}
+            </InboxFileSourceProvider>
           )}
-          {view?.found && kind === 'video' && view.raw && (
-            <div className="ib-refmedia" data-ref-video="">
-              <video src={view.raw} controls playsInline preload="metadata" />
-            </div>
-          )}
-          {view?.found && (view.tooLarge || kind === 'pdf' || kind === 'file') && (
+          {found && (found.tooLarge || (kind !== null && !['markdown', 'text', 'code', 'mermaid', 'graphviz', 'html', 'image', 'video'].includes(kind))) && (
             <div className="ib-refmissing" role="status" data-ref-missing="kind">
               <span className="ib-refmissing-ic">
                 <Icon name="doc" size={22} />
               </span>
-              <span className="ib-refmissing-name">{view.path}</span>
-              <span className="ib-refmissing-t">{view.tooLarge ? 'is too large to show here.' : 'does not show here.'}</span>
+              <span className="ib-refmissing-name">{found.path}</span>
+              <span className="ib-refmissing-t">{found.tooLarge ? 'is too large to show here.' : 'does not show here.'}</span>
             </div>
           )}
         </div>
@@ -244,18 +318,33 @@ export function ReferencedFilePane({
   );
 }
 
-/** A referenced document: read only, its pictures and links from its own folder. */
-function RefDocument({ text, name, kind, scope, folder, onOpenLink }: { text: string; name: string; kind: 'markdown' | 'text'; scope: { thread: string; message: string }; folder: string; onOpenLink: (href: string) => void }) {
+/** A referenced document: its pictures and links from its own folder; a selection comments (`onComment`) when it may. */
+function RefDocument({
+  text,
+  name,
+  kind,
+  scope,
+  folder,
+  onOpenLink,
+  onComment,
+}: {
+  text: string;
+  name: string;
+  kind: 'markdown' | 'text';
+  scope: ReferencedFileScope;
+  folder: string;
+  onOpenLink: (href: string) => void;
+  onComment?: (annotation: Annotation) => Promise<boolean>;
+}) {
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
   const viewer = useRef<ViewerHandle>(null);
   const blocks = useMemo(() => attachmentBlocks(kind, text, name), [kind, text, name]);
   const resolveImage = useCallback<ImageResolver>(
     (src) => {
       if (/^(https?:|data:|blob:)/i.test(src)) return { kind: 'src', src };
-      const raw = new URLSearchParams({ ...scope, path: joinPath(folder, src) });
-      return { kind: 'src', src: `/api/inbox/open-in/file/raw?${raw}` };
+      return { kind: 'src', src: referencedFileRawUrl(scope, joinPath(folder, src)) };
     },
-    [scope.thread, scope.message, folder],
+    [scope, folder],
   );
   const openLinkRef = useRef(onOpenLink);
   openLinkRef.current = onOpenLink;
@@ -269,17 +358,22 @@ function RefDocument({ text, name, kind, scope, folder, onOpenLink }: { text: st
             blocks={blocks}
             markdown={text}
             annotations={NO_ANNOTATIONS}
-            onAddAnnotation={noop}
+            onAddAnnotation={onComment ? (annotation) => void onComment(annotation) : noop}
             onSelectAnnotation={noop}
             selectedAnnotationId={null}
             resolveLocalLink={resolveLocalLink}
             questionDecisionLines={false}
             stickyActions={false}
             disableCodePathValidation
+            copyLabel="Copy file"
             maxWidth={760}
             mode="comment"
+            inputMethod="drag"
             taterMode={false}
-            readOnly
+            gridEnabled={false}
+            allowImages={false}
+            quickLabels={false}
+            readOnly={!onComment}
           />
         </ImageResolverContext.Provider>
       </ScrollViewportProvider>

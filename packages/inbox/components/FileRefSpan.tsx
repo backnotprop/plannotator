@@ -1,26 +1,28 @@
 /**
- * Design prototype "file-refs-open-pane": a code span in an agent's message that is a file's path
- * (`packages/inbox/App.tsx:42`, `docs/plan.md`, `shots/after.png`) opens that file beside the thread. On a computer
- * with Code review on, a code file still shows its code on hover (OpenInCodeHover) and the click opens the pane; on a
- * touch screen the tap goes straight to the pane.
+ * A file an agent's message names in its words (approval "inbox-file-refs-open-viewer"): a code span that is a path
+ * (`packages/inbox/App.tsx:42`, `docs/plan.md`, `shots/after.png`) or a bare path in the text (`docs/plan.md:6-13`)
+ * opens that file beside the thread. Both are buttons: focusable, opened with Enter or Space. On a computer with Code
+ * review on, a code file still shows its code on hover (OpenInCodeHover) and the click opens the pane; on a touch
+ * screen the tap goes straight to the pane.
  */
 import { useMemo, type MutableRefObject, type ReactNode } from 'react';
-import { CodeSpanContext, CodeSpanMatchContext } from '@plannotator/ui/components/LocalLinkContext';
+import { BarePathContext, CodeSpanContext, CodeSpanMatchContext, type BarePathWrap } from '@plannotator/ui/components/LocalLinkContext';
 import { isCodeFilePath } from '@plannotator/core/code-file';
-import { fileRefOf, looksLikeFilePath, type FileRef } from '../fileRefs';
+import { fileRefOf, findBarePaths, looksLikeFilePath, type FileRef } from '../fileRefs';
 import { openAttachmentTitle } from '../links';
 import { OpenInCodeHover } from './OpenIn';
 import { useTouchScreen } from '../phone';
 
-function FileRefSpan({ text, code, hover, scope, openRef }: { text: string; code: ReactNode; hover: boolean; scope: { thread: string; message: string }; openRef: MutableRefObject<((ref: FileRef) => void) | undefined> }) {
+function FileRefSpan({ text, children, bare, hover, scope, openRef }: { text: string; children: ReactNode; bare: boolean; hover: boolean; scope: { thread: string; message: string }; openRef: MutableRefObject<((ref: FileRef) => void) | undefined> }) {
   const touch = useTouchScreen();
-  const ref = fileRefOf(text);
-  if (!ref) return <>{code}</>;
+  const ref = fileRefOf(text, bare);
+  if (!ref) return <>{children}</>;
   const open = () => openRef.current?.(ref);
   const peek = hover && !touch && isCodeFilePath(text);
   const span = (
     <span
-      className="ib-fileref"
+      className={`ib-fileref${bare ? ' ib-fileref-bare' : ''}`}
+      // With the peek, its trigger is the button (Enter shows the code); a click on the words opens the pane.
       role={peek ? undefined : 'button'}
       tabIndex={peek ? -1 : 0}
       title={peek ? undefined : openAttachmentTitle(ref.path)}
@@ -34,10 +36,11 @@ function FileRefSpan({ text, code, hover, scope, openRef }: { text: string; code
       onKeyDown={(event) => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault();
+        event.stopPropagation();
         open();
       }}
     >
-      {code}
+      {children}
     </span>
   );
   if (!peek) return span;
@@ -48,11 +51,37 @@ function FileRefSpan({ text, code, hover, scope, openRef }: { text: string; code
   );
 }
 
-/** Every code span in `children` that is a file's path opens it (`on`); `hover`: Code review's peek on a computer. */
+/**
+ * Every code span and bare path in `children` that is a file's path opens it (`on`); `hover`: Code review's peek on a
+ * computer. Off: ui draws them exactly as before.
+ */
 export function FileRefCodeSpans({ on, hover, scope, openRef, children }: { on: boolean; hover: boolean; scope: { thread: string; message: string }; openRef: MutableRefObject<((ref: FileRef) => void) | undefined>; children: ReactNode }) {
   const key = JSON.stringify(scope);
   const render = useMemo(
-    () => (on ? (text: string, code: ReactNode) => <FileRefSpan text={text} code={code} hover={hover} scope={scope} openRef={openRef} /> : null),
+    () =>
+      on
+        ? (text: string, code: ReactNode) => (
+            <FileRefSpan text={text} bare={false} hover={hover} scope={scope} openRef={openRef}>
+              {code}
+            </FileRefSpan>
+          )
+        : null,
+    // `key` names the scope.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [key, on, hover],
+  );
+  const bare = useMemo<BarePathWrap | null>(
+    () =>
+      on
+        ? {
+            find: findBarePaths,
+            wrap: (text) => (
+              <FileRefSpan text={text} bare hover={hover} scope={scope} openRef={openRef}>
+                {text}
+              </FileRefSpan>
+            ),
+          }
+        : null,
     // `key` names the scope.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [key, on, hover],
@@ -60,7 +89,9 @@ export function FileRefCodeSpans({ on, hover, scope, openRef, children }: { on: 
   if (!on) return <>{children}</>;
   return (
     <CodeSpanMatchContext.Provider value={looksLikeFilePath}>
-      <CodeSpanContext.Provider value={render}>{children}</CodeSpanContext.Provider>
+      <CodeSpanContext.Provider value={render}>
+        <BarePathContext.Provider value={bare}>{children}</BarePathContext.Provider>
+      </CodeSpanContext.Provider>
     </CodeSpanMatchContext.Provider>
   );
 }

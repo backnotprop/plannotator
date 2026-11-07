@@ -938,8 +938,9 @@ export type OpenInFileScope = { thread: string; message?: string; from?: 'root' 
 export type OpenInFileCode = { found: false } | { found: true; contents: string; pull?: { label: string; platform: 'github' | 'gitlab'; url: string } };
 
 /**
- * A referenced file for the pane (design prototype "file-refs-open-pane"): text whole, an image or a film by the raw
- * route's address, any other kind by name only. `reason`: not on this computer, or a path the Inbox does not open.
+ * A file an agent's message names, for the pane (approval "inbox-file-refs-open-viewer"): text whole, an image or a
+ * film read by `referencedFileRawUrl`, any other kind by name only. `attachment_id`: the message already carries it
+ * (the pane opens that attachment instead). `reason`: not on this computer, or a file the Inbox never shows (a secret).
  */
 export type ReferencedFileView =
   | { found: false; name: string; path: string; reason: 'missing' | 'refused' }
@@ -949,10 +950,19 @@ export type ReferencedFileView =
       path: string;
       kind: string;
       contents?: string;
-      raw?: string;
       tooLarge?: boolean;
+      attachment_id?: string;
       pull?: { label: string; platform: 'github' | 'gitlab'; url: string };
     };
+
+/** Where a file a message names is asked about: its thread (whose machine holds it) and the message. */
+export type ReferencedFileScope = { thread: string; message: string };
+
+const referencedFileUrl = (route: 'view' | 'raw', scope: ReferencedFileScope, path: string) =>
+  inboxUrl(`/open-in/file/${route}`, new URLSearchParams({ thread: scope.thread, message: scope.message, path }).toString(), machineOf(scope.thread));
+
+/** An image's or a film's bytes, of a file a message names: through its thread's machine, as every route of it. */
+export const referencedFileRawUrl = (scope: ReferencedFileScope, path: string) => referencedFileUrl('raw', scope, path);
 
 async function post<T>(path: string, body: Record<string, unknown>): Promise<T> {
   refuseContested(path);
@@ -1534,8 +1544,11 @@ export const inboxApi = {
   /** A referenced file in its scope: whether it is on this computer, its real path and kind. 403 through the tailnet. */
   openInFileCheck: (scope: OpenInFileScope, path: string) =>
     get<{ found: boolean; path?: string; kind?: string }>(inboxUrl(`/open-in/file?${new URLSearchParams({ ...scope, path })}`)),
-  referencedFile: (scope: { thread: string; message?: string }, path: string) =>
-    get<ReferencedFileView>(inboxUrl(`/open-in/file/view?${new URLSearchParams({ ...scope, path })}`)),
+  /** A file an agent's message names, for the pane: read only, wherever it is on that computer (never a secret). */
+  referencedFile: (scope: ReferencedFileScope, path: string) => get<ReferencedFileView>(referencedFileUrl('view', scope, path)),
+  /** The person commented on a file a message names: it becomes one of that message's attachments (once). This Inbox's threads only. */
+  attachReferencedFile: (scope: ReferencedFileScope, path: string) =>
+    post<{ attachment: InboxAttachmentState }>(inboxUrl('/open-in/file/attach'), { thread: scope.thread, message: scope.message, path }),
   openInFileCode: (scope: OpenInFileScope, path: string) => get<OpenInFileCode>(inboxUrl(`/open-in/file/code?${new URLSearchParams({ ...scope, path })}`)),
   openInFile: (scope: OpenInFileScope, path: string, appId: string, line?: number) =>
     post<{ ok: boolean; error?: string }>(inboxUrl('/open-in/file'), { ...scope, path, app_id: appId, ...(line ? { line } : {}) }),

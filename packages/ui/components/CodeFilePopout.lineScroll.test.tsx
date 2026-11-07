@@ -159,3 +159,30 @@ describe.if(hasDom)('CodeFileView with a referenced line', () => {
     expect(scrolled).toEqual([]);
   });
 });
+
+describe.if(hasDom)('scrollCodeLineIntoView', () => {
+  test('a short file with nothing to scroll down: the line is brought on screen, never slid sideways', async () => {
+    const { scrollCodeLineIntoView } = await import('../utils/codeLineScroll');
+    // A code block scrolled sideways by nothing, inside Pierre's shadow root, and a line wider than it.
+    const area = document.createElement('div');
+    document.body.appendChild(area);
+    // (A plain host: Pierre's own element is registered by now and makes its own shadow root.)
+    const container = document.createElement('div');
+    const shadow = container.attachShadow({ mode: 'open' });
+    const pre = document.createElement('pre');
+    const row = lineDiv(3);
+    pre.appendChild(row);
+    shadow.appendChild(pre);
+    area.appendChild(container);
+    let asked: ScrollIntoViewOptions | boolean | undefined;
+    // The browser's scrollIntoView slides the block to the long row's start (the gutter's width).
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement, options?: ScrollIntoViewOptions | boolean) {
+      asked = options;
+      pre.scrollLeft = 64;
+    };
+    scrollCodeLineIntoView(row);
+    expect(asked).toEqual({ block: 'center', inline: 'nearest' });
+    expect(pre.scrollLeft).toBe(0);
+    area.remove();
+  });
+});

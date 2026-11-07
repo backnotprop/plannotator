@@ -233,6 +233,10 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // A launched agent's Stop, Try again, Trust folder and Delete from a linked machine's window (remote launch). Open in
   // Terminal and the launch settings never cross: they are this computer's.
   { method: "POST", route: /^launch\/([^/]+)\/(stop|retry|trust|delete)$/, window: (m) => `/api/inbox/launch/${m[1]}/${m[2]}`, machineOnly: true },
+  // A file an agent's message names, read only (approval "inbox-file-refs-open-viewer"): its view and an image's or a
+  // film's bytes (by Range), for a linked machine's window. The window's own routes, so the same refusals and headers.
+  // Not a phone's: a phone reads them through the tailnet as the owner.
+  { method: "GET", route: /^open-in\/file\/(view|raw)$/, window: (m) => `/api/inbox/open-in/file/${m[1]}`, machineOnly: true },
 ];
 
 /** The two writes only a linked machine sends this door (inbox-machines.ts answers them); never a window route. */
