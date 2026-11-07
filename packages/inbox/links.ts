@@ -15,7 +15,8 @@
  * with that name, when only one has it.
  *
  * A local link that names no attachment of the message is drawn as inert
- * text titled "Not attached": the window never asks the server for it.
+ * text titled "Not attached". With Code review on, "Open in" asks the server
+ * whether it is a file on this computer (`projectFileOfLink`); nothing else does.
  */
 import { useMemo } from 'react';
 import type { InboxAttachment, InboxProjectRepo } from '@plannotator/core/inbox-types';
@@ -98,6 +99,23 @@ export function attachmentForLink<T extends LinkableAttachment>(
     if (named.length === 1) return named[0]!;
   }
   return null;
+}
+
+/**
+ * The file a link or a code span names, for its hover and "Open in": the path as the agent wrote it, and the lines
+ * (`#L12`, `#L12-L20`, `:12`, `:12-20`, `:12:4`). The server decides where it starts (the message's folder and checkout)
+ * and whether it is a file.
+ */
+export function projectFileOfLink(href: string): { path: string; line?: number; lineEnd?: number } | null {
+  const candidate = linkCandidates(href).at(-1);
+  if (!candidate) return null;
+  const fragment = /^#L(\d+)(?:-L?(\d+))?/.exec(href.trim().replace(/^[^#]*/, ''));
+  const written = /:(\d+)(?:-(\d+)|:\d+)?$/.exec(candidate);
+  const line = fragment?.[1] ?? written?.[1];
+  const lineEnd = fragment ? fragment[2] : written?.[2];
+  const path = candidate.replace(/:\d+(?:-\d+|:\d+)?$/, '').replace(/\\/g, '/');
+  if (!path || path.endsWith('/')) return null;
+  return { path, ...(line ? { line: Number(line) } : {}), ...(line && lineEnd ? { lineEnd: Number(lineEnd) } : {}) };
 }
 
 /**

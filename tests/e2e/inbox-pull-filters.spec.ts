@@ -3,11 +3,11 @@
  * "highlights when open"), proved in a real browser against the compiled binary. The same sandbox as
  * inbox-pull-requests.spec.ts: `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR, `gh` and `glab` sh
  * fakes first on PATH (nothing reaches GitHub or GitLab; the real CLIs never run), simulated agents through
- * `plannotator inbox mcp`. HOME is never changed.
+ * `plannotator inbox mcp`. HOME is the scratch folder.
  *
  * What is proved, in order:
  *  1. The read: the person's own lists, then Others as a call of its own scoped to the projects (never unscoped).
- *  2. At 1440: the head is "PRs" and the filter mark only; the menu's views and projects with counts, the picked rows
+ *  2. At 1440: the head is "Reviews" and the filter mark only; the menu's views and projects with counts, the picked rows
  *     tinted; a view and a project narrow the rows, the mark says so, one quiet line names them; the address keeps
  *     them over a reload; × clears both and focus comes back to the mark.
  *  3. The keys: the mark's tooltip on keyboard focus; Enter opens; the arrows walk the rows; Enter picks; Escape
@@ -21,7 +21,7 @@
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
@@ -51,39 +51,43 @@ function project(parent: string, name: string, origin: string): string {
   return dir;
 }
 
-/** The fake gh / glab (list answers only): each list read is one line in `calls`, with its arguments. */
+/**
+ * The fake gh / glab (list answers only): each list read is one file of its own in `calls/`, its arguments on one line,
+ * written aside and moved in whole. Not one shared file: gh and glab read at the same time, and a long line appended in
+ * parts by two of them at once comes out as one merged line, the other call lost.
+ */
 function writeForge(dir: string) {
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'calls'), '');
+  mkdirSync(join(dir, 'calls'), { recursive: true });
   const gh = [
     '#!/bin/sh',
     `dir='${dir}'`,
-    'calls="$dir/calls"',
+    'record() { t=$(mktemp "$dir/call.XXXXXX"); printf "%s" "$*" | tr "\\n" " " > "$t"; mv "$t" "$dir/calls/"; }',
     'if [ "$1" = auth ] && [ "$2" = status ]; then',
     '  echo \'{"hosts":{"github.com":[{"login":"dana","active":true,"state":"success","tokenSource":"keyring"}]}}\'',
     '  exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$2" = graphql ]; then',
-    '  case "$*" in *"query InboxPullsOthers"*) echo "gh others $*" | tr "\\n" " " >> "$calls"; echo >> "$calls"; cat "$dir/gh-others.json"; exit 0;; esac',
-    '  case "$*" in *"requested: search"*) echo "gh pulls $*" | tr "\\n" " " >> "$calls"; echo >> "$calls"; cat "$dir/gh-pulls.json"; exit 0;; esac',
-    '  echo "gh graphql-other" >> "$calls"; echo \'{"data":null}\'; exit 1',
+    '  case "$*" in *"query InboxPullsOthers"*) record "gh others $*"; cat "$dir/gh-others.json"; exit 0;; esac',
+    '  case "$*" in *"requested: search"*) record "gh pulls $*"; cat "$dir/gh-pulls.json"; exit 0;; esac',
+    '  record "gh graphql-other"; echo \'{"data":null}\'; exit 1',
     'fi',
-    'echo "gh other $1" >> "$calls"; exit 1',
+    'record "gh other $1"; exit 1',
     '',
   ].join('\n');
   const glab = [
     '#!/bin/sh',
     `dir='${dir}'`,
-    'calls="$dir/calls"',
+    'record() { t=$(mktemp "$dir/call.XXXXXX"); printf "%s" "$*" | tr "\\n" " " > "$t"; mv "$t" "$dir/calls/"; }',
     'if [ "$1" = auth ] && [ "$2" = status ]; then',
     '  echo "gitlab.com"; echo "  ✓ Logged in to gitlab.com as dana (keyring)"; exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$4" = graphql ]; then',
-    '  case "$*" in *"query InboxPullsOthers"*) echo "glab others $*" | tr "\\n" " " >> "$calls"; echo >> "$calls"; cat "$dir/glab-others.json"; exit 0;; esac',
-    '  case "$*" in *reviewRequestedMergeRequests*) echo "glab pulls $*" | tr "\\n" " " >> "$calls"; echo >> "$calls"; cat "$dir/glab-pulls.json"; exit 0;; esac',
-    '  echo "glab graphql-other" >> "$calls"; echo \'{"data":null}\'; exit 1',
+    '  case "$*" in *"query InboxPullsOthers"*) record "glab others $*"; cat "$dir/glab-others.json"; exit 0;; esac',
+    '  case "$*" in *reviewRequestedMergeRequests*) record "glab pulls $*"; cat "$dir/glab-pulls.json"; exit 0;; esac',
+    '  record "glab graphql-other"; echo \'{"data":null}\'; exit 1',
     'fi',
-    'echo "glab other $1" >> "$calls"; exit 1',
+    'record "glab other $1"; exit 1',
     '',
   ].join('\n');
   for (const [file, body] of [['gh', gh], ['glab', glab]] as const) {
@@ -238,7 +242,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 
   const env: Record<string, string> = {
     PATH: `${forge}:${process.env.PATH ?? ''}`,
-    ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
@@ -331,7 +335,7 @@ async function menuRows(page: Page, selector: string): Promise<string[]> {
 
 /** Every row the list shows, the folded ones opened. */
 async function rows(page: Page): Promise<string[]> {
-  const fold = page.locator('[data-pulls-waiting-toggle]');
+  const fold = page.locator('[data-reviews-fold="not_reviewed"]');
   if ((await fold.count()) > 0 && (await fold.getAttribute('aria-expanded')) === 'false') await fold.click();
   return (await page.locator('[data-pulls-row]').evaluateAll((els) => els.map((el) => el.getAttribute('data-pulls-row')!))).sort();
 }
@@ -359,7 +363,7 @@ async function fit(page: Page) {
 }
 
 function fits(f: Awaited<ReturnType<typeof fit>>, phone: boolean): void {
-  expect(f.head, 'the head holds "PRs" only').toBe('PRs');
+  expect(f.head, 'the head holds "Reviews" only').toBe('Reviews');
   expect(f.past_edge, 'past the edge').toBe(false);
   if (f.scope_h) expect(f.scope_h, 'the line is one line').toBeLessThanOrEqual(phone ? 44 : 30);
   if (phone) {
@@ -396,7 +400,12 @@ test('the read: the person\'s own lists, then Others as a call of its own scoped
   const { page } = world;
   await landed(page, async () => (await page.goto('about:blank'), page.goto(`${world.url}#pulls`)));
   await expect(page.locator('[data-pulls-row]').first()).toBeVisible();
-  const calls = readFileSync(join(world.forge, 'calls'), 'utf8').split('\n').filter(Boolean);
+  const read = () => readdirSync(join(world.forge, 'calls')).map((f) => readFileSync(join(world.forge, 'calls', f), 'utf8'));
+  // The first row shows when one forge has answered; the other calls may still be on their way.
+  await expect
+    .poll(() => ['gh pulls', 'glab pulls', 'gh others', 'glab others'].filter((name) => read().some((c) => c.startsWith(name))))
+    .toEqual(['gh pulls', 'glab pulls', 'gh others', 'glab others']);
+  const calls = read();
   const gh = calls.filter((c) => c.startsWith('gh pulls'));
   const glab = calls.filter((c) => c.startsWith('glab pulls'));
   const ghOthers = calls.filter((c) => c.startsWith('gh others'));
@@ -417,12 +426,12 @@ test('the read: the person\'s own lists, then Others as a call of its own scoped
   expect(calls.filter((c) => c.includes('graphql-other'))).toEqual([]);
 });
 
-test('1440: "PRs" and the filter mark; the menu; a view and a project narrow the list, are named once over it, and stay in the address', async () => {
+test('1440: "Reviews" and the filter mark; the menu; a view and a project narrow the list, are named once over it, and stay in the address', async () => {
   const { page } = world;
   await landed(page, async () => (await page.goto('about:blank'), page.goto(`${world.url}#pulls`)));
   const list = page.locator('[data-pulls-list]');
   const trigger = list.locator(TRIGGER);
-  await expect(list.locator('[data-pulls-heading]')).toHaveText('PRs');
+  await expect(list.locator('[data-pulls-heading]')).toHaveText('Reviews');
   await expect(trigger).toHaveAccessibleName('Filter');
   await expect(list.locator('[data-pulls-scope]')).toHaveCount(0);
   fits(await fit(page), false);
@@ -457,7 +466,7 @@ test('1440: "PRs" and the filter mark; the menu; a view and a project narrow the
   fits(await fit(page), false);
 
   // The address keeps both: a reload draws the same list.
-  expect(await page.evaluate(() => location.hash)).toMatch(/^#pulls&project=prj_[^&]+&view=review$/);
+  expect(await page.evaluate(() => location.hash)).toMatch(/^#reviews&project=prj_[^&]+&view=review$/);
   await landed(page, () => page.reload());
   await expect(trigger).toHaveAccessibleName('Filter: To review, web-app');
   expect(await rows(page)).toHaveLength(2);
@@ -466,7 +475,7 @@ test('1440: "PRs" and the filter mark; the menu; a view and a project narrow the
   await list.locator('[data-pulls-filter-clear]').click();
   await expect(trigger).toHaveAccessibleName('Filter');
   await expect(trigger).toBeFocused();
-  expect(await page.evaluate(() => location.hash)).toBe('#pulls');
+  expect(await page.evaluate(() => location.hash)).toBe('#reviews');
   expect(await rows(page)).toHaveLength(14);
   expect(world.errors).toEqual([]);
 });
@@ -498,7 +507,7 @@ test('1440, the keys: the mark says its name on keyboard focus; Enter opens, the
   await expect(menu).toHaveCount(0);
   await expect(trigger).toBeFocused();
   await expect(trigger).toHaveAccessibleName('Filter: To review');
-  expect(await page.evaluate(() => location.hash)).toBe('#pulls&view=review');
+  expect(await page.evaluate(() => location.hash)).toBe('#reviews&view=review');
   // Escape from the open menu also brings focus back.
   await page.keyboard.press('Enter');
   await expect(menu).toBeVisible();

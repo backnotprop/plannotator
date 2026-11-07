@@ -64,7 +64,8 @@ const isWaiting = (q: InboxQuestion) => q.state === 'open' || (q.state === 'pick
  * Once that session wrote, or nothing it lists is open, what is left can be
  * asked again. Also left out right after it
  * answered a note (every question it still has open sits in its one message
- * that answered the note), and when nothing of its waits. `live` says which
+ * that answered the note, and it has not written since), and when nothing of
+ * its waits. `live` says which
  * messages still take answers (not closed by an archive).
  */
 export function reaskTargets(messages: readonly InboxMessageWire[], live: (message: InboxMessageWire) => boolean = () => true): ReaskTarget[] {
@@ -124,8 +125,8 @@ export function reaskTargets(messages: readonly InboxMessageWire[], live: (messa
       continue;
     }
     // Just answered a note: everything still waiting is in that one message,
-    // and that message replies to the note.
-    if (holders.length === 1) {
+    // that message replies to the note, and the session has not written since.
+    if (holders.length === 1 && !wroteAfter(target, own)) {
       const answers = target.reply_to ? messages.find((m) => m.id === target.reply_to) : undefined;
       if (answers && isReaskNote(answers)) continue;
     }

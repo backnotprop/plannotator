@@ -73,6 +73,7 @@ import { getIdentity } from '@plannotator/ui/utils/identity';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { configStore, useConfigValue } from '@plannotator/ui/config';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
+import { useStarAskDoneScreen } from '@plannotator/ui/components/StarAskDoneScreen';
 import { useUpdateCheck } from '@plannotator/ui/hooks/useUpdateCheck';
 import { useUpdateToast } from '@plannotator/ui/hooks/useUpdateToast';
 import { useUpdateCheckSetting } from '@plannotator/ui/hooks/useUpdateCheckSetting';
@@ -7242,6 +7243,15 @@ const App: React.FC = () => {
     autoUpdateActive,
     suppressed: openedWithHash || isSharedSession || archive.archiveMode || !isApiMode,
   });
+  // The "Star the repo" ask (approval "star-ask"): claimed once the page loads (the server stops on the decision),
+  // shown on the done screen only, once a decision was sent (approved, feedback, done; never a closed session or goal
+  // setup's answers), with the announcements' gates (never a shared, archive or read-only page, the share portal, or
+  // the VS Code webview). The server decides the rest.
+  const starAskFooter = useStarAskDoneScreen({
+    ready: !isLoading,
+    decided: (submitted === 'approved' || submitted === 'denied' || submitted === 'done') && !goalSetupMode,
+    eligible: isApiMode && !goalSetupMode && !isSharedSession && !archive.archiveMode && !isVSCodeWebview(),
+  });
   // Read from the host alone, not agentToolOfferApplies: once "Turn it on"
   // succeeds the setting is on, and the open offer must stay to say so.
   const agentToolOfferHost = agentToolOfferHostOf(agentTool.setting);
@@ -8500,6 +8510,7 @@ const App: React.FC = () => {
                     : `${agentName} will revise the plan based on your feedback.`
           }
           agentLabel={agentName}
+          footer={starAskFooter}
         />
 
         <LookAndFeelAnnouncementDialog

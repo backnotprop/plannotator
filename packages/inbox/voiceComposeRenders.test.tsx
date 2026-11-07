@@ -171,4 +171,36 @@ describe.skipIf(!hasDom)('dictating in New message', () => {
     await until(() => host!.querySelector('[data-voice-line="tap"]') !== null);
     expect(mic().querySelector('.ib-spin')).toBeNull();
   });
+
+  test('a failure code this page does not know: the generic note with Retry and Discard, and Retry sends the same clip', async () => {
+    const clips: Blob[] = [];
+    let fail = true;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (!String(input).includes('/voice/transcribe')) return Response.json({ state: 'ready', plan: null });
+      clips.push(init!.body as Blob);
+      return fail ? Response.json({ error: 'Voice did not transcribe this clip.', code: 'voice_from_a_newer_inbox' }, { status: 502 }) : Response.json({ text: 'kept words' });
+    }) as typeof fetch;
+    const button = await openDialog();
+    press(button, 'pointerdown');
+    press(button, 'pointerup');
+    await until(() => host!.querySelector('[data-voice-line="tap"]') !== null);
+    await until(() => ticks >= 12);
+    press(button, 'pointerdown');
+    press(button, 'pointerup');
+    await until(() => host!.querySelector('[data-voice-note]') !== null);
+
+    const note = host!.querySelector('[data-voice-note]')!;
+    expect(note.getAttribute('data-voice-note')).toBe('failed');
+    expect(note.textContent).toContain('Couldn’t transcribe this clip');
+    expect(note.querySelector('[data-voice-retry]')).not.toBeNull();
+    expect(note.querySelector('[data-voice-discard]')).not.toBeNull();
+
+    fail = false;
+    act(() => note.querySelector<HTMLButtonElement>('[data-voice-retry]')!.click());
+    const field = host!.querySelector('textarea')!;
+    await until(() => field.value === 'kept words');
+    expect(clips).toHaveLength(2);
+    expect(clips[1]).toBe(clips[0]!);
+    expect(host!.querySelector('[data-voice-note]')).toBeNull();
+  });
 });

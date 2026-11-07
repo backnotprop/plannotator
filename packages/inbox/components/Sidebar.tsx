@@ -9,12 +9,14 @@ import { connectPrompt } from '../connectPrompt';
 import { formatCount } from '../format';
 import { Icon, type IconName } from '../icons';
 import { pinnedState } from '../pins';
+import { starPopping } from '../starPop';
 import { awayLine, isAway, type MachinesModel } from '../machines';
 import { useSidebarSections, type SidebarSection } from '../sidebarSections';
 import { useSidebar } from '../shell/sidebar';
 import { usePhone } from '../phone';
 import { shortProjectNames } from '../projectLabels';
 import { shownProjects, type ProjectAction } from '../projectMenu';
+import { projectSortControl, setProjectSort, sortProjects, useProjectSort, type ProjectSort } from '../projectSort';
 import { selfMachineId } from '../inboxUrl';
 import { ProjectRow } from './ProjectRow';
 import { PinnedRow, type PinnedAction } from './PinnedRow';
@@ -31,7 +33,7 @@ import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'pulls' | 'shapes';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'shapes';
   /**
    * The Board (approval "inbox-board", step 2): the row under Inbox, always
    * shown with `onBoard`. No count: the approval keeps the count in the
@@ -39,7 +41,7 @@ export interface SidebarProps {
    */
   onBoard?: () => void;
   /**
-   * Pull requests (approval "inbox-code-review-direction", item 4): a row of its own (after Board when the Board is on; it needs none), shown only with
+   * Reviews (approvals "inbox-code-review-direction", item 4, and "inbox-reviews-page"): a row of its own (after Board when the Board is on; it needs none), shown only with
    * `onPulls` (Settings → Capabilities → Code review on). `pullsCount`: the last read's "On you".
    */
   onPulls?: () => void;
@@ -71,6 +73,8 @@ export interface SidebarProps {
   projectNames?: ReadonlyMap<string, string>;
   /** Rows waiting on the person, per project id. */
   projectCounts: ReadonlyMap<string, number>;
+  /** Each project's latest activity (`projectActivity`): what "most recent" sorts Projects by. */
+  projectActivity?: ReadonlyMap<string, string>;
   /**
    * The project menu (design record "inbox-project-menu"): the projects where
    * Mark all as read has something to do, and the action. Absent: no menu.
@@ -206,9 +210,12 @@ export function Sidebar(props: SidebarProps) {
   // A project with nothing in the list leaves the sidebar (automatic hiding); the one the list shows stays until the person leaves it.
   const held = props.page === 'inbox' ? props.projectId : null;
   // Each project by the window's one name for it (windowProjectNames, App.tsx), as the rows name it.
+  const projectSort = useProjectSort();
+  // Only most recent reads the activity, so another order does not sort again when a row's time changes.
+  const activity = projectSort === 'recent' ? props.projectActivity : undefined;
   const shown = useMemo(
-    () => shownProjects(props.projects, held).map((project) => ({ ...project, name: props.projectNames?.get(project.id) ?? project.name })),
-    [props.projects, props.projectNames, held],
+    () => sortProjects(shownProjects(props.projects, held).map((project) => ({ ...project, name: props.projectNames?.get(project.id) ?? project.name })), projectSort, activity),
+    [props.projects, props.projectNames, held, projectSort, activity],
   );
   const pins = props.pins ?? [];
   // Pinned and Projects close like folders; closed, a section still shows where the person is (the open pinned thread, the project the list shows).
@@ -418,13 +425,13 @@ export function Sidebar(props: SidebarProps) {
       {props.onPulls && (
         <button
           type="button"
-          className={`ib-nav${props.page === 'pulls' ? ' ib-on' : ''}`}
+          className={`ib-nav${props.page === 'reviews' ? ' ib-on' : ''}`}
           onClick={pick(props.onPulls)}
-          aria-current={props.page === 'pulls' ? 'page' : undefined}
+          aria-current={props.page === 'reviews' ? 'page' : undefined}
           data-pulls-nav=""
         >
-          <Icon name="pullRequest" />
-          Pull requests
+          <Icon name="reviews" />
+          Reviews
           {(props.pullsCount ?? 0) > 0 && (
             <span className="ib-n" aria-label={`${props.pullsCount} on you`}>
               {formatCount(props.pullsCount ?? 0)}
@@ -452,8 +459,10 @@ export function Sidebar(props: SidebarProps) {
               section="pinned"
               id={pinnedLabelId}
               controls={pinnedBodyId}
-              label="Pinned"
-              icon="pin"
+              label="Starred"
+              icon="star"
+              iconClass="ib-star-on"
+              pop={starPopping()}
               open={!pinnedClosed}
               count={pinsWaiting}
               onToggle={() => sections.toggle('pinned')}
@@ -523,17 +532,21 @@ export function Sidebar(props: SidebarProps) {
             </div>
           </>
         )}
-        <SectionHeader
-          section="projects"
-          id={projectsLabelId}
-          controls={projectsBodyId}
-          label="Projects"
-          icon={projectsClosed ? 'folder' : 'folderOpen'}
-          open={!projectsClosed}
-          count={0}
-          onToggle={() => sections.toggle('projects')}
-        />
-        <div className="ib-projs" id={projectsBodyId} role="group" aria-labelledby={projectsLabelId} data-closed={projectsClosed ? '' : undefined}>
+        {/* Two controls side by side, never one inside the other: the header opens and closes, the icon changes the order. */}
+        <div className="ib-secrow">
+          <SectionHeader
+            section="projects"
+            id={projectsLabelId}
+            controls={projectsBodyId}
+            label="Projects"
+            icon={projectsClosed ? 'folder' : 'folderOpen'}
+            open={!projectsClosed}
+            count={0}
+            onToggle={() => sections.toggle('projects')}
+          />
+          {!projectsClosed && shown.length > 1 && <ProjectSortToggle sort={projectSort} announce={props.announce} />}
+        </div>
+        <div className="ib-projs" id={projectsBodyId} role="group" aria-labelledby={projectsLabelId} data-closed={projectsClosed ? '' : undefined} data-recent={projectSort === 'recent' ? '' : undefined}>
           {/* Closed: only the project the list shows, if any; never the empty notes. */}
           {firstRun ? (
             !projectsClosed && <div className="ib-side-empty">Projects appear here when an agent writes from one.</div>
@@ -665,6 +678,9 @@ function SectionHeader(props: {
   controls: string;
   label: string;
   icon: IconName;
+  iconClass?: string;
+  /** The section's star takes the little pop: a thread was starred just now. */
+  pop?: boolean;
   open: boolean;
   count: number;
   onToggle: () => void;
@@ -679,7 +695,7 @@ function SectionHeader(props: {
       data-sidebar-section={props.section}
       onClick={props.onToggle}
     >
-      <Icon name={props.icon} />
+      <Icon name={props.icon} className={[props.iconClass, props.pop ? 'ib-star-pop' : ''].filter(Boolean).join(' ') || undefined} />
       <span className="ib-side-sec-l">{props.label}</span>
       <span className="ib-side-sec-tail">
         {props.count > 0 && (
@@ -691,6 +707,42 @@ function SectionHeader(props: {
         <Icon name="chevR" className="ib-side-sec-chev" />
       </span>
     </button>
+  );
+}
+
+/**
+ * The order of Projects, one quiet icon beside the header's chevron: the icon
+ * is the order on screen, a press goes to the next. It shows on the header's
+ * hover and keyboard focus; where nothing hovers (a phone, a tablet) it always
+ * shows. Only with two projects or more, and only while the section is open.
+ * Not navigation: the phone sheet stays open. Going while it holds focus (the
+ * list fell to one project), it hands focus to the header, never the page.
+ */
+function ProjectSortToggle({ sort, announce }: { sort: ProjectSort; announce?: (text: string) => void }) {
+  const { icon, label, next, said } = projectSortControl(sort);
+  const button = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    const node = button.current;
+    return () => {
+      if (node && node === document.activeElement) node.closest('.ib-secrow')?.querySelector<HTMLElement>('[data-sidebar-section]')?.focus({ preventScroll: true });
+    };
+  }, []);
+  return (
+    <Tip content={label}>
+      <button
+        ref={button}
+        type="button"
+        className="ib-proj-sort"
+        aria-label={label}
+        data-projects-sort={sort}
+        onClick={() => {
+          setProjectSort(next);
+          announce?.(said);
+        }}
+      >
+        <Icon name={icon} />
+      </button>
+    </Tip>
   );
 }
 

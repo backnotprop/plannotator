@@ -27,16 +27,25 @@ let clock: { mockRestore: () => void } | null = null;
 /** Each read of the list, with its signal, answered when the test says. */
 let reads: { url: URL; signal: AbortSignal | undefined; answer: (over?: Partial<InboxPullsAnswer>) => void }[] = [];
 let seen: ReturnType<typeof usePulls> | null = null;
+/** Each read of the rows from the cache, answered when the test says. */
+let cachedReads: { signal: AbortSignal | undefined; answer: (body: unknown) => void }[] = [];
 
 beforeEach(() => {
   if (!hasDom) return;
   savedFetch = globalThis.fetch;
   reads = [];
+  cachedReads = [];
   seen = null;
   clock = spyOn(Date, 'now').mockImplementation(() => now);
   globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://inbox.test');
-    if (!url.pathname.endsWith('/api/inbox/pulls')) return Promise.resolve(Response.json({}));
+    if (url.searchParams.get('cached') === '1') {
+      return new Promise<Response>((resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+        cachedReads.push({ signal: init?.signal ?? undefined, answer: (body) => resolve(Response.json(body)) });
+      });
+    }
+    if (!url.pathname.endsWith('/api/inbox/pulls')) return Promise.resolve(Response.json({ rows: ['from the full read'] }));
     return new Promise<Response>((resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
       reads.push({ url, signal: init?.signal ?? undefined, answer: (over = {}) => resolve(Response.json({ serverSession: 's', ...ANSWER, ...over })) });
@@ -154,4 +163,21 @@ test.skipIf(!hasDom)("Others on its way: asked again shortly, until it has answe
   } finally {
     globalThis.setTimeout = realSetTimeout;
   }
+});
+
+test.skipIf(!hasDom)('the rows from the cache: "nothing read yet" keeps what is there, and a full read outranks one still on its way', async () => {
+  render(true, true);
+  reads[0]!.answer();
+  await settle();
+  const full = seen!.reviews;
+  expect(full).not.toBeNull();
+
+  act(() => seen!.reloadRows());
+  cachedReads[0]!.answer({ cold: true });
+  await settle();
+  expect(seen!.reviews).toBe(full);
+
+  act(() => seen!.reloadRows());
+  act(() => seen!.refresh());
+  expect(cachedReads[1]!.signal?.aborted).toBe(true);
 });

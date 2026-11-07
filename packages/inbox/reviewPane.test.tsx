@@ -18,6 +18,10 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
+import type { ShapeHost } from '@plannotator/ui/components/shape';
+import type { InboxShapes } from './shape/useInboxShapes';
+
+const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
 const hasDom = typeof document !== 'undefined';
 if (hasDom) {
@@ -150,7 +154,7 @@ async function render(on: InboxThread = thread) {
     root = createRoot(host!);
     root.render(
       <div className="pn-inbox">
-        <ReviewPane thread={on} message={message} onBack={() => (backs += 1)} onClose={() => {}} onSent={() => {}} />
+        <ReviewPane thread={on} message={message} onBack={() => (backs += 1)} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />
       </div>,
     );
   });
@@ -164,9 +168,32 @@ const click = async (selector: string) => {
   await settle();
 };
 
+test.skipIf(!hasDom)('the top bar holds what the rail held: Walkthrough | All files, the chapter menu, the title, then the diff controls; no rail', async () => {
+  await render();
+  const bar = document.querySelector<HTMLElement>('[data-review-message] .ib-vhead')!;
+  expect(document.querySelector('[data-review-message] .ib-rrail')).toBeNull();
+  expect(bar.querySelector('[data-review-mode-choice="walkthrough"]')).not.toBeNull();
+  expect(bar.querySelector('[data-review-mode-choice="files"]')).not.toBeNull();
+  expect(bar.querySelector('[data-review-jump]')?.textContent).toContain('Overview');
+  expect(bar.querySelector('[data-review-title]')?.textContent).toBe('Token refresh');
+  // Less to read: the way back is its arrow, still named for a screen reader and a tooltip.
+  const back = bar.querySelector<HTMLElement>('.ib-back')!;
+  expect(back.textContent).toBe('');
+  expect(back.getAttribute('aria-label')).toBe('Thread');
+  // Nothing of the old header's: the review's name is said once.
+  expect(bar.textContent).not.toContain('· from');
+  // The diff controls are the bar's (approval "diff-controls-headers"): one Split / Unified button, not the old radios.
+  const controls = bar.querySelector<HTMLElement>('[data-diff-controls]')!;
+  expect(controls).not.toBeNull();
+  expect(bar.querySelector('[data-review-title]')!.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(controls.querySelector('[data-diff-layout-toggle]')).not.toBeNull();
+  expect(controls.querySelector('[data-diff-display-options]')).not.toBeNull();
+  expect(document.querySelector('[data-review-message] [data-diff-style-switch]')).toBeNull();
+});
+
 test.skipIf(!hasDom)("a teammate's pull request (the thread holds only theirs): the review reads with no Approve or Request changes, and its card waits on no verdict", async () => {
   await render({ ...thread, pull_theirs: true });
-  expect(document.querySelector('[data-review-chapters]')).not.toBeNull();
+  expect(document.querySelector('[data-review-jump="walkthrough"]')).not.toBeNull();
   expect(document.querySelector('[data-review-decision]')).toBeNull();
   expect(document.querySelector('[data-decision-primary]')).toBeNull();
   expect(document.querySelector('[data-asker-ended]')).toBeNull();
@@ -235,6 +262,23 @@ test.skipIf(!hasDom)('after a post: a follow-up main comment still posts; a push
   await click('[data-review-post-followup]');
   act(() => typeMainComment('One more.'));
   await act(async () => dialogButton('Post Comments').click());
+  await settle();
+  expect(listReads.at(-1)).toContain('refresh=1');
+  expect(document.querySelector('[data-review-pull-moved]')?.getAttribute('data-review-pull-moved')).toBe('read');
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  reviewReply = () => Response.json({ ok: true, prUrl: PR.url, submission: { status: 'complete' } });
+  await click('[data-review-posts] [data-decision-primary]');
+  await act(async () => dialogButton('Approve').click());
+  await settle();
+  expect(reviewPosts.at(-1)).toMatchObject({ action: 'approve', head_sha: 'b'.repeat(40) });
+});
+
+test.skipIf(!hasDom)('a force-push under a post (pull_commit_gone): the PR is read again, and the decision is back at its new head', async () => {
+  await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY] });
+  reviewReply = () => Response.json({ error: 'The commit you read is no longer on this pull request.', code: 'pull_commit_gone' }, { status: 409 });
+  listHead = 'b'.repeat(40);
+  await click('[data-review-posts] [data-decision-primary]');
+  await act(async () => dialogButton('Approve').click());
   await settle();
   expect(listReads.at(-1)).toContain('refresh=1');
   expect(document.querySelector('[data-review-pull-moved]')?.getAttribute('data-review-pull-moved')).toBe('read');

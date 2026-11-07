@@ -40,6 +40,8 @@ The environment variable wins over the config file. Claude Code reads the settin
 
 To keep only the `plannotator` tool out of Claude's tool list and leave the rest of the mod on, set `PLANNOTATOR_AGENT_TOOL=0` or add `{ "agentTool": false }` to `~/.plannotator/config.json`. The slash commands, plan review, Ask this session, and Bash `plannotator` commands that Claude runs work as before. Turning the tool off keeps that Bash take-over, so a `plannotator` command Claude runs still opens without blocking; to get the blocking CLI back, set `PLANNOTATOR_CLAUDE_MOD=0` instead. Restart Claude Code after you change it.
 
+To turn off plan review and keep everything else, set `PLANNOTATOR_PLAN_REVIEW=0` or add `{ "planReview": false }` to `~/.plannotator/config.json`. Claude Code then shows its own plan approval dialog. That dialog offers "Yes, clear context" only when `showClearContextOnPlanAccept` is `true` in Claude Code's settings (it is hidden by default since Claude Code 2.1.81). This helps when you drive Claude Code from a device that can't open the review in a browser. Code review, annotate, the `plannotator` tool and the Inbox work as before. Restart Claude Code after you change it.
+
 ## The classic hook
 
 Without the mod, Plannotator uses Claude Code's hooks system. When Claude calls `ExitPlanMode`, a `PermissionRequest` hook intercepts the call and opens the Plannotator UI.

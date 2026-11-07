@@ -36,12 +36,13 @@
 
 import { homedir } from "node:os";
 import { basename } from "node:path";
-import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
+import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_ASK_POLL_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { graphemesOf, inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { inboxClaimAbandoned } from "./inbox-stuck-delivery";
 import { parseEngine, parseLoadedPlugin, parseSessionFolder, runtimeOf, tagUpdateFix, type LoadedPlugin } from "./inbox-restart";
 
 /** One live session as the window reads it. */
@@ -116,6 +117,8 @@ interface SeenSession {
   /** The project root its `project_path` resolved to; null when it sent none. */
   root: string | null;
   startedAt: number;
+  /** The `started_at` its last poll said (when its wake started); absent when the poll said none. */
+  wakeStartedAt?: number | null;
   lastSeen: number;
   /** Polls held open now. */
   holding: number;
@@ -189,6 +192,63 @@ export const INBOX_MCP_AGENTS_MAX = 30;
  * does not show the note for a moment.
  */
 export const INBOX_ASKER_GRACE_MS = 60_000;
+
+/**
+ * How long after the Inbox starts a session it has not heard from counts as there: this Inbox knows nothing of the
+ * sessions from before it, and a session that kept trying a stopped Inbox tries again only every 60 s
+ * (`INBOX_RETRY_MS.max`), on a 1 s tick. Past that, so no list row says "Session ended" of a live session.
+ */
+export const INBOX_ASKER_RESTART_GRACE_MS = 90_000;
+
+/**
+ * How long a session handed an item to go into its running turn counts as there with no poll, on a connection from
+ * before its tick stopped waiting on a steer (no `steer_polls`): it does not poll until the steer goes in, which a long
+ * tool call can hold for minutes.
+ */
+export const INBOX_ASKER_STEER_GRACE_MS = 10 * 60_000;
+
+/**
+ * Whether the agent message a reply answers came from a session that has ended: one that can be known to (its
+ * connection wakes it) and that the Inbox has not heard from, with the grace.
+ */
+export function replacesEndedAsker(asked: InboxMessage | null | undefined, live: { askerLive(session: string): boolean }): boolean {
+  if (asked?.author.kind !== "agent" || asked.wakes !== true || !asked.author.session) return false;
+  return !live.askerLive(asked.author.session);
+}
+
+/**
+ * Whether a session is there, for moving a reply off it or taking its thread. A launched thread's own session reads by
+ * its launch: one a reply starts again is there even when stopped, and one that is gone is not, however recent.
+ */
+export function thereInThread(
+  live: { askerLive(session: string): boolean },
+  launch: { resumes(threadId: string, session: string): boolean; gone(threadId: string, session: string): boolean } | undefined,
+  threadId: string,
+): { askerLive(session: string): boolean } {
+  return {
+    askerLive: (session) => {
+      if (launch?.gone(threadId, session)) return false;
+      return !!launch?.resumes(threadId, session) || live.askerLive(session);
+    },
+  };
+}
+
+/**
+ * Whether a reply aimed away from `leaving` (the session it waits on, if any) takes the thread (`took_over`): only from
+ * an owner known to have ended (`ownerCanEnd`), so answering an older message cannot take a thread from a hand-off's new
+ * owner or from an agent that reads through MCP; then when it leaves that owner, or answers a session read as ended.
+ */
+export function takesOver(
+  store: { threadOwner(threadId: string): { session: string } | null; ownerCanEnd(threadId: string, session: string): boolean },
+  threadId: string,
+  asked: InboxMessage | null | undefined,
+  leaving: string | null | undefined,
+  live: { askerLive(session: string): boolean },
+): boolean {
+  const owner = store.threadOwner(threadId);
+  if (!owner || !store.ownerCanEnd(threadId, owner.session) || live.askerLive(owner.session)) return false;
+  return owner.session === leaving || replacesEndedAsker(asked, live);
+}
 
 /**
  * How long a session the Inbox wakes itself (Codex) is listed as live after
@@ -450,6 +510,7 @@ export function createInboxLiveSessions(options: {
     if (folder) entry.folder = folder;
     if (root !== null) entry.root = root;
     entry.startedAt = finiteMs(body.started_at) ?? entry.startedAt;
+    entry.wakeStartedAt = finiteMs(body.started_at);
     entry.lastSeen = at;
     entry.holding += 1;
     entry.polls = (entry.polls ?? 0) + 1;
@@ -473,6 +534,11 @@ export function createInboxLiveSessions(options: {
     if (typeof body[INBOX_SEND_NOW_POLL_FIELD] === "boolean") setDeliveryFlags(entry, entry.busy, body[INBOX_SEND_NOW_POLL_FIELD] === true);
     trackWaitsOf(session, entry, at);
   };
+
+  /** When each session was last handed an item to go into its running turn (`INBOX_ASKER_STEER_GRACE_MS`). */
+  const steering = new Map<string, number>();
+  const steerHanded = (session: string) => void steering.set(session, now());
+  const steerDone = (session: string) => void steering.delete(session);
 
   const isLive = (entry: SeenSession) =>
     entry.wakeOnly !== undefined
@@ -544,7 +610,21 @@ export function createInboxLiveSessions(options: {
     const recent = (entry: { holding?: number; lastSeen: number } | undefined) =>
       !!entry && ((entry.holding ?? 0) > 0 || now() - entry.lastSeen <= INBOX_ASKER_GRACE_MS);
     if (recent(sessions.get(session)) || recent(mcpSeen.get(session))) return true;
-    return now() - startedAt <= INBOX_ASKER_GRACE_MS;
+    const steered = steering.get(session);
+    if (steered !== undefined && now() - steered <= INBOX_ASKER_STEER_GRACE_MS) return true;
+    return now() - startedAt <= INBOX_ASKER_RESTART_GRACE_MS;
+  };
+
+  /**
+   * Whether `session`'s connection claimed item `itemId` and will never deliver it (its wake was killed while it
+   * delivered: packages/server/inbox-stuck-delivery.ts). It never goes to that session again; the person may move it.
+   */
+  const stuck = (session: string, itemId: string): boolean =>
+    inboxClaimAbandoned(store.dir, itemId, session, { there: askerLive(session), startedAt: sessions.get(session)?.wakeStartedAt ?? null }, now());
+  /** The thread's latest person item `session` owes, when that session claimed it and will never deliver it (`stuck`). */
+  const stuckField = (threadId: string, session: string): { stuck?: string[] } => {
+    const owed = (store.thread(threadId)?.messages ?? []).filter((m) => m.author.kind === "person" && store.isOwner(m, session)).at(-1);
+    return owed && !owed.delivery && stuck(session, owed.id) ? { stuck: [owed.id] } : {};
   };
 
   /**
@@ -820,6 +900,17 @@ export function createInboxLiveSessions(options: {
   };
 
   /**
+   * The sessions with a waking message that `askerLive` reads as there, the only ones a row can call ended, each once
+   * however it is known: a change means one of them ended or came back, so a row's "Session ended" may have moved
+   * (`sessions` on `event: deliveries`). A turn starting, an MCP call or its window running out does not change it.
+   */
+  const presenceSignature = (): string => {
+    const known = new Set([...sessions.keys(), ...mcpSeen.keys(), ...steering.keys()]);
+    const there = [...known].filter((session) => options.store.hasWakingMessage(session) && askerLive(session)).sort();
+    return [now() - startedAt <= INBOX_ASKER_RESTART_GRACE_MS ? "g" : "", ...there].join("|");
+  };
+
+  /**
    * Everything the rows' delivery reads from the sessions, as one string:
    * which sessions are live, busy or idle, can take Send now, and are still
    * there for the asker grace (MCP presence and the Inbox's own start
@@ -829,7 +920,7 @@ export function createInboxLiveSessions(options: {
    */
   const deliverySignature = (): string => {
     const t = now();
-    const parts: string[] = [now() - startedAt <= INBOX_ASKER_GRACE_MS ? "g" : "", String(deliveryChanges)];
+    const parts: string[] = [now() - startedAt <= INBOX_ASKER_RESTART_GRACE_MS ? "g" : "", String(deliveryChanges)];
     for (const [id, entry] of sessions) {
       const recent = entry.holding > 0 || t - entry.lastSeen <= INBOX_ASKER_GRACE_MS;
       if (!recent) continue;
@@ -864,7 +955,7 @@ export function createInboxLiveSessions(options: {
     extra: (host: InboxToolHostId) => { installed: string | null; update_command: string | null },
   ): Partial<Record<InboxToolHostId, InboxHostSessions>> => {
     const out: Partial<Record<InboxToolHostId, InboxHostSessions>> = {};
-    const hosts: readonly InboxToolHostId[] = ["claude-code", "pi", "opencode", "dsh"];
+    const hosts: readonly InboxToolHostId[] = ["claude-code", "pi", "opencode", "dsh", "cline"];
     for (const [session, entry] of [...sessions].sort((a, b) => b[1].startedAt - a[1].startedAt)) {
       if (!isLive(entry) || !(hosts as readonly string[]).includes(entry.host)) continue;
       const host = entry.host as InboxToolHostId;
@@ -994,7 +1085,8 @@ export function createInboxLiveSessions(options: {
         project: live.project,
         sessions: live.sessions,
         // `connection` (additive): how that session is connected now, for the line under the person's message ("Queued", "Sending", Send now).
-        ...(asker ? { asker: { session: asker, live: askerLive(asker), connection: connectionOf(asker) } } : {}),
+        // `stuck` (additive, absent when none): its items that session claimed and will never deliver.
+        ...(asker ? { asker: { session: asker, live: askerLive(asker), connection: connectionOf(asker), ...stuckField(sessionsMatch[1]!, asker) } } : {}),
         // `recipients` (additive, "inbox-tag-agents"): how each session a reply tags is connected now, for its own line.
         ...(recipients.length > 0 ? { recipients: Object.fromEntries(recipients.map((session) => [session, connectionOf(session)])) } : {}),
       });
@@ -1093,6 +1185,7 @@ export function createInboxLiveSessions(options: {
     seenWakeOnly,
     liveFor,
     askerLive,
+    stuck,
     replyTarget,
     seenOverMcp,
     route,
@@ -1112,6 +1205,9 @@ export function createInboxLiveSessions(options: {
     waitOf,
     deliveredIntoTurn,
     deliverySignature,
+    presenceSignature,
+    steerHanded,
+    steerDone,
     hostOf: (session: string): string | null => sessions.get(session)?.host ?? mcpSeen.get(session)?.host ?? null,
     hostSessions,
     restartCount,
