@@ -24,6 +24,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { resolveInboxProjectRoot } from "@plannotator/server/inbox-project-root";
 import { createShapeStore, type ShapeProject, type ShapeStore } from "@plannotator/shared/shape/store";
 import { expandBoardStamps } from "@plannotator/shared/shape/stamps";
+import { fetchShapeWebPictures } from "@plannotator/shared/shape/web-pictures";
 import { diffShapeVersions, shapeBoardNotes, summarizeShapeDiff, type ShapeSession } from "@plannotator/shared/shape/format";
 import { inboxHostSessionFromEnv, inboxProjectFolderFor, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
 import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch } from "@plannotator/shared/shape/switch";
@@ -153,6 +154,8 @@ export interface ShapeCommandDeps {
   stderr?: (text: string) => void;
   /** The project a folder belongs to (the Inbox's rule). Tests pass a stand-in. */
   projectRootOf?: (folder: string) => Promise<ShapeProject>;
+  /** How `shape update` fetches the board's web pictures. Tests pass a stand-in. */
+  fetch?: (input: string | URL, init?: RequestInit) => Promise<Response>;
 }
 
 async function defaultProjectRoot(folder: string) {
@@ -234,6 +237,9 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     // Icons, logos and drawn things named in the drawing become plain SVG here, so the stored board
     // holds the drawing and nothing is looked up when it is shown (shared/shape/stamps.ts).
     board = expandBoardStamps(board).board;
+    // Web pictures are fetched once, here, and kept in the board's files like a picture on this computer.
+    const web = await fetchShapeWebPictures(board, deps.fetch ? { fetch: deps.fetch } : {});
+    if (web.errors.length) return refuse("invalid", `the board has problems:\n${web.errors.map((e) => `  - ${e}`).join("\n")}`);
     let project: ShapeProject | null = null;
     if (c.id) {
       const record = store.get(c.id);
@@ -253,6 +259,7 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
       project,
       session,
       sourceDir: dirname(path),
+      webPictures: web.pictures,
     });
     if (!result.ok) {
       if (result.code === "invalid") return refuse("invalid", `the board has problems:\n${result.errors.map((e) => `  - ${e}`).join("\n")}`);

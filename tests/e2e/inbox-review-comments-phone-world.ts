@@ -16,6 +16,7 @@ import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { clearSidebarPeek } from './sidebar-peek';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -205,6 +206,7 @@ export async function seedPull(page: Page, comments: readonly Comment[]): Promis
 export async function openPull(world: PhoneWorld, page: Page): Promise<void> {
   const key = encodeURIComponent(PULL_KEY);
   await page.goto(`${world.url}#pulls&stack=${key}&layer=${key}&scope=layer`);
+  await clearSidebarPeek(page);
   await expect(page.locator(`[data-guide-file-shell="${SHORT_FILE}"]`)).toBeVisible({ timeout: 30_000 });
 }
 
@@ -218,6 +220,7 @@ export async function seedReview(world: PhoneWorld, page: Page, comments: readon
 
 export async function openReview(world: PhoneWorld, page: Page): Promise<void> {
   await page.goto(`${world.url}#thread=${world.thread}`);
+  await clearSidebarPeek(page);
   await page.locator('[data-review-card]').getByRole('button', { name: /review/i }).first().click();
   await expect(page.locator('[data-review-message]')).toBeVisible();
   await expect(page.locator(`[data-guide-file-shell="${SHORT_FILE}"]`)).toBeVisible({ timeout: 30_000 });

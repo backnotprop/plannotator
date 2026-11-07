@@ -164,7 +164,7 @@ export function shapeEndedLabel(host: Pick<ShapeHost, 'askWaitsWhenEnded'>): str
   return host.askWaitsWhenEnded ? 'Session ended · your question waits for the agent' : 'Session ended · Ask AI answers; changes wait for the agent';
 }
 
-export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, renderThread, readFirst = false, initialView, initialPanel, onNavigate, headStart, boxSelect }: ShapeSurfaceProps) {
+export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, renderThread, readFirst = false, initialView, initialPanel, onNavigate, headStart, boxSelect, darkContrast = false }: ShapeSurfaceProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
   const attachRoot = useCallback((el: HTMLDivElement | null) => {
@@ -895,6 +895,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
           onRefPeek={readFirst ? onRefPeek : undefined}
           pan={readFirst}
           resolveSrc={assetUrl}
+          darkContrast={darkContrast}
           onHoverMark={phase === 'leaving' ? () => {} : hoverMark}
           onPickMark={(el, text) => pickMark(el, v, text)}
           onCode={phase === 'leaving' ? undefined : openCodeTarget}

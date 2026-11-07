@@ -57,6 +57,12 @@ export const OTHER_PLUGIN_INTERRUPT_TEXT =
  * text as the server's own refusal of a gone session (packages/ai/session-bridge-pull.ts).
  */
 export const SESSION_GONE_INTERRUPT_TEXT = 'The session is no longer available.'
+/**
+ * A question whose prompt failed with no words (Claude Code can drop a prompt
+ * with an empty reason). Same text as the server's own fallback for a failed
+ * question (packages/ai/session-bridge.ts).
+ */
+export const SESSION_COULD_NOT_ANSWER_TEXT = 'The session could not answer.'
 
 /** Used when a `taken_over` comes without a message. */
 const TAKEN_OVER_FALLBACK_NOTE =
@@ -236,8 +242,10 @@ export function createBridge(options: BridgeOptions): BridgeHandle {
     emit({ type: 'started', askId })
     const submit = host.submit(command.text)
     turns.followSubmit(askId, submit)
+    // A prompt Claude Code dropped (PromptDropped) or that failed: the question ends `failed`, never waiting for a turn.
     submit.catch((error: unknown) => {
-      turns.failAsk(askId, error instanceof Error ? error.message : String(error))
+      const message = error instanceof Error ? error.message : String(error)
+      turns.failAsk(askId, message.trim() ? message : SESSION_COULD_NOT_ANSWER_TEXT)
     })
   }
 

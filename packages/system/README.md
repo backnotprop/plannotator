@@ -7,7 +7,10 @@ when the drawing may be out of date. System never commits, branches or pushes in
 in their checkout or its `.git`; it only reads the repo's history to see what merged. (Replaced 2026-11-06 by the
 owner's ruling, row 7689, q-122e6577; the drawing was committed to the repo before.)
 
-This package holds the format, its loader, the check of cited paths, the gate, the recipes agents follow, and the scheduled check that wakes an agent to redraw. It has no UI yet and no Inbox wiring; the `plannotator system` command is its one door from a shell.
+This package holds the format, its loader, the check of cited paths, the gate, the recipes agents follow, the
+scheduled check that wakes an agent to redraw, and the drawing at rest as React components
+(`@plannotator/system/react`). It has no Inbox wiring yet; the `plannotator system` command is its one door from a
+shell.
 This repo also keeps a drawing of Plannotator itself at [`.plannotator/system/`](../../.plannotator/system/), for its
 own tests and CI; that copy is a developer file, not where System keeps a person's drawing.
 
@@ -46,6 +49,53 @@ export function check(o: { dir: string; root: string; roots?: Record<string, str
 export function gateRepo(o: { root: string; from: string; to: string; model: SystemModel }): Promise<GateResult>;
   // git diff --name-status -M <from> <to>, read only, then gate()
 ```
+
+```ts
+// @plannotator/system/react: React components that take props; no fetching, no routes, no storage; browser-safe
+import '@plannotator/system/system.css'; // once: plain CSS, sys- classes, the Inbox's tokens, light and dark
+
+export function SystemThumb(p: {
+  model: SystemModel;
+  sheet?: string;                 // default: the landing sheet
+  revision?: Revision | GateResult; // drawn from step A5 on; ignored at rest
+  width: number;                  // px; the height follows the sheet
+}): JSX.Element;                  // a still picture (role img), no controls
+
+export function SystemView(p: {
+  model: SystemModel;
+  sheet?: string;                 // default (and when the drawing lacks it): the landing sheet
+  project?: string;               // the first crumb, the host's project name
+  reading?: 'simple' | 'full';    // default full; a sheet with one reading draws it
+  layout: 'pane' | 'window';      // pane: fits the width and grows down; window: fits the window
+  revision?: Revision | GateResult; view?: 'before' | 'after' | 'steps'; mode?: 'review' | 'plan'; // step A5
+  onNavigate(sheet: string): void; // a window's "N sheets inside" cue asks for the first sheet inside
+  onReading?(r: 'simple' | 'full'): void; // shows the Simple / Full switch on a sheet with both
+  onView?(v: 'before' | 'after' | 'steps'): void; onOpenFile?(path: string, part: string): void; // step A5
+  onOpenFull?(): void;            // shows Open full window, in the pane
+  onClose?(): void;               // shows the close button
+}): JSX.Element;
+
+export function Sheet(p: { layout: SheetLayout; model: SystemModel; lod?: 0 | 1 | 2 | 3; live?: boolean;
+  onNavigate?(sheet: string): void }): JSX.Element; // one laid-out sheet, in sheet units (1600 wide)
+export function layoutSheet(model: SystemModel, code: string, opts?: LayoutOpts): SheetLayout;
+export function restLayout(model: SystemModel, code: string, o?: { simple?: boolean }): SheetLayout; // at rest
+export function hasSimple(model: SystemModel, code: string): boolean;
+export function setText(t: { type: number; sans: string; mono: string }): void; // what the layout measures with
+export function fontsReady(): Promise<void>; // forgets widths measured before the faces loaded
+```
+
+- The components read the host's text size (`--ib-type`) and faces (`--font-sans`, `--font-mono`) from where they
+  are drawn, and the layout measures with them, so a box fits its words at every Text size. Every font size in the
+  sheet is `var(--ib-fs-N, Npx)`.
+- At rest a sheet fits its pane or window, never past 1:1. Below 0.95 the quiet lines lose their words; below 0.3 every
+  line does.
+- A part that opens a scope with sheets is drawn as a plate with a "N sheets inside" cue. Diving into it, the camera,
+  the crumbs and sheet chips as controls, the zoom group, Key and the keyboard are step A4; a change drawn on the
+  sheet is step A5.
+- CI fetches the drawing's pinned commit (`sources.repos.self.at`) one commit deep before the tests, so the cited paths
+  are checked offline. That fetch costs more as the pinned commit ages; a redraw that refreshes `at` keeps it cheap.
+- `bun run --cwd packages/system demo` serves a page that draws this repo's drawing, for screenshots only:
+  `?shot=thumb`, or `?shot=view&sheet=C-001&reading=simple&layout=window|pane`, with `&mode=light`.
 
 `SystemModel` and `Revision` are plain JSON-safe data (`src/format/types.ts`), so a server may load a drawing and send
 the model, or send the files and let the window call `loadFiles()`.
