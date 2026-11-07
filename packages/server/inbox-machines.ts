@@ -627,8 +627,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (/%2e|%2f|%5c|\\/i.test(route) || segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
       return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     }
-    // Accounts go by `accountsOf` alone: a forward would pass the far answer as it came, past the owner's check.
-    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(route) === "accounts") {
+    // Accounts go by `accountsOf` alone: a forward would pass the far answer as it came, past the owner's check, and
+    // would hold a write such as a switch on disk. Nothing under `accounts/` either: a linked machine's switch is its own step.
+    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(segments[0]!) === "accounts") {
       return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     }
     // This machine's own thread, message, file or project never goes to a peer, whatever the window learned: a
