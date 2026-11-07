@@ -252,8 +252,8 @@ export function mcpWakeName(host: string): string {
   return min ? `${INBOX_HOST_NAMES[host] ?? host} ${min.replace(/\.0$/, '')} or later` : (INBOX_HOST_NAMES[host] ?? host);
 }
 // The first-run line names no DeepSeek Harness (the owner, #2529): it keeps its words whether DSH is here or not,
-// though a reply does wake a DSH session through Plannotator's plugin.
-const WAKE_LINE_UNNAMED: ReadonlySet<string> = new Set(['dsh']);
+// though a reply does wake a DSH session through Plannotator's plugin. Cline likewise (its plugin; words unchanged).
+const WAKE_LINE_UNNAMED: ReadonlySet<string> = new Set(['dsh', 'cline']);
 const BRIDGE_HOSTS = INBOX_WAKING_HOSTS.filter((host) => !INBOX_MCP_WAKING_HOSTS.includes(host) && !WAKE_LINE_UNNAMED.has(host));
 
 /**

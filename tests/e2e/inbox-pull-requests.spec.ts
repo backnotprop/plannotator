@@ -1005,6 +1005,8 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   // Each file's box is as tall as its lines (the empty band under a short file, #2615): the 5-line migration's
   // last row ends within one row of its box's bottom.
   const sqlShell = review.locator('[data-guide-file-shell="migrations/0042_retry_schedule.sql"]');
+  // boundingBox() does not wait: the view can be mounted before its lines are drawn on a busy runner.
+  await expect(sqlShell.locator('[data-line="5"]').first()).toBeVisible();
   const sqlBox = (await sqlShell.locator('[data-guide-code-view-mounted]').boundingBox())!;
   const sqlLast = (await sqlShell.locator('[data-line="5"]').first().boundingBox())!;
   expect(sqlBox.y + sqlBox.height - (sqlLast.y + sqlLast.height)).toBeLessThan(24);
@@ -1176,6 +1178,26 @@ test("Post to GitHub (the owner's answer C): the choice beside the decision, a t
   await review.locator('[data-review-destination-choice="forge"]').click();
   await expect(review.locator('[data-review-posts="github"]')).toBeVisible();
   await expect(review.locator('[data-pull-review-foot]')).toContainText('your review goes on the GitHub PR');
+  // GitHub refuses an approval of your own PR, so Approve rests while its caret stays live: one control, one fill.
+  const ownApprove = review.locator('[data-review-posts] [data-decision-primary]');
+  await expect(ownApprove).toHaveAttribute('aria-disabled', 'true');
+  const look = (el: Element) => { const css = getComputedStyle(el); return [css.backgroundColor, css.opacity]; };
+  const ownCaret = review.locator('[data-review-posts] [data-decision-caret]');
+  const atRest = await ownApprove.evaluate(look);
+  expect(atRest).toEqual(await ownCaret.evaluate(look));
+  // Under the pointer: Approve does not change, and the caret lightens its own fill. Neither shows the enabled green.
+  await ownApprove.hover();
+  await expect.poll(() => ownApprove.evaluate(look)).toEqual(atRest);
+  await page.waitForTimeout(250);
+  expect(await ownApprove.evaluate(look)).toEqual(atRest);
+  await ownCaret.hover();
+  await page.waitForTimeout(250);
+  const caretHover = await ownCaret.evaluate(look);
+  expect(caretHover[0]).not.toBe(atRest[0]);
+  // The grey's own hue: an oklab colour with next to no chroma, where the enabled green has plenty.
+  const [, greenRed, blueYellow] = caretHover[0].match(/-?[\d.]+/g)!.map(Number);
+  expect(Math.hypot(greenRed, blueYellow)).toBeLessThan(0.03);
+  await page.mouse.move(2, 2);
   await shot(page, '10-ending-choice');
   {
     const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'light', deviceScaleFactor: 2 });

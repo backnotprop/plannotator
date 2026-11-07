@@ -84,3 +84,26 @@ export function revisionOfSize(id: string, bytes: number): string {
   const head = `revision: ${id}\n# `;
   return head + 'x'.repeat(bytes - head.length - 1) + '\n';
 }
+
+/**
+ * Whether a drawing's own commit (`sources.repos.self.at`) is in a clone. Tests stay offline, so nothing is
+ * fetched here: CI clones one commit and fetches the drawing's commit in a step of its own before the tests
+ * (.github/workflows/test.yml, "Fetch the system drawing's commit"). When the commit is not there, `reason` says
+ * why, for the test to print as its skip reason.
+ */
+export type AtState = { ok: true; at: string } | { ok: false; at: string; reason: string };
+
+export const FETCH_STEP = `.github/workflows/test.yml, "Fetch the system drawing's commit"`;
+
+export function commitAt(root: string, at: string): AtState {
+  if (!/^[0-9a-f]{7,40}$/.test(at)) return { ok: false, at, reason: `${at} is not a commit id` };
+  try {
+    execFileSync('git', ['-C', root, 'cat-file', '-e', `${at}^{commit}`], {
+      env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
+      stdio: 'ignore',
+    });
+    return { ok: true, at };
+  } catch {
+    return { ok: false, at, reason: `${at} is not in this clone (CI fetches it before the tests: ${FETCH_STEP})` };
+  }
+}
