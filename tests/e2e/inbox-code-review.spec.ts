@@ -473,7 +473,7 @@ test('a phone at 390 px: the switch, the "/" list, the card, the review with a c
     const retry = pane.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
     const added = retry.locator('[data-line-type="change-addition"][data-column-number="12"]');
     await expect(added).toBeVisible({ timeout: 30_000 });
-    await added.scrollIntoViewIfNeeded();
+    // click() scrolls and retries if the diff redraws the line; a separate scroll can catch it detached.
     await added.click();
     const composer = page.getByPlaceholder('Leave feedback...');
     await expect(composer).toBeVisible();
