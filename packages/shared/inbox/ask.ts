@@ -26,7 +26,7 @@
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isInboxId } from "@plannotator/core/inbox-types";
-import { isShapeId } from "@plannotator/core/shape";
+import { isShapeId, SHAPE_LIMITS } from "@plannotator/core/shape";
 import type { InboxShowMeTarget } from "@plannotator/core/inbox-review";
 import { INBOX_DRAFT_BODY_MAX } from "./drafts";
 import { InboxError } from "./schema";
@@ -288,6 +288,7 @@ export interface InboxShowMeInput {
 }
 
 const SHOW_ME_KEYS = ["review", "file", "lines", "round", "words", "part"];
+const SHOW_ME_PICTURE_RE = /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/;
 
 /**
  * The shape of a Show me's input (`kind`, `show_me`, `again_shape`); null
@@ -320,6 +321,12 @@ export function checkInboxShowMeInput(input: { kind?: unknown; show_me?: unknown
     if (!rawPart || typeof rawPart !== "object" || !isShapeId(rawPart.board) || !text(rawPart.name, 600) || (rawPart.code !== undefined && !text(rawPart.code, 1100)) || file !== null) {
       throw bad("show_me.part: { board, name, code? }, with file and lines null.", "show_me");
     }
+    if (rawPart.parts !== undefined && (!Array.isArray(rawPart.parts) || rawPart.parts.length < 2 || rawPart.parts.length > 40 || !rawPart.parts.every((name) => text(name, 600)))) {
+      throw bad("show_me.part.parts: the names of the 2 to 40 parts a box covered.", "show_me");
+    }
+    if (rawPart.picture !== undefined && (typeof rawPart.picture !== "string" || rawPart.picture.length > SHAPE_LIMITS.notePicture || !SHOW_ME_PICTURE_RE.test(rawPart.picture))) {
+      throw bad("show_me.part.picture: the box's picture, a PNG data: URL within the limit.", "show_me");
+    }
   }
   const again = input.again_shape;
   if (again !== undefined && (typeof again !== "string" || !isShapeId(again))) throw bad("again_shape: the id of the board to bring up to date.", "again_shape");
@@ -331,7 +338,17 @@ export function checkInboxShowMeInput(input: { kind?: unknown; show_me?: unknown
       lines: lines as [number, number] | null,
       round: typeof s.round === "number" ? s.round : 1,
       ...(words ? { words } : {}),
-      ...(rawPart ? { part: { board: rawPart.board as string, name: rawPart.name as string, ...(rawPart.code !== undefined ? { code: rawPart.code as string } : {}) } } : {}),
+      ...(rawPart
+        ? {
+            part: {
+              board: rawPart.board as string,
+              name: rawPart.name as string,
+              ...(rawPart.code !== undefined ? { code: rawPart.code as string } : {}),
+              ...(rawPart.parts !== undefined ? { parts: rawPart.parts as string[] } : {}),
+              ...(rawPart.picture !== undefined ? { picture: rawPart.picture as string } : {}),
+            },
+          }
+        : {}),
     },
     ...(again !== undefined ? { againShape: again as string } : {}),
   };

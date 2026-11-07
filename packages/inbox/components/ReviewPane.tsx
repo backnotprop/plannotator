@@ -53,7 +53,7 @@ import type { ShapeHost, ShapeReviewAt } from '@plannotator/ui/components/shape'
 import { OverviewFigure, ShowMeButton } from '../review-drawing/OverviewFigure';
 import { ShowMeBox, ShowMeCorner } from '../review-drawing/ShowMeLayer';
 import { partLanding, reviewDrawnOn, overviewPicture, baseName, changedMarks, chapterOf, markOf, partName, targetLines } from '../review-drawing/showMeModel';
-import { useShowMe } from '../review-drawing/useShowMe';
+import { showMeFromShape, useShowMe } from '../review-drawing/useShowMe';
 import { ShapeBoardLayer, ShapePebbleButton } from '../shape/ShapeParts';
 import { useBoardsNav } from '../shape/ShapeBoardsNav';
 import type { ShapeBoardPlace } from '../shape/types';
@@ -336,7 +336,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
       showMe.state.canAsk
         ? {
             ...shapeHost,
-            showMe: (id, part) => showMeFromBoard.current({ board: id, name: part.name, ...(part.code ? { code: part.code } : {}) }, part.words),
+            showMe: (id, part) => showMeFromShape(() => showMeFromBoard.current, id, part),
             refreshLabel: 'Show me again',
             refresh: async (id) => {
               onBoardRef.current(null);

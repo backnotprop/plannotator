@@ -48,6 +48,10 @@ export interface ShapeShowMeInput {
   /** Its `data-code` value, when it has one. */
   code?: string;
   words: string;
+  /** A dragged box over several parts: their names (`name` is then "A part of the board"). */
+  parts?: string[];
+  /** A dragged box's picture, the box drawn on it (a PNG data: URL; null when there is none). */
+  picture?: Promise<string | null>;
 }
 
 export interface ShapeHost {

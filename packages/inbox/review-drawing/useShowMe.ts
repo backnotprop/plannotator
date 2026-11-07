@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import { parseGuideSnapshot } from '@plannotator/core/guide-format';
 import { inboxShowMeRequest, type InboxShowMePart, type InboxShowMeTarget } from '@plannotator/core/inbox-review';
+import type { ShapeShowMeInput } from '@plannotator/ui/components/shape';
 import { useAIChat } from '@plannotator/ui/hooks/useAIChat';
 import type { AIResponse } from '@plannotator/ui/types';
 import { SESSION_ASK_ERROR_CODES } from '@plannotator/ui/utils/aiProvider';
@@ -36,6 +37,18 @@ export interface ShowMePlace {
   file: string | null;
   lines: [number, number] | null;
   part?: InboxShowMePart;
+}
+
+/**
+ * A board's Show me (`ShapeHost.showMe`) as a Show me from a board: a box's parts, and its picture once drawn (a
+ * picture that fails goes without). `fromBoard` is read when it is called, after the picture settles.
+ */
+export function showMeFromShape(fromBoard: () => (part: InboxShowMePart, words: string) => void, board: string, input: ShapeShowMeInput): void {
+  const part: InboxShowMePart = { board, name: input.name, ...(input.code ? { code: input.code } : {}), ...(input.parts?.length ? { parts: input.parts } : {}) };
+  if (!input.picture) return fromBoard()(part, input.words);
+  void input.picture
+    .catch(() => null)
+    .then((picture) => fromBoard()(picture ? { ...part, picture } : part, input.words));
 }
 
 export interface ShowMeState {
@@ -274,7 +287,9 @@ export function useShowMe({
   const again = (shape: string) => {
     setProblem(null);
     const made = turns.filter((turn) => turn.shape === shape && turn.show_me).at(-1)?.show_me;
-    const place = made?.part ? { file: null, lines: null, part: made.part } : made?.review === reviewId ? { file: made.file, lines: made.lines } : made ? placeNow(made) : null;
+    // A box's picture is not sent again: the Inbox kept it with the first request.
+    const madePart = made?.part ? (({ picture: _picture, ...part }) => part)(made.part) : undefined;
+    const place = madePart ? { file: null, lines: null, part: madePart } : made?.review === reviewId ? { file: made.file, lines: made.lines } : made ? placeNow(made) : null;
     setBox({ place: place ?? { file: null, lines: null }, words: made?.words ?? '', turn: null, again: shape });
   };
 
@@ -288,7 +303,8 @@ export function useShowMe({
       if (posted.provider_id) {
         setBox((current) => (current ? { ...current, turn: turnId } : current));
         live.current = { turn: turnId, index: chat.messages.length };
-        void chat.ask({ prompt: question, ...(policy ? { busyPolicy: policy } : {}) }, { providerId: posted.provider_id });
+        // The turn as the Inbox kept it: a box's request names the picture's file, which only the Inbox knows.
+        void chat.ask({ prompt: posted.turn?.question ?? question, ...(policy ? { busyPolicy: policy } : {}) }, { providerId: posted.provider_id });
       } else {
         // Nobody to ask: the box stays as it was written, to send when the agent is back.
         setBox((current) => (current ? { ...current, turn: null } : current));

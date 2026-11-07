@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import type { ShapeHost } from '@plannotator/ui/components/shape';
 import { ShowMeBox } from '../review-drawing/ShowMeLayer';
-import { useShowMe } from '../review-drawing/useShowMe';
+import { showMeFromShape, useShowMe } from '../review-drawing/useShowMe';
 import { ShapeLayer } from './ShapeParts';
 import { useBoardsNav } from './ShapeBoardsNav';
 import type { InboxShapes } from './useInboxShapes';
@@ -50,7 +50,7 @@ export function ThreadShapeLayer({
   // Show me only on a board of the thread it keeps to: another thread's waits until that one has nothing going.
   const canShowMe = !!boardThread && boardThread === threadId && showMe.state.canAsk;
   const withShowMe = useMemo<ShapeHost>(
-    () => (canShowMe ? { ...host, showMe: (board, part) => fromBoard.current({ board, name: part.name, ...(part.code ? { code: part.code } : {}) }, part.words) } : host),
+    () => (canShowMe ? { ...host, showMe: (board, part) => showMeFromShape(() => fromBoard.current, board, part) } : host),
     [host, canShowMe],
   );
   const nav = useBoardsNav({ shapes: shapes.shapes, threadId: boardThread, board: id, parents: showMe.parents, onBoard });

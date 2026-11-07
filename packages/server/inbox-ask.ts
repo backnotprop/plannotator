@@ -10,7 +10,9 @@
  * (`409 code_review_off`), about a review of this thread, and its `question`
  * is exactly `inboxShowMeRequest`'s words. The board comes back the way any
  * board does (`plannotator shape update --thread`); a read names it on the turn
- * (`showMeShapes`), so nothing is kept twice.
+ * (`showMeShapes`), so nothing is kept twice. A dragged box's Show me sends its
+ * picture as `show_me.part.picture` (a data: URL): it is kept in the board's
+ * folder (`keepPicture`) and the stored request names the file.
  *
  *   GET  /api/inbox/ask                    `{ chats }`: every thread with a conversation, for the
  *                                          window's chat list
@@ -46,7 +48,7 @@
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { inboxAgentName, type InboxThread } from "@plannotator/core/inbox-types";
 import { isAIEndpointPath } from "@plannotator/ai/endpoints";
-import { inboxReviewRound, inboxShowMeRequest, type InboxShowMeTarget } from "@plannotator/core/inbox-review";
+import { inboxReviewRound, inboxShowMeRequest, type InboxShowMePart, type InboxShowMeTarget } from "@plannotator/core/inbox-review";
 import { addInboxAskTurn, checkInboxAskInput, checkInboxShowMeInput, findInboxAskTurn, inboxAskFiles, inboxAskSummary, markInboxAskSeen, readInboxAsk, removeInboxAsk, showMeShapes, type ShowMeBoardVersion, updateInboxAskTurn, type InboxAskConversation, type InboxAskSummary } from "@plannotator/shared/inbox/ask";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -102,6 +104,8 @@ export function createInboxAsk(options: {
   reviewOf?: (messageId: string) => InboxAskReview | "not_a_review" | null;
   /** A thread's Shape boards, and when each version was written, to name the board each Show me made. Absent: none. */
   boardsOf?: (threadId: string) => { id: string; versions: ShowMeBoardVersion[] }[];
+  /** A Show me's box picture, kept in that board's folder: the file's full path, or null. Absent: no picture is kept. */
+  keepPicture?: (board: string, picture: string) => Promise<string | null>;
   store: InboxStore;
   serverSession: string;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
@@ -236,6 +240,8 @@ export function createInboxAsk(options: {
     // Show me: a question that asks the agent to draw, about a review of this thread. Only while Code review is on.
     const showMe = checkInboxShowMeInput(body);
     let showMeFields: { kind: "show_me"; show_me: InboxShowMeTarget; again_shape?: string } | null = null;
+    let boxPicture: string | null = null;
+    let requestOf: ((target: InboxShowMeTarget) => string) | null = null;
     if (showMe) {
       const asked = showMe.target;
       // A review's Show me needs Code review; a board's, the boards (Shape or Code review).
@@ -255,9 +261,12 @@ export function createInboxAsk(options: {
         throw new InboxError("validation_error", `again_shape: ${showMe.againShape} is not a board of this thread.`, { field: "again_shape" });
       }
       // The round is the Inbox's to say: the review's place among the thread's reviews.
-      const target: InboxShowMeTarget = { ...asked, round: asked.review === null ? 1 : inboxReviewRound(thread.messages, asked.review) };
-      const expected = inboxShowMeRequest({ target, title: review && review !== "not_a_review" ? review.title : "", threadId, ...(showMe.againShape !== undefined ? { again: showMe.againShape } : {}) });
-      if (input.question !== expected) throw new InboxError("validation_error", "question: a Show me's question is its request, as inboxShowMeRequest writes it.", { field: "question" });
+      // A box's picture is kept apart (below, with the turn): the window's request is written without it.
+      const { picture: _picture, ...part } = asked.part ?? {};
+      boxPicture = asked.part?.picture ?? null;
+      const target: InboxShowMeTarget = { ...asked, ...(asked.part ? { part: part as InboxShowMePart } : {}), round: asked.review === null ? 1 : inboxReviewRound(thread.messages, asked.review) };
+      requestOf = (shown) => inboxShowMeRequest({ target: shown, title: review && review !== "not_a_review" ? review.title : "", threadId, ...(showMe.againShape !== undefined ? { again: showMe.againShape } : {}) });
+      if (input.question !== requestOf(target)) throw new InboxError("validation_error", "question: a Show me's question is its request, as inboxShowMeRequest writes it.", { field: "question" });
       showMeFields = { kind: "show_me", show_me: target, ...(showMe.againShape !== undefined ? { again_shape: showMe.againShape } : {}) };
     }
     // Before the gates: a retry of a saved turn gets that turn, even if the thread was archived since.
@@ -287,6 +296,13 @@ export function createInboxAsk(options: {
       if (moved) saved = updateInboxAskTurn(store.dir, threadId, input.id, { session: owner.session, host: owner.host }) ?? known;
       else if (known) saved = known;
       else {
+        // A box's Show me: its picture goes in the board's folder, and the request the agent reads names the file.
+        const kept = boxPicture && showMeFields?.show_me.part ? await options.keepPicture?.(showMeFields.show_me.part.board, boxPicture) : null;
+        if (kept && showMeFields?.show_me.part && requestOf) {
+          const show_me: InboxShowMeTarget = { ...showMeFields.show_me, part: { ...showMeFields.show_me.part, picture: kept } };
+          showMeFields = { ...showMeFields, show_me };
+          input.question = requestOf(show_me);
+        }
         const added = addInboxAskTurn(store.dir, threadId, { ...input, ...showMeFields, at: new Date().toISOString(), session: owner.session, host: owner.host });
         saved = { conversation: added.conversation, turn: added.turn };
         options.onChange(threadId);

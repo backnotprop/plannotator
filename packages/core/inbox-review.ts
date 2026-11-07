@@ -218,6 +218,13 @@ export interface InboxShowMePart {
   name: string;
   /** Its `data-code` value, when it has one. */
   code?: string;
+  /** A box over several parts: their names, and `name` is "A part of the board". */
+  parts?: string[];
+  /**
+   * A box's picture, the box drawn on it: a PNG `data:` URL as the window sends it; once the Inbox keeps it in the
+   * board's folder, that file's full path, which the request names.
+   */
+  picture?: string;
 }
 
 /** "16–18" (an en dash), or "16" for one line. */
@@ -252,15 +259,20 @@ export function inboxShowMeRequest(input: { target: InboxShowMeTarget; title: st
   const words = target.words?.trim() ? `: "${quoted(target.words)}"` : '';
   const tie = `--thread ${threadId}${target.review ? ` --through ${target.review}` : ''}`;
   const part = target.part;
+  // A box over several parts names them; a part on its own, its code.
+  const after = part?.parts?.length ? ` (parts: ${part.parts.map(quoted).join(', ')})` : part?.code ? ` (${quoted(part.code)})` : '';
+  // The picture's line only once the Inbox kept it: the window's request, before, has none.
+  const picture = part?.picture && !part.picture.startsWith('data:') ? [`A picture of what they boxed, the box drawn on it: ${part.picture}.`] : [];
   const where = part
-    ? `on "${quoted(part.name)}"${part.code ? ` (${quoted(part.code)})` : ''} in your Shape ${part.board}, from`
+    ? `on "${quoted(part.name)}"${after} in your Shape ${part.board}, from`
     : target.file !== null && target.lines
       ? `on ${target.lines[0] === target.lines[1] ? 'line' : 'lines'} ${inboxReviewLines(target.lines)} of ${target.file} in`
       : 'on the Overview of';
   return [
     target.review
       ? `The reviewer pressed Show me ${where} your review "${title}" (${target.review})${words}.`
-      : `The person pressed Show me on "${quoted(part?.name ?? '')}"${part?.code ? ` (${quoted(part.code)})` : ''} in your Shape ${part?.board ?? ''}${words}.`,
+      : `The person pressed Show me on "${quoted(part?.name ?? '')}"${after} in your Shape ${part?.board ?? ''}${words}.`,
+    ...picture,
     input.again
       ? `Bring your Shape ${input.again} up to date with the code as it is now, as a new version. \`plannotator shape --help\` has how.`
       : part
