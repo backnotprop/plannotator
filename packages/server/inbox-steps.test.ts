@@ -174,6 +174,20 @@ describe("the list's rows", () => {
     await w.setSteps(false);
     expect("steps_waiting" in (await row())).toBe(false);
   });
+
+  test("the person replied, the flag is gone", async () => {
+    const w = await world();
+    const row = async () => {
+      const model = (await (await fetch(`${w.base}/api/inbox/threads`)).json()) as { sections: { threads: { thread_id: string; steps_waiting?: true }[] }[] };
+      return model.sections.flatMap((section) => section.threads).find((r) => r.thread_id === w.thread)!;
+    };
+    await w.setSteps(true);
+    w.server.store.setThreadSteps({ thread_id: w.thread, agent: AGENT, steps: [PLAN[0]!, { step: "Pick the backfill window", status: "waiting" }, PLAN[2]!] });
+    expect((await row()).steps_waiting).toBe(true);
+    // The person answers in the thread: it waits on the agent now, though its list still says "waiting".
+    w.server.store.sendMessage({ project_id: w.server.store.message(w.thread)!.project_id, author: { kind: "person" }, body: "The last 7 days.", reply_to: w.thread });
+    expect("steps_waiting" in (await row())).toBe(false);
+  });
 });
 
 describe("the event stream", () => {

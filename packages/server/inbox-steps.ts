@@ -60,6 +60,23 @@ export function inboxStepsPresenceOf(record: InboxSteps, live: InboxStepsLive, n
 }
 
 /**
+ * A list still waits on the person (the row's and the lane card's amber pause, approval
+ * "inbox-checklist-spinners-2026-11-07": "only while the thread waits on the person"): a step is `waiting`, the person
+ * has written nothing in the thread since the list was last written, and the session has not ended (an ended session
+ * never updates its list, so its "waiting" would stay for good).
+ */
+export function inboxStepsWaitOnPerson(
+  record: InboxSteps,
+  live: InboxStepsLive,
+  now: number,
+  personWroteSince: (threadId: string, since: string) => boolean,
+): boolean {
+  if (!record.steps.some((step) => step.status === "waiting")) return false;
+  if (personWroteSince(record.thread_id, record.updated_at)) return false;
+  return inboxStepsPresenceOf(record, live, now) !== "ended";
+}
+
+/**
  * Tidy's rule for steps (approval "inbox-thread-steps", part 5; asked only while the switch is on): a list with a
  * step still `doing` while its session has been idle for INBOX_STEPS_IDLE_MS or more, or has ended. Idle since: the
  * session's last idle transition when its connection says (else when it was last heard), and never before the list's

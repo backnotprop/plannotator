@@ -629,9 +629,13 @@ const AUTO_STEPS = checklist([
   { step: 'Wire the menu', status: 'doing' },
 ]);
 
-test.if(hasDom)('the lane card: the still amber pause only while a list waits on the person, named for the card; nothing while the agent works, without a list or with the switch off', async () => {
+/** The thread's list row as the server sends it: `steps_waiting` is the server's "still waits on the person" rule. */
+const autoRow = (waiting: boolean) => (id: string) =>
+  id === 'msg_auto' ? ({ thread_id: 'msg_auto', subject: 'Auto-update', project: { id: 'prj_1', name: 'web' }, ...(waiting ? { steps_waiting: true } : {}) } as unknown as InboxListRow) : null;
+
+test.if(hasDom)('the lane card: the still amber pause only while a list waits on the person, named for the card; nothing while the agent works, once the thread stops waiting, without a list or with the switch off', async () => {
   scriptFetch();
-  draw({ model: { serverSession: 's', cursor: 1, cards: CARDS, dropped_unseen: 0, seen_seq: LOOK, steps: { msg_auto: [AUTO_STEPS] } } });
+  draw({ rowOf: autoRow(true), model: { serverSession: 's', cursor: 1, cards: CARDS, dropped_unseen: 0, seen_seq: LOOK, steps: { msg_auto: [AUTO_STEPS] } } });
   const auto = cardEl('crd_auto')!;
   expect(auto.querySelector('.ib-bc-plan [data-step-mark="waiting"]')).not.toBeNull();
   // Still: never the spinner, and no count on the card.
@@ -647,7 +651,15 @@ test.if(hasDom)('the lane card: the still amber pause only while a list waits on
     { step: 'Read the issue', status: 'done' },
     { step: 'Wire the menu', status: 'doing' },
   ]);
-  draw({ model: { serverSession: 's', cursor: 1, cards: CARDS, dropped_unseen: 0, seen_seq: LOOK, steps: { msg_auto: [working] } } });
+  draw({ rowOf: autoRow(true), model: { serverSession: 's', cursor: 1, cards: CARDS, dropped_unseen: 0, seen_seq: LOOK, steps: { msg_auto: [working] } } });
+  expect($$('.ib-bc-plan')).toHaveLength(0);
+  expect(cardEl('crd_auto')!.querySelector('[data-card-open]')!.getAttribute('aria-label')).not.toContain('Checklist');
+  act(() => root?.unmount());
+  root = null;
+  document.body.innerHTML = '';
+  // The list still says "waiting", but the thread no longer waits (the person replied, or the session ended): the
+  // server drops the row's `steps_waiting`, and the card goes plain with the row.
+  draw({ rowOf: autoRow(false), model: { serverSession: 's', cursor: 1, cards: CARDS, dropped_unseen: 0, seen_seq: LOOK, steps: { msg_auto: [AUTO_STEPS] } } });
   expect($$('.ib-bc-plan')).toHaveLength(0);
   expect(cardEl('crd_auto')!.querySelector('[data-card-open]')!.getAttribute('aria-label')).not.toContain('Checklist');
   act(() => root?.unmount());

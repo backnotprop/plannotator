@@ -934,7 +934,9 @@ function BoardCard({
   const mark = markOf(card);
   // The checklist's mark (approval "inbox-checklist-spinners-2026-11-07"): the lane card stays still, with nothing
   // while the agent works and the still amber pause only while a list waits on the person; the opened card has the rest.
-  const planWords = stepsWaitWords(stepsOf(card));
+  // "Waits" is the server's rule on the thread's row (`steps_waiting`): not once the person has written since the list,
+  // nor once its session has ended, so the card and the list row always agree.
+  const planWords = stepsWaitWords(stepsOf(card).filter((list) => rowOf(list.thread_id)?.steps_waiting));
   const label = cardLabel(card, unread, now) + (sent ? `. Sent to ${sent}` : '') + (mark ? `. ${markLabel(mark)}` : '') + (planWords ? `. ${planWords}` : '');
   const thread = line?.you ? youThread(card, rowOf) : null;
   // "Waiting on you" (columns v2, display only): a card before In review whose linked thread waits on the person.
