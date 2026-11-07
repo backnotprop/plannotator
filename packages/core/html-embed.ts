@@ -221,3 +221,11 @@ export function readEmbedMessage(data: unknown): EmbedMessage | null {
 
 /** The id the Inbox gives an embed: the first 32 hex digits of the SHA-256 of its HTML. */
 export const EMBED_ID = /^[a-f0-9]{32}$/;
+
+/**
+ * What a frame document a host serves says to the window that framed it when
+ * the host no longer keeps it (an Inbox restart): the window asks for a new
+ * URL. Sent by the Inbox's attached-page route (packages/server/inbox-pages.ts)
+ * and read by ui's HtmlViewer `frameUrl`.
+ */
+export const SERVED_FRAME_GONE = "plannotator-frame-gone";

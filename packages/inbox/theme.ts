@@ -23,6 +23,7 @@ import { themeSupportsHalf, type ThemeHalf } from '@plannotator/ui/utils/themeRe
 import { configStore, type ServerSyncFn } from '@plannotator/ui/config';
 import type { Mode } from '@plannotator/ui/theme-modes';
 import { inboxApi, type InboxThemeConfig } from './api';
+import { diffOptionsToWire } from './diffOptions';
 
 /**
  * The config store's server write-back, for the Inbox: it has no /api/config,
@@ -60,10 +61,9 @@ export const inboxServerSync: ServerSyncFn = (payload) => {
     }
     if (Object.keys(send).length > 0) void inboxApi.saveTheme(send).catch(() => {});
   }
-  const diffStyle = (payload.diffOptions as { diffStyle?: unknown } | undefined)?.diffStyle;
-  if (diffStyle === 'split' || diffStyle === 'unified') {
-    void inboxApi.saveDiffStyle(diffStyle).catch(() => {});
-  }
+  // Every diff setting the Inbox changed (diffOptions.ts), in one POST.
+  const diffOptions = diffOptionsToWire(payload.diffOptions);
+  if (diffOptions) void inboxApi.saveDiffOptions(diffOptions).catch(() => {});
 };
 
 let adopted = false;

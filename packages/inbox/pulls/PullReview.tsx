@@ -26,11 +26,12 @@
  * window's storage per layer and scope until the verdict goes.
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { GuideReaderPart, PanePart, PullAllFilesPart, PullRepoFilePart, ReaderPart } from '../lazyParts';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
+import { patchBlobIds, type DiffFile } from '@plannotator/core/diff-files';
 import { anchorStillMatches, captureAnchor } from '@plannotator/ui/utils/codeAnnotationAnchor';
 import type { KeptComment } from '../guide/platform-post-types';
-import type { DiffFile } from '@plannotator/core/diff-files';
 import { inboxPullRepoKey, type InboxPullDiffAnswer, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
@@ -45,6 +46,7 @@ import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
 import { SidebarTrigger } from '../shell/sidebar';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
+import { holdBarAfterClose, usePhoneCommentsSheet } from '../components/phoneCommentsSheet';
 import { VerdictKeys, verdictOf } from '../reviewVerdict';
 import { OpenInCodeSpans, OpenInFile } from '../components/OpenIn';
 import { REVIEW_FOLD_PANEL_BELOW } from '../components/ReviewPane';
@@ -58,7 +60,7 @@ import { RailStack } from './RailStack';
 import { RailTree } from './RailTree';
 import { DetailsStatus, PullDetails, usePullDetails } from './PullDetails';
 import { RailScopeSwitch } from './RailScope';
-import { useTreeScope } from '@plannotator/review-editor/hooks/useTreeScope';
+import { useTreeScope } from '@plannotator/ui/hooks/useTreeScope';
 import { useSheetEscape } from '../shortcuts/useSheetEscape';
 import { inOverlay } from '../shortcuts/guards';
 import { reviewFiles } from './reviewFiles';
@@ -81,6 +83,8 @@ export interface PullReviewProps {
   onBack: () => void;
   /** The verdict went. */
   onSent: () => void;
+  /** A review went to the PR on the forge: Reviews reads its rows again. */
+  onPosted?: () => void;
 }
 
 const NO_BLOCKS: never[] = [];
@@ -270,7 +274,7 @@ function forPost(comments: readonly KeptComment[], screen: Pick<OnScreen, 'stamp
   });
 }
 
-function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onBack, onSent }: PullReviewProps) {
+function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onBack, onSent, onPosted }: PullReviewProps) {
   const phone = usePhone();
   const item = useMemo(() => (model ? findStack(pullGroups(model, null), stackId) : null), [model, stackId]);
   const stack = item?.stack ?? null;
@@ -417,6 +421,17 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // that could not be read (the header then offers Open on GitHub).
   const postHead = diff?.head_sha ?? (scope === 'layer' ? null : (layer?.head_sha ?? null));
   const canPost = !!postablePull(layer) && !diffError && (!diff || !!postHead);
+  // The expand arrows' whole files, at the commits this diff runs between.
+  // Asked only with the blobs the patch names, so the server can refuse a text that is not this patch's file; a patch
+  // without them (GitLab's whole stack), or a diff whose head moved during its read, opens nothing.
+  const headMoved = !!diff && !diff.head_sha;
+  const fileContents = useCallback(
+    async (path: string, signal: AbortSignal, patch: string) => {
+      const ids = headMoved ? null : patchBlobIds(patch);
+      return ids ? inboxApi.pullFile(layerKey, scope, path, ids, signal) : { oldContent: null, newContent: null };
+    },
+    [layerKey, scope, headMoved],
+  );
   const [picked, pick] = useReviewDestination();
   const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
   useEffect(() => setPosted(null), [keptId]);
@@ -468,29 +483,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       // Storage full or off: this visit only.
     }
   };
-  // Once the tab on the first file has scrolled away, the same switch sits in the bar. Nothing floats over the code.
-  const [diffBody, setDiffBody] = useState<HTMLDivElement | null>(null);
-  const [docked, setDocked] = useState(false);
-  useEffect(() => {
-    if (!diffBody || phone) return;
-    let frame = 0;
-    const read = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        const box = diffBody.getBoundingClientRect();
-        const tab = diffBody.querySelector('[data-guide-section-tab] [data-diff-style-switch]')?.getBoundingClientRect();
-        setDocked(!!tab && tab.bottom <= box.top);
-      });
-    };
-    read();
-    diffBody.addEventListener('scroll', read, { passive: true });
-    return () => {
-      cancelAnimationFrame(frame);
-      diffBody.removeEventListener('scroll', read);
-    };
-  }, [phone, diffBody]);
   const [sheet, setSheet] = useState(false);
   const sheetId = useId();
+  const sheetCloseRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!folded) setSheet(false);
   }, [folded]);
@@ -539,9 +534,14 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     if (filesSheet) railRef.current?.querySelector<HTMLElement>('[data-review-files] button, [data-repo-file-tree] button, [data-pull-layer-row] button')?.focus({ preventScroll: true });
   }, [filesSheet]);
   const closeComments = () => {
-    setSheet(false);
+    // At once: on a phone the button can take focus only once the page shows again.
+    flushSync(() => setSheet(false));
     sheetButton.current?.focus({ preventScroll: true });
+    if (phone) holdBarAfterClose(sheetButton.current);
   };
+  // A phone's Comments sheet covers the window: focus starts on its close, the selection's bar goes, and Escape from
+  // the hidden page closes it first.
+  usePhoneCommentsSheet(phone && sheet, sheetCloseRef, closeComments);
   const closeFiles = () => {
     setFilesSheet(false);
     filesButton.current?.focus({ preventScroll: true });
@@ -578,6 +578,11 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     const moved = railRef.current?.contains(held) ? filesButton.current : panelRef.current?.contains(held) ? sheetButton.current : held.matches('[data-pull-review-files-button]') ? first(railRef.current) : held.matches('.ib-vcomments') ? first(panelRef.current) : null;
     moved?.focus({ preventScroll: true });
   }, [phone, folded]);
+  // The sheet covers a phone's diff: a comment chosen in it closes it, to show the comment's lines (as ReviewPane).
+  const showFromPanel = (id: string) => {
+    showComment(id);
+    if (phone) setSheet(false);
+  };
   // A global comment chosen in the guide: selected in the panel, and the folded panel opens on it (as ReviewPane).
   const showGlobalComment = (id: string) => {
     setSelectedId(id);
@@ -686,7 +691,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
 
   if (!model || !stack || !layer) {
     return (
-      <section className={`ib-viewer ib-review ib-prreview${phone ? '' : ' ib-prr-wide'}`} aria-label="Review" data-pull-review="">
+      <section className={`ib-viewer ib-wlayer ib-review ib-prreview${phone ? '' : ' ib-prr-wide'}`} aria-label="Review" data-pull-review="">
         <div className="ib-vhead">
           {!phone && <SidebarTrigger />}
           <Tip content="Reviews">
@@ -769,7 +774,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${phone ? '' : ' ib-prr-wide'}${phone ? ' ib-railfold' : ''}${filesSheet ? ' ib-files-open' : ''}`}
+      className={`ib-viewer ib-wlayer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${phone ? '' : ' ib-prr-wide'}${phone ? ' ib-railfold' : ''}${filesSheet ? ' ib-files-open' : ''}`}
       style={{ '--ib-rail-w': `${railWidth}px` } as React.CSSProperties}
       aria-label={`Review ${label}`}
       data-pull-review={layer.key}
@@ -796,7 +801,6 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           </Tip>
         )}
         <span className="ib-sp" />
-        {!phone && docked && <DiffStyleSwitch icons name="ib-diff-style-held" />}
         {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
         {folded && (readerComments || comments.length > 0) && (
           <button
@@ -847,6 +851,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               // Only what went is cleared: a whole stack's line comments map to no PR's lines and stay.
               forgetWent(result.posted);
               setPosted({ label: result.label, url: result.url, action: result.action });
+              onPosted?.();
             }}
           />
         ) : canDecide ? (
@@ -928,7 +933,14 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             data-pull-rail-handle=""
           />
         )}
-        <div className="ib-gbody" ref={setDiffBody} data-repo-open={repoOpen && repoSha ? '' : undefined}>
+        {/* The review app's muted tab row over the code, its view controls at the right end; no tabs of its own here
+            (approval pr-view-one-surface, 11-07 19:08). */}
+        {!phone && (
+          <div className="ib-prp-tabs" data-pull-tabs="">
+            <DiffStyleSwitch icons />
+          </div>
+        )}
+        <div className="ib-gbody" data-repo-open={repoOpen && repoSha ? '' : undefined}>
           {repoOpen && repoSha && (
             <PanePart>
               <PullRepoFilePart.Part key={repoOpen} pullKey={layer.key} sha={repoSha} path={repoOpen} />
@@ -967,8 +979,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             // same code keeps it, whatever the head reads said. The reader is a chunk loaded on first use: one that cannot
             // arrive says so here (GuidePane).
             <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch}>
-              <OpenInCodeSpans scope={{ repo: repoKey ?? '' }} on={!!repoKey}>
-                <GuideReader bare controlsHost={controlsHost} snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} />
+              <OpenInCodeSpans scope={{ repo: repoKey ?? '', pull: layerKey }} on={!!repoKey}>
+                <GuideReader bare controlsHost={controlsHost} hostDiffControls snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} fileContents={fileContents} />
               </OpenInCodeSpans>
             </ReaderPart>
           ) : (
@@ -991,13 +1003,14 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               <b>Comments</b>
               <span className="ib-mut">{comments.length}</span>
               <span className="ib-sp" />
-              <button type="button" className="ib-iconbtn" onClick={closeComments} aria-label="Close the comments">
+              <button ref={sheetCloseRef} type="button" className="ib-iconbtn" onClick={closeComments} aria-label="Close the comments">
                 <Icon name="x" />
               </button>
             </div>
           )}
           {phone && <div ref={setControlsHost} className="ib-prr-controls ib-prp-sheetctl" data-pull-controls="" />}
           <AnnotationPanel
+            title="Comments"
             emptyHint={readerComments ? 'Click a line number, drag across lines, or select code to comment' : undefined}
             isOpen
             presentation={folded ? 'embedded' : undefined}
@@ -1005,10 +1018,10 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             blocks={NO_BLOCKS}
             codeAnnotations={comments}
             codeAnnotationNote={(c) => (here.includes(c) ? null : 'Written on older code')}
-            onSelect={showComment}
+            onSelect={showFromPanel}
             onDelete={remove}
             selectedId={selectedId}
-            onSelectCodeAnnotation={showComment}
+            onSelectCodeAnnotation={showFromPanel}
             onDeleteCodeAnnotation={remove}
             onEditCodeAnnotation={readerComments ? (id, updates) => {
               const before = comments.find((c) => c.id === id);

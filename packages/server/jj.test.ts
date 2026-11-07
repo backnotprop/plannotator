@@ -8,6 +8,9 @@ import {
   runtime as jjRuntime,
   selectDefaultJjCompareTarget,
 } from "./jj";
+import { useScratchJjConfig } from "../../tests/helpers/jj-scratch-config";
+
+const jjConfig = useScratchJjConfig();
 
 describe("jj diff args", () => {
   test("builds git-format diff args for each jj mode", () => {
@@ -105,7 +108,7 @@ describe("jj runtime output ceiling", () => {
   testIfJj("stops reading and flags truncation once maxOutputBytes is passed", async () => {
     workspace = mkdtempSync(join(tmpdir(), "plannotator-jj-cap-"));
     const jj = (args: string[]) => {
-      const result = Bun.spawnSync(["jj", ...args], { cwd: workspace, stdout: "pipe", stderr: "pipe" });
+      const result = Bun.spawnSync(["jj", ...args], { cwd: workspace, env: jjConfig.env(), stdout: "pipe", stderr: "pipe" });
       if (result.exitCode !== 0) throw new Error(result.stderr.toString());
     };
     jj(["git", "init", "."]);

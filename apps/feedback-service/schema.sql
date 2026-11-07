@@ -2,10 +2,13 @@
 --
 -- One append-only table. The Worker only ever INSERTs into it; it holds the
 -- words the person typed, an optional contact they typed, the Plannotator
--- version, the OS and where it was sent from. No IP, user agent, country,
+-- version, the OS, where it was sent from and the names of the agents the
+-- person has used ("Claude Code, Codex"). No IP, user agent, country,
 -- machine id or anything else that identifies a person.
 --
 -- Apply with: bun run db:migrate (remote) or db:migrate:local (wrangler's local SQLite).
+-- A database made before `agents` existed also needs migrations/0001_agents.sql
+-- once (bun run db:migrate:agents), before the Worker that writes it is deployed.
 
 CREATE TABLE IF NOT EXISTS feedback (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -15,6 +18,7 @@ CREATE TABLE IF NOT EXISTS feedback (
   version TEXT,
   os TEXT,
   surface TEXT,
+  agents TEXT,
   created_at TEXT NOT NULL
 );
 

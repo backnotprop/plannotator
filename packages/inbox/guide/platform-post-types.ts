@@ -15,6 +15,8 @@ export type KeptComment = CodeAnnotation & {
   postAt?: string;
   /** For a post: if `postAt` has gone, its lines still read the same on the diff on screen. */
   postHere?: boolean;
+  /** On an agent's guided review: its lines read the same on the PR's own diff, so it can go inline there. */
+  onPullDiff?: boolean;
 };
 
 /** A review event as the forge takes it (the review app's `PRReviewAction`). */
