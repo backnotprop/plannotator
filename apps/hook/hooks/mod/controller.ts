@@ -196,8 +196,6 @@ export const STORE_LAUNCHES = 'launches'
 export const STORE_APPROVALS = 'approvals'
 
 const TICK_MS = 1_000
-/** `$.agent.list()` statuses auto reload waits for: an agent not started yet, running a turn, or held on work it owns. */
-const RELOAD_BUSY_AGENT_STATUSES = new Set(['pending', 'running', 'waiting'])
 /** Liveness check of a launch whose server has not decided yet. */
 const PID_CHECK_EVERY_TICKS = 15
 const PID_MISSES_BEFORE_STOPPED = 3
@@ -374,15 +372,13 @@ export class PlannotatorMod {
    * the prompt box or run a command.
    */
   readonly autoReload: AutoReload | null
-  /** Subagent turns running now (`turn.start` / `turn.complete` with an agent id), by agent and turn. */
-  private agentTurns = new Set<string>()
 
   constructor(
     private readonly host: Host,
     readonly session: SessionInfo,
   ) {
     this.instanceId = host.randomHex(8)
-    const { readPrompt, runReload, loadedPlugin, listAgents } = host
+    const { readPrompt, runReload, loadedPlugin } = host
     this.autoReload =
       session.inboxTools && readPrompt && runReload && loadedPlugin
         ? new AutoReload({
@@ -394,17 +390,6 @@ export class PlannotatorMod {
             promptText: () => readPrompt.call(host),
             run: () => runReload.call(host),
             busyReason: () => this.reloadBusyReason(),
-            ...(listAgents
-              ? {
-                  agentsBusy: async () => {
-                    // An agent the engine tracks, started before this module loaded or after; a list that cannot be read counts as busy.
-                    const agents = await listAgents.call(host).catch(() => null)
-                    if (!agents) return 'the agent list could not be read'
-                    const running = agents.filter((agent) => RELOAD_BUSY_AGENT_STATUSES.has(agent.status)).length
-                    return running > 0 ? `${running} agent${running === 1 ? '' : 's'} running` : null
-                  },
-                }
-              : {}),
             after: (ms, fn) => {
               const timer = host.every(ms, () => {
                 timer.cancel()
@@ -440,14 +425,14 @@ export class PlannotatorMod {
 
   /**
    * Why Plannotator should not reload itself now, or null: a main-loop turn
-   * or this session's own Ask question, a subagent turn, an open review or a
-   * decision waiting to go in, Inbox work in flight. The prompt box is read
-   * by AutoReload itself.
+   * or this session's own Ask question, an open review or a decision waiting
+   * to go in, Inbox work in flight. The prompt box is read by AutoReload
+   * itself. Background agents and subagents never hold it: `/reload-plugins`
+   * leaves them running (owner, "it should never stop work").
    */
   reloadBusyReason(): string | null {
     if (this.disposed) return 'the instance was disposed'
     if (this.turns.busy) return 'a turn runs'
-    if (this.agentTurns.size > 0) return 'a subagent runs'
     if (this.launches.size > 0 || this.awaitingIdle.size > 0) return 'a Plannotator review is open'
     if (this.inbox?.hasWorkInFlight) return 'Inbox work is in flight'
     return null
@@ -1884,10 +1869,8 @@ export class PlannotatorMod {
     // background one included), but its end is not counted (register.ts
     // filters turn.complete by agent id), so counting the start left the
     // session busy after the main turn ended, and the Inbox's replies waited.
-    if (agentId) {
-      this.agentTurns.add(`${agentId}\u0000${turnId}`)
-      return
-    }
+    // Auto reload does not wait for subagents either.
+    if (agentId) return
     this.host.debug(`turn.start ${turnId}: ${JSON.stringify(text.slice(0, 160))}`)
     this.inbox?.onMainTurnStart()
     this.autoReload?.onInputMoved()
@@ -1895,11 +1878,6 @@ export class PlannotatorMod {
     const drop = this.turns.onTurnStart(turnId, text)
     if (drop) await this.host.abortTurn(drop).catch(() => undefined)
     this.pushBridgeStatus()
-  }
-
-  /** A subagent's turn ended (register.ts passes only those with an agent id here). */
-  onAgentTurnComplete(agentId: string, turnId: string): void {
-    this.agentTurns.delete(`${agentId}\u0000${turnId}`)
   }
 
   onTurnComplete(turnId: string, answer: string, aborted: boolean): void {

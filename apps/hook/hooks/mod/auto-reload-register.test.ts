@@ -5,11 +5,12 @@ import { INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_RELOAD_FIELD } from './inbox-contra
 
 // Auto reload through the real registered hooks (review of #2873): the gates
 // the controller tests drive by method must also be wired from register.ts.
-// The failures this catches: `turn.complete` with an agent id no longer
-// reaching the count (auto reload would then never run), `turn.start` with one
-// not counting, `$.agent.list()` not asked (an agent started before this module
-// loaded is missed), and a prompt between Enter and its turn start not holding
-// the run.
+// The failures this catches: a running subagent (its `turn.start` with an agent
+// id, or an agent the engine lists) holding the run, or counting as the main
+// turn (background agents keep running across `/reload-plugins`, and the owner
+// asked that the reload never stop work); the main turn or text in the prompt
+// box no longer holding it while a subagent runs; and a prompt between Enter
+// and its turn start not holding the run.
 
 const DATA = '/data'
 const REGISTRY = JSON.stringify({ v: 1, pid: 1, port: 4100, token: 't'.repeat(40), serverSession: 'srv', url: 'http://127.0.0.1:4100' })
@@ -50,6 +51,7 @@ function engineOver(sessionId: string, installed: string) {
     commands: [] as string[],
     polls: [] as Record<string, unknown>[],
     agents: [] as { id: string; status: string }[],
+    box: '',
     tick: async (n: number) => {
       for (let i = 0; i < n; i += 1) {
         clock += 1_000
@@ -110,7 +112,7 @@ function engineOver(sessionId: string, installed: string) {
       },
       agent: { list: async () => world.agents },
       ui: { log: () => undefined, status: () => undefined, toast: () => undefined },
-      prompt: { submit: async () => undefined, suggest: async () => undefined, read: async () => ({ text: '', cursor: 0 }) },
+      prompt: { submit: async () => undefined, suggest: async () => undefined, read: async () => ({ text: world.box, cursor: world.box.length }) },
       turn: { abort: async () => undefined },
     },
   }
@@ -121,32 +123,51 @@ const RELOAD = `/${AUTO_RELOAD_COMMAND} ${AUTO_RELOAD_ARGS}`
 const pass = (e: unknown) => e
 
 describe('auto reload through the registered hooks', () => {
-  test('a subagent turn (turn.start / turn.complete with an agent id) holds the run until it ends', async () => {
+  test('a running subagent does not hold the run: its turn start, and the engine listing it running', async () => {
     const hook = await freshHooks('auto-reload-agent-turns')
     const world = engineOver('sess-agents', '0.28.51')
     const { $ } = world
+    // One started before this module loaded (the engine lists it), one this module sees start; neither ends here.
+    world.agents = [{ id: 'agent-old', status: 'running' }]
     await hook('session.start')($, { isInteractive: true }, async () => ({ cwd: '/home/me/src/app' }))
     await hook('turn.start')($, { turnId: 'agent-turn-1', text: 'research', agentId: 'agent-7' }, pass)
     await world.tick(5)
     expect(world.polls.length).toBeGreaterThan(0)
     expect(world.polls.every((poll) => poll[INBOX_AUTO_RELOAD_POLL_FIELD] === true)).toBe(true)
-    expect(world.commands).toEqual([])
+    expect(world.commands).toEqual([RELOAD])
+    await hook('session.end')($, {}, pass)
+  })
+
+  test("the main turn still holds the run while a subagent runs, and a subagent's end does not end it", async () => {
+    const hook = await freshHooks('auto-reload-main-turn')
+    const world = engineOver('sess-main-turn', '0.28.52')
+    const { $ } = world
+    world.agents = [{ id: 'agent-7', status: 'running' }]
+    await hook('session.start')($, { isInteractive: true }, async () => ({ cwd: '/home/me/src/app' }))
+    await hook('turn.start')($, { turnId: 'turn-1', text: 'work' }, pass)
+    await hook('turn.start')($, { turnId: 'agent-turn-1', text: 'research', agentId: 'agent-7' }, pass)
     await hook('turn.complete')($, { turnId: 'agent-turn-1', agentId: 'agent-7', answer: 'found it' }, pass)
+    await world.tick(5)
+    expect(world.commands).toEqual([])
+    // A second subagent turn starts; the main turn ends: the reload runs with the subagent still running.
+    await hook('turn.start')($, { turnId: 'agent-turn-2', text: 'more', agentId: 'agent-7' }, pass)
+    await hook('turn.complete')($, { turnId: 'turn-1', answer: 'done' }, pass)
     await world.tick(3)
     expect(world.commands).toEqual([RELOAD])
     await hook('session.end')($, {}, pass)
   })
 
-  test("an agent in $.agent.list() that this module never saw start holds the run", async () => {
-    const hook = await freshHooks('auto-reload-agent-list')
-    const world = engineOver('sess-agent-list', '0.28.52')
+  test('text in the prompt box still holds the run while a subagent runs', async () => {
+    const hook = await freshHooks('auto-reload-box-agent')
+    const world = engineOver('sess-box-agent', '0.28.54')
     const { $ } = world
-    // Started before this module loaded (a manual /reload-plugins, or an earlier auto reload).
-    world.agents = [{ id: 'agent-old', status: 'running' }]
+    world.agents = [{ id: 'agent-7', status: 'running' }]
+    world.box = 'half a thought'
     await hook('session.start')($, { isInteractive: true }, async () => ({ cwd: '/home/me/src/app' }))
+    await hook('turn.start')($, { turnId: 'agent-turn-1', text: 'research', agentId: 'agent-7' }, pass)
     await world.tick(5)
     expect(world.commands).toEqual([])
-    world.agents = [{ id: 'agent-old', status: 'completed' }]
+    world.box = ''
     await world.tick(3)
     expect(world.commands).toEqual([RELOAD])
     await hook('session.end')($, {}, pass)

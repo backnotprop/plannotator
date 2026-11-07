@@ -10,13 +10,15 @@
  * (`auto_reload` on the poll). Then, from the Inbox tick (a `$.clock` timer,
  * never a hook a turn waits on), this runs `/reload-plugins plannotator`
  * once, when:
- *  - no main-loop turn and no subagent runs, no prompt is on its way in (inside
+ *  - no main-loop turn runs, no prompt is on its way in (inside
  *    `prompt.submit`, with no time limit, or entered as a new turn whose
  *    `turn.start` has not come yet), and the mod has no
  *    Plannotator work in flight (an open review, a decision waiting to go in,
- *    an Inbox reply being delivered, an Ask question): `busyReason`, plus
- *    `agentsBusy` (`$.agent.list()`, which also sees agents started before
- *    this module loaded);
+ *    an Inbox reply being delivered, an Ask question): `busyReason`.
+ *    Background agents and subagents do not hold it: `/reload-plugins` leaves
+ *    them running (live check 2026-11-07: a two-step background agent
+ *    finished both steps across a real module swap), and the owner asked
+ *    that it never stop work;
  *  - the prompt box is empty (`$.prompt.read()`), so typed text is never in
  *    the way;
  *  - this session has not tried that installed version yet. The record is
@@ -139,14 +141,8 @@ export interface AutoReloadDeps {
   loaded(): Promise<LoadedPluginInfo | null>
   /** The prompt box's text now (`$.prompt.read()`); absent: the host has no box, nothing runs. */
   promptText?: () => Promise<string>
-  /** Why not now, or null when nothing runs: main or subagent turn, Plannotator work in flight. Synchronous. */
+  /** Why not now, or null when nothing runs: a main-loop turn, a prompt on its way in, Plannotator work in flight. Synchronous. */
   busyReason(): string | null
-  /**
-   * Why not now by the engine's agent list (`$.agent.list()`: an agent
-   * pending, running or waiting, started before this module or after), or
-   * null. Absent: only the turns this module saw count.
-   */
-  agentsBusy?: () => Promise<string | null>
   /** `$.command.run({ command: 'reload-plugins', args: 'plannotator' })`; absent: nothing runs. */
   run?: () => Promise<unknown>
   /** Calls `fn` once after `ms` (a `$.clock` timer, which a reload cancels with this module). */
@@ -357,8 +353,6 @@ export class AutoReload {
     const previous = all[this.deps.sessionId] ?? null
     if (!storeAllows(previous, target)) return this.held(`this session already tried ${target} (${previous?.outcome ?? 'no record'})`)
     if ((await this.deps.promptText!()).trim() !== '') return this.held('text is in the prompt box')
-    const agentsFirst = this.deps.agentsBusy ? await this.deps.agentsBusy() : null
-    if (agentsFirst !== null) return this.held(agentsFirst)
     const beforeWrite = this.busyNow(target)
     if (beforeWrite !== null) return this.held(beforeWrite)
 
@@ -382,11 +376,10 @@ export class AutoReload {
       return
     }
 
-    // The last look, after the store calls: the box and the agent list, then every
-    // synchronous gate with no await between it and the run.
+    // The last look, after the store calls: the box, then every synchronous
+    // gate with no await between it and the run.
     const box = await this.deps.promptText!()
-    const agents = this.deps.agentsBusy ? await this.deps.agentsBusy() : null
-    const busy = box.trim() !== '' ? 'text is in the prompt box' : (agents ?? this.busyNow(target))
+    const busy = box.trim() !== '' ? 'text is in the prompt box' : this.busyNow(target)
     if (busy !== null) {
       // Put the record back as it was: this run never happened.
       const putBack = await this.update((current) => (current && current.at === at && current.outcome === 'pending' ? previous : undefined))

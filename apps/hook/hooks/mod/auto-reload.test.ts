@@ -22,8 +22,10 @@ import { fakeHost, type FakeHost } from './testing/fake-host'
 
 // Plannotator reloads itself after an update (owner approval "cc-auto-reload"
 // and its addendum: one visible echo line is fine; nothing may break, loops and
-// agents keep running). The failures these catch: a reload while a turn, a
-// subagent or Plannotator work runs; a reload over text the person typed; a
+// agents keep running). The failures these catch: a reload while a main turn
+// or Plannotator work runs; a running subagent holding the reload (it keeps
+// running across one, and the owner asked that it never stop work), or
+// counting as the main turn; a reload over text the person typed; a
 // second reload for the same version (a reload that loaded nothing new must not
 // loop); a refused run retried without the person's input, or forever; the old
 // module not saying the reload did not take; the new module not checking in;
@@ -94,11 +96,11 @@ describe('when Plannotator reloads itself', () => {
     expect(state.runs).toBe(1)
   })
 
-  test('never while a turn, a subagent or Plannotator work runs: it waits for the next idle moment', async () => {
+  test('never while a turn or Plannotator work runs: it waits for the next idle moment', async () => {
     const { d, state } = deps()
     const reload = new AutoReload(d)
     reload.setOffer({ installed: '0.28.51' })
-    for (const reason of ['a turn runs', 'a subagent runs', 'a Plannotator review is open', 'Inbox work is in flight']) {
+    for (const reason of ['a turn runs', 'a Plannotator review is open', 'Inbox work is in flight']) {
       state.busy = reason
       await reload.tick()
     }
@@ -367,14 +369,15 @@ describe('never a loop, never over work that started meanwhile (review of #2873)
     expect(late.state.runs).toBe(1)
   })
 
-  test('why nothing runs is in the debug log, once per reason: an agent list that cannot be read, a failed put-back', async () => {
+  test('why nothing runs is in the debug log, once per reason: a turn that keeps running, a failed put-back', async () => {
     const { d, state, record } = deps()
     const lines: string[] = []
-    const reload = new AutoReload({ ...d, debug: (line) => lines.push(line), agentsBusy: async () => 'the agent list could not be read' })
+    const reload = new AutoReload({ ...d, debug: (line) => lines.push(line) })
+    state.busy = 'a turn runs'
     reload.setOffer({ installed: '0.28.51' })
     for (let i = 0; i < 5; i += 1) await reload.tick()
     expect(state.runs).toBe(0)
-    expect(lines.filter((line) => line.includes('the agent list could not be read'))).toHaveLength(1)
+    expect(lines.filter((line) => line.includes('a turn runs'))).toHaveLength(1)
 
     // The gate fails after the record was written, and the put-back write fails too.
     const failing = deps()
@@ -395,27 +398,6 @@ describe('never a loop, never over work that started meanwhile (review of #2873)
     expect(failing.record()?.outcome).toBe('pending')
     expect(said.some((line) => line.includes('could not be put back'))).toBe(true)
     expect(record()).toBeNull()
-  })
-
-  test("an agent in the engine's list holds the run, also when it shows up while the record is written", async () => {
-    const { d, state, record } = deps()
-    let agents: string | null = '1 agent running'
-    const reload = new AutoReload({ ...d, agentsBusy: async () => agents })
-    reload.setOffer({ installed: '0.28.51' })
-    await reload.tick()
-    expect(state.runs).toBe(0)
-    agents = null
-    let calls = 0
-    const racing = new AutoReload({
-      ...d,
-      agentsBusy: async () => ((calls += 1) > 1 ? '1 agent running' : null),
-    })
-    racing.setOffer({ installed: '0.28.51' })
-    await racing.tick()
-    expect(state.runs).toBe(0)
-    expect(record()).toBeNull()
-    await reload.tick()
-    expect(state.runs).toBe(1)
   })
 
   test("a refusal that settles after the new module checked in never overwrites its record", async () => {
@@ -612,7 +594,7 @@ describe('through the mod', () => {
     mod.dispose()
   })
 
-  test('a main-loop turn holds the run until it ends; so does a subagent that is still running', async () => {
+  test('a main-loop turn holds the run until it ends; a subagent still running does not', async () => {
     const host = fakeHost()
     const { mod, reloads } = modOver(host, { offer: '0.28.72' })
     await mod.onTurnStart('turn-1', 'work', undefined)
@@ -620,19 +602,26 @@ describe('through the mod', () => {
     await ticks(host, 5)
     expect(reloads).toHaveLength(0)
     mod.onTurnComplete('turn-1', 'done', false)
-    await ticks(host, 5)
-    // The main loop is idle, but the subagent still runs.
-    expect(reloads).toHaveLength(0)
-    mod.onAgentTurnComplete('agent-7', 'agent-turn')
     await ticks(host, 3)
+    // The main loop is idle; the subagent still runs (it never completes here), and /reload-plugins leaves it running.
     expect(reloads).toHaveLength(1)
     mod.dispose()
   })
 
-  test('text in the prompt box holds the run until it is cleared', async () => {
+  test('a subagent turn alone is not the main turn: the run goes ahead while it runs', async () => {
+    const host = fakeHost()
+    const { mod, reloads } = modOver(host, { offer: '0.28.76' })
+    await mod.onTurnStart('agent-turn', 'research', 'agent-7')
+    await ticks(host, 4)
+    expect(reloads).toHaveLength(1)
+    mod.dispose()
+  })
+
+  test('text in the prompt box holds the run until it is cleared, also while a subagent runs', async () => {
     const host = fakeHost()
     let box = 'draft'
     const { mod, reloads } = modOver(host, { offer: '0.28.73', box: () => box })
+    await mod.onTurnStart('agent-turn', 'research', 'agent-7')
     await ticks(host, 5)
     expect(reloads).toHaveLength(0)
     box = ''
@@ -654,19 +643,6 @@ describe('through the mod', () => {
     await ticks(host, 3)
     expect(reloads).toHaveLength(0)
     mod.onTurnComplete('turn-1', 'done', false)
-    await ticks(host, 3)
-    expect(reloads).toHaveLength(1)
-    mod.dispose()
-  })
-
-  test("an agent the engine lists (started before this module loaded) holds the run", async () => {
-    const host = fakeHost()
-    let agents = [{ status: 'running' }, { status: 'completed' }]
-    host.listAgents = async () => agents
-    const { mod, reloads } = modOver(host, { offer: '0.28.75' })
-    await ticks(host, 5)
-    expect(reloads).toHaveLength(0)
-    agents = [{ status: 'completed' }, { status: 'idle' }]
     await ticks(host, 3)
     expect(reloads).toHaveLength(1)
     mod.dispose()
