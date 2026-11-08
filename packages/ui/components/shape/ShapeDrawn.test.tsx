@@ -311,6 +311,47 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
     }
   });
 
+  // A real board cut off at 390 px showed its left zone and no sign there was more to the right.
+  test('a panning drawing shows which way there is more: that side fades, and a track follows the scroll', async () => {
+    const real = window.getComputedStyle;
+    window.getComputedStyle = ((el: Element) => { const cs = real.call(window, el); return new Proxy(cs, { get: (t, k) => (String(k).startsWith('padding') ? '0px' : Reflect.get(t, k)) }); }) as typeof window.getComputedStyle;
+    try {
+      const canvas = { html: '<p>x</p>', width: 1400, height: 620 };
+      await draw({ html: '<p>x</p>', drawn: canvas, pan: true });
+      const frame = container!.querySelector<HTMLElement>('.shp-drawn')!;
+      const track = frame.querySelector<HTMLElement>('.shp-pan-track')!;
+      expect(track).not.toBeNull();
+      let at = 0;
+      Object.defineProperty(frame, 'clientWidth', { configurable: true, get: () => 360 });
+      Object.defineProperty(frame, 'scrollWidth', { configurable: true, get: () => 770 });
+      Object.defineProperty(frame, 'scrollLeft', { configurable: true, get: () => at, set: (v: number) => { at = v; } });
+      const scrollTo = (x: number) => act(() => { frame.scrollLeft = x; frame.dispatchEvent(new Event('scroll')); });
+      const fades = () => [frame.style.getPropertyValue('--shp-fl'), frame.style.getPropertyValue('--shp-fr')];
+      scrollTo(0);
+      expect(fades()).toEqual(['0px', '28px']);
+      scrollTo(200);
+      expect(fades()).toEqual(['28px', '28px']);
+      // The track stays in the middle of what shows, and its thumb is where you are.
+      expect(track.style.left).toBe(`${200 + (360 - 56) / 2}px`);
+      expect(parseFloat((track.firstElementChild as HTMLElement).style.left)).toBeCloseTo((200 / 770) * 100, 3);
+      scrollTo(410);
+      expect(fades()).toEqual(['28px', '0px']);
+      expect(track.hidden).toBe(false);
+      // A drawing that fits its frame does not pan: no track, no fade.
+      Object.defineProperty(frame, 'scrollWidth', { configurable: true, get: () => 360 });
+      scrollTo(0);
+      expect(track.hidden).toBe(true);
+      expect(fades()).toEqual(['0px', '0px']);
+      act(() => root!.unmount());
+      root = null;
+      container!.remove();
+      await draw({ html: '<p>x</p>', drawn: canvas });
+      expect(container!.querySelector('.shp-pan-track')).toBeNull();
+    } finally {
+      window.getComputedStyle = real;
+    }
+  });
+
   test('a radio the kit draws survives the sanitizer, with the name, class and checked its css reads', async () => {
     const { shadow } = await draw({ html: '<label class="pick on-a"><input type="radio" name="follow" class="f-a" checked=""><span>Path A</span></label><label class="pick"><input type="radio" name="follow" class="f-b"></label>' });
     const radios = [...shadow.querySelectorAll<HTMLInputElement>('input[type="radio"]')];

@@ -99,6 +99,13 @@
 /* A wide canvas on a phone, with no tall drawing: readable, and it pans. */
 .shp-drawn.canvas.pan:not(.tall) { justify-content: flex-start; overflow-x: auto; overscroll-behavior-x: contain; }
 .shp-drawn.canvas.pan:not(.tall) .shp-drawn-fit { overflow: clip; }
+/* Which way there is more: that side fades out (ShapeDrawn sets the widths as it scrolls), and a short track under the drawing shows where you are in it. */
+.shp-drawn.canvas.pan:not(.tall) { scrollbar-width: none; -webkit-mask-image: linear-gradient(90deg, transparent, #000 var(--shp-fl, 0px), #000 calc(100% - var(--shp-fr, 0px)), transparent); mask-image: linear-gradient(90deg, transparent, #000 var(--shp-fl, 0px), #000 calc(100% - var(--shp-fr, 0px)), transparent); }
+.shp-drawn.canvas.pan:not(.tall)::-webkit-scrollbar { display: none; }
+.shp-pan-track { position: absolute; left: 0; top: 0; width: 56px; height: 4px; border-radius: 2px; background: color-mix(in oklab, var(--foreground) 12%, transparent); pointer-events: none; }
+.shp-pan-track > i { position: absolute; top: 0; bottom: 0; border-radius: inherit; background: color-mix(in oklab, var(--foreground) 45%, transparent); }
+/* At the top of its view, under the claim, rather than in the middle of it. */
+.shp-drawn.canvas.top:not(.tall) { align-items: flex-start; }
 .shp-drawn.canvas:not(.tall) .shp-drawn-host { position: absolute; left: 0; top: 0; }
 
 /* ── the pill: "Board updated", "1 change waits for the agent" ── */

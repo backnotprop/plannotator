@@ -582,6 +582,7 @@ packages/inbox/shape/ShapeBoard.test.tsx
 packages/inbox/shape/boardFocus.test.ts
 packages/ui/components/shape/ShapeSurface.commentDraft.test.tsx
 packages/ui/components/shape/ShapeFollow.test.tsx
+packages/ui/components/shape/followPainter.pan.test.ts
 packages/ui/components/shape/ShapeSurface.popoverQuote.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.globalCommentDraft.test.tsx
 packages/ui/components/CodeFilePopout.commentDraft.test.tsx
@@ -616,3 +617,4 @@ packages/ui/components/shape/ShapeSurface.boxShowMe.test.tsx
 packages/inbox/activityChart.test.tsx
 packages/inbox/composeClone.test.tsx
 packages/inbox/projectPlus.test.tsx
+packages/ui/components/shape/litLine.test.ts

@@ -423,8 +423,13 @@ export interface ShapeDrawnProps {
   onRefHover?: (n: number | null) => void;
   /** A bubble was opened (PR and link bubbles open their URL themselves, unless they carry a picture). */
   onRefOpen?: (n: number) => void;
-  /** A fixed canvas in a narrow space keeps a readable size and scrolls sideways. Absent: it shrinks to fit. */
+  /**
+   * A fixed canvas in a narrow space keeps a readable size and scrolls sideways: the side with more
+   * drawing fades out and a small track under it shows how much there is. Absent: it shrinks to fit.
+   */
   pan?: boolean;
+  /** A fixed canvas sits at the top of its view, not in the middle. Absent: in the middle, as before. */
+  top?: boolean;
   /**
    * The bubble's preview: hover or keyboard focus shows it (null hides it), a tap on a touch
    * screen pins it. Absent: a bubble only lights and opens, as before.
@@ -493,6 +498,9 @@ function useFit(ref: React.RefObject<HTMLElement | null>, enabled: boolean) {
 }
 
 const noop = () => {};
+/** How wide the fade is on a side of a panning drawing with more to see, and the track under it (px). */
+const PAN_FADE = 28;
+const PAN_TRACK = 56;
 const FRAME_CONTAIN: React.CSSProperties = { contain: 'layout', clipPath: 'inset(-24px)' };
 
 export function ShapeDrawn(props: ShapeDrawnProps) {
@@ -516,6 +524,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
   const pan = !!props.pan && scaled && narrow;
   const k = scaled && fit ? Math.max(pan ? 0.55 : 0.2, Math.min(fit.w / drawn.width!, fit.h > 40 ? fit.h / drawn.height! : Infinity, 1.08)) : 1;
   const [contentKey, setContentKey] = useState(0);
+  const trackRef = useRef<HTMLDivElement>(null);
 
   // The content: sanitized once per change, then marked up for the board.
   useLayoutEffect(() => {
@@ -575,6 +584,44 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       board.style.width = board.style.height = board.style.transform = '';
     }
   }, [scaled, k, drawn.width, drawn.height, contentKey]);
+
+  // Panning: the side with more drawing fades out, and the track under the drawing follows the scroll.
+  // Written straight to the DOM, so a swipe re-renders nothing.
+  useLayoutEffect(() => {
+    const frame = frameRef.current;
+    const track = trackRef.current;
+    if (!frame || !track || !pan) return;
+    const fit = frame.querySelector<HTMLElement>('.shp-drawn-fit');
+    const update = () => {
+      // Every read first, then the writes: one layout per scroll event.
+      const { scrollLeft, scrollWidth, clientWidth, clientHeight } = frame;
+      const below = fit ? fit.offsetTop + fit.offsetHeight : 0;
+      const more = scrollWidth - clientWidth;
+      // Only a drawing that is wider than its frame pans: one that fits shows no track.
+      track.hidden = more <= 1;
+      frame.style.setProperty('--shp-fl', scrollLeft > 1 ? `${PAN_FADE}px` : '0px');
+      frame.style.setProperty('--shp-fr', scrollLeft < more - 1 ? `${PAN_FADE}px` : '0px');
+      track.style.left = `${scrollLeft + (clientWidth - PAN_TRACK) / 2}px`;
+      // 12 px under the drawing, or less where the frame ends sooner: the track never makes the frame scroll down.
+      track.style.top = `${Math.max(below, Math.min(below + 12, clientHeight - 4))}px`;
+      const thumb = track.firstElementChild as HTMLElement | null;
+      if (thumb && scrollWidth) {
+        thumb.style.width = `${(clientWidth / scrollWidth) * 100}%`;
+        thumb.style.left = `${(scrollLeft / scrollWidth) * 100}%`;
+      }
+    };
+    update();
+    frame.addEventListener('scroll', update, { passive: true });
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    ro?.observe(frame);
+    if (fit) ro?.observe(fit);
+    return () => {
+      frame.removeEventListener('scroll', update);
+      ro?.disconnect();
+      frame.style.removeProperty('--shp-fl');
+      frame.style.removeProperty('--shp-fr');
+    };
+  }, [pan, k]);
 
   // Contrast, in one pass so the two never undo each other: the palette's (`holdShapeContrast`, every board) first, then
   // on a dark board `darkContrast` (opt-in), which starts from the colours the first left; undone the other way round.
@@ -866,13 +913,18 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
   return (
     <div
       ref={frameRef}
-      className={`shp-drawn${canvas ? ' canvas' : ''}${useTall ? ' tall' : ''}${pan ? ' pan' : ''}`}
+      className={`shp-drawn${canvas ? ' canvas' : ''}${useTall ? ' tall' : ''}${pan ? ' pan' : ''}${canvas && props.top ? ' top' : ''}`}
       style={FRAME_CONTAIN}
       onPointerLeave={() => props.onHoverMark?.(null)}
     >
       <div className="shp-drawn-fit" style={scaled && fit ? { width: drawn.width! * k, height: drawn.height! * k } : undefined}>
         <div ref={hostRef} className="shp-drawn-host" />
       </div>
+      {pan && (
+        <div ref={trackRef} className="shp-pan-track" aria-hidden="true">
+          <i />
+        </div>
+      )}
       {props.scenes && <ScenePlayers board={rootRef.current?.querySelector<HTMLElement>('.board') ?? null} drawnKey={contentKey} scenes={props.scenes} reduce={reduce} look={props.sceneLook} />}
     </div>
   );
