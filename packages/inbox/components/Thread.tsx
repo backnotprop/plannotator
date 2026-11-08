@@ -1,4 +1,5 @@
 import { perfInteraction, perfKeystroke } from '../perfMarks';
+import { ThreadPullsButton } from '../threadPulls/ThreadPulls';
 import { LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
 import { inboxUrl, machineOf, selfMachineId } from '../inboxUrl';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
@@ -5696,6 +5697,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // a thread marked read (the pressed Read's click), and Mark unread (`markUnreadInMenu`).
   const phoneMarkRead = phone && markReadOffered && readAt === null && markReadEnabled ? () => onMarkRead!(true) : undefined;
   const phoneMoveBack = phone && markReadOffered && readAt !== null ? () => onMarkRead!(false) : undefined;
+  // A thread's PRs: on this machine's own threads, for the person (a linked machine's and a tailnet guest's have none).
+  const pullsOffered = !machine && !guest;
+  const [addingPull, setAddingPull] = useState(false);
   const snoozeProps = onSnooze && onUnsnooze && !resolved ? { snoozed: !!row?.snoozed, onPick: onSnooze, onUnsnooze } : undefined;
 
   // A phone's header gives way one step at a time so it stays on one line with room for the subject (headFit.ts):
@@ -5896,6 +5900,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 </span>
               </Tip>
             )}
+            {/* The thread's PRs (approval "inbox-pr-binding"): left of Artifacts, at its icon's size; none, no button
+                (the ⋯ menu's Add a pull request shows it with its card open on the Add field). */}
+            {!artifactsOn && pullsOffered && (
+              <ThreadPullsButton threadId={thread.thread_id} summary={row?.pulls} adding={addingPull} onAddingDone={() => setAddingPull(false)} />
+            )}
             {artifactsButton && (
               <Tip content={withShortcut(artifactsOn ? 'Back to the thread' : linksOnly ? 'Links' : 'Artifacts: every file, image and guided review in this thread', { scope: inboxThreadShortcuts, action: 'artifacts' })}>
                 <button
@@ -5941,6 +5950,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               launch={launchMenu}
               snooze={snoozeProps}
               requestGuide={guideOffered ? () => void requestGuide() : undefined}
+              addPull={pullsOffered && !artifactsOn ? () => setAddingPull(true) : undefined}
             />
 
             {phone || stacked || backBesideFile || threadAlone ? null : (

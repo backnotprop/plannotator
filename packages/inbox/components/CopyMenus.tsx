@@ -219,10 +219,12 @@ export function ThreadMore(
     snooze?: ThreadSnoozeProps;
     /** Request guided review (guideRequest.ts): its own group above Archive, only where the thread offers it. */
     requestGuide?: () => void;
+    /** Add a pull request to the thread (approval "inbox-pr-binding"): opens the PRs card on its Add field. */
+    addPull?: () => void;
     launch?: ThreadMoreLaunch | null;
   },
 ) {
-  const { thread, phone, pin, markRead, moveBack, markUnread, archive, snooze, requestGuide, launch } = props;
+  const { thread, phone, pin, markRead, moveBack, markUnread, archive, snooze, requestGuide, addPull, launch } = props;
   const copies = useCopies(props);
   const { ref, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
@@ -375,6 +377,15 @@ export function ThreadMore(
                   <Icon name="hash" size={15} />
                   Copy thread ID
                 </Menu.Item>
+                {addPull && (
+                  <>
+                    <Menu.Separator className="ib-pm-sep" />
+                    <Menu.Item className="ib-pmi" label="Add a pull request" onClick={addPull} data-thread-add-pull-item="">
+                      <Icon name="link" size={15} />
+                      Add a pull request…
+                    </Menu.Item>
+                  </>
+                )}
                 {requestGuide && (
                   <>
                     <Menu.Separator className="ib-pm-sep" />

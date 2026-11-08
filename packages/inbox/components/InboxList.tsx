@@ -12,6 +12,7 @@ import { reaskRowLine, sentRowLine, undeliveredLabel } from '../deliveryLine';
 import { sentRecipientsWords } from '../tags';
 import { TagStack } from './TagPicker';
 import { RowAgents, RowAgentTiles } from './RowAgents';
+import { RowPullsMark } from '../threadPulls/ThreadPulls';
 import { isTextCut, ProjectTipText, Tip } from './Tip';
 import { LazyRowTips, opensTips, RowTip } from './RowTip';
 import { AuthorMark, Icon } from '../icons';
@@ -830,6 +831,8 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColum
       <span className="ib-cw">
         <EndedMark row={row} />
         {row.snoozed ? <SnoozedUntil row={row} /> : <CountWords row={row} wide={full} tip={!full} status={statusMark} />}
+        {/* The thread's PRs (approval "inbox-pr-binding"): the state of the one in play, the count over its corner. */}
+        <RowPullsMark threadId={row.thread_id} summary={row.pulls} />
       </span>
       <span className="ib-bcol">{badgeEl}</span>
       {/* The pin's column, in a list with a pinned row only (`pinColumn`), so a list without pins keeps its columns. */}
@@ -983,6 +986,7 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
   const end = (
     <>
       {pinned && <PinMark threadId={row.thread_id} press={!!onUnstar} />}
+      <RowPullsMark threadId={row.thread_id} summary={row.pulls} />
       {badge}
       <SnoozedUntil row={row} />
       <LineCount row={row} tip status={statusMark} />
@@ -1091,6 +1095,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
   const end = (
     <>
       {pinned && !pinOnLine1 && <PinMark threadId={row.thread_id} press={!!onUnstar} />}
+      <RowPullsMark threadId={row.thread_id} summary={row.pulls} />
       {badge}
       <SnoozedUntil row={row} />
       <LineCount row={row} status={statusMark} />

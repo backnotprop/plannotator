@@ -10,6 +10,7 @@
  * Decisions page (`#decisions=…`) opens the list.
  */
 
+import { threadPullsBus } from './threadPulls/model';
 import { inboxRefTransport } from './refTransport';
 import { perfFirstList, perfStart, perfThreadOpenDropped, perfThreadOpenStart, perfThreadReadLanded, perfUntilNextFrame } from './perfMarks';
 import { inboxUrl, machineOf, selfMachineId } from './inboxUrl';
@@ -2084,6 +2085,13 @@ function Inbox() {
             listAfterEvents(120);
             return;
           }
+          // A thread's PRs (approval "inbox-pr-binding"): silent, like steps. The thread's button and an open card
+          // read them again, and the list (its rows' marks).
+          if (event?.kind === 'thread_pull') {
+            threadPullsBus.emit(event.thread_id);
+            listAfterEvents(120);
+            return;
+          }
           // Any other record may be a message that tags a thread (the person's own send too): the next `#`
           // preview reads the cards again, whatever the 5 s guard says.
           cardsReadAt.current = 0;
@@ -2172,6 +2180,7 @@ function Inbox() {
           reportWindow();
           emitAskChange(null);
           stepsBus.emit('*');
+          threadPullsBus.emit('*');
           // The Inbox may have restarted onto a newer release while this page stayed open.
           stalePageRef.current.recheck();
         },
@@ -2186,6 +2195,7 @@ function Inbox() {
           void refreshDrafts();
           // A steps line meanwhile (a record, so replayed too, but read once here like the thread).
           stepsBus.emit('*');
+          threadPullsBus.emit('*');
           // A card record reads the Board: while it is open, it is read again too.
           if (routeRef.current.page === 'board') void refreshCards();
           // The rows' look another window saved meanwhile (`event: rows` is not replayed): the settings read has it.
