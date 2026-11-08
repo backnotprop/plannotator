@@ -405,10 +405,12 @@ function emitPlainTextWithBareUrls(
 const HostResolvedImage: React.FC<{
   src: string;
   alt: string;
+  /** The original's width when `src` is a smaller copy (`ImageResolution.width`). */
+  width?: number;
   /** The src as written in the markdown (`data-image-src`, read by the image viewer's region comments). */
   writtenSrc?: string;
   onImageClick?: (src: string, alt: string) => void;
-}> = ({ src, alt, writtenSrc, onImageClick }) => {
+}> = ({ src, alt, width, writtenSrc, onImageClick }) => {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const failed = failedSrc === src;
   return (
@@ -422,12 +424,14 @@ const HostResolvedImage: React.FC<{
         key="image"
         src={src}
         alt={failed ? '' : alt}
+        width={width}
         data-image-src={writtenSrc}
         data-image-failed={failed ? '' : undefined}
         hidden={failed || undefined}
         aria-hidden={failed || undefined}
         className={failed ? undefined : 'max-w-full rounded my-2 cursor-zoom-in'}
         loading="lazy"
+        decoding="async"
         onError={() => setFailedSrc(src)}
         onClick={(e) => {
           e.stopPropagation();
@@ -1047,7 +1051,7 @@ export const InlineMarkdown: React.FC<{
         resolveImage ? (
           // With a host resolver, an image that fails to load becomes the
           // same placeholder instead of a broken-image icon.
-          <HostResolvedImage key={key++} src={imgSrc} alt={alt} writtenSrc={src} onImageClick={onImageClick} />
+          <HostResolvedImage key={key++} src={imgSrc} alt={alt} width={resolvedImage?.kind === 'src' ? resolvedImage.width : undefined} writtenSrc={src} onImageClick={onImageClick} />
         ) : (
           <img
             key={key++}
@@ -1056,6 +1060,7 @@ export const InlineMarkdown: React.FC<{
             data-image-src={src}
             className="max-w-full rounded my-2 cursor-zoom-in"
             loading="lazy"
+            decoding="async"
             onClick={(e) => {
               e.stopPropagation();
               onImageClick?.(imgSrc, alt);

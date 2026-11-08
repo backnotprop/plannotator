@@ -23,6 +23,7 @@ import { createHash } from "node:crypto";
 import { isInboxId } from "@plannotator/core/inbox-types";
 import { INBOX_MESSAGE_IMAGE_CSP, inboxMessageImageRefsInOrder, readInboxMessageImageAsync, type InboxMessageImageResult } from "@plannotator/shared/inbox/message-images";
 import { captureInboxInlineImages, yieldToLoop } from "@plannotator/shared/inbox/inline-images";
+import { inboxImageScales, inboxImageWidth, scaledEtag, scaleInboxImage } from "./inbox-image-scale";
 import { syncSection } from "./inbox-perf";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
@@ -64,11 +65,14 @@ export async function inboxMessageImageRoute(req: Request, url: URL, store: Inbo
     // An agent's images come from anywhere; a person's own message (a phone, the relay, a tailnet login) from its project.
     anywhere: message.author.kind === "agent",
   });
-  return inboxImageResponse(req, result);
+  return inboxImageResponse(req, result, inboxImageWidth(url));
 }
 
-/** Safe image bytes and cache validators shared by message bodies and Markdown attachments. */
-export function inboxImageResponse(req: Request, result: InboxMessageImageResult): Response {
+/**
+ * Safe image bytes and cache validators shared by message bodies and Markdown attachments. `to`: the width the
+ * window draws it at (`?w=`), served as a smaller copy when the picture is wider (inbox-image-scale.ts).
+ */
+export async function inboxImageResponse(req: Request, result: InboxMessageImageResult, to: number | null = null): Promise<Response> {
   if (!result.ok) return refuse(result.status, result.code, result.error);
   // The validator is the SHA-256 of the bytes served (read once, at most the
   // cap), so it changes whenever the file does. `no-cache`: the file lives on
@@ -85,6 +89,16 @@ export function inboxImageResponse(req: Request, result: InboxMessageImageResult
       ? { "X-Image-Width": String(result.width), "X-Image-Height": String(result.height) }
       : {}),
   };
+  if (inboxImageScales(result.contentType, result.width, to, result.bytes.byteLength)) {
+    const scaledTag = scaledEtag(etag, to);
+    const scaledHeaders = { ...headers, ETag: scaledTag };
+    if (ifNoneMatchHits(req.headers.get("if-none-match"), scaledTag)) return new Response(null, { status: 304, headers: scaledHeaders });
+    const scaled = await scaleInboxImage(new Uint8Array(result.bytes), result.contentType, to, etag);
+    if (scaled) {
+      const sized = { ...scaledHeaders, "Content-Type": scaled.contentType, "X-Image-Width": String(scaled.width), "X-Image-Height": String(scaled.height) };
+      return new Response(req.method === "HEAD" ? null : scaled.bytes, { headers: { ...sized, "Content-Length": String(scaled.bytes.byteLength) } });
+    }
+  }
   if (ifNoneMatchHits(req.headers.get("if-none-match"), etag)) return new Response(null, { status: 304, headers });
   return new Response(req.method === "HEAD" ? null : new Uint8Array(result.bytes), {
     headers: { ...headers, "Content-Length": String(result.bytes.byteLength) },

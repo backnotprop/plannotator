@@ -44,6 +44,7 @@ import {
   readInboxAttachmentText,
 } from "@plannotator/shared/inbox/attachments";
 import { INBOX_MESSAGE_IMAGE_CSP, readInboxMessageImageAsync, readInboxPictureAsync } from "@plannotator/shared/inbox/message-images";
+import { inboxImageScales, inboxImageWidth, scaledEtag, scaleInboxImage } from "./inbox-image-scale";
 import { inboxImageResponse } from "./inbox-message-images";
 import { readInboxMarkup, readInboxMarkupBody, writeInboxMarkup } from "@plannotator/shared/inbox/markups";
 import { readImageDimensions, sniffImageContentType } from "@plannotator/shared/review-image";
@@ -83,6 +84,18 @@ export function contentDisposition(type: "inline" | "attachment", name: string):
  * cancel (after any read in flight), and by the idle watchdog when a reader
  * vanishes.
  */
+/** A file's bytes from its start, by position (the head read already moved nothing), at most `size`. */
+async function readWhole(handle: FileHandle, size: number): Promise<Uint8Array<ArrayBuffer>> {
+  const buffer = new Uint8Array(size);
+  let total = 0;
+  while (total < size) {
+    const { bytesRead } = await handle.read(buffer, total, size - total, total);
+    if (bytesRead === 0) break;
+    total += bytesRead;
+  }
+  return total === size ? buffer : buffer.subarray(0, total);
+}
+
 function handleStream(handle: FileHandle, idleMs?: number): ReadableStream<Uint8Array> {
   return handleRangeStream(handle, 0, undefined, { idleMs });
 }
@@ -535,6 +548,28 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       if (req.method === "HEAD") {
         await opened.handle.close().catch(() => {});
         return new Response(null, { headers: { ...headers, "Content-Length": String(opened.size) } });
+      }
+      // Drawn small (a tile's icon, the gallery): a smaller copy of a wide picture (inbox-image-scale.ts).
+      const to = route === "image" ? inboxImageWidth(url) : null;
+      const width = Number(extra["X-Image-Width"]) || undefined;
+      if (etag && inboxImageScales(contentType, width, to, opened.size)) {
+        const scaledTag = scaledEtag(etag, to);
+        if (req.headers.get("if-none-match") === scaledTag) {
+          await opened.handle.close().catch(() => {});
+          return new Response(null, { status: 304, headers: { ...headers, ETag: scaledTag } });
+        }
+        let bytes: Uint8Array<ArrayBuffer>;
+        try {
+          bytes = await readWhole(opened.handle, opened.size);
+        } finally {
+          await opened.handle.close().catch(() => {});
+        }
+        const scaled = await scaleInboxImage(bytes, contentType, to, etag);
+        const sized = scaled
+          ? { ...headers, ETag: scaledTag, "Content-Type": scaled.contentType, "X-Image-Width": String(scaled.width), "X-Image-Height": String(scaled.height) }
+          : headers;
+        const body = scaled ? scaled.bytes : bytes;
+        return new Response(body, { headers: { ...sized, "Content-Length": String(body.byteLength) } });
       }
       if (route === "image" && etag && req.headers.get("if-none-match") === etag) {
         await opened.handle.close().catch(() => {});

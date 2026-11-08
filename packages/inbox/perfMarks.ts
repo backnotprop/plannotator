@@ -13,13 +13,14 @@
  *
  * Debug off, every entry point returns after one boolean check: no clock read, no frame callback, no measure,
  * no observer.
- * - An interaction slower than SLOW_UI_MS is also written to the debug log (`slow_ui`).
+ * - An interaction slower than SLOW_UI_MS is also written to the debug log (`slow_ui`), with the page's memory then
+ *   (`heap`, `heap_limit`, `imgs`, `nodes`; debugLog.ts `debugMemory`).
  * - `localStorage['plannotator-inbox-perf'] = '1'` (or `#perf=1` once in the address; `#perf=0` turns it off) also shows a small overlay with
  *   the last timings and the long tasks, while debug is on. Nothing is sent anywhere else.
  *
  * Entries are cleared as they are made, so a window open for weeks keeps none: an observer hears each one first.
  */
-import { debugLogOn, debugNote, whenDebugLogStops } from './debugLog';
+import { debugLogOn, debugMemory, debugNote, whenDebugLogStops } from './debugLog';
 
 export type PerfWhat = 'first-list' | 'thread-open' | 'record-refresh' | 'theme' | 'theme-settled' | 'expand-all' | 'keystroke';
 
@@ -234,7 +235,8 @@ function startListening(): void {
         const seen: Seen = { what, ms: entry.duration, at: entry.startTime, detail: detail ?? undefined };
         recent.push(seen);
         if (recent.length > 50) recent.splice(0, recent.length - 50);
-        if (entry.duration >= SLOW_UI_MS) debugNote('slow_ui', { what, ms: Math.round(entry.duration), n: detail?.messages ?? detail?.rows });
+        // With the page's memory then: a tab about to die of its size says so in its last slow moments.
+        if (entry.duration >= SLOW_UI_MS) debugNote('slow_ui', { what, ms: Math.round(entry.duration), n: detail?.messages ?? detail?.rows, ...debugMemory() });
       }
       draw();
     });
