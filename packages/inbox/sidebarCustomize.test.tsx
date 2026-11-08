@@ -181,7 +181,7 @@ test.skipIf(!hasDom)('the panel: Top and Bottom in the sidebar\'s order, a switc
   draw();
   await act(async () => openSidebarCustomizer(null));
   const rows = (stack: string) => [...panel()!.querySelectorAll(`[data-sbc-zone="${stack}"] [data-sbc-row]`)].map((el) => el.getAttribute('data-sbc-row'));
-  expect(rows('top')).toEqual(['search', 'new-message', 'inbox', 'board', 'drafts']);
+  expect(rows('top')).toEqual(['search', 'new-message', 'inbox', 'board', 'artifacts', 'drafts']);
   expect(rows('bottom')).toEqual(['copy-prompt', 'feedback', 'settings']);
   // The logo heads Top; the Settings row's buttons sit under Settings: they hide, they have no grip.
   expect(panel()!.querySelector('[data-sbc-fixed="logo"] .ib-sbc-grip')).toBeNull();
