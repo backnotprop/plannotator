@@ -276,8 +276,7 @@ import { createBunShapeRoutes } from "./shape-routes";
 import { shapeCodeRoot } from "@plannotator/shared/shape/store";
 import { shapeEventFrame } from "@plannotator/shared/shape/routes";
 import { shapeAgentName } from "@plannotator/shared/shape/routes";
-import { SHAPE_SWITCH_NOT_SAVED, setShapeBoardStyle, setShapeSwitch, shapeBoardStyle, shapeSwitchOn } from "@plannotator/shared/shape/switch";
-import { isShapeBoardStyle, type ShapeBoardStyle } from "@plannotator/core/shape";
+import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch, shapeSwitchOn } from "@plannotator/shared/shape/switch";
 import {
   agentSpec,
   claudeCodeModOn,
@@ -2385,21 +2384,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
-   * How every Shape board is drawn (approval "shape-board-style-switch"; config.json `shapeBoardStyle`): Sharp unless
-   * the person picked Rounded. Sent beside the Shape switch, so an Inbox with Shape off names neither.
-   */
-  const saveShapeStyle = (input: unknown, validateOnly = false): ShapeBoardStyle => {
-    if (!isShapeBoardStyle(input)) throw new InboxError("validation_error", "shape_style: rounded or sharp.", { field: "shape_style" });
-    if (validateOnly) return shapeBoardStyle();
-    if (!setShapeBoardStyle(input)) throw new InboxError("config_not_saved", SHAPE_SWITCH_NOT_SAVED);
-    return input;
-  };
-  const shapeWire = (on: boolean, told = false, style: ShapeBoardStyle = shapeBoardStyle()) => {
-    const wire = heldSwitch("shape", on, told);
-    return wire.shape ? { ...wire, shape_style: style } : wire;
-  };
-
-  /**
    * The line of one-time dialogs (approval "inbox-feature-reveal", and its schedule, "inbox-one-time-dialogs"; the queue
    * is packages/shared/inbox/reveals.ts): the update-day dialogs (sound, list options, voice), then Snooze, the Board
    * and the Checklist, with the agent note keeping the day. Read live: the days pass while the Inbox runs. A dev build
@@ -4444,7 +4428,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.steps === undefined &&
           body.code_review === undefined &&
           body.shape === undefined &&
-          body.shape_style === undefined &&
           body.cookie_host === undefined &&
           body.voice === undefined &&
           !updateSwitches
@@ -4503,7 +4486,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.steps !== undefined) saveSteps(body.steps, true);
         if (body.code_review !== undefined) saveCodeReview(body.code_review, true);
         if (body.shape !== undefined) saveShape(body.shape, true);
-        if (body.shape_style !== undefined) saveShapeStyle(body.shape_style, true);
         if (body.cookie_host !== undefined) saveCookieHostSwitch(body.cookie_host, true);
         if (body.voice !== undefined) voice.save(body.voice, true);
         const tailnet = tailscaleChange === undefined ? tailscale.state() : await tailscale.set(tailscaleChange.on, { via, replaceExposed: tailscaleChange.replaceExposed });
@@ -4525,7 +4507,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const steps = body.steps === undefined ? { on: stepsOn() } : saveSteps(body.steps);
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
         const shape = body.shape === undefined ? { on: shapeOn() } : saveShape(body.shape);
-        const shapeStyle = body.shape_style === undefined ? shapeBoardStyle() : saveShapeStyle(body.shape_style);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
         return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });

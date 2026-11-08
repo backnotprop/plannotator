@@ -396,11 +396,12 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
       const m = /^rgba?\((\d+)[ ,]+(\d+)[ ,]+(\d+)/.exec(color);
       return m ? ([Number(m[1]), Number(m[2]), Number(m[3])] as const) : null;
     };
+    // `.board.board`: above Sharp's own quieter zone fills (color-mix, which the stand-in cannot paint).
     const palette = (dark: boolean) => dark
-      ? '.board { --paper: rgb(8 13 22); --ink: rgb(218 222 229); --grey: rgb(150 156 166); --surface: rgb(22 28 40); --rule: rgb(55 61 72); --blue: rgb(94 140 191); --blue-soft: rgb(13 24 39); --amber: rgb(193 147 86); --amber-soft: rgb(36 33 30); --green: rgb(90 170 120); --green-soft: rgb(12 30 25); --plum: rgb(180 100 150); --plum-soft: rgb(28 18 30); --alert: rgb(241 77 76); --alert-soft: rgb(38 16 20); }'
-      : '.board { --paper: rgb(245 246 248); --ink: rgb(20 24 32); --grey: rgb(90 96 106); --surface: rgb(255 255 255); --rule: rgb(220 222 226); --blue: rgb(40 90 150); --blue-soft: rgb(225 233 243); --amber: rgb(150 100 20); --amber-soft: rgb(248 236 215); --green: rgb(30 110 70); --green-soft: rgb(222 240 230); --plum: rgb(130 50 100); --plum-soft: rgb(243 226 236); --alert: rgb(200 30 30); --alert-soft: rgb(250 225 225); }';
+      ? '.board.board { --paper: rgb(8 13 22); --ink: rgb(218 222 229); --grey: rgb(150 156 166); --surface: rgb(22 28 40); --rule: rgb(55 61 72); --blue: rgb(94 140 191); --blue-soft: rgb(13 24 39); --amber: rgb(193 147 86); --amber-soft: rgb(36 33 30); --green: rgb(90 170 120); --green-soft: rgb(12 30 25); --plum: rgb(180 100 150); --plum-soft: rgb(28 18 30); --alert: rgb(241 77 76); --alert-soft: rgb(38 16 20); }'
+      : '.board.board { --paper: rgb(245 246 248); --ink: rgb(20 24 32); --grey: rgb(90 96 106); --surface: rgb(255 255 255); --rule: rgb(220 222 226); --blue: rgb(40 90 150); --blue-soft: rgb(225 233 243); --amber: rgb(150 100 20); --amber-soft: rgb(248 236 215); --green: rgb(30 110 70); --green-soft: rgb(222 240 230); --plum: rgb(130 50 100); --plum-soft: rgb(243 226 236); --alert: rgb(200 30 30); --alert-soft: rgb(250 225 225); }';
     const logo = expandShapeStamps('<svg data-logo="codex" x="0" y="0" width="40" height="40"/>').html;
-    const html = `<svg><rect id="zone" width="300" height="200" style="fill:var(--blue-soft)"/><rect id="lined" width="80" height="60" style="fill:var(--amber-soft);stroke:var(--rule)"/>${logo}<image href="files/shot.png" x="10" y="20" width="100" height="50" transform="rotate(3)" data-step="2"/><image href="files/framed.png" x="0" y="0" width="80" height="80" clip-path="url(#c)"/><defs><pattern id="p"><image href="files/pat.png" width="8" height="8"/></pattern></defs><image href="files/nosize.png"/></svg><div id="hz" style="background: var(--amber-soft)">zone</div><img src="files/a.png">`;
+    const html = `<svg><rect id="zone" width="300" height="200" style="fill:var(--blue-soft)"/><circle id="blob" cx="400" cy="50" r="20" style="fill:var(--blue-soft)"/><rect id="lined" width="80" height="60" style="fill:var(--amber-soft);stroke:var(--rule)"/>${logo}<image href="files/shot.png" x="10" y="20" width="100" height="50" transform="rotate(3)" data-step="2"/><image href="files/framed.png" x="0" y="0" width="80" height="80" clip-path="url(#c)"/><defs><pattern id="p"><image href="files/pat.png" width="8" height="8"/></pattern></defs><image href="files/nosize.png"/></svg><div id="hz" style="background: var(--amber-soft)">zone</div><img src="files/a.png">`;
 
     const dark = await draw({ html, css: palette(true), resolveSrc: (src) => `/assets/${src}`, darkContrast: true });
     expect(holdDarkBoard(dark.board, paint)).toBe(true);
@@ -408,7 +409,11 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
     // Every structural colour it set reads at 3:1 or more on what it meets (the rule itself: darkContrast.test.ts).
     expect(dark.board.style.getPropertyValue('--rule')).toMatch(/^rgb\(/);
     expect(dark.board.style.getPropertyValue('--shp-edge-blue')).toMatch(/^rgb\(/);
-    expect(dark.shadow.getElementById('zone')?.getAttribute('data-shp-edge')).toBe('blue');
+    // A zone rect draws Sharp's own 1 px edge (`--shp-zone-blue`, held by sharpContrast), so it is left as it is;
+    // a zone Sharp gives no edge (another shape, an HTML box) gets one.
+    expect(dark.shadow.getElementById('zone')?.hasAttribute('data-shp-edge')).toBe(false);
+    expect(getComputedStyle(dark.shadow.getElementById('zone')!).strokeWidth).toBe('1px');
+    expect(dark.shadow.getElementById('blob')?.getAttribute('data-shp-edge')).toBe('blue');
     expect(dark.shadow.getElementById('hz')?.getAttribute('data-shp-edge')).toBe('amber');
     // A zone that draws its own line keeps it (and its --rule is lifted instead).
     expect(dark.shadow.getElementById('lined')?.hasAttribute('data-shp-edge')).toBe(false);
@@ -491,103 +496,70 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
 
 
 /**
- * The board style (approval "shape-board-style-switch"): the host's `boardStyle` restyles any board through the
- * frame's CSS, a stored one included, and rewrites none of it. What regresses: Sharp losing its 2 px corners
- * (3 canvas units) or its 1 px lines at any zoom; Sharp leaking onto a board with no style (another host) or a
- * Rounded one; a flip that does not reach a board already drawn; or the kit's twins showing both lines at once.
+ * Sharp, the only look (approval "shape-board-sharp-only"): the frame's CSS restyles every board, a stored one
+ * included, with no prop from the host, and rewrites none of it. What regresses: a board losing its 2 px corners
+ * (3 canvas units) or its 1 px lines at any zoom, an arrowhead drawn as an outline, a drop shadow coming back, or the
+ * light over a followed line drawn heavier than the line.
  */
-describe.skipIf(!hasDom)('the board style', () => {
-  // A board as an agent stores it: a kit box and arrow with an elbow, a zone the agent drew, a chip, a card.
+describe.skipIf(!hasDom)('Sharp', () => {
+  // A board as an agent stores it: a kit box and arrow with an elbow, a zone the agent drew, a chip, a card, and an
+  // arrow drawn by an older kit (a rounded elbow, an open head).
+  const OLD_ARROW = '<path id="old" d="M160 200L248 200Q260 200 260 212L260 260" class="line" fill="none" stroke-width="2.5"/><path id="old-head" d="M251 251L260 260L269 251" class="line" fill="none" stroke-width="2.5"/>';
   const STORED =
     '<svg viewBox="0 0 600 300"><rect x="10" y="10" width="300" height="200" rx="18" style="fill:var(--blue-soft)"/>' +
-    box(40, 40, 120, 60) + arrow([[160, 70], [260, 70], [260, 150]]) + tag(40, 140, 'New') + card(300, 40, 120, 80) + '</svg>';
+    box(40, 40, 120, 60) + arrow([[160, 70], [260, 70], [260, 150]]) + tag(40, 140, 'New') + card(300, 40, 120, 80) + OLD_ARROW + '</svg>';
   const look = (board: HTMLElement) => {
     const cs = (sel: string) => getComputedStyle(board.querySelector(sel)!);
     return {
-      attr: board.getAttribute('data-shp-style'),
       box: { rx: cs('rect.line').getPropertyValue('rx'), width: cs('rect.line').strokeWidth, scale: cs('rect.line').getPropertyValue('vector-effect') },
-      wire: { width: cs('path.line[data-shp-round]').strokeWidth, scale: cs('path.line[data-shp-round]').getPropertyValue('vector-effect'), cap: cs('path.line[data-shp-round]').getPropertyValue('stroke-linecap') },
+      wire: { width: cs('path.line:not(.shp-head)').strokeWidth, scale: cs('path.line:not(.shp-head)').getPropertyValue('vector-effect'), cap: cs('path.line:not(.shp-head)').getPropertyValue('stroke-linecap') },
+      head: { stroke: cs('path.shp-head').stroke },
       zone: { rx: cs('rect[style*="--blue-soft"]').getPropertyValue('rx'), width: cs('rect[style*="--blue-soft"]').strokeWidth },
       chip: cs('.tag rect').getPropertyValue('rx'),
       card: { rx: cs('rect.obj').getPropertyValue('rx'), shadow: cs('rect.obj').filter },
-      round: cs('[data-shp-round]').display,
-      sharp: [...board.querySelectorAll('[data-shp-sharp]')].map((el) => getComputedStyle(el).display),
+      old: { width: cs('#old').strokeWidth, scale: cs('#old').getPropertyValue('vector-effect'), head: cs('#old-head').strokeWidth },
     };
   };
 
-  test('Sharp: 2 px corners on boxes, zones, chips and cards, 1 px lines at any zoom, square ends, no shadow, the twins swapped', async () => {
-    const { board } = await draw({ html: STORED, boardStyle: 'sharp' });
+  test('every board, with nothing from the host: 2 px corners on boxes, zones, chips and cards, 1 px lines at any zoom, square ends, a filled head, no shadow', async () => {
+    const { board } = await draw({ html: STORED });
     const l = look(board);
-    expect(l.attr).toBe('sharp');
     expect(l.box).toEqual({ rx: '3px', width: '1px', scale: 'non-scaling-stroke' });
     expect(l.wire).toEqual({ width: '1px', scale: 'non-scaling-stroke', cap: 'butt' });
+    expect(l.head.stroke).toBe('none');
     expect(l.zone).toEqual({ rx: '3px', width: '1px' });
     expect(l.chip).toBe('2px');
     expect(l.card).toEqual({ rx: '3px', shadow: 'none' });
-    // The kit's square elbow and filled head show; its rounded elbow and open head go.
-    expect(l.round).toBe('none');
-    expect(l.sharp).toEqual(['inline', 'inline']);
+    // An older board keeps the elbow and the open head it was drawn with, in Sharp's thin line.
+    expect(l.old).toEqual({ width: '1px', scale: 'non-scaling-stroke', head: '1px' });
+    expect(board.querySelector('#old')?.getAttribute('d')).toContain('Q260 200');
   });
 
-  for (const [name, style] of [['Rounded', 'rounded'], ['no style (another host)', undefined]] as const) {
-    test(`${name}: the board as drawn, none of Sharp`, async () => {
-      const { board } = await draw({ html: STORED, ...(style ? { boardStyle: style } : {}) });
-      const l = look(board);
-      expect(l.attr).toBe(style ?? null);
-      for (const value of [l.box.rx, l.zone.rx, l.chip, l.card.rx]) expect(value).not.toMatch(/^[23]px$/);
-      expect([l.box.scale, l.wire.scale]).not.toContain('non-scaling-stroke');
-      expect([l.box.width, l.wire.width, l.zone.width]).not.toContain('1px');
-      expect(l.round).not.toBe('none');
-      // The Sharp twins stay hidden by their own attribute.
-      expect(l.sharp).not.toContain('inline');
-      expect([...board.querySelectorAll('[data-shp-sharp]')].every((el) => el.getAttribute('display') === 'none')).toBe(true);
-    });
-  }
+  test("a drawing's own class rules do not undo it", async () => {
+    const { board } = await draw({ html: STORED, css: 'svg .line { stroke-width: 4px; } svg rect.line { rx: 14px; }' });
+    const l = look(board);
+    expect(l.box.rx).toBe('3px');
+    expect(l.wire.width).toBe('1px');
+  });
 
-  // Follow an example over a kit arrow (followPainter): the dot travels on the line that shows, the light is as thin
-  // as Sharp's lines, and the filled head lights filled. What regresses: the dot cutting the hidden rounded bend, a
-  // 2.2-unit light over a 1 px line, an outline triangle over a filled head.
-  for (const style of ['sharp', 'rounded'] as const) {
-    test(`Follow an example on ${style === 'sharp' ? 'Sharp' : 'Rounded'}: the dot's line and the light match the arrow that shows`, async () => {
-      const { FollowPainter, followLineOf } = await import('./followPainter');
-      const html = `<svg viewBox="0 0 600 300"><g data-mark="a">${box(40, 40, 120, 60)}</g><g data-edge="e">${arrow([[160, 70], [260, 70], [260, 150]])}</g><g data-mark="b">${box(200, 150, 120, 60)}</g></svg>`;
-      const { board } = await draw({ html, boardStyle: style });
-      board.style.setProperty('--mark', 'rgb(1, 2, 3)');
-      const line = followLineOf(board.querySelector('[data-edge="e"]')!);
-      expect(line?.hasAttribute(style === 'sharp' ? 'data-shp-sharp' : 'data-shp-round')).toBe(true);
-      const painter = new FollowPainter(board, { name: 'x', title: 'x', steps: [{ part: 'a', tag: 'a', text: 'a' }, { part: 'b', arrow: 'e', tag: 'b', text: 'b' }] } as never);
-      try {
-        // The lines that show: the light copies its line's twin attributes, so it shows and hides with it.
-        const twin = style === 'sharp' ? '[data-shp-sharp]' : '[data-shp-round]';
-        const lit = [...board.querySelectorAll(`.shp-ex-lit${twin}`)];
-        expect(lit.every((el) => getComputedStyle(el).display !== 'none')).toBe(true);
-        const head = lit.find((el) => el.classList.contains('shp-ex-head'));
-        const wire = lit.find((el) => !el.classList.contains('shp-ex-head'))!;
-        if (style === 'sharp') {
-          expect(getComputedStyle(wire).strokeWidth).toBe('1.5px');
-          expect(getComputedStyle(wire).getPropertyValue('vector-effect')).toBe('non-scaling-stroke');
-          expect(head).toBeDefined();
-          expect(getComputedStyle(head!).fill).toBe('rgb(1, 2, 3)');
-        } else {
-          expect(getComputedStyle(wire).strokeWidth).not.toBe('1.5px');
-          expect(head).toBeUndefined();
-        }
-      } finally {
-        painter.destroy();
-      }
-    });
-  }
-
-  test('a flip reaches a board already drawn, both ways', async () => {
-    const { ShapeDrawn } = drawnModule!;
-    const { shadow } = await draw({ html: STORED, boardStyle: 'rounded' });
-    const now = () => look(shadow.querySelector('.board') as HTMLElement);
-    expect(now().box.rx).not.toBe('3px');
-    for (const [style, rx] of [['sharp', '3px'], ['rounded', null], ['sharp', '3px']] as const) {
-      await act(async () => root!.render(<ShapeDrawn drawn={{ html: STORED, css: '' }} reduce boardStyle={style} />));
-      expect(now().attr).toBe(style);
-      if (rx) expect(now().box.rx).toBe(rx);
-      else expect(now().box.rx).not.toBe('3px');
+  // Follow an example over a kit arrow (followPainter): the light is as thin as the line, a touch heavier, and the
+  // filled head lights filled. What regresses: a 2.2-unit light over a 1 px line, an outline triangle over a filled head.
+  test("Follow an example: the light matches the line, and the filled head lights filled", async () => {
+    const { FollowPainter } = await import('./followPainter');
+    const html = `<svg viewBox="0 0 600 300"><g data-mark="a">${box(40, 40, 120, 60)}</g><g data-edge="e">${arrow([[160, 70], [260, 70], [260, 150]])}</g><g data-mark="b">${box(200, 150, 120, 60)}</g></svg>`;
+    const { board } = await draw({ html });
+    board.style.setProperty('--mark', 'rgb(1, 2, 3)');
+    const painter = new FollowPainter(board, { name: 'x', title: 'x', steps: [{ part: 'a', tag: 'a', text: 'a' }, { part: 'b', arrow: 'e', tag: 'b', text: 'b' }] } as never);
+    try {
+      const lit = [...board.querySelectorAll('.shp-ex-lit')];
+      const head = lit.find((el) => el.classList.contains('shp-ex-head'));
+      const wire = lit.find((el) => !el.classList.contains('shp-ex-head'))!;
+      expect(getComputedStyle(wire).strokeWidth).toBe('1.5px');
+      expect(getComputedStyle(wire).getPropertyValue('vector-effect')).toBe('non-scaling-stroke');
+      expect(head).toBeDefined();
+      expect(getComputedStyle(head!).fill).toBe('rgb(1, 2, 3)');
+    } finally {
+      painter.destroy();
     }
   });
 });

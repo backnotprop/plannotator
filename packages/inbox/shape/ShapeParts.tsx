@@ -210,7 +210,6 @@ export function ShapeGridPage({ shapes, onOpen }: { shapes: InboxShapeSummary[] 
   const items = useMemo(() => (shapes ?? []).filter((s) => s.state === 'active').map(shapeGridItem), [shapes]);
   const byId = useMemo(() => new Map((shapes ?? []).map((s) => [s.id, s])), [shapes]);
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const boardStyle = useShapeStyle();
   // The page's heading takes focus, as the Board's does; Find is one Tab away.
   useEffect(() => headingRef.current?.focus({ preventScroll: true }), []);
   return (
@@ -231,7 +230,6 @@ export function ShapeGridPage({ shapes, onOpen }: { shapes: InboxShapeSummary[] 
           items={items}
           query={query}
           assetUrl={inboxApi.shapeFileUrl}
-          boardStyle={boardStyle}
           onOpen={(id) => {
             const s = byId.get(id);
             if (s) onOpen(s);

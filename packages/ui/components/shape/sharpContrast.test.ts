@@ -1,13 +1,13 @@
 /**
- * The Sharp board style's lines in every shipped palette (sharpContrast.ts, approval "shape-board-style-switch").
+ * Sharp's lines in every shipped palette (sharpContrast.ts; approvals "shape-board-style-switch", "shape-board-sharp-only").
  *
  * What regresses if these fail:
  * - a 1 px box border falls under 3:1, a connector (and its filled head) under 5:1, or a zone's edge under 3:1 on
  *   the paper or its own fill, in some palette (a fixed CSS mix holds on the default palette and not on a soft
  *   dark one or a light one with a grey ink: the fixes must cover each);
  * - the default palette stops drawing exactly the look the owner approved (no fix there, the frame's own mixes);
- * - Sharp's quieter zone fills cost a word: every word colour must read on a Sharp zone at least as well as on a
- *   Rounded one, or at 4.5:1.
+ * - Sharp's quieter zone fills cost a word: every word colour must read on a Sharp zone at least as well as on the
+ *   palette's own zone fill (the frame's `--*-soft`), or at 4.5:1.
  *
  * No DOM: the board's colours are worked out from `SHAPE_FRAME_CSS` and `SHAPE_SHARP_CSS` as written (their
  * `color-mix()` and `var()` chains), over each palette's tokens read from `packages/ui/themes` as text, so a change
@@ -45,8 +45,9 @@ function declarations(css: string, selector: string): Record<string, string> {
   return {};
 }
 
-const ROUNDED = declarations(SHAPE_FRAME_CSS, '.board');
-const SHARP = { ...ROUNDED, ...declarations(SHAPE_SHARP_CSS, '.board[data-shp-style="sharp"]') };
+/** The frame's own colours (the palette's zone fills), and Sharp's over them. */
+const FRAME = declarations(SHAPE_FRAME_CSS, '.board');
+const SHARP = { ...FRAME, ...declarations(SHAPE_SHARP_CSS, '.board[data-shp-style="sharp"]') };
 
 /** Split on the commas at the top level of `s`. */
 function args(s: string): string[] {
@@ -126,17 +127,17 @@ for (const file of themeFiles) {
         expect(failures).toEqual([]);
       });
 
-      test('a word reads on a Sharp zone at least as well as on a Rounded one, or at 4.5:1', () => {
-        const rounded = resolver(ROUNDED, theme);
+      test("a word reads on a Sharp zone at least as well as on the palette's own zone fill, or at 4.5:1", () => {
+        const own = resolver(FRAME, theme);
         const paper = quantize(compositeOver(sharp('var(--paper)'), quantize(compositeOver(sharp('var(--background)'), { r: 1, g: 1, b: 1, a: 1 }))));
         const failures: string[] = [];
         for (const word of ['ink', 'ink2', 'grey', 'mark', 'alert', ...SHAPE_SHARP_ZONES]) {
           for (const z of SHAPE_SHARP_ZONES) {
-            const before = quantize(compositeOver(rounded(`var(--${z}-soft)`), paper));
+            const before = quantize(compositeOver(own(`var(--${z}-soft)`), paper));
             const now = quantize(compositeOver(sharp(`var(--${z}-soft)`), paper));
             const was = ratio(sharp(`var(--${word})`), before);
             const is = ratio(sharp(`var(--${word})`), now);
-            if (is < Math.min(4.5, was) - 0.005) failures.push(`--${word} on the ${z} zone: ${is.toFixed(2)} (Rounded ${was.toFixed(2)})`);
+            if (is < Math.min(4.5, was) - 0.005) failures.push(`--${word} on the ${z} zone: ${is.toFixed(2)} (the palette's fill ${was.toFixed(2)})`);
           }
         }
         expect(failures).toEqual([]);

@@ -1588,21 +1588,6 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-prow .ib-desc a:hover { text-decoration: underline; }
 .ib-prow .ib-desc code, .ib-sframe code { font-family: var(--font-mono); font-size: var(--ib-fs-11-5, 11.5px); color: var(--foreground); }
 .ib-prow .ib-ctl { display: flex; align-items: center; gap: 10px; flex: none; }
-/* A row that belongs to the one above it (Capabilities → Shape → Board style): no rule between the two, as
-   .ib-mcode under its row, set in under the parent's words, with a smaller title. */
-.ib-prow:has(+ .ib-prow-child) { border-bottom: 0; }
-.pn-inbox .ib-prow-child { min-height: 0; padding-top: 0; padding-left: 36px; }
-.ib-prow-child .ib-l { font-size: var(--ib-fs-13, 13px); }
-/* Board style (the Stage take): its words and the Rounded | Sharp control on one line, then one wide preview board
-   drawn in the picked style, then the style's traits. The board's paper is the page's background, as on a board. */
-.pn-inbox .ib-prow-child.ib-bstyle { flex-direction: column; align-items: stretch; gap: 10px; padding-bottom: 14px; }
-.ib-bstyle-head { display: flex; align-items: center; gap: 14px; }
-.ib-bstyle-pic { height: 184px; border-radius: var(--ib-rl-sm-s, 8px); overflow: hidden; background: var(--background); }
-.ib-bstyle-pic[data-narrow] { height: auto; aspect-ratio: 2 / 1; }
-.ib-bstyle-cap { margin-top: -3px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); line-height: 1.4; }
-@media (forced-colors: active) {
-  .ib-bstyle-pic { border: 1px solid CanvasText; }
-}
 /* Settings → Appearance → Colors (components/Palettes.tsx): the half being assigned, then its palettes as tiles.
    The row's own head is an .ib-prow without its rule; the tiles sit under it, in the card. */
 .ib-palrow { border-bottom: 1px solid var(--ib-sep-s, var(--ib-hair)); }
@@ -3489,10 +3474,6 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-pals { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: none; overflow: visible; padding: 4px 12px 12px; }
   .ib-pal { min-height: 44px; gap: 7px; padding-left: 8px; font-size: var(--ib-fs-14, 14px); }
   .ib-pal-sw > span + span { margin-left: -5px; }
-  /* Board style on a phone: set in less; the title keeps the control beside it, which goes under it only when both do not fit (320 px, big text). */
-  .pn-inbox .ib-prow-child { padding-left: 28px; }
-  .ib-bstyle-head { flex-wrap: wrap; row-gap: 8px; }
-  .ib-bstyle-head .ib-txt { flex-basis: auto; }
   /* a phone on its side is about 400 px tall: the projects scroll, the rest keeps its height */
   .ib-sb-sheet-in > .ib-side { overflow-y: auto; }
   .ib-sb-sheet-in .ib-brand, .ib-sb-sheet-in .ib-side-foot { flex: none; }

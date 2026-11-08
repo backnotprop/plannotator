@@ -23,8 +23,6 @@ export interface ShapeBoardProps {
   crosshair?: boolean;
   /** A dragged box's Add to reply: into the reply to the board's thread. Absent (no thread): no Add to reply. */
   onAddToReply?: (selection: ShapeBoxSelection, text: string) => void;
-  /** How the board is drawn (Settings → Capabilities → Board style; `ShapeSurfaceProps.boardStyle`). */
-  boardStyle?: ShapeBoardStyle;
 }
 
 /** Where the person is on a board: its view and its open panel. */

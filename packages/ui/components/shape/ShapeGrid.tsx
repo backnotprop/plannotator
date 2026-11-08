@@ -7,7 +7,7 @@
 //
 // Host-neutral like ShapeSurface: the items come in as props.
 import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { ShapeBoardStyle, ShapeDrawnView, ShapeRef } from '@plannotator/core/shape';
+import type { ShapeDrawnView, ShapeRef } from '@plannotator/core/shape';
 import { ShapeDrawn } from './ShapeDrawn';
 
 export interface ShapeGridItem {
@@ -49,7 +49,7 @@ const THUMB_H = 750;
 const ZOOM = 1.11111; // the mock's crop: a little past the picture's margins
 
 /** A board's Picture, small: drawn once at a desktop width, scaled to the card. */
-export function ShapeThumb({ picture, refs, className, resolveSrc, boardStyle }: { picture?: ShapeDrawnView | null; refs?: readonly ShapeRef[]; className?: string; resolveSrc?: (src: string) => string; boardStyle?: ShapeBoardStyle }) {
+export function ShapeThumb({ picture, refs, className, resolveSrc }: { picture?: ShapeDrawnView | null; refs?: readonly ShapeRef[]; className?: string; resolveSrc?: (src: string) => string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(0);
   useLayoutEffect(() => {
@@ -69,7 +69,7 @@ export function ShapeThumb({ picture, refs, className, resolveSrc, boardStyle }:
     <div ref={ref} className={`shp-thumb${className ? ` ${className}` : ''}`} aria-hidden="true">
       {picture && w > 0 && (
         <div className="shp-thumb-in" style={{ width: THUMB_W, height: THUMB_H, transform: `translateX(${(-(zoom - 1) / 2) * w}px) scale(${k})` }}>
-          <ShapeDrawn drawn={picture} refs={refs} phase="drawn" reduce resolveSrc={resolveSrc} boardStyle={boardStyle} />
+          <ShapeDrawn drawn={picture} refs={refs} phase="drawn" reduce resolveSrc={resolveSrc} />
         </div>
       )}
     </div>
@@ -83,7 +83,6 @@ export function ShapeGrid({
   now,
   empty,
   assetUrl,
-  boardStyle,
 }: {
   items: readonly ShapeGridItem[];
   onOpen: (id: string) => void;
@@ -94,8 +93,6 @@ export function ShapeGrid({
   empty?: React.ReactNode;
   /** Where a board's kept pictures load from, so a thumbnail shows them. */
   assetUrl?: (id: string, src: string) => string;
-  /** How the previews are drawn (`ShapeSurfaceProps.boardStyle`). Absent: as before. */
-  boardStyle?: ShapeBoardStyle;
 }) {
   const shown = useMemo(
     () => filterShapeItems(items, query ?? '').sort((a, b) => Date.parse(b.updated) - Date.parse(a.updated)),
@@ -120,7 +117,7 @@ export function ShapeGrid({
             }
           }}
         >
-          <ShapeThumb picture={it.picture} refs={it.refs} className="shp-gprev" resolveSrc={assetUrl ? (src) => assetUrl(it.id, src) : undefined} boardStyle={boardStyle} />
+          <ShapeThumb picture={it.picture} refs={it.refs} className="shp-gprev" resolveSrc={assetUrl ? (src) => assetUrl(it.id, src) : undefined} />
           <div className="shp-glab">
             <div className="shp-gt">
               {it.changed && <span className="shp-gdot" aria-hidden="true" />}

@@ -10,7 +10,7 @@ import type { ShapeBoxSelection, ShapeReadAsset } from './boxSelect';
 import type { ComponentType, ReactNode } from 'react';
 import type { ShapeCodeTarget, ShapeNote, ShapeNoteInput, ShapeRecord, ShapeVersion, ShapeViewId } from '@plannotator/core/shape';
 
-export type { ShapeBoard, ShapeBoardStyle, ShapeNote, ShapeNoteInput, ShapeRecord, ShapeRef, ShapeVersion, ShapeViewId } from '@plannotator/core/shape';
+export type { ShapeBoard, ShapeNote, ShapeNoteInput, ShapeRecord, ShapeRef, ShapeVersion, ShapeViewId } from '@plannotator/core/shape';
 
 /** The agent session that drew the shape, as the host knows it now. */
 export interface ShapeSessionStatus {

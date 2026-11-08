@@ -65,8 +65,6 @@ export interface ShapeServerInfo {
   on: boolean;
   /** Pages open on this server now (each holds the event stream). Bare `plannotator shape` opens no second tab while one is. */
   pages: number;
-  /** How every board is drawn (config.json `shapeBoardStyle`, the Inbox's Settings → Capabilities → Board style). */
-  board_style: ShapeBoardStyle;
 }
 
 const NO_STORE = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } as const;
@@ -282,7 +280,7 @@ export async function startShapeServer(options: ShapeServerOptions): Promise<Sha
       if (req.method !== "GET") return json({ error: "method not allowed" }, 405);
       const blocked = crossSite(req);
       if (blocked) return blocked;
-      return json({ shape_server: 1, version, serverSession, on: shapeOn(), pages: open, board_style: shapeBoardStyle() } satisfies ShapeServerInfo);
+      return json({ shape_server: 1, version, serverSession, on: shapeOn(), pages: open } satisfies ShapeServerInfo);
     }
 
     if (path === "/api/shapes" || path.startsWith("/api/shapes/")) {

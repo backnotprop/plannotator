@@ -1,4 +1,4 @@
-// Optional helpers for a Shape board: boxes, lines, labels, numbers. They follow the person's theme. No dependencies; run it with node or bun.
+// Optional helpers for a Shape board: sharp boxes, lines, labels, numbers. They follow the person's theme. No dependencies; run it with node or bun.
 // You can do all of this by hand. Same input, same picture: nothing here is random.
 //
 //   plannotator shape kit > kit.mjs
@@ -22,10 +22,6 @@
 // Icons, logos and drawn things by name (the store fills them in): icon('server', x, y), logo('stripe', x, y), thing('database', x, y, w, h, { label: 'Postgres' }),
 // thing('envelope', x, y, 56, 40, { to: [x2, y2] }) travels along a wire. Colour an icon or a thing with { color: 'var(--blue)' }.
 //
-// line() and arrow() draw a bend or an arrowhead twice, one for each board style the person can pick: data-shp-round
-// (shown on Rounded) and data-shp-sharp (a square bend, a small filled head; shown on Sharp). Keep both. To name a line
-// (data-edge, data-mark), wrap its output in a <g> rather than tagging its first <path>.
-//
 // A flow with branches: wrap what belongs to a path in on(['a'], ...), put pick('a', x, y, w, h, 'Case A') and pick('all', x, y, w, h, 'All paths', { of: ['a', 'b'], checked: true })
 // on the board, and give the view followCss(['a', 'b']): how: { ...svg(w, h, body), css: followCss(['a', 'b']) }. Picking one lights its path. No script.
 
@@ -40,37 +36,16 @@ const paint = (tone, dash) => `class="${strokeClass[tone] ?? 'line'}${dash ? ' d
 export const box = (x, y, w, h, { tone = 'ink', dash = false, r = 8 } = {}) =>
   `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" ${paint(tone, dash).replace('fill="none"', 'style="fill:var(--paper)"')}/>`;
 
-// The board has two styles, Rounded and Sharp. Where they draw a line differently, a line has a twin for each:
-// data-shp-round shows on Rounded, data-shp-sharp (square elbows, a small filled head) on Sharp.
-const SHARP_TWIN = 'data-shp-sharp="" display="none"';
-const ROUND_TWIN = 'data-shp-round=""';
-
-/** Straight segments with rounded elbows. Points are [x, y]. */
-export function line(points, { tone = 'ink', dash = false, arrow = false, head = 12, r = 12 } = {}) {
-  const path = (r) => {
-    let d = `M${points[0][0]} ${points[0][1]}`;
-    for (let i = 1; i < points.length - 1; i++) {
-      const [a, b, c] = [points[i - 1], points[i], points[i + 1]];
-      const k = Math.min(r, Math.hypot(b[0] - a[0], b[1] - a[1]) / 2, Math.hypot(c[0] - b[0], c[1] - b[1]) / 2);
-      if (k <= 0) { d += `L${b[0]} ${b[1]}`; continue; }
-      const to = (p) => { const L = Math.hypot(p[0] - b[0], p[1] - b[1]); return `${b[0] + ((p[0] - b[0]) / L) * k} ${b[1] + ((p[1] - b[1]) / L) * k}`; };
-      d += `L${to(a)}Q${b[0]} ${b[1]} ${to(c)}`;
-    }
-    const end = points[points.length - 1];
-    return `${d}L${end[0]} ${end[1]}`;
-  };
-  const round = path(r), square = path(0);
-  let out = round === square
-    ? `<path d="${round}" ${paint(tone, dash)}/>`
-    : `<path d="${round}" ${paint(tone, dash)} ${ROUND_TWIN}/><path d="${square}" ${paint(tone, dash)} ${SHARP_TWIN}/>`;
+/** Straight segments with square elbows. Points are [x, y]. arrow: a small filled head at the end, in the line's colour. */
+export function line(points, { tone = 'ink', dash = false, arrow = false, head = 10 } = {}) {
+  const d = points.map(([x, y], i) => `${i ? 'L' : 'M'}${x} ${y}`).join('');
+  let out = `<path d="${d}" ${paint(tone, dash)}/>`;
   if (arrow) {
     const end = points[points.length - 1];
     const prev = points[points.length - 2];
     const a = Math.atan2(end[1] - prev[1], end[0] - prev[0]);
-    const wing = (t, l) => `${(end[0] + Math.cos(a + t) * l).toFixed(1)} ${(end[1] + Math.sin(a + t) * l).toFixed(1)}`;
-    out += `<path d="M${wing(2.55, head)}L${end[0]} ${end[1]}L${wing(-2.55, head)}" ${paint(tone)} ${ROUND_TWIN}/>`;
-    const small = head * 5 / 6;
-    out += `<path d="M${wing(2.76, small)}L${end[0]} ${end[1]}L${wing(-2.76, small)}Z" ${paint(tone).replace('class="', 'class="shp-head ')} ${SHARP_TWIN}/>`;
+    const wing = (t) => `${(end[0] + Math.cos(a + t) * head).toFixed(1)} ${(end[1] + Math.sin(a + t) * head).toFixed(1)}`;
+    out += `<path d="M${wing(2.76)}L${end[0]} ${end[1]}L${wing(-2.76)}Z" ${paint(tone).replace('class="', 'class="shp-head ')}/>`;
   }
   return out;
 }

@@ -66,27 +66,18 @@ describe('the kit', () => {
     for (const name of names) expect(tile(name, 0, 0)).toContain('<g class="obj">');
   });
 
-  // The board style (approval "shape-board-style-switch"): what only the drawing can carry (an elbow, an arrowhead's
-  // shape) is drawn once per style, so a board drawn since flips both ways. What regresses: both twins showing on a
-  // board with no style (an older renderer, another host), a straight line doubled for nothing, or a path a person
-  // follows lighting its line but not its filled head.
-  test('an elbowed arrow carries a twin for each style; the Sharp one hides itself; a straight line has none', () => {
+  // Boards draw only in Sharp (approval "shape-board-sharp-only"): what only the drawing can carry is the elbow and
+  // the arrowhead's shape. What regresses: a rounded elbow or an open chevron coming back, a line drawn twice, or a
+  // path a person follows lighting its line but not its filled head.
+  test('a line turns square at its elbows; an arrow ends in one small closed head the board fills', () => {
     const tags = (html: string) => [...html.matchAll(/<path\b[^>]*>/g)].map((m) => m[0]);
     const elbow = tags(arrow([[0, 0], [100, 0], [100, 80]], { tone: 'soft' }));
-    const round = elbow.filter((t) => t.includes('data-shp-round'));
-    const sharp = elbow.filter((t) => t.includes('data-shp-sharp'));
-    expect([round.length, sharp.length, elbow.length]).toEqual([2, 2, 4]);
-    // Rounded (and any renderer that knows no style) draws exactly the line and head it drew before.
-    for (const t of round) expect(t).not.toContain('display=');
-    for (const t of sharp) expect(t).toContain('display="none"');
-    // Sharp's line turns square at the elbow; its head is closed and filled by the board in the line's colour.
-    expect(sharp[0]).toContain('d="M0 0L100 0L100 80"');
-    expect(sharp[1]).toMatch(/class="shp-head grey"[^>]*/);
-    expect(sharp[1]).toMatch(/d="M[^"]+Z"/);
-    expect(round[0]).toContain('Q100 0');
-    const straight = tags(line([[0, 0], [50, 0]]));
-    expect(straight).toHaveLength(1);
-    expect(straight[0]).not.toMatch(/data-shp-(round|sharp)/);
+    expect(elbow).toHaveLength(2);
+    expect(elbow[0]).toContain('d="M0 0L100 0L100 80"');
+    expect(elbow[0]).not.toContain('Q');
+    expect(elbow[1]).toMatch(/class="shp-head grey"/);
+    expect(elbow[1]).toMatch(/d="M[^"]+L100 80L[^"]+Z"/);
+    expect(tags(line([[0, 0], [50, 0], [50, 50]]))).toHaveLength(1);
     expect(followCss(['a'])).toContain('.on-a path.shp-head.grey { fill: var(--mark); }');
   });
 

@@ -1,5 +1,5 @@
 /**
- * The Sharp board style's lines, held to WCAG 1.4.11 in every palette (approval "shape-board-style-switch").
+ * Sharp's lines (every board is drawn in Sharp; approvals "shape-board-style-switch", "shape-board-sharp-only"), held to WCAG 1.4.11 in every palette.
  *
  * Sharp draws a board's lines 1 px wide, so their colour carries them. `SHAPE_FRAME_CSS` gives each a mix of the
  * board's own colours, the look the owner approved on the default palette:

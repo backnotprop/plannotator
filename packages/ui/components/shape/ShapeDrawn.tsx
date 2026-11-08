@@ -21,7 +21,6 @@ import {
   SHAPE_DROPPED_ATTRS,
   SHAPE_TOP_LAYER_ATTRS,
   SHAPE_URL_ATTRS,
-  type ShapeBoardStyle,
   type ShapeCodeTarget,
   type ShapeDrawnView,
   type ShapeRef,
@@ -31,6 +30,9 @@ import { syncKeptBoxes, type KeptBox } from './boxSelect';
 import { parseCssColor } from '../../utils/cssColor';
 import { readThemeTokenValues } from '../../utils/themeTokens';
 import { SHAPE_SHARP_COLOR_NAMES, shapeSharpFixes, type ShapeSharpColors } from './sharpContrast';
+import { holdDarkBoard, releaseDarkBoard } from './darkContrast';
+import { ScenePlayers } from './scene/ScenePlayers';
+import type { ShapeScene } from '@plannotator/core/shape-scene';
 
 /**
  * Sharp's line colours held to their bars in the palette on screen (`sharpContrast.ts`): set on `.board` only where
@@ -50,9 +52,6 @@ function holdSharpLines(board: HTMLElement): () => void {
     for (const name of Object.keys(fixes)) board.style.removeProperty(name);
   };
 }
-import { holdDarkBoard, releaseDarkBoard } from './darkContrast';
-import { ScenePlayers } from './scene/ScenePlayers';
-import type { ShapeScene } from '@plannotator/core/shape-scene';
 
 /**
  * A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first.
@@ -78,16 +77,15 @@ const tagPads = new WeakMap<HTMLElement, string>();
 export const NO_MARKS: MarkState = { fresh: new Set(), erasing: new Set(), noted: new Set() };
 
 /**
- * The Sharp board style (approval "shape-board-style-switch"), on a board whose host passes `boardStyle="sharp"`
- * (`data-shp-style="sharp"` on `.board`). CSS beats an SVG's presentation attributes, so it reaches every board as
- * shown, stored or new, and rewrites none: 1 px lines at any zoom (`vector-effect: non-scaling-stroke`), 2 px corners
- * on boxes, panels, chips and pills (3 canvas units, about 2 px on a board shown at 1440), square ends and joins, box
- * borders a softer grey and connectors stronger (`--shp-hair`, `--shp-wire`), quieter zone fills with a 1 px edge in
- * the zone's hue (`--shp-zone-*`), no drop shadow. The kit's lines carry a square-elbow twin and a small filled
- * arrowhead (`data-shp-sharp`, hidden unless Sharp shows them) beside today's (`data-shp-round`, hidden on Sharp), so
- * a board drawn since flips both ways; an older board keeps its elbows and open arrowheads. `sharpContrast.ts`
- * holds the line colours to their bars in every palette. Without the attribute nothing here applies: Rounded, and any
- * host that passes no style, draw exactly as before.
+ * How every board is drawn (approval "shape-board-sharp-only": Sharp only, no switch). CSS beats an SVG's
+ * presentation attributes, so it reaches every board as shown, stored or new, and rewrites none: 1 px lines at any
+ * zoom (`vector-effect: non-scaling-stroke`), 2 px corners on boxes, panels, chips and pills (3 canvas units, about
+ * 2 px on a board shown at 1440), square ends and joins, box borders a softer grey and connectors stronger
+ * (`--shp-hair`, `--shp-wire`), quieter zone fills with a 1 px edge in the zone's hue (`--shp-zone-*`), no drop
+ * shadow. The kit draws square elbows and small filled arrowheads (`.shp-head`); an older board keeps the elbows and
+ * open arrowheads it was drawn with. `sharpContrast.ts` holds the line colours to their bars in every palette.
+ * `ShapeDrawn` writes `data-shp-style="sharp"` on every `.board`: the rules carry its weight, so a drawing's own
+ * class rules do not undo them.
  */
 const SHARP = '.board[data-shp-style="sharp"]';
 const SHARP_ZONE = ':not(.line, .ink, .grey, .acc, .alert, .acc-fill)';
@@ -114,9 +112,7 @@ ${SHARP} svg .dash { stroke-dasharray: 5 4; }
 ${SHARP} svg :is(rect, circle, ellipse, polygon):is(.line, .ink) { stroke: var(--shp-hair); }
 ${SHARP} svg :is(path, line, polyline).line { stroke: var(--shp-wire); }
 ${SHARP} svg rect:is(.line, .ink, .grey, .acc, .alert, .acc-fill) { rx: var(--shp-r); ry: var(--shp-r); }
-/* The kit's twins: the square elbow and the filled head show; the rounded elbow and the open head go. */
-${SHARP} [data-shp-round] { display: none; }
-${SHARP} [data-shp-sharp] { display: inline; }
+/* The kit's arrowhead: closed, filled in its line's colour. */
 ${SHARP} svg path.shp-head:is(.line, .grey, .acc, .alert) { stroke: none; }
 ${SHARP} svg .shp-head.line { fill: var(--shp-wire); } ${SHARP} svg .shp-head.grey { fill: var(--grey); } ${SHARP} svg .shp-head.acc { fill: var(--mark); } ${SHARP} svg .shp-head.alert { fill: var(--alert); }
 /* A zone: a rect the drawing fills with a -soft colour. Small corners, and a 1 px edge in its hue. */
@@ -124,6 +120,9 @@ ${SHARP} svg rect${SHARP_ZONE}:is([style*="-soft"], [fill*="-soft"]) { rx: var(-
 ${['blue', 'amber', 'green', 'plum', 'alert'].map((z) => `${SHARP} svg rect${SHARP_ZONE}${softIs(z)} { stroke: var(--shp-zone-${z}); }`).join('\n')}
 /* darkContrast's zone edge (a shape it found with no line of its own), as thin as the rest. */
 ${SHARP}.dark-hold [data-shp-edge] { stroke-width: 1px; vector-effect: non-scaling-stroke; box-shadow: inset 0 0 0 1px var(--shp-edge); }
+/* darkContrast's light tile behind a kept picture: the same small corner. */
+${SHARP}.dark-hold .shp-pic-tile { rx: var(--shp-r); ry: var(--shp-r); }
+${SHARP}.dark-hold img[data-shp-pic] { border-radius: var(--shp-r); }
 /* Chips, cards, tiles, stickies, pictures, drawn things and path pills: the same corner, the same hairline. */
 ${SHARP} svg .tag rect { rx: 2px; ry: 2px; stroke-width: 1px; vector-effect: non-scaling-stroke; }
 ${SHARP} svg .tag rect[stroke-dasharray] { stroke-dasharray: 5 4; }
@@ -476,7 +475,6 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
   const pan = !!props.pan && scaled && narrow;
   const k = scaled && fit ? Math.max(pan ? 0.55 : 0.2, Math.min(fit.w / drawn.width!, fit.h > 40 ? fit.h / drawn.height! : Infinity, 1.08)) : 1;
   const [contentKey, setContentKey] = useState(0);
-  const boardStyle = props.boardStyle;
 
   // The content: sanitized once per change, then marked up for the board.
   useLayoutEffect(() => {
@@ -485,7 +483,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     const root = rootRef.current ?? host.attachShadow({ mode: 'open' });
     rootRef.current = root;
     const safeCss = shapeCssProblems(css).length ? '' : css;
-    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}${handlers.current.onRefPeek ? ' peek' : ''}">${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc, !!handlers.current.darkContrast)}</div>`;
+    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}${handlers.current.onRefPeek ? ' peek' : ''}" data-shp-style="sharp">${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc, !!handlers.current.darkContrast)}</div>`;
     const board = root.querySelector<HTMLElement>('.board')!;
     // Steps: the agent's numbers, in order, become 0, 1, 2… however sparse.
     const steps = [...board.querySelectorAll<HTMLElement | SVGElement>('[data-step]')];
@@ -521,8 +519,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     }
     setContentKey((x) => x + 1);
     handlers.current.onBoard?.(board);
-    // A style change draws the board afresh, so every pass over its colours runs again on the new look.
-  }, [html, css, scaled, boardStyle]);
+  }, [html, css, scaled]);
   useEffect(() => () => handlers.current.onBoard?.(null), []);
 
   // The canvas scale.
@@ -628,10 +625,9 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
   }, [marks, stale, freshTag, staleTag, contentKey]);
 
   // Sharp's line colours, after every other pass over the board's colours; again when the page's theme changes.
-  const sharp = boardStyle === 'sharp';
   useLayoutEffect(() => {
     const board = rootRef.current?.querySelector<HTMLElement>('.board');
-    if (!board || !sharp) return;
+    if (!board) return;
     let undo = holdSharpLines(board);
     if (typeof MutationObserver === 'undefined') return undo;
     let frame = 0;
@@ -652,7 +648,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       scheme?.removeEventListener?.('change', again);
       undo();
     };
-  }, [sharp, contentKey]);
+  }, [contentKey]);
 
   // Bubbles: lit with their list row, flashed from it.
   useEffect(() => {

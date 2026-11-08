@@ -56,7 +56,6 @@ export default function ShapeBoard({ host, id, onClose, onCode, renderThread, in
       initialPanel={initialPanel}
       onNavigate={onNavigate}
       headStart={headStart}
-      boardStyle={boardStyle}
     />
     </OpenInCodeSpans>
   );

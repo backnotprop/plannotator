@@ -22,7 +22,6 @@ import { useInboxPalettes, useInboxTheme } from '../theme';
 import { PaletteRow } from './Palettes';
 import { DEFAULT_COLOR_THEME } from '@plannotator/ui/utils/themeRegistry';
 import { chooseTextSize, useInboxTextSize } from '../textSize';
-import { ShapeStyleRow } from './ShapeStyleSetting';
 import { SETTINGS_SECTION_LABEL, SETTINGS_SECTIONS, settingsHash, type SettingsSection } from '../settingsRoute';
 import { VoiceSettings } from './VoiceSettings';
 import { useVoiceSettings } from '../voice';
@@ -563,7 +562,6 @@ function CapabilitiesSection({
                 </span>
               </div>
             )}
-            {shapeRow && shape.on && <ShapeStyleRow />}
           </div>
         </section>
       )}
