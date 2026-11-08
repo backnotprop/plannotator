@@ -10721,17 +10721,6 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .pn-inbox .ib-lflt:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .pn-inbox .ib-lflt[data-set], .pn-inbox .ib-lflt[data-set]:hover { color: var(--primary); }
 .pn-inbox .ib-lhead .ib-lflt ~ :is(.ib-lhead-search, .ib-lhead-compose, .ib-lhead-more) { margin-left: 0; }
-/* A count over an icon's corner (components/CountBadge.tsx): the PRs button's count, 13 px across, 9.5 px bold, the quiet
-   text colour on the page's ground. --cnt-x / --cnt-y: how far its centre sits past the icon's top-right corner, half
-   pixels so its edges land on whole ones (13 across). The digits sit in the middle both ways: tabular figures, a line
-   as tall as the badge, no baseline shift, and edges on whole pixels ("9+" a fixed 17 px, not its text's 16.28). */
-.ib-cnt-host { position: relative; --cnt-s: 13px; --cnt-f: 9.5px; --cnt-x: 1.5px; --cnt-y: 2.5px; }
-.ib-cnt { position: absolute; top: calc(var(--cnt-y) - var(--cnt-s) / 2); right: calc(0px - var(--cnt-x) - var(--cnt-s) / 2); min-width: var(--cnt-s); height: var(--cnt-s); padding: 0 2px; box-sizing: border-box; border-radius: 999px; display: flex; align-items: center; justify-content: center; font-size: var(--cnt-f); font-weight: 700; line-height: var(--cnt-s); font-variant-numeric: tabular-nums; letter-spacing: 0; text-align: center; vertical-align: top; background: var(--muted-foreground); color: var(--background); pointer-events: none; }
-.ib-cnt-host:has(> .ib-cnt) > svg { -webkit-mask: radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x)) var(--cnt-y), transparent 97%, #000 100%); mask: radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x)) var(--cnt-y), transparent 97%, #000 100%); }
-.ib-cnt[data-wide] { width: calc(var(--cnt-s) + 4px); padding: 0; }
-/* A wide count's cut: a second circle 4 px to the left, kept where both leave the glyph (the pill and its gap). */
-.ib-cnt-host:has(> .ib-cnt[data-wide]) > svg { -webkit-mask: radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x)) var(--cnt-y), transparent 97%, #000 100%), radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x) - 4px) var(--cnt-y), transparent 97%, #000 100%); -webkit-mask-composite: source-in; mask: radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x)) var(--cnt-y), transparent 97%, #000 100%), radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x) - 4px) var(--cnt-y), transparent 97%, #000 100%); mask-composite: intersect; }
-@media (forced-colors: active) { .ib-cnt { background: CanvasText; color: Canvas; forced-color-adjust: none; } }
 .ib-lflt-g { position: relative; display: inline-grid; place-items: center; }
 .ib-lflt-g > svg.ib-ic { stroke-width: 1.8; }
 .ib-pm.ib-lflt-menu { max-height: min(calc(100vh - 96px), 640px); overflow-y: auto; }
