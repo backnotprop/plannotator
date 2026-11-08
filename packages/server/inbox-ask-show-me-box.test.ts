@@ -45,8 +45,6 @@ function setup(keep?: (id: string, picture: string) => Promise<string | null>) {
     threadOwner: () => ({ session: "ses_owner", host: "claude-code" }),
   } as unknown as InboxStore;
   const ask = createInboxAsk({
-    on: () => true,
-    questionsOn: () => true,
     codeReviewOn: () => false,
     boardsOn: () => true,
     boardsOf: () => [{ id: board, versions: [] }],

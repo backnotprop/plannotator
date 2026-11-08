@@ -84,13 +84,7 @@ export function createInboxAsk(options: {
   /** Code review (Settings → Capabilities): Show me exists only while it is on. Absent: off. */
   codeReviewOn?: () => boolean;
   /**
-   * Plain questions are on. `on` is also true for a Shape on its own (Shape's switch alone), whose only question is a
-   * Show me from a board: its plain questions answer as if the Ask were off, so Shape's Ask keeps waiting for the agent.
-   */
-  questionsOn?: () => boolean;
-  /**
-   * The boards are on (Shape's switch or Code review): a Show me from a board is taken only then, even with
-   * PLANNOTATOR_INBOX_ASK_AI set. Absent: off.
+   * The boards are on (Shape's switch or Code review): a Show me from a board is taken only then. Absent: off.
    */
   boardsOn?: () => boolean;
   /** A review message (`guide.review`) by id, or null when the message is not one. Absent: none. */
@@ -227,7 +221,6 @@ export function createInboxAsk(options: {
       return json({ conversation: seen.conversation });
     }
 
-    if (!(options.questionsOn?.() ?? true) && !(body as { show_me?: { part?: unknown } } | null)?.show_me?.part) return null;
     const input = checkInboxAskInput(body);
     // Show me: a question that asks the agent to draw, about a review of this thread. Only while Code review is on.
     const showMe = checkInboxShowMeInput(body);

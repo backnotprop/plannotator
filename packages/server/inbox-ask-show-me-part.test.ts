@@ -34,8 +34,6 @@ function route(switches: { codeReview: boolean; boards: boolean }) {
   // No owner: a request the gates let through ends at "No agent owns this thread", with nothing saved.
   const store = { dir, onDeletion: () => () => {}, thread: (id: string) => (id === THREAD || id === OTHER ? thread(id) : null), messageAnswerable: () => true, threadOwner: () => null } as unknown as InboxStore;
   const ask = createInboxAsk({
-    on: () => true,
-    questionsOn: () => true,
     codeReviewOn: () => switches.codeReview,
     boardsOn: () => switches.boards,
     boardsOf: (threadId) => [{ id: threadId === THREAD ? BOARD : OTHER_BOARD, versions: [] }],
@@ -75,7 +73,7 @@ describe("a Show me from a board, at the ask route", () => {
     expect(refused.message).toContain(`${OTHER_BOARD} is not a board of this thread`);
   });
 
-  test("with Shape and Code review both off it is refused, even with the route on (PLANNOTATOR_INBOX_ASK_AI)", async () => {
+  test("with Shape and Code review both off it is refused", async () => {
     expect(await (route({ codeReview: false, boards: false }))(BOARD)).toEqual({ status: 409, code: "code_review_off" });
   });
 });
