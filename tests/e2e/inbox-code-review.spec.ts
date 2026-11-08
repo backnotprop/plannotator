@@ -552,7 +552,8 @@ async function expectTipClearOfDecision(page: Page, words = 'Split view. Click f
 async function expectOverviewWhole(page: Page): Promise<void> {
   const name = page.locator('[data-review-message] .ib-rj-name');
   await expect(name).toHaveText('Overview');
-  expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  const cut = await name.evaluate((el) => `${el.scrollWidth} in ${el.clientWidth}`);
+  expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth), `Overview reads ${cut} at ${page.viewportSize()?.width} px`).toBe(true);
 }
 
 test('the top bar holds what the rail held: chapters, the count, files, Overview, and the diff controls, by mouse and by keyboard', async () => {
