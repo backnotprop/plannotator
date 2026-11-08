@@ -153,8 +153,8 @@ export interface MachineView {
    */
   launch: boolean | null;
   /**
-   * Its store takes a Delete on an agent message's words (its health's `message_deletions`): only then does the
-   * window offer Delete on its messages. True for this Inbox; false until its health is read, and for an older Inbox.
+   * Its store takes a Delete on an agent message's words (its health's `message_deletions`). Not: a Delete it refuses
+   * (422) reads "<name> needs an update to delete words". True for this Inbox; false until its health is read, and for an older Inbox.
    */
   message_deletions: boolean;
 }

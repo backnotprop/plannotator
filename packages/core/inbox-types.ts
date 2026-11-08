@@ -1940,7 +1940,7 @@ export interface InboxHealth {
   launch_from_machines?: number;
   /**
    * The store takes a Delete on an agent message's words (`type` "DELETION", approval "inbox-toolbar-delete"; 1).
-   * Absent from an older Inbox, whose store refuses one: a linked machine's window offers no Delete on its messages.
+   * Absent from an older Inbox, whose store refuses one (422): a linked machine's window says it needs an update.
    */
   message_deletions?: number;
   /**

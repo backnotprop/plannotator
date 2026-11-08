@@ -9618,6 +9618,10 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 /* A failed Send (D3): the plain line, its own words behind Details, wrapping anywhere (a path has no spaces). */
 .ib-pfoot .ib-error { overflow-wrap: anywhere; }
 .ib-errd { display: inline; margin-left: 6px; }
+/* A machine that needs an update (a Delete it refused): its Update, a link in the error's own colour. */
+.ib-errup { display: inline; padding: 0; border: 0; background: none; font: inherit; font-weight: 600; color: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.ib-errup:hover { color: var(--foreground); }
+.ib-errup:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 3px; }
 .ib-errd > summary { display: inline; list-style: none; cursor: pointer; color: var(--muted-foreground); font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
 .ib-errd > summary::-webkit-details-marker { display: none; }
 .ib-errd > summary:hover { color: var(--foreground); }

@@ -211,8 +211,8 @@ export interface MachineView {
    */
   launch?: boolean | null;
   /**
-   * Its store takes a Delete on an agent message's words: only then is Delete offered on its messages (an older
-   * Inbox refuses the DELETION). Absent from an older Inbox serving the window; false for a linked one too old.
+   * Its store takes a Delete on an agent message's words. Not: a Delete it refuses (422) reads "<name> needs an
+   * update to delete words · Update". Absent from an older Inbox serving the window; false for a linked one too old.
    */
   message_deletions?: boolean;
 }

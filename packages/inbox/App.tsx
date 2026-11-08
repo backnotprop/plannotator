@@ -6418,6 +6418,8 @@ function Inbox() {
             onSnooze={snoozeOn && rowSnoozes({ machine: machineOf(thread.thread_id) ?? undefined }, machines) ? (until) => void snooze(thread, until) : undefined}
             onUnsnooze={snoozeOn && rowSnoozes({ machine: machineOf(thread.thread_id) ?? undefined }, machines) ? () => void unsnooze(thread) : undefined}
             machine={machines.linked.find((m) => m.id === machineOf(thread.thread_id)) ?? null}
+            // A Delete refused by a machine too old to take one: its Update. Settings → Machines is where an older machine's state is shown.
+            onMachineUpdate={() => go({ page: 'settings', project: null, thread: null, section: 'machines' })}
             outbox={threadOutbox(outbox, thread)}
             onDismissOutbox={dismissOutbox}
             replyRequest={replyFor}

@@ -1,14 +1,16 @@
 /**
- * Delete on a linked machine's message (approval "inbox-toolbar-delete"): the
- * window offers Delete on an agent message's words only when the message's
- * home Inbox takes a DELETION. Its health says `message_deletions`, carried on
- * the machine view. An Inbox from before Delete came back refuses one (422,
- * `annotation.type: "COMMENT" …`): the owner pressed Delete on a thread of
- * their Mac mini and got that error in the thread's foot.
+ * Delete on a linked machine's message (approval "inbox-toolbar-delete"): Delete
+ * shows on every agent message. An Inbox from before Delete came back refuses
+ * one (422, `annotation.type: "COMMENT" …`, its store's words): the owner
+ * pressed Delete on a thread of another machine and got those words in the
+ * thread's foot. Now, when the machine does not say `message_deletions` (its
+ * health, carried on the machine view) and the save is refused with 422, the
+ * line says "<machine> needs an update to delete words · Update".
  *
- * Failures to catch: Delete offered on an older machine's message; offered
- * while the thread's machine view is not read yet; a newer machine or this
- * machine losing Delete; a Delete that does not go to the message's machine.
+ * Failures to catch: Delete hidden on a linked machine; the store's raw words
+ * back for a too-old machine; Update missing or not naming the machine; the
+ * refused words still highlighted; another failure losing its own words; a
+ * newer machine's Delete not reaching that machine.
  *
  * Driven through the real ThreadPane, ui Viewer and web-highlighter; fetch is
  * stubbed, no Inbox server. DOM-gated (DOM_TESTS=1), listed in
@@ -32,10 +34,10 @@ const M1 = 'msg_01KLINKEDDELETE00000000001';
 const WORDS = 'only if a specific kind of code still matters to you';
 const BODY = `Keep hill climbing, ${WORDS}. Otherwise I would pause it.`;
 
-/** MacBook as the machines block names it; `message_deletions` absent: an Inbox from before Delete. */
-const macbook = (extra: Partial<MachineView> = {}): MachineView => ({
+/** The Mac mini as the machines block names it; `message_deletions` absent: an Inbox from before Delete. */
+const macMini = (extra: Partial<MachineView> = {}): MachineView => ({
   id: MAC,
-  name: 'MacBook',
+  name: 'Mac mini',
   self: false,
   state: 'online',
   since: '2026-11-08T10:00:00.000Z',
@@ -75,17 +77,24 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let posts: { url: string; body: { annotation: { type: string; originalText: string } } }[] = [];
+/** How the message's machine answers a save: taken, too old (its store's 422), or another failure. */
+let answer: 'save' | 'too-old' | 'gone' = 'save';
+let updates: string[] = [];
 
 beforeEach(() => {
   if (!hasDom) return;
   resetMachineRoutes();
   posts = [];
+  answer = 'save';
+  updates = [];
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (path.endsWith('/annotations') && init?.method === 'POST') {
       const body = JSON.parse(String(init.body)) as (typeof posts)[number]['body'];
       posts.push({ url: path, body });
+      if (answer === 'too-old') return Response.json({ error: 'annotation.type: "COMMENT" (a comment on the words selected).', code: 'validation_error', field: 'annotation.type' }, { status: 422 });
+      if (answer === 'gone') return Response.json({ error: 'That message was archived.', code: 'message_closed' }, { status: 409 });
       return Response.json({ annotation: { id: 'rec', message_id: M1, thread_id: M1, attachment_id: '', path: M1, version: 'current', message: { at: model.messages[0]!.created_at }, annotation: body.annotation } });
     }
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
@@ -115,7 +124,7 @@ async function render(machine: MachineView | null) {
   await act(async () => {
     root = createRoot(host!);
     root.render(
-      <ThreadPane thread={model} machine={machine} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />,
+      <ThreadPane thread={model} machine={machine} onMachineUpdate={(id) => updates.push(id)} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />,
     );
   });
   await settle();
@@ -143,31 +152,51 @@ async function select(scope: HTMLElement, phrase: string) {
 
 const toolbarNames = () => [...document.querySelectorAll<HTMLButtonElement>('.annotation-toolbar button')].map((b) => b.getAttribute('aria-label') ?? b.title);
 
-test.skipIf(!hasDom)("an older machine's message: no Delete (its Inbox refuses one), Comment and 👍 stay", async () => {
-  rememberMachine([M1], MAC);
-  const el = await render(macbook());
-  await select(el, WORDS);
-  expect(toolbarNames()).toEqual(['Comment', 'Looks good', 'Cancel']);
-});
-
-test.skipIf(!hasDom)("a linked machine's message before its machine view is read: no Delete", async () => {
-  rememberMachine([M1], MAC);
-  const el = await render(null);
-  await select(el, WORDS);
-  expect(toolbarNames()).toEqual(['Comment', 'Looks good', 'Cancel']);
-});
-
-test.skipIf(!hasDom)('a machine whose Inbox takes a Delete: Delete is offered and the DELETION goes to that machine', async () => {
-  rememberMachine([M1], MAC);
-  const el = await render(macbook({ version: '0.28.54', message_deletions: true }));
-  await select(el, WORDS);
-  expect(toolbarNames()).toEqual(['Delete', 'Comment', 'Looks good', 'Cancel']);
+const pressDelete = async () => {
   await act(async () => document.querySelector<HTMLButtonElement>('.annotation-toolbar button[aria-label="Delete"], .annotation-toolbar button[title="Delete"]')!.click());
   await settle();
-  expect(posts.map((p) => [p.url, p.body.annotation.type, p.body.annotation.originalText])).toEqual([[`/api/inbox/m/${MAC}/messages/${M1}/annotations`, 'DELETION', WORDS]]);
+  await settle();
+};
+const errorLine = () => document.querySelector<HTMLElement>('.ib-error[role="alert"]');
+const highlights = (el: HTMLElement) => el.querySelectorAll('mark.annotation-highlight').length;
+
+test.skipIf(!hasDom)("an older machine's message: Delete shows; refused there, the line says it needs an update, with its Update", async () => {
+  rememberMachine([M1], MAC);
+  answer = 'too-old';
+  const el = await render(macMini());
+  await select(el, WORDS);
+  expect(toolbarNames()).toEqual(['Delete', 'Comment', 'Looks good', 'Cancel']);
+  await pressDelete();
+  expect(posts.map((p) => [p.url, p.body.annotation.type])).toEqual([[`/api/inbox/m/${MAC}/messages/${M1}/annotations`, 'DELETION']]);
+  expect(errorLine()?.textContent).toBe('Mac mini needs an update to delete words · Update');
+  // The refused words are not left marked.
+  expect(highlights(el)).toBe(0);
+  await act(async () => errorLine()!.querySelector<HTMLButtonElement>('button[data-error-update]')!.click());
+  expect(updates).toEqual([MAC]);
 });
 
-test.skipIf(!hasDom)("this machine's own message: Delete is offered", async () => {
+test.skipIf(!hasDom)("an older machine's other failure keeps its own words", async () => {
+  rememberMachine([M1], MAC);
+  answer = 'gone';
+  const el = await render(macMini());
+  await select(el, WORDS);
+  await pressDelete();
+  expect(errorLine()?.textContent).toBe('That message was archived.');
+  expect(errorLine()?.querySelector('button[data-error-update]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a machine whose Inbox takes a Delete: the DELETION goes to that machine and saves', async () => {
+  rememberMachine([M1], MAC);
+  const el = await render(macMini({ version: '0.28.54', message_deletions: true }));
+  await select(el, WORDS);
+  expect(toolbarNames()).toEqual(['Delete', 'Comment', 'Looks good', 'Cancel']);
+  await pressDelete();
+  expect(posts.map((p) => [p.url, p.body.annotation.type, p.body.annotation.originalText])).toEqual([[`/api/inbox/m/${MAC}/messages/${M1}/annotations`, 'DELETION', WORDS]]);
+  expect(errorLine()).toBeNull();
+  expect(el.querySelector('mark.annotation-highlight.deletion')?.textContent).toBe(WORDS);
+});
+
+test.skipIf(!hasDom)("this machine's own message: Delete shows", async () => {
   const el = await render(null);
   await select(el, WORDS);
   expect(toolbarNames()).toEqual(['Delete', 'Comment', 'Looks good', 'Cancel']);

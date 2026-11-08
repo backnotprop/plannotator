@@ -7,7 +7,7 @@ import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeIn
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { useInitiativePeek } from './InitiativePeek';
-import type { Annotation, Block } from '@plannotator/ui/types';
+import { AnnotationType, type Annotation, type Block } from '@plannotator/ui/types';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
@@ -472,11 +472,6 @@ export function MessageBody({
     suggest?: (selectedText: string) => string | undefined;
     /** The comment on a diagram part the reply box's list just pointed at: the diagram shows it selected (its part panned into view, its ring pulsing). */
     revealed?: string | null;
-    /**
-     * The toolbar offers Delete (approval "inbox-toolbar-delete"). False on a linked machine whose Inbox is too old
-     * to take one: its store refuses the DELETION. Absent: Delete is offered.
-     */
-    deletions?: boolean;
   };
   /**
    * The person's own sent reply (sentReply.ts): the answers it carried, read
@@ -981,7 +976,7 @@ export function MessageBody({
         selectedAnnotationId={comments ? (comments.revealed ?? comments.openId ?? selectedBadge) : null}
         textComments={comments !== undefined}
         // Delete as plan review has it, before Comment (the owner's ask, approval "inbox-toolbar-delete").
-        textDeletions={comments !== undefined && comments.deletions !== false}
+        textDeletions={comments !== undefined}
         suggestComment={comments?.suggest}
         allowImages={false}
         onRestoreReport={comments ? restoreReport : undefined}
@@ -1062,6 +1057,11 @@ export interface ThreadPaneProps {
    * The meta line under the subject names it, or says it is away since when.
    */
   machine?: MachineView | null;
+  /**
+   * Update a linked machine (by id): the error line's "Update" when a Delete there was refused because its Inbox is
+   * too old. Absent: the line says so without it.
+   */
+  onMachineUpdate?: (machineId: string) => void;
   /** This thread's files, for New message opened over it; null when it has none to offer and when it goes. */
   onThreadFiles?: (files: readonly InboxAttachmentState[] | null) => void;
   /** An archived thread's reuse button: New message with this file. Absent: an archived thread offers no button. */
@@ -1523,7 +1523,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread, threadSteps = null, codeReview = false, machine = null, onThreadFiles, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onThreadFiles, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   // Thread steps (approval "inbox-thread-steps"): the lists with steps, newest first; none while the switch is off.
@@ -1838,6 +1838,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const [error, setError] = useState<string | null>(null);
   /** A failed Send's own words, behind Details on its line (decision D3), for as long as that line is the error shown. */
   const [errorDetails, setErrorDetails] = useState<{ for: string; text: string } | null>(null);
+  /** The error line names a machine that needs an update (a Delete it refused): its Update follows the words. */
+  const [errorUpdate, setErrorUpdate] = useState<{ for: string; machine: string } | null>(null);
   const voice = useVoiceSession();
   /** Words a take left in full screen's card brought back, waiting for the box (`changeReply` waits for a Send). */
   const lateVoice = useRef<string[]>([]);
@@ -2604,6 +2606,15 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       saveRecord(result.annotation);
       return true;
     } catch (cause) {
+      // A Delete on another machine's message, refused (422) by an Inbox too old to take one (it does not say
+      // `message_deletions`): say so, with that machine's Update, not its store's words (approval "inbox-toolbar-delete").
+      const home = machineOf(messageId) ?? machineOf(thread.thread_id);
+      if (home !== null && annotation.type === AnnotationType.DELETION && cause instanceof InboxApiError && cause.status === 422 && machine?.message_deletions !== true) {
+        const line = `${machine?.name ?? 'That machine'} needs an update to delete words`;
+        setError(line);
+        setErrorUpdate({ for: line, machine: home });
+        return false;
+      }
       setError(cause instanceof InboxApiError ? cause.message : 'The comment was not saved.');
       return false;
     }
@@ -5161,9 +5172,18 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         }
       : null;
   const errorMore = error !== null && errorDetails?.for === error ? errorDetails.text : null;
+  const errorUpdateFor = error !== null && errorUpdate?.for === error && onMachineUpdate ? errorUpdate.machine : null;
   const errorLine = (
     <div className="ib-error" role="alert" data-foot-error={errorAbove ? 'above' : undefined}>
       {lineError}
+      {errorUpdateFor !== null && (
+        <>
+          {' · '}
+          <button type="button" className="ib-errup" data-error-update={errorUpdateFor} onClick={() => onMachineUpdate?.(errorUpdateFor)}>
+            Update
+          </button>
+        </>
+      )}
       {/* A failed Send's own words (a path, the Inbox's message), one press away (decision D3). */}
       {errorMore && (
         <details className="ib-errd" data-error-details="">
@@ -6515,8 +6535,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                           onOpen: openListAt,
                           openId: commentsList?.at ?? null,
                           revealed: revealedComment,
-                          // Another machine's message (its saves go there): Delete only when its Inbox takes one (an older store refuses it).
-                          deletions: (machineOf(message.id) === null && machineOf(thread.thread_id) === null) || machine?.message_deletions === true,
                         }
                       : undefined
                   }
