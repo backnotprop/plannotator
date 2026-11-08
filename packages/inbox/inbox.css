@@ -8366,15 +8366,15 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
    the bar holds the same facts. A PR's title stays, shortened: it is the only way to the PR's details. */
 @media (min-width: 768px) and (max-width: 959px) {
   .ib-rv-nav ~ .ib-rv-titlesep:not(:has(+ .ib-dtitle)), .ib-review.ib-rv-walk .ib-vhead .ib-rv-nav ~ .ib-rv-title:not(.ib-dtitle), .ib-review.ib-rv-walk .ib-vhead .ib-rv-nav ~ .ib-rv-from { display: none; }
-  /* With the diff controls and a pull request's destination too, the bar's gaps narrow so the place still reads whole. */
-  .pn-inbox .ib-review.ib-rv-walk .ib-vhead:has([data-review-destination]) { gap: 6px; }
+  /* With the diff controls and a pull request's destination too, the bar's gaps narrow (2px, as under 768 px) so the
+     place still reads whole: "Overview" needed 29 px more at 800 px with 6px gaps. */
+  .pn-inbox .ib-review.ib-rv-walk .ib-vhead:has([data-review-destination]) { gap: 2px; }
   /* A PR's title gives way further here (5rem, not 9rem): the switch and the jump keep their room. */
   .pn-inbox .ib-review.ib-rv-walk .ib-vhead button.ib-rv-title.ib-dtitle { min-width: min(5rem, 100%); }
 }
 /* Under 800 px with a pull request's destination as well, the place still reads whole: the PR's title loses its
-   separator, the gaps narrow again, and the verdict is its check and its green (as under 768 px). The switch stays. */
+   separator, and the verdict is its check and its green (as under 768 px). The switch stays. */
 @media (min-width: 768px) and (max-width: 799px) {
-  .pn-inbox .ib-review.ib-rv-walk .ib-vhead:has([data-review-destination]) { gap: 4px; }
   .ib-rv-walk .ib-vhead:has([data-review-destination]) > .ib-rv-titlesep { display: none; }
   .ib-rv-walk .ib-vhead:has([data-review-destination]) .ib-rv-decide .md\:inline { display: none; }
   .ib-rv-walk .ib-vhead:has([data-review-destination]) .ib-rv-decide [data-slot='button-icon'] { display: inline-flex; }
