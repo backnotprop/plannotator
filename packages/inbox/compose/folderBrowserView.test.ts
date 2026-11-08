@@ -130,6 +130,11 @@ describe('cleanPastedPath', () => {
     expect(cleanPastedPath('file:///Users/ramos/Documents/Client%20Work/', '/Users/ramos')).toBe('~/Documents/Client Work/');
     expect(cleanPastedPath('~/code/Foo\\(1\\)', null)).toBe('~/code/Foo(1)');
   });
+  test('a paste is unescaped once: the filter reading it again keeps the backslash the paste left', () => {
+    const pasted = cleanPastedPath('~/a\\\\b', null);
+    expect(pasted).toBe('~/a\\b');
+    expect(cleanPastedPath(pasted, null, { unescape: false })).toBe('~/a\\b');
+  });
   test('B4: what reads as a path, not words', () => {
     expect(looksLikePath('~/code/web')).toBe(true);
     expect(looksLikePath('/Users/x')).toBe(true);

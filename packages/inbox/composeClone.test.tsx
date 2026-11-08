@@ -21,6 +21,7 @@ const hasDom = typeof document !== 'undefined';
 const { ComposeDialog } = (hasDom ? await import('./compose/ComposeDialog') : {}) as typeof import('./compose/ComposeDialog');
 const { setSelfMachine, resetMachineRoutes } = (hasDom ? await import('./inboxUrl') : {}) as typeof import('./inboxUrl');
 const { resetMachineLaunchesForTests } = (hasDom ? await import('./compose/useMachineLaunches') : {}) as typeof import('./compose/useMachineLaunches');
+const { resetCloneChecksForTests } = (hasDom ? await import('./compose/FolderMenu') : {}) as typeof import('./compose/FolderMenu');
 
 const SELF = 'ibx_01ARZ3NDEKTSV4RRFFQ69G5FAV';
 const MINI = 'ibx_01ARZ3NDEKTSV4RRFFQ69G5FAW';
@@ -70,6 +71,7 @@ beforeEach(() => {
   if (!hasDom) return;
   resetMachineRoutes();
   resetMachineLaunchesForTests();
+  resetCloneChecksForTests();
   setSelfMachine(SELF);
   requests = [];
   sent = [];
@@ -335,4 +337,25 @@ test.skipIf(!hasDom)('D9: a reopened draft keeps its clone pick; checked again, 
   await open({ draft: draft('~/code/web') });
   await until(() => requests.some((r) => r.path.includes('launch/folders')), 'the check');
   await until(() => inDialog('[data-compose-folder]') !== null && !inDialog('[data-compose-folder]')!.hasAttribute('data-compose-folder-clone'), 'the mark dropped');
+});
+
+test.skipIf(!hasDom)("a URL typed key by key is checked once, when the typing stops (each check is a network git run on that machine), and the same URL again asks no one", async () => {
+  await open();
+  await startAndOpenMenu();
+  // Every prefix of the repo's name reads as a repo of its own.
+  for (let n = 'github.com/acme/b'.length; n <= 'github.com/acme/billing-api'.length; n++) type(filter(), 'github.com/acme/billing-api'.slice(0, n));
+  await until(() => cloneRow('self')?.getAttribute('data-clone-path') === '~/code/billing-api', 'the clone row');
+  const checks = () => requests.filter((r) => r.path.startsWith('/api/inbox/launch/clone-check?'));
+  await until(() => checks().length === 1, 'the check');
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 900));
+  });
+  expect(checks().map((r) => new URLSearchParams(r.path.split('?')[1]).get('url'))).toEqual(['github.com/acme/billing-api']);
+  // Cleared and typed again: answered from the check already made.
+  type(filter(), '');
+  type(filter(), 'github.com/acme/billing-api');
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 900));
+  });
+  expect(checks()).toHaveLength(1);
 });

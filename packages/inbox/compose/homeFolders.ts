@@ -91,9 +91,10 @@ export function nameBelow(path: string, above: string): string {
 /**
  * A pasted path as the person meant it (approval "launch-create-clone", B1-B3), cleaned here because the server
  * refuses a backslash: one line, without the quotes around it, a `file://` URL decoded, and Terminal's escapes
- * (`Client\ Work`, `\(1\)`) read as the characters they escape. A full path in `home` reads as `~/…`.
+ * (`Client\ Work`, `\(1\)`) read as the characters they escape. A full path in `home` reads as `~/…`. Text cleaned once
+ * already (`unescape: false`: what the filter holds after its paste) keeps its backslashes, so `~/a\\b` never loses both.
  */
-export function cleanPastedPath(text: string, home: string | null = null): string {
+export function cleanPastedPath(text: string, home: string | null = null, { unescape = true }: { unescape?: boolean } = {}): string {
   let path = text.replace(/[\r\n]+/g, '').trim();
   if (/^(['"]).*\1$/.test(path)) path = path.slice(1, -1);
   if (path.startsWith('file://')) {
@@ -103,7 +104,7 @@ export function cleanPastedPath(text: string, home: string | null = null): strin
       path = path.slice('file://'.length);
     }
   }
-  path = path.replace(/\\(.)/g, '$1');
+  if (unescape) path = path.replace(/\\(.)/g, '$1');
   return homeRelative(path, home);
 }
 

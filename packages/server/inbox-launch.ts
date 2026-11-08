@@ -60,7 +60,7 @@
  *   POST /api/inbox/launch/:id/permission  the hook's long poll; the answer is the person's, from the thread
  */
 
-import { checkNewHomeFolder, isHomeItself, listHomeFolders, makeHomeFolder, resolveHomeFolder } from "./inbox-home-folders";
+import { checkNewHomeFolder, folderIdentity, isHomeItself, listHomeFolders, makeHomeFolder, resolveHomeFolder, sameFolderIdentity } from "./inbox-home-folders";
 import { checkGitRemote, cloneTarget, defaultCloneFolder, originKeyOf, readLastCloneFolder, runGitClone, tildeOf, writeLastCloneFolder, type CloneRun } from "./inbox-launch-clone";
 import { parseInboxGitUrl } from "@plannotator/core/inbox-git-url";
 import { inboxLaunchNotReadyWords } from "@plannotator/core/inbox-launch-ready";
@@ -150,6 +150,8 @@ interface Memo {
 
 /** The clone percent shows once a clone has run this long (E2: a big repo, not every clone). */
 const CLONE_PCT_AFTER_MS = 3_000;
+/** How long the quiet check's answer for a URL is kept (`clone-check`). */
+const CLONE_REACH_KEEP_MS = 60_000;
 
 /** What the engine keeps per host: its availability (30 s), its sessions view (10 s), its permission transport. */
 interface HostState {
@@ -253,15 +255,8 @@ export function createInboxLaunch(options: {
 
   /** Where new scratch folders go: Settings → Agents' `inboxLaunch.scratchDir`, else `<dataDir>/scratch`. Moving it applies to new folders only. */
   const scratchRoot = () => config().scratchDir ?? join(options.dataDir, "scratch");
-  /** A folder's identity (`<dev>:<ino>`), or null when it is not there. */
-  const inodeOf = (folder: string): string | null => {
-    try {
-      const stat = lstatSync(folder, { bigint: true });
-      return `${stat.dev}:${stat.ino}`;
-    } catch {
-      return null;
-    }
-  };
+  /** A folder's identity (`<dev>:<ino>[:<birth>]`, `folderIdentity`), or null when it is not there. */
+  const inodeOf = folderIdentity;
   /**
    * A scratch folder is still the one the Inbox made: a real folder named as a slug, with no symbolic link
    * anywhere on its path, so it is still right inside the root's real path it was made in (the record holds
@@ -271,7 +266,7 @@ export function createInboxLaunch(options: {
    */
   const scratchIntact = (folder: string, inode: string | undefined): boolean => {
     try {
-      return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(basename(folder)) && lstatSync(folder).isDirectory() && realpathSync(folder) === folder && !!inode && inodeOf(folder) === inode;
+      return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(basename(folder)) && lstatSync(folder).isDirectory() && realpathSync(folder) === folder && sameFolderIdentity(inodeOf(folder), inode);
     } catch {
       return false;
     }
@@ -282,7 +277,7 @@ export function createInboxLaunch(options: {
    */
   const removeMadeFolder = (folder: string, inode: string): void => {
     try {
-      if (!lstatSync(folder).isDirectory() || realpathSync(folder) !== folder || inodeOf(folder) !== inode) return;
+      if (!lstatSync(folder).isDirectory() || realpathSync(folder) !== folder || !sameFolderIdentity(inodeOf(folder), inode)) return;
       rmdirSync(folder);
     } catch {
       // Not empty, or gone: left as it is.
@@ -722,38 +717,63 @@ export function createInboxLaunch(options: {
     clonePctSaid.delete(launch.id);
     starting.add(launch.id);
     let started = false;
+    // Cancel and Delete find this run from the first moment (the line shows Cancel at once), not only once git runs:
+    // pressed while the login shell is read, git is never started.
+    type CloneResult = Awaited<CloneRun["done"]>;
+    let git: CloneRun | null = null;
+    let calledOff = false;
+    let settle!: (result: CloneResult) => void;
+    const handle: CloneRun = {
+      done: new Promise<CloneResult>((resolveDone) => (settle = resolveDone)),
+      pct: () => git?.pct() ?? null,
+      cancel: () => {
+        calledOff = true;
+        if (git) git.cancel();
+        else settle({ ok: false, error: "failed", text: "", cancelled: true });
+      },
+    };
+    clones.set(launch.id, handle);
+    options.onChange();
     try {
-      const login = launchSpawnEnv(await readLogin());
-      const running = runGitClone({
-        url: clone.url,
-        ...(clone.branch ? { branch: clone.branch } : {}),
-        folder: launch.folder,
-        env: login,
-        onProgress: (pct) => {
-          const said = clonePctSaid.get(launch.id) ?? -100;
-          if (pct - said >= 5 || pct === 100) {
-            clonePctSaid.set(launch.id, pct);
-            options.onChange();
-          }
-        },
-      });
-      clones.set(launch.id, running);
-      options.onChange();
-      const result = await running.done;
-      clones.delete(launch.id);
+      // A Cancel during the shell read ends the wait too: the line says cancelled at once.
+      const shellRead = await Promise.race([readLogin(), handle.done.then(() => null)]);
+      if (shellRead && !calledOff && !store.message(root.id)?.launch?.deleted_at) {
+        const login = launchSpawnEnv(shellRead);
+        git = runGitClone({
+          url: clone.url,
+          ...(clone.branch ? { branch: clone.branch } : {}),
+          folder: launch.folder,
+          env: login,
+          onProgress: (pct) => {
+            const said = clonePctSaid.get(launch.id) ?? -100;
+            if (pct - said >= 5 || pct === 100) {
+              clonePctSaid.set(launch.id, pct);
+              options.onChange();
+            }
+          },
+        });
+        git.done.then(settle);
+      } else settle({ ok: false, error: "failed", text: "", cancelled: true });
+      const result = await handle.done;
+      if (clones.get(launch.id) === handle) clones.delete(launch.id);
       const current = store.message(root.id);
       if (!current?.launch || current.launch.deleted_at) return;
+      const ended_at = new Date(now()).toISOString();
       if (!result.ok) {
+        // The folder the Send made goes (while it is still that folder), and its identity with it: a folder made at
+        // that path later is never taken for the Inbox's.
+        const removed = removeClonedFolder(current.launch);
         if (result.cancelled) {
-          // E7: nothing is kept on that machine (the folder the Send made, while it is still that folder).
-          removeClonedFolder(current.launch);
-          store.settleLaunch(root.id, { clone: { ...clone, state: "cancelled" } });
+          // E7: nothing is kept on that machine.
+          store.settleLaunch(root.id, { clone: { ...clone, state: "cancelled", ended_at }, ...(removed ? { made_inode: null } : {}) });
         } else {
           // E4-E6: git leaves the folder empty; it goes too, so Try again or a changed URL clones into that name again.
-          removeClonedFolder(current.launch);
           startLog(launch.id, `clone ${clone.url}: ${result.error}
 ${result.text}`);
-          store.settleLaunch(root.id, { clone: { ...clone, state: "failed", error: result.error, ...(result.error === "failed" && result.text ? { error_text: result.text.slice(0, 300) } : {}) } });
+          store.settleLaunch(root.id, {
+            clone: { ...clone, state: "failed", error: result.error, ...(result.error === "failed" && result.text ? { error_text: result.text.slice(0, 300) } : {}), ended_at },
+            ...(removed ? { made_inode: null } : {}),
+          });
         }
         log(`Inbox launch ${launch.id}: clone ${result.cancelled ? "cancelled" : `failed (${result.error})`}`);
         return;
@@ -780,10 +800,13 @@ ${result.text}`);
       started = true;
       await run(settled, host, false);
     } catch (error) {
-      clones.delete(launch.id);
+      if (clones.get(launch.id) === handle) clones.delete(launch.id);
       const text = error instanceof Error ? error.message : String(error);
       startLog(launch.id, `clone error: ${text}`);
-      if (store.message(root.id)?.launch && !store.message(root.id)!.launch!.deleted_at) store.settleLaunch(root.id, { clone: { ...clone, state: "failed", error: "failed", error_text: text.slice(0, 300) } });
+      if (store.message(root.id)?.launch && !store.message(root.id)!.launch!.deleted_at) {
+        const removed = removeClonedFolder(store.message(root.id)!.launch!);
+        store.settleLaunch(root.id, { clone: { ...clone, state: "failed", error: "failed", error_text: text.slice(0, 300), ended_at: new Date(now()).toISOString() }, ...(removed ? { made_inode: null } : {}) });
+      }
     } finally {
       if (!started) {
         starting.delete(launch.id);
@@ -793,20 +816,32 @@ ${result.text}`);
     }
   };
 
-  /** Cancel, or Delete, during a clone: the partly cloned folder goes while it is still the one the Send made (E7). */
-  const removeClonedFolder = (launch: InboxLaunchRecord): void => {
-    if (!launch.made_folder || !launch.made_inode) return;
+  /**
+   * Cancel, Delete or a failed clone: the partly cloned folder goes while it is still the one the Send made (E7): a
+   * real folder at that path, with the identity (inode and birth time) recorded when the Inbox made it. True when the
+   * record should drop that identity: the folder is removed or gone, or what is there now isn't the Inbox's.
+   */
+  const removeClonedFolder = (launch: InboxLaunchRecord): boolean => {
+    if (!launch.made_folder || !launch.made_inode) return false;
     try {
-      if (!lstatSync(launch.folder).isDirectory() || realpathSync(launch.folder) !== launch.folder || inodeOf(launch.folder) !== launch.made_inode) return;
+      if (!lstatSync(launch.folder).isDirectory() || realpathSync(launch.folder) !== launch.folder || !sameFolderIdentity(inodeOf(launch.folder), launch.made_inode)) return true;
       rmSync(launch.folder, { recursive: true, force: true });
+      return true;
     } catch {
       // Gone already.
+      return true;
     }
   };
 
-  /** Try again, Clone again or a reply after a failed or cancelled clone: the folder made again (empty), and the clone run again. */
+  /**
+   * Try again, Clone again or a reply after a failed or cancelled clone: the folder made again (empty), and the clone
+   * run again. A folder at that path now that the Inbox didn't make (the person's own) is cloned into as it is, and
+   * never removed: the record holds no identity for it.
+   */
   const cloneAgain = (root: InboxMessage, host: LaunchHost): void => {
     const launch = root.launch!;
+    // A partly cloned folder of the Inbox's left there (a restart cut its clone off): it goes first, so git gets an empty one.
+    removeClonedFolder(launch);
     let madeInode: string | null = null;
     if (!isFolder(launch.folder)) {
       try {
@@ -816,9 +851,8 @@ ${result.text}`);
       }
       madeInode = inodeOf(launch.folder);
     }
-    const { error: _error, error_text: _text, ...clone } = launch.clone!;
-    // The new folder's identity with it, so a later Cancel removes this one.
-    const settled = store.settleLaunch(root.id, { clone: { ...clone, state: "cloning" }, ...(madeInode ? { made_inode: madeInode } : {}) });
+    const { error: _error, error_text: _text, ended_at: _ended, ...clone } = launch.clone!;
+    const settled = store.settleLaunch(root.id, { clone: { ...clone, state: "cloning" }, made_inode: madeInode });
     void cloneThenRun(settled, host);
   };
 
@@ -862,9 +896,12 @@ ${result.text}`);
     // A clone that failed or was cancelled: the person's reply clones again (E7: "Your reply starts it again"), once per reply.
     if (host && !launch.deleted_at && launch.clone && (launch.clone.state === "failed" || launch.clone.state === "cancelled") && root.to && !starting.has(launch.id)) {
       const memo = memoOf(launch);
+      // A reply the person wrote after the clone ended: never the thread's own first message (it waits for the agent
+      // too), nor one the clone already had (E7: Cancel stays cancelled, a failure stays failed, a restart included).
+      const ended = launch.clone.ended_at ?? null;
       const newest = store
         .pendingReplies(root.to.session, { tags: true })
-        .filter((reply) => !reply.by_guest)
+        .filter((reply) => !reply.by_guest && reply.id !== root.id && ended !== null && reply.created_at > ended)
         .at(-1);
       if (newest && memo.cloneFor !== newest.id) {
         memo.cloneFor = newest.id;
@@ -987,10 +1024,21 @@ ${result.text}`);
     if (refused) return refused;
     const repo = parseInboxGitUrl(new URL(req.url).searchParams.get("url") ?? "");
     if (!repo || repo.kind !== "repo") return json({ error: "Not a git repo's URL.", code: "validation_error" }, 422);
-    // The Inbox's own env, with the login PATH after it: no login shell is read for a check.
+    // Asked a moment ago (another window, the same URL typed again): that answer, with no git run.
+    const known = reachKnown.get(repo.url);
+    if (known && now() - known.at < CLONE_REACH_KEEP_MS) return json({ reach: known.reach });
+    // The Inbox's own env, with the login PATH after it: no login shell is read for a check. A window that stopped
+    // asking (it typed on) ends git at once.
     const env = launchPlainEnv(options.ownEnv(), loginPath);
-    return json({ reach: await checkGitRemote({ url: repo.url, env }) });
+    const reach = await checkGitRemote({ url: repo.url, env, signal: req.signal });
+    if (req.signal.aborted) return json({ reach: "failed" });
+    reachKnown.delete(repo.url);
+    reachKnown.set(repo.url, { at: now(), reach });
+    if (reachKnown.size > 64) reachKnown.delete(reachKnown.keys().next().value!);
+    return json({ reach });
   };
+  /** The quiet check's answers by URL, for a minute: typing on, or a second window, asks git once. */
+  const reachKnown = new Map<string, { at: number; reach: Awaited<ReturnType<typeof checkGitRemote>> }>();
 
   /**
    * `owner`: the machine's owner, here or over the tailnet (a guest the allow list let in is not). `door`: the request
@@ -1075,6 +1123,13 @@ ${result.text}`);
           for (let i = 0; i < 50 && store.message(root.id)?.launch?.clone?.state === "cloning"; i++) await new Promise((r) => setTimeout(r, 20));
           return json({ run: runOfRoot(store.message(root.id)!) });
         }
+        // A clone a restart cut off (no git runs for it now): Cancel still ends it, and its partly cloned folder goes.
+        if (launch.clone?.state === "cloning") {
+          const removed = removeClonedFolder(launch);
+          store.settleLaunch(root.id, { clone: { ...launch.clone, state: "cancelled", ended_at: new Date(now()).toISOString() }, ...(removed ? { made_inode: null } : {}) });
+          options.onChange();
+          return json({ run: runOfRoot(store.message(root.id)!) });
+        }
         if (!launch.session_ref) throw new InboxError("launch_not_found", "That session never started.");
         const memo = memoOf(launch);
         // What waits now was written before the Stop: it stays for the person's next reply.
@@ -1130,7 +1185,7 @@ ${result.text}`);
             cloning.cancel();
             await cloning.done;
             removeClonedFolder(launch);
-          }
+          } else if (launch.clone?.state === "cloning") removeClonedFolder(launch);
           // Still starting: `run` removes the session it makes once it sees `deleted_at`.
           if (launch.session_ref) {
             const stop = await host.stop(launch.session_ref);
@@ -1419,6 +1474,9 @@ ${result.text}`);
         } catch {
           throw new InboxError("folder_unavailable", `Can't make ${toMake.shown}. Nothing was sent.`, { field: "to.launch" });
         }
+        // A clone goes only into a folder this Send made: one made there since the checks (a second Send of the same
+        // URL, from another window) is that clone's, and two gits never share a folder.
+        if (cloneOf && !createdFolder.made) throw new InboxError("folder_unavailable", `${toMake.shown} was just made by another start. Pick the folder again. Nothing was sent.`, { field: "to.launch" });
         folderTarget = createdFolder.real;
       }
       const made = chosen || folderTarget ? null : makeScratch(input.name?.trim() || derivePersonThreadSubject(input.body));

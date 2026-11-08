@@ -7,12 +7,13 @@
  * machine, and that a repo bringing hooks waits for the person's trust while a plain one starts without asking.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxLaunch } from "./inbox-launch";
-import { classifyGitFailure, cloneTarget, defaultCloneFolder, originKeyOf, parseGitProgress } from "./inbox-launch-clone";
+import { classifyGitFailure, cloneTarget, defaultCloneFolder, originKeyOf, parseGitProgress, runGitClone } from "./inbox-launch-clone";
+import { folderIdentity } from "./inbox-home-folders";
 import { FAKE, fakeLaunchHost } from "../../tests/helpers/fake-launch-host";
 
 const restore: (() => void)[] = [];
@@ -67,9 +68,45 @@ describe("where a clone goes, and what git's failures mean", () => {
   });
 });
 
+describe("git asks nothing, in words the lines can read", () => {
+  /** A `git` that writes down the env and the arguments it was run with, then fails as git does (or says nothing). */
+  function recordingGit(silent = false) {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-clone-env-")));
+    restore.push(() => rmSync(root, { recursive: true, force: true }));
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "git"), silent ? "#!/bin/sh\nexec sleep 30\n" : `#!/bin/sh\nenv > ${root}/env\nprintf '%s\\n' "$@" > ${root}/args\necho 'fatal: repository not found' >&2\nexit 128\n`);
+    chmodSync(join(bin, "git"), 0o755);
+    return { root, bin };
+  }
+
+  test("a clone runs with no terminal prompt, no askpass, no credential window, ssh in batch mode, English words, and no other repo's GIT_DIR", async () => {
+    const { root, bin } = recordingGit();
+    // The person's own env, as the login shell gave it: a locale, a repo variable, an askpass. None reaches git as is.
+    const base = { HOME: root, PATH: `${bin}:/usr/bin:/bin`, LANG: "de_DE.UTF-8", LC_ALL: "de_DE.UTF-8", GIT_DIR: "/elsewhere/.git", GIT_INDEX_FILE: "/elsewhere/index", GIT_ASKPASS: "/usr/bin/ask" };
+    const result = await runGitClone({ url: "https://github.com/acme/x.git", folder: join(root, "x"), env: base }).done;
+    expect(result).toMatchObject({ ok: false, error: "not_found" });
+    const env = Object.fromEntries(readFileSync(join(root, "env"), "utf8").trim().split("\n").map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]));
+    expect(env).toMatchObject({ GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", SSH_ASKPASS_REQUIRE: "never", GIT_ASKPASS: "", LC_ALL: "C" });
+    expect(env.GIT_SSH_COMMAND).toContain("BatchMode=yes");
+    expect(env.GIT_DIR).toBeUndefined();
+    expect(env.GIT_INDEX_FILE).toBeUndefined();
+    const args = readFileSync(join(root, "args"), "utf8").trim().split("\n");
+    expect(args).toContain("credential.interactive=false");
+    // The URL and the folder come after `--`: never read as an option.
+    expect(args.slice(-3)).toEqual(["--", "https://github.com/acme/x.git", join(root, "x")]);
+  });
+
+  test("a clone that writes nothing for too long (a prompt no one sees, a stalled transfer) ends, said as the network's", async () => {
+    const { root, bin } = recordingGit(true);
+    const result = await runGitClone({ url: "https://github.com/acme/x.git", folder: join(root, "x"), env: { HOME: root, PATH: `${bin}:/usr/bin:/bin` }, idleMs: 300 }).done;
+    expect(result).toMatchObject({ ok: false, error: "network", cancelled: false });
+  });
+});
+
 // ── On the real launch module, with a local bare repo ──
 
-const gitBase = (home: string) => ({ HOME: home, PATH: process.env.PATH ?? "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0" });
+const gitBase = (home: string) => ({ HOME: home, PATH: process.env.PATH ?? "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" });
 
 function git(cwd: string, env: Record<string, string>, ...args: string[]) {
   const run = Bun.spawnSync(["git", ...args], { cwd, env, stdout: "pipe", stderr: "pipe" });
@@ -93,7 +130,7 @@ function bareRepo(fixtures: string, slug: string, env: Record<string, string>, e
   git(fixtures, env, "clone", "-q", "--bare", work, bare);
 }
 
-function world(options: { slowGit?: boolean } = {}) {
+function world(options: { slowGit?: boolean; holdLogin?: boolean } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-launch-clone-")));
   restore.push(() => rmSync(root, { recursive: true, force: true }));
   const dataDir = join(root, "data");
@@ -118,6 +155,9 @@ function world(options: { slowGit?: boolean } = {}) {
   }
   // https://github.com/<slug> is the bare repo on disk: git's own rewrite, so nothing leaves this machine.
   const login = { ...env, PATH: path, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: `url.file://${fixtures}/.insteadOf`, GIT_CONFIG_VALUE_0: "https://github.com/" };
+  let loginReads = 0;
+  let releaseLogin!: () => void;
+  const loginGate = new Promise<void>((r) => (releaseLogin = r));
   const store = InboxStore.open(dataDir);
   const fake = fakeLaunchHost();
   const changes = { n: 0 };
@@ -128,7 +168,11 @@ function world(options: { slowGit?: boolean } = {}) {
     serverSession: "srv",
     homeDir: home,
     platform: "darwin",
-    loginEnv: async () => login,
+    // `holdLogin`: the start's own shell read (any after the Send's) waits until `releaseLogin`, as a slow login shell does.
+    loginEnv: async () => {
+      if (options.holdLogin && ++loginReads > 1) await loginGate;
+      return login;
+    },
     ownEnv: () => login,
     installDirs: [],
     displayFolder: (p) => (p.startsWith(home) ? `~${p.slice(home.length)}` : p),
@@ -159,7 +203,7 @@ function world(options: { slowGit?: boolean } = {}) {
       "local",
     );
   const get = (path: string) => launch.route(new Request(`http://127.0.0.1${path}`, { headers: { "Sec-Fetch-Site": "same-origin" } }), new URL(`http://x${path}`).pathname, "local");
-  return { root, home, store, fake, launch, send, record, run, runState, post, get, changes };
+  return { root, home, store, fake, launch, send, record, run, runState, post, get, changes, releaseLogin };
 }
 
 async function until(check: () => boolean, ms = 15_000) {
@@ -253,6 +297,96 @@ describe("a Send that clones", () => {
     const plain = await w.send("https://github.com/acme/billing-api", "~/code/billing-api");
     await until(() => w.record(plain.id).clone?.state === "done" && w.fake.calls.some((c) => c.startsWith("start")) && !w.record(plain.id).error && !!w.record(plain.id).session_ref);
     expect(accepted).toEqual([join(w.home, "code", "billing-api")]);
+  });
+
+  test("E7, E5 on the sweep: a failed or cancelled clone stays so on every tick (its own first message is no reply); a reply written after clones again", { timeout: 30_000 }, async () => {
+    const w = world();
+    const root = await w.send("https://github.com/acme/nope", "~/code/nope");
+    await until(() => w.record(root.id).clone?.state === "failed");
+    const ended = w.record(root.id).clone!.ended_at;
+    expect(ended).toBeTruthy();
+    for (let i = 0; i < 5; i++) {
+      w.launch.sweep(true);
+      await Bun.sleep(150);
+    }
+    expect(w.record(root.id).clone).toMatchObject({ state: "failed", ended_at: ended });
+    expect(existsSync(join(w.home, "code", "nope"))).toBe(false);
+    // The person writes again: that reply clones again, once.
+    await Bun.sleep(5);
+    w.store.sendReply(root.id, { words: "Try the other remote.", idempotency_key: "reply-1" });
+    w.launch.sweep(true);
+    await until(() => w.record(root.id).clone?.state === "failed" && w.record(root.id).clone!.ended_at! > ended!);
+    const again = w.record(root.id).clone!.ended_at;
+    for (let i = 0; i < 3; i++) {
+      w.launch.sweep(true);
+      await Bun.sleep(150);
+    }
+    expect(w.record(root.id).clone!.ended_at).toBe(again);
+  });
+
+  test("E7: Cancel or Delete in the first moments (the start's shell read still under way) holds: git never runs, nothing is left", { timeout: 30_000 }, async () => {
+    const w = world({ holdLogin: true });
+    const cancelled = await w.send("https://github.com/acme/billing-api", "~/code/billing-api");
+    expect((await w.run(cancelled.id))?.state).toBe("cloning");
+    const answer = await w.post(w.record(cancelled.id).id, "stop");
+    expect(answer!.status).toBe(200);
+    expect(((await answer!.json()) as { run: { state: string } }).run.state).toBe("clone_cancelled");
+    expect(existsSync(join(w.home, "code", "billing-api"))).toBe(false);
+
+    // A second world (a Send waits for a shell read under way): Delete in the same moment.
+    const d = world({ holdLogin: true });
+    const deleted = await d.send("https://github.com/acme/hooked", "~/code/hooked");
+    expect((await d.post(d.record(deleted.id).id, "delete"))!.status).toBe(200);
+    expect(d.record(deleted.id).deleted_at).toBeTruthy();
+    // The shell reads end now: neither clone starts after all.
+    w.releaseLogin();
+    d.releaseLogin();
+    await Bun.sleep(1500);
+    expect(existsSync(join(w.home, "code", "billing-api"))).toBe(false);
+    expect(existsSync(join(d.home, "code", "hooked"))).toBe(false);
+    expect(w.record(cancelled.id).clone?.state).toBe("cancelled");
+    expect([...w.fake.calls, ...d.fake.calls].filter((call) => call.startsWith("start"))).toEqual([]);
+  });
+
+  test("two Sends of one URL to one new folder: one clones there, the other is refused; two gits never share a folder", async () => {
+    const w = world();
+    const both = await Promise.allSettled([w.send("https://github.com/acme/billing-api", "~/code/billing-api"), w.send("https://github.com/acme/billing-api", "~/code/billing-api")]);
+    const sent = both.filter((r) => r.status === "fulfilled");
+    const refused = both.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    expect(sent).toHaveLength(1);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]!.reason).toMatchObject({ code: "folder_unavailable" });
+    const root = (sent[0] as PromiseFulfilledResult<{ id: string }>).value;
+    await until(() => w.record(root.id).clone?.state === "done");
+    expect(existsSync(join(w.home, "code", "billing-api", "README.md"))).toBe(true);
+  });
+
+  test("a failed clone forgets its folder's identity: a folder the person makes at that path later is never removed, by Try again or Cancel", async () => {
+    const w = world();
+    const root = await w.send("https://github.com/acme/nope", "~/code/nope");
+    await until(() => w.record(root.id).clone?.state === "failed");
+    expect(w.record(root.id).made_folder).toBeUndefined();
+    expect(w.record(root.id).made_inode).toBeUndefined();
+    // The person makes ~/code/nope and works in it; Try again clones into it as it is, and the failure keeps it.
+    mkdirSync(join(w.home, "code", "nope"));
+    writeFileSync(join(w.home, "code", "nope", "notes.md"), "mine");
+    expect((await w.post(w.record(root.id).id, "retry"))!.status).toBe(200);
+    await until(() => w.record(root.id).clone?.state === "failed" && !!w.record(root.id).clone!.ended_at);
+    expect(readFileSync(join(w.home, "code", "nope", "notes.md"), "utf8")).toBe("mine");
+  });
+
+  // Where the file system keeps a birth time: a recorded identity whose inode number came back (ext4 hands a freed one
+  // to the next folder) but whose birth time is another folder's is not the Inbox's folder.
+  test.skipIf((folderIdentity(tmpdir()) ?? "").split(":").length < 3)("an inode number that came back with another birth time is not the folder the Inbox made", async () => {
+    const w = world({ slowGit: true });
+    const root = await w.send("https://github.com/acme/billing-api", "~/code/billing-api");
+    await until(() => w.runState(root.id) === "cloning");
+    const [dev, ino] = folderIdentity(join(w.home, "code", "billing-api"))!.split(":");
+    writeFileSync(join(w.home, "code", "billing-api", "notes.md"), "mine");
+    w.store.settleLaunch(root.id, { clone: w.record(root.id).clone!, made_inode: `${dev}:${ino}:1` });
+    expect((await w.post(w.record(root.id).id, "stop"))!.status).toBe(200);
+    await until(() => w.record(root.id).clone?.state === "cancelled");
+    expect(readFileSync(join(w.home, "code", "billing-api", "notes.md"), "utf8")).toBe("mine");
   });
 
   test("never a URL that isn't an https or ssh repo, or a branch that reads as an option", () => {

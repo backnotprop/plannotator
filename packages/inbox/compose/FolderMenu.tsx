@@ -109,8 +109,21 @@ type Row =
   | { key: string; kind: 'clone'; clone: CloneRow; group: FolderGroup }
   | { key: string; kind: 'cloneOther'; group: FolderGroup };
 
-/** How long a pasted URL settles before each machine is asked where it would clone it. */
+/** How long a pasted URL settles before each machine is asked where it would clone it (a folder read, cheap). */
 const CLONE_ASK_MS = 150;
+/**
+ * How long the URL must stay as it is before each machine checks it can read the repo: a network `git ls-remote`, so
+ * a URL being typed (every prefix of `github.com/acme/billing-api` reads as a repo) is checked once, when the typing
+ * stops, never per key. A paste settles at once and is checked after this.
+ */
+const CLONE_CHECK_MS = 700;
+/** The checks' answers, by machine and URL, for a minute: the same URL again (typed back, reopened) asks no machine again. */
+const reachKnown = new Map<string, { reach: CloneReach; at: number }>();
+const REACH_KEEP_MS = 60_000;
+/** Tests: each starts with no check answered. */
+export function resetCloneChecksForTests(): void {
+  reachKnown.clear();
+}
 
 /**
  * Each awake machine's answers for a pasted repo: where it would clone it, and the quiet check (C11). Keyed by machine
@@ -123,26 +136,40 @@ function useCloneReads(repo: InboxGitRepo | null, url: string, machines: readonl
     if (!repo) return;
     const controller = new AbortController();
     let live = true;
-    setReads({ url, targets: new Map(), reach: new Map() });
+    const known = new Map<string, CloneReach>();
+    for (const machine of machines) {
+      const answer = reachKnown.get(`${machine ?? ''}|${repo.url}`);
+      if (answer && Date.now() - answer.at < REACH_KEEP_MS) known.set(machine ?? '', answer.reach);
+    }
+    setReads({ url, targets: new Map(), reach: known });
     const timer = setTimeout(() => {
+      // An unknown host is only checked (C8): where it would go is asked once it reads as a repo.
+      if (repo.unchecked) return;
       for (const machine of machines) {
         const id = machine ?? '';
-        // An unknown host is only checked (C8): where it would go is asked once it reads as a repo.
-        if (!repo.unchecked) {
-          inboxApi.cloneTarget(url, null, machine, controller.signal).then(
-            (answer) => live && setReads((was) => (was.url === url ? { ...was, targets: new Map(was.targets).set(id, answer) } : was)),
-            () => {},
-          );
-        }
-        inboxApi.cloneCheck(url, machine, controller.signal).then(
-          (answer) => live && setReads((was) => (was.url === url ? { ...was, reach: new Map(was.reach).set(id, answer.reach) } : was)),
+        inboxApi.cloneTarget(url, null, machine, controller.signal).then(
+          (answer) => live && setReads((was) => (was.url === url ? { ...was, targets: new Map(was.targets).set(id, answer) } : was)),
           () => {},
         );
       }
     }, CLONE_ASK_MS);
+    const check = setTimeout(() => {
+      for (const machine of machines) {
+        const id = machine ?? '';
+        if (known.has(id)) continue;
+        inboxApi.cloneCheck(url, machine, controller.signal).then(
+          (answer) => {
+            reachKnown.set(`${id}|${repo.url}`, { reach: answer.reach, at: Date.now() });
+            if (live) setReads((was) => (was.url === url ? { ...was, reach: new Map(was.reach).set(id, answer.reach) } : was));
+          },
+          () => {},
+        );
+      }
+    }, CLONE_CHECK_MS);
     return () => {
       live = false;
       clearTimeout(timer);
+      clearTimeout(check);
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -220,7 +247,8 @@ export function FolderMenu({
   );
   const other = otherId === undefined ? null : (all.find((group) => group.machine === otherId) ?? null);
   // A path in the filter (B4): the projects under it, and each machine's "Another folder…" opens there.
-  const typedPath = looksLikePath(query) ? cleanPastedPath(query) : null;
+  // The paste was cleaned once already (its escapes read): what the filter holds keeps its backslashes now.
+  const typedPath = looksLikePath(query) ? cleanPastedPath(query, null, { unescape: false }) : null;
   // A git URL in the filter (C1-C17): each machine's clone row. A bare `acme/billing-api` stays a project search (C3).
   const git = onClone && typedPath === null ? parseInboxGitUrl(query) : null;
   const repo = git?.kind === 'repo' ? git : null;

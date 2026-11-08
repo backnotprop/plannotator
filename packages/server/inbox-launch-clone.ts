@@ -17,6 +17,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join, relative, sep } from "node:path";
 import { inboxGitRemoteKey } from "@plannotator/core/inbox-git-url";
+import { prepareGitCommand } from "@plannotator/shared/review-core";
 
 /** Why a clone or a check failed, as the run line and the clone row say it. */
 export type GitFailure = "auth" | "not_found" | "network" | "failed";
@@ -26,6 +27,13 @@ export type GitReach = "ok" | GitFailure;
 
 /** How long the quiet check may take before it says nothing (`failed`, which dims nothing). */
 export const GIT_CHECK_TIMEOUT_MS = 15_000;
+
+/**
+ * How long a clone may go without git writing a word before it is called stalled (E6's line): a keychain or security
+ * key waiting for a touch no one sees, or a transfer that stopped. git writes its progress many times a second while
+ * it works, so only a clone that really stopped gets here; a big repo that keeps moving is never cut off.
+ */
+export const GIT_CLONE_IDLE_MS = 120_000;
 
 /** How many `-2`, `-3`… names are tried before a clone folder is given up on. */
 const TAKEN_MAX = 50;
@@ -161,23 +169,49 @@ export function gitBinary(env: Readonly<Record<string, string>>): string {
   return "/usr/bin/git";
 }
 
+/** What git is never handed from the login env: they point git at another repository's files. */
+const GIT_REPO_ENV = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES"];
+
 /**
- * The env git runs with: the person's own (their SSH agent, their credential helper, their proxy), and nothing that
- * could ask: no terminal prompt, no askpass dialog, no Git Credential Manager window.
+ * One git command as it runs: the person's own env (their SSH agent, their credential helper, their proxy) with
+ * nothing that could ask (`prepareGitCommand`'s no-interaction mode: no terminal prompt, `credential.interactive=false`,
+ * ssh in batch mode with a connect timeout, their own `GIT_SSH_COMMAND` kept; and here no askpass dialog and no Git
+ * Credential Manager window), git's words in English (`LC_ALL=C`), which the failure lines and the percent are read
+ * from, and no variable that points git at another repository.
  */
-export function gitEnv(base: Readonly<Record<string, string>>): Record<string, string> {
-  const env: Record<string, string> = { ...base, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", SSH_ASKPASS_REQUIRE: "never", GIT_ASKPASS: "", SSH_ASKPASS: "" };
-  delete env.GIT_DIR;
-  delete env.GIT_WORK_TREE;
-  return env;
+export function gitCommand(args: string[], base: Readonly<Record<string, string>>, connectTimeoutMs = 30_000): { args: string[]; env: Record<string, string> } {
+  const clean: Record<string, string> = { ...base };
+  for (const name of GIT_REPO_ENV) delete clean[name];
+  const prepared = prepareGitCommand(args, { interaction: "forbid", timeoutMs: connectTimeoutMs }, clean);
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(prepared.env ?? clean)) if (typeof value === "string") env[key] = value;
+  return { args: prepared.args, env: { ...env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", SSH_ASKPASS_REQUIRE: "never", GIT_ASKPASS: "", SSH_ASKPASS: "", LC_ALL: "C", LANGUAGE: "C" } };
 }
 
-/** One git run: its exit code and what it wrote on stderr (the last 8 KB). `detached`: no controlling terminal, so ssh can't ask either. */
-function runGit(input: { git: string; args: string[]; env: Record<string, string>; cwd?: string; timeoutMs?: number; onStderr?: (chunk: string) => void; onSpawn?: (child: ChildProcess) => void }): Promise<{ code: number | null; stderr: string; timedOut: boolean }> {
+/**
+ * One git run: its exit code and what it wrote on stderr (the last 8 KB). `detached`: no controlling terminal, so ssh
+ * can't ask either. `timeoutMs` ends it after that long in all; `idleMs` once it has written nothing for that long;
+ * `signal` when the one who asked is gone.
+ */
+function runGit(input: {
+  git: string;
+  args: string[];
+  env: Record<string, string>;
+  cwd?: string;
+  timeoutMs?: number;
+  idleMs?: number;
+  signal?: AbortSignal;
+  onStderr?: (chunk: string) => void;
+  onSpawn?: (child: ChildProcess) => void;
+}): Promise<{ code: number | null; stderr: string; timedOut: boolean }> {
   return new Promise((resolve) => {
     let stderr = "";
     let timedOut = false;
     let child: ChildProcess;
+    if (input.signal?.aborted) {
+      resolve({ code: null, stderr: "", timedOut: false });
+      return;
+    }
     try {
       child = spawn(input.git, input.args, { cwd: input.cwd, env: input.env, stdio: ["ignore", "ignore", "pipe"], detached: true, shell: false });
     } catch (error) {
@@ -185,15 +219,21 @@ function runGit(input: { git: string; args: string[]; env: Record<string, string
       return;
     }
     input.onSpawn?.(child);
-    const timer = input.timeoutMs
-      ? setTimeout(() => {
-          timedOut = true;
-          killTree(child);
-        }, input.timeoutMs)
-      : null;
+    const stop = () => {
+      timedOut = true;
+      killTree(child);
+    };
+    const timer = input.timeoutMs ? setTimeout(stop, input.timeoutMs) : null;
+    let idle = input.idleMs ? setTimeout(stop, input.idleMs) : null;
+    const onAbort = () => killTree(child);
+    input.signal?.addEventListener("abort", onAbort, { once: true });
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk: string) => {
       stderr = (stderr + chunk).slice(-8192);
+      if (idle) {
+        clearTimeout(idle);
+        idle = setTimeout(stop, input.idleMs);
+      }
       input.onStderr?.(chunk);
     });
     child.on("error", (error) => {
@@ -201,6 +241,8 @@ function runGit(input: { git: string; args: string[]; env: Record<string, string
     });
     child.on("close", (code) => {
       if (timer) clearTimeout(timer);
+      if (idle) clearTimeout(idle);
+      input.signal?.removeEventListener("abort", onAbort);
       resolve({ code, stderr, timedOut });
     });
   });
@@ -219,10 +261,14 @@ export function killTree(child: ChildProcess): void {
   }
 }
 
-/** The quiet check after a paste: can this machine read the repo (`git ls-remote`)? A timeout says `failed` (nothing is dimmed for it). */
-export async function checkGitRemote(input: { url: string; env: Record<string, string>; timeoutMs?: number }): Promise<GitReach> {
-  const env = gitEnv(input.env);
-  const result = await runGit({ git: gitBinary(env), args: ["ls-remote", "--heads", "--", input.url], env, timeoutMs: input.timeoutMs ?? GIT_CHECK_TIMEOUT_MS });
+/**
+ * The quiet check after a paste: can this machine read the repo (`git ls-remote`)? A timeout says `failed` (nothing is
+ * dimmed for it); `signal` (the window stopped asking) ends git at once.
+ */
+export async function checkGitRemote(input: { url: string; env: Record<string, string>; timeoutMs?: number; signal?: AbortSignal }): Promise<GitReach> {
+  const timeoutMs = input.timeoutMs ?? GIT_CHECK_TIMEOUT_MS;
+  const command = gitCommand(["ls-remote", "--heads", "--", input.url], input.env, timeoutMs);
+  const result = await runGit({ git: gitBinary(command.env), args: command.args, env: command.env, timeoutMs, ...(input.signal ? { signal: input.signal } : {}) });
   if (result.code === 0) return "ok";
   if (result.timedOut) return "failed";
   return classifyGitFailure(result.stderr);
@@ -236,17 +282,18 @@ export interface CloneRun {
 }
 
 /** `git clone` into `folder` (which the Send made, empty). `onProgress` hears each new percent. */
-export function runGitClone(input: { url: string; branch?: string; folder: string; env: Record<string, string>; onProgress?: (pct: number) => void }): CloneRun {
-  const env = gitEnv(input.env);
+export function runGitClone(input: { url: string; branch?: string; folder: string; env: Record<string, string>; idleMs?: number; onProgress?: (pct: number) => void }): CloneRun {
+  const command = gitCommand(["-c", "advice.detachedHead=false", "clone", "--progress", ...(input.branch ? ["--branch", input.branch] : []), "--", input.url, input.folder], input.env);
+  const env = command.env;
   let pct: number | null = null;
   let child: ChildProcess | null = null;
   let cancelled = false;
-  const args = ["-c", "advice.detachedHead=false", "clone", "--progress", ...(input.branch ? ["--branch", input.branch] : []), "--", input.url, input.folder];
   const done = runGit({
     git: gitBinary(env),
-    args,
+    args: command.args,
     env,
     cwd: dirname(input.folder),
+    idleMs: input.idleMs ?? GIT_CLONE_IDLE_MS,
     onSpawn: (spawned) => {
       child = spawned;
       if (cancelled) killTree(spawned);
@@ -261,7 +308,8 @@ export function runGitClone(input: { url: string; branch?: string; folder: strin
   }).then((result) => {
     if (result.code === 0 && !cancelled) return { ok: true as const };
     const text = result.stderr.replace(/\r/g, "\n").split("\n").filter((line) => line.trim() && !/^(Cloning into|remote: (Counting|Compressing|Enumerating|Total)|Receiving|Resolving)/.test(line.trim())).slice(-3).join(" ").trim();
-    return { ok: false as const, error: cancelled ? ("failed" as const) : classifyGitFailure(result.stderr), text, cancelled };
+    // Stalled (nothing written for `idleMs`): said as the network's, the likeliest cause, with Try again.
+    return { ok: false as const, error: cancelled ? ("failed" as const) : result.timedOut ? ("network" as const) : classifyGitFailure(result.stderr), text, cancelled };
   });
   return {
     done,
