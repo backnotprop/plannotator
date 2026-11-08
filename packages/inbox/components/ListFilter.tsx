@@ -5,10 +5,11 @@
  *
  * - The header holds the funnel alone, at every width. With picks it takes the accent colour and a small count in its
  *   corner: one per ticked row. No tokens, no line over the list: what is picked is read in the menu.
- * - The menu (Base UI's: arrows, Home/End, type-ahead, Escape and Tab close, focus back to the funnel): Project (each
- *   project, several; only on the Inbox page and with two projects or more), Updated (Today, Last 7 days, Last 30
- *   days, Custom range…), Agent (several; only with two agents or more), each row with how many threads it would
- *   leave and a tick when picked, then "Clear filters". It stays open while picking. A phone draws it as the bottom
+ * - The menu (Base UI's: arrows, Home/End, type-ahead, Escape and Tab close, focus back to the funnel): Updated (Today,
+ *   Last 7 days, Last 30 days, Custom range…), Agent (several; only with two agents or more), Pull request (Open,
+ *   Draft, Merged, Closed, Has a PR, No PR, several; behind `LIST_FILTER_PULLS`), then Project last, since the
+ *   sidebar already narrows by project (each project, several; only on the Inbox page and with two projects or
+ *   more). Each row shows how many threads it would leave and a tick when picked, then "Clear filters". It stays open while picking. A phone draws it as the bottom
  *   sheet titled "Filter".
  * - Custom range… opens a small panel by the funnel: From, To, Apply.
  * - Nothing matches: `ListFilterEmpty` in the list's body, "No threads match" and Clear filters.
@@ -22,9 +23,14 @@ import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { formatCount } from '../format';
 import { HostMark, Icon } from '../icons';
 import { Tip } from './Tip';
+import { RefMarkIcon } from '../board/RefMark';
 import {
   NO_LIST_FILTER,
+  PULL_OPTIONS,
   UPDATED_OPTIONS,
+  listFilterPullsOn,
+  rowPullMatches,
+  type PullPick,
   agentHost,
   appliedFilter,
   countWhere,
@@ -37,11 +43,26 @@ import {
   type UpdatedPick,
 } from '../listFilter';
 
-/** The classic funnel (Lucide's `funnel`, ISC), drawn with the window's icon stroke; the icon set has none. */
-function FunnelGlyph({ size }: { size: number }) {
+/**
+ * The header's icon, one of four drawn for the owner to choose from (2026-11-08: "I want to see different filter
+ * options, like filled, different icons"); the shots are in the PR. `funnel` (the default until the owner picks):
+ * the outline funnel, accent with the count; `funnel-fill`: the funnel filled in the accent when picks are set;
+ * `lines`: three lines narrowing (the Board's and the Pull requests page's mark); `funnel-dot`: the outline funnel,
+ * accent with a dot in place of the count (the count stays in its name and tooltip).
+ */
+export type ListFilterIcon = 'funnel' | 'funnel-fill' | 'lines' | 'funnel-dot';
+export const LIST_FILTER_ICON: ListFilterIcon = 'funnel';
+
+/** Lucide's `funnel` and `list-filter` (ISC), drawn with the window's icon stroke; the icon set has neither. */
+const GLYPH_PATHS = {
+  funnel: 'M10 20a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341L21.74 4.67A1 1 0 0 0 21 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14z',
+  lines: 'M3 6h18M7 12h10M10 18h4',
+} as const;
+
+function FilterGlyph({ size }: { size: number }) {
   return (
     <svg className="ib-ic" viewBox="0 0 24 24" style={{ width: size, height: size }} aria-hidden="true" focusable="false">
-      <path d="M10 20a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341L21.74 4.67A1 1 0 0 0 21 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14z" />
+      <path d={LIST_FILTER_ICON === 'lines' ? GLYPH_PATHS.lines : GLYPH_PATHS.funnel} />
     </svg>
   );
 }
@@ -119,48 +140,51 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
   const custom = filter.updated !== null && typeof filter.updated !== 'string' ? filter.updated : null;
   const name = count > 0 ? `Filter, ${count} active` : 'Filter';
 
+  const pulls = listFilterPullsOn();
+  const projectGroup = showProjects && (
+    <Menu.Group>
+      <Menu.GroupLabel className="ib-pm-glabel">Project</Menu.GroupLabel>
+      {projects.map((p) => (
+        <CheckRow
+          key={p.id}
+          label={p.name}
+          on={filter.projects.includes(p.id)}
+          count={countWhere(rows, filter, now, 'projects', (row) => row.project.id === p.id)}
+          onToggle={() => set({ projects: toggled(source.filter.projects, p.id) })}
+          mark={<Icon name="folder" />}
+          data={{ 'data-list-filter-project': p.id }}
+        />
+      ))}
+    </Menu.Group>
+  );
+
   return (
     <>
       <Menu.Root open={open} onOpenChange={setOpen} modal={phone}>
         <Tip content={count > 0 ? `Filter · ${count} active` : 'Filter'}>
-          <Menu.Trigger ref={trigger} className="ib-lflt" aria-label={name} data-set={count > 0 ? '' : undefined} data-list-filter="">
+          <Menu.Trigger ref={trigger} className="ib-lflt" aria-label={name} data-set={count > 0 ? '' : undefined} data-icon={LIST_FILTER_ICON} data-list-filter="">
             <span className="ib-lflt-g">
-              <FunnelGlyph size={phone ? 20 : 16} />
-              {count > 0 && (
-                <span className="ib-lflt-n" aria-hidden="true" data-list-filter-count="">
-                  {count > 9 ? '9+' : count}
-                </span>
-              )}
+              <FilterGlyph size={phone ? 20 : 16} />
+              {count > 0 &&
+                (LIST_FILTER_ICON === 'funnel-dot' ? (
+                  <span className="ib-lflt-dot" aria-hidden="true" data-list-filter-count="" />
+                ) : (
+                  <span className="ib-lflt-n" aria-hidden="true" data-list-filter-count="">
+                    {count > 9 ? '9+' : count}
+                  </span>
+                ))}
             </span>
           </Menu.Trigger>
         </Tip>
         <Menu.Portal container={portal ?? undefined}>
           {phone && <Menu.Backdrop className="ib-pm-scrim" />}
           <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={6} data-phone={phone ? '' : undefined}>
+            {/* The order (the owner, 2026-11-08): what the sidebar cannot do first, Project last (the sidebar has its own). */}
             <Menu.Popup className="ib-pm ib-pc-menu ib-lflt-menu" aria-label="Filter" data-list-filter-menu="">
               <div className="ib-pm-title" aria-hidden="true">
                 Filter
               </div>
-              {showProjects && (
-                <>
-                  <Menu.Group>
-                    <Menu.GroupLabel className="ib-pm-glabel">Project</Menu.GroupLabel>
-                    {projects.map((p) => (
-                      <CheckRow
-                        key={p.id}
-                        label={p.name}
-                        on={filter.projects.includes(p.id)}
-                        count={countWhere(rows, filter, now, 'projects', (row) => row.project.id === p.id)}
-                        onToggle={() => set({ projects: toggled(source.filter.projects, p.id) })}
-                        mark={<Icon name="folder" />}
-                        data={{ 'data-list-filter-project': p.id }}
-                      />
-                    ))}
-                  </Menu.Group>
-                  <Menu.Separator className="ib-pm-sep" />
-                </>
-              )}
-              <Menu.Group>
+              <Menu.Group data-list-filter-group="updated">
                 <Menu.GroupLabel className="ib-pm-glabel">Updated</Menu.GroupLabel>
                 {UPDATED_OPTIONS.map((o) => (
                   <CheckRow
@@ -192,7 +216,7 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
               {showAgents && (
                 <>
                   <Menu.Separator className="ib-pm-sep" />
-                  <Menu.Group>
+                  <Menu.Group data-list-filter-group="agents">
                     <Menu.GroupLabel className="ib-pm-glabel">Agent</Menu.GroupLabel>
                     {agents.map((a) => (
                       <CheckRow
@@ -210,6 +234,31 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
                       />
                     ))}
                   </Menu.Group>
+                </>
+              )}
+              {pulls && (
+                <>
+                  <Menu.Separator className="ib-pm-sep" />
+                  <Menu.Group data-list-filter-group="pulls">
+                    <Menu.GroupLabel className="ib-pm-glabel">Pull request</Menu.GroupLabel>
+                    {PULL_OPTIONS.map((o) => (
+                      <CheckRow
+                        key={o.value}
+                        label={o.label}
+                        on={filter.pulls.includes(o.value)}
+                        count={countWhere(rows, filter, now, 'pulls', (row) => rowPullMatches(row, o.value))}
+                        onToggle={() => set({ pulls: toggled(source.filter.pulls, o.value) as PullPick[] })}
+                        mark={o.value === 'none' ? <Icon name="minus" /> : <RefMarkIcon kind="pr" state={o.value === 'any' ? 'unknown' : o.value} size={16} />}
+                        data={{ 'data-list-filter-pull': o.value }}
+                      />
+                    ))}
+                  </Menu.Group>
+                </>
+              )}
+              {projectGroup && (
+                <>
+                  <Menu.Separator className="ib-pm-sep" />
+                  {projectGroup}
                 </>
               )}
               {count > 0 && (

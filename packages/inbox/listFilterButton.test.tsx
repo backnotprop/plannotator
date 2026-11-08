@@ -6,7 +6,8 @@
  * not taking the accent colour or the count with picks, or keeping them after a clear; a pick that does not narrow the
  * rows, or a group whose band stays drawn with no rows left; Clear filters (the menu's or the empty state's) that
  * leaves a pick, the cookie, or focus nowhere; the empty words drawn in the header; a project's page that offers the
- * Project group or counts its picks; a reload that forgets the picks.
+ * Project group or counts its picks; a reload that forgets the picks; a menu that puts Project anywhere but last (the
+ * sidebar already narrows by project), or a Pull request group that does not narrow by the row's PR.
  *
  * The harness wires the list as App.tsx does (filter the sections, hand the list the rows before the filter).
  *
@@ -23,7 +24,7 @@ const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { ListFilterEmpty, clearedFrom } = (hasDom ? await import('./components/ListFilter') : {}) as typeof import('./components/ListFilter');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
-const { LIST_FILTER_COOKIE, appliedFilter, filterListSections, pickCount, resetListFilterForTests, useListFilter } = await import('./listFilter');
+const { LIST_FILTER_COOKIE, appliedFilter, filterListSections, pickCount, resetListFilterForTests, setListFilterPullsForTests, useListFilter } = await import('./listFilter');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 const stored = new Map<string, string>();
@@ -39,6 +40,7 @@ beforeEach(() => {
 
 afterEach(() => {
   if (hasDom) act(() => root?.unmount());
+  setListFilterPullsForTests(null);
   resetStorageBackend();
   resetListFilterForTests();
   if (!hasDom) return;
@@ -53,7 +55,7 @@ afterEach(() => {
 
 const recent = (hoursAgo: number) => new Date(Date.now() - hoursAgo * 3_600_000).toISOString();
 
-function row(id: string, project: string, hoursAgo: number, agent: string, section: InboxListRow['section']): InboxListRow {
+function row(id: string, project: string, hoursAgo: number, agent: string, section: InboxListRow['section'], pull?: 'open' | 'merged'): InboxListRow {
   return {
     thread_id: id,
     project: { id: `prj_${project}`, name: project },
@@ -69,6 +71,7 @@ function row(id: string, project: string, hoursAgo: number, agent: string, secti
     questions: { open: 0, picked: 0, stopped: false, holds_up: [] },
     sent: null,
     resolved_at: null,
+    pulls: pull ? { count: 1, headline: { key: `github.com/o/r#${id}`, state: pull } } : undefined,
   } as unknown as InboxListRow;
 }
 
@@ -78,8 +81,8 @@ function sections(by: Partial<Record<InboxListGroupId, InboxListRow[]>>): InboxL
 }
 
 const LIST = sections({
-  waiting: [row('w-billing', 'billing', 1, 'claude-code', 'waiting'), row('w-web', 'web', 2, 'codex', 'waiting')],
-  new: [row('n-web', 'web', 3, 'codex', 'new'), row('n-docs-old', 'docs', 24 * 40, 'claude-code', 'new')],
+  waiting: [row('w-billing', 'billing', 1, 'claude-code', 'waiting', 'open'), row('w-web', 'web', 2, 'codex', 'waiting', 'merged')],
+  new: [row('n-web', 'web', 3, 'codex', 'new', 'open'), row('n-docs-old', 'docs', 24 * 40, 'claude-code', 'new')],
 });
 
 /** App.tsx's wiring: the picks from this browser, the sections filtered, the rows before the filter for the menu. */
@@ -250,7 +253,31 @@ describe.skipIf(!hasDom)('the funnel', () => {
     await press(funnel());
     expect($('[data-list-filter-project]')).toBeNull();
     await click($('[data-list-filter-clear]')!);
-    expect(JSON.parse(stored.get(LIST_FILTER_COOKIE)!)).toEqual({ projects: ['prj_billing'], updated: null, agents: [] });
+    expect(JSON.parse(stored.get(LIST_FILTER_COOKIE)!)).toEqual({ projects: ['prj_billing'], updated: null, agents: [], pulls: [] });
+  });
+
+  test('the menu: Updated, Agent, Pull request, then Project last; a Pull request pick narrows by the row\'s PR', async () => {
+    setListFilterPullsForTests(true);
+    const el = render();
+    await press(funnel());
+    const groups = [...document.querySelectorAll('[data-list-filter-menu] [data-list-filter-group], [data-list-filter-menu] [data-list-filter-project]')].map(
+      (n) => n.getAttribute('data-list-filter-group') ?? 'projects',
+    );
+    expect([...new Set(groups)]).toEqual(['updated', 'agents', 'pulls', 'projects']);
+    expect([...document.querySelectorAll('[data-list-filter-pull]')].map((n) => n.textContent?.replace(/\d+$/, ''))).toEqual(['Open', 'Draft', 'Merged', 'Closed', 'Has a PR', 'No PR']);
+    expect($('[data-list-filter-pull="open"] .ib-pmi-n')?.textContent).toBe('2');
+    await click($('[data-list-filter-pull="open"]')!);
+    expect(rowIds(el)).toEqual(['w-billing', 'n-web']);
+    await click($('[data-list-filter-pull="none"]')!);
+    expect(rowIds(el)).toEqual(['w-billing', 'n-web', 'n-docs-old']);
+    expect(badge()).toBe('2');
+  });
+
+  test('with the Pull request group off (until PR linking lands) the menu has no such group', async () => {
+    render();
+    await press(funnel());
+    expect($('[data-list-filter-group="pulls"]')).toBeNull();
+    expect($('[data-list-filter-pull]')).toBeNull();
   });
 
   test('a reload keeps the picks (this browser\'s cookie)', async () => {
