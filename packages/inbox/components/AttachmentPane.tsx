@@ -2507,7 +2507,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               return wordless ? { quote: false, images: false, text: false } : {};
             }}
             renderCardBody={(annotation) => (isWordlessMarkup(annotation) ? <MarkupPicture image={annotation.images![0]!} /> : null)}
-            title={isVideo ? 'Comments' : undefined}
+            title="Comments"
             // A linked page takes no comments: the panel lists the attached page's, and says so.
             titleNote={isVideo ? 'By time' : linkedTop ? `Off on ${linkedTop.name}` : undefined}
             onSelect={(id) => {
