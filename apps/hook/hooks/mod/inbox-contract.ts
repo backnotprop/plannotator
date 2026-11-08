@@ -484,7 +484,7 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
     ].join('\n'),
     reply_to: `A message id: post this as a reply in that message's thread. ${INBOX_REPLY_TO_CHECK}`,
     thread: "A short thread name, one line, to keep separate work apart: the same name in this project is the same open thread, across sessions. Without it, your messages join your session's open thread. Ignored with reply_to, except when you are asked to name a thread the person started: then it names that thread, once.",
-    supersedes: 'Your own questions in this thread that are still open (read_thread state open or picked) and no longer apply: a newer message replaces them, or the reply settled them in words. "<message id>/<key>" for one, "<message id>" for all of that message\'s; send with reply_to into their thread. With one question in this message it replaces them, otherwise they read "No longer applies".',
+    supersedes: 'Your own questions in this thread that are still open (read_thread state open or picked) and no longer apply: a newer message replaces them, or the reply settled them in words. "<message id>/<key>" for one, "<message id>" for all of that message\'s, as a list of strings, e.g. ["msg_…/q-…"]; send with reply_to into their thread. With one question in this message it replaces them, otherwise they read "No longer applies".',
     done: 'Your own open action items (`:::action`) in this thread that you saw done yourself, e.g. the deploy you watch is Ready: "<message id>/<key>" (key a-…); send with reply_to into their thread. The card says you saw it done; nothing is sent to the person.',
     attachments: `Files to show the person beside the message, absolute or relative to project_path: a plan, an HTML mock, code, a video, any file. ${INBOX_ATTACHMENTS_PICTURES_LINE} Link one from the body (\`[the mock](mock.html)\`) to open it beside the thread. Their comments on the files come back in the reply. Folders and .env files are refused.`,
   },
@@ -660,24 +660,260 @@ export function inboxAgentTool(
 }
 
 /**
+ * A string that reads as a piece of JSON rather than a value: it opens with
+ * `{"` or `["`, or holds a quote, a comma or colon, and another quote or
+ * bracket (`", "` or `": [`), which is what is left when a value's quoting
+ * broke and the rest of the call ran into it.
+ */
+const INBOX_JSON_FRAGMENT_RE = /^\s*[{[]\s*"|"\s*[,:]\s*["[{]/
+
+/**
+ * Whether an agent tool call with no action the Inbox has reads as input
+ * that never arrived as fields (an agent's call with broken quoting, which a
+ * host hands over empty, as one leftover field, or with the rest of the call
+ * inside a value), rather than a readable call that names no action or a
+ * wrong one: an action holding quotes, brackets, colons or commas; or no
+ * action and nothing at all, only fields no Inbox tool takes, or a value
+ * that holds JSON.
+ */
+export function inboxInputUnread(input: Record<string, unknown>, tools: readonly InboxToolInfo[]): boolean {
+  const { action, ...rest } = input
+  if (typeof action === 'string') return /["{}[\]:,\n]/.test(action)
+  if (action !== undefined) return false
+  const keys = Object.keys(rest)
+  if (keys.length === 0) return true
+  const known = new Set(tools.flatMap((tool) => Object.keys(propertiesOf(tool))))
+  if (keys.every((key) => !known.has(key))) return true
+  return Object.values(rest).some((value) => typeof value === 'string' && INBOX_JSON_FRAGMENT_RE.test(value))
+}
+
+/** What an agent tool call whose input did not arrive as fields answers: what arrived, the quoting to check, a call that reads, and the actions. */
+export function inboxUnreadInputText(input: unknown, tools: readonly InboxToolInfo[]): string {
+  let got: string
+  if (input === null || input === undefined) got = 'it arrived empty'
+  else if (typeof input !== 'object') got = `it arrived as a ${typeof input}, not fields`
+  else if (Array.isArray(input)) got = 'it arrived as a list, not fields'
+  else {
+    const keys = Object.keys(input)
+    const named = keys.slice(0, 3).map((key) => JSON.stringify(key.slice(0, 40))).join(', ')
+    got = keys.length === 0 ? 'it arrived empty' : `it arrived as ${named}${keys.length > 3 ? ` and ${keys.length - 3} more` : ''}`
+  }
+  return `Invalid plannotator_inbox call: its input could not be read as fields (${got}). Check the JSON quoting and call again: every field is its own key and every string value is in double quotes, e.g. {"action": "send_message", "body": "…", "supersedes": ["msg_…/q-…"]}. action is one of ${tools.map((tool) => tool.name).join(', ')}.`
+}
+
+/**
+ * The key Claude Code hands a tool call under when it could not parse the
+ * model's JSON: `{"__unparsedToolInput": {"raw": "<the model's text>", "len":
+ * <its length>}}`, `raw` cut at 2,048 characters. A session sent the same
+ * call with a bare `"supersedes": msg_…/q-…,` six times this way and was
+ * told only "action must be one of …".
+ */
+export const INBOX_UNPARSED_INPUT_KEY = '__unparsedToolInput'
+
+/** What a host's unparsed wrapper holds: the model's text and its full length (absent: as long as `raw`). */
+function unparsedInputOf(input: unknown): { raw: string; len: number } | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null
+  const wrapper = (input as Record<string, unknown>)[INBOX_UNPARSED_INPUT_KEY]
+  if (!wrapper || typeof wrapper !== 'object') return null
+  const { raw, len } = wrapper as { raw?: unknown; len?: unknown }
+  if (typeof raw !== 'string') return null
+  return { raw, len: typeof len === 'number' && Number.isFinite(len) && len > raw.length ? len : raw.length }
+}
+
+/** An Inbox id an agent writes bare: a message id, optionally with a question or action item key. */
+const INBOX_BARE_ID_RE = /^msg_[0-9A-HJKMNP-TV-Z]{26}(?:\/[aq]-[0-9a-f]{8}(?:-\d{1,3})?)?$/
+
+/**
+ * Where JSON text first fails to read, by a small reader of its own (an
+ * engine's parse error may not give a position): the character offset, what
+ * is wrong there (`bare`: a value with no quotes; `unterminated`: a string
+ * that never ends; `unexpected`: anything else), the field being read, and,
+ * for `bare`, the token. Null when the text reads.
+ */
+function jsonFailure(text: string): { at: number; kind: 'bare' | 'unterminated' | 'unexpected'; field: string | null; token?: string } | null {
+  let i = 0
+  let field: string | null = null
+  const ws = () => {
+    while (i < text.length && /\s/.test(text[i]!)) i++
+  }
+  const fail = (kind: 'bare' | 'unterminated' | 'unexpected', at = i, token?: string) => ({ at, kind, field, ...(token ? { token } : {}) })
+  type Failure = ReturnType<typeof fail>
+  const str = (): Failure | string => {
+    const start = i++
+    let out = ''
+    while (i < text.length) {
+      const c = text[i]!
+      if (c === '"') {
+        i++
+        return out
+      }
+      if (c === '\\') i++
+      else if (c < ' ') return fail('unexpected', i)
+      out += c
+      i++
+    }
+    return fail('unterminated', start)
+  }
+  const value = (): Failure | null => {
+    ws()
+    const c = text[i]
+    if (c === '{') {
+      i++
+      ws()
+      if (text[i] === '}') return (i++, null)
+      for (;;) {
+        ws()
+        if (text[i] !== '"') return fail('unexpected')
+        const key = str()
+        if (typeof key !== 'string') return key
+        ws()
+        if (text[i] !== ':') return fail('unexpected')
+        i++
+        const outer = field
+        field = key
+        const inner = value()
+        if (inner) return inner
+        ws()
+        // A failure right after the value is still about this field (an inner quote with no backslash).
+        if (text[i] !== ',' && text[i] !== '}') return fail('unexpected')
+        field = outer
+        if (text[i++] === '}') return null
+      }
+    }
+    if (c === '[') {
+      i++
+      ws()
+      if (text[i] === ']') return (i++, null)
+      for (;;) {
+        const inner = value()
+        if (inner) return inner
+        ws()
+        if (text[i] === ',') {
+          i++
+          continue
+        }
+        if (text[i] === ']') return (i++, null)
+        return fail('unexpected')
+      }
+    }
+    if (c === '"') {
+      const read = str()
+      return typeof read === 'string' ? null : read
+    }
+    const literal = /^(?:-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)(?![A-Za-z0-9_\/-])/.exec(text.slice(i))
+    if (literal) return (i += literal[0].length, null)
+    const bare = /^[A-Za-z0-9_][A-Za-z0-9_.\/-]*/.exec(text.slice(i))
+    return bare ? fail('bare', i, bare[0]) : fail('unexpected')
+  }
+  const failure = value()
+  if (failure) return failure
+  ws()
+  return i < text.length ? fail('unexpected') : null
+}
+
+/** About 40 characters of `text` around `at`, on one line, with an arrow after the spot. */
+function spotOf(text: string, at: number, end: number): string {
+  const line = (part: string) => part.replace(/\s+/g, ' ')
+  return `${at > 20 ? '…' : ''}${line(text.slice(Math.max(0, at - 20), end))} ←`
+}
+
+/**
+ * A call Claude Code could not parse (INBOX_UNPARSED_INPUT_KEY), read again:
+ * when the text is whole, each bare value that is an Inbox id
+ * (`msg_…/q-…`) or an action name gets its quotes (and a bare id in a
+ * field that takes a list becomes a one-item list), and a text that then
+ * reads is the call, with a line saying what was read. Only those shapes are
+ * mended. Otherwise the refusal names the spot: the character and the text
+ * around it, or, when the host cut the text, the field the cut fell in.
+ */
+function readUnparsedInput(
+  unparsed: { raw: string; len: number },
+  tools: readonly InboxToolInfo[],
+): { input: Record<string, unknown>; note?: string } | { error: string } {
+  const { raw, len } = unparsed
+  const actions = new Set<string>([...tools.map((tool) => tool.name), ...INBOX_TOOL_ACTIONS])
+  const lists = new Set(tools.flatMap((tool) => Object.entries(propertiesOf(tool)).filter(([, schema]) => schema.type === 'array').map(([name]) => name)))
+  if (raw.length >= len) {
+    let text = raw
+    const mended: { field: string | null; value: string }[] = []
+    for (let tries = 0; tries < 20; tries++) {
+      const failure = jsonFailure(text)
+      if (!failure) break
+      const token = failure.kind === 'bare' ? failure.token! : ''
+      const id = INBOX_BARE_ID_RE.test(token)
+      if (!id && !(failure.field === 'action' && actions.has(token))) break
+      const inList = /\[\s*$/.test(text.slice(0, failure.at)) || /,\s*$/.test(text.slice(0, failure.at)) && mended.some((m) => m.field === failure.field)
+      const quoted = JSON.stringify(token)
+      const wrap = id && !inList && failure.field !== null && lists.has(failure.field)
+      text = text.slice(0, failure.at) + (wrap ? `[${quoted}]` : quoted) + text.slice(failure.at + token.length)
+      mended.push({ field: failure.field, value: wrap ? `[${quoted}]` : quoted })
+    }
+    if (!jsonFailure(text)) {
+      const input = JSON.parse(text) as unknown
+      if (input && typeof input === 'object' && !Array.isArray(input)) {
+        if (mended.length === 0) return { input: input as Record<string, unknown> }
+        const fields = [...new Set(mended.map((m) => m.field ?? 'a value'))].join(', ')
+        const read = mended.map((m) => m.value).join(', ')
+        return {
+          input: input as Record<string, unknown>,
+          note: `Your call's JSON had ${mended.length === 1 ? 'an unquoted value' : 'unquoted values'} (${fields}); ${mended.length === 1 ? 'it was' : 'they were'} read as ${read}. Quote every string value.`,
+        }
+      }
+    }
+  }
+  const failure = jsonFailure(raw)
+  const prefix = 'Invalid plannotator_inbox call: '
+  if (raw.length < len && (!failure || failure.at >= raw.length - 1 || failure.kind === 'unterminated')) {
+    const where = failure?.field ? `inside ${failure.field}` : 'past what arrived'
+    const what = failure?.field ?? 'the long text'
+    return {
+      error: `${prefix}this call was ${len} characters and only the first ${raw.length} arrived readable; the JSON breaks ${where}. Check that quotes and backslashes inside ${what} are escaped, or send a shorter ${what} and attach the rest as a file.`,
+    }
+  }
+  if (!failure) return { error: inboxUnreadInputText({ [INBOX_UNPARSED_INPUT_KEY]: null }, tools) }
+  if (failure.kind === 'bare') {
+    return { error: `${prefix}this call's JSON couldn't be read at character ${failure.at}: ${spotOf(raw, failure.at, failure.at + Math.min(failure.token!.length, 20))} this value needs double quotes. Fix that spot and call again.` }
+  }
+  if (failure.kind === 'unterminated') {
+    return { error: `${prefix}this call's JSON couldn't be read at character ${failure.at}: ${spotOf(raw, failure.at, failure.at + 20)} this string never ends. Check that quotes and backslashes inside ${failure.field ?? 'it'} are escaped, then call again.` }
+  }
+  // A string that ended before the text did (`"He said "ship it""`): an inner quote with no backslash.
+  const endedEarly = /"\s*$/.test(raw.slice(0, failure.at)) && /^[^\s,:}\]]/.test(raw.slice(failure.at))
+  const why = endedEarly ? `the string before this spot ended early: a double quote inside ${failure.field ?? 'a string'} needs a backslash (\\").` : 'here.'
+  return { error: `${prefix}this call's JSON couldn't be read at character ${failure.at}: ${spotOf(raw, failure.at, failure.at + 1)} ${why} Fix that spot and call again.` }
+}
+
+/**
  * The Inbox tool call an agent tool call stands for: the action's own fields
  * (any other field is refused, naming the action's fields) plus the filled
  * arguments that tool takes. An agent's own `project_path` (shape-checked
  * here) comes back as `projectPath`, with the working folder still in
  * `arguments`: the connection resolves it against that folder, refuses a
  * path that is not an existing folder, and puts the result in
- * `arguments.project_path` before calling the Inbox.
+ * `arguments.project_path` before calling the Inbox. A call the host could
+ * not parse (INBOX_UNPARSED_INPUT_KEY) is read again first; when a bare id
+ * or action name was mended, `note` says so and the connection puts it
+ * after the result (inboxResultWithNote).
  */
 export function inboxToolCall(
   input: unknown,
   tools: readonly InboxToolInfo[],
   filled: InboxFilledArguments,
-): { name: string; arguments: Record<string, unknown>; projectPath?: string } | { error: string } {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return { error: 'Invalid plannotator_inbox call: expected an object with an action.' }
+): { name: string; arguments: Record<string, unknown>; projectPath?: string; note?: string } | { error: string } {
+  const unparsed = unparsedInputOf(input)
+  if (unparsed) {
+    const read = readUnparsedInput(unparsed, tools)
+    if ('error' in read) return read
+    const call = inboxToolCall(read.input, tools, filled)
+    if (!read.note) return call
+    return 'error' in call ? { error: `${call.error} (${read.note})` } : { ...call, note: read.note }
+  }
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return { error: inboxUnreadInputText(input, tools) }
   const { action, ...rest } = input as Record<string, unknown>
   if (action === INBOX_REMOVED_ACTION) return { error: INBOX_REMOVED_ACTION_TEXT }
   const tool = tools.find((candidate) => candidate.name === action)
   if (!tool) {
+    if (inboxInputUnread(input as Record<string, unknown>, tools)) return { error: inboxUnreadInputText(input, tools) }
     return {
       error: `Invalid plannotator_inbox call: action must be one of ${tools.map((candidate) => candidate.name).join(', ')}${typeof action === 'string' && (INBOX_TOOL_ACTIONS as readonly string[]).includes(action) ? ` (this Plannotator Inbox has no ${action}; update Plannotator for it)` : ''}.`,
     }
@@ -701,6 +937,11 @@ export function inboxToolCall(
   }
   for (const name of INBOX_FILLED_ARGUMENTS) if (name in own) args[name] = filled[name]
   return projectPath === undefined ? { name: tool.name, arguments: args } : { name: tool.name, arguments: args, projectPath }
+}
+
+/** A tool result's text with a call's `note` (inboxToolCall) after it, on a line of its own; unchanged without one. */
+export function inboxResultWithNote(text: string, note: string | undefined): string {
+  return note ? `${text}\n\n${note}` : text
 }
 
 /**
