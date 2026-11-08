@@ -9,7 +9,7 @@
  * - Sharp's quieter zone fills cost a word: every word colour must read on a Sharp zone at least as well as on the
  *   palette's own zone fill (the frame's `--*-soft`), or at 4.5:1.
  *
- * No DOM: the board's colours are worked out from `SHAPE_FRAME_CSS` and `SHAPE_SHARP_CSS` as written (their
+ * No DOM: the board's colours are worked out from `SHAPE_FRAME_CSS` as written (its `.board` rule and the Sharp rule; their
  * `color-mix()` and `var()` chains), over each palette's tokens read from `packages/ui/themes` as text, so a change
  * to either stylesheet or a new palette is swept too.
  */
@@ -17,7 +17,7 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { compositeOver, contrastRatio, mixOklab, parseCssColor, quantize, type RgbColor } from '../../utils/cssColor';
-import { SHAPE_FRAME_CSS, SHAPE_SHARP_CSS } from './ShapeDrawn';
+import { SHAPE_FRAME_CSS } from './ShapeDrawn';
 import {
   SHAPE_SHARP_COLOR_NAMES,
   SHAPE_SHARP_EDGE_MIN,
@@ -47,7 +47,7 @@ function declarations(css: string, selector: string): Record<string, string> {
 
 /** The frame's own colours (the palette's zone fills), and Sharp's over them. */
 const FRAME = declarations(SHAPE_FRAME_CSS, '.board');
-const SHARP = { ...FRAME, ...declarations(SHAPE_SHARP_CSS, '.board[data-shp-style="sharp"]') };
+const SHARP = { ...FRAME, ...declarations(SHAPE_FRAME_CSS, '.board[data-shp-style="sharp"]') };
 
 /** Split on the commas at the top level of `s`. */
 function args(s: string): string[] {

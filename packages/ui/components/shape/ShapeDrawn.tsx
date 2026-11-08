@@ -54,6 +54,17 @@ function holdSharpLines(board: HTMLElement): () => void {
 }
 
 /**
+ * What `holdSharpLines` reads, as one string: the board's colour variables as computed (their `var()` chains already
+ * substituted), without the line variables the hold itself sets. One style read, no probes, so a change on `<html>`
+ * that moves no colour (a viewport height, a class for something else) costs almost nothing.
+ */
+const SHARP_INPUTS = SHAPE_SHARP_COLOR_NAMES.filter((name) => !name.startsWith('shp-')).map((name) => `--${name}`);
+function sharpInputs(board: HTMLElement): string {
+  const cs = getComputedStyle(board);
+  return SHARP_INPUTS.map((name) => cs.getPropertyValue(name).trim()).join('|');
+}
+
+/**
  * A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first.
  * `tile`: each also carries `data-shp-pic`, for `darkContrast`'s picture tiles.
  */
@@ -90,7 +101,7 @@ export const NO_MARKS: MarkState = { fresh: new Set(), erasing: new Set(), noted
 const SHARP = '.board[data-shp-style="sharp"]';
 const SHARP_ZONE = ':not(.line, .ink, .grey, .acc, .alert, .acc-fill)';
 const softIs = (zone: string) => `:is([style*="--${zone}-soft"], [fill*="--${zone}-soft"])`;
-export const SHAPE_SHARP_CSS = `
+const SHAPE_SHARP_CSS = `
 /* Sharp: thin lines, small corners, quiet zones with a thin edge, filled heads. */
 ${SHARP} {
   --shp-r: 3px;
@@ -624,16 +635,21 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     }
   }, [marks, stale, freshTag, staleTag, contentKey]);
 
-  // Sharp's line colours, after every other pass over the board's colours; again when the page's theme changes.
+  // Sharp's line colours, after every other pass over the board's colours (darkContrast's included, so a flip of it
+  // holds them again); again when the page's theme or palette changes, and only then.
   useLayoutEffect(() => {
     const board = rootRef.current?.querySelector<HTMLElement>('.board');
     if (!board) return;
     let undo = holdSharpLines(board);
     if (typeof MutationObserver === 'undefined') return undo;
+    let key = sharpInputs(board);
     let frame = 0;
     const again = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
+        const now = sharpInputs(board);
+        if (now === key) return;
+        key = now;
         undo();
         undo = holdSharpLines(board);
       });
@@ -648,7 +664,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       scheme?.removeEventListener?.('change', again);
       undo();
     };
-  }, [contentKey]);
+  }, [darkContrast, contentKey]);
 
   // Bubbles: lit with their list row, flashed from it.
   useEffect(() => {

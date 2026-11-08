@@ -542,6 +542,39 @@ describe.skipIf(!hasDom)('Sharp', () => {
     expect(l.wire.width).toBe('1px');
   });
 
+  // The line hold at run time (sharpContrast.ts through ShapeDrawn): a palette whose box border falls short gets the
+  // fix on `.board`, and only that one; a change on <html> that moves no colour does not redo it, and one that moves a
+  // colour does. What regresses: the hold never reaching the board (a renamed token, an early return), or every
+  // <html> write (a viewport height on a phone) re-reading every board's colours.
+  test('the line colours that fall short are fixed on the board, and held again only when a colour moves', async () => {
+    const zones = ['blue', 'amber', 'green', 'plum', 'alert'].map((z) => `--${z}: rgb(30 80 160); --${z}-soft: rgb(240 244 250); --shp-zone-${z}: rgb(30 80 160);`).join(' ');
+    // `.board.board`: above Sharp's own mixes (color-mix, which happy-dom does not paint). The paper comes from <html>.
+    const css = `.board.board { --background: rgb(255 255 255); --paper: var(--t-paper, rgb(255 255 255)); --surface: rgb(255 255 255); --ink: rgb(20 20 20); --shp-hair: rgb(235 235 235); --shp-wire: rgb(60 60 60); ${zones} }`;
+    const html = document.documentElement;
+    const frame = () => act(() => new Promise((r) => setTimeout(r, 40)));
+    try {
+      const { board } = await draw({ html: STORED, css });
+      const hair = board.style.getPropertyValue('--shp-hair');
+      expect(hair).toMatch(/^#[0-9a-f]{6}$/);
+      expect(hair).not.toBe('#ebebeb');
+      // The rest hold as drawn: nothing set for them.
+      expect(board.style.getPropertyValue('--shp-wire')).toBe('');
+      expect(board.style.getPropertyValue('--shp-zone-blue')).toBe('');
+      // A write on <html> that moves no colour: the hold is not redone (a mark left on the board stays).
+      board.style.setProperty('--shp-hair', 'kept');
+      html.classList.add('shp-test-unrelated');
+      await frame();
+      expect(board.style.getPropertyValue('--shp-hair')).toBe('kept');
+      // The paper moves: the hold runs again and puts its own colour back.
+      html.style.setProperty('--t-paper', 'rgb(250 250 250)');
+      await frame();
+      expect(board.style.getPropertyValue('--shp-hair')).toMatch(/^#[0-9a-f]{6}$/);
+    } finally {
+      html.classList.remove('shp-test-unrelated');
+      html.style.removeProperty('--t-paper');
+    }
+  });
+
   // Follow an example over a kit arrow (followPainter): the light is as thin as the line, a touch heavier, and the
   // filled head lights filled. What regresses: a 2.2-unit light over a 1 px line, an outline triangle over a filled head.
   test("Follow an example: the light matches the line, and the filled head lights filled", async () => {
