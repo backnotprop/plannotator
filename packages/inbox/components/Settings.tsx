@@ -19,6 +19,7 @@ import { DevicesSection, devicesNeedAttention, usePhones } from './Devices';
 import { MachinesSection } from './Machines';
 import { SidebarTrigger } from '../shell/sidebar';
 import { useInboxPalettes, useInboxTheme } from '../theme';
+import { openSidebarCustomizer } from '../sidebarLayout';
 import { PaletteRow } from './Palettes';
 import { DEFAULT_COLOR_THEME } from '@plannotator/ui/utils/themeRegistry';
 import { chooseTextSize, useInboxTextSize } from '../textSize';
@@ -384,6 +385,27 @@ function GeneralSection({
                   </label>
                 ))}
               </span>
+            </span>
+          </div>
+          {/* The sidebar's layout (approval "inbox-sidebar-customize"): the keyboard's way to the Customize panel, and the phone's. */}
+          <div className="ib-prow" data-settings-sidebar="">
+            <span className="ib-txt">
+              <span className="ib-l" id="ib-sidebar-label">
+                Sidebar
+              </span>
+              <span className="ib-desc">What shows, and where. Also from a right-click on the sidebar.</span>
+            </span>
+            <span className="ib-ctl">
+              <button
+                type="button"
+                className="ib-btn"
+                aria-describedby="ib-sidebar-label"
+                aria-haspopup="dialog"
+                onClick={(event) => openSidebarCustomizer(event.currentTarget)}
+                data-settings-customize-sidebar=""
+              >
+                Customize…
+              </button>
             </span>
           </div>
           <PaletteRow />

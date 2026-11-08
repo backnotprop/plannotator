@@ -1,4 +1,8 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { inboxSidebarShown, type InboxSidebarItem } from '@plannotator/core/inbox-sidebar';
+import { useSidebarLayout } from '../sidebarLayout';
+import { drawnSidebarItems } from '../sidebarItems';
+import { SidebarMenu, useSidebarMenu } from './SidebarMenu';
 import type { InboxHealth, InboxListRow, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { inboxRowSnoozed } from '@plannotator/core/inbox-snooze';
 import { restartAgentsDescription, restartAgentsLabel, restartAgentsOf } from '../restartAgents';
@@ -331,54 +335,81 @@ export function Sidebar(props: SidebarProps) {
     setOpenMobile(false);
     go();
   };
-  return (
-    <aside ref={asideRef} className="ib-side" aria-label="Inbox navigation">
-      <div className="ib-brand">
-        <TaterMark />
-        <b>Plannotator</b>
-        <span>Inbox</span>
-      </div>
-      {props.onSearch && (
-        <div className="ib-sp-entryrow">
-        <button
-          type="button"
-          className="ib-sp-entry"
-          data-open-search=""
-          aria-haspopup="dialog"
-          aria-keyshortcuts={searchKeys}
-          onClick={(event) => {
-            const opener = event.currentTarget;
-            // On a phone the sheet closes first; the search sheet takes the screen.
-            setOpenMobile(false);
-            props.onSearch?.(opener);
-          }}
-        >
-          <Icon name="search" />
-          Search
-          {/* ⌘K / Ctrl K (search/searchShortcut.ts); the button's aria-keyshortcuts names it, and `/`, for a screen reader. */}
-          <ShortcutHint scope={inboxSearchShortcuts} action="openSearch" className="ib-kbd ib-sp-hint" />
-        </button>
-        {props.onCompose && (
-          <Tip content={withShortcut('New message', { scope: inboxAppShortcuts, action: 'compose' })}>
-            <button
-              type="button"
-              className="ib-compose-btn"
-              data-open-compose=""
-              aria-label="New message"
-              aria-keyshortcuts={composeKeys}
-              aria-haspopup="dialog"
-              onClick={(event) => {
-                const opener = event.currentTarget;
-                setOpenMobile(false);
-                props.onCompose?.(opener);
-              }}
-            >
-              <Icon name="compose" />
-            </button>
-          </Tip>
-        )}
-        </div>
-      )}
+  // The person's layout (approval "inbox-sidebar-customize"; core inbox-sidebar.ts): which items show, their order,
+  // top or bottom. The onboarding tour's sidebar always draws the default.
+  const layout = useSidebarLayout(props.rememberSections !== false);
+  const drawn = drawnSidebarItems({
+    board: Boolean(props.onBoard),
+    reviews: Boolean(props.onPulls),
+    shape: Boolean(props.onShape),
+    // The Usage row decides itself whether it shows (components/Usage.tsx); the menu offers it only where `cswap` is.
+    usage: Boolean(props.onUsage),
+    search: Boolean(props.onSearch),
+    compose: Boolean(props.onCompose),
+    feedback: Boolean(props.onFeedback),
+    drafts: Boolean(props.onDrafts),
+    shortcuts: Boolean(props.onShortcuts),
+    copyPrompt: props.connectPrompt !== false,
+    phone,
+  });
+  const shows = (item: InboxSidebarItem) => drawn.has(item) && inboxSidebarShown(layout, item);
+  const menu = useSidebarMenu(asideRef, props.rememberSections !== false);
+  const searchButton = (
+    <button
+      type="button"
+      className="ib-sp-entry"
+      data-open-search=""
+      aria-haspopup="dialog"
+      aria-keyshortcuts={searchKeys}
+      onClick={(event) => {
+        const opener = event.currentTarget;
+        // On a phone the sheet closes first; the search sheet takes the screen.
+        setOpenMobile(false);
+        props.onSearch?.(opener);
+      }}
+    >
+      <Icon name="search" />
+      Search
+      {/* ⌘K / Ctrl K (search/searchShortcut.ts); the button's aria-keyshortcuts names it, and `/`, for a screen reader. */}
+      <ShortcutHint scope={inboxSearchShortcuts} action="openSearch" className="ib-kbd ib-sp-hint" />
+    </button>
+  );
+  const compose = (event: MouseEvent<HTMLButtonElement>) => {
+    const opener = event.currentTarget;
+    setOpenMobile(false);
+    props.onCompose?.(opener);
+  };
+  const composeButton = (
+    <Tip content={withShortcut('New message', { scope: inboxAppShortcuts, action: 'compose' })}>
+      <button type="button" className="ib-compose-btn" data-open-compose="" aria-label="New message" aria-keyshortcuts={composeKeys} aria-haspopup="dialog" onClick={compose}>
+        <Icon name="compose" />
+      </button>
+    </Tip>
+  );
+  const keysShown = shows('shortcuts');
+  const themeShown = shows('theme');
+  /** One item's row. `list` is its stack as drawn: Search and New message share a row while side by side, as by default. */
+  const itemRow = (item: InboxSidebarItem, list: readonly InboxSidebarItem[], at: number): ReactNode => {
+    switch (item) {
+      case 'search':
+        return (
+          <div className="ib-sp-entryrow">
+            {searchButton}
+            {list[at + 1] === 'new-message' && composeButton}
+          </div>
+        );
+      case 'new-message':
+        if (list[at - 1] === 'search') return null;
+        // Apart from Search: a row of its own.
+        return (
+          <button type="button" className="ib-nav" data-open-compose="" aria-haspopup="dialog" aria-keyshortcuts={composeKeys} onClick={compose}>
+            <Icon name="compose" />
+            New message
+          </button>
+        );
+      case 'inbox':
+        return (
+          <>
       {/* On the list it shows, Inbox refreshes it: ↻ on hover with "Refresh", one turn on a click. */}
       <Tip content="Refresh" when={() => inboxRefreshes}>
         <button
@@ -403,23 +434,27 @@ export function Sidebar(props: SidebarProps) {
       <span id={refreshHintId} hidden>
         Refresh the list
       </span>
-      {props.onBoard && (
+          </>
+        );
+      case 'board':
+        return (
         <button
           type="button"
           className={`ib-nav${props.page === 'board' ? ' ib-on' : ''}`}
-          onClick={pick(props.onBoard)}
+          onClick={pick(() => props.onBoard?.())}
           aria-current={props.page === 'board' ? 'page' : undefined}
           data-board-nav=""
         >
           <Icon name="board" />
           Board
         </button>
-      )}
-      {props.onShape && (
+        );
+      case 'shape':
+        return (
         <button
           type="button"
           className={`ib-nav${props.page === 'shapes' ? ' ib-on' : ''}`}
-          onClick={pick(props.onShape)}
+          onClick={pick(() => props.onShape?.())}
           aria-current={props.page === 'shapes' ? 'page' : undefined}
           data-shape-nav=""
         >
@@ -433,12 +468,13 @@ export function Sidebar(props: SidebarProps) {
             </span>
           )}
         </button>
-      )}
-      {props.onPulls && (
+        );
+      case 'reviews':
+        return (
         <button
           type="button"
           className={`ib-nav${props.page === 'reviews' ? ' ib-on' : ''}`}
-          onClick={pick(props.onPulls)}
+          onClick={pick(() => props.onPulls?.())}
           aria-current={props.page === 'reviews' ? 'page' : undefined}
           data-pulls-nav=""
         >
@@ -450,12 +486,15 @@ export function Sidebar(props: SidebarProps) {
             </span>
           )}
         </button>
-      )}
-      {(props.draftsCount ?? 0) > 0 && props.onDrafts && (
+        );
+      case 'drafts':
+        // Only while there are drafts not sent.
+        if ((props.draftsCount ?? 0) <= 0) return null;
+        return (
         <button
           type="button"
           className={`ib-nav${props.page === 'drafts' ? ' ib-on' : ''}`}
-          onClick={pick(props.onDrafts)}
+          onClick={pick(() => props.onDrafts?.())}
           aria-current={props.page === 'drafts' ? 'page' : undefined}
           data-drafts-nav=""
         >
@@ -463,7 +502,65 @@ export function Sidebar(props: SidebarProps) {
           Drafts
           <span className="ib-n">{formatCount(props.draftsCount ?? 0)}</span>
         </button>
+        );
+      case 'copy-prompt':
+        return <CopyConnectPrompt mcpCommand={props.mcpCommand ?? null} />;
+      case 'feedback':
+        return (
+          <button type="button" className="ib-nav" aria-haspopup="dialog" data-feedback-nav="" onClick={pick(() => props.onFeedback?.())}>
+            <Icon name="comment" />
+            Feedback
+          </button>
+        );
+      case 'usage':
+        return <UsageRow installed={props.usageInstalled ?? false} open={props.usageOpen ?? false} onOpen={(row) => pick(() => props.onUsage?.(row))()} />;
+      case 'settings':
+        // Two controls side by side, never one inside the other: the row opens Settings, the icons open the shortcut map and flip light and dark.
+        return (
+          <div className="ib-setrow" data-keys={keysShown ? '' : undefined} data-theme={themeShown ? '' : undefined}>
+            <button
+              type="button"
+              className={`ib-nav${props.page === 'settings' ? ' ib-on' : ''}${keysShown && themeShown ? ' ib-has-keys' : ''}`}
+              onClick={pick(props.onSettings)}
+              aria-current={props.page === 'settings' ? 'page' : undefined}
+            >
+              <Icon name="settings" />
+              Settings
+            </button>
+            {keysShown && props.onShortcuts && <KeysButton onPress={props.onShortcuts} />}
+            {themeShown && <ThemeToggle />}
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+  /** A stack's rows, each in a slot that names its item (the right-click menu's aim). */
+  const stack = (list: readonly InboxSidebarItem[]) => {
+    const drawnList = list.filter(shows);
+    return drawnList.map((item, at) => {
+      const row = itemRow(item, drawnList, at);
+      return row === null ? null : (
+        <div key={item} className="ib-side-item" data-sidebar-item={item}>
+          {row}
+        </div>
+      );
+    });
+  };
+  const bottom = layout.bottom.filter(shows);
+  // The notices (Update, What's new, Can't check, Reload agents) are not items: they head the bottom area, under the
+  // Copy prompt pill when it leads it, as before.
+  const noticesAfter = bottom[0] === 'copy-prompt' ? 1 : 0;
+  return (
+    <aside ref={asideRef} className="ib-side" aria-label="Inbox navigation" onContextMenu={menu.onContextMenu} onTouchStart={menu.onTouchStart}>
+      {shows('logo') && (
+      <div className="ib-brand" data-sidebar-item="logo">
+        <TaterMark />
+        <b>Plannotator</b>
+        <span>Inbox</span>
+      </div>
       )}
+      {stack(layout.top)}
       <div className="ib-sidescroll" ref={projsRef} data-more={moreProjects ? '' : undefined}>
         {pins.length > 0 && (
           <>
@@ -659,8 +756,7 @@ export function Sidebar(props: SidebarProps) {
         </div>
       </div>
       <div className="ib-side-foot" data-held={props.footHeld ? '' : undefined}>
-        {/* Copy prompt first, then the Update button or "What's new in X", then Feedback and the Settings row. */}
-        {props.connectPrompt !== false && !phone && <CopyConnectPrompt mcpCommand={props.mcpCommand ?? null} />}
+        {stack(bottom.slice(0, noticesAfter))}
         <UpdateButton
           update={props.update}
           restarting={props.restarting}
@@ -672,28 +768,9 @@ export function Sidebar(props: SidebarProps) {
           <CheckFailingRow failing={props.checkFailing} onOpen={pick(props.onCheckFailing)} />
         )}
         {restartAgents.total > 0 && props.onRestartSessions && <RestartSessionsRow agents={restartAgents} onOpen={pick(props.onRestartSessions)} />}
-        {props.onFeedback && (
-          <button type="button" className="ib-nav" aria-haspopup="dialog" data-feedback-nav="" onClick={pick(props.onFeedback)}>
-            <Icon name="comment" />
-            Feedback
-          </button>
-        )}
-        {props.onUsage && <UsageRow installed={props.usageInstalled ?? false} open={props.usageOpen ?? false} onOpen={(row) => pick(() => props.onUsage?.(row))()} />}
-        {/* Two controls side by side, never one inside the other: the row opens Settings, the icon flips light and dark. */}
-        <div className="ib-setrow">
-          <button
-            type="button"
-            className={`ib-nav${props.page === 'settings' ? ' ib-on' : ''}${props.onShortcuts && !phone ? ' ib-has-keys' : ''}`}
-            onClick={pick(props.onSettings)}
-            aria-current={props.page === 'settings' ? 'page' : undefined}
-          >
-            <Icon name="settings" />
-            Settings
-          </button>
-          {props.onShortcuts && !phone && <KeysButton onPress={props.onShortcuts} />}
-          <ThemeToggle />
-        </div>
+        {stack(bottom.slice(noticesAfter))}
       </div>
+      <SidebarMenu menu={menu} layout={layout} drawn={props.usageInstalled ? drawn : new Set([...drawn].filter((item) => item !== 'usage'))} />
     </aside>
   );
 }
