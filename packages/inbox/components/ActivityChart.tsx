@@ -377,7 +377,8 @@ export function ActivityChart({ projects, names, project: startProject, phone, r
   const summary = read && rows.length > 0 ? `${plural(rows.length, 'thread')}, ${plural(total, 'message')} ${rangeWords(read.range)}` : '';
   const inkStyle = ink ? (activityInkStyle(ink) as CSSProperties) : undefined;
 
-  // An empty answer names the way out it has: a longer range (the full screen offers it) or another project.
+  // An empty answer names the way out it has: a longer range (the full screen offers it) or another project, or
+  // coming back later (the owner's words, 2026-11-08).
   const longest = phone ? 7 : ACTIVITY_RANGES[ACTIVITY_RANGES.length - 1]!;
   const ways = [read && read.range < longest ? 'a longer range' : null, projects.length > 1 || shownProject ? 'another project' : null].filter(Boolean).join(' or ');
   const emptyNote = (inFull: boolean) =>
@@ -385,7 +386,7 @@ export function ActivityChart({ projects, names, project: startProject, phone, r
     rows.length === 0 && (
       <p className="ib-activity-note" data-activity-empty="">
         No messages {shownProject ? `in ${where} ` : ''}
-        {rangeWords(read.range)}.{ways && (inFull ? ` Try ${ways}.` : ` Expand to try ${ways}.`)}
+        {rangeWords(read.range)}.{ways && (inFull ? ` Try ${ways}.` : ` Expand to try ${ways}.`)}{ways ? ' Or come back later once you’ve gotten some work done.' : ' Come back later once you’ve gotten some work done.'}
       </p>
     );
   const empty = emptyNote(false);

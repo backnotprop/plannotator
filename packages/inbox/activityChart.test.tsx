@@ -231,7 +231,8 @@ test.skipIf(!hasDom)('an empty week still opens the full screen, where a wider r
   await act(async () => expandButton.click());
   const dlg = dialog(host)!;
   // The note names the way out the full screen has.
-  expect(dlg.querySelector('[data-activity-empty]')?.textContent).toContain('a longer range');
+  expect(dlg.querySelector('[data-activity-empty]')?.textContent).toBe('No messages in billing this week. Try a longer range or another project. Or come back later once you’ve gotten some work done.');
+  expect(host.querySelector('.ib-activity-box [data-activity-empty]')?.textContent).toBe('No messages in billing this week. Expand to try a longer range or another project. Or come back later once you’ve gotten some work done.');
   await act(async () => dlg.querySelector<HTMLInputElement>('input[name="ib-activity-range"][value="30"]')!.click());
   await until(dlg, '.ib-activity-plot[data-size="full"] .ib-activity-svg');
   expect(spanDays(lastAsked())).toBe(30);
