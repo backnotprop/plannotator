@@ -327,6 +327,10 @@ export interface HtmlViewerProps {
   /** Opt-in host capability: the glyph on the `selectionActions` button.
    *  Absent → the package's own wand. */
   selectionActionsIcon?: ReactNode;
+  /** Opt-in host capability: the selection toolbar's "Side" button, which
+   *  hands the host the selected text (AnnotationToolbar `onSide`).
+   *  Absent → no button: unchanged. */
+  onSide?: (text: string) => void;
   /** Opt-in host capability, forwarded to BOTH comment composers this viewer
    *  mounts (the pinpoint/selection composer and the global one): the `@`
    *  mention source for the composer's picker. The picked ids ride onto the
@@ -526,6 +530,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       maxAdditionalTargets,
       selectionActions,
       selectionActionsIcon,
+      onSide,
       mentionSource,
       scrollBehavior,
       scrollClear,
@@ -1639,6 +1644,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               commentOnly
               selectionActions={selectionActions}
               selectionActionsIcon={selectionActionsIcon}
+              onSide={onSide}
               onQuickLabel={(label) => {
                 if (label.id === THUMBS_UP_LABEL.id) hook.handleQuickLabel(label);
               }}

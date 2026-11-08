@@ -205,6 +205,7 @@ packages/inbox/archived.test.tsx
 packages/inbox/openStaysPut.test.tsx
 packages/inbox/clickToRefresh.test.tsx
 packages/inbox/ask/askWindow.test.tsx
+packages/inbox/ask/side.test.tsx
 packages/inbox/pullToRefresh.test.tsx
 packages/inbox/threadReadRetry.test.tsx
 packages/inbox/openThreadReadsWiring.test.tsx
@@ -478,6 +479,7 @@ packages/ui/utils/diffFonts.test.ts
 packages/ui/components/Settings.agentTool.test.tsx
 packages/ui/components/settings/QuickLabelsTab.test.tsx
 packages/ui/components/AnnotationToolbar.touchTargets.test.tsx
+packages/ui/components/AnnotationToolbar.side.test.tsx
 packages/ui/components/AnnotationToolbar.touchPlacement.test.tsx
 packages/ui/components/touchAnchorWiring.test.tsx
 packages/ui/components/AnnotationToolbar.modeShortcutGuard.test.tsx

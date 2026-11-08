@@ -21,3 +21,13 @@ export function saveAskWords(threadId: string, words: string): void {
     // Storage full or off: the words stay in the box for as long as it is on screen.
   }
 }
+
+/**
+ * The words Side puts in the box for a selection: quoted, each line behind `> `, then an empty line where the
+ * question goes. Blank lines inside stay in the quote.
+ */
+export function sideQuote(selected: string): string {
+  const text = selected.replace(/\r\n?/g, '\n').trim();
+  if (!text) return '';
+  return `${text.split('\n').map((line) => (line.trim() ? `> ${line}` : '>')).join('\n')}\n\n`;
+}

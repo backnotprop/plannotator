@@ -272,8 +272,11 @@ export interface AttachmentPaneProps {
    * new-tab icon through the tailnet or on a phone (`tab`). Absent: neither.
    */
   openIn?: OpenInSurface;
-  /** Ask AI's icon, for the full-screen bar (the thread's top bar is covered there). */
-  ask?: React.ReactNode;
+  /**
+   * Ask AI's Side in the file's selection bar (ask/useInboxAsk.tsx `side`): the selected words go to the thread's chat.
+   * Absent while this thread cannot ask: no Side. The full-screen bar has no Ask icon (approval "inbox-ask-ai-flow").
+   */
+  onSide?: (words: string) => void;
   /** The window's toast: a drawing added to the reply says so, with Undo. */
   onToast?: Notice;
 }
@@ -2405,7 +2408,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               versionAction={versionAction}
             />
           }
-          ask={props.ask}
           moreOpen={moreOpen}
           leave={props.fullLocked ? { kind: 'back', onLeave: close } : { kind: 'exit', onLeave: () => toggleFull() }}
           // × does what Escape's last step does, never a pick (Side by side is the pick): back where full screen
@@ -2555,6 +2557,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               // The floating comments panel covers the page's right side: a comment picked there scrolls its mark clear of it.
               scrollClear={panelOverFrame}
               mentionSource={props.mentionSource}
+              onSide={props.onSide}
               mode="selection"
               inputMethod="pinpoint"
               annotateModeActive={armed}
@@ -2834,6 +2837,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 copyLabel="Copy file"
                 allowImages={false}
                 quickLabels={false}
+                onSide={props.onSide}
                 refRepo={refRepo}
                 readOnly={props.readOnly}
                 onRestoreReport={(report) => setUnanchored(new Set(report.unanchored))}

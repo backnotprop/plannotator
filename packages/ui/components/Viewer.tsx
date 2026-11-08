@@ -130,6 +130,12 @@ export interface ViewerProps {
    *  both toolbars. Absent → the package's own wand. */
   selectionActionsIcon?: React.ReactNode;
   /**
+   * Opt-in host capability, passed to the text-selection toolbar only: its
+   * "Side" button, which hands the host the selected text (AnnotationToolbar
+   * `onSide`). Absent → no button: unchanged.
+   */
+  onSide?: (text: string) => void;
+  /**
    * Whether the package's quick labels are offered on the selection toolbars
    * (default true). `false` hides the Zap picker and the Alt+digit label
    * shortcuts; the 👍 button is unaffected.
@@ -833,6 +839,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   taterMode,
   selectionActions,
   selectionActionsIcon,
+  onSide,
   quickLabels,
   mentionSource,
   globalAttachments = [],
@@ -2178,6 +2185,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               onQuickLabel={handleQuickLabel}
               selectionActions={selectionActions}
               selectionActionsIcon={selectionActionsIcon}
+              onSide={onSide}
               quickLabels={quickLabels}
               copyText={toolbarState.selectionText}
               getRichCopy={getRichCopyEnabled() ? toolbarState.getRichCopy : undefined}

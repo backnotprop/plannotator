@@ -472,6 +472,8 @@ export function MessageBody({
     suggest?: (selectedText: string) => string | undefined;
     /** The comment on a diagram part the reply box's list just pointed at: the diagram shows it selected (its part panned into view, its ring pulsing). */
     revealed?: string | null;
+    /** Ask AI's Side in the selection bar (ask/useInboxAsk.tsx `side`): the selected words go to the thread's chat. Absent: no Side. */
+    onSide?: (selected: string) => void;
   };
   /**
    * The person's own sent reply (sentReply.ts): the answers it carried, read
@@ -978,6 +980,7 @@ export function MessageBody({
         // Delete as plan review has it, before Comment (the owner's ask, approval "inbox-toolbar-delete").
         textDeletions={comments !== undefined}
         suggestComment={comments?.suggest}
+        onSide={comments?.onSide}
         allowImages={false}
         onRestoreReport={comments ? restoreReport : undefined}
         mode="selection"
@@ -1180,8 +1183,11 @@ export interface ThreadPaneProps {
   askButton?: React.ReactNode;
   /** Shape's Pebble (approval "shape-inbox-placement"): the thread's board, at the header's right beside ⋮. Null: none. */
   shapeButton?: React.ReactNode;
-  /** The same icon for the bar of a full-screen file, whose bar hides the thread's. */
-  askFileButton?: React.ReactNode;
+  /**
+   * Ask AI's Side for the selection bars of the agents' messages and of the open file (ask/useInboxAsk.tsx `side`).
+   * Absent while this thread cannot ask: no Side. A full-screen file's bar has no Ask icon (approval "inbox-ask-ai-flow").
+   */
+  onSide?: (selected: string) => void;
   /** Words from Ask AI's Reply in the thread: they join the reply draft, and the pane calls `onReplyWordsTaken` once. */
   replyWords?: string | null;
   onReplyWordsTaken?: () => void;
@@ -1518,7 +1524,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread, threadSteps = null, codeReview = false, machine = null, onThreadFiles, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread, threadSteps = null, codeReview = false, machine = null, onThreadFiles, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, onSide, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   // Thread steps (approval "inbox-thread-steps"): the lists with steps, newest first; none while the switch is off.
@@ -5928,7 +5934,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 </button>
               </Tip>
             )}
-            {/* A full-screen file's bar carries it instead: one launcher on the page, so focus has one way back. */}
+            {/* Full screen covers this bar and the file's bar has no Ask icon: Side in a selection, or leaving full screen, reaches the chat. */}
             {!shownFull && askButton}
             {shapeButton}
             <ThreadMore
@@ -6510,6 +6516,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                           onOpen: openListAt,
                           openId: commentsList?.at ?? null,
                           revealed: revealedComment,
+                          onSide,
                         }
                       : undefined
                   }
@@ -7157,7 +7164,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         version={file!.version}
         onVersion={(version) => onOpenFile({ id: openAttachment.id, version, focus: null, view: currentView, set: optionSet?.id ?? null })}
         full={shownFull}
-        ask={phone ? null : askFileButton}
+        onSide={onSide}
         fullLocked={phone || fileStacked}
         // Full screen opened from the thread alone: × and Escape close the file, back to the thread as it was.
         exitCloses={fullScreenExit(fullFromSide, phone || fileStacked) === 'close'}

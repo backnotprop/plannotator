@@ -84,8 +84,6 @@ export interface FullViewBarProps {
     /** The peek, drawn under the bar while open (desktop); it closes through `close` with its reason. */
     renderPeek?: (close: (reason: 'key' | 'outside') => void) => ReactNode;
   } | null;
-  /** Ask AI's icon, before ⋯. Absent: nothing there. */
-  ask?: ReactNode;
   /** The button that adds this file to the reply (reuse.tsx). Absent: nothing there. */
   reuse?: ReactNode;
   /** ⋯: the trigger and its menu (OpenIn.tsx `FullScreenMore`), with whether its menu is open. */
@@ -378,7 +376,6 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
           </span>
         )}
         <span className="ib-fvdv" aria-hidden="true" />
-        {props.ask}
         {props.more}
         {props.leave.kind === 'exit' && leaveButton}
         {props.onExitFull && props.leave.kind === 'exit' && !phone && (
