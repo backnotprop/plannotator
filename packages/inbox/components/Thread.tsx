@@ -38,6 +38,8 @@ import { stepsOf } from '../stepping';
 import { optionOf, optionSetId, optionSetOf } from '../optionSets';
 import { artifactKey, artifactOfFile, newestViewableFile, threadArtifacts } from '../artifacts';
 import { ArtifactsView } from './ArtifactsView';
+import { ArtifactsBar, ThreadLinksView, ThreadViewSwitch } from './ThreadLinksView';
+import { threadLinks } from '../threadLinks';
 import { fileViewFor, openingView, parseFileView, readFileViewChoice, writeFileViewChoice, type FileView } from '../fileView';
 import { fullScreenExit, type FrameMove } from '../fullScreenOrigin';
 import { takeArrivalFocus } from '../threadStep';
@@ -1252,6 +1254,10 @@ export interface ThreadPaneProps {
   artifacts?: boolean;
   /** Turn the Artifacts view on or off (the header's button, "Back to the thread"). Absent: no Artifacts button. */
   onArtifacts?: (open: boolean) => void;
+  /** The Artifacts view shows the thread's links (`#thread=…&artifacts&links`): its other side, never a second view. */
+  links?: boolean;
+  /** Move between the view's two sides. */
+  onLinks?: (on: boolean) => void;
   /**
    * Decision mode (experimental, thread only): "Decide these N" at the top of
    * the open-questions list, which opens the dialog scoped to this thread.
@@ -1492,7 +1498,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   // Thread steps (approval "inbox-thread-steps"): the lists with steps, newest first; none while the switch is off.
@@ -2660,9 +2666,15 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** The Artifacts view swaps the thread's body for the grid (the messages never change). */
   const artifactsOn = artifactsRoute;
   /** The button shows once the thread's files have loaded and something is there (or the view is open, from a link). */
-  const artifactsButton = onArtifacts !== undefined && ((files !== null && artifactList.length > 0) || artifactsOn);
+  // The thread's web links (threadLinks.ts). With none, nothing here changes: the same button, the same view.
+  const linkList = useMemo(() => threadLinks(thread.messages, thread.project.repo), [thread.messages, thread.project.repo]);
+  /** Links and no artifacts: the button opens on them, its count theirs. */
+  const linksOnly = linkList.count > 0 && files !== null && artifactList.length === 0;
+  const linksOn = artifactsOn && linkList.count > 0 && (linksRoute || linksOnly);
+  const artifactsButton = onArtifacts !== undefined && ((files !== null && artifactList.length + linkList.count > 0) || artifactsOn);
   const artifactsButtonRef = useRef<HTMLButtonElement>(null);
   const artifactsHeadingRef = useRef<HTMLHeadingElement>(null);
+  const linksHeadingRef = useRef<HTMLHeadingElement>(null);
   const artifactsBodyRef = useRef<HTMLDivElement>(null);
   /** The tile last opened from the grid: focus comes back to it when its file or guide closes. */
   const artifactOpened = useRef<string | null>(null);
@@ -2909,7 +2921,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     if (artifactsWas.current === artifactsOn) return;
     artifactsWas.current = artifactsOn;
     if (artifactsOn) {
-      artifactsHeadingRef.current?.focus({ preventScroll: true });
+      (linksOn ? linksHeadingRef : artifactsHeadingRef).current?.focus({ preventScroll: true });
       return;
     }
     if (bodyRef.current) bodyRef.current.scrollTop = threadScroll.current;
@@ -5657,7 +5669,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // tighter padding, the Artifacts count, then the way back's label; the subject shows only with room to read.
   const headRef = useRef<HTMLDivElement>(null);
   const textSize = useInboxTextSize();
-  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, one, !!askButton, !!shapeButton, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
+  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, linkList.count, linksOn, one, !!askButton, !!shapeButton, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
   const headFittedFor = useRef('');
   const fitHeadRef = useRef<(force?: boolean) => void>(() => {});
   fitHeadRef.current = (force = false) => {
@@ -5679,6 +5691,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     void document.fonts?.ready.then(() => fitHeadRef.current(true));
     return () => observer.disconnect();
   }, []);
+
+  // The view's header: in the phone's bar, in a row below the bar elsewhere. Nothing until the thread's files
+  // are known: before that "Links" would stand alone and then turn into the toggle.
+  const viewSwitch = files !== null && (
+    <ThreadViewSwitch links={linkList.count} artifacts={artifactList.length} linksOn={linksOn} onLinks={(on) => onLinks?.(on)} />
+  );
 
   // The copy menus (CopyMenus.tsx): the header's ⋯ and each open message's.
   const copyHost: CopyMenuHost = {
@@ -5754,14 +5772,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               <Icon name="chevL" size={18} />
               <span className="ib-pback-l">Thread</span>
             </button>
-            <span className="ib-art-ph-title" aria-hidden="true">
-              Artifacts
-            </span>
-            {artifactList.length > 0 && (
-              <span className="ib-art-ph-n" aria-hidden="true">
-                {artifactList.length}
-              </span>
-            )}
+            {viewSwitch}
           </>
         ) : phone ? (
           <button type="button" className="ib-pback" onClick={onClose} aria-label={`Back to ${backLabel}`} data-phone-back="">
@@ -5842,12 +5853,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               </Tip>
             )}
             {artifactsButton && (
-              <Tip content={withShortcut(artifactsOn ? 'Back to the thread' : 'Artifacts: every file, image and guided review in this thread', { scope: inboxThreadShortcuts, action: 'artifacts' })}>
+              <Tip content={withShortcut(artifactsOn ? 'Back to the thread' : linksOnly ? 'Links' : 'Artifacts: every file, image and guided review in this thread', { scope: inboxThreadShortcuts, action: 'artifacts' })}>
                 <button
                   ref={artifactsButtonRef}
                   type="button"
                   className="ib-iconbtn ib-artbtn"
-                  aria-label={`Artifacts, ${artifactList.length}`}
+                  aria-label={linksOnly ? `Links, ${linkList.count}` : `Artifacts, ${artifactList.length}`}
                   aria-keyshortcuts={artifactsKeys}
                   aria-pressed={artifactsOn}
                   onClick={() => onArtifacts?.(!artifactsOn)}
@@ -5855,7 +5866,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 >
                   <Icon name="artifacts" size={17} />
                   <span className="ib-artbtn-n" aria-hidden="true">
-                    {artifactList.length}
+                    {linksOnly ? linkList.count : artifactList.length}
                   </span>
                 </button>
               </Tip>
@@ -6620,8 +6631,14 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         {/* The room a step of the middle fold borrows (roomRef, shrinkRoom). */}
         <div className="ib-fold-room" ref={roomRef} aria-hidden="true" data-fold-room="" />
       </div>
+      {artifactsOn && !phone && <ArtifactsBar onBack={() => onArtifacts?.(false)}>{viewSwitch}</ArtifactsBar>}
+      {linksOn && (
+        <div className="ib-pbody ib-artbody">
+          <ThreadLinksView ref={linksHeadingRef} links={linkList} />
+        </div>
+      )}
       {artifactsOn && (
-        <div className="ib-pbody ib-artbody" ref={artifactsBodyRef}>
+        <div className="ib-pbody ib-artbody" ref={artifactsBodyRef} hidden={linksOn}>
           <ArtifactsView
             ref={artifactsHeadingRef}
             artifacts={files === null ? null : artifactList}
@@ -6634,7 +6651,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               onOpenGuide(artifact.messageId);
             }}
             onOpenAs={phone || fileStacked ? undefined : (artifact, view) => openFromMessage(artifact.attachment, view, () => (artifactOpened.current = artifactKey(artifact)))}
-            onBack={phone ? undefined : () => onArtifacts?.(false)}
             openIn={openIn}
             phone={phone}
           />
