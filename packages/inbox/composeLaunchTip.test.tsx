@@ -137,6 +137,8 @@ async function openWithTip(opts: { phone?: boolean } = {}) {
 const settle = () => wait(LAUNCH_TIP_TIMES.delayMs + 80);
 
 test.skipIf(!hasDom)('a plain New message that can start an agent: claimed once, drawn in the To row, To described by it, said once, and focus stays on To', async () => {
+  // Longer than To takes to load on a loaded runner, so "not in the first frames" is not a race with that load.
+  LAUNCH_TIP_TIMES.delayMs = 200;
   await open();
   const focused = document.activeElement;
   expect(focused === toButton()).toBe(true);
