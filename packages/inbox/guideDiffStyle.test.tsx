@@ -1,6 +1,7 @@
 /**
  * The diff controls of a guided review (approvals "inbox-guide-diff-style",
- * #2107, and "diff-controls-headers"): one Split / Unified button, Collapse
+ * #2107, and "diff-controls-headers"; a guide opens in the full-window review,
+ * "inbox-one-review-screen"): one Split / Unified button, Collapse
  * all and the "Diff display" gear in the review's top bar, before Close, and
  * no tab on any card. Every setting is code review's own (its
  * `plannotator-diff-*` cookie and config.json `diffOptions`); the popover
@@ -210,7 +211,8 @@ const allDrawnIn = (el: ParentNode, style: 'split' | 'unified') => {
 };
 
 const sectionTabs = (el: ParentNode) => [...el.querySelectorAll('[data-guide-section-tab]')];
-const bar = (el: ParentNode) => el.querySelector<HTMLElement>('[data-guide-message] .ib-vhead')!;
+// A guide opens in the full-window review (approval "inbox-one-review-screen").
+const bar = (el: ParentNode) => el.querySelector<HTMLElement>('[data-review-message] .ib-vhead')!;
 const toggle = (el: ParentNode) => bar(el).querySelector<HTMLButtonElement>('[data-diff-layout-toggle]')!;
 /** How many files' diffs show their lines (a folded file draws only its header). */
 const openDiffs = (el: ParentNode) => [...el.querySelectorAll('diffs-container')].filter((c) => (c as HTMLElement).shadowRoot?.querySelector('pre[data-diff] [data-line]')).length;
@@ -222,7 +224,9 @@ test.skipIf(!hasDom)('the bar carries the diff controls before Close, and no car
   expect(sectionTabs(el)).toHaveLength(0);
   expect(el.querySelector('[data-diff-style-switch]')).toBeNull();
   const order = [...bar(el).querySelectorAll('button')].map((b) => b.getAttribute('aria-label'));
-  expect(order.slice(-4)).toEqual(['Switch to Unified view', 'Collapse all files', 'Diff display options', 'Close the guided review']);
+  const at = order.indexOf('Switch to Unified view');
+  expect(order.slice(at, at + 3)).toEqual(['Switch to Unified view', 'Collapse all files', 'Diff display options']);
+  expect(order.at(-1)).toBe('Close the review');
   expect(toggle(el).getAttribute('data-diff-layout-toggle')).toBe('split');
   await until(() => allDrawnIn(el, 'split'), 'both diffs drawn split');
 }, 30_000);
