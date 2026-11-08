@@ -8847,6 +8847,45 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .pn-inbox .ib-dd-box .ib-btn { max-width: 100%; }
 }
 
+/* Remote launch (the folder menu grouped by machine, approval "remote-launch"). "billing-svc · Mac mini" in To's folder
+   button; the folder menu's "· you started it here last"; a machine where the agent can't start, one quiet line (with
+   its command to copy); the asleep machine's line above the footer. */
+.ib-cp-on { color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 400; white-space: nowrap; }
+.ib-cp-fopt .ib-cp-trust { color: var(--muted-foreground); }
+.ib-cp-picker .ib-cp-opt.ib-cp-fnotice { display: flex; align-items: center; gap: 8px; color: var(--muted-foreground); }
+.ib-cp-picker .ib-cp-opt.ib-cp-fnotice > svg.ib-ic { flex: none; color: var(--muted-foreground); }
+.ib-cp-picker .ib-cp-fnotice .ib-cp-op { flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.4; color: var(--muted-foreground); }
+.pn-inbox .ib-cp-fcopy { flex: none; font-size: var(--ib-fs-13, 13px); }
+.ib-cp-asleep { display: flex; gap: 10px; align-items: flex-start; margin: 0; padding: 10px 16px; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); flex: none; }
+.ib-cp-asleep > svg { flex: none; margin-top: 2px; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* A phone's folder row: the folder icon, then the project's name on the same line (it dropped under the icon). */
+  .ib-cp-picker[data-phone] .ib-cp-fopt { grid-template-areas: "mark agent agent check"; }
+  .ib-cp-picker[data-phone] .ib-cp-fopt > svg.ib-ic { grid-area: mark; }
+  .ib-cp-picker[data-phone] .ib-cp-fopt .ib-cp-op { grid-area: agent; color: var(--foreground); font-size: var(--ib-fs-15, 15px); }
+  .ib-cp-picker[data-phone] .ib-cp-fnotice .ib-cp-op { color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
+}
+
+/* "Another folder on <machine>…" (approval addendum "existing folders"): the quiet last row of each machine's group,
+   and the folder browser it opens in the menu's place (HomeFolderBrowser.tsx): "‹ A folder on Mac mini", the path
+   field, the folders under it, "✓ Start in <name>", and the missing or asleep line where the folders would be. */
+.ib-cp-other .ib-cp-op { color: color-mix(in oklch, var(--foreground) 55%, var(--muted-foreground)); }
+.ib-hfb { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.ib-hfb .ib-cp-list { grid-template-columns: auto minmax(0, max-content) minmax(min(12ch, 30%), 1fr) 16px; }
+.ib-hfb-head { display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px 0 6px; border-bottom: 1px solid var(--ib-line); color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); flex: none; }
+.ib-hfb-head b { color: var(--foreground); font-weight: 600; }
+.pn-inbox .ib-hfb-back { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted-foreground); }
+.pn-inbox .ib-hfb-back:hover { background: var(--muted); color: var(--foreground); }
+.ib-hfb-field > svg.ib-ic { flex: none; }
+.ib-hfb-start .ib-cp-op b { font-weight: 600; }
+.ib-hfb-start > svg.ib-ic { color: var(--foreground); }
+.ib-hfb .ib-cp-none.ib-hfb-note { line-height: 1.45; overflow-wrap: anywhere; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-cp-picker[data-phone] .ib-hfb-head { min-height: 44px; padding: 0 14px; font-size: var(--ib-fs-15, 15px); }
+  .ib-cp-picker[data-phone] .ib-hfb .ib-cp-none { font-size: var(--ib-fs-14, 14px); padding: 14px 8px; }
+  .ib-cp-picker[data-phone] .ib-cp-other .ib-cp-op { color: color-mix(in oklch, var(--foreground) 55%, var(--muted-foreground)); }
+}
+
 /* System → Set up a project (packages/inbox/system/SetupDialog.tsx; approval "system-inbox", screens 2b to 2d):
    three steps in one dialog. Today's dialog, buttons, fields and segmented control. A chosen row takes the thread
    rows' filled highlight (--ib-sel), never a border or outline (owner, 2026-11-06; the walkthrough's rings are
