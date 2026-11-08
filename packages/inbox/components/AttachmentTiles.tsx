@@ -72,22 +72,29 @@ export function opensInWindow(attachment: Pick<InboxAttachmentState, 'kind'>): b
  * each image as wide as its shape asks, at most 240 px tall; a tall
  * screenshot shows its top, cropped with a fade. The frame and its caption
  * are one button that opens the image beside the thread. Images load only
- * from the attachment's own route (`<img src>`, so an SVG never runs).
+ * from the attachment's own route (`<img src>`, so an SVG never runs). A
+ * right-click on one opens its tile's menu (TileMenu: Download, Copy image,
+ * the rest of the tile's list); it has no ⋯ of its own.
  */
 export function ImageGallery({
   images,
   annotationCounts,
   onOpen,
+  openIn,
+  onOpenAs,
 }: {
   images: readonly InboxAttachmentState[];
   annotationCounts: ReadonlyMap<string, number>;
   onOpen: (attachment: InboxAttachmentState) => void;
+  /** Where the window is, for the menu's Open in list (as the tiles'). */
+  openIn?: OpenInSurface;
+  onOpenAs?: (attachment: InboxAttachmentState, view: 'full' | 'side') => void;
 }) {
   if (images.length === 0) return null;
   return (
     <div className="ib-gallery" data-image-gallery="">
       {images.map((image) => (
-        <GalleryImage key={image.id} image={image} count={annotationCounts.get(image.path) ?? 0} onOpen={onOpen} />
+        <GalleryImage key={image.id} image={image} count={annotationCounts.get(image.path) ?? 0} onOpen={onOpen} openIn={openIn} onOpenAs={onOpenAs} />
       ))}
     </div>
   );
@@ -96,7 +103,19 @@ export function ImageGallery({
 /** Tall images are cropped to this width-to-height ratio in the row. */
 const TALL_RATIO = 0.62;
 
-function GalleryImage({ image, count, onOpen }: { image: InboxAttachmentState; count: number; onOpen: (attachment: InboxAttachmentState) => void }) {
+function GalleryImage({
+  image,
+  count,
+  onOpen,
+  openIn,
+  onOpenAs,
+}: {
+  image: InboxAttachmentState;
+  count: number;
+  onOpen: (attachment: InboxAttachmentState) => void;
+  openIn?: OpenInSurface;
+  onOpenAs?: (attachment: InboxAttachmentState, view: 'full' | 'side') => void;
+}) {
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const [failed, setFailed] = useState(false);
   const width = natural?.width ?? image.width ?? 4;
@@ -106,7 +125,6 @@ function GalleryImage({ image, count, onOpen }: { image: InboxAttachmentState; c
   const tall = ratio < TALL_RATIO;
   const wide = ratio > WIDE_IMAGE_RATIO;
   const source = useInboxFileSource();
-  const reuse = useReuse();
   const src = source.imageUrl(image, readableVersion(image));
   const changed = changedLine(image, true);
   // A changed image keeps its comment count beside the changed line.
@@ -117,7 +135,6 @@ function GalleryImage({ image, count, onOpen }: { image: InboxAttachmentState; c
     <button
       type="button"
       className="ib-gal-item"
-      style={reuse ? undefined : frame}
       onClick={() => onOpen(image)}
       aria-label={label}
       data-gallery-image={image.id}
@@ -151,13 +168,20 @@ function GalleryImage({ image, count, onOpen }: { image: InboxAttachmentState; c
       </span>
     </button>
   );
-  // The button is the frame's sibling (a button in a button is invalid). No reuse here: the frame as it was.
-  if (!reuse) return item;
+  // The add-to-reply button is the frame's sibling (a button in a button is invalid); the wrapper takes the frame's size.
   return (
-    <div className={`ib-gal-w${count > 0 ? ' ib-gal-w-count' : ''}`} style={frame}>
-      {item}
-      <ReuseButton file={image} surface="gallery" />
-    </div>
+    <TileMenu
+      attachment={image}
+      surface={openIn}
+      onOpenAs={onOpenAs ? (view) => onOpenAs(image, view) : undefined}
+      render={(_more, status) => (
+        <div className={`ib-gal-w${count > 0 ? ' ib-gal-w-count' : ''}`} style={frame}>
+          {item}
+          <ReuseButton file={image} surface="gallery" />
+          {status}
+        </div>
+      )}
+    />
   );
 }
 
@@ -210,7 +234,7 @@ export function AttachmentTiles({
           {plural(attachments.length, 'attachment')}
         </div>
       )}
-      <ImageGallery images={images} annotationCounts={annotationCounts} onOpen={onOpen} />
+      <ImageGallery images={images} annotationCounts={annotationCounts} onOpen={onOpen} openIn={openIn} onOpenAs={onOpenAs} />
       <div className="ib-atts ib-tiles">
         {attachments.map((attachment) => {
           const count = annotationCounts.get(attachment.path) ?? 0;
@@ -265,12 +289,13 @@ export function AttachmentTiles({
               attachment={attachment}
               surface={openIn}
               onOpenAs={onOpenAs && opensInWindow(attachment) ? (view) => onOpenAs(attachment, view) : undefined}
-              render={(more) =>
+              render={(more, status) =>
                 more || reuse ? (
                   <div className={`ib-att-w${reuse ? ' ib-att-w-reuse' : ''}${more ? ' ib-att-w-more' : ''}`} data-open-in-tile={more ? attachment.id : undefined}>
                     {tile}
                     <ReuseButton file={attachment} surface="tile" />
                     {more}
+                    {status}
                   </div>
                 ) : (
                   tile

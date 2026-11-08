@@ -434,11 +434,12 @@ function Tile({
         attachment={artifact.attachment}
         surface={openIn}
         onOpenAs={onOpenAs && !downloads ? (view) => onOpenAs(artifact, view) : undefined}
-        render={(more) => (
+        render={(more, status) => (
           <div className={`ib-art-w${more ? ' ib-art-w-more' : ''}`}>
             {tile}
             <ReuseButton file={artifact.attachment} surface="card" />
             {more}
+            {status}
           </div>
         )}
       />

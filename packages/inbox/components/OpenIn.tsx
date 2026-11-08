@@ -20,6 +20,7 @@ import { useInboxFileSource } from '../fileSource';
 import { usePhone, useTouchScreen } from '../phone';
 import { Tip } from './Tip';
 import { useContextMenuTrigger } from './useContextMenuTrigger';
+import { copyImageToClipboard } from '../copyImage';
 
 /**
  * "Open in" for an attachment (design record "inbox-open-in", approved
@@ -73,7 +74,7 @@ function useOpenInActions(path: string | null, open: (id: string) => Promise<{ o
     flash(ok ? 'Path copied' : 'Could not copy the path', !ok);
   };
 
-  return { busy, status, launch, copyPath };
+  return { busy, status, launch, copyPath, flash };
 }
 
 /** Everything an attachment's control needs: the menu, and picking from it. `enabled: false` (off this computer): no list is read, no menu. */
@@ -676,6 +677,7 @@ function TileMenuItems({
   version,
   onOpenAs,
   download,
+  onCopyImage,
   menu,
   onLaunch,
   onCopyPath,
@@ -684,6 +686,8 @@ function TileMenuItems({
   version: 'current' | 'sent';
   onOpenAs?: (view: 'full' | 'side') => void;
   download: string | null;
+  /** An image: Copy image, what the browser's own Copy Image leaves (copyImage.ts). */
+  onCopyImage: (() => void) | null;
   menu: OpenInMenu | null;
   onLaunch: (item: OpenInItem) => void;
   onCopyPath: () => void;
@@ -701,7 +705,7 @@ function TileMenuItems({
             <Icon name="frame" size={15} className="ib-appi ib-glyph" />
             <span className="flex-1">Open full screen</span>
           </DropdownMenuItem>
-          {(download || menu) && <DropdownMenuSeparator />}
+          {(download || onCopyImage || menu) && <DropdownMenuSeparator />}
         </>
       )}
       {download && (
@@ -711,9 +715,15 @@ function TileMenuItems({
             <Icon name="download" size={15} className="ib-appi ib-glyph" />
             <span className="flex-1">{version === 'sent' ? 'Download the sent version' : 'Download'}</span>
           </DropdownMenuItem>
-          {menu && <DropdownMenuSeparator />}
         </>
       )}
+      {onCopyImage && (
+        <DropdownMenuItem className="text-xs" onClick={onCopyImage} data-tile-copy-image={attachment.id}>
+          <Icon name="copy" size={15} className="ib-appi ib-glyph" />
+          <span className="flex-1">Copy image</span>
+        </DropdownMenuItem>
+      )}
+      {(download || onCopyImage) && menu && <DropdownMenuSeparator />}
       {menu && <OpenInMenuItems kind={attachment.kind} missingWord={missingLabel(attachment)} menu={menu} onLaunch={onLaunch} onCopyPath={onCopyPath} />}
     </>
   );
@@ -722,8 +732,8 @@ function TileMenuItems({
 /** The ⋯ menu's look (ui's DropdownMenuContent), for the right-click one: Base UI's context menu has its own positioner, at the pointer. */
 const TILE_CONTEXT_POPUP =
   'z-50 min-w-[12rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md origin-[var(--transform-origin)] transition-[opacity,scale] duration-150 data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95';
-/** The tile's own control inside what `render` draws: a tile's button or download link, an Artifacts card. */
-const TILE_CONTROL = '[data-attachment-id], [data-artifact-tile]';
+/** The tile's own control inside what `render` draws: a tile's button or download link, an Artifacts card, a gallery picture. */
+const TILE_CONTROL = '[data-attachment-id], [data-artifact-tile], [data-gallery-image]';
 const NO_SLOT = { order: [], fallback: () => null };
 
 /**
@@ -739,8 +749,12 @@ const NO_SLOT = { order: [], fallback: () => null };
  * press), and with nothing to list (the tour writes nothing) the browser's
  * own menu shows. No key of its own: the hook's Shift+F10 is left off.
  *
- * `render` draws the tile (or its wrapper) with `more`, the ⋯ and its status
- * line, placed inside it; `more` is null off this computer.
+ * An image also gets Copy image: what the browser's own Copy Image leaves, so a
+ * paste into a reply is still the same file (reusePaste.ts).
+ *
+ * `render` draws the tile (or its wrapper) with `more`, the ⋯ (null off this
+ * computer), and `status`, the line that says why a launch or a copy failed,
+ * placed inside it where it has a wrapper.
  */
 export function TileMenu({
   attachment,
@@ -751,14 +765,19 @@ export function TileMenu({
   attachment: InboxAttachmentState;
   surface?: OpenInSurface;
   onOpenAs?: (view: 'full' | 'side') => void;
-  render: (more: ReactNode) => ReactElement;
+  render: (more: ReactNode, status: ReactNode) => ReactElement;
 }) {
   const version = readableVersion(attachment);
   const source = useInboxFileSource();
   const apps = surface === 'apps';
-  const { menu, status, launch, copyPath } = useOpenIn(attachment, version, apps);
+  const { menu, status, launch, copyPath, flash } = useOpenIn(attachment, version, apps);
   // A source that writes nothing (the tour): no Download, as the viewer's.
   const download = source.writes ? source.downloadUrl(attachment, version) : null;
+  // Nothing leaves the window in the tour: no Copy image either.
+  const copyImage =
+    source.writes && readInboxAttachmentKind(attachment.kind) === 'image'
+      ? () => void copyImageToClipboard(source.imageUrl(attachment, version), attachment.name).then((ok) => flash(ok ? 'Image copied' : 'Could not copy the image', !ok))
+      : null;
   const empty = !onOpenAs && !download && !menu;
   // The wrapper `render` draws, or the tile's own button or link when it draws no wrapper (typed as Base UI's div).
   const trigger = useRef<HTMLDivElement>(null);
@@ -780,27 +799,24 @@ export function TileMenu({
   // Shift+F10 stays the rows', cards' and messages' (no new shortcut): the platform's own context-menu key still sends `contextmenu`.
   const { onKeyDown: _key, ...triggerProps } = context.trigger;
   const items = (
-    <TileMenuItems attachment={attachment} version={version} onOpenAs={onOpenAs} download={download} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
+    <TileMenuItems attachment={attachment} version={version} onOpenAs={onOpenAs} download={download} onCopyImage={copyImage} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
   );
   const more =
     apps && !empty ? (
-      <>
-        <DropdownMenu>
-          <Tip content="More">
-            <DropdownMenuTrigger render={<button type="button" className="ib-att-more" aria-label={`More: ${attachment.name}`} data-open-in-more={attachment.id} />}>
-              <Icon name="dots" size={16} />
-            </DropdownMenuTrigger>
-          </Tip>
-          <DropdownMenuContent align="end" sideOffset={6} className="min-w-[12rem]" finalFocus={false} data-open-in-menu={attachment.id}>
-            {items}
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <Status status={status} />
-      </>
+      <DropdownMenu>
+        <Tip content="More">
+          <DropdownMenuTrigger render={<button type="button" className="ib-att-more" aria-label={`More: ${attachment.name}`} data-open-in-more={attachment.id} />}>
+            <Icon name="dots" size={16} />
+          </DropdownMenuTrigger>
+        </Tip>
+        <DropdownMenuContent align="end" sideOffset={6} className="min-w-[12rem]" finalFocus={false} data-open-in-menu={attachment.id}>
+          {items}
+        </DropdownMenuContent>
+      </DropdownMenu>
     ) : null;
   return (
     <ContextMenu.Root {...context.root}>
-      <ContextMenu.Trigger ref={trigger} render={render(more)} {...triggerProps} />
+      <ContextMenu.Trigger ref={trigger} render={render(more, <Status status={status} />)} {...triggerProps} />
       <ContextMenu.Portal>
         <ContextMenu.Positioner className="isolate z-50 outline-none">
           <ContextMenu.Popup className={TILE_CONTEXT_POPUP} aria-label={attachment.name} data-open-in-menu={attachment.id} data-tile-context="" {...context.popup}>

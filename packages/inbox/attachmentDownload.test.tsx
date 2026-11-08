@@ -5,7 +5,9 @@
  * Artifacts card, opens the tile's menu at the pointer with Download: the
  * version the tile opens, saved under the file's own name (an HTML page and a
  * Markdown file too, never opened). On this computer the tile's ⋯ holds the
- * same list. A picture in the gallery and a touch keep the browser's own menu.
+ * same list, and a picture in the gallery opens it too; an image's list has
+ * Copy image, which pastes back into a reply as the same file. A touch keeps
+ * the browser's own menu.
  * The viewer's bar beside the thread has Download for every kind, for the
  * version on screen.
  *
@@ -52,6 +54,8 @@ const edited = file('att_01K7EEEEEEEEEEEEEEEEEEEEEE', 'notes.md', 'markdown', {
   changed_since_sent: true,
   current: { sha256: 'b'.repeat(64), size: 1200, mtime: '2026-10-10T12:00:00.000Z' },
 });
+/** An image gone from disk: its picture is the version it sent. */
+const gonePicture = file('att_01K7GGGGGGGGGGGGGGGGGGGGGG', 'before.png', 'image', { media_type: 'image/png', current: null, unavailable: { code: 'attachment_missing', message: 'gone' } });
 /** Gone from disk: the tile opens the version it sent. */
 const gone = file('att_01K7FFFFFFFFFFFFFFFFFFFFFF', 'old.md', 'markdown', { current: null, unavailable: { code: 'attachment_missing', message: 'gone' } });
 
@@ -172,20 +176,77 @@ test.skipIf(!hasDom)('on this computer the tile ⋯ and the right-click list the
   expect(opened).toEqual([`${plan.id}:side`]);
 });
 
-test.skipIf(!hasDom)('a picture in the gallery and a touch keep the browser’s own menu', async () => {
+test.skipIf(!hasDom)('a right-click on the big picture of an attached image opens its tile’s menu; a touch keeps the browser’s own', async () => {
   await render(<AttachmentTiles attachments={[shot]} annotationCounts={new Map()} onOpen={() => {}} />);
-  // The big picture: the browser's Save Image As and Copy Image (a copied picture pastes as this file: reusePaste.ts).
-  const picture = await rightClick(host!.querySelector(`[data-gallery-image="${shot.id}"] .ib-gal-frame`)!);
-  expect(picture.defaultPrevented).toBe(false);
-  expect(contextMenu()).toBeNull();
+  const picture = host!.querySelector(`[data-gallery-image="${shot.id}"] .ib-gal-frame`)!;
   // A long press on a phone: no menu of ours (useContextMenuTrigger has no long press).
-  const touch = await rightClick(host!.querySelector(`button[data-attachment-id="${shot.id}"]`)!, true);
+  const touch = await rightClick(picture, true);
   expect(touch.defaultPrevented).toBe(false);
   expect(contextMenu()).toBeNull();
-  // The same tile by mouse: ours.
-  await rightClick(host!.querySelector(`button[data-attachment-id="${shot.id}"]`)!);
+  // By mouse: ours, with Download and Copy image.
+  const event = await rightClick(picture);
   await until(() => contextMenu() !== null, 'the menu');
+  expect(event.defaultPrevented).toBe(true);
+  expect(downloadIn(contextMenu()!)!.getAttribute('href')).toBe(`/api/inbox/attachments/${shot.id}/download`);
   expect(downloadIn(contextMenu()!)!.getAttribute('download')).toBe(shot.name);
+  expect(labelsOf(contextMenu()!)).toEqual(['Download', 'Copy image']);
+  await closeMenu();
+  // A file that is not an image has no Copy image.
+  act(() => root!.unmount());
+  host!.remove();
+  await render(<AttachmentTiles attachments={[plan]} annotationCounts={new Map()} onOpen={() => {}} />);
+  await rightClick(host!.querySelector(`[data-attachment-id="${plan.id}"]`)!);
+  await until(() => contextMenu() !== null, 'the menu');
+  expect(contextMenu()!.querySelector('[data-tile-copy-image]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('Copy image leaves what the browser’s Copy Image does: pasted into a reply, it is the same file', async () => {
+  const { ownAttachmentInPaste } = await import('./compose/reusePaste');
+  const savedItem = (globalThis as { ClipboardItem?: unknown }).ClipboardItem;
+  const savedClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  const written: Record<string, Blob | Promise<Blob>>[] = [];
+  (globalThis as { ClipboardItem?: unknown }).ClipboardItem = class {
+    constructor(readonly items: Record<string, Blob | Promise<Blob>>) {}
+  };
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write: async (items: { items: Record<string, Blob | Promise<Blob>> }[]) => void written.push(items[0]!.items) } });
+  // The page's own origin: what the copied address and the paste are judged against.
+  const happy = (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM;
+  const savedUrl = location.href;
+  happy.setURL('http://localhost:4000/');
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) =>
+    String(input).includes('/image') ? new Response(new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' })) : realFetch(input)) as typeof fetch;
+  try {
+    for (const [image, version] of [[shot, 'current'], [gonePicture, 'sent']] as const) {
+      await render(<AttachmentTiles attachments={[image]} annotationCounts={new Map()} onOpen={() => {}} />);
+      await rightClick(host!.querySelector(`[data-gallery-image="${image.id}"]`)!);
+      await until(() => contextMenu() !== null, 'the menu');
+      await act(async () => contextMenu()!.querySelector<HTMLElement>(`[data-tile-copy-image="${image.id}"]`)!.click());
+      await until(() => written.length > 0, 'the clipboard write');
+      const item = written.pop()!;
+      // A paste anywhere else is a picture.
+      expect((await item['image/png'])!.type).toBe('image/png');
+      // A paste into a reply: the composer's paste reads the HTML and finds this file (ComposeFiles.tsx `paste`).
+      const html = await (await item['text/html'])!.text();
+      const clip = { getData: (type: string) => (type === 'text/html' ? html : '') };
+      expect(ownAttachmentInPaste(clip, location.origin)).toEqual({
+        id: image.id,
+        version,
+        src: `/api/inbox/attachments/${image.id}/image${version === 'sent' ? '?version=sent' : ''}`,
+      });
+      act(() => root!.unmount());
+      host!.remove();
+      root = null;
+      host = null;
+    }
+  } finally {
+    happy.setURL(savedUrl);
+    globalThis.fetch = realFetch;
+    if (savedItem === undefined) delete (globalThis as { ClipboardItem?: unknown }).ClipboardItem;
+    else (globalThis as { ClipboardItem?: unknown }).ClipboardItem = savedItem;
+    if (savedClipboard) Object.defineProperty(navigator, 'clipboard', savedClipboard);
+    else delete (navigator as { clipboard?: unknown }).clipboard;
+  }
 });
 
 test.skipIf(!hasDom)('a right-click on an Artifacts card opens its menu with Download', async () => {
