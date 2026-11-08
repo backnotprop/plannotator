@@ -10847,6 +10847,7 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 @media (prefers-reduced-motion: reduce) {
   .ib-ctxn-chev { transition: none; }
 }
+
 /* The list's filter (components/ListFilter.tsx, listFilter.ts): the funnel alone in the list header, at every width.
    With picks it takes the accent colour and a count in its corner (the icon cut round it, as the PR badge's count
    is); the menu is the Pull requests filter's (`.ib-pc-menu`). */
@@ -10877,6 +10878,7 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
   .ib-tidy-pos[data-phone] .ib-tidy.ib-lflt-range { width: auto; padding: 16px; }
   .pn-inbox .ib-lflt-range-days input { height: 44px; font-size: var(--ib-fs-16-in, 16px); }
   .ib-lflt-range-act .ib-btn { height: 44px; padding: 0 18px; }
+}
 /* ---- The sidebar's layout (approval "inbox-sidebar-customize"; Sidebar.tsx, SidebarMenu.tsx, SidebarCustomizer.tsx). */
 /* Each item's slot names it for the right-click menu and draws nothing of its own. */
 .ib-side-item { display: contents; }
@@ -10886,6 +10888,7 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-setrow:not([data-theme]):not([data-keys]) > .ib-nav { padding-right: 9px; }
 .pn-inbox .ib-setrow:not([data-theme]) .ib-keys-tg { right: 3px; }
 .ib-side-menu { min-width: 212px; }
+
 /* Customize sidebar: a panel beside the sidebar; a bottom sheet on a phone. */
 .ib-sbc { position: fixed; top: 12px; z-index: 70; width: 300px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); display: flex; flex-direction: column; border-radius: var(--ib-rl-lg-s, 10px); background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-s, 0 0 0 1px var(--border), 0 18px 40px -16px oklch(0 0 0 / 0.45)); transform-origin: top left; animation: ib-pm-in 140ms cubic-bezier(0.23, 1, 0.32, 1); }
 .ib-sbc-head { display: flex; align-items: center; gap: 8px; padding: 12px 10px 4px 16px; }
@@ -10947,8 +10950,12 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
   0% { transform: scale(0.6); }
   60% { transform: scale(1.18); }
   100% { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
   .pn-inbox .ib-apin[data-pop] svg.ib-ic { animation: none; }
   .pn-inbox .ib-apin { transition: none; }
+}
+
 /* On an Artifacts card: top left, on the card's colour like its ⋯; on hover or focus, and always once pinned. */
 .pn-inbox .ib-apin-card, .pn-inbox .ib-apin-wall { position: absolute; z-index: 2; opacity: 0; background: color-mix(in oklch, var(--card) 92%, transparent); box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 80%, transparent); }
 .pn-inbox .ib-apin-card:hover, .pn-inbox .ib-apin-wall:hover { background: var(--card); }
@@ -10959,6 +10966,7 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 /* The viewer's bar and the pane's header. */
 .pn-inbox .ib-apin-bar { width: 30px; height: 30px; }
 .pn-inbox .ib-apin-bar.ib-apin-big { width: 44px; height: 44px; }
+
 /* The thread's Artifacts grid: "Pinned N" first, small cards (name only), then "Everything else". */
 .ib-art-part + .ib-art-part { margin-top: 26px; }
 .ib-art-gh { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--foreground); }
@@ -10974,6 +10982,7 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 /* Every card of the Pinned group is pinned: its pin shows on hover or focus (to unpin). */
 .pn-inbox .ib-art-pinned .ib-apin-card.ib-apin-on { opacity: 0; }
 .pn-inbox .ib-art-pinned .ib-art-w:is(:hover, :focus-within) .ib-apin-card { opacity: 1; }
+
 /* The Artifacts wall: a dense wall by day, the name on hover. */
 .ib-wall { padding-bottom: 120px; }
 .ib-wall-h { margin-bottom: 14px; }
@@ -10999,6 +11008,7 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .pn-inbox .ib-wall-tile { position: relative; display: flex; flex-direction: column; gap: 8px; width: 100%; padding: 0; text-align: left; color: inherit; border-radius: 10px; }
 .pn-inbox .ib-wall-tile:focus-visible { outline: none; }
 .pn-inbox .ib-wall-tile:focus-visible .ib-wall-stage { outline: 2px solid var(--ring); outline-offset: 2px; }
+
 /* The stage: one 4:3 window for every kind, on a quiet backdrop. What it draws is fitted whole and centred.
  * Sizes inside are in container units, so a face reads the same at Smaller and Larger. */
 .ib-wall-stage { --ib-wall-bd: color-mix(in oklch, var(--muted) 72%, var(--background)); --ib-wall-paper: var(--card); --ib-wall-edge: oklch(0 0 0 / 0.07); position: relative; display: block; aspect-ratio: 4 / 3; overflow: hidden; border-radius: 10px; background: var(--ib-wall-bd); container-type: size; transition: background-color 120ms ease; }
@@ -11007,15 +11017,18 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 :root:not(.light) .ib-wall-stage { --ib-wall-bd: color-mix(in oklch, var(--foreground) 5%, var(--card)); --ib-wall-paper: color-mix(in oklch, var(--foreground) 10%, var(--card)); --ib-wall-edge: oklch(1 0 0 / 0.06); }
 :root:not(.light) .ib-wall-cell:hover .ib-wall-stage { background: color-mix(in oklch, var(--foreground) 8%, var(--card)); }
 .ib-wall-stage > * { position: absolute; inset: 0; }
+
 /* A picture or a video: the whole frame, centred, with a hairline so a white screenshot keeps its edge. */
 .ib-wf-fit { display: flex; align-items: center; justify-content: center; padding: 7cqh; }
 .ib-wf-fit :is(img, video) { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; border-radius: 3px; box-shadow: 0 0 0 1px var(--ib-wall-edge), 0 1px 3px oklch(0 0 0 / 0.08); background: var(--card); }
 .ib-wf-play { position: absolute; left: 8px; bottom: 8px; inset-block-start: auto; inset-inline-end: auto; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 999px; background: oklch(0 0 0 / 0.55); color: #fff; font-size: 11px; font-variant-numeric: tabular-nums; }
+
 /* A sheet: a landscape card centred with an even margin (a page, a diagram, a table, a guide). */
 .ib-wf-sheet { inset: 7cqh 8cqh; overflow: hidden; border-radius: 4px; background: var(--ib-wall-paper); box-shadow: 0 0 0 1px var(--ib-wall-edge), 0 1px 3px oklch(0 0 0 / 0.08); }
 .ib-wf-page .ib-art-frame { inset: 0; }
 .ib-wf-diagram > * { position: absolute; inset: 0; }
 .ib-wf-guide > * { position: absolute; inset: 0; }
+
 /* A document: a portrait page centred on the stage, with its words set small. */
 .ib-wf-paper { inset: 7cqh auto 0; left: 50%; width: 70cqh; height: auto; bottom: 0; transform: translateX(-50%); overflow: hidden; border-radius: 3px 3px 0 0; background: var(--ib-wall-paper); box-shadow: 0 0 0 1px var(--ib-wall-edge), 0 1px 3px oklch(0 0 0 / 0.08); }
 .ib-wf-paper-in { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 2.2cqh; padding: 7cqh 7cqh 0; color: var(--foreground); }
@@ -11028,6 +11041,7 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-wf-li { padding-left: 3.4cqh; position: relative; -webkit-line-clamp: 2; }
 .ib-wf-li::before { content: ''; position: absolute; left: 0.8cqh; top: 1.9cqh; width: 1.2cqh; height: 1.2cqh; border-radius: 50%; background: currentColor; opacity: 0.7; }
 .ib-wf-plain { font-family: var(--font-mono, ui-monospace, monospace); font-size: 3.2cqh; -webkit-line-clamp: 1; white-space: pre; }
+
 /* A PDF: a page card with its name and page count (the Inbox draws no PDF). */
 .ib-wf-pdf .ib-wf-paper-in { gap: 3cqh; padding-top: 10cqh; }
 .ib-wf-pdf-mark { display: inline-flex !important; align-items: center; gap: 1.6cqh; align-self: flex-start; font-size: 3.8cqh; font-weight: 600; color: color-mix(in oklch, var(--destructive, #d33) 78%, var(--foreground)); }
@@ -11035,19 +11049,23 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-wf-pdf-name { font-size: 6cqh; line-height: 1.2; font-weight: 650; display: -webkit-box !important; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 .ib-wf-pdf-pages { font-size: 3.8cqh; color: var(--muted-foreground); }
 .ib-wf-pdf .ib-wf-paper-in::after { content: ''; display: block; margin-top: 2cqh; height: 26cqh; background: repeating-linear-gradient(to bottom, color-mix(in oklch, var(--foreground) 9%, transparent) 0 1.6cqh, transparent 1.6cqh 4.6cqh); border-radius: 1px; }
+
 /* Code: its first lines, highlighted, on the code background. */
 .ib-wf-code { inset: 7cqh 8cqh; overflow: hidden; border-radius: 6px; background: var(--code-bg, var(--muted)); box-shadow: 0 0 0 1px var(--ib-wall-edge); }
 .ib-wf-code code { position: absolute; inset: 6cqh 6cqh 0; display: block; overflow: hidden; font-family: var(--font-mono, ui-monospace, monospace); font-size: 4.1cqh; line-height: 1.55; white-space: pre; color: var(--foreground); background: none; padding: 0; }
+
 /* A table: its first rows, the header set apart, numbers to the right. */
 .ib-wf-grid { position: absolute; inset: 5cqh 5cqh 0; display: grid; align-content: start; column-gap: 3cqh; overflow: hidden; }
 .ib-wf-cell { font-size: 3.8cqh; line-height: 1; padding: 2.6cqh 0; border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: color-mix(in oklch, var(--foreground) 75%, transparent); font-variant-numeric: tabular-nums; }
 .ib-wf-th { font-weight: 600; color: var(--foreground); }
 .ib-wf-num { text-align: right; }
+
 /* Any other file: its icon and type, centred on the stage. */
 .ib-wf-file { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4cqh; color: var(--muted-foreground); }
 .ib-wf-file-ic { display: grid; place-items: center; width: 26cqh; height: 26cqh; border-radius: 6cqh; background: var(--ib-wall-paper); box-shadow: 0 0 0 1px var(--ib-wall-edge), 0 1px 3px oklch(0 0 0 / 0.07); color: var(--foreground); }
 .ib-wf-file-ic svg { width: 12cqh !important; height: 12cqh !important; }
 .ib-wf-file-ext { font-size: 4.4cqh; font-weight: 600; letter-spacing: 0.02em; }
+
 /* Under the stage: the name, then the type and the thread, the same for every kind. */
 .ib-wall-cap { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 0 2px; }
 .ib-wall-cap-nm { font-size: var(--ib-fs-13, 13px); font-weight: 550; color: var(--foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -11059,11 +11077,14 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .pn-inbox .ib-wall-linkbtn { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); text-decoration: underline; text-underline-offset: 3px; }
 .pn-inbox .ib-wall-linkbtn:hover { color: var(--foreground); }
 @media (prefers-reduced-motion: reduce) { .ib-wall-stage { transition: none; } }
+
 /* Nothing hovers: a pinned card shows its pin; to pin one, open it (the pin is in the viewer's bar). */
 @media (hover: none) {
   .pn-inbox :is(.ib-apin-card, .ib-apin-wall):not(.ib-apin-on) { display: none; }
   .pn-inbox .ib-art-pinned .ib-apin-card.ib-apin-on { opacity: 1; }
   .ib-art-w:has(.ib-apin-on) .ib-art-chg { left: 40px; max-width: calc(100% - 48px); }
+}
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-art .ib-art-grid.ib-art-pinned { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .ib-wall { padding: 0 0 120px; }
   .ib-wall-h { margin-bottom: 6px; }
@@ -11079,6 +11100,7 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
   .ib-wall-cap-nm { font-size: var(--ib-fs-12, 12px); }
   .ib-wall-cap-sub { font-size: var(--ib-fs-11, 11px); }
   .pn-inbox .ib-apin-wall.ib-apin-on { width: 22px; height: 22px; top: 4px; left: 4px; }
+}
 @media print { .pn-inbox .ib-apin { display: none; } }
 /* A thread's PRs (approval "inbox-pr-binding", 2026-11-08; ThreadPulls.tsx). The mark: the state icon of the PR in
    play, in the forge's colours; several put a grey count over its top-right corner (CountBadge, `.ib-cnt`). */
