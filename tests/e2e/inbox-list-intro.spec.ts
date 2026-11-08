@@ -83,7 +83,8 @@ async function world(options: { earlier: boolean; soundDue?: boolean; attachment
   mkdirSync(home);
   // A fresh install: no update state and nothing that says an Inbox ran here (inboxUsedBefore), only the tour and the
   // agent notes behind it, so the one-time dialog is the first thing on the list.
-  if (!options.earlier) writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxTour: { version: 2, seen_at: '2026-10-01T10:00:00.000Z', skipped_at: '2026-10-01T10:00:00.000Z' }, inboxAgentNotes: { offered: true } }));
+  // Launch off here too (on by default since 0.28.52): New message must run no `claude --version` on the runner's PATH.
+  if (!options.earlier) writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, inboxTour: { version: 2, seen_at: '2026-10-01T10:00:00.000Z', skipped_at: '2026-10-01T10:00:00.000Z' }, inboxAgentNotes: { offered: true } }));
   if (options.earlier) {
     writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ inboxVersion: '0.29.0' }));
     writeFileSync(
