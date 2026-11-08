@@ -223,6 +223,8 @@ export interface MachineUpdateView {
   from: string | null;
   can_update: boolean;
   self_update: boolean;
+  /** The person asked an agent there to update it (an older machine): its thread (null while held) and the agent's name. */
+  asked?: { thread: string | null; agent: string; at: string };
 }
 
 /** What the dialog reads from that machine (`GET /api/inbox/machines/:id/update`). The log comes as `~/…`, so no username crosses. */
@@ -1917,6 +1919,9 @@ export const inboxApi = {
   /** Read and start an update on a linked machine. Its body carries no version: that machine installs its own answer. */
   machineUpdate: (id: string) => get<MachineUpdateDetails>(inboxUrl(`/machines/${encodeURIComponent(id)}/update`)),
   startMachineUpdate: (id: string) => post<{ ok: true; outcome: string }>(inboxUrl(`/machines/${encodeURIComponent(id)}/update`), {}),
+  /** An agent on that (older) machine was just asked to update it: its row says so, then Restarting and Updated. */
+  machineUpdateAsked: (id: string, threadId: string | null, agent: string) =>
+    post<{ ok: true; update: MachineUpdateView | null }>(inboxUrl(`/machines/${encodeURIComponent(id)}/update/asked`), { thread_id: threadId, agent }),
   unlinkMachine: (id: string) => post<{ unlinked: { id: string; name: string }; told: boolean }>(inboxUrl(`/machines/${encodeURIComponent(id)}/unlink`), {}),
   /** Writes held for other machines, and notices about ones that did not land. */
   outbox: () => get<{ waiting: OutboxView[]; notices: OutboxView[] }>(inboxUrl('/outbox')),

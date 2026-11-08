@@ -9423,6 +9423,17 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .pn-inbox .ib-snooze-blocked:hover { opacity: 1; }
 .ib-dlg h2.ib-mh2 { display: flex; align-items: center; gap: 8px; }
 .ib-mdone { display: inline-flex; align-items: center; gap: 4px; font-size: var(--ib-fs-12-5, 12.5px); }
+/* An older machine's Update dialog: the ask to an agent there, and the commands folded under it as the fallback. */
+.ib-dlg .ib-mask-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.ib-dlg .ib-mask-line svg { color: var(--primary); flex: none; }
+.ib-dlg .ib-mask-line a { margin-left: auto; color: var(--primary); font-weight: 550; text-decoration: none; }
+.ib-dlg .ib-mask-line a:hover { text-decoration: underline; text-underline-offset: 2px; }
+.ib-dlg .ib-mask-held { margin-left: auto; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-dlg details.ib-mhand { margin-top: 14px; }
+.ib-dlg details.ib-mhand > summary { cursor: pointer; width: fit-content; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); border-radius: 4px; }
+.ib-dlg details.ib-mhand[open] > summary { color: var(--foreground); font-weight: 550; }
+.ib-dlg details.ib-mhand > .ib-sum:first-of-type { margin-top: 8px; }
+.ib-dlg .ib-acts-row .ib-btn .ib-spin { width: 10px; height: 10px; border-width: 1.5px; margin-right: 5px; }
 .pn-inbox .ib-ctl .ib-btn .ib-spin { width: 10px; height: 10px; border-width: 1.5px; margin-right: 5px; }
 /* Show me in the code review (approval "shape-in-code-review", mock ac2; packages/inbox/review-drawing). The box, the
    picture's sheet over the diff, its corner card, and the Overview's picture. Shape's paper behind every drawing. */
