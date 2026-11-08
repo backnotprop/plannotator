@@ -58,6 +58,7 @@ import { FileTreeMark } from './fileTreeMark';
 import { TooltipEscapePassesThrough } from '@plannotator/ui/components/Tooltip';
 import { RailStack } from './RailStack';
 import { RailTree } from './RailTree';
+import { DetailsStatus, PullDetails, usePullDetails } from './PullDetails';
 import { RailScopeSwitch } from './RailScope';
 import { useTreeScope } from '@plannotator/ui/hooks/useTreeScope';
 import { useSheetEscape } from '../shortcuts/useSheetEscape';
@@ -497,6 +498,33 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   }, [folded]);
   // The folded rail's sheet, the comments' mirror on the other side: one of the two is open at a time.
   const [filesSheet, setFilesSheet] = useState(false);
+  // The PR's details over the code; what opened them takes focus back. One thing over the code at a time.
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  // Only once the list names it: on a fresh load the Inbox has no list yet, and would refuse a PR it has not listed.
+  // Read again when the PR moves, and whenever the panel opens (the server keeps a read for a minute).
+  const details = usePullDetails(layer ? layerKey : null, layer ? `${layer.head_sha ?? ''}\u0000${layer.updated_at}` : '');
+  const detailsPanel = useRef<HTMLElement>(null);
+  const detailsOpener = useRef<HTMLElement | null>(null);
+  const toggleDetails = (event: React.MouseEvent<HTMLElement>) => {
+    detailsOpener.current = event.currentTarget;
+    if (!detailsOpen) details.retry();
+    setDetailsOpen((open) => !open);
+    setSheet(false);
+    setFilesSheet(false);
+  };
+  const closeDetails = () => {
+    setDetailsOpen(false);
+    detailsOpener.current?.focus({ preventScroll: true });
+  };
+  useSheetEscape(detailsOpen, closeDetails);
+  useEffect(() => {
+    if (detailsOpen) detailsPanel.current?.focus({ preventScroll: true });
+  }, [detailsOpen]);
+  useEffect(() => {
+    if (sheet || filesSheet) setDetailsOpen(false);
+  }, [sheet, filesSheet]);
+  // Another layer is another PR: its details do not carry over.
+  useEffect(() => setDetailsOpen(false), [layerKey]);
   const filesSheetId = useId();
   const filesButton = useRef<HTMLButtonElement>(null);
   const sheetButton = useRef<HTMLButtonElement>(null);
@@ -543,6 +571,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       if (!left) return;
       setSheet(false);
       setFilesSheet(false);
+      setDetailsOpen(false);
     },
   };
   // Crossing a fold takes away what held focus (a button, or a rail or panel that hides): focus moves to the same
@@ -814,6 +843,14 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         )}
         {!judged && riskFailure && <RiskMark failed={riskFailure} />}
         {!phone && readOnlyNote}
+        {!phone && (
+          <Tip content="Description, comments, checks and reviewers">
+            <button type="button" className={`ib-prp-dbtn${detailsOpen ? ' ib-on' : ''}`} aria-expanded={detailsOpen} onClick={toggleDetails} data-pull-details-button="">
+              Details
+              <DetailsStatus data={details.data} />
+            </button>
+          </Tip>
+        )}
         <span className="ib-sp" />
         {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
         {folded && (readerComments || comments.length > 0) && (
@@ -882,7 +919,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       <div className="ib-rsplit">
         {phone && (
           <div className="ib-prp-row2">
-            <button type="button" className={`ib-prp-this${filesSheet ? ' ib-on' : ''}`} aria-expanded={filesSheet} aria-controls={filesSheetId} onClick={toggleFiles} data-pull-review-title="">
+            <button type="button" className={`ib-prp-this${detailsOpen ? ' ib-on' : ''}`} aria-expanded={detailsOpen} onClick={toggleDetails} data-pull-review-title="" data-pull-details-button="">
               {stack.layers.length > 1 && <span className="ib-prp-of">{stack.layers.findIndex((l) => l.key === layer.key) + 1} of {stack.layers.length}</span>}
               <bdi className="ib-prp-title">{scope === 'stack' ? `Whole stack up to ${label}` : layer.title}</bdi>
               <Icon name="chevD" size={13} />
@@ -894,6 +931,25 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               </button>
             )}
           </div>
+        )}
+        {detailsOpen && (
+          <PullDetails
+            layer={layer}
+            description={diff?.description}
+            headSha={diff?.head_sha}
+            data={details.data}
+            failed={details.failed}
+            heldUntil={details.heldUntil}
+            onRetry={details.retry}
+            forge={forgeName(stack)}
+            panel={detailsPanel}
+            phone={phone}
+            inDiff={(path) => files.some((file) => file.path === path)}
+            onClose={closeDetails}
+            onFile={move}
+            keys={sheetKeys}
+            top={phone && stack.layers.length > 1 ? <RailStack layers={stack.layers} here={layer} scope={scope} wholeTip={wholeTip} onLayer={(key, next) => { setDetailsOpen(false); onLayer(key, next); }} /> : undefined}
+          />
         )}
         <nav className="ib-rrail" id={filesSheetId} ref={railRef} aria-label="Changed files" {...sheetKeys}>
           {rail}
@@ -953,7 +1009,6 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               </a>
             </div>
           )}
-          {phone && readOnlyNote}
           {sendError && (
             <div className="ib-error ib-gerror" role="alert">
               {sendError}

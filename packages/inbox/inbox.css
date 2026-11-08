@@ -8988,6 +8988,39 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-gbody > .ib-prp-repofile { position: sticky; top: 0; z-index: 3; height: 100%; background: var(--background); }
 .ib-gbody[data-repo-open] > :not(.ib-prp-repofile) { visibility: hidden; }
 
+/* The PR's own description at the head of its diff (PullDescription): the review app's compact Markdown, 13 px. Long,
+   it starts folded and opens into a box of its own height, so the diff stays near. */
+.ib-prr-desc { padding: 12px 16px; border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
+.ib-prr-desc-body { --ib-desc-fold: 112px; overflow-x: auto; }
+/* Only the web's links look like links (descriptionLinks.ts stops the click, keys too): the words of the rest stay. */
+.ib-prr-desc-body a[href]:not([href^="http:" i], [href^="https:" i], [href^="mailto:" i], [href^="#"], [href^="//"]) { color: inherit; text-decoration: none; cursor: inherit; pointer-events: none; }
+.ib-prr-desc[data-pull-description="folded"] { cursor: pointer; }
+.ib-prr-desc[data-pull-description="folded"] .ib-prr-desc-body { max-height: var(--ib-desc-fold); overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
+.ib-prr-desc[data-pull-description="open"] .ib-prr-desc-body { max-height: min(55vh, 560px); overflow-y: auto; overscroll-behavior: auto; }
+/* A list row's bleed (ui's `-mx-2 px-2`) would scroll the body sideways by 8 px. */
+.ib-prr-desc-body .-mx-2 { margin-right: 0; padding-right: 0; }
+.ib-prr-desc-body .ib-body { font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.ib-prr-desc-body article > :empty { display: none; }
+.ib-prr-desc-body article > :not(:empty):not(:not(:empty) ~ *) { margin-top: 0; }
+.ib-prr-desc-body article > :last-child { margin-bottom: 0; }
+.ib-prr-desc-body h1 { font-size: 15px; line-height: 1.35; margin: 12px 0 6px; letter-spacing: normal; }
+.ib-prr-desc-body h2 { font-size: 14px; line-height: 1.35; margin: 12px 0 4px; }
+.ib-prr-desc-body :is(h3, h4, h5, h6) { font-size: 13px; line-height: 1.4; margin: 10px 0 4px; }
+.ib-prr-desc-body p { font-size: 13px; line-height: 1.6; margin-bottom: 8px; }
+.ib-prr-desc-body .text-sm { font-size: 13px; line-height: 1.55; }
+.ib-prr-desc-body hr { margin: 14px 0; }
+.ib-prr-desc-body summary { font-size: 13px; }
+.ib-prr-desc-body blockquote { margin: 8px 0; }
+.ib-prr-desc-body .my-5 { margin-block: 10px; }
+.ib-prr-desc-body pre { font-size: 12px; }
+.ib-prr-desc-body pre code.pn-code { padding: 8px 10px; }
+.ib-prr-desc-body :is(img, video) { max-width: 100%; height: auto; border-radius: 6px; }
+.pn-inbox .ib-prr-desc-more { display: block; margin-top: 6px; padding: 2px 0; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--muted-foreground); }
+.pn-inbox .ib-prr-desc-more:hover { color: var(--foreground); }
+.ib-prreview.ib-prr-wide .ib-gbody:has(> .ib-prr-desc) > .w-full { padding-top: 0; }
+/* Whose PR this is, quiet beside its title. */
+.ib-prreview .ib-vhead > .ib-prr-note { flex: 0 1 auto; min-width: 0; margin: 0 0 0 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
 /* Fixes from the worst-case stress test (break-ui on #2590). */
 /* A long title gives way in the review header (cut with "…", whole in its tooltip): the back label, the comments
    button and the verdict never leave the window. */
@@ -9064,7 +9097,8 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 /* A long chain: the first two marks, "+N", the last two. */
 .ib-pr-more { font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 /* The author's picture (the owner on #2608) over their initials, which show while it loads and stay when it cannot. */
-.ib-pr-av { position: relative; overflow: hidden; }
+.ib-pr-av { position: relative; overflow: hidden; border-radius: 50%; }
+.ib-pr-av[data-pulls-bot] { border-radius: 26%; }
 .ib-pr-av > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; }
 .ib-pr-av > img[data-shown] { opacity: 1; }
 /* A PR whose author's account is gone: a grey person in the same tile. */
@@ -9107,6 +9141,16 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .pn-inbox .ib-pr-lrow { flex-wrap: wrap; padding: 12px 6px 12px 8px; }
   .ib-pr-lrow > .ib-pr-pill { margin-left: 32px; }
   .ib-pr-lgo { flex-basis: calc(100% - 32px); margin-left: 32px; min-height: 24px; }
+  /* The foot's words read as two lines beside Next layer, not two narrow columns. */
+  .ib-prr-foot:has(> .ib-prr-note) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; }
+  .ib-prr-foot:has(> .ib-prr-note) > * { grid-column: 2; grid-row: 1 / 3; }
+  .ib-prr-foot > .ib-prr-note { grid-column: 1; grid-row: 1; margin: 0; }
+  .ib-prr-foot:has(> .ib-prr-note) > .ib-prr-where { grid-column: 1; grid-row: 2; }
+  .ib-prr-foot .ib-prr-note:has(+ .ib-prr-where)::after { content: none; }
+  /* A description takes little of a phone's screen until it is opened. */
+  .ib-prr-desc-body { --ib-desc-fold: 64px; }
+  .ib-prr-desc { padding: 8px 12px; }
+  .ib-prr-desc[data-pull-description="open"] .ib-prr-desc-body { max-height: 38vh; }
   /* The layer strip scrolls with no scrollbar: its edges fade, so a layer past them reads as more to scroll to. */
   .ib-pr-replyfoot { padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); }
   .pn-inbox .ib-pr-replybtn { height: 44px; }
@@ -9587,6 +9631,127 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .pn-inbox .ib-prreview .ib-prp-row, .pn-inbox .ib-prp-file, .pn-inbox .ib-prp-folder { min-height: 28px; }
 .ib-prp-files { padding-top: 16px; }
 .ib-prp-fileshead { padding-bottom: 6px; }
+
+/* The PR's details (pulls/PullDetails.tsx). */
+/* The panel: floats on the page, no rule, generous air. */
+.ib-prd { position: absolute; top: 8px; right: 8px; bottom: 8px; z-index: 7; width: min(480px, calc(100% - 16px)); display: flex; flex-direction: column; min-height: 0; background: var(--card); border-radius: 14px; box-shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 12px 40px -8px rgb(0 0 0 / 0.18); overflow: hidden; }
+.dark .ib-prd { box-shadow: 0 0 0 1px rgb(255 255 255 / 0.06), 0 16px 48px -8px rgb(0 0 0 / 0.6); }
+.ib-prd[data-layout="columns"]:has(.ib-prd-side) { width: min(880px, calc(100% - 16px)); }
+.ib-prd .ib-prr-desc-body { --ib-desc-fold: 220px; }
+.ib-prd-head { flex: none; display: flex; align-items: center; gap: 12px; padding: 18px 12px 14px 24px; min-width: 0; }
+.ib-prd-who { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; font-size: 13.5px; line-height: 1.35; }
+.ib-prd-who b { font-weight: 550; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ib-prd-branch { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 12.5px; color: var(--muted-foreground); }
+.ib-prd-branch svg { flex: none; opacity: 0.7; }
+.ib-prd-ref { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* The base is usually short, and the head long: the head gives way first. */
+.ib-prd-ref.ib-prd-base { flex: none; max-width: 50%; }
+.ib-prd-base { flex: 0 10 auto; }
+.pn-inbox .ib-prd-iconbtn { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; color: var(--muted-foreground); align-self: flex-start; }
+.pn-inbox .ib-prd-iconbtn:hover { background: var(--ib-prp-fill); color: var(--foreground); }
+.ib-prd-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 24px 32px; font-size: 13.5px; line-height: 1.55; scrollbar-width: thin; }
+.ib-prd-top { margin: 0 -8px 20px; }
+/* Faces. */
+.ib-prd-face { position: relative; flex: none; display: inline-block; }
+.ib-prd-pic { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 50%; background: var(--ib-prp-fill); color: var(--muted-foreground); font-weight: 550; }
+.ib-prd-pic::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent); }
+.ib-prd-face[data-square] .ib-prd-pic { border-radius: 26%; }
+.ib-prd-pic img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; }
+.ib-prd-pic img[data-shown] { opacity: 1; }
+.ib-prd-pip { position: absolute; right: -3px; bottom: -3px; width: 13px; height: 13px; display: flex; align-items: center; justify-content: center; border-radius: 50%; color: white; box-shadow: 0 0 0 2px var(--card); }
+.ib-prd-pip svg { width: 8px; height: 8px; stroke-width: 3; }
+.ib-prd-pip[data-state="approved"] { background: var(--success, #0a7f33); }
+.ib-prd-pip[data-state="changes"] { background: var(--destructive); }
+.ib-prd-pip[data-state="commented"] { background: var(--muted-foreground); }
+.ib-prd-pile { display: inline-flex; align-items: center; }
+.ib-prd-pile > .ib-prd-face + .ib-prd-face { margin-left: 4px; }
+.ib-prd-moreface { margin-left: 8px; font-size: 12px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+/* Marks and rows. */
+.ib-prd-cmark { flex: none; display: inline-flex; }
+.ib-prd-cmark[data-state="pass"] { color: var(--success, #0a7f33); }
+.ib-prd-cmark[data-state="fail"] { color: var(--destructive); }
+.ib-prd-ring { flex: none; width: 13px; height: 13px; margin: 1px; border-radius: 50%; border: 2px solid color-mix(in oklab, var(--warning, #c28a00) 30%, transparent); border-top-color: var(--warning, #c28a00); }
+.ib-prd-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.ib-prd-rows li { display: flex; align-items: center; gap: 10px; min-height: 30px; min-width: 0; }
+.ib-prd-rname { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* A check's name takes up to two lines; past them it gives way in its middle (CheckName), so the end that tells checks
+   apart shows. Its tip has the whole name; a failure's word sits on its first line. */
+.ib-prd-checks li { align-items: flex-start; }
+.ib-prd-checks .ib-prd-rlink { align-items: flex-start; padding-block: 5px; }
+.ib-prd-checks .ib-prd-cmark { margin-top: 2px; }
+.ib-prd-rname.ib-prd-cname { white-space: normal; text-overflow: clip; overflow-wrap: anywhere; line-height: 18px; max-height: calc(18px * 2); }
+.ib-prd-cfit { display: block; }
+.ib-prd-cmark[data-state="quiet"] { color: var(--muted-foreground); }
+.ib-prd-rstate { flex: none; margin-left: auto; font-size: 12.5px; color: var(--muted-foreground); }
+.ib-prd-rstate[data-state="approved"] { color: var(--success, #0a7f33); }
+.ib-prd-rstate[data-state="changes"] { color: var(--destructive); }
+.ib-prd-rmark { flex: none; margin-left: auto; display: inline-flex; color: var(--muted-foreground); }
+.ib-prd-rmark[data-state="approved"] { color: var(--success, #0a7f33); }
+.ib-prd-rmark[data-state="changes"] { color: var(--destructive); }
+.pn-inbox .ib-prd-more { justify-self: start; padding: 4px 0; font-size: 12.5px; color: var(--muted-foreground); }
+.pn-inbox .ib-prd-more:hover { color: var(--foreground); }
+.ib-prd-none { margin: 0; color: var(--muted-foreground); }
+.ib-prd-labels { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-bottom: 14px; font-size: 12px; color: var(--muted-foreground); }
+.ib-prd-labels > span { padding: 1px 8px; border-radius: 999px; background: var(--ib-prp-fill); }
+.ib-prd-h { margin: 32px 0 14px; font-size: 13px; font-weight: 550; }
+/* Words and comments. */
+.ib-prd .ib-prr-desc { margin: 0; padding: 0; border: 0; background: transparent; max-width: none; }
+.ib-prd .ib-prr-desc[data-pull-description="open"] .ib-prr-desc-body { max-height: none; overflow: visible; }
+.pn-inbox .ib-prd .ib-prr-desc-body .ib-body, .pn-inbox .ib-prd .ib-prr-desc-body p { font-size: 13.5px; }
+.ib-prd-convo { display: grid; gap: 22px; }
+.ib-prd-comment { display: flex; gap: 12px; min-width: 0; }
+.ib-prd-cbody { flex: 1 1 auto; min-width: 0; }
+.pn-inbox .ib-prd-cbody .ib-body { font-size: 13.5px; line-height: 1.55; }
+.pn-inbox .ib-prd-cbody .ib-body :is(p, ul, ol) { margin-block: 0 6px; font-size: inherit; }
+/* A bot's report opens with a heading: it stays a comment's size. */
+.pn-inbox .ib-prd-cbody .ib-body :is(h1, h2) { font-size: 14px; line-height: 1.35; margin: 8px 0 4px; letter-spacing: normal; }
+.pn-inbox .ib-prd-cbody .ib-body :is(h3, h4, h5, h6) { font-size: 13.5px; line-height: 1.4; margin: 8px 0 4px; }
+.ib-prd-chead { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin-bottom: 2px; font-size: 13px; color: var(--muted-foreground); }
+.ib-prd-chead b { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 550; color: var(--foreground); }
+.ib-prd-at { flex: none; font-size: 12.5px; }
+.pn-inbox .ib-prd-cfile { flex: 0 1 auto; margin-left: auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--muted-foreground); }
+.pn-inbox .ib-prd-cfile:hover { color: var(--foreground); text-decoration: underline; }
+/* A: people and checks compress to one line; everything else is reading. */
+.ib-prd-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 -10px 22px; }
+.pn-inbox .ib-prd-sum { display: inline-flex; align-items: center; gap: 8px; min-width: 0; min-height: 36px; padding: 0 10px; border-radius: 10px; font-size: 13px; color: var(--foreground); }
+.pn-inbox .ib-prd-sum:hover, .pn-inbox .ib-prd-sum[data-on] { background: var(--ib-prp-fill); }
+.ib-prd-sumw[data-state="changes"], .ib-prd-sumw[data-state="fail"] { color: var(--destructive); }
+.ib-prd-sumw[data-state="pending"], .ib-prd-sumw[data-state="pass"] { color: var(--muted-foreground); }
+.ib-prd-drop { margin: -14px -10px 22px; padding: 8px 10px; border-radius: 10px; background: color-mix(in oklab, var(--foreground) 3%, transparent); }
+/* C: reading on the left, the facts in a tinted column, as on the forge. */
+.ib-prd[data-layout="columns"] .ib-prd-body { padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.ib-prd-cols { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 312px; }
+.ib-prd-cols:not(:has(.ib-prd-side)) { grid-template-columns: minmax(0, 1fr); }
+.ib-prd-main { min-width: 0; overflow-y: auto; padding: 4px 24px 32px; scrollbar-width: thin; }
+.ib-prd-side { min-width: 0; overflow-y: auto; margin: 0 8px 8px 0; padding: 14px 14px 18px; border-radius: 10px; background: color-mix(in oklab, var(--foreground) 3.5%, transparent); display: grid; align-content: start; gap: 22px; font-size: 13px; scrollbar-width: thin; }
+.ib-prd-side h3 { margin: 0 0 6px; font-size: 12.5px; font-weight: 550; color: var(--muted-foreground); }
+.ib-prd-side .ib-prd-labels { margin: 0; }
+.ib-prd-side .ib-prd-rows li { min-height: 28px; gap: 8px; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-prd { top: 0; right: 0; bottom: 0; left: 0; width: 100%; border-radius: 0; box-shadow: none; grid-row: 1 / -1; }
+  .ib-prd-head { padding: 14px 8px 12px 16px; }
+  .ib-prd-body { padding: 0 16px 28px; }
+  .ib-prd { overflow-y: auto; }
+  .ib-prd-body { flex: none; overflow: visible; }
+    .ib-prd-top .ib-prp-stack { max-height: none; padding: 0; }
+  .ib-prd-top .ib-prp-layers { overflow: visible; }
+  .pn-inbox .ib-prd-top .ib-prp-row { min-height: 38px; }
+}
+/* Rows a keyboard reaches; a name that cannot be hovered wraps whole. */
+.ib-prd-rlink { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; min-width: 0; min-height: inherit; color: inherit; text-decoration: none; }
+a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
+.ib-prd-rlink[data-plain] .ib-prd-rname { white-space: normal; overflow-wrap: anywhere; }
+@media (pointer: coarse) { .ib-prd-rname { white-space: normal; overflow-wrap: anywhere; } }
+.ib-prd:focus { outline: none; }
+.ib-prd-face[data-gone] .ib-prd-pic { color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }
+.ib-prd-waiting { display: grid; gap: 8px; }
+.ib-prd-waiting i { display: block; height: 12px; border-radius: 6px; background: var(--ib-prp-fill); }
+.ib-prd-waiting i:nth-child(2) { width: 70%; }
+.ib-prd-waiting i:nth-child(3) { width: 85%; }
+/* The first file's Split | Unified tab has no business peeking out from behind the panel. */
+.ib-prreview:has([data-pull-details]) [data-guide-section-tab] { visibility: hidden; }
+.ib-prreview .ib-prr-fn .ib-prr-num { flex: none; }
+
 /* As the code review app (approval pr-view-one-surface, 11-07 19:08), every width but a phone's: the bar its header's
    fill (bg-card/50 on the page), and over the code its muted tab row (dockview's strip, 33 px) with Split | Unified at
    the right end, where the review app keeps its view controls. */

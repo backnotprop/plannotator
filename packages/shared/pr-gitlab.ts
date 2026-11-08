@@ -351,6 +351,7 @@ export async function fetchGlMRContext(
 
   // --- Discussions (inline review threads) ---
   const reviewThreads: PRContext["reviewThreads"] = [];
+  const threadsIncomplete = discussionsResult.exitCode !== 0;
   const discussionNoteIds = new Set<string>();
   if (discussionsResult.exitCode === 0) {
     try {
@@ -516,6 +517,13 @@ export async function fetchGlMRContext(
     }
   }
 
+  const requestedReviewers: NonNullable<PRContext["requestedReviewers"]> = arr(mr.reviewers).flatMap((user: any) => {
+    const login = str(user?.username);
+    if (!login) return [];
+    const avatarUrl = resolveAvatar(user?.avatar_url);
+    return [{ login, ...(avatarUrl ? { avatarUrl } : {}), ...(isGitlabBot(user) ? { isBot: true } : {}) }];
+  });
+
   return {
     body: str(mr.description),
     state,
@@ -527,8 +535,10 @@ export async function fetchGlMRContext(
     comments: notes,
     reviews,
     reviewThreads,
+    ...(threadsIncomplete ? { threadsIncomplete } : {}),
     checks,
     linkedIssues,
+    requestedReviewers,
   };
 }
 

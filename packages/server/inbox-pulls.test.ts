@@ -38,6 +38,8 @@ import {
   type InboxPulls,
   GITHUB_SEARCH_MAX_CHARS,
   githubPullSearches,
+  GITHUB_PULLS_QUERY,
+  INBOX_PULL_DESCRIPTION_MAX_CHARS,
   byActivity,
   githubOthersSearches,
   GITLAB_PROJECTS_PER_QUERY,
@@ -114,6 +116,17 @@ const GH_ANSWER = {
   },
 };
 
+/**
+ * `gh api --jq` as a person's shell may have it: the program picks what it names, and under CLICOLOR_FORCE an object
+ * answer comes out coloured (real gh 2.99, whatever NO_COLOR says) while a string comes out raw.
+ */
+function ghJq(args: string[], pull: { sha: string; body: string | null }): { stdout: string; stderr: string; exitCode: number } {
+  const program = args[args.indexOf("--jq") + 1] ?? "";
+  const picked = { ...(/\bsha: \.head\.sha\b/.test(program) ? { sha: pull.sha } : {}), ...(/\bbody: \.body\b/.test(program) ? { body: pull.body } : {}) };
+  const json = JSON.stringify(picked);
+  return { stdout: `${/\| *tojson *$/.test(program) ? json : `\u001b[1;38m${json}\u001b[m`}\n`, stderr: "", exitCode: 0 };
+}
+
 /** A call of the Others read (its own query), apart from the person's own lists. */
 const othersCall = (args: readonly string[]) => args.some((a) => a.startsWith("query=query InboxPullsOthers"));
 
@@ -139,8 +152,10 @@ interface Forge {
   othersFail: string | null;
   /** How long a GitHub Others read takes, in ms (default: at once). */
   othersDelayMs?: number;
-  /** The head commit `gh api … pulls/N --jq .head.sha` answers (default: the list's `headRefOid`); a list: one per read. */
+  /** The head commit `gh api … pulls/N --jq …` answers (default: the list's `headRefOid`); a list: one per read. */
   heads: string[] | null;
+  /** The description that read answers, by PR number. */
+  bodies: Record<string, string | null>;
   /** The commits GitHub says the PR has; null, that read fails. */
   prCommits?: string[] | null;
 }
@@ -153,12 +168,16 @@ function forge(answer: unknown = GH_ANSWER): Forge {
     othersAnswer: { data: { viewer: { login: "dana" }, others0: { issueCount: 0, nodes: [] } } },
     othersFail: null,
     heads: null,
+    bodies: {},
     graphql: () => f.calls.filter((c) => c.args.includes("graphql") && !othersCall(c.args)),
     others: () => f.calls.filter((c) => othersCall(c.args)),
     run: async (cli, args) => {
       f.calls.push({ cli, args });
       if (cli === "gh" && args.some((a) => a.includes("/commits?"))) return f.prCommits ? { stdout: `${f.prCommits.join("\n")}\n`, stderr: "", exitCode: 0 } : { stdout: "", stderr: "HTTP 502", exitCode: 1 };
-      if (cli === "gh" && args.includes("--jq")) return { stdout: `${f.heads ? f.heads.shift() ?? "" : String(args[3]!.split("/").at(-1)).padStart(40, "a")}\n`, stderr: "", exitCode: 0 };
+      if (cli === "gh" && args.includes("--jq")) {
+        const number = String(args[3]!.split("/").at(-1));
+        return ghJq(args, { sha: f.heads ? f.heads.shift() ?? "" : number.padStart(40, "a"), body: f.bodies[number] ?? null });
+      }
       if (cli === "gh" && args[0] === "auth") return { stdout: JSON.stringify({ hosts: { "github.com": [{ login: "dana", active: true, state: "success" }] } }), stderr: "", exitCode: 0 };
       if (cli === "glab" && args[0] === "auth") return { stdout: "", stderr: "No hosts logged in", exitCode: 1 };
       if (cli === "gh" && othersCall(args)) {
@@ -286,6 +305,7 @@ function gitlabForge(): Forge {
     othersAnswer: { data: { currentUser: { username: "dana" }, p0: { mergeRequests: { count: 1, nodes: [GL_MR(61)] } } } },
     othersFail: null,
     heads: null,
+    bodies: {},
     graphql: () => f.calls.filter((c) => c.args.includes("graphql") && !othersCall(c.args)),
     others: () => f.calls.filter((c) => othersCall(c.args)),
     run: async (cli, args) => {
@@ -903,6 +923,131 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
     const before = calls.length;
     await expect(pulls.diff("gitlab.com/northwind/ledger#5:pull", "stack")).rejects.toMatchObject({ code: "pull_diff_fork" });
     expect(calls.length).toBe(before);
+  });
+
+  describe("the PR's description", () => {
+    const repos = [{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }];
+    const KEY = "github.com/northwind/billing-svc#412";
+    const reads = (f: Forge) => f.calls.filter((c) => c.args.includes("--jq"));
+
+    test("comes with the head read a layer already makes: no extra call", async () => {
+      const f = forge();
+      f.bodies["412"] = "  ## Why\n\nThe schedule table.\n";
+      const pulls = createInboxPulls({ run: f.run });
+      await pulls.list(repos);
+      const before = f.calls.length;
+      const answer = await pulls.diff(KEY, "layer");
+      expect(answer.description).toBe("## Why\n\nThe schedule table.");
+      expect(answer.head_sha).toBe("412".padStart(40, "a"));
+      // Its head, its patch, its head again.
+      expect(f.calls.length).toBe(before + 3);
+    });
+
+    test("none, or only whitespace, comments or a rule, is null", async () => {
+      for (const body of [null, "", "  \n\t ", "<!-- one -->\n\n<!-- two -->", "<!-- Describe your change.\n\nFixes #: -->", "---", "<!-- x -->\n\n***\n"]) {
+        const f = forge();
+        f.bodies["412"] = body;
+        const pulls = createInboxPulls({ run: f.run });
+        await pulls.list(repos);
+        expect((await pulls.diff(KEY, "layer")).description).toBeNull();
+      }
+    });
+
+    test("an HTML comment is gone wherever it starts, a blank line in it or not; in code it is the code", async () => {
+      const cases: [string, string][] = [
+        ["<!-- Describe your change here.\n\nFixes #: -->\n\nThe schedule.", "The schedule."],
+        ["Before <!-- one line --> after.", "Before  after."],
+        ["Before <!-- spans\nlines --> after.", "Before \n after."],
+        ["The schedule.\n\n<!-- never closed\n\nnor seen", "The schedule."],
+        ["Use `<!-- this -->` here.", "Use `<!-- this -->` here."],
+        ["```html\n<!-- kept -->\n```\n\n<!-- gone -->\nThe end.", "```html\n<!-- kept -->\n```\n\n\nThe end."],
+        ["~~~\n```\n<!-- kept -->\n~~~", "~~~\n```\n<!-- kept -->\n~~~"],
+        ["Text.\n\n    <!-- indented code -->", "Text.\n\n    <!-- indented code -->"],
+        ["A stray <!-- mid-line, never closed.", "A stray <!-- mid-line, never closed."],
+        ["<!-->\n\nThe schedule.", "The schedule."],
+        ["<!--->\n\nThe schedule.", "The schedule."],
+      ];
+      for (const [body, shown] of cases) {
+        const f = forge();
+        f.bodies["412"] = body;
+        const pulls = createInboxPulls({ run: f.run });
+        await pulls.list(repos);
+        expect((await pulls.diff(KEY, "layer")).description).toBe(shown);
+      }
+    });
+
+    test("a whole stack's diff carries this layer's, from the head reads around its compare, and each layer has its own", async () => {
+      const f = forge();
+      f.bodies["412"] = "The schedule.";
+      f.bodies["413"] = "The backoff.";
+      const pulls = createInboxPulls({ run: f.run });
+      await pulls.list(repos);
+      const before = reads(f).length;
+      expect((await pulls.diff(KEY, "stack")).description).toBe("The schedule.");
+      expect(reads(f).length).toBe(before + 2);
+      expect((await pulls.diff("github.com/northwind/billing-svc#413", "stack")).description).toBe("The backoff.");
+      expect((await pulls.diff("github.com/northwind/billing-svc#413", "layer")).description).toBe("The backoff.");
+    });
+
+    test("a read that fails costs the description, never the diff", async () => {
+      const f = forge();
+      f.bodies["412"] = "The schedule.";
+      for (const failed of [{ stdout: "", stderr: "HTTP 502", exitCode: 1 }, { stdout: "not json", stderr: "", exitCode: 0 }]) {
+        const run: typeof f.run = async (cli, args, env) => (args.includes("--jq") ? failed : f.run(cli, args, env));
+        for (const scope of ["layer", "stack"] as const) {
+          const pulls = createInboxPulls({ run });
+          await pulls.list(repos);
+          const answer = await pulls.diff(KEY, scope);
+          expect(answer.patch).toContain("diff of");
+          expect(answer.description).toBeNull();
+        }
+      }
+    });
+
+    test("a reused answer reads nothing again", async () => {
+      const f = forge();
+      f.bodies["412"] = "The schedule.";
+      const pulls = createInboxPulls({ run: f.run });
+      await pulls.list(repos);
+      await pulls.diff(KEY, "layer");
+      const before = f.calls.length;
+      expect((await pulls.diff(KEY, "layer")).description).toBe("The schedule.");
+      expect(f.calls.length).toBe(before);
+    });
+
+    test("past the cap it is cut, and says so", async () => {
+      const f = forge();
+      f.bodies["412"] = "x".repeat(INBOX_PULL_DESCRIPTION_MAX_CHARS + 10);
+      const pulls = createInboxPulls({ run: f.run });
+      await pulls.list(repos);
+      const { description } = await pulls.diff(KEY, "layer");
+      expect(description!.length).toBe(INBOX_PULL_DESCRIPTION_MAX_CHARS + 3);
+      expect(description!.endsWith("\n\n…")).toBe(true);
+    });
+
+    test("the list asks for no description and reads no PR, row by row", async () => {
+      const f = forge();
+      const pulls = createInboxPulls({ run: f.run });
+      await pulls.list(repos);
+      expect(GITHUB_PULLS_QUERY).not.toMatch(/\bbody\b/);
+      expect(f.calls.filter((c) => c.args.includes("--hostname") && !c.args.includes("graphql"))).toEqual([]);
+    });
+
+    test("GitLab: the same read, its `description`", async () => {
+      const f = gitlabForge();
+      const endpoint = "projects/northwind%2Fdata%2Fledger/merge_requests/61";
+      const run: typeof f.run = async (cli, args, env) =>
+        args[3] === endpoint
+          ? { stdout: JSON.stringify({ sha: "c".repeat(40), description: "Adds the CSV export.\n" }), stderr: "", exitCode: 0 }
+          : args[3] === `${endpoint}/raw_diffs`
+            ? { stdout: "a patch\n", stderr: "", exitCode: 0 }
+            : f.run(cli, args, env);
+      const pulls = createInboxPulls({ run });
+      await pulls.list([{ host: "gitlab.com", repo: "northwind/data/ledger", project_id: "prj_1" }]);
+      const answer = await pulls.diff("gitlab.com/northwind/data/ledger#61:pull", "layer");
+      expect(answer.description).toBe("Adds the CSV export.");
+      expect(answer.head_sha).toBe("c".repeat(40));
+    });
   });
 
   test("a diff past the cap is refused as too large", async () => {
