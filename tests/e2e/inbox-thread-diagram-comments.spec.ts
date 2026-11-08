@@ -364,7 +364,9 @@ test('on a phone: a tap opens the composer in the window, a swipe scrolls, a sid
     await composer(page).getByRole('button', { name: 'Close (your words are kept)' }).tap();
     await expect(composer(page)).toHaveCount(0);
 
-    // A tap on a part names it, and the comment goes out with the reply.
+    // A tap on a part names it, and the comment goes out with the reply. (The shot: what the second tap meets once the
+    // first part's card closed, for the open question on train C; it failed with round 3's card, #2846.)
+    await shot(page, '03b-phone-before-the-second-tap');
     const tap = await centreOf(target);
     await page.touchscreen.tap(tap.x, tap.y);
     await expect(composer(page)).toContainText('Tests pass?');
