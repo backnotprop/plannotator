@@ -11021,7 +11021,7 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 /* A picture or a video: the whole frame, centred, with a hairline so a white screenshot keeps its edge. */
 .ib-wf-fit { display: flex; align-items: center; justify-content: center; padding: 7cqh; }
 .ib-wf-fit :is(img, video) { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; border-radius: 3px; box-shadow: 0 0 0 1px var(--ib-wall-edge), 0 1px 3px oklch(0 0 0 / 0.08); background: var(--card); }
-.ib-wf-play { position: absolute; left: 8px; bottom: 8px; inset-block-start: auto; inset-inline-end: auto; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 999px; background: oklch(0 0 0 / 0.55); color: #fff; font-size: 11px; font-variant-numeric: tabular-nums; }
+.ib-wf-play { position: absolute; left: 8px; bottom: 8px; inset-block-start: auto; inset-inline-end: auto; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 999px; background: oklch(0 0 0 / 0.55); color: #fff; font-size: var(--ib-fs-11, 11px); font-variant-numeric: tabular-nums; }
 
 /* A sheet: a landscape card centred with an even margin (a page, a diagram, a table, a guide). */
 .ib-wf-sheet { inset: 7cqh 8cqh; overflow: hidden; border-radius: 4px; background: var(--ib-wall-paper); box-shadow: 0 0 0 1px var(--ib-wall-edge), 0 1px 3px oklch(0 0 0 / 0.08); }
@@ -11124,11 +11124,11 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-prpop-sheet { left: 0; right: 0; bottom: 0; top: auto; border-radius: 12px 12px 0 0; max-height: 78dvh; padding-bottom: env(safe-area-inset-bottom); }
 .ib-prpop-scrim { position: fixed; inset: 0; z-index: 119; background: rgb(0 0 0 / 0.3); }
 .ib-prpop-grab { margin: 8px auto 0; width: 36px; height: 4px; flex: none; border-radius: 999px; background: color-mix(in oklch, var(--muted-foreground) 30%, transparent); }
-.ib-prpop-head { display: flex; align-items: baseline; gap: 8px; padding: 12px 14px 6px; font-size: 11.5px; color: var(--muted-foreground); }
+.ib-prpop-head { display: flex; align-items: baseline; gap: 8px; padding: 12px 14px 6px; font-size: var(--ib-fs-11-5, 11.5px); color: var(--muted-foreground); }
 .ib-prpop-repo { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-prpop-n { flex: none; }
 .ib-prpop-group + .ib-prpop-group { border-top: 1px solid var(--border); }
-.ib-prpop-gh { padding: 8px 14px 0; font-size: 11.5px; color: var(--muted-foreground); }
+.ib-prpop-gh { padding: 8px 14px 0; font-size: var(--ib-fs-11-5, 11.5px); color: var(--muted-foreground); }
 .ib-prpop-rows { list-style: none; margin: 0; padding: 0 0 6px; }
 .ib-prpop-row { display: flex; align-items: flex-start; position: relative; }
 .ib-prpop-row + .ib-prpop-row { border-top: 1px solid var(--ib-hair, var(--border)); }
@@ -11140,32 +11140,32 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 /* A stack: a hairline joins the layers' icons, base first. */
 .ib-prpop-stack .ib-prpop-row:not(:last-child) .ib-prpop-ic::after { content: ''; position: absolute; left: 7.5px; top: 21px; bottom: -19px; width: 1px; background: var(--border); }
 .ib-prpop-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.ib-prpop-t { font-size: 13px; font-weight: 600; line-height: 1.35; color: var(--foreground); overflow-wrap: anywhere; }
+.ib-prpop-t { font-size: var(--ib-fs-13, 13px); font-weight: 600; line-height: 1.35; color: var(--foreground); overflow-wrap: anywhere; }
 .ib-prpop-num { font-weight: 400; color: var(--muted-foreground); }
-.ib-prpop-sub { font-size: 11.5px; color: var(--muted-foreground); }
+.ib-prpop-sub { font-size: var(--ib-fs-11-5, 11.5px); color: var(--muted-foreground); }
 .ib-prpop-st-open { color: var(--ib-ref-open); }
 .ib-prpop-st-merged { color: var(--ib-ref-merged); }
 .ib-prpop-st-closed { color: var(--ib-ref-closed); }
 .ib-prpop-bad { color: var(--ib-ref-closed); }
-.ib-prpop-foot { padding: 0 14px 8px; font-size: 11px; color: var(--muted-foreground); }
+.ib-prpop-foot { padding: 0 14px 8px; font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); }
 /* Remove: quiet until the row is hovered or the button has focus (always there on a touch screen). */
 .ib-prpop-rm { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin: 7px 8px 0 0; border-radius: 6px; color: var(--muted-foreground); opacity: 0; }
 .ib-prpop-row:hover .ib-prpop-rm, .ib-prpop-rm:focus-visible { opacity: 1; }
 .ib-prpop-rm:hover { background: var(--muted); color: var(--foreground); }
 @media (pointer: coarse) { .ib-prpop-rm { opacity: 1; width: 44px; height: 44px; margin: 0 4px 0 0; } }
-.ib-prpop-empty { padding: 14px; font-size: 12.5px; color: var(--muted-foreground); }
+.ib-prpop-empty { padding: 14px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 /* The person's edit: add a PR by its ref or link; Undo after a removal. */
 .ib-prpop-edit { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px 10px; border-top: 1px solid var(--border); }
 .ib-prpop-add { display: flex; gap: 6px; }
-.ib-prpop-input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font-size: 12.5px; }
+.ib-prpop-input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-prpop-input:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: -1px; }
 .ib-prpop-input[aria-invalid] { border-color: var(--ib-ref-closed); }
-.ib-prpop-tbtn { flex: none; height: 28px; padding: 0 10px; border-radius: 6px; font-size: 12.5px; font-weight: 550; color: var(--foreground); background: var(--muted); }
+.ib-prpop-tbtn { flex: none; height: 28px; padding: 0 10px; border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; color: var(--foreground); background: var(--muted); }
 .ib-prpop-tbtn:hover:not(:disabled) { background: color-mix(in oklch, var(--muted) 70%, var(--foreground) 8%); }
 .ib-prpop-tbtn:disabled { opacity: 0.5; }
 .ib-prpop-rm1 { align-self: flex-start; background: none; color: var(--muted-foreground); padding: 0 4px; }
 .ib-prpop-rm1:hover:not(:disabled) { background: var(--muted); color: var(--foreground); }
-.ib-prpop-undo { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted-foreground); }
-.ib-prpop-err { font-size: 12px; line-height: 1.4; color: var(--ib-ref-closed); }
-.ib-prpop-close { min-height: 44px; padding: 0 12px; border-radius: 6px; color: var(--muted-foreground); font-size: 13px; align-self: flex-end; }
-@media (pointer: coarse) { .ib-prpop-input, .ib-prpop-tbtn { height: 44px; font-size: 16px; } }
+.ib-prpop-undo { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-prpop-err { font-size: var(--ib-fs-12, 12px); line-height: 1.4; color: var(--ib-ref-closed); }
+.ib-prpop-close { min-height: 44px; padding: 0 12px; border-radius: 6px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); align-self: flex-end; }
+@media (pointer: coarse) { .ib-prpop-input, .ib-prpop-tbtn { height: 44px; font-size: var(--ib-fs-16-in, 16px); } }
