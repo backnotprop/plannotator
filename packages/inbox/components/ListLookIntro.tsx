@@ -3,8 +3,10 @@
  * "inbox-list-options-intro", shipped in 0.28.42). A one-time dialog: the picture of an Inbox with example projects
  * plays a short demo of letter marks and logos and holds on the stacked look (RowsIntroPicture.tsx); under it three
  * looks, Minimal, Balanced and Detailed (Settings → Rows' presets, RowsSettings.tsx `ROWS_PRESETS`), each its name
- * alone. Nothing is picked when it opens; the person's look is marked "Current". Picking a look raises a card over
- * the blurred picture with the person's own rows in that look. Done (disabled until a pick) saves the look; Keep as it
+ * alone. The person's look is picked when it opens and marked "Current" (Balanced, the defaults, for most; the
+ * owner: "balance should be selected by default"), so Done at once keeps it; a custom look picks none and Done waits
+ * for a pick. Once the demo holds, a card rises over the blurred picture with the person's own rows in the picked
+ * look; picking another changes it. Done saves the look; Keep as it
  * is and Escape change nothing; "Customize rows" opens Settings → Rows. App retires it either way (the Inbox's claim).
  *
  * The dialog follows the person's mode, the picture too (the owner, q-fd707b9e). `PreviewList` and `lightScope` stay
@@ -203,7 +205,8 @@ export interface ListLookIntroProps {
 
 export function ListLookIntro({ groups, initial, projectNames, awayMachines, phone, onDone, onKeep, onCustomize }: ListLookIntroProps) {
   const [current] = useState(() => rowsPreset(initial));
-  const [pick, setPick] = useState<RowsPreset | null>(null);
+  // The person's look starts picked (null for a custom look): Done without a change saves the same look.
+  const [pick, setPick] = useState<RowsPreset | null>(current);
   const { t, moving } = useDemo();
   const scene = rowsIntroScene(t);
   const rows = groups.filter((group) => group.id !== 'quiet').flatMap((group) => group.rows.map((row) => ({ row, drawn: group.id as InboxListGroupId }))).slice(0, CARD_ROWS);
@@ -231,12 +234,14 @@ export function ListLookIntro({ groups, initial, projectNames, awayMachines, pho
 
   const choose = (id: RowsPreset) => setPick(id);
   const chosen = pick ? ROWS_PRESETS.find((preset) => preset.id === pick)! : null;
+  // The card shows the picked look once the demo holds (a pick, a key or a click holds it at once), so the demo plays first.
+  const shown = scene.held ? pick : null;
   return (
     <Modal labelledBy="ib-lo-title" describedBy="ib-lo-desc" testId="list-look-intro" onClose={onKeep} ownKeys initialFocus=".ib-rl-looks" className={`ib-lo ib-rl${phone ? ' ib-lo-phone' : ''}`}>
-      <div className="ib-rl-art" data-preview={pick ?? undefined} data-moving={moving ? '' : undefined} style={{ '--rl-s': fit.s, '--rl-fh': `${fit.h}px` } as CSSProperties}>
+      <div className="ib-rl-art" data-preview={shown ?? undefined} data-moving={moving ? '' : undefined} style={{ '--rl-s': fit.s, '--rl-fh': `${fit.h}px` } as CSSProperties}>
         <p className="ib-rl-cap" aria-hidden="true">
-          <span data-on={pick ? undefined : ''}>Example projects</span>
-          <span data-on={pick ? '' : undefined}>Your list</span>
+          <span data-on={shown ? undefined : ''}>Example projects</span>
+          <span data-on={shown ? '' : undefined}>Your list</span>
         </p>
         <div ref={frame} className="ib-rl-frame" inert aria-hidden="true" data-list-intro-picture="" data-scene={scene.held ? 'held' : scene.marks}>
           <RowsIntroWindow scene={scene} moving={moving} />
@@ -244,11 +249,11 @@ export function ListLookIntro({ groups, initial, projectNames, awayMachines, pho
         <RowsIntroNotes shown={scene.card} moving={moving} />
         <div className="ib-rl-veil" aria-hidden="true" />
         {/* The picked look, on the person's own rows: one layer per look, so a change of look crossfades. */}
-        <div className="ib-rl-card" inert aria-hidden="true" data-list-intro-card={pick ?? undefined} style={{ width: fit.w, height: fit.ch, top: fit.top + Math.round((fit.h - fit.ch) / 2) }}>
+        <div className="ib-rl-card" inert aria-hidden="true" data-list-intro-card={shown ?? undefined} style={{ width: fit.w, height: fit.ch, top: fit.top + Math.round((fit.h - fit.ch) / 2) }}>
           <div className="ib-rl-ch">Inbox</div>
           <div className="ib-rl-cls">
             {ROWS_PRESETS.map((preset) => (
-              <div key={preset.id} className="ib-rl-cl" data-look={preset.id} data-on={pick === preset.id ? '' : undefined}>
+              <div key={preset.id} className="ib-rl-cl" data-look={preset.id} data-on={shown === preset.id ? '' : undefined}>
                 <LookRows rows={rows} look={preset.look} phone={phone} projectNames={projectNames} awayMachines={awayMachines} />
               </div>
             ))}

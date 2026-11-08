@@ -164,18 +164,18 @@ const radio = (page: Page, id: string) => look(page, id).locator('input[type="ra
 const picture = (page: Page) => page.locator(`${DIALOG} [data-list-intro-picture]`);
 const done = (page: Page) => page.locator('[data-list-intro-done]');
 
-/** Nothing picked: no look checked, the card down, Done disabled. */
-async function nothingPicked(page: Page) {
-  for (const id of LOOKS) await expect(radio(page, id)).not.toBeChecked();
-  await expect(page.locator(`${DIALOG} [data-list-intro-card]`)).toHaveCount(0);
-  await expect(done(page)).toBeDisabled();
+/** The person's look as it opens (Balanced with none saved): checked, its card up once held, and Done ready. */
+async function balancedPicked(page: Page) {
+  for (const id of LOOKS) await (id === 'balanced' ? expect(radio(page, id)).toBeChecked() : expect(radio(page, id)).not.toBeChecked());
+  await expect(page.locator(`${DIALOG} [data-list-intro-card="balanced"]`)).toHaveCount(1);
+  await expect(done(page)).toBeEnabled();
 }
 
-/** The dialog is up and its demo held on the stacked picture (or never played), with nothing picked. */
+/** The dialog is up and its demo held on the stacked picture (or never played), with Balanced picked. */
 async function heldDialog(page: Page) {
   await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
   await expect(picture(page)).toHaveAttribute('data-scene', 'held', { timeout: 5_000 });
-  await nothingPicked(page);
+  await balancedPicked(page);
 }
 
 /** Picks a look: it is checked, the card rises with that look's layer on, and Done is ready. */
@@ -309,7 +309,7 @@ test('someone who saw the earlier dialog gets this one once; the earlier show is
   await expect(page.locator(DIALOG)).toHaveCount(0);
 });
 
-test('once, in one of two tabs: the demo holds, Done waits for a pick, and Done puts the look on the real list at once', async ({ browser }) => {
+test('once, in one of two tabs: the demo holds with Balanced picked, and Done puts the look on the real list at once', async ({ browser }) => {
   const w = await world({ earlier: true });
   expect(saved(w)?.dueAt).toMatch(/^\d{4}-/);
   const ctx = await context(browser);
@@ -318,9 +318,11 @@ test('once, in one of two tabs: the demo holds, Done waits for a pick, and Done 
   await expect.poll(async () => (await a.locator(DIALOG).count()) + (await b.locator(DIALOG).count()), { timeout: 15_000 }).toBe(1);
   const page = (await a.locator(DIALOG).count()) === 1 ? a : b;
   const other = page === a ? b : a;
-  // The demo plays, then holds on the stacked picture (the last step at 2.6 s), with nothing picked meanwhile.
+  // The demo plays, then holds on the stacked picture (the last step at 2.6 s): Balanced is picked from the start,
+  // its card rising only once the demo holds.
   await expect(picture(page)).not.toHaveAttribute('data-scene', 'held');
-  await expect(done(page)).toBeDisabled();
+  await expect(radio(page, 'balanced')).toBeChecked();
+  await expect(page.locator(`${DIALOG} [data-list-intro-card]`)).toHaveCount(0);
   await heldDialog(page);
   await expect(page.locator(`${DIALOG} #ib-lo-title`)).toHaveText('Choose how your list looks');
   await expect(page.locator(`${DIALOG} #ib-lo-desc`)).toHaveText('Pick a look. Fine-tune it any time in Customize rows, from ⋮ above the list.');
@@ -359,12 +361,12 @@ for (const how of ['Escape', 'Keep as it is'] as const) {
     const rowsBefore = savedRows(w);
     // Reduced motion: held from the first frame.
     await expect(picture(page)).toHaveAttribute('data-scene', 'held');
-    await nothingPicked(page);
-    // The looks take the first focus, with no look picked; Tab, then an arrow, picks by keyboard.
+    await balancedPicked(page);
+    // The looks take the first focus, Balanced picked; Tab reaches it, then an arrow picks the next by keyboard.
     await expect(page.locator(`${DIALOG} .ib-rl-looks`)).toBeFocused();
     await page.keyboard.press('Tab');
     await page.keyboard.press('ArrowDown');
-    await expect(radio(page, 'balanced')).toBeChecked();
+    await expect(radio(page, 'detailed')).toBeChecked();
     await pick(page, 'detailed');
     if (how === 'Escape') await page.keyboard.press('Escape');
     else await page.locator('[data-list-intro-keep]').click();
@@ -409,8 +411,8 @@ for (const how of ['a key', 'a click'] as const) {
     await expect(picture(page)).toHaveAttribute('data-scene', 'held', { timeout: 1_000 });
     expect(Date.now() - at).toBeLessThan(1500);
     await expect(page.locator(`${DIALOG} .ib-rl-art[data-moving]`)).toHaveCount(0);
-    await nothingPicked(page);
-    await pick(page, 'balanced');
+    await balancedPicked(page);
+    await pick(page, 'detailed');
   });
 }
 

@@ -1,6 +1,7 @@
 /**
  * "Choose how your list looks" as drawn (components/ListLookIntro.tsx, approval "inbox-rows-dialog", round 7b). What
- * regresses: a look picked before the person picks one, Done saving with nothing picked, Keep as it is or Escape (or
+ * regresses: the person's look (Balanced with none saved) not picked on open, or Done then saving another look; Done
+ * saving with nothing picked (a custom look), Keep as it is or Escape (or
  * "Customize rows") saving anything, Done saving something other than the picked look whole, "Current" on the wrong
  * look, a look drawn with a picture beside its name (the owner asked for the names alone), the card not showing the person's own rows in the picked look, the demo not ending on the held picture (left
  * alone, on a key or a click, or at once under reduced motion), and `lightScope`'s palette fallback for the dialogs
@@ -91,19 +92,45 @@ const current = (dialog: HTMLElement) => [...dialog.querySelectorAll('.ib-rl-loo
 const preset = (id: string) => ROWS_PRESETS.find((p) => p.id === id)!.look;
 
 describe.skipIf(!hasDom)('Choose how your list looks', () => {
-  test('nothing is picked when it opens, Done is disabled, and the person\'s look says "Current"', () => {
+  test('with no saved look, Balanced is picked on open and says "Current"; Done at once keeps it, the same look', () => {
     motion(true);
     const { dialog, seen } = render(LIST_LOOK_DEFAULT);
     expect(looks(dialog).map((input) => input.value)).toEqual(['minimal', 'balanced', 'detailed']);
+    expect(looks(dialog).filter((input) => input.checked).map((input) => input.value)).toEqual(['balanced']);
+    expect(dialog.querySelector('[data-list-intro-look="balanced"]')!.hasAttribute('data-on')).toBe(true);
+    expect(current(dialog)).toEqual(['balanced']);
+    // The card shows the person's rows in Balanced (the demo is held at once under reduced motion).
+    expect(dialog.querySelector('.ib-rl-art')!.getAttribute('data-preview')).toBe('balanced');
+    expect(done(dialog).disabled).toBe(false);
+    act(() => done(dialog).click());
+    expect(seen).toEqual([{ done: LIST_LOOK_DEFAULT }]);
+    // The words, as approved.
+    expect(dialog.querySelector('#ib-lo-title')!.textContent).toBe('Choose how your list looks');
+    expect(dialog.querySelector('#ib-lo-desc')!.textContent).toBe('Pick a look. Fine-tune it any time in Customize rows, from ⋮ above the list.');
+  });
+
+  test('a saved Minimal starts on Minimal; a custom look starts with none picked and Done waits for a pick', () => {
+    motion(true);
+    const minimal = render(preset('minimal')).dialog;
+    expect(looks(minimal).filter((input) => input.checked).map((input) => input.value)).toEqual(['minimal']);
+    act(() => root?.unmount());
+    host?.remove();
+    const { dialog, seen } = render({ ...LIST_LOOK_DEFAULT, compact: true });
     expect(looks(dialog).filter((input) => input.checked)).toEqual([]);
     expect(dialog.querySelector('.ib-rl-art')!.hasAttribute('data-preview')).toBe(false);
     expect(done(dialog).disabled).toBe(true);
     act(() => done(dialog).click());
     expect(seen).toEqual([]);
-    expect(current(dialog)).toEqual(['balanced']);
-    // The words, as approved.
-    expect(dialog.querySelector('#ib-lo-title')!.textContent).toBe('Choose how your list looks');
-    expect(dialog.querySelector('#ib-lo-desc')!.textContent).toBe('Pick a look. Fine-tune it any time in Customize rows, from ⋮ above the list.');
+  });
+
+  test('Balanced is picked through the demo, but its card waits for the demo to hold', async () => {
+    motion(false);
+    const { dialog } = render(LIST_LOOK_DEFAULT);
+    expect(looks(dialog).filter((input) => input.checked).map((input) => input.value)).toEqual(['balanced']);
+    expect(dialog.querySelector('.ib-rl-art')!.hasAttribute('data-preview')).toBe(false);
+    await wait(2800);
+    expect(scene(dialog)).toBe('held');
+    expect(dialog.querySelector('.ib-rl-art')!.getAttribute('data-preview')).toBe('balanced');
   });
 
   test('each look is its name alone, "Current" added under the person\'s look; no picture beside it (the owner: no icons)', () => {
