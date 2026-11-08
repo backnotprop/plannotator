@@ -539,6 +539,7 @@ packages/inbox/reviewJump.test.tsx
 packages/inbox/pulls/pullFilter.test.tsx
 packages/inbox/guideGlobalComment.test.tsx
 packages/inbox/guideExpandContext.test.tsx
+packages/inbox/guideCollapseAllAfterSwitch.test.tsx
 packages/inbox/guideScrollsWithPage.test.tsx
 packages/inbox/pulls/pullReview.test.tsx
 packages/inbox/pulls/usePulls.test.tsx
