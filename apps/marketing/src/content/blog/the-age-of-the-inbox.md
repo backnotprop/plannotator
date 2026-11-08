@@ -26,7 +26,7 @@ Here is one day with it.
 
 Claude Code starts in `billing-svc`. The retry worker drops charges when Stripe answers 409, and the task is to fix that. Before it writes code, it drafts `retry-plan.md` and sends you a thread with two questions: should the worker retry with the same idempotency key, and should the new worker ship behind a flag?
 
-![Claude Code's design doc next to its thread with a Mermaid diagram two saved comments and a third being written](/assets/inbox/design-doc-dark.webp)
+![Two questions from Claude Code next to its plan with a comment on one line](/assets/inbox/2.2-dark.webp)
 
 The questions are Plannotator's question cards: the options, the one Claude Code recommends, and what the answer holds up. You open the plan beside the thread. One line says the worker retries "at most three times, 2, 4 and 8 seconds apart". You select it and ask whether a key can stay in flight longer than fourteen seconds. That is Plannotator's own annotation tool. You pick "Retry with the same idempotency key" and "Yes" for the flag. The reply box shows "2 picks" and "1 annotation", and you press Send.
 
