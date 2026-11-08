@@ -3321,15 +3321,17 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     () => ({
       diffHeaderHeight: compactTouchLayout ? COMPACT_PANEL_HEADER_HEIGHT : PANEL_HEADER_HEIGHT,
       hunkSeparatorHeight: HUNK_SEPARATOR_HEIGHT,
-      // HUNK_SEPARATOR_HEIGHT already holds the drawn margins. In a box that is as tall as this layout, Pierre's gaps
-      // around each separator would be empty space the rows float in.
-      ...(scrollsWithPage && { spacing: 0 }),
+      // HUNK_SEPARATOR_HEIGHT already holds the drawn margins, so Pierre's gaps around each separator are never drawn.
+      // Counted, every open file was laid out 8px taller per gap than it is. In a box as tall as the layout the rows
+      // float in that room; in the scroller, a list that just outgrows the view is pushed down by it, under the
+      // pointer, when a file opens (#2713: Pierre's sticky window sits at the bottom of the room it is given).
+      spacing: 0,
       // Spacing 0 would count no room under the last row, but the code keeps Pierre's 8px there (its padding plus its
       // sideways scrollbar's gutter): counted, the bar is not cut off by the box or drawn over the next file.
-      ...(scrollsWithPage && { paddingBottom: 8 }),
+      paddingBottom: 8,
       ...(customLineHeight != null && { lineHeight: customLineHeight }),
     }),
-    [compactTouchLayout, customLineHeight, scrollsWithPage],
+    [compactTouchLayout, customLineHeight],
   );
   itemMetricsRef.current = itemMetrics;
 
