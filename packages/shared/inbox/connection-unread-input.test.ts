@@ -9,7 +9,7 @@
  * readable call with a missing or wrong action stops getting the action list.
  */
 import { expect, test } from "bun:test";
-import { inboxToolCall, type InboxToolInfo } from "./connection";
+import { inboxResultWithNote, inboxToolCall, INBOX_UNPARSED_INPUT_KEY, type InboxToolInfo } from "./connection";
 
 const tools: InboxToolInfo[] = [
   {
@@ -17,7 +17,7 @@ const tools: InboxToolInfo[] = [
     description: "Post a message.",
     inputSchema: {
       type: "object",
-      properties: { body: { type: "string" }, reply_to: { type: "string" }, supersedes: { type: "array", items: { type: "string" } }, project_path: { type: "string" } },
+      properties: { body: { type: "string" }, thread: { type: "string" }, reply_to: { type: "string" }, supersedes: { type: "array", items: { type: "string" } }, project_path: { type: "string" } },
     },
   },
   { name: "read_thread", description: "Read.", inputSchema: { type: "object", properties: { thread_id: { type: "string" } } } },
@@ -70,4 +70,49 @@ test("a call with an action goes through unchanged, JSON in its body included", 
     name: "send_message",
     arguments: { body, supersedes: ["msg_01/q-1"], project_path: "/work/notes" },
   });
+});
+
+// Claude Code's wrapper for a call whose JSON it could not parse: the model's text, cut at 2,048, and its length.
+const unparsed = (raw: string, len = raw.length) => ({ [INBOX_UNPARSED_INPUT_KEY]: { raw: raw.slice(0, 2048), len } });
+const MSG = "msg_01M6WCD0P8Y4P59PRG9G0PA7VG";
+const BODY = ":::question\\nWhich cache do we keep?\\n\\n- [ ] Disk\\n- [ ] Memory\\n\\nRecommended: Disk\\n:::";
+
+test("a bare id the host could not parse is quoted, the call runs, and the result says what was read", () => {
+  // The shape a session sent six times: a bare id, not a list.
+  const raw = `{"action": "send_message", "reply_to": "${MSG}", "supersedes": ${MSG}/q-41d641f8, "body": "${BODY}"}`;
+  expect(() => JSON.parse(raw)).toThrow();
+  const call = inboxToolCall(unparsed(raw), tools, filled);
+  expect(call).toEqual({
+    name: "send_message",
+    arguments: { reply_to: MSG, supersedes: [`${MSG}/q-41d641f8`], body: JSON.parse(`"${BODY}"`), project_path: "/work/notes" },
+    note: `Your call's JSON had an unquoted value (supersedes); it was read as ["${MSG}/q-41d641f8"]. Quote every string value.`,
+  });
+  expect(inboxResultWithNote("Sent.", "note" in call ? call.note : undefined)).toBe(`Sent.\n\n${"note" in call ? call.note : ""}`);
+  // Bare ids inside a list, and a bare action name.
+  const list = inboxToolCall(unparsed(`{"action": send_message, "reply_to": "${MSG}", "supersedes": [${MSG}/q-41d641f8, ${MSG}], "body": "x"}`), tools, filled);
+  expect("arguments" in list && list.arguments.supersedes).toEqual([`${MSG}/q-41d641f8`, MSG]);
+  // A wrapper around text that reads runs as it is, with no note.
+  expect(inboxToolCall(unparsed(`{"action": "read_thread", "thread_id": "${MSG}"}`), tools, filled)).toEqual({ name: "read_thread", arguments: { thread_id: MSG } });
+});
+
+test("anything else the host could not parse is refused at its spot, never with the action list", () => {
+  const raw = `{"action": "send_message", "thread": sync-work, "body": "${BODY}"}`;
+  const error = errorOf(unparsed(raw))!;
+  expect(error).toContain(`couldn't be read at character ${raw.indexOf("sync-work")}:`);
+  expect(error).toContain('"thread": sync-work ← this value needs double quotes. Fix that spot and call again.');
+  expect(error).not.toContain("action must be one of");
+  // A quote inside the body that is not escaped: the spot after the string it closed.
+  const quote = `{"action": "send_message", "body": "He said "ship it" today"}`;
+  expect(errorOf(unparsed(quote))).toContain(`at character ${quote.indexOf("ship it")}:`);
+  expect(errorOf(unparsed(quote))).toContain("a double quote inside body needs a backslash");
+});
+
+test("a call the host cut short says how long it was, how much arrived, and which field it broke in", () => {
+  const long = `{"action": "send_message", "reply_to": "${MSG}", "body": "${"The cache keeps every page for a day. ".repeat(80)}\\"oops"}`;
+  const error = errorOf(unparsed(long, long.length))!;
+  expect(error).toContain(`this call was ${long.length} characters and only the first 2048 arrived readable; the JSON breaks inside body.`);
+  expect(error).toContain("or send a shorter body and attach the rest as a file");
+  // A real mistake before the cut is named at its spot instead.
+  const early = `{"action": "send_message", "thread": sync-work, "body": "${"x".repeat(3000)}"}`;
+  expect(errorOf(unparsed(early, early.length))).toContain(`at character ${early.indexOf("sync-work")}`);
 });

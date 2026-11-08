@@ -268,7 +268,7 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   // Pictures sent only as attachments: the result text's advice, on stderr too.
   const attachedOnly = result?.structuredContent?.attached_images_not_in_body;
   if (Array.isArray(attachedOnly) && attachedOnly.length > 0) err(`${attachedImagesNotInBodyText(attachedOnly.length).trim()}\n`);
-  // A question whose first line reads as `key: value`, or a pick-one block with no choices: the result text's advice, on stderr too.
+  // A pick-one block with no choices: the result text's advice, on stderr too.
   const toCheck = result?.structuredContent?.questions_to_check;
   const messageId = result?.structuredContent?.message_id;
   if (Array.isArray(toCheck) && toCheck.length > 0 && typeof messageId === "string") {

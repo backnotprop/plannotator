@@ -32,6 +32,16 @@
  * - Prompt: the first non-blank line that is not a choice or a
  *   recommendation. No prompt means the block is not a question: the parser
  *   returns null and the renderer falls back to the plain directive callout.
+ * - Id label: before the prompt, a short lower-case `id:` or `key:` line
+ *   (`id: sd-approach`, `question_id: q7`, `decision-key: db`; the value one
+ *   token with no spaces, not ending in `?`) is the asker's own label for
+ *   the question, as agents write it: it is dropped, never the prompt, never
+ *   context, and the line after it is the prompt. The value is never the
+ *   key: the key is the hash of kind and prompt, which every reader
+ *   (renderer, store, answers, `Replaces:` / supersedes) computes from the
+ *   block itself. A capitalised or spaced line (`ID: x`, `Deploy: should
+ *   we…?`) is the prompt as before, and an `id:` line after the prompt is
+ *   context.
  * - Context: every other prose line (before or after the choices). A
  *   `Context:` line after the prompt is always context: it never continues
  *   the choice, bullet or recommendation above it.
@@ -281,6 +291,10 @@ const DECISION_LINK_RE = /^\[([^\]]+)\]\((\S+)\)\.?$/;
 const REPLACES_KEY = String.raw`q-[0-9a-f]{8}(?:-\d{1,3})?`;
 const REPLACES_TOKEN = String.raw`(?:msg_[0-9A-HJKMNP-TV-Z]{26}(?:/${REPLACES_KEY})?|${REPLACES_KEY})\.?`;
 const REPLACES_RE = new RegExp(String.raw`^\s*replaces\s*:\s*(${REPLACES_TOKEN}(?:[\s,;]+${REPLACES_TOKEN})*)[\s,;]*$`, 'i');
+// An asker's own label for the question before the prompt (`id: sd-approach`):
+// a lower-case `id` or `key`, optionally after a short `name_` / `name-`,
+// a colon, one token with no spaces that does not end in `?`. Dropped.
+const ID_LABEL_RE = /^\s*(?:[a-z][a-z0-9]{0,15}[_-])?(?:id|key)\s*:\s*\S{0,79}[^\s?]\s*$/;
 // A line (leading whitespace aside) that opens a block of its own (list item, heading,
 // quote, fence, directive, table row, HTML, rule) ends a plain bullet instead
 // of continuing it lazily.
@@ -957,6 +971,8 @@ export const parseQuestionBlock = (
       openBullet = null;
       continue;
     }
+    // The asker's own label before the prompt (`id: sd-approach`): dropped.
+    if (!prompt && ID_LABEL_RE.test(line)) continue;
     if (!prompt) {
       // A heading marker on the prompt line (`### Which…?`) is dropped.
       prompt = line.trim().replace(/^#{1,6}\s+/, '');

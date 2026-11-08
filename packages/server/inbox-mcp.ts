@@ -839,8 +839,8 @@ export async function sendAgentMessage(
   // A question written with a recommended marker in a choice label (read
   // by the parser or not, with or without a `Recommended:` line).
   const recommendedInLabel = inboxQuestionKeysWithRecommendedMarker(message.body);
-  // A question whose first line reads as a `key: value` field, or a pick-one block with no choices:
-  // the result asks the agent to look again (the send and what the person sees are unchanged; a failure is left out).
+  // A pick-one block with no choices: the result asks the agent to look again
+  // (the send and what the person sees are unchanged; a failure is left out).
   let toCheck: InboxQuestionToCheck[] = [];
   try {
     toCheck = inboxQuestionsToCheck(message.body);
@@ -898,7 +898,7 @@ export async function sendAgentMessage(
       ...(noStakes.length > 0 ? { no_stakes: noStakes } : {}),
       /** Keys of the questions that marked their recommendation in a choice label, not a `Recommended:` line (a nudge; the message was sent). */
       ...(recommendedInLabel.length > 0 ? { recommended_in_label: recommendedInLabel } : {}),
-      /** Questions to look at again: a question line that reads as `key: value` (`reads_as`), or a pick-one block with no choices (`no_choices`) (advice; the message was sent). */
+      /** Questions to look at again: a pick-one block with no choices (`no_choices`, the directive as written) (advice; the message was sent). */
       ...(toCheck.length > 0 ? { questions_to_check: toCheck } : {}),
     },
   };

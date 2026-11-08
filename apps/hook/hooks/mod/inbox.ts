@@ -65,6 +65,7 @@ import {
   inboxAskBridgeBase,
   inboxReminderFor,
   inboxToolCall,
+  inboxResultWithNote,
   inboxToolCallParams,
   inboxToolResultText,
   INBOX_SEND_NOW_POLL_FIELD,
@@ -1029,7 +1030,9 @@ export class InboxLink {
       return { deny: `The Plannotator Inbox refused the call: ${message}` }
     }
     const result = inboxToolResultText(answer.result)
-    return result.isError ? { deny: result.text } : { text: result.text }
+    // A call the host could not parse, read again with a bare id quoted: the result says so.
+    const text = inboxResultWithNote(result.text, call.note)
+    return result.isError ? { deny: text } : { text }
   }
 
   private get registryPath(): string {
