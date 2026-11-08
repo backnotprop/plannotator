@@ -736,6 +736,8 @@ test("a busy agent: the box offers the Ask window's choice, never says it draws"
   await board(page).getByRole('button', { name: 'Close Shape' }).click();
 });
 
+let noPictureThread = '';
+
 test("the Overview's picture opens its code; with no picture, the Overview's Show me makes a board of the whole review", async () => {
   const { page } = world;
   await openReview(page, round1.thread_id);
@@ -743,10 +745,12 @@ test("the Overview's picture opens its code; with no picture, the Overview's Sho
   await pickChapter(page, 'overview');
   const fig = page.locator('[data-overview-figure]');
   await expect(fig).toBeVisible();
+  await shot(page, '11a-overview-figure', ['light', 'dark']);
   await part(fig, 'next').click();
   await expect(page.locator(`[data-guide-file-shell="${SCHEDULE}"]`).first()).toBeInViewport();
 
   const bare = await call('submit_guide', { project_path: world.project, guide: guide(1, false), patch: world.round1, review: true, thread: 'no-picture', subject: 'Retry failed charges, no picture', body: 'Ready for review.' });
+  noPictureThread = bare.thread_id;
   await openReview(page, bare.thread_id);
   const ask = page.locator('[data-overview-show-me]');
   await expect(ask).toBeVisible();
@@ -767,6 +771,13 @@ test('a phone at 390 px: the popover, the board, a part lands on its line', asyn
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, colorScheme: 'light', reducedMotion: 'reduce' });
   const page = await context.newPage();
   try {
+    await openReview(page, round1.thread_id);
+    await pickChapter(page, 'overview');
+    await expect(page.locator('[data-overview-figure]')).toBeVisible();
+    await shot(page, 'phone-overview-figure', ['light', 'dark']);
+    await openReview(page, noPictureThread);
+    await expect(page.locator('[data-overview-show-me]')).toBeVisible();
+    await shot(page, 'phone-overview-show-me', ['light', 'dark']);
     await openReview(page, round1.thread_id);
     // The thread's newest board (the busy test's Show me made another).
     await page.locator('[data-review-message] [data-shape-pebble]').click();

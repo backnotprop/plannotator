@@ -575,6 +575,7 @@ packages/inbox/shapeChangeFailed.test.tsx
 packages/inbox/shapeSidebarToggle.test.tsx
 packages/inbox/shape/standalone/ShapePage.test.tsx
 packages/inbox/shape/ShapeBoard.test.tsx
+packages/inbox/shape/boardFocus.test.ts
 packages/ui/components/shape/ShapeSurface.commentDraft.test.tsx
 packages/ui/components/shape/ShapeFollow.test.tsx
 packages/ui/components/shape/ShapeSurface.popoverQuote.test.tsx
@@ -589,6 +590,7 @@ packages/review-editor/utils/scrollWithPage.test.ts
 packages/ui/components/shape/ShapeSurface.board.test.tsx
 packages/ui/components/shape/ShapeSurface.onCode.test.tsx
 packages/ui/components/AnnotationToolstrip.hideActionModes.test.tsx
+packages/ui/components/CommentPopover.extraAction.test.tsx
 packages/ui/components/shape/ShapeSurface.changed.test.tsx
 packages/ui/components/shape/ShapeSurface.stack.test.tsx
 packages/inbox/shapeWhatsChanged.test.tsx
@@ -606,3 +608,4 @@ packages/system/test/change.test.tsx
 packages/system/test/render.test.tsx
 packages/inbox/composeRemoteLaunch.test.tsx
 packages/inbox/composeOtherFolder.test.tsx
+packages/ui/components/shape/ShapeSurface.boxShowMe.test.tsx

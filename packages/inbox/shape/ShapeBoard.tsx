@@ -27,15 +27,10 @@ async function readAsset(url: string): Promise<string | null> {
   });
 }
 
-const BOX_SELECT: ShapeBoxOptions = {
-  readAsset,
-  // STUB (proto/shape-box-comment): the word is drawn; Show me on boards is another branch's (#2669). It logs what it would receive.
-  onShowMe: (selection, text) => {
-    void selection.picture.then((picture) => console.info('[shape-box] Show me stub', JSON.stringify({ ...selection, picture: picture ? `${picture.slice(0, 40)}… (${picture.length} chars)` : null, text })));
-  },
-};
+// The box's Show me is the board's own (`host.showMe`, the Inbox's): no `onShowMe` here.
+const BOX_SELECT: ShapeBoxOptions = { readAsset };
 
-export default function ShapeBoard({ host, id, onClose, onCode, renderThread, initialView, initialPanel, onNavigate, headStart, review, crosshair = false, onAddToReply }: ShapeBoardProps) {
+export default function ShapeBoard({ host, id, onClose, onCode, renderThread, initialView, initialPanel, onNavigate, headStart, headSide, review, crosshair = false, onAddToReply }: ShapeBoardProps) {
   // The crosshair is the Inbox's (its ShapeLayer asks for it): the standalone page keeps Annotate.
   const boxSelect = useMemo<ShapeBoxOptions | undefined>(() => (!crosshair ? undefined : onAddToReply ? { ...BOX_SELECT, onAddToReply } : BOX_SELECT), [crosshair, onAddToReply]);
   return (
@@ -57,6 +52,7 @@ export default function ShapeBoard({ host, id, onClose, onCode, renderThread, in
       initialPanel={initialPanel}
       onNavigate={onNavigate}
       headStart={headStart}
+      headSide={headSide}
     />
     </OpenInCodeSpans>
   );

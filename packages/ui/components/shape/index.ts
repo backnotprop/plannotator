@@ -18,6 +18,7 @@ export type {
   ShapeReviewAt,
   ShapeReviewNarrow,
   ShapeSessionStatus,
+  ShapeShowMeInput,
   ShapeSurfaceProps,
   ShapeSurfaceReview,
 } from './types';
