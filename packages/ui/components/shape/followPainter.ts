@@ -112,18 +112,20 @@ export function besideOf(a: Box, kind: 'mark' | 'edge'): (q: Box) => boolean {
 
 /**
  * Where a tag goes, near where it was put (`spots[0]`; `spots[1]` is its part's other edge): a spot in the
- * view (`fits`) that still reads as its part's or arrow's (`near`), covering as little of `hard` as it can
- * (the drawing's words, the other parts, the tags already placed: none, where there is room), then crossing
- * as few lines as it can (`soft`: points along the drawing's lines), then the nearest. Null: no such spot
- * within reach (the tag stays where it was put).
+ * view (`fits`) that still reads as its part's or arrow's (`near`), covering none of the drawing's own words
+ * (`words`) where any spot can, then as little of `hard` as it can (the other parts, the tags already placed:
+ * none, where there is room), then crossing as few lines as it can (`soft`: points along the drawing's lines),
+ * then the nearest. On a crowded phone a number may meet another number or a part, never the drawing's words.
+ * Null: no such spot within reach (the tag stays where it was put).
  */
-export function bestSpot(spots: readonly Box[], hard: readonly Box[], soft: readonly Box[], fits: (r: Box) => boolean, near: (r: Box) => boolean): { spot: number; dx: number; dy: number } | null {
+export function bestSpot(spots: readonly Box[], hard: readonly Box[], soft: readonly Box[], fits: (r: Box) => boolean, near: (r: Box) => boolean, words: readonly Box[] = []): { spot: number; dx: number; dy: number } | null {
   let best: { spot: number; dx: number; dy: number } | null = null;
   let bestCost = Infinity;
   for (const [spot, t] of spots.entries()) {
     const reach = { left: t.left - 260, right: t.right + 260, top: t.top - 70, bottom: t.bottom + 70 };
     const h = hard.filter((w) => meets(w, reach));
     const s = soft.filter((w) => meets(w, reach));
+    const wd = words.filter((w) => meets(w, reach));
     const count = (r: Box, list: readonly Box[]) => {
       let n = 0;
       for (const w of list) if (meets(r, w)) n++;
@@ -134,7 +136,7 @@ export function bestSpot(spots: readonly Box[], hard: readonly Box[], soft: read
       if (base >= bestCost) break;
       const r = moved(t, m.dx, m.dy);
       if (!fits(r) || !near(r)) continue;
-      const cost = base + 1000 * count(r, h) + 30 * count(r, s);
+      const cost = base + 100_000 * count(r, wd) + 1000 * count(r, h) + 30 * count(r, s);
       if (cost < bestCost) {
         best = { spot, dx: m.dx, dy: m.dy };
         bestCost = cost;
@@ -363,9 +365,9 @@ export class FollowPainter {
         // Its own part: on an edge (the approved look), never across the middle of it.
         const half = tag.getBoundingClientRect().height / 2 + 0.5;
         const own = kind === 'mark' && r.height > 2 * half ? [{ left: r.left, right: r.right, top: r.top + half, bottom: r.bottom - half }] : [];
-        const hard = [...words, ...parts.filter((p) => !p.el.contains(el)).map((p) => p.box), ...own, ...placed];
+        const hard = [...parts.filter((p) => !p.el.contains(el)).map((p) => p.box), ...own, ...placed];
         const soft = lines.filter((l) => !(kind === 'mark' && el.contains(l.el))).flatMap((l) => l.boxes);
-        this.clear(tag, k, view, hard, soft, besideOf(r, kind), flip);
+        this.clear(tag, k, view, words, hard, soft, besideOf(r, kind), flip);
         placed.push(grow(tag.getBoundingClientRect(), CLEAR));
       }
     }
@@ -430,11 +432,11 @@ export class FollowPainter {
    * crossing as few lines as it can. Where nothing beside it is free (a crowded phone), the spot that
    * covers least.
    */
-  private clear(tag: HTMLElement, k: number, view: { left: number; right: number; top: number; bottom: number }, hard: Box[], soft: Box[], near: (r: Box) => boolean, flip?: () => void) {
+  private clear(tag: HTMLElement, k: number, view: { left: number; right: number; top: number; bottom: number }, words: Box[], hard: Box[], soft: Box[], near: (r: Box) => boolean, flip?: () => void) {
     const t = tag.getBoundingClientRect() as Box;
     // Half a pixel's slack: a tag the edge just set at EDGE measures a hair inside it.
     const fits = (r: Box) => r.left > view.left + EDGE - 0.5 && r.right < view.right - EDGE + 0.5 && r.top >= view.top && r.bottom <= view.bottom;
-    if (fits(t) && !hard.some((w) => meets(t, w)) && !soft.some((w) => meets(t, w))) return;
+    if (fits(t) && !words.some((w) => meets(t, w)) && !hard.some((w) => meets(t, w)) && !soft.some((w) => meets(t, w))) return;
     const { left, top } = tag.style;
     const cls = tag.className;
     const restore = () => {
@@ -447,7 +449,7 @@ export class FollowPainter {
       spots.push(tag.getBoundingClientRect());
       restore();
     }
-    const go = bestSpot(spots, hard, soft, fits, near);
+    const go = bestSpot(spots, hard, soft, fits, near, words);
     if (!go) return;
     if (go.spot === 1) flip!();
     tag.style.left = `${parseFloat(tag.style.left) + go.dx / k}px`;

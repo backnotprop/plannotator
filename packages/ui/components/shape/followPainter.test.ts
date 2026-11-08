@@ -59,6 +59,18 @@ describe('a step tag that covers something', () => {
     expect(beside(part)(at(under, go))).toBe(true);
   });
 
+  test("a crowded phone: a tag meets another tag before it covers the drawing's words", () => {
+    // Every spot over the top edge is on a frame's label; every spot on the bottom edge meets a tag already placed.
+    const label = box(250, 240, 400, 60);
+    const placed = box(250, 340, 400, 100);
+    const under = box(358, 351, 170, 26);
+    const middle = box(300, 313.5, 240, 37);
+    const go = bestSpot([tag, under], [placed, middle], [], anywhere, beside(part), [label])!;
+    expect(go.spot).toBe(1);
+    expect(meets(at(under, go), label)).toBe(false);
+    expect(beside(part)(at(under, go))).toBe(true);
+  });
+
   test('crosses no line where a free spot nearby crosses none', () => {
     // A vertical arrow running down into the part, right through where the tag sits.
     const line = Array.from({ length: 12 }, (_, i) => box(448, 240 + i * 5, 4, 4));
