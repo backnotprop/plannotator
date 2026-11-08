@@ -2206,6 +2206,8 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 .ib-view.ib-fullview.ib-drawer:not(.ib-phone) {
   --ib-foot-c: min(50%, calc(100% - 368px - min(340px, (100% - 392px) / 2)));
   --ib-foot-w: calc(100% - 392px);
+  /* Round 3's 600 px card: centred on half of that beside the panel (--ib-foot-c's own half is 340). */
+  --ib-fcomp-c: min(50%, calc(100% - 368px - min(300px, (100% - 392px) / 2)));
 }
 /* the file's own layers (the viewer draws at z-50) stay under the toolbar and the sheets */
 .ib-view.ib-fullview .ib-docarea { isolation: isolate; z-index: 0; }
@@ -7572,8 +7574,8 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
    panel: centred while it fits beside it, else moved left (--ib-foot-c). A phone's sheet hides it, as the sheet covers an
    image's card and hides the toolbar. */
 .ib-view.ib-fullview.ib-drawer:not(.ib-phone) :is(.ib-fcomp, .ib-fcomp-pillwrap) { left: var(--ib-foot-c); }
-/* Round 3's card is 600 px: centred on half of that beside the panel (--ib-foot-c's own half is 340). */
-.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-fcomp { left: min(50%, calc(100% - 368px - min(300px, (100% - 392px) / 2))); width: min(600px, var(--ib-foot-w)); }
+/* Round 3's card is 600 px: centred on --ib-fcomp-c (above). */
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-fcomp { left: var(--ib-fcomp-c); width: min(600px, var(--ib-foot-w)); }
 /* The comments sheet covers the file, and its foot holds Write the reply: the card and its pill step aside with the dock, on the pane (an HTML page) or inside the file (an image, a film). */
 .ib-view.ib-fullview.ib-phone.ib-panel-open :is(.ib-fcomp, .ib-fcomp-pillwrap) { visibility: hidden; }
 .pn-inbox .ib-fcomp-pill { --fc-accent: var(--primary); display: inline-flex; align-items: center; gap: 6px; height: 30px; max-width: min(320px, calc(100vw - 32px)); padding: 0 9px 0 11px; border-radius: 15px; border: 1px solid color-mix(in oklch, var(--border) 85%, transparent); background: color-mix(in oklch, var(--popover) 92%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); color: var(--popover-foreground); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; white-space: nowrap; cursor: pointer; }
@@ -8371,8 +8373,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-annat .ib-annpop { left: auto; right: 0; bottom: 0; width: min(540px, 100%); }
 .ib-annfoot { left: 0; right: 0; bottom: calc(100% + 8px); padding-inline: inherit; }
 .ib-anncard { left: 50%; bottom: calc(28px + var(--ib-fcomp-h, 0px) + env(safe-area-inset-bottom)); transform: translateX(-50%); width: min(540px, calc(100% - 32px)); }
-/* Over an HTML page's card (it sits on the pane too): clear of the floating comments panel, centred over the card. */
-.ib-view.ib-fullview.ib-drawer:not(.ib-phone) > .ib-anncard { left: var(--ib-foot-c); width: min(540px, var(--ib-foot-w)); }
+/* Over an HTML page's card (it sits on the pane too): clear of the floating comments panel, centred over the card
+   (the card's own centre, --ib-fcomp-c). */
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) > .ib-anncard { left: var(--ib-fcomp-c); width: min(540px, var(--ib-foot-w)); }
 /* A tall card in a short window leaves the list what is above it, and keeps its Close on screen. */
 .ib-anncard .ib-annpop { max-height: min(60vh, calc(100dvh - 44px - var(--ib-fcomp-h, 0px) - env(safe-area-inset-bottom))); }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
