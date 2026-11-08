@@ -959,7 +959,9 @@ export function useHtmlAnnotation({
               const r = selectionRectRef.current;
               if (!iframe || !r) return null;
               const f = iframe.getBoundingClientRect();
-              return { top: f.top + r.top, bottom: f.top + r.top + r.height, left: f.left + r.left, right: f.left + r.left + r.width };
+              // The bridge measures in the page's pixels; a scaled frame shows them smaller.
+              const s = frameScaleRef.current;
+              return { top: f.top + r.top * s, bottom: f.top + (r.top + r.height) * s, left: f.left + r.left * s, right: f.left + (r.left + r.width) * s };
             },
             // The markup is built only when Copy is pressed: ask
             // the bridge for the pending range's HTML and wait a moment.
