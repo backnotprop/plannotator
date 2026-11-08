@@ -33,7 +33,7 @@ import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { INBOX_MACHINE_WINDOW_ONLY_BODY, isWindowRequest } from "./inbox-cross-site";
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
-import { doorWriteKind, InboxOutbox, type OutboxEntry } from "./inbox-outbox";
+import { doorWriteKind, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
 import { MACHINE_LINKS_PROTOCOL, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerLinkTimings, type PeerRecord } from "./inbox-peer-link";
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
@@ -146,6 +146,12 @@ export interface MachineView {
   list_cursor: number | null;
   /** Its Inbox keeps snoozes (approval "inbox-snooze"): a write there would land. False until its list is read, and for an older Inbox. */
   snoozes: boolean;
+  /**
+   * Remote launch, from its health when the line connected: agents can start there (true), launch is off there
+   * (false: "Starting agents is off on Mini"), or its Inbox is too old to say (null: "Update Plannotator on Mini to
+   * start agents there"). Null for this Inbox, whose own launch block says.
+   */
+  launch: boolean | null;
 }
 
 /** An agent's snooze of a linked machine's thread: its answer there, or `held`, the words for a write that waits. */
@@ -211,6 +217,8 @@ export const outboxView = (entry: OutboxEntry): OutboxView => ({
 const FORWARD = /^\/api\/inbox\/m\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/(.+)$/;
 const SNOOZE_ROUTE = /^threads\/[^/]+\/snooze$/;
 const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
+/** Another machine's folder names, for "Another folder on <machine>…" (remote launch). */
+const FOLDERS_ROUTE = "launch/folders";
 /** A tailnet guest of this Inbox, acting on another machine or on what waits for one. */
 const OWNER_ONLY_BODY = { error: "Only this computer's owner can act on another machine from this Inbox.", code: "owner_only" } as const;
 /** Of a forwarded read's query, what a guest never passes on: `sessions`' folder-trust facts. */
@@ -314,6 +322,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       waiting: 0,
       list_cursor: null,
       snoozes: true,
+      launch: null,
     },
     ...links.list().map((link) => {
       const peer = peers.get(link.id);
@@ -330,6 +339,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         waiting: outbox.list(link.id, "pending").length,
         list_cursor: peer?.list?.cursor ?? null,
         snoozes: peer?.list?.snoozes ?? false,
+        launch: peer?.launch ?? null,
       } satisfies MachineView;
     }),
   ];
@@ -642,8 +652,15 @@ export function createInboxMachines(context: InboxMachinesContext) {
       json({ error: `${links.get(machine)?.name ?? "That machine"} cannot be reached now.`, code: "machine_offline", machine: machinesView().find((m) => m.id === machine) }, 503);
     if (req.method === "GET") {
       const search = forwardedReadSearch(url.search, context.isGuest(req, via));
+      const headers = pick(req.headers, PASS_REQUEST);
+      // Another machine's folder names ("Another folder on <machine>…"): the owner's window only, and said so to it.
+      if (route === FOLDERS_ROUTE) {
+        if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
+        if (req.headers.get("sec-fetch-site") !== "same-origin") return json({ error: "Folders are listed in the Inbox window only.", code: "window_only" }, 403);
+        headers[MACHINE_WINDOW_HEADER] = "1";
+      }
       try {
-        return passAnswer(await peer.request(route, search, { method: "GET", headers: pick(req.headers, PASS_REQUEST), signal: req.signal }));
+        return passAnswer(await peer.request(route, search, { method: "GET", headers, signal: req.signal }));
       } catch {
         return offline();
       }

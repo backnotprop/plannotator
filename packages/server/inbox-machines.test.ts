@@ -1849,10 +1849,13 @@ describe("the forward takes no write from a tailnet guest", () => {
     }
   }, 60_000);
 
-  test("a tailnet guest can't cancel or dismiss what waits for another machine; the owner cancels from another device", async () => {
+  test("a tailnet guest can't cancel or dismiss what waits for another machine, nor list its folders; the owner cancels from another device", async () => {
     const w = await linkedPair("plannotator-machines-forward-cancel-", false);
     try {
       const { a, b, mini, asked } = w;
+      // Another machine's folder names are the owner's window's: a guest gets none.
+      const folders = await w.throughServe(GUEST, `/api/inbox/m/${mini}/launch/folders?path=~`);
+      expect([folders.status, ((await folders.json()) as Json).code]).toEqual([403, "owner_only"]);
       b.stop();
       await waitFor("A sees B asleep", async () => {
         const view = (await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json;

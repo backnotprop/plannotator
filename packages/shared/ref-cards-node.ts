@@ -7,6 +7,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { childEnv } from "./child-env";
 import { REF_TIMEOUT_MS, type RefRunner } from "./ref-cards";
 
 /** A runner with its own time limit (tests); `nodeRefCliRunner` is the real one. */
@@ -16,7 +17,7 @@ export function createNodeRefCliRunner(timeoutMs: number = REF_TIMEOUT_MS): RefR
       let child: ReturnType<typeof spawn>;
       try {
         child = spawn(cli, args, {
-          env: { ...process.env, GH_PROMPT_DISABLED: "1", NO_COLOR: "1", NO_PROMPT: "1", ...env },
+          env: childEnv({ GH_PROMPT_DISABLED: "1", NO_COLOR: "1", NO_PROMPT: "1", ...env }),
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
         });
