@@ -1464,9 +1464,11 @@ export function InboxList(props: InboxListProps) {
         <SidebarTrigger />
         {props.onRefresh ? (
           <h1 dir="auto" className="ib-lhead-h">
-            {/* No tooltip (the owner, on #2911: words over the ↻ are too heavy): on hover or keyboard focus, only Shift+R's
-                keycap pops out beside the ↻, over the header (inbox.css `.ib-hover-kbd`). Its words stay for screen
-                readers: the description below and `aria-keyshortcuts`. */}
+            {/* The ↻ has no words (the owner, on #2911: a tooltip over it is too heavy): on hover or keyboard focus only
+                Shift+R's keycap pops out beside it, over the header (inbox.css `.ib-hover-kbd`); its words stay for
+                screen readers (the description below, `aria-keyshortcuts`). The name keeps its own tooltip, as a
+                header without the ↻ has: a project's full name and folder (never beside the name), else the name
+                when the header cuts it. */}
             <button
               type="button"
               className="ib-lhead-title"
@@ -1476,7 +1478,9 @@ export function InboxList(props: InboxListProps) {
               data-list-refresh=""
               data-refreshing={props.refreshSpin != null ? '' : undefined}
             >
-              <span className="ib-lhead-tt">{props.title}</span>
+              <Tip content={props.path ? <ProjectTipText name={props.title} root={props.path} /> : props.title} cut={!props.path}>
+                <span className="ib-lhead-tt">{props.title}</span>
+              </Tip>
               <Icon key={props.refreshSpin ?? 'rest'} name="refresh" size={16} className="ib-ic-refresh" />
               <ShortcutHint scope={inboxAppShortcuts} action="refresh" className="ib-kbd ib-hover-kbd" />
             </button>

@@ -331,8 +331,9 @@ function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnsw
           : 'Nothing read on this computer';
   return (
     <div className="ib-pr-foot" data-pulls-foot="">
-      {/* No tooltip, as the list's ↻ (the owner, on #2911): on hover or keyboard focus only Shift+R's keycap pops out beside
-          it, over the foot's words (inbox.css `.ib-hover-kbd`); the words stay for screen readers. */}
+      {/* No tooltip, as the list's ↻ (the owner, on #2911): on hover or keyboard focus only Shift+R's keycap shows beside it.
+          The keycap follows the button in the row, invisible until then, so it has its own room and never covers the
+          words or moves them (inbox.css `.ib-pr-foot > .ib-hover-kbd`); with no keycap drawn, no room is kept. */}
       <button
         type="button"
         className="ib-iconbtn ib-pr-refresh"
@@ -343,8 +344,8 @@ function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnsw
         data-pulls-refresh=""
       >
         <Icon name="refresh" size={14} />
-        <ShortcutHint scope={inboxAppShortcuts} action="refresh" className="ib-kbd ib-hover-kbd" />
       </button>
+      <ShortcutHint scope={inboxAppShortcuts} action="refresh" className="ib-kbd ib-hover-kbd" />
       <span className="ib-pr-foot-t" aria-live="polite" title={words || undefined} data-pulls-foot-words="">
         {words}
       </span>
