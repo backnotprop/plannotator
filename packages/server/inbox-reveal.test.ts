@@ -127,7 +127,8 @@ async function world(options: Options = {}) {
     launchedThread = store.startPersonThread({
       project_id: project.id,
       body: "Fix the totals.",
-      to: null,
+      // A launch's placeholder `to` (inbox-launch.ts): the store refuses a Send with none.
+      to: { host: "claude-code", session: "launch:lch_seeded" },
       idempotency_key: "launched-1",
       launch: { id: "lch_seeded", agent: "claude-code", session_ref: null, folder: join(root, "docs"), scratch: false, started_at: then.toISOString() },
     }).message.thread_id;
