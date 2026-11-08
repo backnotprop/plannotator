@@ -230,6 +230,26 @@ async function bringLine(page: Page, file: string, n: number, by: number, block:
   await line(page, file, n).evaluate((el, at) => el.scrollIntoView({ block: at }), block);
 }
 
+/**
+ * Wheels the page, as a person does, until the line is drawn and wholly on screen under the file's sticky header: real
+ * scrolls, which the diff's drawn rows follow. Down while the line is not drawn yet or is below; up once it is above.
+ */
+async function wheelOnScreen(page: Page, file: string, n: number): Promise<void> {
+  const height = page.viewportSize()!.height;
+  await page.mouse.move(1000, Math.floor(height / 2));
+  let box: { y: number; height: number } | null = null;
+  let roof = 0;
+  for (let i = 0; i < 60; i += 1) {
+    const target = line(page, file, n);
+    box = (await target.count()) ? await target.boundingBox({ timeout: 1000 }).catch(() => null) : null;
+    roof = (await page.locator('[data-review-message] .ib-gbody').first().evaluate((el) => el.getBoundingClientRect().top)) + 40;
+    if (box && box.y >= roof && box.y + box.height <= height) return;
+    await page.mouse.wheel(0, box && box.y < roof ? -80 : 80);
+    await page.waitForTimeout(120);
+  }
+  throw new Error(`line ${n} of ${file} never came on screen: ${box ? `at ${box.y}, the page from ${roof} to ${height}` : 'not drawn'}`);
+}
+
 async function select(page: Page, file: string, from: number, to: number, type = 'change-addition'): Promise<void> {
   await expect(line(page, file, from, type)).toBeVisible({ timeout: 30_000 });
   await line(page, file, from, type).click();
@@ -448,8 +468,8 @@ test('more selected lines than the screen holds: it stays on screen', async () =
     await line(page, LONG, 5).evaluate((el) => el.scrollIntoView({ block: 'start' }));
     await page.waitForTimeout(300);
     await line(page, LONG, 5).click();
-    await line(page, LONG, 25).evaluate((el) => el.scrollIntoView({ block: 'end' }));
-    await page.waitForTimeout(300);
+    // Down to line 25 by the wheel, as a person does: the diff draws the rows the page brings near.
+    await wheelOnScreen(page, LONG, 25);
     await line(page, LONG, 25).click({ modifiers: ['Shift'] });
     await line(page, LONG, 15).evaluate((el) => el.scrollIntoView({ block: 'center' }));
     await expect(bar(page)).toBeVisible();
