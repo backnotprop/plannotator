@@ -39,7 +39,12 @@ import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'shapes';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'shapes' | 'artifacts';
+  /**
+   * Artifacts (approval "inbox-artifact-stars"): the row in the top group, always shown with `onArtifacts`, that opens
+   * the Artifacts wall on All. No count.
+   */
+  onArtifacts?: () => void;
   /**
    * The Board (approval "inbox-board", step 2): the row under Inbox, always
    * shown with `onBoard`. No count: the approval keeps the count in the
@@ -348,6 +353,7 @@ export function Sidebar(props: SidebarProps) {
     compose: Boolean(props.onCompose),
     feedback: Boolean(props.onFeedback),
     drafts: Boolean(props.onDrafts),
+    artifacts: Boolean(props.onArtifacts),
     shortcuts: Boolean(props.onShortcuts),
     copyPrompt: props.connectPrompt !== false,
     phone,
@@ -485,6 +491,20 @@ export function Sidebar(props: SidebarProps) {
               {formatCount(props.pullsCount ?? 0)}
             </span>
           )}
+        </button>
+        );
+      case 'artifacts':
+        // Artifacts (approval "inbox-artifact-stars"): the wall of every thread's artifacts, pinned ones first.
+        return (
+        <button
+          type="button"
+          className={`ib-nav${props.page === 'artifacts' ? ' ib-on' : ''}`}
+          onClick={pick(() => props.onArtifacts?.())}
+          aria-current={props.page === 'artifacts' ? 'page' : undefined}
+          data-artifacts-nav=""
+        >
+          <Icon name="artifacts" />
+          Artifacts
         </button>
         );
       case 'drafts':

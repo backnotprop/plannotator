@@ -40,6 +40,7 @@ export const INBOX_SIDEBAR_ITEMS = [
   { id: 'board', label: 'Board', place: 'stack', stack: 'top', hideable: true },
   { id: 'shape', label: 'Shape', place: 'stack', stack: 'top', hideable: true },
   { id: 'reviews', label: 'Reviews', place: 'stack', stack: 'top', hideable: true },
+  { id: 'artifacts', label: 'Artifacts', place: 'stack', stack: 'top', hideable: true },
   { id: 'drafts', label: 'Drafts', place: 'stack', stack: 'top', hideable: true },
   { id: 'copy-prompt', label: 'Copy prompt', place: 'stack', stack: 'bottom', hideable: true },
   { id: 'feedback', label: 'Feedback', place: 'stack', stack: 'bottom', hideable: true },

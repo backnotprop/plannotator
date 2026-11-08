@@ -15,6 +15,7 @@ export const SIDEBAR_ITEM_ICON: Record<InboxSidebarItem, IconName> = {
   board: 'board',
   shape: 'layers',
   reviews: 'reviews',
+  artifacts: 'artifacts',
   drafts: 'doc',
   'copy-prompt': 'copy',
   feedback: 'comment',
@@ -34,6 +35,8 @@ export interface SidebarFeatures {
   compose?: boolean;
   feedback?: boolean;
   drafts?: boolean;
+  /** Artifacts (approval "inbox-artifact-stars"): absent in a sidebar drawn without it. */
+  artifacts?: boolean;
   shortcuts?: boolean;
   copyPrompt?: boolean;
   phone: boolean;
@@ -50,6 +53,7 @@ export function drawnSidebarItems(features: SidebarFeatures): ReadonlySet<InboxS
   if (features.compose === false) off.add('new-message');
   if (features.feedback === false) off.add('feedback');
   if (features.drafts === false) off.add('drafts');
+  if (features.artifacts === false) off.add('artifacts');
   if (features.phone || features.shortcuts === false) off.add('shortcuts');
   if (features.phone || features.copyPrompt === false) off.add('copy-prompt');
   return new Set(INBOX_SIDEBAR_ITEMS.map((spec) => spec.id).filter((id) => !off.has(id)));
