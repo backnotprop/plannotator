@@ -5957,13 +5957,17 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               // The bar's title, as on main: the thread's name (the list's rule, `threadChipName`), always; with no name,
               // the subject once the body's heading has scrolled away, so its words never show twice; always over the
               // Artifacts grid. The heading stays the body's h2 (what a screen reader reads). Its tooltip is the whole
-              // subject: always under a name (the owner, 2026-11-02), else only when the subject is cut.
-              <Tip content={thread.subject ?? '(no subject)'} cut={!nameChip}>
-                <span className="ib-phsubj" dir="auto" data-header-subject="" data-header-name={nameChip ? '' : undefined} data-on={nameChip || chrome.subject || artifactsOn ? '' : undefined} aria-hidden="true">
-                  <HeadMark thread={thread} where="bar" />
-                  {nameChip ?? thread.subject ?? '(no subject)'}
-                </span>
-              </Tip>
+              // subject: always under a name (the owner, 2026-11-02), else only when the subject is cut. The box takes the
+              // bar's free room, so the tooltip hangs on the words inside it (`.ib-phsubj-t`, as wide as they are, cut
+              // with "…" at the box's edge): it opens under the title, not centred on the empty room after a short one.
+              <span className="ib-phsubj" dir="auto" data-header-subject="" data-header-name={nameChip ? '' : undefined} data-on={nameChip || chrome.subject || artifactsOn ? '' : undefined} aria-hidden="true">
+                <Tip content={thread.subject ?? '(no subject)'} cut={!nameChip}>
+                  <span className="ib-phsubj-t" data-header-title="">
+                    <HeadMark thread={thread} where="bar" />
+                    {nameChip ?? thread.subject ?? '(no subject)'}
+                  </span>
+                </Tip>
+              </span>
             )}
             {artifactsButton && (
               <Tip content={withShortcut(artifactsOn ? 'Back to the thread' : linksOnly ? 'Links' : 'Artifacts: every file, image and guided review in this thread', { scope: inboxThreadShortcuts, action: 'artifacts' })}>
