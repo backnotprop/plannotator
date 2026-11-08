@@ -196,7 +196,7 @@
 - **Claude Code** (the mod, `apps/hook/hooks/mod/inbox.ts`; details in "The Plannotator Inbox" in the mod section):
   - `InboxLink` long-polls on a 1 s tick and submits the wake once the session has been idle for two ticks; a Send now reply (`now`) goes in at once, into a running turn as a user row (`$.session.append`).
   - It claims each reply once (mkdir) and holds a per-session lease, `watcher.json`: the person's last process wins, and the lease goes stale after 20 s.
-  - It needs the mod (Claude Code 2.1.287+, not `claude -p`, not Windows).
+  - It needs the mod (Claude Code 2.1.287+, not `claude -p`).
 - **Pi, OpenCode, DeepSeek Harness and Cline** (`packages/shared/inbox/agent-link.ts`, vendored into Pi as `generated/inbox/`):
   - `InboxAgentConnection` starts a stopped Inbox with `plannotator inbox --background`, through `PLANNOTATOR_BIN`, `plannotator` on PATH, or `~/.local/bin/plannotator`. With no binary, the first result says to install Plannotator.
   - `InboxWake` long-polls, delivers after two idle ticks, checks the reply once more, and claims it with a mkdir of `inbox/claims/<reply id>.<session>` (an older version's `<reply id>` alone still counts until a move drops it). It never interrupts a turn. A Send now reply (`now`) goes in at once: through the target's optional `steer` while the session is busy (its presence is what makes the poll say `send_now`), else `deliver`.

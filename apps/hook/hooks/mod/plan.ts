@@ -141,7 +141,7 @@ export function cliLacksModPlan(stderr: string): boolean {
 
 /** Logged once per session when the CLI has no non-blocking plan review. */
 export const CLASSIC_PLAN_REVIEW_TEXT =
-  'Your plannotator CLI is older than the Plannotator plugin and has no non-blocking plan review, so plans open in the classic review, which holds this session until you decide. Update the CLI (curl -fsSL https://plannotator.ai/install.sh | bash) and start or resume a session to get non-blocking plan review.'
+  'Your plannotator CLI is older than the Plannotator plugin and has no non-blocking plan review, so plans open in the classic review, which holds this session until you decide. Update the CLI (curl -fsSL https://plannotator.ai/install.sh | bash, or on Windows irm https://plannotator.ai/install.ps1 | iex) and start or resume a session to get non-blocking plan review.'
 
 /**
  * Sent to Claude when the old CLI refused only after the ExitPlanMode call had

@@ -292,10 +292,10 @@ test.skipIf(!hasDom)('Your replies: a new turn through Plannotator\'s own tool, 
   expect(replies('cursor')).toBeNull();
 });
 
-test.skipIf(!hasDom)('Your replies on Windows: Claude Code\'s mod stands down there, so its group says nothing about a new turn', () => {
+test.skipIf(!hasDom)('Your replies on Windows: Claude Code and Pi arrive as a new turn, as elsewhere; an MCP agent is the same everywhere', () => {
   const claude = tool('claude-code', 'Claude Code');
   expect(repliesOf(claude, 'mac')).toEqual({ text: 'arrive as a new turn', wakes: true });
-  expect(repliesOf(claude, 'windows')).toBeNull();
+  expect(repliesOf(claude, 'windows')).toEqual({ text: 'arrive as a new turn', wakes: true });
   // Pi's own extension still wakes it on Windows; an MCP agent is the same everywhere.
   expect(repliesOf(tool('pi', 'Pi'), 'windows')?.wakes).toBe(true);
   expect(repliesOf(mcp('codex', 'Codex', '~/.codex/config.toml'), 'windows')?.wakes).toBe(false);

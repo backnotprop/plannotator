@@ -201,7 +201,7 @@ Before any agent has written, the Inbox window shows one next step for this comp
 
 With the Plannotator plugin and [the Plannotator mod](/docs/guides/claude-code/#the-plannotator-mod) (Claude Code 2.1.287 or newer), Claude Code gets a `plannotator_inbox` tool. The tool is on by default for Claude Code, also before you ever ran the Inbox: the first time Claude uses it, it starts the Inbox in the background. The tool is added when Claude Code starts, not when you start a new conversation in a running one, so restart Claude Code after you change the setting. When you send a reply, it arrives in that session as a new turn after Claude finishes what it is doing; **Send now** puts it into the turn Claude is in instead. The thread then shows "Delivered to Claude Code".
 
-The mod is off in `claude -p`, in SDK runs and on Windows. There the tool is not added. Use the MCP server instead (see [Other agents](#other-agents)).
+The mod is off in `claude -p` and in SDK runs. There the tool is not added. Use the MCP server instead (see [Other agents](#other-agents)).
 
 ### Pi
 

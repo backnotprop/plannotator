@@ -271,14 +271,12 @@ function stateOf(row: InboxAgentRow): { text: string; tone: 'on' | 'off' | 'bad'
  * Plannotator's own connection puts it into the session as a new turn; an
  * agent reached through MCP (or OpenCode 1, which has the tool but no wake)
  * reads it when it next checks. Null when the agent does not reach the Inbox,
- * or when it is not known (Claude Code on Windows).
+ * or when it is not known.
  */
 export function repliesOf(row: InboxAgentRow, platform?: ConnectContext['platform']): { text: string; wakes: boolean } | null {
   if (!row.reach.on) return null;
   if (row.reach.kind === 'tool') {
     if (row.tool?.mod_off) return null;
-    // Claude Code's mod stands down on Windows (no /bin/sh), so nothing wakes it there: say no more than the Reaches row.
-    if (row.id === 'claude-code' && platform === 'windows') return null;
     if (row.id === 'opencode' && row.plugin?.generation === '1') return { text: "seen when it checks the Inbox; OpenCode 1 can't be woken", wakes: false };
     return { text: 'arrive as a new turn', wakes: true };
   }
