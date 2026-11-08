@@ -2847,6 +2847,11 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline";
  * The `supersedes` field's example (`e.g. ["msg_…/q-…"]`, after a session's
  * unquoted ids broke its calls): +48 bytes measured from the entry, about +13
  * tokens, Board on or off; inside the 5%, so the constants stay.
+ * The ref rule names the coordinator case (INBOX_REF_LINK_RULE, 171 → 441
+ * characters: where the session started, a word before `#N`, every mention,
+ * relaying another agent's report): about +270 bytes on `body`, about +70
+ * tokens, estimated, not measured on Pi; 2.6%, inside the 5%, so the
+ * constants stay.
  */
 const INBOX_TOOL_COST_NOW = { bytes: 10248, tokens: 2790 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */

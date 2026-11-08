@@ -125,7 +125,7 @@ export const INBOX_REPLY_TO_CHECK = 'Before reply_to into a thread you have not 
  * `owner/repo#123` links on the project's own forge, so a GitHub ref from a
  * GitLab project needs its URL.
  */
-export const INBOX_REF_LINK_RULE = "A bare #123 links to this project's repository. For an issue or PR in another repo, write owner/repo#123 or its full URL (in a GitLab project, a GitHub one needs its URL)."
+export const INBOX_REF_LINK_RULE = "A bare #123 links to this project's repository (where your session started, or `project_path`), even in a message about another repo; a word before it (`docs #12`, `docs PR #12`) does not change that. For any other repo's issue or PR, write owner/repo#123 (its `git remote -v`) or its full URL in every mention, repeats and choices too; relaying another agent's report, rewrite its bare refs. In a GitLab project, a GitHub one needs its URL."
 
 /** The card's `say` and `you`: a pointer to the rule on `body`, not the rule again (every request carries both). */
 export const INBOX_REF_LINK_POINTER = "Refs link as in send_message's body."
