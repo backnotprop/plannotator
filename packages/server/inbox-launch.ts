@@ -13,8 +13,9 @@
  * We start nothing that lives on its own: the agent's own background host
  * keeps the session (`claude --bg`). Messages move over the links the Inbox
  * already has (Claude Code: the mod's bridge poll). Behind
- * `inboxLaunch.enabled` (config only, default off): off, every route here
- * answers 404 and nothing else changes.
+ * `inboxLaunch.enabled` (on unless it is false; Settings → Agents' "Start
+ * agents from New message" switch, read live): off, every route here but the
+ * settings one answers 404 and nothing else changes.
  *
  * The flow (compose's Send, packages/server/inbox-compose.ts):
  *  1. `prepare`: the project's folder must be there (422 folder_missing) and
@@ -724,14 +725,21 @@ export function createInboxLaunch(options: {
 
   // ── Routes ──
 
-  /** Settings → Agents: the full-permissions switch (Claude Code's words, `settingsState`) and the scratch root. */
-  const settingsState = () => ({
-    enabled: enabled(),
-    ...claude.settingsState(),
-    // Settings → Agents' "Scratch folders": where new ones go.
-    scratch_dir: scratchRoot(),
-    scratch_dir_shown: options.displayFolder(scratchRoot()),
-  });
+  /**
+   * Settings → Agents: the "Start agents from New message" switch (`enabled`), and while it is on the full-permissions
+   * switch (Claude Code's words, `settingsState`) and the scratch root. Off, those rows are hidden, so nothing else is
+   * read (no Claude settings, no login shell).
+   */
+  const settingsState = (): { enabled: boolean; full_permissions: boolean } & Record<string, unknown> =>
+    enabled()
+      ? {
+          enabled: true,
+          ...claude.settingsState(),
+          // Settings → Agents' "Scratch folders": where new ones go.
+          scratch_dir: scratchRoot(),
+          scratch_dir_shown: options.displayFolder(scratchRoot()),
+        }
+      : { enabled: false, full_permissions: false };
   /**
    * "Another folder on <machine>…": the folder names in one folder under home (`listHomeFolders`). The owner's window
    * only: a guest gets `owner_only`; an agent's call, MCP and the CLI (no same-origin fetch) and a linked machine
@@ -767,7 +775,8 @@ export function createInboxLaunch(options: {
     }
     const match = /^\/api\/inbox\/launch\/(settings|lch_[0-9A-HJKMNP-TV-Z]{26})(?:\/(stop|open|delete|retry|trust))?$/.exec(path);
     if (!match) return null;
-    if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
+    // Off, only Settings → Agents' switch answers: its read, and the POST that turns it back on.
+    if (!enabled() && !(match[1] === "settings" && !match[2])) return json({ error: "Launch is off.", code: "launch_off" }, 404);
     // Settings → Agents, shown: the switch as it stands; never set, the login shell read again when stale.
     if (req.method === "GET" && match[1] === "settings" && !match[2]) {
       // The owner's, from this computer or over the tailnet (their phone); never a guest's.
@@ -777,7 +786,7 @@ export function createInboxLaunch(options: {
       // `ahead=1` (the composer picked "Start Claude Code"): read now, off the Send's path, so a change to the
       // person's rc counts for that Send. One read at a time either way.
       const ahead = new URL(req.url).searchParams.get("ahead") === "1";
-      if (config().fullPermissions === null && (ahead || !shellFresh())) await readLogin();
+      if (enabled() && config().fullPermissions === null && (ahead || !shellFresh())) await readLogin();
       return json({ launch: settingsState() });
     }
     if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -788,6 +797,18 @@ export function createInboxLaunch(options: {
       if (match[2]) return null;
       // The owner's, from this computer or over the tailnet (their phone), as main's other settings are; never a guest's.
       if (options.isGuest?.(req, via)) return json({ error: "Only this computer's owner can change this.", code: "owner_only" }, 403);
+      if ("enabled" in body) {
+        // Settings → Agents' "Start agents from New message": written either way (an explicit true outlives a change
+        // of default), and read live, so New message offers or drops its New session rows without a restart.
+        if (typeof body.enabled !== "boolean") throw new InboxError("validation_error", "enabled: a boolean.", { field: "enabled" });
+        const current = loadConfig().inboxLaunch ?? {};
+        saveConfig({ inboxLaunch: { ...current, enabled: body.enabled } });
+        if (config().enabled !== body.enabled) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
+        // Turned on: the login shell read the Inbox skipped at start while off, ahead of the first Send.
+        if (body.enabled && !shellFresh()) void readLogin().catch(() => {});
+        return json({ launch: settingsState() });
+      }
+      if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
       if ("scratch_dir" in body) {
         // Settings → Agents' "Scratch folders": a full path (`~/` is the person's home); empty or null is the default.
         const raw = body.scratch_dir;

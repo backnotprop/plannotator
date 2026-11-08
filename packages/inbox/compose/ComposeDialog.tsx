@@ -18,7 +18,7 @@
  * - A reopened draft keeps the session it was for, struck through when that
  *   session has ended: it is never re-addressed on its own.
  * - Files: the paperclip, a drop or a paste (paste.ts), uploaded at once (ComposeFiles.tsx).
- * - Launch on (`inboxLaunch.enabled`, docs/agent-guides/inbox-launch.md): To can
+ * - Launch on (`inboxLaunch.enabled`, on unless Settings → Agents turned it off; docs/agent-guides/inbox-launch.md): To can
  *   also name a new session ("New Claude Code session ▾ in <project> ▾"); Send
  *   writes the thread, then the Inbox starts the agent in the project's folder.
  *   A folder that is gone turns Send off and says so (UX screen 13).

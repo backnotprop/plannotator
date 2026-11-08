@@ -50,9 +50,16 @@ import {
 import type { PlannotatorConfig } from "./config";
 
 describe("resolveInboxLaunch", () => {
-  test("off unless enabled; the model only when it is a plain model name, never settings of another shape", () => {
+  test("on unless enabled is false; the model only when it is a plain model name, never settings of another shape", () => {
     // fullPermissions null: never set (a launch follows the login shell); a value once set, either way.
-    expect(resolveInboxLaunch({})).toEqual({ enabled: false, fullPermissions: null, model: null, scratchDir: null });
+    expect(resolveInboxLaunch({})).toEqual({ enabled: true, fullPermissions: null, model: null, scratchDir: null });
+    // Absent is on (0.29's default); an explicit false, as Settings → Agents' switch writes it or a hand edit, is off.
+    expect(resolveInboxLaunch({ inboxLaunch: {} }).enabled).toBe(true);
+    expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: true } }).enabled).toBe(true);
+    expect(resolveInboxLaunch({ inboxLaunch: { enabled: false } }).enabled).toBe(false);
+    expect(resolveInboxLaunch({ inboxLaunch: { enabled: "false" } } as unknown as PlannotatorConfig).enabled).toBe(false);
+    expect(resolveInboxLaunch({ inboxLaunch: { enabled: "0" } } as unknown as PlannotatorConfig).enabled).toBe(false);
+    expect(resolveInboxLaunch({ inboxLaunch: "off" } as unknown as PlannotatorConfig).enabled).toBe(true);
     expect(resolveInboxLaunch({ inboxLaunch: { enabled: true, model: "haiku" } })).toEqual({ enabled: true, fullPermissions: null, model: "haiku", scratchDir: null });
     expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: false } }).fullPermissions).toBe(false);
     expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: true } }).fullPermissions).toBe(true);

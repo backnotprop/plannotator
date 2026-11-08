@@ -107,6 +107,19 @@ describe('linked machines: one group per machine', () => {
     expect(out.groups.map((g) => g.notice?.line ?? null)).toEqual([null, 'Starting agents is off on Mac mini', 'Update Plannotator on Studio to start agents there']);
   });
 
+  test("the machine's switch turned since the link connected: its last sessions read decides, not the link's health", () => {
+    // Turned off there: health still said on, the read has no launch block. Turned on there: health said off, the read has one.
+    const out = launchGroups({
+      agent: 'claude-code',
+      self,
+      machines: [SELF_VIEW, machine(MINI, 'Mac mini', { launch: true }), machine(STUDIO, 'Studio', { launch: false })],
+      reads: reads([[MINI, undefined], [STUDIO, mini]]),
+    });
+    expect(out.groups.map((g) => g.notice?.line ?? null)).toEqual([null, 'Starting agents is off on Mac mini', null]);
+    expect(out.groups[2]!.name).toBe('Studio');
+    expect(out.groups[2]!.projects.map((p) => p.id)).toEqual(['prj_infra', 'prj_bill_m']);
+  });
+
   test('an unlinked (revoked) machine is gone', () => {
     const out = launchGroups({ agent: 'claude-code', self, machines: [SELF_VIEW, machine(MINI, 'Mac mini', { state: 'revoked' })], reads: reads([[MINI, mini]]) });
     expect(out.grouped).toBe(false);

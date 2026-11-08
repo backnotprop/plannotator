@@ -4,10 +4,13 @@
  * another site's page and a tailnet guest are refused before the person's login shell is
  * started; concurrent reads share one shell read; the person's own bypass consent, read
  * from their Claude files, decides whether Full permissions can apply; and a person
- * whose Claude settings set a default mode is not shown (or started in) auto mode.
+ * whose Claude settings set a default mode is not shown (or started in) auto mode. And
+ * Settings → Agents' "Start agents from New message" switch: absent in config.json is on,
+ * an explicit false is off, and its POST writes config.json and turns launch on or off at
+ * once (no restart), the read and the switch itself still answering while off.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxStore } from "@plannotator/shared/inbox/store";
@@ -30,7 +33,7 @@ function setEnv(name: string, value: string) {
   });
 }
 
-function setup(options: { shellSkips?: boolean; claude?: Record<string, unknown>; claudeLocal?: Record<string, unknown>; claudeJson?: Record<string, unknown>; fullPermissions?: boolean; enabled?: boolean } = {}) {
+function setup(options: { shellSkips?: boolean; claude?: Record<string, unknown>; claudeLocal?: Record<string, unknown>; claudeJson?: Record<string, unknown>; fullPermissions?: boolean; enabled?: boolean | null } = {}) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-launch-settings-"));
   restore.push(() => rmSync(root, { recursive: true, force: true }));
   const dataDir = join(root, "data");
@@ -39,7 +42,9 @@ function setup(options: { shellSkips?: boolean; claude?: Record<string, unknown>
   mkdirSync(dataDir, { recursive: true });
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   setEnv("PLANNOTATOR_TEST_SANDBOX", "1");
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: options.enabled ?? true, ...(options.fullPermissions === undefined ? {} : { fullPermissions: options.fullPermissions }) } }));
+  // `enabled: null`: no `enabled` key at all (the 0.29 default).
+  const enabled = options.enabled === null ? {} : { enabled: options.enabled ?? true };
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { ...enabled, ...(options.fullPermissions === undefined ? {} : { fullPermissions: options.fullPermissions }) } }));
   if (options.claude) writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(options.claude));
   if (options.claudeLocal) writeFileSync(join(home, ".claude", "settings.local.json"), JSON.stringify(options.claudeLocal));
   if (options.claudeJson) writeFileSync(join(home, ".claude.json"), JSON.stringify(options.claudeJson));
@@ -72,8 +77,68 @@ function setup(options: { shellSkips?: boolean; claude?: Record<string, unknown>
     const response = await launch.route(new Request(`http://127.0.0.1:4000/api/inbox/launch/settings${query}`, { headers: { host: "127.0.0.1:4000", ...headers } }), "/api/inbox/launch/settings", via);
     return { status: response!.status, body: (await response!.json()) as { launch?: Record<string, unknown>; code?: string } };
   };
-  return { get, reads, launch, home };
+  const call = async (path: string, init: { method?: string; body?: Record<string, unknown>; headers?: Record<string, string> } = {}, via = "local") => {
+    const request = new Request(`http://127.0.0.1:4000${path}`, {
+      method: init.method ?? (init.body ? "POST" : "GET"),
+      headers: { host: "127.0.0.1:4000", ...(init.body ? { "content-type": "application/json" } : {}), ...init.headers },
+      ...(init.body ? { body: JSON.stringify(init.body) } : {}),
+    });
+    const response = await launch.route(request, new URL(request.url).pathname, via);
+    return { status: response!.status, body: (await response!.json()) as { launch?: Record<string, unknown>; code?: string } };
+  };
+  const post = (body: Record<string, unknown>, headers: Record<string, string> = {}, via = "local") => call("/api/inbox/launch/settings", { body, headers }, via);
+  const saved = () => (JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { inboxLaunch: Record<string, unknown> }).inboxLaunch;
+  return { get, post, call, saved, reads, launch, home };
 }
+
+describe("Start agents from New message (config.json `inboxLaunch.enabled`)", () => {
+  test("no `enabled` key is on; an explicit false is off, where only the settings route answers and no shell is read", async () => {
+    const absent = setup({ enabled: null });
+    expect(absent.launch.enabled()).toBe(true);
+    expect((await absent.get()).body.launch).toMatchObject({ enabled: true });
+    expect(await absent.launch.composeBlock()).toBeDefined();
+
+    const off = setup({ enabled: false, fullPermissions: true });
+    expect(off.launch.enabled()).toBe(false);
+    expect(await off.launch.composeBlock()).toBeUndefined();
+    // Settings → Agents still reads the switch: off, and nothing about the hidden rows.
+    expect(await off.get()).toEqual({ status: 200, body: { launch: { enabled: false, full_permissions: false } } });
+    expect(off.reads.count).toBe(0);
+    // Every other launch route, and the hidden rows' own settings, stay off.
+    expect(await off.call("/api/inbox/launch/folders?path=~")).toMatchObject({ status: 404, body: { code: "launch_off" } });
+    expect(await off.post({ full_permissions: false })).toMatchObject({ status: 404, body: { code: "launch_off" } });
+    expect(await off.post({ scratch_dir: null })).toMatchObject({ status: 404, body: { code: "launch_off" } });
+    expect(off.saved()).toEqual({ enabled: false, fullPermissions: true });
+  });
+
+  test("the switch writes config.json, keeps the other launch settings, and launch follows at once both ways", async () => {
+    const world = setup({ enabled: null, fullPermissions: false });
+    const off = await world.post({ enabled: false });
+    expect(off).toEqual({ status: 200, body: { launch: { enabled: false, full_permissions: false } } });
+    expect(world.saved()).toEqual({ fullPermissions: false, enabled: false });
+    expect(world.launch.enabled()).toBe(false);
+    expect(await world.launch.composeBlock()).toBeUndefined();
+
+    const on = await world.post({ enabled: true });
+    expect(on.status).toBe(200);
+    expect(on.body.launch).toMatchObject({ enabled: true, full_permissions: false });
+    expect(world.saved()).toEqual({ fullPermissions: false, enabled: true });
+    expect(world.launch.enabled()).toBe(true);
+    expect(await world.launch.composeBlock()).toBeDefined();
+    expect((await world.post({ full_permissions: true })).status).toBe(200);
+  });
+
+  test("the owner's alone, and only a boolean", async () => {
+    const world = setup({ enabled: null });
+    expect(await world.post({ enabled: false }, { "tailscale-user-login": "guest@example.com" }, "tailnet")).toMatchObject({ status: 403, body: { code: "owner_only" } });
+    expect(world.launch.enabled()).toBe(true);
+    await expect(world.post({ enabled: "false" })).rejects.toMatchObject({ code: "validation_error" });
+    expect(world.saved()).toEqual({});
+    // The owner over the tailnet (their phone), as the other launch settings.
+    expect((await world.post({ enabled: false }, { "tailscale-user-login": OWNER }, "tailnet")).status).toBe(200);
+    expect(world.launch.enabled()).toBe(false);
+  });
+});
 
 describe("GET /api/inbox/launch/settings", () => {
   test("another site's page and a tailnet guest are refused, and never start the login shell; the owner reads it on their phone too", async () => {

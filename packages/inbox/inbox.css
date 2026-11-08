@@ -3759,6 +3759,8 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 .ib-agrow .ib-agsub.ib-agwarn { color: color-mix(in oklch, var(--warning) 80%, var(--foreground)); }
 .pn-inbox .ib-agrow .ib-agsub svg.ib-ic { width: 13px; height: 13px; margin-top: 2px; flex: none; }
 .ib-agrow.ib-agna .ib-agk { color: var(--muted-foreground); }
+/* Settings → Agents' "Start agents from New message": its own group, first, with no agent mark to indent under. */
+.ib-agent.ib-aglaunch .ib-agrow { padding: 12px 14px; }
 .ib-agpending { font-size: var(--ib-fs-12, 12px); color: var(--primary); }
 .ib-agnote pre { font-size: var(--ib-fs-12, 12px); line-height: 1.55; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ib-amore { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-top: 1px solid var(--ib-line); font-size: var(--ib-fs-13-5, 13.5px); width: 100%; text-align: left; background: none; border-left: 0; border-right: 0; border-bottom: 0; color: inherit; cursor: pointer; }

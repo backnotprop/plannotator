@@ -620,9 +620,10 @@ export interface PlannotatorConfig {
    */
   inboxTailscaleAllow?: string[];
   /**
-   * Launch agents from the Inbox (compose's "New Claude Code session";
-   * packages/server/inbox-launch.ts). `enabled`: config only, default false,
-   * off, compose, the thread and every route are as before.
+   * Launch agents from the Inbox (New message's "New session" rows;
+   * packages/server/inbox-launch.ts). `enabled`: Settings → Agents' "Start
+   * agents from New message" switch, default on (absent is on); `false`
+   * turns it off: no New session rows, and every launch route answers 404.
    * `fullPermissions`: Settings → Agents' "Start new sessions with full
    * permissions" (bypass mode); never set, a launch follows the person's
    * login shell (CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS). `model`: config only, a model name such as
@@ -1296,13 +1297,14 @@ export function resolveDefaultDiffTypeFor(
 const LAUNCH_MODEL = /^[\w.\-[\]]{1,64}$/;
 
 /**
- * config.inboxLaunch, coerced: off unless `enabled` is true; `model` only when it is a plain model name;
+ * config.inboxLaunch, coerced: on unless `enabled` is false (absent is on; Settings → Agents' "Start agents from
+ * New message" switch writes it); `model` only when it is a plain model name;
  * `scratchDir` only when it is an absolute path other than `/` (null: the default, `<dataDir>/scratch`).
  */
 export function resolveInboxLaunch(config: PlannotatorConfig): { enabled: boolean; fullPermissions: boolean | null; model: string | null; scratchDir: string | null } {
   const value = config.inboxLaunch && typeof config.inboxLaunch === "object" ? config.inboxLaunch : {};
   return {
-    enabled: coerceConfigBoolean(value.enabled, false),
+    enabled: coerceConfigBoolean(value.enabled, true),
     // null: the person never set the switch (a launch follows their login shell).
     fullPermissions: parseConfigBoolean(value.fullPermissions) ?? null,
     model: typeof value.model === "string" && LAUNCH_MODEL.test(value.model) ? value.model : null,
