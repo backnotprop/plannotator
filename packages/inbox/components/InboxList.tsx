@@ -1225,6 +1225,61 @@ function FoldedBlocker({ rows, group }: { rows: readonly InboxListRow[]; group: 
   );
 }
 
+/** How long the pointer rests on a group's header before its chevron shows (GroupBand). */
+export const GROUP_CHEV_DWELL_MS = 500;
+
+/**
+ * A group's header: the whole header is the toggle (approval "inbox-list-groups-close"). Its chevron stays hidden
+ * until the pointer rests on the header for GROUP_CHEV_DWELL_MS, or keyboard focus lands on it (owner, 2026-11-08):
+ * passing over a header shows nothing, staying a moment says it closes. A touch never shows it, as before.
+ * `data-chev` shows it; inbox.css fades it in and out. Its own state, so only this header redraws.
+ */
+function GroupBand({ open, onToggle, children }: { open: boolean; onToggle: (band: HTMLButtonElement) => void; children: ReactNode }) {
+  const [dwelt, setDwelt] = useState(false);
+  const [focusShown, setFocusShown] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stop = () => {
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = null;
+  };
+  useEffect(() => stop, []);
+  return (
+    <button
+      type="button"
+      className="ib-band"
+      aria-expanded={open}
+      data-chev={dwelt || focusShown ? '' : undefined}
+      onClick={(event) => onToggle(event.currentTarget)}
+      onPointerEnter={(event) => {
+        if (event.pointerType === 'touch') return;
+        stop();
+        timer.current = setTimeout(() => {
+          timer.current = null;
+          setDwelt(true);
+        }, GROUP_CHEV_DWELL_MS);
+      }}
+      onPointerLeave={() => {
+        stop();
+        setDwelt(false);
+      }}
+      onFocus={(event) => {
+        // Keyboard focus only: a click's focus (or a tap's) waits for the dwell like the pointer does.
+        let keyboard = true;
+        try {
+          keyboard = event.currentTarget.matches(':focus-visible');
+        } catch {
+          // No :focus-visible in this engine: count it as keyboard focus.
+        }
+        if (keyboard) setFocusShown(true);
+      }}
+      onBlur={() => setFocusShown(false)}
+    >
+      {children}
+      <Icon name="chevR" className="ib-band-chev" />
+    </button>
+  );
+}
+
 /** Something new came into a closed group since it was closed: an unread row whose latest agent message came after. */
 function newSince(rows: readonly InboxListRow[], since: number): boolean {
   return rows.some((row) => row.unread && Date.parse(row.last_agent_at ?? row.last_at) > since);
@@ -1637,14 +1692,10 @@ export function InboxList(props: InboxListProps) {
             const fresh = !state.open && newSince(section.threads, state.since);
             return (
               <div key={section.id} className="ib-group" data-section-id={section.id} role="group" aria-label={section.label}>
-                {/* The whole header is the toggle, no chevron (approval "inbox-list-groups-close"). */}
-                <button
-                  type="button"
-                  className="ib-band"
-                  aria-expanded={open}
-                  onClick={(event) => {
+                <GroupBand
+                  open={open}
+                  onToggle={(band) => {
                     // Focus in a row of the group that closes goes to its header, not to the page.
-                    const band = event.currentTarget;
                     const active = document.activeElement;
                     if (open && active !== band && band.parentElement?.contains(active)) band.focus({ preventScroll: true });
                     groups.toggle(section.id);
@@ -1656,7 +1707,7 @@ export function InboxList(props: InboxListProps) {
                     {fresh && <span className="ib-sr">, new since closed</span>}
                   </span>
                   {!open && <FoldedBlocker rows={section.threads} group={section.id} />}
-                </button>
+                </GroupBand>
                 {open && section.threads.map((row) => renderRow(row, section.id))}
               </div>
             );
