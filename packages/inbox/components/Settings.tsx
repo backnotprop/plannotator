@@ -28,6 +28,9 @@ import { useVoiceSettings } from '../voice';
 import { RowsSection, rowsSummary } from './RowsSettings';
 import { useListLook } from '../listLook';
 import { DecisionData } from './DecisionData';
+import type { SystemProjectRow } from '@plannotator/core/inbox-system';
+import { openSystemSetup } from '../system/opener';
+import { systemStateWords } from '../system/projects';
 
 const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'claude-code', name: 'Claude Code' },
@@ -80,6 +83,10 @@ export interface SettingsPageProps {
   onToggleCodeReview?: (next: boolean) => void;
   /** Settings → Capabilities → Shape (approval "shape-inbox-placement"). Absent (or an Inbox without it): no row. */
   onToggleShape?: (next: boolean) => void;
+  /** Settings → Capabilities → System (approval "system-inbox"), under Code review and shown only while it is on. Absent: no row. */
+  onToggleSystem?: (next: boolean) => void;
+  /** System's projects with their drawing's state, listed under its switch while it is on; null until read. */
+  systemProjects?: SystemProjectRow[] | null;
   /** Settings → Capabilities → Checklist (thread steps, approval "inbox-thread-steps"). Absent (or an Inbox without it): no row. */
   onToggleSteps?: (next: boolean) => void;
   /** Over your tailnet: the switch, and whether a change is in flight. */
@@ -473,6 +480,9 @@ function CapabilitiesSection({
   onToggleCodeReview,
   shape,
   onToggleShape,
+  system,
+  onToggleSystem,
+  systemProjects,
   experimental,
   onToggleExperimental,
   experimentalHeading,
@@ -488,6 +498,10 @@ function CapabilitiesSection({
   /** Shape (approval "shape-inbox-placement"), null on an Inbox without it. */
   shape: { on: boolean } | null;
   onToggleShape?: (next: boolean) => void;
+  /** System (approval "system-inbox"): null unless Code review is on. */
+  system: { on: boolean } | null;
+  onToggleSystem?: (next: boolean) => void;
+  systemProjects?: SystemProjectRow[] | null;
   experimental: InboxExperimentalSettings | null;
   onToggleExperimental?: (next: boolean) => void;
   /** The Experimental group's heading, where `#settings/experimental` lands. */
@@ -497,6 +511,7 @@ function CapabilitiesSection({
   const stepsRow = steps && onToggleSteps;
   const codeReviewRow = codeReview && onToggleCodeReview;
   const shapeRow = shape && onToggleShape;
+  const systemRow = system && onToggleSystem && codeReview?.on === true;
   return (
     <>
       {(boardRow || stepsRow || codeReviewRow || shapeRow) && (
@@ -545,6 +560,38 @@ function CapabilitiesSection({
                 <span className="ib-ctl">
                   <Switch on={codeReview.on} labelledBy="ib-code-review-label" onClick={() => onToggleCodeReview(!codeReview.on)} />
                 </span>
+              </div>
+            )}
+            {systemRow && (
+              <div className="ib-prow ib-sysrow" data-settings-system="">
+                <div className="ib-sysrow-top">
+                  <span className="ib-txt">
+                    <span className="ib-l" id="ib-system-label">
+                      System
+                    </span>
+                    <span className="ib-desc">A drawing of each project's system, kept current by an agent when main moves. Shows while Code review is on. Off, none of it shows; every drawing is kept. Yours alone.</span>
+                  </span>
+                  <span className="ib-ctl">
+                    <Switch on={system.on} labelledBy="ib-system-label" onClick={() => onToggleSystem(!system.on)} />
+                  </span>
+                </div>
+                {system.on && systemProjects && systemProjects.length > 0 && (
+                  <ul className="ib-sysrow-list" aria-label="Projects" data-settings-system-projects="">
+                    {systemProjects.map((project) => (
+                      <li key={project.id} className="ib-sysrow-p" data-settings-system-project={project.id}>
+                        <span className="ib-sysrow-n" dir="auto">
+                          {project.name}
+                        </span>
+                        <span className="ib-sysrow-s">{systemStateWords(project)}</span>
+                        {project.repo && (
+                          <button type="button" className="ib-btn" onClick={() => openSystemSetup(project.id)} aria-label={`Set up ${project.name}`} data-settings-system-setup={project.id}>
+                            Set up
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             )}
             {shapeRow && (
@@ -895,6 +942,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const steps = settings?.steps && props.onToggleSteps ? settings.steps : null;
   const codeReview = settings?.code_review && props.onToggleCodeReview ? settings.code_review : null;
   const shape = settings?.shape && props.onToggleShape ? settings.shape : null;
+  const system = settings?.system && props.onToggleSystem ? settings.system : null;
   // Machines shows while this Inbox can link one (its merged view names this machine); an older Inbox has no such page.
   const machines = props.machines ?? [];
   const linkedMachines = machines.filter((machine) => !machine.self);
@@ -1091,6 +1139,9 @@ export function SettingsPage(props: SettingsPageProps) {
               onToggleCodeReview={props.onToggleCodeReview}
               shape={shape}
               onToggleShape={props.onToggleShape}
+              system={system}
+              onToggleSystem={props.onToggleSystem}
+              systemProjects={props.systemProjects}
               experimental={experimental}
               onToggleExperimental={props.onToggleExperimental}
               experimentalHeading={experimentalHeading}

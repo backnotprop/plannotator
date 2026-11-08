@@ -14,6 +14,11 @@
  *   chip only when the Board is on and a card links it; Reply at the foot goes
  *   into the review thread. No merge button.
  *
+ * - System (approval "system-inbox", screens 3, 4a and 4b; only while `systemShown`): the System button beside the
+ *   filter mark lists the drawn projects; one opens its drawing in the pane (`&system=`), with the open PRs that
+ *   change it, and a full window (`&full=1`). The list is never filtered by it. A PR's pane opened from it goes back
+ *   to the drawing when closed.
+ *
  * Read only while the page is open (usePulls). No new keyboard shortcuts.
  */
 import { reviewBoxPull, type ReviewBoxPull } from '../compose/reviewBox';
@@ -53,6 +58,25 @@ import { forgeName } from './labels';
 import { answeredClis } from './notices';
 import { landsNextLayer, layerBaseWords, stackLink, startLayer } from './topology';
 import type { PullsState } from './usePulls';
+import type { SystemProjectRow } from '@plannotator/core/inbox-system';
+import { SystemButton } from '../system/SystemButton';
+import { SystemPane } from '../system/SystemPane';
+
+/** System in Reviews: present only while System shows (`systemShown`). */
+export interface PullsSystem {
+  /** The projects with their drawing's state; null until read. */
+  projects: SystemProjectRow[] | null;
+  /** The project whose drawing is open (`&system=`), its sheet (`&sheet=`) and whether it has the whole window (`&full=1`). */
+  open: string | null;
+  sheet: string | null;
+  full: boolean;
+  /** Open a project's drawing (the menu), or close it (null). */
+  onOpen: (project: string | null) => void;
+  onSheet: (sheet: string) => void;
+  onFull: (full: boolean) => void;
+  /** The menu opened: read the projects again. */
+  onMenu: () => void;
+}
 
 export interface PullsPageProps {
   state: PullsState;
@@ -78,6 +102,8 @@ export interface PullsPageProps {
   onOpenCard?: (cardId: string) => void;
   /** A PR nobody is reviewing: the New review box, filled in with it. */
   onNewReview: (pick: ReviewBoxPull, opener: HTMLElement) => void;
+  /** System's button and drawing; absent while System does not show. */
+  system?: PullsSystem | null;
 }
 
 export function PullsPage(given: PullsPageProps) {
@@ -101,28 +127,46 @@ export function PullsPage(given: PullsPageProps) {
   }, [groups, model, props.stackId, props.filter, props.project]);
   const rows = useMemo(() => (answer ? reviewRowsIn(answer, props.project, props.filter) : null), [answer, props.project, props.filter]);
   const trigger = useFilterTrigger();
+  const head = useRef<HTMLDivElement>(null);
+  const system = props.system ?? null;
+  // The drawing shows while no PR's pane does: a PR opened from it closes back to it.
+  const systemOpen = system?.open && !open ? system.open : null;
+  // The drawing closed (its ×, Escape, a phone's "Reviews"): the focus it held returns to the System button.
+  const drawingWas = useRef(system?.open ?? null);
+  useEffect(() => {
+    const was = drawingWas.current;
+    drawingWas.current = system?.open ?? null;
+    if (!was || system?.open) return;
+    requestAnimationFrame(() => {
+      const lost = !document.activeElement || document.activeElement === document.body;
+      if (lost) head.current?.querySelector<HTMLElement>('[data-system-button]')?.focus({ preventScroll: true });
+    });
+  }, [system?.open]);
   const projectName = props.project ? (props.projectNames.get(props.project) ?? offered.find((p) => p.id === props.project)?.name ?? null) : null;
 
   const list = (
     <section className={`ib-listcol${phone ? '' : ' ib-narrow ib-resizable'} ib-prlist`} aria-label="Reviews" data-pulls-list="">
-      <div className="ib-lhead">
+      <div className="ib-lhead" ref={head}>
         <SidebarTrigger />
         <h1 dir="auto" tabIndex={-1} data-pulls-heading="">
           Reviews
         </h1>
-        {/* Shown once a first answer came: before it, there is nothing to filter. */}
-        {model && (
+        {(model || system) && (
           <span className="ib-pf-slot">
-            <PullFilterControl
-              count={(project, filter) => (answer ? reviewRowsIn(answer, project, filter).length : 0)}
-              filter={props.filter}
-              project={props.project}
-              projects={offered}
-              names={props.projectNames}
-              phone={phone}
-              triggerRef={trigger}
-              onChange={props.onScope}
-            />
+            {system && <SystemButton projects={system.projects} open={systemOpen} phone={phone} portalRef={head} onOpen={system.onOpen} onMenu={system.onMenu} />}
+            {/* Shown once a first answer came: before it, there is nothing to filter. */}
+            {model && (
+              <PullFilterControl
+                count={(project, filter) => (answer ? reviewRowsIn(answer, project, filter).length : 0)}
+                filter={props.filter}
+                project={props.project}
+                projects={offered}
+                names={props.projectNames}
+                phone={phone}
+                triggerRef={trigger}
+                onChange={props.onScope}
+              />
+            )}
           </span>
         )}
         <Tip content="New review">
@@ -159,15 +203,33 @@ export function PullsPage(given: PullsPageProps) {
   );
 
   if (props.threadId) return list;
+  const drawing =
+    system && systemOpen ? (
+      <SystemPane
+        key={systemOpen}
+        project={systemOpen}
+        sheet={system.sheet}
+        full={system.full}
+        phone={phone}
+        pulls={model}
+        onSheet={system.onSheet}
+        onFull={system.onFull}
+        onClose={() => system.onOpen(null)}
+        onOpenStack={(key) => props.onOpenStack(key)}
+      />
+    ) : null;
   if (phone && open && model) {
     return <StackView key={open.stack.id} {...props} item={open} model={model} phone onClose={() => props.onOpenStack(null)} />;
   }
+  if (phone && drawing) return drawing;
   return (
     <>
       {list}
       {!phone &&
         (open && model ? (
           <StackView key={open.stack.id} {...props} item={open} model={model} phone={false} onClose={() => props.onOpenStack(null)} />
+        ) : drawing ? (
+          drawing
         ) : (
           <div className="ib-pane ib-pempty" data-pulls-pane-empty="">
             {rows && rows.length > 0 ? 'Pick a review to open it.' : null}

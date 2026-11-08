@@ -107,6 +107,9 @@ import { AgentNoteDialog } from './components/AgentNoteDialog';
 import { ConnectLine } from './components/ConnectLine';
 import { FeedbackDialog } from './components/FeedbackDialog';
 import { SystemSetupHost } from './system/SetupHost';
+import { systemShown } from './system/gate';
+import { useSystemProjects } from './system/projects';
+import { systemDropped, systemEscapeTo, systemHashOf, systemKept, systemRouteOf } from './system/route';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { connectLineNews, noteQuestionRows } from './agents';
 import type { InboxAgentRow, InboxAgentsModel, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
@@ -340,6 +343,14 @@ interface Route {
   /** Reviews' view (`&view=mine|review|others`; absent: All), beside `project`. */
   view?: PullFilter;
   /**
+   * System in Reviews (approval "system-inbox", screens 4a and 4b): the project whose drawing is open in the pane
+   * (`&system=prj_…`), the sheet on screen (`&sheet=C-001`) and the full window (`&full=1`). A stack opened over it
+   * (`&stack=`) closes back to it.
+   */
+  system?: string | null;
+  sheet?: string | null;
+  full?: boolean;
+  /**
    * Shape (approval "shape-inbox-placement"): the board open over its thread (`#thread=…&shape=shp_…`), or over
    * the grid for a board with no thread (`#shapes&shape=shp_…`). The grid alone is `#shapes`.
    */
@@ -423,7 +434,17 @@ function routeOf(fullHash: string): Route {
   if (fromReviews && !params.get('thread')) {
     const stack = params.get('stack') || null;
     const layer = stack ? params.get('layer') || null : null;
-    return { page: 'reviews', project: params.get('project') || null, view: pullFilterOf(params.get('view')), thread: null, stack, layer, scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer', new: params.has('new') };
+    return {
+      page: 'reviews',
+      project: params.get('project') || null,
+      view: pullFilterOf(params.get('view')),
+      thread: null,
+      stack,
+      layer,
+      scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer',
+      new: params.has('new'),
+      ...systemRouteOf(params),
+    };
   }
   if (params.has('board'))
     return {
@@ -475,6 +496,7 @@ function hashOf(route: Route): string {
       (route.view && route.view !== 'all' ? `&view=${route.view}` : '') +
       (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +
       (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}` : '') +
+      systemHashOf(route) +
       (route.new ? '&new' : '');
   else if (route.page === 'tour') hash = `tour=${route.step ?? 1}`;
   else {
@@ -2492,6 +2514,17 @@ function Inbox() {
         pageBackRef.current();
         return;
       }
+      // System's drawing in Reviews (approval "system-inbox", 4b: "Reviews, top left, or Esc goes back"): one layer per
+      // press, the full window, then the drawing. The drawing's own Escape (a card, a sheet inside) runs first and marks
+      // the key used. A PR's pane open over it owns the screen.
+      // While System does not show, a leftover `&system=` is not on the ladder: Escape is today's.
+      const systemBack = event.key === 'Escape' ? systemEscapeTo(routeRef.current, systemShown(settingsRef.current) && !tailnetGuest(settingsRef.current)) : null;
+      if (systemBack) {
+        const from = keyTarget(event);
+        if (event.defaultPrevented || isComposingKey(event) || modalOpen() || (from && (isEditableTarget(from) || inOverlay(from) || from.closest('[role="menu"], [role="listbox"]')))) return;
+        closeTo(systemBack);
+        return;
+      }
       // Shape's grid and a board open over it (approval "shape-landing-grid": Esc returns). The board's own Escape
       // (its panel, its draw-in) runs first and marks the key used.
       if (event.key === 'Escape' && routeRef.current.page === 'shapes') {
@@ -4260,6 +4293,19 @@ function Inbox() {
     }
   };
 
+  // System (approval "system-inbox", screen 1): under Code review; every other window hears `event: capabilities`.
+  const toggleSystem = async (next: boolean) => {
+    setSettingsError(null);
+    setSettings((current) => (current ? { ...current, system: { on: next } } : current));
+    try {
+      const saved = await inboxApi.saveSystem(next);
+      setSettings((current) => (current ? { ...current, system: saved.system ?? { on: next } } : current));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      void refreshSettings();
+    }
+  };
+
   const toggleShape = async (next: boolean) => {
     setSettingsError(null);
     setSettings((current) => (current ? { ...current, shape: { on: next } } : current));
@@ -4803,6 +4849,17 @@ function Inbox() {
     }, Math.min(REVIEWS_AFTER_STORE_MS, Math.max(0, since + REVIEWS_AFTER_STORE_MAX_MS - Date.now())));
     return () => clearTimeout(timer);
   }, [shown, thread?.messages.length, pullsShown, pullsReloadRows]);
+  // System in Reviews and in Settings (approval "system-inbox"): only while it shows (System on, Code review on).
+  const systemOnHere = systemShown(settings) && !guestPage;
+  const systemProjects = useSystemProjects(systemOnHere && (route.page === 'reviews' || (route.page === 'settings' && route.section === 'capabilities')));
+  // A drawing's address while System does not show (turned off, Code review off, a guest's page): dropped in place,
+  // so Reviews is today's. Not before the settings are read: System may be on.
+  useEffect(() => {
+    if (settings === null) return;
+    const clean = systemDropped(route, systemOnHere);
+    if (clean) writeRoute(clean, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings === null, systemOnHere, route.page, route.system, route.sheet, route.full]);
   // A #reviews link on a guest's page (it could not turn Code review on): the Inbox, as if the page were not there.
   useEffect(() => {
     // In place: Back from the Inbox must not land on #reviews and be sent back again.
@@ -5688,7 +5745,10 @@ function Inbox() {
         })
       : null;
   // The Reviews list: on its own page, or beside a thread opened from it (the thread pane is the Inbox's own).
-  const reviewsList = (project: string | null, view: PullFilter, threadId: string | null) => (
+  const reviewsList = (project: string | null, view: PullFilter, threadId: string | null) => {
+    // A PR opened from a project's drawing closes back to it (its own page only).
+    const drawingKept = systemKept(route, systemOnHere && !threadId);
+    return (
     <PullsPage
       state={pulls}
       stackId={route.stack ?? null}
@@ -5699,14 +5759,30 @@ function Inbox() {
       projectNames={projectNames}
       phone={phone}
       onNew={() => openCompose({ review: {} })}
-      onOpenStack={(id) => (id ? writeRoute({ page: 'reviews', project, view, thread: null, stack: id, layer: null }, { replace: !!route.stack && !phone }) : close({ page: 'reviews', project, view, thread: null, stack: null, layer: null }))}
-      onScope={({ filter, project: next }) => go(threadId ? { ...route, reviews: { project: next, view: filter } } : { page: 'reviews', project: next, view: filter, thread: null, stack: null })}
-      onReview={(stack, layer, scope) => go({ page: 'reviews', project, view, thread: null, stack, layer, scope })}
+      onOpenStack={(id) => (id ? writeRoute({ page: 'reviews', project, view, thread: null, stack: id, layer: null, ...drawingKept }, { replace: !!route.stack && !phone }) : close({ page: 'reviews', project, view, thread: null, stack: null, layer: null, ...drawingKept }))}
+      onScope={({ filter, project: next }) => go(threadId ? { ...route, reviews: { project: next, view: filter } } : { page: 'reviews', project: next, view: filter, thread: null, stack: null, ...drawingKept })}
+      onReview={(stack, layer, scope) => go({ page: 'reviews', project, view, thread: null, stack, layer, scope, ...drawingKept })}
+      system={
+        systemOnHere && !threadId
+          ? {
+              projects: systemProjects.projects,
+              open: route.system ?? null,
+              sheet: route.sheet ?? null,
+              full: route.full === true,
+              // Picking a project opens its drawing in place of a PR's pane; the list keeps its filter.
+              onOpen: (system) => (system ? go({ ...route, stack: null, layer: null, system, sheet: null, full: false }) : close({ ...route, system: null, sheet: null, full: false })),
+              onSheet: (sheet) => writeRoute({ ...route, sheet }, { replace: true }),
+              onFull: (full) => (full ? go({ ...route, full: true }) : close({ ...route, full: false })),
+              onMenu: systemProjects.reload,
+            }
+          : null
+      }
       onOpenThread={(id) => go({ page: 'inbox', reviews: { project, view }, project: null, thread: id })}
       onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
       onNewReview={(pick, opener) => openCompose({ review: { pick } }, opener)}
     />
-  );
+    );
+  };
   let main: ReactNode;
   if (tourOn && !tourFixture) {
     main = <TourLoading />;
@@ -5743,6 +5819,8 @@ function Inbox() {
         onToggleSteps={(next) => void toggleSteps(next)}
         onToggleCodeReview={(next) => void toggleCodeReview(next)}
         onToggleShape={(next) => void toggleShape(next)}
+        onToggleSystem={(next) => void toggleSystem(next)}
+        systemProjects={systemProjects.projects}
         agents={agents}
         onAgents={setAgents}
         onPrompts={(prompts) => setSettings((current) => (current ? { ...current, prompts } : current))}

@@ -8,14 +8,14 @@ import type { InboxEventHandlers, SettingsModel } from './api';
 
 export type InboxCapabilities = Parameters<NonNullable<InboxEventHandlers['onCapabilities']>>[0];
 
-type CapabilitySettings = Pick<SettingsModel, 'board' | 'steps' | 'code_review' | 'shape'>;
+type CapabilitySettings = Pick<SettingsModel, 'board' | 'steps' | 'code_review' | 'shape' | 'system'>;
 
 /** True when the frame names any switch (an empty one: the window reads the settings again instead). */
 export function namesCapability(capabilities: InboxCapabilities): boolean {
-  return Boolean(capabilities.board || capabilities.steps || capabilities.code_review || capabilities.shape);
+  return Boolean(capabilities.board || capabilities.steps || capabilities.code_review || capabilities.shape || capabilities.system);
 }
 
 export function withCapabilities<S extends CapabilitySettings>(current: S, capabilities: InboxCapabilities): S {
-  const { board, steps, code_review: codeReview, shape } = capabilities;
-  return { ...current, ...(board ? { board } : {}), ...(steps ? { steps } : {}), ...(codeReview ? { code_review: codeReview } : {}), ...(shape ? { shape } : {}) };
+  const { board, steps, code_review: codeReview, shape, system } = capabilities;
+  return { ...current, ...(board ? { board } : {}), ...(steps ? { steps } : {}), ...(codeReview ? { code_review: codeReview } : {}), ...(shape ? { shape } : {}), ...(system ? { system } : {}) };
 }

@@ -587,6 +587,7 @@ packages/inbox/shapeWhatsChanged.test.tsx
 packages/inbox/reviewPaneAt.test.tsx
 packages/inbox/shapeBoardPlace.test.tsx
 packages/inbox/system/setupDialog.test.tsx
+packages/inbox/system/systemInReviews.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.frameUrl.test.tsx
 packages/ui/components/Viewer.reopenComment.test.tsx
 packages/ui/components/CodeFilePopout.reopen.test.tsx

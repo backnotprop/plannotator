@@ -9530,6 +9530,74 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .ib-sys-phone .ib-sys-acts .ib-btn { height: 44px; }
 }
 
+/* System in Settings and Reviews (approval "system-inbox", screens 1, 3, 4a and 4b; packages/inbox/system).
+   A picked row or a project that is open takes the filled highlight (--ib-cur-bg, --ib-sel), never a border or outline. */
+.ib-prow.ib-sysrow { flex-direction: column; align-items: stretch; gap: 10px; }
+.ib-sysrow-top { display: flex; align-items: center; gap: 14px; }
+.ib-sysrow-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ib-sysrow-p { display: flex; align-items: center; gap: 14px; min-height: 40px; padding: 4px 4px 4px 12px; border-radius: var(--ib-r8-s, 8px); background: var(--ib-fill); font-size: var(--ib-fs-13, 13px); }
+.ib-sysrow-n { flex: none; max-width: 40%; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-sysrow-s { flex: 1; min-width: 0; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-sysrow-p .ib-btn { flex: none; }
+.ib-prlist .ib-lhead .ib-pf-slot { gap: 2px; align-items: center; }
+.pn-inbox .ib-sysb { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; padding: 0 6px; border: 0; border-radius: 6px; background: none; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-13, 13px); cursor: pointer; transition: background-color 120ms ease-out, color 120ms ease-out; }
+.pn-inbox .ib-sysb:hover, .pn-inbox .ib-sysb[data-popup-open] { background: var(--ib-hover-s, var(--muted)); color: var(--foreground); }
+.pn-inbox .ib-sysb:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.pn-inbox .ib-sysb[data-set] { padding: 0 10px 0 8px; background: var(--ib-cur-bg); color: var(--ib-cur-fg); }
+.ib-sysb-in { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.pn-inbox .ib-sysb svg.ib-ic { width: 16px; height: 16px; stroke-width: 1.8; flex: none; }
+.ib-sysb-n { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
+.ib-sysm-h { padding: 6px 8px 4px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-sysm-none { margin: 0; padding: 4px 8px 8px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-pane.ib-syspane { display: flex; flex-direction: column; overflow-y: auto; }
+.ib-syspane-draw { flex: none; }
+.ib-sysp-note { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 64px 24px; text-align: center; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
+.ib-sysp-note p { margin: 0; }
+.ib-sysprs { padding: 18px 22px 28px; }
+.ib-sysprs-h { margin: 0 0 6px; padding: 0 12px; font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--muted-foreground); }
+.ib-sysprs-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.ib-sysprs-row { display: flex; align-items: center; gap: 14px; width: 100%; padding: 9px 12px; border: 0; border-radius: var(--ib-r10-s, 10px); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ib-sysprs-row:hover { background: var(--ib-hover); }
+.ib-sysprs-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-sysprs-num { flex: none; min-width: 44px; font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-sysprs-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ib-sysprs-t { font-size: var(--ib-fs-14, 14px); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-sysprs-l { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); overflow-wrap: anywhere; }
+.ib-sysprs-parts { color: color-mix(in oklab, var(--warning) 88%, var(--foreground)); }
+.ib-sysprs-go { flex: none; display: inline-flex; align-items: center; gap: 2px; font-size: var(--ib-fs-13, 13px); color: var(--primary); }
+.ib-sysprs-quiet { margin: 4px 0 0; padding: 0 12px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-sysfull { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; background: var(--card); color: var(--foreground); }
+.ib-sysfull-top { flex: none; display: flex; align-items: center; height: 44px; padding: 0 12px 0 max(12px, var(--ib-controls-left, 0px)); border-bottom: 1px solid var(--ib-hair); }
+.pn-inbox .ib-sysfull-back { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 8px; border: 0; border-radius: var(--ib-r10-s, 7px); background: none; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-13, 13px); cursor: pointer; }
+.pn-inbox .ib-sysfull-back:hover { background: var(--ib-hover-s, var(--muted)); color: var(--foreground); }
+.pn-inbox .ib-sysfull-back:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-sysfull-body { flex: 1; min-height: 0; display: flex; }
+.ib-sysfull-draw { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ib-sysfull-draw > .sys-view { flex: 1; min-height: 0; }
+.ib-sysfull-aside { flex: none; width: 340px; overflow-y: auto; border-left: 1px solid var(--ib-hair); }
+.ib-sysfull-aside .ib-sysprs { padding: 16px 10px 24px; }
+.ib-sysfull-aside .ib-sysprs-row { flex-wrap: wrap; row-gap: 4px; }
+.ib-sysfull-aside .ib-sysprs-t { white-space: normal; }
+.ib-sysfull-aside .ib-sysprs-go { flex-basis: 100%; padding-left: 58px; }
+.ib-sysfull.ib-sysfull-phone { position: static; flex: 1; min-width: 0; z-index: auto; background: var(--background); }
+.ib-sysfull-phone .ib-sysfull-top { height: calc(52px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); }
+.ib-sysfull-phone .ib-sysfull-body { flex-direction: column; overflow-y: auto; }
+.ib-sysfull-phone .ib-sysfull-draw { flex: none; }
+.ib-sysfull-phone .ib-sysfull-aside { width: auto; overflow: visible; border-left: 0; }
+.ib-sysfull-phone .ib-sysprs { padding: 14px 6px 24px; }
+.ib-sysfull-phone .ib-sysprs-go { display: none; }
+.ib-sysfull-phone .ib-sysprs-row { min-height: 56px; }
+/* A phone is too narrow for the drawing's one-line bar: the sheets take their own row under the name and the tools. */
+.ib-sysfull-phone .sys-bar { height: auto; grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; padding-block: 8px; }
+.ib-sysfull-phone .sys-bar > .sys-chips, .ib-sysfull-phone .sys-bar > .sys-kind { grid-row: 2; grid-column: 1 / -1; justify-self: start; max-width: 100%; overflow-x: auto; }
+/* A phone's sheet fills the pane's width, so its bottom row runs into the zoom group at the bottom left: on a phone
+   the group (and the Key it opens) sit at the top right, over the sheet's title band, which leaves that corner empty. */
+.ib-sysfull-phone .sys-zoom { top: 8px; right: 8px; bottom: auto; left: auto; }
+.ib-sysfull-phone .sys-card-pop { top: 48px; right: 8px; bottom: auto; left: auto; max-width: calc(100% - 16px); }
+.ib-sysfull-phone .sys-bar > .sys-tools { grid-row: 1; grid-column: 2; }
+/* The drawing's pane and full window take the focus only as a last resort (the way back when "Open full window" is gone). */
+.ib-syspane:focus, .ib-sysfull:focus { outline: none; }
+
 /* ── Letter marks (approval "inbox-letter-marks", 2026-11-07; letterMarks.tsx), all off by default ──
    Eight hues turned from the theme's --primary (45° apart), lightness and chroma fixed so every theme and mode
    gets the same contrast. Soft: a tint of the hue on the page, letters the hue mixed toward the text colour.
