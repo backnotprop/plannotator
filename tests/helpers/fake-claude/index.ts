@@ -37,6 +37,8 @@ export interface FakeClaudeConfig {
   workMs?: number;
   /** Keep the turn running until cleared. */
   hold?: boolean;
+  /** `auth status` says not logged in (JSON `loggedIn: false`, exit 1), as over SSH when macOS keeps the login locked. */
+  signedOut?: boolean;
   /** List busy sessions as waiting on a permission prompt (and keep the turn running). */
   waiting?: boolean;
   /** The answer's first word. */
@@ -209,8 +211,11 @@ export function installFakeClaude(input: { bin: string; state: string; config?: 
     osascript() {
       const file = join(state, "osascript.log");
       if (!existsSync(file)) return [];
+      // Only finished runs: the fake writes each argument on its own and the newline last, so a read while it is
+      // still writing must not take a run cut short (its last element would be a stray "-e").
       return readFileSync(file, "utf8")
         .split("\n")
+        .slice(0, -1)
         .filter(Boolean)
         .map((line) => line.split("\u001f").filter((part, i, all) => i < all.length - 1 || part !== ""));
     },
