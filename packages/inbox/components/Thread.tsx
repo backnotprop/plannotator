@@ -1,5 +1,6 @@
 import { perfInteraction, perfKeystroke } from '../perfMarks';
-import { inboxUrl, machineOf } from '../inboxUrl';
+import { LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
+import { inboxUrl, machineOf, selfMachineId } from '../inboxUrl';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
@@ -1511,7 +1512,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // While the agent rests there is no line: the attach command still comes with the thread (a phone has no Open in Terminal).
   const attach = runLine?.attach_command ?? attachCommand;
   // Terminal is on the Inbox's computer: never from a phone or the tailnet, and only with a session or a refused folder.
-  const openTerminal = launched && !phone && remote !== true && (launched.session_ref || runLine?.untrusted) ? () => void launchAct(() => inboxApi.launchOpen(launched.id)) : null;
+  // Not for another machine's thread either (remote launch): its Terminal is on that machine; Copy attach command is the way in.
+  const openTerminal = launched && !phone && remote !== true && !machine && (launched.session_ref || runLine?.untrusted) ? () => void launchAct(() => inboxApi.launchOpen(launched.id)) : null;
   const launchMenu: ThreadMoreLaunch | null =
     launched && runLine !== undefined && !launched.deleted_at
       ? {
@@ -1522,7 +1524,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // A resting agent (no line) still runs in the background: Stop is offered then too. Never to a tailnet guest.
           stop:
             !guest && launched.session_ref && (runLine === null || runLine.state === 'working' || runLine.state === 'waiting_terminal' || runLine.state === 'starting')
-              ? () => void launchAct(() => inboxApi.launchStop(launched.id))
+              ? () => void launchAct(() => inboxApi.launchStop(launched.id, machine?.id ?? null))
               : null,
           // Not on a phone (PLAN: the phone shows Copy and Stop only): deleting a session is for the computer it runs on.
           remove: phone || guest ? null : () => setConfirmDelete(true),
@@ -5695,6 +5697,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               // subject: always under a name (the owner, 2026-11-02), else only when the subject is cut.
               <Tip content={thread.subject ?? '(no subject)'} cut={!nameChip}>
                 <span className="ib-phsubj" dir="auto" data-header-subject="" data-header-name={nameChip ? '' : undefined} data-on={nameChip || chrome.subject || artifactsOn ? '' : undefined} aria-hidden="true">
+                  <HeadMark thread={thread} where="bar" />
                   {nameChip ?? thread.subject ?? '(no subject)'}
                 </span>
               </Tip>
@@ -5783,6 +5786,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             )}
           </div>
         )}
+        <HeadMark thread={thread} where="body" />
         <h2 className="ib-subject" dir="auto" tabIndex={-1}>{reviewView?.title ?? (thread.pull_keys?.length || thread.review_started ? thread.thread_name : null) ?? thread.subject ?? '(no subject)'}</h2>
         {reviewView?.fromThread && (
           <p className="ib-rvfrom" data-review-from="">
@@ -5806,6 +5810,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           <div className="ib-tmeta" data-started-by="" data-launched={launched.id}>
             <span>
               You started {hostName(launched.agent)} in <bdi>{thread.project.name}</bdi>
+              {/* Started from another linked machine's window (remote launch): which one. */}
+              {launched.from && launched.from.machine !== selfMachineId() && <> from {launched.from.name}</>}
             </span>
             {launched.full_permissions && (
               <>
@@ -5840,7 +5846,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     setConfirmDelete(false);
                     // A scratch folder that was not the one the Inbox made (a link, another folder, gone) is kept: the toast says so.
                     void launchAct(
-                      () => inboxApi.launchDelete(launched.id),
+                      () => inboxApi.launchDelete(launched.id, machine?.id ?? null),
                       (result) => (result.scratch_removed === false ? { lead: 'Session deleted', detail: 'its scratch folder was kept' } : { lead: 'Session deleted' }),
                     );
                   }}
@@ -6019,7 +6025,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               before.push(
                 <article className="ib-message pc-item" key={message.id} data-author="agent" data-message-article={message.id}>
                   <div data-message-id={message.id}>
-                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} arrived={arrivedAfterOpen(message.id)} followUp={permFollowUp(message)} terminal={launchMenu ? { open: openTerminal, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} guest={guest} onChanged={onChanged} />
+                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} arrived={arrivedAfterOpen(message.id)} followUp={permFollowUp(message)} terminal={launchMenu ? { open: openTerminal, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} guest={guest} machine={machine} onChanged={onChanged} />
                   </div>
                 </article>,
               );
@@ -6027,7 +6033,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             if (message === last && shownRun && !runInCard) {
               before.push(
                 <div className="ib-msg" key="perm-run">
-                  <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} onChanged={() => onRunChanged?.()} />
+                  <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} machine={machine?.id ?? null} onChanged={() => onRunChanged?.()} />
                 </div>,
               );
             }
@@ -6353,7 +6359,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     ))}
                   </ul>
                 )}
-                {message === last && shownRun && !runInCard && <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} onChanged={() => onRunChanged?.()} />}
+                {message === last && shownRun && !runInCard && <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} machine={machine?.id ?? null} onChanged={() => onRunChanged?.()} />}
                 {message === last && !shownRun && delivered && tagLines.length > 0 && (
                   // Lines (approval "inbox-tag-agents"): the owner first, then each tagged session, each with its own state.
                   <ul className="ib-tg-dl" data-tag-lines="" tabIndex={-1}>
@@ -7022,4 +7028,35 @@ function SkipChip({ count, keepOpen, onToggle }: { count: number; keepOpen: bool
       </button>
     </span>
   );
+}
+
+/**
+ * Letter marks (letterMarks.tsx) in the thread's header. Styles "Inline" and "Avatar": the bar's title leads with the
+ * mark (Avatar: solid, with the project's on its corner). Style "Dot": a 30 px mark over the subject, where the list
+ * showed only the colour.
+ */
+function HeadMark({ thread, where }: { thread: { thread_id: string; subject: string | null; thread_name?: string | null; project: { id: string; name: string } }; where: 'bar' | 'body' }) {
+  const { marks } = useRowMarks();
+  if (marks.what === 'off') return null;
+  const style = marks.style;
+  const name = thread.thread_name?.trim() ? thread.thread_name : (thread.subject ?? '');
+  const threads = showsThreads(marks.what);
+  const projects = showsProjects(marks.what);
+  if (where === 'bar' && style !== 'dot') {
+    return (
+      <span className="ib-lm-head" data-take={style} aria-hidden="true">
+        {threads ? <LetterMark name={name} seed={thread.thread_id} size={20} solid={style === 'avatar'} /> : <ProjectMark projectId={thread.project.id} name={thread.project.name} size={20} solid={style === 'avatar'} />}
+        {style === 'avatar' && threads && projects && <ProjectMark projectId={thread.project.id} name={thread.project.name} size={12} solid className="ib-lm-badge" />}
+      </span>
+    );
+  }
+  if (where === 'body' && style === 'dot') {
+    return (
+      <div className="ib-lm-hero" aria-hidden="true">
+        {threads && <LetterMark name={name} seed={thread.thread_id} size={30} />}
+        {projects && <ProjectMark projectId={thread.project.id} name={thread.project.name} size={threads ? 16 : 30} className={threads ? 'ib-lm-heroP' : undefined} />}
+      </div>
+    );
+  }
+  return null;
 }
