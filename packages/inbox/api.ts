@@ -203,13 +203,38 @@ export interface MachineView {
   waiting: number;
   /** The cursor of its list this Inbox holds: it moves when its rows changed. Absent from an older Inbox. */
   list_cursor?: number | null;
-  /** Its Inbox keeps snoozes (approval "inbox-snooze"). Absent from an older Inbox, and false for a linked one too old: no Snooze on its rows. */
+  /** Its Inbox keeps snoozes (approval "inbox-snooze"). Absent from an older Inbox, and false for a linked one too old: nothing to snooze with on its rows (`snooze_old`). */
   snoozes?: boolean;
   /**
    * Remote launch: agents can start there (true), launch is off there (false), or its Inbox is too old to say (null;
    * null for this machine, whose own launch block says). Absent from an older Inbox.
    */
   launch?: boolean | null;
+  /** Its list was read and keeps no snoozes: an older Inbox, so Snooze says why instead of vanishing. */
+  snooze_old?: boolean;
+  /** Update on that machine, from its own state. Null: nothing to say (level, ahead, this machine, or no newer release known). */
+  update?: MachineUpdateView | null;
+}
+
+/** A linked machine's update, as `machineUpdateView` (inbox-machines.ts) reads what it hears from there. */
+export interface MachineUpdateView {
+  phase: 'behind' | 'updating' | 'ready' | 'failed' | 'restarting' | 'not_back' | 'updated';
+  target: string | null;
+  from: string | null;
+  can_update: boolean;
+  self_update: boolean;
+}
+
+/** What the dialog reads from that machine (`GET /api/inbox/machines/:id/update`). The log comes as `~/…`, so no username crosses. */
+export interface MachineUpdateDetails {
+  too_old?: boolean;
+  current: string | null;
+  update?: { state: string; version: string; action: 'script' | 'copy' } | null;
+  platform?: 'darwin' | 'linux' | 'win32';
+  command?: string;
+  log?: string;
+  open_reviews?: number;
+  failure?: { exit_code: number; tls?: 'untrusted' | 'revoked'; release_first?: true; prepare?: string; unchanged?: true } | null;
 }
 
 /** A write held for another machine (`GET /api/inbox/outbox`, the `outbox` frame). */
@@ -1880,6 +1905,9 @@ export const inboxApi = {
   offerMachine: () => post<MachineOffer>(inboxUrl('/machines/offer'), { tailscale: true }),
   /** Link the machine whose code this is (a pasted link, or its address and six digits), both ways. */
   linkMachine: (input: { link: string } | { address: string; code: string }) => post<{ machine: MachineView }>(inboxUrl('/machines/link'), { ...input }),
+  /** Read and start an update on a linked machine. Its body carries no version: that machine installs its own answer. */
+  machineUpdate: (id: string) => get<MachineUpdateDetails>(inboxUrl(`/machines/${encodeURIComponent(id)}/update`)),
+  startMachineUpdate: (id: string) => post<{ ok: true; outcome: string }>(inboxUrl(`/machines/${encodeURIComponent(id)}/update`), {}),
   unlinkMachine: (id: string) => post<{ unlinked: { id: string; name: string }; told: boolean }>(inboxUrl(`/machines/${encodeURIComponent(id)}/unlink`), {}),
   /** Writes held for other machines, and notices about ones that did not land. */
   outbox: () => get<{ waiting: OutboxView[]; notices: OutboxView[] }>(inboxUrl('/outbox')),

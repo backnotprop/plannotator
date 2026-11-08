@@ -52,7 +52,8 @@ import {
 } from './api';
 import { listsThread, newRecordBatch, noteRecord, openThreadRead } from './openThreadReads';
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
-import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, threadAwayLine, threadOutbox } from './machines';
+import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from './machines';
+import { MachineUpdateDialog } from './components/MachineUpdate';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { flatRows, useListView, type ListSort } from './listView';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
@@ -1025,6 +1026,8 @@ function Inbox() {
   const [restartAgents, setRestartAgents] = useState<InboxRestartAgents>(NO_RESTART_AGENTS);
   /** The update control's dialogs and what they read (GET /api/inbox/update). */
   const [updateDialog, setUpdateDialog] = useState<null | 'update' | 'restart' | 'failed'>(null);
+  /** The update dialog for a linked machine (approval "inbox-machine-update"), and whether Snooze opened it. */
+  const [machineUpdateOpen, setMachineUpdateOpen] = useState<{ id: string; snooze: boolean } | null>(null);
   const [updateDetails, setUpdateDetails] = useState<UpdateDetails | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
@@ -6005,6 +6008,7 @@ function Inbox() {
         onAgents={setAgents}
         onPrompts={(prompts) => setSettings((current) => (current ? { ...current, prompts } : current))}
         machines={machineViews ?? undefined}
+        onMachineUpdate={pageOffersUpdates(settings) ? (id) => setMachineUpdateOpen({ id, snooze: false }) : undefined}
         onMachinesChanged={() => {
           inboxApi.machines().then((next) => setMachineViews(next.machines), () => {});
           void refreshList(false);
@@ -6325,6 +6329,11 @@ function Inbox() {
           onRowAction={rowAction}
           onSnooze={snoozeOn ? (row, until) => void snooze(row, until) : undefined}
           snoozesOf={(row) => rowSnoozes(row, machines)}
+          snoozeBlockedOf={(row) => (pageOffersUpdates(settings) ? snoozeBlockedBy(row, machines) : null)}
+          onSnoozeBlocked={(row) => {
+            const blocked = snoozeBlockedBy(row, machines);
+            if (blocked) setMachineUpdateOpen({ id: blocked.id, snooze: true });
+          }}
           pinned={pinsOn ? pinnedIds : undefined}
           onUnstar={pinsOn ? unstarRow : undefined}
           tidy={{
@@ -6437,6 +6446,10 @@ function Inbox() {
             onPin={pinsOn && !machineOf(thread.thread_id) ? (next) => setPin(thread, next) : undefined}
             onSnooze={snoozeOn && rowSnoozes({ machine: machineOf(thread.thread_id) ?? undefined }, machines) ? (until) => void snooze(thread, until) : undefined}
             onUnsnooze={snoozeOn && rowSnoozes({ machine: machineOf(thread.thread_id) ?? undefined }, machines) ? () => void unsnooze(thread) : undefined}
+            snoozeBlocked={(() => {
+              const blocked = snoozeOn && pageOffersUpdates(settings) ? snoozeBlockedBy({ machine: machineOf(thread.thread_id) ?? undefined }, machines) : null;
+              return blocked ? { name: blocked.name, onPress: () => setMachineUpdateOpen({ id: blocked.id, snooze: true }) } : undefined;
+            })()}
             machine={machines.linked.find((m) => m.id === machineOf(thread.thread_id)) ?? null}
             outbox={threadOutbox(outbox, thread)}
             onDismissOutbox={dismissOutbox}
@@ -6648,6 +6661,7 @@ function Inbox() {
             projects={filterMachine ? projects.filter((p) => (p.machine ?? machines.self) === filterMachine.id) : projects}
             machines={machines}
             machineCounts={sidebarMachineCounts}
+            onMachineUpdate={pageOffersUpdates(settings) ? (id) => setMachineUpdateOpen({ id, snooze: false }) : undefined}
             onMachine={(machineId) =>
               route.page === 'inbox' && route.project === null && route.machine === machineId
                 ? void refreshInbox(null, route.thread !== null)
@@ -6759,6 +6773,10 @@ function Inbox() {
           }}
         />
       )}
+      {machineUpdateOpen && (() => {
+        const target = machines.linked.find((m) => m.id === machineUpdateOpen.id);
+        return target ? <MachineUpdateDialog machine={target} snooze={machineUpdateOpen.snooze} onClose={() => setMachineUpdateOpen(null)} /> : null;
+      })()}
       {updateDialog === 'update' && update && (
         <UpdateDialog
           details={updateDetails}
