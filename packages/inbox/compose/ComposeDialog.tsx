@@ -118,6 +118,11 @@ export interface ComposeRequest {
   review?: ReviewBoxRequest | null;
   /** A failed clone's Change the URL (E5): To the same agent and machine, the folder menu open with the URL in its filter. */
   clone?: ComposeCloneRequest | null;
+  /**
+   * "+" on a project row (approval "launch-create-clone", F3, F5, F7): To reads "New <agent> session in <project>", the
+   * agent the person started last when that machine has it (`agent`), else its first; the cursor is in the message.
+   */
+  start?: { projectId: string; machine: string | null; agent: string | null } | null;
 }
 
 export interface ComposeSent {
@@ -285,6 +290,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // makes it (Create a folder); `clone`: the Send clones a repo into it first (Clone from a git URL). A draft's own
   // folder pick comes back with it (D9), checked again below.
   const [startPick, setStartPick] = useState<{ agent: string; projectId: string; machine: string | null; folder?: { path: string; name: string; create?: boolean; clone?: ComposeClone } } | null>(() => {
+    if (request.start) return { agent: request.start.agent ?? '', projectId: request.start.projectId, machine: request.start.machine };
     const again = request.clone ? cloneOfUrl(request.clone.url) : null;
     if (request.clone && again) {
       const path = request.clone.folder ?? `~/${again.slug.split('/').pop()}`;
@@ -386,6 +392,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
     return agent && project ? { agent: agent.agent, name: agent.name, project, machine: startPick.machine } : null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startPick, model?.launch, there.reads, pulls, box]);
+  // "+" on a project row: an agent that machine doesn't have (or none started yet) becomes its first, once its block is read.
+  useEffect(() => {
+    if (!request.start || !startPick || startPick.folder) return;
+    const block = blockOf(startPick.machine);
+    if (!block || block.agents.length === 0 || block.agents.some((a) => a.agent === startPick.agent)) return;
+    setStartPick({ ...startPick, agent: block.agents[0]!.agent });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request.start, startPick, model?.launch, there.reads]);
   // The linked machine To's project is on (null: this computer), its home for `~/…` paths, and whether it is asleep.
   const startMachine = start?.machine ? (there.machines.find((m) => m.id === start.machine) ?? null) : null;
   const startMachineName = start?.machine ? (startMachine?.name ?? machineGroups.groups.find((g) => g.machine === start.machine)?.name ?? null) : null;

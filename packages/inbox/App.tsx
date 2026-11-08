@@ -179,7 +179,7 @@ import { useCodeReviewOffer } from './codeReviewOffer';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
-import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, launchHistory, type ComposeAction, type ComposeCloneRequest } from './compose/model';
+import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, lastLaunchAgent, launchHistory, type ComposeAction, type ComposeCloneRequest } from './compose/model';
 import { reviewBoxPulls } from './compose/reviewBox';
 import type { CardsModel, DraftView, InboxStorageModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
@@ -5546,6 +5546,7 @@ function Inbox() {
   }, [stack.thread, view, route.thread, phone]);
 
   // Remote launch: where the person last started an agent on each machine, from the merged list's launched rows.
+  const composeLastAgent = useMemo(() => lastLaunchAgent(latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
   const composeLaunched = useMemo(() => launchHistory(latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
   // The project compose treats as current: the list's filter, else the open thread's.
   const composeCurrent = (() => {
@@ -6304,6 +6305,12 @@ function Inbox() {
             onProjectRename={renameProject}
             onProjectPicture={setProjectPicture}
             onProjectCombine={async (pair) => (await combineProjects([pair])) === null}
+            // "+" on a project row (F1-F7): while agents can be started from New message, and not on a guest's page.
+            onProjectNewSession={
+              settings?.launch?.enabled && !guestPage
+                ? (projectId, machine) => openCompose({ start: { projectId, machine, agent: composeLastAgent } })
+                : undefined
+            }
             announce={say}
             // Not on a tailnet guest's page: the update routes answer it 403 local_only.
             update={pageUpdate}

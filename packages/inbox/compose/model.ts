@@ -114,9 +114,10 @@ export function pickerRows(shown: readonly ComposeGroup[], all: readonly Compose
  * first-run screen) names its session; focus then starts in the message.
  * A draft saved with nobody in To opens the same way as a plain one.
  */
-export function composeOpening(request: { draft?: Pick<InboxDraft, 'to'> | null; session?: string | null }): { chosen: string | null; focus: 'to' | 'message' } {
+export function composeOpening(request: { draft?: Pick<InboxDraft, 'to'> | null; session?: string | null; start?: unknown }): { chosen: string | null; focus: 'to' | 'message' } {
   const chosen = request.draft ? (request.draft.to?.session ?? null) : (request.session ?? null);
-  return { chosen, focus: chosen ? 'message' : 'to' };
+  // "+" on a project row (F3): To is filled, so the cursor starts in the message.
+  return { chosen, focus: chosen || request.start ? 'message' : 'to' };
 }
 
 /** "started 2:41 PM": when the session started, without its host. */
@@ -538,6 +539,21 @@ export type LaunchHistory = ReadonlyMap<string, { at: string; project: string }>
  * Where the person last started an agent on each machine, from the list's rows: a launched thread's row carries
  * `run` (its key, even when null), and the merged list names its `machine`. Each machine keeps its newest.
  */
+/** The agent the person started last from New message (a launched row's addressee), for "+" on a project row (F3); null: none yet. */
+export function lastLaunchAgent(rows: readonly { created_at: string; run?: unknown; addressee?: { host: string } | null }[]): string | null {
+  let last: { at: string; host: string } | null = null;
+  for (const row of rows) {
+    if (!('run' in row) || !row.addressee) continue;
+    if (!last || row.created_at > last.at) last = { at: row.created_at, host: row.addressee.host };
+  }
+  return last?.host ?? null;
+}
+
+/** "+" on a project row's tip and name (F1, F4): the project, its machine when it is another, and that it waits while asleep. */
+export function newSessionTip(name: string, machineName: string | null, asleep: boolean): string {
+  return `New session in ${name}${machineName ? ` · ${machineName}` : ''}${asleep ? ", starts when it's back" : ''}`;
+}
+
 export function launchHistory(rows: readonly { machine?: string; project: { id: string }; created_at: string; run?: unknown }[]): Map<string, { at: string; project: string }> {
   const out = new Map<string, { at: string; project: string }>();
   for (const row of rows) {
