@@ -13,6 +13,7 @@ import type { GuideArtifact } from './artifacts';
 const hasDom = typeof document !== 'undefined';
 const { ArtifactsView } = (hasDom ? await import('./components/ArtifactsView') : {}) as typeof import('./components/ArtifactsView');
 const { ArtifactPinButton } = (hasDom ? await import('./components/ArtifactPinButton') : {}) as typeof import('./components/ArtifactPinButton');
+const { FullScreenMore } = (hasDom ? await import('./components/OpenIn') : {}) as typeof import('./components/OpenIn');
 const { ArtifactsWall } = (hasDom ? await import('./components/ArtifactsWall') : {}) as typeof import('./components/ArtifactsWall');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { resetArtifactPinsForTest } = (hasDom ? await import('./artifactPins') : {}) as typeof import('./artifactPins');
@@ -151,6 +152,29 @@ test.skipIf(!hasDom)('the viewer bar’s pin reads and saves the same pins as th
   await settle();
   expect(posts).toEqual([{ thread_id: THREAD, key: 'att_shot', pinned: false }]);
   expect(button.getAttribute('aria-label')).toBe('Pin shot.png');
+});
+
+// A phone's HTML page has no room in its bar for the pin (320 px, the reply's pill or card on the row): Pin /
+// Unpin is the first item of full screen's ⋯ there, saving the same pins as the bar's button.
+test.skipIf(!hasDom)('full screen’s ⋯ holds Pin / Unpin when the pane hands it the pin, and saves it', async () => {
+  resetArtifactPinsForTest([]);
+  const attachment = { id: 'att_page', name: 'report.html', kind: 'html', sent_sha256: 'a'.repeat(64), current: null } as unknown as import('@plannotator/core/inbox-types').InboxAttachmentState;
+  const menu = (pinned: { threadId: string; key: string; name: string } | null) => (
+    <FullScreenMore attachment={attachment} version="sent" phone open onOpenChange={() => {}} versionAction={null} pin={pinned} />
+  );
+  mount(menu({ threadId: THREAD, key: 'att_page', name: 'report.html' }));
+  await settle();
+  const item = () => document.querySelector<HTMLElement>('[data-artifact-pin-item="att_page"]');
+  expect(item()?.textContent).toBe('Pin');
+  expect(item()?.getAttribute('aria-label')).toBe('Pin report.html');
+  act(() => item()!.click());
+  await settle();
+  expect(posts).toEqual([{ thread_id: THREAD, key: 'att_page', pinned: true }]);
+  // Without the pin (the bar draws it): no item.
+  act(() => root!.render(menu(null)));
+  await settle();
+  expect(item()).toBeNull();
+  expect(document.querySelector('[data-attachment-download]')).not.toBeNull();
 });
 
 function wallRow(i: number, pinned: boolean): InboxArtifactRow {

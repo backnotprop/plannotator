@@ -7,6 +7,7 @@
  */
 
 import { useState } from 'react';
+import { DropdownMenuItem, DropdownMenuSeparator } from '@plannotator/ui/components/ui/dropdown-menu';
 import { Icon } from '../icons';
 import { artifactPinnable, setArtifactPinned, useArtifactPins } from '../artifactPins';
 import { Tip } from './Tip';
@@ -60,5 +61,32 @@ export function ArtifactPinButton({
         <Icon key={pinned ? `on-${pop}` : 'off'} name="pin" size={big ? 20 : 16} />
       </button>
     </Tip>
+  );
+}
+
+/**
+ * Pin / Unpin as an item of full screen's ⋯ (OpenIn.tsx `FullScreenMore`): a phone's HTML page, whose toolbar
+ * shares its row with the reply and has no room for one more 44 px button at 320 px. The same pin as the bar's,
+ * then a separator before the menu's other items. Nothing for a thread that cannot pin (the tour).
+ */
+export function ArtifactPinMenuItem({ threadId, artifactKey, name }: { threadId: string; artifactKey: string; name: string }) {
+  const { byKey } = useArtifactPins();
+  if (!artifactPinnable(threadId)) return null;
+  const pinned = byKey.has(artifactKey);
+  const verb = pinned ? 'Unpin' : 'Pin';
+  return (
+    <>
+      <DropdownMenuItem
+        className="text-xs"
+        aria-label={`${verb} ${name}`}
+        data-artifact-pin-item={artifactKey}
+        data-pinned={pinned ? '' : undefined}
+        onClick={() => void setArtifactPinned(threadId, artifactKey, !pinned)}
+      >
+        <Icon name="pin" size={15} className="ib-appi ib-glyph" />
+        <span className="flex-1">{verb}</span>
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
+    </>
   );
 }

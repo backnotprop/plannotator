@@ -1617,6 +1617,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
 
   // ── An HTML page on a phone (approval "inbox-html-attachments-phone") ──────
   const phoneHtml = full && phone && isHtml;
+  /** A phone's HTML page: Pin / Unpin lives in full screen's ⋯, not in the bar (no room for it at 320 px). */
+  const pinInMenu = phoneHtml;
   const threadId = props.composer?.threadId ?? null;
   // Part B, "Fit the page" (pageSize.ts): Desktop size lays the page out at a laptop's width and scales it to the
   // phone's. A press is remembered per file; until then a page wider than the phone opens on Desktop size by itself.
@@ -2354,9 +2356,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           phone={phone}
           reuse={
             <>
-              {/* Pin stays on a phone's page too: the bar is where a phone pins (its cards have no hover). Like Reuse, not
-                  while the reply's pill shares the bar's row (a phone's HTML page): the row must fit at 320 px. */}
-              {props.pin && !phonePillShown && <ArtifactPinButton threadId={props.pin.threadId} artifactKey={props.pin.key} name={attachment.name} surface="bar" big={phone} />}
+              {/* Pin stays on a phone's page too: the bar is where a phone pins (its cards have no hover). A phone's HTML
+                  page has it in the ⋯ menu instead (`pinInMenu`): its bar, the widest, must fit at 320 px with the reply's
+                  pill on its row or its card open. */}
+              {props.pin && !pinInMenu && <ArtifactPinButton threadId={props.pin.threadId} artifactKey={props.pin.key} name={attachment.name} surface="bar" big={phone} />}
               {phonePillShown ? null : <ReuseButton file={attachment} surface="bar" version={effectiveVersion} big={phone} />}
             </>
           }
@@ -2433,6 +2436,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 setMoreOpen(open);
               }}
               versionAction={versionAction}
+              pin={pinInMenu && props.pin ? { threadId: props.pin.threadId, key: props.pin.key, name: attachment.name } : null}
             />
           }
           moreOpen={moreOpen}

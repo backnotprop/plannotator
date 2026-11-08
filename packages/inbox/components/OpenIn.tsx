@@ -7,6 +7,7 @@ import { CodeSnippetPreview } from '@plannotator/ui/components/CodeSnippetPrevie
 import { HostTitle, tooltipContainerOf } from '@plannotator/ui/components/HostTitle';
 import { CodeSpanContext } from '@plannotator/ui/components/LocalLinkContext';
 import { Tooltip } from '@plannotator/ui/components/Tooltip';
+import { ArtifactPinMenuItem } from './ArtifactPinButton';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@plannotator/ui/components/ui/dropdown-menu';
 import { useHoverPreview } from '@plannotator/ui/hooks/useHoverPreview';
 import { useOpenInApps, useRememberedOpenInApp } from '@plannotator/ui/hooks/useOpenInApps';
@@ -843,6 +844,11 @@ interface FullScreenMoreProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   versionAction: FullScreenVersionAction | null;
+  /**
+   * Pin / Unpin as the menu's first item (a phone's HTML page: its toolbar has no room for the pin button). Absent
+   * or null: the toolbar draws the pin, or there is none (the tour).
+   */
+  pin?: { threadId: string; key: string; name: string } | null;
 }
 
 /**
@@ -889,6 +895,7 @@ function FullScreenMoreMenu(props: FullScreenMoreProps & { openIn: React.ReactNo
         <Icon name="dots" size={props.phone ? 20 : 17} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" side={props.phone ? 'top' : 'bottom'} sideOffset={8} className="min-w-[14rem]" data-full-view-menu={attachment.id}>
+        {props.pin && <ArtifactPinMenuItem threadId={props.pin.threadId} artifactKey={props.pin.key} name={props.pin.name} />}
         {props.openIn}
         {tab && (
           <DropdownMenuItem className="text-xs" render={<a href={tab} target="_blank" rel="noopener noreferrer" />} data-open-in-tab="">
