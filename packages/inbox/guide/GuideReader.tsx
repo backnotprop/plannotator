@@ -199,6 +199,7 @@ function Reader({
   controlsHost = null,
   fileContents,
   threadHeading = false,
+  signComments = false,
   hostDiffControls = false,
   collapseAll,
 }: GuideReaderProps) {
@@ -265,9 +266,9 @@ function Reader({
   commentsRef.current = comments;
   const pendingRef = useRef(pendingSelection);
   pendingRef.current = pendingSelection;
-  // The PR page and the review sign a new comment with the person's name, as the review app does; a thread's guided
-  // review, there with Code review off, leaves it unsigned as on main.
-  const signs = bare || threadHeading;
+  // The PR page and a review with Code review on sign a new comment with the person's name, as the review app does; a
+  // guide, or any review with Code review off, leaves it unsigned as on main.
+  const signs = bare || signComments;
   const signed = useCallback((): { author?: string } => (signs ? { author: getIdentity() } : {}), [signs]);
   // Line comments go to the diffs; global comments (on the whole review) to the guide's header.
   const annotations = useMemo(() => (comments ? comments.annotations.filter((a) => a.scope !== 'general') : NO_ANNOTATIONS), [comments?.annotations]);
