@@ -68,6 +68,11 @@ export interface GuideReaderProps {
    */
   threadHeading?: boolean;
   /**
+   * Sign each new comment with the person's name, as the review app does (the full-window review while Code review is
+   * on). The PR page (`bare`) always signs. Absent: unsigned, as on main.
+   */
+  signComments?: boolean;
+  /**
    * The host's bar draws the diff controls (Split / Unified, Collapse all, the "Diff display" popover: approval
    * "diff-controls-headers"), so the first card has no Split | Unified tab. Absent: the tab, as before.
    */
