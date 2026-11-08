@@ -78,6 +78,14 @@ const DRAG_THRESHOLD_TOUCH = 10;
 /** A second click on the same choice within this window is a double-click:
  *  it selects a word, so the pick its first click made is taken back. */
 const DOUBLE_CLICK_REVERT_MS = 800;
+/**
+ * The choice row the last click on any card landed on. The browser counts a
+ * click as the second of a double-click by time and place alone, and a touch
+ * tap counts within about 100px: on a phone, a quick tap on the next card's
+ * answer arrives with `detail` 2. Only a second click on this same row is a
+ * double-click.
+ */
+let lastRowClick: EventTarget | null = null;
 
 const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -613,10 +621,13 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     const press = pressRef.current;
     pressRef.current = null;
     if (event.target instanceof HTMLInputElement) return;
+    const row = event.currentTarget;
+    const again = lastRowClick === row;
+    lastRowClick = row;
     // A double-click selects a word to annotate, never picks: the second
     // click is cancelled, and the pick the first click made (if any, on this
     // choice, just now) is taken back.
-    if (event.detail >= 2) {
+    if (event.detail >= 2 && again) {
       event.preventDefault();
       const last = lastPickRef.current;
       lastPickRef.current = null;

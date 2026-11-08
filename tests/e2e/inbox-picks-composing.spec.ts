@@ -260,12 +260,11 @@ test.describe('a phone (iPhone 15 screen)', () => {
     await expect(box).toHaveValue('Cards: the list is short.');
     // More answers than fit: the list holds about two and a half rows and scrolls, so the box
     // never eats the thread with the keyboard up.
-    // One tap at a time, each seen saved (two taps close together read as a double tap in Chromium's touch emulation).
-    await page.waitForTimeout(600);
+    // Quick taps, as a thumb makes them: the browser counts a tap near the last one as its second click, and a tap
+    // on another card's answer still picks (only a second tap on the same answer is a double tap).
     await choice(2, 'Code after').tap();
-    await expect.poll(() => states(threadId)).toEqual(['picked', 'picked', 'picked', 'open', 'picked', 'open']);
-    await page.waitForTimeout(600);
     await choice(3, 'Footer').tap();
+    await expect.poll(() => states(threadId)).toEqual(['picked', 'picked', 'picked', 'picked', 'picked', 'open']);
     await expect(list).toContainText('Your 5 answers go with this reply');
     const rows = list.locator('.ib-ranswers-l');
     const [shown, whole] = await rows.evaluate((el) => [el.clientHeight, el.scrollHeight]);
