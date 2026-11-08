@@ -55,6 +55,8 @@ import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads'
 import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, threadAwayLine, threadOutbox } from './machines';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { flatRows, useListView, type ListSort } from './listView';
+import { appliedFilter, filterListSections, localDay, pickCount, useListFilter } from './listFilter';
+import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { deliveriesReadList } from './rowDelivery';
@@ -4603,14 +4605,37 @@ function Inbox() {
     (sections: readonly InboxListSection[]) => filterMachineRows(filterSections(sections, route.project), machines, filterMachine?.id ?? null, hideAway),
     [route.project, machines, filterMachine, hideAway],
   );
+  // The list's filter (listFilter.ts): this browser's picks; on a project's page its Project picks step aside. The
+  // day is in the keys so Today and the last N days move on at midnight.
+  const [listFilterPicks, setListFilter] = useListFilter();
+  const listFilterScoped = route.project !== null;
+  const listFilterDay = localDay(Date.now());
+  const listFilterApplied = useMemo(() => appliedFilter(listFilterPicks, listFilterScoped), [listFilterPicks, listFilterScoped]);
+  /** The list as the person reads it: `filterList`, then the filter. "N new" and the rows read this. */
+  const filterShown = useCallback(
+    (sections: readonly InboxListSection[]) => filterListSections(filterList(sections), listFilterApplied, Date.now()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the day: a new one reads the spans again.
+    [filterList, listFilterApplied, listFilterDay],
+  );
+  /** The rows before the filter: its menu's counts and choices. */
+  const listFilterRows = useMemo(() => {
+    const drawn = listShown ?? shown;
+    return drawn ? filterList(drawn).flatMap((section) => section.threads) : [];
+  }, [listShown, shown, filterList]);
   /** The list's sections as drawn, kept between renders that change none of it (InboxList's List memo reads them). */
   const listSections = useMemo(() => {
     const drawn = listShown ?? shown;
-    return drawn ? filterList(drawn) : null;
-  }, [listShown, shown, filterList]);
+    return drawn ? filterShown(drawn) : null;
+  }, [listShown, shown, filterShown]);
+  /** The filter left no row where the list holds some (the Snoozed band aside): "No threads match". */
+  const listFilterEmpty =
+    pickCount(listFilterApplied) > 0 &&
+    listSections !== null &&
+    listSections.every((section) => section.id === 'snoozed' || section.threads.length === 0) &&
+    listFilterRows.some((row) => !row.snoozed);
   // The list's name: Inbox, or the project's window name (or the machine's); its back buttons read the same.
   const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : 'Inbox';
-  const heldNews = shown && latest ? heldNotice(filterList(shown), filterList(latestGroups), openedHere.current, heldOpen(), projectNames) : null;
+  const heldNews = shown && latest ? heldNotice(filterShown(shown), filterShown(latestGroups), openedHere.current, heldOpen(), projectNames) : null;
   const notice = heldNews?.text ? { count: heldNews.count, project: heldNews.project ?? null } : null;
   // "Inbox updated to X · Reload": at the list's top, and at the open thread's when no list is beside it.
   const staleNotice = stalePage.inbox && !restarting ? (
@@ -6251,7 +6276,8 @@ function Inbox() {
           // One project's list: its window name, the path beside it.
           title={listTitle}
           path={filterProject ? tildePath(filterProject.root, settings?.home) : null}
-          sections={listSections ?? filterList(listShown ?? shown)}
+          sections={listSections ?? filterShown(listShown ?? shown)}
+          listFilter={{ rows: listFilterRows, scoped: listFilterScoped, names: projectNames, filter: listFilterPicks, onChange: setListFilter }}
           sort={listSort}
           filtered={filterProject !== null}
           projectNames={projectNames}
@@ -6320,7 +6346,9 @@ function Inbox() {
           phone={phone}
           reconnecting={streamDead}
           empty={
-            projectAllArchived(filterProject) ? (
+            listFilterEmpty ? (
+              <ListFilterEmpty onClear={() => setListFilter(clearedFrom(listFilterPicks, listFilterScoped))} />
+            ) : projectAllArchived(filterProject) ? (
               <div className="ib-empty-list" data-project-archived="">
                 <b dir="auto">Everything in {listTitle} is archived.</b>
                 It leaves the sidebar when you go elsewhere, and comes back when an agent writes there.{' '}

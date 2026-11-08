@@ -10095,3 +10095,39 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 /* Header: the bar's title leads with the mark. */
 .ib-lm-head { position: relative; display: inline-flex; vertical-align: -5px; margin-right: 8px; }
 .ib-bc-proj { display: inline-flex; }
+
+/* The list's filter (components/ListFilter.tsx, listFilter.ts): the funnel alone in the list header, at every width.
+   With picks it takes the accent colour and a count in its corner (the icon cut round it, as the PR badge's count
+   is); the menu is the Pull requests filter's (`.ib-pc-menu`). */
+.pn-inbox .ib-lflt { position: relative; flex: none; display: inline-grid; place-items: center; width: 32px; height: 32px; margin-left: auto; padding: 0; border: 0; border-radius: var(--ib-r10-s, 7px); background: none; color: var(--muted-foreground); cursor: pointer; transition: var(--ib-fade2-s, var(--ib-ui-fade)); }
+.pn-inbox .ib-lflt:hover, .pn-inbox .ib-lflt[data-popup-open] { background: var(--ib-hb-hover-s, var(--muted)); color: var(--foreground); }
+.pn-inbox .ib-lflt:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.pn-inbox .ib-lflt[data-set], .pn-inbox .ib-lflt[data-set]:hover { color: var(--primary); }
+.pn-inbox .ib-lhead .ib-lflt ~ :is(.ib-lhead-search, .ib-lhead-compose, .ib-lhead-more) { margin-left: 0; }
+.ib-lflt-g { position: relative; display: inline-grid; place-items: center; --lflt-s: 13px; --lflt-x: 2px; --lflt-y: 2px; }
+.ib-lflt-g > svg.ib-ic { stroke-width: 1.8; }
+.ib-lflt-n { position: absolute; top: calc(var(--lflt-y) - var(--lflt-s) / 2); right: calc(0px - var(--lflt-x) - var(--lflt-s) / 2); min-width: var(--lflt-s); height: var(--lflt-s); padding: 0 2px; box-sizing: border-box; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; background: var(--primary); color: var(--primary-foreground); font-size: 9.5px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; pointer-events: none; }
+.ib-lflt-g:has(.ib-lflt-n) > svg.ib-ic { -webkit-mask: radial-gradient(circle calc(var(--lflt-s) / 2 + 1.5px) at calc(100% + var(--lflt-x)) var(--lflt-y), transparent 97%, #000 100%); mask: radial-gradient(circle calc(var(--lflt-s) / 2 + 1.5px) at calc(100% + var(--lflt-x)) var(--lflt-y), transparent 97%, #000 100%); }
+.ib-pm.ib-lflt-menu { max-height: min(calc(100vh - 96px), 640px); overflow-y: auto; }
+.ib-lflt-menu .ib-pmi[data-checked] { box-shadow: none; }
+.ib-lflt-host { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; }
+.ib-lflt-host > * { transform: scale(0.85); }
+.ib-tidy.ib-lflt-range { width: 300px; padding: 14px; }
+.ib-lflt-range-h { margin-bottom: 10px; font-size: var(--ib-fs-13, 13px); font-weight: 550; color: var(--foreground); }
+.ib-lflt-range-days { display: flex; gap: 10px; }
+.ib-lflt-range-days label { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.pn-inbox .ib-lflt-range-days input { width: 100%; height: 32px; padding: 0 8px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 7px; background: var(--background); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); color-scheme: light dark; }
+.pn-inbox .ib-lflt-range-days input:focus-visible { outline: 2px solid var(--ring); outline-offset: -1px; }
+.ib-lflt-range-act { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.ib-lflt-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.ib-lflt-empty b { margin-bottom: 0; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-lflt { width: 44px; height: 44px; border-radius: 8px; color: var(--foreground); }
+  .pn-inbox .ib-lflt:hover, .pn-inbox .ib-lflt[data-popup-open] { background: none; }
+  .ib-lflt-g { --lflt-s: 15px; --lflt-x: 2px; --lflt-y: 2px; }
+  .ib-lflt-n { font-size: 10.5px; }
+  .ib-pm-pos[data-phone] .ib-pm.ib-lflt-menu { max-height: 72vh; }
+  .ib-tidy-pos[data-phone] .ib-tidy.ib-lflt-range { width: auto; padding: 16px; }
+  .pn-inbox .ib-lflt-range-days input { height: 44px; font-size: var(--ib-fs-16-in, 16px); }
+  .ib-lflt-range-act .ib-btn { height: 44px; padding: 0 18px; }
+}
