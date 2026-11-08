@@ -131,7 +131,8 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro, VOICE_INTRO_MIN_WORDS, VOICE_INTRO_MOMENT_MS } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
-import { claimRevealOnce, listTallerThanScreen, listViewRevealLeaveCounts, listViewRevealMayClaim, noteRevealThread, openThreadAsks, revealArmed, broRevealLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
+import { claimRevealOnce, listTallerThanScreen, listViewRevealClear, listViewRevealLeaveCounts, listViewRevealMayClaim, idleClockArmed, noteRevealThread, openThreadAsks, revealArmed, broRevealIdleCounts, broRevealLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
+import { useIdleClock } from './idleClock';
 import { launchTipDue } from './compose/launchTip';
 import type { InboxRevealId } from './api';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
@@ -4683,10 +4684,20 @@ function Inbox() {
   }
   const listIntroAtLoad = listIntroLatch.current;
   const listIntroClear = listIntroPageClear(route, { search: searchOpen, compose: compose !== null });
-  // The list options' moment (approval "inbox-one-time-dialogs"): back on the list, no thread open.
-  const listOptionsClear = listIntroClear && !route.thread;
   // Every one-time dialog's hold: something typed or open over the page, or a question waiting in the open thread.
   const oneTimeHeldBack = () => listIntroHeldBack() || openQuestionHere();
+  // Nothing typed or open: the list intro's rule, and no menu open (a row's, a header's, a sheet) and no toast.
+  const revealHeldBack = () => oneTimeHeldBack() || document.querySelector('.ib-pm-pos:not(.ib-zx-pos), [data-inbox-toast]') !== null;
+  // The idle clock (idleClock.ts): a calm moment for the dialogs whose own moment is "back on the list", which a person
+  // who keeps a thread open beside the list never reaches (the owner, 2026-11-08). Counts only while one of them is
+  // armed, on the Inbox page, the tab in front and nothing typed or open.
+  const idleArmedNow = settings && latest !== null && !firstRun && route.page === 'inbox' ? revealArmed(settings) : null;
+  const pageIdle = useIdleClock({
+    enabled: idleClockArmed(idleArmedNow, settings?.list_intro?.due === true && lineArms('list_intro')),
+    busy: () => revealHeldBack() || !listIntroClear,
+  });
+  // The list options' moment (approval "inbox-one-time-dialogs"): back on the list, no thread open, or the page idle.
+  const listOptionsClear = listIntroClear && (!route.thread || pageIdle);
   const listIntroLoad: ListIntroLoad = {
     due: listIntroAtLoad?.due ?? false,
     local: listIntroAtLoad?.local ?? false,
@@ -4788,8 +4799,6 @@ function Inbox() {
     voiceStage: voiceIntro.stage,
     board: oneTimeDialogShownThisLoad(),
   });
-  // Nothing typed or open: the list intro's rule, and no menu open (a row's, a header's, a sheet) and no toast.
-  const revealHeldBack = () => oneTimeHeldBack() || document.querySelector('.ib-pm-pos:not(.ib-zx-pos), [data-inbox-toast]') !== null;
   const snoozeIntro = useSnoozeIntro({
     due: snoozeIntroLatch.current?.due ?? false,
     listLoaded: snoozeIntroLatch.current !== null,
@@ -4816,6 +4825,7 @@ function Inbox() {
     clear: listIntroClear,
     place: `${route.thread}|${route.project}|${route.machine}`,
     heldBack: revealHeldBack,
+    idle: pageIdle,
     on: settings?.board?.on === true,
     onBoardOn: () => setSettings((current) => (current ? { ...current, board: { on: true } } : current)),
   });
@@ -4832,6 +4842,7 @@ function Inbox() {
     clear: listIntroClear,
     place: `${route.thread}|${route.project}|${route.machine}`,
     heldBack: revealHeldBack,
+    idle: pageIdle,
     on: settings?.steps?.on === true,
     onStepsOn: () => setSettings((current) => (current ? { ...current, steps: { on: true } } : current)),
   });
@@ -4850,13 +4861,17 @@ function Inbox() {
     place: `${route.thread}|${route.project}|${route.machine}`,
     heldBack: revealHeldBack,
     leaveCounts: (visit, now, _row, next) => broRevealLeaveCounts(visit, now, next),
+    // Or the page idle on such a thread (a thread kept open beside the list never goes back to it).
+    idle: pageIdle,
+    idleCounts: broRevealIdleCounts,
     mayClaim: () => true,
     // Turned on meanwhile (Settings, another window): nothing to offer.
     holds: () => settingsRef.current?.bro?.on !== true,
   });
   // The List view's choice, registered with the line (approval "inbox-one-time-dialogs", the change; reveal.ts
   // `useLineReveal`): armed while it is `reveal.next`, or in `reveal.ahead` (it goes at its own moment, ahead of the
-  // other offers), back on the list with no thread open, once the list is taller than the screen, on Smart groups.
+  // other offers), back on the list with no thread open or the page idle (any layout), once the list is taller than the
+  // screen, on Smart groups.
   const [listView, setListView] = useListView();
   const listViewThread = route.page === 'inbox' ? (route.thread ?? null) : null;
   const listViewReveal = useLineReveal({
@@ -4866,11 +4881,12 @@ function Inbox() {
     rows: snoozeIntroRows,
     toast: toast !== null,
     thread: listViewThread,
-    // Only on the list itself: never over a thread (nor a phone's thread) opened after the claim.
-    clear: listIntroClear && listViewThread === null,
+    // On the list itself, or over a thread while the page is idle (the thread kept open beside the list).
+    clear: listViewRevealClear(listIntroClear, listViewThread, pageIdle),
     place: `${route.thread}|${route.project}|${route.machine}`,
     heldBack: revealHeldBack,
     leaveCounts: (_visit, _now, _row, next) => listViewRevealLeaveCounts(next),
+    idle: pageIdle,
     mayClaim: (pageAge) =>
       listViewRevealMayClaim(
         {

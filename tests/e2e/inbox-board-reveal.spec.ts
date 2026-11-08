@@ -119,6 +119,14 @@ async function world(): Promise<World> {
 
 const config = (w: World) => JSON.parse(readFileSync(join(w.dataDir, 'config.json'), 'utf8')) as Record<string, any>;
 
+/**
+ * This spec proves the leave moment ("back on the list"), so the page is never idle (idleClock.ts: 20 s without input
+ * is also the moment, and Playwright tells every page it is focused): a pointer move every 3 s, from the first paint.
+ */
+const neverIdle = () => {
+  setInterval(() => window.dispatchEvent(new Event('pointermove')), 3_000);
+};
+
 async function context(browser: Browser, phone = false): Promise<BrowserContext> {
   const ctx = await browser.newContext({
     viewport: phone ? { width: 390, height: 844 } : { width: 1440, height: 900 },
@@ -128,6 +136,7 @@ async function context(browser: Browser, phone = false): Promise<BrowserContext>
   });
   // Before any page loads: the reveal's page age is the page's `Date.now()`, so the minute can be fast-forwarded.
   await ctx.clock.install();
+  await ctx.addInitScript(neverIdle);
   contexts.push(ctx);
   return ctx;
 }

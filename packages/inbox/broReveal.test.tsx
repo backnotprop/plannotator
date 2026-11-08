@@ -8,6 +8,9 @@
  * "Turn it on" not saving the switch; a second claim after any way out; the card opening once another window turned
  * it on.
  *
+ * Idle: the page going idle on such a thread (a thread kept open beside the list) not being its moment, or being it on
+ * a short message or on the list.
+ *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -86,6 +89,8 @@ interface State {
   blocked: boolean;
   toast: boolean;
   thread: string | null;
+  /** The page is idle (App: idleClock.ts). */
+  idle?: boolean;
 }
 
 const BASE: State = { due: true, blocked: false, toast: false, thread: 'msg_a' };
@@ -107,6 +112,8 @@ function Harness({ state }: { state: State }) {
     place: state.thread ?? '',
     heldBack: () => held,
     leaveCounts: (visit, now, _row, next) => reveal.broRevealLeaveCounts(visit, now, next),
+    idle: state.idle === true,
+    idleCounts: reveal.broRevealIdleCounts,
     mayClaim: () => true,
     holds: () => !shownOn,
   });
@@ -194,6 +201,26 @@ describe.skipIf(!hasDom)('the Bro mode offer', () => {
     await wait(TIMES.settledMs + 80);
     expect(card()).toBeNull();
     expect(claims()).toHaveLength(0);
+  });
+
+  test('a thread kept open (beside the list): the page idle on a long agent message is the moment; on a short one, or on the list, it is not', async () => {
+    const render = await readThread();
+    await wait(TIMES.pageAgeMs);
+    render({ ...BASE, idle: true });
+    await until(() => card() !== null);
+    expect(claims().map((c) => c.body.id)).toEqual(['bro']);
+    act(() => root?.unmount());
+    host?.remove();
+    for (const [words, thread] of [[149, 'msg_a'], [400, null]] as const) {
+      posts = [];
+      const again = await readThread({ ...BASE, thread }, words);
+      await wait(TIMES.pageAgeMs);
+      again({ ...BASE, thread, idle: true });
+      await wait(TIMES.settledMs + 120);
+      expect(claims()).toHaveLength(0);
+      act(() => root?.unmount());
+      host?.remove();
+    }
   });
 
   test('leaving for another thread is not the moment', async () => {

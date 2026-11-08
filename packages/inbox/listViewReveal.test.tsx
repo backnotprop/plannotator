@@ -7,7 +7,10 @@
  * does not name it, or an older Inbox reports no line); opening without the line's claim (`POST /api/inbox/reveal`
  * `list_view`) or after the Inbox refused it; showing on load, or with any one blocker present (the list not taller
  * than the screen, the list already Simple, another one-time dialog this load, a toast, something typed or open, a
- * thread left for another thread); "Simple list" not switching the list at once or not remembering it as the ⋮ menu
+ * thread left for another thread while the page is not idle); the page going idle not being its moment in a split
+ * view, where a thread stays open beside the list and the person goes thread to thread, never back to the list (the
+ * owner, 2026-11-08: "Some people may never see them"), or an idle page claiming before the page's age; "Simple list"
+ * not switching the list at once or not remembering it as the ⋮ menu
  * does; Escape or a click outside not counting as the line's Not now, or a pick counting as one.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -21,6 +24,7 @@ import type { ListView } from './listView';
 
 const hasDom = typeof document !== 'undefined';
 const reveal = (hasDom ? await import('./reveal') : {}) as typeof import('./reveal');
+const idleClock = (hasDom ? await import('./idleClock') : {}) as typeof import('./idleClock');
 const { inboxApi } = (hasDom ? await import('./api') : {}) as typeof import('./api');
 const { ListViewIntro } = (hasDom ? await import('./components/ListViewIntro') : {}) as typeof import('./components/ListViewIntro');
 const listView = await import('./listView');
@@ -34,6 +38,7 @@ const stored = new Map<string, string>();
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedTimes: typeof reveal.REVEAL_TIMES;
+let savedIdleMs = 0;
 let savedFetch: typeof fetch;
 let posts: { path: string; body: Record<string, unknown> }[] = [];
 /** Whether the Inbox grants the claim (false: not its turn any more, or another tab won). */
@@ -50,6 +55,10 @@ beforeEach(() => {
   if (!hasDom) return;
   savedTimes = { ...reveal.REVEAL_TIMES };
   Object.assign(reveal.REVEAL_TIMES, TIMES);
+  savedIdleMs = idleClock.IDLE_CLOCK.idleMs;
+  // The tab in front (the idle clock counts only then).
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+  Object.defineProperty(document, 'hasFocus', { configurable: true, value: () => true });
   savedFetch = globalThis.fetch;
   posts = [];
   grants = true;
@@ -76,6 +85,9 @@ afterEach(() => {
   document.body.innerHTML = '';
   globalThis.fetch = savedFetch;
   Object.assign(reveal.REVEAL_TIMES, savedTimes);
+  idleClock.IDLE_CLOCK.idleMs = savedIdleMs;
+  delete (document as unknown as Record<string, unknown>).visibilityState;
+  delete (document as unknown as Record<string, unknown>).hasFocus;
 });
 
 const wait = (ms: number) => act(() => new Promise((resolve) => setTimeout(resolve, ms)));
@@ -129,6 +141,7 @@ function Harness({ state, line }: { state: State; line: Line }) {
   const [view, setView] = listView.useListView();
   drawn = view;
   const armed = reveal.revealArmed({ reveal: line });
+  const idle = idleClock.useIdleClock({ enabled: true });
   const r = reveal.useLineReveal({
     id: 'list_view',
     due: armed.next === 'list_view' || armed.ahead.includes('list_view'),
@@ -136,10 +149,11 @@ function Harness({ state, line }: { state: State; line: Line }) {
     rows: FIVE,
     toast: state.toast,
     thread: state.thread,
-    clear: state.thread === null,
+    clear: reveal.listViewRevealClear(true, state.thread, idle),
     place: state.thread ?? '',
     heldBack: () => state.held,
     leaveCounts: (_visit, _now, _row, next) => reveal.listViewRevealLeaveCounts(next),
+    idle,
     mayClaim: (pageAge) => reveal.listViewRevealMayClaim({ listLoaded: true, firstRun: false, grouped: view === 'grouped', taller: state.taller }, pageAge),
     holds: () => view === 'grouped',
   });
@@ -291,6 +305,73 @@ describe.skipIf(!hasDom)('the List view choice, through the line', () => {
       expect(claims()).toHaveLength(0);
     });
   }
+
+  test('split view: a thread kept open beside the list, thread to thread, never back on the list: the page going idle is the moment', async () => {
+    idleClock.IDLE_CLOCK.idleMs = 150;
+    const set = mount({ ...BASE, thread: 'a' }, NEXT);
+    // Busy reading and moving between threads: no idle, no moment, past the page's age.
+    for (const thread of ['b', 'c', 'd']) {
+      await wait(100);
+      act(() => void window.dispatchEvent(new Event('pointerdown')));
+      set({ thread });
+    }
+    await wait(60);
+    expect(claims()).toHaveLength(0);
+    // Then the page rests on thread d: the moment, the line's claim, and the dialog over the open thread.
+    await until(() => dialog() !== null);
+    expect(claims().map((c) => c.body)).toEqual([{ id: 'list_view', key: expect.any(String) }]);
+  });
+
+  test('an idle page waits for the page\'s age before it claims', async () => {
+    idleClock.IDLE_CLOCK.idleMs = 100;
+    mount({ ...BASE, thread: 'a' }, NEXT);
+    // Idle from 100 ms, but the page is younger than its age (300 ms): no claim yet.
+    await wait(230);
+    expect(claims()).toHaveLength(0);
+    await until(() => dialog() !== null);
+    expect(claims()).toHaveLength(1);
+  });
+
+  test('idle with the real list on the page: an open Smart group band and a sidebar section (aria-expanded, no popup) never keep it away', async () => {
+    idleClock.IDLE_CLOCK.idleMs = 100;
+    // InboxList.tsx's band (groups open by default) and Sidebar.tsx's section toggle, as they render.
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<nav><button type="button" aria-expanded="true" data-sidebar-section="">Projects</button></nav><div class="ib-listcol"><div class="ib-lbody"><div class="ib-group" data-section-id="new"><button type="button" class="ib-band" aria-expanded="true">New since you looked</button></div></div></div>',
+    );
+    mount({ ...BASE, thread: 'a' }, NEXT);
+    await until(() => dialog() !== null);
+    expect(claims()).toHaveLength(1);
+  });
+
+  test('idle with the Ask AI window open over the thread: no claim', async () => {
+    idleClock.IDLE_CLOCK.idleMs = 100;
+    document.body.insertAdjacentHTML('beforeend', '<div data-popover-layer=""><section data-chat-window="">Ask AI</section></div>');
+    mount({ ...BASE, thread: 'a' }, NEXT);
+    await wait(TIMES.pageAgeMs + 400);
+    expect(claims()).toHaveLength(0);
+  });
+
+  test("App's clock runs only while a reveal that takes idle is armed (next, List view ahead, or the list options due)", () => {
+    expect(reveal.idleClockArmed(null, true)).toBe(false);
+    for (const next of ['list_view', 'board', 'steps', 'bro'] as const) expect(reveal.idleClockArmed({ next, ahead: [] }, false)).toBe(true);
+    expect(reveal.idleClockArmed({ next: 'snooze', ahead: ['list_view'] }, false)).toBe(true);
+    expect(reveal.idleClockArmed({ next: null, ahead: [] }, true)).toBe(true);
+    for (const next of ['snooze', 'code_review', 'voice', 'sound', null] as const) expect(reveal.idleClockArmed({ next, ahead: [] }, false)).toBe(false);
+  });
+
+    test('idle with a blocker present (the list no taller than the screen, something open): no claim', async () => {
+    idleClock.IDLE_CLOCK.idleMs = 100;
+    mount({ ...BASE, thread: 'a', taller: false }, NEXT);
+    await wait(TIMES.pageAgeMs + 400);
+    expect(claims()).toHaveLength(0);
+    act(() => root?.unmount());
+    host?.remove();
+    mount({ ...BASE, thread: 'a', held: true }, NEXT);
+    await wait(TIMES.pageAgeMs + 400);
+    expect(claims()).toHaveLength(0);
+    expect(dialog()).toBeNull();
+  });
 
   test('not once the list is Simple: the choice is for the groups', async () => {
     stored.set(listView.LIST_VIEW_COOKIE, 'list');
