@@ -62,7 +62,7 @@ import { FileTreeMark } from './fileTreeMark';
 import { TooltipEscapePassesThrough } from '@plannotator/ui/components/Tooltip';
 import { RailStack } from './RailStack';
 import { RailTree } from './RailTree';
-import { DetailsStatus, PullDetails, usePullDetails } from './PullDetails';
+import { DetailsButton, DetailsTitle, PullDetails, usePullDetails } from './PullDetails';
 import { RailScopeSwitch } from './RailScope';
 import { useTreeScope } from '@plannotator/ui/hooks/useTreeScope';
 import { useSheetEscape } from '../shortcuts/useSheetEscape';
@@ -778,20 +778,27 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       </p>
     </Tip>
   );
+  // The title opens the PR's details (the owner's "title only"; with `DETAILS_BUTTON`, the Details button beside it too).
   const title = (
-    <Tip content={`${label} ${layer.title} · ${layer.author ?? 'A teammate'} wants to merge ${layer.head} into ${layer.base}`}>
-      <span className="ib-fn ib-prr-fn" data-pull-review-title="">
-        <RefMarkIcon kind="pr" state={layer.state} size={15} />
-        {scope === 'stack' ? (
-          <bdi>Whole stack up to {label}</bdi>
-        ) : (
-          <>
-            <span className="ib-prr-num">{label}</span>
-            <bdi>{layer.title}</bdi>
-          </>
-        )}
-      </span>
-    </Tip>
+    <DetailsTitle
+      name={scope === 'stack' ? `Whole stack up to ${label}` : `${label} ${layer.title}`}
+      tip={`${label} ${layer.title} · ${layer.author ?? 'A teammate'} wants to merge ${layer.head} into ${layer.base}`}
+      open={detailsOpen}
+      data={details.data}
+      onToggle={toggleDetails}
+      className="ib-fn ib-prr-fn"
+      data-pull-review-title=""
+    >
+      <RefMarkIcon kind="pr" state={layer.state} size={15} />
+      {scope === 'stack' ? (
+        <bdi>Whole stack up to {label}</bdi>
+      ) : (
+        <>
+          <span className="ib-prr-num">{label}</span>
+          <bdi>{layer.title}</bdi>
+        </>
+      )}
+    </DetailsTitle>
   );
   const toggleFiles = () => {
     setFilesSheet((open) => !open);
@@ -858,14 +865,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         )}
         {!judged && riskFailure && <RiskMark failed={riskFailure} />}
         {!phone && readOnlyNote}
-        {!phone && (
-          <Tip content="Description, comments, checks and reviewers">
-            <button type="button" className={`ib-prp-dbtn${detailsOpen ? ' ib-on' : ''}`} aria-expanded={detailsOpen} onClick={toggleDetails} data-pull-details-button="">
-              Details
-              <DetailsStatus data={details.data} />
-            </button>
-          </Tip>
-        )}
+        {!phone && <DetailsButton open={detailsOpen} data={details.data} onToggle={toggleDetails} />}
         <span className="ib-sp" />
         {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
         {(readerComments || comments.length > 0) && (
@@ -934,7 +934,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       <div className="ib-rsplit">
         {phone && (
           <div className="ib-prp-row2">
-            <button type="button" className={`ib-prp-this${detailsOpen ? ' ib-on' : ''}`} aria-expanded={detailsOpen} onClick={toggleDetails} data-pull-review-title="" data-pull-details-button="">
+            <button type="button" className={`ib-prp-this${detailsOpen ? ' ib-on' : ''}`} aria-expanded={detailsOpen} aria-label={`${stack.layers.length > 1 ? `${stack.layers.findIndex((l) => l.key === layer.key) + 1} of ${stack.layers.length} ` : ''}${scope === 'stack' ? `Whole stack up to ${label}` : layer.title}, opens details`} onClick={toggleDetails} data-pull-review-title="" data-pull-details-button="">
               {stack.layers.length > 1 && <span className="ib-prp-of">{stack.layers.findIndex((l) => l.key === layer.key) + 1} of {stack.layers.length}</span>}
               <bdi className="ib-prp-title">{scope === 'stack' ? `Whole stack up to ${label}` : layer.title}</bdi>
               <Icon name="chevD" size={13} />

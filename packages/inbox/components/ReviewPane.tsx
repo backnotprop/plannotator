@@ -91,6 +91,8 @@ import { clearReviewNotes, readReviewNotes, saveReviewNotes, VerdictKeys, verdic
 import { useGuideState } from './useGuideState';
 import { PostEnding, reviewEnding, useReviewDestination } from '../pulls/PostEnding';
 import { onPullDiff, postedSignature, postedWords } from '../pulls/postRules';
+import { DetailsButton, DetailsTitle } from '../pulls/PullDetails';
+import { ThreadPullDetailsPanel, ThreadPullTitleRow, useThreadPullDetails } from '../pulls/ThreadPullDetails';
 import { useLiveSessions } from './NewMessage';
 import {
   AskerEndedNote,
@@ -273,6 +275,11 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   useEffect(() => {
     if (!folded) setSheet(false);
   }, [folded]);
+  // The PR page's Details, when this thread was handed one PR: one thing over the code at a time.
+  const pullDetails = useThreadPullDetails(thread, postKey ? postPull : undefined, () => setSheet(false));
+  useEffect(() => {
+    if (sheet) pullDetails.shut();
+  }, [sheet]); // eslint-disable-line react-hooks/exhaustive-deps
   // A global comment chosen in the guide: selected in the panel, and a closed panel opens on it.
   const readerComments = useMemo(
     () =>
@@ -888,6 +895,16 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   // Who sent it and when, as the thread's message says (the old guide pane's line).
   const from = `from ${author} in ${thread.project.name}, sent ${whenTime(message.created_at)}`;
   const source = snapshot ? reviewSourceLine(snapshot) : '';
+  const titleTip = (
+    <span className="ib-tip-proj">
+      <bdi className="ib-tip-name">{title}</bdi>
+      {source && (
+        <span className="ib-tip-path" dir="ltr" data-review-source="">
+          {source}
+        </span>
+      )}
+    </span>
+  );
   const railModes = (
     <div className="ib-seg ib-rv-modes" role="radiogroup" aria-label="Review by">
       {(['walkthrough', 'files'] as const).map((value) => (
@@ -959,23 +976,21 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
         )}
         {!phone && <span className="ib-vsep ib-rv-titlesep" aria-hidden="true" />}
         {/* The review's title, quiet; where it gives way (a short bar) the heading holds the same facts. */}
-        {!phone && (
-          <Tip
-            content={
-              <span className="ib-tip-proj">
-                <bdi className="ib-tip-name">{title}</bdi>
-                {source && (
-                  <span className="ib-tip-path" dir="ltr" data-review-source="">
-                    {source}
-                  </span>
-                )}
-              </span>
-            }
-          >
+        {!phone && !pullDetails.pull && (
+          <Tip content={titleTip}>
             <span className="ib-fn ib-rv-title" data-review-title="">
               <bdi>{title}</bdi>
             </span>
           </Tip>
+        )}
+        {/* A review of one PR: its title opens the PR's details (and with `DETAILS_BUTTON`, the Details button beside it). */}
+        {!phone && pullDetails.pull && (
+          <>
+            <DetailsTitle name={title} tip={titleTip} open={pullDetails.open} data={pullDetails.details.data} onToggle={pullDetails.toggle} className="ib-fn ib-rv-title" data-review-title="">
+              <bdi>{title}</bdi>
+            </DetailsTitle>
+            <DetailsButton open={pullDetails.open} data={pullDetails.details.data} onToggle={pullDetails.toggle} />
+          </>
         )}
         {!phone && (
           <span className="ib-from ib-rv-from" data-review-from="">
@@ -1106,6 +1121,8 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
             />
           </nav>
         )}
+        {phone && <ThreadPullTitleRow state={pullDetails} />}
+        <ThreadPullDetailsPanel state={pullDetails} phone={phone} inDiff={(path) => files.some((file) => file.path === path)} onFile={toFile} />
         <div className="ib-gbody" ref={bodyRef}>
           {moved && (
             <p className="ib-prr-note" role="status" data-review-pull-moved={moved}>
