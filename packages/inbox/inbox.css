@@ -7169,11 +7169,11 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
 .ib-fbk-sent h2 { margin-top: 10px; }
 .ib-fbk-sent .ib-acts-row { justify-content: center; align-self: stretch; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  .pn-inbox dialog.ib-dlg.ib-fbk.ib-fbk-phone, dialog.ib-dlg.ib-fbk.ib-fbk-phone {
+  .pn-inbox dialog.ib-dlg.ib-fbk.ib-fbk-phone, dialog.ib-dlg.ib-fbk.ib-fbk-phone, dialog.ib-dlg.ib-riskd {
     inset: auto 0 calc(100% - var(--ib-vvh, 100%)) 0; margin: 0; width: 100vw; max-width: 100vw; max-height: calc(var(--ib-vvh, 100dvh) - 24px);
     border-radius: var(--ib-sheet-corner, 12px) var(--ib-sheet-corner, 12px) 0 0; border-bottom: 0;
   }
-  .ib-fbk-phone .ib-dlg-in { padding: 18px calc(16px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); }
+  .ib-fbk-phone .ib-dlg-in, .ib-riskd .ib-dlg-in { padding: 18px calc(16px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); }
   /* The whole row is a 44 px target. Three lines, so Send stays on screen on a small phone. */
   .ib-fbk-rel li { padding: 0; line-height: 44px; font-size: var(--ib-fs-14, 14px); }
   .ib-fbk-rel li:nth-child(n + 4) { display: none; }
@@ -8655,6 +8655,41 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-pr-notice > .ib-ic { flex: none; margin-top: 2px; }
 .ib-pr-notice a { color: var(--primary); font-weight: 550; text-decoration: none; white-space: nowrap; }
 .ib-pr-notice a:hover { text-decoration: underline; }
+
+/* PR risk ranking (pulls/RiskMark.tsx, RiskFilter.tsx, RiskRulesDialog.tsx): high stands out, medium is quiet, low is quietest. */
+.ib-risk { flex: none; display: inline-flex; align-items: center; font-size: var(--ib-fs-12, 12px); font-weight: 500; line-height: 17px; white-space: nowrap; color: var(--muted-foreground); }
+.ib-risk[data-risk="failed"] { font-style: italic; }
+.ib-risk[data-risk="low"] { font-weight: 400; color: color-mix(in oklch, var(--muted-foreground) 72%, transparent); }
+.ib-risk[data-risk="high"] { padding: 0 7px; border-radius: 999px; font-weight: 600; background: color-mix(in oklch, var(--destructive) 14%, var(--card)); color: color-mix(in oklch, var(--destructive) 85%, var(--foreground)); }
+.ib-pr-risknote { margin: 8px 0 0; padding: 4px 10px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-pr-empty .ib-pr-risknote { margin: 0; padding: 0; }
+.ib-pr-riskline { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; margin: 10px 0 0; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); }
+.ib-pr-l1 .ib-risk { margin-left: 2px; }
+.ib-vhead .ib-risk { margin-left: 4px; }
+.ib-prlist .ib-lhead .ib-pr-riskf:not([data-set]) .ib-bpf-l { position: static; width: auto; height: auto; clip-path: none; }
+.ib-prlist .ib-lhead .ib-pr-riskf:not([data-set]) { flex: none; }
+.ib-prlist .ib-lhead .ib-pr-riskf { margin-left: auto; }
+.ib-prlist .ib-lhead .ib-pf-slot:has(+ .ib-pr-riskf) { margin-right: 0; }
+.ib-prlist .ib-lhead .ib-pf-slot + .ib-pr-riskf { margin-left: 6px; }
+.ib-riskd-l { display: block; margin-top: 6px; line-height: 1.45; }
+.ib-riskd-t { display: block; width: 100%; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: inherit; line-height: 1.5; resize: vertical; }
+.ib-riskd-t::placeholder { color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }
+/* The model list opens over the dialog's edge: a dialog that scrolls would clip it. */
+.ib-riskd:has(.ib-riskd-row .absolute) { overflow: visible; }
+.ib-riskd-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.ib-riskd-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* A sheet at the bottom of the screen, as the feedback dialog (its rule is above): the list opens upward, inside it, and the sheet can still scroll. */
+  .ib-riskd:has(.ib-riskd-row .absolute) { overflow-y: auto; }
+  .ib-riskd-row > div { width: 100%; }
+  .ib-riskd-row button { width: 100%; min-height: 44px; font-size: var(--ib-fs-14, 14px); }
+  .ib-riskd-row button > span:nth-child(2) { flex: 1; min-width: 0; max-width: none; text-align: left; }
+  .ib-riskd-row input { font-size: var(--ib-fs-16-in, 16px); }
+  .ib-riskd-row .absolute { top: auto; bottom: 100%; width: 100%; min-width: 0; margin: 0 0 4px; }
+  .ib-riskd-row .absolute > .overflow-y-auto { max-height: min(224px, 30dvh); }
+  /* A short phone keeps Save and Cancel on screen: the box gives up its height first. */
+  .ib-riskd-t { font-size: var(--ib-fs-16-in, 16px); height: clamp(88px, 16dvh, 140px); }
+}
 /* A long chain: the first two marks, "+N", the last two. */
 .ib-pr-more { font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 /* The author's picture (the owner on #2608) over their initials, which show while it loads and stay when it cannot. */

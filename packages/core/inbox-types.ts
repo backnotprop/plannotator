@@ -47,6 +47,7 @@ export * from "./inbox-surface-bridge";
 export * from "./inbox-tidy";
 // Pull requests (code review in the Inbox, phase 2), the same way.
 export * from "./inbox-pulls";
+export * from "./inbox-pull-risk";
 // Reviews (approval "inbox-reviews-page"): the per-thread review index and whose move, the same way.
 export * from "./inbox-reviews";
 
