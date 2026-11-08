@@ -204,6 +204,8 @@ import { askArrivalFocus, listOrder as drawnOrder, threadStep } from './threadSt
 import { LIST_STOPS, listKeyTarget } from './listKeys';
 import { emitAskChange } from './ask/askEvents';
 import { useInboxAsk } from './ask/useInboxAsk';
+import { useReplyFloaters } from './floaters/useReplyFloaters';
+import { emitFloaterEvent } from './floaters/model';
 import { setSessionLabels } from './sessionLabels';
 import { createInboxShapeHost } from './shape/inboxShapeHost';
 import { ShapeGridPage, ShapePebbleButton } from './shape/ShapeParts';
@@ -2103,6 +2105,8 @@ function Inbox() {
             return;
           }
           readAfterRecord(event);
+          // A floating draft's window reads its thread again (a new message, a hand-off).
+          emitFloaterEvent('record', null);
         },
         // A reply draft was saved or discarded (here or in another window): the rows' `unsent` and the Drafts row.
         // Its own timer: sharing the record timer let a draft save cancel a record's pending reads (the open thread's).
@@ -2111,6 +2115,8 @@ function Inbox() {
         onDrafts: (threadId) => {
           // The open thread's own copy of its draft follows at once (the foot's Send carries those words).
           if (threadId !== null && threadId === routeRef.current.thread) setDraftChanged((n) => n + 1);
+          // A floating draft's window follows, and a draft set aside floats once its save landed.
+          emitFloaterEvent('draft', threadId);
           if (draftsTimer) clearTimeout(draftsTimer);
           draftsTimer = setTimeout(() => void refreshDrafts(), 80);
           if (threadId !== null) listAfterEvents(80);
@@ -5051,6 +5057,20 @@ function Inbox() {
     openThread: (threadId) => writeRoute({ page: 'inbox', project: null, thread: threadId }),
     replyInThread: (threadId, words) => setAskReply({ threadId, words }),
   });
+  // Floating reply drafts in the corner, beside this thread's Ask chat (approval "inbox-reply-floaters").
+  const floaters = useReplyFloaters({
+    rows: replyDrafts,
+    rowsRead: drafts !== null,
+    threadId: route.page === 'inbox' ? route.thread : null,
+    phone,
+    off: tourOn || settings?.guest === true,
+    ask: ask.corner,
+    openThread: (threadId) => writeRoute({ page: 'inbox', project: null, thread: threadId }),
+    openDrafts: () => writeRoute({ page: 'drafts', project: null, thread: null }),
+    refreshDrafts,
+    toast: (next) => showToast(next),
+    dismissToast,
+  });
   const reducedMotion = useReducedMotion();
   const [tourState, dispatchTourRaw] = useReducer(tourReducer, TOUR_START);
   const tourContent = useTourFixture(tourOn);
@@ -7023,6 +7043,7 @@ function Inbox() {
           />
         </div>
       )}
+      {floaters.layer}
       {ask.layer}
       {toast && !toast.hidden && soundDialog !== 'open' && !agentNoteOpen && <InboxToast toast={toast} phone={phone} onDismiss={dismissToast} onHold={holdToast} />}
       <SearchHost
