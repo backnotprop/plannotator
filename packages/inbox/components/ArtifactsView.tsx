@@ -145,7 +145,7 @@ const PREVIEW_CACHE_MAX = 48;
 /** Reads kept by file version: the grid opens, closes and scrolls back without reading again. */
 const previewCache = new Map<string, Promise<{ text: string; html: string | null }>>();
 
-function previewOf(source: InboxFileSource, attachment: InboxAttachmentState): Promise<{ text: string; html: string | null }> {
+export function previewOf(source: InboxFileSource, attachment: InboxAttachmentState): Promise<{ text: string; html: string | null }> {
   const version = readableVersion(attachment);
   const key = `${attachment.id}:${version}:${version === 'current' ? (attachment.current?.sha256 ?? '') : attachment.sent_sha256}`;
   let cached = previewCache.get(key);
@@ -164,12 +164,12 @@ function previewOf(source: InboxFileSource, attachment: InboxAttachmentState): P
 }
 
 /** A short type mark ("SQL", "MD", "PDF"): the extension, else the kind. */
-function typeMark(attachment: Pick<InboxAttachmentState, 'name' | 'kind'>): string {
+export function typeMark(attachment: Pick<InboxAttachmentState, 'name' | 'kind'>): string {
   const ext = /\.([A-Za-z0-9]{1,5})$/.exec(attachment.name)?.[1];
   return (ext ?? readInboxAttachmentKind(attachment.kind)).toUpperCase().slice(0, 5);
 }
 
-function typedIcon(kind: InboxAttachmentKind): IconName {
+export function typedIcon(kind: InboxAttachmentKind): IconName {
   if (kind === 'video') return 'film';
   if (kind === 'image') return 'photo';
   if (kind === 'file') return 'cube';
@@ -201,7 +201,7 @@ function TextLines({ text, code }: { text: string; code: boolean }) {
 }
 
 /** An HTML page drawn small: its own markup in a frame that runs no script and takes no pointer or focus. */
-function PageFrame({ html }: { html: string }) {
+export function PageFrame({ html }: { html: string }) {
   const box = useRef<HTMLSpanElement>(null);
   const [scale, setScale] = useState(0.2);
   useEffect(() => {
@@ -223,7 +223,7 @@ function PageFrame({ html }: { html: string }) {
 const PAGE_WIDTH = 1024;
 
 /** The face of a file: what it is, at a glance. Also the Artifacts wall's (ArtifactsWall.tsx). */
-export function FileFace({ artifact, near }: { artifact: FileArtifact; near: boolean }) {
+function FileFace({ artifact, near }: { artifact: FileArtifact; near: boolean }) {
   const { attachment } = artifact;
   const source = useInboxFileSource();
   const kind = readInboxAttachmentKind(attachment.kind);

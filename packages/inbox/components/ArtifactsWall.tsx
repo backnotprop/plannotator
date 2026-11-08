@@ -19,7 +19,9 @@ import { dayWords, formatCount, plural } from '../format';
 import { Icon } from '../icons';
 import { SidebarTrigger } from '../shell/sidebar';
 import { ArtifactPinButton } from './ArtifactPinButton';
-import { FileFace, GuideFace, useNear } from './ArtifactsView';
+import { useNear } from './ArtifactsView';
+import { usePdfPages, WallFace } from './WallFace';
+import { wallTypeLabel } from '../wallFaceText';
 import { Tip } from './Tip';
 
 const TYPES: { id: InboxArtifactType; name: string }[] = [
@@ -60,16 +62,23 @@ function WallTile({ row, onOpen }: { row: InboxArtifactRow; onOpen: (row: InboxA
   const [ref, near] = useNear<HTMLLIElement>();
   const artifact = wallArtifact(row);
   const name = nameOf(row);
+  const pages = usePdfPages(row.attachment, near);
+  const type = wallTypeLabel(row, pages);
   return (
     <li className="ib-wall-cell" ref={ref} data-wall-artifact={row.key}>
-      <button type="button" className="ib-wall-tile" onClick={() => onOpen(row)} aria-label={`${name}, in ${row.thread_title}, ${artifact.sender} at ${artifact.sentAt}`}>
-        {artifact.type === 'file' ? <FileFace artifact={artifact} near={near} /> : <GuideFace artifact={artifact} />}
+      <button type="button" className="ib-wall-tile" onClick={() => onOpen(row)} aria-label={`${name}, ${type}, in ${row.thread_title}, ${artifact.sender} at ${artifact.sentAt}`}>
+        <span className="ib-wall-stage">
+          <WallFace row={row} near={near} guide={artifact.type === 'guide' ? artifact : null} pages={pages} />
+        </span>
         <span className="ib-wall-cap" aria-hidden="true">
-          <span className="ib-wall-cap-nm" dir="auto">
+          <span className="ib-wall-cap-nm" dir="auto" data-wall-name={name}>
             {name}
           </span>
-          <span className="ib-wall-cap-th" dir="auto">
-            {row.thread_title}
+          <span className="ib-wall-cap-sub" dir="auto">
+            <span className="ib-wall-cap-ty" data-wall-type-label="">
+              {type}
+            </span>
+            <span className="ib-wall-cap-th"> · {row.thread_title}</span>
           </span>
         </span>
       </button>
