@@ -2,7 +2,7 @@
  * Reply drafts in the window (approval "inbox-reply-drafts", variant Label):
  * the words typed in a thread's reply box are kept as a server draft while
  * typing, come back (without taking focus) when the thread opens again,
- * survive Cancel, go with Discard and with the Send that carries them; the
+ * survive closing the box, go with Discard and with the Send that carries them; the
  * list row says "Draft · Your reply" (or "Draft · 1 pick"), and the Drafts
  * page lists the threads holding unsent work above the messages.
  *
@@ -248,10 +248,10 @@ test.skipIf(!hasDom)('typed words are saved while typing, and come back in the b
   await settle();
   type(el, 'Pagefind, but index the changelog too');
   await until(async () => (await serverDraft(world.waiting))?.body === 'Pagefind, but index the changelog too', 'the draft saved');
-  // The soft pill with when it was saved, and Discard.
-  await until(() => el.querySelector('[data-draft-head] .ib-draft-pill') !== null, 'the Draft pill');
-  expect(el.querySelector('[data-draft-head] .ib-draft-saved')?.textContent).toMatch(/^Saved \d{1,2}:\d{2} [AP]M$/);
-  expect(el.querySelector('[data-draft-discard]')?.textContent).toBe('Discard');
+  // A computer saves silently (approval "inbox-reply-box", T6): no Draft pill or Saved time in the box, and Discard is
+  // the bin in the box's row.
+  expect(el.querySelector('[data-draft-head]')).toBeNull();
+  expect(el.querySelector('[data-reply-row] [data-reply-discard]')?.getAttribute('aria-label')).toBe('Discard draft');
   leave();
 
   const again = await renderApp(`#thread=${world.waiting}`);
@@ -291,14 +291,14 @@ test.skipIf(!hasDom)('leaving the thread before the pause in typing still saves 
   await until(async () => (await serverDraft(world.waiting))?.body === 'Orama.', 'the draft saved as the thread closed');
 });
 
-test.skipIf(!hasDom)('Cancel keeps the words: the foot says "Draft · Your reply", Send and Edit draft; Edit draft brings them back', async () => {
+test.skipIf(!hasDom)('closing the box keeps the words: the foot says "Draft · Your reply", Send and Edit draft; Edit draft brings them back', async () => {
   const el = await renderApp(`#thread=${world.waiting}`);
   await until(() => [...el.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Reply'), 'the foot');
   act(() => button(el, 'Reply').click());
   await settle();
   type(el, 'Pagefind.');
-  act(() => button(el, 'Cancel').click());
-  await until(async () => (await serverDraft(world.waiting))?.body === 'Pagefind.', 'the draft saved on Cancel');
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
+  await until(async () => (await serverDraft(world.waiting))?.body === 'Pagefind.', 'the draft saved on close');
   await until(() => el.querySelector('[data-draft-foot]') !== null, 'the foot says Draft');
   expect(el.querySelector('[data-draft-foot]')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Draft, Your reply');
   expect(el.querySelector('.ib-pfoot')?.textContent).not.toContain('Not sent');
@@ -314,8 +314,8 @@ test.skipIf(!hasDom)('Discard drops the draft, here and on the server', async ()
   act(() => button(el, 'Reply').click());
   await settle();
   type(el, 'Never mind this.');
-  await until(() => el.querySelector('[data-draft-discard]') !== null, 'Discard');
-  act(() => (el.querySelector('[data-draft-discard]') as HTMLButtonElement).click());
+  await until(() => el.querySelector('[data-reply-discard]') !== null, 'the bin');
+  act(() => (el.querySelector('[data-reply-discard]') as HTMLButtonElement).click());
   await until(() => el.querySelector('textarea') === null, 'the box closed');
   await until(async () => (await serverDraft(world.waiting)) === null, 'the draft gone');
   button(el, 'Reply');
@@ -366,8 +366,8 @@ test.skipIf(!hasDom)('the foot\'s Send (box closed) carries the draft as it is n
   act(() => button(el, 'Reply').click());
   await settle();
   type(el, 'Pagefind.');
-  act(() => button(el, 'Cancel').click());
-  await until(async () => (await serverDraft(world.waiting))?.body === 'Pagefind.', 'the draft saved on Cancel');
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
+  await until(async () => (await serverDraft(world.waiting))?.body === 'Pagefind.', 'the draft saved on close');
   // Another window types over the draft; no event reaches this one.
   const mine = (await serverDraft(world.waiting))!;
   const theirs = await loopback(`/api/inbox/threads/${world.waiting}/draft`, 'POST', JSON.stringify({ body: 'Orama, after all.', base: mine.updated_at }));
@@ -386,8 +386,8 @@ test.skipIf(!hasDom)('an `event: drafts` for the open thread reads its draft aga
   act(() => button(el, 'Reply').click());
   await settle();
   type(el, 'First words.');
-  act(() => button(el, 'Cancel').click());
-  await until(async () => (await serverDraft(world.waiting))?.body === 'First words.', 'the draft saved on Cancel');
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
+  await until(async () => (await serverDraft(world.waiting))?.body === 'First words.', 'the draft saved on close');
   const mine = (await serverDraft(world.waiting))!;
   await loopback(`/api/inbox/threads/${world.waiting}/draft`, 'POST', JSON.stringify({ body: 'Newer words.', base: mine.updated_at }));
   await act(async () => emit('drafts', { thread_id: world.waiting }));
@@ -912,14 +912,14 @@ test.skipIf(!hasDom)('a thread read finds the lost Send landed: what was added s
   await until(() => liveText(el).includes('Your reply went. Not sent yet: 1 pick.'), 'the pick said');
 }, 30_000);
 
-test.skipIf(!hasDom)('a lost Send then Cancel: the reply is read back, and no stale "Draft · Your reply" stays in the foot', async () => {
+test.skipIf(!hasDom)('a lost Send then the box closed: the reply is read back, and no stale "Draft · Your reply" stays in the foot', async () => {
   const { el } = await openWithSaved('Cancelled after.');
   const real = globalThis.fetch;
   landUnread(real);
   act(() => button(el, 'Send').click());
   await until(() => !!el.textContent?.includes('The reply may not have gone.'), 'the error');
   globalThis.fetch = real;
-  act(() => button(el, 'Cancel').click());
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await until(() => box(el) === null, 'the box closed');
   await until(() => el.querySelector('[data-draft-foot]') === null, 'no stale Draft foot');
   await until(() => liveText(el).includes('Your reply went.'), 'said');

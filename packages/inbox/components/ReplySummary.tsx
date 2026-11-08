@@ -1,24 +1,22 @@
 /**
- * The reply box's foot on a phone (approval "inbox-reply-foot-phone", variant B "Summary", 2026-11-02): one row,
- * the paperclip at the left, the mic at the right, and between them one quiet line naming only what goes with this
- * Send: "4 questions open · 3 comments ⌃". Where the row is too narrow for that (a 320 px phone, a larger text
- * size), "4 open · 3 comments ⌃".
+ * What goes with this Send, said in one quiet line: "4 questions open · 3 comments ⌃" (approval
+ * "inbox-reply-foot-phone", variant B "Summary", 2026-11-02). Where the line is too narrow for that (a 320 px phone, a
+ * larger text size), "4 open · 3 comments ⌃".
  *
  * - A press on the line opens a small sheet: the questions with "Skip them" (or "Keep open" once skipped), the
  *   picks on a replaced question that won't be sent, and the comments with "Review", which opens their list.
  * - With comments only, the line opens the comments list itself: one press.
  * - Every action is two presses away at most, every target at least 44 px.
  *
- * The desktop box keeps its chips (Thread.tsx). The answers chip ("2 picks") is not drawn here: the answers list
- * just above the foot says the same.
+ * Where it sits (approval "inbox-reply-box", T6): on a phone, on its own line over the box's row; on a computer, in
+ * the row's middle cell in place of the chips when they don't fit (inbox.css, a container query). The answers chip
+ * ("2 picks") is not drawn here: the answers list in the box says the same.
  */
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { plural, formatCount } from '../format';
 import { Icon } from '../icons';
 import { useInboxTextSize } from '../textSize';
-import type { VoiceHandle } from '../voice';
 import { AnnotationsList, type AnnotationsListProps, type CommentsListAt } from './AnnotationsChip';
-import { VoiceFoot } from './VoiceMic';
 
 export interface FootSkip {
   /** The unanswered questions (kept open) or the ones this Send skips. 0: none unanswered. */
@@ -94,9 +92,13 @@ function FootSheet({ title, onClose, back, children }: { title: string; onClose:
   );
 }
 
-export function ReplyFootPhone({ clip, skip, dropped, comments, voice }: { clip: ReactNode; skip: FootSkip; dropped: number; comments: FootComments | null; voice: VoiceHandle }) {
+/**
+ * Stays mounted while the box is open, drawing nothing when nothing goes with the Send: when the questions go while
+ * its sheet has focus, it puts focus on the box's paperclip.
+ */
+export function ReplySummary({ skip, dropped, comments }: { skip: FootSkip; dropped: number; comments: FootComments | null }) {
   const [sheetOpen, setSheet] = useState(false);
-  const rowRef = useRef<HTMLDivElement>(null);
+  const rowRef = useRef<HTMLSpanElement>(null);
   const lineRef = useRef<HTMLButtonElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
   const descId = useId();
@@ -113,14 +115,14 @@ export function ReplyFootPhone({ clip, skip, dropped, comments, voice }: { clip:
     setRefocus(true);
   }
   const sheet = sheetOpen && !direct;
-  // Focus was in the sheet that went: back on the line, or with no line left, the paperclip (not the field, which
-  // would raise a phone's keyboard nobody asked for).
+  // Focus was in the sheet that went: back on the line, or with no line left, the box's paperclip (not the field,
+  // which would raise a phone's keyboard nobody asked for).
   useLayoutEffect(() => {
     if (!refocus) return;
     setRefocus(false);
     const active = document.activeElement;
     if (active && active !== document.body && active.isConnected) return;
-    (lineRef.current ?? rowRef.current?.querySelector<HTMLElement>('input[type="file"]'))?.focus({ preventScroll: true });
+    (lineRef.current ?? rowRef.current?.closest('.ib-rbox')?.querySelector<HTMLElement>('input[type="file"]'))?.focus({ preventScroll: true });
   }, [refocus]);
 
   // Short of room, "4 open" for "4 questions open": tried long first, again on every change of the words, the row's
@@ -172,8 +174,7 @@ export function ReplyFootPhone({ clip, skip, dropped, comments, voice }: { clip:
     .filter(Boolean)
     .join(', ');
   return (
-    <div className="ib-rfoot ib-rfoot-phone" data-reply-foot-phone="" ref={rowRef}>
-      {clip}
+    <span className="ib-rsum" data-reply-summary="" ref={rowRef}>
       {shown && (
         <span className="ib-annchip ib-fsum-w">
           <button
@@ -260,7 +261,6 @@ export function ReplyFootPhone({ clip, skip, dropped, comments, voice }: { clip:
           )}
         </FootSheet>
       )}
-      <VoiceFoot voice={voice} phone />
-    </div>
+    </span>
   );
 }

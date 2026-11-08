@@ -3280,14 +3280,18 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   /* The reply's words scroll in their own box, and their ends never drag the page. */
   .ib-rtext { overscroll-behavior: contain; }
   /* iOS with the keyboard up: Safari no longer pans to what the keyboard covers (phone.ts), so everything that must
-     be reached fits above it. The foot shrinks and scrolls in its own box, with Send's row held at its bottom
-     (attached files, picks, a notice or an error line scroll above it; the skill picker is portalled out of it; the scroll to the caret clears that row);
+     be reached fits above it. The foot shrinks and scrolls in its own box, with the row that holds Send held at its bottom
+     (the open box's own row, else the closed foot's buttons; attached files, picks, a notice or an error line scroll above it; the skill picker is portalled out of it; the scroll to the caret clears that row);
      the home bar's gap goes, since the keyboard covers it. Under 400 px left (`tight`: an iPhone's ~257 in
      portrait, ~140 on its side) the thread's padding also closes and the reply's words scroll past a third of the
      visible height (about two and a half lines). */
   /* overflow-anchor: none, since the Draft line's arrival keeps the foot's view itself (Thread.tsx, draftAboveRef). */
   :root[data-ib-keyboard-pin] .ib-pane .ib-pfoot { flex: 0 1 auto; min-height: 0; overflow-y: auto; overflow-anchor: none; overscroll-behavior: contain; padding-bottom: 0; scroll-padding-bottom: 64px; }
   :root[data-ib-keyboard-pin] .ib-pane .ib-pfoot > .ib-acts { position: sticky; bottom: 0; z-index: 2; padding-bottom: 10px; background: var(--card); }
+  /* The open box's own row (Send, the paperclip, Skills, the mic) is the row held at the foot's bottom; its corners follow the box's. */
+  :root[data-ib-keyboard-pin] .ib-pane .ib-pfoot .ib-rbox > .ib-rrow { position: sticky; bottom: 0; z-index: 2; background: var(--card); border-radius: 0 0 17px 17px; }
+  :root.dark[data-ib-keyboard-pin] .ib-pane .ib-pfoot .ib-rbox:not([data-drop-over]) > .ib-rrow,
+  :root[data-ib-keyboard-pin] .dark .ib-pane .ib-pfoot .ib-rbox:not([data-drop-over]) > .ib-rrow { background: color-mix(in oklch, var(--card) 94%, var(--foreground)); }
   :root[data-ib-keyboard-pin="tight"] .ib-pane .ib-pbody { padding-top: 0; padding-bottom: 0; }
   :root[data-ib-keyboard-pin="tight"] .ib-pfoot :is(.ib-rtext, .ib-rmirror) { max-height: max(52px, calc(var(--ib-vvh, 100dvh) * 0.3)); }
   /* A field in the thread itself (an action item's note) takes the keyboard: the foot steps aside, so the field
@@ -7916,13 +7920,10 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .pn-inbox button.ib-draft-pc.ib-comments-link::after { inset: auto; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
 }
 
-/* The reply box's foot on a phone (components/ReplyFootPhone.tsx, approval "inbox-reply-foot-phone"): one row, the
-   paperclip, one quiet line for the questions and comments, the mic at the right. Drawn only on a phone; the desktop
-   box keeps its chips. The paperclip and the mic keep their phone size (36 px drawn, 44 px to press). */
-.pn-inbox .ib-rfoot.ib-rfoot-phone { flex-wrap: nowrap; align-items: center; gap: 2px; min-height: 52px; padding: 2px 4px 4px; }
-.ib-rfoot.ib-rfoot-phone > .ib-dtfoot { margin-left: 0; gap: 8px; }
-.ib-rfoot.ib-rfoot-phone > .ib-rclip { margin: 0 4px; }
-.ib-rfoot-phone .ib-fsum-w { flex: 0 1 auto; min-width: 0; }
+/* The reply box's summary line (components/ReplySummary.tsx, approval "inbox-reply-foot-phone"): one quiet line for
+   the questions and comments, and its sheet. Where it sits is the reply box's (approval "inbox-reply-box", below). */
+.ib-rsum { display: flex; align-items: center; min-width: 0; }
+.ib-rsum .ib-fsum-w { flex: 0 1 auto; min-width: 0; }
 .pn-inbox .ib-fsum { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; min-height: 44px; padding: 0 10px; border: 0; border-radius: 10px; background: none; font: inherit; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; color: var(--muted-foreground); }
 .ib-fsum-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-fsum > .ib-ic { flex: none; }
@@ -7946,25 +7947,18 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-fsheet-sub { display: block; margin-top: 2px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .pn-inbox .ib-fsheet-row .ib-btn { flex: none; min-height: 44px; }
 .ib-fsheet-quiet .ib-fsheet-t { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
-/* Dictating in the reply box, the status line's Cancel: 44 px to press (it was 34). The reply box's row only: the
-   full-screen card's foot keeps its height, so starting to listen moves nothing there. */
-.pn-inbox .ib-rfoot-phone .ib-vline .ib-dtlink[data-voice-cancel] { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 2px; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   /* The comments sheet: a comment's place (a long agent name's "…'s message, 2:58 PM") on one line from the left, cut
      with an ellipsis, never a three-line centred link. Its whole name stays its accessible name. */
   .pn-inbox .ib-arow .ib-af { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start; }
 }
 
-/* ─────────────── Who gets the reply (approval "inbox-reply-recipient", option E "Under the box, right") ───────────────
-   On a computer nothing sits above the reply box: "Draft  Saved 4:51 PM  Discard" is in Send's row, at its right, and
-   in a thread with more than one agent the pill after it names who gets the reply ("to [tile] Claude Code
-   (plannotator) ⌄"). A phone is the exception: the pill sits after Cancel (the folder alone), and the Draft line is
-   above the box, at the right, once something is saved; the foot grows upward, so the first save never moves the box. */
+/* ─────────────── Who gets the reply (approval "inbox-reply-recipient", option E; placed by "inbox-reply-box", T6) ───────────────
+   In a thread with more than one agent a pill names who gets the reply ("to [tile] Claude Code (plannotator) ⌄"): on
+   a computer in the box's row, by the bin; on a phone on the line over the row. On a phone the Draft line is above
+   the box, at the right, once something is saved; the foot grows upward, so the first save never moves the box. */
 .ib-draft-stamp { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-draft-stamp .ib-draft-saved { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ib-replyrow > .ib-footstatus:empty { display: none; }
-.ib-replyrow > .ib-footstatus { flex-wrap: nowrap; }
-.ib-replyrow > .ib-footstatus > .ib-draft-stamp { flex: 0 1 auto; }
 .pn-inbox .ib-rto { position: relative; display: inline-flex; align-items: center; gap: 5px; height: 26px; min-width: 0; max-width: 100%; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; cursor: pointer; }
 .pn-inbox .ib-rto:hover { background: var(--muted); color: var(--foreground); }
 .pn-inbox .ib-rto:hover .ib-atile { background: color-mix(in oklch, var(--muted) 50%, var(--border)); }
@@ -7977,9 +7971,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-rto[data-ended] .ib-rto-n { color: var(--muted-foreground); }
 .ib-rto .ib-tg-stack .ib-mk { box-shadow: 0 0 0 1.5px var(--card); }
 .ib-rto-wrap { position: relative; display: inline-flex; align-items: center; min-width: 0; max-width: 100%; }
-/* A wide window: the Draft words step back to plain words on the pill's left, and the slot keeps the widest name's
-   width (the names stacked, hidden), so Discard never moves when the recipient changes. */
-.ib-replyrow:has(.ib-rto-slot) .ib-draft-pill { padding: 0; background: none; color: var(--muted-foreground); font-weight: 400; }
+/* A wide window: the slot keeps the widest name's width (the names stacked, hidden), so nothing moves when the
+   recipient changes. */
 .ib-rto-slot { display: inline-grid; grid-template-columns: minmax(0, 1fr); justify-items: end; align-items: center; flex: 0 1 auto; min-width: 0; max-width: 260px; margin-left: 6px; margin-right: -6px; }
 .ib-rto-slot > * { grid-area: 1 / 1; }
 .pn-inbox .ib-rto-ghost { visibility: hidden; pointer-events: none; }
@@ -7997,35 +7990,16 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox :is(.ib-rpick-name, .ib-rpick-tick, .ib-rpick-more):focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .pn-inbox .ib-rpick-more { display: block; width: 100%; height: 34px; margin-top: 4px; padding: 0 8px; border: 0; border-radius: 8px; background: none; color: var(--muted-foreground); font: inherit; text-align: left; cursor: pointer; }
 @media (hover: hover) { .pn-inbox .ib-rpick-more:hover { background: color-mix(in oklch, var(--muted) 55%, transparent); color: var(--foreground); } }
-/* A pane too narrow for the Draft words and the widest name on one line: the saved time gives way, then the
-   names take their short form, so the row stays one line and the box stays where it is. */
-.ib-replyrow { container-type: inline-size; }
-@media (min-width: 768px) {
-  @container (max-width: 640px) {
-    .ib-replyrow:has(.ib-rto-slot) .ib-draft-saved { display: none; }
-  }
-  @container (max-width: 480px) {
-    .ib-rto-slot .ib-rto-full { display: none; }
-    .ib-rto-slot .ib-rto-short { display: block; }
-  }
-}
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   /* The Draft line is above the box, at the right, once something is saved (the owner, 2026-11-03): the foot is held
-     at the bottom, so the line grows it upward and the box, its mic and Send's row stay where they are. Nothing is
+     at the bottom, so the line grows it upward and the box, its row, the mic and Send stay where they are. Nothing is
      there, and nothing is kept for it, before the first save. Discard's 44 px tap area stays inside the foot: the
      foot's 10 px top padding plus the line's 4 px above it, and 14 px between the line and the box under it. */
   .ib-draft-above { display: flex; justify-content: flex-end; padding-top: 4px; margin-bottom: 14px; }
   .ib-draft-above:empty { display: none; }
-  /* The pill in Send's row: the folder alone, so the box stays where a one-agent thread has it. Send gets shorter. */
+  /* The pill on the line over the box's row: the folder alone. */
   .ib-rto-full { display: none; }
   .ib-rto-short { display: block; }
-  .pn-inbox .ib-footbtns:has(> .ib-rto-wrap) { flex: 1 1 100%; flex-wrap: nowrap; gap: 6px; min-width: 0; }
-  .pn-inbox .ib-footbtns:has(> .ib-rto-wrap) > .ib-btn { flex: none; }
-  .pn-inbox .ib-footbtns:has(> .ib-rto-wrap) > .ib-btn.ib-pri { flex: 1 1 auto; min-width: 72px; padding-left: 10px; padding-right: 10px; }
-  .pn-inbox .ib-footbtns:has(> .ib-rto-wrap) > .ib-btn.ib-ghost { padding-left: 8px; padding-right: 8px; }
-  .ib-footbtns > .ib-rto-wrap { flex: 0 1 auto; max-width: 52%; }
-  .ib-footbtns > .ib-rto-wrap .ib-rto-l { display: none; }
-  .pn-inbox .ib-footbtns > .ib-rto-wrap .ib-rto { height: 44px; padding: 0 2px 0 4px; font-size: var(--ib-fs-15, 15px); }
   .pn-inbox .ib-rpick-name { height: 44px; gap: 8px; }
   .pn-inbox .ib-rpick-tick { width: 44px; height: 44px; }
   .ib-rpick-tick > span { width: 20px; height: 20px; }
@@ -8039,7 +8013,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
      scroll), so the box and its mic stay put and the line is a scroll up. */
   :root[data-ib-keyboard-pin="tight"] .ib-pane .ib-pfoot { padding-top: 6px; }
   :root[data-ib-keyboard-pin="tight"] .ib-pfoot .ib-rbox { margin-bottom: 6px; }
-  :root[data-ib-keyboard-pin="tight"] .ib-pfoot .ib-replyrow { row-gap: 4px; }
   :root[data-ib-keyboard-pin="tight"] .ib-draft-above { padding-top: 2px; margin-bottom: 8px; }
   :root[data-ib-keyboard-pin="tight"] .ib-draft-above .ib-draft-discard::after { inset: -9px -8px; }
 }
@@ -9218,6 +9191,163 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-dd-meaning ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted-foreground); line-height: 1.55; }
 .ib-dd-meaning li { margin-bottom: 5px; }
 .ib-dd-meaning b { color: var(--foreground); font-weight: 600; }
+
+/* ─────────────── The reply box (approval "inbox-reply-box", T6, 2026-11-07; Thread.tsx, ReplyRow.tsx) ───────────────
+   One card: the words first, then the box's own row (Send, the paperclip, Skills, the mic; what goes with the reply
+   and who gets it; the bin). A chevron at the top right closes the box and keeps the draft. No header line.
+   - D1: the words, files, answers and actions scroll in one region capped near half the window, so the row with Send
+     is always in view.
+   - D2: files are compact chips that wrap; no cap; past a handful the row says "N files".
+   - D4: the row never wraps. A computer shows the chips when they fit beside the picker, else the one summary line
+     (measured in ReplyRow.tsx).
+   - D5: while a take runs its status takes the middle cell's place; the mic and Send never move. One 120 ms fade each
+     way; a spinner only after 150 ms; a voice note opens and closes in one 160 ms motion. Reduced motion: none.
+   No accent ring at rest: a hairline and a soft shadow; the border steps up while focused. */
+.pn-inbox .ib-pfoot .ib-rbox { display: flex; flex-direction: column; position: relative; border-radius: 16px; margin-bottom: 0; interpolate-size: allow-keywords; }
+.pn-inbox .ib-pfoot .ib-rbox:not([data-drop-over]) {
+  border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
+  background: var(--card);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.06), 0 8px 24px -12px rgb(0 0 0 / 0.18);
+}
+.pn-inbox .ib-pfoot .ib-rbox:not([data-drop-over]):focus-within { border-color: color-mix(in oklch, var(--foreground) 22%, transparent); }
+:root.dark .pn-inbox .ib-pfoot .ib-rbox:not([data-drop-over]),
+.dark .pn-inbox .ib-pfoot .ib-rbox:not([data-drop-over]) { background: color-mix(in oklch, var(--card) 94%, var(--foreground)); box-shadow: 0 10px 28px -14px rgb(0 0 0 / 0.6); }
+/* The scroll region (D1): the words grow and the region scrolls (no box inside a box). A voice note stays in view at
+   its foot while the words run on. With a phone's keyboard up, a third of what is left. */
+.ib-rscroll { flex: 0 1 auto; min-height: 0; max-height: max(150px, calc(52vh - 120px)); overflow-y: auto; overscroll-behavior: contain; }
+.pn-inbox .ib-pfoot .ib-rscroll :is(.ib-rtext, .ib-rmirror) { max-height: none; }
+.ib-pfoot .ib-rscroll :is(.ib-rtext, .ib-rmirror) { padding: 14px 48px 8px 16px; min-height: 64px; }
+.pn-inbox .ib-pfoot .ib-rscroll .ib-vnote { position: sticky; bottom: 0; z-index: 1; padding: 4px 16px; background: var(--card); overflow: hidden; transition: height 160ms ease-out, opacity 160ms ease-out; }
+:root.dark .pn-inbox .ib-pfoot .ib-rscroll .ib-vnote, .dark .pn-inbox .ib-pfoot .ib-rscroll .ib-vnote { background: color-mix(in oklch, var(--card) 94%, var(--foreground)); }
+/* It glides in when it comes (a keyframe, not @starting-style: the thread CSS ui ships for host pages takes no @starting-style). */
+.pn-inbox .ib-pfoot .ib-rscroll .ib-vnote { animation: ib-rnote-in 160ms ease-out; }
+@keyframes ib-rnote-in { from { height: 0; opacity: 0; padding-top: 0; padding-bottom: 0; } }
+.pn-inbox .ib-pfoot .ib-rscroll .ib-vnote-leaving { animation: ib-rnote-out 160ms ease-out forwards; pointer-events: none; }
+@keyframes ib-rnote-out { to { height: 0; opacity: 0; padding-top: 0; padding-bottom: 0; } }
+/* Each paragraph of the words, and each answer, runs in its own direction (Arabic reads right to left, its full stop
+   at its left end); the mirror that paints tokens follows the same rule, so the two stay in register. */
+.ib-pfoot .ib-rscroll :is(.ib-rtext, .ib-rmirror) { unicode-bidi: plaintext; text-align: start; }
+.ib-pfoot .ib-rscroll :is(.ib-ranswer-p, .ib-ranswer-a) { unicode-bidi: plaintext; }
+.ib-pfoot .ib-rscroll .ib-ranswers { margin-inline: 14px; }
+/* Files (D2): compact chips that wrap, the name cut in the middle, the kind and size under it. */
+.ib-pfoot .ib-rscroll .ib-rfiles { padding: 2px 12px 6px; }
+.ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 0; }
+.ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-file { flex: 1 1 190px; max-width: 280px; gap: 8px; padding: 4px 2px 4px 6px; border-radius: 9px; }
+.ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-file .ib-fi { width: 28px; height: 28px; border-radius: 6px; }
+.ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-file .ib-nm { font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-file .ib-kd { font-size: var(--ib-fs-11-5, 11.5px); }
+/* The close chevron over the region's top right, on its own ground, so words scrolling under it never show through. */
+/* Clear of a classic (always shown) scrollbar on the scroll region: `--ib-rsb` is its width (Thread.tsx), 0 for overlay scrollbars. */
+.pn-inbox .ib-rclose {
+  position: absolute; top: 8px; right: calc(8px + var(--ib-rsb, 0px)); z-index: 2;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0; border: 0; border-radius: 999px;
+  background: var(--card); color: var(--muted-foreground); cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+:root.dark .pn-inbox .ib-rclose, .dark .pn-inbox .ib-rclose { background: color-mix(in oklch, var(--card) 94%, var(--foreground)); }
+.pn-inbox .ib-rclose:hover { background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-rclose:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* "Not saved …" on its own line over the row, in full, wrapping inside the box (a computer). */
+.ib-rnote { padding: 2px 16px 0; font-size: var(--ib-fs-12-5, 12.5px); overflow-wrap: anywhere; transition: opacity 160ms ease-out; }
+/* Fades in when it comes. */
+.ib-rnote { animation: ib-rfade-in 160ms ease-out; }
+.ib-rnote .ib-draft-stamp { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; white-space: normal; color: var(--muted-foreground); }
+.ib-rnote .ib-draft-stamp .ib-draft-saved { overflow: visible; }
+
+/* The row. */
+.ib-rrow { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; padding: 6px 10px 10px 12px; }
+.ib-rlead { display: flex; align-items: center; gap: 4px; flex: none; }
+.pn-inbox .ib-rsend { position: relative; height: 34px; padding: 0 18px; margin-right: 6px; border-radius: 999px; font-weight: 600; }
+/* While it sends the spinner takes the word's place, and Send keeps its width. */
+.pn-inbox .ib-rsend > .ib-spin { position: absolute; left: 50%; top: 50%; margin: -6px 0 0 -6px; color: var(--primary-foreground); }
+.pn-inbox .ib-rsend:has(> .ib-spin) > .ib-rsend-w { visibility: hidden; }
+.pn-inbox .ib-rrow :is(.ib-rclip, .ib-vmic, .ib-ricon) { width: 32px; height: 32px; border-radius: 8px; }
+.pn-inbox .ib-ricon { display: inline-flex; align-items: center; justify-content: center; flex: none; position: relative; padding: 0; border: 0; background: transparent; color: var(--muted-foreground); font: inherit; cursor: pointer; transition: background-color 120ms ease-out, color 120ms ease-out; }
+.pn-inbox .ib-ricon:hover { background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-ricon:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.pn-inbox .ib-rdiscard:hover { color: var(--destructive, var(--foreground)); }
+.ib-rrow > .ib-rdiscard { margin-left: 2px; }
+/* The middle cell: what goes with the reply and who gets it, or, while voice runs, its status in exactly that place. */
+.ib-rmid { flex: 1 1 0; min-width: 0; height: 36px; display: grid; grid-template-areas: "cell"; grid-template-rows: minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); align-items: center; container: ib-rmid / inline-size; }
+.ib-rmid > * { grid-area: cell; min-width: 0; }
+.ib-rlayer { display: flex; align-items: center; gap: 6px; min-width: 0; height: 100%; padding-left: 6px; transition: opacity 120ms ease-out, visibility 0s linear 0s; }
+/* Measured unfolded (ReplyRow.tsx): nothing shrinks, so chips that don't fit overflow and the row folds. */
+.ib-rmid:not([data-fold]) .ib-rlayer > * { flex: none; }
+.ib-rchips { display: flex; align-items: center; gap: 6px; }
+.pn-inbox .ib-rchips .ib-skipchip { flex: none; flex-wrap: nowrap; white-space: nowrap; height: 26px; }
+.ib-rmid[data-fold] .ib-rlayer > .ib-rsum { flex: 0 1 auto; }
+.pn-inbox .ib-rrow .ib-rsum .ib-fsum { min-height: 32px; padding: 0 8px; font-size: var(--ib-fs-12-5, 12.5px); }
+/* Who gets it: at the cell's right end, by the bin, so its list opens over the box. */
+.ib-rto-cell { margin-left: auto; min-width: 0; display: flex; justify-content: flex-end; }
+.ib-rmid[data-fold] .ib-rto-cell { flex: 0 1 auto; }
+.ib-rto-cell .ib-rto-slot { justify-items: end; margin: 0; max-width: 100%; }
+@container ib-rmid (max-width: 420px) { .ib-rto-cell .ib-rto-full { display: none; } .ib-rto-cell .ib-rto-short { display: block; } }
+.pn-inbox .ib-rfilesn { border: 0; cursor: pointer; font: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; font-variant-numeric: tabular-nums; }
+.pn-inbox .ib-rfilesn:hover { color: var(--foreground); background: color-mix(in oklch, var(--muted) 70%, var(--border)); }
+.pn-inbox .ib-rfilesn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* Voice running (D5): what was in the cell steps back in place (and can't be pressed). */
+.ib-rmid:has(> .ib-vline) > .ib-rlayer { visibility: hidden; opacity: 0; transition: opacity 120ms ease-out, visibility 0s linear 120ms; }
+.pn-inbox .ib-pfoot .ib-rmid > .ib-vline { display: flex; align-items: center; gap: 10px; height: 100%; padding: 0 2px 0 8px; overflow: hidden; white-space: nowrap; transition: opacity 120ms ease-out; }
+.pn-inbox .ib-pfoot .ib-rmid > .ib-vline { animation: ib-rfade-in 120ms ease-out; }
+/* The status's word gives way before Cancel ever does; with no room for it, the lit mic says it. */
+.ib-rmid > .ib-vline b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-rmid > .ib-vline [data-voice-cancel] { flex: none; }
+.ib-rmid > .ib-vline .ib-vhint { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-rmid > .ib-vline .ib-vsp { flex: 1 1 0; min-width: 0; }
+.ib-rmid > .ib-vline .ib-dttime { flex: none; font-variant-numeric: tabular-nums; }
+/* "No skills are installed" for a moment after a press on Skills with none to pick: a quiet line in the middle cell,
+   over the chips on a computer (they step aside, as for voice); a phone draws it after the paperclip and Skills. */
+.ib-rhint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 8px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); animation: ib-rfade-in 120ms ease-out; }
+.ib-rmid > .ib-rhint { align-self: center; }
+.ib-rmid[data-hint] > .ib-rlayer { visibility: hidden; }
+@container ib-rmid (max-width: 470px) { .ib-rmid > .ib-vline .ib-vhint { display: none; } }
+@container ib-rmid (max-width: 110px) { .ib-rmid > .ib-vline .ib-vbars { display: none; } }
+@container ib-rmid (max-width: 180px) { .ib-rmid > .ib-vline b { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); } }
+/* The mic's spinner only for a step that takes a while (150 ms), so a quick one never flashes it. */
+.pn-inbox .ib-rrow .ib-vmic .ib-spin { animation-name: ib-spin, ib-rfade-in; animation-duration: 0.8s, 1ms; animation-delay: 0s, 150ms; animation-iteration-count: infinite, 1; animation-fill-mode: none, backwards; animation-timing-function: linear, linear; }
+@keyframes ib-rfade-in { from { opacity: 0; } to { opacity: 1; } }
+/* A failed Send (D3): the plain line, its own words behind Details, wrapping anywhere (a path has no spaces). */
+.ib-pfoot .ib-error { overflow-wrap: anywhere; }
+.ib-errd { display: inline; margin-left: 6px; }
+.ib-errd > summary { display: inline; list-style: none; cursor: pointer; color: var(--muted-foreground); font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
+.ib-errd > summary::-webkit-details-marker { display: none; }
+.ib-errd > summary:hover { color: var(--foreground); }
+.ib-errd > summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 3px; }
+.ib-errd[open] > .ib-errd-t { display: block; margin-top: 4px; color: var(--muted-foreground); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-11-5, 11.5px); white-space: pre-wrap; }
+
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-pfoot .ib-rbox { border-radius: 18px; }
+  .ib-rscroll { max-height: max(120px, calc(46dvh - 130px)); }
+  .ib-pfoot .ib-rscroll :is(.ib-rtext, .ib-rmirror) { padding: 13px 52px 6px 14px; }
+  .ib-pfoot .ib-rscroll .ib-rfiles .ib-cp-file { flex-basis: 100%; max-width: none; }
+  .pn-inbox .ib-rclose { top: 4px; right: 4px; width: 44px; height: 44px; }
+  /* The line over the row: what goes with the reply at the left, who gets it at the right; 44 px tall. */
+  .ib-rline { display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 4px; }
+  .ib-rline[data-empty] { display: none; }
+  .ib-rline > .ib-rsum { flex: 1 1 auto; }
+  .ib-rline > .ib-rto-wrap { flex: 0 1 auto; min-width: 0; max-width: 55%; margin-left: auto; }
+  /* The pill as it was in a phone's Send row: 44 px, 15 px words, no "to" (approval "inbox-reply-recipient"). */
+  .ib-rline > .ib-rto-wrap .ib-rto-l { display: none; }
+  .pn-inbox .ib-rline > .ib-rto-wrap .ib-rto { height: 44px; padding: 0 2px 0 4px; font-size: var(--ib-fs-15, 15px); }
+  /* The row: the paperclip at the left (the owner), then Skills; the mic and Send at the right edge, under the thumb.
+     No bin: Discard is on the Draft line above the box. Every target 44 px. The closed foot is today's bar. */
+  .ib-rrow { gap: 2px; padding: 0 6px 6px; }
+  .ib-rmid { height: 44px; }
+  .ib-rlayer { gap: 2px; padding-left: 0; }
+  .pn-inbox .ib-rrow :is(.ib-rclip, .ib-vmic, .ib-ricon) { width: 44px; height: 44px; margin: 0; border-radius: 10px; }
+  .pn-inbox .ib-rrow :is(.ib-rclip, .ib-vmic)::after { content: none; }
+  .pn-inbox .ib-rsend { height: 44px; padding: 0 20px; margin: 0 0 0 4px; }
+  .pn-inbox .ib-rfilesn { height: 44px; padding: 0 10px; background: none; }
+  .pn-inbox .ib-pfoot .ib-rmid > .ib-vline { gap: 8px; padding-left: 8px; }
+  .pn-inbox .ib-rmid > .ib-vline .ib-dtlink[data-voice-cancel] { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; }
+}
+:root[data-ib-keyboard-pin] .ib-rscroll { max-height: max(96px, calc(var(--ib-vvh, 100dvh) * 0.34)); }
+@media (prefers-reduced-motion: reduce) {
+  .pn-inbox .ib-pfoot :is(.ib-rlayer, .ib-rmid > .ib-vline, .ib-rscroll .ib-vnote, .ib-rnote, .ib-rhint, .ib-rclose, .ib-ricon) { transition: none; animation: none; }
+  .pn-inbox .ib-pfoot .ib-rscroll .ib-vnote-leaving { animation: none; display: none; }
+  .pn-inbox .ib-rrow .ib-vmic .ib-spin { animation: ib-rfade-in 1ms 150ms backwards; }
+}
 
 /* Remote launch (the folder menu grouped by machine, approval "remote-launch"). "billing-svc · Mac mini" in To's folder
    button; the folder menu's "· you started it here last"; a machine where the agent can't start, one quiet line (with

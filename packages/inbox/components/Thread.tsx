@@ -102,8 +102,10 @@ import { TidyNote } from './Tidy';
 import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } from '../reask';
 import { ChangedNotice, ReplacedQuestionCard, ReplacesLine, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import { InboxComposerField, type InboxComposerFieldProps } from './ComposerField';
-import { VoiceFoot } from './VoiceMic';
-import { ReplyFootPhone } from './ReplyFootPhone';
+import { VoiceMicButton, VoiceStatusLine } from './VoiceMic';
+import { ReplySummary } from './ReplySummary';
+import { ReplyRow } from './ReplyRow';
+import { sendFailure } from '../sendFailure';
 import { ReplyRecipient } from './ReplyRecipient';
 import { aimable, canTakeAlone, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, recipientRows, recipientState, sessionFolder, toggleRecipient, type RecipientPerson, type RecipientRow } from '../replyRecipients';
 import { useVoiceSession } from '../voice';
@@ -137,6 +139,7 @@ import type { MentionSource } from '@plannotator/ui/utils/mentions';
 import { TAG_TOKEN_CLASS } from './ComposerField';
 import { HostMark } from '../icons';
 import { INBOX_REPLY_SKILL_AUDIENCE, annotationSkillTexts, inboxSkillFilter, inboxSkillsBlock, withSkillsBlock } from '../skills';
+import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { ActionChecklist, type ActionMark } from './ActionChecklist';
 import { actionForBlock } from '../actions';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
@@ -1308,6 +1311,11 @@ function useThreadAttachments(threadId: string, revision: unknown, again: number
  */
 const SHOW_NEW_MESSAGE_BUTTON = false;
 
+/** From this many files the box's row says "7 files" (approval "inbox-reply-box", decision D2: no cap on files). */
+const REPLY_FILES_SUMMARY_FROM = 7;
+/** How long "No skills are installed" stays in the reply box's row after a press on Skills with none to pick. */
+const NO_SKILLS_HINT_MS = 2000;
+
 /** Where a 👍 Looks good is on its way to the agent (amended 2026-10-16: it is sent through). */
 export type AckPillState = 'pending' | 'queued' | 'sending' | 'saved' | 'delivered' | 'not-sent';
 
@@ -1785,6 +1793,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     return () => debugNote('send_clear', { thread: id });
   }, [sending]);
   const [error, setError] = useState<string | null>(null);
+  /** A failed Send's own words, behind Details on its line (decision D3), for as long as that line is the error shown. */
+  const [errorDetails, setErrorDetails] = useState<{ for: string; text: string } | null>(null);
   const voice = useVoiceSession();
   /** Words a take left in full screen's card brought back, waiting for the box (`changeReply` waits for a Send). */
   const lateVoice = useRef<string[]>([]);
@@ -3886,6 +3896,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       text.focus();
       text.setSelectionRange(text.value.length, text.value.length);
       text.scrollTop = text.scrollHeight;
+      // The words scroll in the box's capped region (approval "inbox-reply-box", D1), not in the field: their end, and
+      // the caret there, are brought to the region's bottom.
+      const region = text.closest<HTMLElement>('[data-reply-scroll]');
+      if (region) region.scrollTop += text.getBoundingClientRect().bottom - region.getBoundingClientRect().bottom;
     });
   /**
    * From full screen to the thread, on the device's own route: beside the thread where there is room (as
@@ -4544,7 +4558,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         void loadLive();
         return;
       }
-      setError(cause instanceof InboxApiError ? cause.message : 'The reply was not sent. Send again to retry.');
+      const failed = sendFailure(cause);
+      setError(failed.line);
+      setErrorDetails(failed.details ? { for: failed.line, text: failed.details } : null);
     } finally {
       // Nothing went (or not all of it): the claim is given back and the box's words are saved again.
       // Unless the reply carrying them may have gone (its POST went out and no clear refusal came back,
@@ -5092,9 +5108,17 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           },
         }
       : null;
+  const errorMore = error !== null && errorDetails?.for === error ? errorDetails.text : null;
   const errorLine = (
     <div className="ib-error" role="alert" data-foot-error={errorAbove ? 'above' : undefined}>
       {lineError}
+      {/* A failed Send's own words (a path, the Inbox's message), one press away (decision D3). */}
+      {errorMore && (
+        <details className="ib-errd" data-error-details="">
+          <summary>Details</summary>
+          <span className="ib-errd-t">{errorMore}</span>
+        </details>
+      )}
       {!error && lateMissActions}
     </div>
   );
@@ -5128,22 +5152,107 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     }
     openBox();
   };
-  /** "Draft  Saved 4:51 PM  Discard" for the open box: under it in Send's row, or above it on a phone. Nothing until the first save. */
+  /** "Draft  Saved 4:51 PM  Discard" for the open box: above it on a phone; a computer shows only "Not saved …", over the box's row. Nothing until the first save. */
   const stampSavedAt = replyDraft.conflict === null && (boxHasWords || replyDraft.draft?.files?.length) ? (replyDraft.draft?.updated_at ?? null) : null;
   const stampTooLong = replyDraft.conflict === null && replyDraft.tooLong;
   const stampFailed = replyDraft.conflict === null && replyDraft.failed && (boxHasWords || replyFiles.files.length > 0);
-  const draftStamp = (
-    <DraftStamp
-      savedAt={stampSavedAt}
-      tooLong={stampTooLong}
-      failed={stampFailed}
-      onDiscard={() => {
-        replyDraft.discard();
-        closeBox(true);
-        announce('Draft discarded.');
-      }}
-    />
+  /** Discard: the Draft line's (a phone, above the box) and the bin's (a computer, the row's far right). */
+  const discardReply = () => {
+    // An empty box with nothing saved has nothing to discard: it only closes, and says nothing that is not so.
+    const had = replyText.get().trim() !== '' || replyFiles.files.length > 0 || replyDraft.draft !== null;
+    replyDraft.discard();
+    closeBox(true);
+    if (had) announce('Draft discarded.');
+  };
+  /** The live-session choice open under the box: it stands in for the box's Send and bin. */
+  const routeChoiceOpen = route.open && asking;
+  /** After a conflict, "Discard mine": only this window's words and file changes go; the other window's draft stays and comes into the box. */
+  const discardMine = () => {
+    const draft = replyDraft.takeTheirs();
+    const theirs = draft?.body ?? '';
+    setBox({ open: true, text: theirs });
+    takeDraftFiles(draft?.files ?? [], theirs);
+    announce(theirs.trim() ? 'Your words were discarded; the other window’s are in the box.' : 'Your words were discarded.');
+    requestAnimationFrame(() => textRef.current?.focus());
+  };
+  const draftStamp = <DraftStamp savedAt={stampSavedAt} tooLong={stampTooLong} failed={stampFailed} onDiscard={discardReply} />;
+  // The box's row (approval "inbox-reply-box", T6; ReplyRow.tsx). What goes with the reply: chips on a computer that
+  // has room for them, else the one summary line (always on a phone, on its own line over the row).
+  const replySkip = { count: keepOpen ? unanswered.length : skipIds.size, keepOpen, onToggle: toggleKeepOpen };
+  const replySummaryShown = replySkip.count > 0 || dropped.length > 0 || (takesAnnotations && records.length > 0) || (commentsList !== null && !commentsList.card);
+  const [replyFold, setReplyFold] = useState(false);
+  const replyFitKey = [draftAnswers.length, unanswered.length, skipIds.size, dropped.length, records.length, takesAnnotations, rcptChosen.map((r) => r.session).join(',')].join('|');
+  const replyChips = (
+    <>
+      {/* The answers the list above shows, a pick still being saved included, so the two numbers agree. */}
+      {draftAnswers.length > 0 && (
+        <span className="ib-rchip" data-picks-chip="">
+          <Icon name="check" size={13} />
+          {plural(draftAnswers.length, 'pick')}
+        </span>
+      )}
+      <SkipChip count={replySkip.count} keepOpen={keepOpen} onToggle={toggleKeepOpen} />
+      {dropped.length > 0 && (
+        <Tip content="Replaced; this pick won't be sent">
+          <span className="ib-rchip ib-dropped" data-dropped-picks-chip="">
+            {dropped.length} {dropped.length === 1 ? 'pick' : 'picks'} on a replaced question
+          </span>
+        </Tip>
+      )}
+      {takesAnnotations && <AnnotationsChip {...commentsListProps} list={commentsList?.card ? null : commentsList} onList={setCommentsList} />}
+    </>
   );
+  /** "27 files": the files are in the scroll region with the words; this brings them into view there. */
+  const replyScrollRef = useRef<HTMLDivElement>(null);
+  // A classic (always shown) scrollbar on the scroll region: its width, so the chevron sits clear of it (inbox.css).
+  useEffect(() => {
+    const region = replyScrollRef.current;
+    const holder = region?.parentElement;
+    if (!region || !holder || typeof ResizeObserver === 'undefined') return;
+    const fit = () => holder.style.setProperty('--ib-rsb', `${Math.max(0, region.offsetWidth - region.clientWidth)}px`);
+    const observer = new ResizeObserver(fit);
+    observer.observe(region);
+    fit();
+    return () => observer.disconnect();
+  }, [box.open]);
+  const showReplyFiles = () => {
+    const region = replyScrollRef.current;
+    const files = region?.querySelector<HTMLElement>('[data-reply-files]');
+    if (!region || !files) return;
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    region.scrollTo({ top: files.offsetTop - region.offsetTop, behavior: reduce ? 'auto' : 'smooth' });
+  };
+  /** "No skills are installed" in the row's middle cell for a moment, after a press on Skills with none to pick. */
+  const [noSkillsHint, setNoSkillsHint] = useState(false);
+  const noSkillsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (noSkillsTimer.current) clearTimeout(noSkillsTimer.current);
+  }, []);
+  /**
+   * Skills (the cube): a real `/` at the caret (after a space when it follows a word), so the field's own skill picker
+   * opens. With no skill to pick here, no `/` (it would open nothing and stay in the words) and no focus on the field
+   * (a phone's keyboard would come up for nothing): "No skills are installed" shows in the row for about 2 s instead,
+   * and the live region says it.
+   */
+  const openSkillsFromBox = () => {
+    const field = textRef.current;
+    if (!field) return;
+    const slash = () => {
+      if (textRef.current !== field) return;
+      field.focus();
+      const at = field.selectionStart ?? field.value.length;
+      const before = field.value.slice(0, at);
+      document.execCommand('insertText', false, at === 0 || /\s$/.test(before) ? '/' : ' /');
+    };
+    const none = () => {
+      setNoSkillsHint(true);
+      announce('No skills are installed to pick from.');
+      if (noSkillsTimer.current) clearTimeout(noSkillsTimer.current);
+      noSkillsTimer.current = setTimeout(() => setNoSkillsHint(false), NO_SKILLS_HINT_MS);
+    };
+    if (getCachedSkillCatalog().some(skillFilter)) return slash();
+    void fetchSkillCatalog().then((catalog) => (catalog.some(skillFilter) ? slash() : none()));
+  };
   // On a phone the Draft line is above the box. Where the foot scrolls in its own box (the keyboard up, the phone
   // on its side), a line coming or going at its top would push the box and its mic down or pull them up: the
   // foot's scroll moves by the line's height instead, so what is in view stays where it is.
@@ -6601,22 +6710,14 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     announce('Your words are saved.');
                     requestAnimationFrame(() => textRef.current?.focus());
                   },
-                  onDiscard: () => {
-                    // Only this window's words and file changes go: the other window's draft stays and comes into the box.
-                    const draft = replyDraft.takeTheirs();
-                    const theirs = draft?.body ?? '';
-                    setBox({ open: true, text: theirs });
-                    takeDraftFiles(draft?.files ?? [], theirs);
-                    announce(theirs.trim() ? 'Your words were discarded; the other window’s are in the box.' : 'Your words were discarded.');
-                    requestAnimationFrame(() => textRef.current?.focus());
-                  },
+                  onDiscard: discardMine,
                 }}
               />
             )}
             {staleQuestions.length > 0 && <ChangedNotice questions={staleQuestions} thread={thread} onJump={jumpTo} />}
             {/* On a phone "Draft  Saved 4:51 PM  Discard" sits above the box, at the right, once something is saved.
-                While the live-session choice stands in for Send's row it goes, as it does on a computer (it lives in
-                that row there), so Discard cannot close the box under the choice. */}
+                While the live-session choice stands in for the box's Send it goes, as a computer's bin does, so
+                Discard cannot close the box under the choice. */}
             {phone && !(route.open && asking) && (
               <div className="ib-draft-above" data-draft-above="" ref={draftAboveRef}>
                 {draftStamp}
@@ -6633,106 +6734,148 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 if (replyFiles.paste(event)) setError(null);
               }}
             >
-              <ReplyTextField
-                replyText={replyText}
-                textareaRef={textRef}
-                voice={voice}
-                ariaLabel={`Reply to ${replyToNames}`}
-                ariaDescribedBy={[showAskerNote ? noteId : null, replyDraft.conflict !== null ? conflictId : null].filter(Boolean).join(' ') || undefined}
-                placeholder="Write a reply"
-                destination="your reply"
-                skillFilter={skillFilter}
-                tags={composerTags}
-                onChange={(text) => changeReply(text)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                    event.preventDefault();
-                    // The chord is spent here: the thread's own Send key (a window listener) never sees it, whether or not
-                    // the event is cancelable (a synthetic one is not, and `defaultPrevented` would stay false).
-                    event.stopPropagation();
-                    // With the choice open, the shortcut goes to it.
-                    if (route.open) setRoute((current) => ({ ...current, focus: current.focus + 1 }));
-                    else {
-                      sentByChord.current = true;
-                      void send();
+              {/* The one visible way to close for a pointer or a phone (Esc does the same): it keeps the words and files as
+                  the draft, as Cancel did; an empty box leaves none. */}
+              <Tip content="Close (Esc). Your words stay as a draft.">
+                <button type="button" className="ib-rclose" aria-label="Close the reply box (your draft is kept)" data-reply-close="" onClick={() => closeBox()}>
+                  <Icon name="chevD" size={phone ? 20 : 16} />
+                </button>
+              </Tip>
+              {/* The words, files, answers and actions scroll in one region capped near half the window (decision D1), so
+                  the row with Send under it is always in view however much the reply holds. */}
+              <div className="ib-rscroll" data-reply-scroll="" ref={replyScrollRef}>
+                <ReplyTextField
+                  replyText={replyText}
+                  textareaRef={textRef}
+                  voice={voice}
+                  voiceNoteGlide
+                  ariaLabel={`Reply to ${replyToNames}`}
+                  ariaDescribedBy={[showAskerNote ? noteId : null, replyDraft.conflict !== null ? conflictId : null].filter(Boolean).join(' ') || undefined}
+                  placeholder="Write a reply. Type / for a skill"
+                  destination="your reply"
+                  skillFilter={skillFilter}
+                  tags={composerTags}
+                  onChange={(text) => changeReply(text)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                      event.preventDefault();
+                      // The chord is spent here: the thread's own Send key (a window listener) never sees it, whether or not
+                      // the event is cancelable (a synthetic one is not, and `defaultPrevented` would stay false).
+                      event.stopPropagation();
+                      // With the choice open, the shortcut goes to it.
+                      if (route.open) setRoute((current) => ({ ...current, focus: current.focus + 1 }));
+                      else {
+                        sentByChord.current = true;
+                        void send();
+                      }
+                    } else if (event.key === 'Escape') {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (route.open) routeBack();
+                      else closeBox();
                     }
-                  } else if (event.key === 'Escape') {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (route.open) routeBack();
-                    else closeBox();
-                  }
-                }}
-              />
-              {replyFiles.files.length > 0 && (
-                <div className="ib-rfiles" data-reply-files="">
-                  <ComposeFileTiles
-                    files={replyFiles.files}
-                    onRemove={(key) => {
-                      replyFiles.remove(key);
-                      // The × goes with its tile: focus stays in the reply.
-                      textRef.current?.focus();
-                    }}
-                    onPutBack={(key) => replyFiles.putBack(key, textRef.current)}
-                  />
+                  }}
+                />
+                {replyFiles.files.length > 0 && (
+                  <div className="ib-rfiles" data-reply-files="">
+                    <ComposeFileTiles
+                      files={replyFiles.files}
+                      onRemove={(key) => {
+                        replyFiles.remove(key);
+                        // The × goes with its tile: focus stays in the reply.
+                        textRef.current?.focus();
+                      }}
+                      onPutBack={(key) => replyFiles.putBack(key, textRef.current)}
+                    />
+                  </div>
+                )}
+                {draftAnswers.length > 0 && <ReplyAnswers answers={draftAnswers} onJump={jumpTo} />}
+                {draftActions.length > 0 && <ReplyActions actions={draftActions} onJump={jumpTo} />}
+              </div>
+              {/* A computer: a draft that did not save says so on its own line over the row, in full (a phone says it in
+                  the Draft line above the box). */}
+              {!phone && (stampTooLong || stampFailed) && (
+                <div className="ib-rnote" data-reply-note="">
+                  {draftStamp}
                 </div>
               )}
-              {draftAnswers.length > 0 && <ReplyAnswers answers={draftAnswers} onJump={jumpTo} />}
-              {draftActions.length > 0 && <ReplyActions actions={draftActions} onJump={jumpTo} />}
-              {/* The box's toolbar: the paperclip first (any file; a phone's picker offers the photo library too, and
-                  names what it hands over as a paste is), then the picks, skip and annotations chips. A phone draws
-                  one row instead: the paperclip, one line for the questions and comments, the mic (ReplyFootPhone). */}
-              {phone ? (
-                <ReplyFootPhone
-                  clip={
-                    <AttachFilesButton
-                      className="ib-rclip"
-                      iconSize={19}
-                      phone
-                      inputData="data-reply-attach"
-                      onFiles={(list) => {
-                        replyFiles.attach(list);
-                        setError(null);
-                      }}
-                    />
-                  }
-                  skip={{ count: keepOpen ? unanswered.length : skipIds.size, keepOpen, onToggle: toggleKeepOpen }}
-                  dropped={dropped.length}
-                  comments={takesAnnotations ? { props: commentsListProps, list: commentsList, onList: setCommentsList } : null}
-                  voice={voice}
-                />
-              ) : (
-                <div className={`ib-rfoot${keepOpen ? ' ib-keep' : ''}`}>
+              {/* A phone: what goes with the reply and who gets it, on one quiet line over the row. */}
+              {phone && (
+                <div className="ib-rline" data-reply-line="" data-recipient-anchor="" data-empty={replySummaryShown || pillActive ? undefined : ''}>
+                  <ReplySummary skip={replySkip} dropped={dropped.length} comments={takesAnnotations ? { props: commentsListProps, list: commentsList, onList: setCommentsList } : null} />
+                  {pillActive && rcptPill}
+                </div>
+              )}
+              <ReplyRow
+                phone={phone}
+                keepOpen={keepOpen}
+                fold={replyFold}
+                onFold={setReplyFold}
+                fitKey={replyFitKey}
+                send={
+                  routeChoiceOpen ? null : (
+                  <Tip content={withShortcut('Send', { scope: inboxThreadShortcuts, action: 'send' })}>
+                    <button type="button" className="ib-btn ib-pri ib-rsend" ref={sendRef} data-reply-send="" onClick={() => void send()} disabled={sending || voice.busy}>
+                      {/* While it sends the spinner takes the word's place and Send keeps its width, so nothing beside it moves. */}
+                      {sending && <span className="ib-spin" aria-hidden="true" />}
+                      <span className="ib-rsend-w">Send</span>
+                    </button>
+                  </Tip>
+                  )
+                }
+                clip={
                   <AttachFilesButton
                     className="ib-rclip"
-                    iconSize={16}
+                    iconSize={phone ? 20 : 16}
+                    phone={phone}
                     inputData="data-reply-attach"
                     onFiles={(list) => {
-                      replyFiles.add(list);
+                      if (phone) replyFiles.attach(list);
+                      else replyFiles.add(list);
                       setError(null);
                     }}
                   />
-                  {/* The answers the list above shows, a pick still being saved included, so the two numbers agree. */}
-                  {draftAnswers.length > 0 && (
-                    <span className="ib-rchip" data-picks-chip="">
-                      <Icon name="check" size={13} />
-                      {plural(draftAnswers.length, 'pick')}
-                    </span>
-                  )}
-                  <SkipChip count={keepOpen ? unanswered.length : skipIds.size} keepOpen={keepOpen} onToggle={toggleKeepOpen} />
-                  {dropped.length > 0 && (
-                    <Tip content="Replaced; this pick won't be sent">
-                      <span className="ib-rchip ib-dropped" data-dropped-picks-chip="">
-                        {dropped.length} {dropped.length === 1 ? 'pick' : 'picks'} on a replaced question
-                      </span>
+                }
+                skills={
+                  <Tip content="Skills (or type / in the reply)">
+                    <button type="button" className="ib-ricon" aria-label="Skills" data-reply-skills="" onClick={openSkillsFromBox}>
+                      <Icon name="cube" size={phone ? 20 : 16} />
+                    </button>
+                  </Tip>
+                }
+                mic={<VoiceMicButton voice={voice} phone={phone} />}
+                status={<VoiceStatusLine voice={voice} phone={phone} />}
+                files={
+                  replyFiles.files.length >= REPLY_FILES_SUMMARY_FROM ? (
+                    <button type="button" className="ib-rchip ib-rfilesn" data-reply-files-count="" aria-label={`${replyFiles.files.length} files attached. Show them`} onClick={showReplyFiles}>
+                      <Icon name="clip" size={13} />
+                      {replyFiles.files.length} files
+                    </button>
+                  ) : null
+                }
+                chips={replyChips}
+                summary={<ReplySummary skip={replySkip} dropped={dropped.length} comments={takesAnnotations ? { props: commentsListProps, list: commentsList?.card ? null : commentsList, onList: setCommentsList } : null} />}
+                pill={!phone && pillActive ? rcptPill : null}
+                hint={noSkillsHint ? 'No skills are installed' : null}
+                discard={
+                  // While the live-session choice is open it stands in for Send and the bin, as it did for Send's
+                  // row, so nothing can close the box under it. After a conflict the bin is "Discard mine": the
+                  // other window's draft is never deleted from here.
+                  phone || routeChoiceOpen ? null : replyDraft.conflict !== null ? (
+                    <Tip content="Discard your words; the other window’s draft stays">
+                      <button type="button" className="ib-ricon ib-rdiscard" aria-label="Discard my words" data-reply-discard="" onClick={discardMine}>
+                        <Icon name="trash" size={16} />
+                      </button>
                     </Tip>
-                  )}
-                  {takesAnnotations && (
-                    <AnnotationsChip {...commentsListProps} list={commentsList?.card ? null : commentsList} onList={setCommentsList} />
-                  )}
-                  <VoiceFoot voice={voice} phone={false} />
-                </div>
-              )}
+                  ) : (
+                    <Tip content="Discard this draft">
+                      <button type="button" className="ib-ricon ib-rdiscard" aria-label="Discard draft" data-reply-discard="" onClick={discardReply}>
+                        <Icon name="trash" size={16} />
+                      </button>
+                    </Tip>
+                  )
+                }
+              />
               {boxDrop.over && (
                 <div className="ib-rdrop" aria-hidden="true" data-box-drop="">
                   <Icon name="clip" size={18} />
@@ -6743,35 +6886,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             <div className="ib-sr" role="status">
               {skipping ? `${plural(skipIds.size, 'question')} will be skipped when you send.` : ''}
             </div>
-            {route.open && asking ? (
-              routeChoice
-            ) : (
-              <>
-              {lineError && errorLine}
-              {/* Send's row (approval "inbox-reply-recipient"): Send and Cancel, then at the right "Draft  Saved 4:51 PM
-                  Discard" and, with more than one agent, who gets the reply. On a phone the pill sits after Cancel and
-                  the Draft line is above the box (the owner, 2026-11-03), so the first save grows the foot upward and
-                  the box, its mic and this row stay where they are. */}
-              <div className="ib-acts ib-footrow ib-replyrow" data-reply-row="">
-                <div className="ib-footbtns">
-                  <button type="button" className="ib-btn ib-pri" ref={sendRef} onClick={() => void send()} disabled={sending || voice.busy}>
-                    <Icon name="send" size={15} />
-                    Send
-                  </button>
-                  <button type="button" className="ib-btn ib-ghost" onClick={() => closeBox()}>
-                    Cancel
-                  </button>
-                  {/* The in-thread New message button is off (approval "inbox-acknowledge"); its route and code stay. */}
-                  {SHOW_NEW_MESSAGE_BUTTON && !archived && <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />}
-                  {pillActive && phone && rcptPill}
-                </div>
-                <div className="ib-footstatus">
-                  {!phone && draftStamp}
-                  {pillActive && !phone && rcptPill}
-                </div>
-              </div>
-              </>
-            )}
+            {route.open && asking ? routeChoice : lineError && errorLine}
           </>
         ) : route.open && asking ? (
           routeChoice
@@ -7037,7 +7152,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
  * default "3 questions stay open · Skip them"; after Skip them, "↷ 3 questions
  * will be skipped · Keep open", for that one Send. Nothing when none is
  * unanswered. The closed foot says the same in the open questions list (approval
- * "reply-bar-pairs"), and a phone's box in its sheet (ReplyFootPhone.tsx).
+ * "reply-bar-pairs"), and the box's summary line in its sheet (ReplySummary.tsx).
  */
 function SkipChip({ count, keepOpen, onToggle }: { count: number; keepOpen: boolean; onToggle: () => void }) {
   if (count === 0) return null;

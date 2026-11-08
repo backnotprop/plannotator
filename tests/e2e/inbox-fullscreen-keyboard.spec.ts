@@ -296,8 +296,8 @@ for (const phone of [{ browserName: 'webkit' as const }, { browserName: 'chromiu
       await card.getByRole('textbox', { name: 'Comment on checkout.png' }).fill(`Crop the header (${tag})`);
       await card.locator('.ib-csave').click();
       await page.goto(`${world.url}#thread=${world.threadId}`);
-      // A phone's reply box: its foot's one line, then (with questions too) the sheet's Review comments.
-      const line = page.locator('section.ib-pane .ib-rfoot [data-foot-summary]');
+      // A phone's reply box: its summary line over the row, then (with questions too) the sheet's Review comments.
+      const line = page.locator('section.ib-pane .ib-rbox [data-reply-line] [data-foot-summary]');
       if (!(await line.isVisible())) await page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /Reply|Edit draft/ }).first().click();
       await line.click();
       if ((await line.getAttribute('data-foot-summary')) === 'sheet')
