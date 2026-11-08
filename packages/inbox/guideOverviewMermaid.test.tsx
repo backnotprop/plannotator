@@ -13,9 +13,9 @@
  *    its plain fence;
  *  - GuideReader drawing it only for a host that passes a renderer (the
  *    pull request page passes none; its snapshot has no overview today);
- *  - the overview beside its diagram (the owner on #2887): split in a wide
- *    pane, stacked again when the pane narrows (its own width, not the
- *    window's), and never split for an overview without a diagram.
+ *  - the diagram's box wider than the title's column (the owner on #2887:
+ *    under the words, as wide as the title), read from the window's own
+ *    `.gv-` rules.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -23,8 +23,9 @@ import { plugin } from 'bun';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, mock, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { resolve } from 'node:path';
-import { FIXTURE_V2_OVERVIEW, FIXTURE_V2_PR_TEXT } from '@plannotator/core/guide-format-fixtures';
+import { readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { FIXTURE_V2_OVERVIEW } from '@plannotator/core/guide-format-fixtures';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
 import type { ShapeHost } from '@plannotator/ui/components/shape';
@@ -184,73 +185,37 @@ test.skipIf(!hasDom)('the reader draws it on its own, for a host with no diagram
   expect(box()!.querySelector('pre') === null).toBe(true);
 });
 
-// The pane's width, as the reader's box reports it (happy-dom lays nothing out), and the observer that reports a change.
-// Only the reader's own box (the element around `.gv-guide`) is the pane; every other box keeps happy-dom's zero rect.
-let paneWidth = 1200;
-let observed: { el: Element; callback: (entries: unknown[]) => void }[] = [];
-const elementProto = (hasDom ? HTMLElement.prototype : {}) as unknown as Record<string, unknown>;
-const savedRect = elementProto['getBoundingClientRect'];
-const savedObserver = (globalThis as { ResizeObserver?: unknown }).ResizeObserver;
-const isReaderBox = (el: Element) => !!el.firstElementChild?.classList.contains('gv-guide');
-function stubLayout() {
-  elementProto['getBoundingClientRect'] = function (this: HTMLElement) {
-    const rect = (savedRect as () => DOMRect).call(this);
-    return isReaderBox(this) ? ({ x: 0, y: 0, top: 0, left: 0, right: paneWidth, bottom: 800, width: paneWidth, height: 800, toJSON: () => ({}) } as DOMRect) : rect;
-  };
-  (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
-    constructor(private readonly callback: (entries: unknown[]) => void) {}
-    observe(el: Element) { observed.push({ el, callback: this.callback }); }
-    unobserve() {}
-    disconnect() { observed = observed.filter((o) => o.callback !== this.callback); }
-  };
+/** The guide heading's and overview's rules of the window's stylesheet (`.gv-` lines outside the phone block), as the page has them. */
+function guideRules(): string {
+  return readFileSync(join(import.meta.dir, 'inbox.css'), 'utf8')
+    .split('\n')
+    .filter((line) => /^\.gv-/.test(line))
+    .join('\n');
 }
-function restoreLayout() {
-  elementProto['getBoundingClientRect'] = savedRect;
-  (globalThis as { ResizeObserver?: unknown }).ResizeObserver = savedObserver;
-  observed = [];
-}
-/** The pane is now `paneWidth` wide: the reader's observer hears it, as a resize would tell it. */
-async function resizePane() {
-  await act(async () => {
-    for (const { el, callback } of observed) if (isReaderBox(el)) callback([{ target: el, borderBoxSize: [{ inlineSize: paneWidth, blockSize: 800 }], contentRect: el.getBoundingClientRect() }]);
-  });
-}
-const split = () => document.querySelector('[data-guide-overview-split]');
-const pane = () => <ReviewPane thread={thread} message={message} codeReview onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />;
 
-test.skipIf(!hasDom)('in a wide pane the overview sits beside its diagram, and stacks when the pane narrows', async () => {
-  paneWidth = 1200;
-  stubLayout();
+test.skipIf(!hasDom)("the diagram sits under the overview's words, no wider than the title's column", async () => {
+  const sheet = document.createElement('style');
+  sheet.textContent = guideRules();
+  document.head.append(sheet);
   try {
-    await mount(pane());
-    expect(split() !== null).toBe(true);
-    // The words and the diagram are both inside the split reader.
-    expect(split()!.querySelector('[data-guide-overview] .gv-prose') !== null).toBe(true);
-    expect(split()!.querySelector('[data-guide-overview-diagram="mermaid"]') !== null).toBe(true);
-
-    // The same window, a narrower pane (side by side): it stacks.
-    paneWidth = 700;
-    await resizePane();
-    expect(split() === null).toBe(true);
-    expect(box() !== null).toBe(true);
-
-    paneWidth = 1100;
-    await resizePane();
-    expect(split() !== null).toBe(true);
+    await mount(<ReviewPane thread={thread} message={message} codeReview onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />);
+    const title = document.querySelector<HTMLElement>('[data-guide-heading] .gv-title');
+    const overview = document.querySelector<HTMLElement>('[data-guide-overview]');
+    const diagram = box() as HTMLElement | null;
+    expect(title !== null && overview !== null && diagram !== null).toBe(true);
+    // Under the words, in the overview (not a column beside the heading).
+    expect(diagram!.parentElement === overview).toBe(true);
+    expect(overview!.querySelector('.gv-prose')!.compareDocumentPosition(diagram!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Its box takes the title's measure: the same maximum width, in the same type size and weight (a ch is the font's own).
+    const t = getComputedStyle(title!);
+    const d = getComputedStyle(diagram!);
+    expect(t.maxWidth !== '' && t.maxWidth !== 'none').toBe(true);
+    expect(d.maxWidth).toBe(t.maxWidth);
+    expect(d.fontSize).toBe(t.fontSize);
+    expect(d.fontWeight).toBe(t.fontWeight);
+    // The drawing is inside that box.
+    expect(diagram!.querySelector('svg[data-drawn-overview]') !== null).toBe(true);
   } finally {
-    restoreLayout();
-  }
-});
-
-test.skipIf(!hasDom)('an overview without a diagram is never split', async () => {
-  paneWidth = 1400;
-  snapshot = FIXTURE_V2_PR_TEXT;
-  stubLayout();
-  try {
-    await mount(pane());
-    expect(document.querySelector('[data-guide-overview]') !== null).toBe(true);
-    expect(split() === null).toBe(true);
-  } finally {
-    restoreLayout();
+    sheet.remove();
   }
 });

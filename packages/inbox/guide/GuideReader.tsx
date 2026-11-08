@@ -51,15 +51,12 @@ import { useConfigValue } from '@plannotator/ui/config';
 import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
 import { reviewSourceLine } from './sourceLine';
 import { withOverviewMermaid } from './overviewMermaid';
-import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
 
 /** A line range the review app selects on (Pierre's). */
 type SelectedLineRange = NonNullable<AllFilesCodeViewProps['pendingSelection']>;
 
 const NO_ANNOTATIONS: never[] = [];
-/** Below this the overview's words would be too narrow beside a diagram column: it stacks. */
-const OVERVIEW_SPLIT_MIN_PX = 960;
 const noop = () => {};
 
 /** One card's comment wiring: the review app's annotation props of `AllFilesCodeView`. */
@@ -461,16 +458,10 @@ function Reader({
 
   // The window's wrap for a code span, for the viewer's own inline parser.
   const codeSpan = useContext(CodeSpanContext);
-  // The overview beside its diagram (the owner on #2887): in a review whose overview has one, and a pane at least
-  // OVERVIEW_SPLIT_MIN_PX wide, the heading, its facts and the words on the left, the diagram on the right (inbox.css,
-  // [data-guide-overview-split]). Measured on the reader's own box, so a narrow side by side pane stacks as before.
-  const [splitRef, narrowPane] = useNarrowerThan<HTMLDivElement>(OVERVIEW_SPLIT_MIN_PX, true);
-  const overviewSplit = threadHeading && mode !== 'files' && !!snapshot.guide.overview?.diagram && !narrowPane;
 
   return (
     <GuideHostProvider value={host}>
       <GuideCodeSpanContext.Provider value={codeSpan}>
-      <div ref={splitRef} data-guide-overview-split={overviewSplit ? '' : undefined}>
       <GuideView
         guide={guide}
         reviewed={ticks}
@@ -485,7 +476,6 @@ function Reader({
         // Every file's box as tall as its diff, in the readers built on this one (a thread's guided review, the review, the PR page).
         fitFileHeights
       />
-      </div>
       </GuideCodeSpanContext.Provider>
       {globalAnchor && globalDraftKey && (
         <CommentPopover
