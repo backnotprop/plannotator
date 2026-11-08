@@ -7,7 +7,8 @@
  *
  * Failures to catch: Side missing from a thread that can ask, or showing in
  * one that cannot (no live agent: a guest's or a linked machine's thread
- * reads `can_ask: false` too); Side out of its place; a press that opens the
+ * reads `can_ask: false` too), or in the phone layout (the owner hides it
+ * there; the top bar icon stays); Side out of its place; a press that opens the
  * window without the words, or not at all; the Ask icon coming back to the
  * full-screen file's bar.
  *
@@ -116,8 +117,8 @@ async function until(check: () => boolean, what: string, ms = 3000) {
 }
 
 /** One message as the thread draws it, with the window's Ask: Side comes from the hook, as App passes it. */
-function MessageWithAsk() {
-  const ask = useInboxAsk({ on: true, codeReview: false, threadId: ROOT, phone: false, openThread: () => {}, replyInThread: () => {} });
+function MessageWithAsk({ phone = false }: { phone?: boolean }) {
+  const ask = useInboxAsk({ on: true, codeReview: false, threadId: ROOT, phone, openThread: () => {}, replyInThread: () => {} });
   return (
     <div className="pn-inbox">
       <div data-test-top="">{ask.button}</div>
@@ -220,6 +221,15 @@ test.skipIf(!hasDom)('a thread that cannot ask (no live agent): no Ask icon, and
   await mount(<MessageWithAsk />);
   await settle();
   expect(document.querySelectorAll('[data-ask-open]')).toHaveLength(0);
+  await select(host!, WORDS);
+  expect(barOrder()).toEqual(['Delete', 'Comment', 'Looks good', '|', 'Cancel']);
+  expect(document.querySelectorAll('[data-annotation-side]')).toHaveLength(0);
+});
+
+test.skipIf(!hasDom)('the phone layout: the top bar keeps its Ask icon, and the selection bar has no Side', async () => {
+  serve(true);
+  await mount(<MessageWithAsk phone />);
+  await until(() => askIcon() !== null, 'the Ask icon');
   await select(host!, WORDS);
   expect(barOrder()).toEqual(['Delete', 'Comment', 'Looks good', '|', 'Cancel']);
   expect(document.querySelectorAll('[data-annotation-side]')).toHaveLength(0);

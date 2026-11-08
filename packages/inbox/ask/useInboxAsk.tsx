@@ -24,7 +24,8 @@ export interface InboxAskParts {
   button: ReactNode;
   /**
    * Side in a message's or a file's selection bar (approval "inbox-ask-ai-flow", 2026-11-08): the selected
-   * words, quoted, open the thread's chat. Undefined wherever the icon is null (this thread cannot ask, Ask off).
+   * words, quoted, open the thread's chat. Undefined wherever the icon is null (this thread cannot ask, Ask off),
+   * and in the phone layout (`phone`, App's usePhone), where the owner keeps the selection bar without it.
    */
   side: ((selected: string) => void) | undefined;
   /** The window. Outside the thread's section: see AskChat. */
@@ -183,7 +184,7 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
   return {
     askWith,
     button,
-    side: canAsk ? side : undefined,
+    side: canAsk && !phone ? side : undefined,
     layer: askFor ? (
       // The code window's handlers sit on the layer itself: ChatFrame sizes itself from this element.
       <div className="ib-ask-layer" data-ask-layer="" onPointerDownCapture={keepFocusIn} {...region.handlers}>
