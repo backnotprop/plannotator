@@ -210,6 +210,11 @@ export interface MachineView {
    * null for this machine, whose own launch block says). Absent from an older Inbox.
    */
   launch?: boolean | null;
+  /**
+   * Its store takes a Delete on an agent message's words. Not: a Delete it refuses (422) reads "<name> needs an
+   * update to delete words · Update". Absent from an older Inbox serving the window; false for a linked one too old.
+   */
+  message_deletions?: boolean;
   /** Its list was read and keeps no snoozes: an older Inbox, so Snooze says why instead of vanishing. */
   snooze_old?: boolean;
   /** Update on that machine, from its own state. Null: nothing to say (level, ahead, this machine, or no newer release known). */

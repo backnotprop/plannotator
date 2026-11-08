@@ -184,6 +184,18 @@ describe("the line", () => {
     expect(peer.reason).toContain("0.28.30");
   });
 
+  test("Delete on its messages is offered only when its health says its store takes one", async () => {
+    // An Inbox from before Delete on a message's words says nothing, and its store refuses the DELETION (422).
+    const older = link(door({ health: () => Response.json({ inbox_id: B, machine_links: 1, version: "0.28.51" }) }).url).peer;
+    older.start();
+    await until("online", () => older.state === "online");
+    expect(older.messageDeletions).toBe(false);
+    const newer = link(door({ health: () => Response.json({ inbox_id: B, machine_links: 1, version: "0.28.54", message_deletions: 1 }) }).url).peer;
+    newer.start();
+    await until("online", () => newer.state === "online");
+    expect(newer.messageDeletions).toBe(true);
+  });
+
   test("a different Inbox at the address is never taken for this machine (rule 19)", async () => {
     const d = door({ health: () => Response.json({ inbox_id: "ibx_01K00000000000000000000009", machine_links: 1 }) });
     const { peer } = link(d.url);

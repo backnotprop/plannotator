@@ -1945,6 +1945,11 @@ export interface InboxHealth {
   /** Remote launch: 1 while a linked machine may start agents here, 0 while launch is off. Absent from an older Inbox. */
   launch_from_machines?: number;
   /**
+   * The store takes a Delete on an agent message's words (`type` "DELETION", approval "inbox-toolbar-delete"; 1).
+   * Absent from an older Inbox, whose store refuses one (422): a linked machine's window says it needs an update.
+   */
+  message_deletions?: number;
+  /**
    * The page honours `--pn-window-controls-width` and `-height` on `:root`, for
    * a desktop host that draws the window's buttons over it, and from 2 names
    * the line they go on in `--pn-window-controls-center-y` (additive; absent

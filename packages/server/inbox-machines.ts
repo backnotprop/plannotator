@@ -244,6 +244,11 @@ export interface MachineView {
    * start agents there"). Null for this Inbox, whose own launch block says.
    */
   launch: boolean | null;
+  /**
+   * Its store takes a Delete on an agent message's words (its health's `message_deletions`). Not: a Delete it refuses
+   * (422) reads "<name> needs an update to delete words". True for this Inbox; false until its health is read, and for an older Inbox.
+   */
+  message_deletions: boolean;
 }
 
 /** An agent's snooze of a linked machine's thread: its answer there, or `held`, the words for a write that waits. */
@@ -420,6 +425,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       list_cursor: null,
       snoozes: true,
       launch: null,
+      message_deletions: true,
     },
     ...links.list().map((link) => {
       const peer = peers.get(link.id);
@@ -439,6 +445,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         snooze_old: peer?.list ? !peer.list.snoozes : false,
         update: peer ? updateView(peer) : null,
         launch: peer?.launch ?? null,
+        message_deletions: peer?.messageDeletions ?? false,
       } satisfies MachineView;
     }),
   ];

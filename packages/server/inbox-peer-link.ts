@@ -140,6 +140,8 @@ export class PeerLink {
   version: string | null = null;
   /** Its health's `launch_from_machines` (remote launch): agents can start there (true), launch is off (false), or its Inbox is too old to say (null). */
   launch: boolean | null = null;
+  /** Its health's `message_deletions`: its store takes a Delete on a message's words. False until it answered, and for an older Inbox. */
+  messageDeletions = false;
   list: PeerList | null = null;
   /** That machine's own update answer (its health and its status frames), and whether its door takes `update`. */
   farUpdate: FarUpdate | null = null;
@@ -277,6 +279,7 @@ export class PeerLink {
       }
     }
     this.launch = typeof body.launch_from_machines === "number" ? body.launch_from_machines >= 1 : null;
+    this.messageDeletions = typeof body.message_deletions === "number" && body.message_deletions >= 1;
     if (body.inbox_id !== this.id) return "a different Inbox answers at this address";
     if (typeof body.machine_links !== "number" || body.machine_links < MACHINE_LINKS_PROTOCOL) {
       this.setState("needs_update", `Update Plannotator on ${this.options.link.name} (it runs ${this.version ?? "an older version"}).`);

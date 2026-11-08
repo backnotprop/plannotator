@@ -6506,6 +6506,8 @@ function Inbox() {
               return blocked ? { name: blocked.name, onPress: () => setMachineUpdateOpen({ id: blocked.id, snooze: true }) } : undefined;
             })()}
             machine={machines.linked.find((m) => m.id === machineOf(thread.thread_id)) ?? null}
+            // A Delete refused by a machine too old to take one: the error line's Update opens that machine's update dialog.
+            onMachineUpdate={pageOffersUpdates(settings) ? (id) => setMachineUpdateOpen({ id, snooze: false }) : undefined}
             outbox={threadOutbox(outbox, thread)}
             onDismissOutbox={dismissOutbox}
             replyRequest={replyFor}
