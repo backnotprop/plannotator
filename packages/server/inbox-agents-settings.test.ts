@@ -545,11 +545,16 @@ test("a note already in an agent's file (written by hand or an older Inbox, no r
 });
 
 test("a window older than the dialog (no asked list): the agents that can take a note now count as asked", async () => {
-  fake.install("codex");
+  // Qwen Code: still asked in the dialog (Codex's note would be written by itself, so asked already).
+  fake.install("qwen");
+  mkdirSync(join(fake.home, ".qwen"), { recursive: true });
   const s = await start();
   await s.connectAgents();
+  const before = (await get(s)) as Asked;
+  expect(before.notes_asked).toEqual([]);
+  expect(row(before, "qwen").note?.state).toBe("absent");
   const answer = (await (await post(s, "/api/inbox/agents/notes", { add: [] })).json()) as Asked;
-  expect(answer.notes_asked).toEqual(["codex"]);
+  expect(answer.notes_asked).toEqual(["qwen"]);
 });
 
 test("the answer's fields are checked", async () => {
