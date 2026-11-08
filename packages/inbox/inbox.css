@@ -7638,6 +7638,13 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
 .ib-fcomp.ib-phone .ib-fcomp-foot > .ib-dtfoot:has(.ib-vline) { flex: 1 1 0; }
 /* Dictating, the status has the row: the link or "Sent to …" would squeeze Cancel and the clock out of it at 320. */
 .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-foot:has(.ib-vline) > :is(.ib-fcomp-link, .ib-fcomp-sent) { display: none; }
+/* Round 3's row (Send's word, the 44 px clip) leaves the status less room: as in compose's foot, "Listening" is whole
+   or not there; the level, the clock and Cancel say it, and a screen reader keeps the status (VoiceFoot). */
+.ib-fcomp.ib-phone .ib-vline b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-fcomp.ib-phone .ib-vline:is([data-voice-line="hold"], [data-voice-line="tap"], [data-voice-line="nearcap"]) b { flex: none; }
+@media (max-width: 429px) {
+  .ib-fcomp.ib-phone .ib-vline:is([data-voice-line="hold"], [data-voice-line="tap"], [data-voice-line="nearcap"]) b { display: none; }
+}
 .ib-fcomp.ib-phone .ib-fcomp-chips { flex-wrap: nowrap; min-width: 44px; }
 .ib-fcomp.ib-phone .ib-fcomp-chip { flex: none; height: auto; min-height: 22px; }
 .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-q { height: auto; min-height: 22px; }
