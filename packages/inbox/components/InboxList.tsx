@@ -65,9 +65,11 @@ export interface InboxListProps {
   selectedThreadId: string | null;
   /**
    * The held list's "N new" (held.ts `heldNotice`): how many, and the one project they are in when all are in
-   * one. Always one line: a long project name is cut with "…", the whole line then in a tooltip.
+   * one. Always one line: a long project name is cut with "…", the whole line then in a tooltip. `lands`: the
+   * groups its rows land in (held.ts `showLandsIn`); Show opens each one closed, as a click on its header does, so
+   * the rows it brings in are on screen (List has no groups to open).
    */
-  notice: { count: number; project?: string | null } | null;
+  notice: { count: number; project?: string | null; lands?: readonly InboxListGroupId[] } | null;
   /**
    * When the list on screen was last sorted whole (listView.ts `ListSort`): List keeps each row's place between
    * sorts, as the groups do. Absent: every render is a sort (a list that never holds, the tour).
@@ -1672,7 +1674,19 @@ export function InboxList(props: InboxListProps) {
               {line.text}
             </p>
           ))}
-          {props.notice && <HeldNoticeLine count={props.notice.count} project={props.notice.project ?? null} onShow={props.onShowNew} />}
+          {props.notice && (
+            <HeldNoticeLine
+              count={props.notice.count}
+              project={props.notice.project ?? null}
+              onShow={() => {
+                // The groups the rows land in open with the press (the owner, 2026-11-08), in the same render as the
+                // rows: closed, they would come in out of sight and Show would seem to do nothing.
+                const lands = props.notice?.lands;
+                if (lands && !asList) groups.open(lands);
+                props.onShowNew();
+              }}
+            />
+          )}
           {/* The band alone is an empty list with a band under it: nothing else says the list is clear. */}
           {/* So is a list whose rows are all archived, waiting for the list to settle without them (Archive all). */}
           {visible.every((section) => section.id === 'snoozed' || section.threads.every(inboxRowArchived)) && props.empty}
