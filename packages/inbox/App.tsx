@@ -128,7 +128,6 @@ import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './r
 import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
-import { GuidePane } from './components/GuidePane';
 import { ReviewPane } from './components/ReviewPane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
@@ -136,6 +135,7 @@ import { reloadOntoInbox, useStalePage } from './stalePage';
 import { StalePageNotice } from './components/StalePageNotice';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
 import { errorToast } from './toastError';
+import { pictureFromFile } from './projectPictures';
 import { canToggleRead, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, seenHeldInNew } from './markRead';
 import { threadLink, type RowMenuAction } from './rowMenu';
 import { movePin, unpinnedWhere } from './pins';
@@ -159,7 +159,8 @@ import { adoptSavedTheme, inboxServerSync } from './theme';
 import { adoptSavedDiffOptions } from './diffOptions';
 import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
 import { parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
-import { ComposeDialog, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
+import { ComposeDialog, type ComposeHeld, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
+import { heldLaunchToast } from './compose/heldLaunch';
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage, type BoardMove } from './board/BoardPage';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
@@ -178,7 +179,7 @@ import { useCodeReviewOffer } from './codeReviewOffer';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
-import { composeActions, composeTargets, hostLabel, type ComposeAction } from './compose/model';
+import { composeActions, composeTargets, hostLabel, launchHistory, type ComposeAction } from './compose/model';
 import { reviewBoxPulls } from './compose/reviewBox';
 import type { CardsModel, DraftView, InboxStorageModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
@@ -2499,9 +2500,8 @@ function Inbox() {
       // (approval "inbox-thread-artifacts": one more rung before Escape closes the thread).
       // A thread in full screen leaves it before it closes (the sidebar and the list come back, the thread stays).
       const now = routeRef.current;
-      // A review a board opened over itself (the guide pane) closes first, back to the board; then the board, back to
-      // the thread. The full-window review holds the board itself (over it, or as its corner card): Escape closes the
-      // board and the review stays.
+      // The full-window review holds the board itself (over it, or as its corner card): Escape closes the board and the
+      // review stays. A review not drawn yet (its thread still reading) closes first, back to the board.
       if (now.shape && now.guide && !reviewPaneOpenRef.current) {
         closeTo({ ...now, guide: null, guideAt: null });
         return;
@@ -2714,6 +2714,18 @@ function Inbox() {
       },
       7000,
     );
+  };
+  /**
+   * Remote launch: a new session for a linked machine waits in this Inbox's outbox (the machine is asleep, or slow to
+   * answer). Compose has closed; the toast says it starts when that machine is back, and Cancel takes it back while it
+   * has not left (`POST /api/inbox/outbox/:key/cancel`) and puts its words back in Drafts.
+   */
+  const composeHeld = (held: ComposeHeld) => {
+    if (held.draftId) setDrafts((current) => (current ?? []).filter((d) => d.id !== held.draftId));
+    closeCompose(held.draftId ? draftNeighbour(held.draftId) : null);
+    if (held.draftId) void refreshDrafts();
+    const { toast: heldToast, ms } = heldLaunchToast(held, showToast, dismissToast, () => void refreshDrafts());
+    showToast(heldToast, ms);
   };
   const lastSentRef = useRef(lastSent);
   const rememberSent = (session: string) => {
@@ -3716,6 +3728,26 @@ function Inbox() {
     await refreshList(false);
     const now = latestRef.current?.projects.find((p) => p.id === projectId)?.name;
     say(name === null ? `Name reset${now ? ` to ${now}` : ''}.` : `Renamed to ${name}.`);
+    return true;
+  };
+
+  /**
+   * The project menu's Set picture… (approval "inbox-letter-marks"): the picture kept by the Inbox, then the list read
+   * again, so every project mark shows it. A refused picture (not an image, too big) says why in the toast.
+   */
+  const setProjectPicture = async (projectId: string, file: File | null): Promise<boolean> => {
+    try {
+      const read = file ? await pictureFromFile(file) : { picture: null };
+      if ('refused' in read) {
+        showToast({ icon: 'warn', lead: read.refused, wrap: true });
+        return false;
+      }
+      await inboxApi.setProjectPicture(projectId, read.picture);
+    } catch (cause) {
+      showToast(errorToast(cause, 'The picture did not change.'));
+      return false;
+    }
+    await refreshList(false);
     return true;
   };
 
@@ -5313,8 +5345,8 @@ function Inbox() {
   const shapeLayerId = boardsOn && route.shape && (route.page === 'shapes' || (route.page === 'inbox' && !!route.thread)) ? route.shape : null;
   const guideMessage =
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
-  // A review, while Code review is on: the full-window review (ReviewPane).
-  const reviewPaneOpen = codeReviewOn && !!guideMessage?.guide?.review;
+  // Every guide or review opens the full-window review (ReviewPane, approval "inbox-one-review-screen").
+  const reviewPaneOpen = !!guideMessage;
   reviewPaneOpenRef.current = reviewPaneOpen;
   // The review is at the place a board's link named: the address lets it go, so a reload opens it at the top.
   const landGuide = () => {
@@ -5502,6 +5534,8 @@ function Inbox() {
     }
   }, [stack.thread, view, route.thread, phone]);
 
+  // Remote launch: where the person last started an agent on each machine, from the merged list's launched rows.
+  const composeLaunched = useMemo(() => launchHistory(latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
   // The project compose treats as current: the list's filter, else the open thread's.
   const composeCurrent = (() => {
     const id = route.page === 'inbox' ? (route.project ?? thread?.project.id ?? null) : null;
@@ -6257,6 +6291,7 @@ function Inbox() {
             projectsReadable={projectsReadable}
             onProjectAction={(projectId, action) => void projectAction(projectId, action)}
             onProjectRename={renameProject}
+            onProjectPicture={setProjectPicture}
             onProjectCombine={async (pair) => (await combineProjects([pair])) === null}
             announce={say}
             // Not on a tailnet guest's page: the update routes answer it 403 local_only.
@@ -6316,8 +6351,7 @@ function Inbox() {
               id={shapeLayerId}
               thread={route.page === 'inbox' && thread && thread.thread_id === route.thread ? thread : null}
               onClose={() => close({ ...routeRef.current, shape: null })}
-              // Its review opens at the place a link names. With Code review on the code shows and the board is its
-              // corner card (ReviewPane); otherwise the guide pane opens over the board, and Back or Esc comes back to it.
+              // Its review opens at the place a link names: the full-window review (ReviewPane), the board its corner card.
               onOpenReview={(messageId, at) => {
                 setBoardLink(messageId);
                 boardPlaces.leave(shapeLayerId);
@@ -6655,6 +6689,8 @@ function Inbox() {
           lastSent={lastSent}
           home={settings?.home ?? null}
           board={boardEnabled === true}
+          launched={composeLaunched}
+          onHeld={composeHeld}
           reviewPulls={compose.review ? reviewPulls : undefined}
           reviewPullsRead={!pulls.reviews ? (pulls.error ? 'failed' : 'reading') : pulls.reviews.hosts.length > 0 && pulls.reviews.hosts.some((host) => host.error) ? 'failed' : 'read'}
           onOpenReviewThread={(id) => writeRoute({ page: 'inbox', reviews: reviewsScope(), project: null, thread: id })}
@@ -6724,53 +6760,48 @@ function Inbox() {
       <div className="ib-sr" aria-live="polite" data-inbox-live="">
         {said}
       </div>
-      {guideMessage &&
-        thread &&
-        // A review, while Code review is on: the full-window review (its own header's verdict). Otherwise the guide pane, as always.
-        (reviewPaneOpen ? (
-          <ReviewPane
-            key={guideMessage.id}
-            thread={thread}
-            message={guideMessage}
-            guest={tailnetGuest(settings)}
-            // From the route as it is now (a verdict lands after the person moved on): only while it still shows this review.
-            onBack={() => {
-              const now = routeRef.current;
-              if (now.guide === guideMessage.id) close({ ...now, guide: null, shape: null });
-            }}
-            onClose={() => close({ ...route, thread: null, guide: null, shape: null })}
-            onSent={afterWrite}
-            onPosted={pullsReloadRows}
-            onAsk={ask.askWith}
-            shapeHost={shapeHost}
-            shapes={shapes}
-            board={shapeLayerId}
-            onBoard={(id) => {
-              const now = routeRef.current;
-              if (now.guide !== guideMessage.id) return;
-              if (id) go({ ...now, shape: id });
-              else close({ ...now, shape: null });
-            }}
-            boardShrunk={boardLink === guideMessage.id}
-            boardPlace={shapeLayerId ? boardPlaces.placeOf(shapeLayerId) : null}
-            onBoardNavigate={(place) => {
-              if (shapeLayerId) boardPlaces.moved(shapeLayerId, place);
-            }}
-            at={route.guideAt ?? null}
-            onLanded={landGuide}
-          />
-        ) : (
-          <GuidePane
-            thread={thread}
-            message={guideMessage}
-            guest={tailnetGuest(settings)}
-            codeReview={settings?.code_review?.on === true}
-            at={route.guideAt ?? null}
-            onLanded={landGuide}
-            onBack={() => close({ ...route, guide: null })}
-            onClose={() => close({ ...route, thread: null, guide: null })}
-          />
-        ))}
+      {guideMessage && thread && (
+        // Every guide or review an agent sends opens the full-window review (approval "inbox-one-review-screen");
+        // what Code review brings shows only while it is on.
+        <ReviewPane
+          key={guideMessage.id}
+          thread={thread}
+          message={guideMessage}
+          guest={tailnetGuest(settings)}
+          codeReview={codeReviewOn}
+          // From the route as it is now (a verdict lands after the person moved on): only while it still shows this review.
+          onBack={() => {
+            const now = routeRef.current;
+            if (now.guide === guideMessage.id) close({ ...now, guide: null, shape: null });
+          }}
+          onClose={() => close({ ...route, thread: null, guide: null, shape: null })}
+          onSent={afterWrite}
+          onPosted={pullsReloadRows}
+          onAsk={ask.askWith}
+          // No verdict: back to the thread, its reply box open (the comments ride its Send).
+          onWriteReply={() => {
+            const now = routeRef.current;
+            if (now.guide === guideMessage.id) close({ ...now, guide: null, shape: null });
+            setReplyFor(thread.thread_id);
+          }}
+          shapeHost={shapeHost}
+          shapes={shapes}
+          board={shapeLayerId}
+          onBoard={(id) => {
+            const now = routeRef.current;
+            if (now.guide !== guideMessage.id) return;
+            if (id) go({ ...now, shape: id });
+            else close({ ...now, shape: null });
+          }}
+          boardShrunk={boardLink === guideMessage.id}
+          boardPlace={shapeLayerId ? boardPlaces.placeOf(shapeLayerId) : null}
+          onBoardNavigate={(place) => {
+            if (shapeLayerId) boardPlaces.moved(shapeLayerId, place);
+          }}
+          at={route.guideAt ?? null}
+          onLanded={landGuide}
+        />
+      )}
     </div>
     </InitiativeTagsContext.Provider>
   );

@@ -83,7 +83,7 @@ export function PanePart({ children, loading = null, onFailed }: { children: Rea
 }
 
 /**
- * The review reader in a pane (GuidePane, ReviewPane, PullReview): drawn once its chunk is in and its diff's
+ * The review reader in a pane (ReviewPane, PullReview): drawn once its chunk is in and its diff's
  * grammars are attached in the diff themes (threadDrawReady.ts), so no diff line paints plain first. Both
  * already in (the usual case once the window has been idle): it draws in the same commit.
  */

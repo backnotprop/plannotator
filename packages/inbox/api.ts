@@ -11,6 +11,7 @@ import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } f
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
+import { learnProjects } from './projectPictures';
 import type { ReplyViewing } from './replyViewing';
 import type {
   InboxCardMark,
@@ -139,6 +140,8 @@ export interface ProjectFolder extends InboxProject {
   machine?: string;
   /** The projects combined into this one: a link to one opens this project. Absent when there are none. */
   combined?: { id: string; name: string; root: string }[];
+  /** When its letter mark's picture was set (Set picture…, ms). Absent when none, and from an older Inbox. */
+  picture?: number;
 }
 
 /** The project menu's batches (POST /api/inbox/projects/:id/read and /resolve): the threads each took. */
@@ -196,6 +199,11 @@ export interface MachineView {
   list_cursor?: number | null;
   /** Its Inbox keeps snoozes (approval "inbox-snooze"). Absent from an older Inbox, and false for a linked one too old: no Snooze on its rows. */
   snoozes?: boolean;
+  /**
+   * Remote launch: agents can start there (true), launch is off there (false), or its Inbox is too old to say (null;
+   * null for this machine, whose own launch block says). Absent from an older Inbox.
+   */
+  launch?: boolean | null;
 }
 
 /** A write held for another machine (`GET /api/inbox/outbox`, the `outbox` frame). */
@@ -204,7 +212,8 @@ export interface OutboxView {
   machine: string;
   /** The door route, as `messages/msg_…/reply`. */
   route: string;
-  state: 'queued' | 'sending' | 'delivered' | 'refused' | 'parked' | 'dropped';
+  /** `cancelled`: taken back before it ever left (Cancel on a held launch); never sent. */
+  state: 'queued' | 'sending' | 'delivered' | 'refused' | 'parked' | 'dropped' | 'cancelled';
   queued_at: string;
   settled_at: string | null;
   status: number | null;
@@ -958,6 +967,8 @@ async function post<T>(path: string, body: Record<string, unknown>): Promise<T> 
         rememberMachine(idsIn(entry.answer), machine);
         return entry.answer as T;
       }
+      // Taken back with Cancel: a Send retried with its key never sends it after all.
+      if (entry.state === 'cancelled') throw new InboxApiError(409, 'outbox_cancelled', `Cancelled. It was never sent to ${held.machine?.name ?? 'the other machine'}.`);
       const why = entry.answer && typeof entry.answer === 'object' ? (entry.answer as { error?: unknown }).error : null;
       throw new InboxApiError(409, 'not_delivered', typeof why === 'string' && why ? why : `Not delivered to ${held.machine?.name ?? 'the other machine'}.`);
     }
@@ -1003,6 +1014,8 @@ function learnMachines(model: ListModel): void {
   rememberLocal(localIdsIn(model));
   for (const row of rows) rememberMachine([row.thread_id], row.machine);
   for (const project of model.projects) rememberMachine([project.id], project.machine);
+  // Letter marks (letterMarks.tsx): the projects' names (a Board card names only an id) and their pictures' keys.
+  learnProjects(model.projects);
 }
 
 /** A file's query: the page session, and for another machine the key its door asks of every write. */
@@ -1094,10 +1107,19 @@ export interface ComposeTrustPick {
   project: string;
 }
 
+/** `GET /api/inbox/launch/folders`: the folder names in one folder under home, and the path as the server read it (`~/…`). */
+export interface HomeFoldersAnswer {
+  path: string;
+  exists: boolean;
+  folders: string[];
+  /** A path that isn't there: the nearest folder above it that is, and its folders (absent from an older Inbox). */
+  nearest?: { path: string; folders: string[] };
+}
+
 /** What compose sends: a new thread to one live session. */
 export interface StartThreadInput {
-  /** A live session, or (launch on) a new session of `agent` started in the project; `trust`: Trust and start, on this reading. */
-  to: { host: string; session: string } | { launch: ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true }) & { trust?: InboxLaunchTrust } };
+  /** A live session, or (launch on) a new session of `agent` started in the project, a new scratch folder, or a folder under home (`~/…`); `trust`: Trust and start, on this reading. */
+  to: { host: string; session: string } | { launch: ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true } | { agent: InboxLaunchAgent; folder: string }) & { trust?: InboxLaunchTrust } };
   body: string;
   idempotency_key: string;
   uploads?: string[];
@@ -1333,6 +1355,9 @@ export const inboxApi = {
   /** The project menu's Rename… (a name) and Reset name (null): the project's `display_name`. */
   renameProject: (projectId: string, name: string | null) =>
     post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/name`), { name }),
+  /** Set picture… (letter marks): an image as a data: URL, or null to take it away. Answers the project with its `picture`. */
+  setProjectPicture: (projectId: string, picture: string | null) =>
+    post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/picture`), { picture }),
   /** Combine a project into another, or undo that (null): answers the project the person now sees. */
   combineProject: (projectId: string, into: string | null) =>
     post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/combine`), { into }),
@@ -1533,19 +1558,29 @@ export const inboxApi = {
   deleteThread: (threadId: string) => post<{ store: InboxStorageModel }>(threadUrl(threadId, `/delete`), {}),
   // Step 8: New message to a live session of the thread's project.
   // Compose: every live session, a new thread, Send to another session, and drafts.
-  composeSessions: (session?: string | null, trust?: ComposeTrustPick | null) => {
+  /** `machine`: a linked machine's sessions and launch block, read through the forward (remote launch); absent: this Inbox's. */
+  composeSessions: (session?: string | null, trust?: ComposeTrustPick | null, machine?: string | null) => {
     const query = new URLSearchParams({ ...(session ? { session } : {}), ...(trust ? { trust_agent: trust.agent, trust_project: trust.project } : {}) }).toString();
-    return get<ComposeSessionsModel>(inboxUrl('/sessions', query || undefined));
+    return get<ComposeSessionsModel>(inboxUrl('/sessions', query || undefined, machine));
   },
-  startThread: (input: StartThreadInput) =>
-    post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean; launch?: { id: string; state: 'starting' | 'failed' } }>(inboxUrl('/messages'), { ...input }),
+  /**
+   * "Another folder on <machine>…": the folder names in one folder under that machine's home (`GET
+   * /api/inbox/launch/folders?path=~/…`), one level, no hidden ones. `machine`: a linked machine's, through the
+   * forward; null: this computer's. A path that isn't there is `exists: false`; a hidden one or one outside home is a
+   * 422 (`folder_hidden`, `folder_outside_home`), a guest or a call from outside the window a 403.
+   */
+  homeFolders: (path: string, machine?: string | null, signal?: AbortSignal) =>
+    get<HomeFoldersAnswer>(inboxUrl('/launch/folders', new URLSearchParams({ path }).toString(), machine), signal),
+  /** `machine`: start the agent on that linked machine (remote launch), through the forward; a `202` is `InboxHeldError`. */
+  startThread: (input: StartThreadInput, machine?: string | null) =>
+    post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean; launch?: { id: string; state: 'starting' | 'failed' } }>(inboxUrl('/messages', undefined, machine), { ...input }),
   // Launch (behind `inboxLaunch.enabled`): the run line's buttons and Settings → Agents' switch.
-  launchStop: (launchId: string) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/stop`), {}),
+  launchStop: (launchId: string, machine?: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/stop`, undefined, machine), {}),
   launchOpen: (launchId: string) => post<{ ok: true; command: string }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/open`), {}),
-  launchDelete: (launchId: string) => post<{ ok: true; scratch_removed?: boolean }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/delete`), {}),
-  launchRetry: (launchId: string) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/retry`), {}),
+  launchDelete: (launchId: string, machine?: string | null) => post<{ ok: true; scratch_removed?: boolean }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/delete`, undefined, machine), {}),
+  launchRetry: (launchId: string, machine?: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/retry`, undefined, machine), {}),
   /** `warning`: the line the person read (`run.trust.warning`): a server that now reads another saves nothing. */
-  launchTrust: (launchId: string, warning: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/trust`), { warning }),
+  launchTrust: (launchId: string, warning: string | null, machine?: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/trust`, undefined, machine), { warning }),
   /** Settings → Agents, shown: the switch as it stands (never set: the login shell read again when stale). */
   /** `ahead`: the composer picked "Start Claude Code": read the login shell now (switch never set), so the Send need not wait. */
   launchSettingsRead: (ahead = false) => get<{ launch: InboxLaunchSettings }>(inboxUrl(ahead ? '/launch/settings?ahead=1' : '/launch/settings')),
@@ -1758,6 +1793,8 @@ export const inboxApi = {
   /** Writes held for other machines, and notices about ones that did not land. */
   outbox: () => get<{ waiting: OutboxView[]; notices: OutboxView[] }>(inboxUrl('/outbox')),
   dismissOutbox: (key: string) => post<{ entry: OutboxView }>(inboxUrl(`/outbox/${encodeURIComponent(key)}/dismiss`), {}),
+  /** Take back a held write that never left (a launch waiting for a machine that is asleep): it is never sent. */
+  cancelOutbox: (key: string) => post<{ entry: OutboxView }>(inboxUrl(`/outbox/${encodeURIComponent(key)}/cancel`), {}),
   pairPhone: () => post<PairingOffer>(inboxUrl('/pairing'), {}),
   pairingOffer: () => get<{ offer: PairingOfferView | null }>(inboxUrl('/pairing')),
   /** `fresh`: skip the answer the Inbox keeps a few seconds (Check again, after a switch). */

@@ -809,7 +809,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           ) : snapshot ? (
             // Keyed on the code: new code brings a new reader, so a composer left open cannot save onto a moved line; the
             // same code keeps it, whatever the head reads said. The reader is a chunk loaded on first use: one that cannot
-            // arrive says so here (GuidePane).
+            // arrive says so here.
             <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ repo: repoKey ?? '', pull: layerKey }} on={!!repoKey}>
                 <GuideReader bare snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} fileContents={fileContents} />
@@ -833,6 +833,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             </div>
           )}
           <AnnotationPanel
+            title="Comments"
             emptyHint={readerComments ? 'Click a line number, drag across lines, or select code to comment' : undefined}
             isOpen
             presentation={folded ? 'embedded' : undefined}
