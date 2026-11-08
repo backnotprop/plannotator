@@ -4409,6 +4409,19 @@ function Inbox() {
     }
   };
 
+  // Floating reply drafts (approval "inbox-reply-floaters", off by default): every other window hears `event: capabilities`.
+  const toggleFloatDrafts = async (next: boolean) => {
+    setSettingsError(null);
+    setSettings((current) => (current ? { ...current, float_drafts: { on: next } } : current));
+    try {
+      const saved = await inboxApi.saveFloatDrafts(next);
+      setSettings((current) => (current ? { ...current, float_drafts: saved.float_drafts } : current));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      void refreshSettings();
+    }
+  };
+
   // Thread steps (approval "inbox-thread-steps"): every other window hears `event: capabilities`.
   const toggleSteps = async (next: boolean) => {
     setSettingsError(null);
@@ -5119,6 +5132,8 @@ function Inbox() {
     threadId: route.page === 'inbox' ? route.thread : null,
     phone,
     off: tourOn || settings?.guest === true,
+    // Off by default (the owner, 2026-11-08): Settings → Capabilities → Experimental → "Float reply drafts".
+    floatDrafts: settings ? settings.float_drafts?.on === true : null,
     ask: ask.corner,
     openThread: (threadId) => writeRoute({ page: 'inbox', project: null, thread: threadId }),
     openDrafts: () => writeRoute({ page: 'drafts', project: null, thread: null }),
@@ -6057,6 +6072,7 @@ function Inbox() {
         onToggleBoard={(next) => void toggleBoard(next)}
         onToggleSteps={(next) => void toggleSteps(next)}
         onToggleBro={(next) => void toggleBro(next)}
+        onToggleFloatDrafts={(next) => void toggleFloatDrafts(next)}
         onToggleCodeReview={(next) => void toggleCodeReview(next)}
         onToggleShape={(next) => void toggleShape(next)}
         onToggleSystem={(next) => void toggleSystem(next)}

@@ -9,7 +9,7 @@ import { describe, expect, test } from 'bun:test';
 import { dispatchInboxFrame, type InboxEventHandlers, type SettingsModel } from './api';
 import { namesCapability, withCapabilities } from './capabilities';
 
-type Held = Pick<SettingsModel, 'serverSession' | 'board' | 'steps' | 'bro' | 'code_review' | 'shape' | 'system'>;
+type Held = Pick<SettingsModel, 'serverSession' | 'board' | 'steps' | 'bro' | 'float_drafts' | 'code_review' | 'shape' | 'system'>;
 
 /** What App's onCapabilities does with a frame: apply what it names, else read the settings again. */
 function hear(data: string, settings: Held): { settings: Held; reread: boolean } {
@@ -43,6 +43,15 @@ describe('event: capabilities', () => {
     const { settings, reread } = hear(JSON.stringify({ bro: { on: true } }), { ...OFF, bro: { on: false } });
     expect(reread).toBe(false);
     expect(settings).toEqual({ ...OFF, bro: { on: true } });
+  });
+
+  test('floating reply drafts turned on, then off, in another window: this window follows; a frame without it leaves it', () => {
+    const on = hear(JSON.stringify({ board: { on: false }, steps: { on: true }, bro: { on: false }, float_drafts: { on: true } }), { ...OFF, float_drafts: { on: false } });
+    expect(on.reread).toBe(false);
+    expect(on.settings.float_drafts).toEqual({ on: true });
+    expect(hear(JSON.stringify({ board: { on: false }, steps: { on: true }, float_drafts: { on: false } }), on.settings).settings.float_drafts).toEqual({ on: false });
+    // The server leaves it out of a frame while it is off and was not the change: the window keeps what it has.
+    expect(hear(JSON.stringify({ board: { on: true }, steps: { on: true } }), on.settings).settings.float_drafts).toEqual({ on: true });
   });
 
   test('a frame without the Board leaves it; a malformed Board value is not applied', () => {
