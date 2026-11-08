@@ -225,6 +225,9 @@ configurePlannotatorUI({
   digitHexIssueRefs: true,
   // The selection toolbar's Copy copies rich text, in messages and attached files (#1972).
   richCopy: true,
+  // On a phone the selection toolbar sits below the selection, clear of iOS's own edit menu, inside the screen,
+  // with thumb-sized buttons (utils/touchToolbarPlacement).
+  touchSelectionToolbar: true,
   // Hover cards for issue, PR and MR links: the server fetches with this computer's gh or glab (ref-cards.ts).
   refCardTransport: async (href, _ref, signal) => {
     const res = await fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal, headers: { accept: 'application/json' } });

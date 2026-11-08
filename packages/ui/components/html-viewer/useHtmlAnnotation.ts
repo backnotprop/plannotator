@@ -631,6 +631,9 @@ export function useHtmlAnnotation({
   hostCapRef.current = maxAdditionalTargets !== undefined;
 
   const anchorRef = useRef<HTMLDivElement | null>(null);
+  // The bridge's whole selection rect (frame coordinates), for the touch
+  // toolbar, which goes below it; the anchor div marks only its top.
+  const selectionRectRef = useRef<{ top: number; left: number; width: number; height: number } | null>(null);
   /** Rich-text Copy requests waiting for the bridge's markup, by id. An
    *  answer with an id not in here (unsolicited, or after its timeout) is ignored. */
   const richCopyRequestsRef = useRef(new Map<string, (answer: BridgeRichCopyMessage) => void>());
@@ -711,6 +714,7 @@ export function useHtmlAnnotation({
       if (anchorRef.current) anchorRef.current.remove();
       anchorRef.current = null;
       const anchor = getOrCreateAnchor();
+      selectionRectRef.current = bridgeRect;
       anchor.style.top = `${iframeRect.top + bridgeRect.top}px`;
       anchor.style.left = `${iframeRect.left + bridgeRect.left + bridgeRect.width / 2}px`;
       return anchor;
@@ -856,6 +860,13 @@ export function useHtmlAnnotation({
             element: anchor,
             source: null,
             selectionText: message.text,
+            getAnchorRect: () => {
+              const iframe = iframeRef.current;
+              const r = selectionRectRef.current;
+              if (!iframe || !r) return null;
+              const f = iframe.getBoundingClientRect();
+              return { top: f.top + r.top, bottom: f.top + r.top + r.height, left: f.left + r.left, right: f.left + r.left + r.width };
+            },
             // The markup is built only when Copy is pressed: ask
             // the bridge for the pending range's HTML and wait a moment.
             ...(message.richCopy ? {
@@ -958,6 +969,7 @@ export function useHtmlAnnotation({
         const anchor = anchorRef.current;
         if (!iframe || !anchor) return;
         const r = message.rect;
+        selectionRectRef.current = r;
         const iframeRect = iframe.getBoundingClientRect();
         anchor.style.top = `${iframeRect.top + r.top}px`;
         anchor.style.left = `${iframeRect.left + r.left + r.width / 2}px`;
