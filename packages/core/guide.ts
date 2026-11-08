@@ -1,3 +1,5 @@
+import type { GuideDiffNote } from './guide-notes';
+
 /** Hard cap on reviewer-supplied extra guide instructions (#1265): the
  *  freeform text appended to the organizer methodology at launch. A hygiene
  *  bound on prompt size, not a security boundary (the instructions run on the
@@ -25,6 +27,9 @@ export interface GuideDiffRef {
    *  for schema-enforced engines; optional here so a marker engine that omits
    *  it still yields a valid guide — the UI simply renders nothing. */
   summary?: string;
+  /** The author's notes on lines of this file (code review in the Inbox; snapshot format version 4, written only
+   *  when a note exists). Each sits inside one hunk. Readers that do not know them show the file as before. */
+  notes?: GuideDiffNote[];
 }
 
 export interface GuideSection {

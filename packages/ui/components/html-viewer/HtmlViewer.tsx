@@ -462,6 +462,13 @@ export interface HtmlViewerProps {
    */
   sandbox?: string;
   /**
+   * Opt-out: `false` draws the page's comment boxes (a pin, a selection, the
+   * global comment) with no image button, for a host whose upload refuses
+   * every image (the Plannotator Inbox). Absent → `true`, the image button as
+   * always.
+   */
+  allowCommentImages?: boolean;
+  /**
    * Opt-in: frame the document from a URL the host serves instead of as a
    * srcdoc. The viewer builds the same document (the page, theme, print
    * defaults, the inline annotation bridge) and hands it here; the host keeps
@@ -542,6 +549,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       touchSelection = false,
       hostNavigates = false,
       sandbox = HTML_VIEWER_SANDBOX,
+      allowCommentImages = true,
       frameUrl,
     },
     ref,
@@ -1661,6 +1669,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               isGlobal={false}
               draftKey={`html:${hook.commentPopover.draftKey}`}
               onSubmit={hook.handleCommentSubmit}
+              allowImages={allowCommentImages}
               mentionSource={mentionSource}
               // A pinpoint click opens this composer directly (never the
               // selection toolbar), so it carries the surface's one-click 👍.
@@ -1697,6 +1706,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               // The words typed survive a close (Escape, X) and come back on reopen.
               draftKey={globalCommentPopover.draftKey}
               onSubmit={handleGlobalCommentSubmit}
+              allowImages={allowCommentImages}
               onClose={() => setGlobalCommentPopover(null)}
               mentionSource={mentionSource}
               skillReferences

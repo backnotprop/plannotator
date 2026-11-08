@@ -26,6 +26,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { homedir } from "node:os";
 import type { InboxUpdate } from "@plannotator/core/inbox-types";
 import { statSync } from "node:fs";
 import { loadConfig, parseAutoUpdateEnv, parseUpdateCheckEnv, resolveAutoUpdate, resolveUpdateCheck } from "@plannotator/shared/config";
@@ -53,6 +54,7 @@ import {
   runReleaseCheck,
   UPDATE_SNOOZE_MS,
   type FetchReleaseResult,
+  type InstallFlagId,
   type ReleaseHighlight,
 } from "@plannotator/shared/update-check";
 import {
@@ -188,6 +190,48 @@ export interface InboxUpdatesOptions {
   probeVersion?: (binaryPath: string) => Promise<string | null>;
   /** The button's model changed. */
   onChange: () => void;
+  /** A linked machine's Update is in and its install script has finished: restart onto the binary on disk. */
+  onRestartWanted?: () => void;
+  /** Tests: this user's home, which a path sent to a linked machine never names. */
+  home?: string;
+}
+
+/**
+ * What a linked machine's window reads about this machine's update (the door's `GET update`). Only what its small
+ * dialog says: no log lines, no project names, no username.
+ */
+export interface MachineUpdateAnswer {
+  current: string;
+  update: InboxUpdate | null;
+  platform: NodeJS.Platform;
+  /** Where update.log is, as `~/…` (machinePath). */
+  log: string;
+  /** The install flags it remembers, as neutral ids: the other machine's own table spells its install command. */
+  flags: readonly InstallFlagId[];
+  /** Open reviews, counted: which projects they are in stays here. */
+  open_reviews: number;
+  /** `unchanged`: the install ended without an error and this machine still runs the same version. */
+  failure: { exit_code: number; tls?: UpdateTlsFailure; release_first?: true; prepare?: string; unchanged?: true } | null;
+}
+
+/** What Update answers a linked machine. `joined`: an install was already running. `restarting`: the new binary was already on disk. */
+export type MachineUpdateOutcome = ManualUpdateOutcome["outcome"] | "restarting" | "joined";
+
+/**
+ * A path of this machine, for another machine's window: its username stays here. Under the home folder it is
+ * `~/…`; under the data folder it is named that way; anywhere else only the file's name goes.
+ */
+export function machinePath(path: string, home: string, dataDir?: string): string {
+  const under = (root: string): string | null => {
+    if (!root || !path.startsWith(root)) return null;
+    const rest = path.slice(root.length);
+    return /^[/\\]/.test(rest) ? rest : null;
+  };
+  const inHome = under(home);
+  if (inHome) return `~${inHome}`;
+  const inData = dataDir ? under(dataDir) : null;
+  if (inData) return `$PLANNOTATOR_DATA_DIR${inData}`;
+  return path.split(/[/\\]/).pop() ?? "";
 }
 
 /** How long GET /api/inbox/whats-new waits for a release's notes before answering "still fetching". */
@@ -292,6 +336,10 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
   let fastTimer: ReturnType<typeof setTimeout> | null = null;
   let ticking = false;
   let stopped = false;
+  /** A linked machine pressed Update: restart by itself once the install is finished (no page here to do it). */
+  let restartWanted = false;
+  /** That Update ended with no error and the same binary: the version it was for, until the next press or restart. */
+  let noChange: string | null = null;
 
   // "Just updated": this Inbox runs a newer version than the one that ran
   // before it, or a later start on that version whose link was not yet
@@ -481,7 +529,7 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
       options.onChange();
     }
     // While an install runs, look at the binary every 2 s.
-    if (!stopped && next?.state === "updating" && !fastTimer) {
+    if (!stopped && (next?.state === "updating" || restartWanted) && !fastTimer) {
       fastTimer = setTimeout(() => {
         fastTimer = null;
         void tick();
@@ -506,6 +554,25 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
     const version = await probe(options.binaryPath);
     if (version === null) probedSignature = null;
     onDisk = version;
+  };
+
+  /**
+   * A linked machine's Update, judged right after a fresh look at the binary and only once the install script has
+   * finished (its skills and plugins come after the binary swap). A new binary: restart. An install that failed
+   * says so through the failed state. Anything else ended with this machine on the same version, and the person
+   * who pressed Update is told (`update_no_change`), never left looking at Update again.
+   */
+  const settleMachineUpdate = () => {
+    if (!restartWanted || stopped || isUpdateLockHeld(options.dataDir)) return;
+    restartWanted = false;
+    const state = compute();
+    if (state?.state === "ready") {
+      options.onRestartWanted?.();
+      return;
+    }
+    if (state?.state === "failed") return;
+    noChange = normalizeStableVersion(readUpdateState(options.dataDir).pending?.version) ?? state?.version ?? normalizeStableVersion(options.version);
+    options.onChange();
   };
 
   const sources = {
@@ -552,11 +619,25 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
         }
       }
       refresh();
+      settleMachineUpdate();
     } catch {
       // A tick never throws.
     } finally {
       ticking = false;
     }
+  };
+
+  const launch = (): ManualUpdateOutcome => {
+    const outcome = startManualUpdate({
+      currentVersion: release ? options.version : undefined,
+      dataDir: options.dataDir,
+      now,
+      platform: process.platform,
+      isManaged,
+      launchInstaller: options.launchInstaller ?? defaultLaunchInstaller,
+    });
+    refresh();
+    return outcome;
   };
 
   const details = (): InboxUpdateDetails => {
@@ -654,16 +735,70 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
           // The known release stands.
         }
       }
-      const outcome = startManualUpdate({
-        currentVersion: release ? options.version : undefined,
-        dataDir: options.dataDir,
-        now,
+      return launch();
+    },
+    /** The newest release this machine knows of. */
+    knownLatest: () => knownLatestRelease(readUpdateState(options.dataDir))?.version ?? null,
+    /** The install script owns this copy, so it can update itself. */
+    selfUpdates: () => release && isManaged(),
+    /** That linked machine's Update ended with no error and no new binary: the version it was for. */
+    noChange: () => noChange,
+    /** A linked machine's window asks what this machine would do. */
+    machineRead(): MachineUpdateAnswer {
+      const d = details();
+      const home = options.home ?? homedir();
+      // A reason can name the temp folder (update-prepare.ts), and that path can hold a username: under the home
+      // folder it reads `~/…`, anywhere else it stays on this machine.
+      const private_ = (text: string) =>
+        (home ? text.split(home).join("~") : text)
+          .replace(/temp folder (?!~)\S.*?(?= is full \(| can't be written \(| does not exist \(| \()/, "temp folder")
+          .replace(/(^|[\s'"(])\/[^\s'")]+/g, "$1…");
+      const failure = d.failure;
+      return {
+        current: d.current,
+        update: d.update,
         platform: process.platform,
-        isManaged,
-        launchInstaller: options.launchInstaller ?? defaultLaunchInstaller,
-      });
+        log: machinePath(d.log, home, options.dataDir),
+        flags: readInstallFlags(options.dataDir).flags,
+        open_reviews: d.sessions.length,
+        failure: failure
+          ? {
+              exit_code: failure.exit_code,
+              ...(failure.tls && { tls: failure.tls }),
+              ...(failure.release_first && { release_first: true as const }),
+              ...(failure.prepare && { prepare: private_(failure.prepare) }),
+            }
+          : noChange
+            ? { exit_code: 0, unchanged: true }
+            : null,
+      };
+    },
+    /**
+     * A linked machine pressed Update. Exactly Update now, with its lock, its checks and its log, and never a version
+     * the caller names: this Inbox asks GitHub itself, then installs the newest answer. A binary already on disk is a
+     * restart. An install already running (a terminal's, another window's) is joined. No page here restarts this
+     * Inbox, so it does that itself once the install has finished.
+     */
+    async machineStart(): Promise<{ outcome: MachineUpdateOutcome }> {
+      if (!release) return { outcome: "dev-build" };
+      noChange = null;
+      await probeBinary();
+      const before = compute();
+      if (isUpdateLockHeld(options.dataDir) || before?.state === "ready") {
+        const joined = isUpdateLockHeld(options.dataDir);
+        restartWanted = true;
+        refresh();
+        return { outcome: joined ? "joined" : "restarting" };
+      }
+      try {
+        await runReleaseCheck({ dataDir: options.dataDir, now, enabled: () => true, force: true, ...sources });
+      } catch {
+        // The release already known stands.
+      }
+      const outcome = launch();
+      if (outcome.outcome === "launched" || outcome.outcome === "locked") restartWanted = true;
       refresh();
-      return outcome;
+      return { outcome: outcome.outcome === "locked" ? "joined" : outcome.outcome };
     },
     /** Remind me tomorrow: hide the button for this version for 24 h, for every tab. */
     snooze(): boolean {

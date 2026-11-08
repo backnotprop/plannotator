@@ -100,7 +100,7 @@ async function world(options: Options = {}) {
   const config: Record<string, unknown> = {
     updateCheck: false,
     inboxSound: { dialogShownFor: options.version ?? RELEASE },
-    inboxListIntro: { shownAt: settledAt },
+    inboxListIntro: { shownAt: settledAt, version: 2 },
     inboxVoiceIntro: { shownAt: settledAt },
   };
   if (options.saved) config.inboxSnoozeIntro = options.saved;

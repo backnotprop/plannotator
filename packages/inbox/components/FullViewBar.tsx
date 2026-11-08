@@ -65,6 +65,11 @@ export interface FullViewBarProps {
   changed: boolean;
   /** A reply draft waits in full screen's composer (words or files): the corner control says "Draft". */
   draft?: boolean;
+  /**
+   * A comment not sent waits in the file (its words stayed when the tools hid): a dot sits on the corner control's
+   * arrows, and its name says "comment not sent" (approval "inbox-comment-box", visible drafts).
+   */
+  commentDraft?: boolean;
   /** Where focus goes when the tools come back from the corner; absent or null: » (where Hide was pressed). */
   restoreTarget?: () => HTMLElement | null;
   /**
@@ -240,7 +245,7 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
     if (count > lastCount.current && !drawerOpen) setBump((n) => n + 1);
     lastCount.current = count;
   }, [count, drawerOpen]);
-  const handleLabel = `Show tools${props.draft ? ', reply draft' : ''}${count ? `, ${plural(count, 'comment')}` : ''}${props.changed ? ', file changed since sent' : ''}`;
+  const handleLabel = `Show tools${props.commentDraft ? ', comment not sent' : ''}${props.draft ? ', reply draft' : ''}${count ? `, ${plural(count, 'comment')}` : ''}${props.changed ? ', file changed since sent' : ''}`;
   const iconSize = phone ? 18 : 15;
 
   // The way out of full screen names where it goes, "Side by side" (a pick: remembered); on a phone or a stacked window it is Back to the thread.
@@ -279,7 +284,10 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
           aria-label={handleLabel}
           data-full-view-handle=""
         >
-          <Icon name="chevsU" size={phone ? 18 : 14} />
+          <span className="ib-fvhandle-arrows">
+            <Icon name="chevsU" size={phone ? 18 : 14} />
+            {props.commentDraft && <span className="ib-fvhandle-cdot" aria-hidden="true" data-full-view-comment-dot="" />}
+          </span>
           {props.draft && <span className="ib-fvhandle-w">Draft</span>}
           {count > 0 && (
             <span key={bump} className={`ib-fvhandle-n${bump ? ' ib-bump' : ''}`}>

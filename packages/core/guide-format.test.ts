@@ -16,6 +16,7 @@ import {
   type GuideSnapshotV1,
 } from "./guide-format";
 import { FIXTURE_PATCH_TS_JSON, FIXTURE_V1_LOCAL, FIXTURE_V1_PR, FIXTURE_V2_HTML, FIXTURE_V2_OVERVIEW, GUIDE_SNAPSHOT_FIXTURES } from "./guide-format-fixtures";
+import { checkGuideNotes } from "./guide-notes";
 
 const VIEWER = {
   baseUrl: "https://guides.show/v1/",
@@ -68,7 +69,7 @@ describe("parseGuideSnapshot rejects what it must", () => {
     ["unknown top-level field", (s) => (s.annotations = []), "$"],
     ["unknown guide field", (s) => (s.guide.saved = true), "$.guide"],
     ["unknown section field", (s) => (s.guide.sections[0].order = 1), "$.guide.sections[0]"],
-    ["unknown version", (s) => (s.version = 4), "$.version"],
+    ["unknown version", (s) => (s.version = 5), "$.version"],
     // Version 1 has no overview: a v1 reader never sees one.
     ["overview on a version-1 snapshot", (s) => (s.guide.overview = { text: "x" }), "$.guide"],
     ["empty overview text", (s) => { s.version = 2; s.guide.overview = { text: "  " }; }, "$.guide.overview.text"],
@@ -306,4 +307,66 @@ describe("format version 3: a drawn overview picture (code review's Show me)", (
       expect(parseGuideSnapshot(v3(diagram)).ok).toBe(false);
     });
   }
+});
+
+describe("format version 4: the guide author's context notes", () => {
+  const pieces = {
+    reviewed: [true, false],
+    review: { rawPatch: FIXTURE_PATCH_TS_JSON, gitRef: "origin/main..HEAD", diffType: "since-base", base: "origin/main", source: FIXTURE_V1_LOCAL.source },
+    generator: FIXTURE_V1_LOCAL.generator,
+    exportedAt: FIXTURE_V1_LOCAL.exportedAt,
+  };
+  const { reviewed: _r, ...base } = FIXTURE_V1_LOCAL.guide;
+  const withNotes = (notes: unknown) => ({
+    ...base,
+    sections: base.sections.map((section, i) => (i === 0 ? { ...section, diffs: section.diffs.map((ref) => ({ ...ref, notes })) } : section)),
+  });
+  const note = { lineStart: 2, lineEnd: 4, text: "Refresh happens here so callers stop retrying." };
+  const build = (notes: unknown) => buildGuideSnapshot({ ...pieces, guide: withNotes(notes) as typeof base });
+
+  test("a guide with a note builds version 4 and reads the note back", () => {
+    const built = build([note]);
+    expect(built.version).toBe(4);
+    const parsed = parseGuideSnapshot(JSON.parse(JSON.stringify(built)));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.guide.sections[0]!.diffs[0]!.notes).toEqual([note]);
+  });
+
+  test("a guide with an empty notes list still builds version 1, byte for byte", () => {
+    const built = build([]);
+    expect(built.version).toBe(1);
+    expect(JSON.stringify(built)).toBe(JSON.stringify(FIXTURE_V1_LOCAL));
+  });
+
+  test("notes are refused below version 4: an older reader never sees them", () => {
+    const doc = JSON.parse(JSON.stringify(build([note])));
+    for (const version of [1, 2, 3]) expect(parseGuideSnapshot({ ...doc, version }).ok).toBe(false);
+  });
+
+  const bad: Array<[string, unknown]> = [
+    ["a note with no words", [{ lineStart: 2, lineEnd: 3, text: "  " }]],
+    ["lineEnd before lineStart", [{ lineStart: 4, lineEnd: 2, text: "x" }]],
+    ["an unknown side", [{ lineStart: 2, lineEnd: 3, side: "left", text: "x" }]],
+    ["an unknown field", [{ lineStart: 2, lineEnd: 3, text: "x", author: "me" }]],
+    ["notes that are not a list", { lineStart: 2, text: "x" }],
+  ];
+  for (const [name, notes] of bad) {
+    test(`refuses ${name}`, () => {
+      const doc = JSON.parse(JSON.stringify(build([note])));
+      doc.guide.sections[0].diffs[0].notes = notes;
+      expect(parseGuideSnapshot(doc).ok).toBe(false);
+    });
+  }
+
+  test("checkGuideNotes keeps each note inside one hunk of its file, on its side", () => {
+    // src/auth.ts: new lines 1-6 and old lines 1-4 are one hunk each.
+    expect(checkGuideNotes(withNotes([note]), FIXTURE_PATCH_TS_JSON)).toEqual([]);
+    expect(checkGuideNotes(withNotes([{ lineStart: 2, lineEnd: 2, side: "old", text: "x" }]), FIXTURE_PATCH_TS_JSON)).toEqual([]);
+    const outside = checkGuideNotes(withNotes([{ lineStart: 5, lineEnd: 9, text: "x" }]), FIXTURE_PATCH_TS_JSON);
+    expect(outside).toHaveLength(1);
+    expect(outside[0]).toContain("sections[0].diffs[0].notes[0]");
+    expect(outside[0]).toContain("lines 5–9");
+    expect(checkGuideNotes(withNotes([{ lineStart: 6, lineEnd: 6, side: "old", text: "x" }]), FIXTURE_PATCH_TS_JSON)).toHaveLength(1);
+    expect(checkGuideNotes({ sections: [{ diffs: [{ file: "src/gone.ts", notes: [note] }] }] }, FIXTURE_PATCH_TS_JSON)).toHaveLength(1);
+  });
 });

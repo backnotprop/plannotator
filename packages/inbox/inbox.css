@@ -987,7 +987,7 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-nrow .ib-l1 .ib-from { flex: 1 1 auto; min-width: 0; }
 .ib-nrow .ib-l1 .ib-p { font-size: var(--ib-fs-13, 13px); font-weight: 500; line-height: 17px; color: var(--muted-foreground); }
 .ib-nrow.ib-u:not(.ib-sent) .ib-l1 .ib-p { color: var(--foreground); font-weight: 550; }
-.ib-nrow .ib-l3 .ib-c, .ib-nrow .ib-l1 .ib-t { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; }
+.ib-nrow .ib-l3 .ib-c, .ib-lend .ib-c, .ib-nrow .ib-l1 .ib-t { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; }
 .ib-nrow .ib-l1 .ib-t { flex: none; margin-left: auto; line-height: 17px; }
 /* Line 2: the title, never cut: a long one wraps, a word longer than the line breaks. Read, it is at the row's text
    size and weight, darker than the preview. Unread (approval "inbox-row-unread-bigger", 2026-10-30), it is bigger
@@ -2206,6 +2206,8 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 .ib-view.ib-fullview.ib-drawer:not(.ib-phone) {
   --ib-foot-c: min(50%, calc(100% - 368px - min(340px, (100% - 392px) / 2)));
   --ib-foot-w: calc(100% - 392px);
+  /* Round 3's 600 px card: centred on half of that beside the panel (--ib-foot-c's own half is 340). */
+  --ib-fcomp-c: min(50%, calc(100% - 368px - min(300px, (100% - 392px) / 2)));
 }
 /* the file's own layers (the viewer draws at z-50) stay under the toolbar and the sheets */
 .ib-view.ib-fullview .ib-docarea { isolation: isolate; z-index: 0; }
@@ -2256,6 +2258,11 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 .ib-fvhandle-w { color: var(--foreground); }
 .ib-fvhandle-n { display: inline-flex; align-items: center; gap: 3px; }
 .ib-fvhandle-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warning); flex: none; }
+/* A comment not sent waits in the file (approval "inbox-comment-box", visible drafts): a dot on the arrows, in the
+   theme's red (no pink token), ringed in the handle's colour. The handle's name says it; the dot is hidden from readers. */
+.ib-fvhandle-arrows { position: relative; display: inline-flex; }
+.ib-fvhandle-cdot { position: absolute; top: -3px; right: -4px; width: 7px; height: 7px; border-radius: 50%; background: var(--destructive); box-shadow: 0 0 0 1.5px var(--popover); }
+.ib-fvdock-phone .ib-fvhandle-cdot { top: -3px; right: -5px; width: 8px; height: 8px; }
 /* A comment saved while the drawer is closed: the count bumps once. */
 .ib-bump { display: inline-block; animation: ib-bump 380ms cubic-bezier(0.23, 1, 0.32, 1); }
 @keyframes ib-bump { 0% { transform: scale(1); } 35% { transform: scale(1.18); } 100% { transform: scale(1); } }
@@ -4265,13 +4272,43 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 /* The To row: its label and the agent's name share one baseline (the button exports its text's baseline). */
 .ib-cp-to { position: relative; display: flex; align-items: baseline; gap: 10px; min-height: 48px; padding: 7px 14px 7px 16px; border-bottom: 1px solid var(--ib-line); flex: none; --ib-cp-tdlh: 20px; }
 .ib-cp-to .ib-cp-tol { line-height: var(--ib-cp-tdlh); }
+/*
+ * The Launch tip (approval "launch-tip", variant Beside; compose/launchTip.ts): the tour's coach card, drawn inside the
+ * To row (so inside the modal dialog), beside the box level with To, or under To when the window has no room (or on a
+ * phone). Its ring and arrow mix in srgb: oklch swings the primary's hue against the hueless popover.
+ */
+.ib-tour-coach.ib-lt { position: absolute; z-index: 6; right: auto; bottom: auto; width: 284px; max-width: none; max-height: none; padding: 12px 14px 10px; animation: none; text-align: left; --ib-lt-ring: color-mix(in srgb, var(--primary) 45%, var(--border)); box-shadow: 0 0 0 1px var(--ib-lt-ring), var(--ib-float-shadow, 0 16px 40px -12px rgb(0 0 0 / 0.45)); }
+.ib-tour-coach.ib-lt[data-phone] { right: 12px; width: auto; }
+.ib-tour-coach.ib-lt h2 { margin: 0 0 2px; font-size: var(--ib-fs-14-5, 14.5px); }
+.ib-tour-coach.ib-lt p { font-size: var(--ib-fs-13, 13px); line-height: 1.45; }
+.ib-tour-coach.ib-lt .ib-tc-eb { margin-bottom: 1px; }
+.ib-tour-coach.ib-lt .ib-tc-acts { margin-top: 10px; }
+/* A desktop's Got it is the mock's 28 px; a phone keeps the coach card's 44 px tap target. */
+.pn-inbox .ib-tour-coach.ib-lt:not([data-phone]) .ib-tc-next { height: 28px; padding: 0 12px; font-size: var(--ib-fs-13, 13px); }
+.ib-lt-arrow { position: absolute; width: 10px; height: 10px; background: var(--popover); transform: rotate(45deg); }
+.ib-lt-arrow[data-side="left"] { left: -5px; top: 21px; box-shadow: -1px 1px 0 0 var(--ib-lt-ring); }
+.ib-lt-arrow[data-side="up"] { top: -5px; left: 24px; box-shadow: -1px -1px 0 0 var(--ib-lt-ring); }
+/* Enter: a fade and a 4 px slide from the side it points at. Leave: shorter, a fade with a hair of scale. Reduced: fades only. */
+@media (prefers-reduced-motion: no-preference) {
+  .ib-tour-coach.ib-lt[data-side="right"] { animation: ib-lt-in-left 180ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+  .ib-tour-coach.ib-lt[data-side="below"] { animation: ib-lt-in-up 180ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+  .ib-tour-coach.ib-lt[data-leaving] { animation: ib-lt-out 120ms ease-out both; }
+  @keyframes ib-lt-in-left { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: none; } }
+  @keyframes ib-lt-in-up { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  @keyframes ib-lt-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.98); } }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ib-tour-coach.ib-lt { animation: ib-lt-fade 120ms linear both; }
+  .ib-tour-coach.ib-lt[data-leaving] { animation: ib-lt-fade 100ms linear reverse both; }
+  @keyframes ib-lt-fade { from { opacity: 0; } to { opacity: 1; } }
+}
 /* Create thread from a Board card: which card the new thread is for. */
 .ib-cp-card { display: flex; align-items: center; gap: 8px; margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--ib-line); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); flex: none; }
 .ib-cp-card b { color: var(--foreground); font-weight: 600; }
 .ib-cp-tol { color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); flex: none; }
 .pn-inbox .ib-cp-tobtn { display: inline-flex; align-items: baseline; gap: 7px; min-width: 0; max-width: 100%; height: 34px; padding: 7px 8px; border-radius: 7px; border: 0; background: transparent; color: var(--foreground); font-size: var(--ib-fs-14, 14px); line-height: var(--ib-cp-tdlh, 20px); text-align: left; }
 .ib-cp-tobtn > .ib-mk, .ib-cp-tobtn > svg.ib-ic, .ib-cp-none-to > svg.ib-ic { align-self: center; }
-.pn-inbox .ib-cp-tobtn:hover:not(:disabled), .pn-inbox .ib-cp-tobtn[aria-expanded="true"] { background: color-mix(in oklch, var(--muted) 70%, transparent); }
+.pn-inbox .ib-cp-tobtn:hover:not(:disabled), .pn-inbox .ib-cp-tobtn[aria-expanded="true"], .pn-inbox .ib-cp-tobtn[data-launch-tip] { background: color-mix(in oklch, var(--muted) 70%, transparent); }
 .pn-inbox .ib-cp-tobtn:disabled { color: var(--muted-foreground); }
 /* To is one line at every width: the mark, the agent's name and the chevron never shrink; the detail takes the rest. */
 .ib-cp-tobtn b, .ib-cp-tobtn s { flex: none; white-space: nowrap; }
@@ -5608,7 +5645,7 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .pn-inbox .ib-badge.ib-b-wait { background: var(--ib-wait-bg); color: var(--ib-wait-fg); border-color: transparent; font-variant-numeric: tabular-nums; }
 .pn-inbox .ib-badge.ib-b-wait[data-stuck] { background: color-mix(in oklch, var(--foreground) 7%, transparent); color: var(--muted-foreground); }
 .ib-row .ib-c:has(.ib-b-wait) { display: flex; justify-content: flex-end; align-items: center; }
-.ib-nrow .ib-l3 .ib-c:has(.ib-b-wait) { display: inline-flex; align-items: center; }
+.ib-nrow .ib-l3 .ib-c:has(.ib-b-wait), .ib-lend .ib-c:has(.ib-b-wait) { display: inline-flex; align-items: center; }
 .pn-inbox .ib-ract[data-row-send-now] svg { color: var(--ib-wait-fg); }
 /* The band under the reply. */
 .pn-inbox .ib-delivered.ib-undl { width: fit-content; max-width: 100%; margin-top: 12px; padding: 6px 6px 6px 11px; gap: 12px; border-radius: var(--ib-lr-sm, 8px); background: var(--ib-wait-band); border: 1px solid color-mix(in oklab, var(--primary) 22%, var(--border)); color: var(--foreground); font-size: var(--ib-fs-13, 13px); }
@@ -7421,57 +7458,100 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
   .pn-inbox .ib-tidy-pos[data-phone] .ib-tidy-bot .ib-btn { height: 44px; padding: 0 22px; font-size: var(--ib-fs-15, 15px); }
 }
 
-/* ── Full screen's composer (approval "inbox-fullscreen-composer", 2A, round 4; FullScreenComposer.tsx) ──────────────
-   One card floating at the bottom centre of an image, a film or an HTML page in full screen: the tabs on its top edge,
-   the minimize at its top right, the field and its buttons under them. Buttons 30 px (the toolbar's), tabs 24 px; keyboard
-   focus is a 2 px ring, never a filled block; no coloured border while typing. Comment is amber, Reply the primary. */
+/* ── Full screen's composer (approval "inbox-fullscreen-composer", 2A, round 4; restyled by "inbox-comment-box",
+   round 3; FullScreenComposer.tsx) ──────────────────────────────────────────────────────────────────────────────────
+   One opaque card floating at the bottom centre of an image, a film or an HTML page in full screen. Its top is a tinted
+   tray with the two tabs carved out of it (shape c: the picked tab in the card's own colour, joined by two curved feet;
+   the other quieter, with a dot while it holds words) and the chevron that hides the tools at its end. Under it, the
+   words, then one row: the reply's is Send first (the reply box's, T6), the paperclip and the mic, what rides, Open in
+   thread and the bin; a comment's is the file's tools at the left, the bin, and a solid "Comment" at the right end.
+   No frosted plate, no transitions on the buttons, no fill that changes on hover; focus is a 2 px ring. */
 .ib-fcomp {
-  --fc-line: color-mix(in oklch, var(--foreground) 10%, transparent);
-  --fc-accent: var(--primary);
+  --fc-line: color-mix(in oklch, var(--foreground) 12%, transparent);
+  --fc-tray: color-mix(in oklch, var(--foreground) 7%, var(--popover));
   position: absolute; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 9;
-  box-sizing: border-box; width: min(680px, calc(100% - 32px)); padding: 6px 6px 6px 8px; border-radius: 14px;
-  background: color-mix(in oklch, var(--popover) 92%, transparent); color: var(--popover-foreground);
+  box-sizing: border-box; width: min(600px, calc(100% - 32px)); padding: 0; border-radius: 16px;
+  background: var(--popover); color: var(--popover-foreground);
   border: 1px solid var(--fc-line);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 24px -6px rgba(0, 0, 0, 0.45), 0 28px 60px -18px rgba(0, 0, 0, 0.55);
-  -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 30px -14px rgb(0 0 0 / 0.55);
   transition: var(--ib-gather-back, opacity 180ms ease, visibility 0s linear 0s);
 }
-:root.light .ib-fcomp { --fc-line: color-mix(in oklch, var(--foreground) 9%, transparent); background: color-mix(in oklch, var(--popover) 94%, transparent); box-shadow: 0 1px 2px rgba(20, 20, 30, 0.06), 0 8px 20px -6px rgba(20, 20, 30, 0.12), 0 24px 52px -20px rgba(20, 20, 30, 0.2); }
-.ib-fcomp.ib-mode-comment { --fc-accent: var(--warning, #d79b3a); }
+:root.light .ib-fcomp { --fc-line: color-mix(in oklch, var(--foreground) 11%, transparent); --fc-tray: color-mix(in oklch, var(--foreground) 4.5%, var(--popover)); box-shadow: 0 1px 2px rgb(20 20 30 / 0.06), 0 12px 30px -14px rgb(20 20 30 / 0.22); }
+.pn-inbox .ib-fcomp :is(button, .ib-btn, .ib-fvb) { transition: none !important; }
 
-/* The tabs (a radio group) on the card's top edge, and the minimize at its right. */
-.ib-fcomp-top { display: flex; align-items: center; gap: 6px; margin: 0 0 2px; }
-.ib-fcomp-tabs { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: color-mix(in oklch, var(--muted) 60%, transparent); }
-.pn-inbox .ib-fcomp-tabs button { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); font-weight: 550; white-space: nowrap; cursor: pointer; }
-.pn-inbox .ib-fcomp-tabs button:hover { color: var(--foreground); }
-.pn-inbox .ib-fcomp-tabs button.ib-on { background: var(--popover); color: var(--foreground); box-shadow: 0 0 0 1px var(--fc-line); }
-.pn-inbox .ib-fcomp-tabs button.ib-on .ib-ic { color: var(--fc-accent); }
-.ib-fcomp-solo { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 4px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+/* The tray and its tabs (one radio group), the chevron at its end. */
+.ib-fcomp-top { display: flex; align-items: flex-end; gap: 4px; min-width: 0; padding: 6px 6px 0 8px; border-radius: 15px 15px 0 0; background: var(--fc-tray); }
+.ib-fcomp-tabs { flex: 1 1 auto; display: flex; align-items: flex-end; gap: 10px; min-width: 0; padding-left: 4px; }
+.pn-inbox .ib-fcomp-tab {
+  position: relative; flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 7px;
+  height: 28px; margin-bottom: 2px; padding: 0 14px; border: 0; border-radius: 8px; background: none; color: var(--muted-foreground);
+  font: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; white-space: nowrap; cursor: pointer;
+}
+.pn-inbox .ib-fcomp-tab:not(.ib-on):hover { color: var(--foreground); }
+.pn-inbox .ib-fcomp-tab.ib-on { height: 32px; margin-bottom: 0; border-radius: 10px 10px 0 0; background: var(--popover); color: var(--foreground); cursor: default; }
+/* A long agent name cuts the Reply tab, never the Comment tab; below 360 px the tabs drop their icons. */
+.pn-inbox .ib-fcomp-tab[data-fcomp-mode="comment"] { flex-shrink: 0; }
+.pn-inbox .ib-fcomp-tab[data-fcomp-mode="reply"] { min-width: 64px; }
+.ib-fcomp-tabl { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-fcomp-tab .ib-ic { flex: none; }
+.ib-fcomp-tabdot { flex: none; width: 6px; height: 6px; border-radius: 3px; background: var(--primary); }
+.ib-fcomp-flare { display: block; position: absolute; bottom: 0; pointer-events: none; overflow: visible; fill: var(--popover); }
+.ib-fcomp-flare-l { left: -10px; }
+.ib-fcomp-flare-r { right: -10px; transform: scaleX(-1); }
+.pn-inbox .ib-fcomp-tab:focus-visible { outline: 2px solid var(--ring); outline-offset: -3px; }
+.ib-fcomp-solo { flex: 1 1 auto; display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 32px; padding: 0 8px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-fcomp-solo b { color: var(--foreground); font-weight: 550; }
-.ib-fcomp-solo .ib-ic { color: var(--fc-accent); }
-/* The minimize is the toolbar's own button (.ib-fvb: 30 px square, 8 px corner, its muted hover); only its place is new. */
-.pn-inbox .ib-fcomp .ib-fcomp-min { margin-left: auto; width: 30px; padding: 0; }
+/* The chevron: the toolbar's own button (.ib-fvb), in the tray. */
+.pn-inbox .ib-fcomp .ib-fcomp-min { flex: none; align-self: center; width: 30px; height: 30px; margin: -4px 0 0 auto; padding: 0; border: 0; background: none; color: var(--muted-foreground); }
 
-/* The row: the file's comment row, or the reply field and Send, flat inside the card. */
-.ib-fcomp-row { display: flex; align-items: flex-end; gap: 6px; }
-.ib-fcomp-slot { flex: 1; min-width: 0; display: flex; }
-.ib-fcomp-slot[hidden] { display: none; }
-.ib-fcomp-comment { flex: 1; min-width: 0; display: flex; }
-.ib-fcomp .ib-ccard { flex: 1; min-width: 0; max-width: none; padding: 0; border: 0; background: transparent; box-shadow: none; }
-.ib-fcomp .ib-ccard:focus-within { border-color: transparent; box-shadow: none; }
-.pn-inbox .ib-fcomp .ib-ccard .ib-ta { min-height: 36px; padding: 8px 6px; font-size: var(--ib-fs-14, 14px); }
-.pn-inbox .ib-fcomp .ib-ccard .ib-btn, .pn-inbox .ib-fcomp .ib-fcomp-send { height: 30px; border-radius: 8px; padding: 0 11px; gap: 6px; margin-bottom: 3px; font-size: var(--ib-fs-13, 13px); }
-.pn-inbox .ib-fcomp .ib-ccard .ib-csave { background: var(--warning, #e0a548); border-color: transparent; color: #1b1406; }
-.pn-inbox .ib-fcomp .ib-ccard .ib-csave:disabled { opacity: 0.55; }
-.ib-fcomp .ib-ccard .ib-vtime { margin-bottom: 3px; }
-.ib-fcomp-field { flex: 1; min-width: 0; }
-.ib-fcomp-field .ib-rtext, .ib-fcomp-field .ib-rmirror { min-height: 36px; max-height: min(160px, 24vh); padding: 8px 6px; }
-.pn-inbox .ib-fcomp-send { flex: none; }
-.pn-inbox .ib-fcomp-send:disabled { opacity: 0.5; }
+/* The body: the words, then the row. A comment's row is the file's own comment row drawn into this grid (the slot, the
+   comment and its card are display: contents); the reply's row is one flex line (`.ib-fcomp-foot`) across it. */
+.ib-fcomp-body {
+  display: grid; align-items: center; column-gap: 2px;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "thumbs thumbs thumbs thumbs" "field field field field" "tools mid end pri";
+  padding: 0 8px 8px;
+}
+.ib-fcomp :is(.ib-fcomp-slot, .ib-fcomp-comment, .ib-ccard) { display: contents; }
+.ib-fcomp .ib-fcomp-slot[hidden] { display: none; }
+.ib-fcomp .ib-ccard > :is(.ib-kept, .ib-tipwrap:has(> :is(.ib-markup, .ib-vframe))) { grid-area: thumbs; justify-self: start; margin: 10px 0 0 4px; }
+.ib-fcomp .ib-ccard > :is(.ib-vtime, .ib-tipwrap:has(> .ib-vtime)) { grid-area: mid; justify-self: start; margin-left: 6px; }
+.pn-inbox .ib-fcomp .ib-ccard > .ib-ta { grid-area: field; width: 100%; min-width: 0; box-sizing: border-box; min-height: 52px; max-height: 30vh; padding: 12px 6px 6px; border: 0; background: transparent; box-shadow: none; resize: none; font-size: var(--ib-fs-14, 14px); line-height: 1.5; outline: none; field-sizing: content; }
+.ib-fcomp .ib-ccard > .ib-tipwrap:has(> .ib-cbtn) { grid-area: tools; }
+.pn-inbox .ib-fcomp .ib-ccard .ib-cbtn { height: 30px; width: 30px; margin: 0; padding: 0; justify-content: center; border: 0; background: none; color: var(--muted-foreground); }
+.pn-inbox .ib-fcomp .ib-cbtn-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.ib-fcomp-cend { grid-area: end; display: inline-flex; align-items: center; }
+/* The comment button (the same as the comment card's, comment-card.css): the solid primary, squarer than Send's pill
+   (8 px, 12 px on a phone), "Comment" and no icon. Empty, only its fill lightens (65% of the primary on the card). */
+.pn-inbox .ib-fcomp .ib-ccard > .ib-csave {
+  grid-area: pri; display: inline-flex; align-items: center; height: 30px; margin: 0 0 0 8px; padding: 0 14px;
+  border: 0; border-radius: 8px; background: var(--primary); color: var(--primary-foreground);
+  font-size: var(--ib-fs-13, 13px); font-weight: 600; white-space: nowrap; opacity: 1;
+}
+.pn-inbox .ib-fcomp .ib-ccard > .ib-csave:hover:not(:disabled) { background: color-mix(in oklch, var(--primary) 88%, black); }
+.pn-inbox .ib-fcomp .ib-ccard > .ib-csave:disabled { background: color-mix(in srgb, var(--primary) 65%, var(--popover)); color: var(--primary-foreground); opacity: 1; cursor: default; }
+.ib-fcomp-field { grid-area: field; min-width: 0; padding: 6px 0 0; }
+.ib-fcomp-field .ib-rtext, .ib-fcomp-field .ib-rmirror { min-height: 36px; max-height: min(160px, 24vh); padding: 6px; }
+.ib-fcomp .ib-fcomp-field :is(textarea, .ib-rtext):focus { outline: none; box-shadow: none; border-color: transparent; }
+.pn-inbox .ib-fcomp :is(.ib-fcomp-bin, .ib-fcomp-clip) { flex: none; width: 30px; height: 30px; padding: 0; border: 0; background: none; color: var(--muted-foreground); }
+.pn-inbox .ib-fcomp .ib-fcomp-bin:disabled { opacity: 0.35; cursor: default; }
+.pn-inbox .ib-fcomp :is(.ib-fcomp-min, .ib-fcomp-bin, .ib-cbtn, .ib-fcomp-clip, .ib-vmic):hover:not(:disabled) { color: var(--foreground); background: none; }
+/* Send: the reply box's round pill (T6), first in the reply's row. */
+.pn-inbox .ib-fcomp-send { flex: none; height: 30px; margin: 0 4px 0 0; padding: 0 15px; border: 0; border-radius: 15px; background: var(--primary); color: var(--primary-foreground); font-size: var(--ib-fs-13, 13px); font-weight: 600; }
+.pn-inbox .ib-fcomp-send:hover:not(:disabled) { background: color-mix(in oklch, var(--primary) 88%, black); }
+.pn-inbox .ib-fcomp-send:disabled { opacity: 0.45; }
 
-/* Under the row: the refused Send's words, and (only when something rides the Send, or it just went) the chips and Open in thread. */
-.ib-fcomp-err { margin: 2px 6px 4px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); }
-.ib-fcomp-foot { display: flex; align-items: center; gap: 8px; min-height: 26px; margin: 4px 2px 0; padding-top: 4px; border-top: 1px solid var(--fc-line); font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+/* The reply's row, and under it the refused Send's words. */
+.ib-fcomp-err { margin: 0 12px 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); }
+.ib-fcomp-foot { grid-row: 3; grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; min-width: 0; min-height: 30px; margin: 2px 0 0; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-fcomp-foot > .ib-fcomp-chips { padding: 0 4px; }
+.pn-inbox .ib-fcomp-foot > .ib-fcomp-link { margin-left: auto; }
+.ib-fcomp-foot > .ib-fcomp-link ~ .ib-fcomp-bin { margin-left: 2px; }
+.pn-inbox .ib-fcomp:focus-visible { outline: none; }
+@media (max-width: 360px) {
+  .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-tab { padding: 0 12px; gap: 6px; }
+  .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-tab .ib-ic { display: none; }
+}
 /* The reply's paperclip (the reply box's AttachFilesButton), first in the toolbar, the card's 30 px button. */
 .pn-inbox .ib-fcomp .ib-fcomp-clip { width: 30px; padding: 0; margin-left: -2px; cursor: pointer; }
 .pn-inbox .ib-fcomp .ib-fcomp-clip:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
@@ -7494,7 +7574,8 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
    panel: centred while it fits beside it, else moved left (--ib-foot-c). A phone's sheet hides it, as the sheet covers an
    image's card and hides the toolbar. */
 .ib-view.ib-fullview.ib-drawer:not(.ib-phone) :is(.ib-fcomp, .ib-fcomp-pillwrap) { left: var(--ib-foot-c); }
-.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-fcomp { width: min(680px, var(--ib-foot-w)); }
+/* Round 3's card is 600 px: centred on --ib-fcomp-c (above). */
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-fcomp { left: var(--ib-fcomp-c); width: min(600px, var(--ib-foot-w)); }
 /* The comments sheet covers the file, and its foot holds Write the reply: the card and its pill step aside with the dock, on the pane (an HTML page) or inside the file (an image, a film). */
 .ib-view.ib-fullview.ib-phone.ib-panel-open :is(.ib-fcomp, .ib-fcomp-pillwrap) { visibility: hidden; }
 .pn-inbox .ib-fcomp-pill { --fc-accent: var(--primary); display: inline-flex; align-items: center; gap: 6px; height: 30px; max-width: min(320px, calc(100vw - 32px)); padding: 0 9px 0 11px; border-radius: 15px; border: 1px solid color-mix(in oklch, var(--border) 85%, transparent); background: color-mix(in oklch, var(--popover) 92%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); color: var(--popover-foreground); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; white-space: nowrap; cursor: pointer; }
@@ -7567,22 +7648,39 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
 .ib-fcomp.ib-phone { left: 8px; right: 8px; width: auto; transform: none; bottom: calc(8px + env(safe-area-inset-bottom)); }
 /* With the keyboard up the full view ends at its top (`--ib-vvh`) and the home bar is under it: the card sits on the keyboard. */
 :root[data-ib-keyboard] .ib-fcomp.ib-phone { bottom: 8px; }
-.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-tabs button { height: 32px; font-size: var(--ib-fs-13, 13px); }
-.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-min, .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-clip { width: 36px; height: 36px; }
+.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-tab { height: 44px; padding: 0 16px; gap: 8px; font-size: var(--ib-fs-14, 14px); }
+.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-tab:not(.ib-on) { height: 44px; margin-bottom: 0; }
+.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-tab.ib-on { border-radius: 12px 12px 0 0; }
+.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-top { padding-top: 4px; }
+.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-min, .ib-fcomp-clip, .ib-fcomp-bin) { width: 44px; height: 44px; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-fcomp.ib-phone .ib-fcomp-field .ib-rtext, .ib-fcomp.ib-phone .ib-fcomp-field .ib-rmirror { min-height: 44px; font-size: var(--ib-fs-16-in, 16px); }
   .pn-inbox .ib-fcomp.ib-phone .ib-ccard .ib-ta { min-height: 44px; font-size: var(--ib-fs-16-in, 16px); }
 }
-.pn-inbox .ib-fcomp.ib-phone .ib-ccard .ib-btn { height: 40px; min-width: 40px; margin-bottom: 2px; }
-.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-send { width: 40px; height: 40px; padding: 0; justify-content: center; margin-bottom: 2px; }
-.ib-fcomp.ib-phone .ib-fcomp-foot { min-height: 32px; font-size: var(--ib-fs-13, 13px); }
+.pn-inbox .ib-fcomp.ib-phone .ib-ccard .ib-btn { height: 44px; min-width: 44px; }
+.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-send { height: 44px; padding: 0 18px; border-radius: 22px; margin: 0 0 0 4px; font-size: var(--ib-fs-15, 15px); }
+.pn-inbox .ib-fcomp.ib-phone .ib-ccard .ib-csave, .pn-inbox .ib-fcomp.ib-phone .ib-htmlcomment .ib-csave { height: 44px; padding: 0 18px; border-radius: 12px; font-size: var(--ib-fs-15, 15px); }
+/* No bin on a phone (the owner's T6 note): the words go by clearing them. */
+.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-bin, .ib-fcomp-cend) { display: none; }
+.ib-fcomp.ib-phone .ib-fcomp-foot { min-height: 44px; font-size: var(--ib-fs-13, 13px); }
 /* The foot is one row at 320 px and up. The mic takes its own room, not half the row's, so the chips get what is left;
    a chip never wraps or shrinks. When the row runs short, what yields is decided in footFit.ts (`cardFootFitCandidates`)
    and drawn from `data-fit`: the words go, into visually hidden text, so names stay whole. */
-.ib-fcomp.ib-phone .ib-fcomp-foot > .ib-dtfoot { flex: none; margin-left: 0; }
+/* The mic's 44 px press (it is 30 px) stays off the 44 px paperclip's: 4px more between them than the row's gap. */
+.ib-fcomp.ib-phone .ib-fcomp-foot > .ib-dtfoot { flex: none; margin-left: 4px; }
+/* A voice note's link over the foot: its 44 px press reaches 5 px under it (34 px with a phone's padding), so the
+   note keeps 8px under it, off the presses in the foot's row (the mic, or stacked, the chips). */
+.ib-fcomp.ib-phone .ib-vnote { padding-bottom: 8px; }
 .ib-fcomp.ib-phone .ib-fcomp-foot > .ib-dtfoot:has(.ib-vline) { flex: 1 1 0; }
 /* Dictating, the status has the row: the link or "Sent to …" would squeeze Cancel and the clock out of it at 320. */
 .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-foot:has(.ib-vline) > :is(.ib-fcomp-link, .ib-fcomp-sent) { display: none; }
+/* Round 3's row (Send's word, the 44 px clip) leaves the status less room: as in compose's foot, "Listening" is whole
+   or not there; the level, the clock and Cancel say it, and a screen reader keeps the status (VoiceFoot). */
+.ib-fcomp.ib-phone .ib-vline b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-fcomp.ib-phone .ib-vline:is([data-voice-line="hold"], [data-voice-line="tap"], [data-voice-line="nearcap"]) b { flex: none; }
+@media (max-width: 429px) {
+  .ib-fcomp.ib-phone .ib-vline:is([data-voice-line="hold"], [data-voice-line="tap"], [data-voice-line="nearcap"]) b { display: none; }
+}
 .ib-fcomp.ib-phone .ib-fcomp-chips { flex-wrap: nowrap; min-width: 44px; }
 .ib-fcomp.ib-phone .ib-fcomp-chip { flex: none; height: auto; min-height: 22px; }
 .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-q { height: auto; min-height: 22px; }
@@ -7590,10 +7688,13 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
 .ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="chips"] .ib-fcomp-w,
 .ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="link"] .ib-fcomp-lo { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="link"] .ib-fcomp-lt { display: inline-block; text-transform: capitalize; }
-.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] { flex-wrap: wrap; row-gap: 2px; }
-.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] > .ib-fcomp-chips { order: -1; flex: 1 0 100%; }
+/* Stacked (large text, or under 360 px), each row keeps its presses 44 px: the chips' row is 44 px tall, so a chip's
+   44 px press stays in it (off the voice note above and the clip, the mic and the link below), the rows keep apart, and
+   the link keeps clear of the mic’s press (the mic is 30 px, its press 44: 7 px past it, the gap and this margin 8). */
+.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] { flex-wrap: wrap; row-gap: 8px; }
+.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] > .ib-fcomp-chips { order: -1; flex: 1 0 100%; min-height: 44px; }
 .ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] > .ib-dtfoot { margin-left: auto; }
-.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] > .ib-dtfoot ~ .ib-fcomp-link { margin-left: 0; }
+.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] > .ib-dtfoot ~ .ib-fcomp-link { margin-left: 4px; }
 .ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="wrap"] > .ib-fcomp-chips { flex-wrap: wrap; }
 /* What stands in for the chips stays in the row: a long agent's name is cut, and the note takes its own line. */
 .ib-fcomp.ib-phone .ib-fcomp-sent { min-width: 0; }
@@ -7608,8 +7709,8 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
 /* 44 px to press, drawn on an overlay: the card's controls stay the size they are, and nothing moves. The top row's
    reach over the field's first pixels, so it is painted over the field (its textarea is positioned). */
 .ib-fcomp.ib-phone .ib-fcomp-top { position: relative; z-index: 1; }
-.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-tabs button, .ib-fcomp-send, .ib-ccard .ib-btn, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink) { position: relative; }
-.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-tabs button, .ib-fcomp-min, .ib-fcomp-clip, .ib-fcomp-send, .ib-ccard .ib-btn, .ib-vmic, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink)::after { content: ''; position: absolute; inset: auto; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-send, .ib-ccard .ib-btn, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink) { position: relative; }
+.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-min, .ib-fcomp-clip, .ib-fcomp-send, .ib-ccard .ib-btn, .ib-vmic, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink)::after { content: ''; position: absolute; inset: auto; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 .ib-fcomp-pillwrap.ib-phone { left: calc(12px + env(safe-area-inset-left)); bottom: calc(14px + env(safe-area-inset-bottom)); transform: none; }
 .ib-fcomp-pillwrap.ib-phone[data-fcomp-pill-above] { bottom: calc(14px + 52px + 8px + env(safe-area-inset-bottom)); }
 .pn-inbox .ib-fcomp-pillwrap.ib-phone .ib-fcomp-pill { height: 52px; min-width: 52px; justify-content: center; border-radius: 14px; padding: 0 14px; gap: 7px; font-size: var(--ib-fs-14, 14px); }
@@ -7624,13 +7725,13 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
    the corner control still shows, the one way back. */
 .ib-view.ib-fullview.ib-phone:has(.ib-fcomp-slot:not([hidden]) .ib-htmlcomment) .ib-fvdock[data-bar="tucked"] .ib-fvhandle { visibility: visible; }
 .ib-view.ib-fullview.ib-phone:has(.ib-htmlframe) .ib-fcomp.ib-phone { background: var(--popover); }
-.ib-htmlcomment { flex-direction: column; }
-.ib-htmlcomment-on { display: flex; align-items: center; gap: 2px; min-height: 44px; padding-left: 6px; }
-.ib-htmlcomment-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); }
-.pn-inbox .ib-htmlcomment-on .ib-fvb { flex: none; width: 44px; height: 44px; padding: 0; }
-.pn-inbox .ib-fcomp.ib-phone .ib-htmlcomment .ib-btn { height: 44px; padding: 0 16px; }
-.pn-inbox .ib-fcomp.ib-phone:has(.ib-htmlcomment) .ib-fcomp-tabs button { height: 44px; padding: 0 14px; }
-.pn-inbox .ib-fcomp.ib-phone:has(.ib-htmlcomment) .ib-fcomp-min { width: 44px; height: 44px; }
+/* In the card's grid: what it is on reads as the line above the field; Parent and Child go to the row's tools, so the
+   only chevron on top is the one that hides the tools. */
+.ib-fcomp .ib-htmlcomment-on { display: contents; }
+.ib-fcomp .ib-htmlcomment-t { grid-area: thumbs; display: block; min-width: 0; margin: 0; padding: 10px 8px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.pn-inbox .ib-fcomp .ib-htmlcomment-on .ib-fvb { grid-area: tools; justify-self: start; flex: none; width: 44px; height: 44px; padding: 0; border: 0; background: none; color: var(--muted-foreground); }
+.pn-inbox .ib-fcomp .ib-htmlcomment-on .ib-fvb[data-html-comment-step="child"] { margin-left: 44px; }
+.ib-fcomp .ib-ccard > .ib-fcomp-field { grid-area: field; min-width: 0; }
 
 /* The list's look options (approval "inbox-list-options", 2026-10-30; listLook.ts): four checkboxes in the list's
    ⋮ menu, all off by default. Every rule here needs its option's class on the list column (.ib-lk-pill,
@@ -7687,7 +7788,8 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
   .ib-lk-small .ib-mrow.ib-u:not(.ib-sent) .ib-m2 { font-size: var(--ib-fs-14, 14px); letter-spacing: 0; }
 }
 
-/* The one-time list options dialog (approval "inbox-list-options-intro"; components/ListLookIntro.tsx): the Board
+/* The one-time dialogs that draw the person's rows (first the list options dialog, approval "inbox-list-options-intro";
+   now ListViewIntro's and VoiceIntro's frame, and the words and actions of "Choose how your list looks", .ib-rl below): the Board
    intro's width and well. The picture is the person's own rows in a column the list's width, centred, its bottom
    fading out so no row is ever cut mid-line; the words, the four switches stacked, the actions.
    The dialog follows the person's mode. Only the picture (.ib-lo-frame, the example rows) is light for everyone (the
@@ -7744,6 +7846,162 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
   .ib-lo-phone .ib-lo-opt { min-height: 44px; font-size: var(--ib-fs-15, 15px); }
   .ib-lo-phone .ib-lo-acts { flex-direction: column-reverse; align-items: stretch; padding-top: 14px; }
   .pn-inbox .ib-lo-phone .ib-lo-acts .ib-btn, dialog.ib-lo-phone .ib-lo-acts .ib-btn { min-height: 44px; justify-content: center; }
+}
+
+/* "Choose how your list looks" (approval "inbox-rows-dialog", round 7b; components/ListLookIntro.tsx,
+   RowsIntroPicture.tsx). The .ib-lo dialog's words and actions, 720 px wide. Over them: the picture of an Inbox with
+   example projects (drawn 620 wide and scaled to the frame, --rl-s), the notes look stacked at its bottom right, and,
+   once a look is picked, a card with the person's rows in that look over the blurred picture. Everything follows the
+   window's mode (the owner, q-fd707b9e). The picked look is a light tint, no border. */
+dialog.ib-dlg.ib-lo.ib-rl { width: min(720px, calc(100vw - 32px)); }
+/* The dialog is a flex column that starts its items: the inner box takes the whole width, not the picture's. */
+.ib-rl > .ib-dlg-in { align-self: stretch; min-width: 0; }
+/* It opens on the looks' group (focus with no ring); Tab then reaches each look. */
+.ib-rl-looks:focus { outline: none; }
+.ib-rl { --rl-band: color-mix(in oklch, var(--muted) 80%, var(--card)); --rl-sel: color-mix(in oklab, var(--primary) 22%, var(--card));
+  --rl-raised: color-mix(in oklab, var(--card) 94%, var(--foreground)); }
+:root.light .ib-rl { --rl-band: color-mix(in oklch, var(--muted) 62%, var(--card)); --rl-sel: color-mix(in oklab, var(--primary) 13%, var(--card)); --rl-raised: var(--card); }
+.ib-rl-art { position: relative; background: var(--lo-well); padding: 32px 18px 0; }
+:root:not(.light) .ib-rl-art { padding-bottom: 18px; }
+.ib-rl-cap { position: relative; width: 620px; max-width: 100%; height: 0; margin: 0 auto; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-rl-cap > span { position: absolute; left: 2px; bottom: 7px; white-space: nowrap; opacity: 0; transition: opacity 220ms var(--ib-ease-enter); }
+.ib-rl-cap > span[data-on] { opacity: 1; }
+.ib-rl-frame { position: relative; width: 620px; max-width: 100%; height: var(--rl-fh, 400px); margin: 0 auto; overflow: hidden; border-radius: 10px 10px 0 0; text-align: left;
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); transition: filter 300ms var(--ib-ease-enter);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 64px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 64px), transparent); }
+:root:not(.light) .ib-rl-frame { border-radius: 10px; -webkit-mask-image: none; mask-image: none; }
+:root:not(.light) .ib-rl-frame::after { content: ""; position: absolute; inset: auto 0 0; height: 64px; z-index: 3; background: linear-gradient(to bottom, color-mix(in oklch, var(--background) 0%, transparent), var(--background)); pointer-events: none; }
+/* The window, at the Inbox's own sizes. */
+.ib-rl-comp { position: absolute; left: 0; top: 0; width: 620px; height: calc(var(--rl-fh, 400px) / var(--rl-s, 1)); transform-origin: 0 0; transform: scale(var(--rl-s, 1));
+  display: grid; grid-template-columns: 224px minmax(0, 1fr); padding: 8px 8px 0 0; background: var(--background); color: var(--foreground); }
+.ib-rl-sb { padding: 4px 12px 0; min-width: 0; }
+.ib-rl-brand { display: flex; align-items: center; gap: 6px; height: 42px; padding-left: 2px; font-size: var(--ib-fs-16, 16px); font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; }
+.ib-rl-brand > span { color: var(--muted-foreground); font-weight: 500; }
+.ib-rl-search { display: flex; gap: 7px; margin-top: 8px; }
+.ib-rl-box { flex: 1; min-width: 0; height: 34px; display: flex; align-items: center; gap: 7px; padding: 0 9px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
+.ib-rl-box > .ib-rl-kbd { margin-left: auto; }
+.ib-rl-new { width: 34px; height: 34px; flex: none; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--muted-foreground); }
+.ib-rl-nav { display: flex; align-items: center; gap: 9px; height: 36px; margin-top: 10px; padding: 0 10px; border-radius: 9px; background: var(--rl-sel); color: color-mix(in oklab, var(--primary) 85%, var(--foreground)); font-size: var(--ib-fs-14-5, 14.5px); font-weight: 600; }
+.ib-rl-nav > .ib-rl-n { margin-left: auto; }
+.ib-rl-phead { display: flex; align-items: center; gap: 9px; height: 28px; margin-top: 14px; padding: 0 10px; font-size: var(--ib-fs-14-5, 14.5px); }
+.ib-rl-prow { display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 10px; font-size: var(--ib-fs-14-5, 14.5px); white-space: nowrap; min-width: 0; }
+.ib-rl-pn { overflow: hidden; text-overflow: ellipsis; }
+.ib-rl-prow > .ib-rl-n { margin-left: auto; padding-left: 8px; font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-rl-lp { min-width: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--border); border-bottom: 0; border-radius: 12px 12px 0 0; }
+.ib-rl-lhead { display: flex; align-items: center; gap: 12px; height: 52px; flex: none; padding: 0 12px 0 16px; color: var(--muted-foreground); }
+.ib-rl-lhead > .ib-rl-h { color: var(--foreground); font-size: var(--ib-fs-20, 20px); font-weight: 700; letter-spacing: -0.01em; }
+.ib-rl-lhead > :last-child { margin-left: auto; }
+.ib-rl-lbody { display: flex; flex-direction: column; gap: 2px; padding: 0 8px; }
+.ib-rl-band { display: flex; align-items: center; gap: 8px; height: 34px; flex: none; margin-top: 6px; padding: 0 12px; border-radius: 8px; background: var(--rl-band); font-size: var(--ib-fs-13, 13px); font-weight: 600; }
+.ib-rl-band:first-child { margin-top: 0; }
+.ib-rl-band > .ib-rl-n { color: var(--muted-foreground); font-weight: 500; }
+.ib-rl-row { position: relative; min-width: 0; padding: 10px 12px 11px; border-radius: 10px; }
+.ib-rl-l1 { display: flex; align-items: center; gap: 6px; height: 19px; min-width: 0; font-size: var(--ib-fs-13, 13px); font-weight: 600; }
+.ib-rl-proj { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-rl-time { margin-left: auto; padding-left: 10px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 400; white-space: nowrap; }
+.ib-rl-l2 { margin-top: 3px; min-width: 0; font-size: var(--ib-fs-14, 14px); font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-rl-l3 { display: flex; align-items: center; gap: 8px; margin-top: 2px; min-width: 0; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
+.ib-rl-prev { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-rl-q { display: inline-flex; align-items: center; gap: 3px; flex: none; color: var(--foreground); font-size: var(--ib-fs-12, 12px); }
+/* The marks (letterMarks.tsx's rules): the stacked look is the thread's letters with the project's on its corner;
+   "projects" turns each row's mark over to the project's. A logo covers the letters once logos are on. */
+.ib-rl-av { display: none; position: absolute; left: 14px; top: 12px; width: 30px; height: 30px; perspective: 240px; }
+.ib-rl-comp:not([data-marks="off"]) .ib-rl-av { display: block; }
+.ib-rl-comp:not([data-marks="off"]) .ib-rl-row { padding-left: 56px; }
+.ib-rl-pop, .ib-rl-flip { position: absolute; inset: 0; transform-style: preserve-3d; }
+.ib-rl-flip > .ib-rl-face { position: absolute; inset: 0; backface-visibility: hidden; }
+.ib-rl-flip > .ib-rl-back { transform: rotateY(180deg); }
+.ib-rl-comp[data-marks="projects"] .ib-rl-flip { transform: rotateY(180deg); }
+.ib-rl-av > .ib-rl-badge { position: absolute; inset: auto -4px -4px auto; box-shadow: 0 0 0 2px var(--card); }
+.ib-rl-comp:not([data-marks="both"]) .ib-rl-badge { display: none; }
+.ib-rl-comp[data-marks="off"] .ib-rl-sbm { display: none; }
+.ib-rl-logo > img { transform: scale(1.35); }
+.ib-rl-comp[data-logos] .ib-rl-logo { background: var(--muted); color: transparent; }
+.ib-rl-comp[data-logos] .ib-rl-logo > img { opacity: 1; transform: none; }
+.ib-rl-comp[data-moving] :is(.ib-rl-pop, .ib-rl-sbm) { animation: ib-rl-pop 360ms cubic-bezier(0.34, 1.5, 0.64, 1) both; animation-delay: calc(var(--i, 0) * 55ms); }
+@keyframes ib-rl-pop { from { transform: scale(0.35); opacity: 0; } 55% { opacity: 1; } to { transform: none; opacity: 1; } }
+.ib-rl-comp[data-moving] .ib-rl-flip { transition: transform 460ms cubic-bezier(0.3, 1.25, 0.5, 1); transition-delay: calc(var(--i, 0) * 60ms); }
+.ib-rl-comp[data-moving] .ib-rl-logo { transition: color 120ms ease-out, background-color 120ms ease-out; transition-delay: calc(var(--i, 0) * 45ms); }
+.ib-rl-comp[data-moving] .ib-rl-logo > img { transition: opacity 200ms ease-out, transform 340ms cubic-bezier(0.34, 1.4, 0.64, 1); transition-delay: calc(var(--i, 0) * 45ms); }
+/* The notes look on the picture's bottom right: name first and bold, preview, the time under it, hairlines, a status
+   mark at the end. It rises in as the demo lands (2.2 s), its rows 70 ms apart, then the marks pop. */
+.ib-rl-stack { position: absolute; right: 22px; bottom: 16px; z-index: 4; width: 272px; padding: 2px 0; border-radius: 12px; background: var(--rl-raised); color: var(--foreground);
+  transform-origin: 100% 100%; transform: scale(var(--rl-cs, 1)); --rl-warn: var(--warning, oklch(0.75 0.15 85)); --rl-ok: var(--success, oklch(0.72 0.17 150));
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 85%, transparent), 0 2px 4px -1px oklch(0 0 0 / 0.35), 0 16px 32px -8px oklch(0 0 0 / 0.55), 0 32px 64px -16px oklch(0 0 0 / 0.55);
+  transition: opacity 240ms var(--ib-ease-enter), transform 420ms var(--ib-ease-enter), filter 300ms var(--ib-ease-enter); }
+:root.light .ib-rl-stack { box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 80%, transparent), 0 2px 4px -1px oklch(0.2 0.02 260 / 0.08), 0 14px 28px -8px oklch(0.2 0.02 260 / 0.2), 0 28px 56px -16px oklch(0.2 0.02 260 / 0.22); }
+.ib-rl-nrow { padding: 11px 14px 10px; }
+.ib-rl-nrow + .ib-rl-nrow { border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent); }
+.ib-rl-nt { font-size: var(--ib-fs-14, 14px); font-weight: 650; letter-spacing: -0.005em; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-rl-nrow[data-status="done"] .ib-rl-nt { color: color-mix(in oklab, var(--foreground) 72%, var(--card)); }
+.ib-rl-np { margin-top: 2px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.4; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.ib-rl-nb { display: flex; align-items: center; height: 18px; margin-top: 5px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-rl-stm { margin-left: auto; display: inline-flex; line-height: 0; }
+.ib-rl-nrow[data-status="waiting"] .ib-rl-stm { color: color-mix(in oklab, var(--rl-warn) 85%, var(--foreground)); }
+.ib-rl-nrow[data-status="done"] .ib-rl-stm { color: color-mix(in oklab, var(--rl-ok) 85%, var(--foreground)); }
+.ib-rl-stack[data-off] { opacity: 0; transform: translateY(14px) scale(var(--rl-cs, 1)); }
+.ib-rl-stack[data-off] .ib-rl-nrow { opacity: 0; transform: translateY(6px); }
+.ib-rl-stack[data-off] .ib-rl-stm { opacity: 0; transform: scale(0.4); }
+.ib-rl-stack[data-moving] .ib-rl-nrow { transition: opacity 260ms var(--ib-ease-enter), transform 380ms var(--ib-ease-enter); }
+.ib-rl-stack[data-moving] .ib-rl-nrow:nth-child(1) { transition-delay: 90ms; }
+.ib-rl-stack[data-moving] .ib-rl-nrow:nth-child(2) { transition-delay: 160ms; }
+.ib-rl-stack[data-moving] .ib-rl-stm { transition: opacity 180ms var(--ib-ease-enter) 360ms, transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1) 360ms; }
+.ib-rl-stack[data-moving] .ib-rl-nrow:nth-child(2) .ib-rl-stm { transition-delay: 430ms; }
+/* A look picked: the picture steps back (blurred, dimmed; the notes card a touch smaller) and the card rises into
+   its middle with the person's rows in that look. A change of look crossfades the rows; the card stays. */
+.ib-rl-veil { position: absolute; inset: 0; z-index: 5; pointer-events: none; opacity: 0; background: color-mix(in oklch, var(--lo-well) 40%, transparent); transition: opacity 300ms var(--ib-ease-enter); }
+.ib-rl-art[data-preview] .ib-rl-veil { opacity: 1; }
+.ib-rl-art[data-preview] :is(.ib-rl-frame, .ib-rl-stack) { filter: blur(5px) saturate(0.8); }
+.ib-rl-art[data-preview] .ib-rl-stack:not([data-off]) { transform: translateY(6px) scale(calc(var(--rl-cs, 1) * 0.96)); }
+.ib-rl-card { position: absolute; z-index: 6; left: 0; right: 0; margin: 0 auto; overflow: hidden; border-radius: 14px; pointer-events: none; text-align: left;
+  background: var(--rl-raised); color: var(--foreground); opacity: 0; transform: translateY(18px) scale(0.965);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 85%, transparent), 0 2px 6px -1px oklch(0 0 0 / 0.4), 0 18px 36px -10px oklch(0 0 0 / 0.6), 0 36px 72px -20px oklch(0 0 0 / 0.6);
+  transition: opacity 220ms var(--ib-ease-enter), transform 360ms var(--ib-ease-enter); }
+:root.light .ib-rl-card { box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 80%, transparent), 0 2px 6px -1px oklch(0.2 0.02 260 / 0.1), 0 18px 36px -10px oklch(0.2 0.02 260 / 0.24), 0 36px 72px -20px oklch(0.2 0.02 260 / 0.26); }
+.ib-rl-art[data-preview] .ib-rl-card { opacity: 1; transform: none; }
+.ib-rl-ch { display: flex; align-items: center; height: 46px; padding: 0 18px; font-size: var(--ib-fs-17, 17px); font-weight: 700; letter-spacing: -0.01em; }
+.ib-rl-cls { position: absolute; inset: 46px 0 0; -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); }
+.ib-rl-cl { position: absolute; inset: 0; padding: 0 6px; opacity: 0; transition: opacity 110ms ease-out; }
+.ib-rl-cl[data-on] { opacity: 1; transition: opacity 200ms var(--ib-ease-enter) 70ms; }
+/* The person's rows are the list's own (ListRow), on the card: always drawn, whatever hides the list behind. */
+dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: auto; visibility: visible; width: auto; height: auto; border-right: 0; background: transparent; --background: var(--rl-raised); --card: var(--rl-raised); }
+.ib-rl-card .ib-lbody { overflow: hidden; padding-top: 0; }
+.ib-rl-card .ib-lbody > .ib-group > :is(.ib-rw, .ib-mrow) { content-visibility: visible; }
+.ib-rl-card :is(.ib-nrow .ib-l2 > .ib-title, .ib-mrow > .ib-m2) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+/* The words' link and the three looks: filled cards, each its name alone. */
+.ib-rl-link { font: inherit; color: var(--foreground); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-decoration-color: color-mix(in oklch, var(--foreground) 35%, transparent); text-underline-offset: 2px; }
+.ib-rl-link:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 3px; }
+.ib-rl-looks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 14px 22px 0; }
+.ib-rl-look { position: relative; display: flex; min-height: 60px; padding: 6px 12px; border-radius: 10px; cursor: pointer; background: var(--lo-well); transition: background-color 150ms ease-out; -webkit-tap-highlight-color: transparent; }
+@media (hover: hover) { .ib-rl-look:hover { background: color-mix(in oklch, var(--muted) 85%, var(--card)); } }
+.ib-rl-look[data-on], .ib-rl-look[data-on]:hover { background: color-mix(in oklab, var(--primary) 20%, var(--popover)); }
+:root.light .ib-rl-look[data-on], :root.light .ib-rl-look[data-on]:hover { background: color-mix(in oklab, var(--primary) 12%, var(--card)); }
+.ib-rl-look > input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.ib-rl-look:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
+/* The name sits in the card's middle row, "Current" in the row under it: the rows above and below share what is
+   left, so the name is centred whether or not "Current" shows, and the three names line up. */
+.ib-rl-ln { flex: 1; display: grid; grid-template-rows: 1fr auto 1fr; justify-items: center; min-width: 0; text-align: center; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 550; line-height: 1.3; }
+.ib-rl-name { grid-row: 2; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.ib-rl-cur { grid-row: 3; align-self: start; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); font-weight: 400; }
+.pn-inbox .ib-rl .ib-btn:disabled, dialog.ib-rl .ib-btn:disabled { opacity: 0.45; cursor: default; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* A phone: the bottom sheet (.ib-lo-phone), the same window drawn smaller, the notes card at 0.7 tucked into the
+     corner; the three looks stay in one row. */
+  dialog.ib-dlg.ib-lo.ib-rl.ib-lo-phone { width: calc(100vw - 16px); }
+  .ib-lo-phone .ib-rl-art { padding: 30px 14px 0; }
+  :root:not(.light) .ib-lo-phone .ib-rl-art { padding-bottom: 14px; }
+  .ib-lo-phone .ib-rl-frame { width: auto; }
+  .ib-lo-phone .ib-rl-stack { --rl-cs: 0.7; right: 10px; bottom: 10px; width: 240px; }
+  .ib-lo-phone.ib-rl .ib-lo-text h2 { font-size: var(--ib-fs-17, 17px); }
+  .ib-lo-phone.ib-rl .ib-lo-text p { font-size: var(--ib-fs-14, 14px); }
+  .ib-lo-phone .ib-rl-looks { gap: 6px; padding: 14px 14px 0; }
+  .ib-lo-phone .ib-rl-look { min-height: 64px; padding: 6px 4px; }
+  .ib-lo-phone .ib-rl-ln { font-size: var(--ib-fs-15, 15px); }
+  .ib-lo-phone .ib-rl-cur { font-size: var(--ib-fs-12-5, 12.5px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ib-rl :is(.ib-rl-cap > span, .ib-rl-frame, .ib-rl-stack, .ib-rl-nrow, .ib-rl-stm, .ib-rl-veil, .ib-rl-card, .ib-rl-cl, .ib-rl-look, .ib-rl-flip, .ib-rl-logo, .ib-rl-logo > img) { transition: none !important; }
+  .ib-rl :is(.ib-rl-pop, .ib-rl-sbm) { animation: none !important; }
 }
 
 /* Settings → Rows (components/RowsSettings.tsx): the narrow picture and the controls side by side (the controls drop
@@ -7832,6 +8090,14 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 .ib-lk-dot .ib-mrow.ib-u::after { left: 6px; top: 20px; }
 /* Subject preview "2 lines": the preview wraps to two lines, then "…" (three-line and phone rows). */
 .ib-lk-pv2 :is(.ib-nrow .ib-l3, .ib-m3) > .ib-pv { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; }
+/* With the preview on two lines, the open counts, pin, badge and book sit on its first line, as on a one-line
+   preview, not halfway between its lines (the line centres its parts): each is a line of the preview's height,
+   centred on it. The badge, taller than that line, starts at its top. A one-line preview looks as before. */
+.ib-lk-pv2 .ib-nrow .ib-l3:has(> .ib-pv) { --ib-pv-lh: calc(var(--ib-fs-13-5, 13.5px) * 1.35); }
+.ib-lk-pv2 .ib-m3:has(> .ib-pv) { --ib-pv-lh: calc(var(--ib-fs-14, 14px) * 1.35); }
+.ib-lk-pv2 :is(.ib-nrow .ib-l3, .ib-m3):has(> .ib-pv) { align-items: flex-start; }
+.ib-lk-pv2 :is(.ib-nrow .ib-l3, .ib-m3) > :not(.ib-pv, .ib-badge, .ib-sr):has(~ .ib-pv),
+.ib-lk-pv2 :is(.ib-nrow .ib-l3, .ib-m3) > .ib-pv ~ :not(.ib-pv, .ib-badge, .ib-sr) { display: inline-flex; align-items: center; min-height: var(--ib-pv-lh); }
 /* First line "Thread name": the name on line 1, one line cut with "…", the time after it; the agents and the
    project on line 2. */
 .ib-lk-tfirst .ib-nrow .ib-l1 > .ib-title, .ib-lk-tfirst .ib-m1 > .ib-m2 { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
@@ -7899,6 +8165,21 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 .ib-lk-tbelow.ib-lk-tfirst.ib-lk-noagents.ib-noproj.ib-lk-pv2:not(.ib-lk-compact) .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 104px; }
 /* Show → Bold thread names (.ib-lk-bold): every row's name in bold, read or not; Sent and Quiet keep their colour. */
 .ib-lk-bold :is(.ib-row, .ib-nrow) .ib-title, .ib-lk-bold .ib-mrow .ib-m2 { font-weight: 600; }
+/* With Subject preview off too, the row is two lines (InboxList's `twoLines`): line 3's guided review mark, pin,
+   badge, snooze return and count sit at line 2's right end (`.ib-lend`), after the agents and the project. They are
+   never cut: the project gives way with "…" first. */
+:is(.ib-nrow .ib-l2-lead, .ib-m1-lead):has(> .ib-lend) { gap: 8px; }
+.ib-lend { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: none; margin-left: auto; font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-lend:empty { display: none; }
+.ib-lend > * { flex: none; }
+/* Its unrendered estimates, measured, each the taller row's (a badge's 22px on line 2). Beside a thread the wrapper
+   (no padding) holds the whole row: 62px to 67px, roomy 72px to 77px. A phone's estimate is the row's content box,
+   inside its padding and rule, as the compact phone row's: 64px to 67px in all, 40px to 43px inside; roomy 73px to
+   78px, 41px to 46px inside. */
+.ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow > .ib-l2 > .ib-lend) { contain-intrinsic-size: auto none auto 66px; }
+.ib-lk-roomy .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow > .ib-l2 > .ib-lend) { contain-intrinsic-size: auto none auto 76px; }
+.ib-lbody > .ib-group > .ib-mrow:has(> .ib-m1-lead > .ib-lend) { contain-intrinsic-size: auto none auto 43px; }
+.ib-lk-roomy .ib-lbody > .ib-group > .ib-mrow:has(> .ib-m1-lead > .ib-lend) { contain-intrinsic-size: auto none auto 46px; }
 
 /* Voice dictation: the microphone in the composer (components/VoiceMic.tsx). The button takes the paperclip's size in
    each host. The status shares the toolbar's row, so starting to listen moves nothing. */
@@ -8106,8 +8387,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-annat .ib-annpop { left: auto; right: 0; bottom: 0; width: min(540px, 100%); }
 .ib-annfoot { left: 0; right: 0; bottom: calc(100% + 8px); padding-inline: inherit; }
 .ib-anncard { left: 50%; bottom: calc(28px + var(--ib-fcomp-h, 0px) + env(safe-area-inset-bottom)); transform: translateX(-50%); width: min(540px, calc(100% - 32px)); }
-/* Over an HTML page's card (it sits on the pane too): clear of the floating comments panel, centred over the card. */
-.ib-view.ib-fullview.ib-drawer:not(.ib-phone) > .ib-anncard { left: var(--ib-foot-c); width: min(540px, var(--ib-foot-w)); }
+/* Over an HTML page's card (it sits on the pane too): clear of the floating comments panel, centred over the card
+   (the card's own centre, --ib-fcomp-c). */
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) > .ib-anncard { left: var(--ib-fcomp-c); width: min(540px, var(--ib-foot-w)); }
 /* A tall card in a short window leaves the list what is above it, and keeps its Close on screen. */
 .ib-anncard .ib-annpop { max-height: min(60vh, calc(100dvh - 44px - var(--ib-fcomp-h, 0px) - env(safe-area-inset-bottom))); }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
@@ -8341,6 +8623,21 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-review.ib-rv-walk.ib-fold .ib-rsplit { grid-template-columns: minmax(0, 1fr); }
 /* The comments panel closed from the header's Comments button: the diff takes the width, nothing of the panel stays. */
 .ib-review.ib-rv-walk.ib-rv-shut .ib-rsplit { grid-template-columns: minmax(0, 1fr); }
+/* All files: the PR page's file tree on the left (approval "review-allfiles-tree"; pulls/RailTree.tsx, its rows'
+   styles are `.ib-prp-files` below). Walkthrough has none. A phone has no rail: its Files button opens the tree as a
+   sheet over the diff, as the PR page's does. */
+.ib-review.ib-rv-walk.ib-rv-tree .ib-rsplit { grid-template-columns: 280px minmax(0, 1fr) 300px; }
+.ib-review.ib-rv-walk.ib-rv-tree:is(.ib-fold, .ib-rv-shut) .ib-rsplit { grid-template-columns: 280px minmax(0, 1fr); }
+.ib-rv-tree .ib-rrail { --ib-prp-fill: color-mix(in oklab, var(--foreground) 7%, transparent); padding: 0; gap: 0; overflow: hidden; }
+.ib-rv-filesbtn { gap: 6px; }
+/* The tree's head: "N files" on the left, "N viewed" at the right end (RailTree's own head, which the PR page
+   replaces with its scope switch). */
+.ib-prp-fileshead .ib-sp { flex: 1; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-review.ib-rv-walk.ib-rv-tree .ib-rsplit, .ib-review.ib-rv-walk.ib-rv-tree:is(.ib-fold, .ib-rv-shut) .ib-rsplit { grid-template-columns: minmax(0, 1fr); position: relative; }
+  .pn-inbox .ib-rv-walk .ib-vhead .ib-rv-filesbtn { min-width: 0; padding-inline: 8px; gap: 4px; }
+  .ib-review.ib-rv-tree.ib-files-open .ib-rrail { display: flex; position: absolute; inset: 0; z-index: 6; border-right: 0; background: var(--background); }
+}
 .ib-review.ib-rv-shut .ib-gpanel { display: none; }
 .ib-rv-walk .ib-vhead { gap: 10px; }
 .ib-rv-walk .ib-vhead > * { flex: none; }
@@ -8363,11 +8660,21 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-rj-btn .ib-ic { flex: none; color: var(--muted-foreground); }
 .ib-rj-btn .ib-rj-done { color: var(--success); }
 /* Where the bar is short of room the place (the switch, the chapter) keeps it, and the title goes: the heading under
-   the bar holds the same facts. */
+   the bar holds the same facts. A PR's title stays, shortened: it is the only way to the PR's details. */
 @media (min-width: 768px) and (max-width: 959px) {
-  .ib-rv-nav ~ .ib-rv-titlesep, .ib-review.ib-rv-walk .ib-vhead .ib-rv-nav ~ :is(.ib-rv-title, .ib-rv-from) { display: none; }
-  /* With the diff controls and a pull request's destination too, the bar's gaps narrow so the place still reads whole. */
-  .pn-inbox .ib-review.ib-rv-walk .ib-vhead:has([data-review-destination]) { gap: 6px; }
+  .ib-rv-nav ~ .ib-rv-titlesep:not(:has(+ .ib-dtitle)), .ib-review.ib-rv-walk .ib-vhead .ib-rv-nav ~ .ib-rv-title:not(.ib-dtitle), .ib-review.ib-rv-walk .ib-vhead .ib-rv-nav ~ .ib-rv-from { display: none; }
+  /* With the diff controls and a pull request's destination too, the bar's gaps narrow (2px, as under 768 px) so the
+     place still reads whole: "Overview" needed 29 px more at 800 px with 6px gaps. */
+  .pn-inbox .ib-review.ib-rv-walk .ib-vhead:has([data-review-destination]) { gap: 2px; }
+  /* A PR's title gives way further here (5rem, not 9rem): the switch and the jump keep their room. */
+  .pn-inbox .ib-review.ib-rv-walk .ib-vhead button.ib-rv-title.ib-dtitle { min-width: min(5rem, 100%); }
+}
+/* Under 800 px with a pull request's destination as well, the place still reads whole: the PR's title loses its
+   separator, and the verdict is its check and its green (as under 768 px). The switch stays. */
+@media (min-width: 768px) and (max-width: 799px) {
+  .ib-rv-walk .ib-vhead:has([data-review-destination]) > .ib-rv-titlesep { display: none; }
+  .ib-rv-walk .ib-vhead:has([data-review-destination]) .ib-rv-decide .md\:inline { display: none; }
+  .ib-rv-walk .ib-vhead:has([data-review-destination]) .ib-rv-decide [data-slot='button-icon'] { display: inline-flex; }
 }
 /* Less to read in the bar: Thread is its arrow, the destination its marks. Each keeps its name in a tooltip. */
 .pn-inbox .ib-rv-walk .ib-vhead .ib-back { gap: 0; padding-inline: 8px; }
@@ -8746,8 +9053,9 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
    next one rides up over them, so the hairline is the only thing between one file's code and the next one's header. */
 .ib-prreview [data-guide-file-shell] + [data-guide-file-shell] { position: relative; margin-top: -17px; }
 .ib-prreview [data-guide-file-shell] + [data-guide-file-shell]::before { content: ''; position: absolute; inset: 7px 0 auto; height: 1px; background: color-mix(in oklch, var(--border) 50%, transparent); }
-/* From REVIEW_FOLD_PANEL_BELOW up the comments are a column beside the diff: the review app's sidebar fill (bg-card/30). Folded, the sheet stays a card over the diff. */
-.ib-prreview:not(.ib-fold) :is(.ib-gpanel, .ib-gpanel > [data-annotation-panel]) { background: color-mix(in oklab, var(--card) 30%, var(--background)); }
+/* From REVIEW_FOLD_PANEL_BELOW up an open comments panel is a column beside the diff, framed as the Guided Review's
+   (.ib-apanel and the panel's own header: the card fill, a hairline down its left and under its title, no corner),
+   so the file headers end on a line, not on a fill (the owner on #2871). Folded, the sheet stays a card over the diff. */
 /* What else sits in the pane keeps a row's margin. */
 .ib-prreview .ib-gbody > .w-full > div:has(> [data-guide-global-comment-add]) { margin-inline: 16px; }
 .ib-prreview [data-guide-global-comments] { margin-inline: 16px; }
@@ -8793,6 +9101,39 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-gbody[data-repo-open] { overflow: hidden; }
 .ib-gbody > .ib-prp-repofile { position: sticky; top: 0; z-index: 3; height: 100%; background: var(--background); }
 .ib-gbody[data-repo-open] > :not(.ib-prp-repofile) { visibility: hidden; }
+
+/* The PR's own description at the head of its diff (PullDescription): the review app's compact Markdown, 13 px. Long,
+   it starts folded and opens into a box of its own height, so the diff stays near. */
+.ib-prr-desc { padding: 12px 16px; border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
+.ib-prr-desc-body { --ib-desc-fold: 112px; overflow-x: auto; }
+/* Only the web's links look like links (descriptionLinks.ts stops the click, keys too): the words of the rest stay. */
+.ib-prr-desc-body a[href]:not([href^="http:" i], [href^="https:" i], [href^="mailto:" i], [href^="#"], [href^="//"]) { color: inherit; text-decoration: none; cursor: inherit; pointer-events: none; }
+.ib-prr-desc[data-pull-description="folded"] { cursor: pointer; }
+.ib-prr-desc[data-pull-description="folded"] .ib-prr-desc-body { max-height: var(--ib-desc-fold); overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
+.ib-prr-desc[data-pull-description="open"] .ib-prr-desc-body { max-height: min(55vh, 560px); overflow-y: auto; overscroll-behavior: auto; }
+/* A list row's bleed (ui's `-mx-2 px-2`) would scroll the body sideways by 8 px. */
+.ib-prr-desc-body .-mx-2 { margin-right: 0; padding-right: 0; }
+.ib-prr-desc-body .ib-body { font-size: var(--ib-fs-13, 13px); line-height: 1.55; overflow-wrap: anywhere; }
+.ib-prr-desc-body article > :empty { display: none; }
+.ib-prr-desc-body article > :not(:empty):not(:not(:empty) ~ *) { margin-top: 0; }
+.ib-prr-desc-body article > :last-child { margin-bottom: 0; }
+.ib-prr-desc-body h1 { font-size: var(--ib-fs-15, 15px); line-height: 1.35; margin: 12px 0 6px; letter-spacing: normal; }
+.ib-prr-desc-body h2 { font-size: var(--ib-fs-14, 14px); line-height: 1.35; margin: 12px 0 4px; }
+.ib-prr-desc-body :is(h3, h4, h5, h6) { font-size: var(--ib-fs-13, 13px); line-height: 1.4; margin: 10px 0 4px; }
+.ib-prr-desc-body p { font-size: var(--ib-fs-13, 13px); line-height: 1.6; margin-bottom: 8px; }
+.ib-prr-desc-body .text-sm { font-size: var(--ib-fs-13, 13px); line-height: 1.55; }
+.ib-prr-desc-body hr { margin: 14px 0; }
+.ib-prr-desc-body summary { font-size: var(--ib-fs-13, 13px); }
+.ib-prr-desc-body blockquote { margin: 8px 0; }
+.ib-prr-desc-body .my-5 { margin-block: 10px; }
+.ib-prr-desc-body pre { font-size: var(--ib-fs-12, 12px); }
+.ib-prr-desc-body pre code.pn-code { padding: 8px 10px; }
+.ib-prr-desc-body :is(img, video) { max-width: 100%; height: auto; border-radius: 6px; }
+.pn-inbox .ib-prr-desc-more { display: block; margin-top: 6px; padding: 2px 0; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--muted-foreground); }
+.pn-inbox .ib-prr-desc-more:hover { color: var(--foreground); }
+.ib-prreview.ib-prr-wide .ib-gbody:has(> .ib-prr-desc) > .w-full { padding-top: 0; }
+/* Whose PR this is, quiet beside its title. */
+.ib-prreview .ib-vhead > .ib-prr-note { flex: 0 1 auto; min-width: 0; margin: 0 0 0 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
 /* Fixes from the worst-case stress test (break-ui on #2590). */
 /* A long title gives way in the review header (cut with "…", whole in its tooltip): the back label, the comments
@@ -8870,7 +9211,8 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 /* A long chain: the first two marks, "+N", the last two. */
 .ib-pr-more { font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 /* The author's picture (the owner on #2608) over their initials, which show while it loads and stay when it cannot. */
-.ib-pr-av { position: relative; overflow: hidden; }
+.ib-pr-av { position: relative; overflow: hidden; border-radius: 50%; }
+.ib-pr-av[data-pulls-bot] { border-radius: 26%; }
 .ib-pr-av > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; }
 .ib-pr-av > img[data-shown] { opacity: 1; }
 /* A PR whose author's account is gone: a grey person in the same tile. */
@@ -8913,6 +9255,16 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .pn-inbox .ib-pr-lrow { flex-wrap: wrap; padding: 12px 6px 12px 8px; }
   .ib-pr-lrow > .ib-pr-pill { margin-left: 32px; }
   .ib-pr-lgo { flex-basis: calc(100% - 32px); margin-left: 32px; min-height: 24px; }
+  /* The foot's words read as two lines beside Next layer, not two narrow columns. */
+  .ib-prr-foot:has(> .ib-prr-note) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; }
+  .ib-prr-foot > :where(:not(.ib-prr-note)):has(~ .ib-prr-note), .ib-prr-foot > .ib-prr-note ~ * { grid-column: 2; grid-row: 1 / 3; }
+  .ib-prr-foot > .ib-prr-note { grid-column: 1; grid-row: 1; margin: 0; }
+  .ib-prr-foot:has(> .ib-prr-note) > .ib-prr-where { grid-column: 1; grid-row: 2; }
+  .ib-prr-foot .ib-prr-note:has(+ .ib-prr-where)::after { content: none; }
+  /* A description takes little of a phone's screen until it is opened. */
+  .ib-prr-desc-body { --ib-desc-fold: 64px; }
+  .ib-prr-desc { padding: 8px 12px; }
+  .ib-prr-desc[data-pull-description="open"] .ib-prr-desc-body { max-height: 38vh; }
   /* The layer strip scrolls with no scrollbar: its edges fade, so a layer past them reads as more to scroll to. */
   .ib-pr-replyfoot { padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); }
   .pn-inbox .ib-pr-replybtn { height: 44px; }
@@ -9041,12 +9393,28 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-noproj .ib-row:has(.ib-rended) { --ib-words-track: max-content; }
 .ib-rended + .ib-c { margin-left: 8px; }
 
-/* Send to another session and Archive beside Reply when the session ended; a phone gives them their own line. */
+/* Send to another session and Archive beside Reply when the session ended; a phone gives them their own line, last
+   in the row's markup too (Thread.tsx), so the tab order is what is on screen. */
 .ib-footended { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  .pn-inbox .ib-footended { flex: 1 0 100%; order: 1; }
+  .pn-inbox .ib-footended { flex: 1 0 100%; }
 }
 
+/* Update on a linked machine (approval "inbox-machine-update"): the word beside it, Snooze's why, the dialog's states. */
+.ib-mside { position: relative; }
+.ib-mside[data-machine-notice] .ib-proj { padding-right: 76px; }
+.ib-mside[data-machine-notice] .ib-proj .ib-n { margin-left: auto; }
+.ib-mside:is([data-machine-notice='updating'], [data-machine-notice='restarting'], [data-machine-notice='updated'], [data-machine-notice='failed'], [data-machine-notice='not_back']) .ib-proj { padding-right: 98px; }
+.pn-inbox .ib-mthing { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); height: 24px; display: inline-flex; align-items: center; gap: 5px; padding: 0 7px; border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--primary); font-weight: 550; white-space: nowrap; }
+.pn-inbox .ib-mthing:hover { background: var(--ib-side-hover, var(--muted)); }
+.pn-inbox .ib-mthing[data-kind='updating'], .pn-inbox .ib-mthing[data-kind='restarting'], .pn-inbox .ib-mthing[data-kind='failed'], .pn-inbox .ib-mthing[data-kind='not_back'], .pn-inbox .ib-mthing[data-kind='updated'] { color: var(--muted-foreground); font-weight: 450; }
+.pn-inbox .ib-mthing .ib-spin { width: 10px; height: 10px; border-width: 1.5px; }
+.ib-zneeds { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.pn-inbox .ib-snooze-blocked { opacity: 0.55; }
+.pn-inbox .ib-snooze-blocked:hover { opacity: 1; }
+.ib-dlg h2.ib-mh2 { display: flex; align-items: center; gap: 8px; }
+.ib-mdone { display: inline-flex; align-items: center; gap: 4px; font-size: var(--ib-fs-12-5, 12.5px); }
+.pn-inbox .ib-ctl .ib-btn .ib-spin { width: 10px; height: 10px; border-width: 1.5px; margin-right: 5px; }
 /* Show me in the code review (approval "shape-in-code-review", mock ac2; packages/inbox/review-drawing). The box, the
    picture's sheet over the diff, its corner card, and the Overview's picture. Shape's paper behind every drawing. */
 .ib-review { --shp-paper: color-mix(in oklab, var(--background) 92%, var(--muted)); }
@@ -9247,17 +9615,19 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-prreview .ib-vhead, .ib-prr-wide :is(.ib-vhead, .ib-rrail) { background: var(--ib-prp-chrome); border-color: transparent; border-bottom: 0; }
 .ib-prreview .ib-rsplit { background: var(--ib-prp-chrome); position: relative; }
 .ib-prreview .ib-rrail { background: transparent; border: 0; gap: 0; }
-.ib-prreview:not(.ib-fold) :is(.ib-gpanel, .ib-gpanel > [data-annotation-panel]) { background: var(--ib-prp-chrome); border: 0; }
 .ib-prreview .ib-gbody { background: var(--background); }
 /* One surface, as the code review app (approval pr-view-one-surface, follow-up): every width but a phone's, the rail
    and the code share the page's colour with a hairline between them, no sheet and no corner; the bar is the one strip
-   that stands out, a hairline under it. The comments column keeps its fill. */
+   that stands out, a hairline under it. An open comments column is the Guided Review's (above). */
 .ib-prr-wide .ib-rsplit { background: var(--background); }
 .ib-prr-wide .ib-vhead { border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
 .ib-prr-wide:not(.ib-railfold) .ib-rrail { border-right: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
 .ib-prr-wide .ib-gbody { border-radius: 0; }
 .ib-review.ib-prreview.ib-prr-wide:not(.ib-railfold) .ib-rsplit { grid-template-columns: var(--ib-rail-w, 280px) minmax(0, 1fr) 300px; }
 .ib-review.ib-prreview.ib-prr-wide.ib-fold:not(.ib-railfold) .ib-rsplit { grid-template-columns: var(--ib-rail-w, 280px) minmax(0, 1fr); }
+/* Closed beside the code (PullReview's Comments button, approval pr-view-one-surface 11-07 18:33Z): its width goes back to the code. */
+.ib-review.ib-prreview.ib-prr-wide.ib-prr-panel-shut:not(.ib-railfold) .ib-rsplit { grid-template-columns: var(--ib-rail-w, 280px) minmax(0, 1fr); }
+.ib-prreview.ib-prr-panel-shut .ib-gpanel { display: none; }
 .ib-prp-handle { position: absolute; top: 0; bottom: 0; left: calc(var(--ib-rail-w, 280px) - 4px); width: 8px; z-index: 4; cursor: col-resize; touch-action: none; }
 .ib-prp-handle::after { content: ""; position: absolute; top: 12px; bottom: 12px; left: 3px; width: 2px; border-radius: 1px; background: transparent; transition: background-color 120ms ease; }
 .ib-prp-handle:hover::after, .ib-prp-handle:active::after, .ib-prp-handle:focus-visible::after { background: var(--ring); }
@@ -9356,8 +9726,6 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .ib-prreview .ib-gbody { border-top-left-radius: 12px; border-top-right-radius: 12px; }
   .ib-prreview .ib-rsplit { grid-template-rows: auto minmax(0, 1fr); }
 }
-/* The panel scrolls: a long description opens in it, with no second scroller. */
-.ib-prreview:not(.ib-fold) .ib-gpanel [data-annotation-panel] > :first-child { border-bottom: 0; }
 
 /* The bar: one weight of icon, one muted colour, no pills but the switch's seat and Approve. */
 .pn-inbox .ib-prreview .ib-vhead { gap: 6px; }
@@ -9377,6 +9745,151 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .pn-inbox .ib-prreview .ib-prp-row, .pn-inbox .ib-prp-file, .pn-inbox .ib-prp-folder { min-height: 28px; }
 .ib-prp-files { padding-top: 16px; }
 .ib-prp-fileshead { padding-bottom: 6px; }
+
+/* The PR's details (pulls/PullDetails.tsx). */
+/* The panel: floats on the page, no rule, generous air. */
+.ib-prd { position: absolute; top: 8px; right: 8px; bottom: 8px; z-index: 7; width: min(480px, calc(100% - 16px)); display: flex; flex-direction: column; min-height: 0; background: var(--card); border-radius: 14px; box-shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 12px 40px -8px rgb(0 0 0 / 0.18); overflow: hidden; }
+.dark .ib-prd { box-shadow: 0 0 0 1px rgb(255 255 255 / 0.06), 0 16px 48px -8px rgb(0 0 0 / 0.6); }
+.ib-prd[data-layout="columns"]:has(.ib-prd-side) { width: min(880px, calc(100% - 16px)); }
+.ib-prd .ib-prr-desc-body { --ib-desc-fold: 220px; }
+.ib-prd-head { flex: none; display: flex; align-items: center; gap: 12px; padding: 18px 12px 14px 24px; min-width: 0; }
+.ib-prd-who { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.35; }
+.ib-prd-who b { font-weight: 550; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ib-prd-branch { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-prd-branch svg { flex: none; opacity: 0.7; }
+.ib-prd-ref { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* The base is usually short, and the head long: the head gives way first. */
+.ib-prd-ref.ib-prd-base { flex: none; max-width: 50%; }
+.ib-prd-base { flex: 0 10 auto; }
+.pn-inbox .ib-prd-iconbtn { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; color: var(--muted-foreground); align-self: flex-start; }
+.pn-inbox .ib-prd-iconbtn:hover { background: var(--ib-prp-fill); color: var(--foreground); }
+.ib-prd-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 24px 32px; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.55; scrollbar-width: thin; }
+.ib-prd-top { margin: 0 -8px 20px; }
+/* Faces. */
+.ib-prd-face { position: relative; flex: none; display: inline-block; }
+.ib-prd-pic { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 50%; background: var(--ib-prp-fill); color: var(--muted-foreground); font-weight: 550; }
+.ib-prd-pic::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent); }
+.ib-prd-face[data-square] .ib-prd-pic { border-radius: 26%; }
+.ib-prd-pic img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; }
+.ib-prd-pic img[data-shown] { opacity: 1; }
+.ib-prd-pip { position: absolute; right: -3px; bottom: -3px; width: 13px; height: 13px; display: flex; align-items: center; justify-content: center; border-radius: 50%; color: white; box-shadow: 0 0 0 2px var(--card); }
+.ib-prd-pip svg { width: 8px; height: 8px; stroke-width: 3; }
+.ib-prd-pip[data-state="approved"] { background: var(--success, #0a7f33); }
+.ib-prd-pip[data-state="changes"] { background: var(--destructive); }
+.ib-prd-pip[data-state="commented"] { background: var(--muted-foreground); }
+.ib-prd-pile { display: inline-flex; align-items: center; }
+.ib-prd-pile > .ib-prd-face + .ib-prd-face { margin-left: 4px; }
+.ib-prd-moreface { margin-left: 8px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+/* Marks and rows. */
+.ib-prd-cmark { flex: none; display: inline-flex; }
+.ib-prd-cmark[data-state="pass"] { color: var(--success, #0a7f33); }
+.ib-prd-cmark[data-state="fail"] { color: var(--destructive); }
+.ib-prd-ring { flex: none; width: 13px; height: 13px; margin: 1px; border-radius: 50%; border: 2px solid color-mix(in oklab, var(--warning, #c28a00) 30%, transparent); border-top-color: var(--warning, #c28a00); }
+.ib-prd-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.ib-prd-rows li { display: flex; align-items: center; gap: 10px; min-height: 30px; min-width: 0; }
+.ib-prd-rname { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* A check's name takes up to two lines; past them it gives way in its middle (CheckName), so the end that tells checks
+   apart shows. Its tip has the whole name; a failure's word sits on its first line. */
+.ib-prd-checks li { align-items: flex-start; }
+.ib-prd-checks .ib-prd-rlink { align-items: flex-start; padding-block: 5px; }
+.ib-prd-checks .ib-prd-cmark { margin-top: 2px; }
+.ib-prd-rname.ib-prd-cname { white-space: normal; text-overflow: clip; overflow-wrap: anywhere; line-height: 18px; max-height: calc(18px * 2); }
+.ib-prd-cfit { display: block; }
+.ib-prd-cmark[data-state="quiet"] { color: var(--muted-foreground); }
+.ib-prd-rstate { flex: none; margin-left: auto; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-prd-rstate[data-state="approved"] { color: var(--success, #0a7f33); }
+.ib-prd-rstate[data-state="changes"] { color: var(--destructive); }
+.ib-prd-rmark { flex: none; margin-left: auto; display: inline-flex; color: var(--muted-foreground); }
+.ib-prd-rmark[data-state="approved"] { color: var(--success, #0a7f33); }
+.ib-prd-rmark[data-state="changes"] { color: var(--destructive); }
+.pn-inbox .ib-prd-more { justify-self: start; padding: 4px 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.pn-inbox .ib-prd-more:hover { color: var(--foreground); }
+.ib-prd-none { margin: 0; color: var(--muted-foreground); }
+.ib-prd-labels { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-bottom: 14px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-prd-labels > span { padding: 1px 8px; border-radius: 999px; background: var(--ib-prp-fill); }
+.ib-prd-h { margin: 32px 0 14px; font-size: var(--ib-fs-13, 13px); font-weight: 550; }
+/* Words and comments. */
+.ib-prd .ib-prr-desc { margin: 0; padding: 0; border: 0; background: transparent; max-width: none; }
+.ib-prd .ib-prr-desc[data-pull-description="open"] .ib-prr-desc-body { max-height: none; overflow: visible; }
+.pn-inbox .ib-prd .ib-prr-desc-body .ib-body, .pn-inbox .ib-prd .ib-prr-desc-body p { font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-prd-convo { display: grid; gap: 22px; }
+.ib-prd-comment { display: flex; gap: 12px; min-width: 0; }
+.ib-prd-cbody { flex: 1 1 auto; min-width: 0; }
+.pn-inbox .ib-prd-cbody .ib-body { font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.55; }
+.pn-inbox .ib-prd-cbody .ib-body :is(p, ul, ol) { margin-block: 0 6px; font-size: inherit; }
+/* A bot's report opens with a heading: it stays a comment's size. */
+.pn-inbox .ib-prd-cbody .ib-body :is(h1, h2) { font-size: var(--ib-fs-14, 14px); line-height: 1.35; margin: 8px 0 4px; letter-spacing: normal; }
+.pn-inbox .ib-prd-cbody .ib-body :is(h3, h4, h5, h6) { font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.4; margin: 8px 0 4px; }
+.ib-prd-chead { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin-bottom: 2px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-prd-chead b { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 550; color: var(--foreground); }
+.ib-prd-at { flex: none; font-size: var(--ib-fs-12-5, 12.5px); }
+.pn-inbox .ib-prd-cfile { flex: 0 1 auto; margin-left: auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.pn-inbox .ib-prd-cfile:hover { color: var(--foreground); text-decoration: underline; }
+/* A: people and checks compress to one line; everything else is reading. */
+.ib-prd-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 -10px 22px; }
+.pn-inbox .ib-prd-sum { display: inline-flex; align-items: center; gap: 8px; min-width: 0; min-height: 36px; padding: 0 10px; border-radius: 10px; font-size: var(--ib-fs-13, 13px); color: var(--foreground); }
+.pn-inbox .ib-prd-sum:hover, .pn-inbox .ib-prd-sum[data-on] { background: var(--ib-prp-fill); }
+.ib-prd-sumw[data-state="changes"], .ib-prd-sumw[data-state="fail"] { color: var(--destructive); }
+.ib-prd-sumw[data-state="pending"], .ib-prd-sumw[data-state="pass"] { color: var(--muted-foreground); }
+.ib-prd-drop { margin: -14px -10px 22px; padding: 8px 10px; border-radius: 10px; background: color-mix(in oklab, var(--foreground) 3%, transparent); }
+/* C: reading on the left, the facts in a tinted column, as on the forge. */
+.ib-prd[data-layout="columns"] .ib-prd-body { padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.ib-prd-cols { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 312px; }
+.ib-prd-cols:not(:has(.ib-prd-side)) { grid-template-columns: minmax(0, 1fr); }
+.ib-prd-main { min-width: 0; overflow-y: auto; padding: 4px 24px 32px; scrollbar-width: thin; }
+.ib-prd-side { min-width: 0; overflow-y: auto; margin: 0 8px 8px 0; padding: 14px 14px 18px; border-radius: 10px; background: color-mix(in oklab, var(--foreground) 3.5%, transparent); display: grid; align-content: start; gap: 22px; font-size: var(--ib-fs-13, 13px); scrollbar-width: thin; }
+.ib-prd-side h3 { margin: 0 0 6px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; color: var(--muted-foreground); }
+.ib-prd-side .ib-prd-labels { margin: 0; }
+.ib-prd-side .ib-prd-rows li { min-height: 28px; gap: 8px; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-prd { top: 0; right: 0; bottom: 0; left: 0; width: 100%; border-radius: 0; box-shadow: none; grid-row: 1 / -1; }
+  .ib-prd-head { padding: 14px 8px 12px 16px; }
+  .ib-prd-body { padding: 0 16px 28px; }
+  .ib-prd { overflow-y: auto; }
+  .ib-prd-body { flex: none; overflow: visible; }
+    .ib-prd-top .ib-prp-stack { max-height: none; padding: 0; }
+  .ib-prd-top .ib-prp-layers { overflow: visible; }
+  .pn-inbox .ib-prd-top .ib-prp-row { min-height: 38px; }
+}
+/* Rows a keyboard reaches; a name that cannot be hovered wraps whole. */
+.ib-prd-rlink { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; min-width: 0; min-height: inherit; color: inherit; text-decoration: none; }
+a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
+.ib-prd-rlink[data-plain] .ib-prd-rname { white-space: normal; overflow-wrap: anywhere; }
+@media (pointer: coarse) { .ib-prd-rname { white-space: normal; overflow-wrap: anywhere; } }
+.ib-prd:focus { outline: none; }
+.ib-prd-face[data-gone] .ib-prd-pic { color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }
+.ib-prd-waiting { display: grid; gap: 8px; }
+.ib-prd-waiting i { display: block; height: 12px; border-radius: 6px; background: var(--ib-prp-fill); }
+.ib-prd-waiting i:nth-child(2) { width: 70%; }
+.ib-prd-waiting i:nth-child(3) { width: 85%; }
+/* The first file's Split | Unified tab has no business peeking out from behind the panel. */
+.ib-prreview:has([data-pull-details]) [data-guide-section-tab] { visibility: hidden; }
+.ib-prreview .ib-prr-fn .ib-prr-num { flex: none; }
+/* The bar's title opens the PR's details (the PR page, a thread's review of one PR): a quiet fill on hover and while
+   they are open, as the Details button has. */
+.pn-inbox .ib-vhead button.ib-dtitle { height: var(--ib-prp-h, 28px); padding: 0 6px; border-radius: 7px; cursor: pointer; text-align: left; }
+.pn-inbox .ib-vhead button.ib-dtitle:hover, .pn-inbox .ib-vhead button.ib-dtitle.ib-on { background: var(--ib-prp-fill); }
+.pn-inbox .ib-vhead button.ib-dtitle:focus-visible { outline: 1.5px solid color-mix(in oklch, var(--ring) 55%, transparent); outline-offset: -1.5px; }
+.ib-review.ib-rv-walk .ib-vhead button.ib-dtitle:hover, .ib-review.ib-rv-walk .ib-vhead button.ib-dtitle.ib-on { color: var(--foreground); }
+.ib-dtitle .ib-prp-dot, .ib-dtitle .ib-prp-count { margin-left: 6px; font-weight: 400; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+/* In a title that is not a row (the full review's), the dot needs a box of its own. */
+.ib-dtitle .ib-prp-dot { display: inline-block; vertical-align: middle; }
+.ib-dtitle .ib-prp-count { vertical-align: middle; }
+/* The full review's PR title: its words give way, never the status at their end, and never the whole title (it is the
+   only way to the details): it keeps room for a few words where the bar is short. */
+.ib-review.ib-rv-walk .ib-vhead button.ib-rv-title.ib-dtitle { display: inline-flex; align-items: center; min-width: min(9rem, 100%); }
+.ib-rv-title.ib-dtitle > bdi { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-rv-title.ib-dtitle > .ib-prp-dot, .ib-rv-title.ib-dtitle > .ib-prp-count { flex: none; }
+/* A thread's review of one PR (ReviewPane): the PR page's Details button and panel, the panel over the review's body. */
+.ib-review:not(.ib-prreview) { --ib-prp-fill: color-mix(in oklab, var(--foreground) 7%, transparent); --ib-prp-h: 28px; }
+.ib-review:not(.ib-prreview) .ib-rsplit:has(> .ib-prd) { position: relative; }
+.ib-review:not(.ib-prreview) .ib-rsplit > .ib-prd { z-index: 30; }
+/* A phone: the PR's title in a row under the bar opens the details full screen, as on the PR page. */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-review:not(.ib-prreview) .ib-rsplit:has(> .ib-prp-row2) { grid-template-rows: auto minmax(0, 1fr); position: relative; }
+  .ib-review:not(.ib-prreview) .ib-rsplit > .ib-prp-row2 { grid-column: 1 / -1; padding: 0 8px 6px; border-bottom: 1px solid color-mix(in oklab, var(--border) 50%, transparent); }
+}
+
 /* As the code review app (approval pr-view-one-surface, 11-07 19:08), every width but a phone's: the bar its header's
    fill (bg-card/50 on the page), and over the code its muted tab row (dockview's strip, 33 px) with Split | Unified at
    the right end, where the review app keeps its view controls. */
@@ -10095,3 +10608,75 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 /* Header: the bar's title leads with the mark. */
 .ib-lm-head { position: relative; display: inline-flex; vertical-align: -5px; margin-right: 8px; }
 .ib-bc-proj { display: inline-flex; }
+
+/* The bottom bar, B1 (approval "inbox-reaction-tray", addendum 2026-11-07; footLine.ts). Its line, and a faint 18 px
+   shadow above it, fade in only while thread text scrolls under the bar (`data-under`); with nothing under it (the
+   thread all fits, or it is scrolled to its end) the bar sits on the page. A colour fade with no movement, so reduced
+   motion keeps it. */
+.ib-pfoot { transition: border-color 160ms ease-out, box-shadow 160ms ease-out; }
+.ib-pfoot:not([data-under]) { border-top-color: transparent; }
+.ib-pfoot[data-under] { box-shadow: 0 -12px 18px -16px color-mix(in oklch, var(--ib-shadow-ink) 40%, transparent); }
+/* The actions on the left (Reply, the reaction, an ended session's two), what is open on the right (the open
+   questions, then the checklist): the right group starts at whichever of the two comes first. Same on a phone. */
+.ib-pfoot > .ib-acts.ib-footrow > .ib-footbtns { flex: 1 1 auto; }
+.ib-footbtns[data-foot-buttons] > [data-open-questions],
+.ib-footbtns[data-foot-buttons]:not(:has(> [data-open-questions])) > [data-steps-button] { margin-inline-start: auto; }
+
+/* ── Context notes (approval "inbox-context-notes", take Line) ──────────────────────────────────────────────────────
+   An agent's words on lines of the diff, drawn through review-editor's `contextNotes` seam (`.context-note-slot`):
+   one row (Show me's Pebble, the writer in words, the first words), opened in place. Shape's paper with a breath of the
+   accent; a stale note goes grey. No comment chrome: no border, no card shadow, no count. */
+.ib-review, .ib-prreview { --ctxn-paper: color-mix(in oklab, var(--shp-paper, color-mix(in oklab, var(--background) 92%, var(--muted))) 95%, var(--primary)); }
+.context-note-slot { margin: 4px 0.25rem; font-family: var(--font-sans); white-space: normal; }
+.ib-ctxn { color: var(--foreground); }
+.ib-ctxn-line { border-radius: 8px; background: var(--ctxn-paper, color-mix(in oklab, var(--muted) 60%, var(--card))); }
+.ib-ctxn-line[data-stale] { background: color-mix(in oklch, var(--muted) 40%, var(--card)); }
+.ib-ctxn-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ib-ctxn-row:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 60%, transparent); outline-offset: 1px; }
+.ib-ctxn-h { flex: none; display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--ib-fs-12, 12px); line-height: 18px; color: var(--muted-foreground); }
+.ib-ctxn-h b { flex: none; color: var(--foreground); font-weight: 600; }
+.ib-ctxn-peb { flex: none; }
+.ib-ctxn-risk-mark { flex: none; color: var(--muted-foreground); }
+.ib-ctxn-risk { font-size: var(--ib-fs-11-5, 11.5px); line-height: 16px; }
+.ib-ctxn-first { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-ctxn-chev { flex: none; color: var(--muted-foreground); transition: transform 0.15s ease-out; }
+.ib-ctxn-line[data-open] .ib-ctxn-chev { transform: rotate(180deg); }
+/* Open: the words after the writer follow on its line ("Claude Code · 12:34 PM"), wrapping as text, with the marks inline. */
+.ib-ctxn-line[data-open] .ib-ctxn-row { padding-block: 5px; }
+.ib-ctxn-line[data-open] .ib-ctxn-h { display: block; flex: 1 1 auto; overflow-wrap: anywhere; }
+.ib-ctxn-line[data-open] .ib-ctxn-h > svg { display: inline-block; vertical-align: -2px; margin-right: 6px; }
+.ib-ctxn-line[data-open] .ib-ctxn-h > .ib-ctxn-risk { display: inline-flex; margin-left: 6px; vertical-align: 1px; }
+.ib-ctxn-h .ib-ctxn-by { display: inline; }
+.ib-ctxn-open { padding: 0 12px 10px 30px; }
+.ib-ctxn-by { display: block; font-size: var(--ib-fs-12, 12px); line-height: 18px; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.ib-ctxn-t { margin: 4px 0 0; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
+[data-stale] .ib-ctxn-t { color: var(--muted-foreground); }
+.ib-ctxn-acts { margin-top: 6px; display: flex; gap: 14px; }
+.ib-ctxn-link { padding: 0; border: 0; background: none; color: var(--primary); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); cursor: pointer; }
+.ib-ctxn-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.ib-ctxn-link:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 60%, transparent); outline-offset: 2px; border-radius: 3px; }
+.ib-ctxn-stale { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--ib-hair); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.4; color: var(--muted-foreground); }
+.ib-ctxn-act { flex: none; }
+/* A risk's places: the PR page's "See the N places" and the diff header's "N places". */
+.ib-ctxn-places { margin-left: 6px; padding: 0; border: 0; background: none; color: var(--primary); font: inherit; font-size: var(--ib-fs-12, 12px); cursor: pointer; white-space: nowrap; }
+.ib-ctxn-places:hover { text-decoration: underline; text-underline-offset: 2px; }
+.ib-ctxn-places:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 60%, transparent); outline-offset: 2px; border-radius: 3px; }
+/* The thread: a `:::note` block's chip and words. */
+.ib-ctxn-msg { margin: 10px 0 14px; }
+.ib-ctxn-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 24px; padding: 0 9px; border: 0; border-radius: 999px; background: color-mix(in oklch, var(--primary) 8%, var(--card)); color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-12, 12px); text-align: left; }
+button.ib-ctxn-chip { cursor: pointer; }
+button.ib-ctxn-chip:hover { color: var(--foreground); }
+button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 60%, transparent); outline-offset: 1px; }
+.ib-ctxn-chip-f { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-11-5, 11.5px); color: var(--foreground); }
+.ib-ctxn-chip-go { color: var(--primary); }
+.ib-ctxn-msg-t { margin-top: 6px; font-size: var(--ib-fs-15, 15px); line-height: 1.6; color: color-mix(in oklch, var(--foreground) 90%, transparent); }
+@media (max-width: 640px) {
+  .ib-ctxn-open { padding-left: 12px; }
+}
+@media (pointer: coarse) {
+  .ib-ctxn-row { min-height: 44px; }
+  .ib-ctxn-chip { min-height: 32px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ib-ctxn-chev { transition: none; }
+}

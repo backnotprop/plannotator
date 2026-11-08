@@ -54,8 +54,8 @@ export interface GuideReaderProps {
   renderOverviewDiagram?: (diagram: GuideOverviewDiagram) => ReactNode | null;
   /** A picture slot when the overview has no diagram (the guide host's `renderOverviewFigure`). Absent: none. */
   renderOverviewFigure?: () => ReactNode | null;
-  /** Paint these lines (new side) and bring them into view; a new token moves again. */
-  highlight?: { path: string; start: number; end: number; token: number } | null;
+  /** Paint these lines (new side; `side: 'old'`: removed lines' numbers) and bring them into view; a new token moves again. */
+  highlight?: { path: string; start: number; end: number; token: number; side?: 'old' } | null;
   /** Under the host's own title (the PR review): no heading block of the reader's own, the host's page margins. */
   bare?: boolean;
   /** Bare: Global comment and Split | Unified in this element of the host's (the PR review's strip), not above the files. */
@@ -83,6 +83,21 @@ export interface GuideReaderProps {
   renderHeadActions?: () => ReactNode | null;
   /** "Open in" on each file's header (a review while Code review is on). Absent: none, as before. */
   fileOpenIn?: (path: string) => ReactNode;
+  /**
+   * Context notes (approval "inbox-context-notes"): agents' words on lines, drawn under their last line by
+   * `renderContextNote` through review-editor's `contextNotes` seam, never as comments. Absent: nothing changes.
+   */
+  contextNotes?: readonly GuideContextNote[];
+  renderContextNote?: (id: string) => ReactNode;
+}
+
+/** Where a context note sits (review-editor's `ContextNoteAnchor`, as the window's strict typecheck sees it). */
+export interface GuideContextNote {
+  id: string;
+  filePath: string;
+  side: 'old' | 'new';
+  lineStart: number;
+  lineEnd: number;
 }
 
 /** Selected lines, as a selection action receives them (review-editor's `DiffSelection`). */

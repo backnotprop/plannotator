@@ -7,7 +7,7 @@
 
 import { inboxAttachmentKindLabel, type InboxAttachmentState, type InboxMessageWire } from '@plannotator/core/inbox-types';
 import { threadArtifacts, type Artifact } from './artifacts';
-import { hasCommandModifier, inOverlay, isComposingKey, isEditableTarget, isRepeatKey, singleKeysLive } from './shortcuts/guards';
+import { ANNOTATOR_STAGE, hasCommandModifier, inOverlay, isComposingKey, isEditableTarget, isRepeatKey, singleKeysLive } from './shortcuts/guards';
 
 /** One file in the thread's sequence, with the message it came in. */
 export interface AttachmentStep {
@@ -126,7 +126,7 @@ export function stepKeyIntent(event: KeyboardEvent, context: StepKeyContext): 1 
   if (isEditableTarget(target)) return null;
   // A dialog or popover over the window (the image annotator, a composer) keeps its keys.
   if (inOverlay(target)) return null;
-  if (typeof document !== 'undefined' && document.querySelector('[data-pn-image-annotator-stage]')) return null;
+  if (typeof document !== 'undefined' && document.querySelector(ANNOTATOR_STAGE)) return null;
   if (!context.full) {
     const pane = context.pane;
     const inside = !!pane && !!target && (pane === target || pane.contains(target));

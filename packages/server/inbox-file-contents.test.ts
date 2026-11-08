@@ -46,6 +46,8 @@ const KEY = "github.com/northwind/billing-svc#412";
 const HEAD = "a".repeat(40);
 const BASE = "b".repeat(40);
 const REPO = { host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" };
+/** The diff's read of the PR as it is now: its head and its description, one JSON line (inbox-pulls.ts `pullNow`). */
+const PULL_NOW_JQ = "{sha: .head.sha, body: .body} | tojson";
 
 const ghPull = (fields: Record<string, unknown> = {}) => ({
   number: 412,
@@ -112,6 +114,7 @@ function scripted(pull: Record<string, unknown> = ghPull()): Scripted {
       if (f.failWith) return { stdout: "", stderr: f.failWith.stderr, exitCode: 1 };
       if (args.includes(".merge_base_commit.sha")) return { stdout: `${f.mergeBase}\n`, stderr: "", exitCode: 0 };
       if (args.includes(".head.sha")) return { stdout: `${f.headNow}\n`, stderr: "", exitCode: 0 };
+      if (args.includes(PULL_NOW_JQ)) return { stdout: `${JSON.stringify({ sha: f.headNow, body: "" })}\n`, stderr: "", exitCode: 0 };
       if (endpoint.endsWith("/pulls/412")) return { stdout: f.patch, stderr: "", exitCode: 0 };
       const file = f.files.get(endpoint);
       return file !== undefined ? { stdout: file, stderr: "", exitCode: 0 } : { stdout: "", stderr: "gh: Not Found (HTTP 404)", exitCode: 1 };
@@ -224,7 +227,10 @@ describe("a PR's file", () => {
     let heads = 0;
     // Before and after the first read: two different heads. Before and after the next: the same one.
     const sequence = ["c", "e", "d", "d", "f", "g"];
-    const run: RefRunner = (cli, args) => (args.includes(".head.sha") ? Promise.resolve({ stdout: `${sequence[heads++]!.repeat(40)}\n`, stderr: "", exitCode: 0 }) : f.run(cli, args));
+    const run: RefRunner = (cli, args) =>
+      args.includes(PULL_NOW_JQ)
+        ? Promise.resolve({ stdout: `${JSON.stringify({ sha: sequence[heads++]!.repeat(40), body: "" })}\n`, stderr: "", exitCode: 0 })
+        : f.run(cli, args);
     let clock = 1_000_000;
     const pulls = createInboxPulls({ run, gitRead: async () => null, now: () => clock });
     await pulls.list([REPO]);

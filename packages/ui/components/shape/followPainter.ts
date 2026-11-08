@@ -14,6 +14,7 @@
  */
 import type { ShapeExample } from '@plannotator/core/shape';
 import type { FollowDir } from './followState';
+import { outlineOf } from './litLine';
 
 /** One ease-out for everything the card and the board do together; an in-out for the dot that travels. */
 export const FOLLOW_EASE = 'cubic-bezier(.22, 1, .36, 1)';
@@ -35,6 +36,7 @@ export const FOLLOW_DRAWN_CSS = `
 .board.shp-ex-on text[data-edge]:is([data-ex-s="on"], [data-ex-s="now"]) { fill: var(--mark); }
 .board.shp-ex-on [data-edge][data-mark]:is([data-ex-s="on"], [data-ex-s="now"]) { color: var(--ink); }
 .shp-ex-lit { fill: none !important; stroke: var(--mark) !important; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: none !important; opacity: 0; transition: opacity var(--ex-dur, .22s) ease var(--ex-d, 0ms); pointer-events: none; animation: none !important; }
+.shp-ex-lit.shp-ex-head { fill: var(--mark) !important; stroke: none !important; }
 .shp-ex-lit:is([data-s="on"], [data-s="now"]) { opacity: 1; }
 .shp-ex-layer { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 6; pointer-events: none; --ex-inv: 1; }
 .shp-ex-ring { position: absolute; box-shadow: 0 0 0 2px var(--mark); opacity: 0; transition: opacity .22s ease var(--ex-d, 0ms); pointer-events: none; }
@@ -43,6 +45,10 @@ export const FOLLOW_DRAWN_CSS = `
 .shp-ex-ring .halo { box-shadow: 0 0 0 2px var(--mark), 0 0 0 7px var(--mark-soft); opacity: 0; transition: opacity .26s ease var(--ex-d, 0ms); }
 .shp-ex-ring[data-s="now"] .halo { opacity: 1; }
 .shp-ex-ring .pulse { box-shadow: 0 0 0 2px var(--mark); opacity: 0; }
+.shp-ex-ring.own { box-shadow: none; }
+.shp-ex-ring.own .halo { box-shadow: 0 0 0 6px var(--mark-soft); }
+.board.shp-ex-on [data-ex-own] { transition: stroke .22s ease var(--ex-d, 0ms), border-color .22s ease var(--ex-d, 0ms); }
+.board.shp-ex-on [data-ex-own]:is([data-ex-s="on"], [data-ex-s="now"]) { stroke: var(--mark) !important; border-color: var(--mark) !important; }
 .shp-ex-tag { position: absolute; pointer-events: none; appearance: none; border: 0; margin: 0; cursor: pointer; transform-origin: 100% 50%;
   display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px 0 4px; border-radius: 8px;
   background: var(--raise); color: var(--ink); white-space: nowrap;
@@ -77,11 +83,68 @@ const GEOMETRY = 'path, line, polyline';
 const EDGE = 8;
 /** How far the drawing's frame shows past itself (ShapeDrawn's `clip-path: inset(-24px)`). */
 const FRAME_BLEED = 24;
-/** What a tag keeps from words it steps aside from. */
+/** What a tag keeps from words, parts and other tags (px on screen). */
 const CLEAR = 4;
 
-type Box = { left: number; top: number; right: number; bottom: number };
+export type Box = { left: number; top: number; right: number; bottom: number };
 const meets = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+const grow = (b: Box, n: number): Box => ({ left: b.left - n, top: b.top - n, right: b.right + n, bottom: b.bottom + n });
+const moved = (b: Box, dx: number, dy: number): Box => ({ left: b.left + dx, top: b.top + dy, right: b.right + dx, bottom: b.bottom + dy });
+
+/** The moves a tag tries, nearest first: a few px up or down, or a longer way along its row. */
+const NEAR: readonly { dx: number; dy: number }[] = (() => {
+  const out: { dx: number; dy: number }[] = [];
+  for (let dy = -60; dy <= 60; dy += 6) for (let dx = -240; dx <= 240; dx += 12) out.push({ dx, dy });
+  return out.sort((a, b) => Math.abs(a.dx) + 2.5 * Math.abs(a.dy) - (Math.abs(b.dx) + 2.5 * Math.abs(b.dy)));
+})();
+
+/**
+ * Whether a tag still reads as its part's or arrow's: within 40 px of it, and over a part's column by
+ * 40 px (half a narrow part), or within 40 px of an arrow's span.
+ */
+export function besideOf(a: Box, kind: 'mark' | 'edge'): (q: Box) => boolean {
+  return (q) => {
+    if (q.bottom < a.top - 40 || q.top > a.bottom + 40) return false;
+    if (kind === 'edge') return q.right >= a.left - 40 && q.left <= a.right + 40;
+    return Math.min(q.right, a.right) - Math.max(q.left, a.left) >= Math.min(40, (a.right - a.left) / 2);
+  };
+}
+
+/**
+ * Where a tag goes, near where it was put (`spots[0]`; `spots[1]` is its part's other edge): a spot in the
+ * view (`fits`) that still reads as its part's or arrow's (`near`), covering none of the drawing's own words
+ * (`words`) where any spot can, then as little of `hard` as it can (the other parts, the tags already placed:
+ * none, where there is room), then crossing as few lines as it can (`soft`: points along the drawing's lines),
+ * then the nearest. On a crowded phone a number may meet another number or a part, never the drawing's words.
+ * Null: no such spot within reach (the tag stays where it was put).
+ */
+export function bestSpot(spots: readonly Box[], hard: readonly Box[], soft: readonly Box[], fits: (r: Box) => boolean, near: (r: Box) => boolean, words: readonly Box[] = []): { spot: number; dx: number; dy: number } | null {
+  let best: { spot: number; dx: number; dy: number } | null = null;
+  let bestCost = Infinity;
+  for (const [spot, t] of spots.entries()) {
+    const reach = { left: t.left - 260, right: t.right + 260, top: t.top - 70, bottom: t.bottom + 70 };
+    const h = hard.filter((w) => meets(w, reach));
+    const s = soft.filter((w) => meets(w, reach));
+    const wd = words.filter((w) => meets(w, reach));
+    const count = (r: Box, list: readonly Box[]) => {
+      let n = 0;
+      for (const w of list) if (meets(r, w)) n++;
+      return n;
+    };
+    for (const m of NEAR) {
+      const base = (Math.abs(m.dx) + 2.5 * Math.abs(m.dy)) / 4 + spot * 8;
+      if (base >= bestCost) break;
+      const r = moved(t, m.dx, m.dy);
+      if (!fits(r) || !near(r)) continue;
+      const cost = base + 100_000 * count(r, wd) + 1000 * count(r, h) + 30 * count(r, s);
+      if (cost < bestCost) {
+        best = { spot, dx: m.dx, dy: m.dy };
+        bestCost = cost;
+      }
+    }
+  }
+  return best;
+}
 
 /**
  * A bug beside the number: this number steps the example (the debugger). Bug02 from @hugeicons/core-free-icons 4.4.0
@@ -106,6 +169,15 @@ export function scaleOf(board: HTMLElement) {
   return { b, k: board.offsetWidth && b.width ? b.width / board.offsetWidth : 1 };
 }
 
+/** An element's corner radius in the drawing's coordinates: an HTML box's border-radius, an SVG rect's rx on screen. */
+function radiusOf(el: Element, k: number): string {
+  if (!(el instanceof SVGElement)) return getComputedStyle(el).borderRadius;
+  if (el.localName !== 'rect') return '';
+  const rx = parseFloat(getComputedStyle(el).getPropertyValue('rx')) || parseFloat(el.getAttribute('rx') ?? '') || 0;
+  const m = (el as SVGGraphicsElement).getScreenCTM?.();
+  return rx && m ? `${(rx * Math.hypot(m.a, m.b)) / k}px` : '';
+}
+
 const byAttr = (name: string, value: string) => `[${name}="${value.replace(/["\\]/g, '\\$&')}"]`;
 
 type StepState = 'on' | 'now' | 'later';
@@ -120,7 +192,8 @@ export class FollowPainter {
   private touched: Element[] = [];
   private dimmed: Element[] = [];
   private lit: { i: number; el: SVGElement }[] = [];
-  private rings = new Map<number, { el: HTMLElement; mark: HTMLElement }>();
+  /** `own`: the part's own border or stroke, which takes the mark colour when lit in place of the ring's line (one border, not two). */
+  private rings = new Map<number, { el: HTMLElement; mark: HTMLElement; own: Element | null }>();
   private tags: { tag: HTMLButtonElement; i: number; el: Element; kind: 'mark' | 'edge' }[] = [];
   private ro: ResizeObserver | null = null;
   private moving: Animation[] = [];
@@ -154,7 +227,8 @@ export class FollowPainter {
         for (const p of lines) {
           const lit = p.cloneNode(false) as SVGElement;
           for (const a of ['class', 'style', 'data-step', 'data-mark', 'data-edge', 'data-ex-i', 'id', 'marker-start', 'marker-mid', 'marker-end']) lit.removeAttribute(a);
-          lit.setAttribute('class', 'shp-ex-lit');
+          // A filled arrowhead (the kit's `.shp-head`) lights filled, not as an outline.
+          lit.setAttribute('class', p.classList.contains('shp-head') ? 'shp-ex-lit shp-ex-head' : 'shp-ex-lit');
           p.after(lit);
           this.lit.push({ i, el: lit });
         }
@@ -163,8 +237,13 @@ export class FollowPainter {
         const ring = doc.createElement('div');
         ring.className = 'shp-ex-ring';
         ring.innerHTML = '<i class="halo"></i><i class="pulse"></i>';
+        const own = outlineOf(mark);
+        if (own) {
+          ring.classList.add('own');
+          own.setAttribute('data-ex-own', '');
+        }
         this.layer.appendChild(ring);
-        this.rings.set(i, { el: ring, mark });
+        this.rings.set(i, { el: ring, mark, own });
       }
       const line = edges.find((e) => e instanceof SVGElement) ?? edges[0];
       const anchor: { el: Element; kind: 'mark' | 'edge' } | null = mark ? { el: mark, kind: 'mark' } : line ? { el: line, kind: 'edge' } : null;
@@ -216,27 +295,41 @@ export class FollowPainter {
     return step === null ? 'on' : i < step ? 'on' : i === step ? 'now' : 'later';
   }
 
-  /** Puts the rings and the values on their parts, in the drawing's coordinates, counter-scaled to read the same. */
-  place() {
+  /**
+   * Puts the rings and the values on their parts, in the drawing's coordinates, counter-scaled to read the same.
+   * `quick`: while the drawing only scales (the card's room animation, every frame), just the counter-scale:
+   * everything sits in the drawing's own coordinates, so nothing else moves until a full place when it lands.
+   */
+  place(options: { quick?: boolean } = {}) {
     const { b, k } = scaleOf(this.board);
     if (!k) return;
+    this.layer.style.setProperty('--ex-inv', String(Math.min(1.6, 1 / k)));
+    if (options.quick) return;
     // What shows of the drawing: its frame, which clips 24 px outside itself, within the view it scrolls in.
     const host = (this.board.getRootNode() as ShadowRoot).host as HTMLElement | undefined;
     const box = host?.closest?.('.shp-view');
     const frame = host?.closest?.('.shp-drawn');
     const v = box && box.clientWidth ? box.getBoundingClientRect() : null;
     const f = frame ? frame.getBoundingClientRect() : null;
+    // A panning drawing (a wide one on a phone) scrolls inside its frame, and the drawing's own box clips:
+    // each tag stays inside that box, the whole drawing, not the slice that shows now, so it pans with its part.
+    const fitBox = frame?.classList.contains('pan') ? frame.querySelector('.shp-drawn-fit')?.getBoundingClientRect() : null;
     const view = v
-      ? { left: Math.max(v.left, f ? f.left - FRAME_BLEED : -Infinity), right: Math.min(v.right, f ? f.right + FRAME_BLEED : Infinity), top: f ? f.top - FRAME_BLEED : -Infinity }
+      ? fitBox
+        ? { left: fitBox.left, right: fitBox.right, top: fitBox.top, bottom: fitBox.bottom }
+        : { left: Math.max(v.left, f ? f.left - FRAME_BLEED : -Infinity), right: Math.min(v.right, f ? f.right + FRAME_BLEED : Infinity), top: f ? f.top - FRAME_BLEED : -Infinity, bottom: Infinity }
       : null;
-    const words = view ? this.wordsOf() : [];
+    const words = view ? this.wordsOf().map((w) => grow(w, 3)) : [];
+    const parts = view ? this.partsOf() : [];
+    const lines = view ? this.linesOf() : [];
     const placed: Box[] = [];
-    this.layer.style.setProperty('--ex-inv', String(Math.min(1.6, 1 / k)));
     const x = (v: number) => (v - b.left) / k;
     const y = (v: number) => (v - b.top) / k;
-    for (const { el, mark } of this.rings.values()) {
-      const r = mark.getBoundingClientRect();
-      const radius = typeof getComputedStyle === 'function' ? getComputedStyle(mark).borderRadius : '';
+    for (const { el, mark, own } of this.rings.values()) {
+      // A part with its own line: the halo and the pulse follow that line's box and corners.
+      const at = own ?? mark;
+      const r = at.getBoundingClientRect();
+      const radius = typeof getComputedStyle === 'function' ? radiusOf(at, k) : '';
       Object.assign(el.style, { left: `${x(r.left)}px`, top: `${y(r.top)}px`, width: `${r.width / k}px`, height: `${r.height / k}px`, borderRadius: radius });
     }
     for (const { tag, i, el, kind } of this.tags) {
@@ -268,9 +361,14 @@ export class FollowPainter {
         const t = tag.getBoundingClientRect();
         const shift = t.left < view.left + EDGE ? view.left + EDGE - t.left : t.right > view.right - EDGE ? Math.max(view.left + EDGE - t.left, view.right - EDGE - t.right) : 0;
         if (shift) tag.style.left = `${parseFloat(tag.style.left) + shift / k}px`;
-        // Nor does it cover the drawing's own words (a frame's label) or a tag already placed: it steps right, up, or left of them.
-        this.clear(tag, k, view, [...words, ...placed], flip);
-        placed.push(tag.getBoundingClientRect());
+        // Nor does it cover the drawing's own words (an arrow's label), another part or a tag already placed.
+        // Its own part: on an edge (the approved look), never across the middle of it.
+        const half = tag.getBoundingClientRect().height / 2 + 0.5;
+        const own = kind === 'mark' && r.height > 2 * half ? [{ left: r.left, right: r.right, top: r.top + half, bottom: r.bottom - half }] : [];
+        const hard = [...parts.filter((p) => !p.el.contains(el)).map((p) => p.box), ...own, ...placed];
+        const soft = lines.filter((l) => !(kind === 'mark' && el.contains(l.el))).flatMap((l) => l.boxes);
+        this.clear(tag, k, view, words, hard, soft, besideOf(r, kind), flip);
+        placed.push(grow(tag.getBoundingClientRect(), CLEAR));
       }
     }
   }
@@ -290,31 +388,72 @@ export class FollowPainter {
     return out;
   }
 
-  /** Moves a tag off what it covers: right of it, to its part's other edge, above it, or left of it; else leaves it. */
-  private clear(tag: HTMLElement, k: number, view: { left: number; right: number; top: number }, taken: Box[], flip?: () => void) {
-    const t = tag.getBoundingClientRect();
-    const on = taken.filter((w) => meets(t, w));
-    if (!on.length) return;
+  /** The drawing's parts (`data-mark`s holding no other), on screen. A part as big as a quarter of the drawing is a zone, not a part. */
+  private partsOf(): { el: Element; box: Box }[] {
+    const b = this.board.getBoundingClientRect();
+    const zone = (b.width * b.height) / 4;
+    const out: { el: Element; box: Box }[] = [];
+    for (const el of this.board.querySelectorAll('[data-mark]')) {
+      if (this.layer.contains(el) || el.querySelector('[data-mark]')) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width && r.height && r.width * r.height < zone) out.push({ el, box: grow(r, 2) });
+    }
+    return out;
+  }
+
+  /** The drawing's lines (arrows, rules), as small boxes along each one, on screen. */
+  private linesOf(): { el: Element; boxes: Box[] }[] {
+    const out: { el: Element; boxes: Box[] }[] = [];
+    for (const el of this.board.querySelectorAll<SVGGeometryElement>(GEOMETRY)) {
+      if (this.layer.contains(el) || el.classList.contains('shp-ex-lit') || el.closest('defs, marker, symbol, clipPath, mask, pattern')) continue;
+      if (typeof el.getTotalLength !== 'function') continue;
+      try {
+        const len = el.getTotalLength();
+        const m = el.getScreenCTM?.();
+        if (!m || !(len > 0)) continue;
+        const n = Math.max(2, Math.min(150, Math.ceil((len * Math.hypot(m.a, m.b)) / 6)));
+        const boxes: Box[] = [];
+        for (let i = 0; i <= n; i++) {
+          const p = el.getPointAtLength((len * i) / n);
+          const s = new DOMPoint(p.x, p.y).matrixTransform(m);
+          boxes.push({ left: s.x - 2, top: s.y - 2, right: s.x + 2, bottom: s.y + 2 });
+        }
+        out.push({ el, boxes });
+      } catch {
+        // No geometry to read here.
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Moves a tag that covers something, or is cut off by the edge of what shows, to the nearest free spot
+   * beside its part (`bestSpot`): off the drawing's words, the other parts and the tags already placed,
+   * crossing as few lines as it can. Where nothing beside it is free (a crowded phone), the spot that
+   * covers least.
+   */
+  private clear(tag: HTMLElement, k: number, view: { left: number; right: number; top: number; bottom: number }, words: Box[], hard: Box[], soft: Box[], near: (r: Box) => boolean, flip?: () => void) {
+    const t = tag.getBoundingClientRect() as Box;
+    // Half a pixel's slack: a tag the edge just set at EDGE measures a hair inside it.
+    const fits = (r: Box) => r.left > view.left + EDGE - 0.5 && r.right < view.right - EDGE + 0.5 && r.top >= view.top && r.bottom <= view.bottom;
+    if (fits(t) && !words.some((w) => meets(t, w)) && !hard.some((w) => meets(t, w)) && !soft.some((w) => meets(t, w))) return;
     const { left, top } = tag.style;
     const cls = tag.className;
-    const by = (dx: number, dy: number) => () => {
-      tag.style.left = `${parseFloat(left) + dx / k}px`;
-      tag.style.top = `${parseFloat(top) + dy / k}px`;
-    };
-    const tries = [
-      by(Math.max(...on.map((w) => w.right)) + CLEAR - t.left, 0),
-      ...(flip ? [flip] : []),
-      by(0, Math.min(...on.map((w) => w.top)) - CLEAR - t.bottom),
-      by(Math.min(...on.map((w) => w.left)) - CLEAR - t.right, 0),
-    ];
-    for (const go of tries) {
-      go();
-      const r = tag.getBoundingClientRect();
-      // Half a pixel's slack: a tag the edge just set at EDGE measures a hair inside it.
-      if (r.left > view.left + EDGE - 0.5 && r.right < view.right - EDGE + 0.5 && r.top >= view.top && !taken.some((w) => meets(r, w))) return;
+    const restore = () => {
       Object.assign(tag.style, { left, top });
       tag.className = cls;
+    };
+    const spots: Box[] = [t];
+    if (flip) {
+      flip();
+      spots.push(tag.getBoundingClientRect());
+      restore();
     }
+    const go = bestSpot(spots, hard, soft, fits, near, words);
+    if (!go) return;
+    if (go.spot === 1) flip!();
+    tag.style.left = `${parseFloat(tag.style.left) + go.dx / k}px`;
+    tag.style.top = `${parseFloat(tag.style.top) + go.dy / k}px`;
   }
 
   /** The step on now (null: the whole path). Forward, a dot runs to it first and its light comes up as the dot lands. */
@@ -322,9 +461,10 @@ export class FollowPainter {
     this.stopMoving();
     const arrive = dir === 'fwd' && step !== null && step > 0 && !reduce ? this.travel(step - 1, step) : 0;
     const delay = (i: number) => (arrive && i === step ? Math.round(arrive * 0.82) : 0);
-    for (const [i, { el }] of this.rings) {
+    for (const [i, { el, own }] of this.rings) {
       el.style.setProperty('--ex-d', `${delay(i)}ms`);
       el.setAttribute('data-s', this.stateOf(i, step));
+      own?.setAttribute('data-ex-s', this.stateOf(i, step));
     }
     for (const { tag, i } of this.tags) {
       const state = this.stateOf(i, step);
@@ -457,6 +597,10 @@ export class FollowPainter {
     this.layer.remove();
     this.board.classList.remove('shp-ex-on');
     for (const { el } of this.lit) el.remove();
+    for (const { own } of this.rings.values()) {
+      own?.removeAttribute('data-ex-own');
+      own?.removeAttribute('data-ex-s');
+    }
     for (const el of this.touched) {
       el.removeAttribute('data-ex-s');
       el.removeAttribute('data-ex-i');

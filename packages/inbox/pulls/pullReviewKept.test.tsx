@@ -192,6 +192,7 @@ beforeEach(() => {
       if (forge && url.pathname.endsWith('/pulls/review')) return forgeTakes(body);
       return Response.json({ ok: true, prUrl: '', submission: { status: 'complete' } });
     }
+    if (url.pathname.endsWith('/pulls/details')) return Response.json({ serverSession: 's', key: url.searchParams.get('key'), description: null, labels: [], reviewers: [], checks: [], comments: [] });
     if (!url.pathname.endsWith('/pulls/diff')) return Response.json({});
     diffReads += 1;
     const scope = url.searchParams.get('scope')!;

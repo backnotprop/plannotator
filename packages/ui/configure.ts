@@ -19,12 +19,14 @@ import type { ServerSyncFn } from './config/configStore';
 import type { ExternalAnnotationEvent, VaultNode } from './types';
 import { setComponentTooltips } from './components/HostTitle';
 import { setRichCopyEnabled } from './utils/richCopyPolicy';
+import { setCommentCardEnabled, setVisibleCommentDrafts, type CommentCardLayout } from './utils/commentCardPolicy';
 import { setTouchSelectionToolbar } from './utils/touchToolbarPlacement';
 import { setDigitHexIssueRefs } from './components/InlineMarkdown';
 import { setRefCardTransport, type RefCardTransport } from './utils/refCard';
 
 // One-stop type barrel: every seam contract a host implements is importable
 // from this module, next to configurePlannotatorUI itself.
+export type { CommentCardLayout } from './utils/commentCardPolicy';
 export type {
   ImageSrcResolver,
   DocPreviewFetcher,
@@ -148,6 +150,24 @@ export interface PlannotatorUIConfig {
    */
   richCopy?: boolean;
   /**
+   * Draw `CommentPopover` as the small comment card (no header line, no
+   * blurred page behind, a chevron that closes and keeps the words, a solid
+   * "Comment" button at the row's right end). Import
+   * `@plannotator/ui/comment-card.css` with it. An object turns it on and
+   * names, as CSS selectors, the host's pane (where a docked card spans) and
+   * the things at its foot the card never covers. Default: false, the popover
+   * exactly as before. The Plannotator Inbox turns it on
+   * (`utils/commentCardPolicy`).
+   */
+  commentCard?: boolean | CommentCardLayout;
+  /**
+   * Keep a closed text-selection comment that holds words visible: a pale
+   * highlight and a floating "Draft" badge under the words' end, a press on
+   * either reopening the box (Viewer). Default: false, a closed box leaves no
+   * mark, as before. The Plannotator Inbox passes true.
+   */
+  visibleCommentDrafts?: boolean;
+  /**
    * On a touch screen (main pointer a finger), put the selection toolbar
    * (`AnnotationToolbar`) below the selection, where iOS Safari's own edit
    * menu does not go, keep it inside the visible screen with an 8px margin
@@ -191,6 +211,8 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.componentTooltips !== undefined) setComponentTooltips(config.componentTooltips);
   if (config.digitHexIssueRefs !== undefined) setDigitHexIssueRefs(config.digitHexIssueRefs);
   if (config.richCopy !== undefined) setRichCopyEnabled(config.richCopy);
+  if (config.commentCard !== undefined) setCommentCardEnabled(config.commentCard);
+  if (config.visibleCommentDrafts !== undefined) setVisibleCommentDrafts(config.visibleCommentDrafts);
   if (config.touchSelectionToolbar !== undefined) setTouchSelectionToolbar(config.touchSelectionToolbar);
   if (config.refCardTransport) setRefCardTransport(config.refCardTransport);
   // Re-hydrate AFTER storageBackend is installed (load-bearing order — gated last).

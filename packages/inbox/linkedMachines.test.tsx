@@ -230,6 +230,33 @@ function sidebarProps(over: Partial<SidebarProps> = {}): SidebarProps {
   } as SidebarProps;
 }
 
+test.skipIf(!hasDom)('the word beside a machine that is behind shows only on a page that offers updates: a tailnet guest gets none, in the sidebar or on its Settings row', () => {
+  const update = { phase: 'behind' as const, target: '0.28.49', from: '0.28.39', can_update: true, self_update: true };
+  const list = [machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'online', { update })];
+  const model = machinesModel(list);
+  const fresh = () => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = null;
+    host = null;
+  };
+  mount(<Sidebar {...sidebarProps({ machines: model, onMachineUpdate: noop })} />);
+  expect(host!.querySelector('.ib-mthing')?.textContent).toBe('Update');
+  fresh();
+  mount(<Sidebar {...sidebarProps({ machines: model })} />);
+  expect(host!.querySelector('[data-machine]')).not.toBeNull();
+  expect(host!.querySelector('.ib-mthing')).toBeNull();
+  expect(host!.querySelector('[data-machine-notice]')).toBeNull();
+  fresh();
+  mount(<MachinesSection machines={list} via="local" onChanged={noop} onMachineUpdate={noop} />);
+  expect(host!.textContent).toContain('0.28.49 is out');
+  fresh();
+  mount(<MachinesSection machines={list} via="tailnet" onChanged={noop} />);
+  expect(host!.textContent).toContain('MacBook');
+  expect(host!.textContent).not.toContain('0.28.49');
+  expect(host!.textContent).not.toContain('is out');
+});
+
 test.skipIf(!hasDom)('the sidebar lists Machines before Projects, this machine first; a machine is a filter, marked while shown; an asleep one reads quiet', () => {
   const picked: string[] = [];
   const model = machinesModel([machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'offline')]);
