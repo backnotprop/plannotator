@@ -531,8 +531,18 @@ test('a phone at 390 px: touch-sized, on screen, not on the lines, at the bottom
     expect(box.top).toBeGreaterThan(g.bottom);
     expect(box.top - g.bottom).toBeLessThan(12);
     await pictures(page, 'phone', box);
-    await page.touchscreen.tap(195, 8);
+    // A tap on nothing: the page's margin beside the chapter's card. Not the top bar: on a phone its row is all
+    // buttons (Comments there opens the sheet, which hides the review under it).
+    const nothing = { x: 4, y: 200 };
+    expect(
+      await page.evaluate(({ x, y }) => {
+        const at = document.elementFromPoint(x, y);
+        return !at || at.closest('button, a, input, label, [role="button"], [data-guide-file-shell], [data-guide-section], .ib-vhead') ? `a tap there reaches ${at?.outerHTML.slice(0, 120)}` : 'nothing';
+      }, nothing),
+    ).toBe('nothing');
+    await page.touchscreen.tap(nothing.x, nothing.y);
     await expect(bar(page)).toHaveCount(0);
+    await expect(page.locator('[data-guide-comments-sheet]')).toHaveAttribute('aria-expanded', 'false');
 
     await line(page, LONG, 25).evaluate((el) => el.scrollIntoView({ block: 'end' }));
     await page.waitForTimeout(300);
