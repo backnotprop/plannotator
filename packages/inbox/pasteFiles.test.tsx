@@ -449,7 +449,9 @@ test.skipIf(!hasDom)('a file pasted while a Send is in flight stays in the box f
     const model = JSON.parse((await loopback(`/api/inbox/threads/${world.waiting}`)).text) as { thread: { messages: InboxMessage[] } };
     expect(model.thread.messages.at(-1)!.attachments!.map((a) => a.name)).toEqual([first]);
 
-    // The next Send carries it.
+    // The next Send carries it. Send stays off until the first Send has read the thread and the files again (its tile
+    // goes before that), as the person sees it: a click before then does nothing, so wait for Send to come back.
+    await until(() => !button(el, 'Send').disabled, 'Send back after the first Send');
     act(() => button(el, 'Send').click());
     await until(() => el.querySelector('.ib-rbox') === null, 'the second Send');
     const again = JSON.parse((await loopback(`/api/inbox/threads/${world.waiting}`)).text) as { thread: { messages: InboxMessage[] } };
@@ -490,6 +492,8 @@ test.skipIf(!hasDom)('a Send the Inbox never got, then a file pasted and the sam
   // The person pastes the screenshot they meant to send, and sends the same words again.
   expect(paste(text, { files: [image()] })).toBe(true);
   await until(() => tiles(replyBox(el)!)[0]?.getAttribute('data-compose-file') === 'done', 'the upload');
+  // The error shows before the failed Send has finished looking for its reply; Send is off until then.
+  await until(() => !button(el, 'Send').disabled, 'Send back after the failed Send');
   act(() => button(el, 'Send').click());
   await until(() => el.querySelector('.ib-rbox') === null, 'the Send');
   const reply = posted.filter((p) => p.path.endsWith('/reply')).at(-1)!;
