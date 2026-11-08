@@ -220,7 +220,8 @@ export function FolderMenu({
   );
   const other = otherId === undefined ? null : (all.find((group) => group.machine === otherId) ?? null);
   // A path in the filter (B4): the projects under it, and each machine's "Another folder…" opens there.
-  const typedPath = looksLikePath(query) ? cleanPastedPath(query) : null;
+  // The paste was cleaned once already (its escapes read): what the filter holds keeps its backslashes now.
+  const typedPath = looksLikePath(query) ? cleanPastedPath(query, null, { unescape: false }) : null;
   // A git URL in the filter (C1-C17): each machine's clone row. A bare `acme/billing-api` stays a project search (C3).
   const git = onClone && typedPath === null ? parseInboxGitUrl(query) : null;
   const repo = git?.kind === 'repo' ? git : null;
