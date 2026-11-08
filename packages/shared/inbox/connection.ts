@@ -1201,6 +1201,38 @@ export function parseInboxAskWaits(text: string): boolean {
 }
 
 /**
+ * The poll field (`true`) by which a Claude Code connection says it reloads
+ * Plannotator by itself (`/reload-plugins`, owner approval "cc-auto-reload")
+ * when a poll answer carries INBOX_RELOAD_FIELD. An older connection never
+ * sends it, so it is never told.
+ */
+export const INBOX_AUTO_RELOAD_POLL_FIELD = 'auto_reload'
+
+/**
+ * Set on a poll answer to a connection that sent INBOX_AUTO_RELOAD_POLL_FIELD
+ * while the Inbox judges its session outdated and a reload brings it up to
+ * date (`claudeSessionOutdated`, fix `restart`): `{ installed }`, the version
+ * a reload loads (null when the registry names none). A state, said on every
+ * answer: an answer without it says no reload is needed.
+ */
+export const INBOX_RELOAD_FIELD = 'reload'
+
+export interface InboxReloadOffer {
+  installed: string | null
+}
+
+export function parseInboxReloadOffer(text: string): InboxReloadOffer | null {
+  try {
+    const value = (JSON.parse(text) as Record<string, unknown>)[INBOX_RELOAD_FIELD]
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const installed = (value as Record<string, unknown>).installed
+    return { installed: typeof installed === 'string' && installed.trim() && installed.length <= 64 ? installed.trim() : null }
+  } catch {
+    return null
+  }
+}
+
+/**
  * The turn a connection submits when a reply it put into a running turn
  * arrived as that turn ended, so the model never read it: the reply is in
  * the conversation already, so this only points at it.
