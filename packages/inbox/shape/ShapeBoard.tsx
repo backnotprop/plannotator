@@ -2,8 +2,8 @@
  * The board, as the Inbox opens it (lazy: `#shape-board`). ShapeSurface
  * without its Code view (approval "shape-whats-changed": the guided review is
  * another part of the review, so the board does not embed it). With a review,
- * What's changed and the board's `file:line` links open the review's own
- * guided review (`review`); without one, a `file:line` opens the file viewer.
+ * a place in code on the board (a drawn part's `data-code`) opens the review's
+ * own guided review (`review`); without one, the file viewer.
  * The shared Code view (`ShapeCode`, `@plannotator/guide-viewer/ShapeCodeGuide`)
  * stays in its packages for other hosts. Checked under tsconfig.guide.json;
  * the window sees its shape in board-module.d.ts.

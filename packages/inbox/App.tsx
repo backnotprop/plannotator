@@ -391,8 +391,8 @@ interface Route {
   /** The message whose guided review is open over the window (`#thread=…&guide=msg_…`). */
   guide?: string | null;
   /**
-   * Where that review opens (a Shape board's link, approval "shape-whats-changed"): `&code=path:line`, `&step=N`
-   * or `&files`. Dropped from the address once the review is there.
+   * Where that review opens (a Shape board's place in code, such as a drawn part's `data-code`): `&code=path:line`,
+   * `&step=N` or `&files`. Dropped from the address once the review is there.
    */
   guideAt?: ShapeReviewAt | null;
   /**

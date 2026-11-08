@@ -39,7 +39,7 @@
  *   agent's own picture sent with the guide; a review with none has one Show me
  *   in its heading, for the whole review. Plain Ask opens the Inbox's Ask window
  *   with the lines named.
- * - A link on a Shape board (What's changed, a `file:line`) opens the review
+ * - A place in code on a Shape board (a drawn part's `data-code`) opens the review
  *   there with the board as that same corner card (the owner, q-db7db55f).
  *
  * No new keyboard shortcuts: Escape and "Thread" go back to the thread.
@@ -373,7 +373,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   });
   /**
    * The board shrunk to the corner card, kept as it is underneath: the part a click landed on, or none (a link on the
-   * board: What's changed, a `file:line`; opened from one, the review starts this way).
+   * board, a drawn part's place in code; opened from one, the review starts this way).
    */
   const [landed, setLanded] = useState<{ part: { name: string; mark: string | null; file: string; lines: [number, number] | null } | null } | null>(() =>
     boardShrunk && board ? { part: null } : null,
@@ -511,7 +511,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     // The place is read once per review; the jumps read the latest render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [at, snapshot]);
-  // The board over this review links into it: What's changed and a `file:line` land here, and the board shrinks to
+  // The board over this review links into it: a place in code lands here, and the board shrinks to
   // the corner card, as a link on the board over the thread does (it opens this review that way).
   const goToRef = useRef(goTo);
   goToRef.current = goTo;
