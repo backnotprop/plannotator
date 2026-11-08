@@ -1048,7 +1048,7 @@ test('Settings: the store size counts the sent files; delete thread removes its 
   // Open docs-site's row and delete its thread (the diagram's blob goes with it).
   await page.locator('[data-store-project="docs-site"] .ib-fold').click();
   const row = page.locator(`[data-store-thread="${world.threads.docs}"]`);
-  await row.getByRole('button', { name: /Delete thread/ }).click();
+  await row.getByRole('button', { name: /Delete from Inbox/ }).click();
   await expect(row.getByRole('button', { name: /click again to delete/ })).toHaveText('Delete? Click again');
   await shot('7.1-settings-delete-asks-once-more');
   await row.getByRole('button', { name: /click again to delete/ }).click();
@@ -1064,8 +1064,8 @@ test('Settings: the store size counts the sent files; delete thread removes its 
   expect((await inboxFetch(`/api/inbox/attachments/${world.attachments.flow}`)).status).toBe(404);
   await shot('7.1-settings-after-delete');
 
-  // Delete project removes the rest: the billing project and its two blobs.
-  await page.locator('[data-store-project="billing-svc"]').getByRole('button', { name: /Delete project/ }).click();
+  // The project's Delete removes the rest: the billing project and its two blobs.
+  await page.locator('[data-store-project="billing-svc"]').getByRole('button', { name: /Delete from Inbox/ }).click();
   await page.locator('[data-store-project="billing-svc"]').getByRole('button', { name: /click again to delete/ }).click();
   await expect(page.locator('[data-store-project="billing-svc"]')).toHaveCount(0);
   expect(readdirSync(join(world.dataDir, 'inbox', 'blobs'))).toHaveLength(0);

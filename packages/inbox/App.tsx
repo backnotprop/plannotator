@@ -169,7 +169,7 @@ import { adoptSavedTheme, inboxServerSync } from './theme';
 import { adoptSavedDiffOptions } from './diffOptions';
 import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
 import { adoptSavedReactions, hearReactionsEvent, onSavedReactionsFailed, reactionsReadMark } from './reactions';
-import { parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
+import { movedSettingsHash, parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 import { ComposeDialog, type ComposeHeld, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { heldLaunchToast } from './compose/heldLaunch';
 import { DraftsPage } from './compose/DraftsPage';
@@ -623,6 +623,15 @@ function settleOldExperimental(): boolean {
   if (!parseSettingsHash(window.location.hash.replace(/^#/, ''))?.experimental) return false;
   window.history.replaceState(window.history.state, '', `#${settingsHash({ section: 'capabilities' })}`);
   return true;
+}
+
+/**
+ * `#settings/decision-data`, Decision data's own page before it joined Activity (approval
+ * "settings-storage-activity", 2026-11-08): the address becomes `#settings/activity` in place (no new history entry).
+ */
+function settleMovedSettings(): void {
+  const moved = movedSettingsHash(window.location.hash.replace(/^#/, ''));
+  if (moved) window.history.replaceState(window.history.state, '', `#${moved}`);
 }
 
 /** A `msg=` with no thread to land in (a hand-edited or truncated link) leaves the address bar; the route already ignores it. */
@@ -1271,6 +1280,7 @@ function Inbox() {
       settleReviewsAlias();
       stripStrayMsg();
       settleTourEntry();
+      settleMovedSettings();
       const oldExperimental = settleOldExperimental();
       setRoute(oldExperimental ? { ...readRoute(), experimental: true } : readRoute());
     };
@@ -1311,6 +1321,7 @@ function Inbox() {
     settleReviewsAlias();
     stripStrayMsg();
     settleOldExperimental();
+    settleMovedSettings();
     window.addEventListener('hashchange', onHash);
     window.addEventListener('popstate', onTraverse);
     return () => {

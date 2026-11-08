@@ -583,7 +583,7 @@ test('Settings: in sections; Settings → Agents switches apply to the next sess
   // A focused page (design of record inbox-settings-tabs): General first, the section nav beside it.
   await expect(page.getByRole('heading', { name: 'General', level: 1 })).toBeVisible();
   const nav = page.getByRole('navigation', { name: 'Settings sections' });
-  await expect(nav.getByRole('link')).toHaveText(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Activity', 'Archived', 'Storage', 'Decision data', 'About']);
+  await expect(nav.getByRole('link')).toHaveText(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Activity', 'Archived', 'Storage', 'About']);
   await nav.getByRole('link', { name: 'Agents' }).click();
   await expect(page).toHaveURL(/#settings\/agents$/);
   await expect(nav.getByRole('link', { name: 'Agents' })).toHaveAttribute('aria-current', 'page');
@@ -611,8 +611,8 @@ test('Settings: in sections; Settings → Agents switches apply to the next sess
   const store = page.locator('.ib-stbl');
   await expect(store.locator('[data-store-project="billing-svc"]')).toContainText('2 threads');
   await expect(store.locator('[data-store-project="docs-site"]')).toContainText('2 threads');
-  // Delete thread and delete project are live since step 2 (proved in inbox-attachments.spec.ts).
-  await expect(store.getByRole('button', { name: /Delete project/ }).first()).toBeEnabled();
+  // Delete from Inbox, on threads and projects, is live since step 2 (proved in inbox-attachments.spec.ts).
+  await expect(store.locator('[data-store-project="billing-svc"]').getByRole('button', { name: 'Delete from Inbox: billing-svc' })).toBeEnabled();
 
   await nav.getByRole('link', { name: 'Agents' }).click();
   await piSwitch.click();
