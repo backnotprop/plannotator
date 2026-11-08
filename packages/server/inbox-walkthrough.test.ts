@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
 import { readInboxWalkthrough, walkthroughFilePatch, walkthroughRangesOf } from "./inbox-walkthrough";
+import { registerInboxGuideTools } from "./inbox-guides";
+import type { InboxMcpContext } from "./inbox-mcp";
 
 const folder = () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "inbox-walkthrough-")));
@@ -114,5 +116,40 @@ describe("reading a guide", () => {
     expect(refused(readInboxWalkthrough(guideOf([]), [project]))).toContain("Name at least one file");
     expect(refused(readInboxWalkthrough("{not json", [project]))).toContain("isn't valid JSON");
     expect(refused(readInboxWalkthrough({ title: "t" }, [project]))).toContain("guide.sections");
+  });
+});
+
+// The owner: a walkthrough is part of code review, so with Code review off an agent gets nothing about it.
+describe("Code review off: nothing of walkthroughs reaches an agent", () => {
+  type Tool = { config: { description: string; inputSchema: { shape: Record<string, { description?: string }> } }; handler: (input: unknown, ctx: unknown) => Promise<{ isError?: boolean; content: { text: string }[] }> };
+  const toolsWith = (on: boolean) => {
+    const { project } = folder();
+    const tools = new Map<string, Tool>();
+    const server = { registerTool: (name: string, config: Tool["config"], handler: Tool["handler"]) => void tools.set(name, { config, handler }) };
+    const context = {
+      codeReviewOn: () => on,
+      walkthroughThread: () => true,
+      resolveProject: async () => ({ id: "prj_1", key: "project", name: "project", root: project, created_at: "" }),
+      store: {},
+    } as unknown as InboxMcpContext;
+    registerInboxGuideTools(server as never, context);
+    return { tools, project };
+  };
+  const words = (tool: Tool) => [tool.config.description, ...Object.entries(tool.config.inputSchema.shape).flatMap(([key, field]) => [key, field.description ?? ""])].join("\n");
+
+  test("submit_guide and get_guide_brief name no walkthrough while off; on, submit_guide has the field", async () => {
+    const off = toolsWith(false).tools;
+    for (const name of ["submit_guide", "get_guide_brief"]) expect(words(off.get(name)!)).not.toMatch(/walkthrough/i);
+    const brief = await off.get("get_guide_brief")!.handler({}, {});
+    expect(JSON.stringify(brief)).not.toMatch(/walkthrough/i);
+    expect(Object.keys(toolsWith(true).tools.get("submit_guide")!.config.inputSchema.shape)).toContain("walkthrough");
+  });
+
+  test("a stale session's `walkthrough: true` while off gets no line about walkthroughs", async () => {
+    const { tools } = toolsWith(false);
+    const result = await tools.get("submit_guide")!.handler({ project_path: "/x", walkthrough: true, guide: guideOf([{ file: "src/retry.ts", lines: "3-4", summary: "The wait." }]) }, {});
+    expect(result.isError).toBe(true);
+    expect(result.content.map((part) => part.text).join("\n")).not.toMatch(/walkthrough/i);
+    expect(result.content[0]!.text).not.toContain("code_review_off");
   });
 });

@@ -502,11 +502,11 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
       guarded(async () => {
         const project = await sendProject(context, input);
         // A walkthrough: asked for here, or any guide in a thread the New review box started as one, so a real agent's
-        // own patch (or an empty one) can't turn it back into a diff, and the verdict stays away.
-        const asked = (input as { walkthrough?: boolean }).walkthrough === true;
-        if (asked && !context.codeReviewOn?.()) throw new InboxError("code_review_off", "Code review is off in this Inbox (Settings → Capabilities): send the guide without `walkthrough`.");
+        // own patch (or an empty one) can't turn it back into a diff, and the verdict stays away. Only while Code review
+        // is on (the owner: a walkthrough is part of code review): off, the field means nothing and no text names it.
+        const codeReviewOn = !!context.codeReviewOn?.();
         const replyThread = input.reply_to ? context.store.message(input.reply_to)?.thread_id : null;
-        const walkthrough = asked || (!!context.codeReviewOn?.() && !!replyThread && !!context.walkthroughThread?.(replyThread));
+        const walkthrough = codeReviewOn && ((input as { walkthrough?: boolean }).walkthrough === true || (!!replyThread && !!context.walkthroughThread?.(replyThread)));
         let submitted: { snapshot?: unknown; guide?: unknown; patch?: string } = input;
         if (walkthrough && input.snapshot === undefined && input.guide !== undefined) {
           const read = readInboxWalkthrough(input.guide, [callerWorkingFolder(ctx), input.project_path, project.root].filter((folder): folder is string => !!folder && isAbsolute(folder)));
