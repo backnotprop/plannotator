@@ -268,7 +268,10 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
   const home = realpathOrNull(givenHome) ?? givenHome;
   // The home folder as given and at its realpath (`/home` -> `/var/home`), so either spelling of `~/.plannotator` is
   // refused, also when that folder is made after the Inbox starts.
-  const dataDirs = [...new Set([dirname(store.dir), join(givenHome, ".plannotator"), join(home, ".plannotator")].flatMap((dir) => [dir, realpathOrNull(dir) ?? dir]))];
+  // The data folder is the store's parent (`<data>/inbox`); a route made without a store folder (a refusal-only use)
+  // still guards the home's.
+  const storeData = typeof store.dir === "string" && store.dir !== "" ? [dirname(store.dir)] : [];
+  const dataDirs = [...new Set([...storeData, join(givenHome, ".plannotator"), join(home, ".plannotator")].flatMap((dir) => [dir, realpathOrNull(dir) ?? dir]))];
   /** What a referenced file's view, raw read and attach refuse: a secret, a live system file, Plannotator's own state. */
   const refusedHere = (path: string): boolean => secretOrSystem(path) || isPlannotatorState(path, dataDirs);
 

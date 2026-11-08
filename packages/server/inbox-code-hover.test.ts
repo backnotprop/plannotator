@@ -70,7 +70,8 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 function route(options: { codeReview?: boolean; owner?: boolean; threadPulls?: string[]; pullFile?: (pull: string, path: string) => Promise<InboxPullFile | null> } = {}) {
   const message = { id: "msg_1", thread_id: "msg_1", project_id: "prj_1", base_path: project };
   const store = {
-    dir,
+    // The real layout, `<data>/inbox`: the data folder is Plannotator's own state, which a hover never shows.
+    dir: join(dir, "data", "inbox"),
     message: (id: string) => (id === "msg_1" ? message : null),
     project: () => ({ root: project }),
     thread: () => ({ project: { root: project } }),

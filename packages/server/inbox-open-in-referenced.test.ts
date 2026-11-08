@@ -167,7 +167,10 @@ describe("a file a message names: the view", () => {
 
   test("~/.plannotator made after the Inbox starts, under a home folder that is a symlink, is refused by either spelling", async () => {
     const w = world({ linkedHome: true });
-    for (const path of [join(w.home, ".plannotator", "inbox", "machines.json"), join(w.root, "home-link", ".plannotator", "inbox", "machines.json"), "~/.plannotator/inbox/machines.json"]) {
+    // The words a message names (the Inbox expands them under its sandbox home), never a path this test opens.
+    const named = "~/.plannotator/inbox/machines.json";
+    const spellings = [join(w.home, ".plannotator", "inbox", "machines.json"), join(w.root, "home-link", ".plannotator", "inbox", "machines.json")];
+    for (const path of [...spellings, named]) {
       expect([path, (await w.view(path)).body.found]).toEqual([path, false]);
     }
     expect((await w.view("~/notes/todo.md")).body).toMatchObject({ found: true, contents: "- one\n" });
