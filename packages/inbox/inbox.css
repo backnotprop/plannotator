@@ -8520,6 +8520,21 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-review.ib-rv-walk.ib-fold .ib-rsplit { grid-template-columns: minmax(0, 1fr); }
 /* The comments panel closed from the header's Comments button: the diff takes the width, nothing of the panel stays. */
 .ib-review.ib-rv-walk.ib-rv-shut .ib-rsplit { grid-template-columns: minmax(0, 1fr); }
+/* All files: the PR page's file tree on the left (approval "review-allfiles-tree"; pulls/RailTree.tsx, its rows'
+   styles are `.ib-prp-files` below). Walkthrough has none. A phone has no rail: its Files button opens the tree as a
+   sheet over the diff, as the PR page's does. */
+.ib-review.ib-rv-walk.ib-rv-tree .ib-rsplit { grid-template-columns: 280px minmax(0, 1fr) 300px; }
+.ib-review.ib-rv-walk.ib-rv-tree:is(.ib-fold, .ib-rv-shut) .ib-rsplit { grid-template-columns: 280px minmax(0, 1fr); }
+.ib-rv-tree .ib-rrail { --ib-prp-fill: color-mix(in oklab, var(--foreground) 7%, transparent); padding: 0; gap: 0; overflow: hidden; }
+.ib-rv-filesbtn { gap: 6px; }
+/* The tree's head: "N files" on the left, "N viewed" at the right end (RailTree's own head, which the PR page
+   replaces with its scope switch). */
+.ib-prp-fileshead .ib-sp { flex: 1; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-review.ib-rv-walk.ib-rv-tree .ib-rsplit, .ib-review.ib-rv-walk.ib-rv-tree:is(.ib-fold, .ib-rv-shut) .ib-rsplit { grid-template-columns: minmax(0, 1fr); position: relative; }
+  .pn-inbox .ib-rv-walk .ib-vhead .ib-rv-filesbtn { min-width: 0; padding-inline: 8px; gap: 4px; }
+  .ib-review.ib-rv-tree.ib-files-open .ib-rrail { display: flex; position: absolute; inset: 0; z-index: 6; border-right: 0; background: var(--background); }
+}
 .ib-review.ib-rv-shut .ib-gpanel { display: none; }
 .ib-rv-walk .ib-vhead { gap: 10px; }
 .ib-rv-walk .ib-vhead > * { flex: none; }

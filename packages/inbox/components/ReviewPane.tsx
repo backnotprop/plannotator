@@ -14,13 +14,17 @@
  *   thread, and the header's Write the reply goes back to it with the reply
  *   box open.
  *
- * - The agent's walkthrough is the spine. There is no left rail (approval
- *   "review-deslop", r7): the top bar holds the "Walkthrough | All files"
+ * - The agent's walkthrough is the spine. Walkthrough has no left rail
+ *   (approval "review-deslop", r7): the top bar holds the "Walkthrough | All files"
  *   switch, the menu of chapters or changed files (ReviewJump) and the review's
  *   title in quiet grey. The diff controls (one Split / Unified button,
  *   Collapse all, the "Diff display" gear: DiffControls, approval
  *   "diff-controls-headers") sit in the bar only, never on the chapters. A
  *   phone's bar is one row: the same menu holds its title and switch.
+ * - All files has the PR page's file tree on the left (approval
+ *   "review-allfiles-tree", the PR page's `RailTree`): a click on a file goes to
+ *   it. As on the PR page, a phone has no rail: the bar's Files button opens the
+ *   same tree as a sheet over the diff.
  * - The diff is Plannotator's own (`GuideReader` over review-editor's
  *   `AllFilesCodeView`): line comments as in code review, and a Viewed tick on
  *   each file's header, kept on the message.
@@ -106,6 +110,9 @@ import { DropdownMenuRadioGroup, DropdownMenuRadioItem } from '@plannotator/ui/c
 import { chapterInView, fileInView, ReviewJump } from './ReviewJump';
 import { OpenInCodeSpans, OpenInFile } from './OpenIn';
 import { Tip } from './Tip';
+import { RailTree } from '../pulls/RailTree';
+import { reviewFiles } from '../pulls/reviewFiles';
+import { FileTreeMark } from '../pulls/fileTreeMark';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 const GuideReader = GuideReaderPart.Part;
@@ -157,6 +164,7 @@ export const REVIEW_FOLD_PANEL_BELOW = 1500;
 
 const NO_BLOCKS: never[] = [];
 const NO_ANNOTATIONS: never[] = [];
+const NO_VIEWED: ReadonlySet<string> = new Set();
 
 type RailMode = 'walkthrough' | 'files';
 
@@ -287,6 +295,13 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     const sent = new Set(went.map(postedSignature));
     for (const c of comments) if (sent.has(postedSignature(c))) remove(c.id);
   };
+  // All files' tree: the PR page's, over the same patch.
+  const tree = useMemo(() => (snapshot ? reviewFiles(snapshot.review.rawPatch) : null), [snapshot]);
+  // A phone's tree is a sheet over the diff, opened from the bar's Files button.
+  const [filesSheet, setFilesSheet] = useState(false);
+  const filesButtonRef = useRef<HTMLButtonElement>(null);
+  const filesSheetId = useId();
+  const railRef = useRef<HTMLElement>(null);
   const chapters = snapshot?.guide.sections ?? [];
 
   const move = (path: string) => setReveal((was) => ({ path, token: (was?.token ?? 0) + 1 }));
@@ -345,6 +360,23 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
     if (mode !== 'files') setMode('files');
     move(path);
   };
+  /** A file picked in the tree. From the phone's sheet it closes, showing the file, and focus goes back to its button. */
+  const pickFile = (path: string) => {
+    toFile(path);
+    if (filesSheet) closeFiles();
+  };
+  const closeFiles = () => {
+    setFilesSheet(false);
+    filesButtonRef.current?.focus({ preventScroll: true });
+  };
+  const showTree = mode === 'files' && !!tree && tree.files.length > 0;
+  useEffect(() => {
+    if (!phone || !showTree) setFilesSheet(false);
+  }, [phone, showTree]);
+  // Opening the Files sheet, focus goes to its first row.
+  useEffect(() => {
+    if (filesSheet) railRef.current?.querySelector<HTMLElement>('[data-review-files] button')?.focus({ preventScroll: true });
+  }, [filesSheet]);
   /** The switch keeps the person's place: the file at the top of the view stays there in the other mode. */
   const flip = (next: RailMode) => {
     const body = bodyRef.current;
@@ -870,7 +902,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer ib-wlayer ib-review ib-rv-walk${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${!folded && !panelOpen ? ' ib-rv-shut' : ''}`}
+      className={`ib-viewer ib-wlayer ib-review ib-rv-walk${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${!folded && !panelOpen ? ' ib-rv-shut' : ''}${showTree ? ' ib-rv-tree' : ''}${filesSheet ? ' ib-files-open' : ''}`}
       aria-label="Review"
       data-review-message={message.id}
       data-review-mode={mode}
@@ -953,11 +985,32 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
         <span className="ib-sp" />
         {snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
         {threadBoard && <ShapePebbleButton shape={threadBoard} open={!!board} onToggle={() => onBoard(board ? null : threadBoard.id)} />}
+        {phone && showTree && tree && (
+          <button
+            ref={filesButtonRef}
+            type="button"
+            className={`ib-btn ib-sm ib-rv-filesbtn${filesSheet ? ' ib-on' : ''}`}
+            aria-expanded={filesSheet}
+            aria-controls={filesSheetId}
+            aria-label={`Files, ${tree.files.length}`}
+            onClick={() => {
+              setFilesSheet(!filesSheet);
+              setPanelOpen(false);
+            }}
+            data-review-files-button=""
+          >
+            <FileTreeMark />
+            {tree.files.length}
+          </button>
+        )}
         <button
           type="button"
           ref={sheetButtonRef}
           className={`ib-btn ib-sm ib-vcomments${panelOpen ? ' ib-on' : ''}`}
-          onClick={() => setPanelOpen(!panelOpen)}
+          onClick={() => {
+            setPanelOpen(!panelOpen);
+            setFilesSheet(false);
+          }}
           onKeyDown={onSheetKey}
           aria-expanded={panelOpen}
           aria-controls={sheetId}
@@ -1027,6 +1080,32 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
         </Tip>
       </div>
       <div className="ib-rsplit">
+        {showTree && tree && (
+          <nav
+            className="ib-rrail"
+            id={filesSheetId}
+            ref={railRef}
+            aria-label="Changed files"
+            onKeyDown={(event) => {
+              // Escape closes the phone's sheet before it closes the review (App's handler skips a used Escape).
+              if (event.key === 'Escape' && filesSheet && !event.defaultPrevented) {
+                event.preventDefault();
+                closeFiles();
+              }
+            }}
+            data-review-tree=""
+          >
+            <RailTree
+              tree={tree.tree}
+              loose={tree.loose}
+              files={tree.files}
+              viewed={viewedProp ? viewedSet : NO_VIEWED}
+              commentCount={(path) => comments.filter((comment) => comment.filePath === path).length}
+              onSelect={pickFile}
+              {...(viewedProp ? { onToggleViewed: toggleViewed } : {})}
+            />
+          </nav>
+        )}
         <div className="ib-gbody" ref={bodyRef}>
           {moved && (
             <p className="ib-prr-note" role="status" data-review-pull-moved={moved}>
