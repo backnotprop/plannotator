@@ -21,7 +21,7 @@ function securityError(message: string): Error {
   return Object.assign(new Error(message), { name: "SecurityError" });
 }
 
-function opaqueFrame(documentUrl: string) {
+function opaqueFrame(documentUrl: string, globals: Record<string, unknown> = {}) {
   let href = documentUrl;
   let state: unknown = null;
   const change = (next: unknown, _unused: string, url?: string | URL | null) => {
@@ -55,6 +55,7 @@ function opaqueFrame(documentUrl: string) {
     });
   }
   win.window = win;
+  Object.assign(win, globals);
   const context = vm.createContext(win);
   return {
     run: (source: string) => vm.runInContext(source, context),
@@ -114,21 +115,50 @@ describe("a page that uses history and storage as it builds itself", () => {
   });
 });
 
+const SHIM_TAG = `<script>${SANDBOX_SHIM_SCRIPT}</script>`;
+
 describe("where the shim runs", () => {
   test("before the page's own head scripts", () => {
     const page = '<!doctype html><html lang="en"><head data-x="1"><script>PAGE_HEAD()</script></head><body></body></html>';
-    const out = injectSandboxShim(page);
-    expect(out.startsWith('<!doctype html><html lang="en"><head data-x="1"><script>')).toBe(true);
-    expect(out.indexOf(SANDBOX_SHIM_SCRIPT)).toBeLessThan(out.indexOf("PAGE_HEAD()"));
+    expect(injectSandboxShim(page)).toBe(`<!doctype html><html lang="en"><head data-x="1">${SHIM_TAG}<script>PAGE_HEAD()</script></head><body></body></html>`);
   });
 
-  test("never inside a script that names <head> before the real one", () => {
-    const page = '<script>var t = "<head>";</script><p>x</p>';
-    expect(injectSandboxShim(page)).toBe(page);
-    expect(injectSandboxShim("<header>x</header>")).toBe("<header>x</header>");
+  test("never inside a comment, a title or an attribute that names <head>", () => {
+    expect(injectSandboxShim('<!doctype html><!-- the <head> goes here --><html><head><script>boot()</script></head>'))
+      .toBe(`<!doctype html><!-- the <head> goes here --><html><head>${SHIM_TAG}<script>boot()</script></head>`);
+    expect(injectSandboxShim('<!doctype html><title>About <head></title><script>boot()</script></head>'))
+      .toBe(`<!doctype html>${SHIM_TAG}<title>About <head></title><script>boot()</script></head>`);
+    expect(injectSandboxShim('<!doctype html><html data-n="<head>"><head data-x="a>b"><script>boot()</script></head>'))
+      .toBe(`<!doctype html><html data-n="<head>"><head data-x="a>b">${SHIM_TAG}<script>boot()</script></head>`);
   });
 
-  test("the bridge carries it too, for hosts that load the bridge by URL", () => {
-    expect(BRIDGE_SCRIPT).toContain(SANDBOX_SHIM_SCRIPT);
+  test("ahead of a script that comes before <head>, and never inside one", () => {
+    expect(injectSandboxShim('<!doctype html><script>boot()</script><head></head>'))
+      .toBe(`<!doctype html>${SHIM_TAG}<script>boot()</script><head></head>`);
+    expect(injectSandboxShim('<script>var t = "<head>";</script><p>x</p>'))
+      .toBe(`${SHIM_TAG}<script>var t = "<head>";</script><p>x</p>`);
+    expect(injectSandboxShim("<!doctype html><header>x</header>")).toBe(`<!doctype html>${SHIM_TAG}<header>x</header>`);
+  });
+});
+
+describe("the bridge (hosts that load it by URL get the shim from it)", () => {
+  // The bridge needs a DOM past its first lines; the shim runs before that, so what it left behind is read after the throw.
+  const runBridge = (frame: ReturnType<typeof opaqueFrame>) => {
+    try { frame.run(BRIDGE_SCRIPT); } catch {}
+  };
+
+  test("installs the shim in a sandboxed page", () => {
+    const frame = opaqueFrame("about:srcdoc");
+    runBridge(frame);
+    frame.run(PROTOTYPE_BOOT);
+    expect(frame.run("window.drawn.hash")).toBe("#state=C4&theme=light&vp=phone");
+  });
+
+  test("leaves a live app's own history and storage alone", () => {
+    const parent = {};
+    const frame = opaqueFrame("http://localhost:5173/", { __plannotatorLiveConfig: { token: "t", editorOrigins: [] }, parent, top: parent });
+    runBridge(frame);
+    expect(() => frame.run("localStorage.getItem('theme')")).toThrow("sandboxed");
+    expect(frame.run("history.replaceState.plannotatorSandboxShim")).toBeUndefined();
   });
 });

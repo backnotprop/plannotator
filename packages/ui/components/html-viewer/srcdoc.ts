@@ -197,34 +197,44 @@ const SECTION_BREAK_PRINT_CSS = `
 `;
 
 /**
- * Where a `<style>` goes so it comes before every author style: just inside
- * the real `<head>`, or right after the doctype when there is no `<head>`
- * (before it would put the page in quirks mode). A `<head` inside a comment or
- * a script that precedes the real head is skipped.
+ * Where an injection goes so it comes before everything the author wrote in
+ * `<head>`: just inside the real `<head>`, or right after the doctype when
+ * there is no `<head>` (before it would put the page in quirks mode). A
+ * `<head` inside a comment, a script, a `<style>`, `<title>` or `<textarea>`,
+ * or an attribute value is skipped. `firstScript` is where the first page
+ * script before that point starts, if one does (a script ahead of `<head>`).
  */
-function printDefaultsPosition(rawHtml: string): number {
+function headStart(rawHtml: string): { position: number; firstScript: number | null } {
   // Built from strings: Semgrep's TypeScript parser cannot read this pattern
   // as a regex literal, and a file it cannot parse fails the security scan.
+  const attributes = "(?:\"[^\"]*\"|'[^']*'|[^>\"'])*";
   const tokens = new RegExp(
     [
       "<!--[\\s\\S]*?(?:-->|$)",
       "<script\\b[\\s\\S]*?(?:</script\\s*>|$)",
+      "<(style|title|textarea)\\b[\\s\\S]*?(?:</\\1\\s*>|$)",
       "<!doctype\\b[^>]*>",
-      "<head\\b[^>]*>",
+      `<head\\b${attributes}>`,
       "<body\\b",
+      `<[a-z][^\\s/>]*${attributes}>`,
     ].join("|"),
     "gi",
   );
   let afterDoctype = 0;
+  let firstScript: number | null = null;
   for (let match = tokens.exec(rawHtml); match; match = tokens.exec(rawHtml)) {
     const token = match[0].toLowerCase();
-    if (token.startsWith("<!--") || token.startsWith("<script")) continue;
     const end = match.index + match[0].length;
-    if (token.startsWith("<!doctype")) afterDoctype = end;
-    else if (token.startsWith("<head")) return end;
-    else break;
+    if (token.startsWith("<script")) firstScript ??= match.index;
+    else if (token.startsWith("<!doctype")) afterDoctype = end;
+    else if (/^<head[\s>]/.test(token)) return { position: end, firstScript };
+    else if (token === "<body") break;
   }
-  return afterDoctype;
+  return { position: afterDoctype, firstScript: firstScript !== null && firstScript < afterDoctype ? firstScript : null };
+}
+
+function printDefaultsPosition(rawHtml: string): number {
+  return headStart(rawHtml).position;
 }
 
 /**
@@ -283,25 +293,20 @@ export function neutralizeMetaCsp(rawHtml: string): string {
   return rawHtml.replace(META_CSP_RE, "<!-- plannotator: meta CSP removed for annotation -->");
 }
 
-/** Splice the injection just before `</head>`, or prepend when there is none. */
-const HEAD_OPEN_RE = /<head(?:\s[^>]*)?>/i;
-
 /**
- * The sandbox shim (`sandboxShim.ts`) as the first thing in `<head>`, so a
- * page's own head scripts already find history and storage safe to use. Only
- * when the page's `<head>` tag comes before any script (a `<head>` found after
- * one could sit inside that script's text); otherwise the page is returned
- * unchanged and the bridge, at the end of `<head>`, installs the shim instead.
+ * The sandbox shim (`sandboxShim.ts`) ahead of every page script, so a page's
+ * own head scripts already find history and storage safe to use: at the start
+ * of `<head>` (or after the doctype when there is none), or just before a
+ * script that comes ahead of `<head>`. The bridge, at the end of `<head>`,
+ * runs it again, which then does nothing.
  */
 export function injectSandboxShim(html: string): string {
-  const head = HEAD_OPEN_RE.exec(html);
-  if (!head) return html;
-  const firstScript = html.search(/<script[\s>]/i);
-  if (firstScript !== -1 && firstScript < head.index) return html;
-  const at = head.index + head[0].length;
+  const { position, firstScript } = headStart(html);
+  const at = firstScript ?? position;
   return `${html.slice(0, at)}<script>${SANDBOX_SHIM_SCRIPT}</script>${html.slice(at)}`;
 }
 
+/** Splice the injection just before `</head>`, or prepend when there is none. */
 export function injectIntoHead(rawHtml: string, injection: string): string {
   const html = neutralizeMetaCsp(rawHtml);
   const headClose = html.indexOf("</head>");

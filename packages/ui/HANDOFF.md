@@ -2869,3 +2869,17 @@ A board may carry `scenes`; a drawn view plays one where its HTML holds `<div da
 - `ShapeSurface` passes `version.scenes` and `sceneLook="technical"`: a board with scenes plays them in the technical look in every host that shows `ShapeSurface`; a board without scenes is untouched.
 - New export `@plannotator/ui/components/shape/scene/frame` (`setSceneFrame`, `sceneFrame`, `sceneFrameFromHash`): a module seam, null by default. Plannotator's standalone Shape page sets it from its address for `plannotator shape frame`. Another host never needs it.
 - `ShapeDiagram` does not pass `scenes`.
+
+## HtmlViewer: history and storage safe in the sandboxed frame (unreleased; behavior fix, no prop, no core change)
+
+A page that called `history.replaceState` / `pushState` or read `localStorage` / `sessionStorage` while it built itself stopped there and stayed blank in the viewer's frame. The frame runs scripts without `allow-same-origin`, an opaque origin, where these calls throw. `SANDBOX_SHIM_SCRIPT` (`components/html-viewer/sandboxShim.ts`) makes them safe:
+- A bare fragment or an empty URL applies to the page's own address.
+- Any other URL the frame refuses keeps the address, takes only its fragment, and keeps the state object.
+- A refused Storage becomes an in-memory one for that load. Nothing is kept anywhere.
+
+What a host sees:
+- **Not opt-in, and no new prop.** Every host's inline srcdoc gains a second inline `<script>`: the shim, ahead of the page's first script (at the start of `<head>`, or after the doctype when there is no `<head>`). This changes the "byte-for-byte unchanged" promise of the seam rules for the inline path's srcdoc only.
+- **On the `bridgeScriptUrl` path no inline script is added.** A host there may forbid inline scripts. `bridge-script.asset.js` now carries the shim and runs it, so it takes effect at the end of `<head>`. On that path a page's body scripts are covered, but a head script that uses history or storage still throws. The README's description of the URL path (one classic `<script src>`, nothing of it running on the inline path) is still correct.
+- **Never in live mode.** A proxied app runs on its own origin, and the bridge skips the shim there.
+- **The sandbox and CSP are unchanged.**
+- In a srcdoc frame, `pushState` now succeeds and adds entries to the host's session history, as a served page's frame already did.
