@@ -40,7 +40,7 @@
  */
 
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
@@ -265,10 +265,13 @@ import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars"
 import { createProjectPictures, type ProjectPictureOptions } from "./inbox-project-pictures";
 import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullStacks, inboxReviewLandingChanges, inboxReviewLinkOf, inboxReviewRows, inboxReviewStartOf, type InboxPullReason, type InboxReviewStart, inboxPullRepoKey } from "@plannotator/core/inbox-types";
 import { createInboxPullStates, createInboxReviewIndex, readInboxReviewLink } from "./inbox-reviews";
-import { inboxPullRefOfKey, type InboxPull } from "@plannotator/core/inbox-types";
+import { inboxPullRefOfKey, inboxPullUrlOfKey, type InboxPull } from "@plannotator/core/inbox-types";
+import { inboxThreadPullsSummary, inboxThreadPullText, parseInboxThreadPullRef, type InboxThreadPull } from "@plannotator/core/inbox-types";
 import { readInboxReviewChanges } from "./inbox-review-changes";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
+import { createThreadPullStates, createThreadPullsRoute, type ThreadPullFixture } from "./inbox-thread-pulls";
+import { sessionLastSawThread } from "./inbox-session-reads";
 import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as stepsListWaitsOnPerson } from "./inbox-steps";
 import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller } from "./inbox-devices";
@@ -323,6 +326,24 @@ const BRIDGE_WAKING_HOSTS: ReadonlySet<string> = new Set(INBOX_WAKING_HOSTS.filt
 
 /** Where a request came in: the window's loopback port, or the tailnet-only listener `tailscale serve` points at. */
 type RequestVia = "local" | "tailnet";
+
+/**
+ * PLANNOTATOR_TEST_FORGE_STATES (the test sandbox only, PLANNOTATOR_TEST_SANDBOX): a JSON file of stand-in states for a
+ * thread's PRs, `{ "<owner/repo#n, group/project!n, URL or key>": { state, title, base, head, checks, review } }`, read
+ * again on each pass. With it the Inbox runs no gh or glab for them. Null otherwise.
+ */
+function threadPullFixtureFromEnv(): (() => ThreadPullFixture | null) | null {
+  const file = process.env.PLANNOTATOR_TEST_FORGE_STATES;
+  if (!file || !process.env.PLANNOTATOR_TEST_SANDBOX) return null;
+  return () => {
+    try {
+      const value: unknown = JSON.parse(readFileSync(file, "utf8"));
+      return value && typeof value === "object" && !Array.isArray(value) ? (value as ThreadPullFixture) : {};
+    } catch {
+      return {};
+    }
+  };
+}
 
 /** Headers `tailscale serve` sets on every proxied request (the identity headers for a user's device). */
 const SERVE_IDENTITY_HEADERS = ["tailscale-headers-info", "tailscale-user-login"] as const;
@@ -494,6 +515,8 @@ export interface InboxServerOptions {
   readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
   /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
   refRunner?: RefRunner;
+  /** Tests: a thread's PRs read their states from this instead of gh / glab (inbox-thread-pulls.ts). */
+  threadPullFixture?: () => ThreadPullFixture | null;
   /**
    * Tests: the `gh` / `glab` a review posted to the forge runs through (Pull requests' Post to GitHub/GitLab; the review
    * app's providers, `submitPRReview`). Default the Bun command runtime (pr.ts).
@@ -1109,6 +1132,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const cardFavicons = createCardFavicons(options.cardFavicons ?? {});
   // The Board's lane marks (inbox-card-marks.ts): GitHub batched per repository, GitLab through the hover cards.
   const cardMarks = createCardMarks({ refCards, ...(options.refRunner ? { run: options.refRunner } : {}) });
+  // A thread's PRs (approval "inbox-pr-binding", inbox-thread-pulls.ts): their state, read only on view, GitHub batched
+  // per repository and GitLab through the hover cards. A sandboxed test Inbox may name a file of stand-in states
+  // (PLANNOTATOR_TEST_FORGE_STATES), so pictures and tests never run gh or glab.
+  const threadPullStates = createThreadPullStates({
+    store,
+    refCards,
+    ...(options.refRunner ? { run: options.refRunner } : {}),
+    fixture: options.threadPullFixture ?? threadPullFixtureFromEnv(),
+  });
   // Pull requests (inbox-pulls.ts): read only while the page is open and Code review is on; the route refuses first otherwise.
   // The project roots whose origin the Pull requests list has waited for once.
   const pullRepoRead = new Set<string>();
@@ -1318,6 +1350,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         boardOn,
         // Thread steps: the steps tool and field are listed and served only while the person has them on.
         stepsOn,
+        // A thread's PRs: the reader's live checks, and a read of the PRs an agent just added.
+        pulls: threadPullStates,
         // Bro mode: send_message's `body` field carries the line only while the person has it on.
         broOn,
         // Code review: submit_guide's `review` field is listed and served only while the person has it on.
@@ -1460,9 +1494,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // was last written, and its session has not ended (an ended session never updates the list). Off: never.
     const stepsWaiting = stepsOn() ? new Set(store.allSteps().filter((list) => inboxStepsWaitOnPerson(list, now.getTime())).map((list) => list.thread_id)) : null;
     const withStepsWaiting = (row: InboxListRow): InboxListRow => (stepsWaiting?.has(row.thread_id) ? { ...row, steps_waiting: true } : row);
+    // `pulls` (additive, approval "inbox-pr-binding"): the thread's PRs, from their stored state, so a row paints its
+    // mark without a read. The threads not archived have their PRs still in play read now, off the request path:
+    // a changed state lands as a `thread_pull` line and the window reads the list again.
+    const pullsByThread = new Map<string, InboxThreadPull[]>();
+    for (const pull of store.allThreadPulls()) {
+      const list = pullsByThread.get(pull.thread_id);
+      if (list) list.push(pull);
+      else pullsByThread.set(pull.thread_id, [pull]);
+    }
+    const withPulls = (row: InboxListRow): InboxListRow => {
+      const pulls = pullsByThread.get(row.thread_id);
+      const summary = pulls ? inboxThreadPullsSummary(pulls.sort((a, b) => a.added_at.localeCompare(b.added_at) || a.id.localeCompare(b.id))) : undefined;
+      return summary ? { ...row, pulls: summary } : row;
+    };
     const own = store
       .listRows()
-      .map((row) => withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now));
+      .map((row) => withPulls(withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now)));
+    if (pullsByThread.size > 0) {
+      const onView = own.filter((row) => row.pulls && !inboxRowArchived(row)).flatMap((row) => pullsByThread.get(row.thread_id) ?? []);
+      if (onView.length > 0) void threadPullStates.refresh(onView);
+    }
     // A linked machine never lists an id this store holds (archived and pinned included): its row is dropped, never merged.
     // The same clock over its rows: a machine asleep past a thread's `until` still gives that thread back.
     // A linked machine's row loses its `steps_waiting`: this window never shows that machine's checklists.
@@ -2957,6 +3009,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       case "initiative":
         // A Board initiative (approval "board-initiatives"): silent. A reader that does not know the kind skips it.
         return { seq: line.seq, kind: line.kind, id: line.id, initiative: line.record };
+      case "thread_pull":
+        // A thread's PRs changed (approval "inbox-pr-binding"): silent, never a notification or unread. `thread_id` so a
+        // window reads that thread's PRs again (and its row). A reader that does not know the kind skips it.
+        return { seq: line.seq, kind: line.kind, id: line.id, thread_id: line.record.thread_id };
     }
   };
 
@@ -3224,9 +3280,31 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Thread steps (approval "inbox-thread-steps"): the session's own list in this thread, one wake line, only while
     // the person has steps on.
     const list = stepsOn() && receiver ? store.stepsOf(reply.thread_id, receiver) : null;
-    if (!list) return { ...command, ...context };
+    // A thread's PRs (approval "inbox-pr-binding"): what the person changed since the thread's owner last saw it, one line.
+    const pulls = receiver ? pullsChangedFor(reply.thread_id, receiver) : null;
+    const withPulls = pulls ? { pulls_changed: pulls } : {};
+    if (!list) return { ...command, ...context, ...withPulls };
     const { done, total, doing } = inboxStepsProgress(list.steps);
-    return { ...command, ...context, ...(total > 0 ? { steps: { done, total, doing } } : {}) };
+    return { ...command, ...context, ...withPulls, ...(total > 0 ? { steps: { done, total, doing } } : {}) };
+  };
+  /**
+   * What the person changed in a thread's PRs since `session` last saw the thread (a read, a delivery to it, its own
+   * message, its own PR change), for a wake to the thread's owner only; null when nothing, or another session. An edit
+   * alone never wakes anyone: it rides the next wake, and once that is delivered it is seen.
+   */
+  const pullsChangedFor = (threadId: string, session: string): { added: string[]; removed: string[] } | null => {
+    try {
+      if (store.threadOwner(threadId)?.session !== session) return null;
+      let since = sessionLastSawThread(store, session, threadId) ?? "";
+      for (const event of store.threadPullEvents(threadId)) {
+        if (event.by.kind === "agent" && event.by.session === session && event.at > since) since = event.at;
+      }
+      const { added, removed } = store.personPullChangesSince(threadId, since);
+      if (added.length + removed.length === 0) return null;
+      return { added: added.map((pull) => inboxThreadPullText(pull)), removed: removed.map((pull) => inboxThreadPullText(pull)) };
+    } catch {
+      return null;
+    }
   };
   /** Words for the wake, never a condition of it: with no context, the reply goes as it would from an older Inbox. */
   const wakeContextOf = (reply: InboxMessage, receiver: string | null): Pick<InboxReplyCommand, "context"> => {
@@ -3704,6 +3782,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // No login-shell read at start: the launch module reads it the first time New message asks (`warmLogin`).
 
   // Compose: a new thread the person starts with a live agent, drafts and uploads (packages/server/inbox-compose.ts).
+  /**
+   * A hand-off from the PR page (Hand to an agent, Launch an agent, a review started for a PR) also couples its PRs to
+   * the thread it starts, added by the person (approval "inbox-pr-binding"), so that thread shows them. Never refuses
+   * the hand-off: a PR past the thread's 20 is left out.
+   */
+  const couplePulls = (keys: readonly string[], threadId: string) => {
+    try {
+      const refs = keys.flatMap((key) => {
+        const url = inboxPullUrlOfKey(key);
+        const ref = url ? parseInboxThreadPullRef(url) : null;
+        return ref && !("error" in ref) ? [ref] : [];
+      });
+      if (refs.length > 0) store.changeThreadPulls({ thread_id: threadId, add: refs, by: { kind: "person" } });
+    } catch {
+      // The hand-off stands without the coupling.
+    }
+  };
   const compose = createInboxCompose({
     store,
     serverSession,
@@ -3721,6 +3816,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       pullOwners.start(threadId, started);
       // A link's PR belongs to this thread from now on, on the list or not: only its own state is read, while its row is listed.
       if (started.pull) pullOwners.set([started.pull.key], threadId, { ask: started.ask, theirs: !started.pull.mine });
+      if (started.pull) couplePulls([started.pull.key], threadId);
     },
     launch,
     isGuest,
@@ -3822,6 +3918,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** A route the tailnet never reaches: it would hand a tailnet peer this machine's agent surface, or widen the Inbox's exposure. */
   const localOnly = () =>
     json({ error: "This answers only on this computer, not over the tailnet.", code: "local_only" }, 403);
+
+  /**
+   * A thread's PRs in the window (approval "inbox-pr-binding", inbox-thread-pulls.ts): the read, and the person's
+   * add and remove from the popover. A change is the owner's window only (this computer's, or the owner's over the
+   * tailnet); a guest reads the stored states and runs nothing.
+   */
+  const threadPullsRoute = createThreadPullsRoute({
+    store,
+    states: threadPullStates,
+    serverSession,
+    json,
+    readBody,
+    sessionMismatch: (body) => (checkServerSession(body, serverSession) === "mismatch" ? json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409) : null),
+    localOnly,
+  });
 
   /** Voice dictation (inbox-voice.ts): Settings → Voice, its one-time announcement and its routes. */
   const voice = createInboxVoice({
@@ -4468,6 +4579,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (validateOnly) return json({ serverSession, ok: true });
         if (body.ask !== undefined && body.ask !== "guide" && body.ask !== "custom") throw new InboxError("validation_error", "ask: guide or custom.", { field: "ask" });
         pullOwners.set(keys as string[], threadId, { ask: (body.ask as "guide" | "custom" | undefined) ?? null, theirs });
+        couplePulls(keys as string[], threadId);
         return json({ serverSession, ok: true });
       }
       // Post to GitHub/GitLab (the owner's answer C on #2590: the person chooses at the end): the review the person
@@ -5735,6 +5847,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Thread steps (approval "inbox-thread-steps"): a thread's lists with each session's presence (packages/server/inbox-steps.ts).
       const steps = stepsRoute.route(req, path);
       if (steps) return steps;
+      // A thread's PRs (approval "inbox-pr-binding"): the window's read and the person's add and remove (inbox-thread-pulls.ts).
+      // Never another site; a change only from the owner's window (a guest gets 403 local_only); never on the device door.
+      if (/^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/pulls$/.test(path)) {
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        const pullsAnswer = await threadPullsRoute.route(req, path, ownerOrLocal(req, via));
+        if (pullsAnswer) return pullsAnswer;
+      }
 
       // #1813: an image a message's body shows, read from wherever it is on this
       // computer outside the home folder's hidden folders (packages/server/inbox-message-images.ts).
