@@ -63,7 +63,7 @@ import { learnDebugLog, resumeDebugLog } from './debugLog';
 import type { RecipientConnection } from './deliveryLine';
 import { parseRestartAgents } from './restartAgents';
 import type { PatchBlobIds } from '@plannotator/core/diff-files';
-import type { InboxFileContents, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullRiskAnswer, InboxPullRiskModels, InboxPullsAnswer, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewLinkAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun, InboxActivityModel } from '@plannotator/core/inbox-types';
+import type { InboxFileContents, InboxPullDetailsAnswer, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullRiskAnswer, InboxPullRiskModels, InboxPullsAnswer, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewLinkAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun, InboxActivityModel } from '@plannotator/core/inbox-types';
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchSort, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
   InboxAgentId,
@@ -97,8 +97,8 @@ import { newUuid } from './uuid';
 export type InboxRevealId = 'code_review' | 'sound' | 'list_intro' | 'voice' | 'snooze' | 'bro' | 'board' | 'steps' | 'star' | 'list_view';
 /** An offer of the line (not an update-day dialog): only an offer's Not now stamps the four-day gap. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
-/** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, or the agent note. */
-export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note';
+/** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, or the Launch tip (outside the line). */
+export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip';
 
 /**
  * This page load's id, sent with every read and write (`X-Plannotator-Load`): the line of one-time dialogs never shows
@@ -203,13 +203,38 @@ export interface MachineView {
   waiting: number;
   /** The cursor of its list this Inbox holds: it moves when its rows changed. Absent from an older Inbox. */
   list_cursor?: number | null;
-  /** Its Inbox keeps snoozes (approval "inbox-snooze"). Absent from an older Inbox, and false for a linked one too old: no Snooze on its rows. */
+  /** Its Inbox keeps snoozes (approval "inbox-snooze"). Absent from an older Inbox, and false for a linked one too old: nothing to snooze with on its rows (`snooze_old`). */
   snoozes?: boolean;
   /**
    * Remote launch: agents can start there (true), launch is off there (false), or its Inbox is too old to say (null;
    * null for this machine, whose own launch block says). Absent from an older Inbox.
    */
   launch?: boolean | null;
+  /** Its list was read and keeps no snoozes: an older Inbox, so Snooze says why instead of vanishing. */
+  snooze_old?: boolean;
+  /** Update on that machine, from its own state. Null: nothing to say (level, ahead, this machine, or no newer release known). */
+  update?: MachineUpdateView | null;
+}
+
+/** A linked machine's update, as `machineUpdateView` (inbox-machines.ts) reads what it hears from there. */
+export interface MachineUpdateView {
+  phase: 'behind' | 'updating' | 'ready' | 'failed' | 'restarting' | 'not_back' | 'updated';
+  target: string | null;
+  from: string | null;
+  can_update: boolean;
+  self_update: boolean;
+}
+
+/** What the dialog reads from that machine (`GET /api/inbox/machines/:id/update`). The log comes as `~/…`, so no username crosses. */
+export interface MachineUpdateDetails {
+  too_old?: boolean;
+  current: string | null;
+  update?: { state: string; version: string; action: 'script' | 'copy' } | null;
+  platform?: 'darwin' | 'linux' | 'win32';
+  command?: string;
+  log?: string;
+  open_reviews?: number;
+  failure?: { exit_code: number; tls?: 'untrusted' | 'revoked'; release_first?: true; prepare?: string; unchanged?: true } | null;
 }
 
 /** A write held for another machine (`GET /api/inbox/outbox`, the `outbox` frame). */
@@ -469,9 +494,10 @@ export interface SettingsModel {
    * as soon as its own moment comes (List view); `setup`: the agent note may show on this load (absent from an older
    * Inbox: it may); `line`: this Inbox keeps the line (a release build), so the update-day dialogs (sound, list
    * options, voice) show only when `next` names them; `aside`: the star ask, which this page may arm beside `next` (it
-   * stands outside the line's order). The whole field is absent from an older Inbox.
+   * stands outside the line's order); `launch_tip`: the Launch tip may show at the first plain New message (outside the
+   * line; absent from an older Inbox: it never shows). The whole field is absent from an older Inbox.
    */
-  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[] };
+  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
@@ -765,6 +791,8 @@ export class InboxApiError extends Error {
     message: string,
     /** The request's field the refusal names (`files[1]`), when it names one. */
     readonly field: string | null = null,
+    /** When a held read may be asked again (ms since the epoch), when the answer says. */
+    readonly retryAt: number | null = null,
   ) {
     super(message);
     this.name = 'InboxApiError';
@@ -779,6 +807,7 @@ async function readJson<T>(response: Response): Promise<T> {
       typeof body.code === 'string' ? body.code : 'error',
       typeof body.error === 'string' ? body.error : `The Inbox answered ${response.status}.`,
       typeof body.field === 'string' ? body.field : null,
+      typeof body.retry_at === 'number' ? body.retry_at : null,
     );
   }
   return body as T;
@@ -1747,6 +1776,7 @@ export const inboxApi = {
   savePullRisk: (input: { rules: string; provider: string | null; model: string | null }) => post<InboxPullRiskAnswer>(inboxUrl('/pulls/risk'), input),
   pullRiskModels: (provider: string, signal?: AbortSignal) => get<InboxPullRiskModels>(inboxUrl(`/pulls/risk/models?provider=${encodeURIComponent(provider)}`), signal),
   /** A PR author's profile picture, served by the Inbox from its own origin (only an author the last list returned). */
+  pullDetails: (key: string, signal?: AbortSignal) => get<InboxPullDetailsAnswer>(inboxUrl(`/pulls/details?key=${encodeURIComponent(key)}`), signal),
   pullAvatarUrl: (host: string, login: string) => inboxUrl('/pulls/avatar', `host=${encodeURIComponent(host)}&login=${encodeURIComponent(login)}`),
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
   pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>
@@ -1880,6 +1910,9 @@ export const inboxApi = {
   offerMachine: () => post<MachineOffer>(inboxUrl('/machines/offer'), { tailscale: true }),
   /** Link the machine whose code this is (a pasted link, or its address and six digits), both ways. */
   linkMachine: (input: { link: string } | { address: string; code: string }) => post<{ machine: MachineView }>(inboxUrl('/machines/link'), { ...input }),
+  /** Read and start an update on a linked machine. Its body carries no version: that machine installs its own answer. */
+  machineUpdate: (id: string) => get<MachineUpdateDetails>(inboxUrl(`/machines/${encodeURIComponent(id)}/update`)),
+  startMachineUpdate: (id: string) => post<{ ok: true; outcome: string }>(inboxUrl(`/machines/${encodeURIComponent(id)}/update`), {}),
   unlinkMachine: (id: string) => post<{ unlinked: { id: string; name: string }; told: boolean }>(inboxUrl(`/machines/${encodeURIComponent(id)}/unlink`), {}),
   /** Writes held for other machines, and notices about ones that did not land. */
   outbox: () => get<{ waiting: OutboxView[]; notices: OutboxView[] }>(inboxUrl('/outbox')),

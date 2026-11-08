@@ -20,7 +20,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 const hasDom = typeof document !== 'undefined';
 const { RowsSection, ROWS_PRESETS, rowsSummary } = (hasDom ? await import('./components/RowsSettings') : {}) as typeof import('./components/RowsSettings');
-const { LIST_LOOK_DEFAULT, LIST_LOOK_OFF, readListLook, resetListLookForTests } = await import('./listLook');
+const { LIST_LOOK_DEFAULT, LIST_LOOK_OFF, readListLook, resetListLookForTests, rowsFromLook } = await import('./listLook');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 const saves: unknown[][] = [];
@@ -154,7 +154,7 @@ describe.if(hasDom)('Settings → Rows', () => {
     }
     expect(saves).toHaveLength(ROWS_PRESETS.length);
     await pick(el, 'preset', 'Minimal');
-    await pick(el, 'time', 'Clock');
+    await pick(el, 'time', 'Relative');
     expect(chosen(el, 'preset')).toEqual([]);
     expect(el.querySelector('.ib-rws-custom')!.textContent).toBe('Custom');
     expect(rowsSummary(readListLook())).toBe('Custom');
@@ -168,7 +168,7 @@ describe.if(hasDom)('Settings → Rows', () => {
   test('the presets are buttons, never radios, so a key moves through them without choosing; "Custom" goes with them', async () => {
     const el = render();
     await pick(el, 'preset', 'Minimal');
-    await pick(el, 'time', 'Clock');
+    await pick(el, 'time', 'Relative');
     const group = el.querySelector<HTMLElement>('.ib-rws-presets [role="group"]')!;
     expect(el.querySelector('.ib-rws-presets :is(input, [role="radio"], [role="radiogroup"])')).toBeNull();
     expect([...group.children].map((b) => [b.tagName, (b as HTMLButtonElement).type, b.getAttribute('aria-pressed')])).toEqual([
@@ -238,14 +238,16 @@ describe.if(hasDom)('Settings → Rows', () => {
     expect(sw('githubPictures').getAttribute('aria-checked')).toBe('true');
   });
 
-  test('Detailed turns marks on (Both, Avatar, both picture switches off); Minimal and Balanced keep them off', async () => {
+  test('Detailed turns marks on (Both, Avatar, the repo logo on, GitHub pictures off); Minimal and Balanced keep them off', async () => {
     const el = render();
     await pick(el, 'preset', 'Detailed');
     expect(chosen(el, 'marks')).toEqual(['Both']);
     expect(chosen(el, 'markstyle')).toEqual(['Avatar']);
-    for (const key of ['repoLogo', 'githubPictures']) expect(el.querySelector(`[data-rows-control="${key}"] [role="switch"]`)!.getAttribute('aria-checked')).toBe('false');
-    // A picture switch on is no longer Detailed.
-    act(() => el.querySelector<HTMLElement>('[data-rows-control="repoLogo"] [role="switch"]')!.click());
+    // The repo logo (pending owner answer q-737e5fd4).
+    expect(el.querySelector('[data-rows-control="repoLogo"] [role="switch"]')!.getAttribute('aria-checked')).toBe('true');
+    expect(el.querySelector('[data-rows-control="githubPictures"] [role="switch"]')!.getAttribute('aria-checked')).toBe('false');
+    // GitHub pictures on is no longer Detailed (it asks GitHub; no preset does).
+    act(() => el.querySelector<HTMLElement>('[data-rows-control="githubPictures"] [role="switch"]')!.click());
     await settle();
     expect(chosen(el, 'preset')).toEqual([]);
     for (const preset of ['Minimal', 'Balanced']) {
@@ -309,5 +311,16 @@ describe.if(hasDom)('Settings → Rows', () => {
     await settle();
     expect(phone.querySelectorAll('[data-rows-preview="phone"] .ib-mrow > .ib-m4').length).toBe(3);
     expect(phone.querySelectorAll('[data-rows-preview="phone"] .ib-stm').length).toBe(3);
+  });
+
+  // Approval "inbox-rows-dialog", round 7b: the dialog's three looks are these presets, so their exact options are
+  // what both places save. Detailed's pill and repo logo follow pending owner answers q-70c1a472 and q-737e5fd4.
+  test("each preset's exact options: Minimal two-line title first, Balanced the defaults, Detailed roomy with marks", () => {
+    const tokens = Object.fromEntries(ROWS_PRESETS.map((preset) => [preset.id, rowsFromLook(preset.look)]));
+    expect(tokens).toEqual({
+      minimal: ['smallNames', 'hidePreview', 'titleFirst'],
+      balanced: ['smallNames'],
+      detailed: ['roomy', 'previewTwo', 'marksThreads', 'marksProjects', 'repoLogo'],
+    });
   });
 });

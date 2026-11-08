@@ -426,6 +426,8 @@ export function useShowMe({
     /** This review's lines by file, and another review's (undefined until read). */
     nowLines,
     linesOf: (review: string): ReviewLines | undefined => otherLines[review],
+    /** The boards this thread's Show me turns made (context notes draw their code parts on the diff). */
+    boards: [...new Set(turns.flatMap((turn) => (turn.show_me && turn.shape ? [turn.shape] : [])))],
     /** The review the newest Show me that made this board was asked on. */
     askedOn: (board: string): string | undefined => [...turns].reverse().find((turn) => turn.shape === board)?.show_me?.review ?? undefined,
   };

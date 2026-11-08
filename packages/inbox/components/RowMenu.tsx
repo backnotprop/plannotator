@@ -21,6 +21,9 @@ export interface ThreadRowMenuProps {
   snoozesOf?: (row: InboxListRow) => boolean;
   /** H on a row (InboxList.tsx): each new request opens that row's menu at its Snooze times. */
   snoozeRequest?: { id: string; n: number } | null;
+  /** The machine that must update before this row can be snoozed: Snooze stays, and says so. */
+  snoozeBlockedOf?: (row: InboxListRow) => { name: string } | null;
+  onSnoozeBlocked?: (row: InboxListRow) => void;
   /**
    * Whether a thread is pinned to the sidebar (approval "inbox-pinned-threads"): Pin thread or Unpin
    * thread leads the menu, in its own group. Absent (an older Inbox keeps no pins): no item.
@@ -99,7 +102,8 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
     onTarget: props.onTarget,
   });
   const target = menu.targetId ? props.rowOf(menu.targetId) : null;
-  const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target.thread_id) : null, props.sectionOf?.(target.thread_id) ?? null, props.onSnooze !== undefined && (props.snoozesOf?.(target) ?? true)) : [];
+  const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target.thread_id) : null, props.sectionOf?.(target.thread_id) ?? null, props.onSnooze !== undefined && ((props.snoozesOf?.(target) ?? true) || !!props.snoozeBlockedOf?.(target))) : [];
+  const snoozeBlocked = target ? (props.snoozeBlockedOf?.(target) ?? null) : null;
   const pinning = actions.filter((a) => a === 'pin' || a === 'unpin');
   const copies = actions.filter((a) => a === 'copy-thread' || a === 'copy-link' || a === 'copy-id');
   const writes = actions.filter((a) => a === 'snooze' || a === 'unsnooze' || a === 'read' || a === 'mark-unread' || a === 'unread' || a === 'archive');
@@ -132,7 +136,13 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request?.id, request?.n]);
   const item = (action: RowMenuAction) =>
-    action === 'snooze' ? (
+    action === 'snooze' && snoozeBlocked ? (
+      <Menu.Item key={action} className="ib-pmi" label={`Snooze: update ${snoozeBlocked.name} first`} data-row-action="snooze" data-snooze-blocked="" onClick={() => target && props.onSnoozeBlocked?.(target)}>
+        <Icon name="clock" size={15} />
+        {LABELS.snooze.label}
+        <span className="ib-zsub ib-zneeds">Update {snoozeBlocked.name}</span>
+      </Menu.Item>
+    ) : action === 'snooze' ? (
       <Menu.Item key={action} className="ib-pmi" label={LABELS.snooze.label} closeOnClick={false} data-row-action="snooze" onClick={() => setSnoozeView('times')}>
         <Icon name="clock" size={15} />
         {LABELS.snooze.label}

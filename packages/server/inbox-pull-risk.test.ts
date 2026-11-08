@@ -45,7 +45,7 @@ const settled = async () => {
 };
 
 /** An engine with a scripted agent and a scripted diff read; every run is kept in `runs`. */
-function engine(options: { answer?: RiskRunner; agents?: { id: string; label: string }[]; on?: () => boolean; now?: () => number; head?: (key: string) => string | null; patch?: string; diffFails?: boolean | string; diffGate?: Promise<void> } = {}) {
+function engine(options: { answer?: RiskRunner; agents?: { id: string; label: string }[]; on?: () => boolean; now?: () => number; head?: (key: string) => string | null; patch?: string; diffFails?: boolean | string; diffGate?: Promise<void>; read?: { per_file?: true; partial?: boolean; held_back?: string } } = {}) {
   const runs: RiskRun[] = [];
   const reads: string[] = [];
   const risk = createPullRisk({
@@ -59,7 +59,7 @@ function engine(options: { answer?: RiskRunner; agents?: { id: string; label: st
         await options.diffGate;
         if (options.diffFails) throw Object.assign(new Error("gh failed"), typeof options.diffFails === "string" ? { code: options.diffFails } : {});
         const number = key.split("#")[1];
-        return { patch: options.patch ?? "diff --git a/x b/x\n", partial: false, head_sha: options.head ? options.head(key) : `head-${number}` };
+        return { patch: options.patch ?? "diff --git a/x b/x\n", partial: false, head_sha: options.head ? options.head(key) : `head-${number}`, ...options.read };
       },
     },
     run: async (run) => {
@@ -206,6 +206,21 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
     expect(prompt).not.toMatch(/too large/i);
     expect(risk.answer().judgments[key]?.level).toBe("high");
     expect(risk.answer().failed).toEqual({});
+  });
+
+  const PAY_PLACE = JSON.stringify({ risk: "high", why: "It charges twice.", where: [{ file: "src/pay.ts", side: "new", lines: [1, 1], why: "Charges twice." }] });
+  test("a high judgment from the forge's one document, the diff the PR page draws, keeps its places", async () => {
+    setRules();
+    const { risk, judge, key } = await reading("github", { whole: { stdout: "diff --git a/src/pay.ts b/src/pay.ts\n--- a/src/pay.ts\n+++ b/src/pay.ts\n@@ -1 +1 @@\n-old\n+charge twice\n" } }, { answer: PAY_PLACE });
+    await judge();
+    expect(risk.answer().judgments[key]?.where).toHaveLength(1);
+  });
+
+  test("one from the per-file read keeps none: the PR page draws no diff then, so a count would promise nothing", async () => {
+    setRules();
+    const { risk, judge, key } = await reading("github", { whole: { stderr: "gh: (HTTP 406)", exitCode: 1 }, paged: { stdout: FILES_PAGE_1 } }, { answer: PAY_PLACE });
+    await judge();
+    expect(risk.answer().judgments[key]).toEqual({ level: "high", why: "It charges twice." });
   });
 
   describe("an answer of Low from a read known to be incomplete", () => {
@@ -1411,5 +1426,82 @@ describe("finding the agent", () => {
     expect(installedPath("sh")).toBeNull();
     delete process.env.PLANNOTATOR_TEST_SANDBOX;
     expect(installedPath("sh")).not.toBeNull();
+  });
+});
+
+describe("a high judgment's places (context notes)", () => {
+  const PATCH = "diff --git a/src/billing.ts b/src/billing.ts\n--- a/src/billing.ts\n+++ b/src/billing.ts\n@@ -10,3 +10,5 @@\n context\n-old line\n+new one\n+new two\n+new three\n context\n";
+  const RULES = "- Anything in billing.\n- Auth changes.";
+  const check = { rules: RULES, patch: PATCH };
+  const place = { file: "src/billing.ts", side: "new", lines: [11, 13], rule: "Anything in billing.", why: "Charges now retry." };
+  const answer = (risk: string, where: unknown) => JSON.stringify({ risk, why: "It changes billing.", where });
+
+  test("keeps a place inside one hunk, with the person's rule matched line for line", () => {
+    expect(parseRiskAnswer(answer("high", [place]), check)).toEqual({ level: "high", why: "It changes billing.", where: [{ file: "src/billing.ts", side: "new", lines: [11, 13], rule: "Anything in billing.", why: "Charges now retry." }] });
+    expect(parseRiskAnswer(answer("high", [{ ...place, side: "old", lines: [11, 11] }]), check)?.where).toHaveLength(1);
+  });
+
+  test("only a high judgment keeps places; low and medium keep their verdict without them", () => {
+    expect(parseRiskAnswer(answer("medium", [place]), check)).toEqual({ level: "medium", why: "It changes billing." });
+    expect(parseRiskAnswer(answer("low", [place]), check)).toEqual({ level: "low", why: "It changes billing." });
+  });
+
+  test("a bad place is dropped, never the judgment", () => {
+    const bad = [
+      { ...place, file: "src/other.ts" },
+      { ...place, lines: [30, 31] },
+      { ...place, lines: [13, 11] },
+      { ...place, side: "both" },
+      { ...place, why: "" },
+      { ...place, extra: 1 },
+      "src/billing.ts#L11",
+    ];
+    expect(parseRiskAnswer(answer("high", bad), check)).toEqual({ level: "high", why: "It changes billing." });
+  });
+
+  test("a rule that is not one of the person's lines is left off; at most five places", () => {
+    expect(parseRiskAnswer(answer("high", [{ ...place, rule: "Something I made up." }]), check)?.where?.[0]?.rule).toBeUndefined();
+    expect(parseRiskAnswer(answer("high", Array.from({ length: 8 }, () => place)), check)?.where).toHaveLength(5);
+  });
+
+  test("a fourth key, or where beside another extra key, is still no judgment", () => {
+    expect(parseRiskAnswer(JSON.stringify({ risk: "high", why: "x", where: [place], note: "y" }), check)).toBeNull();
+    expect(parseRiskAnswer(JSON.stringify({ risk: "high", why: "x", note: "y" }), check)).toBeNull();
+  });
+
+  test("the engine keeps a high judgment's places for its head and drops ones outside the diff", async () => {
+    setRules(RULES);
+    const { risk } = engine({ patch: PATCH, answer: async () => ({ text: answer("high", [place, { ...place, lines: [40, 41] }]) }) });
+    risk.assess([pull(7)]);
+    await settled();
+    expect(risk.answer().judgments["github.com/n/b#7"]?.where).toEqual([{ file: "src/billing.ts", side: "new", lines: [11, 13], rule: "Anything in billing.", why: "Charges now retry." }]);
+  });
+
+  test("the places are read back from pull-risk.json after a restart, with no new run, and the rule's words are stored there", async () => {
+    setRules(RULES);
+    const first = engine({ patch: PATCH, answer: async () => ({ text: answer("high", [place]) }) });
+    first.risk.assess([pull(7)]);
+    await settled();
+    const stored = JSON.parse(readFileSync(join(dataDir, "inbox", INBOX_PULL_RISK_FILE), "utf8")) as { judgments: Record<string, { where?: unknown }> };
+    expect(stored.judgments["github.com/n/b#7"]?.where).toEqual([{ file: "src/billing.ts", side: "new", lines: [11, 13], rule: "Anything in billing.", why: "Charges now retry." }]);
+    const restarted = engine({ patch: PATCH });
+    restarted.risk.assess([pull(7)]);
+    await settled();
+    expect(restarted.runs).toEqual([]);
+    expect(restarted.risk.answer().judgments["github.com/n/b#7"]?.where).toEqual([{ file: "src/billing.ts", side: "new", lines: [11, 13], rule: "Anything in billing.", why: "Charges now retry." }]);
+  });
+
+  test("a judgment made from a diff the PR page can't draw keeps no places, so no count promises places it can't show", async () => {
+    setRules(RULES);
+    // The forge would not serve one document (its per-file read, or a clone, gave the diff): the PR's diff shows none of it.
+    const perFile = engine({ patch: PATCH, read: { per_file: true }, answer: async () => ({ text: answer("high", [place]) }) });
+    perFile.risk.assess([pull(7)]);
+    await settled();
+    expect(perFile.risk.answer().judgments["github.com/n/b#7"]).toEqual({ level: "high", why: "It changes billing." });
+    // Known to be less than the whole (held-back files): High stays High, without places.
+    const partial = engine({ patch: PATCH, read: { partial: true }, answer: async () => ({ text: answer("high", [place]) }) });
+    partial.risk.assess([pull(8)]);
+    await settled();
+    expect(partial.risk.answer().judgments["github.com/n/b#8"]).toEqual({ level: "high", why: "It changes billing." });
   });
 });

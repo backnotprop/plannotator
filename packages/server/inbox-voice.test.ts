@@ -16,6 +16,7 @@ import { doorWriteKind } from "./inbox-outbox";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import { startInboxServer, type InboxServer } from "./inbox";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
+import { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_VOICE_MAX_CLIP_BYTES } from "@plannotator/core/inbox-types";
 import { installFakeCodex, type FakeCodex, type FakeCodexState } from "../../tests/helpers/fake-codex-app-server";
 
@@ -92,6 +93,8 @@ interface WorldOptions {
   env?: Record<string, string>;
   config?: Record<string, unknown>;
   tailnet?: boolean;
+  /** Threads in the store before the Inbox starts (none by default). */
+  threads?: number;
 }
 
 async function world(options: WorldOptions = {}) {
@@ -102,8 +105,14 @@ async function world(options: WorldOptions = {}) {
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(home);
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
-  const config = { ...(options.usedBefore ? { inboxNotifications: { dismissed: true }, inboxSound: { dialogShownFor: "0.1.0" }, inboxListIntro: { shownAt: "2026-10-01T00:00:00.000Z" } } : {}), ...options.config };
+  const config = { ...(options.usedBefore ? { inboxNotifications: { dismissed: true }, inboxSound: { dialogShownFor: "0.1.0" }, inboxListIntro: { shownAt: "2026-10-01T00:00:00.000Z", version: 2 } } : {}), ...options.config };
   if (Object.keys(config).length > 0) writeFileSync(join(dataDir, "config.json"), JSON.stringify(config));
+  if (options.threads) {
+    const store = InboxStore.open(dataDir);
+    const project = store.ensureProject({ name: "docs", root: join(root, "docs") });
+    // One session's messages make one thread: a session each.
+    for (let i = 0; i < options.threads; i++) store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: `ses_${i}`, name: "Claude Code" }, body: `Question ${i}?` });
+  }
   const codex = options.codex === null ? null : installFakeCodex(root, options.codex ?? CHATGPT);
   const environment = createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: { HOME: home, PATH: codex ? `${codex.bin}:/usr/bin:/bin` : "/nowhere", ...options.env } });
   const serve = new Map<number, string>();
@@ -697,13 +706,21 @@ describe("the announcement", () => {
   });
 
   test.each([
-    ["the sound dialog", { inboxSound: { dialogDueFor: "0.30.0" } }],
-    ["the list options dialog", { inboxListIntro: { dueAt: "2026-10-30T00:00:00.000Z" } }],
-  ])("%s due: no check, no claim", async (_name, config) => {
-    const w = await world({ version: "0.30.0", usedBefore: true, config });
+    ["the sound dialog", { inboxSound: { dialogDueFor: "0.30.0" } }, 0],
+    ["the list dialog, with the five threads it waits for", { inboxListIntro: { dueAt: "2026-10-30T00:00:00.000Z" } }, 5],
+  ])("%s due: no check, no claim", async (_name, config, threads) => {
+    const w = await world({ version: "0.30.0", usedBefore: true, config, threads });
     expect(await claim(w)).toBe(false);
     expect(w.codex.starts()).toBe(0);
     expect(w.saved().inboxVoiceIntro?.shownAt).toBeUndefined();
+  });
+
+  test("the list dialog due under five threads (no page shows it yet): it never holds voice back", async () => {
+    // Someone who saw the earlier list dialog: version 2 makes it due again, but it waits for five threads.
+    const w = await world({ version: "0.30.0", usedBefore: true, config: { inboxListIntro: { dueAt: "2026-10-20T00:00:00.000Z", shownAt: "2026-10-21T00:00:00.000Z" } }, threads: 4 });
+    expect(await claim(w)).toBe(true);
+    expect(w.saved().inboxVoiceIntro?.shownAt).toMatch(/^\d{4}-/);
+    await codexStopped(w.codex);
   });
 
   test("turning voice on in Settings first leaves nothing to announce, even after it is turned off again", async () => {

@@ -176,6 +176,8 @@ export interface ThreadSnoozeProps {
   snoozed: boolean;
   onPick: (until: string) => void;
   onUnsnooze: () => void;
+  /** This thread's machine must update first: Snooze stays, says why and opens the update dialog. */
+  blocked?: { name: string; onPress: () => void };
 }
 
 /**
@@ -273,7 +275,14 @@ export function ThreadMore(
   const lead = phone ? (
     <>
       {readItems}
-      {snooze && (
+      {snooze?.blocked && (
+        <Menu.Item className="ib-pmi" label={`Snooze: update ${snooze.blocked.name} first`} onClick={snooze.blocked.onPress} data-thread-snooze-item="" data-snooze-blocked="">
+          <Icon name="clock" size={15} />
+          Snooze
+          <span className="ib-zsub ib-zneeds">Update {snooze.blocked.name}</span>
+        </Menu.Item>
+      )}
+      {snooze && !snooze.blocked && (
         <Menu.Item className="ib-pmi" label="Snooze" closeOnClick={false} onClick={() => setView('times')} data-thread-snooze-item="">
           <Icon name="clock" size={15} />
           Snooze
@@ -437,6 +446,16 @@ export function ThreadSnooze({ snooze, openRequest = 0 }: { snooze: ThreadSnooze
     const frame = requestAnimationFrame(() => popup.current?.querySelector<HTMLElement>('[data-snooze-choice]')?.focus());
     return () => cancelAnimationFrame(frame);
   }, [open]);
+  // A machine that must update first (approval "inbox-machine-update"): Snooze stays, and says why. After the hooks.
+  if (snooze.blocked) {
+    return (
+      <Tip content={`Update ${snooze.blocked.name} to snooze here`}>
+        <button type="button" className="ib-iconbtn ib-snooze-blocked" aria-label={`Snooze: update ${snooze.blocked.name} first`} onClick={snooze.blocked.onPress} data-thread-snooze="" data-snooze-blocked="">
+          <Icon name="clock" size={17} />
+        </button>
+      </Tip>
+    );
+  }
   return (
     <Menu.Root
       modal={false}

@@ -12,6 +12,10 @@
  * - The rail stays at every width but a phone's, where the row under the bar
  *   opens it as a sheet over the diff, the comments' sheet's mirror; an open
  *   sidebar never takes it away: its toggle gives the room back.
+ * - The comments panel starts closed at every width, as in the review app: the
+ *   bar's Comments button opens it, beside the code from REVIEW_FOLD_PANEL_BELOW
+ *   up and as a sheet below. It opens by itself on a new comment and on a
+ *   comment chosen elsewhere (approval "pr-view-one-surface", 11-07 18:33Z).
  * - A layer is the PR's own diff; "All N layers" is the compare from the
  *   stack's base branch to this layer's head (inbox-pulls.ts `diff`).
  * - The end of a layer's diff offers the next layer.
@@ -42,7 +46,7 @@ import { guideCommentSections } from '../attachments';
 import { RefMarkIcon } from '../board/RefMark';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
-import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
+import { DiffControls, nextCollapseAll, type CollapseAllState } from '../components/DiffControls';
 import { SidebarTrigger } from '../shell/sidebar';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
@@ -58,6 +62,7 @@ import { FileTreeMark } from './fileTreeMark';
 import { TooltipEscapePassesThrough } from '@plannotator/ui/components/Tooltip';
 import { RailStack } from './RailStack';
 import { RailTree } from './RailTree';
+import { DetailsButton, DetailsTitle, PullDetails, usePullDetails } from './PullDetails';
 import { RailScopeSwitch } from './RailScope';
 import { useTreeScope } from '@plannotator/ui/hooks/useTreeScope';
 import { useSheetEscape } from '../shortcuts/useSheetEscape';
@@ -65,6 +70,8 @@ import { inOverlay } from '../shortcuts/guards';
 import { reviewFiles } from './reviewFiles';
 import { layerVerdictLink, nextLayer, stackVerdictLink } from './topology';
 import { RiskMark } from './RiskMark';
+import { ContextNotesProvider, useContextNotes } from '../contextNotes/ContextNotes';
+import { placesWord, riskNotes, takeRiskPlaces } from '../contextNotes/model';
 import { usePullRisk } from './usePullRisk';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
@@ -487,14 +494,46 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       // Storage full or off: this visit only.
     }
   };
+  // The tab row's Collapse all (DiffControls): every file's diff, this view only.
+  const [collapseAll, setCollapseAll] = useState<CollapseAllState | null>(null);
+  // The comments panel, open or not, at every width: closed at first, as in the review app; from REVIEW_FOLD_PANEL_BELOW
+  // up an open one is the column beside the code, below it the sheet. Crossing the fold closes it. Nothing is kept: a
+  // fresh PR opens closed.
   const [sheet, setSheet] = useState(false);
   const sheetId = useId();
   const sheetCloseRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    if (!folded) setSheet(false);
+    setSheet(false);
   }, [folded]);
   // The folded rail's sheet, the comments' mirror on the other side: one of the two is open at a time.
   const [filesSheet, setFilesSheet] = useState(false);
+  // The PR's details over the code; what opened them takes focus back. One thing over the code at a time.
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  // Only once the list names it: on a fresh load the Inbox has no list yet, and would refuse a PR it has not listed.
+  // Read again when the PR moves, and whenever the panel opens (the server keeps a read for a minute).
+  const details = usePullDetails(layer ? layerKey : null, layer ? `${layer.head_sha ?? ''}\u0000${layer.updated_at}` : '');
+  const detailsPanel = useRef<HTMLElement>(null);
+  const detailsOpener = useRef<HTMLElement | null>(null);
+  const toggleDetails = (event: React.MouseEvent<HTMLElement>) => {
+    detailsOpener.current = event.currentTarget;
+    if (!detailsOpen) details.retry();
+    setDetailsOpen((open) => !open);
+    setSheet(false);
+    setFilesSheet(false);
+  };
+  const closeDetails = () => {
+    setDetailsOpen(false);
+    detailsOpener.current?.focus({ preventScroll: true });
+  };
+  useSheetEscape(detailsOpen, closeDetails);
+  useEffect(() => {
+    if (detailsOpen) detailsPanel.current?.focus({ preventScroll: true });
+  }, [detailsOpen]);
+  useEffect(() => {
+    if (sheet || filesSheet) setDetailsOpen(false);
+  }, [sheet, filesSheet]);
+  // Another layer is another PR: its details do not carry over.
+  useEffect(() => setDetailsOpen(false), [layerKey]);
   const filesSheetId = useId();
   const filesButton = useRef<HTMLButtonElement>(null);
   const sheetButton = useRef<HTMLButtonElement>(null);
@@ -539,8 +578,10 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       const left = tabbing.current && event.relatedTarget instanceof Element && !event.currentTarget.contains(event.relatedTarget) && !inOverlay(event.relatedTarget);
       tabbing.current = false;
       if (!left) return;
-      setSheet(false);
+      // The column beside the code is no sheet: it stays.
+      if (folded) setSheet(false);
       setFilesSheet(false);
+      setDetailsOpen(false);
     },
   };
   // Crossing a fold takes away what held focus (a button, or a rail or panel that hides): focus moves to the same
@@ -559,14 +600,21 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     showComment(id);
     if (phone) setSheet(false);
   };
-  // A global comment chosen in the guide: selected in the panel, and the folded panel opens on it (as ReviewPane).
+  // A global comment chosen in the guide: selected in the panel, and the panel opens on it (as ReviewPane folded).
   const showGlobalComment = (id: string) => {
     setSelectedId(id);
-    if (folded) setSheet(true);
+    setSheet(true);
+  };
+  // A new comment opens the column beside the code, so it never lands out of sight; a sheet would cover the code.
+  const saveFromReader = async (annotation: CodeAnnotation) => {
+    const added = !comments.some((c) => c.id === annotation.id);
+    save(annotation);
+    if (added && !folded) setSheet(true);
+    return true;
   };
   // The unsaved global comment's words are named per layer and scope, not per push: they outlive a push, as the
   // global comments do.
-  const readerComments = canDecide || canPost ? { annotations: here, selectedId, onSelect: setSelectedId, onSave: async (annotation: CodeAnnotation) => (save(annotation), true), onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
+  const readerComments = canDecide || canPost ? { annotations: here, selectedId, onSelect: setSelectedId, onSave: saveFromReader, onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
 
   // Open in: what is on disk in a clone of this repository, which may not be the PR's version; nothing when no clone holds the file.
   const repoKey = stack ? inboxPullRepoKey(stack.host, stack.repo) : null;
@@ -609,6 +657,43 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     setTreeScope(next);
     if (next === 'changes') setRepoOpen(null);
   };
+  // A high judgment's places (context notes, approval "inbox-context-notes"): on this layer's own diff, at the head it
+  // judged, each a row under its lines. Never comments. The header's "N places" steps through them.
+  const placeNotes = useMemo(
+    () => (scope === 'layer' && judged && layer && diff?.head_sha && diff.head_sha === layer.head_sha ? riskNotes(judged, files) : []),
+    [scope, judged, layer?.head_sha, diff?.head_sha, files], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const places = useContextNotes(placeNotes, {});
+  const placeAt = useRef(-1);
+  const goToPlace = (index: number) => {
+    const note = placeNotes[index];
+    if (!note) return;
+    placeAt.current = index;
+    move(note.file);
+    places.show(note.id);
+  };
+  const nextPlace = () => goToPlace((placeAt.current + 1) % placeNotes.length);
+  // The PR page's "See the N places": taken as this layer's diff mounts (the ask is gone after that, whatever it
+  // named), and the first place opens once the diff draws its places. Once the diff settles with none to draw (it
+  // could not be read, the judged head's diff draws none, the whole stack is on screen) or another layer opens, the
+  // ask is dropped: no later diff moves by itself.
+  const placesTaken = useRef<string | null>(null);
+  const placesWanted = useRef(false);
+  useEffect(() => {
+    // StrictMode runs this twice on the same layer: the second run keeps what the first took.
+    if (placesTaken.current === layerKey) return;
+    placesTaken.current = layerKey;
+    placesWanted.current = takeRiskPlaces(layerKey);
+  }, [layerKey]);
+  useEffect(() => {
+    if (!placesWanted.current) return;
+    if (placeNotes.length > 0) {
+      placesWanted.current = false;
+      goToPlace(0);
+      return;
+    }
+    if (scope !== 'layer' || diffError || (judged && layer && diff?.head_sha && diff.head_sha === layer.head_sha)) placesWanted.current = false;
+  }, [placeNotes.length, layerKey, scope, diffError, judged, diff?.head_sha, layer?.head_sha]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The verdict: one reply to the agent's last message in its thread.
   const [sending, setSending] = useState(false);
@@ -695,20 +780,27 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       </p>
     </Tip>
   );
+  // The title opens the PR's details (the owner's "title only"; with `DETAILS_BUTTON`, the Details button beside it too).
   const title = (
-    <Tip content={`${label} ${layer.title} · ${layer.author ?? 'A teammate'} wants to merge ${layer.head} into ${layer.base}`}>
-      <span className="ib-fn ib-prr-fn" data-pull-review-title="">
-        <RefMarkIcon kind="pr" state={layer.state} size={15} />
-        {scope === 'stack' ? (
-          <bdi>Whole stack up to {label}</bdi>
-        ) : (
-          <>
-            <span className="ib-prr-num">{label}</span>
-            <bdi>{layer.title}</bdi>
-          </>
-        )}
-      </span>
-    </Tip>
+    <DetailsTitle
+      name={scope === 'stack' ? `Whole stack up to ${label}` : `${label} ${layer.title}`}
+      tip={`${label} ${layer.title} · ${layer.author ?? 'A teammate'} wants to merge ${layer.head} into ${layer.base}`}
+      open={detailsOpen}
+      data={details.data}
+      onToggle={toggleDetails}
+      className="ib-fn ib-prr-fn"
+      data-pull-review-title=""
+    >
+      <RefMarkIcon kind="pr" state={layer.state} size={15} />
+      {scope === 'stack' ? (
+        <bdi>Whole stack up to {label}</bdi>
+      ) : (
+        <>
+          <span className="ib-prr-num">{label}</span>
+          <bdi>{layer.title}</bdi>
+        </>
+      )}
+    </DetailsTitle>
   );
   const toggleFiles = () => {
     setFilesSheet((open) => !open);
@@ -750,7 +842,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer ib-wlayer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${phone ? '' : ' ib-prr-wide'}${phone ? ' ib-railfold' : ''}${filesSheet ? ' ib-files-open' : ''}`}
+      className={`ib-viewer ib-wlayer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${!folded && !sheet ? ' ib-prr-panel-shut' : ''}${phone ? '' : ' ib-prr-wide'}${phone ? ' ib-railfold' : ''}${filesSheet ? ' ib-files-open' : ''}`}
       style={{ '--ib-rail-w': `${railWidth}px` } as React.CSSProperties}
       aria-label={`Review ${label}`}
       data-pull-review={layer.key}
@@ -768,11 +860,17 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         </Tip>
         {!phone && title}
         {judged && <RiskMark judgment={judged} />}
+        {placeNotes.length > 0 && (
+          <button type="button" className="ib-ctxn-places" onClick={nextPlace} data-pull-risk-places={placeNotes.length}>
+            {placesWord(placeNotes.length)}
+          </button>
+        )}
         {!judged && riskFailure && <RiskMark failed={riskFailure} />}
         {!phone && readOnlyNote}
+        {!phone && <DetailsButton open={detailsOpen} data={details.data} onToggle={toggleDetails} />}
         <span className="ib-sp" />
         {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
-        {folded && (readerComments || comments.length > 0) && (
+        {(readerComments || comments.length > 0) && (
           <button
             type="button"
             ref={sheetButton}
@@ -838,7 +936,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       <div className="ib-rsplit">
         {phone && (
           <div className="ib-prp-row2">
-            <button type="button" className={`ib-prp-this${filesSheet ? ' ib-on' : ''}`} aria-expanded={filesSheet} aria-controls={filesSheetId} onClick={toggleFiles} data-pull-review-title="">
+            <button type="button" className={`ib-prp-this${detailsOpen ? ' ib-on' : ''}`} aria-expanded={detailsOpen} aria-label={`${stack.layers.length > 1 ? `${stack.layers.findIndex((l) => l.key === layer.key) + 1} of ${stack.layers.length} ` : ''}${scope === 'stack' ? `Whole stack up to ${label}` : layer.title}, opens details`} onClick={toggleDetails} data-pull-review-title="" data-pull-details-button="">
               {stack.layers.length > 1 && <span className="ib-prp-of">{stack.layers.findIndex((l) => l.key === layer.key) + 1} of {stack.layers.length}</span>}
               <bdi className="ib-prp-title">{scope === 'stack' ? `Whole stack up to ${label}` : layer.title}</bdi>
               <Icon name="chevD" size={13} />
@@ -850,6 +948,25 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               </button>
             )}
           </div>
+        )}
+        {detailsOpen && (
+          <PullDetails
+            layer={layer}
+            description={diff?.description}
+            headSha={diff?.head_sha}
+            data={details.data}
+            failed={details.failed}
+            heldUntil={details.heldUntil}
+            onRetry={details.retry}
+            forge={forgeName(stack)}
+            panel={detailsPanel}
+            phone={phone}
+            inDiff={(path) => files.some((file) => file.path === path)}
+            onClose={closeDetails}
+            onFile={move}
+            keys={sheetKeys}
+            top={phone && stack.layers.length > 1 ? <RailStack layers={stack.layers} here={layer} scope={scope} wholeTip={wholeTip} onLayer={(key, next) => { setDetailsOpen(false); onLayer(key, next); }} /> : undefined}
+          />
         )}
         <nav className="ib-rrail" id={filesSheetId} ref={railRef} aria-label="Changed files" {...sheetKeys}>
           {rail}
@@ -885,10 +1002,11 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           />
         )}
         {/* The review app's muted tab row over the code, its view controls at the right end; no tabs of its own here
-            (approval pr-view-one-surface, 11-07 19:08). */}
+            (approval pr-view-one-surface, 11-07 19:08). The controls are every review header's (approval
+            diff-controls-headers): one Split / Unified button, Collapse all, the Diff display gear. */}
         {!phone && (
           <div className="ib-prp-tabs" data-pull-tabs="">
-            <DiffStyleSwitch icons />
+            {snapshot && <DiffControls files={files.length} collapseAll={collapseAll} onCollapseAll={() => setCollapseAll(nextCollapseAll)} />}
           </div>
         )}
         <div className="ib-gbody" data-repo-open={repoOpen && repoSha ? '' : undefined}>
@@ -909,7 +1027,6 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               </a>
             </div>
           )}
-          {phone && readOnlyNote}
           {sendError && (
             <div className="ib-error ib-gerror" role="alert">
               {sendError}
@@ -932,7 +1049,24 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             // arrive says so here.
             <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ repo: repoKey ?? '', pull: layerKey }} on={!!repoKey}>
-                <GuideReader bare controlsHost={controlsHost} hostDiffControls snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} fileContents={fileContents} />
+                <ContextNotesProvider api={places.api}>
+                  <GuideReader
+                    bare
+                    controlsHost={controlsHost}
+                    hostDiffControls
+                    {...(collapseAll ? { collapseAll } : {})}
+                    snapshot={snapshot}
+                    reviewed={[]}
+                    onReviewedChange={() => {}}
+                    comments={readerComments}
+                    mode="files"
+                    reveal={reveal}
+                    viewed={{ files: viewedSet, onToggle: toggleViewed }}
+                    fileOpenIn={fileOpenIn}
+                    fileContents={fileContents}
+                    {...(places.anchors.length > 0 ? { contextNotes: places.anchors, renderContextNote: places.renderContextNote } : {})}
+                  />
+                </ContextNotesProvider>
               </OpenInCodeSpans>
             </ReaderPart>
           ) : (

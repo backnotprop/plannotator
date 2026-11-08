@@ -16,6 +16,29 @@ export interface InboxPullRiskJudgment {
   level: InboxPullRiskLevel;
   /** One sentence: what in the diff decided it. Written by an agent that read untrusted text: shown as plain text only. */
   why: string;
+  /**
+   * A high judgment's places in the diff (context notes, approval "inbox-context-notes"): the lines that decided it,
+   * the most important first, each inside one hunk of the diff that was judged. Only a high judgment has them; absent
+   * on every other, and on a high one whose agent named none. Readers that do not know them show the judgment as before.
+   */
+  where?: InboxPullRiskPlace[];
+}
+
+/** The most places one judgment marks. */
+export const INBOX_PULL_RISK_PLACES_MAX = 5;
+
+/** One place a high-risk judgment marks in the diff it judged. Written by an agent that read untrusted text: plain text only. */
+export interface InboxPullRiskPlace {
+  /** The file's path as the diff names it. */
+  file: string;
+  /** `new` for added or unchanged lines, `old` for removed lines. */
+  side: "new" | "old";
+  /** First and last line, numbered as the hunk headers number that side. */
+  lines: [number, number];
+  /** The line of the person's rules these lines touch, word for word; absent when the agent named none that is. */
+  rule?: string;
+  /** One sentence: what these lines do that the rule describes. */
+  why: string;
 }
 
 /** An agent CLI found on this computer that can be the risk agent. */

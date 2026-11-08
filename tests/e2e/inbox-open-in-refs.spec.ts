@@ -154,7 +154,8 @@ function fakes(dir: string, launches: string, patch: string) {
       '  "api repos/"*) exit 1;;',
       'esac',
       `if [ "$1" = api ] && [ "$2" = graphql ]; then cat '${join(dir, 'pulls.json')}'; exit 0; fi`,
-      'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then echo "' + '8'.repeat(40) + '"; exit 0; fi',
+      // The PR read around its patch: head and description as one JSON line (`| tojson`); a plain `.head.sha`, raw.
+      'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then case "$6" in *tojson*) echo \'{"sha":"' + '8'.repeat(40) + '","body":null}\';; *) echo "' + '8'.repeat(40) + '";; esac; exit 0; fi',
       `if [ "$1" = api ] && [ "$2" = --hostname ]; then cat '${join(dir, 'pr.patch')}'; exit 0; fi`,
       'exit 1',
       '',
@@ -819,7 +820,7 @@ test('a selection or a saved comment across the words: resting on them still sho
     await dragAcross(page, span);
     await page.locator('.annotation-toolbar button[aria-label="Comment"]').click();
     await page.locator('[data-comment-popover] textarea[data-pn-mobile-editable="true"]').last().fill('Check the rows.');
-    await page.getByRole('button', { name: 'Save' }).click();
+    await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
     await expect(page.locator('.annotation-toolbar')).toHaveCount(0);
     await page.reload();
     await expect(span).toBeVisible();
@@ -863,7 +864,7 @@ test('a saved comment across a link to a missing file: learning it is missing le
     await dragAcross(page, link);
     await page.locator('.annotation-toolbar button[aria-label="Comment"]').click();
     await page.locator('[data-comment-popover] textarea[data-pn-mobile-editable="true"]').last().fill('Is this one here?');
-    await page.getByRole('button', { name: 'Save' }).click();
+    await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
     await page.reload();
     await expect(link.locator('mark').first()).toBeVisible();
     await link.hover();

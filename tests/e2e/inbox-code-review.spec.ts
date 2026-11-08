@@ -530,12 +530,12 @@ async function expectBarFits(page: Page): Promise<void> {
     parts.forEach((part, i) => {
       if (part.box.right > window.innerWidth + 0.5 || part.box.left < -0.5) problems.push(`${part.name} leaves the window`);
       const next = parts[i + 1];
-      if (next && next.box.left < part.box.right - 0.5) problems.push(`${part.name} overlaps ${next.name}`);
+      if (next && next.box.left < part.box.right - 0.5) problems.push(`${part.name} overlaps ${next.name} (${Math.round(part.box.right)} > ${Math.round(next.box.left)})`);
     });
     if (head.scrollWidth > head.clientWidth + 1) problems.push('the bar overflows');
     return problems;
   });
-  expect(trouble).toEqual([]);
+  expect(trouble, `at ${page.viewportSize()?.width} px`).toEqual([]);
 }
 
 /** The tooltip showing now does not sit on the verdict's buttons. */
@@ -552,7 +552,8 @@ async function expectTipClearOfDecision(page: Page, words = 'Split view. Click f
 async function expectOverviewWhole(page: Page): Promise<void> {
   const name = page.locator('[data-review-message] .ib-rj-name');
   await expect(name).toHaveText('Overview');
-  expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  const cut = await name.evaluate((el) => `${el.scrollWidth} in ${el.clientWidth}`);
+  expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth), `Overview reads ${cut} at ${page.viewportSize()?.width} px`).toBe(true);
 }
 
 test('the top bar holds what the rail held: chapters, the count, files, Overview, and the diff controls, by mouse and by keyboard', async () => {

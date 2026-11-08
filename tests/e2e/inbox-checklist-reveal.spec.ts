@@ -86,7 +86,7 @@ async function world(steps?: boolean): Promise<World> {
       inboxNotifications: { dismissed: true },
       inboxAgentNotes: { offered: true, asked: ['claude-code', 'codex', 'opencode', 'pi', 'gemini', 'qwen', 'cursor'] },
       inboxSound: { dialogShownFor: VERSION },
-      inboxListIntro: { shownAt: past },
+      inboxListIntro: { shownAt: past, version: 2 },
       inboxVoiceIntro: { shownAt: past },
       inboxSnoozeIntro: { shownAt: snoozeShown },
       inboxBoard: true,
@@ -190,6 +190,9 @@ async function readAndLeave(page: Page, id: string, phone = false) {
  */
 async function tooYoung(page: Page, w: World) {
   await expect(rowOf(page, w.ids['invoice-pdf']!)).toBeVisible();
+  // The page's first read of the line keeps when the Checklist first became next (not a claim): wait for it, so the
+  // stamps compared below are the ones the moment could spend.
+  await expect.poll(() => config(w).inboxReveals?.waitingSince?.steps ?? null).not.toBeNull();
   const before = JSON.stringify(config(w).inboxReveals);
   await readAndLeave(page, w.ids['invoice-pdf']!);
   await page.waitForTimeout(5_000);

@@ -639,20 +639,22 @@ test.skipIf(!hasDom)('the thread box changing size (the reply box opening or clo
   });
   const el = await render(seven());
   const body = el.querySelector('.ib-pbody')!;
-  const watcher = observers.find((o) => o.observed.includes(body))!;
-  expect(watcher).toBeDefined();
+  // Every observer on the body fires, as in a browser: the foot's line (footLine.ts) watches it too.
+  const watchers = observers.filter((o) => o.observed.includes(body));
+  expect(watchers.length).toBeGreaterThan(0);
+  const resized = () => act(() => watchers.forEach((w) => w.callback([], {} as ResizeObserver)));
   const pill = el.querySelector<HTMLButtonElement>('[data-new-pill]')!;
   expect(pill.hasAttribute('data-off')).toBe(false);
   bottom = 800;
-  act(() => watcher.callback([], {} as ResizeObserver));
+  resized();
   expect(pill.hasAttribute('data-off')).toBe(true);
   // The reply box opens again and covers it: it was on screen, so the pill stays away.
   bottom = 600;
-  act(() => watcher.callback([], {} as ResizeObserver));
+  resized();
   expect(pill.hasAttribute('data-off')).toBe(true);
   act(() => root!.unmount());
   root = null;
-  expect(watcher.connected).toBe(false);
+  expect(watchers.every((w) => !w.connected)).toBe(true);
 });
 
 // The Inbox's own notes (Mark read's set-aside note, a late Undo's reopened

@@ -1,30 +1,28 @@
 /**
- * The one-time list options dialog (approval "inbox-list-options-intro", 2026-10-31; A-r3 with the r4 preview):
- * shaped like the Board intro. The picture is the person's own list, drawn by the real rows (InboxList's `ListRow`)
- * in a column the list's width, its bottom fading out (each thread name on one line, cut with "…"); under it a title,
- * one line and the four options of the list's ⋮ menu as switches. It opens at the list's look as it stands (the defaults, smaller names on, for someone who never opened
- * the ⋮ menu), so Done never undoes a choice made there. Done saves the switches as shown (every list takes them at
- * once); Keep as it is and Escape change nothing. App retires it either way (the Inbox's claim, once per machine).
+ * "Choose how your list looks" (approval "inbox-rows-dialog", round 7b; it replaced the switches of approval
+ * "inbox-list-options-intro", shipped in 0.28.42). A one-time dialog: the picture of an Inbox with example projects
+ * plays a short demo of letter marks and logos and holds on the stacked look (RowsIntroPicture.tsx); under it three
+ * looks, Minimal, Balanced and Detailed (Settings → Rows' presets, RowsSettings.tsx `ROWS_PRESETS`), each its name
+ * alone. The person's look is picked when it opens and marked "Current" (Balanced, the defaults, for most; the
+ * owner: "balance should be selected by default"), so Done at once keeps it; a custom look picks none and Done waits
+ * for a pick. Once the demo holds, a card rises over the blurred picture with the person's own rows in the picked
+ * look; picking another changes it. Done saves the look; Keep as it
+ * is and Escape change nothing; "Customize rows" opens Settings → Rows. App retires it either way (the Inbox's claim).
  *
- * As it opens it plays a short preview (listIntro.ts `listIntroPreview`): the switches that are off turn on one at a
- * time and the rows change, then all go back to how it opened. The switches are inert meanwhile (no pointer, no focus, out of the
- * accessibility tree, so a screen reader never hears them flip), drawn as usual. Any key, click or touch ends it at
- * once and snaps back to where it opened; the input still does its normal job (so the first Tab reaches the
- * switches). None under reduced motion.
- *
- * The dialog follows the person's mode, light or dark; only its picture (the framed example rows that change) is
- * drawn light for everyone (the owner, 2026-10-31: "just the image that changes needs to be light mode"). The picture is a
- * light scope on the person's own light palette (`lightScope`), so the window's tokens are worked out again inside it.
+ * The dialog follows the person's mode, the picture too (the owner, q-fd707b9e). `PreviewList` and `lightScope` stay
+ * here for the other dialogs that draw the person's rows in a light picture (ListViewIntro, VoiceIntro).
  */
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { flushSync } from 'react-dom';
 import type { InboxListGroupId, InboxListRow, InboxSectionId } from '@plannotator/core/inbox-types';
-import { listLookClasses, LIST_LOOK_OPTIONS, type ListLook, type ListLookKey } from '../listLook';
-import { listIntroPreview, LIST_INTRO_SWAP_MS } from '../listIntro';
+import { listLookClasses, type ListLook } from '../listLook';
+import { LIST_INTRO_SWAP_MS, ROWS_INTRO_END_MS, ROWS_INTRO_STEPS_MS, rowsIntroScene } from '../listIntro';
+import { RowMarksScope } from '../letterMarks';
 import { ListRow } from './InboxList';
 import { Modal } from './Updates';
+import { ROWS_PRESETS, rowsPreset, type RowsPreset } from './RowsSettings';
+import { RowsIntroNotes, RowsIntroWindow } from './RowsIntroPicture';
 import { Icon } from '../icons';
-import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { themeSupportsHalf } from '@plannotator/ui/utils/themeRegistry';
 
 /**
@@ -117,31 +115,19 @@ export function PreviewList({ groups, flat, projectNames, awayMachines, look, ph
 }
 
 /**
- * The preview as the dialog opens: true while it plays. Every step goes through `set`; the end (or any key, click
- * or touch) puts back the look it opened at. A key ends it synchronously, before the key reaches the dialog, so the
- * switches are no longer inert when a first Tab moves focus.
+ * The demo as the dialog opens: the time it has reached (ms), and whether it still moves. Any key, click or touch
+ * jumps to the held picture at once (a key synchronously, so the key still does its job, the first Tab reaching the
+ * looks). Under reduced motion it opens on the held picture.
  */
-function usePreview(opened: ListLook, set: (key: ListLookKey, on: boolean) => void, reset: () => void): boolean {
-  const [playing, setPlaying] = useState(() => !reducedMotion());
-  const latest = useRef({ set, reset });
-  latest.current = { set, reset };
+function useDemo(): { t: number; moving: boolean } {
+  const [state, setState] = useState(() => (reducedMotion() ? { t: ROWS_INTRO_END_MS, moving: false } : { t: 0, moving: true }));
+  const playing = state.t < ROWS_INTRO_END_MS;
   useEffect(() => {
     if (!playing) return;
-    const timers = listIntroPreview(opened).map((step) =>
-      setTimeout(() => {
-        if (step.key) latest.current.set(step.key, true);
-        else {
-          latest.current.reset();
-          setPlaying(false);
-        }
-      }, step.at),
-    );
+    const timers = ROWS_INTRO_STEPS_MS.map((at) => setTimeout(() => setState((now) => (now.t >= at ? now : { ...now, t: at })), at));
     const stop = () => {
       for (const timer of timers) clearTimeout(timer);
-      flushSync(() => {
-        latest.current.reset();
-        setPlaying(false);
-      });
+      flushSync(() => setState((now) => (now.t >= ROWS_INTRO_END_MS ? now : { t: ROWS_INTRO_END_MS, moving: false })));
     };
     window.addEventListener('keydown', stop, true);
     window.addEventListener('pointerdown', stop, true);
@@ -151,57 +137,148 @@ function usePreview(opened: ListLook, set: (key: ListLookKey, on: boolean) => vo
       window.removeEventListener('pointerdown', stop, true);
     };
   }, [playing]);
-  return playing;
+  return state;
+}
+
+/** The picture's drawn size, scaled to the frame's width (a phone shows the same window, smaller and taller). */
+const PICTURE_W = 620;
+const PICTURE_H = { desktop: 400, phone: 560 };
+/** The card over the picture: at most this size, inset from the frame's edges (14 px a side, 15 above and below). */
+const CARD_MAX = { w: 372, h: 320 };
+/** The card's rows: the person's list, from the top. A denser look shows more of them; the card cuts the last. */
+const CARD_ROWS = 7;
+
+/** The person's rows in one look, as the list draws them (its own rows, marks and classes). */
+function LookRows({ rows, look, phone, projectNames, awayMachines }: { rows: readonly { row: InboxListRow; drawn: InboxListGroupId }[]; look: ListLook; phone: boolean; projectNames?: ReadonlyMap<string, string>; awayMachines?: ReadonlySet<string> }) {
+  return (
+    <RowMarksScope look={look}>
+      <section className={`ib-listcol${phone ? '' : ' ib-narrow'} ib-rl-list${look.hideProject ? ' ib-noproj' : ''}${listLookClasses(look)}`} aria-hidden="true">
+        <div className="ib-lbody">
+          <div className="ib-group">
+            {rows.map(({ row, drawn }) => (
+              <ListRow
+                key={row.thread_id}
+                row={row}
+                project={projectNames?.get(row.project.id) ?? row.project.name}
+                away={!!row.machine && (awayMachines?.has(row.machine) ?? false)}
+                drawn={drawn}
+                shape={phone ? 'phone' : 'narrow'}
+                full={false}
+                filtered={look.hideProject}
+                selected={false}
+                lit={false}
+                onOpen={noop}
+                day=""
+                menu={false}
+                pinned={false}
+                pinColumn={false}
+                pill={look.highlight}
+                compact={look.compact}
+                noPreview={look.hidePreview}
+                relative={look.relativeTime}
+                titleFirst={look.titleFirst}
+              />
+            ))}
+          </div>
+        </div>
+      </section>
+    </RowMarksScope>
+  );
 }
 
 export interface ListLookIntroProps {
+  /** The person's list (Quiet folded): its rows are drawn in each look on the card. */
   groups: readonly ListIntroGroup[];
-  /** The list's look as it stands (the ⋮ menu's options): the switches open at it and the preview returns to it. */
+  /** The list's look as it stands: the look it matches is marked "Current". */
   initial: ListLook;
   projectNames?: ReadonlyMap<string, string>;
   /** Linked machines that are away (machines.ts): their rows are greyed, as in the list. */
   awayMachines?: ReadonlySet<string>;
   phone: boolean;
-  /** Done: the switches as they stand, and as they opened (only what the person changed is saved). */
-  onDone: (look: ListLook, opened: ListLook) => void;
+  /** Done: the look picked, whole (a Settings → Rows preset). */
+  onDone: (look: ListLook) => void;
   /** Keep as it is, or Escape: nothing changes. */
   onKeep: () => void;
+  /** "Customize rows": Settings → Rows. Nothing is saved. */
+  onCustomize: () => void;
 }
 
-export function ListLookIntro({ groups, initial, projectNames, awayMachines, phone, onDone, onKeep }: ListLookIntroProps) {
-  const [opened] = useState(initial);
-  const [look, setLook] = useState<ListLook>(opened);
-  const set = (key: ListLookKey, on: boolean) => setLook((current) => (current[key] === on ? current : { ...current, [key]: on }));
-  const playing = usePreview(opened, set, () => setLook(opened));
-  const base = useId();
-  const { lightTheme } = useTheme();
+export function ListLookIntro({ groups, initial, projectNames, awayMachines, phone, onDone, onKeep, onCustomize }: ListLookIntroProps) {
+  const [current] = useState(() => rowsPreset(initial));
+  // The person's look starts picked (null for a custom look): Done without a change saves the same look.
+  const [pick, setPick] = useState<RowsPreset | null>(current);
+  const { t, moving } = useDemo();
+  const scene = rowsIntroScene(t);
+  const rows = groups.filter((group) => group.id !== 'quiet').flatMap((group) => group.rows.map((row) => ({ row, drawn: group.id as InboxListGroupId }))).slice(0, CARD_ROWS);
+
+  // The picture is drawn at a fixed size and scaled to the frame; the card sits in the frame's middle.
+  const frame = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState({ s: 1, h: PICTURE_H.desktop, top: 0, w: CARD_MAX.w, ch: CARD_MAX.h });
+  useLayoutEffect(() => {
+    const el = frame.current;
+    if (!el) return;
+    const measure = () => {
+      const width = el.clientWidth || PICTURE_W;
+      const s = Math.min(1, width / PICTURE_W);
+      const h = Math.round((phone ? PICTURE_H.phone : PICTURE_H.desktop) * s);
+      const w = Math.min(CARD_MAX.w, width - 28);
+      const ch = Math.min(CARD_MAX.h, h - 30);
+      setFit((was) => (was.s === s && was.h === h && was.top === el.offsetTop && was.w === w && was.ch === ch ? was : { s, h, top: el.offsetTop, w, ch }));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [phone]);
+
+  const choose = (id: RowsPreset) => setPick(id);
+  const chosen = pick ? ROWS_PRESETS.find((preset) => preset.id === pick)! : null;
+  // The card shows the picked look once the demo holds (a pick, a key or a click holds it at once), so the demo plays first.
+  const shown = scene.held ? pick : null;
   return (
-    <Modal labelledBy="ib-lo-title" describedBy="ib-lo-desc" testId="list-look-intro" onClose={onKeep} ownKeys className={`ib-lo${phone ? ' ib-lo-phone' : ''}`}>
-      <div className="ib-lo-art">
-        {/* The picture: always light (`lightScope`), whatever the dialog's mode. */}
-        <div className={`ib-lo-frame ${lightScope(lightTheme)}`} inert data-list-intro-picture="">
-          <PreviewList groups={groups} projectNames={projectNames} awayMachines={awayMachines} look={look} phone={phone} />
+    <Modal labelledBy="ib-lo-title" describedBy="ib-lo-desc" testId="list-look-intro" onClose={onKeep} ownKeys initialFocus=".ib-rl-looks" className={`ib-lo ib-rl${phone ? ' ib-lo-phone' : ''}`}>
+      <div className="ib-rl-art" data-preview={shown ?? undefined} data-moving={moving ? '' : undefined} style={{ '--rl-s': fit.s, '--rl-fh': `${fit.h}px` } as CSSProperties}>
+        <p className="ib-rl-cap" aria-hidden="true">
+          <span data-on={shown ? undefined : ''}>Example projects</span>
+          <span data-on={shown ? '' : undefined}>Your list</span>
+        </p>
+        <div ref={frame} className="ib-rl-frame" inert aria-hidden="true" data-list-intro-picture="" data-scene={scene.held ? 'held' : scene.marks}>
+          <RowsIntroWindow scene={scene} moving={moving} />
+        </div>
+        <RowsIntroNotes shown={scene.card} moving={moving} />
+        <div className="ib-rl-veil" aria-hidden="true" />
+        {/* The picked look, on the person's own rows: one layer per look, so a change of look crossfades. */}
+        <div className="ib-rl-card" inert aria-hidden="true" data-list-intro-card={shown ?? undefined} style={{ width: fit.w, height: fit.ch, top: fit.top + Math.round((fit.h - fit.ch) / 2) }}>
+          <div className="ib-rl-ch">Inbox</div>
+          <div className="ib-rl-cls">
+            {ROWS_PRESETS.map((preset) => (
+              <div key={preset.id} className="ib-rl-cl" data-look={preset.id} data-on={shown === preset.id ? '' : undefined}>
+                <LookRows rows={rows} look={preset.look} phone={phone} projectNames={projectNames} awayMachines={awayMachines} />
+              </div>
+            ))}
+          </div>
         </div>
       </div>
       <div className="ib-lo-text">
         <h2 id="ib-lo-title">Choose how your list looks</h2>
-        <p id="ib-lo-desc">You can change these later from ⋮ above the list.</p>
+        <p id="ib-lo-desc">
+          Pick a look. Fine-tune it any time in{' '}
+          <button type="button" className="ib-rl-link" onClick={onCustomize} data-list-intro-customize="">
+            Customize rows
+          </button>
+          , from ⋮ above the list.
+        </p>
       </div>
-      {/* While the preview plays the switches are inert: drawn as usual, never reached, never announced. */}
-      <div className="ib-lo-sw" role="group" aria-label="List options" inert={playing} data-list-intro-playing={playing ? '' : undefined}>
-        {LIST_LOOK_OPTIONS.map((option) => (
-          <label key={option.key} className="ib-lo-opt" htmlFor={`${base}-${option.key}`}>
-            <span id={`${base}-${option.key}-l`}>{option.label}</span>
-            <button
-              type="button"
-              role="switch"
-              id={`${base}-${option.key}`}
-              className="ib-sw"
-              aria-checked={look[option.key]}
-              aria-labelledby={`${base}-${option.key}-l`}
-              onClick={() => set(option.key, !look[option.key])}
-              data-list-intro-option={option.key}
-            />
+      <div className="ib-rl-looks" role="radiogroup" aria-labelledby="ib-lo-title" tabIndex={-1}>
+        {ROWS_PRESETS.map((preset) => (
+          <label key={preset.id} className="ib-rl-look" data-on={pick === preset.id ? '' : undefined} data-list-intro-look={preset.id}>
+            <input type="radio" name="ib-rl-look" value={preset.id} checked={pick === preset.id} onChange={() => choose(preset.id)} />
+            {/* The look's name alone (the owner: no icons), centred; "Current" under it never moves it, so the three line up. */}
+            <span className="ib-rl-ln">
+              <span className="ib-rl-name">{preset.label}</span>
+              {current === preset.id && <span className="ib-rl-cur">Current</span>}
+            </span>
           </label>
         ))}
       </div>
@@ -210,7 +287,7 @@ export function ListLookIntro({ groups, initial, projectNames, awayMachines, pho
           Keep as it is
         </button>
         <span className="ib-bsp" />
-        <button type="button" className="ib-btn ib-pri" onClick={() => onDone(look, opened)} data-list-intro-done="">
+        <button type="button" className="ib-btn ib-pri" disabled={!chosen} onClick={() => chosen && onDone(chosen.look)} data-list-intro-done="">
           Done
         </button>
       </div>
