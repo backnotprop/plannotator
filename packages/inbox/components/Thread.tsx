@@ -152,6 +152,7 @@ import { useHoldPress } from '../holdPress';
 import { threadChipName } from '../threadChip';
 import { OpenQuestionsButton, type OpenQuestionsDecide } from './OpenQuestions';
 import { fitWholeFootRowForms, footRowOpenQuestionsForm, footRowTokens, laidOutChildren, pillHitsButtons, type OpenQuestionsLabelForm } from '../footFit';
+import { useTextUnderFoot } from '../footLine';
 import { clearPhoneHead, fitPhoneHead } from '../headFit';
 import { useInboxTextSize } from '../textSize';
 import { openQuestionsShown, placeOf, reaskItemLabel, skipToggledAnswer, threadOpenActions, threadOpenQuestions, type OpenQuestion, type OpenQuestionPlace } from '../openQuestions';
@@ -1862,6 +1863,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     if (el) el.readOnly = sending;
   }, [sending, box.open]);
   const bodyRef = useRef<HTMLDivElement>(null);
+  // The bottom bar's line shows only while thread text scrolls under it (approval "inbox-reaction-tray", B1; footLine.ts).
+  const textUnder = useTextUnderFoot(bodyRef, thread.thread_id);
   const sendRef = useRef<HTMLButtonElement>(null);
   const guardRef = useRef<HTMLDivElement>(null);
 
@@ -5048,6 +5051,28 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       pick(q.messageId, q.key, skipToggledAnswer(base));
     }
   };
+  // Send to another session and Archive, when the session that asked has ended (the foot's row, below).
+  const endedActions = showAskerNote ? (
+    <div className="ib-footended" data-foot-ended="">
+      {anyOtherLive && (
+        <button
+          type="button"
+          className="ib-btn"
+          data-ended-send=""
+          onClick={() => {
+            openBox();
+            setRcptOpen(true);
+          }}
+        >
+          <Icon name="forward" size={15} />
+          Send to another session
+        </button>
+      )}
+      <button type="button" className="ib-btn" data-ended-archive="" onClick={() => void resolve(true)}>
+        Archive
+      </button>
+    </div>
+  ) : null;
   // Shown whenever a question is listed (open, or answered in the draft) or an action item waits, or Re-ask or "Decide
   // these" is offered (they live in the list, so never out of reach). Every question answered in the draft: the icon
   // alone, "? ⌄" (approval "reply-bar-pairs": the draft counts those), so the list and its Unskip stay in reach.
@@ -6700,7 +6725,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           />
         </div>
       )}
-      <div className="ib-pfoot" hidden={artifactsOn}>
+      <div className="ib-pfoot" hidden={artifactsOn} data-under={textUnder ? '' : undefined}>
         {/* One status region, always mounted, so a screen reader announces the note when it appears. */}
         <div role="status" id={noteId} data-asker-note="">
           {/* With the pill there, the open box's pill says who gets the reply (and that it ended): no note above it. */}
@@ -7009,6 +7034,27 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 )}
                 <ShortcutHint scope={inboxThreadShortcuts} action="reply" className="ib-kbd ib-btn-kbd" />
               </button>
+              {/* 👍 Looks good beside Reply: sent to the agent after the Undo window; hidden while a question waits.
+                  Before the checklist: the actions first, the status after. */}
+              {/* With its tray of reactions (approval "inbox-reaction-tray"): one click still marks it Looks good. */}
+              {ackOffered && !waiting && !draftKept && (
+                <ReactionTray
+                  messageId={ackTarget!.id}
+                  agent={agentName(ackTarget!.author)}
+                  on={ackOn}
+                  current={ackTarget!.ack?.reaction ?? null}
+                  phone={phone}
+                  onAck={(next, reaction, was) => onAck!(ackTarget!.id, next, agentName(ackTarget!.author), reaction, was)}
+                  openRequest={trayRequest}
+                />
+              )}
+              {/* The session ended (the note above says so): what the person can do about it, with Reply. A phone draws
+                  the pair on a line of its own under the row, so there it comes after the checklist (the tab order is
+                  what is on screen). */}
+              {!phone && endedActions}
+              {/* What is open goes on the right (approval "inbox-reaction-tray", B1): the open questions, then the checklist,
+                  after the actions (Reply, the reaction, an ended session's two). inbox.css starts the right group at
+                  whichever of the two comes first; the order here is the tab order too. */}
               {/* The thread's open questions (approval "inbox-thread-open-questions"): a list that takes the person to each
                   card, with Re-ask at its foot (owner, 2026-10-23: the open questions again, in one message per session). */}
               {openQShown && (
@@ -7035,42 +7081,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   skip={waiting && unanswered.length > 0 ? { count: keepOpen ? unanswered.length : skipIds.size, keepOpen, onToggle: toggleKeepOpen } : null}
                 />
               )}
-              {/* 👍 Looks good beside Reply: sent to the agent after the Undo window; hidden while a question waits.
-                  Before the checklist: the actions first, the status after. */}
-              {/* With its tray of reactions (approval "inbox-reaction-tray"): one click still marks it Looks good. */}
-              {ackOffered && !waiting && !draftKept && (
-                <ReactionTray
-                  messageId={ackTarget!.id}
-                  agent={agentName(ackTarget!.author)}
-                  on={ackOn}
-                  current={ackTarget!.ack?.reaction ?? null}
-                  phone={phone}
-                  onAck={(next, reaction, was) => onAck!(ackTarget!.id, next, agentName(ackTarget!.author), reaction, was)}
-                  openRequest={trayRequest}
-                />
-              )}
-              {/* The session ended (the note above says so): what the person can do about it, with Reply. */}
-              {showAskerNote && (
-                <div className="ib-footended" data-foot-ended="">
-                  {anyOtherLive && (
-                    <button
-                      type="button"
-                      className="ib-btn"
-                      data-ended-send=""
-                      onClick={() => {
-                        openBox();
-                        setRcptOpen(true);
-                      }}
-                    >
-                      <Icon name="forward" size={15} />
-                      Send to another session
-                    </button>
-                  )}
-                  <button type="button" className="ib-btn" data-ended-archive="" onClick={() => void resolve(true)}>
-                    Archive
-                  </button>
-                </div>
-              )}
               {/* The agents' steps (approval "inbox-thread-steps", A1): beside the open questions, by their list's rules. */}
               {stepLists.length > 0 && (
                 <StepsButton
@@ -7084,6 +7094,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   answeredSince={stepsAnswered}
                 />
               )}
+              {phone && endedActions}
               {/* The in-thread New message button is off (approval "inbox-acknowledge", 2026-10-15): Reply and compose cover it.
                   Its route, door row and code stay; turn SHOW_NEW_MESSAGE_BUTTON on to bring it back. */}
               {SHOW_NEW_MESSAGE_BUTTON && !archived && <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />}

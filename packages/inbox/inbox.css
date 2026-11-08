@@ -9041,10 +9041,11 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-noproj .ib-row:has(.ib-rended) { --ib-words-track: max-content; }
 .ib-rended + .ib-c { margin-left: 8px; }
 
-/* Send to another session and Archive beside Reply when the session ended; a phone gives them their own line. */
+/* Send to another session and Archive beside Reply when the session ended; a phone gives them their own line, last
+   in the row's markup too (Thread.tsx), so the tab order is what is on screen. */
 .ib-footended { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  .pn-inbox .ib-footended { flex: 1 0 100%; order: 1; }
+  .pn-inbox .ib-footended { flex: 1 0 100%; }
 }
 
 /* Show me in the code review (approval "shape-in-code-review", mock ac2; packages/inbox/review-drawing). The box, the
@@ -10095,3 +10096,16 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 /* Header: the bar's title leads with the mark. */
 .ib-lm-head { position: relative; display: inline-flex; vertical-align: -5px; margin-right: 8px; }
 .ib-bc-proj { display: inline-flex; }
+
+/* The bottom bar, B1 (approval "inbox-reaction-tray", addendum 2026-11-07; footLine.ts). Its line, and a faint 18 px
+   shadow above it, fade in only while thread text scrolls under the bar (`data-under`); with nothing under it (the
+   thread all fits, or it is scrolled to its end) the bar sits on the page. A colour fade with no movement, so reduced
+   motion keeps it. */
+.ib-pfoot { transition: border-color 160ms ease-out, box-shadow 160ms ease-out; }
+.ib-pfoot:not([data-under]) { border-top-color: transparent; }
+.ib-pfoot[data-under] { box-shadow: 0 -12px 18px -16px color-mix(in oklch, var(--ib-shadow-ink) 40%, transparent); }
+/* The actions on the left (Reply, the reaction, an ended session's two), what is open on the right (the open
+   questions, then the checklist): the right group starts at whichever of the two comes first. Same on a phone. */
+.ib-pfoot > .ib-acts.ib-footrow > .ib-footbtns { flex: 1 1 auto; }
+.ib-footbtns[data-foot-buttons] > [data-open-questions],
+.ib-footbtns[data-foot-buttons]:not(:has(> [data-open-questions])) > [data-steps-button] { margin-inline-start: auto; }

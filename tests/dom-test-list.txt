@@ -188,6 +188,7 @@ packages/inbox/tailnetOwner.test.tsx
 packages/inbox/sentReply.test.tsx
 packages/inbox/skillHighlightSent.test.ts
 packages/inbox/threadFoot.test.tsx
+packages/inbox/footLine.test.tsx
 packages/inbox/replyDrafts.test.tsx
 packages/inbox/replyDraftFiles.test.tsx
 packages/inbox/skipNote.test.tsx
