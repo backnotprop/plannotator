@@ -609,3 +609,4 @@ packages/system/test/render.test.tsx
 packages/inbox/composeRemoteLaunch.test.tsx
 packages/inbox/composeOtherFolder.test.tsx
 packages/ui/components/shape/ShapeSurface.boxShowMe.test.tsx
+packages/inbox/activityChart.test.tsx

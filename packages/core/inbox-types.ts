@@ -3262,3 +3262,37 @@ export type InboxVoiceFailure = (typeof INBOX_VOICE_FAILURES)[number];
 
 /** The largest clip the Inbox takes: a 2:00 clip at 24 kHz, 16-bit mono is 5.76 MB. */
 export const INBOX_VOICE_MAX_CLIP_BYTES = 6 * 1024 * 1024;
+
+/**
+ * `GET /api/inbox/activity` (Settings → Activity): each thread's messages counted by
+ * hour over `[from, to)`. One entry per thread with a message in that span, in
+ * the order the threads began. `hours` is flat pairs `[hour, count, …]`, the
+ * hour counted from `from` (so an hour boundary is wherever `from` is: the
+ * window sends its own local midnight). Read from this Inbox's store only.
+ */
+export interface InboxActivityThread {
+  thread_id: string;
+  /** The thread's name, else its subject, else null. */
+  name: string | null;
+  project_id: string;
+  /** The thread's first and last message, over its whole life. */
+  started_at: string;
+  last_at: string;
+  /** Messages over its whole life. */
+  total: number;
+  /** `[hour, count, hour, count, …]` in hour order, only the hours in the span with a message. */
+  hours: number[];
+}
+
+export interface InboxActivityModel {
+  from: string;
+  to: string;
+  /** The hours the span holds (`ceil((to - from) / 1 h)`). */
+  hour_count: number;
+  /** The project asked for (combined projects count as one), or null for every project. */
+  project_id: string | null;
+  threads: InboxActivityThread[];
+}
+
+/** The longest span `GET /api/inbox/activity` answers. */
+export const INBOX_ACTIVITY_MAX_DAYS = 400;

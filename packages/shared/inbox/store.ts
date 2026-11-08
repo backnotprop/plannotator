@@ -121,6 +121,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } from "./list";
 import { inboxProjectLabels } from "./project-name";
+import { inboxActivity, type InboxActivitySource } from "./activity";
 import { inboxAckLine, inboxClaimName, inboxStopNoticeId, inboxStopNoticeReply, type InboxWakeContext } from "./connection";
 import { inboxWakeQuote } from "./wake-quote";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
@@ -188,6 +189,7 @@ import {
   type InboxCardWire,
 } from "@plannotator/core/inbox-types";
 import { isInboxStepsRecord, normalizeInboxSteps, sameInboxSteps, type InboxSteps } from "@plannotator/core/inbox-types";
+import type { InboxActivityModel } from "@plannotator/core/inbox-types";
 import {
   inboxHashtags,
   inboxInitiativeBareName,
@@ -1983,6 +1985,38 @@ export class InboxStore {
       if (summary) out.push(summary);
     }
     return out.sort((a, b) => b.last_at.localeCompare(a.last_at) || b.thread_id.localeCompare(a.thread_id));
+  }
+
+  /**
+   * Settings → Activity: every thread's messages counted by hour over `[fromMs, toMs)`, for one project (its
+   * combined projects too) or all of them (`inboxActivity`, ./activity.ts). Reads the in-memory log only: each
+   * thread's message times, its name only when it has a message in the span. Writes and logs nothing.
+   */
+  activity(span: { fromMs: number; toMs: number; projectId: string | null }): InboxActivityModel {
+    const store = this;
+    function* sources(): Iterable<InboxActivitySource> {
+      for (const [threadId, members] of store.threadMembers) {
+        const root = store.messages.get(threadId);
+        if (!root || root.thread_id !== threadId) continue;
+        // Messages are in seq order, so the last one written is the newest: a thread quiet since before the span
+        // is passed over without reading the rest.
+        const lastId = members[members.length - 1];
+        const lastAt = lastId ? Date.parse(store.messages.get(lastId)?.created_at ?? "") : NaN;
+        if (!(lastAt >= span.fromMs)) continue;
+        const times: number[] = [];
+        for (const id of members) {
+          const at = Date.parse(store.messages.get(id)?.created_at ?? "");
+          if (Number.isFinite(at)) times.push(at);
+        }
+        yield {
+          thread_id: threadId,
+          project_id: root.project_id,
+          name: () => store.threadShortName(threadId) ?? store.threadSubject(threadId),
+          times,
+        };
+      }
+    }
+    return inboxActivity(sources(), { ...span, inProject: span.projectId === null ? undefined : (projectId) => this.sameProject(projectId, span.projectId!) });
   }
 
   /** One row of the list: the thread's summary, its project label and its section. */

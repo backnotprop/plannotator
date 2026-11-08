@@ -63,7 +63,7 @@ import { learnDebugLog, resumeDebugLog } from './debugLog';
 import type { RecipientConnection } from './deliveryLine';
 import { parseRestartAgents } from './restartAgents';
 import type { PatchBlobIds } from '@plannotator/core/diff-files';
-import type { InboxFileContents, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullRiskAnswer, InboxPullRiskModels, InboxPullsAnswer, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewLinkAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotator/core/inbox-types';
+import type { InboxFileContents, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullRiskAnswer, InboxPullRiskModels, InboxPullsAnswer, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewLinkAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun, InboxActivityModel } from '@plannotator/core/inbox-types';
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchSort, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
   InboxAgentId,
@@ -1302,6 +1302,12 @@ export const inboxApi = {
   storage: () => getWithin<InboxStorageModel>(inboxUrl('/settings/storage'), STORAGE_READ_MS),
   /** Settings -> Decision data's numbers, asked for only while that section is shown. Leaving aborts it, and the server stops counting. */
   decisionData: (days: number, signal: AbortSignal) => get<DecisionDataSummary>(inboxUrl('/decision-data', new URLSearchParams({ days: String(days), tz: String(-new Date().getTimezoneOffset()) }).toString()), signal),
+  /** Settings → Activity: each thread's messages by hour over `[from, to)` (this Inbox's store only), one project or all. */
+  activity: (from: Date, to: Date, project: string | null) => {
+    const query = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() });
+    if (project) query.set('project', project);
+    return get<InboxActivityModel>(inboxUrl('/activity', query.toString()));
+  },
   /** Decision mode (experimental): every decision waiting on the person, in queue order. 404 while the feature is off. */
   decisions: () => get<InboxDecisionsModel>(inboxUrl('/decisions')),
   /** Tidy: who it would ask in the list's (or the Board's) scope, and the last run. */

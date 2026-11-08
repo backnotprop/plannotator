@@ -1579,6 +1579,79 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 /* Capabilities → Experimental's heading takes focus when `#settings/experimental` lands there, like a section's h1. */
 .pn-inbox .ib-sgroup > h2[tabindex]:focus, .pn-inbox .ib-sgroup > h2[tabindex]:focus-visible { outline: none; }
 .ib-sgroup > .ib-callout { margin-bottom: 10px; }
+/* Settings → Activity (components/ActivityChart.tsx): the threads hour by hour, one SVG of a few paths. Every colour is
+   the theme's: the accent (--ib-act-ink) mixed toward the surface the chart sits on (--ib-act-ground), so each
+   palette, light or dark, draws its own ramp. Moving the chart onto another surface sets --ib-act-ground there.
+   activityInk.ts sets --ib-act-ink (and --ib-act-strand) on the section when a palette's accent sits too close to
+   its card: the accent with just enough of the text colour that the faintest mark keeps 2:1. */
+.ib-activity { --ib-act-ground: var(--card); --ib-act-ink: var(--primary); }
+.ib-activity-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 14px; }
+.ib-activity-sum { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-activity-box { position: relative; min-width: 0; }
+.ib-activity-scroll { position: relative; overflow-x: clip; border-radius: 6px; }
+.ib-activity-scroll[data-scrolls] { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
+.ib-activity-svg { display: block; touch-action: pan-x pan-y; }
+/* The day labels over the chart (the SVG's own top band); in the full screen they stick to its top as it scrolls down. */
+.ib-activity-days { position: relative; z-index: 1; pointer-events: none; }
+.ib-activity-day { position: absolute; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: flex-end; padding: 0 0 6px 6px; overflow: hidden; white-space: nowrap; }
+.ib-activity-day + .ib-activity-day::before { content: ""; position: absolute; left: 0; top: 4px; bottom: 0; width: 1px; background: var(--ib-hair); }
+.ib-activity-wd { font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); line-height: 1.2; }
+.ib-activity-dt { font-size: var(--ib-fs-13, 13px); color: var(--foreground); font-weight: 550; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.ib-activity-dline { stroke: var(--ib-hair); stroke-width: 1; fill: none; shape-rendering: crispEdges; }
+.ib-activity-band { fill: var(--ib-hover); }
+/* Blend: a faint strand along each thread, then each run of hours as one translucent shape, a little more opaque
+   for busier runs. Mixed in oklab, which never turns the hue on its way to the surface (oklch's hue arc does). */
+.ib-activity-strand { stroke: color-mix(in oklab, var(--ib-act-ink) var(--ib-act-strand, 34%), var(--ib-act-ground)); stroke-width: 1; fill: none; }
+.ib-activity-t0, .ib-activity-t1, .ib-activity-t2 { fill: var(--ib-act-ink); }
+.ib-activity-t0 { fill-opacity: 0.62; }
+.ib-activity-t1 { fill-opacity: 0.76; }
+.ib-activity-t2 { fill-opacity: 0.9; }
+/* Dots (dev comparison, ?activity-look=dots): five steps from the accent near the surface to the accent toward the
+   text colour, so the brightest step stands out in light and dark alike. */
+.ib-activity-s0 { fill: color-mix(in oklab, var(--ib-act-ink) 56%, var(--ib-act-ground)); }
+.ib-activity-s1 { fill: color-mix(in oklab, var(--ib-act-ink) 70%, var(--ib-act-ground)); }
+.ib-activity-s2 { fill: color-mix(in oklab, var(--ib-act-ink) 85%, var(--ib-act-ground)); }
+.ib-activity-s3 { fill: var(--ib-act-ink); }
+.ib-activity-s4 { fill: color-mix(in oklab, var(--ib-act-ink) 55%, var(--foreground)); }
+.ib-activity-ring { fill: none; stroke: var(--foreground); stroke-width: 1.5; pointer-events: none; }
+.ib-activity-key { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 12px; font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); }
+.ib-activity-key svg { display: block; }
+.ib-activity-note { margin: 0; padding: 18px 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-activity-wait { height: 160px; }
+.ib-activity-tip { position: fixed; z-index: 90; max-width: 300px; padding: 9px 11px; border-radius: 8px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-s, 0 0 0 1px var(--border), 0 12px 30px -12px oklch(0 0 0 / 0.5)); pointer-events: none; font-size: var(--ib-fs-12, 12px); line-height: 1.45; }
+.ib-activity-tip-n { font-weight: 600; font-size: var(--ib-fs-13, 13px); margin-bottom: 4px; overflow-wrap: anywhere; }
+.ib-activity-tip-v { font-variant-numeric: tabular-nums; }
+.ib-activity-tip-v b { font-weight: 600; }
+.ib-activity-tip-m { margin-top: 4px; color: var(--muted-foreground); }
+/* The slim preview: one dense picture, a click opens the full screen. */
+.ib-activity-bar .ib-activity-sum { flex: 1 1 0; min-width: 0; }
+.ib-activity-expand { margin-left: auto; flex: none; }
+.ib-activity-preview { cursor: zoom-in; border-radius: 6px; transition: background-color 120ms ease; }
+.ib-activity-preview:hover { background: var(--ib-hover); }
+.ib-activity-plot[data-size="preview"] .ib-activity-day { flex-direction: row; align-items: baseline; justify-content: flex-start; gap: 4px; padding: 0 0 6px 5px; }
+.ib-activity-plot[data-size="preview"] .ib-activity-dt { font-size: var(--ib-fs-11-5, 11.5px); }
+.ib-activity-day[data-narrow] { padding-left: 4px; }
+.ib-activity-plot[data-size="preview"] .ib-activity-day[data-narrow] { gap: 2px; }
+/* The full screen: the window's modal, sized to the window, on the card's colour (the fitted ink's ground). */
+.pn-inbox dialog.ib-dlg.ib-activity-lb, dialog.ib-dlg.ib-activity-lb { width: calc(100vw - 48px); height: calc(100vh - 48px); max-height: none; overflow: hidden; background: var(--card); }
+dialog.ib-dlg.ib-activity-lb[open] { display: flex; flex-direction: column; }
+.ib-activity-lb .ib-dlg-in { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px 18px 12px; }
+.ib-activity-full { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.ib-activity-lbhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 10px; }
+.ib-activity-lbhead h2 { margin: 0 4px 0 0; }
+.ib-activity-full .ib-activity-sum { margin-left: auto; }
+.ib-activity-lbbody { position: relative; flex: 1; min-height: 0; }
+.ib-activity-plot[data-size="full"] { position: absolute; inset: 0; }
+.ib-activity-plot[data-size="full"] .ib-activity-scroll { height: 100%; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.ib-activity-plot[data-size="full"] .ib-activity-days { position: sticky; top: 0; background: var(--ib-act-ground); }
+.ib-activity-full .ib-activity-key { margin-top: 8px; }
+@media (max-width: 767px) {
+  .pn-inbox dialog.ib-dlg.ib-activity-lb, dialog.ib-dlg.ib-activity-lb { width: 100vw; height: var(--ib-vvh, 100dvh); max-width: none; margin: 0; border: 0; border-radius: 0; }
+  .ib-activity-lb .ib-dlg-in { padding: calc(10px + env(safe-area-inset-top)) 12px calc(10px + env(safe-area-inset-bottom)); }
+  .ib-activity-lbhead .ib-activity-close { order: 1; margin-left: auto; }
+  .ib-activity-lbhead .ib-seg { order: 2; }
+  .ib-activity-lbhead .ib-activity-sum { order: 3; margin-left: 0; width: 100%; }
+}
 .ib-spg > .ib-callout { margin-top: 16px; }
 .ib-card { border: 1px solid var(--ib-line); border-radius: 10px; overflow: hidden; background: var(--card); }
 .ib-card-pad { padding: 4px 16px 12px; }

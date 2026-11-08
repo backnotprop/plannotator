@@ -192,7 +192,7 @@ import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
-import { INBOX_ACCOUNT_SWITCHING, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
+import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
@@ -1509,6 +1509,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         .filter((row): row is InboxListRow => row !== undefined),
       ...(merged ? { self: machines.selfId, machines: machines.machinesView() } : {}),
     };
+  };
+
+  /** `GET /api/inbox/activity`'s `from` and `to`: ISO times, `from` first, at most INBOX_ACTIVITY_MAX_DAYS apart. */
+  const activitySpanOf = (url: URL): { fromMs: number; toMs: number } => {
+    const fromMs = Date.parse(url.searchParams.get("from") ?? "");
+    const toMs = Date.parse(url.searchParams.get("to") ?? "");
+    if (!Number.isFinite(fromMs)) throw new InboxError("validation_error", "from: an ISO time.", { field: "from" });
+    if (!Number.isFinite(toMs) || toMs <= fromMs) throw new InboxError("validation_error", "to: an ISO time after from.", { field: "to" });
+    if (toMs - fromMs > INBOX_ACTIVITY_MAX_DAYS * 86_400_000) throw new InboxError("validation_error", `to: at most ${INBOX_ACTIVITY_MAX_DAYS} days after from.`, { field: "to" });
+    return { fromMs, toMs };
   };
 
   const projectFilterOf = (url: URL): string | null => {
@@ -4175,6 +4185,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ serverSession, cursor: store.cursor(), decisions });
       }
       if (path === "/api/inbox/projects" && req.method === "GET") return json({ serverSession, cursor: store.cursor(), projects: projectFolders() });
+      // Settings → Activity: each thread's messages by hour over `from`..`to` (ISO times; the window sends its local
+      // midnight so hours line up with its clock), one project (`project=prj_…`, its combined ones too) or all.
+      // Thread names go only into this answer: nothing is written or logged.
+      if (path === "/api/inbox/activity") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        const span = activitySpanOf(url);
+        return json(perfPhase("activity", () => store.activity({ ...span, projectId: projectFilterOf(url) })));
+      }
       // Tidy: who it would ask (GET) and asking them (POST).
       const tidied = await tidy.route(req, url);
       if (tidied) return tidied;
