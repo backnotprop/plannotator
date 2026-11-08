@@ -248,6 +248,8 @@ import { shapeBoardsOn } from "@plannotator/shared/shape/switch";
 import { isReviewDrawCommand } from "./review-draw-command";
 import { INBOX_REVIEW_DRAW_GONE } from "@plannotator/core/inbox-review";
 import { runShapeOpen, runShapeServe } from "./shape-open";
+import { runShapeFrame } from "./shape-frame";
+import { isShapeAnimateHelp, SHAPE_ANIMATE_HELP } from "@plannotator/core/shape-animate";
 import { runInboxCallCommand } from "./inbox-call-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
 import { runFeedbackCommand } from "./feedback-command";
@@ -385,6 +387,23 @@ if (isReviewDrawCommand(rawArgs, () => loadConfig({ quiet: true }).inboxCodeRevi
         openUrl: (url) => openBrowserDetached(url, { isRemote: isRemoteSession() }),
         // Bare: the page already open, if there is one; `shape open` always opens a tab.
         reuseOpenPage: args.length === 1,
+      }),
+    );
+  }
+  // `shape --help animate` (or `shape animate [--help]`): the animation guide, read once the agent decides to animate.
+  if (args[0] === "shape" && isShapeAnimateHelp(args.slice(1))) {
+    await writeWholeToStdout(`${SHAPE_ANIMATE_HELP}\n`);
+    process.exit(0);
+  }
+  // `shape frame`: a picture of a board at one moment, through the Chrome on this computer (shape-frame.ts).
+  if (args[0] === "shape" && args[1] === "frame" && !hasHelpFlag(args.slice(2))) {
+    process.exit(
+      await runShapeFrame(args.slice(2), {
+        dataDir: getPlannotatorDataDir(),
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        pageGzip: shapeHtmlGzip,
+        version: getCliVersion() ?? "dev",
       }),
     );
   }

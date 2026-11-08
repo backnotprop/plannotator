@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { HueDot, LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
 import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
 import { shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxSearchShortcuts } from '../search/searchShortcut';
@@ -174,6 +175,9 @@ export function rowAgent(row: InboxListRow): InboxListRow['author'] {
  * on a three-line or phone row.
  */
 function RowMark({ row }: { row: InboxListRow }) {
+  // Agent icons off (Settings → Rows) takes the agent's mark off the card too; its name stays in words beside it.
+  const { hideAgents } = useRowMarks();
+  if (hideAgents) return null;
   if ((row.participants?.length ?? 0) > 1) return <TagStack participants={row.participants!} />;
   return <AuthorMark author={rowAgent(row)} />;
 }
@@ -304,7 +308,48 @@ function RowTitle({ row, className, pill, tip = false }: { row: InboxListRow; cl
       {titleOf(row)}
     </span>
   );
-  return pill ? <span className="ib-key ib-rowkey">{title}</span> : title;
+  const out = pill ? <span className="ib-key ib-rowkey">{title}</span> : title;
+  return <TitleMark row={row}>{out}</TitleMark>;
+}
+
+/** Letter marks (letterMarks.tsx), style "Inline": a 20 px tile before the title; style "Dot": the thread's hue alone. */
+function TitleMark({ row, children }: { row: InboxListRow; children: ReactNode }) {
+  const { marks } = useRowMarks();
+  if (marks.style === 'avatar' || !showsThreads(marks.what)) return <>{children}</>;
+  return (
+    <span className="ib-lm-tt" data-take={marks.style}>
+      {marks.style === 'inline' ? <LetterMark name={titleOf(row)} seed={row.thread_id} size={20} /> : <HueDot seed={row.thread_id} />}
+      {children}
+    </span>
+  );
+}
+
+/** Letter marks, style "Avatar": one mark per row in a column of its own, the thread's with the project's on its corner. */
+function RowAvatar({ row, size }: { row: InboxListRow; size: 24 | 30 }) {
+  const { marks } = useRowMarks();
+  if (marks.style !== 'avatar' || marks.what === 'off') return null;
+  const project = row.project?.name ?? '';
+  const threads = showsThreads(marks.what);
+  const projects = showsProjects(marks.what);
+  return (
+    <span className="ib-lm-av" data-size={size} aria-hidden="true">
+      {threads ? <LetterMark name={titleOf(row)} seed={row.thread_id} size={size} solid /> : <ProjectMark projectId={row.project_id} name={project} size={size} solid />}
+      {threads && projects && project && <ProjectMark projectId={row.project_id} name={project} size={size === 30 ? 14 : 12} solid className="ib-lm-badge" />}
+    </span>
+  );
+}
+
+/** Letter marks, style "Inline": the project's mark before its name in a row. */
+function RowProjectMark({ row }: { row: InboxListRow }) {
+  const { marks } = useRowMarks();
+  if (marks.style !== 'inline' || !showsProjects(marks.what) || !row.project?.name) return null;
+  return <ProjectMark projectId={row.project_id} name={row.project.name} size={16} className="ib-lm-rowp" />;
+}
+
+/** Whether the row leads with an avatar (style "Avatar", some marks on): three-line and phone rows make room for it. */
+function useAvatarRow(): boolean {
+  const { marks } = useRowMarks();
+  return marks.style === 'avatar' && marks.what !== 'off';
 }
 
 /**
@@ -329,6 +374,8 @@ function previewOf(row: InboxListRow): string | null {
 function FromLine({ row, project, filtered }: { row: InboxListRow; project: string; filtered: boolean }) {
   return (
     <span className="ib-from">
+      <RowAvatar row={row} size={24} />
+      {!filtered && <RowProjectMark row={row} />}
       {!filtered && <ClipText className="ib-p" text={project} />}
       <RowAgents participants={row.participants} agent={rowAgent(row)} />
     </span>
@@ -347,6 +394,7 @@ function FromLine({ row, project, filtered }: { row: InboxListRow; project: stri
 function LeadLine({ row, project, filtered, tip = true }: { row: InboxListRow; project: string; filtered: boolean; tip?: boolean }) {
   return (
     <span className="ib-from ib-lead">
+      {!filtered && <RowProjectMark row={row} />}
       {!filtered &&
         (tip ? (
           <ClipText className="ib-p" text={project} />
@@ -879,6 +927,7 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
   const wordsId = useId();
   const badge = badgeOf(row, kbd);
   const lead = <LeadLine row={row} project={project} filtered={filtered} />;
+  const avatarRow = useAvatarRow();
   const time = (
     <span className="ib-t">
       <RowTime row={row} relative={relative} />
@@ -889,6 +938,7 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
     <button
       type="button"
       className={`ib-nrow${row.unread ? ' ib-u' : ''}${row.section === 'sent' ? ' ib-sent' : ''}${selected ? ' ib-sel' : ''}`}
+      data-lm-av={avatarRow ? '' : undefined}
       onPointerDown={notePressPointer}
       onClick={(event) => pressRow(event, row.thread_id, onOpen, onUnstar)}
       aria-current={selected ? 'true' : undefined}
@@ -901,6 +951,7 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
       aria-describedby={rowHasBadge(row) ? wordsId : undefined}
       {...focus}
     >
+      <RowAvatar row={row} size={30} />
       {/* Three lines (approval "inbox-list-row-v2", 2026-10-30). Line 1: the agents' tiles and the project after
           them, on one line, then the ✓ and the time at the right. Compact rows (approval "inbox-list-options"): the
           title joins line 1, before the time, cut with "…", and line 2 goes. */}
@@ -963,12 +1014,14 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
   const preview = noPreview ? null : previewOf(row);
   // A pin with nothing else for line 3 (no preview, book, badge or count) stays on line 1, before the time, so the
   // row never grows a line for the pin alone.
+  const avatarRow = useAvatarRow();
   const pinOnLine1 = pinned && !preview && !guide && !badge && !row.snoozed && countWords(row, 0) === null && row.questions.open < 1;
   return (
     <>
     <button
       type="button"
       className={`ib-mrow${row.unread ? ' ib-u' : ''}${row.section === 'sent' ? ' ib-sent' : ''}`}
+      data-lm-av={avatarRow ? '' : undefined}
       onPointerDown={notePressPointer}
       onClick={(event) => pressRow(event, row.thread_id, onOpen, onUnstar)}
       data-thread-id={row.thread_id}
@@ -980,6 +1033,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
       data-lit={lit ? '' : undefined}
       aria-describedby={rowHasBadge(row) ? wordsId : undefined}
     >
+      <RowAvatar row={row} size={30} />
       {titleFirst ? (
         // Settings → Rows' First line "Thread name", as on a three-line row.
         <>

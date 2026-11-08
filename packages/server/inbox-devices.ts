@@ -237,6 +237,8 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // film's bytes (by Range), for a linked machine's window. The window's own routes, so the same refusals and headers.
   // Not a phone's: a phone reads them through the tailnet as the owner.
   { method: "GET", route: /^open-in\/file\/(view|raw)$/, window: (m) => `/api/inbox/open-in/file/${m[1]}`, machineOnly: true },
+  // "Another folder on <machine>…": folder names under that machine's home, for a linked machine's window only.
+  { method: "GET", route: /^launch\/folders$/, window: () => "/api/inbox/launch/folders", machineOnly: true },
 ];
 
 /** The two writes only a linked machine sends this door (inbox-machines.ts answers them); never a window route. */
