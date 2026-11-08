@@ -538,10 +538,12 @@ function CapabilitiesSection({
   const [systemRowSeen, setSystemRowSeen] = useState(false);
   if (system?.on === true && codeReview?.on === true && !systemRowSeen) setSystemRowSeen(true);
   const systemRow = system && onToggleSystem && codeReview?.on === true && (SYSTEM_SETTINGS_ROW_VISIBLE || system.on || systemRowSeen);
+  // Bro mode sits in the Experimental group (the owner, 2026-11-08), so the group shows for it alone too.
   const broRow = bro && onToggleBro;
+  const decisionRow = experimental && onToggleExperimental;
   return (
     <>
-      {(boardRow || stepsRow || codeReviewRow || shapeRow || broRow) && (
+      {(boardRow || stepsRow || codeReviewRow || shapeRow) && (
         <section className="ib-sgroup" data-settings-capabilities="" aria-label="Capabilities">
           <div className="ib-card">
             {boardRow && (
@@ -636,49 +638,53 @@ function CapabilitiesSection({
                 </span>
               </div>
             )}
-            {broRow && (
-              <div className="ib-prow" data-settings-bro="">
-                <span className="ib-txt">
-                  <span className="ib-l" id="ib-bro-label">
-                    Bro mode
-                  </span>
-                  <span className="ib-desc">Agents write to your Inbox in plain words, from their next session.</span>
-                </span>
-                <span className="ib-ctl">
-                  <Switch on={bro.on} labelledBy="ib-bro-label" onClick={() => onToggleBro(!bro.on)} />
-                </span>
-              </div>
-            )}
           </div>
         </section>
       )}
-      {experimental && onToggleExperimental && (
+      {(decisionRow || broRow) && (
         <section className="ib-sgroup" data-settings-experimental="" aria-labelledby="ib-g-experimental">
           <h2 id="ib-g-experimental" ref={experimentalHeading} tabIndex={-1}>
             Experimental
           </h2>
           <p>Features still being tried. Each stays off until you turn it on.</p>
           <div className="ib-card">
-            <div className="ib-prow">
-              <span className="ib-txt">
-                <span className="ib-l" id="ib-decision-mode-label">
-                  Decision mode
+            {decisionRow && (
+              <div className="ib-prow" data-settings-decision-mode="">
+                <span className="ib-txt">
+                  <span className="ib-l" id="ib-decision-mode-label">
+                    Decision mode
+                  </span>
+                  <span className="ib-desc">
+                    {experimental.decision_mode.env !== null
+                      ? `PLANNOTATOR_EXPERIMENTAL turns it ${experimental.decision_mode.env ? 'on' : 'off'}.`
+                      : 'Answer what agents ask in a thread one decision at a time, from its open questions; each agent gets one reply.'}
+                  </span>
                 </span>
-                <span className="ib-desc">
-                  {experimental.decision_mode.env !== null
-                    ? `PLANNOTATOR_EXPERIMENTAL turns it ${experimental.decision_mode.env ? 'on' : 'off'}.`
-                    : 'Answer what agents ask in a thread one decision at a time, from its open questions; each agent gets one reply.'}
+                <span className="ib-ctl">
+                  <Switch
+                    on={experimental.decision_mode.on}
+                    labelledBy="ib-decision-mode-label"
+                    disabled={experimental.decision_mode.env !== null}
+                    onClick={() => onToggleExperimental(!experimental.decision_mode.on)}
+                  />
                 </span>
-              </span>
-              <span className="ib-ctl">
-                <Switch
-                  on={experimental.decision_mode.on}
-                  labelledBy="ib-decision-mode-label"
-                  disabled={experimental.decision_mode.env !== null}
-                  onClick={() => onToggleExperimental(!experimental.decision_mode.on)}
-                />
-              </span>
-            </div>
+              </div>
+            )}
+            {broRow && (
+              <div className="ib-prow" data-settings-bro="">
+                <span className="ib-txt">
+                  <span className="ib-l" id="ib-bro-label">
+                    Bro mode
+                  </span>
+                  <span className="ib-desc">
+                    Agents write to your Inbox in plain words. Applies to new agent sessions. In open Claude Code sessions, run <code>/reload-plugins plannotator</code>.
+                  </span>
+                </span>
+                <span className="ib-ctl">
+                  <Switch on={bro.on} labelledBy="ib-bro-label" onClick={() => onToggleBro(!bro.on)} />
+                </span>
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -970,7 +976,7 @@ export function SettingsPage(props: SettingsPageProps) {
   if (props.landOnExperimental && !landAsked.current) landing.current = true;
   landAsked.current = props.landOnExperimental === true;
   if (section !== 'capabilities') landing.current = false;
-  const experimentalShown = section === 'capabilities' && !!settings?.experimental && !!props.onToggleExperimental;
+  const experimentalShown = section === 'capabilities' && ((!!settings?.experimental && !!props.onToggleExperimental) || (!!settings?.bro && !!props.onToggleBro));
   useEffect(() => {
     if (!landing.current || !experimentalShown || !experimentalHeading.current) return;
     landing.current = false;

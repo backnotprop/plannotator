@@ -282,7 +282,7 @@ test.skipIf(!hasDom)('no global way in: no sidebar row, no list-header button, w
     host?.remove();
     const settings = await renderApp('#settings/capabilities');
     await until(() => settings.querySelector('[data-settings-experimental]') !== null, 'the Experimental group');
-    const sw = settings.querySelector('[data-settings-experimental] [role="switch"]') as HTMLButtonElement;
+    const sw = settings.querySelector('[data-settings-experimental] [data-settings-decision-mode] [role="switch"]') as HTMLButtonElement;
     expect(sw.getAttribute('aria-checked')).toBe('false');
     act(() => sw.click());
     await until(async () => (await loopback('/api/inbox/decisions')).status === 200, 'the switch to turn it on');
