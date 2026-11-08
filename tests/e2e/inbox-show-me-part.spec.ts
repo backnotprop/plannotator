@@ -457,7 +457,8 @@ test('Show me again makes a new version of this board, not a new board, and it s
   await expect(boardBack(page)).toHaveAttribute('data-shape-board-back', first);
 });
 
-test('What to know and the whole board have the same three, and each makes its own board', async () => {
+// #2703 removed What to know (approval shape-know-removed): a part of the Shape view takes its place.
+test('the whole board and a part have the same three, and each makes its own board', async () => {
   test.setTimeout(150_000);
   const { page } = world;
   await boardBack(page).click();
@@ -470,17 +471,8 @@ test('What to know and the whole board have the same three, and each makes its o
   expect(world.requests.at(-1)).toContain(`pressed Show me on "The whole board" in your Shape ${first}`);
   await boardBack(page).click();
 
-  // What to know: a part of the words.
-  await board(page).getByRole('button', { name: 'What to know' }).click();
-  await startAnnotating(page);
-  const know = board(page).locator('[data-mark]').first();
-  await expect(know).toBeVisible();
-  await know.click();
-  await expect(showMeButton(page)).toBeVisible();
-  await shot(page, '05-box-on-what-to-know', ['light']);
-  await showMeButton(page).click();
-  // A paragraph is named by its words, not by a bold word in it.
-  await expect(title(page)).toHaveText(/^About After the third failure/, { timeout: 30_000 });
+  // A part of the Shape view, in What to know's place, so the list below still counts 6 and 20.
+  await showMeOnPart(page, 'ledger', /^About The ledger, outside the review/);
   await expect(boardBack(page)).toHaveAttribute('data-shape-board-back', first);
 });
 
