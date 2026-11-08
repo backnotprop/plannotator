@@ -3339,7 +3339,13 @@ test('New review, its other doors: #reviews&new, ⌘K from the Inbox, and a PR a
 
   await page.goto(`${world.url}#`);
   await page.reload();
-  await page.keyboard.press('ControlOrMeta+k');
+  // ⌘K before the page's keys are wired does nothing, and the words typed after it land on the list's own shortcuts:
+  // press it until the palette has the words' field, then type.
+  const field = page.locator('dialog[data-search-palette] [role="combobox"]');
+  await expect(async () => {
+    if (!(await field.isVisible())) await page.keyboard.press('ControlOrMeta+k');
+    await expect(field).toBeFocused({ timeout: 1000 });
+  }).toPass({ timeout: 15_000 });
   await page.keyboard.type('new review');
   await page.locator('[data-compose-action="review"]').click();
   await expect(box).toBeVisible();

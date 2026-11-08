@@ -370,6 +370,7 @@ for (const phone of PHONES) {
         await page.locator('[data-fcomp-mode="reply"]').tap();
         // The comment count comes with the file's model, after the card: at 320 px the "12" chip is what stacks the
         // chips (round 3), so both cards are measured once their chips are in, or the foot's rows differ, not the field.
+        // Both threads were seeded alike (12 comments, 3 questions) and nothing sends on them.
         await expect(card(page).locator('[data-fcomp-comments]')).toHaveAccessibleName('12 comments');
         await expect(card(page).locator('[data-fcomp-questions]')).toBeVisible();
         await page.waitForTimeout(250);
@@ -380,8 +381,11 @@ for (const phone of PHONES) {
 
     test('a long agent: its name is cut on one line, in the header and in “Sent to …”', async () => {
       await page.setViewportSize({ width: 320, height: 568 });
+      // A thread of its own: the Send below takes the thread's comments with it, and the shared long-name thread must
+      // keep its 12 for the other browser's pass ("the empty field stays one line" compares it with twelve's card).
+      const t = await seed(long, 12);
       await page.goto('about:blank');
-      await page.goto(fileUrl(seeded.longName, 'page.html'));
+      await page.goto(fileUrl(t, 'page.html'));
       await page.locator('.ib-htmlframe iframe').waitFor();
       await page.locator('[data-fcomp-pill]').tap();
       await card(page).waitFor();

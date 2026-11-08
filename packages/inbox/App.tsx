@@ -2888,10 +2888,13 @@ function Inbox() {
   };
   // The palette's Actions group reads the live sessions while it is open.
   const { model: paletteSessions } = useComposeSessions(searchOpen);
-  const pullsShownRef = useRef(false);
+  // "New review…" is offered with Code review on (as `pullsShown` below). A dependency, not a ref: the palette's
+  // Actions are worked out when its words are answered, and the settings can land after that (⌘K just after a
+  // load), so the actions must change with them or "review" never offers New review… until the words change.
+  const paletteReviews = codeReviewOn && !tailnetGuest(settings);
   const paletteActions = useCallback(
-    (q: string): ComposeAction[] => composeActions(q, composeTargets(paletteSessions?.projects ?? []), lastSentRef.current, pullsShownRef.current),
-    [paletteSessions],
+    (q: string): ComposeAction[] => composeActions(q, composeTargets(paletteSessions?.projects ?? []), lastSentRef.current, paletteReviews),
+    [paletteSessions, paletteReviews],
   );
 
   /** The thread landed on the message `msg=` named: drop it from the hash, so a reload does not jump again. */
@@ -4980,7 +4983,6 @@ function Inbox() {
   // this computer's gh / glab).
   const pullsShown = codeReviewOn && !guestPage;
   pagesRef.current = { pulls: pullsShown, drafts: (drafts?.length ?? 0) + replyDrafts.length > 0, composing: compose !== null };
-  pullsShownRef.current = pullsShown;
   const onReviews = route.page === 'reviews' || !!route.reviews;
   const pulls = usePulls(onReviews && pullsShown, pullsShown, (route.reviews?.view ?? route.view) === 'others');
   // The list a thread from the box opens beside: the one the box opened over.
