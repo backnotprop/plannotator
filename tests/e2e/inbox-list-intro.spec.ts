@@ -1,32 +1,29 @@
 /**
- * The one-time list options dialog (approval "inbox-list-options-intro", 2026-10-31), proved in a real Chromium
- * against a compiled binary under temp HOMEs and data dirs. The spec compiles its own binary with a release version
- * (0.30.0): the shared e2e binary is 0.0.0-dev, which never decides the dialog (so it never shows in other specs).
- * Each case is its own Inbox (the dialog is once per machine); agents write through `plannotator inbox mcp`.
+ * The one-time "Choose how your list looks" dialog (approval "inbox-rows-dialog", round 7b), proved in a real
+ * Chromium against a compiled binary under temp HOMEs and data dirs. The spec compiles its own binary with a release
+ * version (0.30.0): the shared e2e binary is 0.0.0-dev, which never decides the dialog (so it never shows in other
+ * specs). Each case is its own Inbox (the dialog is once per machine); agents write through `plannotator inbox mcp`.
+ * Every Inbox here has six threads: the dialog waits for five (q-2c590791).
  *
- *  - A new user (a fresh install) never gets it, even with a long list.
- *  - Someone who used an Inbox before: it shows once, in one of two tabs, plays its preview (each option that is off
- *    on in turn, then back to the defaults: smaller names on), and Done puts the switches on the real list at once,
- *    which a reload keeps; it never shows again.
- *  - Escape and Keep as it is change nothing and retire it (with reduced motion: no preview at all).
- *  - A key or a click during the preview ends it at once, back to the defaults.
+ *  - A fresh install gets it too (no day-four rule), once, like someone who used an Inbox before.
+ *  - Someone who saw the earlier dialog (0.28.42, the switches) gets this one once: the saved mark moved to version 2.
+ *  - Once, in one of two tabs: the demo plays and holds on the stacked picture, nothing is picked, Done waits for a
+ *    pick; a pick raises the card with the person's own rows, and Done puts the look on the real list at once, which a
+ *    reload keeps; it never shows again.
+ *  - Escape and Keep as it is change nothing and retire it, even after a pick (with reduced motion: no demo at all).
+ *  - "Customize rows" opens Settings → Rows, saves nothing and retires it.
+ *  - A key or a click during the demo jumps to the held picture.
  *  - Never on the same load as the tour (the next load shows it); after the sound dialog, never that load nor the next
  *    (the line of one-time dialogs, approval "inbox-one-time-dialogs": one a day, two days apart).
- *  - Its moment is back on the list (approval "inbox-one-time-dialogs"; it replaced "over a thread", the owner's
- *    2026-10-31 note): a first load on a thread link (desktop or phone) never shows it over the thread; back on the
- *    list it shows after the same short wait as a first load on the list, with the picture's rows drawn; never while
- *    a file is open beside the thread, nor with the thread alone, then on the list after the short wait; never under
- *    an image opened full size or a modal layer; a thread opened just before the wait ends starts it again.
- *  - The dialog follows the window's mode, its text and switches at WCAG AA in dark and light (desktop and a dark
- *    phone); only its picture is light, in both (and under Synthwave '84), and nothing else on the page is a light
- *    scope or a second window root.
- *  - The picture's thread names stay on one line, a long one cut with "…" (the owner: no long names in the examples).
- *  - Smaller thread names is the fourth switch, on from the start (a default since 2026-11-05): the preview never
- *    shows it turning on, and turning it off is saved by Done.
- *  - Dark, and a 390 px phone: a bottom sheet with the phone's rows.
+ *  - Its moment is back on the list (approval "inbox-one-time-dialogs"): a first load on a thread link (desktop or
+ *    phone) never shows it over the thread; back on the list it shows after the same short wait as a first load on the
+ *    list; never while a file is open beside the thread, nor with the thread alone; never under an image opened full
+ *    size or a modal layer; a thread opened just before the wait ends starts it again.
+ *  - The dialog and its picture follow the window's mode, its words at WCAG AA in dark and light (desktop and phone).
+ *  - A 390 px phone: a bottom sheet, the three looks and 44 px buttons.
  *
  * Build the apps first (bun run --cwd apps/review build && bun run build:hook), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-list-intro.spec.ts`. PNGs and a video of the preview
+ * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-list-intro.spec.ts`. PNGs and a video of the demo
  * land in PLANNOTATOR_E2E_PROOF_DIR/list-intro, or .local/proof/list-intro/.
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
@@ -41,7 +38,7 @@ const repo = resolve(__dirname, '../..');
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'list-intro');
 const VERSION = '0.30.0';
 const DIALOG = '[data-dialog="list-look-intro"]';
-const KEYS = ['highlight', 'compact', 'hideAgents', 'smallNames'] as const;
+const LOOKS = ['minimal', 'balanced', 'detailed'] as const;
 const LONG_NAME = 'Ledger reconciliation dry run for the quarter-end close across every subsidiary and region';
 
 let binary = '';
@@ -74,15 +71,19 @@ function compileReleaseBinary(): string {
 
 /**
  * An Inbox with six threads. `earlier`: someone who used an Inbox before (update-state.json names an older version),
- * with the sound dialog and the agent notes already behind them unless `soundDue`.
+ * with the sound dialog and the agent notes already behind them unless `soundDue`; `seenOld`: they also saw the
+ * earlier list dialog (its mark has no version).
  */
-async function world(options: { earlier: boolean; soundDue?: boolean; attachment?: boolean }): Promise<World> {
+async function world(options: { earlier: boolean; soundDue?: boolean; attachment?: boolean; seenOld?: boolean }): Promise<World> {
   const root = inboxScratch('plannotator-inbox-list-intro-world-');
   worldRoots.push(root);
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(home);
+  // A fresh install: no update state and nothing that says an Inbox ran here (inboxUsedBefore), only the tour and the
+  // agent notes behind it, so the one-time dialog is the first thing on the list.
+  if (!options.earlier) writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxTour: { version: 2, seen_at: '2026-10-01T10:00:00.000Z', skipped_at: '2026-10-01T10:00:00.000Z' }, inboxAgentNotes: { offered: true } }));
   if (options.earlier) {
     writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ inboxVersion: '0.29.0' }));
     writeFileSync(
@@ -94,6 +95,7 @@ async function world(options: { earlier: boolean; soundDue?: boolean; attachment
         // Due on a used Inbox, and its check would run the `codex` on this PATH.
         inboxVoiceIntro: { shownAt: '2026-10-01T10:00:00.000Z' },
         ...(options.soundDue ? {} : { inboxSound: { dialogShownFor: '0.29.0' } }),
+        ...(options.seenOld ? { inboxListIntro: { dueAt: '2026-10-20T10:00:00.000Z', shownAt: '2026-10-21T10:00:00.000Z' } } : {}),
       }),
     );
   }
@@ -128,10 +130,19 @@ async function world(options: { earlier: boolean; soundDue?: boolean; attachment
   return { url, dataDir, opened, file };
 }
 
-function saved(w: World): { dueAt?: string; shownAt?: string } | undefined {
-  const path = join(w.dataDir, 'config.json');
-  return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')).inboxListIntro : undefined;
+interface SavedIntro {
+  dueAt?: string;
+  shownAt?: string;
+  version?: number;
+  before?: { dueAt?: string; shownAt?: string };
 }
+
+function savedConfig(w: World): Record<string, unknown> {
+  const path = join(w.dataDir, 'config.json');
+  return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
+}
+const saved = (w: World) => savedConfig(w).inboxListIntro as SavedIntro | undefined;
+const savedRows = (w: World) => savedConfig(w).inboxRows as string[] | undefined;
 
 async function context(browser: Browser, options: { phone?: boolean; dark?: boolean; reduce?: boolean; video?: boolean } = {}): Promise<BrowserContext> {
   const viewport = options.phone ? { width: 390, height: 844 } : { width: 1440, height: 900 };
@@ -147,19 +158,33 @@ async function context(browser: Browser, options: { phone?: boolean; dark?: bool
   return ctx;
 }
 
-const lookClasses = (page: Page) => page.locator('.pn-inbox .ib-listcol:not(.ib-lo-list)').first().evaluate((el) => [...el.classList].filter((c) => c.startsWith('ib-lk-')).sort());
-const option = (page: Page, key: string) => page.locator(`${DIALOG} [data-list-intro-option="${key}"]`);
+const lookClasses = (page: Page) => page.locator('.pn-inbox .ib-listcol:not(.ib-lo-list):not(.ib-rl-list)').first().evaluate((el) => [...el.classList].filter((c) => c.startsWith('ib-lk-')).sort());
+const look = (page: Page, id: string) => page.locator(`${DIALOG} [data-list-intro-look="${id}"]`);
+const radio = (page: Page, id: string) => look(page, id).locator('input[type="radio"]');
+const picture = (page: Page) => page.locator(`${DIALOG} [data-list-intro-picture]`);
+const done = (page: Page) => page.locator('[data-list-intro-done]');
 
-/** The switches at the defaults: Smaller thread names on (since 2026-11-05), the other three off. */
-async function atDefaults(page: Page) {
-  for (const key of KEYS) await expect(option(page, key)).toHaveAttribute('aria-checked', key === 'smallNames' ? 'true' : 'false');
+/** The person's look as it opens (Balanced with none saved): checked, its card up once held, and Done ready. */
+async function balancedPicked(page: Page) {
+  for (const id of LOOKS) await (id === 'balanced' ? expect(radio(page, id)).toBeChecked() : expect(radio(page, id)).not.toBeChecked());
+  await expect(page.locator(`${DIALOG} [data-list-intro-card="balanced"]`)).toHaveCount(1);
+  await expect(done(page)).toBeEnabled();
 }
 
-/** The dialog is up and its preview has played out (or never played): the switches at the defaults and usable. */
-async function settledDialog(page: Page) {
+/** The dialog is up and its demo held on the stacked picture (or never played), with Balanced picked. */
+async function heldDialog(page: Page) {
   await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator('[data-list-intro-playing]')).toHaveCount(0, { timeout: 5_000 });
-  await atDefaults(page);
+  await expect(picture(page)).toHaveAttribute('data-scene', 'held', { timeout: 5_000 });
+  await balancedPicked(page);
+}
+
+/** Picks a look: it is checked, the card rises with that look's layer on, and Done is ready. */
+async function pick(page: Page, id: string) {
+  await look(page, id).click();
+  await expect(radio(page, id)).toBeChecked();
+  await expect(page.locator(`${DIALOG} [data-list-intro-card="${id}"]`)).toHaveCount(1);
+  await expect(page.locator(`${DIALOG} .ib-rl-cl[data-look="${id}"]`)).toHaveAttribute('data-on', '');
+  await expect(done(page)).toBeEnabled();
 }
 
 async function shot(page: Page, name: string) {
@@ -167,77 +192,57 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: join(proofDir, `${name}.png`) });
 }
 
-/** Every thread name in the picture is one line; the long one is cut with "…". */
-async function namesOneLine(page: Page) {
-  const names = await page.locator(`${DIALOG} .ib-lo-frame :is(.ib-title, .ib-m2)`).evaluateAll((els) =>
-    els.map((el) => {
-      const style = getComputedStyle(el);
-      return { text: el.textContent ?? '', lines: Math.round(el.getBoundingClientRect().height / parseFloat(style.lineHeight)), cut: el.scrollWidth > el.clientWidth + 0.5, overflow: style.textOverflow };
-    }),
-  );
-  expect(names.length).toBeGreaterThanOrEqual(3);
-  for (const name of names) expect(name.lines, `"${name.text}" on one line`).toBe(1);
-  const long = names.find((name) => name.text === LONG_NAME);
-  expect(long, 'the long name is in the picture').toBeTruthy();
-  expect(long).toMatchObject({ cut: true, overflow: 'ellipsis' });
-}
-
 /**
- * WCAG contrast of the dialog's words and switches against what they sit on, in sRGB as Chromium paints the
- * colours (a 1 px canvas resolves oklch and color-mix). Text 4.5:1; an off switch's outline and its thumb 3:1.
+ * WCAG contrast of the dialog's words against what they sit on, in sRGB as Chromium paints the colours: a 1 px
+ * canvas resolves oklch and color-mix, and each element's ground is its own and its ancestors' backgrounds painted in
+ * order from the dialog's, so a tint with alpha counts as it shows. Run with a look picked, so Done is enabled.
  */
 async function dialogContrast(page: Page): Promise<Record<string, number>> {
   return page.locator(DIALOG).evaluate((dialog) => {
     const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true })!;
-    const rgb = (color: string) => {
+    const paint = (layers: string[]) => {
       ctx.clearRect(0, 0, 1, 1);
       ctx.fillStyle = '#000';
-      ctx.fillStyle = color;
       ctx.fillRect(0, 0, 1, 1);
+      for (const color of layers) {
+        ctx.fillStyle = '#000';
+        ctx.fillStyle = color;
+        ctx.fillRect(0, 0, 1, 1);
+      }
       const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
       return [r!, g!, b!];
     };
-    const lum = (color: string) => {
-      const [r, g, b] = rgb(color).map((v) => {
+    const lum = (rgb: number[]) => {
+      const [r, g, b] = rgb.map((v) => {
         const c = v / 255;
         return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
       });
       return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
     };
-    const ratio = (a: string, b: string) => {
-      const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m);
+    const grounds = (el: Element) => {
+      const layers: string[] = [];
+      for (let at: Element | null = el; at; at = at === dialog ? null : at.parentElement) layers.unshift(getComputedStyle(at).backgroundColor);
+      return layers;
+    };
+    const ratio = (sel: string) => {
+      const el = dialog.querySelector(sel)!;
+      const layers = grounds(el);
+      const [x, y] = [lum(paint([...layers, getComputedStyle(el).color])), lum(paint(layers))].sort((m, n) => n - m);
       return Math.round(((x! + 0.05) / (y! + 0.05)) * 100) / 100;
     };
-    const bg = getComputedStyle(dialog).backgroundColor;
-    const color = (sel: string) => getComputedStyle(dialog.querySelector(sel)!).color;
-    const done = dialog.querySelector('[data-list-intro-done]')!;
-    const off = dialog.querySelector<HTMLElement>('.ib-sw[aria-checked="false"]')!;
-    const offStyle = getComputedStyle(off);
-    const picture = dialog.querySelector('[data-list-intro-picture]')!;
-    const pictureBg = getComputedStyle(picture).backgroundColor;
-    const band = getComputedStyle(picture.querySelector('.ib-band')!);
     return {
-      background: lum(bg),
-      picture: lum(pictureBg),
-      pictureName: ratio(getComputedStyle(picture.querySelector('.ib-title, .ib-m2')!).color, pictureBg),
-      // Text that takes its colour from the picture itself, not a row: the first band's label on the band, and the
-      // desktop picture's list header (none on a phone, so it passes as 21).
-      pictureBand: ratio(band.color, band.backgroundColor === 'rgba(0, 0, 0, 0)' ? pictureBg : band.backgroundColor),
-      pictureHeader: picture.querySelector('.ib-lhead h1') ? ratio(getComputedStyle(picture.querySelector('.ib-lhead h1')!).color, pictureBg) : 21,
-      title: ratio(color('#ib-lo-title'), bg),
-      line: ratio(color('#ib-lo-desc'), bg),
-      label: ratio(color('.ib-lo-opt > span'), bg),
-      keep: ratio(color('[data-list-intro-keep]'), bg),
-      done: ratio(getComputedStyle(done).color, getComputedStyle(done).backgroundColor),
-      offOutline: ratio(offStyle.borderTopColor, bg),
-      offThumb: ratio(getComputedStyle(off, '::after').backgroundColor, offStyle.backgroundColor),
+      background: lum(paint([getComputedStyle(dialog).backgroundColor])),
+      picture: lum(paint(grounds(dialog.querySelector('.ib-rl-comp')!))),
+      title: ratio('#ib-lo-title'),
+      line: ratio('#ib-lo-desc'),
+      customize: ratio('[data-list-intro-customize]'),
+      lookName: ratio('[data-list-intro-look]:not([data-on]) .ib-rl-ln'),
+      pickedName: ratio('[data-list-intro-look][data-on] .ib-rl-ln'),
+      current: ratio('.ib-rl-cur'),
+      keep: ratio('[data-list-intro-keep]'),
+      done: ratio('[data-list-intro-done]'),
     };
   });
-}
-
-function contrastPasses(c: Record<string, number>) {
-  for (const key of ['title', 'line', 'label', 'keep', 'done', 'pictureName', 'pictureBand', 'pictureHeader']) expect(c[key], `${key}: text 4.5:1`).toBeGreaterThanOrEqual(4.5);
-  for (const key of ['offOutline', 'offThumb']) expect(c[key], `${key}: 3:1`).toBeGreaterThanOrEqual(3);
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -270,17 +275,41 @@ test.afterAll(async () => {
   }
 });
 
-test('a new user never gets it, even with a long list', async ({ browser }) => {
+test('a fresh install gets it too, once, with Balanced as the current look', async ({ browser }) => {
   const w = await world({ earlier: false });
-  expect(saved(w)?.shownAt).toMatch(/^\d{4}-/);
-  const page = await (await context(browser)).newPage();
+  expect(saved(w)).toMatchObject({ version: 2, dueAt: expect.stringMatching(/^\d{4}-/) });
+  expect(saved(w)?.shownAt).toBeUndefined();
+  const page = await (await context(browser, { reduce: true })).newPage();
   await page.goto(w.url);
+  await heldDialog(page);
+  await expect(page.locator(`${DIALOG} .ib-rl-cur`)).toHaveCount(1);
+  await expect(look(page, 'balanced').locator('.ib-rl-cur')).toHaveText('Current');
+  await page.locator('[data-list-intro-keep]').click();
+  await expect(page.locator(DIALOG)).toHaveCount(0);
+  expect(saved(w)?.shownAt).toMatch(/^\d{4}-/);
+  await page.reload();
   await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
   await page.waitForTimeout(3500);
   await expect(page.locator(DIALOG)).toHaveCount(0);
 });
 
-test('once, in one of two tabs: the preview plays, Done puts the switches on the real list at once, a reload keeps them', async ({ browser }) => {
+test('someone who saw the earlier dialog gets this one once; the earlier show is kept for the line', async ({ browser }) => {
+  const w = await world({ earlier: true, seenOld: true });
+  expect(saved(w)).toMatchObject({ version: 2, before: { shownAt: '2026-10-21T10:00:00.000Z' } });
+  expect(saved(w)?.shownAt).toBeUndefined();
+  const page = await (await context(browser, { reduce: true })).newPage();
+  await page.goto(w.url);
+  await heldDialog(page);
+  await page.keyboard.press('Escape');
+  await expect(page.locator(DIALOG)).toHaveCount(0);
+  expect(saved(w)?.shownAt).toMatch(/^\d{4}-/);
+  await page.reload();
+  await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
+  await page.waitForTimeout(3500);
+  await expect(page.locator(DIALOG)).toHaveCount(0);
+});
+
+test('once, in one of two tabs: the demo holds with Balanced picked, and Done puts the look on the real list at once', async ({ browser }) => {
   const w = await world({ earlier: true });
   expect(saved(w)?.dueAt).toMatch(/^\d{4}-/);
   const ctx = await context(browser);
@@ -289,25 +318,33 @@ test('once, in one of two tabs: the preview plays, Done puts the switches on the
   await expect.poll(async () => (await a.locator(DIALOG).count()) + (await b.locator(DIALOG).count()), { timeout: 15_000 }).toBe(1);
   const page = (await a.locator(DIALOG).count()) === 1 ? a : b;
   const other = page === a ? b : a;
-  // The preview: Highlight first, the switches out of reach meanwhile, and the real rows in the picture change.
-  await expect(option(page, 'highlight')).toHaveAttribute('aria-checked', 'true', { timeout: 3_000 });
-  await expect(page.locator(`${DIALOG} .ib-lo-list.ib-lk-pill`)).toHaveCount(1);
-  await settledDialog(page);
-  await shot(page, 'desktop-light-open');
-  await option(page, 'highlight').click();
-  await option(page, 'compact').click();
-  await expect(page.locator(`${DIALOG} .ib-lo-list.ib-lk-pill.ib-lk-compact`)).toHaveCount(1);
-  await namesOneLine(page);
-  await shot(page, 'desktop-light-options-on');
-  // The real list keeps the defaults until Done.
+  // The demo plays, then holds on the stacked picture (the last step at 2.6 s): Balanced is picked from the start,
+  // its card rising only once the demo holds.
+  await expect(picture(page)).not.toHaveAttribute('data-scene', 'held');
+  await expect(radio(page, 'balanced')).toBeChecked();
+  await expect(page.locator(`${DIALOG} [data-list-intro-card]`)).toHaveCount(0);
+  await heldDialog(page);
+  await expect(page.locator(`${DIALOG} #ib-lo-title`)).toHaveText('Choose how your list looks');
+  await expect(page.locator(`${DIALOG} #ib-lo-desc`)).toHaveText('Pick a look. Fine-tune it any time in Customize rows, from ⋮ above the list.');
+  await expect(page.locator(`${DIALOG} .ib-rl-look .ib-rl-ln`)).toHaveText(['Minimal', /^Balanced\s*Current$/, 'Detailed']);
+  await shot(page, 'desktop-light-held');
+  // Each pick raises the card with the person's own threads in that look.
+  await pick(page, 'detailed');
+  await expect(page.locator(`${DIALOG} .ib-rl-cl[data-look="detailed"]`)).toContainText('Spacing scale');
+  await expect(page.locator(`${DIALOG} .ib-rl-cl[data-look="detailed"] .ib-lm`).first()).toBeVisible();
+  await shot(page, 'desktop-light-detailed');
+  await pick(page, 'minimal');
+  await expect(page.locator(`${DIALOG} .ib-rl-cl[data-look="minimal"] .ib-listcol.ib-lk-tfirst`)).toHaveCount(1);
+  await shot(page, 'desktop-light-minimal');
+  // The real list keeps its look until Done.
   expect(await lookClasses(page)).toEqual(['ib-lk-small']);
-  await page.locator('[data-list-intro-done]').click();
+  await done(page).click();
   await expect(page.locator(DIALOG)).toHaveCount(0);
-  expect(await lookClasses(page)).toEqual(['ib-lk-compact', 'ib-lk-pill', 'ib-lk-small']);
-  await shot(page, 'after-done');
+  expect(await lookClasses(page)).toEqual(['ib-lk-small', 'ib-lk-tfirst']);
+  await expect.poll(() => [...(savedRows(w) ?? [])].sort()).toEqual(['hidePreview', 'smallNames', 'titleFirst']);
   await page.reload();
   await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
-  expect(await lookClasses(page)).toEqual(['ib-lk-compact', 'ib-lk-pill', 'ib-lk-small']);
+  expect(await lookClasses(page)).toEqual(['ib-lk-small', 'ib-lk-tfirst']);
   await other.reload();
   await page.waitForTimeout(3000);
   await expect(page.locator(DIALOG)).toHaveCount(0);
@@ -316,27 +353,26 @@ test('once, in one of two tabs: the preview plays, Done puts the switches on the
 });
 
 for (const how of ['Escape', 'Keep as it is'] as const) {
-  test(`${how} changes nothing and retires it; with reduced motion there is no preview`, async ({ browser }) => {
+  test(`${how} changes nothing and retires it, even after a pick; with reduced motion there is no demo`, async ({ browser }) => {
     const w = await world({ earlier: true });
     const page = await (await context(browser, { reduce: true })).newPage();
     await page.goto(w.url);
     await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
-    // Reduced motion: never a preview; the switches are usable from the start.
-    await expect(page.locator('[data-list-intro-playing]')).toHaveCount(0);
-    await page.waitForTimeout(700);
-    await atDefaults(page);
-    // Tab stays inside the dialog and never lands on the picture's (inert) rows.
-    await expect(page.locator('[data-list-intro-done]')).toBeFocused();
+    const rowsBefore = savedRows(w);
+    // Reduced motion: held from the first frame.
+    await expect(picture(page)).toHaveAttribute('data-scene', 'held');
+    await balancedPicked(page);
+    // The looks take the first focus, Balanced picked; Tab reaches it, then an arrow picks the next by keyboard.
+    await expect(page.locator(`${DIALOG} .ib-rl-looks`)).toBeFocused();
     await page.keyboard.press('Tab');
-    await expect(option(page, 'highlight')).toBeFocused();
-    await page.keyboard.press('Shift+Tab');
-    await expect(page.locator('[data-list-intro-done]')).toBeFocused();
-    await option(page, 'compact').click();
-    await option(page, 'hideAgents').click();
+    await page.keyboard.press('ArrowDown');
+    await expect(radio(page, 'detailed')).toBeChecked();
+    await pick(page, 'detailed');
     if (how === 'Escape') await page.keyboard.press('Escape');
     else await page.locator('[data-list-intro-keep]').click();
     await expect(page.locator(DIALOG)).toHaveCount(0);
     expect(await lookClasses(page)).toEqual(['ib-lk-small']);
+    expect(savedRows(w)).toEqual(rowsBefore);
     // The list is still there: Escape closed only the dialog.
     await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
     await page.reload();
@@ -347,26 +383,36 @@ for (const how of ['Escape', 'Keep as it is'] as const) {
   });
 }
 
+test('"Customize rows" opens Settings → Rows, saves nothing and retires it', async ({ browser }) => {
+  const w = await world({ earlier: true });
+  const page = await (await context(browser, { reduce: true })).newPage();
+  await page.goto(w.url);
+  await heldDialog(page);
+  const rowsBefore = savedRows(w);
+  await pick(page, 'detailed');
+  await page.locator('[data-list-intro-customize]').click();
+  await expect(page.locator(DIALOG)).toHaveCount(0);
+  await expect(page).toHaveURL(/#settings\/rows$/);
+  await expect(page.locator('[data-settings-section="rows"]')).toBeVisible();
+  expect(savedRows(w)).toEqual(rowsBefore);
+  expect(saved(w)?.shownAt).toMatch(/^\d{4}-/);
+});
+
 for (const how of ['a key', 'a click'] as const) {
-  test(`${how} during the preview ends it at once, back to the defaults`, async ({ browser }) => {
+  test(`${how} during the demo jumps to the held picture`, async ({ browser }) => {
     const w = await world({ earlier: true });
     const page = await (await context(browser)).newPage();
     await page.goto(w.url);
-    await expect(option(page, 'compact')).toHaveAttribute('aria-checked', 'true', { timeout: 15_000 });
-    await expect(page.locator('[data-list-intro-playing]')).toHaveCount(1);
-    // The key is Tab: it ends the preview and moves focus from Done (the first focus) to the first switch.
-    if (how === 'a key') await page.keyboard.press('Tab');
+    await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
+    await expect(picture(page)).not.toHaveAttribute('data-scene', 'held');
+    const at = Date.now();
+    if (how === 'a key') await page.keyboard.press('Shift');
     else await page.locator(`${DIALOG} #ib-lo-title`).click();
-    await expect(page.locator('[data-list-intro-playing]')).toHaveCount(0);
-    if (how === 'a key') await expect(option(page, 'highlight')).toBeFocused();
-    await atDefaults(page);
-    await expect(page.locator(`${DIALOG} .ib-lo-list`)).not.toHaveClass(/ib-lk-(pill|compact|noagents)/);
-    await expect(page.locator(`${DIALOG} .ib-lo-list`)).toHaveClass(/ib-lk-small/);
-    // Nothing plays on after it, and the switches answer.
-    await page.waitForTimeout(1800);
-    await atDefaults(page);
-    await option(page, 'hideAgents').click();
-    await expect(option(page, 'hideAgents')).toHaveAttribute('aria-checked', 'true');
+    await expect(picture(page)).toHaveAttribute('data-scene', 'held', { timeout: 1_000 });
+    expect(Date.now() - at).toBeLessThan(1500);
+    await expect(page.locator(`${DIALOG} .ib-rl-art[data-moving]`)).toHaveCount(0);
+    await balancedPicked(page);
+    await pick(page, 'detailed');
   });
 }
 
@@ -438,9 +484,7 @@ for (const phone of [false, true]) {
     await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
     expect(Date.now() - back).toBeGreaterThanOrEqual(2000);
     expect(saved(w)?.shownAt).toMatch(/^\d{4}-/);
-    await settledDialog(page);
-    await expect(page.locator(`${DIALOG} .ib-lo-frame ${phone ? '.ib-mrow' : '.ib-nrow'}`).first()).toBeVisible();
-    await namesOneLine(page);
+    await heldDialog(page);
     await shot(page, `thread-link${phone ? '-phone' : ''}-dialog`);
     // Once: Keep as it is retires it, and opening a thread and closing it never brings it again.
     await page.locator('[data-list-intro-keep]').click();
@@ -533,129 +577,65 @@ test('never over a file open beside a thread, nor the thread alone: it waits, un
   expect(await page.evaluate(() => location.hash)).not.toContain('file=');
 });
 
-test('the dialog follows the window\'s mode and passes WCAG AA in both; only its picture is light', async ({ browser }) => {
+test('the dialog and its picture follow the window\'s mode, its words at WCAG AA in both; each look picked', async ({ browser }) => {
   const cases = [
-    { dark: true, phone: false, name: 'dark-window-dark-dialog-light-preview' },
-    { dark: false, phone: false, name: 'light-window-light-dialog' },
+    { dark: false, phone: false, name: 'desktop-light' },
+    { dark: true, phone: false, name: 'desktop-dark' },
+    { dark: false, phone: true, name: 'phone-light' },
     { dark: true, phone: true, name: 'phone-dark' },
   ];
   for (const { dark, phone, name } of cases) {
     const w = await world({ earlier: true });
     const page = await (await context(browser, { dark, phone, reduce: true })).newPage();
     await page.goto(w.url);
-    await settledDialog(page);
+    await heldDialog(page);
     expect(await page.evaluate(() => document.documentElement.classList.contains('light'))).toBe(!dark);
-    // The light scope is the picture alone: no other element of the page is light or a scope, and the picture is
-    // not a second window root (`.pn-inbox`), so the window's own layout rules never reach it.
+    // No light scope anywhere: the picture follows the mode (the owner, q-fd707b9e), and it is not a second window root.
     const scopes = await page.evaluate(() => ({
-      light: [...document.querySelectorAll('body .light, .ib-lightscope')].map((el) => ({ picture: el.hasAttribute('data-list-intro-picture'), dialogText: el.querySelectorAll('#ib-lo-title, [role="switch"], [data-list-intro-done]').length })),
+      light: document.querySelectorAll('body .light, .ib-lightscope').length,
       roots: document.querySelectorAll('.pn-inbox').length,
-      pictureRoot: document.querySelector('[data-list-intro-picture]')!.classList.contains('pn-inbox'),
     }));
-    expect(scopes).toEqual({ light: [{ picture: true, dialogText: 0 }], roots: 1, pictureRoot: false });
-    // The list behind keeps the window's mode.
-    const paneLight = await page.locator('.pn-inbox .ib-listcol:not(.ib-lo-list)').first().evaluate((el) => {
-      const ctx = document.createElement('canvas').getContext('2d')!;
-      ctx.fillStyle = getComputedStyle(el).backgroundColor;
-      ctx.fillRect(0, 0, 1, 1);
-      const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
-      return (r! + g! + b!) / 3 > 128;
-    });
-    expect(paneLight, 'the list behind').toBe(!dark);
+    expect(scopes).toEqual({ light: 0, roots: 1 });
+    await shot(page, `${name}-held`);
+    for (const id of LOOKS) {
+      await pick(page, id);
+      await shot(page, `${name}-${id}`);
+    }
     const c = await dialogContrast(page);
-    // The dialog in the window's mode; the picture light in both.
-    if (dark) expect(c.background, `a dark dialog: ${JSON.stringify(c)}`).toBeLessThan(0.1);
-    else expect(c.background, `a light dialog: ${JSON.stringify(c)}`).toBeGreaterThan(0.8);
-    expect(c.picture, `a light picture: ${JSON.stringify(c)}`).toBeGreaterThan(0.8);
-    contrastPasses(c);
-    // The picture's bottom: in a dark dialog the rows fade into the card's own light ground (no mask, a clean rounded
-    // edge, its bottom row of pixels the card's colour); in a light one, the approved fade to transparent.
-    const edge = await page.locator('[data-list-intro-picture]').evaluate((el) => {
-      const style = getComputedStyle(el);
-      const after = getComputedStyle(el, '::after');
-      return { mask: style.maskImage, radius: style.borderBottomLeftRadius, fade: after.backgroundImage, fadeBottom: after.bottom, card: style.backgroundColor };
-    });
     if (dark) {
-      expect(edge.mask).toBe('none');
-      expect(edge.radius).toBe('10px');
-      expect(edge.fade).toContain('linear-gradient');
-      expect(edge.fadeBottom).toBe('0px');
+      expect(c.background, `a dark dialog: ${JSON.stringify(c)}`).toBeLessThan(0.1);
+      expect(c.picture, `a dark picture: ${JSON.stringify(c)}`).toBeLessThan(0.1);
     } else {
-      expect(edge.mask).toContain('linear-gradient');
-      expect(edge.radius).toBe('0px');
-      expect(edge.fade).toBe('none');
+      expect(c.background, `a light dialog: ${JSON.stringify(c)}`).toBeGreaterThan(0.8);
+      expect(c.picture, `a light picture: ${JSON.stringify(c)}`).toBeGreaterThan(0.8);
     }
-    await namesOneLine(page);
-    await shot(page, name);
-    if (dark && !phone) {
-      // A dark palette with its own ground rule for the window (Synthwave '84, Terminal): the picture keeps its own.
-      const ground = () => page.locator('[data-list-intro-picture]').evaluate((el) => getComputedStyle(el).getPropertyValue('--ib-ground-panes').trim());
-      const before = await ground();
-      await page.evaluate(() => {
-        const root = document.documentElement;
-        for (const cls of [...root.classList]) if (cls.startsWith('theme-')) root.classList.remove(cls);
-        root.classList.add('theme-synthwave-84');
-      });
-      expect(await ground()).toBe(before);
-      const synth = await dialogContrast(page);
-      expect(synth.picture, `a light picture under Synthwave: ${JSON.stringify(synth)}`).toBeGreaterThan(0.8);
-    }
+    for (const key of ['title', 'line', 'customize', 'lookName', 'pickedName', 'current', 'keep', 'done']) expect(c[key], `${name} ${key}: text 4.5:1 (${JSON.stringify(c)})`).toBeGreaterThanOrEqual(4.5);
+    await closeWorlds();
   }
 });
 
-test('Smaller thread names: the fourth switch, on from the start, turned off by Done', async ({ browser }) => {
-  const w = await world({ earlier: true });
-  const page = await (await context(browser)).newPage();
-  await page.goto(w.url);
-  await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator(`${DIALOG} [role="switch"]`)).toHaveCount(4);
-  await expect(page.locator(`${DIALOG} .ib-lo-opt > span`)).toHaveText(['Highlight thread subject', 'Compact rows', 'Hide agent icons', 'Smaller thread names']);
-  // A default (2026-11-05): on from the open, and the preview never shows it turning on; the other three reach on.
-  await expect(option(page, 'smallNames')).toHaveAttribute('aria-checked', 'true');
-  await expect(page.locator(`${DIALOG} .ib-lo-list.ib-lk-small`)).toHaveCount(1);
-  await expect(option(page, 'hideAgents')).toHaveAttribute('aria-checked', 'true', { timeout: 4_000 });
-  for (const key of KEYS) await expect(option(page, key)).toHaveAttribute('aria-checked', 'true');
-  await settledDialog(page);
-  await option(page, 'smallNames').click();
-  await page.locator('[data-list-intro-done]').click();
-  await expect(page.locator(DIALOG)).toHaveCount(0);
-  expect(await lookClasses(page)).toEqual([]);
-  await page.reload();
-  await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
-  expect(await lookClasses(page)).toEqual([]);
-});
-
-test('dark, with options on', async ({ browser }) => {
-  const w = await world({ earlier: true });
-  const page = await (await context(browser, { dark: true, reduce: true })).newPage();
-  await page.goto(w.url);
-  await settledDialog(page);
-  await option(page, 'highlight').click();
-  await option(page, 'compact').click();
-  await shot(page, 'desktop-dark-options-on');
-});
-
-test('a 390 px phone: a bottom sheet with the phone rows', async ({ browser }) => {
+test('a 390 px phone: a bottom sheet with the three looks and 44 px buttons', async ({ browser }) => {
   const w = await world({ earlier: true });
   const page = await (await context(browser, { phone: true, reduce: true })).newPage();
   await page.goto(w.url);
-  await settledDialog(page);
-  await namesOneLine(page);
-  await shot(page, 'phone-390');
+  await heldDialog(page);
   const box = (await page.locator(DIALOG).boundingBox())!;
   const why = await page.locator(DIALOG).evaluate((el) => JSON.stringify({ vw: innerWidth, cw: document.documentElement.clientWidth, width: getComputedStyle(el).width, margin: getComputedStyle(el).margin }));
   // A sheet: 8 px from each side and the bottom.
   expect(Math.round(box.x), why).toBe(8);
   expect(Math.round(390 - box.x - box.width), why).toBe(8);
   expect(Math.round(844 - box.y - box.height)).toBeLessThanOrEqual(9);
-  await expect(page.locator(`${DIALOG} .ib-mrow`).first()).toBeVisible();
+  // The three looks side by side, inside the sheet.
+  const looks = await page.locator(`${DIALOG} [data-list-intro-look]`).evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => ({ x: r.x, y: r.y, right: r.right })));
+  expect(looks).toHaveLength(3);
+  expect(new Set(looks.map((l) => Math.round(l.y))).size).toBe(1);
+  for (const l of looks) expect(l.x >= box.x && l.right <= box.x + box.width).toBe(true);
   for (const button of await page.locator(`${DIALOG} .ib-lo-acts .ib-btn`).all()) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
-  await option(page, 'highlight').click();
-  await option(page, 'compact').click();
-  await shot(page, 'phone-390-options-on');
+  await pick(page, 'minimal');
+  await expect(page.locator(`${DIALOG} .ib-rl-cl[data-look="minimal"] .ib-mrow`).first()).toBeVisible();
 });
 
-test('the preview, recorded', async ({ browser }) => {
+test('the demo, recorded', async ({ browser }) => {
   const w = await world({ earlier: true });
   const ctx = await context(browser, { video: true });
   const page = await ctx.newPage();
@@ -664,7 +644,9 @@ test('the preview, recorded', async ({ browser }) => {
   await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
   const openedAt = (Date.now() - t0) / 1000;
   const box = (await page.locator(DIALOG).boundingBox())!;
-  await settledDialog(page);
+  await heldDialog(page);
+  await page.waitForTimeout(900);
+  await pick(page, 'detailed');
   await page.waitForTimeout(900);
   const video = page.video()!;
   await ctx.close();

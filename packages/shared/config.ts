@@ -450,12 +450,13 @@ export interface PlannotatorConfig {
    */
   inboxBoardIntro?: { shownAt?: string };
   /**
-   * The Inbox's one-time list options dialog (approval "inbox-list-options-intro"): decided at the first release
-   * start that knows it. Someone who used an Inbox before gets `dueAt`; a fresh install is marked `shownAt` and never
-   * sees it. `shownAt` once a page on this computer claimed it (`POST /api/inbox/list-intro`, a compare-and-set):
-   * once per machine.
+   * The Inbox's one-time "Choose how your list looks" dialog: decided at the first release start of each `version`
+   * (packages/server/inbox-list-intro.ts). Version 2 (approval "inbox-rows-dialog", the three looks) is due for
+   * everyone, fresh installs included (`dueAt`); version 1's record (the switches, approval
+   * "inbox-list-options-intro") moves under `before`. `shownAt` once a page on this computer claimed it
+   * (`POST /api/inbox/list-intro`, a compare-and-set): once per machine and version. No `version`: version 1.
    */
-  inboxListIntro?: { dueAt?: string; shownAt?: string };
+  inboxListIntro?: { dueAt?: string; shownAt?: string; version?: number; before?: { dueAt?: string; shownAt?: string } };
   /**
    * Inbox voice dictation (approval "inbox-voice"), off unless turned on. Written by Settings → Voice and the
    * announcement (`POST /api/inbox/settings` `{ voice }`).

@@ -216,11 +216,25 @@ export type RowsPreset = 'minimal' | 'balanced' | 'detailed';
  * letter marks on (approval "inbox-letter-marks") now reads Custom until Detailed is picked again.
  */
 // Letter marks (approval "inbox-letter-marks"): Minimal and Balanced keep them off (Balanced is the defaults); Detailed
-// turns them on, both kinds as Avatar (no style option on), with the picture switches off.
+// turns them on, both kinds as Avatar (no style option on), with the repo's logo on and GitHub pictures off.
 export const ROWS_PRESETS: readonly { id: RowsPreset; label: string; look: ListLook }[] = [
-  { id: 'minimal', label: 'Minimal', look: { ...LIST_LOOK_OFF, compact: true, hideAgents: true, hidePreview: true, smallNames: true, unreadDot: true, relativeTime: true } },
+  // Minimal (approval "inbox-rows-dialog", round 7b): the two-line title-first row, no preview, no dot, clock times.
+  { id: 'minimal', label: 'Minimal', look: { ...LIST_LOOK_OFF, titleFirst: true, hidePreview: true, smallNames: true } },
   { id: 'balanced', label: 'Balanced', look: LIST_LOOK_DEFAULT },
-  { id: 'detailed', label: 'Detailed', look: { ...LIST_LOOK_OFF, roomy: true, highlight: true, previewTwo: true, marksThreads: true, marksProjects: true } },
+  {
+    id: 'detailed',
+    label: 'Detailed',
+    look: {
+      ...LIST_LOOK_OFF,
+      roomy: true,
+      // No subject pill beside the avatars (pending owner answer q-70c1a472). To undo: `highlight: true`.
+      previewTwo: true,
+      marksThreads: true,
+      marksProjects: true,
+      // The repo's logo on project marks (pending owner answer q-737e5fd4): a local file, nothing asked of GitHub.
+      repoLogo: true,
+    },
+  },
 ];
 
 export function rowsPreset(look: ListLook): RowsPreset | null {

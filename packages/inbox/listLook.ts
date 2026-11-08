@@ -301,17 +301,6 @@ export function writeListLookOption(key: ListLookKey, on: boolean): Promise<void
   return writeListLookOptions({ [key]: on });
 }
 
-/**
- * The one-time list options dialog's Done (approval "inbox-list-options-intro"): only the options the person changed
- * in it (`look` against `opened`), on top of the look now, so every other keeps whatever it is now, even when another
- * window changed it while the dialog was open (a stale "smaller names off" would turn its Dot off). Nothing changed:
- * nothing saved.
- */
-export function writeMenuLook(look: Pick<ListLook, MenuLookKey>, opened: Pick<ListLook, MenuLookKey>): Promise<void> {
-  const changed = LIST_LOOK_OPTIONS.filter(({ key }) => look[key] !== opened[key]).map(({ key }) => [key, look[key]]);
-  return changed.length ? writeListLookOptions(Object.fromEntries(changed)) : Promise.resolve();
-}
-
 /** Taken when a settings read is sent, and given back with its answer (`adoptSavedRows`'s `sentAt`). */
 export function listLookReadMark(): number {
   return serverRev;

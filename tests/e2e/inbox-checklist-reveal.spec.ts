@@ -81,7 +81,7 @@ async function world(steps?: boolean): Promise<World> {
       inboxNotifications: { dismissed: true },
       inboxAgentNotes: { offered: true, asked: ['claude-code', 'codex', 'opencode', 'pi', 'gemini', 'qwen', 'cursor'] },
       inboxSound: { dialogShownFor: VERSION },
-      inboxListIntro: { shownAt: past },
+      inboxListIntro: { shownAt: past, version: 2 },
       inboxVoiceIntro: { shownAt: past },
       inboxSnoozeIntro: { shownAt: snoozeShown },
       inboxBoard: true,

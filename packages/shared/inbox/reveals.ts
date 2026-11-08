@@ -94,7 +94,9 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // The update-day dialogs (who: config.json `inboxSound`, `inboxListIntro`, `inboxVoiceIntro`), one a day (the line's
   // one-day spacing): the sound on the update day, then list options and voice on later days, each at its moment.
   { id: "sound", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
-  { id: "list_intro", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
+  // "Choose how your list looks" (approval "inbox-rows-dialog"; q-2c590791: "It's when they have more threads, that's
+  // the point"): due for everyone, fresh installs too, once the machine holds five threads, with no day count.
+  { id: "list_intro", kind: "update", tenureMs: 0, minThreads: 5, enabled: true },
   { id: "voice", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
   // Its own rules stay (packages/server/inbox-snooze-intro.ts); the queue adds the spacing.
   { id: "snooze", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 0, enabled: true },

@@ -40,6 +40,7 @@
  */
 
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
+import { listIntroAtStart, listIntroDue } from "./inbox-list-intro";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -252,7 +253,7 @@ import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitFo
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
-import { createProjectPictures, type ProjectPictureOptions } from "./inbox-project-pictures";
+import { createProjectPictures, pictureSources, type ProjectPictureOptions } from "./inbox-project-pictures";
 import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullStacks, inboxReviewLandingChanges, inboxReviewRows, inboxReviewStartOf, type InboxPullReason, type InboxReviewStart, inboxPullRepoKey } from "@plannotator/core/inbox-types";
 import { createInboxPullStates, createInboxReviewIndex } from "./inbox-reviews";
 import { readInboxReviewChanges } from "./inbox-review-changes";
@@ -2133,17 +2134,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   }
 
   /**
-   * The one-time list options dialog (approval "inbox-list-options-intro"): `due` while it waits for a page on this
-   * computer to claim it. Decided at the first release start that knows it, like the sound dialog: someone who used an
-   * Inbox before gets it due; a fresh install is marked shown and never sees it (the tour shows today's list).
+   * The one-time "Choose how your list looks" dialog: `due` while it waits for a page on this computer to claim it.
+   * Decided at the first release start of each version (inbox-list-intro.ts): version 2, the three looks (approval
+   * "inbox-rows-dialog"), is due once for everyone, fresh installs and those who saw version 1 included. The page
+   * waits for a list of five threads or more.
    */
-  const listIntroState = () => {
-    const saved = loadConfig().inboxListIntro;
-    return { due: typeof saved?.dueAt === "string" && saved.dueAt !== "" && !saved.shownAt };
-  };
-  if (normalizeStableVersion(version) !== null && loadConfig().inboxListIntro === undefined) {
-    const at = new Date().toISOString();
-    saveConfig({ inboxListIntro: usedBefore ? { dueAt: at } : { shownAt: at } });
+  const listIntroState = () => ({ due: listIntroDue(loadConfig().inboxListIntro) });
+  const listIntroMinThreads = INBOX_REVEALS.find((entry) => entry.id === "list_intro")?.minThreads ?? 0;
+  /** Due, with the threads the dialog waits for: what holds the dialogs after it back. */
+  const listIntroWaits = () => listIntroState().due && store.threadIds().length >= listIntroMinThreads;
+  if (normalizeStableVersion(version) !== null) {
+    const next = listIntroAtStart(loadConfig().inboxListIntro, new Date().toISOString());
+    if (next) saveConfig({ inboxListIntro: next });
   }
   /**
    * The page that is about to show the dialog claims it: only the first claim ever gets `show: true`, so two tabs
@@ -2451,6 +2453,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const reveals = config.inboxReveals;
     // A list options or voice `shownAt` without `dueAt` is a fresh install's mark (never shown), not a show.
     const shown = (intro: { dueAt?: string; shownAt?: string } | undefined) => (intro?.dueAt ? intro.shownAt : undefined);
+    // Version 1 of the list dialog, kept under `before` when version 2 became due (inbox-list-intro.ts).
     const offers = Object.fromEntries(Object.entries(lineOffers).map(([id, undecided]) => [id, undecided!() && !lineOfferSaved(id as RevealId)?.shownAt]));
     const open: RevealState["open"] = {
       // The update-day dialogs: who they are for was decided at a release start (and is kept until claimed).
@@ -2467,7 +2470,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       release: snoozeIntroRelease,
       firstUseAt: snooze?.firstUseAt ?? null,
       // The spacing clock: the reveals' own stamp, and every announcement shown before this key existed (an upgrade).
-      lastShownAt: revealLastShown([reveals?.lastShownAt, snooze?.shownAt, shown(config.inboxListIntro), shown(config.inboxVoiceIntro), config.inboxBoardIntro?.shownAt]),
+      lastShownAt: revealLastShown([reveals?.lastShownAt, snooze?.shownAt, shown(config.inboxListIntro), shown(config.inboxListIntro?.before), shown(config.inboxVoiceIntro), config.inboxBoardIntro?.shownAt]),
       dayShownAt: reveals?.dayShownAt ?? null,
       notNowAt: reveals?.notNowAt ?? null,
       afterShowLoad: revealAfterShowLoad(reveals?.shownLoad, pageLoads, load),
@@ -3644,9 +3647,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     usedBefore,
     decidesIntro: normalizeStableVersion(version) !== null,
     computerName: () => phones?.machineDoor.computerName() ?? "this computer",
-    // It goes last: the sound and list options dialogs first, whatever keeps them waiting; and the line's day, load and
+    // It goes last: the sound dialog first, and the list dialog while it can show (due, and the five threads it waits
+    // for: below that it is due but no page shows it, so it never holds voice back); and the line's day, load and
     // spacing (shared/inbox/reveals.ts).
-    otherDialogDue: (load) => soundState().dialog_due || listIntroState().due || !lineFree("spaced", load),
+    otherDialogDue: (load) => soundState().dialog_due || listIntroWaits() || !lineFree("spaced", load),
     lineStamp: (at, load) => lineStamp(at, true, load),
     json,
     readBody,
@@ -5014,7 +5018,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
       // A project's letter-mark picture (approval "inbox-letter-marks"; inbox-project-pictures.ts). GET: the picture
       // in order (the one set with Set picture…, then the repo's logo and the GitHub owner's picture when Settings →
-      // Rows has them on, read from config.json `inboxRows`, never from the request), or a 404 and the window draws
+      // Rows has them on, read from config.json `inboxRows`; the repo's logo also with `logo=1`, a local file, while
+      // GitHub is never turned on by the request: `pictureSources`), or a 404 and the window draws
       // the letters. POST `{ picture: "data:image/…;base64,…" | null }`: Set picture…, or take it away; the same
       // guards as every window write. Window only: not on the phone's door, and never an agent's.
       const projectPictureMatch = /^\/api\/inbox\/projects\/([A-Za-z0-9_]+)\/picture$/.exec(path);
@@ -5028,10 +5033,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
             return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
           }
-          const rows = rowsState().rows ?? [];
           const picture = await projectPictures.get(
             { id: project.id, root: project.root },
-            { logo: rows.includes("repoLogo"), github: rows.includes("githubPictures"), repo: () => repos.get(project.root) ?? repos.refresh(project.root) },
+            { ...pictureSources(rowsState().rows ?? [], url.searchParams), repo: () => repos.get(project.root) ?? repos.refresh(project.root) },
           );
           if (!picture) {
             const miss = json({ error: "No picture for this project.", code: "no_picture" }, 404);

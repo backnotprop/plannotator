@@ -1,18 +1,16 @@
 /**
- * The one-time list options dialog (approval "inbox-list-options-intro", 2026-10-31): when a load may ask the Inbox
- * for it, and the short preview it plays as it opens.
+ * The one-time "Choose how your list looks" dialog (approval "inbox-rows-dialog", round 7b; it replaced the switches
+ * of "inbox-list-options-intro"): when a load may ask the Inbox for it, and the short demo it plays as it opens.
  *
- * The Inbox decides who gets it (packages/server/inbox.ts `inboxListIntro`): someone who used an Inbox before, once
- * per machine. The page decides when: never on the same load as another one-time dialog or the tour, only once the
+ * The Inbox decides who gets it (packages/server/inbox-list-intro.ts): everyone once per version and machine, fresh
+ * installs too. The page decides when: never on the same load as another one-time dialog or the tour, only once the
  * Inbox page (the list, or a thread open on it: `listIntroPageClear`) has been settled for a moment, only with a list
- * of three rows or more, and never over a file, document, guided review or Artifacts view, a search, a new message,
- * a reply being typed or another dialog. A page that
- * may show it claims it (POST /api/inbox/list-intro); only the first claim ever gets `show: true`.
+ * of five threads or more (q-2c590791: a decent, growing list), and never over a file, document, guided review or
+ * Artifacts view, a search, a new message, a reply being typed or another dialog. A page that may show it claims it
+ * (POST /api/inbox/list-intro); only the first claim ever gets `show: true`.
  */
-import { LIST_LOOK_OPTIONS, type ListLook, type MenuLookKey } from './listLook';
-
-/** A list shorter than this has too little to show the options on: the dialog waits for a later load. */
-export const LIST_INTRO_MIN_ROWS = 3;
+/** A list shorter than this is not yet the decent, growing list the dialog is for: it waits for a later load. */
+export const LIST_INTRO_MIN_ROWS = 5;
 
 /**
  * How long the Inbox page stays settled (`listIntroPageClear` without a break) before the dialog may open, ms. About
@@ -86,17 +84,36 @@ export function listIntroMayAsk(load: ListIntroLoad, now: { modal: boolean; repl
   return listIntroWanted(load) && load.settled && load.othersSettled && !load.updating && !now.modal && !now.replying;
 }
 
-/**
- * The preview as the dialog opens (the owner's r4): the options that are off turn on one at a time, in the ⋮ menu's
- * order, 500 ms apart from 300 ms, then after a 700 ms hold all go back together to the look the dialog opened at.
- * An option already on (smaller thread names, on by default since 2026-11-05) is not shown turning on: it is on
- * already. `at` is ms after the dialog opens; `key` null is "back to the look it opened at". Not under reduced motion.
- */
-export function listIntroPreview(opened: Pick<ListLook, MenuLookKey>): { at: number; key: MenuLookKey | null }[] {
-  const steps: { at: number; key: MenuLookKey | null }[] = LIST_LOOK_OPTIONS.filter(({ key }) => !opened[key]).map(({ key }, i) => ({ at: 300 + i * 500, key }));
-  steps.push({ at: steps.length ? steps[steps.length - 1]!.at + 700 : 300, key: null });
-  return steps;
+/** What the demo's picture shows at one moment (example projects, letter marks, logos, the stacked notes card). */
+export interface RowsIntroScene {
+  /** Which marks the rows and the sidebar show: none yet, the thread's with the project's on its corner, or the project's. */
+  marks: 'off' | 'both' | 'projects';
+  /** The projects' logos have landed on the marks. */
+  logos: boolean;
+  /** The stacked notes card is in. */
+  card: boolean;
+  /** The demo has ended and holds on this picture. */
+  held: boolean;
 }
 
-/** The rows' crossfade on each change of look, ms (none under reduced motion). */
+/**
+ * The demo's moments, ms after the dialog opens (approval "inbox-rows-dialog", NOTES.md, take C): letters pop in at
+ * 0.3 s, logos land at 0.9 s, the row marks turn over to the projects at 1.5 s, back to the stacked look at 2.2 s as
+ * the notes card rises in, and it holds from 2.6 s. Never under reduced motion: the dialog opens on the held picture.
+ */
+export const ROWS_INTRO_STEPS_MS = [300, 900, 1500, 2200, 2600] as const;
+export const ROWS_INTRO_END_MS = ROWS_INTRO_STEPS_MS[ROWS_INTRO_STEPS_MS.length - 1];
+
+/** The picture at `t` ms after the dialog opened. */
+export function rowsIntroScene(t: number): RowsIntroScene {
+  const [letters, logos, turn, back, end] = ROWS_INTRO_STEPS_MS;
+  return {
+    marks: t < letters ? 'off' : t >= turn && t < back ? 'projects' : 'both',
+    logos: t >= logos,
+    card: t >= back,
+    held: t >= end,
+  };
+}
+
+/** The rows' crossfade on each change of look in the List view's dialog (ListViewIntro), ms (none under reduced motion). */
 export const LIST_INTRO_SWAP_MS = 150;
