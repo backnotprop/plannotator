@@ -1328,6 +1328,8 @@ export function InboxList(props: InboxListProps) {
   const generatedColumnId = useId();
   const columnId = props.columnId ?? generatedColumnId;
   const refreshHintId = useId();
+  /** Shift+R's name on the ↻ (approval "inbox-refresh-key"), gone with single keys off. */
+  const refreshKeys = useShortcutAria({ scope: inboxAppShortcuts, action: 'refresh' });
   const resizable = props.narrow && !isMobile;
   const visible = props.sections.filter((s) => s.threads.length > 0);
   // List's rows (listView.ts): every group's but the Snoozed band's, newest first, each keeping its place until the
@@ -1496,20 +1498,28 @@ export function InboxList(props: InboxListProps) {
         <SidebarTrigger />
         {props.onRefresh ? (
           <h1 dir="auto" className="ib-lhead-h">
-            {/* The full name in the tooltip too, for a project name the header cuts; a project's folder is there as well, never beside the name. */}
-            <Tip content={props.path ? <ProjectTipText name={`Refresh ${props.title}`} root={props.path} /> : props.title === 'Inbox' ? 'Refresh' : `Refresh ${props.title}`}>
-              <button
-                type="button"
-                className="ib-lhead-title"
-                onClick={props.onRefresh}
-                aria-describedby={refreshHintId}
-                data-list-refresh=""
-                data-refreshing={props.refreshSpin != null ? '' : undefined}
-              >
+            {/* Two tooltips, each on its own part: the name's, as a header without the ↻ has (a project's full name and
+                folder, never beside the name; else the name when the header cuts it), and the ↻'s, below it: "Refresh"
+                with Shift+R's two keycaps (the owner, on #2911; withShortcut leaves the keys out with single keys or
+                Show keys on buttons off, and Tip opens on no touch screen). */}
+            <button
+              type="button"
+              className="ib-lhead-title"
+              onClick={props.onRefresh}
+              aria-describedby={refreshHintId}
+              aria-keyshortcuts={refreshKeys}
+              data-list-refresh=""
+              data-refreshing={props.refreshSpin != null ? '' : undefined}
+            >
+              <Tip content={props.path ? <ProjectTipText name={props.title} root={props.path} /> : props.title} cut={!props.path}>
                 <span className="ib-lhead-tt">{props.title}</span>
-                <Icon key={props.refreshSpin ?? 'rest'} name="refresh" size={16} className="ib-ic-refresh" />
-              </button>
-            </Tip>
+              </Tip>
+              <Tip content={withShortcut('Refresh', { scope: inboxAppShortcuts, action: 'refresh' })} side="bottom">
+                <span className="ib-lhead-ic" data-list-refresh-icon="">
+                  <Icon key={props.refreshSpin ?? 'rest'} name="refresh" size={16} className="ib-ic-refresh" />
+                </span>
+              </Tip>
+            </button>
           </h1>
         ) : (
           <Tip content={props.path ? <ProjectTipText name={props.title} root={props.path} /> : props.title} cut={!props.path}>

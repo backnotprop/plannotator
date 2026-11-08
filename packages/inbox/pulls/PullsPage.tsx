@@ -35,7 +35,8 @@ import { SidebarTrigger } from '../shell/sidebar';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
 import { newUuid } from '../uuid';
 import { matchesShortcutBinding, resolveShortcutBindings } from '@plannotator/ui/shortcuts';
-import { ShortcutHint, useShortcutAria } from '../shortcuts/hint';
+import { ShortcutHint, useShortcutAria, withShortcut } from '../shortcuts/hint';
+import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import {
   checksWords,
@@ -315,6 +316,8 @@ export function ReviewsOff({ phone, onSettings }: { phone: boolean; onSettings: 
 
 function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnswer | null; loading: boolean; error: string | null; onRefresh: () => void }) {
   const now = useRelativeClock(true);
+  // Shift+R runs this ↻ on Reviews (approval "inbox-refresh-key"): its keycap and key name, gone with single keys off.
+  const refreshKeys = useShortcutAria({ scope: inboxAppShortcuts, action: 'refresh' });
   // Only the CLIs that answered: a host that failed is said in the list, by name.
   const answered = model ? answeredClis(model) : [];
   const when = model?.fetched_at ? relativeWords(model.fetched_at, now) : null;
@@ -329,8 +332,17 @@ function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnsw
           : 'Nothing read on this computer';
   return (
     <div className="ib-pr-foot" data-pulls-foot="">
-      <Tip content="Read again">
-        <button type="button" className="ib-iconbtn ib-pr-refresh" onClick={onRefresh} aria-label="Read the pull requests again" data-refreshing={loading ? '' : undefined} data-pulls-refresh="">
+      {/* As the list's ↻ (the owner, on #2911): "Refresh" with Shift+R's two keycaps, which Shift+R runs here. */}
+      <Tip content={withShortcut('Refresh', { scope: inboxAppShortcuts, action: 'refresh' })}>
+        <button
+          type="button"
+          className="ib-iconbtn ib-pr-refresh"
+          onClick={onRefresh}
+          aria-label="Read the pull requests again"
+          aria-keyshortcuts={refreshKeys}
+          data-refreshing={loading ? '' : undefined}
+          data-pulls-refresh=""
+        >
           <Icon name="refresh" size={14} />
         </button>
       </Tip>

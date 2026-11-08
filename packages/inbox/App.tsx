@@ -94,7 +94,7 @@ import { onOpenSearchKey } from './search/searchShortcut';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from './shortcuts/thread.shortcuts';
 import { bareKeyAllowed, inOverlay, isComposingKey, isEditableTarget, isRepeatKey, keyboardFocused, keyTarget, modalOpen, singleKeysLive } from './shortcuts/guards';
-import { appKeyAllowed as appKeyAllowedOn, archiveTarget, newPageKeys } from './keyboard/appKeys';
+import { appKeyAllowed as appKeyAllowedOn, archiveTarget, newPageKeys, refreshAction, refreshKey, refreshKind } from './keyboard/appKeys';
 import { inboxAppShortcuts } from './shortcuts/app.shortcuts';
 import { ShortcutMap } from './components/ShortcutMap';
 import { EmptyState } from './components/EmptyState';
@@ -4115,6 +4115,8 @@ function Inbox() {
   const [mapOpen, setMapOpen] = useState(false);
   /** What G P, G D and C need from later in the render: whether Reviews and Drafts show, and whether compose is up. */
   const pagesRef = useRef({ pulls: false, drafts: false, composing: false });
+  /** What Shift+R runs: the refresh of the page on screen, set as the page is drawn; null where it has none. */
+  const refreshRef = useRef<(() => void) | null>(null);
   const appKeyAllowed = (event: KeyboardEvent, onTouchPhone = false) => appKeyAllowedOn(event, routeRef.current.page, onTouchPhone);
   /** Focus the first of `selectors` on screen once the page it is on has drawn (two frames: the route, then its layout). */
   const focusSoon = (selectors: readonly string[]) => requestAnimationFrame(() => requestAnimationFrame(() => focusFirst(selectors)));
@@ -4167,6 +4169,8 @@ function Inbox() {
         },
         compose: () => openCompose({}),
       }),
+      // Shift+R (approval "inbox-refresh-key"): what the page's own refresh does (keyboard/appKeys.ts has its gate).
+      ...refreshKey(() => ({ page: routeRef.current.page, run: refreshRef.current })),
     },
   });
 
@@ -5998,6 +6002,11 @@ function Inbox() {
     />
     );
   };
+  /** The Board's ⋮ Refresh (BoardPage's `onChanged` with no card), and Shift+R on the Board. */
+  const refreshBoard = () => {
+    void refreshCards();
+    void refreshList(false);
+  };
   let main: ReactNode;
   if (tourOn && !tourFixture) {
     main = <TourLoading />;
@@ -6203,8 +6212,7 @@ function Inbox() {
             handleCard(card.id);
             setCards((model) => (model ? { ...model, cards: [card, ...model.cards.filter((c) => c.id !== card.id)] } : model));
           }
-          void refreshCards();
-          void refreshList(false);
+          refreshBoard();
         }}
         onSeeDrops={seeDrops}
         tidy={boardTidy}
@@ -6615,6 +6623,30 @@ function Inbox() {
       </>
     );
   }
+  // Shift+R: the refresh of the page on screen (keyboard/appKeys.ts `refreshKind` decides which).
+  const refreshOpen = route.page === 'inbox' ? route.thread : null;
+  refreshRef.current = refreshAction(
+    refreshKind({
+      page: route.page,
+      thread: route.thread,
+      fromReviews: !!route.reviews,
+      fromCard: !!fromCard,
+      pullReview: !!(route.stack && route.layer),
+      fileOpen,
+      tourOn,
+      boardOn: boardEnabled === true,
+      pullsShown,
+      listReady: !!latest && !!shown && !showTourEntry && !firstRun,
+    }),
+    {
+      inbox: () => void refreshInbox(route.project, false),
+      board: refreshBoard,
+      reviews: pulls.refresh,
+      thread: () => {
+        if (refreshOpen) void refreshThread(refreshOpen);
+      },
+    },
+  );
 
   return (
     <InitiativeTagsContext.Provider value={initiativeTags}>

@@ -4,15 +4,17 @@
  * outside one); H opening the header clock's menu without focus in it, snoozing on its own, or opening again by
  * itself when the clock mounts again; H on a row opening another row's menu, or a menu on a row that cannot snooze;
  * Shift+E archiving the wrong thread; C and G P / G D firing while typing, on the tour, or where their page is
- * hidden; Shift+F10 on a message head not opening its ⋯ menu, or opening it from a text field.
+ * hidden; Shift+F10 on a message head not opening its ⋯ menu, or opening it from a text field. Shift+R (approval
+ * "inbox-refresh-key") not running the page's refresh from the list or an open thread, running it while typing, under a
+ * dialog, with single keys off or where the page has none, or taking plain R from Reply.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { GuideArtifact } from './artifacts';
 import { gridStep, laneStep, type Box } from './gridMove';
-import { archiveTarget, newPageKeys, type AppKeyPages } from './keyboard/appKeys';
-import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import { archiveTarget, newPageKeys, refreshAction, refreshKey, refreshKind, type AppKeyPages, type RefreshView } from './keyboard/appKeys';
+import type { InboxListRow, InboxListSection, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
 const { ArtifactsView } = (hasDom ? await import('./components/ArtifactsView') : {}) as typeof import('./components/ArtifactsView');
@@ -20,6 +22,10 @@ const { ThreadSnooze, MessageMenu } = (hasDom ? await import('./components/CopyM
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { useShortcutScope } = (hasDom ? await import('@plannotator/ui/shortcuts') : {}) as typeof import('@plannotator/ui/shortcuts');
+// Viewer pulls in web-highlighter, which reads `window` at module-eval time.
+const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
+const prefs = await import('./shortcuts/prefs');
+const { withShortcut } = (hasDom ? await import('./shortcuts/hint') : {}) as typeof import('./shortcuts/hint');
 const { inboxAppShortcuts } = await import('./shortcuts/app.shortcuts');
 
 let root: Root | null = null;
@@ -348,4 +354,214 @@ test.skipIf(!hasDom)('Shift+F10 in a text field inside a message’s head is the
   await frames();
   expect(document.querySelector('[data-message-menu="msg_1"]')).toBeNull();
   expect(document.activeElement).toBe(field);
+});
+
+test('Shift+R runs the refresh of the page on screen, route by route; none where the page has no refresh', () => {
+  const base: RefreshView = { page: 'inbox', thread: null, fromReviews: false, fromCard: false, pullReview: false, fileOpen: false, tourOn: false, boardOn: true, pullsShown: true, listReady: true };
+  const rows: [string, Partial<RefreshView>, ReturnType<typeof refreshKind>][] = [
+    ['the Inbox list', {}, 'inbox'],
+    ['a project’s list', {}, 'inbox'],
+    ['a thread beside the list', { thread: 'thr_1' }, 'inbox'],
+    ['a file open from a thread', { thread: 'thr_1', fileOpen: true }, 'inbox'],
+    ['a thread opened from a Board card', { thread: 'thr_1', fromCard: true }, 'board+thread'],
+    ['a file open in a thread from a card', { thread: 'thr_1', fromCard: true, fileOpen: true }, 'board+thread'],
+    ['a thread beside the Reviews list', { thread: 'thr_1', fromReviews: true }, 'reviews+thread'],
+    ['a file open in a thread from Reviews', { thread: 'thr_1', fromReviews: true, fileOpen: true }, 'inbox'],
+    ['a thread from Reviews with Reviews hidden', { thread: 'thr_1', fromReviews: true, pullsShown: false }, 'inbox'],
+    ['the list still loading, first run, the tour’s entry', { listReady: false }, null],
+    ['the Board', { page: 'board' }, 'board'],
+    ['the Board turned off or loading', { page: 'board', boardOn: false }, null],
+    ['the Reviews list', { page: 'reviews' }, 'reviews'],
+    ['a pull request’s review', { page: 'reviews', pullReview: true }, null],
+    ['Reviews hidden (Code review off, a tailnet guest)', { page: 'reviews', pullsShown: false }, null],
+    ['Drafts', { page: 'drafts' }, null],
+    ['Settings', { page: 'settings' }, null],
+    ['What’s new', { page: 'whats-new' }, null],
+    ['Shapes', { page: 'shapes' }, null],
+    ['the tour', { page: 'tour', tourOn: true }, null],
+  ];
+  for (const [where, over, kind] of rows) expect([where, refreshKind({ ...base, ...over })]).toEqual([where, kind]);
+
+  // Each kind runs the window's own refreshes, the thread's beside the Board's or Reviews'.
+  const ran: string[] = [];
+  const act = { inbox: () => ran.push('inbox'), board: () => ran.push('board'), reviews: () => ran.push('reviews'), thread: () => ran.push('thread') };
+  for (const [kind, runs] of [['inbox', ['inbox']], ['board', ['board']], ['board+thread', ['board', 'thread']], ['reviews', ['reviews']], ['reviews+thread', ['reviews', 'thread']]] as const) {
+    ran.length = 0;
+    refreshAction(kind, act)!();
+    expect([kind, ran]).toEqual([kind, [...runs]]);
+  }
+  expect(refreshAction(null, act)).toBeNull();
+});
+
+function RefreshKeys({ on }: { on: () => { page: string; run: (() => void) | null } }) {
+  useShortcutScope({ scope: inboxAppShortcuts, handlers: refreshKey(on) });
+  return null;
+}
+
+const REFRESH_PROJECT: InboxProject = { id: 'prj_1', key: 'ledger-abcdef', name: 'ledger', root: '/work/ledger', created_at: '2026-10-11T10:00:00.000Z' };
+
+function refreshThread(): InboxThread {
+  const id = 'msg_01M4H6G73M9H3Z32T859E72DPY';
+  const message: InboxMessageWire = {
+    id,
+    project_id: REFRESH_PROJECT.id,
+    thread_id: id,
+    reply_to: null,
+    author: { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null },
+    subject: 'Nightly sync',
+    body: 'The nightly sync is green again.',
+    created_at: '2026-10-11T10:41:00.000Z',
+    resolved_at: null,
+    idempotency_key: null,
+  };
+  return { thread_id: id, project: REFRESH_PROJECT, subject: 'Nightly sync', thread_name: null, resolved_at: null, messages: [message] };
+}
+
+test.skipIf(!hasDom)('Shift+R runs the page’s refresh from the list and from an open thread; plain R still opens Reply', async () => {
+  const savedFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = String(input);
+    if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
+    if (path.includes('/sessions')) return Response.json({ serverSession: 's', home: '/home/me', project: REFRESH_PROJECT, sessions: [] });
+    return Response.json({});
+  }) as typeof fetch;
+  restores.push(() => {
+    globalThis.fetch = savedFetch;
+  });
+  const settle = async () => {
+    for (let i = 0; i < 4; i += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+  };
+  let refreshes = 0;
+  const view: { page: string; run: (() => void) | null } = { page: 'inbox', run: () => (refreshes += 1) };
+  const el = mount(
+    <>
+      <RefreshKeys on={() => view} />
+      <button type="button" data-thread-id="thr_row">
+        A row
+      </button>
+      <ThreadPane thread={refreshThread()} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />
+    </>,
+  );
+  await settle();
+  const box = () => el.querySelector<HTMLTextAreaElement>('textarea');
+  const replyButton = () => el.querySelector<HTMLButtonElement>('[data-reply-button]');
+  expect(replyButton()).not.toBeNull();
+  const shiftR = (target: Element, init: KeyboardEventInit = {}) => press(target, 'R', { code: 'KeyR', shiftKey: true, ...init });
+
+  // From the list (a row with focus), Shift+R refreshes, and opens nothing.
+  const row = el.querySelector<HTMLElement>('[data-thread-id="thr_row"]')!;
+  act(() => row.focus());
+  shiftR(row);
+  expect(refreshes).toBe(1);
+  // From inside the open thread (its Reply button with focus), the same; the reply box stays shut.
+  act(() => replyButton()!.focus());
+  shiftR(replyButton()!);
+  await settle();
+  expect(refreshes).toBe(2);
+  expect(box()).toBeNull();
+  // Plain R is still Reply: the box opens, nothing refreshes.
+  act(() => (document.activeElement as HTMLElement | null)?.blur());
+  press(document.body, 'r', { code: 'KeyR' });
+  await settle();
+  expect(box()).not.toBeNull();
+  expect(refreshes).toBe(2);
+  // Typing in the reply box: Shift+R is a capital R.
+  act(() => box()!.focus());
+  shiftR(box()!);
+  expect(refreshes).toBe(2);
+  act(() => box()!.blur());
+  // ⌘⇧R and Ctrl+Shift+R stay the browser's hard reload.
+  shiftR(document.body, { metaKey: true });
+  shiftR(document.body, { ctrlKey: true });
+  expect(refreshes).toBe(2);
+  // Under a dialog, nothing.
+  const dialog = document.createElement('dialog');
+  dialog.setAttribute('open', '');
+  document.body.append(dialog);
+  shiftR(document.body);
+  dialog.remove();
+  expect(refreshes).toBe(2);
+  // Single-key shortcuts off (Settings → General): nothing; back on, it refreshes again.
+  act(() => prefs.setSingleKeys(false));
+  try {
+    shiftR(document.body);
+    expect(refreshes).toBe(2);
+  } finally {
+    act(() => prefs.setSingleKeys(true));
+  }
+  shiftR(document.body);
+  expect(refreshes).toBe(3);
+  // A page with no refresh (Drafts, Settings): nothing, and the key is left alone.
+  view.run = null;
+  const left = new KeyboardEvent('keydown', { key: 'R', code: 'KeyR', shiftKey: true, bubbles: true, cancelable: true });
+  act(() => {
+    document.body.dispatchEvent(left);
+  });
+  expect(left.defaultPrevented).toBe(false);
+  // On the tour, nothing either.
+  view.run = () => (refreshes += 1);
+  view.page = 'tour';
+  shiftR(document.body);
+  expect(refreshes).toBe(3);
+});
+
+test.skipIf(!hasDom)('the list’s ↻: its tooltip reads Refresh with the two keys ⇧ R, just Refresh with single keys or keycaps off; the button keeps its words and key name', () => {
+  let refreshed = 0;
+  const el = mount(
+    <SidebarProvider>
+      <InboxList
+        title="Inbox"
+        path={null}
+        sections={[]}
+        filtered={false}
+        narrow={false}
+        selectedThreadId={null}
+        notice={null}
+        onShowNew={() => {}}
+        onOpen={() => {}}
+        phone={false}
+        onRefresh={() => (refreshed += 1)}
+      />
+    </SidebarProvider>,
+  );
+  const button = () => el.querySelector<HTMLButtonElement>('.ib-lhead [data-list-refresh]')!;
+  // Nothing pops out beside the ↻: no keycap on the button itself, its icon the tooltip's own trigger.
+  expect(button().querySelector('kbd')).toBeNull();
+  expect(button().querySelector('[data-list-refresh-icon] svg.ib-ic-refresh')).not.toBeNull();
+  expect(button().getAttribute('aria-keyshortcuts')).toBe('Shift+R');
+  expect(document.getElementById(button().getAttribute('aria-describedby')!)?.textContent?.trim()).toBe('Refresh the list');
+  act(() => button().click());
+  expect(refreshed).toBe(1);
+  // The tooltip's words (the same withShortcut the ↻ hands its Tip): Refresh, then one cap per key.
+  const tipHost = document.createElement('div');
+  document.body.append(tipHost);
+  const tipRoot = createRoot(tipHost);
+  restores.push(() => {
+    act(() => tipRoot.unmount());
+    tipHost.remove();
+  });
+  const drawTip = () => act(() => tipRoot.render(<SidebarProvider>{withShortcut('Refresh', { scope: inboxAppShortcuts, action: 'refresh' })}</SidebarProvider>));
+  drawTip();
+  expect(tipHost.textContent?.replace(/\s+/g, ' ').trim()).toMatch(/^Refresh ?(⇧|Shift) ?R$/);
+  expect(tipHost.querySelectorAll('kbd').length).toBe(2);
+  for (const off of [() => prefs.setSingleKeys(false), () => prefs.setKeyHints(false)]) {
+    act(off);
+    try {
+      drawTip();
+      expect(tipHost.querySelectorAll('kbd').length).toBe(0);
+      expect(tipHost.textContent?.trim()).toBe('Refresh');
+    } finally {
+      act(() => {
+        prefs.setSingleKeys(true);
+        prefs.setKeyHints(true);
+      });
+    }
+  }
+  // Single keys off: the button's key name goes too.
+  act(() => prefs.setSingleKeys(false));
+  try {
+    expect(button().hasAttribute('aria-keyshortcuts')).toBe(false);
+  } finally {
+    act(() => prefs.setSingleKeys(true));
+  }
 });
