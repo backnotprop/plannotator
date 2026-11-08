@@ -122,6 +122,8 @@ function serve(canAsk: boolean) {
       return Response.json({ attachment: NOTES, version: 'current', text: '# Notes\n\nThe budget is five attempts with a one second start.\n', html: null });
     }
     if (url.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [NOTES], annotations: [] });
+    // The file's pin (#2926's artifact pins) reads the pins: none.
+    if (url.endsWith('/artifact-pins')) return Response.json({ pins: [] });
     return Response.json({});
   }) as typeof fetch;
 }
