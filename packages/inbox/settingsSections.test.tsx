@@ -203,7 +203,7 @@ test.skipIf(!hasDom)('#settings opens General; the nav moves between sections by
   await until(() => navLink(el, 'machines') !== null, 'the Machines row');
   const links = [...el.querySelectorAll<HTMLAnchorElement>('.ib-snav a')];
   // Machines right after Devices, then Capabilities (the owner, 2026-10-27), with Voice between them (inbox-voice); Experimental is a group inside it, not a row of its own.
-  expect(links.map((a) => a.textContent?.trim())).toEqual(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Activity', 'Archived', 'Storage', 'Decision data', 'About']);
+  expect(links.map((a) => a.textContent?.trim())).toEqual(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Activity', 'Archived', 'Storage', 'About']);
   expect(links.map((a) => a.getAttribute('href'))).toEqual([
     '#settings/general',
     '#settings/rows',
@@ -217,7 +217,6 @@ test.skipIf(!hasDom)('#settings opens General; the nav moves between sections by
     '#settings/activity',
     '#settings/archived',
     '#settings/storage',
-    '#settings/decision-data',
     '#settings/about',
   ]);
   // No line in the nav any more: nothing sits apart.
@@ -235,7 +234,7 @@ test.skipIf(!hasDom)('#settings opens General; the nav moves between sections by
   await until(() => heading(again) === 'General', 'General for an unknown section');
 });
 
-test.skipIf(!hasDom)('nothing asks the server to count until Decision data is shown: not the list, not Settings opening, not another section', async () => {
+test.skipIf(!hasDom)('nothing asks the server to count decisions until Activity is shown: not the list, not Settings opening, not another section', async () => {
   const counted = () => requests.filter((line) => line.includes('/decision-data')).length;
   const el = await renderApp(`#thread=${current!.thread}`);
   act(() => (el.querySelector('.ib-setrow .ib-nav') as HTMLButtonElement).click());
@@ -245,15 +244,24 @@ test.skipIf(!hasDom)('nothing asks the server to count until Decision data is sh
     await until(() => navLink(el, section).getAttribute('aria-current') === 'page', section);
   }
   expect(counted()).toBe(0);
-  act(() => navLink(el, 'decision-data').click());
-  await until(() => heading(el) === 'Decision data', 'Decision data');
+  // Activity holds the decision numbers under its chart; opening it is what asks for the count.
+  act(() => navLink(el, 'activity').click());
+  await until(() => heading(el) === 'Activity', 'Activity');
   await until(() => counted() === 1, 'the count');
+  expect(el.querySelector('[data-activity]')?.compareDocumentPosition(el.querySelector('[data-decision-data]')!)! & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   // Leaving asks for nothing more; coming back asks once.
   act(() => navLink(el, 'about').click());
   await until(() => heading(el) === 'About', 'About');
   expect(counted()).toBe(1);
-  act(() => navLink(el, 'decision-data').click());
+  act(() => navLink(el, 'activity').click());
   await until(() => counted() === 2, 'the next count');
+  act(() => root?.unmount());
+  host?.remove();
+  // Decision data's old address lands on Activity, rewritten in place, and counts there.
+  const old = await renderApp('#settings/decision-data');
+  await until(() => heading(old) === 'Activity', 'Activity from the old address');
+  expect(window.location.hash).toBe('#settings/activity');
+  await until(() => counted() === 3, 'the count from the old address');
 });
 
 test.skipIf(!hasDom)('the Inbox sidebar closes while Settings is open and comes back on leaving, without its cookie being written; ← Inbox returns to where the person was', async () => {
@@ -794,12 +802,12 @@ test.skipIf(!hasDom)('on a phone: #settings is the list of sections; a section o
   await until(() => el.querySelector('[data-settings-list] [data-settings-link="capabilities"]') !== null, 'the Capabilities row');
   await until(() => el.querySelector('[data-settings-list] [data-settings-link="machines"]') !== null, 'the Machines row');
   const links = [...el.querySelectorAll<HTMLAnchorElement>('[data-settings-list] a')];
-  expect(links.map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'rows', 'agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities', 'activity', 'archived', 'storage', 'decision-data', 'about']);
+  expect(links.map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'rows', 'agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities', 'activity', 'archived', 'storage', 'about']);
   // Capabilities is the last row of the first group, above Activity, Archived, Storage and About; no Experimental row or group.
   const groups = [...el.querySelectorAll<HTMLUListElement>('[data-settings-list] ul')];
   expect(groups.map((g) => g.getAttribute('aria-label'))).toEqual(['Settings', 'Your data and Plannotator']);
   expect([...groups[0]!.querySelectorAll('a')].map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'rows', 'agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities']);
-  expect([...groups[1]!.querySelectorAll('a')].map((a) => a.getAttribute('data-settings-link'))).toEqual(['activity', 'archived', 'storage', 'decision-data', 'about']);
+  expect([...groups[1]!.querySelectorAll('a')].map((a) => a.getAttribute('data-settings-link'))).toEqual(['activity', 'archived', 'storage', 'about']);
   const capabilitiesRow = groups[0]!.querySelector<HTMLAnchorElement>('[data-settings-link="capabilities"]')!;
   expect(capabilitiesRow.querySelector('.ib-v')?.textContent).toBe('Off');
   act(() => capabilitiesRow.click());

@@ -1,7 +1,8 @@
 /**
- * Settings -> Decision data (approval `.product/approved/decision-data/`, 2026-11-05): Ask on top, Insights below.
- * Short labels and numbers, one chart in the product's accent, two tables, a CSV. Only Settings mounts this, and this
- * mount is the only thing that asks the server to count. Ask never waits on the count.
+ * Decision data (approval `.product/approved/decision-data/`, 2026-11-05): Ask on top, Insights below. Since
+ * 2026-11-08 (approval "settings-storage-activity") it sits in Settings -> Activity, under the hour-by-hour chart.
+ * Short labels and numbers, one chart in the product's accent, two tables, a CSV. Only Settings -> Activity mounts
+ * this, and this mount is the only thing that asks the server to count. Ask never waits on the count.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { DecisionDataSummary, DecisionGroup, DecisionTrend } from '@plannotator/core/inbox-types';

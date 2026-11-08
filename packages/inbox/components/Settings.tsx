@@ -51,7 +51,6 @@ const SECTION_ICON: Record<SettingsSection, IconName> = {
   voice: 'mic',
   archived: 'archive',
   storage: 'disk',
-  'decision-data': 'contents',
   about: 'info',
   capabilities: 'puzzle',
   activity: 'clock',
@@ -127,7 +126,10 @@ export interface SettingsPageProps {
   sound?: InboxSound;
   /** Settings → Archived: the archived threads (components/Archived.tsx). */
   archived?: ReactNode;
-  /** Settings → Activity: the threads hour by hour (components/ActivityChart.tsx). Absent: no Activity section. */
+  /**
+   * Settings → Activity's chart: the threads hour by hour (components/ActivityChart.tsx), above the decision numbers
+   * (components/DecisionData.tsx). Absent: Activity shows the decision numbers alone.
+   */
   activity?: ReactNode;
   /** How many threads are archived, for the nav's count; null while unknown. */
   archivedTotal?: number | null;
@@ -756,11 +758,14 @@ function AgentsSection({
 }
 
 /**
- * Delete thread / Delete project (record 7.1): a first click asks "Delete?
- * Click again" for a few seconds, a second one deletes. Nothing is undone
- * once deleted, so one stray click never removes a project.
+ * Delete from Inbox, on a thread's row and on a project's (record 7.1; the words, approval
+ * "settings-storage-activity", 2026-11-08: "Delete project" read as deleting the project itself, while it only
+ * removes the project's messages and files from the Inbox). A first click asks "Delete? Click again" for a few
+ * seconds, a second one deletes. Nothing is undone once deleted, so one stray click never removes a project.
  */
-function DeleteLink({ label, what, onDelete }: { label: string; what: string; onDelete: () => Promise<void> }) {
+const DELETE_LABEL = 'Delete from Inbox';
+
+function DeleteLink({ what, onDelete }: { what: string; onDelete: () => Promise<void> }) {
   const [state, setState] = useState<'idle' | 'confirm' | 'busy'>('idle');
   useEffect(() => {
     if (state !== 'confirm') return;
@@ -772,7 +777,7 @@ function DeleteLink({ label, what, onDelete }: { label: string; what: string; on
       type="button"
       className={`ib-del-l${state === 'confirm' ? ' ib-confirm' : ''}`}
       disabled={state === 'busy'}
-      aria-label={state === 'confirm' ? `Delete ${what}: click again to delete` : `${label}: ${what}`}
+      aria-label={state === 'confirm' ? `${DELETE_LABEL}: ${what} (click again to delete)` : `${DELETE_LABEL}: ${what}`}
       onClick={() => {
         if (state === 'idle') return setState('confirm');
         if (state !== 'confirm') return;
@@ -780,7 +785,7 @@ function DeleteLink({ label, what, onDelete }: { label: string; what: string; on
         onDelete().finally(() => setState('idle'));
       }}
     >
-      {state === 'confirm' ? 'Delete? Click again' : label}
+      {state === 'confirm' ? 'Delete? Click again' : DELETE_LABEL}
     </button>
   );
 }
@@ -809,14 +814,14 @@ function StoreTable({
                 <button type="button" className="ib-fold" onClick={() => setOpen(isOpen ? null : project.id)} aria-expanded={isOpen}>
                   <Icon name={isOpen ? 'chevD' : 'chevR'} size={13} /> {project.name}
                 </button>
-                {/* Each folder keeps its own size and Delete: Delete project never reaches a combined project's threads. */}
+                {/* Each folder keeps its own size and Delete: a project's Delete never reaches a combined project's threads. */}
                 {project.combined_into && <div className="ib-store-note">In {project.combined_into}</div>}
                 {project.combined && <div className="ib-store-note">Deleting it leaves {project.combined.join(', ')}, as {project.combined.length === 1 ? 'its own project' : 'their own projects'}</div>}
               </td>
               <td className="ib-n ib-n-threads">{plural(project.threads.length, 'thread')}</td>
               <td className="ib-n">{formatBytes(project.bytes)}</td>
               <td className="ib-a">
-                <DeleteLink label="Delete project" what={project.name} onDelete={() => onDeleteProject(project.id)} />
+                <DeleteLink what={project.name} onDelete={() => onDeleteProject(project.id)} />
               </td>
             </tr>,
             ...(isOpen
@@ -826,7 +831,7 @@ function StoreTable({
                     <td className="ib-n ib-n-threads" />
                     <td className="ib-n">{formatBytes(thread.bytes)}</td>
                     <td className="ib-a">
-                      <DeleteLink label="Delete thread" what={thread.subject ?? 'this thread'} onDelete={() => onDeleteThread(thread.thread_id)} />
+                      <DeleteLink what={thread.subject ?? 'this thread'} onDelete={() => onDeleteThread(thread.thread_id)} />
                     </td>
                   </tr>
                 ))
@@ -851,7 +856,6 @@ function StoreTable({
 }
 
 const LEDE: Record<SettingsSection, string> = {
-  'decision-data': '',
   general: 'How the Inbox looks, and how it gets your attention.',
   // Rows draws its own lede, with the presets beside it (RowsSettings.tsx).
   rows: '',
@@ -865,7 +869,7 @@ const LEDE: Record<SettingsSection, string> = {
   storage: '',
   about: 'The version, and how Plannotator keeps itself up to date.',
   capabilities: 'What the Inbox does beyond your messages. Each switch turns a whole feature on or off.',
-  activity: 'Your threads hour by hour: one row per thread in the order they began, a mark for each hour with messages.',
+  activity: 'Your threads hour by hour: one row per thread in the order they began, a mark for each hour with messages. Under it, the decisions you made.',
 };
 
 /**
@@ -987,12 +991,12 @@ export function SettingsPage(props: SettingsPageProps) {
   const voice = useVoiceSettings();
   const [look] = useListLook();
   const sections = SETTINGS_SECTIONS.filter(
-    (id) => (id !== 'capabilities' || board !== null || steps !== null || codeReview !== null || shape !== null || bro !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null) && (id !== 'activity' || props.activity !== undefined),
+    (id) => (id !== 'capabilities' || board !== null || steps !== null || codeReview !== null || shape !== null || bro !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
   );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
     { label: 'Settings', ids: sections.filter((id) => SETTINGS_SECTIONS.indexOf(id) <= SETTINGS_SECTIONS.indexOf('capabilities')) },
-    { label: 'Your data and Plannotator', ids: sections.filter((id) => id === 'activity' || id === 'archived' || id === 'storage' || id === 'decision-data' || id === 'about') },
+    { label: 'Your data and Plannotator', ids: sections.filter((id) => id === 'activity' || id === 'archived' || id === 'storage' || id === 'about') },
   ].filter((group) => group.ids.length > 0);
 
   const devicesDot = devicesNeedAttention(phonesOn ? phones : null, settings?.tailscale);
@@ -1050,7 +1054,6 @@ export function SettingsPage(props: SettingsPageProps) {
       case 'storage':
         // Only once Storage was opened this visit: the list never asks for the walk.
         return store ? formatBytes(store.bytes) : '';
-      case 'decision-data':
       case 'activity':
         return '';
       case 'about':
@@ -1130,7 +1133,7 @@ export function SettingsPage(props: SettingsPageProps) {
         body = (
           <section className="ib-sgroup" aria-labelledby="ib-g-store">
             <h2 id="ib-g-store">By project</h2>
-            <p>Delete asks twice. A deleted thread or project cannot be brought back.</p>
+            <p>Deleting removes a thread or project's messages and files from the Inbox. Your code is never touched. Delete asks twice and can't be undone.</p>
             {!store ? (
               <div className="ib-card ib-store-wait" data-store-wait="" aria-busy={props.storeError ? undefined : true}>
                 {props.storeError ? (
@@ -1157,11 +1160,15 @@ export function SettingsPage(props: SettingsPageProps) {
           </section>
         );
         break;
-      case 'decision-data':
-        body = <DecisionData />;
-        break;
       case 'activity':
-        body = props.activity ?? null;
+        // The chart on top, the decision numbers under it (approval "settings-storage-activity"). DecisionData asks
+        // the server to count when it mounts, so only this section, while shown, ever asks.
+        body = (
+          <>
+            {props.activity}
+            <DecisionData />
+          </>
+        );
         break;
       case 'about':
         body = about;
