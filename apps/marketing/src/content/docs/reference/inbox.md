@@ -452,6 +452,8 @@ Click **Update to X** to see what's new and what will happen, then **Update now*
 
 If the binary was already updated (by auto-update, `plannotator update`, or the install script), the button restarts the Inbox at once; if you are typing a reply, it asks first. If an update you started fails, the button reads **Update failed** and shows the exit code and the log. After an update, **What's new in X** sits above Settings for that run.
 
+A machine linked to this Inbox that runs an older Plannotator shows **Update** beside its name in the sidebar and on its row in **Settings → Machines**. Press it, then **Update now**: that machine installs its own newest release and restarts its Inbox, and the dialog follows along. Its agents keep working, and you can close the dialog at any point. A machine on a release from before this feature needs one update by hand: the dialog shows the line to run there.
+
 ### Privacy
 
 **Settings → About → Privacy** says what the anonymous daily ping sends: once a day, each Plannotator tool you use sends its name, the version, and how many weeks since this computer first used Plannotator, with no ID. To turn it off, set `NO_ANON_PING=1` and restart Plannotator. See the [privacy policy](/privacy/).

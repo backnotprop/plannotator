@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { InboxApiError, inboxApi, type MachineOffer, type MachineView, type OutboxView } from '../api';
 import { shortTime } from '../format';
 import { Icon } from '../icons';
-import { machineStatus } from '../machines';
+import { machineNotice, machineStatus } from '../machines';
+import { MachineUpdateButton } from './MachineUpdate';
 import { CodeBox, CopyButton } from './ConnectPicker';
 import { UnlinkLink } from './Devices';
 
@@ -28,10 +29,12 @@ function waitingText(waiting: number): string {
   return `${waiting} waiting to send`;
 }
 
-/** The line under a linked machine: its state, then the answers waiting for it. */
-function machineLine(machine: MachineView): string {
+/** The line under a linked machine: its state, what its update says when this page offers updates, then the answers waiting for it. */
+function machineLine(machine: MachineView, offersUpdates: boolean): string {
   const status = machineStatus(machine);
-  return machine.waiting > 0 ? `${status} · ${waitingText(machine.waiting)}` : status;
+  const notice = offersUpdates ? machineNotice(machine) : null;
+  const withNotice = notice ? `${status} · ${notice.line}` : status;
+  return machine.waiting > 0 ? `${withNotice} · ${waitingText(machine.waiting)}` : withNotice;
 }
 
 export interface MachinesSectionProps {
@@ -40,6 +43,8 @@ export interface MachinesSectionProps {
   via: 'local' | 'tailnet';
   /** After a link or an Unlink: read the machines again. */
   onChanged: () => void;
+  /** Open a machine's update dialog. Absent on a page that offers no updates (a tailnet guest's). */
+  onMachineUpdate?: (machineId: string) => void;
 }
 
 /**
@@ -49,7 +54,7 @@ export interface MachinesSectionProps {
  * (asked twice), then the row that starts a link. Linking is local only,
  * like Pair a phone, so a code never shows on another device.
  */
-export function MachinesSection({ machines, via, onChanged }: MachinesSectionProps) {
+export function MachinesSection({ machines, via, onChanged, onMachineUpdate }: MachinesSectionProps) {
   const remote = via !== 'local';
   const linked = machines.filter((machine) => !machine.self);
   // Why this Inbox's own door is not on the tailnet (its port held by another mapping): linked machines cannot reach it until that is fixed.
@@ -105,9 +110,10 @@ export function MachinesSection({ machines, via, onChanged }: MachinesSectionPro
             </span>
             <span className="ib-txt">
               <span className="ib-l">{machine.name}</span>
-              <span className="ib-desc">{machineLine(machine)}</span>
+              <span className="ib-desc">{machineLine(machine, !!onMachineUpdate)}</span>
             </span>
             <span className="ib-ctl">
+              {onMachineUpdate && <MachineUpdateButton machine={machine} onPress={() => onMachineUpdate(machine.id)} />}
               {!remote && (
                 <UnlinkLink
                   name={machine.name}

@@ -8668,6 +8668,21 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .pn-inbox .ib-footended { flex: 1 0 100%; order: 1; }
 }
 
+/* Update on a linked machine (approval "inbox-machine-update"): the word beside it, Snooze's why, the dialog's states. */
+.ib-mside { position: relative; }
+.ib-mside[data-machine-notice] .ib-proj { padding-right: 76px; }
+.ib-mside[data-machine-notice] .ib-proj .ib-n { margin-left: auto; }
+.ib-mside:is([data-machine-notice='updating'], [data-machine-notice='restarting'], [data-machine-notice='updated'], [data-machine-notice='failed'], [data-machine-notice='not_back']) .ib-proj { padding-right: 98px; }
+.pn-inbox .ib-mthing { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); height: 24px; display: inline-flex; align-items: center; gap: 5px; padding: 0 7px; border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--primary); font-weight: 550; white-space: nowrap; }
+.pn-inbox .ib-mthing:hover { background: var(--ib-side-hover, var(--muted)); }
+.pn-inbox .ib-mthing[data-kind='updating'], .pn-inbox .ib-mthing[data-kind='restarting'], .pn-inbox .ib-mthing[data-kind='failed'], .pn-inbox .ib-mthing[data-kind='not_back'], .pn-inbox .ib-mthing[data-kind='updated'] { color: var(--muted-foreground); font-weight: 450; }
+.pn-inbox .ib-mthing .ib-spin { width: 10px; height: 10px; border-width: 1.5px; }
+.ib-zneeds { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.pn-inbox .ib-snooze-blocked { opacity: 0.55; }
+.pn-inbox .ib-snooze-blocked:hover { opacity: 1; }
+.ib-dlg h2.ib-mh2 { display: flex; align-items: center; gap: 8px; }
+.ib-mdone { display: inline-flex; align-items: center; gap: 4px; font-size: var(--ib-fs-12-5, 12.5px); }
+.pn-inbox .ib-ctl .ib-btn .ib-spin { width: 10px; height: 10px; border-width: 1.5px; margin-right: 5px; }
 /* Show me in the code review (approval "shape-in-code-review", mock ac2; packages/inbox/review-drawing). The box, the
    picture's sheet over the diff, its corner card, and the Overview's picture. Shape's paper behind every drawing. */
 .ib-review { --shp-paper: color-mix(in oklab, var(--background) 92%, var(--muted)); }

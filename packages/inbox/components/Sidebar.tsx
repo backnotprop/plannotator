@@ -10,7 +10,8 @@ import { formatCount } from '../format';
 import { Icon, type IconName } from '../icons';
 import { pinnedState } from '../pins';
 import { starPopping } from '../starPop';
-import { awayLine, isAway, type MachinesModel } from '../machines';
+import { awayLine, isAway, machineNotice, type MachinesModel } from '../machines';
+import { MachineSidebarWord } from './MachineUpdate';
 import { useSidebarSections, type SidebarSection } from '../sidebarSections';
 import { useSidebar } from '../shell/sidebar';
 import { usePhone } from '../phone';
@@ -63,6 +64,8 @@ export interface SidebarProps {
   /** Rows waiting on the person, per machine id. */
   machineCounts?: ReadonlyMap<string, number>;
   onMachine?: (machineId: string) => void;
+  /** The word on a machine opens its update dialog. Absent on a page that offers no updates. */
+  onMachineUpdate?: (machineId: string) => void;
   /** Rows waiting on the person, all projects. */
   inboxCount: number;
   projects: readonly ProjectFolder[];
@@ -514,21 +517,25 @@ export function Sidebar(props: SidebarProps) {
                 const on = props.page === 'inbox' && props.machineId === machine.id && props.projectId === null;
                 if (machinesClosed && !on) return null;
                 const away = isAway(machine);
+                const notice = props.onMachineUpdate ? machineNotice(machine) : null;
                 return (
-                  <Tip key={machine.id} content={machine.self ? 'This machine' : (awayLine(machine) ?? machine.name)} side="right">
-                    <button
-                      type="button"
-                      className={`ib-proj${n === 0 || away ? ' ib-proj-quiet' : ''}${on ? ' ib-on' : ''}`}
-                      onClick={pick(() => props.onMachine?.(machine.id))}
-                      aria-current={on ? 'page' : undefined}
-                      data-machine={machine.id}
-                      data-away={away ? '' : undefined}
-                    >
-                      <span className="ib-name" dir="auto">{machine.name}</span>
-                      {away && <span className="ib-sr">, {awayLine(machine)}</span>}
-                      {n > 0 && <span className="ib-n">{formatCount(n)}</span>}
-                    </button>
-                  </Tip>
+                  <div key={machine.id} className="ib-mside" data-machine-notice={notice?.kind ?? undefined}>
+                    <Tip content={machine.self ? 'This machine' : (awayLine(machine) ?? machine.name)} side="right">
+                      <button
+                        type="button"
+                        className={`ib-proj${n === 0 || away ? ' ib-proj-quiet' : ''}${on ? ' ib-on' : ''}`}
+                        onClick={pick(() => props.onMachine?.(machine.id))}
+                        aria-current={on ? 'page' : undefined}
+                        data-machine={machine.id}
+                        data-away={away ? '' : undefined}
+                      >
+                        <span className="ib-name" dir="auto">{machine.name}</span>
+                        {away && <span className="ib-sr">, {awayLine(machine)}</span>}
+                        {n > 0 && <span className="ib-n">{formatCount(n)}</span>}
+                      </button>
+                    </Tip>
+                    {notice && <MachineSidebarWord notice={notice} name={machine.name} onPress={pick(() => props.onMachineUpdate?.(machine.id))} />}
+                  </div>
                 );
               })}
             </div>
