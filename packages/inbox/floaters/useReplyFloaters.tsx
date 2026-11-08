@@ -13,6 +13,9 @@
  *   anywhere, a day old, or × ("Stop floating"), it stops. It stays a draft.
  * - The corner shows in a thread with no Ask chat while drafts float, and hides in full screen and while a phone's
  *   keyboard is up.
+ * - Drafts float only while the person turned it on (Settings → Capabilities → Experimental, "Float reply drafts";
+ *   the owner, 2026-11-08: off by default). Off, no draft floats, no draft row or window shows, and the threads that
+ *   floated are forgotten (each stays a draft in Drafts); Ask's row and window in the corner work as with it on.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import type { InboxReplyDraftRow } from '@plannotator/core/inbox-types';
@@ -36,6 +39,11 @@ export interface ReplyFloatersOptions {
   phone: boolean;
   /** The tour, a guest. */
   off: boolean;
+  /**
+   * Settings → Capabilities → Experimental → "Float reply drafts" (config.json `inboxFloatDrafts`), off by default.
+   * null: the settings are not read yet (nothing floats, and the threads that floated are kept until it is known).
+   */
+  floatDrafts: boolean | null;
   ask: AskCorner;
   openThread: (threadId: string) => void;
   openDrafts: () => void;
@@ -69,7 +77,9 @@ function draftMark(row: InboxReplyDraftRow) {
 }
 
 export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactNode } {
-  const { rows, rowsRead, threadId, phone, off, ask, openThread, openDrafts, refreshDrafts, toast, dismissToast } = options;
+  const { rows, rowsRead, threadId, phone, off, floatDrafts, ask, openThread, openDrafts, refreshDrafts, toast, dismissToast } = options;
+  /** Drafts float: not the tour or a guest, and the person turned it on. Off, only Ask's row is in the corner. */
+  const floats = !off && floatDrafts === true;
   const entries = useFloatEntries();
   const [openId, setOpenId] = useState<string | null>(null);
   const [wantsFocus, setWantsFocus] = useState<string | null>(null);
@@ -117,24 +127,27 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
     },
     [look],
   );
-  // Off (the tour, a guest) or gone: no look still waiting floats a draft.
+  // Off (the tour, a guest, the setting) or gone: no look still waiting floats a draft.
   useEffect(() => {
-    if (off) return;
+    if (!floats) return;
     const timers = settleTimers.current;
     return () => {
       for (const timer of timers) clearTimeout(timer);
       timers.clear();
       settling.current.clear();
     };
-  }, [off]);
+  }, [floats]);
   useEffect(() => {
-    if (off) return;
+    if (!floats) return;
     return onFloaterEvent((kind, changed) => {
       if (kind === 'draft' && changed && settling.current.has(changed)) look(changed);
     });
-  }, [off, look]);
+  }, [floats, look]);
   useEffect(() => {
-    if (off) return;
+    if (!floats) {
+      visit.current = null;
+      return;
+    }
     const left = visit.current;
     visit.current = null;
     if (threadId && !machineOf(threadId)) {
@@ -146,23 +159,31 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
       setOpenId((id) => (id === threadId ? null : id));
     }
     if (left && left.id !== threadId) settle(left.id, left.updated, 350);
-  }, [threadId, off, settle]);
+  }, [threadId, floats, settle]);
   // T6's down arrow, or Escape in the thread's box (Thread.tsx says so): it floats now, and shows once they go.
   useEffect(() => {
-    if (off) return;
+    if (!floats) return;
     return onReplyBoxSetAside((id) => {
       const here = visit.current;
       if (here?.id === id) settle(id, here.updated, 450);
     });
-  }, [off, settle]);
+  }, [floats, settle]);
+
+  // The setting read as off (the default; an upgrade from 0.28.54 with drafts floating): they stop floating and stay
+  // in Drafts, and an open draft window closes (its words are the thread's draft, saved as typed).
+  useEffect(() => {
+    if (off || floatDrafts !== false) return;
+    setOpenId(null);
+    for (const entry of entries) unfloatThread(entry.id);
+  }, [off, floatDrafts, entries]);
 
   // Sent, discarded or a day old: it stops floating, wherever that happened.
   useEffect(() => {
-    if (off || !rowsRead) return;
+    if (!floats || !rowsRead) return;
     for (const id of staleFloats(entries, rows, openId ? [openId] : [], Date.now())) unfloatThread(id);
-  }, [off, rowsRead, entries, rows, openId]);
+  }, [floats, rowsRead, entries, rows, openId]);
 
-  const drafts = useMemo(() => floatingDrafts(entries, rows, threadId), [entries, rows, threadId]);
+  const drafts = useMemo(() => (floats ? floatingDrafts(entries, rows, threadId) : []), [floats, entries, rows, threadId]);
 
   /** Back to the corner's button; when the last item went with it, to the open thread's title (never to the page). */
   const focusLauncher = useCallback(() => {
@@ -301,7 +322,7 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
   const listed = openId !== null ? (rows.find((each) => each.thread_id === openId) ?? null) : null;
   if (listed) openedRow.current = listed;
   else if (openedRow.current?.thread_id !== openId) openedRow.current = null;
-  const openRow = openId !== null && openId !== threadId ? (listed ?? openedRow.current) : null;
+  const openRow = floats && openId !== null && openId !== threadId ? (listed ?? openedRow.current) : null;
   // A window with nothing to show is closed, so its float entry is not kept for good.
   const orphan = openId !== null && openId !== threadId && openRow === null;
   useEffect(() => {
