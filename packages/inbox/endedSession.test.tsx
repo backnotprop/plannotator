@@ -718,11 +718,13 @@ test.skipIf(!hasDom)('ended, another live: Send to another session and Archive s
   expect(inFoot(el, 'Reply')).toBe(true);
   expect(inFoot(el, 'Send to another session')).toBe(true);
   expect(inFoot(el, 'Archive')).toBe(true);
-  // The bottom bar, B1 (approval "inbox-reaction-tray"): the actions first, what is open after them (the right group).
+  // The actions first, then what is open, right after them (the owner, 2026-11-08: "I want them next to the button").
   const order = [...el.querySelectorAll('[data-foot-buttons] button')];
   const archiveAt = order.findIndex((b) => b.hasAttribute('data-ended-archive'));
   expect(archiveAt).toBeGreaterThan(order.findIndex((b) => b.hasAttribute('data-reply-button')));
-  expect(order.findIndex((b) => b.hasAttribute('data-open-questions'))).toBeGreaterThan(archiveAt);
+  expect(order.findIndex((b) => b.hasAttribute('data-open-questions'))).toBe(archiveAt + 1);
+  // The open questions are the ended pair's next neighbour in the row: nothing sits between them to push them away.
+  expect(el.querySelector('[data-foot-buttons] > [data-foot-ended]')!.nextElementSibling!.hasAttribute('data-open-questions')).toBe(true);
 
   act(() => button(el, 'Send to another session').click());
   await settle();
