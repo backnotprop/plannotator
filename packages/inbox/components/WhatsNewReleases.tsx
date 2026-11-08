@@ -206,20 +206,29 @@ function ReleasesList({ releases, showing, onOpen }: ReleasesListProps) {
   );
 }
 
-/** Scroll a list so the row of `version` sits in its middle (the panel follows the page's release). */
-function centerRow(scroller: HTMLElement | null, version: string | null) {
-  if (!scroller || !version) return;
+/**
+ * Scroll a list, and only the list, so the row of `version` sits in its
+ * middle (the panel follows the page's release; "N releases in between" takes
+ * it to your row). Never `scrollIntoView`: that also scrolls the page under
+ * the sticky panel. Returns the row, or null when the list has none.
+ */
+export function centerRow(scroller: HTMLElement | null, version: string | null, smooth = false): HTMLElement | null {
+  if (!scroller || !version) return null;
   const row = scroller.querySelector<HTMLElement>(`[data-whats-new-release="${CSS.escape(version)}"]`);
-  if (!row) return;
-  const top = row.offsetTop - scroller.offsetTop - (scroller.clientHeight - row.offsetHeight) / 2;
-  scroller.scrollTop = Math.max(0, top);
+  if (!row) return null;
+  const box = scroller.getBoundingClientRect();
+  const at = row.getBoundingClientRect();
+  const top = Math.max(0, scroller.scrollTop + (at.top - box.top) - (scroller.clientHeight - at.height) / 2);
+  if (smooth && typeof scroller.scrollTo === 'function') scroller.scrollTo({ top, behavior: 'smooth' });
+  else scroller.scrollTop = top;
+  return row;
 }
 
 /** The panel beside the notes: an inspector column with its own scroll, its heading on the version's baseline. */
 export function ReleasesPanel(props: ReleasesListProps & { scrollRef?: RefObject<HTMLDivElement | null> }) {
   const own = useRef<HTMLDivElement>(null);
   const scroller = props.scrollRef ?? own;
-  useEffect(() => centerRow(scroller.current, props.showing), [props.showing, props.releases.releases.length]);
+  useEffect(() => void centerRow(scroller.current, props.showing), [props.showing, props.releases.releases.length]);
   return (
     <aside className="ib-wn-panel" aria-labelledby="ib-wn-rel-h" data-whats-new-panel="">
       <div className="ib-wn-phead">

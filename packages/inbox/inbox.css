@@ -3695,6 +3695,10 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-wn-gh .ib-ic { width: 20px; height: 20px; }
   .ib-wn-gh-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .pn-inbox .ib-wn-acts .ib-btn { height: 44px; padding: 0 13px; }
+  /* Behind, the bar holds back, picker, GitHub and Update: "Inbox" never shrinks, and Update drops its
+     "to X" (the picker beside it names the version; the button's name keeps it). */
+  .pn-inbox .ib-wn-bar .ib-pback { flex: none; max-width: none; }
+  .ib-wn-acts:has(.ib-wn-picker) .ib-wn-to { display: none; }
   .ib-wn-hrow { flex-direction: column; align-items: flex-start; gap: 8px; }
   .ib-wn-hero h1 { font-size: calc(26px * var(--ib-type, 14) / 14); line-height: 32px; }
   .ib-wn-meta { font-size: var(--ib-fs-14, 14px); }

@@ -120,12 +120,21 @@ test.skipIf(!hasDom)('behind: the meta names the version and the releases in bet
   expect(button.tagName).toBe('BUTTON');
   expect(button.textContent).toBe('You have 0.28.19 · 2 releases in between');
   const mine = el.querySelector<HTMLElement>('[data-whats-new-panel] [data-whats-new-release="0.28.19"]')!;
-  let scrolled = false;
+  const list = el.querySelector<HTMLElement>('[data-whats-new-panel] .ib-wn-pscroll')!;
+  // Only the panel's list scrolls to your row: scrollIntoView would also scroll the page (and its notes) under the sticky panel.
+  let pageScrolled = false;
   mine.scrollIntoView = () => {
-    scrolled = true;
+    pageScrolled = true;
   };
+  const listScrolls: number[] = [];
+  list.scrollTo = ((options: ScrollToOptions) => listScrolls.push(options.top ?? -1)) as typeof list.scrollTo;
+  Object.defineProperty(list, 'clientHeight', { configurable: true, value: 200 });
+  list.getBoundingClientRect = () => ({ top: 100, height: 200, bottom: 300, left: 0, right: 300, width: 300, x: 0, y: 100, toJSON() {} }) as DOMRect;
+  mine.getBoundingClientRect = () => ({ top: 700, height: 80, bottom: 780, left: 0, right: 300, width: 300, x: 0, y: 700, toJSON() {} }) as DOMRect;
   act(() => button.click());
-  expect(scrolled).toBe(true);
+  expect(pageScrolled).toBe(false);
+  // 600 px below the list's top, centred in its 200 px: 600 - (200 - 80) / 2.
+  expect(listScrolls).toEqual([540]);
   expect(document.activeElement).toBe(mine);
   window.matchMedia = realMatch;
   // No Also box, whatever is skipped.

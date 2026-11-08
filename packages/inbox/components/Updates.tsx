@@ -23,7 +23,7 @@ import { Icon } from '../icons';
 import { CopyButton } from './ConnectPicker';
 import { SidebarTrigger } from '../shell/sidebar';
 import { releasesBetween } from '../whatsNew';
-import { KnownLine, NotesMissing, ReleasesPanel, ReleasesSheet, TldrLedger } from './WhatsNewReleases';
+import { KnownLine, NotesMissing, ReleasesPanel, ReleasesSheet, TldrLedger, centerRow } from './WhatsNewReleases';
 
 type Update = NonNullable<InboxHealth['update']>;
 
@@ -689,11 +689,9 @@ export function WhatsNewPage({
           setSheet({ focus: mine });
           return;
         }
-        const target = panelScroll.current?.querySelector<HTMLElement>(`[data-whats-new-release="${CSS.escape(mine)}"]`);
-        if (!target) return;
         const reduce = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        target.scrollIntoView?.({ behavior: reduce ? 'auto' : 'smooth', block: 'center' });
-        target.focus({ preventScroll: true });
+        // The panel's list scrolls; the notes stay where they are.
+        centerRow(panelScroll.current, mine, !reduce)?.focus({ preventScroll: true });
       }
     : null;
   const open = (next: string) => {
