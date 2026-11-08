@@ -1100,12 +1100,12 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 /* A closed group's header looks as an open one does (approval "inbox-list-groups-close", correction 2026-11-06):
    only its rows go. Something new inside since it closed: the count bold, in the text colour. */
 .ib-band .ib-n[data-new] { font-weight: 700; color: var(--foreground); }
-/* A group's chevron (owner, 2026-11-08, after approval "inbox-list-groups-close"): last after the words, the count and
-   a closed group's triangle, where the eye already is (the header's right end is a list's width away). Hidden until
-   the pointer rests on the header for a moment or keyboard focus lands on it (data-chev, GroupBand in InboxList.tsx).
+/* A group's chevron (owner, 2026-11-08, after approval "inbox-list-groups-close"): at the header's right end, as the
+   chevrons were before (owner's pick). Hidden until the pointer rests on the header for a moment or keyboard focus
+   lands on it (data-chev, GroupBand in InboxList.tsx).
    It points right closed and down open, as the sidebar's sections do. It fades in over 200 ms with a 3 px slide, and
    goes in 100 ms; always drawn, so nothing moves when it shows. Reduced motion: the fade only. */
-.pn-inbox .ib-band svg.ib-band-chev { margin-left: -2px; width: 12px; height: 12px; stroke-width: 2.2; flex: none; opacity: 0; translate: -3px 0; transition: opacity 100ms ease-out, translate 100ms ease-out, rotate 160ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.pn-inbox .ib-band svg.ib-band-chev { margin-left: auto; width: 12px; height: 12px; stroke-width: 2.2; flex: none; opacity: 0; translate: -3px 0; transition: opacity 100ms ease-out, translate 100ms ease-out, rotate 160ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .pn-inbox .ib-band[data-chev] svg.ib-band-chev { opacity: 1; translate: 0 0; transition: opacity 200ms ease, translate 200ms cubic-bezier(0.23, 1, 0.32, 1), rotate 160ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .ib-band[aria-expanded="true"] .ib-band-chev { rotate: 90deg; }
 @media (prefers-reduced-motion: reduce) {
