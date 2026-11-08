@@ -85,7 +85,7 @@ import { isHtmlEmbedLanguage, isSvgFenceLanguage } from './html-embed/languages'
 import type { HtmlEmbedHost } from './html-embed/HtmlEmbedBlock';
 import { getIdentity } from '../utils/identity';
 import { type QuickLabel } from '../utils/quickLabels';
-import type { SelectionAction } from '../utils/selectionActions';
+import type { SelectionAction, SelectionActionContext } from '../utils/selectionActions';
 import type { MentionSource } from '../utils/mentions';
 import { DocBadges, type DocBadgesProps, type LinkedDocBadgeInfo } from './DocBadges';
 import { legacyBadgesMaxWidth } from './docBadgesWidth';
@@ -133,6 +133,12 @@ export interface ViewerProps {
   /** Opt-in host capability: the glyph on the `selectionActions` button on
    *  both toolbars. Absent → the package's own wand. */
   selectionActionsIcon?: React.ReactNode;
+  /**
+   * Opt-in host capability, passed to the text-selection toolbar only: its
+   * "Side" button, which hands the host the selected text and its context
+   * (AnnotationToolbar `onSide`). Absent → no button: unchanged.
+   */
+  onSide?: (text: string, context: SelectionActionContext) => void;
   /**
    * Whether the package's quick labels are offered on the selection toolbars
    * (default true). `false` hides the Zap picker and the Alt+digit label
@@ -837,6 +843,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   taterMode,
   selectionActions,
   selectionActionsIcon,
+  onSide,
   quickLabels,
   mentionSource,
   globalAttachments = [],
@@ -2202,6 +2209,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               onQuickLabel={handleQuickLabel}
               selectionActions={selectionActions}
               selectionActionsIcon={selectionActionsIcon}
+              onSide={onSide}
               quickLabels={quickLabels}
               copyText={toolbarState.selectionText}
               getRichCopy={getRichCopyEnabled() ? toolbarState.getRichCopy : undefined}

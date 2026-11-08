@@ -8,7 +8,7 @@ import { copyRichSelection, richCopyOutcomeLabel, type RichCopyOutcome, type Ric
 import { acquireTypeToCommentCapture } from "../shortcuts/plan-review/annotationMode.shortcuts";
 import { FloatingQuickLabelPicker } from "./FloatingQuickLabelPicker";
 import { FloatingSelectionActionsPicker } from "./SelectionActionsDropdown";
-import { buildSelectionActionContext, type SelectionAction } from "../utils/selectionActions";
+import { buildSelectionActionContext, type SelectionAction, type SelectionActionContext } from "../utils/selectionActions";
 import { HostTitle } from './HostTitle';
 import { TOUCH_PRIMARY_QUERY } from "../utils/touchSelection";
 import {
@@ -103,6 +103,16 @@ interface AnnotationToolbarProps {
    */
   selectionActionsIcon?: React.ReactNode;
   /**
+   * Opt-in host capability: a "Side" button (two speech bubbles and the word
+   * "Side") after the reactions, between a divider and the one before ×.
+   * Pressing it hands the host the selected text, the same text Copy reads,
+   * with the selection's context (the same one `selectionActions` get: block
+   * and offsets, so the host can say where the words came from), and closes
+   * the toolbar; the host opens its side conversation with it.
+   * Absent → no button and no divider: today's toolbar. No shortcut.
+   */
+  onSide?: (text: string, context: SelectionActionContext) => void;
+  /**
    * Whether the package's own quick labels are offered (default true).
    * `false` hides the Zap picker button and the Alt+digit label shortcuts on
    * this toolbar. The one-click 👍 is a separate affordance and is unaffected.
@@ -136,6 +146,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   onQuickLabel,
   selectionActions,
   selectionActionsIcon,
+  onSide,
   quickLabels: quickLabelsEnabled = true,
   copyText,
   getRichCopy,
@@ -519,6 +530,30 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             )}
           </>
         )}
+        {onSide && (
+          <>
+            <div className="w-px h-5 bg-border mx-0.5" />
+            {/* The word shows, so the name is the word: no tooltip. On a touch
+                toolbar theme.css gives it the 44px height and the 20px glyph;
+                its words are a bare text node, never a span (sized there as a
+                glyph). */}
+            <button
+              type="button"
+              data-pn-touch-target="true"
+              data-annotation-side=""
+              onClick={() => {
+                // Read at press time, as the selection actions read it.
+                const text = copyText ?? element.querySelector('code')?.textContent ?? element.textContent ?? '';
+                onSide(text, buildSelectionActionContext(element, text));
+                onClose();
+              }}
+              className="flex items-center gap-1.5 h-7 pl-2 pr-2.5 rounded-md text-foreground hover:bg-muted transition-colors text-[12.5px] font-medium whitespace-nowrap"
+            >
+              <MessagesSquareIcon />
+              Side
+            </button>
+          </>
+        )}
         <div className="w-px h-5 bg-border mx-0.5" />
         <ToolbarButton
           onClick={onClose}
@@ -533,6 +568,14 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 };
 
 // Icons
+/** Lucide's messages-square (ISC): the Side button's two bubbles. */
+const MessagesSquareIcon = () => (
+  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+    <path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1" />
+  </svg>
+);
+
 const CopyIcon = () => (
   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />

@@ -6,6 +6,7 @@ import { Tip } from '../components/Tip';
 import { AskChat } from './AskChat';
 import { onAskChange } from './askEvents';
 import { askUnseen } from './askModel';
+import { sideQuote } from './askWords';
 
 export interface InboxAskOptions {
   /** The settings are read, this is not a tailnet guest's page, and not the tour: while false nothing is read and nothing shows. */
@@ -20,17 +21,22 @@ export interface InboxAskOptions {
 }
 
 export interface InboxAskParts {
-  /** The Ask AI icon for the thread's top bar, or null. */
+  /** The Ask AI icon for the thread's top bar, or null. The only icon: a full-screen file's bar has none. */
   button: ReactNode;
-  /** The same icon for a full-screen file's bar. */
-  fileButton: ReactNode;
+  /**
+   * Side in a message's or a file's selection bar (approval "inbox-ask-ai-flow", 2026-11-08): the selected
+   * words, quoted, open the thread's chat. Undefined wherever the icon is null (this thread cannot ask, Ask off),
+   * and in the phone layout (`phone`, App's usePhone), where the owner keeps the selection bar without it.
+   */
+  side: ((selected: string, source?: string) => void) | undefined;
   /** The window. Outside the thread's section: see AskChat. */
   layer: ReactNode;
   /**
    * Open the open thread's chat with these words in its box, after any words
-   * already there (code review's Ask on selected lines). Nothing while Ask is off.
+   * already there (code review's Ask on selected lines). Nothing while Ask is off. `source` (a Side's): where the
+   * words came from, which the agent gets ahead of the question (AskChat, useAIChat's `contextPreamble`) and the box never shows.
    */
-  askWith: (words: string) => void;
+  askWith: (words: string, source?: string) => void;
   /** What the corner (floaters/useReplyFloaters.tsx) needs: this thread's chat as a row of its list, and the window. */
   corner: AskCorner;
 }
@@ -55,12 +61,15 @@ export interface AskCorner {
   minimize: () => void;
 }
 
-/** Lucide's sparkles: the Inbox's own icons have no such mark, and `packages/inbox` does not depend on lucide. */
-function SparklesIcon() {
+/**
+ * Lucide's messages-square (ISC), the two bubbles Side wears in the selection bar: `packages/inbox` does not depend
+ * on lucide. The owner dropped the sparkles for it (approval "inbox-ask-ai-flow", 2026-11-08).
+ */
+function MessagesSquareIcon() {
   return (
-    <svg className="ib-ic" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
-      <path d="M20 3v4M22 5h-4M4 17v2M5 18H3" />
+    <svg className="ib-ic" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" data-ask-icon="messages-square">
+      <path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+      <path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1" />
     </svg>
   );
 }
@@ -84,7 +93,7 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
   const [read, setRead] = useState<{ threadId: string; model: InboxAskModel } | null>(null);
   const [picked, setPicked] = useState<InboxAskChat | null>(null);
   const [focusRequest, setFocusRequest] = useState(0);
-  const [seed, setSeed] = useState<{ threadId: string; words: string; token: number } | null>(null);
+  const [seed, setSeed] = useState<{ threadId: string; words: string; token: number; source?: string } | null>(null);
   /** The thread whose box takes focus once it can: only after a press here, never when the list moves to a thread. */
   const wantsFocus = useRef<string | null>(null);
   const askForFocus = (threadId: string) => {
@@ -167,24 +176,24 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
     });
   };
 
-  const icon = (className: string) =>
+  const button =
     model?.can_ask ? (
       <Tip content="Ask AI about this thread">
-        <button type="button" className={className} aria-label="Ask AI about this thread" aria-pressed={pressed} data-chat-launcher="" data-ask-open="" onClick={press}>
-          <SparklesIcon />
+        <button type="button" className="ib-iconbtn ib-artbtn" aria-label="Ask AI about this thread" aria-pressed={pressed} data-chat-launcher="" data-ask-open="" onClick={press}>
+          <MessagesSquareIcon />
         </button>
       </Tip>
     ) : null;
 
   // One function for the window's life (a review's selection actions hold it): the thread on screen through its ref.
   const askWith = useCallback(
-    (words: string) => {
+    (words: string, source?: string) => {
       const thread = onScreen.current;
       if (!thread) return;
       openChats.current.add(thread);
       store.setMinimized(false);
       seedCount += 1;
-      setSeed({ threadId: thread, words, token: seedCount });
+      setSeed({ threadId: thread, words, token: seedCount, ...(source ? { source } : {}) });
       wantsFocus.current = thread;
       setFocusRequest((count) => count + 1);
     },
@@ -212,13 +221,16 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
     },
   };
 
+  const canAsk = model?.can_ask === true;
+  const side = useCallback((selected: string, source?: string) => askWith(sideQuote(selected), source), [askWith]);
+
   const region = useOpenInCodeRegion({ thread: askFor ?? '' }, codeReview && !!askFor);
 
   return {
     askWith,
     corner,
-    button: icon('ib-iconbtn ib-artbtn'),
-    fileButton: icon(pressed ? 'ib-fvb ib-on' : 'ib-fvb'),
+    button,
+    side: canAsk && !phone ? side : undefined,
     layer: askFor ? (
       // The code window's handlers sit on the layer itself: ChatFrame sizes itself from this element.
       <div className="ib-ask-layer" data-ask-layer="" onPointerDownCapture={keepFocusIn} {...region.handlers}>

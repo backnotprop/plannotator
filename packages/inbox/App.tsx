@@ -6590,7 +6590,7 @@ function Inbox() {
               const open = !!route.shape;
               return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : go({ ...route, shape: board.id }))} />;
             })()}
-            askFileButton={ask.fileButton}
+            onSide={ask.side}
             replyWords={askReply?.threadId === thread.thread_id ? askReply.words : null}
             onReplyWordsTaken={() => setAskReply(null)}
             replyPart={shapeReply?.threadId === thread.thread_id ? shapeReply : null}
