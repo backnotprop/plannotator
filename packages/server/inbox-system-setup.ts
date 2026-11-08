@@ -7,7 +7,7 @@
 import { statSync } from "node:fs";
 import type { InboxProject, InboxProjectRepo } from "@plannotator/core/inbox-types";
 import { systemSetupFromInput, type SystemSetup, type SystemSetupProject } from "@plannotator/core/inbox-system-setup";
-import { readSystemSetup, writeSystemSetup } from "@plannotator/shared/inbox/system-setup";
+import { readSystemSetup, systemDrawingPath, writeSystemSetup } from "@plannotator/shared/inbox/system-setup";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
@@ -40,7 +40,7 @@ export async function systemSetupProjects(projects: readonly InboxProject[], dep
       if (!isFolder(project.root)) return null;
       const repo = systemRepoOf(await deps.repoOf(project.root));
       if (!repo) return null;
-      return { id: project.id, key: project.key, name: project.display_name ?? project.name, root: project.root, repo, setup: readSystemSetup(deps.dataDir, project.key) };
+      return { id: project.id, key: project.key, name: project.display_name ?? project.name, root: project.root, repo, drawing: systemDrawingPath(deps.dataDir, project.key), setup: readSystemSetup(deps.dataDir, project.key) };
     }),
   );
   return found.filter((project): project is SystemSetupProject => project !== null);
