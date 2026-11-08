@@ -168,7 +168,7 @@ describe("to.launch.folder with create", () => {
         return { code: code ?? "thrown", message };
       }
     };
-    return { home, store, launch, prepare, refusal };
+    return { home, store, launch, prepare, refusal, fake };
   }
 
   test("makes the last folder and starts there; the record says it made it", async () => {
@@ -178,6 +178,41 @@ describe("to.launch.folder with create", () => {
     expect(made.launch.made_folder).toBe(true);
     expect(existsSync(join(home, "code", "pricing-page"))).toBe(true);
     expect(made.project.root).toBe(join(home, "code", "pricing-page"));
+  });
+
+  test("q-d2512542: Create + Send starts straight away: the empty folder it made is trusted as by hand, with no Trust folder step; one with anything in it by then is not", async () => {
+    const { home, launch, prepare, store, fake } = world();
+    // Claude Code trusts nothing here yet, and refuses an untrusted folder until the trust is saved (by the host's offer).
+    const accepted: string[] = [];
+    fake.faults.trusted = () => false;
+    fake.faults.untrusted = true;
+    fake.host.trustOffer = (target) => ({
+      folder: target.folder,
+      read: () => ({ warning: null, facts: [], warns: false }),
+      accept: async () => {
+        accepted.push(target.folder);
+        fake.faults.untrusted = false;
+      },
+    });
+    const send = async (folder: string, key: string, before?: () => void) => {
+      const made = await prepare(folder);
+      before?.();
+      const root = store.startPersonThread({ project_id: made.project.id, body: "x", to: made.to, idempotency_key: key, thread_name: key, launch: made.launch }).message;
+      launch.begin(root);
+      return root;
+    };
+    const fresh = await send("~/code/pricing-page", "fresh");
+    for (let i = 0; i < 200 && !store.message(fresh.id)!.launch!.session_ref && !store.message(fresh.id)!.launch!.error; i++) await Bun.sleep(10);
+    expect(store.message(fresh.id)!.launch!.error ?? null).toBeNull();
+    expect(store.message(fresh.id)!.launch!.session_ref).toBeTruthy();
+    expect(accepted).toEqual([join(home, "code", "pricing-page")]);
+
+    // Something was put in it before the start: the person reads and trusts it, as any other folder (E8, Trust folder).
+    fake.faults.untrusted = true;
+    const filled = await send("~/code/pricing-notes", "filled", () => writeFileSync(join(home, "code", "pricing-notes", "notes.md"), "x"));
+    for (let i = 0; i < 200 && !store.message(filled.id)!.launch!.error && !store.message(filled.id)!.launch!.session_ref; i++) await Bun.sleep(10);
+    expect(store.message(filled.id)!.launch!.error?.code).toBe("untrusted");
+    expect(accepted).toEqual([join(home, "code", "pricing-page")]);
   });
 
   test("without create, a folder that isn't there is still folder_missing and nothing is made", async () => {
