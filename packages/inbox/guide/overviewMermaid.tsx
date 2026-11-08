@@ -35,7 +35,7 @@ export function OverviewMermaid({ source }: { source: string }) {
   );
 }
 
-/** The host's renderer first (code review's HTML picture); a Mermaid diagram it leaves is drawn here. */
+/** The host's renderer first (the pane's HTML picture); a Mermaid diagram it leaves is drawn here. */
 export function withOverviewMermaid(
   host: ((diagram: GuideOverviewDiagram) => ReactNode | null) | undefined,
 ): (diagram: GuideOverviewDiagram) => ReactNode | null {

@@ -2869,3 +2869,9 @@ A board may carry `scenes`; a drawn view plays one where its HTML holds `<div da
 - `ShapeSurface` passes `version.scenes` and `sceneLook="technical"`: a board with scenes plays them in the technical look in every host that shows `ShapeSurface`; a board without scenes is untouched.
 - New export `@plannotator/ui/components/shape/scene/frame` (`setSceneFrame`, `sceneFrame`, `sceneFrameFromHash`): a module seam, null by default. Plannotator's standalone Shape page sets it from its address for `plannotator shape frame`. Another host never needs it.
 - `ShapeDiagram` does not pass `scenes`.
+
+## `MermaidBlock` / `GraphvizBlock` `sourceOnError` (unreleased; additive, opt-in, no core change)
+
+- **`sourceOnError?: boolean`** on `DiagramBlockProps`. With it, a diagram whose source does not render shows the source as the plain fence (`DiagramInlineSource`), not the red error panel: for a diagram the person did not write, such as the Inbox's guide overview. A renderer that could not load (`runtimeUnavailable`) still shows the panel and its Retry. Absent: unchanged.
+
+Pinned by `components/DiagramBlock.lazyRetry.test.tsx` ("Mermaid sourceOnError").

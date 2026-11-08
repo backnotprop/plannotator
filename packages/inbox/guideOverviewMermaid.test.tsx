@@ -12,7 +12,10 @@
  *  - a source that does not render showing the red error panel instead of
  *    its plain fence;
  *  - GuideReader drawing it only for a host that passes a renderer (the
- *    pull request page passes none; its snapshot has no overview today).
+ *    pull request page passes none; its snapshot has no overview today);
+ *  - the overview beside its diagram (the owner on #2887): split in a wide
+ *    pane, stacked again when the pane narrows (its own width, not the
+ *    window's), and never split for an overview without a diagram.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -21,7 +24,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, mock, test } from '
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { resolve } from 'node:path';
-import { FIXTURE_V2_OVERVIEW } from '@plannotator/core/guide-format-fixtures';
+import { FIXTURE_V2_OVERVIEW, FIXTURE_V2_PR_TEXT } from '@plannotator/core/guide-format-fixtures';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
 import type { ShapeHost } from '@plannotator/ui/components/shape';
@@ -49,7 +52,8 @@ mock.module(resolve(import.meta.dir, '../review-editor/workerPool.tsx'), () => (
 
 const hasDom = typeof document !== 'undefined';
 const { ReviewPane } = (hasDom ? await import('./components/ReviewPane') : {}) as typeof import('./components/ReviewPane');
-const { default: GuideReader } = (hasDom ? await import('./guide/GuideReader') : {}) as typeof import('./guide/GuideReader');
+// Through `#guide-reader` (the window's strict typecheck sees its shape, not review-editor's code).
+const GuideReader = (hasDom ? (await import('#guide-reader')).default : null)!;
 const mermaid = hasDom ? await import('@plannotator/ui/utils/mermaid') : null;
 const diagramSvg = hasDom ? await import('@plannotator/ui/test-setup/diagramSvg') : null;
 
@@ -152,27 +156,101 @@ async function mount(element: React.ReactElement) {
 const box = () => document.querySelector('[data-guide-overview-diagram="mermaid"]');
 
 test.skipIf(!hasDom)('the guide pane draws a Mermaid overview diagram instead of showing its source', async () => {
-  await mount(<ReviewPane thread={thread} message={message} onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />);
-  expect(box()).not.toBeNull();
+  await mount(<ReviewPane thread={thread} message={message} codeReview onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />);
+  expect(box() !== null).toBe(true);
   expect(rendered).toContain(DRAWN);
-  expect(box()!.querySelector('svg[data-drawn-overview]')).not.toBeNull();
+  expect(box()!.querySelector('svg[data-drawn-overview]') !== null).toBe(true);
   // Drawn: no source in a code box, and the block's Show source is there to read it.
-  expect(box()!.querySelector('pre')).toBeNull();
-  expect(box()!.querySelector('[aria-label="Show source"]')).not.toBeNull();
+  expect(box()!.querySelector('pre') === null).toBe(true);
+  expect(box()!.querySelector('[aria-label="Show source"]') !== null).toBe(true);
 });
 
 test.skipIf(!hasDom)('a Mermaid source that does not render stays readable as its plain fence, without the error panel', async () => {
   snapshot = overviewOf(BROKEN);
-  await mount(<ReviewPane thread={thread} message={message} onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />);
+  await mount(<ReviewPane thread={thread} message={message} codeReview onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />);
   expect(rendered).toContain(BROKEN);
   expect(box()!.querySelector('pre')?.textContent).toBe(BROKEN);
   expect(box()!.textContent).not.toContain('Error');
   expect(box()!.textContent).not.toContain('Parse error');
+  // The final fallback, not the pending state (which also shows the source).
+  expect(box()!.querySelector('[data-diagram-pending]') === null).toBe(true);
+  expect(box()!.textContent).not.toContain('Rendering diagram');
 });
 
 test.skipIf(!hasDom)('the reader draws it on its own, for a host with no diagram renderer', async () => {
   await mount(<GuideReader snapshot={FIXTURE_V2_OVERVIEW} reviewed={[]} onReviewedChange={() => {}} />);
-  expect(box()).not.toBeNull();
-  expect(box()!.querySelector('svg[data-drawn-overview]')).not.toBeNull();
-  expect(box()!.querySelector('pre')).toBeNull();
+  expect(box() !== null).toBe(true);
+  expect(box()!.querySelector('svg[data-drawn-overview]') !== null).toBe(true);
+  expect(box()!.querySelector('pre') === null).toBe(true);
+});
+
+// The pane's width, as the reader's box reports it (happy-dom lays nothing out), and the observer that reports a change.
+// Only the reader's own box (the element around `.gv-guide`) is the pane; every other box keeps happy-dom's zero rect.
+let paneWidth = 1200;
+let observed: { el: Element; callback: (entries: unknown[]) => void }[] = [];
+const elementProto = (hasDom ? HTMLElement.prototype : {}) as unknown as Record<string, unknown>;
+const savedRect = elementProto['getBoundingClientRect'];
+const savedObserver = (globalThis as { ResizeObserver?: unknown }).ResizeObserver;
+const isReaderBox = (el: Element) => !!el.firstElementChild?.classList.contains('gv-guide');
+function stubLayout() {
+  elementProto['getBoundingClientRect'] = function (this: HTMLElement) {
+    const rect = (savedRect as () => DOMRect).call(this);
+    return isReaderBox(this) ? ({ x: 0, y: 0, top: 0, left: 0, right: paneWidth, bottom: 800, width: paneWidth, height: 800, toJSON: () => ({}) } as DOMRect) : rect;
+  };
+  (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
+    constructor(private readonly callback: (entries: unknown[]) => void) {}
+    observe(el: Element) { observed.push({ el, callback: this.callback }); }
+    unobserve() {}
+    disconnect() { observed = observed.filter((o) => o.callback !== this.callback); }
+  };
+}
+function restoreLayout() {
+  elementProto['getBoundingClientRect'] = savedRect;
+  (globalThis as { ResizeObserver?: unknown }).ResizeObserver = savedObserver;
+  observed = [];
+}
+/** The pane is now `paneWidth` wide: the reader's observer hears it, as a resize would tell it. */
+async function resizePane() {
+  await act(async () => {
+    for (const { el, callback } of observed) if (isReaderBox(el)) callback([{ target: el, borderBoxSize: [{ inlineSize: paneWidth, blockSize: 800 }], contentRect: el.getBoundingClientRect() }]);
+  });
+}
+const split = () => document.querySelector('[data-guide-overview-split]');
+const pane = () => <ReviewPane thread={thread} message={message} codeReview onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />;
+
+test.skipIf(!hasDom)('in a wide pane the overview sits beside its diagram, and stacks when the pane narrows', async () => {
+  paneWidth = 1200;
+  stubLayout();
+  try {
+    await mount(pane());
+    expect(split() !== null).toBe(true);
+    // The words and the diagram are both inside the split reader.
+    expect(split()!.querySelector('[data-guide-overview] .gv-prose') !== null).toBe(true);
+    expect(split()!.querySelector('[data-guide-overview-diagram="mermaid"]') !== null).toBe(true);
+
+    // The same window, a narrower pane (side by side): it stacks.
+    paneWidth = 700;
+    await resizePane();
+    expect(split() === null).toBe(true);
+    expect(box() !== null).toBe(true);
+
+    paneWidth = 1100;
+    await resizePane();
+    expect(split() !== null).toBe(true);
+  } finally {
+    restoreLayout();
+  }
+});
+
+test.skipIf(!hasDom)('an overview without a diagram is never split', async () => {
+  paneWidth = 1400;
+  snapshot = FIXTURE_V2_PR_TEXT;
+  stubLayout();
+  try {
+    await mount(pane());
+    expect(document.querySelector('[data-guide-overview]') !== null).toBe(true);
+    expect(split() === null).toBe(true);
+  } finally {
+    restoreLayout();
+  }
 });
