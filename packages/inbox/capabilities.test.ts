@@ -9,7 +9,7 @@ import { describe, expect, test } from 'bun:test';
 import { dispatchInboxFrame, type InboxEventHandlers, type SettingsModel } from './api';
 import { namesCapability, withCapabilities } from './capabilities';
 
-type Held = Pick<SettingsModel, 'serverSession' | 'board' | 'steps' | 'code_review' | 'shape' | 'system'>;
+type Held = Pick<SettingsModel, 'serverSession' | 'board' | 'steps' | 'bro' | 'code_review' | 'shape' | 'system'>;
 
 /** What App's onCapabilities does with a frame: apply what it names, else read the settings again. */
 function hear(data: string, settings: Held): { settings: Held; reread: boolean } {
@@ -37,6 +37,12 @@ describe('event: capabilities', () => {
     expect(settings).toEqual({ serverSession: 's', board: { on: true }, steps: { on: true }, code_review: { on: true } });
     // And off again.
     expect(hear(JSON.stringify({ board: { on: false }, steps: { on: true } }), settings).settings.board).toEqual({ on: false });
+  });
+
+  test('Bro mode turned on in another window: this window takes it, every other switch as it was', () => {
+    const { settings, reread } = hear(JSON.stringify({ bro: { on: true } }), { ...OFF, bro: { on: false } });
+    expect(reread).toBe(false);
+    expect(settings).toEqual({ ...OFF, bro: { on: true } });
   });
 
   test('a frame without the Board leaves it; a malformed Board value is not applied', () => {

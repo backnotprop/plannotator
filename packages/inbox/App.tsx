@@ -129,7 +129,7 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro, VOICE_INTRO_MIN_WORDS, VOICE_INTRO_MOMENT_MS } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
-import { listTallerThanScreen, listViewRevealLeaveCounts, listViewRevealMayClaim, noteRevealThread, openThreadAsks, revealArmed, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
+import { listTallerThanScreen, listViewRevealLeaveCounts, listViewRevealMayClaim, noteRevealThread, openThreadAsks, revealArmed, broRevealLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
 import type { InboxRevealId } from './api';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
 import { namesCapability, withCapabilities } from './capabilities';
@@ -178,6 +178,7 @@ import { reviewRowProject, reviewViewOf } from './pulls/reviewsModel';
 import { reviewsAlias } from './reviewsRoute';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
+import { BroIntro } from './components/BroIntro';
 import { ListViewIntro } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
@@ -4268,6 +4269,19 @@ function Inbox() {
     }
   };
 
+  // Bro mode (approval "bro-mode"): every other window hears `event: capabilities`.
+  const toggleBro = async (next: boolean) => {
+    setSettingsError(null);
+    setSettings((current) => (current ? { ...current, bro: { on: next } } : current));
+    try {
+      const saved = await inboxApi.saveBro(next);
+      setSettings((current) => (current ? { ...current, bro: saved.bro } : current));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      void refreshSettings();
+    }
+  };
+
   // Thread steps (approval "inbox-thread-steps"): every other window hears `event: capabilities`.
   const toggleSteps = async (next: boolean) => {
     setSettingsError(null);
@@ -4693,6 +4707,25 @@ function Inbox() {
     on: settings?.steps?.on === true,
     onStepsOn: () => setSettings((current) => (current ? { ...current, steps: { on: true } } : current)),
   });
+  // The Bro mode offer (approval "bro-mode"), registered with the line (approval "inbox-one-time-dialogs"; reveal.ts
+  // `useLineReveal`): the queue gives it to heavy use only, never on day 0 or 1. Its moment: back on the list from a
+  // thread whose last agent message has 150 words or more, after 20 s or more on it (`broRevealLeaveCounts`). The claim
+  // only stamps it; BroIntro offers it.
+  const broReveal = useLineReveal({
+    id: 'bro',
+    due: snoozeIntroLatch.current?.next === 'bro',
+    blocked: revealBlocked,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    leaveCounts: (visit, now, _row, next) => broRevealLeaveCounts(visit, now, next),
+    mayClaim: () => true,
+    // Turned on meanwhile (Settings, another window): nothing to offer.
+    holds: () => settingsRef.current?.bro?.on !== true,
+  });
   // The List view's choice, registered with the line (approval "inbox-one-time-dialogs", the change; reveal.ts
   // `useLineReveal`): armed while it is `reveal.next`, or in `reveal.ahead` (it goes at its own moment, ahead of the
   // other offers), back on the list with no thread open, once the list is taller than the screen, on Smart groups.
@@ -4731,7 +4764,7 @@ function Inbox() {
   // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
   // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
   // claim runs the already-starred check, then the corner card shows.
-  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, listViewReveal.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, listViewReveal.stage].some((stage) => stage === 'open' || stage === 'claimed');
   const starReveal = useStarReveal({
     due: snoozeIntroLatch.current?.aside.includes('star') === true,
     listLoaded: snoozeIntroLatch.current !== null,
@@ -4752,7 +4785,9 @@ function Inbox() {
           ? () => inboxApi.saveBoard(true).then((saved) => saved.board)
           : feature === 'steps'
             ? () => inboxApi.saveSteps(true).then((saved) => saved.steps)
-            : () =>
+            : feature === 'bro'
+              ? () => inboxApi.saveBro(true).then((saved) => saved.bro)
+              : () =>
                 inboxApi.saveCodeReview(true).then((saved) => {
                   // As Settings' switch: the "/" list gains the review skills.
                   reloadSkillCatalog();
@@ -4809,6 +4844,8 @@ function Inbox() {
     boardReveal.stage !== 'claimed' &&
     stepsReveal.stage !== 'open' &&
     stepsReveal.stage !== 'claimed' &&
+    broReveal.stage !== 'open' &&
+    broReveal.stage !== 'claimed' &&
     starReveal.stage !== 'open' &&
     starReveal.stage !== 'claimed' &&
     listViewReveal.stage !== 'open' &&
@@ -5819,6 +5856,7 @@ function Inbox() {
         landOnExperimental={route.experimental === true}
         onToggleBoard={(next) => void toggleBoard(next)}
         onToggleSteps={(next) => void toggleSteps(next)}
+        onToggleBro={(next) => void toggleBro(next)}
         onToggleCodeReview={(next) => void toggleCodeReview(next)}
         onToggleShape={(next) => void toggleShape(next)}
         onToggleSystem={(next) => void toggleSystem(next)}
@@ -6642,6 +6680,17 @@ function Inbox() {
             stepsReveal.close();
           }}
           onTurnOn={() => turnOnFromReveal('steps', stepsReveal.close)}
+        />
+      )}
+      {broReveal.stage === 'open' && (
+        <BroIntro
+          phone={phone}
+          onClose={() => {
+            // Not now (Escape, a click outside): the line's next dialog waits three days.
+            void inboxApi.revealNotNow('bro');
+            broReveal.close();
+          }}
+          onTurnOn={() => turnOnFromReveal('bro', broReveal.close)}
         />
       )}
       {starReveal.stage === 'open' && (

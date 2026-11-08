@@ -5,9 +5,8 @@
  * A machine keeps what config.json keeps for the line (`inboxReveals`) and changes it only through the module's own
  * helpers, as packages/server/inbox.ts does: a page load is seen (`revealSeeLoad`), the page arms `revealNext`, the
  * agent note asks `revealLineFree("setup")`, a claim stamps (`revealStamp`), a Not now stamps (`revealStampNotNow`).
- * Each user brings their own loads, reads and moments (what the page would see). List view is in the real queue; Bro
- * mode is not built here: it is registered in a test table the way its branch registers (`heavyUse`), so the line's
- * seam is what is tested.
+ * Each user brings their own loads, reads and moments (what the page would see). Bro mode and List view are in the
+ * real queue, so the real table is what is tested.
  *
  * What regresses: a heavy user's dialogs leaving their approved days (setup on day 0, then one a day from day 2: the
  * owner, 2026-11-06, "one day apart, three after a Not now: a heavy user sees all five by about day 5"); List
@@ -50,15 +49,14 @@ const DAY = 24 * HOUR;
 /** Day 0, local time: the person's first use (or the update) is that morning. */
 const at = (day: number, hour: number) => new Date(2026, 10, 2 + day, hour, 0, 0, 0);
 
-const BRO = "bro" as RevealId;
+const BRO: RevealId = "bro";
 const LIST_VIEW: RevealId = "list_view";
-/** The queue with Bro mode registered at its place, as #2693 adds it (List view, #2716, is in the real queue). */
-const AFTER_SNOOZE = INBOX_REVEALS.findIndex((entry) => entry.id === "snooze") + 1;
-const TABLE: readonly RevealEntry[] = [
-  ...INBOX_REVEALS.slice(0, AFTER_SNOOZE),
-  { id: BRO, kind: "offer", tenureMs: 2 * DAY, minThreads: 0, heavyUse: true, enabled: true },
-  ...INBOX_REVEALS.slice(AFTER_SNOOZE),
-];
+const TABLE: readonly RevealEntry[] = INBOX_REVEALS;
+
+test("Bro mode is registered in the real queue as the approval places it: right after Snooze, an offer for heavy use, never on day 0 or 1", () => {
+  const after = INBOX_REVEALS.findIndex((entry) => entry.id === "snooze") + 1;
+  expect(INBOX_REVEALS[after]).toEqual({ id: BRO, kind: "offer", tenureMs: 2 * DAY, minThreads: 0, heavyUse: true, enabled: true });
+});
 
 test("List view is registered in the real queue as the approval places it: last, an offer, ahead at its moment", () => {
   expect(INBOX_REVEALS.at(-1)).toEqual({ id: LIST_VIEW, kind: "offer", tenureMs: 2 * DAY, minThreads: 15, ahead: true, enabled: true });
