@@ -2859,10 +2859,18 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline";
  * The `supersedes` field's example (`e.g. ["msg_…/q-…"]`, after a session's
  * unquoted ids broke its calls): +48 bytes measured from the entry, about +13
  * tokens, Board on or off; inside the 5%, so the constants stay.
+ * A thread's PRs (approval "inbox-pr-binding": the `thread_pulls` action, its
+ * `add` and `remove` fields, send_message's `pulls`, "its PRs" in read_thread's
+ * `thread_id`; no line in the description, which stays 1,938 characters):
+ * +932 bytes for the action and the field, measured on Pi's request shape from
+ * a scratch Inbox's tools/list, with and without them. The entry measured the
+ * same way, with Pi's wrapper: 11,293 bytes (tokens +255 at the entry's ratio,
+ * plus the supersedes example's 13, so 3,058). Board on: 13,268 bytes, 3,634
+ * tokens the same way.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 10248, tokens: 2790 };
+const INBOX_TOOL_COST_NOW = { bytes: 11293, tokens: 3058 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 12223, tokens: 3366 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 13268, tokens: 3634 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval

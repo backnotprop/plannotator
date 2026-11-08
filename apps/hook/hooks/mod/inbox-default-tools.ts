@@ -71,6 +71,13 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           "items": {
             "type": "string"
           }
+        },
+        "pulls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Pull/merge requests this thread is responsible for: added to the thread, so the person sees their live state on its row. You own your thread's list. Full refs, any repo: `owner/repo#123`, `group/sub/project!45`, or the URL. Pass it when you open or take on one for this work, not on later messages. Merged ones stay. To remove one that is no longer part of the work, or add without a message: action thread_pulls."
         }
       },
       "required": [
@@ -237,6 +244,50 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
       "required": [
         "thread_id",
         "until"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "thread_pulls",
+    "description": "A thread's pull/merge requests: `add`, `remove`, or neither to list them with live state and who added each. The thread's agent owns the list; the person can change it too.",
+    "inputSchema": {
+      "type": "object",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "thread_id": {
+          "type": "string",
+          "description": "Thread or message id."
+        },
+        "add": {
+          "description": "PRs to add, any number in one call (a whole stack, or related ones), as send_message's `pulls`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "remove": {
+          "description": "PRs to take off: no longer part of this work (moved elsewhere, abandoned). Not merged ones; they stay. [\"all\"] takes off every one.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "project_path": {
+          "type": "string"
+        },
+        "agent_session": {
+          "type": "string"
+        },
+        "agent_name": {
+          "type": "string"
+        },
+        "agent_host": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id"
       ],
       "additionalProperties": false
     }
