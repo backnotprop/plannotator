@@ -217,6 +217,19 @@ function clearOfLines(g: Awaited<ReturnType<typeof geometry>>): Box {
 const line = (page: Page, file: string, n: number, type = 'change-addition') =>
   page.locator(`[data-guide-file-shell="${file}"]`).first().locator(`[data-line-type="${type}"][data-column-number="${n}"]`).first();
 
+/**
+ * A line the diff may not have drawn yet (a mounted diff draws only the rows near the viewport): scrolled to as a
+ * person does, by the wheel, `by` pixels a step, until the diff draws it; then placed.
+ */
+async function bringLine(page: Page, file: string, n: number, by: number, block: ScrollLogicalPosition = 'center'): Promise<void> {
+  await page.mouse.move(1000, 500);
+  for (let i = 0; i < 40 && !(await line(page, file, n).count()); i += 1) {
+    await page.mouse.wheel(0, by);
+    await page.waitForTimeout(100);
+  }
+  await line(page, file, n).evaluate((el, at) => el.scrollIntoView({ block: at }), block);
+}
+
 async function select(page: Page, file: string, from: number, to: number, type = 'change-addition'): Promise<void> {
   await expect(line(page, file, from, type)).toBeVisible({ timeout: 30_000 });
   await line(page, file, from, type).click();
@@ -602,8 +615,9 @@ test('two files with the same line numbers: scrolled to the next file, the lines
   await expect(inFile(NEXT), 'its numbers painted on the next file').toHaveCount(0);
   await expect(selpop(page)).toBeHidden();
 
-  // Back: the same lines, the bar under them, and Comment goes to this file.
-  await line(page, LONG, 1).evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  // Back, by the wheel (the first file's top rows are no longer drawn): the same lines, the bar under them, and
+  // Comment goes to this file.
+  await bringLine(page, LONG, 1, -300);
   await settled(page);
   const g = await geometry(page);
   const box = clearOfLines(g);
@@ -626,15 +640,7 @@ test('its lines gone: the bar hides, the header is free, the + rule lifts, and i
   await line(page, LONG, 7).evaluate((el) => el.scrollIntoView({ block: 'center' }));
   await page.waitForTimeout(300);
   await select(page, LONG, 7, 9);
-  // A line the diff may not have drawn yet: scrolled to as a person does, then placed.
-  const bring = async (n: number, by: number, block: ScrollLogicalPosition = 'center') => {
-    await page.mouse.move(1000, 500);
-    for (let i = 0; i < 40 && !(await line(page, LONG, n).count()); i += 1) {
-      await page.mouse.wheel(0, by);
-      await page.waitForTimeout(100);
-    }
-    await line(page, LONG, n).evaluate((el, at) => el.scrollIntoView({ block: at }), block);
-  };
+  const bring = (n: number, by: number, block: ScrollLogicalPosition = 'center') => bringLine(page, LONG, n, by, block);
   const headerFree = async () => {
     await expect(selpop(page)).toBeHidden();
     await expect(bar(page)).toHaveCount(0);
