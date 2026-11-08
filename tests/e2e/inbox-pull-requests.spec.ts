@@ -1210,9 +1210,15 @@ async function stubbedReview(browser: Browser, width: number, patch: string, ans
   return { context, page };
 }
 
-/** The details over the code, from the bar or, on a phone, the title's row. */
+/**
+ * The way to the details: the bar's PR title on a computer (the owner's "title only", PullDetails.tsx
+ * `DETAILS_BUTTON`; it carries the checks' dot and the comments' count), the title's row on a phone.
+ */
+const detailsWayIn = (review: Locator) => review.locator('[data-pull-details-title], [data-pull-details-button]');
+
+/** The details over the code, from the bar's title or, on a phone, the title's row. */
 async function openDetails(review: Locator): Promise<Locator> {
-  await review.locator('[data-pull-details-button]').click();
+  await detailsWayIn(review).click();
   const panel = review.locator('[data-pull-details]');
   await expect(panel).toBeVisible();
   return panel;
@@ -1270,7 +1276,7 @@ test("the details as real gh answers them: a running check, a template for a bod
   const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, {}, 'layer', pull);
   try {
     const review = page.locator('[data-pull-review]');
-    const button = review.locator('[data-pull-details-button]');
+    const button = detailsWayIn(review);
     await expect(button.locator('[data-pull-details-checks]')).toHaveAttribute('data-pull-details-checks', 'pending', { timeout: 30_000 });
     const panel = await openDetails(review);
     await expect(panel.locator('[data-pull-details-check="pending"]')).toHaveCount(1);
@@ -1342,8 +1348,8 @@ test('the details, from the forge: who stands where, the checks, every comment; 
   const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF);
   try {
     const review = page.locator('[data-pull-review]');
-    const button = review.locator('[data-pull-details-button]');
-    // The bar's control says how the checks stand and how many people's comments, bots not counted.
+    const button = detailsWayIn(review);
+    // The bar's title says how the checks stand and how many people's comments, bots not counted.
     await expect(button.locator('[data-pull-details-checks]')).toHaveAttribute('data-pull-details-checks', 'fail');
     await expect(button.locator('[data-pull-details-comments]')).toHaveText('3');
     const panel = await openDetails(review);
