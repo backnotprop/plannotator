@@ -959,6 +959,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
                 renderHeadActions={renderHeadActions}
                 highlight={highlight}
                 threadHeading
+                signComments={isReview}
                 hostDiffControls
                 {...(collapseAll ? { collapseAll } : {})}
               />

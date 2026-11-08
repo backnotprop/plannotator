@@ -773,14 +773,14 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 /* main list */
 .ib-main { background: var(--ib-main-bg); display: flex; flex: 1; min-width: 0; height: 100%; padding: var(--ib-gutter); gap: var(--ib-gutter); }
 /* Each pane is a card on the ground: the list, a thread, a file beside its thread, Settings, Drafts, What's new. */
-.ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage) { border-radius: var(--ib-pane-r); box-shadow: var(--ib-pane-shadow); min-height: 0; }
+.ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage, .ib-prreview) { border-radius: var(--ib-pane-r); box-shadow: var(--ib-pane-shadow); min-height: 0; }
 /* Each takes the card's colour under the panes switch. Off, today's: the thread pane its own card, a file the
    window's background, and the rest none of their own (an opaque scroller draws its text differently). */
 .ib-main > :is(.ib-listcol, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage) { background: var(--ib-pane-bg-s, transparent); }
 .ib-main > .ib-view { background: var(--ib-pane-bg-s, var(--background)); }
 /* The list keeps its resize edge in the gutter beside it (never clipped); its scroll box follows the card's corners instead.
    Settings, Drafts and What's new scroll themselves, which clips them to their corners already. */
-.ib-main > :is(.ib-pane, .ib-view:not(.ib-full)) { overflow: var(--ib-clip-s, visible); }
+.ib-main > :is(.ib-pane, .ib-view:not(.ib-full), .ib-prreview) { overflow: var(--ib-clip-s, visible); }
 .ib-main > .ib-listcol > .ib-lbody { border-radius: 0 0 var(--ib-pane-r) var(--ib-pane-r); }
 .ib-listcol { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .ib-listcol.ib-narrow { flex: none; width: 380px; border-right: 1px solid var(--ib-pane-line); }
@@ -3149,7 +3149,7 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   :root[data-ib-keyboard-pin]:has(.pn-inbox) { height: var(--ib-vvh, 100%); overflow: hidden; overscroll-behavior: none; }
   .ib-main { padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); gap: 0; position: relative; overflow: hidden; }
   /* One screen at a time: the pane is the screen, edge to edge, with no card around it. */
-  .ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage) { border-radius: 0; box-shadow: none; }
+  .ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage, .ib-prreview) { border-radius: 0; box-shadow: none; }
   .ib-main > .ib-listcol > .ib-lbody { border-radius: 0; }
   body:has(.pn-inbox) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select) { font-size: 16px !important; }
   .ib-lbody, .ib-pbody, .ib-spage, .ib-dpage, .ib-docscroll, .ib-gbody, .ib-wn { overscroll-behavior: contain; }
@@ -8441,7 +8441,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 
 /* "Review layer by layer": phase 1's review frame with the layers strip under its header and a foot. One title, the
    header's (approval "pr-page-review-with-agent"): the reader draws none (GuideReader `bare`), the strip numbers. */
-.ib-viewer.ib-prreview { grid-template-rows: 46px auto minmax(0, 1fr) auto; }
+.ib-viewer.ib-prreview { grid-template-rows: 46px minmax(0, 1fr); }
+.ib-prreview .ib-rsplit { grid-template-rows: auto minmax(0, 1fr) auto; }
 /* A PR layer has no curated chapters: the reader's one "Every changed file" card would only repeat the rail's
    files, so its narrative column goes and the diffs take the width (the rail, as phase 1's All files, navigates). */
 .ib-prreview [data-guide-section-grid] { display: block; }
@@ -8449,18 +8450,67 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prr-fn { display: inline-flex; align-items: center; gap: 7px; min-width: 0; overflow: hidden; }
 .ib-prr-fn bdi { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-prr-num { color: var(--muted-foreground); font-weight: 500; }
-.ib-prr-strip { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 8px 14px; background: var(--card); border-bottom: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); }
-.ib-prr-layers { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
-.ib-prr-lstep { display: inline-flex; align-items: center; gap: 2px; flex: none; color: var(--muted-foreground); }
-.pn-inbox .ib-prr-layer { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px; border-radius: 7px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: nowrap; }
-.pn-inbox .ib-prr-layer:not(:disabled):hover { background: var(--ib-hover-s, var(--muted)); color: var(--foreground); }
-.pn-inbox .ib-prr-layer[aria-current] { background: color-mix(in oklab, var(--primary) 10%, var(--card)); color: var(--foreground); font-weight: 600; }
-.pn-inbox .ib-prr-layer:disabled { cursor: default; }
-.pn-inbox .ib-prr-layer:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-.ib-prr-scope { flex: none; }
 .ib-prr-note { margin: 14px 18px 0; padding: 10px 12px; border-radius: 8px; background: var(--muted); color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
-.ib-prr-foot { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 10px 16px; background: var(--card); border-top: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
-.ib-prr-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The flat PR view: the code review app's layering, measured against it on one diff (the owner: "Plannotator is the
+   baseline you have to meet"). The review area is --background; a file is its header and code, edge to edge, with no
+   card, and a hairline at the seam (the approved mock's, diffshub's). The bars are the review app's half-card. */
+.ib-prreview .ib-gbody > .w-full { padding-inline: 0; padding-bottom: 0; }
+.ib-prreview [data-guide-section] { border: 0; border-radius: 0; background: transparent; overflow: visible; }
+.ib-prreview [data-guide-section-grid] > :not([data-guide-section-narrative]) { background: transparent; padding: 0; }
+.ib-prreview [data-guide-section-grid] > :not([data-guide-section-narrative]) > * { margin: 0; }
+.ib-prreview [data-guide-file-shell] { scroll-margin-top: 0; }
+.ib-prreview [data-guide-code-view-mounted] { border: 0; border-radius: 0; background: transparent; }
+/* A file's box keeps 8 px of its own above the header and 10 below the code (GuideFileCard's room): between files the
+   next one rides up over them, so the hairline is the only thing between one file's code and the next one's header. */
+.ib-prreview [data-guide-file-shell] + [data-guide-file-shell] { position: relative; margin-top: -17px; }
+.ib-prreview [data-guide-file-shell] + [data-guide-file-shell]::before { content: ''; position: absolute; inset: 7px 0 auto; height: 1px; background: color-mix(in oklch, var(--border) 50%, transparent); }
+/* From REVIEW_FOLD_PANEL_BELOW up the comments are a column beside the diff: the review app's sidebar fill (bg-card/30). Folded, the sheet stays a card over the diff. */
+.ib-prreview:not(.ib-fold) :is(.ib-gpanel, .ib-gpanel > [data-annotation-panel]) { background: color-mix(in oklab, var(--card) 30%, var(--background)); }
+/* What else sits in the pane keeps a row's margin. */
+.ib-prreview .ib-gbody > .w-full > div:has(> [data-guide-global-comment-add]) { margin-inline: 16px; }
+.ib-prreview [data-guide-global-comments] { margin-inline: 16px; }
+.ib-prreview .ib-prr-posted { margin-inline: 16px; }
+.ib-prreview .ib-gerror { padding-inline: 16px; }
+.ib-prreview .ib-prr-note { margin: 10px 16px 0; padding: 0; border-radius: 0; background: none; overflow-wrap: anywhere; }
+/* Every width but a phone's, from the review app: a 37 px bar over the rail and the diff's column; the rail runs to the
+   window's foot; the column opens on a 33 px --muted row (its tab row) holding the layers as tabs and the controls; the
+   first file is 16 px under it. The foot is the Inbox's own: the bar's recipe and height. */
+/* This page covers the sidebar, which stays open underneath: its edge would catch the rail's right side and drag unseen. */
+.ib-viewer.ib-prreview.ib-prr-wide { grid-template-rows: 37px minmax(0, 1fr); }
+.ib-prr-wide .ib-gbody > .w-full { padding-top: 8px; }
+.ib-prr-wide :is(.ib-vhead, .ib-rrail) { border-color: color-mix(in oklch, var(--border) 50%, transparent); }
+.ib-prr-wide .ib-vhead { padding-right: 16px; }
+.pn-inbox .ib-prr-wide .ib-vhead .ib-btn { height: 28px; }
+.pn-inbox .ib-prr-wide .ib-vhead :is(.ib-seg, .ib-gtab) { height: 29px; box-sizing: border-box; border: 0; background: var(--muted); align-items: stretch; }
+.pn-inbox .ib-prr-wide .ib-vhead .ib-seg-o { height: auto; padding: 0 8px; font-size: var(--ib-fs-13, 13px); font-weight: 400; }
+.pn-inbox .ib-prr-wide .ib-vhead .ib-seg-o[data-on] { background: var(--background); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1); }
+/* More layers than fit: the edges fade as on a phone, the layers scroll under them. */
+/* The controls' row is short (PullReview's NOTE_ON_STRIP_FROM): the note leads the foot. */
+.ib-prr-controls { display: flex; flex: none; align-items: center; gap: 8px; }
+.ib-prr-controls [data-guide-global-comment-add] { padding-block: 4px; }
+.ib-prr-wide:not(.ib-railfold) .ib-rrail { grid-column: 1; grid-row: 1 / -1; }
+/* The rail's rows, from the review app's sidebar (review-editor's index.css, which this window does not load): rows 28
+   px and touching, sans 13/500, its 14 px circle, its letter, its folder rows and its two +/- columns. */
+.ib-prreview .ib-rrail { --ib-rail-fill: color-mix(in oklab, var(--foreground) 6%, transparent); --ib-rail-quiet: color-mix(in oklab, var(--muted-foreground) 85%, var(--background)); padding: 8px 8px 12px; gap: 0; }
+.ib-prreview .ib-rrail .ib-rv-list { gap: 0; }
+.pn-inbox .ib-prreview .ib-rrail .file-tree-item { width: 100%; min-height: 28px; padding-block: 0; padding-right: 8px; gap: 6px; border-radius: 6px; font-size: var(--ib-fs-13, 13px); font-weight: 500; text-align: left; color: var(--muted-foreground); }
+.pn-inbox .ib-prreview .ib-rrail .file-tree-item:hover { background: var(--ib-rail-fill); color: var(--foreground); }
+.pn-inbox .ib-prreview .ib-rrail .file-tree-item:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-prr-wide:not(.ib-railfold) .ib-gbody { grid-column: 2; grid-row: 2; }
+.ib-prr-wide:not(.ib-railfold):not(.ib-fold) .ib-gpanel { grid-column: 3; grid-row: 1 / -1; }
+/* The rail's Changes | All files (pulls/RailScope.tsx): the review app's pills over its fills. */
+.ib-prreview .ib-rrail { --sidebar-fill: color-mix(in oklab, var(--foreground) 6%, transparent); --sidebar-fill-strong: color-mix(in oklab, var(--foreground) 9%, transparent); --sidebar-text-tertiary: color-mix(in oklab, var(--muted-foreground) 85%, var(--background)); }
+.ib-prp-fileshead:has(> .ib-prp-scope) { padding-left: 0; }
+/* All files (guide/PullRepoParts.tsx): the review app's tree, its row rules from review-editor's index.css (which
+   this window does not load). */
+.ib-prp-tree .review-file-row-main { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.ib-prp-tree .review-change-letter { display: flex; flex-shrink: 0; margin: 0 -2px; }
+.ib-prp-tree .review-file-row-main > .truncate ~ * { margin-left: -2px; }
+.pn-inbox .ib-prreview .ib-prp-tree .file-tree-item.active { background: var(--sidebar-fill-strong); color: var(--foreground); }
+/* A file the PR does not change, over the diff, which keeps its place under it for the way back. */
+.ib-gbody[data-repo-open] { overflow: hidden; }
+.ib-gbody > .ib-prp-repofile { position: sticky; top: 0; z-index: 3; height: 100%; background: var(--background); }
+.ib-gbody[data-repo-open] > :not(.ib-prp-repofile) { visibility: hidden; }
 
 /* Fixes from the worst-case stress test (break-ui on #2590). */
 /* A long title gives way in the review header (cut with "…", whole in its tooltip): the back label, the comments
@@ -8476,15 +8526,17 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 @media (max-width: 1100px) {
   .pn-inbox .ib-prreview .ib-vhead .ib-back { font-size: 0; gap: 0; padding-inline: 8px; }
 }
-/* A review under 900px wide (PullReview's RAIL_FOLD_BELOW): the file rail folds into the Files picker over the diff,
-   as on a phone, and the diff takes the width. */
-.ib-review.ib-prreview.ib-railfold .ib-rsplit { grid-template-columns: minmax(0, 1fr); }
+/* A review under RAIL_FOLD_BELOW: the rail folds, the diff takes the width, and the header's Files button opens the
+   same tree as a sheet over the diff. */
+.ib-review.ib-prreview.ib-railfold .ib-rsplit { grid-template-columns: minmax(0, 1fr); position: relative; }
 .ib-prreview.ib-railfold .ib-rrail { display: none; }
-/* Past the phone layout (which keeps its own 44px picker). */
-@media (min-width: 768px) {
-  .ib-prreview.ib-railfold .ib-rv-phonebar { display: grid; gap: 8px; padding: 10px 16px 0; }
-  .pn-inbox .ib-prreview.ib-railfold .ib-rv-jump { height: 34px; width: 100%; max-width: 520px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); }
-}
+/* A folded sheet covers the diff and nothing else: its containing block is the diff's grid area, so the layers, the
+   scope, Split | Unified, Global comment and Next layer stay on screen and in reach. A phone's Comments sheet takes
+   the whole window instead (the phone media query's .ib-review rules); the Files sheet still covers only the diff. */
+.ib-review.ib-prreview.ib-fold.ib-panel-open .ib-gpanel { grid-column: -2 / -1; grid-row: 2 / 3; padding-bottom: 0; clip-path: inset(0 0 0 -64px); }
+.pn-inbox .ib-prreview .ib-vhead .ib-vfiles { flex: none; white-space: nowrap; }
+/* Sidebar and page apart, on this page only (the owner on the 800 px picture): the review app's rows of layers sit on
+   --muted, so the Inbox's sidebar takes that fill over its own ground, and its line the page's half strength. */
 /* What the list could not read, or read only in part: a quiet line over the groups. */
 .ib-pr-notices { display: grid; gap: 6px; margin: 4px 2px 10px; }
 .ib-pr-notice { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--muted); color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; overflow-wrap: anywhere; }
@@ -8505,9 +8557,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-pr-magent > .ib-mk > svg, .ib-pr-magent > .ib-mk > img { width: var(--ib-mark-16-g); height: var(--ib-mark-16-g); }
 /* A branch named in a layer's line can be long and unbroken. */
 .ib-pr-basew { min-width: 0; overflow-wrap: anywhere; }
-/* The review rail grouped by folder (names repeat in deep folders): a quiet heading over each group. */
-.ib-rv-folder { padding: 8px 8px 2px; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-11-5, 11.5px); color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
-.ib-rv-folder:first-child { padding-top: 0; }
 
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-prlist { width: 100%; }
@@ -8541,7 +8590,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-pr-lrow > .ib-pr-pill { margin-left: 32px; }
   .ib-pr-lgo { flex-basis: calc(100% - 32px); margin-left: 32px; min-height: 24px; }
   /* The layer strip scrolls with no scrollbar: its edges fade, so a layer past them reads as more to scroll to. */
-  .ib-prr-layers { padding-inline: 10px; -webkit-mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent); mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent); }
   .ib-pr-replyfoot { padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); }
   .pn-inbox .ib-pr-replybtn { height: 44px; }
   .pn-inbox .ib-pr-replyin { font-size: var(--ib-fs-16-in, 16px); }
@@ -8549,13 +8597,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-pr-foot { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
   .pn-inbox .ib-pr-refresh { min-width: 44px; min-height: 44px; }
   .pn-inbox .ib-pr-foldbtn { height: 44px; }
-  .ib-prr-strip { flex-wrap: wrap; padding: 6px 8px; }
-  .ib-prr-scope { flex: 1 1 100%; }
-  .ib-prr-scope .ib-seg-o { flex: 1; justify-content: center; height: 36px; }
-  .pn-inbox .ib-prr-layer { height: 40px; }
-  .ib-prr-foot { padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
-  .ib-prr-where { white-space: normal; }
-  .pn-inbox .ib-prr-foot .ib-btn { height: 44px; }
 }
 @media (forced-colors: active) {
   .ib-pr-pill, .pn-inbox .ib-pr-chip { border: 1px solid CanvasText; }
@@ -8777,6 +8818,221 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* The Inbox's own neutral badge (.ib-badge.ib-b-mut), a size down in the preview; a column's count after its name. */
 .pn-inbox .ib-tagpeek .ib-badge.ib-tagpeek-badge { height: 20px; padding: 0 6px; gap: 0; font-size: var(--ib-fs-12, 12px); font-weight: 500; border-color: color-mix(in oklch, var(--foreground) 18%, transparent); }
 .ib-tagpeek .ib-tagpeek-n { color: var(--foreground); font-variant-numeric: tabular-nums; margin-left: 2px; }
+
+/* Split | Unified as marks: #2679's rules, as they are. */
+.pn-inbox .ib-gtab-marks .ib-seg-o { padding: 0 5px; }
+.pn-inbox .ib-gtab-marks .ib-seg-o[data-on] { background: color-mix(in oklch, var(--foreground) 20%, var(--card)); }
+:root.light .pn-inbox .ib-gtab-marks .ib-seg-o[data-on], .ib-lightscope.light .ib-gtab-marks .ib-seg-o[data-on] { background: var(--card); }
+.ib-gtab-marks .ib-seg-o:not([data-on]) .ib-mark { opacity: 0.75; }
+.ib-gtab-marks .ib-seg-o:hover .ib-mark { opacity: 1; }
+.ib-gtab-marks .ib-seg-o[data-on] .ib-mark-old { fill: currentColor; fill-opacity: 0.1; }
+.ib-gtab-marks .ib-seg-o[data-on] .ib-mark-new { fill: currentColor; fill-opacity: 0.24; }
+
+/* The PR page (approval "inbox-pr-page"): the bar and the rail are one surface, the code a sheet on it. Space and
+   background, no rules. It sits beside the sidebar, as the other pages do, rather than over it. */
+.ib-viewer.ib-prreview.ib-prr-wide { position: relative; inset: auto; flex: 1 1 auto; min-width: 0; height: 100%; }
+.ib-prreview .ib-vhead { gap: 8px; }
+.ib-prreview .ib-prr-controls [data-guide-global-comment-add] > span { display: none; }
+.ib-prreview .ib-prr-controls [data-guide-global-comment-add] { padding-inline: 8px; height: 29px; }
+.ib-prreview .ib-vhead .ib-prr-note { flex: none; max-width: 160px; margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ib-prreview .ib-rrail { padding: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.ib-prp-title { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
+.ib-prp-of { flex: none; white-space: nowrap; }
+.ib-prp-num { flex: none; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.pn-inbox .ib-prp-row { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; min-height: 28px; padding: 0 8px; border-radius: 6px; font-size: var(--ib-fs-13, 13px); color: var(--foreground); text-align: left; }
+.pn-inbox .ib-prp-row:not(:disabled):hover { background: color-mix(in oklab, var(--foreground) 6%, transparent); }
+.pn-inbox .ib-prp-row[aria-checked="true"], .pn-inbox .ib-prp-row.ib-on { background: color-mix(in oklab, var(--foreground) 9%, transparent); font-weight: 500; }
+.pn-inbox .ib-prp-row:disabled { color: var(--muted-foreground); cursor: default; }
+.ib-prp-rowtitle { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ib-prp-counts { flex: none; font-size: var(--ib-fs-11, 11px); font-variant-numeric: tabular-nums; }
+.ib-prp-counts .additions { color: var(--success, #0a7f33); }
+.ib-prp-counts .deletions { color: var(--destructive); }
+/* The phone: one bar of one height, one row under it at most. */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-prreview .ib-vhead .ib-btn.ib-sm { min-width: 0; height: 30px; position: relative; padding: 0 9px; font-size: var(--ib-fs-13, 13px); }
+  .pn-inbox .ib-prreview .ib-vhead .ib-btn.ib-sm::after { content: ""; position: absolute; inset: -7px 0; }
+  .ib-prreview .ib-vhead .ib-fn { flex: 1 1 auto; min-width: 0; }
+  .ib-prreview .ib-rsplit { position: relative; grid-template-rows: auto minmax(0, 1fr) auto; }
+  .ib-prreview .ib-gbody { grid-row: 2; }
+  .ib-prp-row2 { grid-row: 1; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 12px; border-bottom: 1px solid color-mix(in oklab, var(--foreground) 9%, transparent); }
+  .pn-inbox .ib-prp-jump::after { content: ""; position: absolute; inset: -7px 0; }
+  .pn-inbox .ib-prp-jump { position: relative; flex: none; display: inline-flex; align-items: center; gap: 6px; height: 30px; margin-left: auto; padding: 0 8px; border-radius: 7px; background: var(--muted); font-size: var(--ib-fs-13, 13px); color: var(--foreground); }
+  .ib-prreview.ib-railfold.ib-files-open .ib-rrail { display: flex; position: absolute; top: 0; left: 0; right: 0; bottom: 0; grid-column: 1 / 2; grid-row: 2 / 4; z-index: 6; background: var(--background); }
+  .ib-prreview .ib-vhead .ib-sp { display: block; flex: 1 1 auto; }
+  .pn-inbox .ib-prreview .ib-vhead [data-decision-primary], .pn-inbox .ib-prreview .ib-vhead [data-decision-caret] { height: 30px; }
+  .pn-inbox .ib-prreview .ib-vhead .ib-rv-dest { height: 30px; box-sizing: border-box; align-items: stretch; }
+  .pn-inbox .ib-prreview .ib-vhead .ib-rv-dest .ib-seg-o { height: auto; min-height: 0; }
+  .ib-prreview .ib-prp-sheetctl .ib-seg, .ib-prreview .ib-prp-sheetctl [role="radiogroup"] { display: none; }
+  .ib-prreview .ib-prp-sheetctl [data-guide-global-comment-add] > span { display: inline; }
+}
+
+/* Thread's arrow, the guided header's way. */
+.pn-inbox .ib-prreview .ib-vhead .ib-back { gap: 0; padding-inline: 8px; }
+.ib-prreview .ib-vhead .ib-vfiles { gap: 6px; font-variant-numeric: tabular-nums; }
+.ib-prreview .ib-gbody > .w-full { padding-top: 6px; }
+.ib-prreview { --ib-prp-page: var(--background); }
+/* Where the verdict goes: the mark lit is the one it goes to, in its colour; the other sits grey and quiet. */
+.pn-inbox .ib-prreview .ib-rv-dest .ib-seg-o { padding: 0 7px; gap: 0; }
+.ib-prreview .ib-rv-dest .ib-seg-o:not([data-on]) :is(.ib-rv-dest-mark, .ib-atile) { opacity: 0.45; filter: grayscale(1); }
+.ib-prreview .ib-rv-dest .ib-seg-o:not([data-on]):hover :is(.ib-rv-dest-mark, .ib-atile) { opacity: 0.8; filter: none; }
+.ib-rv-dest-lone { display: inline-flex; flex: none; align-items: center; padding: 0 3px; }
+.ib-rv-dest-lone .ib-rv-dest-mark { width: 15px; height: 15px; }
+.ib-rv-dest-lone .ib-atile { width: 16px; height: 16px; background: transparent; }
+.ib-prreview .ib-prp-row2 .ib-prr-note { flex: none; margin: 0; white-space: nowrap; }
+/* Every control in the bar and the phone's row one height. */
+.ib-prreview { --ib-prp-h: 28px; }
+.pn-inbox .ib-prreview .ib-vhead .ib-rv-decide button { height: var(--ib-prp-h); }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-prreview { --ib-prp-h: 30px; }
+  .pn-inbox .ib-prreview :is(.ib-vhead, .ib-prp-row2) :is(.ib-iconbtn, .ib-back) { position: relative; min-width: 30px; }
+  .pn-inbox .ib-prreview :is(.ib-vhead, .ib-prp-row2) :is(.ib-iconbtn, .ib-back)::after { content: ""; position: absolute; inset: -7px 0; }
+}
+
+.ib-prreview { --ib-prp-chrome: color-mix(in oklab, var(--muted) 42%, var(--background)); --ib-prp-file: color-mix(in oklab, var(--foreground) 4.5%, var(--background)); --ib-prp-page: var(--ib-prp-file); --ib-prp-fill: color-mix(in oklab, var(--foreground) 7%, transparent); background: var(--ib-prp-chrome); }
+/* The bar and the rail are one surface; the code is a sheet on it. */
+.ib-prreview .ib-vhead, .ib-prr-wide :is(.ib-vhead, .ib-rrail) { background: var(--ib-prp-chrome); border-color: transparent; border-bottom: 0; }
+.ib-prreview .ib-rsplit { background: var(--ib-prp-chrome); position: relative; }
+.ib-prreview .ib-rrail { background: transparent; border: 0; gap: 0; }
+.ib-prreview:not(.ib-fold) :is(.ib-gpanel, .ib-gpanel > [data-annotation-panel]) { background: var(--ib-prp-chrome); border: 0; }
+.ib-prreview .ib-gbody { background: var(--background); }
+/* One surface, as the code review app (approval pr-view-one-surface, follow-up): every width but a phone's, the rail
+   and the code share the page's colour with a hairline between them, no sheet and no corner; the bar is the one strip
+   that stands out, a hairline under it. The comments column keeps its fill. */
+.ib-prr-wide .ib-rsplit { background: var(--background); }
+.ib-prr-wide .ib-vhead { border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
+.ib-prr-wide:not(.ib-railfold) .ib-rrail { border-right: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
+.ib-prr-wide .ib-gbody { border-radius: 0; }
+.ib-review.ib-prreview.ib-prr-wide:not(.ib-railfold) .ib-rsplit { grid-template-columns: var(--ib-rail-w, 280px) minmax(0, 1fr) 300px; }
+.ib-review.ib-prreview.ib-prr-wide.ib-fold:not(.ib-railfold) .ib-rsplit { grid-template-columns: var(--ib-rail-w, 280px) minmax(0, 1fr); }
+.ib-prp-handle { position: absolute; top: 0; bottom: 0; left: calc(var(--ib-rail-w, 280px) - 4px); width: 8px; z-index: 4; cursor: col-resize; touch-action: none; }
+.ib-prp-handle::after { content: ""; position: absolute; top: 12px; bottom: 12px; left: 3px; width: 2px; border-radius: 1px; background: transparent; transition: background-color 120ms ease; }
+.ib-prp-handle:hover::after, .ib-prp-handle:active::after, .ib-prp-handle:focus-visible::after { background: var(--ring); }
+.ib-prp-handle:focus { outline: none; }
+/* The bar's title and the one quiet control. */
+.ib-prreview .ib-vhead .ib-vsep { display: none; }
+.ib-prreview .ib-prr-fn { flex: 0 1 auto; }
+.pn-inbox .ib-prp-dbtn { flex: none; display: inline-flex; align-items: center; gap: 6px; height: var(--ib-prp-h, 28px); padding: 0 8px; border-radius: 7px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.pn-inbox .ib-prp-dbtn:hover, .pn-inbox .ib-prp-dbtn.ib-on { background: var(--ib-prp-fill); color: var(--foreground); }
+.ib-prp-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--muted-foreground); }
+.ib-prp-dot[data-state="pass"] { background: var(--success, #0a7f33); }
+.ib-prp-dot[data-state="fail"] { background: var(--destructive); }
+.ib-prp-dot[data-state="pending"] { background: var(--warning, #c28a00); }
+.ib-prp-count { display: inline-flex; align-items: center; gap: 3px; font-variant-numeric: tabular-nums; }
+/* The stack in the rail. */
+.ib-prp-stack { flex: 0 1 auto; display: flex; flex-direction: column; min-height: 0; max-height: 50%; padding: 6px 8px 0; }
+.ib-prp-layers { min-height: 0; overflow-y: auto; scrollbar-width: thin; position: relative; display: flex; flex-direction: column; }
+.ib-prp-layers > * { flex: none; width: 100%; min-width: 0; }
+.pn-inbox .ib-prreview .ib-prp-row { min-height: 26px; border-radius: 6px; padding: 0 6px; font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-prreview .ib-prp-num { font-size: var(--ib-fs-12, 12px); }
+.pn-inbox .ib-prreview .ib-prp-fold { color: var(--muted-foreground); }
+.pn-inbox .ib-prreview .ib-prp-fold svg { flex: none; opacity: 0.7; }
+.ib-prreview .ib-prp-here { color: var(--foreground); font-weight: 550; }
+.pn-inbox .ib-prreview .ib-prp-row.ib-on { background: var(--ib-prp-fill); }
+.pn-inbox .ib-prreview .ib-prp-all { margin-bottom: 2px; }
+.ib-prp-all .ib-prp-rowtitle { font-weight: 450; }
+/* The tree: one column. */
+/* From nothing, not from the tree's height: a big tree otherwise squeezes the layers above it to a row, hiding the one you are on. */
+.ib-prp-files { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 12px 8px 12px; scrollbar-width: thin; }
+.ib-prp-fileshead { display: flex; align-items: center; padding: 0 6px 4px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-prp-list { list-style: none; margin: 0; padding: 0; }
+.pn-inbox .ib-prp-file, .pn-inbox .ib-prp-folder { display: flex; align-items: center; gap: 5px; width: 100%; min-height: 25px; padding-right: 6px; border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); text-align: left; color: var(--foreground); }
+.pn-inbox .ib-prp-file:hover, .pn-inbox .ib-prp-folder:hover { background: var(--ib-prp-fill); }
+.pn-inbox .ib-prp-folder { color: var(--muted-foreground); }
+.ib-prp-folder svg { flex: none; transition: transform 100ms ease; }
+.ib-prp-folder svg.ib-prp-open { transform: rotate(90deg); }
+/* A name stays on one line and whole while it fits, and nothing on the row fades. Short of room a folder gives way in
+   its middle (its head ends in "…", its last folder stays), and where not even that fits beside the name it leaves the
+   line whole, wrapped onto a second line that is cut off, so no sliver of it reads as a stray mark. A name alone too
+   long gives way the same way, keeping its end. The row's tip has the path. */
+.ib-prp-fname { flex: 1 1 auto; display: flex; min-width: 0; height: 1.45em; line-height: 1.45em; overflow: hidden; }
+.ib-prp-fname[data-has-dir] { flex-flow: row-reverse wrap; justify-content: flex-end; }
+/* The name is laid out first, so the folder is what wraps out of sight; row-reverse draws it before the name. */
+.ib-prp-fname[data-has-dir] > .ib-prp-base { order: -1; }
+.ib-prp-cutbox { display: flex; min-width: 0; white-space: nowrap; }
+.ib-prp-base, .ib-prp-dirname { flex: 0 1 auto; }
+.ib-prp-dir { flex: 1 1 4.5em; max-width: max-content; color: var(--muted-foreground); }
+.ib-prp-cut { flex: 0 1000000 auto; min-width: 1.1em; overflow: hidden; text-overflow: ellipsis; }
+.ib-prp-keep { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A last folder longer than the row gives way in its own middle once the head is spent: its end stays. */
+.ib-prp-keep[data-split] { display: flex; }
+.ib-prp-cut2 { flex: 0 1 auto; min-width: 1.1em; overflow: hidden; text-overflow: ellipsis; }
+.ib-prp-end { flex: 0 0 auto; }
+/* The review app's +/- columns (review-editor/index.css `.review-count-columns`), sized by the rail's widest row. */
+.ib-prp-files .review-count-columns { display: grid; grid-template-columns: minmax(var(--count-add-w, 3ch), max-content) minmax(var(--count-del-w, 3ch), max-content); column-gap: 4px; justify-items: end; align-items: center; flex-shrink: 0; margin-left: auto; font-size: var(--ib-fs-11, 11px); font-weight: 400; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-prp-files .review-count-columns .additions { color: var(--success, #0a7f33); }
+.ib-prp-files .review-count-columns .deletions { color: var(--destructive); }
+.ib-prp-files .review-count-columns[data-count-columns="quiet"] :is(.additions, .deletions) { color: color-mix(in oklab, var(--muted-foreground) 85%, var(--background)); }
+/* A row's (and a folder's) +/- are one pair at the row's end, 4 px apart, as on GitHub's file tree: the − number's
+   right edge on the row's end padding, the + number just before it, an add-only row's + on that same edge. Tabular
+   digits, so equal numbers line up row to row. */
+.ib-prp-files :is(.ib-prp-file, .ib-prp-folder) > .review-count-columns { display: inline-flex; justify-content: flex-end; gap: 4px; }
+.ib-prp-files :is(.ib-prp-file, .ib-prp-folder) > .review-count-columns > span:empty { display: none; }
+.ib-prp-file[data-seen] .ib-prp-base { color: var(--muted-foreground); }
+.ib-prp-c { flex: none; font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+/* The review app's file row spacing (review-editor index.css `.review-sidebar .file-tree-item`, `.review-change-letter`):
+   6 px between the parts, 8 px at the row's end, the letter pulled 2 px in on each side. */
+.pn-inbox .ib-prp-files .ib-prp-file, .pn-inbox .ib-prp-files .ib-prp-folder { gap: 6px; padding-right: 8px; }
+.ib-prp-files .review-change-letter { display: flex; flex-shrink: 0; margin: 0 -2px; }
+.ib-prp-files .ib-prp-fname ~ .ib-prp-c { margin-left: -2px; }
+@media (pointer: coarse) { .pn-inbox .ib-prp-file, .pn-inbox .ib-prp-folder { min-height: 40px; } }
+/* Files as the code review app draws them (approval pr-view-one-surface, 11-07 "fix all four"): one surface, a file its
+   header and its code, edge to edge, in the page's colour, with the header's own hairline under it (FileHeader's) and
+   the next file's header right under the last code row. No band above the first file: Split | Unified is in the bar. */
+.ib-prreview diffs-container { --diffs-bg-separator-override: transparent; }
+.pn-inbox .ib-prreview .ib-gbody > .w-full { padding-top: 0; }
+.ib-prreview [data-guide-section] { border: 0 !important; background: transparent !important; }
+/* Each box is exactly its header and code (the guide host's flushFiles: no border, padding or corner). */
+.ib-prreview [data-guide-code-view-mounted] { border: 0 !important; }
+.ib-prreview [data-guide-file-shell] + [data-guide-file-shell] { margin-top: 0; }
+.ib-prreview [data-guide-file-shell] + [data-guide-file-shell]::before { display: none; }
+/* The header: the page's colour (opaque, as it sticks over the code), the review app's hover. */
+.ib-prreview [data-guide-code-view-mounted] [data-file-header] { background: var(--background); }
+.ib-prreview [data-guide-code-view-mounted] [data-file-header]:hover { background: color-mix(in oklab, var(--muted) 30%, var(--background)); }
+/* The end of a layer: the next one. */
+.pn-inbox .ib-prp-next { display: flex; align-items: center; gap: 8px; width: calc(100% - 24px); min-height: 44px; margin: 20px 12px 28px; padding: 0 14px; border-radius: 10px; background: var(--ib-prp-file); font-size: var(--ib-fs-13, 13px); text-align: left; color: var(--foreground); }
+.pn-inbox .ib-prp-next:hover { background: var(--ib-prp-fill); }
+.ib-prp-nextw { flex: none; color: var(--muted-foreground); }
+.ib-prp-next .ib-prp-title { flex: 1 1 auto; font-weight: 550; }
+/* The phone: one control over the code; the details as the whole sheet. */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-prreview .ib-prp-row2 { border-bottom: 0; background: var(--ib-prp-chrome); padding: 0 8px 6px; gap: 6px; }
+  .pn-inbox .ib-prp-this { flex: 1 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 9px; border-radius: 7px; background: var(--ib-prp-fill); font-size: var(--ib-fs-13, 13px); color: var(--foreground); text-align: left; position: relative; }
+  .pn-inbox .ib-prp-this::after { content: ""; position: absolute; inset: -7px 0; }
+  .ib-prp-this .ib-prp-title { flex: 1 1 auto; }
+  .ib-prreview .ib-gbody { border-top-left-radius: 12px; border-top-right-radius: 12px; }
+  .ib-prreview .ib-rsplit { grid-template-rows: auto minmax(0, 1fr); }
+}
+/* The panel scrolls: a long description opens in it, with no second scroller. */
+.ib-prreview:not(.ib-fold) .ib-gpanel [data-annotation-panel] > :first-child { border-bottom: 0; }
+
+/* The bar: one weight of icon, one muted colour, no pills but the switch's seat and Approve. */
+.pn-inbox .ib-prreview .ib-vhead { gap: 6px; }
+.ib-prreview .ib-prr-fn, .ib-prreview .ib-prp-title { font-weight: 550; letter-spacing: -0.003em; }
+.pn-inbox .ib-prreview .ib-vhead .ib-vcomments { background: transparent; border-color: transparent; color: var(--muted-foreground); box-shadow: none; }
+.pn-inbox .ib-prreview .ib-vhead .ib-vcomments:hover, .pn-inbox .ib-prreview .ib-vhead .ib-vcomments.ib-on { background: var(--ib-prp-fill); color: var(--foreground); }
+.ib-prreview .ib-rv-dest-mark { color: var(--muted-foreground); }
+.ib-prreview .ib-seg-o[data-on] .ib-rv-dest-mark { color: var(--foreground); }
+.pn-inbox .ib-prp-dbtn { color: var(--muted-foreground); font-weight: 450; }
+.pn-inbox .ib-prreview .ib-prr-controls > button { background: transparent; }
+.pn-inbox .ib-prreview .ib-prr-controls > button:hover { background: var(--ib-prp-fill); }
+/* The rail: a state's colour only where it says something. Open is the normal case: grey; merged keeps its colour. */
+.ib-prreview .ib-prp-row .ib-refmark[data-ref-state="open"], .ib-prreview .ib-prp-row .ib-refmark[data-ref-state="draft"] { color: var(--muted-foreground); opacity: 0.8; }
+.ib-prreview .ib-prp-row.ib-on .ib-refmark[data-ref-state="open"] { color: var(--foreground); opacity: 1; }
+.ib-prp-all svg { color: var(--muted-foreground); }
+.ib-prreview .ib-prp-num { color: var(--muted-foreground); font-weight: 400; }
+.pn-inbox .ib-prreview .ib-prp-row, .pn-inbox .ib-prp-file, .pn-inbox .ib-prp-folder { min-height: 28px; }
+.ib-prp-files { padding-top: 16px; }
+.ib-prp-fileshead { padding-bottom: 6px; }
+/* As the code review app (approval pr-view-one-surface, 11-07 19:08), every width but a phone's: the bar its header's
+   fill (bg-card/50 on the page), and over the code its muted tab row (dockview's strip, 33 px) with Split | Unified at
+   the right end, where the review app keeps its view controls. */
+.ib-prr-wide .ib-vhead { background: color-mix(in oklab, var(--card) 50%, var(--background)); }
+.ib-prp-tabs { display: flex; align-items: center; justify-content: flex-end; gap: 6px; height: 33px; padding: 0 8px; background: var(--muted); }
+.ib-prr-wide:not(.ib-railfold) .ib-prp-tabs { grid-column: 2; grid-row: 1; }
+.pn-inbox .ib-prp-tabs :is(.ib-seg, .ib-gtab) { height: 27px; box-sizing: border-box; border: 0; background: transparent; align-items: stretch; }
+.pn-inbox .ib-prp-tabs .ib-seg-o { height: auto; padding: 0 7px; }
+.pn-inbox .ib-prp-tabs .ib-seg-o[data-on] { background: var(--background); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1); }
+
 
 /* ─────────────── Window controls (a desktop host; inbox-window.md "Window controls") ───────────────
    A host that draws the window's buttons over this page sets --pn-window-controls-width and -height on :root (health
