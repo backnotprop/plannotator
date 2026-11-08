@@ -29,7 +29,7 @@ import { storage } from '@plannotator/ui/utils/storage';
 import { setSidebarSectionOpen } from './sidebarSections';
 import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
-import type { InboxAttachmentState, InboxCardWire, InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxReplyDraftRow, InboxRun, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxCardWire, InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxReplyDraftRow, InboxRun, InboxThread } from '@plannotator/core/inbox-types';
 import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill, decideEntryShown } from './decisions/entry';
 import { threadDecisions } from './decisions/model';
@@ -910,7 +910,6 @@ function Inbox() {
   }, []);
   const [thread, setThread] = useState<InboxThread | null>(null);
   /** The open thread's files as its pane read them, for New message over it (null: no thread, or another machine's). */
-  const [threadFiles, setThreadFiles] = useState<readonly InboxAttachmentState[] | null>(null);
   /** The open thread's own list row, from its read: an archived thread has none in the list. */
   const [threadRow, setThreadRow] = useState<InboxListRow | null>(null);
   // A launched thread's run line (the thread route's `run`; launch only): null while the agent rests.
@@ -6445,7 +6444,6 @@ function Inbox() {
               </>
             }
             thread={thread}
-            onThreadFiles={setThreadFiles}
             onNewMessageWith={(source) => openCompose({ reuse: [source] })}
             codeReview={settings?.code_review?.on === true}
             inReviews={!!route.reviews}
@@ -7153,7 +7151,6 @@ function Inbox() {
         <ComposeDialog
           request={compose}
           phone={phone}
-          threadFiles={threadFiles}
           current={composeCurrent}
           lastSent={lastSent}
           home={settings?.home ?? null}

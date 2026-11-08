@@ -29,12 +29,11 @@
  */
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxAttachmentState, type InboxDraft, type InboxDraftTo, type InboxReviewChanges, type InboxReviewLinkAnswer } from '@plannotator/core/inbox-types';
+import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxDraft, type InboxDraftTo, type InboxReviewChanges, type InboxReviewLinkAnswer } from '@plannotator/core/inbox-types';
 import { InboxApiError, InboxHeldError, inboxApi, type DraftView, type StartThreadInput } from '../api';
 import { tildePath, whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
 import type { ReuseSource } from '../reuse';
-import { ThreadFilesStrip } from './ThreadFilesStrip';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFiles, useFileDrop } from './ComposeFiles';
 import { SessionDetail, ToPicker, startKey } from './ToPicker';
 import { FolderMenu, type FolderGroup } from './FolderMenu';
@@ -190,8 +189,6 @@ export interface ComposeTransport {
 export interface ComposeDialogProps {
   request: ComposeRequest;
   phone: boolean;
-  /** The files of the thread behind the dialog, offered one click each. Absent or null: no row. */
-  threadFiles?: readonly InboxAttachmentState[] | null;
   /** The project the person is looking at: the list's filter, or the open thread's. */
   current: { id: string | null; root: string | null; name: string | null } | null;
   /** The session the person last sent to: listed first in the picker while it is live; never put in To by itself. */
@@ -1528,7 +1525,6 @@ export function ComposeDialog(props: ComposeDialogProps) {
             }}
           />
         </div>
-        {takesFiles && <ThreadFilesStrip threadFiles={props.threadFiles} files={files} />}
         <ComposeFileTiles
           files={files.files}
           onRemove={(key) => {
