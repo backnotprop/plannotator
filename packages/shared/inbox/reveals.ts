@@ -6,7 +6,7 @@
  * every claim against it.
  *
  * In the line, in this order: Code review's day-0 offer (`CODE_REVIEW_OFFER`), the update-day dialogs (the sound, list
- * options, voice), then the offers (Snooze, the Board, the Checklist). The agent note is a setup dialog: never in the queue, but it keeps the day and the page-load
+ * options, voice), then the offers (Snooze, the Board, Shape, the Checklist). The agent note is a setup dialog: never in the queue, but it keeps the day and the page-load
  * rules (`revealLineFree("setup")`). The tour and the notification ask are not in the line: day 0 is theirs.
  *
  * The rules:
@@ -41,7 +41,7 @@
  */
 
 /** Every dialog the queue orders. A registered dialog adds its id here. */
-export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "snooze" | "board" | "steps" | "star" | "list_view";
+export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "snooze" | "board" | "shape" | "steps" | "star" | "list_view";
 /** Every dialog that keeps the line's day: the queue's, and the agent note (setup). */
 export type LineDialogId = RevealId | "agent_note";
 
@@ -88,6 +88,14 @@ export interface RevealEntry {
  */
 export const CODE_REVIEW_OFFER: RevealEntry = { id: "code_review", kind: "offer", tenureMs: 0, minThreads: 0, enabled: true };
 
+/**
+ * Shape's offer (approval "shape-turn-on-dialog", 2026-11-08, `.product/approved/shape-turn-on-dialog/`): once, after
+ * 4 days and 5 threads, between the Board and the Checklist. Only while Shape was never decided (config.json
+ * `inboxShape` unset; Code review users included, the owner's default). Opt-in, as the Board: the claim only stamps
+ * it, and only the dialog's "Turn on Shape" writes `inboxShape`. Its moment: packages/inbox/shapeOffer.ts.
+ */
+export const SHAPE_OFFER: RevealEntry = { id: "shape", kind: "offer", tenureMs: 4 * DAY_MS, minThreads: 5, enabled: true };
+
 /** The queue, in order. */
 export const INBOX_REVEALS: readonly RevealEntry[] = [
   CODE_REVIEW_OFFER,
@@ -102,6 +110,8 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // The owner: "ok board can be 3 days, snooze 2". Opt-in (the owner, 2026-11-04): the claim only stamps it; the
   // dialog's "Turn it on" writes inboxBoard (unset -> true), "Not now" leaves it unset.
   { id: "board", kind: "offer", tenureMs: 3 * DAY_MS, minThreads: 5, enabled: true },
+  // Shape's offer (approval "shape-turn-on-dialog", 2026-11-08; `SHAPE_OFFER`): between the Board and the Checklist.
+  SHAPE_OFFER,
   // The Checklist (thread steps), approval "inbox-checklist-reveal" (2026-11-04): 5 days ("lands around day 6") and the
   // Board's 5 threads; the Board need not be on. Opt-in, as the Board: the claim only stamps it, `ChecklistIntro` opens,
   // and only its "Turn it on" writes inboxSteps (unset -> true). Until then no word of it reaches an agent.

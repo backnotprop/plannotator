@@ -396,6 +396,28 @@ export function useStepsReveal(input: StepsRevealInput) {
   });
 }
 
+/**
+ * Shape's moment (approval "shape-turn-on-dialog", NOTES "the moment"): back on the list from a thread whose newest
+ * agent message is long, after the person had it open long enough to read it. The moment a picture would have helped.
+ */
+export const SHAPE_REVEAL = {
+  /** The newest agent message in the thread just left has this many words or more. */
+  minWords: 150,
+  /** And the thread was open this long (a long message read, not skimmed). A test shrinks it (and puts it back). */
+  readMs: 20_000,
+};
+
+/** Leaving a thread counts for Shape: back on the list, open 20 s or more, its newest agent message 150 words or more. */
+export function shapeRevealLeaveCounts(visit: RevealVisit, now: number, next: string | null): boolean {
+  if (next !== null || now - visit.at < SHAPE_REVEAL.readMs) return false;
+  return (revealThreadFactsOf(visit.threadId)?.lastAgentWords ?? 0) >= SHAPE_REVEAL.minWords;
+}
+
+/** Shape's need at a settled moment: the Checklist's (the list loaded, not the first-run screen, 60 s, 5 rows). */
+export function shapeRevealMayClaim(gate: Pick<BoardRevealInput, 'due' | 'blocked' | 'listLoaded' | 'firstRun' | 'rows'>, pageAge: number): boolean {
+  return stepsRevealMayClaim(gate, pageAge);
+}
+
 /** What a registered offer of the line brings: its id, its moment and its need (the line does the rest). */
 export interface LineRevealInput {
   /** Its id in the line (`INBOX_REVEALS`, and `lineOffers` on the server). */

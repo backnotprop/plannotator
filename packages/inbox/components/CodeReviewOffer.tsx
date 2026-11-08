@@ -13,7 +13,7 @@ import { Modal } from './Updates';
  * codeReviewOffer.ts.
  */
 export function CodeReviewOffer({ phone, onClose, onTurnOn }: { phone: boolean; onClose: () => void; onTurnOn: () => void }) {
-  useFirstFocusOnDialog();
+  useFirstFocusOnDialog('code-review-offer');
   return (
     <Modal labelledBy="ib-cro-title" describedBy="ib-cro-feats" testId="code-review-offer" onClose={onClose} ownKeys fallbackFocus={pageHeading} className={`ib-cro${phone ? ' ib-cro-phone' : ''}`}>
       <CodeReviewOfferArt phone={phone} />
@@ -51,7 +51,7 @@ export function CodeReviewOffer({ phone, onClose, onTurnOn }: { phone: boolean; 
 }
 
 /** Focus after the dialog when nothing focusable opened it (it opens at once on a fresh load): the page's heading. */
-function pageHeading(): HTMLElement | null {
+export function pageHeading(): HTMLElement | null {
   const heading = document.querySelector<HTMLElement>('.ib-main h1');
   if (heading && !heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
   return heading;
@@ -61,11 +61,11 @@ function pageHeading(): HTMLElement | null {
  * First focus on the dialog itself, as the approved Card does: its name is read, no ring shows on a button until the
  * keyboard moves, and Enter turns nothing on by itself. `Modal` focused the primary button first (a child's effect runs
  * before this one) and keeps the opener to give focus back. Tab from the dialog goes to its first button, Shift+Tab to
- * its last, so focus never leaves it.
+ * its last, so focus never leaves it. Shape's offer (ShapeOffer.tsx) does the same. `testId`: the dialog's `data-dialog`.
  */
-function useFirstFocusOnDialog() {
+export function useFirstFocusOnDialog(testId: string) {
   useEffect(() => {
-    const dialog = document.querySelector<HTMLDialogElement>('dialog[data-dialog="code-review-offer"]');
+    const dialog = document.querySelector<HTMLDialogElement>(`dialog[data-dialog="${testId}"]`);
     if (!dialog) return;
     dialog.tabIndex = -1;
     dialog.focus({ preventScroll: true });
@@ -79,7 +79,7 @@ function useFirstFocusOnDialog() {
     };
     dialog.addEventListener('keydown', onKey);
     return () => dialog.removeEventListener('keydown', onKey);
-  }, []);
+  }, [testId]);
 }
 
 /** The static storm, cracked open around one sorted column. Decoration only. */
