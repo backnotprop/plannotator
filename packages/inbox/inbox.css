@@ -4730,6 +4730,11 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .ib-att-w:hover .ib-att-more, .ib-att-w:focus-within .ib-att-more, .pn-inbox .ib-att-more[data-popup-open] { opacity: 1; }
 .pn-inbox .ib-att-more:hover, .pn-inbox .ib-att-more[data-popup-open] { background: var(--muted); color: var(--foreground); }
 @media (hover: none) { .pn-inbox .ib-att-more { opacity: 1; } }
+/* A right-click's menu is open on a tile, a gallery picture or an Artifacts card (TileMenu): it keeps its hover look, and its ⋯ shows. */
+.pn-inbox .ib-att-w[data-popup-open] > .ib-att-t, .pn-inbox .ib-att-t[data-popup-open] { background: var(--ib-sf-tile-hover-s, color-mix(in oklch, var(--primary) 4%, var(--card))); }
+.pn-inbox .ib-att-w[data-popup-open] .ib-att-more, .pn-inbox .ib-art-w[data-popup-open] .ib-att-more { opacity: 1; }
+.pn-inbox .ib-art-w[data-popup-open] > .ib-art-tile { background: color-mix(in oklch, var(--foreground) 6%, var(--ib-raise)); }
+.ib-gal-w[data-popup-open] .ib-gal-frame { border-color: color-mix(in oklch, var(--primary) 55%, var(--border)); box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 12%, transparent); }
 @media (prefers-reduced-motion: reduce) { .pn-inbox .ib-att-more { transition: none; } }
 
 /* 👍 Looks good (design record "inbox-acknowledge", approved 2026-10-15): beside Reply in the
