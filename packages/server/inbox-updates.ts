@@ -52,8 +52,10 @@ import {
   releaseUrlFor,
   runReleaseCheck,
   UPDATE_SNOOZE_MS,
+  type FetchReleaseListResult,
   type FetchReleaseResult,
   type ReleaseHighlight,
+  type TldrLine,
 } from "@plannotator/shared/update-check";
 import {
   autoUpdatePaths,
@@ -70,6 +72,14 @@ import {
 import { listSessions as defaultListSessions, type SessionInfo } from "./sessions";
 import { lastRunLog, stagingFailureIn, tlsFailureIn, type UpdateTlsFailure } from "./update-log";
 import { fetchReleaseImagesFor, storedReleaseImageSources } from "./inbox-whats-new-images";
+import {
+  readReleaseList,
+  refreshReleaseList,
+  releaseListFailing,
+  releaseListNames,
+  whatsNewReleases as buildWhatsNewReleases,
+  type WhatsNewReleases,
+} from "./inbox-whats-new-releases";
 
 /** While an install runs, the binary is probed this often (the design's 2 s). */
 export const INBOX_UPDATING_TICK_MS = 2_000;
@@ -147,6 +157,11 @@ export interface WhatsNew {
   release_url: string;
   notes: string;
   /**
+   * The `### TL;DR` at the top of the release's notes (taken out of `notes`),
+   * empty when it has none. Additive.
+   */
+  tldr: TldrLine[];
+  /**
    * The version `skipped` counts from: the one this Inbox runs, or, for a
    * release it already runs, the one it ran before the update. Null for a
    * development build. Added after `current`, which stays the running version.
@@ -178,6 +193,8 @@ export interface InboxUpdatesOptions {
   fetchRelease?: () => Promise<FetchReleaseResult>;
   /** One release by its tag, for notes a version needs and the release check never saved. */
   fetchReleaseTag?: (version: string) => Promise<FetchReleaseResult>;
+  /** The newest releases (What's new's panel, once a day). Default: GitHub's releases API (fetchReleaseList). */
+  fetchReleaseList?: () => Promise<FetchReleaseListResult>;
   /** How long the What's new route waits for those notes (WHATS_NEW_WAIT_MS). */
   whatsNewWaitMs?: number;
   /** The fetch the release notes' images go through (inbox-whats-new-images.ts). Default: global fetch. */
@@ -193,8 +210,15 @@ export interface InboxUpdatesOptions {
 /** How long GET /api/inbox/whats-new waits for a release's notes before answering "still fetching". */
 export const WHATS_NEW_WAIT_MS = 3_000;
 
+/**
+ * Why a release's notes are not here: update checks are off (nothing is
+ * asked), GitHub could not be reached (the last request for them, or for the
+ * release list that would name them, failed), or no source has them.
+ */
+export type WhatsNewMissing = "checks_off" | "unreachable" | "not_found";
+
 /** What the What's new route answers: the notes, still fetching, or nothing for that version. */
-export type WhatsNewAnswer = { kind: "notes"; notes: WhatsNew } | { kind: "loading" } | { kind: "missing" };
+export type WhatsNewAnswer = { kind: "notes"; notes: WhatsNew } | { kind: "loading" } | { kind: "missing"; reason: WhatsNewMissing };
 
 /** The installed binary's version (`plannotator X` on stdout), or null. */
 export async function probeBinaryVersion(binaryPath: string): Promise<string | null> {
@@ -340,18 +364,23 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
 
   /**
    * The versions whose notes this Inbox may fetch: the one it runs, the
-   * newest known release, the binary on disk, an install in progress. A
-   * request for any other version reads only what is saved.
+   * newest known release, the binary on disk, an install in progress, and any
+   * release the cached release list names (What's new's panel). A request for
+   * any other version reads only what is saved.
    */
   const fetchableVersion = (version: string): boolean => {
     if (!release) return false;
     const state = readUpdateState(options.dataDir);
     const known = [options.version, knownLatestRelease(state)?.version, onDisk, state.pending?.version];
-    return known.some((v) => normalizeStableVersion(v) === version);
+    return known.some((v) => normalizeStableVersion(v) === version) || releaseListNames(options.dataDir, version);
   };
 
-  /** `asked`: the person's Check now, which asks even with update checks off. */
-  const ensureNotes = (version: string, asked = false): Promise<void> => {
+  /**
+   * `asked`: the person's Check now, which asks even with update checks off.
+   * `force`: the person's Try again on What's new, which asks whatever the
+   * per-version throttle says (never with update checks off).
+   */
+  const ensureNotes = (version: string, asked = false, force = false): Promise<void> => {
     const running = notesInFlight.get(version);
     if (running) return running;
     if (!fetchableVersion(version)) return Promise.resolve();
@@ -360,6 +389,7 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
       dataDir: options.dataDir,
       now,
       enabled: asked ? () => true : checksOn,
+      ...(force && { force: true }),
       ...(options.fetchReleaseTag && { fetchRelease: options.fetchReleaseTag }),
     })
       .then(() => undefined)
@@ -369,6 +399,29 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
         if (!stopped) refresh();
       });
     notesInFlight.set(version, job);
+    return job;
+  };
+
+  // What's new's release list (inbox-whats-new-releases.ts): one request a
+  // day at most, one at a time, never in a development build or while update
+  // checks are off. It saves the notes of the releases it names.
+  let listInFlight: Promise<void> | null = null;
+  const ensureList = (force = false): Promise<void> => {
+    if (listInFlight) return listInFlight;
+    if (!release) return Promise.resolve();
+    const job = refreshReleaseList({
+      dataDir: options.dataDir,
+      now,
+      enabled: checksOn,
+      ...(force && { force: true }),
+      ...(options.fetchReleaseList && { fetchList: options.fetchReleaseList }),
+    })
+      .then(() => undefined)
+      .catch(() => undefined)
+      .finally(() => {
+        listInFlight = null;
+      });
+    listInFlight = job;
     return job;
   };
 
@@ -700,21 +753,36 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
      * version, throttled, never while update checks are off), waiting at most
      * `waitMs`; past that the answer is `loading` and the page asks again.
      */
-    async whatsNew(version: string, waitMs: number = options.whatsNewWaitMs ?? WHATS_NEW_WAIT_MS): Promise<WhatsNewAnswer> {
+    async whatsNew(
+      version: string,
+      waitMs: number = options.whatsNewWaitMs ?? WHATS_NEW_WAIT_MS,
+      opts: { retry?: boolean } = {},
+    ): Promise<WhatsNewAnswer> {
       const v = normalizeStableVersion(version);
-      if (!v) return { kind: "missing" };
+      if (!v) return { kind: "missing", reason: "not_found" };
       const deadline = Date.now() + waitMs;
       const waitFor = async (job: Promise<void>) => {
         let timer: ReturnType<typeof setTimeout> | undefined;
         await Promise.race([job, new Promise<void>((resolve) => (timer = setTimeout(resolve, Math.max(0, deadline - Date.now()))))]);
         clearTimeout(timer);
       };
-      if (!hasReleaseNotesContent(readReleaseNotes(v, options.dataDir))) await waitFor(ensureNotes(v));
+      if (!hasReleaseNotesContent(readReleaseNotes(v, options.dataDir))) {
+        // The release list first (when it is due, or after a failure on Try
+        // again): it names the release, and usually brings its notes with it.
+        await waitFor(ensureList(!!opts.retry && releaseListFailing(readReleaseList(options.dataDir))));
+        if (!hasReleaseNotesContent(readReleaseNotes(v, options.dataDir))) await waitFor(ensureNotes(v, false, !!opts.retry));
+      }
       // The notes' images, within the same wait; past it the page shows what is stored.
       if (hasReleaseNotesContent(readReleaseNotes(v, options.dataDir))) await waitFor(ensureImages(v));
       const notes = readReleaseNotes(v, options.dataDir);
-      if (!hasReleaseNotesContent(notes) && notesInFlight.has(v)) return { kind: "loading" };
-      if (!notes) return { kind: "missing" };
+      if (!hasReleaseNotesContent(notes) && (notesInFlight.has(v) || (listInFlight && !releaseListNames(options.dataDir, v)))) return { kind: "loading" };
+      if (!notes) {
+        if (!release || !checksOn()) return { kind: "missing", reason: "checks_off" };
+        const record = readUpdateState(options.dataDir).notesFetch?.[v];
+        const fetchFailed = typeof record?.failedAt === "number" && record.failedAt >= record.attemptedAt;
+        const listFailed = !fetchableVersion(v) && releaseListFailing(readReleaseList(options.dataDir));
+        return { kind: "missing", reason: fetchFailed || listFailed ? "unreachable" : "not_found" };
+      }
       // The releases in between count from the version this Inbox ran before
       // an update when the page shows a release it already runs (or an older
       // one); for a newer release, from the version it runs now.
@@ -729,6 +797,7 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
           published_at: notes.publishedAt ?? null,
           release_url: releaseUrlFor(v),
           notes: notes.notes,
+          tldr: notes.tldr ?? [],
           // The releases a person skipped: newer than `since`, older than this one.
           skipped: from
             ? notes.highlights.filter((h) => isNewerStableVersion(h.version, from) && isNewerStableVersion(v, h.version))
@@ -736,6 +805,24 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
           images: storedReleaseImageSources(v, notes.notes, options.dataDir),
         },
       };
+    },
+    /**
+     * What's new's releases panel: the cached release list and the notes
+     * saved here. Asks GitHub for the list when it is due (a day after the last
+     * answer), waiting at most `waitMs`; past that the answer says `refreshing`
+     * and the page asks again.
+     */
+    async whatsNewReleases(waitMs: number = options.whatsNewWaitMs ?? WHATS_NEW_WAIT_MS): Promise<WhatsNewReleases> {
+      const job = ensureList();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([job, new Promise<void>((resolve) => (timer = setTimeout(resolve, waitMs)))]);
+      clearTimeout(timer);
+      const state = readUpdateState(options.dataDir);
+      return buildWhatsNewReleases(options.dataDir, {
+        current: options.version,
+        refreshing: listInFlight !== null,
+        known: [knownLatestRelease(state)?.version, release ? options.version : null],
+      });
     },
   };
 }

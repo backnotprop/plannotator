@@ -49,6 +49,7 @@ import {
   type SettingsModel,
   type UpdateDetails,
   type WhatsNewModel,
+  type WhatsNewReleasesModel,
 } from './api';
 import { listsThread, newRecordBatch, noteRecord, openThreadRead } from './openThreadReads';
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
@@ -137,7 +138,7 @@ import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
 import { ReviewPane } from './components/ReviewPane';
-import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
+import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage, type WhatsNewError } from './components/Updates';
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
 import { reloadOntoInbox, useStalePage } from './stalePage';
 import { StalePageNotice } from './components/StalePageNotice';
@@ -296,6 +297,9 @@ const SEEN_RETRY_MS = 1000;
 /** The What's new page asks again this often while the server fetches the notes (its request gives up after 10 s). */
 const WHATS_NEW_RETRIES = 15;
 const WHATS_NEW_RETRY_MS = 1000;
+/** The releases panel asks again this often while the server fetches the release list (once a day at most). */
+const WHATS_NEW_RELEASES_RETRIES = 6;
+const WHATS_NEW_RELEASES_RETRY_MS = 1500;
 /**
  * Opening a thread whose read failed (a dropped connection, a 5xx; not a 404): read it again after
  * these waits, then every last one, while it stays open. Before this the pane stayed blank until some
@@ -1030,7 +1034,12 @@ function Inbox() {
   /** The person pressed Update now in this tab: once the new binary is in, the Inbox restarts itself. */
   const restartWhenReady = useRef(false);
   const [whatsNew, setWhatsNew] = useState<WhatsNewModel | null>(null);
-  const [whatsNewError, setWhatsNewError] = useState<string | null>(null);
+  const [whatsNewError, setWhatsNewError] = useState<WhatsNewError | null>(null);
+  /** What's new's releases panel: loaded once per visit to the page, kept across switches between releases (no flash). */
+  const [whatsNewReleases, setWhatsNewReleases] = useState<WhatsNewReleasesModel | null>(null);
+  /** The person's Try again on What's new (each press asks GitHub once more, for the release it was pressed on). */
+  const [whatsNewRetry, setWhatsNewRetry] = useState(0);
+  const whatsNewRetryFor = useRef<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   /** The one-time sound dialog: open on this load, or shown on it (then the notification ask line waits for another load). */
   const [soundDialog, setSoundDialog] = useState<'none' | 'open' | 'shown'>('none');
@@ -4280,25 +4289,62 @@ function Inbox() {
   };
 
   const whatsNewVersion = route.page === 'whats-new' ? (route.version ?? null) : null;
+  const onWhatsNewPage = route.page === 'whats-new';
+  // The releases panel: once per visit (switching releases keeps it), asked again while the server fetches the list.
+  const [whatsNewReleasesNonce, setWhatsNewReleasesNonce] = useState(0);
+  useEffect(() => {
+    if (!onWhatsNewPage) {
+      setWhatsNewReleases(null);
+      return;
+    }
+    let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const load = (attempt: number) => {
+      inboxApi
+        .whatsNewReleases()
+        .then((model) => {
+          if (cancelled) return;
+          setWhatsNewReleases(model);
+          if (model.refreshing && attempt < WHATS_NEW_RELEASES_RETRIES) retry = setTimeout(() => load(attempt + 1), WHATS_NEW_RELEASES_RETRY_MS);
+        })
+        // No panel: the notes still read on their own.
+        .catch(() => {});
+    };
+    load(0);
+    return () => {
+      cancelled = true;
+      if (retry) clearTimeout(retry);
+    };
+  }, [onWhatsNewPage, whatsNewReleasesNonce]);
+  const whatsNewReleasesRef = useRef(whatsNewReleases);
+  whatsNewReleasesRef.current = whatsNewReleases;
   useEffect(() => {
     if (!whatsNewVersion) return;
     let cancelled = false;
     let retry: ReturnType<typeof setTimeout> | undefined;
     setWhatsNew(null);
     setWhatsNewError(null);
+    const retried = whatsNewRetryFor.current === whatsNewVersion;
+    whatsNewRetryFor.current = null;
     // Notes this machine never saved are fetched from GitHub by the server,
     // which answers `notes_loading` while that takes longer than it waits.
     const load = (attempt: number) => {
       inboxApi
-        .whatsNew(whatsNewVersion)
-        .then((model) => !cancelled && setWhatsNew(model))
+        .whatsNew(whatsNewVersion, attempt === 0 && retried)
+        .then((model) => {
+          if (cancelled) return;
+          setWhatsNew(model);
+          // Notes the panel did not have yet (fetched just now): its row gets their TL;DR.
+          const row = whatsNewReleasesRef.current?.releases.find((r) => r.version === model.version);
+          if (row && !row.saved) setWhatsNewReleasesNonce((n) => n + 1);
+        })
         .catch((cause) => {
           if (cancelled) return;
           if (cause instanceof InboxApiError && cause.code === 'notes_loading' && attempt < WHATS_NEW_RETRIES) {
             retry = setTimeout(() => load(attempt + 1), WHATS_NEW_RETRY_MS);
             return;
           }
-          setWhatsNewError(cause instanceof Error ? cause.message : String(cause));
+          setWhatsNewError({ message: cause instanceof Error ? cause.message : String(cause), code: cause instanceof InboxApiError ? cause.code : null });
         });
     };
     load(0);
@@ -4306,7 +4352,7 @@ function Inbox() {
       cancelled = true;
       if (retry) clearTimeout(retry);
     };
-  }, [whatsNewVersion]);
+  }, [whatsNewVersion, whatsNewRetry]);
 
   const toggleTool = async (host: AgentToolHost, next: boolean) => {
     setSettingsError(null);
@@ -6071,11 +6117,18 @@ function Inbox() {
   } else if (route.page === 'whats-new') {
     main = (
       <WhatsNewPage
+        version={whatsNewVersion}
         model={whatsNew}
         error={whatsNewError}
+        releases={whatsNewReleases}
         update={pageUpdate}
         onBack={() => pageBackRef.current()}
         onUpdate={pressUpdate}
+        onOpenRelease={(version) => go({ page: 'whats-new', project: null, thread: null, version })}
+        onRetry={() => {
+          whatsNewRetryFor.current = whatsNewVersion;
+          setWhatsNewRetry((n) => n + 1);
+        }}
         onTakeTour={
           settings?.tour && !tourUnavailable && settings.tour.seen_at === null && settings.tour.skipped_at === null && settings.tour.finished_at === null ? startTour : undefined
         }

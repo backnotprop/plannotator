@@ -385,12 +385,51 @@ export interface WhatsNewModel {
   published_at: string | null;
   release_url: string;
   notes: string;
+  /**
+   * The `### TL;DR` at the top of the notes (taken out of `notes`): `label` is
+   * New, Changed, Fixed, Removed or Off by default (another label as written,
+   * "" for none). Absent from an older Inbox (read as none).
+   */
+  tldr?: TldrLine[];
   skipped: { version: string; text: string }[];
   /**
    * The notes' image sources (as written) saved on this computer, loaded from
    * `whatsNewImageUrl`. Absent from an older Inbox (no image is loaded).
    */
   images?: string[];
+}
+
+/** One line of a release's TL;DR. */
+export interface TldrLine {
+  label: string;
+  text: string;
+}
+
+/** One release in What's new's releases panel (GET /api/inbox/whats-new/releases). */
+export interface WhatsNewRelease {
+  version: string;
+  published_at: string | null;
+  /** Its TL;DR (empty: none). */
+  tldr: TldrLine[];
+  /** Its line in the newest saved "Missed recent releases?" table, and the release whose notes carry it. */
+  listed: { text: string; in: string } | null;
+  /** The first sentence of its saved notes. */
+  sentence: string | null;
+  /** Its notes are saved on this computer. */
+  saved: boolean;
+}
+
+export interface WhatsNewReleasesModel {
+  /** The newest release (the Latest card); null with no rows. */
+  latest: string | null;
+  current: string;
+  /** Newest first. */
+  releases: WhatsNewRelease[];
+  /** The list is being asked for now: ask again shortly. */
+  refreshing: boolean;
+  /** The last request for the list failed. */
+  offline: boolean;
+  fetched_at: string | null;
 }
 
 /** Where the What's new page loads one of the notes' saved images. */
@@ -1550,7 +1589,10 @@ export const inboxApi = {
   updateNow: () => post<{ ok: true; version: string; update: InboxHealth['update'] }>(inboxUrl('/update'), {}),
   snoozeUpdate: () => post<{ ok: true; update: InboxHealth['update'] }>(inboxUrl('/update/snooze'), {}),
   checkForUpdate: () => post<UpdateDetails & { checked: { ok: boolean; error?: string } }>(inboxUrl('/update/check'), {}),
-  whatsNew: (version: string) => get<WhatsNewModel>(inboxUrl(`/whats-new?version=${encodeURIComponent(version)}`)),
+  /** `retry`: the person's Try again, which asks GitHub whatever the throttle says. */
+  whatsNew: (version: string, retry = false) =>
+    get<WhatsNewModel>(inboxUrl(`/whats-new?version=${encodeURIComponent(version)}${retry ? '&retry=1' : ''}`)),
+  whatsNewReleases: () => get<WhatsNewReleasesModel>(inboxUrl('/whats-new/releases')),
   saveUpdateSwitches: (change: { update_check?: boolean; auto_update?: boolean }) =>
     post<{ updates: UpdateSwitches }>(inboxUrl('/settings'), change),
   saveInboxTool: (hosts: Partial<Record<AgentToolHost, boolean>>) =>

@@ -280,6 +280,9 @@ import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createInboxTailscale, isDoorTailnetPort, type InboxTailscale } from "./inbox-tailscale";
 import { createInboxUpdates, type InboxUpdatesOptions } from "./inbox-updates";
 import { INBOX_WHATS_NEW_IMAGE_PATH, whatsNewImageRoute } from "./inbox-whats-new-images";
+
+/** What's new's releases panel (inbox-whats-new-releases.ts). */
+const INBOX_WHATS_NEW_RELEASES_PATH = "/api/inbox/whats-new/releases";
 import { inboxCanonicalBaseUrl, inboxCanonicalRedirect } from "./inbox-canonical";
 import { createInboxWindows, parseWindowId, parseWindowOrigin, parseWindowPermission } from "./inbox-windows";
 import { handleInboxTourRequest } from "./inbox-tour";
@@ -411,7 +414,7 @@ export interface InboxServerOptions {
    */
   updates?: Pick<
     InboxUpdatesOptions,
-    "fetchReleasePage" | "fetchRelease" | "fetchReleaseTag" | "fetchImage" | "whatsNewWaitMs" | "launchInstaller" | "isManaged" | "listSessions" | "now" | "probeVersion"
+    "fetchReleasePage" | "fetchRelease" | "fetchReleaseTag" | "fetchReleaseList" | "fetchImage" | "whatsNewWaitMs" | "launchInstaller" | "isManaged" | "listSessions" | "now" | "probeVersion"
   >;
   /**
    * The window: the built app (`apps/hook/dist/inbox.html`, which the binary
@@ -4598,26 +4601,44 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // notes, so they answer this computer and the owner over the tailnet; any
       // other tailnet login is refused (`owner_only`, as voice and Feedback do).
       // Fetching missing notes by a release's tag is limited to the versions
-      // this Inbox knows (inbox-updates.ts fetchableVersion) and stays inside
-      // the update-notes folder of the data directory.
-      if (path === "/api/inbox/whats-new" || path === INBOX_WHATS_NEW_IMAGE_PATH) {
+      // this Inbox knows, the cached release list's included (inbox-updates.ts
+      // fetchableVersion), and stays inside the update-notes folder of the
+      // data directory. The releases panel (inbox-whats-new-releases.ts) asks
+      // GitHub for the release list at most once a day.
+      if (path === "/api/inbox/whats-new" || path === INBOX_WHATS_NEW_RELEASES_PATH || path === INBOX_WHATS_NEW_IMAGE_PATH) {
         if (!ownerOrLocal(req, via)) {
           throw new InboxError("owner_only", "Only this computer's owner can read What's new from this Inbox.");
         }
         // A stored image of a release's notes: read only, never fetched here.
         if (path === INBOX_WHATS_NEW_IMAGE_PATH) return whatsNewImageRoute(req, url, dataDir);
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (path === INBOX_WHATS_NEW_RELEASES_PATH) return json(await updates.whatsNewReleases());
         // Notes this machine never saved (a version installed outside the
-        // Inbox) are fetched by the release's tag, waited for at most 3 s;
-        // past that the page is told to ask again (503 notes_loading).
-        const answer = await updates.whatsNew(url.searchParams.get("version") ?? "");
+        // Inbox, an older release from the panel) come from the release list
+        // or by the release's tag, waited for at most 3 s; past that the page
+        // is told to ask again (503 notes_loading). `retry=1`: the person's
+        // Try again, which asks GitHub whatever the throttle says.
+        const version = url.searchParams.get("version") ?? "";
+        const answer = await updates.whatsNew(version, undefined, { retry: url.searchParams.get("retry") === "1" });
         if (answer.kind === "notes") return json(answer.notes);
         if (answer.kind === "loading") {
           const res = json({ error: "Fetching the release notes…", code: "notes_loading", retry_after_ms: 1000 }, 503);
           res.headers.set("Retry-After", "1");
           return res;
         }
-        return json({ error: "No release notes for that version.", code: "notes_not_found" }, 404);
+        if (answer.reason === "unreachable") {
+          return json({ error: "Can't reach GitHub for these release notes.", code: "notes_unreachable" }, 404);
+        }
+        return json(
+          {
+            error:
+              answer.reason === "checks_off"
+                ? "These release notes aren't saved on this computer, and update checks are off, so the Inbox doesn't ask GitHub for them."
+                : "No release notes for that version.",
+            code: "notes_not_found",
+          },
+          404,
+        );
       }
       // The update control (packages/server/inbox-updates.ts). Updating changes
       // this computer, so it answers the owner only.

@@ -85,6 +85,7 @@ packages/inbox/issueRefs.test.tsx
 packages/inbox/attachmentKinds.test.tsx
 packages/inbox/updates.test.tsx
 packages/inbox/whatsNewLink.test.tsx
+packages/inbox/whatsNewPanel.test.tsx
 packages/inbox/whatsNewHeader.test.tsx
 packages/inbox/whatsNewTailnet.test.tsx
 packages/inbox/whatsNewImages.test.tsx
