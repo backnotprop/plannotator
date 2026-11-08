@@ -353,4 +353,5 @@ export const INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC = [
   '  it is a flow across 3 or more steps that is easier to see than to read.',
   '  { "kind": "html", "source", "css"?, "width"?, "height"?, "tall"? }: `source` is a',
   '  drawing by the rules in `plannotator shape --help`. Or { "kind": "mermaid", "source" }.',
+  '  For Mermaid, draw it left to right (`flowchart LR`).',
 ].join('\n');
