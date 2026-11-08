@@ -901,6 +901,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
           onRefOpen={(n) => void openRef(n)}
           onRefPeek={readFirst ? onRefPeek : undefined}
           pan={readFirst}
+          top={readFirst}
           resolveSrc={assetUrl}
           darkContrast={darkContrast}
           onHoverMark={phase === 'leaving' ? () => {} : hoverMark}
