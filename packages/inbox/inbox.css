@@ -7634,7 +7634,11 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
 /* The foot is one row at 320 px and up. The mic takes its own room, not half the row's, so the chips get what is left;
    a chip never wraps or shrinks. When the row runs short, what yields is decided in footFit.ts (`cardFootFitCandidates`)
    and drawn from `data-fit`: the words go, into visually hidden text, so names stay whole. */
-.ib-fcomp.ib-phone .ib-fcomp-foot > .ib-dtfoot { flex: none; margin-left: 0; }
+/* The mic's 44 px press (it is 30 px) stays off the 44 px paperclip's: 4px more between them than the row's gap. */
+.ib-fcomp.ib-phone .ib-fcomp-foot > .ib-dtfoot { flex: none; margin-left: 4px; }
+/* A voice note's link over the foot: its 44 px press reaches 5 px under it (34 px with a phone's padding), so the
+   note keeps 8px under it, off the presses in the foot's row (the mic, or stacked, the chips). */
+.ib-fcomp.ib-phone .ib-vnote { padding-bottom: 8px; }
 .ib-fcomp.ib-phone .ib-fcomp-foot > .ib-dtfoot:has(.ib-vline) { flex: 1 1 0; }
 /* Dictating, the status has the row: the link or "Sent to …" would squeeze Cancel and the clock out of it at 320. */
 .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-foot:has(.ib-vline) > :is(.ib-fcomp-link, .ib-fcomp-sent) { display: none; }
@@ -7654,9 +7658,8 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
 .ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="link"] .ib-fcomp-lt { display: inline-block; text-transform: capitalize; }
 /* Stacked (large text, or under 360 px), each row keeps its presses 44 px: the chips' row is 44 px tall, so a chip's
    44 px press stays in it (off the voice note above and the clip, the mic and the link below), the rows keep apart, and
-   the link keeps clear of the mic’s press (the mic is 30 px, its press 44: 7 px past it, the gap and this margin 8).
-   The 6px over the chips keep them off the press of a voice note's link above (its press reaches 5 px under it). */
-.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] { flex-wrap: wrap; row-gap: 8px; padding-top: 6px; }
+   the link keeps clear of the mic’s press (the mic is 30 px, its press 44: 7 px past it, the gap and this margin 8). */
+.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] { flex-wrap: wrap; row-gap: 8px; }
 .ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] > .ib-fcomp-chips { order: -1; flex: 1 0 100%; min-height: 44px; }
 .ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] > .ib-dtfoot { margin-left: auto; }
 .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] > .ib-dtfoot ~ .ib-fcomp-link { margin-left: 4px; }
