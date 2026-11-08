@@ -33,6 +33,7 @@ import { ActionBadge, QuestionMark, WIDE_ROW_WAIT_WORDS, WaitCard, WaitWords, ba
 import { StatusMark, rowStatus } from './RowStatus';
 import { attachPullToRefresh } from '../pullRefresh';
 import { TidyMenu, type TidyController } from './Tidy';
+import { ListFilterButton, type ListFilterSource } from './ListFilter';
 import { awayLine, type MachinesModel } from '../machines';
 import { listLookClasses, useListLook } from '../listLook';
 import { flatRows, useListView, type ListPlaces, type ListSort } from '../listView';
@@ -164,6 +165,11 @@ export interface InboxListProps {
    * as the tour's sidebar ignores its closed sections.
    */
   rememberLook?: boolean;
+  /**
+   * The list's filter (listFilter.ts): the funnel in the header, left of Search, New message and ⋮. App filters the
+   * sections it hands the list; this is the menu's source. Absent (the tour): no funnel.
+   */
+  listFilter?: ListFilterSource;
   /** The ⋮ menu's "Customize rows…": Settings → Rows. Absent (the tour): no item. */
   onCustomizeRows?: () => void;
 }
@@ -1595,6 +1601,8 @@ export function InboxList(props: InboxListProps) {
             Refresh the list
           </span>
         )}
+        {/* The filter: the funnel alone, at every width (listFilter.ts). */}
+        {props.listFilter && <ListFilterButton source={props.listFilter} phone={isMobile} />}
         {/* Search shows where New message does: a phone always, a wider window only while the main sidebar (which holds its own Search) is closed. */}
         {props.onSearch && headerCompose && (
           <Tip content={withShortcut('Search', { scope: inboxSearchShortcuts, action: 'openSearch' })}>
