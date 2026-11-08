@@ -1405,13 +1405,22 @@ test('the details, from the forge: who stands where, the checks, every comment; 
     await expect(panel).toContainText('Coverage is up.');
     // A bot's report opening with a heading stays a comment's size.
     expect(await panel.locator('.ib-prd-cbody h2', { hasText: 'Coverage' }).evaluate((h) => parseFloat(getComputedStyle(h).fontSize))).toBeLessThanOrEqual(14);
-    // The tab behind the panel does not peek out.
-    await expect(review.locator('[data-guide-section-tab]').first()).toBeHidden();
-    // Escape closes it, back on its button; the tab returns.
+    // Nothing in the code behind the panel peeks out: across its top band, what is on screen is the panel's own.
+    // (Split | Unified is in the bar now, main 423fa3b92: no tab on the first file is left to check.)
+    expect(
+      await panel.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return [r.left + 24, r.left + r.width / 2, r.right - 24].every((x) => {
+          const hit = document.elementFromPoint(x, r.top + 12);
+          return !!hit && el.contains(hit);
+        });
+      }),
+    ).toBe(true);
+    // Escape closes it, back on its way in; the code is there again.
     await page.keyboard.press('Escape');
     await expect(panel).toHaveCount(0);
     await expect(button).toBeFocused();
-    await expect(review.locator('[data-guide-section-tab]').first()).toBeVisible();
+    await expect(review.locator('[data-guide-file-shell] [data-file-header]').first()).toBeVisible();
     // One thing over the code at a time.
     await page.setViewportSize({ width: 1280, height: 900 });
     await button.click();
