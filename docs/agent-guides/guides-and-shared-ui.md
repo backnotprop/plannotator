@@ -420,3 +420,7 @@ used to print as empty boxes — near-black text on a near-black node fill. The
 zoom strip stays `data-print-hide`; rings and badges still print.
 
 **Bundle note:** Pierre imports Shiki's full bundle, so every grammar and theme is already packed into the single-file builds (each its own chunk, fetched when first used); reusing its shared highlighter costs no extra bytes and needs no CDN or runtime wasm fetch. The Oniguruma WASM engine is dead weight under `shiki-js` and is aliased to `build/shiki-wasm-stub.ts` in the review, hook and portal Vite configs (via `resolve.alias`, which — unlike `plugins` — is shared with Vite's worker build).
+
+### Fullscreen video in embedded documents
+
+`HtmlViewer` and the fenced HTML embed frames delegate fullscreen permission through `allowFullScreen`. Their existing sandbox tokens stay unchanged. A video's native fullscreen control still requires a user gesture.

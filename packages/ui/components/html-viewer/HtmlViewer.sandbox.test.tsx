@@ -67,6 +67,7 @@ describe.if(hasDom)('HtmlViewer sandbox', () => {
   test('sandbox="allow-scripts" is the whole attribute, with no allow-modals', async () => {
     const frame = await frameFor({ sandbox: 'allow-scripts' });
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(frame.hasAttribute('allowfullscreen')).toBe(true);
   });
 
   test('hostNavigates adds allow-popups to the default and to a host value', async () => {

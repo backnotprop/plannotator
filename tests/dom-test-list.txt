@@ -629,3 +629,4 @@ packages/inbox/projectPlus.test.tsx
 packages/ui/components/shape/litLine.test.ts
 packages/inbox/contextNotes/contextNotes.test.tsx
 packages/inbox/composeLaunchTip.test.tsx
+packages/review-editor/components/PRDescriptionVideo.test.tsx

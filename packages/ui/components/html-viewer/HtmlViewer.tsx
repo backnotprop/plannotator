@@ -1575,6 +1575,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
                 unchanged. */}
             <iframe
               ref={iframeRef}
+              allowFullScreen
               {...(src
                 ? { src }
                 : servesFrame
