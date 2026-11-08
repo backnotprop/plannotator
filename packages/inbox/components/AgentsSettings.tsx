@@ -293,12 +293,52 @@ const NO_NOTE_FILE: Partial<Record<InboxAgentId, string>> = {
   kiro: 'Kiro CLI has no global instructions file, so there is no file to add a note to.',
 };
 
-function Row({ k, v, r, sub, warn, na, data }: { k: string; v: ReactNode; r?: ReactNode; sub?: ReactNode; warn?: boolean; na?: boolean; data?: Record<`data-${string}`, string> }) {
+/**
+ * What a switch left off means for that agent, one quiet line under its row
+ * while it is off (owner, 2026-11-07: "If they turn off the Inbox tool, then
+ * it's game over. … Let 'em know. Even reminders."). No dialog, no confirm.
+ */
+export const offWords = {
+  reach: (label: string) => `Off: ${label} can't send you messages or read your replies here.`,
+  /** The Inbox tool off while its MCP server still reaches the Inbox (Claude Code or Pi connected through MCP). */
+  toolBesideMcp: (label: string) => `Off: ${label} reaches you only through its MCP server above.`,
+  reminder: (label: string) => `Off: ${label} isn't told the Inbox exists when a session starts, so it rarely uses it.`,
+  note: (label: string) => `Off: ${label} isn't told when to send you decisions and finished work.`,
+};
+
+type OffKind = 'reach' | 'tool' | 'reminder' | 'note';
+
+function Row({
+  k,
+  v,
+  r,
+  sub,
+  warn,
+  na,
+  off,
+  data,
+}: {
+  k: string;
+  v: ReactNode;
+  r?: ReactNode;
+  sub?: ReactNode;
+  warn?: boolean;
+  na?: boolean;
+  /** The off line: what this switch being off means, shown only while it is off. */
+  off?: { kind: OffKind; text: string } | null;
+  data?: Record<`data-${string}`, string>;
+}) {
   return (
     <div className={`ib-agrow${na ? ' ib-agna' : ''}`} {...data}>
       <span className="ib-agk">{k}</span>
       <span className="ib-agv">{v}</span>
       <span className="ib-agr">{r}</span>
+      {off && (
+        <span className="ib-agsub" data-agent-off={off.kind}>
+          <Icon name="info" />
+          <span>{off.text}</span>
+        </span>
+      )}
       {sub && (
         <span className={`ib-agsub${warn ? ' ib-agwarn' : ''}`}>
           <Icon name={warn ? 'warn' : 'info'} />
@@ -427,6 +467,8 @@ function AgentGroup({
       <Row
         k="Reaches the Inbox"
         v={reachValue}
+        // Connected under another QWEN_HOME still reaches the Inbox from there: its value says where, so no off line.
+        off={reachSwitchable && !reach.on && reach.state !== 'elsewhere' ? { kind: 'reach', text: offWords.reach(row.label) } : null}
         sub={modOff && reach.kind === 'tool' ? reach.reason : reach.kind === 'tool' ? cost : null}
         warn={modOff && reach.kind === 'tool'}
         r={
@@ -443,6 +485,7 @@ function AgentGroup({
         <Row
           k="The Inbox tool"
           sub={cost}
+          off={row.tool.on ? null : { kind: 'tool', text: reach.on ? offWords.toolBesideMcp(row.label) : offWords.reach(row.label) }}
           v={
             <>
               the <code>plannotator_inbox</code> tool, with Plannotator&apos;s {row.id === 'pi' ? 'extension' : 'plugin'}
@@ -460,6 +503,8 @@ function AgentGroup({
         <Row
           k="Reminder at session start"
           v={row.reminder.needs_tool ? 'Needs the tool' : 'one line when a session starts'}
+          // "Needs the tool" already says why; the tool's own off line says what that means.
+          off={!row.reminder.on && !row.reminder.needs_tool ? { kind: 'reminder', text: offWords.reminder(row.label) } : null}
           r={
             <>
               {pending.has(`${row.id}:reminder`) && <span className="ib-agpending">{next}</span>}
@@ -495,6 +540,7 @@ function AgentGroup({
                 </>
               ) : null
             }
+            off={note.state === 'absent' ? { kind: 'note', text: offWords.note(row.label) } : null}
             sub={noteSub}
             warn={(note.state === 'unavailable' || note.state === 'damaged' || note.state === 'refused') && noteSub !== null}
           />
