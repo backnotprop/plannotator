@@ -4,8 +4,10 @@ import { COMPOSE_SESSIONS_REFRESH_MS } from './useComposeSessions';
 import type { MachineLaunchRead } from './model';
 
 /**
- * Each linked machine's last good sessions read (its launch block and home), kept for the page's life: an asleep
- * machine's projects still show in the folder menu, and a Send to it waits in the outbox.
+ * Each linked machine's last good sessions read (its launch block and home): an asleep machine's projects still show
+ * in the folder menu, and a Send to it waits in the outbox. A machine not read live here (asleep, or not read yet)
+ * takes the read the server kept (`launch_reads` on the machines answer), so a window opened while that machine
+ * sleeps lists it too, and one that read it earlier gets what another window read since.
  */
 const kept = new Map<string, MachineLaunchRead>();
 
@@ -47,8 +49,22 @@ export function useMachineLaunches(active: boolean, trust: (ComposeTrustPick & {
   const load = useCallback(async () => {
     let list: MachineView[];
     try {
-      const answer = await inboxApi.machines();
+      const answer = await inboxApi.machines(true);
       list = Array.isArray(answer?.machines) ? answer.machines : [];
+      // The server's copy is the newest read any window made through it, this page's own included. A machine read live
+      // here keeps this page's read (its next read lands in a moment); any other takes the server's.
+      const serverReads = answer?.launch_reads ?? {};
+      let learned = false;
+      for (const m of list) {
+        const read = m.self || (readable(m) && kept.has(m.id)) ? undefined : serverReads[m.id];
+        if (!read?.launch) continue;
+        const next: MachineLaunchRead = { launch: read.launch, home: typeof read.home === 'string' ? read.home : null };
+        const had = kept.get(m.id);
+        if (had && JSON.stringify(had) === JSON.stringify(next)) continue;
+        kept.set(m.id, next);
+        learned = true;
+      }
+      if (learned) setReads(new Map(kept));
     } catch {
       return;
     }

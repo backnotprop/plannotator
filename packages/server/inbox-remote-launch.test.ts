@@ -16,8 +16,9 @@
  *     a bare Stop is refused.
  *  4. Trust and start across the link: B's untrusted folder is offered to A's window with B's own facts; one press
  *     trusts it on B (B's Claude config) and starts there.
- *  5. B asleep: a launch from A waits (202 queued). Cancel takes one back before it ever left; the other starts on
- *     B exactly once when B is back, and the cancelled one never does; an agent's bare Cancel of a held launch can't.
+ *  5. B asleep: A's machines read still carries B's last launch read (a new window lists B's projects), and a
+ *     launch from A waits (202 queued). Cancel takes one back before it ever left; the other starts on B exactly once
+ *     when B is back, and the cancelled one never does; an agent's bare Cancel of a held launch can't.
  *  8. Another folder on B: A's window lists B's folder names under B's home (never hidden ones, never outside home),
  *     an agent's bare read and a door read without the mark are refused, and a launch in a folder that is not a
  *     project yet starts there and makes it one of B's projects.
@@ -267,8 +268,12 @@ describe("remote launch, on two real Inboxes linked both ways", () => {
 
   test("5. a machine asleep: the launch waits, Cancel takes one back, the other starts once when it is back", async () => {
     for (const [here, there] of both()) {
+      await getJson(here, `/api/inbox/m/${there.id}/sessions`);
       await stopInbox(there.w);
       await waitFor(`${here.name} sees ${there.name} asleep`, async () => (await stateOf(here, there)) === "offline", 30_000);
+      // A window opened now still lists its projects in New message: this Inbox kept that machine's last read.
+      const keptRead = ((await getJson(here, "/api/inbox/machines?launch_reads=1")).launch_reads as Json)[there.id];
+      expect((keptRead.launch.projects as Json[]).map((p) => p.id)).toContain(there.project.id);
       const kept = await windowPost(here, `/api/inbox/m/${there.id}/messages`, launchBody(`k-held-${here.name}`, there.project.id));
       expect(kept.status).toBe(202);
       expect(((await kept.json()) as Json).outbox.state).toBe("queued");

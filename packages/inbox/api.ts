@@ -1784,7 +1784,12 @@ export const inboxApi = {
     }),
   // Phones: pairing, the paired devices, the tailnet and Wi-Fi switches (packages/server/inbox-devices.ts).
   // Linked machines (docs/agent-guides/inbox-machines.md). Linking and unlinking answer only on this computer.
-  machines: () => get<{ self: string; machines: MachineView[] }>(inboxUrl('/machines')),
+  /**
+   * `launchReads` (compose only): also each linked machine's last good launch read the server kept (remote launch,
+   * `launch_reads`), so a window opened while it sleeps still lists its projects. Absent from an older Inbox.
+   */
+  machines: (launchReads?: boolean) =>
+    get<{ self: string; machines: MachineView[]; launch_reads?: Record<string, { launch?: InboxComposeLaunch; home?: string | null }> }>(inboxUrl('/machines', launchReads ? 'launch_reads=1' : undefined)),
   /** This machine's one-time link code for another machine; `tailscale` publishes this Inbox's door on the tailnet first. */
   offerMachine: () => post<MachineOffer>(inboxUrl('/machines/offer'), { tailscale: true }),
   /** Link the machine whose code this is (a pasted link, or its address and six digits), both ways. */
