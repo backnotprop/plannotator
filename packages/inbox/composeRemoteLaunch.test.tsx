@@ -213,8 +213,8 @@ test.skipIf(!hasDom)('↓ and Enter walk every row of every group, into the next
   await startAndOpenMenu();
   await until(() => all('[data-compose-folder-group]').length === 2, 'two groups');
   const menu = inDialog('[data-compose-folders] input')!;
-  // This computer first (no launch yet): web-app (picked), billing-svc, scratch, then Mac mini's infra.
-  for (let i = 0; i < 3; i++) act(() => menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+  // This computer first (no launch yet): web-app (picked), billing-svc, scratch, "Another folder on MacBook…", then Mac mini's infra.
+  for (let i = 0; i < 4; i++) act(() => menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
   act(() => menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
   expect(inDialog('[data-compose-folder]')!.getAttribute('data-compose-folder')).toBe('prj_infra');
   expect(inDialog('[data-compose-folder]')!.getAttribute('data-compose-folder-machine')).toBe(MINI);
