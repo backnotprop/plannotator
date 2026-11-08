@@ -7101,9 +7101,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   the pair on a line of its own under the row, so there it comes after the checklist (the tab order is
                   what is on screen). */}
               {!phone && endedActions}
-              {/* What is open goes on the right (approval "inbox-reaction-tray", B1): the open questions, then the checklist,
-                  after the actions (Reply, the reaction, an ended session's two). inbox.css starts the right group at
-                  whichever of the two comes first; the order here is the tab order too. */}
+              {/* What is open comes right after the actions (Reply, the reaction, an ended session's two): the open
+                  questions, then the checklist, at the buttons' usual gap, never pushed to the bar's far end (the owner,
+                  2026-11-08: "I want them next to the button"). The order here is the tab order too. */}
               {/* The thread's open questions (approval "inbox-thread-open-questions"): a list that takes the person to each
                   card, with Re-ask at its foot (owner, 2026-10-23: the open questions again, in one message per session). */}
               {openQShown && (
