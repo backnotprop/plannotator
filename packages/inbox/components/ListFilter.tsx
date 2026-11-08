@@ -3,8 +3,8 @@
  * the header under any state. A number badge can show and the filter icon can change color. That's all I want."; the
  * rule is listFilter.ts).
  *
- * - The header holds the funnel alone, at every width. With picks it takes the accent colour and a small count in its
- *   corner: one per ticked row. No tokens, no line over the list: what is picked is read in the menu.
+ * - The header holds the filter icon (three lines narrowing) alone, at every width. With picks it takes the accent
+ *   colour and a small count in its corner (`CountBadge`, the PRs button's size): one per ticked row. No tokens, no line over the list: what is picked is read in the menu.
  * - The menu (Base UI's: arrows, Home/End, type-ahead, Escape and Tab close, focus back to the funnel): Updated (Today,
  *   Last 7 days, Last 30 days, Custom range…), Agent (several; only with two agents or more), Pull request (Open,
  *   Draft, Merged, Closed, Has a PR, No PR, several; behind `LIST_FILTER_PULLS`), then Project last, since the
@@ -24,6 +24,7 @@ import { formatCount } from '../format';
 import { HostMark, Icon } from '../icons';
 import { Tip } from './Tip';
 import { RefMarkIcon } from '../board/RefMark';
+import { CountBadge } from './CountBadge';
 import {
   NO_LIST_FILTER,
   PULL_OPTIONS,
@@ -43,26 +44,11 @@ import {
   type UpdatedPick,
 } from '../listFilter';
 
-/**
- * The header's icon, one of four drawn for the owner to choose from (2026-11-08: "I want to see different filter
- * options, like filled, different icons"); the shots are in the PR. `funnel` (the default until the owner picks):
- * the outline funnel, accent with the count; `funnel-fill`: the funnel filled in the accent when picks are set;
- * `lines`: three lines narrowing (the Board's and the Pull requests page's mark); `funnel-dot`: the outline funnel,
- * accent with a dot in place of the count (the count stays in its name and tooltip).
- */
-export type ListFilterIcon = 'funnel' | 'funnel-fill' | 'lines' | 'funnel-dot';
-export const LIST_FILTER_ICON: ListFilterIcon = 'funnel';
-
-/** Lucide's `funnel` and `list-filter` (ISC), drawn with the window's icon stroke; the icon set has neither. */
-const GLYPH_PATHS = {
-  funnel: 'M10 20a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341L21.74 4.67A1 1 0 0 0 21 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14z',
-  lines: 'M3 6h18M7 12h10M10 18h4',
-} as const;
-
+/** The header's icon: three lines narrowing (Lucide's `list-filter`, ISC; the owner's pick on #2921, 2026-11-08). */
 function FilterGlyph({ size }: { size: number }) {
   return (
     <svg className="ib-ic" viewBox="0 0 24 24" style={{ width: size, height: size }} aria-hidden="true" focusable="false">
-      <path d={LIST_FILTER_ICON === 'lines' ? GLYPH_PATHS.lines : GLYPH_PATHS.funnel} />
+      <path d="M3 6h18M7 12h10M10 18h4" />
     </svg>
   );
 }
@@ -162,17 +148,10 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
     <>
       <Menu.Root open={open} onOpenChange={setOpen} modal={phone}>
         <Tip content={count > 0 ? `Filter · ${count} active` : 'Filter'}>
-          <Menu.Trigger ref={trigger} className="ib-lflt" aria-label={name} data-set={count > 0 ? '' : undefined} data-icon={LIST_FILTER_ICON} data-list-filter="">
-            <span className="ib-lflt-g">
+          <Menu.Trigger ref={trigger} className="ib-lflt" aria-label={name} data-set={count > 0 ? '' : undefined} data-list-filter="">
+            <span className="ib-lflt-g ib-cnt-host">
               <FilterGlyph size={phone ? 20 : 16} />
-              {count > 0 &&
-                (LIST_FILTER_ICON === 'funnel-dot' ? (
-                  <span className="ib-lflt-dot" aria-hidden="true" data-list-filter-count="" />
-                ) : (
-                  <span className="ib-lflt-n" aria-hidden="true" data-list-filter-count="">
-                    {count > 9 ? '9+' : count}
-                  </span>
-                ))}
+              {count > 0 && <CountBadge count={count} data={{ 'data-list-filter-count': '' }} />}
             </span>
           </Menu.Trigger>
         </Tip>

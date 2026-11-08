@@ -211,6 +211,14 @@ describe.skipIf(!hasDom)('the funnel', () => {
     expect(headerWords(el)).toBe('Inbox2');
   });
 
+  test('ten picks or more read "9+" on a wide badge of whole pixels (CountBadge)', () => {
+    stored.set(LIST_FILTER_COOKIE, JSON.stringify({ projects: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'], updated: '30d', agents: [] }));
+    render();
+    expect(badge()).toBe('9+');
+    expect(funnel().querySelector('[data-list-filter-count]')!.hasAttribute('data-wide')).toBe(true);
+    expect(funnel().getAttribute('aria-label')).toBe('Filter, 10 active');
+  });
+
   test('Clear filters in the menu drops every pick, the count, the colour and the cookie', async () => {
     const el = render();
     await press(funnel());
