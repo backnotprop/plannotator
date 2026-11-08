@@ -2911,7 +2911,7 @@ export type InboxLaunchNotReady = "missing" | "too_old" | "plugin_off" | "tool_o
 
 /**
  * Compose's launch block (`GET /api/inbox/sessions` `launch`, only while
- * `inboxLaunch.enabled`): the agents To offers to start (only those
+ * `inboxLaunch.enabled`, on unless false): the agents To offers to start (only those
  * available: no grey rows), and the projects the folder menu lists, the most
  * recently active first, each with whether its folder is still there.
  */

@@ -620,9 +620,10 @@ export interface PlannotatorConfig {
    */
   inboxTailscaleAllow?: string[];
   /**
-   * Launch agents from the Inbox (compose's "New Claude Code session";
-   * packages/server/inbox-launch.ts). `enabled`: config only, default false,
-   * off, compose, the thread and every route are as before.
+   * Launch agents from the Inbox (New message's "New session" rows;
+   * packages/server/inbox-launch.ts). `enabled`: Settings → Agents' "Start
+   * agents from New message" switch, default on (absent is on); `false`
+   * turns it off: no New session rows, and every launch route answers 404.
    * `fullPermissions`: Settings → Agents' "Start new sessions with full
    * permissions" (bypass mode); never set, a launch follows the person's
    * login shell (CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS). `model`: config only, a model name such as
@@ -1066,7 +1067,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
     const plain = (value: unknown): value is Record<string, unknown> =>
       !!value && typeof value === "object" && !Array.isArray(value);
     const merged: Record<string, unknown> = { ...current, ...partial };
-    const nested = (key: "experimental" | "diffOptions" | "reviewDefaults" | "theme" | "reviewAnalysis" | "prompts" | "packageChanges") => {
+    const nested = (key: "experimental" | "diffOptions" | "reviewDefaults" | "theme" | "reviewAnalysis" | "prompts" | "packageChanges" | "inboxLaunch") => {
       const cur = (current as Record<string, unknown>)[key];
       const par = (partial as Record<string, unknown>)[key];
       if (par === undefined) {
@@ -1079,7 +1080,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
       }
       merged[key] = key === "prompts" ? mergePromptConfig(cur as PromptConfig, par as PromptConfig) : { ...cur, ...par };
     };
-    for (const key of ["experimental", "diffOptions", "reviewDefaults", "theme", "reviewAnalysis", "prompts", "packageChanges"] as const) nested(key);
+    for (const key of ["experimental", "diffOptions", "reviewDefaults", "theme", "reviewAnalysis", "prompts", "packageChanges", "inboxLaunch"] as const) nested(key);
     writeConfigAtomic(getConfigPath(), JSON.stringify(merged, null, 2) + "\n");
     saved = true;
   } catch (e) {
@@ -1295,14 +1296,35 @@ export function resolveDefaultDiffTypeFor(
 /** A model name as Claude Code takes it (`haiku`, `claude-opus-4-1`, `opus[1m]`): letters, digits, `.`, `_`, `-`, `[`, `]`. */
 const LAUNCH_MODEL = /^[\w.\-[\]]{1,64}$/;
 
+/** A hand-edited on/off: false, 0, "false", "0", "off", "no" are off; true, 1, "true", "1", "on", "yes" on; anything else says nothing. */
+function parseLaunchFlag(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (value === 0 || value === 1) return value === 1;
+  if (typeof value !== "string") return undefined;
+  const v = value.trim().toLowerCase();
+  if (v === "true" || v === "1" || v === "on" || v === "yes") return true;
+  if (v === "false" || v === "0" || v === "off" || v === "no") return false;
+  return undefined;
+}
+
 /**
- * config.inboxLaunch, coerced: off unless `enabled` is true; `model` only when it is a plain model name;
+ * config.inboxLaunch, coerced. `enabled`: Settings → Agents' "Start agents from New message" switch writes it. Absent,
+ * on, but off on Windows, where launch has no support (Claude Code's mod, which carries the messages, stands down
+ * there): only an explicit true turns it on. Any false-like value (`false`, `0`, `"false"`, `"0"`, `"off"`, `"no"`),
+ * in `enabled` or as `inboxLaunch` itself, is off. A config.json that does not parse reads as `{}` (`loadConfig`),
+ * so as the default. `model` only when it is a plain model name;
  * `scratchDir` only when it is an absolute path other than `/` (null: the default, `<dataDir>/scratch`).
  */
-export function resolveInboxLaunch(config: PlannotatorConfig): { enabled: boolean; fullPermissions: boolean | null; model: string | null; scratchDir: string | null } {
-  const value = config.inboxLaunch && typeof config.inboxLaunch === "object" ? config.inboxLaunch : {};
+export function resolveInboxLaunch(
+  config: PlannotatorConfig,
+  platform: NodeJS.Platform = process.platform,
+): { enabled: boolean; fullPermissions: boolean | null; model: string | null; scratchDir: string | null } {
+  const raw: unknown = config.inboxLaunch;
+  const value = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as NonNullable<PlannotatorConfig["inboxLaunch"]>) : {};
+  // `"inboxLaunch": false` (or "off") by hand: the whole feature off.
+  const whole = raw === undefined || (typeof raw === "object" && raw !== null) ? undefined : parseLaunchFlag(raw);
   return {
-    enabled: coerceConfigBoolean(value.enabled, false),
+    enabled: whole ?? parseLaunchFlag(value.enabled) ?? platform !== "win32",
     // null: the person never set the switch (a launch follows their login shell).
     fullPermissions: parseConfigBoolean(value.fullPermissions) ?? null,
     model: typeof value.model === "string" && LAUNCH_MODEL.test(value.model) ? value.model : null,

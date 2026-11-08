@@ -31,7 +31,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createFakeAgents, type FakeAgents } from '../helpers/fake-agents';
-import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { E2E_LAUNCH_OFF, inboxScratch, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
@@ -105,7 +105,7 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
   writeFileSync(join(fake.home, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'plannotator@plannotator': true } }));
   // The sound dialog is due (as after an update): it shows first, and the note dialog waits for another load.
   mkdirSync(join(root, 'data'), { recursive: true });
-  writeFileSync(join(root, 'data', 'config.json'), JSON.stringify({ inboxSound: { dialogDueFor: '0.0.0-dev' } }));
+  writeFileSync(join(root, 'data', 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, inboxSound: { dialogDueFor: '0.0.0-dev' } }));
   // The first-run connect screen, not the tour's entry screen (inbox-tour.spec.ts proves that one).
   markTourDecided(join(root, 'data'));
   const env = envFor(fake, root);

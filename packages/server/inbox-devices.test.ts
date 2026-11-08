@@ -1268,7 +1268,8 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
     await poll("ses-b", "pi");
 
     const sessions = (await (await door("sessions?session=ses-a")).json()) as Json;
-    expect(Object.keys(sessions).sort()).toEqual(["home", "machine", "projects", "serverSession", "session"]);
+    // `launch`: compose's launch block, there while launch is on (the default since 0.29; contract 7.39).
+    expect(Object.keys(sessions).sort()).toEqual(["home", "launch", "machine", "projects", "serverSession", "session"]);
     expect(sessions.session).toEqual({ session: "ses-a", live: true });
     expect(sessions.projects.map((group: Json) => group.project.root)).toEqual([ledger]);
     expect(sessions.projects[0].sessions.map((s: Json) => s.session).sort()).toEqual(["ses-a", "ses-b"]);
