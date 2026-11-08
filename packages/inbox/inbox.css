@@ -6603,6 +6603,17 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-refmark[data-ref-state="closed"][data-ref-kind="pr"] { color: var(--ib-ref-closed); }
 .ib-refmark[data-ref-state="unknown"] { color: var(--muted-foreground); opacity: 0.7; }
 @media (forced-colors: active) { .ib-refmark { color: CanvasText; } }
+/* A count over an icon's corner (components/CountBadge.tsx): the PRs button's count, 13 px across, 9.5 px bold, the quiet
+   text colour on the page's ground. --cnt-x / --cnt-y: how far its centre sits past the icon's top-right corner, half
+   pixels so its edges land on whole ones (13 across). The digits sit in the middle both ways: tabular figures, a line
+   as tall as the badge, no baseline shift, and edges on whole pixels ("9+" a fixed 17 px, not its text's 16.28). */
+.ib-cnt-host { position: relative; --cnt-s: 13px; --cnt-f: 9.5px; --cnt-x: 1.5px; --cnt-y: 2.5px; }
+.ib-cnt { position: absolute; top: calc(var(--cnt-y) - var(--cnt-s) / 2); right: calc(0px - var(--cnt-x) - var(--cnt-s) / 2); min-width: var(--cnt-s); height: var(--cnt-s); padding: 0 2px; box-sizing: border-box; border-radius: 999px; display: flex; align-items: center; justify-content: center; font-size: var(--cnt-f); font-weight: 700; line-height: var(--cnt-s); font-variant-numeric: tabular-nums; letter-spacing: 0; text-align: center; vertical-align: top; background: var(--muted-foreground); color: var(--background); pointer-events: none; }
+.ib-cnt-host:has(> .ib-cnt) > svg { -webkit-mask: radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x)) var(--cnt-y), transparent 97%, #000 100%); mask: radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x)) var(--cnt-y), transparent 97%, #000 100%); }
+.ib-cnt[data-wide] { width: calc(var(--cnt-s) + 4px); padding: 0; }
+/* A wide count's cut: a second circle 4 px to the left, kept where both leave the glyph (the pill and its gap). */
+.ib-cnt-host:has(> .ib-cnt[data-wide]) > svg { -webkit-mask: radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x)) var(--cnt-y), transparent 97%, #000 100%), radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x) - 4px) var(--cnt-y), transparent 97%, #000 100%); -webkit-mask-composite: source-in; mask: radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x)) var(--cnt-y), transparent 97%, #000 100%), radial-gradient(circle calc(var(--cnt-s) / 2 + 1.25px) at calc(100% + var(--cnt-x) - 4px) var(--cnt-y), transparent 97%, #000 100%); mask-composite: intersect; }
+@media (forced-colors: active) { .ib-cnt { background: CanvasText; color: Canvas; forced-color-adjust: none; } }
 /* A lane dot in a menu: centred in the icons' 15 px, so a lane's words line up with Done's. */
 .ib-pmi .ib-lane-dot { margin: 0 3.5px; }
 
@@ -10096,26 +10107,22 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-lm-head { position: relative; display: inline-flex; vertical-align: -5px; margin-right: 8px; }
 .ib-bc-proj { display: inline-flex; }
 /* A thread's PRs (approval "inbox-pr-binding", 2026-11-08; ThreadPulls.tsx). The mark: the state icon of the PR in
-   play, in the forge's colours; several put a grey count over its top-right corner. The icon is cut under the count
-   (a mask on our own glyph, not a ring), so it reads on any row fill. --prc-s: the count's size; --prc-x / --prc-y: how
-   far its centre sits past the icon's top-right corner. */
-.ib-prc { position: relative; display: inline-flex; flex: none; --prc-s: 11px; --prc-f: 8.5px; --prc-x: 2px; --prc-y: 2.5px; }
-.ib-prbtn .ib-prc { --prc-s: 13px; --prc-f: 9.5px; --prc-x: 2px; --prc-y: 2px; }
+   play, in the forge's colours; several put a grey count over its top-right corner (CountBadge, `.ib-cnt`). */
+.ib-prc { display: inline-flex; flex: none; }
+/* The count is the shared CountBadge (.ib-cnt, below), at its own size on the row and on the button: at 11 px a row's
+   8.5 px digits sat half a pixel high (measured at 1x and 2x); at 13 px they are centred both ways. */
 .ib-prc .ib-refmark { display: block; }
 .ib-prc[data-state="draft"] .ib-refmark { color: var(--ib-ref-neutral); }
-.ib-prc-n { position: absolute; top: calc(var(--prc-y) - var(--prc-s) / 2); right: calc(0px - var(--prc-x) - var(--prc-s) / 2); min-width: var(--prc-s); height: var(--prc-s); padding: 0 2px; box-sizing: border-box; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-size: var(--prc-f); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; pointer-events: none; background: var(--muted-foreground); color: var(--background); }
-.ib-prc:has(.ib-prc-n) .ib-refmark { -webkit-mask: radial-gradient(circle calc(var(--prc-s) / 2 + 1.25px) at calc(100% + var(--prc-x)) var(--prc-y), transparent 97%, #000 100%); mask: radial-gradient(circle calc(var(--prc-s) / 2 + 1.25px) at calc(100% + var(--prc-x)) var(--prc-y), transparent 97%, #000 100%); }
-@media (forced-colors: active) { .ib-prc-n { background: CanvasText; color: Canvas; forced-color-adjust: none; } }
 /* The row's mark: room for the count past the icon's edge, and line 3 must not clip it. */
 .ib-prmark { display: inline-flex; align-items: center; flex: none; position: relative; cursor: default; }
 .ib-prmark[data-pr-n]:not([data-pr-n="1"]) .ib-prc { margin-right: 6px; }
 .ib-row .ib-cw .ib-prmark { margin-left: 8px; }
-:is(.ib-nrow .ib-l3, .ib-m3):has(.ib-prc-n) { overflow: visible; }
-:is(.ib-nrow .ib-l3, .ib-m3):has(.ib-prc-n) > .ib-pv { overflow: hidden; }
+:is(.ib-nrow .ib-l3, .ib-m3):has(.ib-prc .ib-cnt) { overflow: visible; }
+:is(.ib-nrow .ib-l3, .ib-m3):has(.ib-prc .ib-cnt) > .ib-pv { overflow: hidden; }
 @media (pointer: coarse) { .ib-prmark::before { content: ''; position: absolute; inset: -14px -10px; } }
 /* The thread's button, left of Artifacts, at its icon's size. */
 .pn-inbox .ib-iconbtn.ib-prbtn { flex: none; }
-.ib-prbtn .ib-prc:has(.ib-prc-n) { margin-right: 3px; }
+.ib-prbtn .ib-prc:has(.ib-cnt) { margin-right: 3px; }
 .pn-inbox .ib-iconbtn.ib-prbtn[aria-expanded="true"] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
 /* The card: the hover card's surface; a phone's bottom sheet. */
 .ib-prpop-sheet { left: 0; right: 0; bottom: 0; top: auto; border-radius: 12px 12px 0 0; max-height: 78dvh; padding-bottom: env(safe-area-inset-bottom); }

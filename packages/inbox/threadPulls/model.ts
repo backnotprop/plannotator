@@ -51,11 +51,6 @@ export function pullExtras(pull: Pick<InboxThreadPullWire, 'state' | 'checks' | 
   return out;
 }
 
-/** The count over the mark's corner: 2 to 9, then "9+". */
-export function pullCountText(count: number): string {
-  return count > 9 ? '9+' : String(count);
-}
-
 /** The PR the mark shows, from a full answer (the same rule as the server's row summary). */
 export function pullHeadline(answer: Pick<InboxThreadPullsAnswer, 'pulls' | 'groups'>): InboxThreadPullWire | null {
   return inboxThreadPullHeadline(answer.pulls, answer.groups);

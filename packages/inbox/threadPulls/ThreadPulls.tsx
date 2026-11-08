@@ -11,8 +11,9 @@
  *   the same icon and count, at the shapes icon's size. Hover or a click
  *   opens the card; a click keeps it open.
  * - The card (`PullsCard`): one PR is the existing hover card (RefCardView);
- *   several are a list in the same surface, each stack base first and joined,
- *   then "Related" in the order they were added, each with its live state.
+ *   several are a list in the same surface, each stack base first and joined
+ *   ("Stack of 3"), then the others under a divider with no heading, in the
+ *   order they were added, each with its live state.
  *   The person adds a PR (its ref or link) and removes one there; a removal
  *   says so with Undo. On a touch screen a tap opens it as a bottom sheet.
  *
@@ -27,7 +28,8 @@ import { REF_CARD_CLOSE_MS, REF_CARD_DELAY_MS, RefCardView } from '@plannotator/
 import { loadRefCard } from '@plannotator/ui/utils/refCard';
 import { inboxApi } from '../api';
 import { RefMarkIcon } from '../board/RefMark';
-import { labelOfKey, pullCountText, pullExtras, pullHeadline, pullsHead, pullsMarkWords, pullStateWord, pullsSummaryOf, threadPullsBus } from './model';
+import { CountBadge, countBadgeText } from '../components/CountBadge';
+import { labelOfKey, pullExtras, pullHeadline, pullsHead, pullsMarkWords, pullStateWord, pullsSummaryOf, threadPullsBus } from './model';
 
 const WIDTH = 400;
 const EDGE = 12;
@@ -35,16 +37,12 @@ const GAP = 6;
 
 const coarse = () => typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
 
-/** The state icon with the count of PRs over its top-right corner (several PRs only). */
+/** The state icon with the count of PRs over its top-right corner (several PRs only): the shared CountBadge. */
 export function PullsMarkIcon({ summary, size }: { summary: InboxThreadPullsSummary; size: number }) {
   return (
-    <span className="ib-prc" data-pr-count={summary.count > 1 ? pullCountText(summary.count) : undefined} data-state={summary.headline.state}>
+    <span className="ib-prc ib-cnt-host" data-pr-count={summary.count > 1 ? countBadgeText(summary.count) : undefined} data-state={summary.headline.state}>
       <RefMarkIcon kind="pr" state={summary.headline.state} size={size} />
-      {summary.count > 1 && (
-        <span className="ib-prc-n" aria-hidden="true">
-          {pullCountText(summary.count)}
-        </span>
-      )}
+      {summary.count > 1 && <CountBadge count={summary.count} />}
     </span>
   );
 }
@@ -269,7 +267,7 @@ function PullRow({ pull, oneRepo, onRemove }: { pull: InboxThreadPullWire; oneRe
   );
 }
 
-/** Several PRs: each stack base first and joined, then the related ones in the order they were added. */
+/** Several PRs: each stack base first and joined, then the others (no heading) in the order they were added. */
 function PullsList({ answer, onRemove }: { answer: InboxThreadPullsAnswer; onRemove?: (pull: InboxThreadPullWire) => void }) {
   const head = pullsHead(answer);
   const byKey = new Map(answer.pulls.map((pull) => [pull.pull, pull]));
@@ -282,8 +280,10 @@ function PullsList({ answer, onRemove }: { answer: InboxThreadPullsAnswer; onRem
         <span className="ib-prpop-n">{head.count}</span>
       </div>
       {answer.groups.map((group, index) => (
-        <section key={`${group.kind}-${index}`} className="ib-prpop-group" data-pr-group={group.kind} aria-label={group.kind === 'stack' ? `Stack of ${group.pulls.length}` : 'Related'}>
-          {!only && <div className="ib-prpop-gh">{group.kind === 'stack' ? `Stack of ${group.pulls.length}` : 'Related'}</div>}
+        // The thread's other PRs follow the stacks under the divider, with no heading (the owner, 2026-11-08: "it's
+        // intuitive already"); only a stack is named.
+        <section key={`${group.kind}-${index}`} className="ib-prpop-group" data-pr-group={group.kind} aria-label={group.kind === 'stack' ? `Stack of ${group.pulls.length}` : undefined}>
+          {!only && group.kind === 'stack' && <div className="ib-prpop-gh">Stack of {group.pulls.length}</div>}
           <ol className={`ib-prpop-rows${group.kind === 'stack' ? ' ib-prpop-stack' : ''}`}>
             {group.pulls.flatMap((key) => byKey.get(key) ?? []).map((pull) => (
               <PullRow key={pull.pull} pull={pull} oneRepo={head.oneRepo} onRemove={onRemove} />

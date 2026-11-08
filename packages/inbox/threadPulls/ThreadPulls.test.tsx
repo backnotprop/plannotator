@@ -6,7 +6,7 @@
  * What regresses: a count that is missing, wrong or past "9+"; the mark
  * showing a merged PR while one is still open; a screen reader hearing
  * nothing of the PRs; the button drawn on a thread with none; a stack shown
- * out of order or mixed into Related; a remove that sends the wrong ref or
+ * out of order or mixed with the others; a remove that sends the wrong ref or
  * cannot be undone; a refused add that says nothing; and a change to another
  * thread making this one read again.
  *
@@ -121,11 +121,16 @@ describe.skipIf(!hasDom)('the row mark', () => {
     render(<RowPullsMark threadId={THREAD} summary={summary(1, 'merged')} />);
     const mark = host!.querySelector('[data-pr-mark]')!;
     expect(mark.getAttribute('data-pr-mark')).toBe('merged');
-    expect(mark.querySelector('.ib-prc-n')).toBeNull();
+    expect(mark.querySelector('.ib-cnt')).toBeNull();
     render(<RowPullsMark threadId={THREAD} summary={summary(3, 'open')} />);
-    expect(host!.querySelector('.ib-prc-n')!.textContent).toBe('3');
+    expect(host!.querySelector('.ib-cnt')!.textContent).toBe('3');
+    expect(host!.querySelector('.ib-cnt')!.hasAttribute('data-wide')).toBe(false);
     render(<RowPullsMark threadId={THREAD} summary={summary(14, 'draft')} />);
-    expect(host!.querySelector('.ib-prc-n')!.textContent).toBe('9+');
+    // Two characters take the badge's fixed wide width (whole pixels), not their text's.
+    expect(host!.querySelector('.ib-cnt')!.textContent).toBe('9+');
+    expect(host!.querySelector('.ib-cnt')!.hasAttribute('data-wide')).toBe(true);
+    // The count sits in the shared badge's host, so the icon is cut under it.
+    expect(host!.querySelector('.ib-cnt')!.parentElement!.classList.contains('ib-cnt-host')).toBe(true);
   });
 
   test('a screen reader hears the PRs in the row: the count and the one in play', () => {
@@ -162,7 +167,7 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     expect(done).toBe(1);
   });
 
-  test('the button shows the PR in play with the count; its card lists the stack base first, then Related, with states', async () => {
+  test('the button shows the PR in play with the count; its card lists the stack base first, then the others with no heading, with states', async () => {
     const base = pull('northwind/billing-svc#430', 'merged', 'main', 'model');
     const related = pull('northwind/web-app#1309', 'closed', 'main', 'flag');
     const top = pull('northwind/billing-svc#431', 'open', 'model', 'schedule', { checks: 'failing', review: 'review_required' });
@@ -172,7 +177,7 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     expect(reads).toEqual([`/api/inbox/threads/${THREAD}/pulls`]);
     const button = host!.querySelector('[data-pr-button]')!;
     expect(button.getAttribute('data-pr-button')).toBe('open');
-    expect(button.querySelector('.ib-prc-n')!.textContent).toBe('3');
+    expect(button.querySelector('.ib-cnt')!.textContent).toBe('3');
     expect(button.getAttribute('aria-label')).toBe('3 pull requests, #431 open');
     await click(button);
     const card = popover()!;
@@ -183,7 +188,9 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
       ['stack', ['northwind/billing-svc#430', 'northwind/billing-svc#431']],
       ['related', ['northwind/web-app#1309']],
     ]);
-    expect([...card.querySelectorAll('.ib-prpop-gh')].map((h) => h.textContent)).toEqual(['Stack of 2', 'Related']);
+    // Only the stack is named; the others follow under the divider with no heading.
+    expect([...card.querySelectorAll('.ib-prpop-gh')].map((h) => h.textContent)).toEqual(['Stack of 2']);
+    expect(card.textContent).not.toContain('Related');
     const open = card.querySelector('[data-pr-row="northwind/billing-svc#431"] .ib-prpop-sub')!.textContent;
     expect(open).toContain('Open');
     expect(open).toContain('checks failing');
@@ -215,11 +222,11 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     expect(posts).toEqual([{ path: `/api/inbox/threads/${THREAD}/pulls`, body: { remove: ['o/web#2'] } }]);
     expect(popover()!.querySelector('[data-pr-removed]')!.textContent).toContain('Removed o/web#2');
     // One PR left: the button's count goes.
-    expect(host!.querySelector('[data-pr-button] .ib-prc-n')).toBeNull();
+    expect(host!.querySelector('[data-pr-button] .ib-cnt')).toBeNull();
     await click(popover()!.querySelector('[data-pr-undo]'));
     expect(posts.at(-1)!.body).toEqual({ add: ['o/web#2'] });
     expect(popover()!.querySelector('[data-pr-removed]')).toBeNull();
-    expect(host!.querySelector('[data-pr-button] .ib-prc-n')!.textContent).toBe('2');
+    expect(host!.querySelector('[data-pr-button] .ib-cnt')!.textContent).toBe('2');
   });
 
   test("the person adds a PR by its ref; a refused one says why and keeps what they typed", async () => {
@@ -259,7 +266,7 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     await settle();
     expect(reads).toHaveLength(2);
     expect(host!.querySelector('[data-pr-button]')!.getAttribute('data-pr-button')).toBe('open');
-    expect(host!.querySelector('[data-pr-button] .ib-prc-n')!.textContent).toBe('2');
+    expect(host!.querySelector('[data-pr-button] .ib-cnt')!.textContent).toBe('2');
   });
 
   test("one PR with no forge answer shows what the Inbox knows, never a made-up card; the forge's answer shows the hover card", async () => {
