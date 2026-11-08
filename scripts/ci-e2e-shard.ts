@@ -20,8 +20,14 @@
  * shard also writes Playwright's JSON report (E2E_REPORT), from which the
  * workflow records the specs it passed for the next run.
  *
+ *   bun run scripts/ci-e2e-shard.ts smoke   # the PR smoke (browser-smoke.yml)
+ *
+ * `smoke` runs SMOKE_SPECS only, the Inbox's core paths, in one job of about
+ * five minutes on every PR; the whole suite runs on main every two hours.
+ *
  * scripts/ci-e2e-shard.test.ts checks that the shards together are every spec,
- * each once, and that the workflow's matrix runs every shard.
+ * each once, that the workflow's matrix runs every shard, and that the smoke
+ * specs exist and the smoke workflow runs them.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -31,6 +37,17 @@ export const E2E_SHARDS = 16;
 export const E2E_CONFIG = 'tests/e2e/playwright.config.ts';
 /** Seconds shard 1 spends on the release-numbered binary's update specs. */
 export const SHARD_1_EXTRA_S = 90;
+
+/**
+ * The PR smoke: whole spec files, about 75 s together, that walk the Inbox's
+ * core paths on the compiled binary. inbox.spec.ts: agents' threads land in the
+ * list, a row opens the thread, picks and words go out with Send and the agent
+ * reads them, Settings opens and saves. inbox-message-comments.spec.ts: a
+ * comment on words in an agent's message, sent and read back by the agent.
+ * Whole files, not single tests: both are serial specs whose tests build on
+ * each other.
+ */
+export const SMOKE_SPECS = ['tests/e2e/inbox.spec.ts', 'tests/e2e/inbox-message-comments.spec.ts'];
 
 /** Every spec Playwright's testMatch can find, relative to the repo root, sorted. */
 export function specFiles(): string[] {
@@ -69,7 +86,22 @@ export function fileFilter(file: string): string {
   return `${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`;
 }
 
-if (import.meta.main) {
+/** Runs Playwright on these spec files, with the JSON report the workflow reads. Returns its exit code. */
+function runSpecs(files: string[], passWithNoTests: boolean): number {
+  const report = resolve(process.env.E2E_REPORT ?? join(repoRoot, '.local/e2e-report/report.json'));
+  const noTests = passWithNoTests ? ['--pass-with-no-tests'] : [];
+  const child = Bun.spawnSync(['bunx', 'playwright', 'test', '-c', E2E_CONFIG, '--reporter=list,json', ...noTests, ...files.map(fileFilter)], {
+    cwd: repoRoot,
+    env: { ...process.env, PLAYWRIGHT_JSON_OUTPUT_NAME: report },
+    stdio: ['inherit', 'inherit', 'inherit'],
+  });
+  return child.exitCode ?? 1;
+}
+
+if (import.meta.main && process.argv[2] === 'smoke') {
+  console.log(`e2e smoke: ${SMOKE_SPECS.length} specs\n  ${SMOKE_SPECS.join('\n  ')}`);
+  process.exit(runSpecs(SMOKE_SPECS, false));
+} else if (import.meta.main) {
   const planFile = process.env.E2E_PLAN;
   // A missing plan would mean the 16-shard split on a smaller matrix, which drops specs: fail instead.
   if (planFile && !existsSync(planFile)) {
@@ -80,20 +112,13 @@ if (import.meta.main) {
   const k = Number(process.argv[2]);
   const count = plan?.specs ? plan.count : E2E_SHARDS;
   if (!Number.isInteger(k) || k < 1 || k > count) {
-    console.error(`usage: bun run scripts/ci-e2e-shard.ts <1..${count}>`);
+    console.error(`usage: bun run scripts/ci-e2e-shard.ts <1..${count}> | smoke`);
     process.exit(2);
   }
   const { files } = shardOf(k, plan);
   console.log(`e2e shard ${k}/${count}: ${files.length} specs\n  ${files.join('\n  ')}`);
   // No file filter would run every spec: a shard the plan left empty runs nothing.
   if (files.length === 0) process.exit(0);
-  const report = resolve(process.env.E2E_REPORT ?? join(repoRoot, '.local/e2e-report/report.json'));
   // A planned shard may hold only specs whose every test is quarantined in CI.
-  const noTests = plan?.specs ? ['--pass-with-no-tests'] : [];
-  const child = Bun.spawnSync(['bunx', 'playwright', 'test', '-c', E2E_CONFIG, '--reporter=list,json', ...noTests, ...files.map(fileFilter)], {
-    cwd: repoRoot,
-    env: { ...process.env, PLAYWRIGHT_JSON_OUTPUT_NAME: report },
-    stdio: ['inherit', 'inherit', 'inherit'],
-  });
-  process.exit(child.exitCode ?? 1);
+  process.exit(runSpecs(files, Boolean(plan?.specs)));
 }

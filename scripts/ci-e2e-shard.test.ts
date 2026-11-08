@@ -6,12 +6,15 @@
  * from the workflow's matrix, the shard job no longer calling the script, or
  * a file filter that also picks up another spec, or a shard that no longer
  * records the specs it passed (the next run would rerun them all). The balance check catches
- * stale times: a shard well past an even split holds the whole run up.
+ * stale times: a shard well past an even split holds the whole run up. The
+ * smoke checks catch a PR smoke that runs nothing: a smoke spec renamed away,
+ * one no Chromium run picks up, or the smoke workflow no longer running them
+ * on the compiled binary.
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { E2E_SHARDS, SHARD_1_EXTRA_S, fileFilter, repoRoot, shards, specFiles, specTimes } from './ci-e2e-shard';
+import { E2E_SHARDS, SHARD_1_EXTRA_S, SMOKE_SPECS, fileFilter, repoRoot, shards, specFiles, specTimes } from './ci-e2e-shard';
 
 const workflow = Bun.YAML.parse(readFileSync(join(repoRoot, '.github/workflows/inbox-e2e.yml'), 'utf8')) as {
   jobs: Record<string, { needs?: string | string[]; strategy?: { matrix?: { shard?: number[] | string } }; steps?: { run?: string; if?: string; env?: Record<string, string> }[] }>;
@@ -81,5 +84,30 @@ describe('Inbox window e2e shards', () => {
     const record = steps.findIndex((step) => step.run?.startsWith('bun run scripts/ci-e2e-reuse.ts passed '));
     expect(record).toBeGreaterThan(run);
     expect(steps[record].if).toBe('always()');
+  });
+});
+
+describe('the PR smoke', () => {
+  test('every smoke spec exists and runs in Chromium, and the slice stays short', () => {
+    const all = specFiles();
+    expect(SMOKE_SPECS.length).toBeGreaterThan(0);
+    for (const file of SMOKE_SPECS) {
+      expect(all, file).toContain(file);
+      // The webkit project runs *-webkit specs only, and inbox-thread-parity has its own config.
+      expect(file).not.toMatch(/-webkit\.spec\.ts$|inbox-thread-parity/);
+    }
+    // About five minutes in all: the build takes about three. Measured seconds per spec.
+    const times = specTimes();
+    expect(SMOKE_SPECS.reduce((sum, f) => sum + (times[f.split('/').pop()!] ?? 0), 0)).toBeLessThanOrEqual(120);
+  });
+
+  test('browser-smoke.yml compiles the binary, then runs the smoke specs in the Playwright image', () => {
+    const smoke = Bun.YAML.parse(readFileSync(join(repoRoot, '.github/workflows/browser-smoke.yml'), 'utf8')) as typeof workflow;
+    const steps = smoke.jobs.smoke?.steps ?? [];
+    const run = steps.findIndex((step) => step.run?.trim() === 'bash scripts/ci-e2e-in-image.sh . bun run scripts/ci-e2e-shard.ts smoke');
+    expect(run, 'smoke step').toBeGreaterThanOrEqual(0);
+    const compile = steps.findIndex((step) => step.run?.includes('--outfile .local/plannotator'));
+    expect(compile, 'compile before the specs').toBeGreaterThanOrEqual(0);
+    expect(compile).toBeLessThan(run);
   });
 });
