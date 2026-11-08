@@ -49,6 +49,15 @@ export const REVEAL_TIMES = {
  */
 export const IDLE_REVEALS: ReadonlySet<InboxRevealId> = new Set<InboxRevealId>(['list_view', 'board', 'steps', 'bro']);
 
+/**
+ * App's idle clock runs (`useIdleClock` `enabled`): a reveal that takes idle is armed on this load (`next`, or List view
+ * `ahead`), or the list options' update-day dialog is due.
+ */
+export function idleClockArmed(armed: Pick<RevealArmed, 'next' | 'ahead'> | null, listIntroDue: boolean): boolean {
+  if (armed === null) return false;
+  return (armed.next !== null && IDLE_REVEALS.has(armed.next)) || armed.ahead.some((id) => IDLE_REVEALS.has(id)) || listIntroDue;
+}
+
 /** One visit to a thread: which, and when it opened. */
 export interface RevealVisit {
   threadId: string;

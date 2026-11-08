@@ -332,7 +332,35 @@ describe.skipIf(!hasDom)('the List view choice, through the line', () => {
     expect(claims()).toHaveLength(1);
   });
 
-  test('idle with a blocker present (the list no taller than the screen, something open): no claim', async () => {
+  test('idle with the real list on the page: an open Smart group band and a sidebar section (aria-expanded, no popup) never keep it away', async () => {
+    idleClock.IDLE_CLOCK.idleMs = 100;
+    // InboxList.tsx's band (groups open by default) and Sidebar.tsx's section toggle, as they render.
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<nav><button type="button" aria-expanded="true" data-sidebar-section="">Projects</button></nav><div class="ib-listcol"><div class="ib-lbody"><div class="ib-group" data-section-id="new"><button type="button" class="ib-band" aria-expanded="true">New since you looked</button></div></div></div>',
+    );
+    mount({ ...BASE, thread: 'a' }, NEXT);
+    await until(() => dialog() !== null);
+    expect(claims()).toHaveLength(1);
+  });
+
+  test('idle with the Ask AI window open over the thread: no claim', async () => {
+    idleClock.IDLE_CLOCK.idleMs = 100;
+    document.body.insertAdjacentHTML('beforeend', '<div data-popover-layer=""><section data-chat-window="">Ask AI</section></div>');
+    mount({ ...BASE, thread: 'a' }, NEXT);
+    await wait(TIMES.pageAgeMs + 400);
+    expect(claims()).toHaveLength(0);
+  });
+
+  test("App's clock runs only while a reveal that takes idle is armed (next, List view ahead, or the list options due)", () => {
+    expect(reveal.idleClockArmed(null, true)).toBe(false);
+    for (const next of ['list_view', 'board', 'steps', 'bro'] as const) expect(reveal.idleClockArmed({ next, ahead: [] }, false)).toBe(true);
+    expect(reveal.idleClockArmed({ next: 'snooze', ahead: ['list_view'] }, false)).toBe(true);
+    expect(reveal.idleClockArmed({ next: null, ahead: [] }, true)).toBe(true);
+    for (const next of ['snooze', 'code_review', 'voice', 'sound', null] as const) expect(reveal.idleClockArmed({ next, ahead: [] }, false)).toBe(false);
+  });
+
+    test('idle with a blocker present (the list no taller than the screen, something open): no claim', async () => {
     idleClock.IDLE_CLOCK.idleMs = 100;
     mount({ ...BASE, thread: 'a', taller: false }, NEXT);
     await wait(TIMES.pageAgeMs + 400);

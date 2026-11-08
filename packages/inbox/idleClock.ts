@@ -25,11 +25,44 @@ export function pageAttentive(doc: Document = document): boolean {
   return doc.visibilityState === 'visible' && (typeof doc.hasFocus !== 'function' || doc.hasFocus());
 }
 
-/** Something is typed or open: a focused field, a dialog, a modal panel, a menu, a list of choices or an open popover. */
+/**
+ * What is open over the page: a dialog (modal or not), a menu, a list of choices, an open popover (its trigger declares
+ * `aria-haspopup`: an open disclosure, such as a Smart group's band or a sidebar section, only says `aria-expanded`,
+ * and is no overlay), the Ask AI window and Show me (`data-popover-layer`, `data-chat-window`), an image being marked
+ * up, a Shape board over the thread, the annotation toolbar and its comment, picker and table floats.
+ */
+export const PAGE_OVERLAYS = [
+  'dialog[open]',
+  '[aria-modal="true"]',
+  '[role="dialog"]',
+  '[role="alertdialog"]',
+  '[role="menu"]',
+  '[role="listbox"]',
+  '[aria-haspopup]:not([aria-haspopup="false"])[aria-expanded="true"]',
+  '[data-popover-layer]',
+  '[data-chat-window]',
+  '[data-pn-image-annotator-stage]',
+  '[data-shape-open]',
+  '.annotation-toolbar',
+  '[data-comment-popover]',
+  '[data-floating-picker]',
+  '[data-table-toolbar]',
+].join(', ');
+
+/** An element shown with the Popover API is open (`:popover-open`; false where the engine has no such selector). */
+function popoverOpen(doc: Document): boolean {
+  try {
+    return doc.querySelector(':popover-open') !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** Something is typed or open: a focused field, or an overlay (`PAGE_OVERLAYS`, an open popover). */
 export function pageBusy(doc: Document = document): boolean {
   const active = doc.activeElement as HTMLElement | null;
   if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT' || active.isContentEditable)) return true;
-  return doc.querySelector('dialog[open], [aria-modal="true"], [role="menu"], [role="listbox"], [aria-expanded="true"]') !== null;
+  return doc.querySelector(PAGE_OVERLAYS) !== null || popoverOpen(doc);
 }
 
 export interface IdleClockInput {

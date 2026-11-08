@@ -4,8 +4,9 @@
  *
  * What regresses: idle coming without the full quiet length, or input (a pointer move, a key, a scroll, a touch) not
  * starting the count again; idle while the tab is hidden or the window blurred, or the count carrying over a hidden
- * spell; idle while a field has focus, a dialog, menu or popover is open, or the page says it is busy; a clock that is
- * off still counting.
+ * spell; idle while a field has focus, a dialog (modal or not), menu, popover, the Ask AI window, a Shape board or the
+ * annotation toolbar is open, or the page says it is busy; an open disclosure (a Smart group's band, a sidebar section:
+ * `aria-expanded` with no popup) keeping idle away (review of #2916, finding 1); a clock that is off still counting.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -64,6 +65,13 @@ function mount(enabled = true) {
     root = createRoot(host!);
     root.render(<Harness enabled={enabled} />);
   });
+}
+
+/** A menu button with its popover open: `aria-haspopup` and `aria-expanded`. */
+function popoverTrigger(): HTMLElement {
+  const el = element('button', 'aria-haspopup', 'menu');
+  el.setAttribute('aria-expanded', 'true');
+  return el;
 }
 
 function element(tag: string, name: string, value: string): HTMLElement {
@@ -140,7 +148,11 @@ describe.skipIf(!hasDom)('the idle clock', () => {
     ['a modal panel', () => element('div', 'aria-modal', 'true')],
     ['a menu', () => element('div', 'role', 'menu')],
     ['a list of choices', () => element('div', 'role', 'listbox')],
-    ['a popover (its trigger expanded)', () => element('button', 'aria-expanded', 'true')],
+    ['a popover (its trigger expanded)', () => popoverTrigger()],
+    ['a non-modal dialog (a comment list, a confirm)', () => element('div', 'role', 'dialog')],
+    ['the Ask AI window', () => element('div', 'data-chat-window', '')],
+    ['a Shape board over the thread', () => element('main', 'data-shape-open', '')],
+    ['the annotation toolbar', () => Object.assign(document.createElement('div'), { className: 'annotation-toolbar' })],
   ];
   for (const [what, make] of overlays) {
     test(`never with ${what}; idle once it closes`, async () => {
@@ -155,7 +167,20 @@ describe.skipIf(!hasDom)('the idle clock', () => {
     });
   }
 
-  test("never while the page says it is busy (App: a composer, a search, a row's menu, a toast)", async () => {
+  test('an open disclosure is no overlay: an open Smart group band and a sidebar section still let idle come', async () => {
+    // The real list's band (InboxList.tsx `.ib-band`, open by default) and a sidebar section toggle: aria-expanded, no popup.
+    const band = Object.assign(document.createElement('button'), { className: 'ib-band' });
+    band.setAttribute('aria-expanded', 'true');
+    const section = document.createElement('button');
+    section.setAttribute('aria-expanded', 'true');
+    section.setAttribute('aria-haspopup', 'false');
+    document.body.append(band, section);
+    mount();
+    await wait(IDLE_MS * 1.6);
+    expect(idle).toBe(true);
+  });
+
+    test("never while the page says it is busy (App: a composer, a search, a row's menu, a toast)", async () => {
     busy = true;
     mount();
     await wait(IDLE_MS * 2.5);
