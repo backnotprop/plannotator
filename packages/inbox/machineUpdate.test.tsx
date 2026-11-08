@@ -76,7 +76,7 @@ const starts = () => sent.filter((call) => call.method === 'POST');
 const dialog = (update: MachineUpdateView | null, extra: Partial<MachineView> = {}, snooze = false) =>
   draw(<MachineUpdateDialog machine={machine(update, extra)} snooze={snooze} onClose={() => {}} />);
 
-test('Update now asks that machine with nothing but the tab, so the window cannot name a version', async () => {
+test.skipIf(!hasDom)('Update now asks that machine with nothing but the tab, so the window cannot name a version', async () => {
   await dialog(view('behind'));
   await act(async () => button('Update now')!.click());
   expect(starts()).toHaveLength(1);
@@ -84,7 +84,7 @@ test('Update now asks that machine with nothing but the tab, so the window canno
   expect(Object.keys(starts()[0]!.body ?? {}).filter((key) => key !== 'serverSession')).toEqual([]);
 });
 
-test('a refused start says why in the dialog and can be pressed again', async () => {
+test.skipIf(!hasDom)('a refused start says why in the dialog and can be pressed again', async () => {
   startAnswer = { status: 409, body: { error: 'Studio is busy with something else.', code: 'update_x' } };
   await dialog(view('behind'));
   await act(async () => button('Update now')!.click());
@@ -92,7 +92,7 @@ test('a refused start says why in the dialog and can be pressed again', async ()
   expect(button('Update now')!.disabled).toBe(false);
 });
 
-test('states that cannot start an update offer no way to press one', async () => {
+test.skipIf(!hasDom)('states that cannot start an update offer no way to press one', async () => {
   const cases: [string, MachineUpdateView, Partial<MachineView>][] = [
     ['updating', view('updating'), {}],
     ['restarting', view('restarting'), { state: 'offline' }],
@@ -112,12 +112,12 @@ test('states that cannot start an update offer no way to press one', async () =>
   expect(starts()).toEqual([]);
 });
 
-test('asleep sends nothing, not even a read: a machine that is not there gets no request', async () => {
+test.skipIf(!hasDom)('asleep sends nothing, not even a read: a machine that is not there gets no request', async () => {
   await dialog(view('behind'), { state: 'offline' });
   expect(sent).toEqual([]);
 });
 
-test('an install that finished with the binary unchanged tells the person and offers Try Again, never Update again', async () => {
+test.skipIf(!hasDom)('an install that finished with the binary unchanged tells the person and offers Try Again, never Update again', async () => {
   answer = { current: '0.28.46', log: '~/.plannotator/update.log', command: 'curl -fsSL https://plannotator.ai/install.sh | bash', failure: { exit_code: 0, unchanged: true } };
   await dialog(view('failed'));
   const unchanged = document.querySelector('[data-dialog="machine-update-unchanged"]')?.textContent;
@@ -131,7 +131,7 @@ test('an install that finished with the binary unchanged tells the person and of
   expect(starts()).toHaveLength(1);
 });
 
-test('a failed install keeps its reason from that machine, with the log as it came, and Try Again presses again', async () => {
+test.skipIf(!hasDom)('a failed install keeps its reason from that machine, with the log as it came, and Try Again presses again', async () => {
   answer = { current: '0.28.46', log: '~/.plannotator/update.log', command: 'curl x', failure: { exit_code: 75, prepare: 'the temp folder ~/tmp is full' } };
   await dialog(view('failed'));
   expect(commands()).toContain('~/.plannotator/update.log');
@@ -141,7 +141,7 @@ test('a failed install keeps its reason from that machine, with the log as it ca
   expect(starts()).toHaveLength(1);
 });
 
-test('a machine too old for this: the by-hand command, and the full path for a shell that skips PATH (ssh host cmd)', async () => {
+test.skipIf(!hasDom)('a machine too old for this: the by-hand command, and the full path for a shell that skips PATH (ssh host cmd)', async () => {
   await dialog(view('behind', { can_update: false }));
   expect(commands()).toEqual([UPDATE_BY_HAND, UPDATE_BY_HAND_FULL_PATH, UPDATE_BY_HAND_POWERSHELL]);
   // Both parts of the second line must not depend on PATH, or it fails the same way.
@@ -154,13 +154,13 @@ test('a machine too old for this: the by-hand command, and the full path for a s
   expect(commands()).toEqual([UPDATE_BY_HAND, UPDATE_BY_HAND_FULL_PATH, UPDATE_BY_HAND_POWERSHELL]);
 });
 
-test('the PowerShell line takes no `&&` (a parse error in 5.1) and no path that only exists on macOS and Linux', () => {
+test.skipIf(!hasDom)('the PowerShell line takes no `&&` (a parse error in 5.1) and no path that only exists on macOS and Linux', () => {
   expect(UPDATE_BY_HAND_POWERSHELL).not.toContain('&&');
   expect(UPDATE_BY_HAND_POWERSHELL).not.toContain('~');
   expect(UPDATE_BY_HAND_POWERSHELL.split(';').map((part) => part.trim())).toEqual(['plannotator update', 'plannotator inbox restart']);
 });
 
-test('an older door, in any state its own install left: never a press that gets machine_too_old, and never an empty Copy box', async () => {
+test.skipIf(!hasDom)('an older door, in any state its own install left: never a press that gets machine_too_old, and never an empty Copy box', async () => {
   // Before and after its door answered: the row alone already knows.
   for (const read of [{ too_old: true, current: '0.28.46' }, { current: '0.28.46' }]) {
     answer = read;
@@ -176,7 +176,7 @@ test('an older door, in any state its own install left: never a press that gets 
   expect(starts()).toEqual([]);
 });
 
-test('updating says its Inbox restarts by itself only where it does: an older door waits for a person there', async () => {
+test.skipIf(!hasDom)('updating says its Inbox restarts by itself only where it does: an older door waits for a person there', async () => {
   await dialog(view('updating'));
   expect(document.body.textContent).toContain('then its Inbox restarts');
   act(() => root?.unmount());
@@ -186,14 +186,14 @@ test('updating says its Inbox restarts by itself only where it does: an older do
   expect(document.body.textContent).not.toContain('restarts');
 });
 
-test('a log that did not read as a path shows no empty Copy box: only the install command stays', async () => {
+test.skipIf(!hasDom)('a log that did not read as a path shows no empty Copy box: only the install command stays', async () => {
   answer = { current: '0.28.46', log: '', command: 'curl x', failure: { exit_code: 1 } };
   await dialog(view('failed'));
   expect(commands()).toEqual(['curl x']);
   expect(document.body.textContent).not.toContain('the log says');
 });
 
-test('a press that machine answers up to date: the word has gone, the dialog says so, and nothing is left to press', async () => {
+test.skipIf(!hasDom)('a press that machine answers up to date: the word has gone, the dialog says so, and nothing is left to press', async () => {
   startAnswer = { status: 409, body: { error: 'Studio is up to date.', code: 'update_up_to_date' } };
   await dialog(view('behind'));
   await act(async () => button('Update now')!.click());
@@ -205,13 +205,13 @@ test('a press that machine answers up to date: the word has gone, the dialog say
   expect(button('Close')).not.toBeNull();
 });
 
-test('a copy the script does not own: the install command, from what that machine read', async () => {
+test.skipIf(!hasDom)('a copy the script does not own: the install command, from what that machine read', async () => {
   answer = { current: '0.28.46', command: 'irm https://plannotator.ai/install.ps1 | iex' };
   await dialog(view('behind', { self_update: false }));
   expect(commands()).toEqual(['irm https://plannotator.ai/install.ps1 | iex']);
 });
 
-test('a copy the script does not own, asleep: no terminal line with nothing under it, and no request', async () => {
+test.skipIf(!hasDom)('a copy the script does not own, asleep: no terminal line with nothing under it, and no request', async () => {
   await dialog(view('behind', { self_update: false }), { state: 'offline' });
   expect(document.querySelector('[data-dialog="machine-update-by-hand"]')).not.toBeNull();
   expect(document.body.textContent).not.toContain('in a terminal');
@@ -219,7 +219,7 @@ test('a copy the script does not own, asleep: no terminal line with nothing unde
   expect(sent).toEqual([]);
 });
 
-test("Snooze's words show only when Snooze opened the dialog", async () => {
+test.skipIf(!hasDom)("Snooze's words show only when Snooze opened the dialog", async () => {
   for (const [update, extra] of [
     [view('behind'), {}],
     [view('behind', { can_update: false }), {}],
@@ -239,7 +239,7 @@ test("Snooze's words show only when Snooze opened the dialog", async () => {
   }
 });
 
-test('the word in the sidebar opens the dialog; the press never reaches the row beneath, which filters', async () => {
+test.skipIf(!hasDom)('the word in the sidebar opens the dialog; the press never reaches the row beneath, which filters', async () => {
   let opened = 0;
   let filtered = 0;
   await draw(
@@ -252,7 +252,7 @@ test('the word in the sidebar opens the dialog; the press never reaches the row 
   expect(document.querySelector('.ib-mthing')?.textContent).toBe('Update');
 });
 
-test('Settings: the row has its button for each state that needs one, and none on a page that offers no updates', async () => {
+test.skipIf(!hasDom)('Settings: the row has its button for each state that needs one, and none on a page that offers no updates', async () => {
   const machines = [machine(null, { id: SELF, name: 'Mac', self: true }), machine(view('behind'))];
   let pressed = '';
   await draw(<MachinesSection machines={machines} via="local" onChanged={() => {}} onMachineUpdate={(id) => (pressed = id)} />);
@@ -269,7 +269,7 @@ test('Settings: the row has its button for each state that needs one, and none o
   expect(document.querySelector('[data-machine-update-done]')).not.toBeNull();
 });
 
-test('Snooze on an older machine stays, and its press opens the dialog instead of a list of times', async () => {
+test.skipIf(!hasDom)('Snooze on an older machine stays, and its press opens the dialog instead of a list of times', async () => {
   let pressed = 0;
   await draw(<ThreadSnooze snooze={{ snoozed: false, onPick: () => {}, onUnsnooze: () => {}, blocked: { name: 'Studio', onPress: () => pressed++ } }} />);
   await act(async () => document.querySelector<HTMLButtonElement>('[data-snooze-blocked]')!.click());
@@ -277,7 +277,7 @@ test('Snooze on an older machine stays, and its press opens the dialog instead o
   expect(document.querySelector('[data-snooze-choice]')).toBeNull();
 });
 
-test('Not back offers to put back the version it ran, with each install script, and only for a release they can install', async () => {
+test.skipIf(!hasDom)('Not back offers to put back the version it ran, with each install script, and only for a release they can install', async () => {
   await dialog(view('not_back'), { state: 'offline' });
   const back = commands().filter((c) => c?.includes('0.28.46'));
   expect(back).toHaveLength(2);
