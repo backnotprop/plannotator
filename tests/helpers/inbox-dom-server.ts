@@ -288,7 +288,7 @@ if (broOfferMode) {
       inboxTailscaleAllow: ["guest@example.com"],
       inboxSnoozeIntro: { firstUseAt: settled, snoozedAt: settled },
       inboxSound: { dialogShownFor: "0.30.0" },
-      inboxListIntro: { shownAt: settled },
+      inboxListIntro: { shownAt: settled, version: 2 },
       inboxVoiceIntro: { shownAt: settled },
     }),
   );
