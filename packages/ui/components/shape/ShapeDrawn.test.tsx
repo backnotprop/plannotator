@@ -593,6 +593,7 @@ describe.skipIf(!hasDom)('Sharp', () => {
     const css = `.board.board { --background: rgb(255 255 255); --paper: var(--t-paper, rgb(255 255 255)); --surface: rgb(255 255 255); --ink: rgb(20 20 20); --shp-hair: rgb(235 235 235); --shp-wire: rgb(60 60 60); ${zones} }`;
     const html = document.documentElement;
     const frame = () => act(() => new Promise((r) => setTimeout(r, 40)));
+    const nudge = document.createElement('style');
     try {
       const { board } = await draw({ html: STORED, css });
       const hair = board.style.getPropertyValue('--shp-hair');
@@ -608,9 +609,13 @@ describe.skipIf(!hasDom)('Sharp', () => {
       expect(board.style.getPropertyValue('--shp-hair')).toBe('kept');
       // The paper moves: the hold runs again and puts its own colour back.
       html.style.setProperty('--t-paper', 'rgb(250 250 250)');
+      // happy-dom keeps an element's computed style (here, inside the board's shadow root) across a change on <html>
+      // until its cache is collected, which a browser never does; a stylesheet added to the page drops that cache.
+      document.head.append(nudge);
       await frame();
       expect(board.style.getPropertyValue('--shp-hair')).toMatch(/^#[0-9a-f]{6}$/);
     } finally {
+      nudge.remove();
       html.classList.remove('shp-test-unrelated');
       html.style.removeProperty('--t-paper');
     }
