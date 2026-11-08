@@ -242,9 +242,10 @@ describe('nothing reads as gone', () => {
     expect(row().textContent).toBe('Earlier1');
   });
 
-  test.skipIf(!hasDom)('side by side keeps the Annotations title, with no empty message', async () => {
+  test.skipIf(!hasDom)('side by side the column is called Comments, with no empty message', async () => {
     await render(<Pane full={false} />);
-    expect(column().textContent).toContain('Annotations');
+    expect(column().querySelector('h2')!.textContent).toBe('Comments');
+    expect(column().textContent).not.toContain('Annotations');
     expect(column().textContent).not.toContain('No annotations yet');
   });
 

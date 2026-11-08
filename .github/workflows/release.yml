@@ -1546,11 +1546,7 @@ jobs:
         timeout-minutes: 10
         run: npm publish ./npm-packages/plannotator-dsh.tgz --ignore-scripts --provenance --access public
 
-      # Lenient for the same reason as @plannotator/dsh above: allowed to fail
-      # until npm trusted publishing is set up for @plannotator/cline (its
-      # first version is published by hand). Remove continue-on-error then.
       - name: Publish @plannotator/cline
-        continue-on-error: true
         timeout-minutes: 10
         run: npm publish ./npm-packages/plannotator-cline.tgz --ignore-scripts --provenance --access public
 
