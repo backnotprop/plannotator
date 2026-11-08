@@ -1071,8 +1071,10 @@ test("a drawn part's place in code on a board over the thread: the code shows an
   await expect(painted).toHaveCount(1);
   await expect(painted).toBeInViewport();
   const clearOfCard = async () => {
-    const line = (await painted.boundingBox())!;
-    const card = (await corner(page).boundingBox())!;
+    // Either may be between renders (the line repainted, the corner card not drawn yet): ask again, never throw.
+    const line = await painted.boundingBox();
+    const card = await corner(page).boundingBox();
+    if (!line || !card) return false;
     return line.y + line.height <= card.y;
   };
   await expect.poll(clearOfCard).toBe(true);
