@@ -125,8 +125,12 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   // context gaps and an open comment.
   const [collapseToken, setCollapseToken] = useState(collapseAll?.token ?? 0);
   const [mountKey, setMountKey] = useState(0);
+  // The reveal a later Collapse all overrides. The renderer opens a folded file for the reveal it mounts with, so a
+  // renderer mounted again (below, or back in the outer window) gets no stale reveal; a new reveal still passes.
+  const [overriddenReveal, setOverriddenReveal] = useState<{ filePath: string; token: number } | null>(null);
   if (collapseAll && collapseAll.token !== collapseToken) {
     setCollapseToken(collapseAll.token);
+    setOverriddenReveal(revealTarget);
     if (collapseAll.collapsed !== collapsed) {
       setCollapsed(collapseAll.collapsed);
       setMountKey((key) => key + 1);
@@ -187,6 +191,8 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
     applyMeasured(next);
   }, [applyMeasured, stopWaiting]);
   const target = revealTarget?.filePath === file.path ? revealTarget : null;
+  const rendererTarget =
+    target && !(overriddenReveal?.filePath === target.filePath && overriddenReveal.token === target.token) ? target : null;
   const renderedHeight = collapsed
     ? COLLAPSED_HEIGHT + (fitContent ? FIT_BOX_CHROME - 16 : 0)
     : fitContent && measuredHeight !== null
@@ -297,7 +303,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
             key={mountKey}
             {...getDiffRendererProps({ file, focused })}
             files={fileList}
-            fileScrollTarget={target}
+            fileScrollTarget={rendererTarget}
             fileOrder="list"
             mountCollapsed={collapsed}
             // The page owns the position of a box that scrolls with it.
