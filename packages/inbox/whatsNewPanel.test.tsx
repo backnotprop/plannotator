@@ -143,9 +143,11 @@ test.skipIf(!hasDom)('the Latest card: compact while the latest release is open,
   const el = render({ version: '0.28.53', model: model('0.28.53') });
   const card = () => panel(el).querySelector<HTMLElement>('[data-whats-new-latest]')!;
   expect(card().dataset.whatsNewLatest).toBe('compact');
-  expect(card().querySelector('.ib-wn-cl')).toBeNull();
-  expect([...card().querySelectorAll('.ib-wn-rl li')].map((li) => li.textContent)).toEqual(['Start an agent in a new folder', '"+" on each project row']);
-  expect(card().textContent).toContain('You have this');
+  // Compact: its version, date and "You have this" only; the TL;DR is in the ledger right beside it.
+  expect(card().querySelector('.ib-wn-cl, .ib-wn-rl, .ib-wn-rp, li')).toBeNull();
+  expect(card().textContent).not.toContain('Start an agent');
+  expect(card().querySelector('.ib-wn-rv')!.textContent).toBe('0.28.53You have this');
+  expect(card().querySelector('.ib-wn-rd')!.textContent).not.toBe('');
 
   rerender({ version: '0.28.50', model: model('0.28.50') });
   expect(card().dataset.whatsNewLatest).toBe('full');

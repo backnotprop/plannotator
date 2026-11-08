@@ -2,7 +2,8 @@
  * What's new's TL;DR ledger and releases panel (design of record
  * .product/approved/inbox-whats-new-tldr/, round 2): the ledger between two
  * hairlines with a fixed label column and status dots; the panel's Latest
- * card (compact while the latest release is open, full otherwise) and its
+ * card (compact, its version, date and "You have this" only, while the latest
+ * release is open; full otherwise) and its
  * earlier releases, each a link to `#whats-new=<version>`; the same list in a
  * bottom sheet where the panel does not fit (a phone, a window under 1100 px).
  */
@@ -158,7 +159,7 @@ function ReleasesList({ releases, showing, onOpen }: ReleasesListProps) {
         onClick={click(top.version)}
       >
         <VersionLine row={top} current={releases.current} />
-        {face === 'full' && top.tldr.length > 0 ? (
+        {face === 'compact' ? null : top.tldr.length > 0 ? (
           <ul className="ib-wn-cl">
             {top.tldr.map((line, i) => (
               <li key={i}>

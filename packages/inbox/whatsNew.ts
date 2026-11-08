@@ -34,8 +34,8 @@ export function tldrDot(label: string): string | null {
 }
 
 /**
- * The Latest card: compact (its version, date and two lines, no labels)
- * while the page shows the latest release, whose full TL;DR is right there;
+ * The Latest card: compact (its version, date and "You have this" only, no
+ * lines) while the page shows the latest release, whose full TL;DR is right there;
  * full (every line with its label's dot) while another release is open.
  */
 export function latestCardFace(showing: string | null, latest: string): 'compact' | 'full' {
