@@ -208,9 +208,10 @@ function writeForge(dir: string) {
     'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$6" = .merge_base_commit.sha ]; then',
     `  echo "gh merge-base $4" >> "$calls"; echo ${MERGE_BASE}; exit 0`,
     'fi',
-    // A PR read around its patch (`--jq`): the list's `headRefOid` for that number, and its description.
+    // A PR read around its patch (`--jq … | tojson`): the list's `headRefOid` for that number, and its description.
+    // A plain `.head.sha` read (the whole diff's) gets the head raw, as gh prints a string.
     'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then',
-    '  echo "gh head $4" >> "$calls"; n="${4##*/}"; body=null; [ -f "$dir/gh-body-$n.json" ] && body=$(cat "$dir/gh-body-$n.json"); sha=$(printf "%040d" "$n"); [ -f "$dir/gh-head-$n" ] && sha=$(cat "$dir/gh-head-$n"); printf \'{"sha":"%s","body":%s}\\n\' "$sha" "$body"; exit 0',
+    '  echo "gh head $4" >> "$calls"; n="${4##*/}"; body=null; [ -f "$dir/gh-body-$n.json" ] && body=$(cat "$dir/gh-body-$n.json"); sha=$(printf "%040d" "$n"); [ -f "$dir/gh-head-$n" ] && sha=$(cat "$dir/gh-head-$n"); case "$6" in *tojson*) printf \'{"sha":"%s","body":%s}\\n\' "$sha" "$body";; *) echo "$sha";; esac; exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$2" = --hostname ]; then',
     '  echo "gh diff $4" >> "$calls"',

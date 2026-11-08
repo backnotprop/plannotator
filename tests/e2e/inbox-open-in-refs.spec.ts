@@ -154,7 +154,8 @@ function fakes(dir: string, launches: string, patch: string) {
       '  "api repos/"*) exit 1;;',
       'esac',
       `if [ "$1" = api ] && [ "$2" = graphql ]; then cat '${join(dir, 'pulls.json')}'; exit 0; fi`,
-      'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then echo "' + '8'.repeat(40) + '"; exit 0; fi',
+      // The PR read around its patch: head and description as one JSON line (`| tojson`); a plain `.head.sha`, raw.
+      'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then case "$6" in *tojson*) echo \'{"sha":"' + '8'.repeat(40) + '","body":null}\';; *) echo "' + '8'.repeat(40) + '";; esac; exit 0; fi',
       `if [ "$1" = api ] && [ "$2" = --hostname ]; then cat '${join(dir, 'pr.patch')}'; exit 0; fi`,
       'exit 1',
       '',
