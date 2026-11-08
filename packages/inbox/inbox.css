@@ -897,15 +897,16 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-pincol.ib-noproj .ib-row { grid-template-columns: max-content minmax(var(--ib-title-min), 1fr) var(--ib-words-track) 52px 11px var(--ib-cq-w, 84px) 76px; }
 .ib-pincol.ib-noproj.ib-fullw .ib-row { grid-template-columns: max-content minmax(96px, 1fr) clamp(148px, 14%, 160px) 110px 11px var(--ib-cq-w, 84px) 76px; }
 .ib-row .ib-cpin { display: flex; align-items: center; min-width: 0; overflow: visible; }
-/* The words, the badge and the open counts, each right-aligned in its column, so every title starts on one left
-   edge. Open counts wider than their column (two-digit pairs and up, "[□ 99+] ?99+" is 108px at 14px text) run out
-   to the left, never into the time; past the gap they slide under the badge, which paints above them on an opaque
-   ground, so the alert is always whole (the exact counts are in the row's name and the tooltips). */
+/* The words, the badge column and the open counts, each right-aligned in its column, so every title starts on one
+   left edge. Open counts wider than their column (two-digit pairs and up, "[□ 99+] ?99+" is 108px at 14px text) run
+   out to the left, never into the time; past the gap they slide under the badge column, whose words (a blocked row
+   in full-width mode, `WaitWords`) paint above them on an opaque ground (the exact counts are in the row's name and
+   the tooltips). The badge column holds nothing else since the one question mark (approval "inbox-question-mark"). */
 .ib-row :is(.ib-cw, .ib-bcol, .ib-cq) { display: inline-flex; justify-content: flex-end; align-items: center; min-width: 0; }
 .ib-row .ib-cq { gap: 8px; }
 .ib-row .ib-bcol { position: relative; z-index: 1; }
-/* The badge's ground: its tint over what the row shows under it (the card, the hover or the selected fill), so it
-   reads exactly as before while hiding whatever runs under it. */
+/* The words' ground (`WaitWords`): what the row shows under them (the card, the hover or the selected fill), so they
+   read exactly as before while hiding whatever runs under them. */
 .ib-row { --ib-row-fill: transparent; }
 .ib-row:hover, .ib-rw[data-menu] .ib-row { --ib-row-fill: var(--ib-hover); }
 .ib-row.ib-sel { --ib-row-fill: var(--ib-sel); }
@@ -913,8 +914,7 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    `data-archived`): its words faded, its fill and its place as they were; the same under reduced motion. */
 .ib-rw[data-archived] :is(.ib-row, .ib-nrow, .ib-mrow) > * { opacity: 0.55; }
 .ib-row.ib-sel:hover, .ib-rw[data-menu] .ib-row.ib-sel { --ib-row-fill: var(--ib-sel-hover); }
-.ib-row .ib-bcol .ib-badge.ib-b-stop { background: linear-gradient(var(--ib-badge-stop-bg), var(--ib-badge-stop-bg)), linear-gradient(var(--ib-row-fill), var(--ib-row-fill)) var(--card); }
-.ib-row .ib-bcol .ib-badge.ib-b-hold { background: linear-gradient(var(--ib-badge-hold-bg), var(--ib-badge-hold-bg)), linear-gradient(var(--ib-row-fill), var(--ib-row-fill)) var(--card); }
+.ib-row .ib-bcol .ib-bwords { padding-left: 4px; background: linear-gradient(var(--ib-row-fill), var(--ib-row-fill)) var(--card); }
 .ib-row .ib-c.ib-qn { justify-content: flex-end; }
 /* The project cell (the owner, 2026-10-31): the agents' tiles, never cut, then 6px (the three-line row's gap,
    approval "inbox-list-row-v2", v2-r3), then the project hugging them, cut with "…". No slot reserves width: each
@@ -976,10 +976,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 @keyframes ib-dots { 0%, 100% { opacity: 0.3; } 40% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .ib-dots i { animation: none; opacity: 0.85; } }
 .ib-badge { display: inline-flex; align-items: center; height: 22px; padding: 0 7px; border-radius: 6px; border: 1px solid color-mix(in oklch, var(--foreground) 35%, transparent); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; white-space: nowrap; justify-self: start; flex: none; }
-/* The list rows' Stopped and Holds up badges (approval "inbox-row-badges"): a triangle (Heroicons
-   exclamation-triangle, outline) in the badge's tint, Holds up with its count; the words stay for a screen reader. */
+/* A badge with an icon and a number (the list rows' marks, `RowBadge.tsx`). */
 .ib-badge.ib-bicon { padding: 0 6px; gap: 4px; font-variant-numeric: tabular-nums; }
-.ib-tri { display: block; flex: none; }
 /* The three-line row beside a thread (approval "list-rows-mail-icons", 2026-10-30). Line 1 sits 2px further from
    the title than the lines below part, so the hover action (no taller than line 1, below) never reaches the title. */
 .ib-nrow { padding: 10px 12px; border-bottom: 1px solid var(--ib-hair); display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; }
@@ -1022,18 +1020,24 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    past the slot end in "…" inside the pill. */
 .ib-cs > .ib-badge.ib-b-wait { flex: 0 1 auto; min-width: 0; max-width: 100%; }
 .ib-b-wait > .ib-bwt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* A wide row's badge says its words (the owner, 2026-10-29): the triangle, then "Stopped" or "Holds up 3". */
-.ib-badge.ib-bicon.ib-bwords { gap: 5px; padding: 0 8px 0 7px; }
-/* The open questions (`QuestionCount`; approval "inbox-row-action-icon", Q3, 2026-10-29): a speech bubble with a "?"
-   right next to its number, in quiet text with no pill; its words are for a screen reader. */
+/* A wide row's words for a blocked row in full-width mode (`WaitWords`, the owner, 2026-10-29; `WIDE_ROW_WAIT_WORDS`):
+   "Stopped" or "Holds up 3", in the badge's text colour, beside the marks. */
+.ib-bwords { font-size: var(--ib-fs-12-5, 12.5px); font-weight: var(--ib-badge-weight); white-space: nowrap; }
+.ib-bwords.ib-bw-stop { color: var(--ib-badge-stop-fg, currentcolor); }
+.ib-bwords.ib-bw-hold { color: var(--ib-badge-hold-fg, currentcolor); }
+/* The open questions (`QuestionMark`; approvals "inbox-row-action-icon", Q3, 2026-10-29, and "inbox-question-mark",
+   Take 3, 2026-11-08): a speech bubble with a "?" right next to its number. Open, quiet text with no pill; holding up
+   work or stopped, the same face in today's amber or red tint pill (`.ib-badge.ib-b-hold`, `.ib-b-stop`), so the
+   steps read as no fill, then a fill, in greyscale too. Its words are for a screen reader. */
 .ib-c.ib-qn { display: inline-flex; align-items: center; gap: 3px; font-variant-numeric: tabular-nums; }
 .pn-inbox .ib-qn svg.ib-qbub { stroke-width: 1.8; }
+.ib-badge.ib-bicon.ib-qn, .ib-badge.ib-bicon.ib-b-actstep { padding: 0 7px 0 6px; }
 /* The open action items (`ActionBadge`; approval "inbox-row-action-icon", A2, 2026-10-29): the checklist card's box
    with its tick taken out and the number, in the alert badge's pill with a neutral fill and the text colour, so it
    reads one step under the red and amber badge and one over the question count. Today's badges (Soft off) are
    outlined, and so is this one. */
 .ib-badge.ib-bicon.ib-b-act { padding: 0 7px 0 6px; background: var(--ib-badge-act-bg); color: var(--foreground); }
-.pn-inbox .ib-b-act svg.ib-ic { stroke-width: 2; }
+.pn-inbox :is(.ib-b-act, .ib-b-actstep) svg.ib-ic { stroke-width: 2; }
 /* A wide row's agents before the project (approval "list-rows-mail-icons", `RowAgents`; the owner, 2026-10-31): the
    list's overlapping grey tiles (`.ib-atile`, below), one per host, at most three, then "+N" as plain small text 3px
    after them. They take the line's quiet colour (OpenCode's mark is `currentColor`). */

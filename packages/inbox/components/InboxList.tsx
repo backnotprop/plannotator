@@ -7,7 +7,7 @@ import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
-import { agentName, formatCount, fullTime, shortTime, waitCount, whenTime } from '../format';
+import { agentName, formatCount, fullTime, shortTime, whenTime } from '../format';
 import { reaskRowLine, sentRowLine, undeliveredLabel } from '../deliveryLine';
 import { sentRecipientsWords } from '../tags';
 import { TagStack } from './TagPicker';
@@ -29,7 +29,7 @@ import type { RowMenuAction } from '../rowMenu';
 import { rowTimeIso, rowWait } from '../rowDelivery';
 import { UndeliveredBadge, useMinuteClock } from './Undelivered';
 import { TimeWithTick } from './DeliveryTick';
-import { ActionBadge, RowBadge, WaitCard, badgeDescription, rowActionCount, rowHasBadge, shownCount } from './RowBadge';
+import { ActionBadge, QuestionMark, WIDE_ROW_WAIT_WORDS, WaitCard, WaitWords, badgeDescription, rowHasBadge, rowMarks, type RowMarks } from './RowBadge';
 import { StatusMark, rowStatus } from './RowStatus';
 import { attachPullToRefresh } from '../pullRefresh';
 import { TidyMenu, type TidyController } from './Tidy';
@@ -225,11 +225,10 @@ function useKeyboardFocus(enabled: boolean): [
   ];
 }
 
-/** The row's badge with its hover card (wide and three-line rows), or null. `words`: the triangle and its words (a wide row). */
-function badgeOf(row: InboxListRow, kbd: boolean, words = false): ReactNode {
-  if (!rowHasBadge(row)) return null;
-  const card = <WaitCard row={row} agent={agentName(rowAgent(row))} mark={<RowMark row={row} />} time={shortTime(rowTimeIso(row))} />;
-  return <RowBadge row={row} card={card} open={kbd} words={words} />;
+/** A blocked row's hover card (wide and three-line rows), or undefined: its filled marks' tooltip. */
+function cardOf(row: InboxListRow): ReactNode | undefined {
+  if (!rowHasBadge(row)) return undefined;
+  return <WaitCard row={row} agent={agentName(rowAgent(row))} mark={<RowMark row={row} />} time={shortTime(rowTimeIso(row))} />;
 }
 
 /** A snoozed row's return time, with the clock: where the row's words go (approval "inbox-snooze"). */
@@ -540,58 +539,66 @@ function EndedMark({ row }: { row: InboxListRow }) {
  * The row's count (approval "inbox-row-byline", 2026-10-29): at the right end of a three-line or phone row's line 3.
  * What waits on the person is the action pill and `?N` (`OpenCounts`); anything else in words (`CountWords`).
  */
-function LineCount({ row, tip = false, status = false }: { row: InboxListRow; tip?: boolean; status?: boolean }) {
+function LineCount({ row, tip = false, status = false, card, open = false }: { row: InboxListRow; tip?: boolean; status?: boolean; card?: ReactNode; open?: boolean }) {
   return (
     <>
       <EndedMark row={row} />
       <CountWords row={row} tip={tip} status={status} />
-      {/* Settings → Rows' Status mark: one mark in place of the open counts, their words its name and tooltip. */}
-      {status ? <StatusMark row={row} tip={tip} /> : <OpenCounts row={row} tip={tip} />}
+      <OpenCounts row={row} tip={tip} status={status} card={card} open={open} />
     </>
   );
 }
 
 /**
- * What a row's open counts (`OpenCounts`) draw, as a key: its open action items and questions, or '' when it draws
- * none. Two rows with the same key draw the same counts.
+ * What the row's marks draw (`OpenCounts`): both, from the row's open action items and questions, when the row has
+ * no words (and Settings → Rows' Status mark is off); otherwise only the filled ones (a blocked row keeps its state).
+ */
+function shownMarks(row: InboxListRow, status = false): RowMarks | null {
+  const marks = rowMarks(row);
+  if (!status && row.questions.open > 0 && countWords(row, 0) === null) return marks;
+  const filled: RowMarks = {
+    questions: marks.question === 'open' ? 0 : marks.questions,
+    question: marks.question,
+    actions: marks.action === 'open' ? 0 : marks.actions,
+    action: marks.action,
+  };
+  return filled.questions > 0 || filled.actions > 0 ? filled : null;
+}
+
+/**
+ * What a row's open counts (`OpenCounts`, Status mark off) draw, as a key: each mark's fill step and number, or ''
+ * when it draws none. Two rows with the same key draw the same counts.
  */
 function openCountsKey(row: InboxListRow): string {
-  if (row.questions.open < 1 || countWords(row, 0) !== null) return '';
-  return `${rowActionCount(row)}/${row.questions.open}`;
+  const marks = shownMarks(row);
+  if (!marks) return '';
+  return `${marks.action}${marks.actions}/${marks.question}${marks.questions}`;
 }
 
 /**
- * What waits on the person, when the row has no words (approval "inbox-row-action-icon", 2026-10-29): the open
- * action items' pill (`ActionBadge`, A2), then the open questions' `?N` (Q3). Under the alert badge in emphasis.
+ * What waits on the person (approvals "inbox-row-action-icon", 2026-10-29, and "inbox-question-mark", 2026-11-08):
+ * the open action items' box (`ActionBadge`, A2), then the open questions' `?N` (`QuestionMark`), each in its fill
+ * step. A row with words (a draft, Undelivered …) or Settings → Rows' Status mark draws its words or the status mark
+ * instead, and keeps only a filled mark, before the status mark, so a blocked row always says so. The first filled
+ * mark opens the row's card on keyboard focus (`open`), unless the wide row's words do (`open` false then).
  */
-function OpenCounts({ row, tip = false }: { row: InboxListRow; tip?: boolean }) {
-  if (!openCountsKey(row)) return null;
+function OpenCounts({ row, tip = false, status = false, card, open = false }: { row: InboxListRow; tip?: boolean; status?: boolean; card?: ReactNode; open?: boolean }) {
+  const marks = shownMarks(row, status);
+  const statusMark = status ? <StatusMark row={row} tip={tip} /> : null;
+  if (!marks) return statusMark;
+  // The card opens on the strongest filled mark, the question mark when both are as strong.
+  const onQuestion = marks.questions > 0 && marks.question !== 'open' && (marks.actions < 1 || marks.action === 'open' || STEP_ORDER.indexOf(marks.question) >= STEP_ORDER.indexOf(marks.action));
   return (
     <>
-      <ActionBadge row={row} tip={tip} />
-      <QuestionCount row={row} tip={tip} />
+      <ActionBadge row={row} marks={marks} tip={tip} card={card} open={open && !onQuestion} />
+      <QuestionMark row={row} marks={marks} tip={tip} card={card} open={open && onQuestion} />
+      {/* Settings → Rows' Status mark: one mark in place of the open counts, their words its name and tooltip. */}
+      {statusMark}
     </>
   );
 }
 
-/**
- * `?N`, the open questions (action items left out, `ActionBadge` counts those): a speech bubble with a "?" (approval
- * "inbox-row-action-icon", Q3) and the number, from one question on, in quiet text with no pill; its words for a
- * screen reader and in the tooltip. Otherwise nothing.
- */
-function QuestionCount({ row, tip = false }: { row: InboxListRow; tip?: boolean }) {
-  const open = row.questions.open - rowActionCount(row);
-  if (open < 1) return null;
-  const words = waitCount(open, 0) || '1 question';
-  const cell = (
-    <span className="ib-c ib-qn" data-open-count={open}>
-      <Icon name="questionBubble" size={14} className="ib-qbub" />
-      <span aria-hidden="true">{shownCount(open)}</span>
-      <span className="ib-sr">{words}</span>
-    </span>
-  );
-  return tip ? <RowTip content={words}>{cell}</RowTip> : cell;
-}
+const STEP_ORDER = ['open', 'hold', 'stop'] as const;
 
 /**
  * One line of text the row may cut with "…": ui's tooltip shows it whole on
@@ -695,9 +702,9 @@ export const WIDE_ROWS_MIN_LIST_WIDTH = 900;
 export const ONE_PROJECT_WIDE_ROWS_MIN_LIST_WIDTH = 496;
 
 /**
- * From this list width a wide row draws the full words and the badge's words (the owner, 2026-10-29: full words in
- * full-width mode; a 1440px window with the sidebar gives a 1192px list). Narrower wide rows keep approval
- * "inbox-row-byline", option A (the short forms, the bare triangle), so the subject keeps its room.
+ * From this list width a wide row draws the full words and a blocked row's words (the owner, 2026-10-29: full words
+ * in full-width mode; a 1440px window with the sidebar gives a 1192px list; `WIDE_ROW_WAIT_WORDS`). Narrower wide rows
+ * keep approval "inbox-row-byline", option A (the short forms, the marks alone), so the subject keeps its room.
  */
 export const FULL_WORDS_MIN_LIST_WIDTH = 1150;
 
@@ -805,7 +812,10 @@ interface RowLook {
 function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColumn, keys, full, pill, noPreview, relative, statusMark, onOpen, onUnstar }: { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; pinColumn: boolean; keys?: string; full: boolean; pill: boolean; onOpen: () => void } & Omit<RowLook, 'titleFirst' | 'timeBelow' | 'noAgents'>) {
   const [kbd, focus] = useKeyboardFocus(rowHasBadge(row));
   const wordsId = useId();
-  const badgeEl = badgeOf(row, kbd, full);
+  const card = cardOf(row);
+  // A wide row in full-width mode says a blocked row's state in words too (`WIDE_ROW_WAIT_WORDS`), in the badge's
+  // column; they open the card on keyboard focus, so the marks do not.
+  const words = full && WIDE_ROW_WAIT_WORDS && rowHasBadge(row) ? <WaitWords row={row} card={card} open={kbd} /> : null;
   const sent = row.section === 'sent';
   return (
     <>
@@ -834,10 +844,12 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColum
         <EndedMark row={row} />
         {row.snoozed ? <SnoozedUntil row={row} /> : <CountWords row={row} wide={full} tip={!full} status={statusMark} />}
       </span>
-      <span className="ib-bcol">{badgeEl}</span>
+      <span className="ib-bcol">{words}</span>
       {/* The pin's column, in a list with a pinned row only (`pinColumn`), so a list without pins keeps its columns. */}
       {pinColumn && <span className="ib-cpin">{pinned && <PinMark threadId={row.thread_id} press={!!onUnstar} />}</span>}
-      <span className="ib-cq">{statusMark ? <StatusMark row={row} tip /> : <OpenCounts row={row} tip />}</span>
+      <span className="ib-cq">
+        <OpenCounts row={row} tip status={statusMark} card={card} open={kbd && !words} />
+      </span>
       <span className="ib-t">
         <RowTime row={row} relative={relative} />
       </span>
@@ -973,7 +985,6 @@ function RowWithAction({
 function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, pill, compact, noPreview, relative, titleFirst, timeBelow, statusMark, noAgents, onOpen, onUnstar }: { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
   const [kbd, focus] = useKeyboardFocus(rowHasBadge(row));
   const wordsId = useId();
-  const badge = badgeOf(row, kbd);
   const lead = <LeadLine row={row} project={project} filtered={filtered} />;
   const avatarRow = useAvatarRow();
   const time = (
@@ -981,14 +992,13 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
       <RowTime row={row} relative={relative} />
     </span>
   );
-  // The row's end: the pin, the badge, a snooze's return, then the count (or the status mark). At the right of line 3,
+  // The row's end: the pin, a snooze's return, then the count (or the status mark). At the right of line 3,
   // or with the time under the preview (`timeBelow`) at the right of the time's own line, so the preview has its width.
   const end = (
     <>
       {pinned && <PinMark threadId={row.thread_id} press={!!onUnstar} />}
-      {badge}
       <SnoozedUntil row={row} />
-      <LineCount row={row} tip status={statusMark} />
+      <LineCount row={row} tip status={statusMark} card={cardOf(row)} open={kbd} />
     </>
   );
   // First line "Thread name" with Subject preview off too (approval "inbox-customize-rows"): two lines, the guided
@@ -1094,8 +1104,7 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
  */
 function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill, compact, noPreview, relative, titleFirst, timeBelow, statusMark, noAgents, onOpen, onUnstar }: { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; filtered: boolean; lit: boolean; menu: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
   const wordsId = useId();
-  // A phone: the icons only, no card (the thread shows the details).
-  const badge = rowHasBadge(row) ? <RowBadge row={row} /> : null;
+  // A phone: the marks only, no card (the thread shows the details).
   const guide = row.guide && row.section !== 'sent';
   const preview = noPreview ? null : previewOf(row);
   // A pin with nothing else for line 3 (no preview, book, badge or count) stays on line 1, before the time, so the
@@ -1104,7 +1113,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
   // With the time under the preview the pin goes with the row's end, on the time's line.
   // First line "Thread name" with Subject preview off: two lines, line 3's book, pin, badge and count at line 2's end.
   const twoLines = titleFirst && noPreview && !compact && !timeBelow;
-  const pinOnLine1 = !timeBelow && !twoLines && pinned && !preview && !guide && !badge && !row.snoozed && countWords(row, 0, statusMark) === null && row.questions.open < 1 && !(statusMark && rowStatus(row));
+  const pinOnLine1 = !timeBelow && !twoLines && pinned && !preview && !guide && !rowHasBadge(row) && !row.snoozed && countWords(row, 0, statusMark) === null && row.questions.open < 1 && !(statusMark && rowStatus(row));
   const time = (
     <span className="ib-t">
       <RowTime row={row} relative={relative} />
@@ -1113,7 +1122,6 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
   const end = (
     <>
       {pinned && !pinOnLine1 && <PinMark threadId={row.thread_id} press={!!onUnstar} />}
-      {badge}
       <SnoozedUntil row={row} />
       <LineCount row={row} status={statusMark} />
     </>
@@ -1372,7 +1380,7 @@ export function InboxList(props: InboxListProps) {
   useLayoutEffect(() => setBesideThread(props.narrow), [props.narrow]);
   const twoLine = (narrowList && (props.narrow || !noProject)) || (thinList && (props.narrow || !besideThread));
   // The full words on a wide row need a list of at least 1150px (FULL_WORDS_MIN_LIST_WIDTH); a narrower wide row
-  // keeps the short forms and the bare triangles (option A).
+  // keeps the short forms and the marks alone (option A).
   const fullWords = !twoLine && !shortWords;
   // The column beside a pane gets the sidebar's resize edge, except on a phone.
   const { isMobile, open: sidebarDocked } = useSidebar();
