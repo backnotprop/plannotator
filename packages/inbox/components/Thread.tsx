@@ -36,7 +36,7 @@ import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import { OpenInCodeHover, OpenInCodeSpans, type OpenInSurface } from './OpenIn';
 import { stepsOf } from '../stepping';
 import { optionOf, optionSetId, optionSetOf } from '../optionSets';
-import { artifactKey, artifactOfFile, newestViewableFile, threadArtifacts } from '../artifacts';
+import { artifactKey, artifactOfFile, newestViewableFile, openArtifactKey, threadArtifacts } from '../artifacts';
 import { ArtifactsView } from './ArtifactsView';
 import { ArtifactsBar, ThreadLinksView, ThreadViewSwitch } from './ThreadLinksView';
 import { threadLinks } from '../threadLinks';
@@ -6685,6 +6685,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         <div className="ib-pbody ib-artbody" ref={artifactsBodyRef} hidden={linksOn}>
           <ArtifactsView
             ref={artifactsHeadingRef}
+            threadId={thread.thread_id}
             artifacts={files === null ? null : artifactList}
             annotationCounts={countsByPath}
             openId={file && !shownFull ? file.id : null}
@@ -7145,6 +7146,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       <AttachmentPane
         ref={paneRef}
         attachment={openAttachment}
+        pin={{ threadId: thread.thread_id, key: openArtifactKey(artifactList, openAttachment.id) }}
         attachments={allFiles}
         // The files' annotations only: a guided-review comment is on the guide's diff, not on a file.
         records={fileRecords}

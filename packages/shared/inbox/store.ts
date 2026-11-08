@@ -154,6 +154,8 @@ import { inboxDraftsBytes } from "./drafts";
 import { pruneInboxAsks } from "./ask";
 import { checkInboxReplyDraftInput, type InboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
 import { checkInboxPinOrder, checkInboxPinRestore, readInboxPins, writeInboxPins } from "./pins";
+import { isInboxArtifactKey, readInboxArtifactPins, writeInboxArtifactPins } from "./artifact-pins";
+import { inboxThreadArtifactRefs, type InboxArtifactPin, type InboxArtifactRef } from "@plannotator/core/inbox-artifact-pins";
 import { readInboxSnoozes, refuseInboxSnoozeUntil, writeInboxSnoozes } from "./snoozes";
 import { inboxSnoozeRefusal, inboxSnoozeRunning, type InboxSnooze } from "@plannotator/core/inbox-snooze";
 import { INBOX_CARD_PR_HINT } from "./cards";
@@ -817,6 +819,13 @@ export class InboxStore {
   /** Told when the pins change (no store line is written for them). */
   private readonly pinListeners = new Set<() => void>();
   /**
+   * The artifacts the person pinned, in pin order (artifact-pins.ts, approval
+   * "inbox-artifact-stars"): a file outside the event log, read at load. Not
+   * the thread pins above. Read by nothing that routes, lists or answers an agent.
+   */
+  private artifactPinList: InboxArtifactPin[] = [];
+  private readonly artifactPinListeners = new Set<() => void>();
+  /**
    * The snoozed threads (snoozes.ts, approval "inbox-snooze"): a file outside
    * the event log, read at load. Read by nothing that routes, lists or answers
    * an agent; `listRow` never carries it (the server's list model does).
@@ -913,6 +922,7 @@ export class InboxStore {
       lines.sort((a, b) => a.seq - b.seq);
       for (const line of lines) this.apply(line);
       this.loadPins();
+      this.loadArtifactPins();
       this.loadSnoozes();
       return;
     }
@@ -928,6 +938,7 @@ export class InboxStore {
     for (const line of lines) this.apply(line);
     this.repairUnsentAnswers();
     this.loadPins();
+    this.loadArtifactPins();
     this.loadSnoozes();
   }
 
@@ -1293,6 +1304,90 @@ export class InboxStore {
     const next = [...this.pinList];
     next.splice(Math.min(restore.index, next.length), 0, { thread_id: restore.thread_id, pinned_at: restore.pinned_at });
     return this.commitPins(next);
+  }
+
+  // ─────────────────────────── artifact pins ───────────────────────────
+
+  /** The pinned artifacts changed (pinned, unpinned, or a deleted thread or file left them): no store line is written. */
+  onArtifactPinsChange(listener: () => void): () => void {
+    this.artifactPinListeners.add(listener);
+    return () => this.artifactPinListeners.delete(listener);
+  }
+
+  private artifactPinsChanged(): void {
+    for (const listener of this.artifactPinListeners) {
+      try {
+        listener();
+      } catch {
+        // A listener's failure never fails the write.
+      }
+    }
+  }
+
+  /**
+   * A thread's artifacts in reading order, keyed as the window keys them
+   * (inboxThreadArtifactRefs): what a pin may name, and what the Wall lists.
+   * The note carrying a 👍 is left out, as the thread the window reads leaves it out.
+   */
+  threadArtifactRefs(threadId: string): InboxArtifactRef<InboxMessage>[] {
+    return inboxThreadArtifactRefs(this.threadMessages(threadId).filter((m) => !isAckNote(m)));
+  }
+
+  /**
+   * Read artifact-pins.json and keep the pins whose thread and artifact still
+   * exist (a deleted thread or project ends in a reload, so every load is
+   * where a pin can outlive its artifact). Called at the end of every load.
+   */
+  private loadArtifactPins(): void {
+    const before = this.artifactPinList;
+    const read = readInboxArtifactPins(this.dir);
+    const keysOf = new Map<string, Set<string>>();
+    const kept = read.filter((pin) => {
+      if (!this.isThreadRoot(pin.thread_id)) return false;
+      let keys = keysOf.get(pin.thread_id);
+      if (!keys) keysOf.set(pin.thread_id, (keys = new Set(this.threadArtifactRefs(pin.thread_id).map((ref) => ref.key))));
+      return keys.has(pin.key);
+    });
+    this.artifactPinList = kept;
+    if (kept.length !== read.length) {
+      try {
+        writeInboxArtifactPins(this.dir, kept);
+      } catch {
+        // Best effort: the next load prunes it again.
+      }
+    }
+    if (before.some((pin) => !kept.some((k) => k.key === pin.key))) this.artifactPinsChanged();
+  }
+
+  /** Every pinned artifact, in pin order (the oldest pin first). */
+  artifactPins(): readonly InboxArtifactPin[] {
+    return this.artifactPinList;
+  }
+
+  /** One thread's pinned artifacts, the newest pin first: the order of the thread grid's Pinned group. */
+  threadArtifactPins(threadId: string): InboxArtifactPin[] {
+    return this.artifactPinList.filter((pin) => pin.thread_id === threadId).reverse();
+  }
+
+  /**
+   * Pin an artifact of a thread, or unpin it. `key` is the artifact's key
+   * (an attachment id, or `guide:<message id>`) and must be one of the
+   * thread's artifacts. Pinning a pinned artifact, or unpinning one that is
+   * not, changes nothing. Writes no store line.
+   */
+  setArtifactPinned(threadId: string, key: unknown, pinned: boolean): readonly InboxArtifactPin[] {
+    if (!isInboxArtifactKey(key)) throw new InboxError("validation_error", "key: an attachment id (att_) or guide:<message id>.", { field: "key" });
+    if (!this.isThreadRoot(threadId)) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const has = this.artifactPinList.some((pin) => pin.key === key);
+    if (has === pinned) return this.artifactPinList;
+    if (pinned && !this.threadArtifactRefs(threadId).some((ref) => ref.key === key)) {
+      throw new InboxError("artifact_not_found", `No artifact ${key} in thread ${threadId}.`);
+    }
+    const next = pinned ? [...this.artifactPinList, { key, thread_id: threadId, pinned_at: this.now().toISOString() }] : this.artifactPinList.filter((pin) => pin.key !== key);
+    writeInboxArtifactPins(this.dir, next);
+    this.artifactPinList = next;
+    this.artifactPinsChanged();
+    return next;
   }
 
   /** The snoozes changed (set, ended, or a deleted thread left them): no store line is written. */

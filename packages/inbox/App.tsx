@@ -170,6 +170,8 @@ import { adoptSavedReactions, hearReactionsEvent, onSavedReactionsFailed, reacti
 import { parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 import { ComposeDialog, type ComposeHeld, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { heldLaunchToast } from './compose/heldLaunch';
+import { ArtifactsWall } from './components/ArtifactsWall';
+import { readArtifactPins } from './artifactPins';
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage, type BoardMove } from './board/BoardPage';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
@@ -328,7 +330,9 @@ interface ThreadLoad {
 }
 
 interface Route {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'shapes';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'shapes' | 'artifacts';
+  /** The Artifacts wall on Pinned (`#artifacts=pinned`; approval "inbox-artifact-stars"); All is `#artifacts`. */
+  pinned?: boolean;
   /**
    * Reviews (`#reviews`, Code review on; `#pulls` is its permanent alias): the stack open beside the list (`&stack=`, its top layer's key),
    * and the layer under review (`&layer=`, with `&scope=stack` for the whole stack up to it).
@@ -432,6 +436,8 @@ function routeOf(fullHash: string): Route {
   if (params.has('whats-new')) return { page: 'whats-new', project: null, thread: null, version: params.get('whats-new') };
   if (params.has('tour')) return { page: 'tour', project: null, thread: null, step: tourStepOf(params.get('tour')) };
   if (params.has('drafts')) return { page: 'drafts', project: null, thread: null };
+  // The Artifacts wall (the sidebar's Artifacts row). `#thread=…&artifacts` is a thread's own grid, below.
+  if (params.has('artifacts') && !params.get('thread')) return { page: 'artifacts', project: null, thread: null, pinned: params.get('artifacts') === 'pinned' };
   if (params.has('shapes')) return { page: 'shapes', project: null, thread: null, shape: params.get('shape') };
   // The Board's project filter rides the list's own key (`#board&project=prj_…`).
   // `#pulls…` is rewritten to this address on arrival (reviewsAlias): it may still be read here in the same breath.
@@ -489,6 +495,7 @@ function hashOf(route: Route): string {
   if (route.page === 'settings') hash = settingsHash({ section: route.section ?? null, pair: route.pair });
   else if (route.page === 'whats-new') hash = new URLSearchParams({ 'whats-new': route.version ?? '' }).toString();
   else if (route.page === 'drafts') hash = 'drafts';
+  else if (route.page === 'artifacts') hash = route.pinned ? 'artifacts=pinned' : 'artifacts';
   else if (route.page === 'shapes') hash = route.shape ? `shapes&shape=${encodeURIComponent(route.shape)}` : 'shapes';
   else if (route.page === 'board')
     hash =
@@ -2119,6 +2126,8 @@ function Inbox() {
         onAsk: emitAskChange,
         // The sidebar's pins changed (here, in another window, or a deleted thread left them): read `pins` again.
         onPins: () => listAfterEvents(60),
+        // The pinned artifacts changed (another window, a phone): read them again (artifactPins.ts).
+        onArtifactPins: () => void readArtifactPins(),
         // A snooze changed (another window, a phone, a linked machine) or ran out: read the list. It is the person's
         // own act, so with no thread open the row goes to its place, as it does in the window they did it in; a return
         // waits behind "N new" (held.ts). A return may ask something: notifications read this list too.
@@ -6190,6 +6199,22 @@ function Inbox() {
         onOpen={(s) => go(s.thread ? { page: 'inbox', project: null, thread: s.thread, shape: s.id } : { page: 'shapes', project: null, thread: null, shape: s.id })}
       />
     );
+  } else if (route.page === 'artifacts') {
+    // The Artifacts wall (approval "inbox-artifact-stars"): a tile opens its file or guided review in its thread; Back comes here.
+    main = (
+      <ArtifactsWall
+        pinned={route.pinned === true}
+        onPinned={(pinned) => writeRoute({ page: 'artifacts', project: null, thread: null, pinned }, { replace: true })}
+        onOpen={(row) =>
+          go(
+            row.attachment
+              ? { page: 'inbox', project: null, thread: row.thread_id, file: { id: row.attachment.id, version: 'current', focus: null } }
+              : { page: 'inbox', project: null, thread: row.thread_id, guide: row.message_id },
+          )
+        }
+        phone={phone}
+      />
+    );
   } else if (route.page === 'drafts') {
     main = (
       <DraftsPage
@@ -6659,6 +6684,7 @@ function Inbox() {
             onPinAction={(row, action) => void pinAction(row, action)}
             draftsCount={(drafts?.length ?? 0) + replyDrafts.length}
             onDrafts={() => leave({ page: 'drafts', project: null, thread: null })}
+            onArtifacts={() => leave({ page: 'artifacts', project: null, thread: null })}
             // The Board (approval "inbox-board"): a row only while the person has it on; no count (the header has it).
             onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined}
             // Reviews: a row only while Code review is on; its count is the last read's "On you" (read at start and on focus).

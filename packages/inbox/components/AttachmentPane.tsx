@@ -63,6 +63,7 @@ import { CONTENTS_RAIL_MIN_PANE_WIDTH as RAIL_MIN_PAGE_WIDTH } from '@plannotato
 import { ContentsHide, ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
 import { DeferredMarkdownContentsRail } from '@plannotator/ui/components/DeferredMarkdownContentsRail';
 import { FullViewBar, GATHERED, type FullViewBarHandle, type ToolbarState } from './FullViewBar';
+import { ArtifactPinButton } from './ArtifactPinButton';
 import { ReuseButton } from '../reuse';
 import { FullScreenComposer, FullScreenComposerContext, type FullScreenComposerValue } from './FullScreenComposer';
 import { forgetComposerOpened, useComposerFolded } from '../fullScreenComposer';
@@ -151,6 +152,11 @@ const paneEscapes = new WeakSet<Event>();
 
 export interface AttachmentPaneProps {
   attachment: InboxAttachmentState;
+  /**
+   * The file's pin (approval "inbox-artifact-stars"): its thread and its artifact key (the shown image's id for an
+   * image both shown and attached). Pin / Unpin sits in the viewer's bar and the pane's header. Absent (the tour): none.
+   */
+  pin?: { threadId: string; key: string } | null;
   /** The file is in the person's own message (an image their reply shows): the header and the changed line say "You", not the agent. */
   fromPerson?: boolean;
   /** Every attachment of the thread, for the panel's files and the strip. */
@@ -2330,7 +2336,13 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         <FullViewBar
           ref={barRef}
           phone={phone}
-          reuse={phonePillShown ? null : <ReuseButton file={attachment} surface="bar" version={effectiveVersion} big={phone} />}
+          reuse={
+            <>
+              {/* Pin stays on a phone's page too: the bar is where a phone pins (its cards have no hover). */}
+              {props.pin && <ArtifactPinButton threadId={props.pin.threadId} artifactKey={props.pin.key} name={attachment.name} surface="bar" big={phone} />}
+              {phonePillShown ? null : <ReuseButton file={attachment} surface="bar" version={effectiveVersion} big={phone} />}
+            </>
+          }
           state={shownToolbar}
           onState={(next) => {
             // Each control flies from where it rests: measured before the state changes.
@@ -2432,6 +2444,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           </span>
           <span className="ib-sp" />
           {isHtml && !props.readOnly && !linkedTop && <HtmlSurfaceControls armed={armed} onToggleArmed={() => setArmed((v) => !v)} />}
+          {props.pin && <ArtifactPinButton threadId={props.pin.threadId} artifactKey={props.pin.key} name={attachment.name} surface="bar" />}
           <ReuseButton file={attachment} surface="pane" version={effectiveVersion} />
           {props.openIn && <OpenInControl attachment={attachment} version={effectiveVersion} surface={props.openIn} label={!folded} big={phone} />}
           {/* A source that writes nothing (the tour) offers no Download: nothing leaves the window. */}
