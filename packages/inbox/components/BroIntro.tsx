@@ -1,15 +1,19 @@
 import spriteSheet from '../assets/tater-sidebar.webp';
 import { Modal } from './Updates';
 
-/** Where Bro mode came from (the owner, 2026-11-05): the card's credit line. */
-export const BRO_CREDIT = { seenBy: 'https://x.com/dillon_mullroy', by: 'https://github.com/backnotprop/bro' } as const;
+/** Where Bro mode came from (the owner, 2026-11-05; the post and the skill, 2026-11-08): the card's credit line. */
+export const BRO_CREDIT = {
+  seenBy: 'https://x.com/dillon_mulroy/status/2079238358358778142',
+  by: 'https://github.com/backnotprop/bro/blob/main/skills/bro/SKILL.md',
+} as const;
 
 /**
  * Bro mode's one-time offer (approval "bro-mode", 2026-11-05; the owner picked the poster look): the name as the
  * picture, with the sidebar's Tater sprite sitting on it, played as the sidebar plays it (a one-frame window over the
  * strip, sliding by `transform` in whole frames; its first frame under reduced motion). "Turn it on" turns Bro mode on;
  * "Not now", Escape and a click outside close it and leave it off. Every way out is final: the claim already stamped
- * it. No keyboard shortcut.
+ * it. No keyboard shortcut. Marked Experimental (the owner, 2026-11-08): the Settings chip, in the card's own colours,
+ * beside the name and outside the title, so the dialog is still named "Bro mode".
  */
 export function BroIntro({ phone, onClose, onTurnOn }: { phone: boolean; onClose: () => void; onTurnOn: () => void }) {
   return (
@@ -21,12 +25,18 @@ export function BroIntro({ phone, onClose, onTurnOn }: { phone: boolean; onClose
           <span className="ib-bro-strip" style={{ backgroundImage: `url(${spriteSheet})` }} />
         </span>
       </h2>
+      <span className="ib-chip ib-bro-exp" data-bro-intro-experimental="">
+        Experimental
+      </span>
       <div className="ib-bi-text">
         <p id="ib-bro-desc">Agents write to your Inbox in plain words, like one person to another.</p>
+        <p className="ib-bro-reach">
+          Applies to new agent sessions. In open Claude Code sessions, run <code>/reload-plugins plannotator</code>.
+        </p>
         <p className="ib-bro-credit">
           <code>/bro</code> as seen by{' '}
           <a href={BRO_CREDIT.seenBy} target="_blank" rel="noopener noreferrer">
-            @dillon_mullroy
+            @dillon_mulroy
           </a>
           , repo:{' '}
           <a href={BRO_CREDIT.by} target="_blank" rel="noopener noreferrer">

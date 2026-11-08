@@ -1671,6 +1671,8 @@ dialog.ib-dlg.ib-activity-lb[open] { display: flex; flex-direction: column; }
 .ib-prow .ib-desc a { color: var(--primary); text-decoration: none; }
 .ib-prow .ib-desc a:hover { text-decoration: underline; }
 .ib-prow .ib-desc code, .ib-sframe code { font-family: var(--font-mono); font-size: var(--ib-fs-11-5, 11.5px); color: var(--foreground); }
+/* Bro mode's command (the owner, 2026-11-08) moves to the next line whole, never split at its hyphen. */
+.ib-prow[data-settings-bro] .ib-desc code { white-space: nowrap; }
 .ib-prow .ib-ctl { display: flex; align-items: center; gap: 10px; flex: none; }
 /* Settings → Appearance → Colors (components/Palettes.tsx): the half being assigned, then its palettes as tiles.
    The row's own head is an .ib-prow without its rule; the tiles sit under it, in the card. */
@@ -6967,6 +6969,11 @@ dialog.ib-dlg.ib-bro h2 { position: relative; margin: 0; padding: 18px 24px 0; f
 .pn-inbox .ib-bro .ib-btn.ib-ghost:hover { background: #fbfaf51f; }
 .pn-inbox .ib-bro .ib-btn.ib-pri { background: #f69d25; border-color: #f69d25; color: #222222; font-weight: 650; }
 .pn-inbox .ib-bro .ib-btn:focus-visible { outline: 2px solid #fbfaf5; outline-offset: 2px; }
+/* Experimental (the owner, 2026-11-08): the Settings chip in the card's colours, at the top right beside "Bro". */
+.ib-bro .ib-bro-exp { position: absolute; top: 22px; right: 22px; background: #fbfaf51a; color: #fbfaf5b3; }
+/* Who it reaches (the owner, 2026-11-08): new sessions, and the command an open Claude Code session needs. */
+.ib-bro .ib-bi-text .ib-bro-reach { margin-top: 8px; font-size: var(--ib-fs-13, 13px); line-height: 1.45; color: #fbfaf5b3; }
+.ib-bro .ib-bro-reach code { padding: 1px 5px; border-radius: 4px; background: #fbfaf51a; color: #fbfaf5d9; font-size: var(--ib-fs-12, 12px); white-space: nowrap; }
 /* Where it came from: small and quiet, under the line. */
 .ib-bro .ib-bi-text .ib-bro-credit { margin-top: 10px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.5; color: #fbfaf58c; }
 .ib-bro .ib-bro-credit code { padding: 1px 5px; border-radius: 4px; background: #fbfaf51a; color: #fbfaf5c7; font-size: var(--ib-fs-11-5, 11.5px); }

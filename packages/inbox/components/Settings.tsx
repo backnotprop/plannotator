@@ -635,10 +635,15 @@ function CapabilitiesSection({
             {broRow && (
               <div className="ib-prow" data-settings-bro="">
                 <span className="ib-txt">
-                  <span className="ib-l" id="ib-bro-label">
-                    Bro mode
+                  <span className="ib-l">
+                    <span id="ib-bro-label">Bro mode</span>
+                    <span className="ib-chip" data-settings-bro-experimental="">
+                      Experimental
+                    </span>
                   </span>
-                  <span className="ib-desc">Agents write to your Inbox in plain words, from their next session.</span>
+                  <span className="ib-desc">
+                    Agents write to your Inbox in plain words. Applies to new agent sessions. In open Claude Code sessions, run <code>/reload-plugins plannotator</code>.
+                  </span>
                 </span>
                 <span className="ib-ctl">
                   <Switch on={bro.on} labelledBy="ib-bro-label" onClick={() => onToggleBro(!bro.on)} />
