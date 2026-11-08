@@ -18,6 +18,12 @@
  *     trusts it on B (B's Claude config) and starts there.
  *  5. B asleep: a launch from A waits (202 queued). Cancel takes one back before it ever left; the other starts on
  *     B exactly once when B is back, and the cancelled one never does; an agent's bare Cancel of a held launch can't.
+ *  8. Another folder on B: A's window lists B's folder names under B's home (never hidden ones, never outside home),
+ *     an agent's bare read and a door read without the mark are refused, and a launch in a folder that is not a
+ *     project yet starts there and makes it one of B's projects.
+ *  6. Readiness: A's machine list says B takes launches; B's Claude Code signed out shows in B's launch block, read
+ *     through the forward, with the SSH cause when B's Inbox was started over SSH; a launch is refused in words that
+ *     name B, nothing starts, and once signed in it starts at once. Launch off on B: its health says 0.
  *  7. A permission prompt of an agent started on B: answered from A's window, never by an agent's bare call through
  *     the forward, which B refuses in words that name A.
  */
@@ -48,6 +54,8 @@ const env = (m: Machine) => ({
   PLANNOTATOR_TEST_SANDBOX: m.w.root,
   PLANNOTATOR_TEST_LAUNCH_PATH: `${join(m.w.root, "fakes")}:/usr/bin:/bin`,
   PLANNOTATOR_MACHINE_NAME: m.name,
+  // Mini's Inbox was started over SSH (macOS then keeps Claude Code's login locked); the MacBook's was not.
+  SSH_CONNECTION: m.name === "Mini" ? "10.0.0.2 50022 10.0.0.3 22" : "",
   PLANNOTATOR_UPDATE_CHECK: "0",
   PLANNOTATOR_INBOX_NOTES: "0",
   NO_ANON_PING: "1",
@@ -288,8 +296,62 @@ describe("remote launch, on two real Inboxes linked both ways", () => {
     }
   }, 180_000);
 
+  test("6. readiness: signed out, with the SSH cause, and launch off, said with the other machine's name", async () => {
+    for (const [here, there] of both()) {
+      await waitFor(`${here.name} sees ${there.name} online`, async () => (await stateOf(here, there)) === "online", 30_000);
+      const view = ((await getJson(here, "/api/inbox/machines")).machines as Json[]).find((x) => x.id === there.id)!;
+      expect(view.launch).toBe(true);
+
+      // Its Inbox started again (over SSH, for Mini) with Claude Code signed out: a fresh start has nothing kept.
+      await stopInbox(there.w);
+      there.fake.configure({ signedOut: true });
+      start(there);
+      await waitFor(`${here.name} sees ${there.name} back`, async () => (await stateOf(here, there)) === "online", 30_000);
+      try {
+        const block = (await getJson(here, `/api/inbox/m/${there.id}/sessions`)).launch as Json;
+        expect(block.agents).toEqual([]);
+        const notReady = (block.not_ready as Json[]).find((n) => n.agent === "claude-code")!;
+        expect(notReady.code).toBe("signed_out");
+        // The SSH cause is macOS's Keychain: only said on a Mac.
+        const overSsh = there.name === "Mini" && process.platform === "darwin";
+        expect(notReady.over_ssh ?? false).toBe(overSsh);
+
+        const starts = there.fake.starts().length;
+        const refused = await windowPost(here, `/api/inbox/m/${there.id}/messages`, launchBody(`k-signed-out-${here.name}`, there.project.id));
+        expect(refused.status).toBe(409);
+        const answer = (await refused.json()) as Json;
+        expect(answer.code).toBe("agent_unavailable");
+        expect(answer.not_ready).toBe("signed_out");
+        expect(answer.error).toContain(`isn't signed in on ${there.name}`);
+        expect(answer.error).toContain(overSsh ? "SSH" : "`claude`");
+        expect(there.fake.starts().length).toBe(starts);
+      } finally {
+        there.fake.configure({ signedOut: false });
+      }
+      // Signed in now: within a few seconds (a signed-out answer is kept briefly) it is offered again, and starts.
+      await waitFor(`${there.name} offers Claude Code again`, async () => (((await getJson(here, `/api/inbox/m/${there.id}/sessions`)).launch as Json).agents as Json[]).length > 0, 15_000);
+      const sent = await windowPost(here, `/api/inbox/m/${there.id}/messages`, launchBody(`k-signed-in-${here.name}`, there.project.id));
+      expect(sent.status).toBe(200);
+
+      // Launch off there: its health says so, which an older Inbox can't (no field), and this machine's list says
+      // launch is off there (false, not null) once its line connects again.
+      const config = join(there.w.dataDir, "config.json");
+      const on = readFileSync(config, "utf8");
+      writeFileSync(config, JSON.stringify({ inboxLaunch: { enabled: false } }));
+      try {
+        await waitFor(`${there.name} says launch is off`, async () => (await getJson(there, "/api/inbox/health")).launch_from_machines === 0);
+        await stopInbox(there.w);
+        start(there);
+        await waitFor(`${here.name} sees launch off on ${there.name}`, async () => ((await getJson(here, "/api/inbox/machines")).machines as Json[]).find((x) => x.id === there.id)?.launch === false, 30_000);
+      } finally {
+        writeFileSync(config, on);
+      }
+      expect((await getJson(there, "/api/inbox/health")).launch_from_machines).toBe(1);
+    }
+  }, 90_000);
   test("7. a permission prompt of an agent started there: A's window answers it, an agent's bare call through the forward does not", async () => {
     for (const [here, there] of both()) {
+      await waitFor(`${here.name} sees ${there.name} online`, async () => (await stateOf(here, there)) === "online", 30_000);
       there.fake.configure({ prompts: [{ tool_name: "Bash", tool_input: { command: "bun run build" } }] });
       try {
         const sent = (await (await windowPost(here, `/api/inbox/m/${there.id}/messages`, launchBody(`k-perm-${here.name}`, there.project.id))).json()) as Json;
@@ -314,4 +376,55 @@ describe("remote launch, on two real Inboxes linked both ways", () => {
       }
     }
   }, 120_000);
+
+  test("8. another folder on the other machine: its folder names, the owner's window only; a launch there makes it a project", async () => {
+    for (const [here, there] of both()) {
+      await waitFor(`${here.name} sees ${there.name} online`, async () => (await stateOf(here, there)) === "online", 30_000);
+      // The other machine's home (the sandbox's) has a code folder with one repository, and a hidden folder.
+      const folder = join(agentsHome(there), "code", `billing-api-${here.name.toLowerCase()}`);
+      mkdirSync(folder, { recursive: true });
+      mkdirSync(join(agentsHome(there), "code", ".cache"), { recursive: true });
+      const real = realpathSync(folder);
+      const trust = JSON.parse(readFileSync(join(agentsHome(there), ".claude.json"), "utf8")) as Json;
+      writeFileSync(join(agentsHome(there), ".claude.json"), JSON.stringify({ ...trust, projects: { ...trust.projects, [real]: { hasTrustDialogAccepted: true } } }));
+
+      const read = (path: string, headers: Record<string, string> = { "Sec-Fetch-Site": "same-origin" }) =>
+        fetch(`${base(here)}/api/inbox/m/${there.id}/launch/folders?path=${encodeURIComponent(path)}`, { headers });
+      const listed = (await (await read("~/code")).json()) as Json;
+      expect(listed.exists).toBe(true);
+      expect(listed.folders).toContain(`billing-api-${here.name.toLowerCase()}`);
+      expect(listed.folders).not.toContain(".cache");
+      expect(((await (await read("~/code/biling-api")).json()) as Json).exists).toBe(false);
+      expect(((await (await read("~/.claude")).json()) as Json).code).toBe("folder_hidden");
+      expect(((await (await read("~/..")).json()) as Json).code).toBe("folder_outside_home");
+      // A backslash is never a way into a hidden folder, and a missing folder offers the nearest one above it.
+      expect(((await (await read("~/x\\..\\.claude")).json()) as Json).code).toBe("folder_outside_home");
+      expect(((await (await read("~/code/biling-api")).json()) as Json).nearest).toMatchObject({ path: "~/code", folders: expect.arrayContaining([`billing-api-${here.name.toLowerCase()}`]) });
+      // An agent's bare read through the forward, and a read at the other door with this machine's token but no mark.
+      const bare = await read("~/code", {});
+      expect([bare.status, ((await bare.json()) as Json).code]).toEqual([403, "window_only"]);
+      const door = await fetch(`${base(there)}/api/inbox/device/launch/folders?path=~/code`, { headers: { Authorization: `Bearer ${tokenFor(here, there)}` } });
+      expect([door.status, ((await door.json()) as Json).code]).toEqual([403, "window_only"]);
+
+      const before = startsIn(there, real).length;
+      const sent = await windowPost(here, `/api/inbox/m/${there.id}/messages`, {
+        idempotency_key: `k-folder-${here.name}`,
+        body: "Look at the retry logic in this folder.",
+        thread_name: `Folder start ${here.name}`,
+        to: { launch: { agent: "claude-code", folder: `~/code/billing-api-${here.name.toLowerCase()}` } },
+      });
+      expect(sent.status).toBe(200);
+      await waitFor(`--bg in the folder on ${there.name}`, async () => startsIn(there, real).length === before + 1);
+      expect(((await getJson(there, "/api/inbox/projects")).projects as Json[]).some((p) => p.root === real)).toBe(true);
+      // A folder that isn't there: refused, nothing starts.
+      const missing = await windowPost(here, `/api/inbox/m/${there.id}/messages`, { idempotency_key: `k-folder-missing-${here.name}`, body: "x", to: { launch: { agent: "claude-code", folder: "~/code/nope" } } });
+      expect([missing.status, ((await missing.json()) as Json).code]).toEqual([422, "folder_missing"]);
+      // Home itself, and a hidden folder by a backslash: refused there, nothing starts.
+      for (const folder of ["~", "~/\\.claude"]) {
+        const refused = await windowPost(here, `/api/inbox/m/${there.id}/messages`, { idempotency_key: `k-folder-refused-${here.name}-${folder}`, body: "x", to: { launch: { agent: "claude-code", folder } } });
+        expect([folder, refused.status, ((await refused.json()) as Json).code]).toEqual([folder, 422, "validation_error"]);
+      }
+      expect(startsIn(there, realpathSync(agentsHome(there)))).toEqual([]);
+    }
+  }, 90_000);
 });
