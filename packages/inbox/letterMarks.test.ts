@@ -9,7 +9,7 @@
 import { describe, expect, test } from 'bun:test';
 import { INBOX_ROWS_DEFAULT, inboxRowsCanonical, inboxRowsList, inboxRowsRead } from '@plannotator/core/inbox-types';
 import { HUES, hueOf, markLetters } from './letterMarks';
-import { PICTURE_MAX_BYTES, pictureFromFile } from './projectPictures';
+import { PICTURE_MAX_BYTES, pictureFromFile, projectPictureUrl } from './projectPictures';
 import { LIST_LOOK_DEFAULT, LIST_LOOK_OFF, lookFromRows, lookMarks, lookWithChange, markStyleLook, marksWhatLook, rowsFromLook } from './listLook';
 
 describe('the letters: first and last letter of the title, by grapheme', () => {
@@ -108,6 +108,18 @@ describe('the marks in the Rows look', () => {
     // A hand-edited config.json in a shape the window never writes reads as the window would make it.
     expect(inboxRowsCanonical(['markInline', 'markDot', 'githubPictures', 'marksThreads'])).toEqual(['marksThreads', 'markInline']);
     expect(inboxRowsCanonical(['markDot', 'repoLogo'])).toEqual([]);
+  });
+});
+
+describe("a project picture's address", () => {
+  // The list dialog's Detailed card draws a look the person has not saved, so the Inbox cannot read its logo switch
+  // from config.json: the address asks for the repo's logo itself. GitHub is never asked for in the address.
+  test("a look with the repo's logo asks for it (logo=1), whatever is saved; a look without it, or GitHub only, does not", () => {
+    const logo = projectPictureUrl('prj_a', lookMarks(lookWithChange(LIST_LOOK_DEFAULT, { repoLogo: true })));
+    expect(new URL(logo!, 'http://x').searchParams.get('logo')).toBe('1');
+    const github = projectPictureUrl('prj_a', lookMarks(lookWithChange(LIST_LOOK_DEFAULT, { githubPictures: true })));
+    expect(new URL(github!, 'http://x').searchParams.get('logo')).toBeNull();
+    expect(projectPictureUrl('prj_a', lookMarks(LIST_LOOK_DEFAULT))).toBeNull();
   });
 });
 

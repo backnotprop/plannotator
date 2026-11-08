@@ -10,7 +10,7 @@ import { formatBytes, plural } from '../format';
 import { Icon } from '../icons';
 import { FileName } from './FileName';
 import { Tip } from './Tip';
-import { FullScreenComposer, FullScreenComposerContext } from './FullScreenComposer';
+import { FullScreenCommentBin, FullScreenComposer, FullScreenComposerContext } from './FullScreenComposer';
 import { useConfigValue } from '@plannotator/ui/config';
 import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { markupWords, noteOnto } from '../markup';
@@ -417,6 +417,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
           Cancel
         </button>
       )}
+      <FullScreenCommentBin />
       <button type="button" className="ib-btn ib-pri ib-csave" onClick={() => void submit()} disabled={!canSave} data-video-comment-save="">
         {kept ? 'Add note' : 'Comment'}
       </button>

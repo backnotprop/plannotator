@@ -1936,6 +1936,12 @@ export interface InboxHealth {
   inbox_id?: string;
   /** The machine-link protocol this Inbox speaks (additive; absent: it cannot link). */
   machine_links?: number;
+  /** Additive: this Inbox's door takes `update`, so a linked machine can update it. */
+  machine_update?: number;
+  /** Additive: the install script owns this copy, so it can update itself. */
+  self_update?: boolean;
+  /** Additive: a linked machine's Update ended with no error and no new binary: the version it was for. */
+  update_no_change?: string | null;
   /** Remote launch: 1 while a linked machine may start agents here, 0 while launch is off. Absent from an older Inbox. */
   launch_from_machines?: number;
   /**

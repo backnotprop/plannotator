@@ -55,6 +55,7 @@ import {
   type InboxPullChecks,
   type InboxPullCliState,
   inboxPullCompareBranch,
+  type InboxPullDetailsAnswer,
   type InboxPullDiffAnswer,
   type InboxPullDiffScope,
   type InboxPullHost,
@@ -66,8 +67,9 @@ import {
   type InboxPullState,
 } from "@plannotator/core/inbox-types";
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
-import { fetchPRFileBytes, fetchPRFileContent, fetchPRTree, ghEntryMissingContent, glEntryMissingContent, parsePaginatedArray, reconstructGhPatch, reconstructGitlabPatch, type GitHubFileEntry, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
+import { fetchPRContextWithReviewers, fetchPRFileBytes, fetchPRFileContent, fetchPRTree, ghEntryMissingContent, glEntryMissingContent, parsePaginatedArray, reconstructGhPatch, reconstructGitlabPatch, type GitHubFileEntry, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
 import type { PRRef, PRRuntime } from "@plannotator/shared/pr-types";
+import { pullDetailsOf, type PullDetailsRead } from "./inbox-pull-details";
 import { MAX_REPO_FILE_BYTES } from "@plannotator/shared/repo-file";
 import { compareRepoPaths, MAX_REVIEW_FILE_CONTENT_BYTES, prepareGitCommand, readGitObjectBytes, validateFilePath, type RepoFileListing } from "@plannotator/shared/review-core";
 import { handleRepoFileRequest, handleRepoFilesRequest, type HandlerResult, type RepoFileRead } from "@plannotator/shared/repo-files";
@@ -84,8 +86,89 @@ export const INBOX_PULLS_REFRESH_MS = 20_000;
 export const INBOX_PULLS_RATE_FLOOR = 100;
 /** A patch larger than this is refused (the review says to open it on the forge). */
 export const INBOX_PULL_DIFF_MAX_BYTES = 8 * 1024 * 1024;
+/** A PR's details are kept this long (keyed by the PR's last update too): opening the page again does not ask again. */
+const INBOX_PULL_DETAILS_FRESH_MS = 60_000;
+/** How long the people a read named stay allowed for their pictures: as long as a page is likely to stay open. */
+const INBOX_PULL_DETAILS_KEEP_MS = 60 * 60_000;
 /** A layer's diff is kept this long (keyed by the PR's last update too). */
 export const INBOX_PULL_DIFF_FRESH_MS = 5 * 60_000;
+
+/** The longest description kept: over GitHub's own limit, so only a GitLab description past it is cut. */
+export const INBOX_PULL_DESCRIPTION_MAX_CHARS = 66_000;
+
+/**
+ * The body as a reader of it on the forge sees it: no HTML comments (an unfilled PR template is mostly these, and one
+ * with a blank line in it would otherwise draw as text), outside code. A comment that starts a line and never closes
+ * runs to the end, as it does on the forge; one that starts mid-line and never closes is plain text.
+ */
+function withoutHtmlComments(text: string): string {
+  const lines = text.split("\n");
+  const lastClose = lines.reduce((last, line, index) => (line.includes("-->") ? index : last), -1);
+  const out: string[] = [];
+  let fence: string | null = null;
+  let inComment = false;
+  lines.forEach((whole, index) => {
+    let line = whole;
+    if (inComment) {
+      const end = line.indexOf("-->");
+      if (end < 0) return;
+      line = line.slice(end + 3);
+      inComment = false;
+    }
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence) {
+      if (marker && marker[0] === fence[0] && marker.length >= fence.length && !line.trim().slice(marker.length)) fence = null;
+      out.push(line);
+      return;
+    }
+    if (marker) {
+      fence = marker;
+      out.push(line);
+      return;
+    }
+    if (/^(?: {4}|\t)/.test(line) && !out[out.length - 1]?.trim()) {
+      out.push(line);
+      return;
+    }
+    let kept = "";
+    let at = 0;
+    while (at < line.length) {
+      if (line[at] === "`") {
+        let run = at;
+        while (line[run] === "`") run++;
+        const tick = line.slice(at, run);
+        const close = line.indexOf(tick, run);
+        const end = close < 0 ? run : close + tick.length;
+        kept += line.slice(at, end);
+        at = end;
+      } else if (line.startsWith("<!--", at)) {
+        // From the opening's own dashes: `<!-->` and `<!--->` are whole comments.
+        const close = line.indexOf("-->", at + 2);
+        if (close >= 0) {
+          at = close + 3;
+        } else if (!kept.trim() || index < lastClose) {
+          inComment = true;
+          at = line.length;
+        } else {
+          kept += line.slice(at);
+          at = line.length;
+        }
+      } else {
+        kept += line[at];
+        at++;
+      }
+    }
+    out.push(kept.trim() ? kept : "");
+  });
+  return out.join("\n");
+}
+
+/** A PR's description as the forge answered it, or null when it has none: no words left is none, a lone rule too. */
+function descriptionOf(value: unknown): string | null {
+  const text = typeof value === "string" ? withoutHtmlComments(value).trim() : "";
+  if (text.split("\n").every((line) => !line.trim() || /^ {0,3}([-*_])(?: *\1){2,} *$/.test(line))) return null;
+  return text.length > INBOX_PULL_DESCRIPTION_MAX_CHARS ? `${text.slice(0, INBOX_PULL_DESCRIPTION_MAX_CHARS)}\n\n…` : text;
+}
 
 /** One file's text larger than this is not read (the diff stays as it came): the review's own expansion cap. */
 export const INBOX_PULL_FILE_MAX_BYTES = MAX_REVIEW_FILE_CONTENT_BYTES;
@@ -566,8 +649,10 @@ interface HostState {
 
 export class InboxPullsError extends Error {
   constructor(
-    readonly code: "pull_unknown" | "pull_diff_failed" | "pull_diff_too_large" | "pull_diff_fork" | "validation_error",
+    readonly code: "pull_unknown" | "pull_details_failed" | "pull_details_held" | "pull_diff_failed" | "pull_diff_too_large" | "pull_diff_fork" | "validation_error",
     message: string,
+    /** For `pull_details_held`: when the forge may be asked again (ms since the epoch). */
+    readonly retryAt?: number,
   ) {
     super(message);
   }
@@ -596,15 +681,19 @@ export interface InboxPulls {
   avatarUrls(host: string): Record<string, string>;
   /** One layer's patch, or the stack's from its base up to that layer. Throws InboxPullsError. */
   diff(key: string, scope: InboxPullDiffScope): Promise<InboxPullDiffAnswer>;
+  /** What the forge has beside the diff: reviewers, checks, labels, comments. Only for a PR the last list named. */
+  details(key: string): Promise<InboxPullDetailsAnswer>;
   /**
    * One layer's diff for an agent to read: no limit of ours on its size, and when the forge won't serve it as one
    * document, whatever its per-file read gives; `partial` when that is known to be less than the whole diff.
    * When that read is partial or empty and `roots` holds a clone of the PR's repository on this computer, git reads
    * the whole diff there instead (`localWholeDiff`), and it is not partial; `held_back` is then the forge's own read
    * (its held-back files as their headers), for an agent the whole is too long for.
+   * `per_file` when the forge would not serve the diff as one document (the per-file read or a clone gave it): the
+   * PR's diff on screen (`diff`) reads only that document, so it shows none of this.
    * `head_sha` as `diff`'s. Throws InboxPullsError when there is nothing.
    */
-  wholeDiff(key: string, signal?: AbortSignal, roots?: readonly string[]): Promise<{ patch: string; head_sha: string | null; partial: boolean; held_back?: string }>;
+  wholeDiff(key: string, signal?: AbortSignal, roots?: readonly string[]): Promise<{ patch: string; head_sha: string | null; partial: boolean; held_back?: string; per_file?: true }>;
   /** The head commit of the last patch read for this PR, either scope (`diff`'s `head_sha`), or null. */
   readHead(key: string): string | null;
   /**
@@ -860,6 +949,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   const signed =new Map<RefCli, { at: number; ttl: number; set: Promise<Set<string>>; missing: boolean }>();
   const diffs = new Map<string, { at: number; answer: InboxPullDiffAnswer }>();
   const readHeads = new Map<string, string>();
+  /** One read a PR, while it is fresh; the people's pictures it named stay allowed while the PR is on the list. */
+  const detailReads = new Map<string, { at: number; updated: string; read: Promise<PullDetailsRead>; avatars?: Record<string, string>; partial?: boolean }>();
   /**
    * A PR's whole diff at `head`, read with git in a clone of its repository on this computer (its `origin` is the
    * PR's repository: that is how the clone is one of its projects). What the clone lacks is fetched by the PR's own
@@ -1104,7 +1195,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   };
 
   /** A list read (own or Others) is held: the forge asked to slow down, or GitHub's GraphQL budget is nearly spent. */
-  const listHeld = (host: string): boolean => now() < Math.max(holdUntil.get(host) ?? 0, budgetHold.get(host) ?? 0);
+  const heldUntil = (host: string): number => Math.max(holdUntil.get(host) ?? 0, budgetHold.get(host) ?? 0);
+  const listHeld = (host: string): boolean => now() < heldUntil(host);
 
   /** A failed list read: a rate-limit answer holds the host (diffs too); anything else is "unavailable". */
   const fail = (host: string, state: { error: InboxPullHost["error"] | null; failedAt: number }, cli: RefCli, result: RefCommandResult) => {
@@ -1325,7 +1417,65 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       await Promise.all([...hosts.values()].map((state) => state.others.pending));
     },
     avatarUrls(host) {
-      return { ...(avatars.get(host.toLowerCase()) ?? {}) };
+      const named: Record<string, string> = {};
+      const asked = host.toLowerCase();
+      for (const [key, entry] of detailReads) {
+        const pull = known.get(key);
+        if (!pull || now() - entry.at > INBOX_PULL_DETAILS_KEEP_MS) {
+          detailReads.delete(key);
+          continue;
+        }
+        if (pull.host.toLowerCase() === asked && entry.avatars) Object.assign(named, entry.avatars);
+      }
+      return { ...named, ...(avatars.get(asked) ?? {}) };
+    },
+    async details(key) {
+      const pull = known.get(key);
+      if (!pull || !lastRepos.has(inboxPullRepoKey(pull.host, pull.repo))) throw new InboxPullsError("pull_unknown", "That pull request is not in the list.");
+      const forge = pull.platform === "github" ? "GitHub" : "GitLab";
+      const failed = () => new InboxPullsError("pull_details_failed", `${forge} did not answer. Try again in a minute.`);
+      const hit = detailReads.get(key);
+      if (hit && !hit.partial && hit.updated === pull.updated_at && now() - hit.at < INBOX_PULL_DETAILS_FRESH_MS) {
+        try {
+          return (await hit.read).answer;
+        } catch {
+          // Another asker's read, still in flight when it failed: the same answer, not an internal error.
+          throw failed();
+        }
+      }
+      // Held (a rate limit: a minute; GitHub's budget spent: until it fills, up to an hour): the window says until when.
+      if (listHeld(pull.host)) throw new InboxPullsError("pull_details_held", `${pull.host} asked to slow down.`, heldUntil(pull.host));
+      const parts = splitPath(pull.repo);
+      if (!parts) throw failed();
+      const ref: PRRef = pull.platform === "github"
+        ? { platform: "github", host: pull.host, owner: parts.owner, repo: parts.repo, number: pull.number }
+        : { platform: "gitlab", host: pull.host, projectPath: pull.repo, iid: pull.number };
+      const runtime: PRRuntime = {
+        runCommand: async (cmd, args, options) => {
+          const result = await run(cmd as RefCli, args, options?.env);
+          if (result.exitCode !== 0 && refErrorOf(cmd as RefCli, result) === "rate_limited") holdUntil.set(pull.host, now() + REF_RATE_LIMIT_MS);
+          return result;
+        },
+      };
+      const entry: { at: number; updated: string; read: Promise<PullDetailsRead>; avatars?: Record<string, string>; partial?: boolean } = {
+        at: now(),
+        updated: pull.updated_at,
+        read: fetchPRContextWithReviewers(runtime, ref).then((context) => pullDetailsOf(key, context, pull.author)),
+        // The faces already shown stay allowed while the next read is out.
+        ...(hit?.avatars ? { avatars: hit.avatars } : {}),
+      };
+      detailReads.set(key, entry);
+      try {
+        const read = await entry.read;
+        entry.avatars = { ...entry.avatars, ...read.avatars };
+        // Part of an answer is shown, and asked again on the next opening; its faces stay allowed meanwhile.
+        if (read.answer.threads_incomplete) entry.partial = true;
+        return read.answer;
+      } catch {
+        // A failure is not kept: the next opening asks again.
+        if (detailReads.get(key) === entry) detailReads.delete(key);
+        throw failed();
+      }
     },
     readHead: (key) => readHeads.get(key) ?? null,
     async file(key, path, repos) {
@@ -1452,9 +1602,22 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
             : `projects/${project}/repository/compare?from=${encodeURIComponent(base)}&to=${encodeURIComponent(pull.head)}&straight=false`;
         return ["api", "--hostname", pull.host, endpoint];
       };
-      // The head commit, read around the patch: a push between the two reads leaves it unknown (a layer posts nothing).
-      const headNow = () => readHeadNow(pull, cli);
-      const headBefore = await headNow();
+      // The PR as the forge has it now, one call: its head commit, read around the patch (a push between the two reads
+      // leaves it unknown; a layer posts nothing), and its description.
+      // `tojson`: gh colours an object answer under CLICOLOR_FORCE, whatever NO_COLOR says, and prints a string raw.
+      const pullNow = async (): Promise<{ sha: string | null; description: string | null } | null> => {
+        const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
+        const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", "{sha: .head.sha, body: .body} | tojson"] : [])]).catch(() => null);
+        if (!read || read.exitCode !== 0) return null;
+        try {
+          const answer = obj(JSON.parse(read.stdout));
+          if (pull.platform === "github") return { sha: shaOf(answer.sha), description: descriptionOf(answer.body) };
+          return { sha: shaOf(answer.sha) ?? shaOf(obj(answer.diff_refs).head_sha), description: descriptionOf(answer.description) };
+        } catch {
+          return null;
+        }
+      };
+      const before = await pullNow();
       let base = bases[0]!;
       let result = await diffRun(cli, argsFor(base), INBOX_PULL_DIFF_MAX_BYTES);
       if (result.exitCode !== 0 && !result.tooLarge && bases.length > 1 && /\b404\b|not found|no common ancestor|could not compare/i.test(`${result.stderr}\n${result.stdout}`)) {
@@ -1479,10 +1642,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           throw new InboxPullsError("pull_diff_failed", "glab answered something other than a compare.");
         }
       }
-      const headAfter = headBefore ? await headNow() : null;
+      const headBefore = before?.sha ?? null;
+      const headAfter = headBefore ? ((await pullNow())?.sha ?? null) : null;
       const head_sha = headBefore && headBefore === headAfter ? headBefore : null;
+      const description = before?.description ?? null;
       if (head_sha) readHeads.set(key, head_sha);
-      const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, head_sha };
+      const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, description, head_sha };
       diffs.set(cacheKey, { at: now(), answer });
       // Bounded: only the last few diffs are kept.
       while (diffs.size > 24) diffs.delete(diffs.keys().next().value!);
@@ -1512,7 +1677,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       let patch = whole.exitCode === 0 ? whole.stdout : "";
       let partial = false;
       let heldBack: string | undefined;
-      if (!patch.trim()) {
+      const perFile = !patch.trim();
+      if (perFile) {
         const stop = whole.exitCode === 0 ? null : stopFor(whole);
         if (stop) throw new InboxPullsError("pull_diff_failed", stop);
         // The forge's per-file read: a file it holds back still comes by name, and a page that failed leaves the ones before it.
@@ -1540,7 +1706,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         }
       }
       const headAfter = headBefore ? await readHeadNow(pull, cli) : null;
-      return { patch, partial, head_sha: headBefore && headBefore === headAfter ? headBefore : null, ...(heldBack ? { held_back: heldBack } : {}) };
+      return { patch, partial, head_sha: headBefore && headBefore === headAfter ? headBefore : null, ...(heldBack ? { held_back: heldBack } : {}), ...(perFile ? { per_file: true as const } : {}) };
     },
     async fileContents(key, scope, path, roots, ids, oldPath) {
       const none: InboxFileContents = { oldContent: null, newContent: null };

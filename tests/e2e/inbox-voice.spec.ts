@@ -106,7 +106,7 @@ async function startWorld(options: { version?: string; config?: Record<string, u
       ...(options.fresh ? {} : { inboxNotifications: { dismissed: true } }),
       inboxAgentNotes: { offered: true },
       inboxSound: { dialogShownFor: '0.29.0' },
-      inboxListIntro: { shownAt: '2026-10-01T10:00:00.000Z' },
+      inboxListIntro: { shownAt: '2026-10-01T10:00:00.000Z', version: 2 },
       ...options.config,
     }),
   );

@@ -594,7 +594,7 @@ export function useHtmlAnnotation({
   onPageTap,
 }: UseHtmlAnnotationOptions): Omit<
   UseAnnotationHighlighterReturn,
-  "highlighterRef" | "highlightRange" | "highlightMathElement" | "reopenComment"
+  "highlighterRef" | "highlightRange" | "highlightMathElement" | "commentDrafts" | "reopenCommentDraft" | "reopenComment"
 > & {
   /** Whether any pinned draft target is still displayed by the page. Always
    *  true while no composer is open. */
