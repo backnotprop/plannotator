@@ -87,7 +87,7 @@ async function runGit(
   args: string[],
   options?: GitCommandOptions,
 ): Promise<GitCommandResult> {
-  const command = prepareGitCommand(args, options, process.env);
+  const command = prepareGitCommand(args, options, childEnv());
   const proc = Bun.spawn(["git", ...command.args], {
     cwd: options?.cwd,
     detached: command.isolateProcessGroup,
@@ -188,7 +188,7 @@ async function runGitBytes(
   args: string[],
   options?: GitCommandOptions,
 ): Promise<GitBytesCommandResult> {
-  const command = prepareGitCommand(args, options, process.env);
+  const command = prepareGitCommand(args, options, childEnv());
   const proc = Bun.spawn(["git", ...command.args], {
     cwd: options?.cwd,
     env: command.env ?? childEnv(),

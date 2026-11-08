@@ -1321,8 +1321,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Additive (linked machines, inbox-machines.ts): this Inbox's stable id and the link protocol it speaks.
     inbox_id: machines.selfId,
     machine_links: 1,
-    // Additive (remote launch): a linked machine may start agents here (launch is on; the door takes its Stop, Try again, Trust folder and Delete).
-    ...(launch.enabled() ? { launch_from_machines: 1 } : {}),
+    // Additive (remote launch): a linked machine may start agents here (1: launch is on; the door takes its Stop, Try again, Trust folder and Delete).
+    // 0 while launch is off there: an Inbox new enough says so, an older one has no field ("update Plannotator there").
+    launch_from_machines: launch.enabled() ? 1 : 0,
     // Additive: the page honours --pn-window-controls-width and -height on :root and names their line in
     // --pn-window-controls-center-y (inbox.css, for a desktop host).
     window_controls: 2,
@@ -3165,10 +3166,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     };
     // Ask AI: said on every answer until the client connects, so an answer that no one read loses nothing.
     const askWaits = () => (ask.waits(session) ? { [INBOX_ASK_WAITS_FIELD]: true } : {});
+    // Auto reload (owner approval "cc-auto-reload"): a Claude Code connection that reloads itself is told,
+    // on every answer, the version a /reload-plugins loads while the session is outdated (fix `restart`).
+    const reloadOffer = () => live.reloadAnswerFor(session, body);
     const now = commands();
     if (now.length > 0 || waitMs === 0 || ask.waits(session)) {
       answered();
-      return json({ commands: now, ...askWaits() });
+      return json({ commands: now, ...askWaits(), ...reloadOffer() });
     }
     return new Promise<Response>((resolve) => {
       let done = false;
@@ -3180,7 +3184,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         stopAskWaits();
         req.signal.removeEventListener("abort", finish);
         answered();
-        resolve(json({ commands: commands(), ...askWaits() }));
+        resolve(json({ commands: commands(), ...askWaits(), ...reloadOffer() }));
       };
       const timer = setTimeout(finish, waitMs);
       const unsubscribe = store.subscribe((line) => {
@@ -3499,6 +3503,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }),
     ownEnv: () => (process.env.PLANNOTATOR_TEST_SANDBOX ? { HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" } : process.env),
     installDirs: process.env.PLANNOTATOR_TEST_SANDBOX ? [] : [join(homedir(), ".local", "bin"), join(homedir(), ".claude", "local")],
+    // Read once: the env this Inbox started with. Over SSH, macOS keeps Claude Code's login locked (remote launch);
+    // that is the Keychain's rule, so only on a Mac.
+    startedOverSsh: process.platform === "darwin" && !!process.env.SSH_CONNECTION,
+    machineName: () => phones?.machineDoor.computerName() ?? null,
     displayFolder: (path) => displayPath(path, agentEnvironment) ?? path,
     readBody: (req) => readBody(req),
     json,

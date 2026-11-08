@@ -1808,6 +1808,8 @@ export interface InboxHealth {
   inbox_id?: string;
   /** The machine-link protocol this Inbox speaks (additive; absent: it cannot link). */
   machine_links?: number;
+  /** Remote launch: 1 while a linked machine may start agents here, 0 while launch is off. Absent from an older Inbox. */
+  launch_from_machines?: number;
   /**
    * The page honours `--pn-window-controls-width` and `-height` on `:root`, for
    * a desktop host that draws the window's buttons over it, and from 2 names
@@ -2825,6 +2827,13 @@ export interface InboxLaunchUntrusted {
 }
 
 /**
+ * Why an agent can't start on a machine: its CLI is not there (`missing`), older than launch needs (`too_old`),
+ * Plannotator's plugin is not on (`plugin_off`) or its Inbox tool is off (`tool_off`), or it is not signed in
+ * (`signed_out`). `unknown`: the check itself failed.
+ */
+export type InboxLaunchNotReady = "missing" | "too_old" | "plugin_off" | "tool_off" | "signed_out" | "unknown";
+
+/**
  * Compose's launch block (`GET /api/inbox/sessions` `launch`, only while
  * `inboxLaunch.enabled`): the agents To offers to start (only those
  * available: no grey rows), and the projects the folder menu lists, the most
@@ -2838,6 +2847,12 @@ export interface InboxComposeLaunch {
    */
   agents: { agent: InboxLaunchAgent; name: string; scratch_trusted?: boolean; untrusted?: Record<string, InboxLaunchUntrusted> }[];
   projects: { id: string; name: string; root: string; exists: boolean }[];
+  /**
+   * Additive (remote launch): the agents this machine has a host for but can't start now, and why, so a linked
+   * machine's window can say so with this machine's name (`inboxLaunchNotReadyWords`). `over_ssh`: this Inbox was
+   * started over SSH, which is why Claude Code reads as signed out (macOS keeps its login locked for SSH).
+   */
+  not_ready?: { agent: InboxLaunchAgent; name: string; code: InboxLaunchNotReady; over_ssh?: true }[];
   /** The folder menu's "New scratch folder": the root new scratch folders go in (Settings → Agents). Absent from an older Inbox. */
   scratch?: { root: string };
 }
