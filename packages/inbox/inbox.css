@@ -1653,7 +1653,7 @@ dialog.ib-dlg.ib-activity-lb[open] { display: flex; flex-direction: column; }
 .ib-activity-plot[data-size="full"] .ib-activity-scroll { height: 100%; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .ib-activity-plot[data-size="full"] .ib-activity-days { position: sticky; top: 0; background: var(--ib-act-ground); }
 .ib-activity-full .ib-activity-key { margin-top: 8px; }
-@media (max-width: 767px) {
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .pn-inbox dialog.ib-dlg.ib-activity-lb, dialog.ib-dlg.ib-activity-lb { width: 100vw; height: var(--ib-vvh, 100dvh); max-width: none; margin: 0; border: 0; border-radius: 0; }
   .ib-activity-lb .ib-dlg-in { padding: calc(10px + env(safe-area-inset-top)) 12px calc(10px + env(safe-area-inset-bottom)); }
   .ib-activity-lbhead .ib-activity-close { order: 1; margin-left: auto; }
