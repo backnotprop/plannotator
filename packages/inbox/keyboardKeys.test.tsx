@@ -525,12 +525,15 @@ test.skipIf(!hasDom)('the list’s ↻ shows only Shift+R’s keycap beside it, 
   );
   const el = mount(list());
   const button = () => el.querySelector<HTMLButtonElement>('.ib-lhead [data-list-refresh]')!;
-  // The keycap is inside the button (an overlay, inbox.css `.ib-hover-kbd`), with no words of its own.
-  const cap = button().querySelector<HTMLElement>('kbd.ib-hover-kbd');
-  // ⇧R on a Mac, Shift R elsewhere (the registry's formatter).
-  expect(cap?.getAttribute('data-keycap')).toMatch(/^(⇧R|Shift R)$/);
-  expect(cap?.getAttribute('aria-hidden')).toBe('true');
-  expect(cap?.textContent).toBe('');
+  // The keycaps are inside the button (an overlay, inbox.css `.ib-hover-kbd`): two, Shift and R, with no words of their own.
+  const group = button().querySelector<HTMLElement>('.ib-hover-kbd');
+  expect(group?.getAttribute('aria-hidden')).toBe('true');
+  expect(group?.textContent).toBe('');
+  const caps = [...(group?.querySelectorAll('kbd.ib-kbd') ?? [])].map((k) => k.getAttribute('data-keycap'));
+  // ⇧ on a Mac, Shift elsewhere (the registry's formatter).
+  expect(caps.length).toBe(2);
+  expect(caps[0]).toMatch(/^(⇧|Shift)$/);
+  expect(caps[1]).toBe('R');
   expect(button().getAttribute('aria-keyshortcuts')).toBe('Shift+R');
   expect(document.getElementById(button().getAttribute('aria-describedby')!)?.textContent?.trim()).toBe('Refresh the list');
   act(() => button().click());
@@ -542,5 +545,5 @@ test.skipIf(!hasDom)('the list’s ↻ shows only Shift+R’s keycap beside it, 
   } finally {
     act(() => prefs.setSingleKeys(true));
   }
-  expect(button().querySelector('kbd.ib-hover-kbd')).not.toBeNull();
+  expect(button().querySelectorAll('.ib-hover-kbd kbd').length).toBe(2);
 });

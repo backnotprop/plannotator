@@ -828,7 +828,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    covers the words. ShortcutHint leaves it out with single keys or Show keys on buttons off, and on a phone. */
 .pn-inbox .ib-lhead-title { position: relative; }
 /* The pane's own colour, and a ring of it: over the Reviews foot's words it covers them cleanly (as `.ib-sb-trigger-dot`). */
-.pn-inbox .ib-hover-kbd { position: absolute; top: 50%; left: calc(100% + 6px); z-index: 2; translate: 0 -50%; scale: 0.92; transform-origin: left center; opacity: 0; pointer-events: none; white-space: nowrap; background: var(--ib-pane-bg-s, var(--ib-main-bg)); box-shadow: 0 0 0 4px var(--ib-pane-bg-s, var(--ib-main-bg)); transition: opacity 120ms ease-out, scale 120ms ease-out; }
+/* Two caps, ⇧ and R (the owner: "better when it's two keys"), each `.ib-kbd`, a small gap between. */
+.pn-inbox .ib-hover-kbd { display: inline-flex; align-items: center; gap: 3px; position: absolute; top: 50%; left: calc(100% + 6px); z-index: 2; translate: 0 -50%; scale: 0.92; transform-origin: left center; opacity: 0; pointer-events: none; white-space: nowrap; background: var(--ib-pane-bg-s, var(--ib-main-bg)); box-shadow: 0 0 0 4px var(--ib-pane-bg-s, var(--ib-main-bg)); transition: opacity 120ms ease-out, scale 120ms ease-out; }
 /* Reviews' foot: in the row after the button, its room kept while hidden, so hover moves nothing. */
 .pn-inbox .ib-pr-foot > .ib-hover-kbd { position: static; flex: none; translate: none; box-shadow: none; }
 @media (hover: hover) {

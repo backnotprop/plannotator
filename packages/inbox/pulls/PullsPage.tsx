@@ -345,7 +345,7 @@ function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnsw
       >
         <Icon name="refresh" size={14} />
       </button>
-      <ShortcutHint scope={inboxAppShortcuts} action="refresh" className="ib-kbd ib-hover-kbd" />
+      <ShortcutHint scope={inboxAppShortcuts} action="refresh" className="ib-hover-kbd" split />
       <span className="ib-pr-foot-t" aria-live="polite" title={words || undefined} data-pulls-foot-words="">
         {words}
       </span>

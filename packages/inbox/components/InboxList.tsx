@@ -1482,7 +1482,7 @@ export function InboxList(props: InboxListProps) {
                 <span className="ib-lhead-tt">{props.title}</span>
               </Tip>
               <Icon key={props.refreshSpin ?? 'rest'} name="refresh" size={16} className="ib-ic-refresh" />
-              <ShortcutHint scope={inboxAppShortcuts} action="refresh" className="ib-kbd ib-hover-kbd" />
+              <ShortcutHint scope={inboxAppShortcuts} action="refresh" className="ib-hover-kbd" split />
             </button>
           </h1>
         ) : (

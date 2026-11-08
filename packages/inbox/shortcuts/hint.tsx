@@ -121,12 +121,29 @@ export function useShortcutHintShown(ref: ShortcutRef): boolean {
  * only, so a narrow desktop window (the phone layout, a mouse and keys) still shows it (the toast's Undo, break 15 of
  * design record "inbox-toasts-break-fixes").
  */
-export function ShortcutHint({ className = 'ib-kbd', touchOnly = false, ...ref }: ShortcutRef & { className?: string; touchOnly?: boolean }) {
+export function ShortcutHint({
+  className = 'ib-kbd',
+  touchOnly = false,
+  split = false,
+  capClassName = 'ib-kbd',
+  ...ref
+}: ShortcutRef & { className?: string; touchOnly?: boolean; split?: boolean; capClassName?: string }) {
   const prefs = useShortcutPrefs();
   const phone = usePhone();
   const touchPhone = useTouchPhone();
   const text = hintShown(ref, { prefs, phone: touchOnly ? touchPhone : phone });
   if (text === null) return null;
+  if (split) {
+    // One cap per key (⇧ and R), as a tooltip's TipKeys draws them: `className` on the group, `capClassName` on each cap.
+    const tokens = formatShortcutBindingTokens(bindingOf(ref)).map((token) => KEYCAP[token] ?? token);
+    return (
+      <span className={className || undefined} aria-hidden="true" data-shortcut-hint={`${ref.scope.id}.${ref.action}`} data-keycaps={text}>
+        {tokens.map((token, i) => (
+          <kbd key={`${token}-${i}`} className={capClassName || undefined} data-keycap={token} />
+        ))}
+      </span>
+    );
+  }
   return (
     // The keycap's text is drawn by CSS from `data-keycap` (inbox.css), so it is no part of the button's own text: a
     // button reads "Reply", not "ReplyR", to anything that reads its words (its name is aria-hidden-free either way).
