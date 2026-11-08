@@ -503,3 +503,44 @@ test.skipIf(!hasDom)('Shift+R runs the page’s refresh from the list and from a
   shiftR(document.body);
   expect(refreshes).toBe(3);
 });
+
+test.skipIf(!hasDom)('the list’s ↻ shows only Shift+R’s keycap beside it, keeps its words for screen readers, and drops both with single keys off', () => {
+  let refreshed = 0;
+  const list = () => (
+    <SidebarProvider>
+      <InboxList
+        title="Inbox"
+        path={null}
+        sections={[]}
+        filtered={false}
+        narrow={false}
+        selectedThreadId={null}
+        notice={null}
+        onShowNew={() => {}}
+        onOpen={() => {}}
+        phone={false}
+        onRefresh={() => (refreshed += 1)}
+      />
+    </SidebarProvider>
+  );
+  const el = mount(list());
+  const button = () => el.querySelector<HTMLButtonElement>('.ib-lhead [data-list-refresh]')!;
+  // The keycap is inside the button (an overlay, inbox.css `.ib-hover-kbd`), with no words of its own.
+  const cap = button().querySelector<HTMLElement>('kbd.ib-hover-kbd');
+  // ⇧R on a Mac, Shift R elsewhere (the registry's formatter).
+  expect(cap?.getAttribute('data-keycap')).toMatch(/^(⇧R|Shift R)$/);
+  expect(cap?.getAttribute('aria-hidden')).toBe('true');
+  expect(cap?.textContent).toBe('');
+  expect(button().getAttribute('aria-keyshortcuts')).toBe('Shift+R');
+  expect(document.getElementById(button().getAttribute('aria-describedby')!)?.textContent?.trim()).toBe('Refresh the list');
+  act(() => button().click());
+  expect(refreshed).toBe(1);
+  act(() => prefs.setSingleKeys(false));
+  try {
+    expect(button().querySelector('kbd')).toBeNull();
+    expect(button().hasAttribute('aria-keyshortcuts')).toBe(false);
+  } finally {
+    act(() => prefs.setSingleKeys(true));
+  }
+  expect(button().querySelector('kbd.ib-hover-kbd')).not.toBeNull();
+});

@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { HueDot, LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
 import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
-import { shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
+import { ShortcutHint, shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxSearchShortcuts } from '../search/searchShortcut';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
@@ -1294,6 +1294,8 @@ export function InboxList(props: InboxListProps) {
   const generatedColumnId = useId();
   const columnId = props.columnId ?? generatedColumnId;
   const refreshHintId = useId();
+  /** Shift+R's name on the ↻ (approval "inbox-refresh-key"), gone with single keys off. */
+  const refreshKeys = useShortcutAria({ scope: inboxAppShortcuts, action: 'refresh' });
   const resizable = props.narrow && !isMobile;
   const visible = props.sections.filter((s) => s.threads.length > 0);
   // List's rows (listView.ts): every group's but the Snoozed band's, newest first, each keeping its place until the
@@ -1462,26 +1464,22 @@ export function InboxList(props: InboxListProps) {
         <SidebarTrigger />
         {props.onRefresh ? (
           <h1 dir="auto" className="ib-lhead-h">
-            {/* The full name in the tooltip too, for a project name the header cuts; a project's folder is there as well, never beside the name. */}
-            <Tip
-              content={withShortcut(props.path ? <ProjectTipText name={`Refresh ${props.title}`} root={props.path} /> : props.title === 'Inbox' ? 'Refresh' : `Refresh ${props.title}`, {
-                scope: inboxAppShortcuts,
-                action: 'refresh',
-              })}
+            {/* No tooltip (the owner, on #2911: words over the ↻ are too heavy): on hover or keyboard focus, only Shift+R's
+                keycap pops out beside the ↻, over the header (inbox.css `.ib-hover-kbd`). Its words stay for screen
+                readers: the description below and `aria-keyshortcuts`. */}
+            <button
+              type="button"
+              className="ib-lhead-title"
+              onClick={props.onRefresh}
+              aria-describedby={refreshHintId}
+              aria-keyshortcuts={refreshKeys}
+              data-list-refresh=""
+              data-refreshing={props.refreshSpin != null ? '' : undefined}
             >
-              <button
-                type="button"
-                className="ib-lhead-title"
-                onClick={props.onRefresh}
-                aria-describedby={refreshHintId}
-                aria-keyshortcuts={shortcutAria({ scope: inboxAppShortcuts, action: 'refresh' })}
-                data-list-refresh=""
-                data-refreshing={props.refreshSpin != null ? '' : undefined}
-              >
-                <span className="ib-lhead-tt">{props.title}</span>
-                <Icon key={props.refreshSpin ?? 'rest'} name="refresh" size={16} className="ib-ic-refresh" />
-              </button>
-            </Tip>
+              <span className="ib-lhead-tt">{props.title}</span>
+              <Icon key={props.refreshSpin ?? 'rest'} name="refresh" size={16} className="ib-ic-refresh" />
+              <ShortcutHint scope={inboxAppShortcuts} action="refresh" className="ib-kbd ib-hover-kbd" />
+            </button>
           </h1>
         ) : (
           <Tip content={props.path ? <ProjectTipText name={props.title} root={props.path} /> : props.title} cut={!props.path}>

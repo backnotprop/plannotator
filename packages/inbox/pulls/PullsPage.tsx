@@ -35,7 +35,7 @@ import { SidebarTrigger } from '../shell/sidebar';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
 import { newUuid } from '../uuid';
 import { matchesShortcutBinding, resolveShortcutBindings } from '@plannotator/ui/shortcuts';
-import { ShortcutHint, useShortcutAria, withShortcut } from '../shortcuts/hint';
+import { ShortcutHint, useShortcutAria } from '../shortcuts/hint';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import {
@@ -331,19 +331,20 @@ function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnsw
           : 'Nothing read on this computer';
   return (
     <div className="ib-pr-foot" data-pulls-foot="">
-      <Tip content={withShortcut('Read again', { scope: inboxAppShortcuts, action: 'refresh' })}>
-        <button
-          type="button"
-          className="ib-iconbtn ib-pr-refresh"
-          onClick={onRefresh}
-          aria-label="Read the pull requests again"
-          aria-keyshortcuts={refreshKeys}
-          data-refreshing={loading ? '' : undefined}
-          data-pulls-refresh=""
-        >
-          <Icon name="refresh" size={14} />
-        </button>
-      </Tip>
+      {/* No tooltip, as the list's ↻ (the owner, on #2911): on hover or keyboard focus only Shift+R's keycap pops out beside
+          it, over the foot's words (inbox.css `.ib-hover-kbd`); the words stay for screen readers. */}
+      <button
+        type="button"
+        className="ib-iconbtn ib-pr-refresh"
+        onClick={onRefresh}
+        aria-label="Read the pull requests again"
+        aria-keyshortcuts={refreshKeys}
+        data-refreshing={loading ? '' : undefined}
+        data-pulls-refresh=""
+      >
+        <Icon name="refresh" size={14} />
+        <ShortcutHint scope={inboxAppShortcuts} action="refresh" className="ib-kbd ib-hover-kbd" />
+      </button>
       <span className="ib-pr-foot-t" aria-live="polite" title={words || undefined} data-pulls-foot-words="">
         {words}
       </span>
