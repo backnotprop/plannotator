@@ -118,7 +118,7 @@ const TIDY: TidyController = { surface: 'list', scope: null, plan: null, run: nu
 
 type Shape = 'wide' | 'narrow' | 'phone';
 
-function render(shape: Shape, onCustomizeRows?: () => void): HTMLElement {
+function render(shape: Shape, onCustomizeRows?: () => void, opts: { sections?: InboxListSection[]; pinned?: ReadonlySet<string> } = {}): HTMLElement {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.append(host);
@@ -129,7 +129,8 @@ function render(shape: Shape, onCustomizeRows?: () => void): HTMLElement {
         <InboxList
           title="Inbox"
           path={null}
-          sections={SECTIONS}
+          sections={opts.sections ?? SECTIONS}
+          pinned={opts.pinned}
           // happy-dom has no layout: a column beside a thread draws three-line rows, one project's list wide ones.
           filtered={shape === 'wide'}
           narrow={shape === 'narrow'}
@@ -147,10 +148,10 @@ function render(shape: Shape, onCustomizeRows?: () => void): HTMLElement {
   return host;
 }
 
-function remount(shape: Shape): HTMLElement {
+function remount(shape: Shape, opts?: Parameters<typeof render>[2]): HTMLElement {
   act(() => root?.unmount());
   host?.remove();
-  return render(shape);
+  return render(shape, undefined, opts);
 }
 
 async function settle() {
@@ -659,6 +660,46 @@ describe.if(hasDom)('the rows in each mode', () => {
     // The full-width row keeps its columns (approval: name first there is out of scope).
     const wide = remount('wide');
     expect([...wide.querySelector<HTMLElement>('.ib-row[data-thread-id="msg_unread"] .ib-subj')!.children].map(part)).toEqual(['title(Name of msg_unread)', 'ib-pv']);
+  });
+
+  // The owner, 2026-11-07: First line "Thread name" with Subject preview off is a true two-line row. Line 3's marks
+  // and counts move to line 2's right end, after the agents and the project; no line 3.
+  test('name first with no preview: two lines, the badge, pin and count at the end of line 2, on a three-line and a phone row', () => {
+    const stopped = row('msg_stop', { section: 'stopped', guide: true, snoozed: { until: '2026-10-21T12:00:00.000Z', at: '2026-10-20T00:00:00.000Z' }, questions: { open: 2, picked: 0, stopped: true, holds_up: [], prompt: null } });
+    const opts = { sections: [{ id: 'stopped', label: 'Stopped on you', threads: [stopped] }, ...SECTIONS] as InboxListSection[], pinned: new Set(['msg_stop']) };
+    act(() => adoptSavedRows(['titleFirst', 'hidePreview']));
+    const el = remount('narrow', opts);
+    expect(narrowLines(el, 'msg_unread')).toEqual({ 'ib-l1': ['title(Name of msg_unread)', 'time'], 'ib-l2 ib-l2-lead': ['from', 'ib-lend'] });
+    expect([...el.querySelector('.ib-nrow[data-thread-id="msg_unread"] .ib-lend')!.children].map(part)).toEqual(['ib-c ib-qn']);
+    const stop = el.querySelector<HTMLElement>('.ib-nrow[data-thread-id="msg_stop"]')!;
+    expect(stop.querySelector('.ib-l3')).toBeNull();
+    expect([...stop.querySelector('.ib-l2 > .ib-lend')!.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-att', 'ib-pinmark', 'ib-badge', 'ib-zwhen', 'ib-c']);
+    // The pin's and the badge's words still reach a screen reader.
+    expect(stop.querySelector(':scope > .ib-sr')!.textContent).toBe(', starred');
+    expect(document.getElementById(stop.getAttribute('aria-describedby')!)!.textContent).toBeTruthy();
+
+    const phone = remount('phone', opts);
+    expect(phoneLines(phone, 'msg_unread')).toEqual({ m1: ['title(Name of msg_unread)', 'time'], rest: ['ib-m1 ib-m1-lead'] });
+    expect(phone.querySelector('.ib-mrow[data-thread-id="msg_unread"] .ib-m1-lead > .ib-lend > .ib-qn')).not.toBeNull();
+    // The pin goes with the counts to line 2, never to line 1 before the time.
+    const pstop = phone.querySelector<HTMLElement>('.ib-mrow[data-thread-id="msg_stop"]')!;
+    expect(pstop.querySelector('.ib-m3')).toBeNull();
+    expect([...pstop.querySelector('.ib-m1-lead > .ib-lend')!.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-att', 'ib-pinmark', 'ib-badge', 'ib-zwhen', 'ib-c']);
+    expect(pstop.querySelector('.ib-m1:not(.ib-m1-lead) > .ib-pinmark')).toBeNull();
+  });
+
+  // Every other combination keeps its line 3 (the owner: "keep what I have right now").
+  test('name first with a preview, no preview alone, and compact name first with no preview: line 3 as before', () => {
+    act(() => adoptSavedRows(['titleFirst', 'previewTwo']));
+    expect(narrowLines(remount('narrow'), 'msg_unread')).toEqual({ 'ib-l1': ['title(Name of msg_unread)', 'time'], 'ib-l2 ib-l2-lead': ['from'], 'ib-l3': ['ib-pv', 'ib-c ib-qn'] });
+    expect(phoneLines(remount('phone'), 'msg_unread').rest).toEqual(['ib-m1 ib-m1-lead', 'ib-m3']);
+    act(() => adoptSavedRows(['hidePreview']));
+    expect(narrowLines(remount('narrow'), 'msg_unread')).toEqual({ 'ib-l1': ['from', 'time'], 'ib-l2': ['title(Name of msg_unread)'], 'ib-l3': ['ib-c ib-qn'] });
+    expect(phoneLines(remount('phone'), 'msg_unread').rest).toEqual(['ib-m2', 'ib-m3']);
+    act(() => adoptSavedRows(['titleFirst', 'hidePreview', 'compact']));
+    expect(narrowLines(remount('narrow'), 'msg_unread')).toEqual({ 'ib-l1': ['title(Name of msg_unread)', 'from', 'time'], 'ib-l3': ['ib-c ib-qn'] });
+    expect(phoneLines(remount('phone'), 'msg_unread').rest).toEqual(['ib-m3']);
+    expect(document.querySelector('.ib-lend')).toBeNull();
   });
 
   // The time, the questions and the warnings always show: no option hides them, on any shape.

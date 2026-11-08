@@ -988,6 +988,9 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
       <LineCount row={row} tip status={statusMark} />
     </>
   );
+  // First line "Thread name" with Subject preview off too (approval "inbox-customize-rows"): two lines, the guided
+  // review mark and the row's end at line 2's right end. With the time under the preview the end has its own line.
+  const twoLines = titleFirst && noPreview && !compact && !timeBelow;
   return (
     <>
     <button
@@ -1020,11 +1023,23 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
             {!timeBelow && time}
           </div>
           {/* Nothing shows on it with Agent icons and Project both off (`leadEmpty`): it stays for a screen reader (the
-              agents' names), but takes no room, so the preview sits under the name (the owner, 2026-11-07, q-dbe4dc80). */}
-          {!compact && (
-            <div className="ib-l2 ib-l2-lead" data-lead-empty={leadEmpty(filtered, noAgents) ? '' : undefined}>
+              agents' names), but takes no room, so the preview sits under the name (the owner, 2026-11-07, q-dbe4dc80).
+              Subject preview off too (`twoLines`): line 3's marks and counts at line 2's right end, and no line 3, so the
+              line draws them and never folds. */}
+          {twoLines ? (
+            <div className="ib-l2 ib-l2-lead">
               {lead}
+              <span className="ib-lend">
+                <GuideMark row={row} />
+                {end}
+              </span>
             </div>
+          ) : (
+            !compact && (
+              <div className="ib-l2 ib-l2-lead" data-lead-empty={leadEmpty(filtered, noAgents) ? '' : undefined}>
+                {lead}
+              </div>
+            )
           )}
         </>
       ) : (
@@ -1044,11 +1059,13 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
       )}
       {/* Line 3: the grey preview, cut first, then the guided review mark, and at the right end the pin, the badge
           and the count (inbox-row-byline's line 2 without the marks). Nothing to show: no line. */}
-      <div className="ib-l3">
-        {!noPreview && <Preview row={row} />}
-        <GuideMark row={row} />
-        {!timeBelow && end}
-      </div>
+      {!twoLines && (
+        <div className="ib-l3">
+          {!noPreview && <Preview row={row} />}
+          <GuideMark row={row} />
+          {!timeBelow && end}
+        </div>
+      )}
       {/* Time position "Under the preview": the time on a line of its own at the left, the row's end at its right. */}
       {timeBelow && (
         <div className="ib-l4" data-time-below="">
@@ -1082,7 +1099,9 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
   // row never grows a line for the pin alone.
   const avatarRow = useAvatarRow();
   // With the time under the preview the pin goes with the row's end, on the time's line.
-  const pinOnLine1 = !timeBelow && pinned && !preview && !guide && !badge && !row.snoozed && countWords(row, 0, statusMark) === null && row.questions.open < 1 && !(statusMark && rowStatus(row));
+  // First line "Thread name" with Subject preview off: two lines, line 3's book, pin, badge and count at line 2's end.
+  const twoLines = titleFirst && noPreview && !compact && !timeBelow;
+  const pinOnLine1 = !timeBelow && !twoLines && pinned && !preview && !guide && !badge && !row.snoozed && countWords(row, 0, statusMark) === null && row.questions.open < 1 && !(statusMark && rowStatus(row));
   const time = (
     <span className="ib-t">
       <RowTime row={row} relative={relative} />
@@ -1124,8 +1143,18 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
             {!timeBelow && time}
           </span>
           {!compact && (
-            <span className="ib-m1 ib-m1-lead" data-lead-empty={leadEmpty(filtered, noAgents) ? '' : undefined}>
+            <span className="ib-m1 ib-m1-lead" data-lead-empty={!twoLines && leadEmpty(filtered, noAgents) ? '' : undefined}>
               <LeadLine row={row} project={project} filtered={filtered} tip={false} />
+              {twoLines && (
+                <span className="ib-lend">
+                  {guide && (
+                    <span className="ib-att" data-guide-mark="" role="img" aria-label="Guided review">
+                      <Icon name="book" size={13} />
+                    </span>
+                  )}
+                  {end}
+                </span>
+              )}
             </span>
           )}
         </>
@@ -1141,20 +1170,22 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
           {!compact && <RowTitle row={row} className="ib-m2" pill={pill} />}
         </>
       )}
-      {/* Line 3: the preview (cut first), then the book, the pin, the badge and the count. */}
-      <span className="ib-m3">
-        {preview && (
-          <span className="ib-pv" dir="auto">
-            {preview}
-          </span>
-        )}
-        {guide && (
-          <span className="ib-att" data-guide-mark="" role="img" aria-label="Guided review">
-            <Icon name="book" size={13} />
-          </span>
-        )}
-        {!timeBelow && end}
-      </span>
+      {/* Line 3: the preview (cut first), then the book, the pin, the badge and the count. None on a two-line row. */}
+      {!twoLines && (
+        <span className="ib-m3">
+          {preview && (
+            <span className="ib-pv" dir="auto">
+              {preview}
+            </span>
+          )}
+          {guide && (
+            <span className="ib-att" data-guide-mark="" role="img" aria-label="Guided review">
+              <Icon name="book" size={13} />
+            </span>
+          )}
+          {!timeBelow && end}
+        </span>
+      )}
       {/* Time position "Under the preview", as on a three-line row. */}
       {timeBelow && (
         <span className="ib-m4" data-time-below="">
