@@ -29,3 +29,12 @@ test("a pick that isn't one is refused: a path outside ~/, a machine that isn't 
     expect(() => saveInboxDraft(dir, "drf_01ARZ3NDEKTSV4RRFFQ69G5FT3", { body: "x", start }, AT)).toThrow("start:");
   }
 });
+
+test("a clone pick keeps its URL and branch; a URL git can't take, or a branch that reads as an option, is refused", () => {
+  const start = { agent: "claude-code", machine: null, folder: "~/code/billing-api", name: "billing-api", clone: { url: "git@github.com:acme/billing-api.git", branch: "release-2.1" } };
+  saveInboxDraft(dir, "drf_01ARZ3NDEKTSV4RRFFQ69G5FT4", { body: "Find the cent drift.", start }, AT);
+  expect(readInboxDraft(dir, "drf_01ARZ3NDEKTSV4RRFFQ69G5FT4")?.start).toEqual(start);
+  for (const clone of [{ url: "--upload-pack=x" }, { url: "file:///etc" }, { url: "https://github.com/acme/x", branch: "--upload-pack=x" }, "https://github.com/acme/x"]) {
+    expect(() => saveInboxDraft(dir, "drf_01ARZ3NDEKTSV4RRFFQ69G5FT5", { body: "x", start: { ...start, clone } }, AT)).toThrow("start:");
+  }
+});

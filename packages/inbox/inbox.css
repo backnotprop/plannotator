@@ -9680,7 +9680,22 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-hfb-after { grid-column: 2 / -1; padding: 2px 8px 8px 0; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); }
 .ib-hfb-sub { display: block; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: normal; overflow-wrap: anywhere; }
 .ib-cp-tobtn[data-compose-folder-new] > svg.ib-ic:first-child { color: var(--muted-foreground); }
+/* Clone from a git URL (approval "launch-create-clone", C1-C17, E1-E2): the clone rows lead with the git mark; a
+   machine whose git can't sign in is dimmed and still pickable (C11); "Checking git.acme.dev…" with the run line's
+   spinner; the line under the clone rows; the git mark in To's folder button; the clone's thin progress bar. */
+.ib-cp-clone-cant, .ib-cp-clone-cant .ib-cp-op { color: var(--muted-foreground); }
+.ib-cp-clone-cant > svg.ib-ic { color: var(--muted-foreground); }
+.ib-cp-none.ib-cp-checking { display: flex; align-items: center; gap: 9px; }
+.ib-cp-none.ib-cp-checking .ib-run-spin { margin-top: 0; }
+.ib-cp-explain { grid-column: 1 / -1; padding: 6px 10px 8px 34px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); }
+.ib-cp-tobtn[data-compose-folder-clone] > svg.ib-ic:first-child { color: var(--muted-foreground); }
+.ib-run-bar { display: block; height: 3px; margin-top: 6px; max-width: 280px; border-radius: 2px; background: var(--muted); overflow: hidden; }
+.ib-run-bar > i { display: block; height: 100%; background: var(--primary); }
+@media (prefers-reduced-motion: no-preference) {
+  .ib-run-bar > i { transition: width 0.4s ease-out; }
+}
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-cp-picker[data-phone] .ib-cp-explain { font-size: var(--ib-fs-13-5, 13.5px); padding-left: 36px; }
   .ib-cp-picker[data-phone] .ib-hfb-head { min-height: 44px; padding: 0 14px; font-size: var(--ib-fs-15, 15px); }
   .ib-cp-picker[data-phone] .ib-hfb .ib-cp-none { font-size: var(--ib-fs-14, 14px); padding: 14px 8px; }
   .ib-cp-picker[data-phone] .ib-cp-other .ib-cp-op { color: color-mix(in oklch, var(--foreground) 55%, var(--muted-foreground)); }

@@ -1152,10 +1152,28 @@ export interface HomeFoldersAnswer {
   blocked?: { path: string; state: 'file' | 'locked' };
 }
 
+/** Clone from a git URL: where that machine would clone it (`GET /api/inbox/launch/clone`), each path as `~/…`. */
+export interface CloneTargetAnswer {
+  /** The folder the clone goes in. */
+  into: string;
+  /** The clone's own folder: the repo's name, or the next free `-2`, `-3` (C10). */
+  path: string;
+  name: string;
+  /** `already`: that folder is a clone of the same repo, so it starts there (C9). */
+  state: 'clone' | 'already';
+  /** The repo's name was another folder's (C10). */
+  taken: string | null;
+  /** A clone can be made in `into` (C15c). */
+  writable: boolean;
+}
+
+/** The quiet check after a paste (C11): whether that machine's git can read the repo. */
+export type CloneReach = 'ok' | 'auth' | 'not_found' | 'network' | 'failed';
+
 /** What compose sends: a new thread to one live session. */
 export interface StartThreadInput {
   /** A live session, or (launch on) a new session of `agent` started in the project, a new scratch folder, or a folder under home (`~/…`); `trust`: Trust and start, on this reading. */
-  to: { host: string; session: string } | { launch: ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true } | { agent: InboxLaunchAgent; folder: string; create?: true }) & { trust?: InboxLaunchTrust } };
+  to: { host: string; session: string } | { launch: ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true } | { agent: InboxLaunchAgent; folder: string; create?: true; clone?: { url: string; branch?: string } }) & { trust?: InboxLaunchTrust } };
   body: string;
   idempotency_key: string;
   uploads?: string[];
@@ -1630,6 +1648,12 @@ export const inboxApi = {
    */
   homeFolders: (path: string, machine?: string | null, signal?: AbortSignal) =>
     get<HomeFoldersAnswer>(inboxUrl('/launch/folders', new URLSearchParams({ path }).toString(), machine), signal),
+  /** Clone from a git URL: where `url` would be cloned on that machine (`into` absent: its default clone folder, C1). */
+  cloneTarget: (url: string, into: string | null, machine?: string | null, signal?: AbortSignal) =>
+    get<CloneTargetAnswer>(inboxUrl('/launch/clone', new URLSearchParams({ url, ...(into ? { into } : {}) }).toString(), machine), signal),
+  /** The quiet check after a paste (C11): that machine's git reads the repo's branches, with no prompt. */
+  cloneCheck: (url: string, machine?: string | null, signal?: AbortSignal) =>
+    get<{ reach: CloneReach }>(inboxUrl('/launch/clone-check', new URLSearchParams({ url }).toString(), machine), signal),
   /** `machine`: start the agent on that linked machine (remote launch), through the forward; a `202` is `InboxHeldError`. */
   startThread: (input: StartThreadInput, machine?: string | null) =>
     post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean; launch?: { id: string; state: 'starting' | 'failed' } }>(inboxUrl('/messages', undefined, machine), { ...input }),

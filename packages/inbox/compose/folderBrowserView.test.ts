@@ -6,7 +6,7 @@
  * opened, one that can't be written, a hidden one or one outside home is said, never offered.
  */
 import { describe, expect, test } from 'bun:test';
-import { cleanPastedPath, folderBrowserView, looksLikePath, needsNameRead, type FolderRead } from './homeFolders';
+import { cleanPastedPath, cloneAt, folderBrowserView, looksLikePath, needsNameRead, type CloneTargetRead, type FolderRead } from './homeFolders';
 
 const CODE: FolderRead = {
   exists: true,
@@ -141,5 +141,42 @@ describe('cleanPastedPath', () => {
     expect(looksLikePath('"/Users/x y"')).toBe(true);
     expect(looksLikePath('web app')).toBe(false);
     expect(looksLikePath('acme/billing-api')).toBe(false);
+  });
+});
+
+describe('folderBrowserView, cloning into another folder', () => {
+  const target = (into: string, over: Partial<CloneTargetRead> = {}): CloneTargetRead => ({ into, path: `${into}/billing-api`, name: 'billing-api', state: 'clone', taken: null, writable: true, ...over });
+  const cloneKinds = (view: ReturnType<typeof folderBrowserView>) => view.rows.map((row) => `${row.kind}:${row.kind === 'cloneHere' || row.kind === 'cloneStart' ? row.path : row.name}${'quiet' in row && row.quiet ? ' (quiet)' : ''}`);
+
+  test('C14, C15: a folder that is there leads as Clone here; its folders sit quiet below, so Enter never goes deeper', () => {
+    expect(cloneKinds(folderBrowserView({ typed: '~/code/', read: CODE, nameRead: null, clone: { repo: 'billing-api', target: target('~/code') } }))[0]).toBe('cloneHere:~/code/billing-api');
+    const web: FolderRead = { exists: true, state: 'folder', folders: ['docs', 'src'], writable: true };
+    expect(cloneKinds(folderBrowserView({ typed: '~/code/web/', read: web, nameRead: null, clone: { repo: 'billing-api', target: target('~/code/web') } }))).toEqual(['cloneHere:~/code/web/billing-api', 'folder:docs', 'folder:src']);
+    // Without the slash, the same lead (the folder named is where the clone goes).
+    expect(cloneAt('~/code/web', CODE, null)).toBe('~/code/web');
+    // A target for another folder (an older answer) offers nothing until the right one comes.
+    expect(cloneKinds(folderBrowserView({ typed: '~/code/web/', read: web, nameRead: null, clone: { repo: 'billing-api', target: target('~/code') } }))).toEqual(['folder:docs', 'folder:src']);
+  });
+
+  test('home is allowed when cloning; the same repo there already starts in it (C9); a taken name keeps -2 (C10)', () => {
+    expect(cloneAt('~/', HOME, null)).toBe('~');
+    expect(cloneKinds(folderBrowserView({ typed: '~/', read: HOME, nameRead: null, clone: { repo: 'billing-api', target: target('~') } }))[0]).toBe('cloneHere:~/billing-api');
+    expect(cloneKinds(folderBrowserView({ typed: '~/code/', read: CODE, nameRead: null, clone: { repo: 'api-gateway', target: target('~/code', { state: 'already', path: '~/code/api-gateway', name: 'api-gateway' }) } }))[0]).toBe('cloneStart:~/code/api-gateway');
+    const web2 = folderBrowserView({ typed: '~/code/', read: CODE, nameRead: null, clone: { repo: 'web', target: target('~/code', { path: '~/code/web-2', name: 'web-2', taken: '~/code/web' }) } });
+    expect(web2.rows[0]).toEqual({ kind: 'cloneHere', path: '~/code/web-2', name: 'web-2', repo: 'web', taken: '~/code/web' });
+  });
+
+  test('C15b: a new name is the clone\'s own folder, last and quiet while a folder still matches', () => {
+    expect(cloneKinds(folderBrowserView({ typed: '~/code/invoices', read: CODE, nameRead: missing, clone: { repo: 'billing-api', target: null } }))[0]).toBe('cloneInto:invoices');
+    expect(cloneKinds(folderBrowserView({ typed: '~/code/bil', read: CODE, nameRead: missing, clone: { repo: 'billing-api', target: null } }))).toEqual(['folder:billing-svc', 'cloneInto:bil (quiet)']);
+    expect(cloneAt('~/code/invoices', CODE, missing)).toBeNull();
+  });
+
+  test('C15c: a folder that can\'t be written says so, and its folders are still there to go into', () => {
+    const archive: FolderRead = { exists: true, state: 'folder', folders: ['2019', '2020'], writable: false };
+    const view = folderBrowserView({ typed: '~/Documents/Archive/', read: archive, nameRead: null, clone: { repo: 'billing-api', target: target('~/Documents/Archive', { writable: false }) } });
+    expect(view.note).toBe("Can't clone into ~/Documents/Archive: no permission.");
+    expect(cloneKinds(view)).toEqual(['folder:2019', 'folder:2020']);
+    expect(folderBrowserView({ typed: '~/Documents/Archive/new', read: archive, nameRead: missing, clone: { repo: 'billing-api', target: null } }).note).toBe("Can't clone into ~/Documents/Archive: no permission.");
   });
 });

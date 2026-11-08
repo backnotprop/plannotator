@@ -71,6 +71,7 @@ import {
   type InboxAck,
   type InboxReaction,
   type InboxAddressee,
+  type InboxLaunchClone,
   type InboxLaunchError,
   type InboxLaunchRecord,
   type InboxReplyViewing,
@@ -6712,12 +6713,17 @@ export class InboxStore {
    */
   settleLaunch(
     messageId: string,
-    outcome: { to: InboxAddressee; session_ref: string } | { error: InboxLaunchError | null } | { deleted_at: string },
+    outcome: { to: InboxAddressee; session_ref: string } | { error: InboxLaunchError | null } | { deleted_at: string } | { clone: InboxLaunchClone; made_inode?: string | null },
   ): InboxMessage {
     const message = this.messages.get(messageId);
     if (!message?.launch) throw new InboxError("message_not_found", `No launched thread ${messageId}.`);
+    // A clone's folder: a new identity when the Inbox made it again, or none (`null`) once it is gone or no longer
+    // the Inbox's, so a later Cancel never removes a folder made at that path since.
+    const { made_folder: _madeFolder, made_inode: _madeInode, ...unmade } = message.launch;
     const next: InboxMessage =
-      "to" in outcome
+      "clone" in outcome
+        ? { ...message, launch: { ...(outcome.made_inode === null ? unmade : message.launch), clone: outcome.clone, ...(outcome.made_inode ? { made_folder: true as const, made_inode: outcome.made_inode } : {}) } }
+        : "to" in outcome
         ? { ...message, to: { host: outcome.to.host, session: outcome.to.session }, launch: { ...message.launch, session: outcome.to.session, session_ref: outcome.session_ref, error: null } }
         : "error" in outcome
           ? { ...message, launch: { ...message.launch, error: outcome.error } }

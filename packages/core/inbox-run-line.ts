@@ -66,6 +66,10 @@ export interface InboxRunEvidence {
   attachCommand: string | null;
   /** The launch's folder as the person knows it (`~/…`), for the failed line of a folder the Send made. */
   shownFolder?: string;
+  /** A clone under way: its percent, once shown (null before, or in its first seconds). */
+  clonePct?: number | null;
+  /** The clone the record says runs is running in this Inbox now (false after a restart cut it off). */
+  cloneRunning?: boolean;
   /** When the oldest permission question of ours still open was asked (its hook holds it), or null. */
   permissionSince?: number | null;
 }
@@ -84,6 +88,21 @@ export function inboxLaunchedSession(root: { to?: { session: string } | null; la
 }
 
 export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
+  // Clone from a git URL: the clone comes before the agent (E1-E7, E11).
+  const clone = e.launch.clone;
+  const cloneOf = (extra: Partial<NonNullable<InboxRun["clone"]>> = {}): NonNullable<InboxRun["clone"]> => ({
+    url: clone!.url,
+    host: clone!.host,
+    slug: clone!.slug,
+    branch: clone!.branch ?? null,
+    pct: null,
+    error: null,
+    error_text: null,
+    renamed_from: clone!.renamed_from ?? null,
+    brings: clone!.brings ?? null,
+    folder_shown: e.shownFolder ?? null,
+    ...extra,
+  });
   const line = (state: InboxRun["state"], extra: Partial<InboxRun> = {}): InboxRun => ({
     state,
     launch_id: e.launch.id,
@@ -96,12 +115,21 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
     cause: null,
     untrusted: false,
     attach_command: e.attachCommand,
+    // A clone that is done: the line after it still names it (E11's "Cloned into …", E10's trust words).
+    ...(clone && clone.state === "done" ? { clone: cloneOf() } : {}),
     ...extra,
   });
+  if (clone && clone.state === "cloning") {
+    // A clone the Inbox no longer runs (it was restarted meanwhile): failed, with Try again.
+    if (e.cloneRunning === false) return line("clone_failed", { since: e.launch.started_at, clone: cloneOf({ error: "failed", error_text: "The clone stopped when the Inbox closed." }) });
+    return line("cloning", { since: iso(e.startedAt), clone: cloneOf({ pct: e.clonePct ?? null }) });
+  }
+  if (clone && clone.state === "failed") return line("clone_failed", { clone: cloneOf({ error: clone.error ?? "failed", error_text: clone.error_text ?? null }) });
+  if (clone && clone.state === "cancelled") return line("clone_cancelled", { clone: cloneOf() });
   const error = e.launch.error;
   if (error) {
     if (error.code === "missing") return line("missing");
-    return line("failed", { cause: error.text, untrusted: error.code === "untrusted", since: error.at, ...(e.launch.made_folder ? { made_folder: e.shownFolder ?? e.launch.folder } : {}) });
+    return line("failed", { cause: error.text, untrusted: error.code === "untrusted", since: error.at, ...(e.launch.made_folder && !clone ? { made_folder: e.shownFolder ?? e.launch.folder } : {}) });
   }
   if (e.permissionSince != null) return line("waiting_answer", { since: iso(e.permissionSince) });
   const host = e.host === "absent" ? null : e.host;

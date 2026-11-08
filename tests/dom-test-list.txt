@@ -146,6 +146,7 @@ packages/inbox/decisionData.test.tsx
 packages/inbox/composeTrust.test.tsx
 packages/inbox/openInTerminal.test.tsx
 packages/inbox/runTrustHowto.test.tsx
+packages/inbox/runLineClone.test.tsx
 packages/inbox/sessionLabelPicker.test.tsx
 packages/inbox/sessionLabels.test.tsx
 packages/inbox/listHeaderCompose.test.tsx
@@ -610,3 +611,4 @@ packages/inbox/composeRemoteLaunch.test.tsx
 packages/inbox/composeOtherFolder.test.tsx
 packages/ui/components/shape/ShapeSurface.boxShowMe.test.tsx
 packages/inbox/activityChart.test.tsx
+packages/inbox/composeClone.test.tsx
