@@ -7786,6 +7786,13 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
 .ib-lk-dot .ib-mrow.ib-u::after { left: 6px; top: 20px; }
 /* Subject preview "2 lines": the preview wraps to two lines, then "…" (three-line and phone rows). */
 .ib-lk-pv2 :is(.ib-nrow .ib-l3, .ib-m3) > .ib-pv { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; }
+/* With the preview on two lines, the open counts, pin, badge and book sit on its first line, as on a one-line
+   preview, not halfway between its lines (the line centres its parts): each is a line of the preview's height,
+   centred on it. The badge, taller than that line, starts at its top. A one-line preview looks as before. */
+.ib-lk-pv2 .ib-nrow .ib-l3:has(> .ib-pv) { --ib-pv-lh: calc(var(--ib-fs-13-5, 13.5px) * 1.35); }
+.ib-lk-pv2 .ib-m3:has(> .ib-pv) { --ib-pv-lh: calc(var(--ib-fs-14, 14px) * 1.35); }
+.ib-lk-pv2 :is(.ib-nrow .ib-l3, .ib-m3):has(> .ib-pv) { align-items: flex-start; }
+.ib-lk-pv2 :is(.ib-nrow .ib-l3, .ib-m3):has(> .ib-pv) > :not(.ib-pv, .ib-badge, .ib-sr) { display: inline-flex; align-items: center; min-height: var(--ib-pv-lh); }
 /* First line "Thread name": the name on line 1, one line cut with "…", the time after it; the agents and the
    project on line 2. */
 .ib-lk-tfirst .ib-nrow .ib-l1 > .ib-title, .ib-lk-tfirst .ib-m1 > .ib-m2 { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
