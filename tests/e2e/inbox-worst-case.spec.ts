@@ -462,16 +462,17 @@ for (const width of [944, 1024, 1180, 1280]) {
 }
 
 test('a guided review at 1024 and 900 keeps its diffs readable, with its comments a button away (row 48)', async ({ browser }) => {
-  for (const width of [900, 1024, 1440]) {
+  // The full-window review (every guide opens it): its comments fold into the header's button below 1,500 px.
+  for (const width of [900, 1024, 1440, 1600]) {
     // The guide rides the thread's first message, whose id is the thread's.
     const { context, page } = await open(browser, { name: String(width), width, height: 800 }, `thread=${world.seed.threads.guide}&guide=${world.seed.threads.guide}`);
     try {
       await expect(page.locator('section.ib-viewer .ib-gbody')).toContainText('Guard the refresh entry point', { timeout: 20_000 });
       await page.waitForTimeout(500);
       const viewer = page.locator('section.ib-viewer');
-      if (width < 1280) {
+      if (width < 1500) {
         await expect(viewer).toHaveClass(/\bib-fold\b/);
-        expect((await viewer.locator('.ib-gbody').boundingBox())!.width).toBeGreaterThan(width - 260);
+        expect((await viewer.locator('.ib-gbody').boundingBox())!.width).toBeGreaterThan(width - 40);
         const button = viewer.locator('[data-guide-comments-sheet]');
         await button.click();
         await expect(viewer.locator('.ib-gpanel')).toBeVisible();
@@ -488,9 +489,24 @@ test('a guided review at 1024 and 900 keeps its diffs readable, with its comment
         await expect(button).toBeFocused();
         await expect(viewer).toBeVisible();
       } else {
+        // Wide: the panel docks beside the diff, and the same Comments button opens and closes it. It starts open only
+        // when the review already has comments; closed, nothing of it shows and the diff takes the width.
         await expect(viewer).not.toHaveClass(/\bib-fold\b/);
-        await expect(viewer.locator('[data-guide-comments-sheet]')).toHaveCount(0);
-        await expect(viewer.locator('.ib-gpanel')).toBeVisible();
+        const button = viewer.locator('[data-guide-comments-sheet]');
+        const panel = viewer.locator('.ib-gpanel');
+        const count = Number(await panel.getAttribute('data-guide-comments'));
+        await expect(button).toHaveAttribute('aria-expanded', count > 0 ? 'true' : 'false');
+        if (count === 0) {
+          await expect(panel).toBeHidden();
+          expect((await viewer.locator('.ib-gbody').boundingBox())!.width).toBeGreaterThan(width - 40);
+          await button.click();
+        }
+        await expect(panel).toBeVisible();
+        await shot(page, `guide-${width}-docked`);
+        await viewer.getByRole('button', { name: 'Close the comments' }).click();
+        await expect(panel).toBeHidden();
+        await expect(button).toBeFocused();
+        await expect(button).toHaveAttribute('aria-expanded', 'false');
       }
       await shot(page, `guide-${width}`);
     } finally {
