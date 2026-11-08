@@ -4,8 +4,9 @@ import { COMPOSE_SESSIONS_REFRESH_MS } from './useComposeSessions';
 import type { MachineLaunchRead } from './model';
 
 /**
- * Each linked machine's last good sessions read (its launch block and home), kept for the page's life: an asleep
- * machine's projects still show in the folder menu, and a Send to it waits in the outbox.
+ * Each linked machine's last good sessions read (its launch block and home): an asleep machine's projects still show
+ * in the folder menu, and a Send to it waits in the outbox. A page that never read a machine starts from the read the
+ * server kept (`launch_reads` on the machines answer), so a window opened while that machine sleeps lists it too.
  */
 const kept = new Map<string, MachineLaunchRead>();
 
@@ -49,6 +50,16 @@ export function useMachineLaunches(active: boolean, trust: (ComposeTrustPick & {
     try {
       const answer = await inboxApi.machines();
       list = Array.isArray(answer?.machines) ? answer.machines : [];
+      // The server's copy is the last read any window made through it; this page's own read, once it has one, wins.
+      const serverReads = answer?.launch_reads ?? {};
+      let learned = false;
+      for (const m of list) {
+        const read = m.self || kept.has(m.id) ? undefined : serverReads[m.id];
+        if (!read?.launch) continue;
+        kept.set(m.id, { launch: read.launch, home: typeof read.home === 'string' ? read.home : null });
+        learned = true;
+      }
+      if (learned) setReads(new Map(kept));
     } catch {
       return;
     }

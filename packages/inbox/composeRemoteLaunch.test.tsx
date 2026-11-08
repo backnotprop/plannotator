@@ -58,6 +58,8 @@ let savedFetch: typeof fetch;
 let requests: { method: string; path: string; body: Record<string, unknown> | null }[] = [];
 let machines: MachineView[] = [SELF_VIEW];
 let miniBlock: InboxComposeLaunch = MINI_BLOCK;
+/** The machines answer's `launch_reads`: each linked machine's last read the server kept. */
+let launchReads: Record<string, { launch: InboxComposeLaunch; home: string | null }> | undefined;
 let sendAnswer: () => Response = () => Response.json({ thread_id: 'msg_01ARZ3NDEKTSV4RRFFQ69G5FT1', launch: { id: 'lch_1', state: 'starting' } });
 let sent: ComposeSent[] = [];
 let held: ComposeHeld[] = [];
@@ -72,6 +74,7 @@ beforeEach(() => {
   held = [];
   machines = [SELF_VIEW];
   miniBlock = MINI_BLOCK;
+  launchReads = undefined;
   sendAnswer = () => Response.json({ thread_id: 'msg_01ARZ3NDEKTSV4RRFFQ69G5FT1', launch: { id: 'lch_1', state: 'starting' } });
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -83,7 +86,7 @@ beforeEach(() => {
       if (path.startsWith('/api/inbox/outbox/')) return Response.json({ entry: { key: 'k1', state: 'cancelled' } });
       return Response.json({});
     }
-    if (path.startsWith('/api/inbox/machines')) return Response.json({ self: SELF, machines });
+    if (path.startsWith('/api/inbox/machines')) return Response.json({ self: SELF, machines, ...(launchReads ? { launch_reads: launchReads } : {}) });
     if (path.startsWith(`/api/inbox/m/${MINI}/sessions`)) return Response.json({ serverSession: 't', home: '/Users/mini', projects: [], launch: miniBlock });
     if (path.startsWith('/api/inbox/sessions')) return Response.json({ serverSession: 's', home: '/Users/me', projects: [], launch: HERE });
     if (path.startsWith('/api/inbox/skills')) return Response.json({ skills: [] });
@@ -246,6 +249,40 @@ test.skipIf(!hasDom)("asleep: Send says it starts when that machine is back, a l
   expect(document.querySelector('dialog[data-compose]')).not.toBeNull();
   expect(inDialog('[data-compose-send]')).not.toBeNull();
   expect(inDialog('.ib-cp-error')).toBeNull();
+});
+
+test.skipIf(!hasDom)("a window opened while that machine is asleep lists its projects from the server's last read, and Send waits for it", async () => {
+  // This page never read Mac mini: it was asleep before the window opened. The server kept its last read.
+  machines = [SELF_VIEW, view(MINI, 'Mac mini', { state: 'offline' })];
+  launchReads = { [MINI]: { launch: MINI_BLOCK, home: '/Users/mini' } };
+  await open();
+  await startAndOpenMenu();
+  await until(() => all('[data-compose-folder-group]').some((g) => g.textContent === 'Mac mini · asleep'), 'the asleep caption');
+  expect(all(`[data-compose-folder-option][data-compose-folder-machine="${MINI}"]`).map((r) => r.getAttribute('data-compose-folder-option'))).toEqual(['prj_infra', 'prj_bill_m', INBOX_SCRATCH_PICK]);
+  // An asleep machine is never read through the forward: its rows are the kept read alone.
+  expect(machinesRead()).toBe(false);
+  act(() => inDialog(`[data-compose-folder-option="prj_infra"]`)!.click());
+  expect(inDialog(`[data-compose-folder] [data-compose-machine="${MINI}"]`)!.textContent).toBe('· Mac mini');
+  expect(inDialog('[data-compose-send]')!.textContent).toContain('Start when Mac mini is back');
+  expect(inDialog('[data-compose-note="asleep"]')!.textContent).toContain('Mac mini is asleep (since');
+});
+
+test.skipIf(!hasDom)("this page's own read of a machine wins over the server's kept one", async () => {
+  machines = [SELF_VIEW, view(MINI, 'Mac mini')];
+  launchReads = { [MINI]: { launch: { ...MINI_BLOCK, projects: [{ id: 'prj_old', name: 'old-thing', root: '/Users/mini/code/old-thing', exists: true }] }, home: '/Users/mini' } };
+  await open();
+  await until(machinesRead, "Mac mini's sessions read");
+  await startAndOpenMenu();
+  await until(() => inDialog(`[data-compose-folder-option="prj_infra"]`) !== null, "Mac mini's own read");
+  // Mac mini goes to sleep, and the machines answer still carries the server's older copy: it never replaces what
+  // this page read.
+  machines = [SELF_VIEW, view(MINI, 'Mac mini', { state: 'offline' })];
+  await act(async () => {
+    document.dispatchEvent(new Event('visibilitychange'));
+    await new Promise((r) => setTimeout(r, 30));
+  });
+  expect(inDialog(`[data-compose-folder-option="prj_old"]`)).toBeNull();
+  expect(inDialog(`[data-compose-folder-option="prj_infra"]`)).not.toBeNull();
 });
 
 test.skipIf(!hasDom)("the held toast: it starts on that machine when it's back, and Cancel takes it back and puts its words in Drafts", async () => {

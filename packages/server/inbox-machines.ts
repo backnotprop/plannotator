@@ -33,6 +33,7 @@ import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { INBOX_MACHINE_WINDOW_ONLY_BODY, isWindowRequest } from "./inbox-cross-site";
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
+import { createMachineLaunchReads, MACHINE_SESSIONS_ROUTE } from "./inbox-machine-launch-reads";
 import { doorWriteKind, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
 import { MACHINE_LINKS_PROTOCOL, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerLinkTimings, type PeerRecord } from "./inbox-peer-link";
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
@@ -294,6 +295,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const links = InboxLinks.open(context.dataDir);
   const outbox = InboxOutbox.open(context.dataDir, context.now);
   const peers = new Map<string, PeerLink>();
+  /** Each linked machine's last good launch read, so a window opened while it sleeps still lists its projects. */
+  const launchReads = createMachineLaunchReads();
   const listeners = new Set<(frame: MachineFrame) => void>();
   /** An offer that published the door: the door comes down when it expires unused. */
   let offerTimer: ReturnType<typeof setTimeout> | null = null;
@@ -395,6 +398,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const forget = (id: string, closeDoor: "now" | "after_answer" | "after_refusal" = "now"): InboxLinkRecord | null => {
     peers.get(id)?.stop();
     peers.delete(id);
+    launchReads.forget(id);
     const link = links.remove(id);
     if (link?.device_id) context.door.revokeDevice(link.device_id, { oweRefusal: closeDoor === "after_refusal" });
     outbox.dropMachine(id, link?.name ?? null);
@@ -660,7 +664,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
         headers[MACHINE_WINDOW_HEADER] = "1";
       }
       try {
-        return passAnswer(await peer.request(route, search, { method: "GET", headers, signal: req.signal }));
+        const answer = await peer.request(route, search, { method: "GET", headers, signal: req.signal });
+        // Its launch block and home are kept for a window opened while it sleeps (`launch_reads` on the machines read).
+        if (route === MACHINE_SESSIONS_ROUTE && answer.ok) void launchReads.keep(machine, answer.clone(), () => peers.has(machine));
+        return passAnswer(answer);
       } catch {
         return offline();
       }
@@ -837,7 +844,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (forwarded) return forward(req, url, forwarded[1]!, forwarded[2]!, via);
     if (path === "/api/inbox/machines") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-      return json({ self: links.selfId, machines: machinesView() });
+      const machines = machinesView();
+      const linked = machines.filter((m) => !m.self).map((m) => m.id);
+      return json({ self: links.selfId, machines, launch_reads: launchReads.view(linked, context.isGuest(req, via)) });
     }
     if (path === "/api/inbox/outbox") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
