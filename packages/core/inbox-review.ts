@@ -386,3 +386,22 @@ export const INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC = [
   '  { "kind": "html", "source", "css"?, "width"?, "height"?, "tall"? }: `source` is a',
   '  drawing by the rules in `plannotator shape --help`. Or { "kind": "mermaid", "source" }.',
 ].join('\n');
+
+/**
+ * Context notes (issue #2588, approval "inbox-context-notes"): get_guide_brief's rule for a guide's notes, served only
+ * while Code review is on, after the overview's drawing. Wording awaits the owner's OK (AGENT-TEXT, writer 1).
+ */
+export const INBOX_REVIEW_NOTES_RULE =
+  'Optional `diffs[].notes`: your notes on lines of the diff, `[{ lineStart, lineEnd, side?, text }]`. Line numbers come from the patch\'s hunk headers (`side: "old"` for removed lines), and a note must sit inside one hunk. Write a note only where a hunk needs its why, in one or two sentences: why the change is there and where that reason comes from (the PR description, a commit, a decision record, or your own reading). Notes are yours, not the person\'s comments: they are never counted, sent back to you or posted to a pull request.';
+
+/** submit_guide's `guide` field: as always with Code review off; with it on, a diff reference names its `notes`. */
+export const INBOX_GUIDE_FIELD_DESCRIPTION =
+  'The guide: { title, intent, sections: [{ title, overview, diffs: [{ file, summary }] }], unplacedFiles?, review?: { gitRef, base }, source?, generator? } (get_guide_brief\'s output_schema), as an object or its JSON.';
+export const INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES = INBOX_GUIDE_FIELD_DESCRIPTION.replace('diffs: [{ file, summary }]', 'diffs: [{ file, summary, notes? }]');
+
+/**
+ * The thread agent's way to pin words to lines (writer 3): one sentence on send_message's `body`, served only while
+ * Code review is on. An Ask's answer is never pinned by itself (the owner, 2026-11-07: it stays in the thread).
+ */
+export const INBOX_NOTE_BLOCK_LINE =
+  'In a thread with a review, a `:::note path#L42-L48` … `:::` block pins its words to those lines of the newest review (` old` after the lines for removed lines): your note, not the person\'s comment. Pin a note only when your words are about those lines; answer the rest in the message.';

@@ -65,6 +65,8 @@ import { inOverlay } from '../shortcuts/guards';
 import { reviewFiles } from './reviewFiles';
 import { layerVerdictLink, nextLayer, stackVerdictLink } from './topology';
 import { RiskMark } from './RiskMark';
+import { ContextNotesProvider, useContextNotes } from '../contextNotes/ContextNotes';
+import { placesWord, riskNotes, takeRiskPlaces } from '../contextNotes/model';
 import { usePullRisk } from './usePullRisk';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
@@ -609,6 +611,43 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     setTreeScope(next);
     if (next === 'changes') setRepoOpen(null);
   };
+  // A high judgment's places (context notes, approval "inbox-context-notes"): on this layer's own diff, at the head it
+  // judged, each a row under its lines. Never comments. The header's "N places" steps through them.
+  const placeNotes = useMemo(
+    () => (scope === 'layer' && judged && layer && diff?.head_sha && diff.head_sha === layer.head_sha ? riskNotes(judged, files) : []),
+    [scope, judged, layer?.head_sha, diff?.head_sha, files], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const places = useContextNotes(placeNotes, {});
+  const placeAt = useRef(-1);
+  const goToPlace = (index: number) => {
+    const note = placeNotes[index];
+    if (!note) return;
+    placeAt.current = index;
+    move(note.file);
+    places.show(note.id);
+  };
+  const nextPlace = () => goToPlace((placeAt.current + 1) % placeNotes.length);
+  // The PR page's "See the N places": taken as this layer's diff mounts (the ask is gone after that, whatever it
+  // named), and the first place opens once the diff draws its places. Once the diff settles with none to draw (it
+  // could not be read, the judged head's diff draws none, the whole stack is on screen) or another layer opens, the
+  // ask is dropped: no later diff moves by itself.
+  const placesTaken = useRef<string | null>(null);
+  const placesWanted = useRef(false);
+  useEffect(() => {
+    // StrictMode runs this twice on the same layer: the second run keeps what the first took.
+    if (placesTaken.current === layerKey) return;
+    placesTaken.current = layerKey;
+    placesWanted.current = takeRiskPlaces(layerKey);
+  }, [layerKey]);
+  useEffect(() => {
+    if (!placesWanted.current) return;
+    if (placeNotes.length > 0) {
+      placesWanted.current = false;
+      goToPlace(0);
+      return;
+    }
+    if (scope !== 'layer' || diffError || (judged && layer && diff?.head_sha && diff.head_sha === layer.head_sha)) placesWanted.current = false;
+  }, [placeNotes.length, layerKey, scope, diffError, judged, diff?.head_sha, layer?.head_sha]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The verdict: one reply to the agent's last message in its thread.
   const [sending, setSending] = useState(false);
@@ -768,6 +807,11 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         </Tip>
         {!phone && title}
         {judged && <RiskMark judgment={judged} />}
+        {placeNotes.length > 0 && (
+          <button type="button" className="ib-ctxn-places" onClick={nextPlace} data-pull-risk-places={placeNotes.length}>
+            {placesWord(placeNotes.length)}
+          </button>
+        )}
         {!judged && riskFailure && <RiskMark failed={riskFailure} />}
         {!phone && readOnlyNote}
         <span className="ib-sp" />
@@ -932,7 +976,23 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             // arrive says so here.
             <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ repo: repoKey ?? '', pull: layerKey }} on={!!repoKey}>
-                <GuideReader bare controlsHost={controlsHost} hostDiffControls snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} fileContents={fileContents} />
+                <ContextNotesProvider api={places.api}>
+                  <GuideReader
+                    bare
+                    controlsHost={controlsHost}
+                    hostDiffControls
+                    snapshot={snapshot}
+                    reviewed={[]}
+                    onReviewedChange={() => {}}
+                    comments={readerComments}
+                    mode="files"
+                    reveal={reveal}
+                    viewed={{ files: viewedSet, onToggle: toggleViewed }}
+                    fileOpenIn={fileOpenIn}
+                    fileContents={fileContents}
+                    {...(places.anchors.length > 0 ? { contextNotes: places.anchors, renderContextNote: places.renderContextNote } : {})}
+                  />
+                </ContextNotesProvider>
               </OpenInCodeSpans>
             </ReaderPart>
           ) : (

@@ -618,3 +618,4 @@ packages/inbox/activityChart.test.tsx
 packages/inbox/composeClone.test.tsx
 packages/inbox/projectPlus.test.tsx
 packages/ui/components/shape/litLine.test.ts
+packages/inbox/contextNotes/contextNotes.test.tsx

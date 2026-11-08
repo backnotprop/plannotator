@@ -3,6 +3,7 @@ import type { InboxPullRiskJudgment } from '@plannotator/core/inbox-types';
 import { noHover } from '@plannotator/ui/utils/textCut';
 import { Tip } from '../components/Tip';
 import { riskLevelWord } from './risk';
+import { placesWord, riskPlaceCount } from '../contextNotes/model';
 
 export const COULD_NOT_RANK = 'Couldn\u2019t rank';
 
@@ -16,7 +17,9 @@ export function RiskMark({ judgment, failed }: { judgment?: InboxPullRiskJudgmen
   const [tapped, setTapped] = useState(false);
   const mark = useRef<HTMLSpanElement>(null);
   const level = judgment?.level ?? 'failed';
-  const why = judgment?.why ?? failed ?? '';
+  // A high judgment's places (context notes): the sentence says how many the diff marks.
+  const places = riskPlaceCount(judgment);
+  const why = (judgment?.why ?? failed ?? '') + (places > 0 ? ` ${placesWord(places)} marked in the diff.` : '');
   useEffect(() => {
     if (!tapped) return;
     const away = (event: PointerEvent) => {

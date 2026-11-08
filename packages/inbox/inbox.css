@@ -10303,3 +10303,62 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-pfoot > .ib-acts.ib-footrow > .ib-footbtns { flex: 1 1 auto; }
 .ib-footbtns[data-foot-buttons] > [data-open-questions],
 .ib-footbtns[data-foot-buttons]:not(:has(> [data-open-questions])) > [data-steps-button] { margin-inline-start: auto; }
+
+/* ── Context notes (approval "inbox-context-notes", take Line) ──────────────────────────────────────────────────────
+   An agent's words on lines of the diff, drawn through review-editor's `contextNotes` seam (`.context-note-slot`):
+   one row (Show me's Pebble, the writer in words, the first words), opened in place. Shape's paper with a breath of the
+   accent; a stale note goes grey. No comment chrome: no border, no card shadow, no count. */
+.ib-review, .ib-prreview { --ctxn-paper: color-mix(in oklab, var(--shp-paper, color-mix(in oklab, var(--background) 92%, var(--muted))) 95%, var(--primary)); }
+.context-note-slot { margin: 4px 0.25rem; font-family: var(--font-sans); white-space: normal; }
+.ib-ctxn { color: var(--foreground); }
+.ib-ctxn-line { border-radius: 8px; background: var(--ctxn-paper, color-mix(in oklab, var(--muted) 60%, var(--card))); }
+.ib-ctxn-line[data-stale] { background: color-mix(in oklch, var(--muted) 40%, var(--card)); }
+.ib-ctxn-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ib-ctxn-row:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 60%, transparent); outline-offset: 1px; }
+.ib-ctxn-h { flex: none; display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--ib-fs-12, 12px); line-height: 18px; color: var(--muted-foreground); }
+.ib-ctxn-h b { flex: none; color: var(--foreground); font-weight: 600; }
+.ib-ctxn-peb { flex: none; }
+.ib-ctxn-risk-mark { flex: none; color: var(--muted-foreground); }
+.ib-ctxn-risk { font-size: var(--ib-fs-11-5, 11.5px); line-height: 16px; }
+.ib-ctxn-first { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-ctxn-chev { flex: none; color: var(--muted-foreground); transition: transform 0.15s ease-out; }
+.ib-ctxn-line[data-open] .ib-ctxn-chev { transform: rotate(180deg); }
+/* Open: the words after the writer follow on its line ("Claude Code · 12:34 PM"), wrapping as text, with the marks inline. */
+.ib-ctxn-line[data-open] .ib-ctxn-row { padding-block: 5px; }
+.ib-ctxn-line[data-open] .ib-ctxn-h { display: block; flex: 1 1 auto; overflow-wrap: anywhere; }
+.ib-ctxn-line[data-open] .ib-ctxn-h > svg { display: inline-block; vertical-align: -2px; margin-right: 6px; }
+.ib-ctxn-line[data-open] .ib-ctxn-h > .ib-ctxn-risk { display: inline-flex; margin-left: 6px; vertical-align: 1px; }
+.ib-ctxn-h .ib-ctxn-by { display: inline; }
+.ib-ctxn-open { padding: 0 12px 10px 30px; }
+.ib-ctxn-by { display: block; font-size: var(--ib-fs-12, 12px); line-height: 18px; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.ib-ctxn-t { margin: 4px 0 0; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
+[data-stale] .ib-ctxn-t { color: var(--muted-foreground); }
+.ib-ctxn-acts { margin-top: 6px; display: flex; gap: 14px; }
+.ib-ctxn-link { padding: 0; border: 0; background: none; color: var(--primary); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); cursor: pointer; }
+.ib-ctxn-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.ib-ctxn-link:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 60%, transparent); outline-offset: 2px; border-radius: 3px; }
+.ib-ctxn-stale { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--ib-hair); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.4; color: var(--muted-foreground); }
+.ib-ctxn-act { flex: none; }
+/* A risk's places: the PR page's "See the N places" and the diff header's "N places". */
+.ib-ctxn-places { margin-left: 6px; padding: 0; border: 0; background: none; color: var(--primary); font: inherit; font-size: var(--ib-fs-12, 12px); cursor: pointer; white-space: nowrap; }
+.ib-ctxn-places:hover { text-decoration: underline; text-underline-offset: 2px; }
+.ib-ctxn-places:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 60%, transparent); outline-offset: 2px; border-radius: 3px; }
+/* The thread: a `:::note` block's chip and words. */
+.ib-ctxn-msg { margin: 10px 0 14px; }
+.ib-ctxn-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 24px; padding: 0 9px; border: 0; border-radius: 999px; background: color-mix(in oklch, var(--primary) 8%, var(--card)); color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-12, 12px); text-align: left; }
+button.ib-ctxn-chip { cursor: pointer; }
+button.ib-ctxn-chip:hover { color: var(--foreground); }
+button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(--primary) 60%, transparent); outline-offset: 1px; }
+.ib-ctxn-chip-f { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-11-5, 11.5px); color: var(--foreground); }
+.ib-ctxn-chip-go { color: var(--primary); }
+.ib-ctxn-msg-t { margin-top: 6px; font-size: var(--ib-fs-15, 15px); line-height: 1.6; color: color-mix(in oklch, var(--foreground) 90%, transparent); }
+@media (max-width: 640px) {
+  .ib-ctxn-open { padding-left: 12px; }
+}
+@media (pointer: coarse) {
+  .ib-ctxn-row { min-height: 44px; }
+  .ib-ctxn-chip { min-height: 32px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ib-ctxn-chev { transition: none; }
+}
