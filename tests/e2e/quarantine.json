@@ -23,8 +23,8 @@
     },
     {
       "spec": "inbox-show-me.spec.ts",
-      "title": "a busy agent: the box offers the Ask window's choice, never says it draws; interrupt asks now; this round's picture has Show me again",
-      "why": "After Send with the fake agent set busy, the Show me box never turns `busy` within 15 s (line 538, `toHaveAttribute('data-show-me-box', 'busy')`).",
+      "title": "a busy agent: the box offers the Ask window's choice, never says it draws",
+      "why": "After Send with the fake agent set busy, the Show me box never turns `busy` (15 s then, 20 s now: `toHaveAttribute('data-show-me-box', 'busy')`).",
       "firstSeen": "2026-11-05",
       "evidence": [
         42004602635,
@@ -35,28 +35,6 @@
         42176139859,
         42186760384,
         42223127512
-      ],
-      "dependents": [
-        {
-          "title": "round 2: the redrawn Overview tags its changed parts; a Show me picture stays as asked",
-          "why": "It opens the round-1 picture of lines 7–9, which only the busy-agent test asks for."
-        },
-        {
-          "title": "the picture moves by its header like the window, stays in the pane, keeps its place, and a double-click puts it back",
-          "why": "It opens `round2`, which only the round 2 test sets."
-        },
-        {
-          "title": "a phone at 390 px: the popover and the picture",
-          "why": "It opens `round2`, which only the round 2 test sets."
-        },
-        {
-          "title": "reloaded while it draws, and the agent ends with no words: the box goes back to its words with the Ask window's note",
-          "why": "It opens `round2`, which only the round 2 test sets."
-        },
-        {
-          "title": "the agent gone: a Show me it never answers goes back to the box with the Ask window's problem, never says it draws",
-          "why": "It opens `round2`, which only the round 2 test sets."
-        }
       ]
     },
     {
@@ -111,13 +89,56 @@
     },
     {
       "spec": "inbox-code-review.spec.ts",
-      "title": "the top bar holds what the rail held: chapters, the count, files, Overview, Split | Unified, by mouse and by keyboard",
-      "why": "After Enter on the third chapter in the jump menu, the top bar still reads \"1 of 3\" where \"3 of 3\" is expected (line 735, `expect(await jump.textContent()).toBe(place)`).",
+      "title": "the top bar holds what the rail held: chapters, the count, files, Overview, and the diff controls, by mouse and by keyboard",
+      "why": "After Enter on the third chapter in the jump menu, the top bar still reads \"1 of 3\" where \"3 of 3\" is expected (line 698, `expect(await jump.textContent()).toBe(place)`).",
       "firstSeen": "2026-11-05",
       "evidence": [
         42119502727,
         42122455103,
         42133516139
+      ]
+    },
+    {
+      "spec": "inbox-review-jumps.spec.ts",
+      "title": "a jump to a file nearby lands exactly",
+      "why": "After the first jump, to file 100 from the changed-files menu, the file settles 83 px above the top of the reader instead of 16 px below it (line 228, `expect(await settledPlace(page, body, fixture.paths[100])).toBe(PLACE)`: -83, expected 16).",
+      "firstSeen": "2026-11-06",
+      "evidence": [
+        42255709255,
+        42272056744,
+        42307730886
+      ]
+    },
+    {
+      "spec": "inbox-guides.spec.ts",
+      "title": "a thread's guided review with Code review off: arrows open a long file in place, the page scrolls with no box limit, the file header sticks, and a comment on an opened line saves",
+      "why": "The middle scroll check misses by a few hundred px (line 689, `expect(await scrollTop()).toBe(middle)`, e.g. 10932 vs 10512), and the runner was then killed (exit 137) on one run. Failed on three unrelated PRs (#2721 shape kit contrast, #2842 Shape run player, #2847 checklist line) that do not touch guided review.",
+      "firstSeen": "2026-11-07",
+      "evidence": [
+        42346233742,
+        42347213074,
+        42348560192
+      ]
+    },
+    {
+      "spec": "inbox-list-view.spec.ts",
+      "title": "grouped: the same hover Mark read keeps the row in its group, not bold, and brings no news in",
+      "why": "After the hover Mark read is clicked, the row in New stays bold (line 333, `expect(row).not.toHaveClass(/\\bib-u\\b/)`: still \"ib-row ib-u\" after 15 s). Failed on three unrelated PRs (#2824 reply box, #2690 Reviews links, #2822 close keeps the draft) and passed on #2721's run of the same main.",
+      "firstSeen": "2026-11-07",
+      "evidence": [
+        42350363799,
+        42350656727,
+        42357501348
+      ],
+      "dependents": [
+        {
+          "title": "grouped: with a read waiting in place, a snooze made elsewhere moves only its own row (review P1)",
+          "why": "It needs the Grouped view, which the left-out test chooses; the test before it leaves List on."
+        },
+        {
+          "title": "grouped: an Archive waits in place, faded; after the list settles without it, its Undo brings the row back (review N1)",
+          "why": "It needs the Grouped view too, and follows the snooze test."
+        }
       ]
     }
   ]

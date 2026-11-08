@@ -28,7 +28,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_LAUNCH_OFF, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
@@ -76,10 +76,10 @@ test.beforeAll(async () => {
   const root = inboxScratch('plannotator-links-in-place-');
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
-  mkdirSync(dataDir);
+  mkdirSync(dataDir, { recursive: true });
   mkdirSync(home);
   // The dialog case needs Decision mode, which is off by default.
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ experimental: { decisionMode: true } }));
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, experimental: { decisionMode: true } }));
   const env = {
     PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir,
     CLAUDE_CONFIG_DIR: join(root, 'claude'), CODEX_HOME: join(root, 'codex'), OPENCODE_CONFIG_DIR: join(root, 'opencode'),

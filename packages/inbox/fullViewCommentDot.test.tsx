@@ -46,7 +46,6 @@ async function mountBar(opts: { commentDraft?: boolean; draft?: boolean; handleC
         moreOpen={false}
         leave={{ kind: 'exit', onLeave: () => {} }}
         chord={null}
-        shifted={false}
       />,
     );
   });

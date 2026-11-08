@@ -291,7 +291,7 @@ test.skipIf(!hasDom)("a plain update opened from New, its row held in New: the h
   expect(posted.filter((p) => p.path === `/api/inbox/threads/${id}/seen`).length).toBe(1);
 }, 15_000);
 
-test.skipIf(!hasDom)("the row's hover action toggles: Mark read on a row that waits, Mark unread on a read row, which puts it back in New, bold", async () => {
+test.skipIf(!hasDom)("the row's hover action toggles: Mark read on a row that waits, Mark unread on a read row, bold in place, in New after a tidy", async () => {
   const id = ids.news[0]!;
   await loopback(`/api/inbox/threads/${id}/seen`, 'POST', '{}');
   await renderList(ids.waiting);
@@ -309,12 +309,18 @@ test.skipIf(!hasDom)("the row's hover action toggles: Mark read on a row that wa
   // It never opens the thread.
   expect(window.location.hash).toBe(`#project=${ids.project}`);
   expect(posted.at(-1)!.path).toBe(`/api/inbox/threads/${id}/mark-unread`);
+  // The list holds still (approval "inbox-list-view", R7): bold where it is, in Quiet, with Mark read again; the
+  // toast names it and never says it moved.
+  await until(() => rowButton(id)?.classList.contains('ib-u') === true, 'the row bold in place');
+  expect(sectionOfRow(id)).toBe('quiet');
+  expect(toast()?.querySelector('.ib-tlead')?.textContent).toBe('Marked unread');
+  expect(toast()?.textContent).not.toContain('back in New');
+  expect((await threadOf(id)).thread.messages.length).toBe(messages);
+  await until(() => rowAction(id, 'read') !== null && rowAction(id, 'unread') === null, 'Mark read on the row again');
+  // The tidy (the list's title refreshes it): back in New, bold.
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-list-refresh]')!.click());
   await until(() => sectionOfRow(id) === 'new', 'the row back in New');
   expect(rowButton(id)!.classList.contains('ib-u')).toBe(true);
-  expect(toast()?.querySelector('.ib-tlead')?.textContent).toBe('Marked unread');
-  expect((await threadOf(id)).thread.messages.length).toBe(messages);
-  // Back in New with news, the action is Mark read again.
-  await until(() => rowAction(id, 'read') !== null && rowAction(id, 'unread') === null, 'Mark read on the row again');
 });
 
 test.skipIf(!hasDom)('a thread marked read keeps its pressed Read button; ⋯ More marks it unread, its question still set aside', async () => {
@@ -370,8 +376,10 @@ test.skipIf(!hasDom)('a stale row: when the thread is new already the server wri
   await until(async () => (await serverSection(id)) === 'new', 'the agent to write');
   await act(async () => rowAction(id, 'unread')!.click());
   await until(() => posted.at(-1)!.path === `/api/inbox/threads/${id}/mark-unread`, 'the write');
-  // The list reads again and shows what is true; nothing offers an Undo.
-  await until(() => sectionOfRow(id) === 'new', 'the row refreshed in New');
+  // The list reads again and shows what is true in place (bold, with Mark read; it goes to New at the tidy, R7);
+  // nothing offers an Undo.
+  await until(() => rowButton(id)?.classList.contains('ib-u') === true && rowAction(id, 'read') !== null, 'the row refreshed in place');
+  expect(sectionOfRow(id)).toBe('quiet');
   expect(toast()).toBeNull();
 });
 

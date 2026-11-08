@@ -335,21 +335,27 @@ async function menuRows(page: Page, selector: string): Promise<string[]> {
 
 /** Every row the list shows, the folded ones opened. */
 async function rows(page: Page): Promise<string[]> {
-  const fold = page.locator('[data-pulls-waiting-toggle]');
+  const fold = page.locator('[data-reviews-fold="not_reviewed"]');
   if ((await fold.count()) > 0 && (await fold.getAttribute('aria-expanded')) === 'false') await fold.click();
   return (await page.locator('[data-pulls-row]').evaluateAll((els) => els.map((el) => el.getAttribute('data-pulls-row')!))).sort();
 }
 
-/** The head and the quiet line now: the head one line with nothing past it, the line one line, the targets. */
+/**
+ * The head and the quiet line now: the head one line with nothing past it, the line one line, the targets. `head` leaves
+ * out the Risk chip, which comes in when the risk answer does (inbox-pull-risk.spec.ts checks it); it still counts
+ * for "past the edge".
+ */
 async function fit(page: Page) {
   return page.evaluate(() => {
     const list = document.querySelector('[data-pulls-list]')!.getBoundingClientRect();
     const lhead = document.querySelector<HTMLElement>('[data-pulls-list] .ib-lhead')!;
+    const risk = lhead.querySelector<HTMLElement>('[data-pulls-risk-filter]');
+    const words = (text: string) => text.replace(/\s+/g, ' ').trim();
     const scope = document.querySelector<HTMLElement>('[data-pulls-scope]');
     const name = document.querySelector<HTMLElement>('[data-pulls-scope-project] .ib-pscope-n');
     const past = [...document.querySelectorAll<HTMLElement>('[data-pulls-list] .ib-lhead *, [data-pulls-scope] *')].some((el) => el.getBoundingClientRect().right > list.right + 0.5);
     return {
-      head: lhead.innerText.replace(/\s+/g, ' ').trim(),
+      head: words(risk ? words(lhead.innerText).replace(words(risk.innerText), ' ') : lhead.innerText),
       head_h: Math.round(lhead.getBoundingClientRect().height),
       scope_h: scope ? Math.round(scope.getBoundingClientRect().height) : 0,
       name_cut: !!name && name.scrollWidth > name.clientWidth,

@@ -57,6 +57,7 @@ function startWorld(name: string): World {
     // The test sandbox: no agent CLI is looked up at all, not even the ChatGPT or Codex app's own on macOS.
     PLANNOTATOR_TEST_SANDBOX: root,
     HOME: home,
+    NO_ANON_PING: '1',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,

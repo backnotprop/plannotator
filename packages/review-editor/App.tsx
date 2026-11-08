@@ -37,6 +37,7 @@ import { storage } from '@plannotator/ui/utils/storage';
 import { RefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { refCardRouteTransport, setRefCardTransport } from '@plannotator/ui/utils/refCard';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
+import { useStarAskDoneScreen } from '@plannotator/ui/components/StarAskDoneScreen';
 import {
   closePendingTab,
   openPendingTab,
@@ -295,8 +296,10 @@ import {
 declare const __APP_VERSION__: string;
 
 // Plannotator's own code review: the selection toolbar's Copy copies rich
-// text; @plannotator/ui hosts keep plain Copy unless they opt in.
-configurePlannotatorUI({ richCopy: true });
+// text, and on a touch screen the toolbar sits below the selection (clear of
+// iOS's edit menu), inside the screen, with thumb-sized buttons;
+// @plannotator/ui hosts keep both unchanged unless they opt in.
+configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true });
 
 function getReviewRecoveryStorage(): ReviewRecoveryStorage | null {
   try {
@@ -5446,6 +5449,14 @@ const ReviewApp: React.FC = () => {
     },
   });
 
+  // The "Star the repo" ask (approval "star-ask"): claimed once the page loads (the server stops on the decision),
+  // shown on the done screen only, once a decision was sent (approved or feedback; never a closed session), never in
+  // the VS Code webview or without a live session. The server decides the rest.
+  const starAskFooter = useStarAskDoneScreen({
+    ready: !isLoading,
+    decided: submitted === 'approved' || submitted === 'feedback',
+    eligible: !!origin && !isVSCodeWebview(),
+  });
   // Explorer keys (the `review-explorer` scope): never over a dialog, the
   // guide, or while the review is settling; only Go to File works from a text
   // field (as in VS Code), every other key leaves typing alone.
@@ -7022,6 +7033,7 @@ const ReviewApp: React.FC = () => {
                   : `${getAgentName(origin)} will address your review feedback.`
           }
           agentLabel={getAgentName(origin)}
+          footer={starAskFooter}
           links={platformMode && submitted !== 'exited'
             ? platformPostedUrls.map((href) => ({
               href,

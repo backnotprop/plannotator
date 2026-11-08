@@ -36,10 +36,11 @@ function estimateDiffHeight(patch: string): number {
  * renderer measures it: the rows the diff draws (its hunks' lines, not git's header lines; in Split a run of removed
  * lines and the added lines after it share rows), a separator before each hunk that does not start the file, the
  * file's header and the list's padding (AllFilesCodeView's metrics: 20 px rows, one more for a "\ No newline", a
- * 33 px header, a 40 px separator above the first hunk and 48 px between hunks, 8 px above and below the list, 8 px
- * in the code block, a 1 px border). With a reader of whole files the viewer also draws an arrow row after the last
- * hunk (`trailingRow`), whose 24 px its margins leave out. A patch with no hunk (a binary file, a rename) keeps the old
- * estimate.
+ * 33 px header, a 32 px separator above the first hunk and between hunks, with no gaps around them (the renderer's
+ * files scroll with the page and draw no spacing there, so a host whose files sit flush, `flushFiles`, counts the
+ * same), 8 px above and below the list, a 1 px border). With a reader of whole files the viewer also draws an arrow
+ * row after the last hunk (`trailingRow`), whose 24 px its margins leave out. A patch with no hunk (a binary file, a
+ * rename) keeps the old estimate.
  */
 function estimateFitDiffHeight(patch: string, diffStyle: 'split' | 'unified' = 'unified', trailingRow = false): number {
   let rows = 0;
@@ -116,18 +117,36 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   onActivate,
   fitContent = false,
 }) => {
-  const { DiffRenderer, getDiffRendererProps, renderFileActions, diffStyle, opensWholeFiles } = useGuideHost();
+  const { DiffRenderer, getDiffRendererProps, renderFileActions, diffStyle, opensWholeFiles, collapseAll, flushFiles } = useGuideHost();
+  // A flush host's box (host `flushFiles`) has no border or padding: it holds the renderer's height and nothing more.
+  const flush = fitContent && !!flushFiles;
+  const boxChrome = flush ? 0 : FIT_BOX_CHROME;
   const actions = renderFileActions?.(file) ?? null;
   const scrollPositionRef = useRef(0);
-  const [collapsed, setCollapsed] = useState(kind === 'generated');
+  const [collapsed, setCollapsed] = useState(collapseAll && collapseAll.token > 0 ? collapseAll.collapsed : kind === 'generated');
+  // The host's Collapse all: a new token folds or opens this card too. The renderer reads `mountCollapsed` once, so it
+  // mounts again (`key` below), but only when this card's state changes: a file already that way keeps its opened
+  // context gaps and an open comment.
+  const [collapseToken, setCollapseToken] = useState(collapseAll?.token ?? 0);
+  const [mountKey, setMountKey] = useState(0);
+  if (collapseAll && collapseAll.token !== collapseToken) {
+    setCollapseToken(collapseAll.token);
+    if (collapseAll.collapsed !== collapsed) {
+      setCollapsed(collapseAll.collapsed);
+      setMountKey((key) => key + 1);
+    }
+  }
   const fileList = useMemo(() => [file], [file]);
   // A file whose gap was opened stays mounted: the viewer holds the opened lines, and leaving the outer window would
   // close them, shrink the box under the reader and read the file again. A mounted viewer draws only rows near the viewport.
   const [opened, setOpened] = useState(false);
   const { mounted, register, requestMount, jumpTo } = useGuideFileWindow(file.path, focused || opened);
   const diffHeight = useMemo(
-    () => (fitContent ? estimateFitDiffHeight(file.patch, diffStyle, !!opensWholeFiles && (file.status === 'modified' || file.status === 'renamed')) : estimateDiffHeight(file.patch)),
-    [fitContent, file.patch, file.status, diffStyle, opensWholeFiles],
+    () =>
+      fitContent
+        ? estimateFitDiffHeight(file.patch, diffStyle, !!opensWholeFiles && (file.status === 'modified' || file.status === 'renamed')) - (FIT_BOX_CHROME - boxChrome)
+        : estimateDiffHeight(file.patch),
+    [fitContent, file.patch, file.status, diffStyle, opensWholeFiles, boxChrome],
   );
   // The content's height as the renderer last reported it (plus the box's border), kept while the CodeView is
   // unmounted so the box does not jump when it leaves the outer window.
@@ -155,7 +174,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
     return stopWaiting;
   }, [mounted, fitContent, stopWaiting]);
   const onContentHeightChange = useCallback((height: number) => {
-    const next = height + FIT_BOX_CHROME;
+    const next = height + boxChrome;
     if (!settledRef.current) {
       if (measuredRef.current !== null && next < measuredRef.current) {
         pendingRef.current = next;
@@ -173,12 +192,14 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
       stopWaiting();
     }
     applyMeasured(next);
-  }, [applyMeasured, stopWaiting]);
+  }, [applyMeasured, stopWaiting, boxChrome]);
   const target = revealTarget?.filePath === file.path ? revealTarget : null;
+  // Folded: the header alone (a flush box has no padding around it).
+  const collapsedHeight = flush ? COLLAPSED_HEIGHT - 16 : COLLAPSED_HEIGHT + (fitContent ? FIT_BOX_CHROME - 16 : 0);
   const renderedHeight = collapsed
-    ? COLLAPSED_HEIGHT + (fitContent ? FIT_BOX_CHROME - 16 : 0)
+    ? collapsedHeight
     : fitContent && measuredHeight !== null
-      ? Math.max(COLLAPSED_HEIGHT, measuredHeight)
+      ? Math.max(flush ? collapsedHeight : COLLAPSED_HEIGHT, measuredHeight)
       : diffHeight;
   // Fitting, a mounted box follows its content by itself; the last height holds it until the viewer has drawn. No
   // `overflow: hidden` there: it would make the box the sticky header's scroller.
@@ -226,16 +247,19 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
 
   // Folded from its sticky header, the box is gone from under the reader: bring the file to the top of the page, not
   // whatever now sits where they were reading. Before paint, and before the box's new height reaches the observer above.
+  // Not for Collapse all: every box folds then, and the host's bar keeps the place.
   const wasCollapsed = useRef(collapsed);
+  const foldedToken = useRef(collapseToken);
   useLayoutEffect(() => {
-    const folded = collapsed && !wasCollapsed.current;
+    const folded = collapsed && !wasCollapsed.current && foldedToken.current === collapseToken;
     wasCollapsed.current = collapsed;
+    foldedToken.current = collapseToken;
     const box = boxRef.current;
     if (!folded || !fitContent || !box) return;
     const page = pageOf(box);
     const above = pageTopOf(page) - box.getBoundingClientRect().top;
     if (above > 0) page.scrollTop -= above;
-  }, [collapsed, fitContent]);
+  }, [collapsed, fitContent, collapseToken]);
 
   return (
     <div
@@ -267,7 +291,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
       <div
         ref={boxRef}
         style={followsContent ? { minHeight: renderedHeight } : { height: renderedHeight }}
-        className={`${fitContent ? 'overflow-clip py-2' : 'overflow-hidden'} rounded-lg border border-border/40 bg-background`}
+        className={flush ? 'flow-root overflow-clip' : `${fitContent ? 'overflow-clip py-2' : 'overflow-hidden'} rounded-lg border border-border/40 bg-background`}
         data-guide-code-view-mounted={mounted ? 'true' : 'false'}
         onClickCapture={
           fitContent && !opened
@@ -279,6 +303,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
       >
         {mounted ? (
           <DiffRenderer
+            key={mountKey}
             {...getDiffRendererProps({ file, focused })}
             files={fileList}
             fileScrollTarget={target}

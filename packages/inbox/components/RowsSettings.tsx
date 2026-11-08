@@ -5,14 +5,19 @@
  * width" (the one-line row, zoomed down when the page is narrower than a wide list). On a phone one picture, the
  * phone's rows. Round 2 (the owner, 2026-11-02: "Couldn't customization go a bit further"): three presets beside the
  * lede (Minimal, Balanced = the defaults, Detailed) as starting points, then beside the narrow picture Look (density,
- * first line, thread names, unread, subject preview, time) and Show (agent icons, project).
+ * first line, thread names, unread, subject preview, time) and Show (agent icons, project). Letter marks (approval
+ * "inbox-letter-marks", 2026-11-07, all off by default): Look → Mark style, and Show → Letter marks with its two
+ * picture switches, in the same cards; Detailed turns them on (Both, Avatar, no pictures). A notes-list look (the
+ * owner's picture, 2026-11-07; approval "inbox-customize-rows", addendum), all off by default and in no preset: Look →
+ * Time position (Top right / Under the preview), and Show → Dividers, Status mark and Bold thread names.
  *
  * Every control is the list's look (listLook.ts): a change shows at once and is saved for the person (config.json `inboxRows`), and every list in every window
  * takes it (`useListLook` listens). The pictures follow the person's mode, light or dark.
  */
 import { useLayoutEffect, useRef, useState } from 'react';
+import { RowMarksScope } from '../letterMarks';
 import type { InboxListRow, InboxSectionId } from '@plannotator/core/inbox-types';
-import { LIST_LOOK_DEFAULT, LIST_LOOK_KEYS, LIST_LOOK_OFF, listLookClasses, useListLook, type ListLook, type ListLookKey } from '../listLook';
+import { LIST_LOOK_DEFAULT, LIST_LOOK_KEYS, LIST_LOOK_OFF, listLookClasses, lookMarks, markStyleLook, marksWhatLook, useListLook, type ListLook, type ListLookKey, type MarkStyle, type MarksWhat } from '../listLook';
 import { ListRow } from './InboxList';
 import { Icon } from '../icons';
 
@@ -81,13 +86,19 @@ function sampleGroups(): { id: InboxSectionId; label: string; rows: InboxListRow
           questions: { open: 2, picked: 0, stopped: false, holds_up: [], prompt: null },
           last_at: ago(4),
         }),
+      ],
+    },
+    {
+      // A thread with nothing left to do, so Show → Status mark has a "done" to draw.
+      id: 'quiet',
+      label: 'Quiet',
+      rows: [
         sample({
           thread_id: 'rows-sample-plain',
           subject: 'Tests pass on main after the retry fix',
           author: { kind: 'agent', host: 'pi', session: 'ses_p', name: null },
-          section: 'waiting',
-          unread: true,
-          questions: { open: 1, picked: 0, stopped: false, holds_up: [], prompt: null },
+          section: 'quiet',
+          waiting_on_person: false,
           last_at: ago(52),
         }),
       ],
@@ -99,39 +110,45 @@ function sampleGroups(): { id: InboxSectionId; label: string; rows: InboxListRow
 function PreviewList({ look, shape, className }: { look: ListLook; shape: 'narrow' | 'wide' | 'phone'; className: string }) {
   const [groups] = useState(sampleGroups);
   return (
-    <section className={`ib-listcol ib-rws-list ${className}${look.hideProject ? ' ib-noproj' : ''}${listLookClasses(look)}`} aria-hidden="true">
-      {/* The rows alone, no bands: nothing here changes a band, and the page keeps both pictures in one screen. */}
-      <div className="ib-lbody">
-        <div className="ib-group">
-          {groups.flatMap((group) =>
-            group.rows.map((row) => (
-              <ListRow
-                key={row.thread_id}
-                row={row}
-                project={row.project.name}
-                away={false}
-                drawn={group.id}
-                shape={shape}
-                full={false}
-                filtered={look.hideProject}
-                selected={false}
-                lit={false}
-                onOpen={noop}
-                day=""
-                menu={false}
-                pinned={false}
-                pinColumn={false}
-                pill={look.highlight}
-                compact={look.compact}
-                noPreview={look.hidePreview}
-                relative={look.relativeTime}
-                titleFirst={look.titleFirst}
-              />
-            )),
-          )}
+    // The sample projects have no pictures: their marks are letters (`pictures` off asks the Inbox for none).
+    <RowMarksScope look={look} pictures={false}>
+      <section className={`ib-listcol ib-rws-list ${className}${look.hideProject ? ' ib-noproj' : ''}${listLookClasses(look)}`} aria-hidden="true">
+        {/* The rows alone, no bands: nothing here changes a band, and the page keeps both pictures in one screen. */}
+        <div className="ib-lbody">
+          <div className="ib-group">
+            {groups.flatMap((group) =>
+              group.rows.map((row) => (
+                <ListRow
+                  key={row.thread_id}
+                  row={row}
+                  project={row.project.name}
+                  away={false}
+                  drawn={group.id}
+                  shape={shape}
+                  full={false}
+                  filtered={look.hideProject}
+                  selected={false}
+                  lit={false}
+                  onOpen={noop}
+                  day=""
+                  menu={false}
+                  pinned={false}
+                  pinColumn={false}
+                  pill={look.highlight}
+                  compact={look.compact}
+                  noPreview={look.hidePreview}
+                  relative={look.relativeTime}
+                  titleFirst={look.titleFirst}
+                  timeBelow={look.timeBelow}
+                  statusMark={look.statusMark}
+                  noAgents={look.hideAgents}
+                />
+              )),
+            )}
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+    </RowMarksScope>
   );
 }
 
@@ -159,7 +176,7 @@ function WidePreview({ look }: { look: ListLook }) {
 }
 
 /** A row's two- or three-way choice, as Settings → General's Theme and Text size. */
-function Seg<T extends string>({ name, labelledBy, value, choices, onChange }: { name: string; labelledBy: string; value: T; choices: readonly { id: T; label: string }[]; onChange: (next: T) => void }) {
+function Seg<T extends string>({ name, labelledBy, value, choices, onChange }: { name: string; labelledBy: string; value: T | null; choices: readonly { id: T; label: string }[]; onChange: (next: T) => void }) {
   return (
     <span className="ib-seg" role="radiogroup" aria-labelledby={labelledBy}>
       {choices.map((choice) => (
@@ -173,7 +190,7 @@ function Seg<T extends string>({ name, labelledBy, value, choices, onChange }: {
 }
 
 /** A Look row: its title (naming the choice for a screen reader) and its segmented choice. */
-function LookRow<T extends string>({ id, label, desc, value, choices, onChange }: { id: string; label: string; desc?: string; value: T; choices: readonly { id: T; label: string }[]; onChange: (next: T) => void }) {
+function LookRow<T extends string>({ id, label, desc, value, choices, onChange }: { id: string; label: string; desc?: string; value: T | null; choices: readonly { id: T; label: string }[]; onChange: (next: T) => void }) {
   return (
     <div className="ib-prow" data-rows-control={id}>
       <span className="ib-txt">
@@ -189,23 +206,66 @@ function LookRow<T extends string>({ id, label, desc, value, choices, onChange }
   );
 }
 
-/** The Show card's switches: on is shown. Each hides with its `ListLook` key. */
+/**
+ * The Show card's switches: on is shown. Each hides with its `ListLook` key. The page's words follow the owner's rule
+ * (2026-11-07: "only necessary labels or words for things that are not intuitive"): a description says only what the
+ * pictures cannot show (a machine, where a picture comes from, a side effect).
+ */
 const SHOW: readonly { key: ListLookKey; label: string; desc?: string }[] = [
   { key: 'hideAgents', label: 'Agent icons' },
-  { key: 'hideProject', label: 'Project', desc: 'With its machine, when you link machines' },
+  { key: 'hideProject', label: 'Project', desc: 'With its machine' },
 ];
+
+/** The notes-list look's switches (all off by default): on is shown, as each one's own `ListLook` key. */
+// Words as few as the owner asked (2026-11-07: "only necessary labels or words for things that are not intuitive"):
+// the pictures show Dividers and Bold names, so only Status mark says what it replaces.
+const NOTES_LOOK: readonly { key: 'dividers' | 'statusMark' | 'boldNames'; label: string; desc?: string }[] = [
+  { key: 'dividers', label: 'Dividers' },
+  { key: 'statusMark', label: 'Status mark', desc: 'Instead of counts' },
+  { key: 'boldNames', label: 'Bold names' },
+];
+
+/** A project's picture instead of its letters. Turning one on turns project marks on (listLook.ts `lookWithChange`). */
+const PICTURES: readonly { key: 'repoLogo' | 'githubPictures'; label: string; desc: string }[] = [
+  { key: 'repoLogo', label: 'Logo from the repo', desc: 'Stays on this computer' },
+  { key: 'githubPictures', label: 'GitHub pictures', desc: "The owner's picture. Asks GitHub once a week." },
+];
+
+/** A Show switch that is on while its option is (the notes-list look's, the picture switches), with its words, if any, for a screen reader. */
+function OnSwitch({ id, label, desc, on, onToggle }: { id: ListLookKey; label: string; desc?: string; on: boolean; onToggle: () => void }) {
+  return (
+    <div className="ib-prow" data-rows-control={id}>
+      <span className="ib-txt">
+        <span className="ib-l" id={`ib-rows-${id}`}>
+          {label}
+        </span>
+        {desc && (
+          <span className="ib-desc" id={`ib-rows-${id}-desc`}>
+            {desc}
+          </span>
+        )}
+      </span>
+      <span className="ib-ctl">
+        <button type="button" role="switch" className="ib-sw" aria-checked={on} aria-labelledby={`ib-rows-${id}`} aria-describedby={desc ? `ib-rows-${id}-desc` : undefined} onClick={onToggle} />
+      </span>
+    </div>
+  );
+}
 
 export type RowsPreset = 'minimal' | 'balanced' | 'detailed';
 
 /**
  * The presets: starting points, each a whole look. Balanced is the defaults (smaller thread names on, every other
  * option off), so choosing it is also how to reset. Detailed keeps the larger unread names it had before smaller
- * names became the default, so a look saved as Detailed still reads Detailed. A look that matches none reads "Custom".
+ * names became the default. A look that matches none reads "Custom": a look saved as Detailed before Detailed turned
+ * letter marks on (approval "inbox-letter-marks") now reads Custom until Detailed is picked again.
  */
+// Letter marks (approval "inbox-letter-marks"): Minimal and Balanced keep them off (Balanced is the defaults); Detailed
+// turns them on, both kinds as Avatar (no style option on), with the picture switches off.
 export const ROWS_PRESETS: readonly { id: RowsPreset; label: string; look: ListLook }[] = [
   { id: 'minimal', label: 'Minimal', look: { ...LIST_LOOK_OFF, compact: true, hideAgents: true, hidePreview: true, smallNames: true, unreadDot: true, relativeTime: true } },
   { id: 'balanced', label: 'Balanced', look: LIST_LOOK_DEFAULT },
-  { id: 'detailed', label: 'Detailed', look: { ...LIST_LOOK_OFF, roomy: true, highlight: true, previewTwo: true } },
+  { id: 'detailed', label: 'Detailed', look: { ...LIST_LOOK_OFF, roomy: true, highlight: true, previewTwo: true, marksThreads: true, marksProjects: true } },
 ];
 
 export function rowsPreset(look: ListLook): RowsPreset | null {
@@ -215,6 +275,7 @@ export function rowsPreset(look: ListLook): RowsPreset | null {
 export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: () => void }) {
   // A choice that turns one option on turns its rival off (Compact and Roomy; no preview and two lines), in one write.
   const [look, set] = useListLook();
+  const marks = lookMarks(look);
   const preset = rowsPreset(look);
   // Buttons, not radios: a radio group's arrow keys choose as they move, so one stray key would wipe a Custom look.
   // Tab reaches each preset, and only Enter, Space or a click applies one; the pressed one is the look's.
@@ -274,6 +335,20 @@ export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: 
             ]}
             onChange={(next) => set({ highlight: next === 'pill' })}
           />
+          {/* Where a letter mark lives. Nothing is picked while marks are off; picking one turns thread marks on, so
+              the choice never does nothing. */}
+          <LookRow<MarkStyle>
+            id="markstyle"
+            label="Mark style"
+            desc={marks.what === 'off' ? 'Turns letter marks on' : undefined}
+            value={marks.what === 'off' ? null : marks.style}
+            choices={[
+              { id: 'inline', label: 'Inline' },
+              { id: 'avatar', label: 'Avatar' },
+              { id: 'dot', label: 'Dot' },
+            ]}
+            onChange={(style) => set(markStyleLook(style, look))}
+          />
           <LookRow
             id="unread"
             label="Unread"
@@ -306,6 +381,17 @@ export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: 
             ]}
             onChange={(next) => set({ relativeTime: next === 'relative' })}
           />
+          {/* Where the time sits on three-line and phone rows; a full-width row keeps its columns. */}
+          <LookRow
+            id="timeplace"
+            label="Time position"
+            value={look.timeBelow ? 'below' : 'top'}
+            choices={[
+              { id: 'top', label: 'Top right' },
+              { id: 'below', label: 'Under the preview' },
+            ]}
+            onChange={(next) => set({ timeBelow: next === 'below' })}
+          />
         </div>
       </section>
       <section className="ib-sgroup" aria-labelledby="ib-g-rows-show">
@@ -336,6 +422,24 @@ export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: 
               </span>
             </div>
           ))}
+          {NOTES_LOOK.map((item) => (
+            <OnSwitch key={item.key} id={item.key} label={item.label} desc={item.desc} on={look[item.key]} onToggle={() => set({ [item.key]: !look[item.key] })} />
+          ))}
+          <LookRow<MarksWhat>
+            id="marks"
+            label="Letter marks"
+            value={marks.what}
+            choices={[
+              { id: 'off', label: 'Off' },
+              { id: 'threads', label: 'Threads' },
+              { id: 'projects', label: 'Projects' },
+              { id: 'both', label: 'Both' },
+            ]}
+            onChange={(what) => set(marksWhatLook(what))}
+          />
+          {PICTURES.map((item) => (
+            <OnSwitch key={item.key} id={item.key} label={item.label} desc={item.desc} on={look[item.key]} onToggle={() => set({ [item.key]: !look[item.key] })} />
+          ))}
         </div>
       </section>
     </div>
@@ -344,7 +448,7 @@ export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: 
     <div className="ib-note ib-rws-note">
       <Icon name="info" />
       <span>
-        The time, questions and warnings always show. Full width keeps one line and its columns.{' '}
+        Full width keeps one line.{' '}
         {onGeneral ? (
           <>
             Text size is in{' '}
@@ -363,7 +467,7 @@ export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: 
     <div className="ib-rws" data-settings-rows="">
       {/* Settings draws no lede of its own for Rows: this one has the presets beside it. */}
       <div className="ib-rws-head">
-        <p className="ib-lede">How each thread looks in your list. Changes apply at once, wherever you use the Inbox.</p>
+        <p className="ib-lede">Changes apply everywhere you use the Inbox.</p>
         {presets}
       </div>
       <div className="ib-rws-top">

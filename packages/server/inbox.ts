@@ -39,6 +39,7 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
+import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -79,6 +80,13 @@ import {
   isInboxSoundVolume,
   isInboxTextSize,
   type InboxTextSize,
+  isInboxReactionEmoji,
+  parseInboxReaction,
+  parseInboxSavedReactions,
+  parseInboxReactionChange,
+  applyInboxReactionChange,
+  INBOX_SAVED_REACTIONS_MAX,
+  type InboxReaction,
   inboxRowsList,
   inboxRowsRead,
   inboxRowsSaved,
@@ -107,7 +115,6 @@ import {
   parseUpdateCheckEnv,
   resolveAutoUpdate,
   resolveUpdateCheck,
-  resolveInboxAskAi,
   resolveInboxPhones,
   resolveInboxTool,
   saveConfig,
@@ -126,6 +133,7 @@ import { isLoopbackHostHeader, isLoopbackForwardedFor } from "@plannotator/share
 import { prepareAppHtml, prewarmAppHtml } from "@plannotator/shared/app-html";
 import { openPackedApp, packedAppResponse, PACKED_ASSET_ROUTE_PREFIX } from "@plannotator/shared/packed-app";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
+import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines } from "@plannotator/shared/inbox/decision-data";
 import { createInboxSearchRoutes } from "./inbox-search";
 import { inboxSkillsRoute } from "./inbox-skills";
 import { assertTestHome } from "./test-home-guard";
@@ -177,13 +185,14 @@ import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT } from
 import { guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
 import { systemSetupRoute } from "./inbox-system-setup";
+import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
 import { createRefCards, type RefRunner } from "./ref-cards";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
-import { INBOX_ACCOUNT_SWITCHING } from "@plannotator/core/inbox-types";
+import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
@@ -210,13 +219,12 @@ import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
 import { createLoginEnv } from "./inbox-launch-env";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxAsk } from "./inbox-ask";
-import { createInboxReviewDrawings, INBOX_REVIEW_DRAWINGS_PATH } from "./inbox-review-drawings";
-import { pruneInboxReviewDrawings } from "@plannotator/shared/inbox/review-drawings";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
+import { changedFileOf } from "./inbox-pull-diff-files";
 import { snoozeIntroDue, snoozeIntroFirstUse, type SnoozeIntroSaved } from "./inbox-snooze-intro";
 import {
   INBOX_REVEALS,
@@ -224,6 +232,7 @@ import {
   revealAgentNoteAgents,
   revealAgentNoteNew,
   revealAhead,
+  revealAsideNow,
   revealHeavyUse,
   revealLastShown,
   revealLineFree,
@@ -238,6 +247,8 @@ import {
   type RevealLoads,
   type RevealState,
 } from "@plannotator/shared/inbox/reveals";
+import { configStarAskStore, createStarAsk, readStarAskRecord, runGh, starAskEnabled, starAskOpen, type StarAskClaim } from "@plannotator/shared/star-ask";
+import { claimInboxStar, inboxStarAction } from "./inbox-star-ask";
 import { createInboxEmbeds } from "./inbox-embeds";
 import { createInboxPages } from "./inbox-pages";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
@@ -245,19 +256,22 @@ import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
 import { createCardFavicons, type CardFaviconOptions } from "./inbox-card-favicons";
 import { createCardMarks } from "./inbox-card-marks";
 import { validateFilePath } from "@plannotator/shared/review-core";
-import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
+import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
+import { createPullRisk, type PullRiskOptions } from "./inbox-pull-risk";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
-import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullRepoKey, inboxPullItems, inboxPullStacks, inboxReviewLandingChanges,
-  inboxReviewRows, type InboxPullReason } from "@plannotator/core/inbox-types";
-import { createInboxPullStates, createInboxReviewIndex } from "./inbox-reviews";
+import { createProjectPictures, type ProjectPictureOptions } from "./inbox-project-pictures";
+import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullStacks, inboxReviewLandingChanges, inboxReviewLinkOf, inboxReviewRows, inboxReviewStartOf, type InboxPullReason, type InboxReviewStart, inboxPullRepoKey } from "@plannotator/core/inbox-types";
+import { createInboxPullStates, createInboxReviewIndex, readInboxReviewLink } from "./inbox-reviews";
+import { inboxPullRefOfKey, type InboxPull } from "@plannotator/core/inbox-types";
+import { readInboxReviewChanges } from "./inbox-review-changes";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
-import { createInboxStepsRoute, inboxStepsStale } from "./inbox-steps";
+import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as stepsListWaitsOnPerson } from "./inbox-steps";
 import { createInboxDebugLog } from "./inbox-debug-log";
-import { createInboxDevices, DOOR_PREFIX } from "./inbox-devices";
+import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller } from "./inbox-devices";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
 import { replyIsStale } from "./inbox-outbox";
 import type { PairingProbes } from "./inbox-pairing-checks";
@@ -272,7 +286,7 @@ import { handleInboxTourRequest } from "./inbox-tour";
 import { createBunShapeRoutes } from "./shape-routes";
 import { shapeCodeRoot } from "@plannotator/shared/shape/store";
 import { shapeEventFrame } from "@plannotator/shared/shape/routes";
-import { shapeAgentName } from "@plannotator/shared/shape/routes";
+import { shapeAgentName, unlocked as unlockedShape } from "@plannotator/shared/shape/routes";
 import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch, shapeSwitchOn } from "@plannotator/shared/shape/switch";
 import {
   agentSpec,
@@ -290,7 +304,7 @@ import {
   writeInboxAgents,
   type AgentEnvironment,
 } from "./inbox-agents";
-import { addInboxNote, INBOX_NOTE_BLOCK, inboxNotesDisabled, markNotesAsked, noteCandidateIds, notesAsked, noteStatus, refreshInboxNotes, removeInboxNote } from "./inbox-agent-notes";
+import { addInboxNote, autoAddInboxNotes, INBOX_NOTE_BLOCK, inboxNotesDisabled, markAutoNotesSaid, markNotesAsked, noteCandidateIds, notesAsked, noteStatus, refreshInboxNotes, removeInboxNote, unsaidAutoNotes } from "./inbox-agent-notes";
 import {
   displayInboxSubject,
   INBOX_AGENT_IDS,
@@ -447,11 +461,6 @@ export interface InboxServerOptions {
    * nothing listens, connects, spawns or makes a certificate.
    */
   phones?: boolean;
-  /**
-   * Ask AI (inbox-ask.ts). Default: `resolveInboxAskAi` (PLANNOTATOR_INBOX_ASK_AI,
-   * else off). Off, its routes answer the unknown-route 404.
-   */
-  askAi?: boolean;
   /** Tests: Ask AI's waits (inbox-ask-live.ts). */
   askTimes?: InboxAskTimes;
   /** Tests: linked machines' clocks (packages/server/inbox-peer-link.ts): heartbeat silence, backoff. */
@@ -494,6 +503,10 @@ export interface InboxServerOptions {
   cardFavicons?: CardFaviconOptions;
   /** Tests: how a PR author's picture is fetched (inbox-pull-avatars.ts): a scripted fetch and DNS, never the network. */
   pullAvatars?: Partial<PullAvatarOptions>;
+  /** Tests: the risk agent and the CLIs found (inbox-pull-risk.ts): a scripted answer, never a real agent. */
+  pullRisk?: Pick<PullRiskOptions, "run" | "agents" | "listModels">;
+  /** Tests: how a project's GitHub picture is fetched (inbox-project-pictures.ts): a scripted fetch, never the network. */
+  projectPictures?: Partial<ProjectPictureOptions>;
   /** Tests: the git that decides a path's project (default `inboxGitRunner`, inbox-project-root.ts). */
   projectRootGit?: InboxGitRunner;
   /** Tests: the home folder no repository project is made at (default this user's, inbox-project-root.ts `isHomeOrRootFolder`). */
@@ -667,6 +680,7 @@ const ERROR_STATUS: Record<string, number> = {
   ack_not_allowed: 422,
   ack_stale: 409,
   ack_after_reply: 409,
+  ack_sent: 409,
   question_open: 409,
   idempotency_key_reused: 409,
   // Action items (approval "inbox-next-actions"): a Done already sent (no Undo), an action item no longer open, an agent's `done` that names no open action item.
@@ -712,6 +726,8 @@ const ERROR_STATUS: Record<string, number> = {
   session_not_live: 409,
   // Launch (inbox-launch.ts): the project's folder is gone, the agent can't be started, or the feature is off.
   folder_missing: 422,
+  // Create a folder: the folder can't be made there (no permission, a file has the name, a folder that can't be opened).
+  folder_unavailable: 422,
   // A new scratch folder could not be made (the root can't be written, or every name is taken).
   scratch_unavailable: 422,
   agent_unavailable: 409,
@@ -953,9 +969,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // A send a crash interrupted leaves a temp blob; the next start removes it once it is stale.
   sweepStaleInboxSendTemps(store.dir);
   const serverSession = createServerSessionNonce();
-  // The requests the phone's device door hands in, in-process, after it checked the device's token
-  // (inbox-devices.ts `toWindow`): the person's own paired device, which answers a permission prompt as a window does.
-  const fromDeviceDoor = new WeakSet<Request>();
+  // The requests the device door hands in, in-process, after it checked the device's token (inbox-devices.ts
+  // `toWindow`), with the device that asked: a paired phone answers a permission prompt as a window does; a linked
+  // machine does for a press in a window there (`window`), and may start, stop or trust for one (remote launch).
+  const fromDeviceDoor = new WeakMap<Request, InboxDoorCaller>();
   // Search (packages/server/inbox-search.ts): the index is built on the first search, not here.
   const search = createInboxSearchRoutes({ store, serverSession, index: options.searchIndex });
   // Mark read: the note to the asking agents goes once the Undo window has passed.
@@ -1027,8 +1044,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const token = createInboxToken();
   // Read once per start: the phone surface stays hidden until the iPhone app ships.
   const phonesOn = options.phones ?? resolveInboxPhones(loadConfig());
-  // Read once per start: Ask AI stays hidden until the owner has used it.
-  const askOn = options.askAi ?? resolveInboxAskAi();
   const hostGuard = createRequestHostGuard({ localOnly: true });
   const previous = readInboxRegistry(dataDir);
   let port = 0;
@@ -1048,6 +1063,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const snoozeListeners = new Set<() => void>();
   /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
   const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number) => void>();
+  /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
+  const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: held until the next big release (heldSwitch). */
   const capabilityListeners = new Set<(changed?: "code_review" | "shape") => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
@@ -1095,16 +1112,34 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Pull requests (inbox-pulls.ts): read only while the page is open and Code review is on; the route refuses first otherwise.
   // The project roots whose origin the Pull requests list has waited for once.
   const pullRepoRead = new Set<string>();
+  const pullRepoReading = new Map<string, Promise<InboxProjectRepo | null>>();
   const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
   // The PR authors' pictures (inbox-pull-avatars.ts): only for logins the last list showed, served from this origin.
   const pullAvatars = createPullAvatars({ ...options.pullAvatars, dir: options.pullAvatars?.dir ?? join(inboxDir(dataDir), "pull-avatars") });
+  // The projects' letter-mark pictures (inbox-project-pictures.ts; Settings → Rows, all off by default).
+  const projectPictures = createProjectPictures({ ...options.projectPictures, dir: options.projectPictures?.dir ?? join(inboxDir(dataDir), "project-pictures") });
   /** Reviews posted to a forge while this Inbox runs (PR key, head, action, body): an identical one is refused. */
   const postedReviews = new Set<string>();
   // Which agent thread owns a PR, as the person chose it (Hand to an agent, Launch an agent): inbox/pull-links.json.
   const pullOwners = createInboxPullLinks(dataDir);
+  // PR risk ranking (inbox-pull-risk.ts): judged in the background from the list reads below, while Code review is on and rules exist.
+  const pullRisk = createPullRisk({ dataDir, pulls, roots: (key) => pullRoots(key), isOn: () => codeReviewOn(), ...options.pullRisk });
   // Reviews (inbox-reviews.ts): every thread with a review card, derived from the store's messages on read.
   const reviewIndex = createInboxReviewIndex(store);
+  let lastReviewsRead: { projectsByRepo: Awaited<ReturnType<typeof pullProjects>>["projectsByRepo"]; wanted: Awaited<ReturnType<typeof pullProjects>>["wanted"]; listed: Awaited<ReturnType<typeof pulls.list>> } | null = null;
   // A review thread's PR that left the list: one read of its state, so a closed PR, or one merged long ago, is recorded.
+  // A PR's owner as the lists use it. A thread archived before any review came is no one's to curate: its PR is
+  // listed again and a new review can start. Unarchived, it owns the PR again, unless the PR was handed on since.
+  const pullOwnersNow = () => {
+    const reviewed = new Set(reviewIndex.threads().map((thread) => thread.thread_id));
+    return new Map(
+      [...pullOwners.all()].filter(([, owner]) => {
+        if (reviewed.has(owner.thread_id)) return true;
+        const row = store.listRow(owner.thread_id);
+        return !row || !inboxRowArchived(row);
+      }),
+    );
+  };
   const pullStates = createInboxPullStates({ run: options.refRunner, onLand: (record, forget) => pullOwners.land(record, forget) });
   const pullLinkStore: InboxPullLinkStore = {
     threadsOf: (id) => store.threadsOf(id),
@@ -1117,6 +1152,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     },
     // An agent that sent with a wake and polls no more is marked ended in the stack view (`live` is set up below).
     sessionLive: (session) => live.isSessionLive(session),
+    launchDead: (threadId) => launch.didNotStart(threadId),
   };
   // The folders of this computer's clones of a PR's repository.
   const pullRoots = async (key: string): Promise<string[]> => {
@@ -1149,9 +1185,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const reposNow = await Promise.all(
       projectsNow.map(async (project) => {
         const repo = repos.get(project.root);
-        if (repo || pullRepoRead.has(project.root)) return repo;
+        // A second list read while the first waits on git waits too: it must not answer "no project is on a forge".
+        if (repo || pullRepoRead.has(project.root)) return repo ?? pullRepoReading.get(project.root);
         pullRepoRead.add(project.root);
-        return repos.refresh(project.root);
+        const reading = repos.refresh(project.root).finally(() => pullRepoReading.delete(project.root));
+        pullRepoReading.set(project.root, reading);
+        return reading;
       }),
     );
     for (const [i, project] of projectsNow.entries()) {
@@ -1174,6 +1213,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * Others PR lands only when the background Others read does, so while one is still missing, wait for that read (its
    * own deadline) and list once more. A caller answers `pull_unknown` for any key still missing after.
    */
+  /** The PRs New review's links read, by key: what Start review takes for whose it is. */
+  const linkReads = new Map<string, InboxPull>();
+  /** One PR no list holds, from a host this computer's CLI is signed in to; nothing is asked of any other host. */
+  const readUnlistedPull = async (ref: NonNullable<ReturnType<typeof inboxPullRefOfKey>>): Promise<InboxPull | null> => {
+    if (!(await pulls.signedInTo(ref.platform === "gitlab" ? "glab" : "gh", ref.host))) return null;
+    const login = lastReviewsRead?.listed.hosts.find((host) => host.host === ref.host)?.login ?? null;
+    return readInboxReviewLink(options.refRunner, { ref }, login);
+  };
+
   const findPulls = async (keys: readonly string[], wanted: InboxPullRepo[]): Promise<void> => {
     if (keys.every((key) => pulls.find(key))) return;
     await pulls.list(wanted, { refresh: false });
@@ -1270,6 +1318,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         boardOn,
         // Thread steps: the steps tool and field are listed and served only while the person has them on.
         stepsOn,
+        // Bro mode: send_message's `body` field carries the line only while the person has it on.
+        broOn,
         // Code review: submit_guide's `review` field is listed and served only while the person has it on.
         codeReviewOn,
         // A thread only a linked machine holds goes through the window's own forward (inbox-machines.ts).
@@ -1295,6 +1345,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Additive (linked machines, inbox-machines.ts): this Inbox's stable id and the link protocol it speaks.
     inbox_id: machines.selfId,
     machine_links: 1,
+    // Additive (remote launch): a linked machine may start agents here (1: launch is on; the door takes its Stop, Try again, Trust folder and Delete).
+    // 0 while launch is off there: an Inbox new enough says so, an older one has no field ("update Plannotator there").
+    launch_from_machines: launch.enabled() ? 1 : 0,
     // Additive: the page honours --pn-window-controls-width and -height on :root and names their line in
     // --pn-window-controls-center-y (inbox.css, for a desktop host).
     window_controls: 2,
@@ -1330,7 +1383,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const combined = store.combinedInto(project.id).map(({ id, name, root }) => ({ id, name, root }));
       // A snoozed thread is listed (its project stays, for the band) and not unread (nothing shows until it is back).
       const unread = mine.filter((row) => row.unread && !inboxRowSnoozed(row)).length;
-      return { ...project, ...(combined.length > 0 ? { combined } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
+      // When its letter mark's picture was set (Set picture…), additive: the window's key for the picture.
+      const picture = projectPictures.uploadedAt(project.id);
+      return { ...project, ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
     });
   };
 
@@ -1364,6 +1419,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * A checklist still waits on the person (the row's `steps_waiting`): a waiting step, its session not ended, and
+   * the person has not answered in the thread since the list was last written: no message of theirs and no 👍 Looks
+   * good (`store.personAnsweredSince`, which reads the stored messages, 👍 included).
+   */
+  const inboxStepsWaitOnPerson = (list: Parameters<typeof stepsListWaitsOnPerson>[0], now: number): boolean =>
+    stepsListWaitsOnPerson(list, live, now, (threadId, since) => store.personAnsweredSince(threadId, since));
+  /** A row without `steps_waiting` (a linked machine's: this window never shows that machine's checklists). */
+  const withoutStepsWaiting = (row: InboxListRow): InboxListRow => {
+    if (!("steps_waiting" in row)) return row;
+    const { steps_waiting: _dropped, ...rest } = row;
+    return rest;
+  };
+
+  /**
    * The list model: one row per thread, placed in the approved sections, with
    * the project as a label and an optional filter (`?project=prj_...`), which
    * keeps the sections and drops other projects' rows.
@@ -1385,13 +1454,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Applied after the launch decoration, so a launched row keeps its run word and section under a snooze.
     const now = new Date();
     const byThread = snoozesById();
+    // `steps_waiting` (additive, approval "inbox-checklist-spinners-2026-11-07"): while the Checklist switch is on, a
+    // thread whose checklist has a step waiting on the person; the row's still amber pause (and the Board lane card's,
+    // which reads this flag). Only while the thread still waits: the person has written nothing there since that list
+    // was last written, and its session has not ended (an ended session never updates the list). Off: never.
+    const stepsWaiting = stepsOn() ? new Set(store.allSteps().filter((list) => inboxStepsWaitOnPerson(list, now.getTime())).map((list) => list.thread_id)) : null;
+    const withStepsWaiting = (row: InboxListRow): InboxListRow => (stepsWaiting?.has(row.thread_id) ? { ...row, steps_waiting: true } : row);
     const own = store
       .listRows()
-      .map((row) => withSnooze(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row), byThread, now));
+      .map((row) => withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now));
     // A linked machine never lists an id this store holds (archived and pinned included): its row is dropped, never merged.
     // The same clock over its rows: a machine asleep past a thread's `until` still gives that thread back.
+    // A linked machine's row loses its `steps_waiting`: this window never shows that machine's checklists.
     const rows: InboxListRow[] = merged
-      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => inboxRowAsOf(row, now))]
+      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => inboxRowAsOf(withoutStepsWaiting(row), now))]
       : own;
     // Rows carry the head of a combined project; an id from before the combine (a phone, an API client) means that head.
     const shownProject = projectFilter ? store.canonicalProjectId(projectFilter) : null;
@@ -1435,6 +1511,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         .filter((row): row is InboxListRow => row !== undefined),
       ...(merged ? { self: machines.selfId, machines: machines.machinesView() } : {}),
     };
+  };
+
+  /** `GET /api/inbox/activity`'s `from` and `to`: ISO times, `from` first, at most INBOX_ACTIVITY_MAX_DAYS apart. */
+  const activitySpanOf = (url: URL): { fromMs: number; toMs: number } => {
+    const fromMs = Date.parse(url.searchParams.get("from") ?? "");
+    const toMs = Date.parse(url.searchParams.get("to") ?? "");
+    if (!Number.isFinite(fromMs)) throw new InboxError("validation_error", "from: an ISO time.", { field: "from" });
+    if (!Number.isFinite(toMs) || toMs <= fromMs) throw new InboxError("validation_error", "to: an ISO time after from.", { field: "to" });
+    if (toMs - fromMs > INBOX_ACTIVITY_MAX_DAYS * 86_400_000) throw new InboxError("validation_error", `to: at most ${INBOX_ACTIVITY_MAX_DAYS} days after from.`, { field: "to" });
+    return { fromMs, toMs };
   };
 
   const projectFilterOf = (url: URL): string | null => {
@@ -1631,14 +1717,37 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let connecting: Promise<InboxConnectReport> | null = null;
   // The Inbox's stop ends a run still going: its agent CLIs are killed, never left running.
   const connectStop = new AbortController();
-  const connectAgents = (): Promise<InboxConnectReport> => {
-    connecting ??= connectInboxAgents({ dataDir, selfCommand, environment: agentEnvironment, signal: connectStop.signal }).finally(() => {
-      connecting = null;
+  // The note in each connected agent's instructions, written by itself for the agents proven to load it
+  // (approval "inbox-agent-note-auto"; autoAddInboxNotes): at this start, and after each connecting run (an
+  // agent connected by it can take one now). One pass at a time; the agents' model waits for the one going,
+  // so the window reads the notes it wrote.
+  let notesPass: Promise<void> = Promise.resolve();
+  const autoNotes = (): Promise<void> => {
+    notesPass = notesPass.then(async () => {
+      if (connectStop.signal.aborted) return;
+      try {
+        await autoAddInboxNotes({ dataDir, selfCommand, environment: agentEnvironment });
+      } catch {
+        // Tried again at the next start or run.
+      }
     });
+    return notesPass;
+  };
+  void autoNotes();
+  const connectAgents = (): Promise<InboxConnectReport> => {
+    connecting ??= connectInboxAgents({ dataDir, selfCommand, environment: agentEnvironment, signal: connectStop.signal })
+      .then(async (report) => {
+        await autoNotes();
+        return report;
+      })
+      .finally(() => {
+        connecting = null;
+      });
     return connecting;
   };
   /** What the window reads about the agents: the records (paths shown with ~), the last run's report, and whether a run is going. */
   const agentsModel = async () => {
+    await notesPass;
     const file = readInboxAgents(dataDir);
     const records = Object.fromEntries(
       Object.entries(file.agents).map(([id, record]) => [id, { ...record, path: displayPath(record!.path, agentEnvironment) }]),
@@ -1691,6 +1800,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       notes_offered: loadConfig().inboxAgentNotes?.offered === true,
       notes_asked: await notesAsked(options),
       note_text: INBOX_NOTE_BLOCK,
+      notes_auto: unsaidAutoNotes(),
       // The open sessions that poll now, per host, and which need a restart or an update (inbox-restart.ts).
       sessions: live.hostSessions((host) => {
         if (host !== "claude-code") return { installed: host === "pi" && version !== "dev" ? version : null, update_command: null };
@@ -1751,8 +1861,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       } else {
         const change = body.note ? addInboxNote(agent as InboxNoteAgentId, dataDir, agentEnvironment) : removeInboxNote(agent as InboxNoteAgentId, dataDir, agentEnvironment);
         if (!change.ok) problems.push(change.reason);
-        // A yes in Settings answers the note dialog for this agent: removing the note later never asks again.
-        else if (body.note) await markNotesAsked([agent as InboxNoteAgentId], { dataDir, selfCommand, environment: agentEnvironment });
+        // Either way the person decided for this agent: a note turned off stays off (never written again by
+        // itself, never asked again), and removing one turned on later never asks again.
+        else await markNotesAsked([agent as InboxNoteAgentId], { dataDir, selfCommand, environment: agentEnvironment });
       }
     }
     return { ...(await agentsModel()), error: problems.length ? problems.join("; ") : null };
@@ -1953,6 +2064,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return saved;
   };
 
+  /** The name on the person's comments (config.json `displayName`); null when never set. */
+  const displayNameState = (): string | null => {
+    const name = loadConfig().displayName;
+    return typeof name === 'string' && name ? name : null;
+  };
   /**
    * The window's text size (config.json `inboxTextSize`): the body size in px
    * the Inbox's type ramp scales from, 12 to 15; 14 (the window as it has
@@ -1969,6 +2085,61 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     saveConfig({ inboxTextSize: input });
     if (loadConfig().inboxTextSize !== input) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     return input;
+  };
+
+  /**
+   * The reaction tray's saved emoji (config.json `inboxReactions`, approval
+   * "inbox-reaction-tray"): up to INBOX_SAVED_REACTIONS_MAX emoji, each with
+   * the person's name for it (optional), in the order saved. Lenient on read
+   * (an entry that is not one is dropped), strict on write (a `422`).
+   *
+   * A window sends one change (`reaction_change`: add, name, change or remove
+   * an emoji), applied here to the list as it is now, so two windows (a
+   * laptop and a phone) never write over each other's emoji. `reactions`
+   * replaces the whole list. `inboxReactionsRev` counts the saves; every
+   * answer and `event: reactions` carries it, so a window takes a list only
+   * when it is newer than the last it took.
+   */
+  const reactionsState = (): { reactions: InboxReaction[]; rev: number } => {
+    const config = loadConfig();
+    const rev = config.inboxReactionsRev;
+    return { reactions: parseInboxSavedReactions(config.inboxReactions) ?? [], rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0 };
+  };
+  const reactionsWire = (state: { reactions: InboxReaction[]; rev: number }) => ({ reactions: state.reactions, reactions_rev: state.rev });
+
+  /** The list `body` asks for (`reactions`, else `reaction_change` on the list now), or a `422`. */
+  const reactionsWanted = (body: { reactions?: unknown; reaction_change?: unknown }): InboxReaction[] => {
+    if (body.reactions !== undefined) {
+      const input = body.reactions;
+      const list = parseInboxSavedReactions(input);
+      if (!list || !Array.isArray(input) || list.length !== input.length || input.length > INBOX_SAVED_REACTIONS_MAX) {
+        throw new InboxError("validation_error", `reactions: up to ${INBOX_SAVED_REACTIONS_MAX} of { emoji: one emoji, label?: string }, each emoji once.`, { field: "reactions" });
+      }
+      return list;
+    }
+    const change = parseInboxReactionChange(body.reaction_change);
+    if (!change) {
+      throw new InboxError("validation_error", "reaction_change: { op: add | remove, emoji } or { op: name, emoji, label } or { op: change, emoji, to }, each one emoji other than 👍.", { field: "reaction_change" });
+    }
+    const list = applyInboxReactionChange(reactionsState().reactions, change);
+    if (!list) throw new InboxError("validation_error", `reaction_change: your tray already has ${INBOX_SAVED_REACTIONS_MAX} emoji. Remove one to save another.`, { field: "reaction_change" });
+    return list;
+  };
+
+  const saveReactions = (body: { reactions?: unknown; reaction_change?: unknown }, validateOnly = false): { reactions: InboxReaction[]; rev: number } => {
+    const list = reactionsWanted(body);
+    const before = reactionsState();
+    if (validateOnly) return before;
+    // Nothing to change (a name for an emoji another window took out): no write, no event.
+    if (JSON.stringify(before.reactions) === JSON.stringify(list)) return before;
+    const rev = before.rev + 1;
+    saveConfig({ inboxReactions: list, inboxReactionsRev: rev });
+    const saved = reactionsState();
+    if (saved.rev !== rev || JSON.stringify(saved.reactions) !== JSON.stringify(list)) {
+      throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    }
+    for (const listener of reactionsListeners) listener(list, rev);
+    return saved;
   };
 
   /**
@@ -2052,18 +2223,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * the same setting code review reads and writes, so a choice in either holds
    * in the other: `split` or `unified`, null while never chosen.
    */
-  const diffStyleState = (): "split" | "unified" | null => {
-    const value = loadConfig().diffOptions?.diffStyle;
-    return value === "split" || value === "unified" ? value : null;
-  };
+  const diffStyleState = (): "split" | "unified" | null => inboxDiffOptionsOf(loadConfig().diffOptions).diff_style;
+  const diffOptionsState = () => inboxDiffOptionsOf(loadConfig().diffOptions);
 
-  const saveDiffStyle = (input: unknown, validateOnly = false): "split" | "unified" | null => {
-    if (input !== "split" && input !== "unified") throw new InboxError("validation_error", "diff_style: split or unified.", { field: "diff_style" });
-    if (validateOnly) return diffStyleState();
-    // saveConfig merges diffOptions per field, so code review's other diff options stay.
-    saveConfig({ diffOptions: { diffStyle: input } });
-    if (diffStyleState() !== input) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
-    return input;
+  /**
+   * The diff display settings (inbox-diff-options.ts): `diff_options`, any of its fields, and the `diff_style`
+   * alias, each checked. saveConfig merges diffOptions per field, so code review's other diff options stay.
+   */
+  const saveDiffOptions = (body: { diff_options?: unknown; diff_style?: unknown }, validateOnly = false) => {
+    const change = parseInboxDiffOptionsChange(body);
+    if (!change.ok) throw new InboxError("validation_error", change.error, { field: change.field });
+    if (validateOnly) return diffOptionsState();
+    saveConfig({ diffOptions: change.diffOptions });
+    if (!inboxDiffOptionsSaved(change.diffOptions, loadConfig().diffOptions)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    return diffOptionsState();
   };
 
   /**
@@ -2296,6 +2469,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * Bro mode (approval "bro-mode", 2026-11-05): on only when the person turned it on (config.json `inboxBro`). Off or
+   * unset: agent text is byte-equal to what it was before. Not held by `heldSwitch`: the owner offers it to everyone.
+   */
+  const broOn = () => loadConfig().inboxBro === true;
+  const saveBro = (input: unknown, validateOnly = false) => {
+    if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
+      throw new InboxError("validation_error", "bro: { on: boolean }.", { field: "bro" });
+    }
+    const on = (input as { on: boolean }).on;
+    if (validateOnly) return { on: broOn() };
+    const was = broOn();
+    saveConfig({ inboxBro: on });
+    if ((loadConfig().inboxBro === true) !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    if (was !== broOn()) for (const listener of capabilityListeners) listener();
+    return { on: broOn() };
+  };
+
+  /**
    * Code review in the Inbox (approval "inbox-code-review-direction",
    * 2026-11-03): on only when the person turned it on (config.json
    * `inboxCodeReview`). Off or unset, agents get nothing of it (no
@@ -2305,16 +2496,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const codeReviewOn = () => options.codeReview ?? loadConfig().inboxCodeReview === true;
   /**
    * System (approval "system-inbox"): a drawing of each project, shown only while Code review is on. The one
-   * reading every System route and the settings answer use. Settings → Capabilities' switch is step B1; until it
-   * lands, only config.json `inboxSystem` turns it on.
+   * reading every System route and the settings answer use. `systemSwitchOn` is the person's switch alone
+   * (Settings → Capabilities → System, config.json `inboxSystem`), which Settings shows only while Code review is on.
    */
-  const systemOn = () => codeReviewOn() && (options.system ?? loadConfig().inboxSystem === true);
-  /**
-   * Ask AI is on with PLANNOTATOR_INBOX_ASK_AI, or whenever Code review is on
-   * (approval "shape-in-code-review", q-668227a8: Code review brings Ask, and
-   * so Show me). Read on every request, as the switch is.
-   */
-  const askOnNow = () => askOn || codeReviewOn();
+  const system = systemSwitch({
+    codeReviewOn,
+    saved: () => loadConfig().inboxSystem === true,
+    fixed: options.system,
+    save: (on) => saveConfig({ inboxSystem: on }),
+    // Every window follows at once (its Settings switch, the Reviews System button).
+    changed: () => {
+      for (const listener of capabilityListeners) listener();
+    },
+  });
+  const systemOn = system.on;
+  /** The switch's state for the window: present only while Code review is on (the row shows only then). */
+  const systemWire = system.wire;
+  /** The open PRs' files by head commit, for "Open PRs that change this" (read again only for a PR that moved). */
+  const systemFiles = systemFilesCache();
   const saveCodeReview = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
       throw new InboxError("validation_error", "code_review: { on: boolean }.", { field: "code_review" });
@@ -2336,6 +2535,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * group, and no agent text names it. Read on every request.
    */
   const shapeOn = () => options.shape ?? shapeSwitchOn();
+  /** The boards themselves: Shape on, or Code review on, whose Show me makes a board (approval "code-review-launch-build", item 1). */
+  const boardsOn = () => shapeOn() || codeReviewOn();
   const saveShape = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
       throw new InboxError("validation_error", "shape: { on: boolean }.", { field: "shape" });
@@ -2360,6 +2561,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const boardUndecided = () => INBOX_CARD_ACTION_ON && options.board === undefined && loadConfig().inboxBoard === undefined;
   /** The Checklist can be revealed only while config.json `inboxSteps` is unset, as the Board. */
   const stepsUndecided = () => options.steps === undefined && loadConfig().inboxSteps === undefined;
+  /** Bro mode's offer, while config.json `inboxBro` is unset (the person never decided). */
+  const broUndecided = () => loadConfig().inboxBro === undefined;
   /**
    * Code review's day-0 offer (approval "code-review-offer-card", 2026-11-06; its slot: `CODE_REVIEW_OFFER` in
    * shared/inbox/reveals.ts): only while config.json `inboxCodeReview` is unset (nobody decided; `false` is the
@@ -2371,7 +2574,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * set its switch). The claim stamps `inboxReveals[id]` with the page's key and turns nothing on; its dialog's "Turn it
    * on" writes the switch. A registered offer (Bro mode, List view) adds its own here, and its id to `INBOX_REVEALS`.
    */
-  const lineOffers: Partial<Record<RevealId, () => boolean>> = { code_review: codeReviewUndecided, board: boardUndecided, steps: stepsUndecided };
+  /**
+   * The "Star the repo" ask (approval "star-ask"; packages/shared/star-ask.ts): open while no surface showed or answered
+   * it (config.json `starAsk`, shared with plan review, code review and annotate), in a release build. It stands aside
+   * from the line (reveals.ts `aside`): the line gives it its day and a free moment, never a turn; its claim
+   * (`claimStarReveal`, inbox-star-ask.ts) runs the already-starred check before any stamp and stamps nothing of the line.
+   */
+  const starUndecided = () => {
+    if (!starAskEnabled()) return false;
+    const config = loadConfig();
+    return starAskOpen(readStarAskRecord(config), (config as { starAsk?: unknown }).starAsk);
+  };
+  const starAsk = createStarAsk({ store: configStarAskStore, run: runGh, enabled: () => starAskEnabled(), returning: () => true });
+  const lineOffers: Partial<Record<RevealId, () => boolean>> = {
+    code_review: codeReviewUndecided,
+    board: boardUndecided,
+    steps: stepsUndecided,
+    // Bro mode (approval "bro-mode"): offered while config.json `inboxBro` is unset; its need (heavy use) is the queue's.
+    bro: broUndecided,
+    star: starUndecided,
+    // List view's choice (approval "inbox-list-view-dialog"): the view is each browser's own (packages/inbox/listView.ts),
+    // so the Inbox never sees it decided; the page holds it back on Simple list (`holds`, `mayClaim`).
+    list_view: () => true,
+  };
   type LineOfferSaved = { shownAt?: string; key?: string };
   const lineOfferSaved = (id: RevealId): LineOfferSaved | undefined => (loadConfig().inboxReveals as Record<string, LineOfferSaved | undefined> | undefined)?.[id];
   /** The agent messages the person has looked at (up to each thread's `person_seen_seq`): heavy use reads their dates. */
@@ -2482,6 +2707,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return lineOfferSaved(id)?.shownAt === at;
   };
   /**
+   * The "Star the repo" ask's claim (inbox-star-ask.ts `claimInboxStar`): only while the line is free (checked before
+   * the already-starred check and again after it), then one save stamps `inboxReveals.star` and config.json `starAsk`,
+   * nothing of the line. Starred already: `starAsk.answer` "already", nothing shown. `key`: the same page's retry after
+   * a lost answer is shown it again, while it is still unanswered.
+   */
+  const claimStarReveal = (owner: boolean, key: string | null, load: string | null): Promise<StarAskClaim> =>
+    claimInboxStar(
+      {
+        service: starAsk,
+        release: snoozeIntroRelease,
+        mayClaim: () => {
+          const now = new Date();
+          return revealMayClaim("star", revealState(now, load), now);
+        },
+      },
+      owner,
+      key,
+    );
+  /**
    * The agent note (approval "inbox-one-time-dialogs": setup): never on the load after a dialog, never on a day that had
    * one; it stamps the day, not the spacing. Once for each agent (`agents`, the ones it would ask about): a note left
    * unanswered is not shown again for the same agents, so it never takes another day (`revealAgentNoteNew`). A dev
@@ -2507,6 +2751,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return {
       next,
       ahead: owner && snoozeIntroRelease ? revealAhead(state, now) : [],
+      // The star ask (reveals.ts `aside`): armed beside `next` while the line is free; it moves no one.
+      aside: owner && snoozeIntroRelease ? revealAsideNow(state, now) : [],
       setup: via === "local" && revealLineFree("setup", state, now),
       line: snoozeIntroRelease,
     };
@@ -2614,25 +2860,33 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(guest ? {} : { cookie_host: cookieHostWire() }),
     /** Plannotator's appearance (config.json `theme`), shared with plan review; null when never chosen. */
     theme: themeState(),
+    /** The name on this person's comments (config.json `displayName`), shared with plan and code review; null when never set. Not for a guest. */
+    ...(guest ? {} : { display_name: displayNameState() }),
     /** The window's text size in px (config.json `inboxTextSize`), 14 unless chosen. */
     text_size: textSizeState(),
+    /** The reaction tray's saved emoji (config.json `inboxReactions`): up to 5, in the order saved; [] until one is saved. `reactions_rev` counts the saves. */
+    ...reactionsWire(reactionsState()),
     /** How the list's rows look (config.json `inboxRows`): the options that are on, null until first saved; `rows_rev` counts the saves. */
     ...rowsWire(rowsState()),
-    /** The guided review's diff layout (config.json `diffOptions.diffStyle`), shared with code review; null when never chosen. */
+    /** The guided review's diff layout (config.json `diffOptions.diffStyle`), shared with code review; null when never chosen. Also `diff_options.diff_style`. */
     diff_style: diffStyleState(),
+    /** How diffs are drawn (config.json `diffOptions`, inbox-diff-options.ts), shared with code review; each field null when never chosen. */
+    diff_options: diffOptionsState(),
     /** Experimental features, each off unless switched on (Settings → Capabilities → Experimental). */
     experimental: experimentalState(),
     /** The Board (config.json `inboxBoard`): off unless the person turned it on. */
     board: { on: boardOn() },
-    /** Launch (config.json `inboxLaunch`): present only while it is on; Settings → Agents' full-permissions switch. */
-    ...(launch.enabled() ? { launch: launch.settingsState() } : {}),
+    /** Launch (config.json `inboxLaunch`, on unless `enabled` is false; off by default on Windows): Settings → Agents' "Start agents from New message" switch, and while on its full-permissions switch and scratch root. Never for a tailnet guest, whom `/launch/settings` refuses. */
+    ...(guest ? {} : { launch: launch.settingsState() }),
     /** Thread steps (config.json `inboxSteps`): off unless the person turned it on. */
     steps: { on: stepsOn() },
+    /** Bro mode (config.json `inboxBro`): off unless the person turned it on. */
+    bro: { on: broOn() },
     /** Code review (config.json `inboxCodeReview`) and Shape (`inboxShape`): off unless the person turned them on. Held until the next big release: absent while off. */
     ...heldSwitch("code_review", codeReviewOn()),
     ...heldSwitch("shape", shapeOn()),
-    /** System (config.json `inboxSystem`, only while Code review is on): absent while off. */
-    ...(systemOn() ? { system: { on: true } } : {}),
+    /** System (config.json `inboxSystem`): its switch, present only while Code review is on (Settings shows the row only then). */
+    ...systemWire(),
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder (editable by the owner) and the plan, review and annotate prompts. */
@@ -2642,8 +2896,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     store_dir: store.dir,
     /** Whether this Inbox serves phones; the window shows the Phones block only then. */
     phones: phonesOn,
-    /** Ask AI (PLANNOTATOR_INBOX_ASK_AI, or Code review on): absent while it is off, and for a tailnet guest, who may not use it. */
-    ...(askOnNow() && !guest ? { ask_ai: true } : {}),
+    /** Ask AI, on in every Inbox: always true, kept for older windows that read it; absent for a tailnet guest, who may not use it. */
+    ...(!guest ? { ask_ai: true } : {}),
     /** Whether `cswap` is on this computer, so the sidebar's Usage row is there before the first read. Looks on PATH, runs nothing. Never for a tailnet guest. */
     cswap: !guest && accounts.installed(),
   });
@@ -2784,16 +3038,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onRows = (rows: readonly InboxRowsOption[], rev: number) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
+        // The tray's saved emoji changed (any window's, a phone's too): every window takes the list at once. Windows only.
+        const onReactions = (reactions: readonly InboxReaction[], rev: number) => send(`event: reactions\ndata: ${JSON.stringify({ reactions, rev })}\n\n`);
+        if (windowId) reactionsListeners.add(onReactions);
         // The steps switch was saved (any window's): every window reads its settings and the open thread's steps again. Windows only.
         // Shape's boards changed (a version, a note, a delivery, seen): `event: shapes` on this one stream, so a window
-        // opens no second connection (sharedEvents.ts holds every tab to one). Only while Shape is on, and only for the
+        // opens no second connection (sharedEvents.ts holds every tab to one). Only while boards are on, and only for the
         // owner's window (here, or the owner over the tailnet): a tailnet guest, refused the routes, hears no board ids
         // and starts no polling. Off, nothing polls.
         const shapesFor = ownerOrLocal(req, via);
         let stopShapes: (() => void) | null = null;
         const syncShapes = () => {
-          if (windowId && shapesFor && shapeOn() && !stopShapes) stopShapes = shapes.watch.subscribe((ids) => send(shapeEventFrame(ids)));
-          else if (!shapeOn() && stopShapes) {
+          if (windowId && shapesFor && boardsOn() && !stopShapes) stopShapes = shapes.watch.subscribe((ids) => send(shapeEventFrame(ids)));
+          else if (!boardsOn() && stopShapes) {
             stopShapes();
             stopShapes = null;
           }
@@ -2801,7 +3058,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         syncShapes();
         const onCapabilities = (changed?: "code_review" | "shape") => {
           syncShapes();
-          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape") };
+          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire() };
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
         };
         if (windowId) capabilityListeners.add(onCapabilities);
@@ -2841,6 +3098,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           pinListeners.delete(onPins);
           snoozeListeners.delete(onSnoozes);
           rowsListeners.delete(onRows);
+          reactionsListeners.delete(onReactions);
           capabilityListeners.delete(onCapabilities);
           stopShapes?.();
           stopShapes = null;
@@ -3046,8 +3304,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       ...(reply.deliver_now_at && sendNow ? { now: true } : {}),
       // A thread the person started with no name yet, handed to a session that may name it: the wake asks it to.
       ...(!reply.ack_of && store.canNameThread(reply.thread_id, reply.to?.session ?? recipientOf(reply)) ? { name_thread: true } : {}),
-      // The person's 👍 Looks good (amended 2026-10-16): the wake is the one ack line.
-      ...(reply.ack_of ? { ack_of: reply.ack_of } : {}),
+      // The person's 👍 Looks good (amended 2026-10-16): the wake is the one ack line,
+      // with the tray reaction the ack had when its window closed (approval "inbox-reaction-tray").
+      ...(reply.ack_of ? { ack_of: reply.ack_of, ...(reply.ack_reaction ? { ack_reaction: reply.ack_reaction } : {}) } : {}),
       // The person's Re-ask (approval "inbox-reask"): the wake takes INBOX_REASK_INSTRUCTION.
       ...((reply.reask?.length ?? 0) > 0 ? { reask: true } : {}),
       // What the note lists (#2059): the wake names action items only when it lists some.
@@ -3088,10 +3347,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     };
     // Ask AI: said on every answer until the client connects, so an answer that no one read loses nothing.
     const askWaits = () => (ask.waits(session) ? { [INBOX_ASK_WAITS_FIELD]: true } : {});
+    // Auto reload (owner approval "cc-auto-reload"): a Claude Code connection that reloads itself is told,
+    // on every answer, the version a /reload-plugins loads while the session is outdated (fix `restart`).
+    const reloadOffer = () => live.reloadAnswerFor(session, body);
     const now = commands();
     if (now.length > 0 || waitMs === 0 || ask.waits(session)) {
       answered();
-      return json({ commands: now, ...askWaits() });
+      return json({ commands: now, ...askWaits(), ...reloadOffer() });
     }
     return new Promise<Response>((resolve) => {
       let done = false;
@@ -3103,7 +3365,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         stopAskWaits();
         req.signal.removeEventListener("abort", finish);
         answered();
-        resolve(json({ commands: commands(), ...askWaits() }));
+        resolve(json({ commands: commands(), ...askWaits(), ...reloadOffer() }));
       };
       const timer = setTimeout(finish, waitMs);
       const unsubscribe = store.subscribe((line) => {
@@ -3269,7 +3531,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session)],
   });
 
-  // Shape (approval "shape-inbox-placement"): the boards' routes and event feed, mounted only while Shape is on.
+  // Shape (approval "shape-inbox-placement"): the boards' routes and event feed, mounted only while boards are on.
   // The drawing session's state, for the board's Ask footer: its own session, else the thread's owner.
   const shapes = createBunShapeRoutes({
     dataDir,
@@ -3402,7 +3664,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   /** A tailnet login the allow list let in that is not this computer's owner: never starts, stops or deletes an agent (as Ask AI's own check below). */
   const isGuest = (req: Request, via: string) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers);
-  // Launch: compose starts Claude Code in a project, behind `inboxLaunch.enabled` (packages/server/inbox-launch.ts).
+  // Launch: compose starts Claude Code or Pi in a project, behind `inboxLaunch.enabled`, on unless false (packages/server/inbox-launch.ts).
   // A start gets the person's login-shell env (read for that start only); a sandboxed test Inbox reads no shell and finds no CLI.
   const launch = createInboxLaunch({
     store,
@@ -3412,15 +3674,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // The sandbox's own home: Trust folder writes to `<home>/.claude.json`, so a test never reaches the real one.
     homeDir: process.env.PLANNOTATOR_TEST_SANDBOX ? join(dataDir, "agents-home") : homedir(),
     platform: process.platform,
+    // A sandboxed test Inbox finds agents only on the PATH its test names (PLANNOTATOR_TEST_LAUNCH_PATH: the fakes), never the person's.
     loginEnv: process.env.PLANNOTATOR_TEST_SANDBOX
-      ? async () => ({ HOME: join(dataDir, "agents-home"), PATH: "" })
+      ? async () => ({ HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" })
       : createLoginEnv({
           run: (argv, o) => createAgentEnvironmentFor({ platform: process.platform, homeDir: homedir(), env: o.env }).run(argv, { timeoutMs: o.timeoutMs }),
           env: () => process.env,
           log: (line) => process.stderr.write(`${line}\n`),
         }),
-    ownEnv: () => (process.env.PLANNOTATOR_TEST_SANDBOX ? { HOME: join(dataDir, "agents-home"), PATH: "" } : process.env),
+    ownEnv: () => (process.env.PLANNOTATOR_TEST_SANDBOX ? { HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" } : process.env),
     installDirs: process.env.PLANNOTATOR_TEST_SANDBOX ? [] : [join(homedir(), ".local", "bin"), join(homedir(), ".claude", "local")],
+    // Read once: the env this Inbox started with. Over SSH, macOS keeps Claude Code's login locked (remote launch);
+    // that is the Keychain's rule, so only on a Mac.
+    startedOverSsh: process.platform === "darwin" && !!process.env.SSH_CONNECTION,
+    machineName: () => phones?.machineDoor.computerName() ?? null,
     displayFolder: (path) => displayPath(path, agentEnvironment) ?? path,
     readBody: (req) => readBody(req),
     json,
@@ -3434,8 +3701,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     hosts: options.launchHosts,
     isGuest,
   });
-  // The login shell read ahead, off any request's path (launch on only).
-  launch.warm();
+  // No login-shell read at start: the launch module reads it the first time New message asks (`warmLogin`).
 
   // Compose: a new thread the person starts with a live agent, drafts and uploads (packages/server/inbox-compose.ts).
   const compose = createInboxCompose({
@@ -3446,6 +3712,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     readBody: (req) => readBody(req),
     json,
     boardOn,
+    onReviewStart: (threadId, review, where) => {
+      const start = codeReviewOn() ? inboxReviewStartOf(review, where) : null;
+      if (!start) return;
+      // Whose PR it is comes from what the Inbox read itself (the list, or the link's read just before Start), never the window's word.
+      const read = start.pull && (pulls.find(start.pull.key) ?? linkReads.get(start.pull.key));
+      const started = start.pull ? { ...start, pull: { ...start.pull, mine: read?.mine === true } } : start;
+      pullOwners.start(threadId, started);
+      // A link's PR belongs to this thread from now on, on the list or not: only its own state is read, while its row is listed.
+      if (started.pull) pullOwners.set([started.pull.key], threadId, { ask: started.ask, theirs: !started.pull.mine });
+    },
     launch,
     isGuest,
     machine: () => machines.selfId,
@@ -3466,8 +3742,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   // Ask AI: the conversation a thread keeps with its agent (packages/server/inbox-ask.ts).
   const ask = createInboxAsk({
-    on: askOnNow,
     codeReviewOn,
+    boardsOn,
+    // The boards of a thread, for naming the board each Show me made (`showMeShapes`).
+    boardsOf: (threadId) =>
+      shapes.store
+        .list({ state: "all" })
+        .filter((shape) => shape.thread === threadId)
+        .map((shape) => ({ id: shape.id, versions: shapes.store.versionStamps(shape.id) })),
+    // A Show me's box picture: in the board's own folder, as a box note's picture is.
+    keepPicture: async (board, picture) => ((await unlockedShape(shapes.store, board)) ? shapes.store.keepShowMePicture(board, picture) : null),
     // Show me's review: its thread, title and the files of its diff (inbox-guides.ts reads the stored snapshot).
     reviewOf: (messageId) => {
       const message = store.message(messageId);
@@ -3489,20 +3773,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     hostOf: (session) => live.askHostOf(session),
     ...(options.askTimes ? { times: options.askTimes } : {}),
   });
-  // Show me's drawings (packages/server/inbox-review-drawings.ts): the agent's pictures for a review, beside it.
-  const reviewDrawings = createInboxReviewDrawings({
-    store,
-    serverSession,
-    json,
-    readBody: (req) => readBody(req),
-    codeReviewOn,
-    isGuest: (req, via) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers),
-    onAskChange: (threadId) => {
-      for (const listener of askListeners) listener(threadId);
-    },
-  });
-  // A deleted review takes its drawings along.
-  store.onDeletion(() => pruneInboxReviewDrawings(store.dir, (messageId) => store.message(messageId) !== null));
   // Pins: threads pinned to the window's sidebar (packages/server/inbox-pins.ts). A deletion's prune tells the windows too.
   const pins = createInboxPins({ store, serverSession, readBody: (req) => readBody(req), json });
   // Snoozes: threads out of the list until a time (packages/server/inbox-snooze.ts).
@@ -3762,12 +4032,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A launched session's permission hook (Claude Code's: inbox-launch-claude-permission.ts): guarded like the bridge below
     // (this machine, no browser, the Inbox token), then the launch's own key. Never a window route.
     const isPermissionHook = /^\/api\/inbox\/launch\/[^/]+\/permission$/.test(path);
-    // Ask AI's client (inbox-ask-live.ts). With the setting off, the unknown route, as if it did not exist.
-    const askClient = askOnNow() && path.startsWith(INBOX_ASK_BRIDGE_PREFIX);
-    // `plannotator review draw` / `drawings` (inbox-review-drawings.ts): a POST, or a read that carries the token. The window reads below.
-    // Code review off: not a route at all, as before Show me.
-    const drawingsClient = INBOX_REVIEW_DRAWINGS_PATH.test(path) && (req.method !== "GET" || req.headers.has("authorization")) && codeReviewOn();
-    if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/") || isPermissionHook || askClient || drawingsClient) {
+    // Ask AI's client (inbox-ask-live.ts).
+    const askClient = path.startsWith(INBOX_ASK_BRIDGE_PREFIX);
+    if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/") || isPermissionHook || askClient) {
       // A tailnet peer can claim a loopback Host (serve passes it through, and
       // the tailnet HTTPS port is this port), so the listener decides.
       if (via === "tailnet") return localOnly();
@@ -3789,13 +4056,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (askClient) {
         try {
           return await ask.hostRoute(req, url);
-        } catch (error) {
-          return errorResponse(error);
-        }
-      }
-      if (drawingsClient) {
-        try {
-          return (await reviewDrawings.cliRoute(req, path)) ?? json({ error: "Not found", code: "not_found" }, 404);
         } catch (error) {
           return errorResponse(error);
         }
@@ -3879,7 +4139,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (tourAnswer) return tourAnswer;
 
     try {
-      // Ask AI's session and query routes. Off, and on any other server path, they do not exist here.
+      // Ask AI's session and query routes. On any other server path, they do not exist here.
       if (path.startsWith("/api/ai/")) {
         const answer = await ask.aiRoute(req, path, via);
         if (answer) return answer;
@@ -3927,6 +4187,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ serverSession, cursor: store.cursor(), decisions });
       }
       if (path === "/api/inbox/projects" && req.method === "GET") return json({ serverSession, cursor: store.cursor(), projects: projectFolders() });
+      // Settings → Activity: each thread's messages by hour over `from`..`to` (ISO times; the window sends its local
+      // midnight so hours line up with its clock), one project (`project=prj_…`, its combined ones too) or all.
+      // Thread names go only into this answer: nothing is written or logged.
+      if (path === "/api/inbox/activity") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        const span = activitySpanOf(url);
+        return json(perfPhase("activity", () => store.activity({ ...span, projectId: projectFilterOf(url) })));
+      }
       // Tidy: who it would ask (GET) and asking them (POST).
       const tidied = await tidy.route(req, url);
       if (tidied) return tidied;
@@ -3948,7 +4219,28 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // projects' repositories, read with this computer's gh / glab, and the agent thread each is tied to. Only
       // while Code review is on (refused before anything runs otherwise), only the owner's window (this computer's,
       // or the owner's over the tailnet), never on the device door (not on its allowlist), never another site.
-      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar") {
+      // PR risk ranking (inbox-pull-risk.ts): the rules, the agent and the judgments; the same guards as the list, so a
+      // guest or a web page can neither read the rules nor change them. Inbox-only (Bun).
+      if (path === "/api/inbox/pulls/risk" || path === "/api/inbox/pulls/risk/models") {
+        if (req.method !== "GET" && !(req.method === "POST" && path === "/api/inbox/pulls/risk")) return json({ error: "Use GET or POST." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        if (path === "/api/inbox/pulls/risk/models") {
+          const provider = url.searchParams.get("provider") ?? "";
+          if (!pullRisk.answer().agents.some((agent) => agent.id === provider)) throw new InboxError("validation_error", "provider: an agent from the list.", { field: "provider" });
+          return json({ serverSession, ...(await pullRisk.models(provider)) });
+        }
+        if (req.method === "POST") {
+          const body = await readBody(req);
+          if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+          pullRisk.save(body);
+        }
+        return json({ serverSession, ...pullRisk.answer() });
+      }
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!ownerOrLocal(req, via)) return localOnly();
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
@@ -3975,6 +4267,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             },
           });
         }
+        // The rail's All files: the PR's repository at a head this Inbox read for it, and one file of it, answered as the
+        // review app's `/api/repo-files` and `/api/repo-file` (its tree and file view read them unchanged). Read only.
+        if (path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file") {
+          const key = url.searchParams.get("key") ?? "";
+          if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
+          const result = path === "/api/inbox/pulls/repo-files" ? await pulls.repoFiles(key, url.searchParams) : await pulls.repoFile(key, url.searchParams);
+          return json(result.body, result.status);
+        }
         if (path === "/api/inbox/pulls/diff") {
           const key = url.searchParams.get("key") ?? "";
           const scope = url.searchParams.get("scope") ?? "layer";
@@ -3997,7 +4297,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             const [oldId, newId] = [url.searchParams.get("old"), url.searchParams.get("new")];
             const ids = oldId && newId && /^[0-9a-f]{7,64}$/.test(oldId) && /^[0-9a-f]{7,64}$/.test(newId) ? { oldId, newId } : null;
             // Only a file the diff changes: the route is for that diff's arrows, not for any file whose blob id one knows.
-            const changed = ids ? parseDiffToFiles((await pulls.diff(key, scope)).patch).find((file) => file.path === filePath) : null;
+            // Parsed once per diff (`changedFileOf`): the PR page asks for every changed file as it nears the viewport.
+            const changed = ids ? changedFileOf(await pulls.diff(key, scope), filePath) : null;
             if (ids && !changed) return json({ serverSession, oldContent: null, newContent: null });
             return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, ids ? await pullRoots(key) : [], ids, changed?.oldPath)) });
           } catch (cause) {
@@ -4008,9 +4309,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const { projectsByRepo, wanted } = await pullProjects();
         // `others=1`: the person has the Others view open, so Others is read as often as the list.
         const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1", others: url.searchParams.get("others") === "1" });
+        pullRisk.assess(listed.pulls);
         // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
         pullAvatars.allowOnly(listed.hosts.map(({ host }) => ({ host, avatars: pulls.avatarUrls(host) })));
-        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwners.all());
+        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwnersNow());
         // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
         const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};
         return json({ serverSession, ...listed, links, projects: Object.fromEntries(projectsByRepo), cards });
@@ -4026,17 +4328,65 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
-        const { projectsByRepo, wanted } = await pullProjects();
-        const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1" });
-        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwners.all());
+        // `cached`: the store changed, not the forge: the rows again from what the forges last answered.
+        // Never a forge call: nothing read yet answers `cold`, and the next real read brings the rows.
+        const cached = url.searchParams.get("cached") === "1";
+        if (cached && !lastReviewsRead) return json({ serverSession, cold: true });
+        const last = cached ? lastReviewsRead : null;
+        const { projectsByRepo, wanted } = last ?? (await pullProjects());
+        const listed = last?.listed ?? (await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1", others: url.searchParams.get("others") === "1" }));
+        lastReviewsRead = { projectsByRepo, wanted, listed };
+        pullRisk.assess(listed.pulls);
+        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwnersNow());
         const stacks = inboxPullStacks(listed.pulls);
         const pullReasons = new Map<string, InboxPullReason>(inboxPullItems(stacks, (pull) => !!links[pull.key]).map((item) => [item.stack.id, item.reason]));
         const threads = reviewIndex.threads();
         const changes = inboxReviewLandingChanges({ threads, pulls: listed.pulls, links, landed: pullOwners.landings() });
         pullOwners.land(changes.record, changes.forget);
-        pullStates.look({ threads, pulls: listed.pulls, hosts: listed.hosts, owners: pullOwners.all(), landed: pullOwners.landings() });
-        const rows = inboxReviewRows({ threads, stacks, links, pulls: listed.pulls, pullReasons, landed: pullOwners.landings(), owners: pullOwners.all() });
+        if (!cached) pullStates.look({ threads, pulls: listed.pulls, hosts: listed.hosts, owners: pullOwners.all(), landed: pullOwners.landings() });
+        // A New review's row shows until its thread is archived or gone.
+        const started = new Map<string, InboxReviewStart>();
+        for (const [threadId, start] of pullOwners.started()) {
+          const row = store.listRow(threadId);
+          if (row && !inboxRowArchived(row)) started.set(threadId, { ...start, name: row.thread_name ?? row.subject });
+        }
+        const rows = inboxReviewRows({ threads, stacks, links, pulls: listed.pulls, pullReasons, landed: pullOwners.landings(), owners: pullOwners.all(), posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true });
         return json({ serverSession, fetched_at: listed.fetched_at, hosts: listed.hosts, rows, projects: Object.fromEntries(projectsByRepo) });
+      }
+      // New review's Pull request link: what a pasted link is. One read of that one PR, unless the list already has it.
+      if (path === "/api/inbox/reviews/link") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        const link = inboxReviewLinkOf(url.searchParams.get("ref") ?? "");
+        if (!link) return json({ serverSession, ok: false, reason: "not_a_link" });
+        if ("unsupported" in link) return json({ serverSession, ok: false, reason: link.unsupported });
+        const { ref } = link;
+        const cli = ref.platform === "gitlab" ? ("glab" as const) : ("gh" as const);
+        const pull = pulls.find(ref.key) ?? (await readUnlistedPull(ref));
+        if (pull) linkReads.set(ref.key, pull);
+        if (!pull) return json({ serverSession, ok: false, reason: "unreadable", cli, host: ref.host });
+        const { projectsByRepo } = await pullProjects();
+        const owner = pullOwners.get(ref.key);
+        const row = owner ? store.listRow(owner.thread_id) : null;
+        const inReview = owner && row && !inboxRowArchived(row) && threadAgent(pullLinkStore, owner.thread_id)?.ended !== true;
+        return json({ serverSession, ok: true, cli, pull, projects: projectsByRepo.get(`${ref.host}/${ref.repo}`.toLowerCase()) ?? [], thread_id: inReview ? owner.thread_id : null });
+      }
+      // New review's change summary: what `plannotator review` would show for a project's local changes. Same guards.
+      if (path === "/api/inbox/reviews/changes") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        const project = store.project(url.searchParams.get("project") ?? "");
+        const changes = url.searchParams.get("changes");
+        if (!project || (changes !== "uncommitted" && changes !== "last" && changes !== "branch")) return json({ error: "A project and which changes.", code: "validation_error" }, 400);
+        return json(await readInboxReviewChanges(project.root, changes));
       }
       // System's project setup (inbox-system-setup.ts): the projects found on this Mac with a git remote, and the
       // save of one project's setup.json. Owner only, same origin, and only while System is on.
@@ -4050,6 +4400,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           ownerOrLocal: (request) => ownerOrLocal(request, via),
           systemOn,
           readBody,
+          json,
+        });
+      }
+      // System's reads (inbox-system.ts): the projects with their drawing's state, one project's drawing, and the open
+      // PRs whose files touch it (the pulls list's own read and cached patches). Same guards as the setup route.
+      if ((SYSTEM_READ_PATHS as readonly string[]).includes(path)) {
+        return await systemReadRoute(req, path, {
+          dataDir,
+          repoOf: async (root: string) => repos.get(root) ?? (await repos.refresh(root)),
+          store,
+          serverSession,
+          ownerOrLocal: (request) => ownerOrLocal(request, via),
+          systemOn,
+          listPulls: async () => (await pulls.list((await pullProjects()).wanted)).pulls,
+          patchOf: async (key: string) => (await pulls.diff(key, "layer")).patch,
+          filesCache: systemFiles,
           json,
         });
       }
@@ -4130,7 +4496,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const fileLevelSent = Array.isArray(body.fileLevelComments) ? body.fileLevelComments.length : 0;
         if (fileLevelSent !== fileLevelComments.length || fileLevelSent > PULL_REVIEW_COMMENTS_MAX) throw new InboxError("validation_error", `fileLevelComments: at most ${PULL_REVIEW_COMMENTS_MAX} comments, each { path, body }.`, { field: "fileLevelComments" });
         if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
-        const pull = pulls.find(key);
+        // A PR a thread owns but no list has (reached by its link): its own read says what the list would. Any other stays unknown.
+        const unlisted = !pulls.find(key) && pullOwners.get(key) ? inboxPullRefOfKey(key) : null;
+        const pull = pulls.find(key) ?? (unlisted ? await readUnlistedPull(unlisted) : null);
+        if (!pull && unlisted) return json({ error: "Couldn't check that link. Try again.", code: "pull_unknown" }, 404);
         if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
         // Pinned to the commit the person read: the list's head, or the head of the patch they read (the list can be a
@@ -4163,6 +4532,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           const submission = await submitForgeReview(options.prRuntime ?? prCommandRuntime, ref, headSha, action, text, fileComments, fileLevelComments);
           if (submission.status === "complete") {
             postedReviews.add(fingerprint);
+            pullOwners.markPosted(pull.key, headSha);
             while (postedReviews.size > PULL_REVIEW_POSTED_MAX) postedReviews.delete(postedReviews.values().next().value!);
           }
           // The list reads the forge again on its next look: the review moved the PR's state there.
@@ -4290,11 +4660,44 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (path === "/api/inbox/agents") return json(await saveAgent(body));
         if (path === "/api/inbox/agents/notes") return json(await answerNotes(body));
         if (path === "/api/inbox/agents/seen") {
+          // The window's line said the last run's news and the notes written by themselves: only what it showed
+          // (`report_at`: the report's time, null for none; `notes`), so news that came after its read is said next
+          // time. A window without these fields (older) says all.
+          const shown = seenFields(body);
+          if (!shown) return json({ error: "notes must be a list of { agent, path }, report_at a string or null", code: "invalid" }, 422);
           const file = readInboxAgents(dataDir);
-          if (file.last_report && !file.last_report.seen) writeInboxAgents(dataDir, { ...file, last_report: { ...file.last_report, seen: true } });
+          const report = file.last_report;
+          if (report && !report.seen && (shown.reportAt === undefined || shown.reportAt === report.at)) {
+            writeInboxAgents(dataDir, { ...file, last_report: { ...report, seen: true } });
+          }
+          markAutoNotesSaid(shown.notes);
           return json(await agentsModel());
         }
         return json({ error: "Not found", code: "not_found" }, 404);
+      }
+      // Settings -> Decision data's numbers, asked for only while that section is shown. Read only, nothing kept: the
+      // calculation hands the server back every few ms and stops when the reader leaves (decision-data.ts).
+      // Never on the device door (not on its allowlist).
+      if (path === "/api/inbox/decision-data") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        const days = Number(url.searchParams.get("days") ?? "0");
+        const tz = Number(url.searchParams.get("tz") ?? "0");
+        const now = Date.now();
+        const since = Number.isFinite(days) && days > 0 ? now - days * 86_400_000 : null;
+        const input = { ...store.decisionDataInput(), deleted: await readDecisionLines(store.dir) };
+        try {
+          if (url.searchParams.get("format") === "csv") {
+            const csv = await decisionDataCsv(input, since, req.signal);
+            return new Response(csv, { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="plannotator-decisions.csv"' } });
+          }
+          return json(await decisionDataSummary(input, { since, until: now, tz_offset_min: Number.isFinite(tz) ? Math.max(-840, Math.min(840, tz)) : 0, now }, req.signal));
+        } catch (error) {
+          if (error instanceof DecisionDataAborted) return new Response(null, { status: 499 });
+          throw error;
+        }
       }
       // Settings → Storage's sizes walk every file in the store, so only that panel asks for them, when it is shown.
       if (path === "/api/inbox/settings/storage") {
@@ -4320,30 +4723,39 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.tailscale === undefined &&
           body.theme === undefined &&
           body.text_size === undefined &&
+          body.reactions === undefined &&
+          body.reaction_change === undefined &&
           body.rows === undefined &&
           body.diff_style === undefined &&
+          body.diff_options === undefined &&
           body.experimental === undefined &&
           body.tour === undefined &&
           body.prompts === undefined &&
           body.board === undefined &&
           body.steps === undefined &&
+          body.bro === undefined &&
           body.code_review === undefined &&
           body.shape === undefined &&
+          body.system === undefined &&
           body.cookie_host === undefined &&
           body.voice === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, rows, diff_style, experimental, tour, prompts, board, steps, code_review, shape, voice, update_check, auto_update or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, reactions, reaction_change, rows, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, code_review, shape, system, voice, update_check, auto_update or cookie_host is required.");
         }
         const owner = ownerOrLocal(req, via);
         // The Board changes what agents on this computer are offered (the card tool): the owner's to change.
         if (body.board !== undefined && !owner) return localOnly();
         // Steps too (the steps tool, the wake and compaction lines): the owner's to change.
         if (body.steps !== undefined && !owner) return localOnly();
+        // Bro mode too (a line in what every agent here reads): the owner's to change.
+        if (body.bro !== undefined && !owner) return localOnly();
         // Code review too (submit_guide's `review` field, the review skills): the owner's to change.
         if (body.code_review !== undefined && !owner) return localOnly();
         // Shape too (the shape skill, the routes): the owner's to change.
         if (body.shape !== undefined && !owner) return localOnly();
+        // System too (the drawings, and from B9 the jobs that keep them current); a malformed value throws here.
+        if (system.check(body, owner) === "local_only") return localOnly();
         if (body.voice !== undefined && !owner) throw voiceOwnerOnly();
         // Updating changes this computer: the owner's to change.
         if (updateSwitches && !owner) return localOnly();
@@ -4378,12 +4790,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (updateSwitches) saveUpdateSwitches(body, true);
         if (body.theme !== undefined) saveTheme(body.theme, true);
         if (body.text_size !== undefined) saveTextSize(body.text_size, true);
+        const reactionsChange = body.reactions !== undefined || body.reaction_change !== undefined;
+        if (reactionsChange) saveReactions(body, true);
         if (body.rows !== undefined) saveRows(body.rows, true);
-        if (body.diff_style !== undefined) saveDiffStyle(body.diff_style, true);
+        const diffOptionsChange = body.diff_style !== undefined || body.diff_options !== undefined;
+        if (diffOptionsChange) saveDiffOptions(body, true);
         if (body.experimental !== undefined) saveExperimental(body.experimental, true);
         if (body.tour !== undefined) saveTour(body.tour, true);
         if (body.board !== undefined) saveBoard(body.board, true);
         if (body.steps !== undefined) saveSteps(body.steps, true);
+        if (body.bro !== undefined) saveBro(body.bro, true);
         if (body.code_review !== undefined) saveCodeReview(body.code_review, true);
         if (body.shape !== undefined) saveShape(body.shape, true);
         if (body.cookie_host !== undefined) saveCookieHostSwitch(body.cookie_host, true);
@@ -4399,17 +4815,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (updateSwitches) updates.refresh();
         const theme = body.theme === undefined ? themeState() : saveTheme(body.theme);
         const textSize = body.text_size === undefined ? textSizeState() : saveTextSize(body.text_size);
+        const reactions = reactionsWire(reactionsChange ? saveReactions(body) : reactionsState());
         const rows = rowsWire(body.rows === undefined ? rowsState() : saveRows(body.rows));
-        const diffStyle = body.diff_style === undefined ? diffStyleState() : saveDiffStyle(body.diff_style);
+        const diffOptions = diffOptionsChange ? saveDiffOptions(body) : diffOptionsState();
         const experimental = body.experimental === undefined ? experimentalState() : saveExperimental(body.experimental);
         const tour = body.tour === undefined ? tourState() : saveTour(body.tour);
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
         const steps = body.steps === undefined ? { on: stepsOn() } : saveSteps(body.steps);
+        const bro = body.bro === undefined ? { on: broOn() } : saveBro(body.bro);
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
         const shape = body.shape === undefined ? { on: shapeOn() } : saveShape(body.shape);
+        const systemAnswer = system.answer(body);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffStyle, experimental, tour, board, steps, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...reactions, ...rows, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
@@ -4508,8 +4927,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           revealNotNow(owner);
           return json({ show: false, reveal: { next: revealNow(owner, load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
         }
+        // The star ask: its claim waits on the already-starred check (gh, up to 3 s) and says how the button works.
+        if (id === "star") {
+          const star = await claimStarReveal(owner, key ?? null, load);
+          return json({ show: star.show, star: { can_star: star.canStar }, reveal: { next: revealNow(owner, load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+        }
         const show = claimReveal(id as RevealId | "agent_note", owner, key ?? null, load, via, agents);
         return json({ show, reveal: { next: revealNow(owner, load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
+      }
+
+      // The "Star the repo" ask once shown (packages/shared/star-ask.ts): `action: "star"` stars it with the person's
+      // own gh (their click; only while the claim found gh able to), `action: "answer"` records Not now (and the line's
+      // three-day wait) or the GitHub page opened from the link. The owner's pages only.
+      if (path === "/api/inbox/star-ask") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        return json(await inboxStarAction(starAsk, ownerOrLocal(req, via), body));
       }
 
       // The Board's first-visit dialog (approval "inbox-board", intro amendment): the first page on this
@@ -4531,7 +4965,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Shape (packages/server/shape-routes.ts): off, every path is the unknown-route 404, as if absent. The person's
       // own window only: another site is refused (reads too: a board names files and folders), and a tailnet guest.
       if (path === "/api/shapes" || path.startsWith("/api/shapes/")) {
-        if (!shapeOn()) return json({ error: "Not found", code: "not_found" }, 404);
+        if (!boardsOn()) return json({ error: "Not found", code: "not_found" }, 404);
         const crossSite = crossSiteCardRead(req);
         if (crossSite) return crossSite;
         if (!ownerOrLocal(req, via)) return localOnly();
@@ -4551,22 +4985,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), shape: shapeOn() });
       if (skills) return skills;
 
-      // Launch: Stop, Open in Terminal, Delete, Try again, Trust folder and its setting (404 while `inboxLaunch.enabled` is off).
-      const launched = await launch.route(req, path, via, isOwner(req, via));
+      // Launch: Stop, Open in Terminal, Delete, Try again, Trust folder and its settings (404 while `inboxLaunch.enabled` is off, but for the settings route).
+      const door = fromDeviceDoor.get(req) ?? null;
+      const launched = await launch.route(req, path, via, isOwner(req, via), door);
       if (launched) return launched;
       // Compose: live sessions in every project, a new thread, Send to another session, drafts and uploads.
       // The device door is never the owner here: it may not trust a folder, so it is offered none.
-      const composed = await compose.route(req, url, isOwner(req, via) && !fromDeviceDoor.has(req), via);
+      // A linked machine is the owner's other computer: it may trust a folder for a press in its window (remote launch).
+      const machineDoor = door?.platform === MACHINE_PLATFORM;
+      const composed = await compose.route(req, url, isOwner(req, via) && (!door || machineDoor), via, door ? { machine: machineDoor, window: door.window, from: machineDoor ? machines.machineOfDevice(door.device_id) : null } : null);
       if (composed) return composed;
       // Reply drafts: the reply box's words per thread (approval "inbox-reply-drafts").
       const drafted = await replyDrafts.route(req, url);
       if (drafted) return drafted;
-      // Ask AI: off, this answers nothing and the path is an unknown route.
+      // Ask AI: on for everyone; only the owner's own window is answered.
       const asked = await ask.route(req, url, via);
       if (asked) return asked;
-      // Show me's drawings, for the owner's window (inbox-review-drawings.ts; the CLI's door is above).
-      const drawn = await reviewDrawings.windowRoute(req, path, via);
-      if (drawn) return drawn;
       // Pins (approval "inbox-pinned-threads"): pin, unpin and the order of the sidebar's pinned threads.
       const pinned = await pins.route(req, url);
       if (pinned) return pinned;
@@ -4802,6 +5236,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           project: { ...thread.project, repo: repos.get(thread.project.root) },
           ...(pullOwners.theirs(thread.thread_id) ? { pull_theirs: true as const } : {}),
           ...(pullKeys.length > 0 ? { pull_keys: pullKeys } : {}),
+          ...(codeReviewOn() && pullOwners.started().has(thread.thread_id) ? { review_started: true as const } : {}),
         };
         // `run` (additive, launch only): the launched thread's run line; null while the agent rests.
         // `attach_command` (with `run`): the host's attach command, there while the agent rests too.
@@ -4856,7 +5291,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         if (body.ack !== undefined && typeof body.ack !== "boolean") throw new InboxError("validation_error", "ack: must be a boolean.", { field: "ack" });
         const on = body.ack !== false;
-        const result = store.ackMessage(ackMatch[1]!, on);
+        // The tray's emoji (approval "inbox-reaction-tray"): the agent gets the one the window closes on; after that it never changes (`409 ack_sent`).
+        let reaction: InboxReaction | null | undefined;
+        if (body.reaction !== undefined && body.reaction !== null) {
+          const emoji = (body.reaction as { emoji?: unknown } | null)?.emoji;
+          if (!isInboxReactionEmoji(emoji)) throw new InboxError("validation_error", "reaction: { emoji: one emoji, label?: string }.", { field: "reaction" });
+          reaction = parseInboxReaction(body.reaction);
+        } else if (body.reaction === null) reaction = null;
+        const result = store.ackMessage(ackMatch[1]!, on, on ? reaction : undefined);
         if (on) scheduleAckSettle();
         return json(result);
       }
@@ -4893,6 +5335,65 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           throw new InboxError("validation_error", "name: the project's new name, or null to go back to its folder's name.", { field: "name" });
         }
         store.renameProject(projectId, body.name as string | null);
+        return json({ project: projectFolders().find((p) => p.id === projectId) ?? null });
+      }
+
+      // A project's letter-mark picture (approval "inbox-letter-marks"; inbox-project-pictures.ts). GET: the picture
+      // in order (the one set with Set picture…, then the repo's logo and the GitHub owner's picture when Settings →
+      // Rows has them on, read from config.json `inboxRows`, never from the request), or a 404 and the window draws
+      // the letters. POST `{ picture: "data:image/…;base64,…" | null }`: Set picture…, or take it away; the same
+      // guards as every window write. Window only: not on the phone's door, and never an agent's.
+      const projectPictureMatch = /^\/api\/inbox\/projects\/([A-Za-z0-9_]+)\/picture$/.exec(path);
+      if (projectPictureMatch) {
+        const projectId = projectPictureMatch[1]!;
+        if (!isInboxId("prj", projectId)) throw new InboxError("validation_error", "A project id (prj_).", { field: "project" });
+        const project = store.project(projectId);
+        if (!project) throw new InboxError("project_not_found", `No project ${projectId}.`);
+        if (req.method === "GET") {
+          if (!ownerOrLocal(req, via)) return localOnly();
+          if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+            return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+          }
+          const rows = rowsState().rows ?? [];
+          const picture = await projectPictures.get(
+            { id: project.id, root: project.root },
+            { logo: rows.includes("repoLogo"), github: rows.includes("githubPictures"), repo: () => repos.get(project.root) ?? repos.refresh(project.root) },
+          );
+          if (!picture) {
+            const miss = json({ error: "No picture for this project.", code: "no_picture" }, 404);
+            miss.headers.set("cache-control", "private, max-age=300");
+            return miss;
+          }
+          return new Response(picture.body, {
+            headers: {
+              "content-type": picture.type,
+              "cache-control": "private, max-age=3600",
+              "x-content-type-options": "nosniff",
+              // An SVG opened as a page runs nothing, and downloads instead of showing (an <img> ignores both).
+              "content-security-policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'",
+              ...(picture.type === "image/svg+xml" ? { "content-disposition": "attachment" } : {}),
+              "cross-origin-resource-policy": "same-origin",
+            },
+          });
+        }
+        if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
+        // A tailnet guest cannot see the picture, so it cannot set one either.
+        if (!ownerOrLocal(req, via)) return localOnly();
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        if (body.picture === null) {
+          projectPictures.removeUpload(projectId);
+        } else {
+          // Only the approved words reach the toast: too big (however long the data URL), or not one of the five.
+          const given = typeof body.picture === "string" ? body.picture : "";
+          if (given.length > 800_000) throw new InboxError("validation_error", "Picture: at most 512 KB.", { field: "picture" });
+          const dataUrl = /^data:image\/[a-z0-9.+-]+;base64,([A-Za-z0-9+/=\s]+)$/i.exec(given);
+          const saved = dataUrl ? projectPictures.setUpload(projectId, new Uint8Array(Buffer.from(dataUrl[1]!, "base64"))) : ({ ok: false, reason: "not_image" } as const);
+          if (!saved.ok) {
+            if (saved.reason === "not_saved") throw new InboxError("config_not_saved", "The picture did not change.");
+            throw new InboxError("validation_error", saved.reason === "too_big" ? "Picture: at most 512 KB." : "Picture: a PNG, JPEG, GIF, WebP or SVG image.", { field: "picture" });
+          }
+        }
         return json({ project: projectFolders().find((p) => p.id === projectId) ?? null });
       }
 
@@ -5030,7 +5531,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
        */
       const answeredFromWindow = (request: Request, body: Record<string, unknown>, target: InboxMessage | null | undefined): boolean => {
         if (target?.author.kind !== "agent" || !isInboxPermissionSession(target.author.session)) return true;
-        return fromDeviceDoor.has(request) || isWindowRequest(request, body, serverSession);
+        // A linked machine answers for a press in a window there only (its Inbox checked it), never for an agent's call.
+        const door = fromDeviceDoor.get(request);
+        if (door) return door.platform !== MACHINE_PLATFORM || door.window;
+        return isWindowRequest(request, body, serverSession);
       };
 
       const messageMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/(picks|reply|reask|resolve)$/.exec(path);
@@ -5043,6 +5547,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // this run's serverSession, never a bare local call (an agent's curl). A tightening, not a secret:
         // see "Permission prompts" in docs/agent-guides/inbox-launch.md.
         if ((messageMatch[2] === "picks" || messageMatch[2] === "reply") && !answeredFromWindow(req, body, store.message(messageId))) {
+          // A linked machine without the window's mark: an agent's call there, or a Plannotator there from before the mark.
+          const door = fromDeviceDoor.get(req);
+          const from = door?.platform === MACHINE_PLATFORM ? machines.machineOfDevice(door.device_id) : null;
+          if (from) return json({ error: `Update Plannotator on ${from.name} to answer from there.`, code: "window_only" }, 403);
           return json({ error: "A permission prompt is answered in the Inbox window.", code: "window_only" }, 403);
         }
         switch (messageMatch[2]) {
@@ -5369,8 +5877,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       registry: () => registry,
       readBody,
       // Only the door calls this, after the device's token: its requests may answer a permission prompt.
-      dispatch: (req) => {
-        fromDeviceDoor.add(req);
+      dispatch: (req, from) => {
+        fromDeviceDoor.set(req, from);
         return fetch(req);
       },
       now: options.now,
@@ -5497,6 +6005,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // An answer in progress is saved. Open clients lose the connection (the force below cuts their
     // `closing` short); one that polls the next Inbox gets a 404, and stops.
     ask.stop();
+    // No judgment written after stop, and no agent left running.
+    pullRisk.stop();
     void mcp.close().catch(() => {});
     server.stop(true);
     // The tailnet mapping and the door listener, the Wi-Fi listener and its
@@ -5522,4 +6032,21 @@ export async function handleInboxServerReady(
     process.stderr.write("The Inbox could not reuse its last port; allow notifications again when the page asks.\n");
   }
   if (options.open && process.env.PLANNOTATOR_SKIP_BROWSER_OPEN !== "1") await openBrowser(inbox.url);
+}
+
+
+/** POST /api/inbox/agents/seen's fields: what the window's line showed. null: malformed. */
+function seenFields(body: Record<string, unknown>): { reportAt?: string | null; notes?: InboxNoteAutoAdd[] } | null {
+  const out: { reportAt?: string | null; notes?: InboxNoteAutoAdd[] } = {};
+  if ("report_at" in body) {
+    if (body.report_at !== null && typeof body.report_at !== "string") return null;
+    out.reportAt = body.report_at as string | null;
+  }
+  if ("notes" in body) {
+    const notes = body.notes;
+    if (!Array.isArray(notes)) return null;
+    if (!notes.every((note) => !!note && typeof note === "object" && typeof (note as InboxNoteAutoAdd).agent === "string" && typeof (note as InboxNoteAutoAdd).path === "string")) return null;
+    out.notes = notes.map((note: InboxNoteAutoAdd) => ({ agent: note.agent, path: note.path }));
+  }
+  return out;
 }

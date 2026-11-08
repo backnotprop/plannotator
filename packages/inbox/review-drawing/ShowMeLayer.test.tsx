@@ -1,8 +1,7 @@
 /**
- * Show me's parts over the code review (approval "shape-in-code-review", mock
- * ac2). What regresses if these fail:
- * - a part of the picture no longer opens its code (the click-to-code that is
- *   the point of the picture), or the corner card loses which part was opened;
+ * Show me's parts over the code review (approval "code-review-launch-build",
+ * item 1). What regresses if these fail:
+ * - the corner card loses which part a click landed on, or the way back to the board;
  * - the box sends with no lines named, or keeps offering Show me while the
  *   agent draws (a second request on top of the first), or loses Stop;
  * - the Overview's picture cannot be hidden, or its changed parts lose their
@@ -15,8 +14,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxReviewDrawing } from '@plannotator/core/inbox-review';
-import type { ShapeCodeTarget } from '@plannotator/core/shape';
 import { bridgeSanitizerDom } from '../../../tests/helpers/chat-sanitizer-dom';
 import type { ShowMeState } from './useShowMe';
 
@@ -44,24 +41,36 @@ function mount(node: React.ReactNode): HTMLElement {
   return el;
 }
 
-const DRAWING: InboxReviewDrawing = {
-  id: 'drw_1',
-  turn: 'ask_1',
-  file: 'src/retry-worker.ts',
-  lines: [16, 18],
-  round: 1,
-  title: 'How a failed job comes back',
-  view: { html: '<div data-mark="pick" data-code="src/retry-worker.ts#L16-L18"><b>Pick the next job</b> from the queue</div><div data-mark="wait">Wait</div>' },
-  at: '2026-11-04T00:00:00.000Z',
-};
+const PICTURE = { html: '<div data-mark="pick"><b>Pick the next job</b> from the queue</div><div data-mark="wait">Wait</div>' };
 
 function state(over: Partial<ShowMeState>): ShowMeState {
-  return { canAsk: true, box: null, shown: null, drawing: false, answerOnly: null, problem: null, posting: false, ...over };
+  return { canAsk: true, box: null, drawing: false, answerOnly: null, problem: null, posting: false, ...over };
 }
 
 const board = (el: HTMLElement) => el.querySelector('.shp-drawn-host')!.shadowRoot!.querySelector('.board') as HTMLElement;
 
 describe.skipIf(!hasDom)('Show me over the code review', () => {
+  test('a Show me from a board waits on the board and names the part, and the review\'s words stay', () => {
+    const props = { agent: 'Claude Code', onWords: () => {}, onSend: () => {}, onStop: () => {}, onClose: () => {} };
+    const part = { board: 'shp_a', name: 'The next attempt' };
+    const el = mount(<layer.ShowMeBox state={state({ drawing: true, box: { place: { file: null, lines: null, part }, words: 'why', turn: 'ask_1' } })} {...props} />);
+    expect(el.querySelector('[data-show-me-box]')!.hasAttribute('data-over-board')).toBe(true);
+    expect(el.querySelector('[data-show-me-place]')!.textContent).toBe('The next attempt');
+    expect(el.querySelector('[role="status"]')!.textContent).toContain('It opens here when it’s ready.');
+    act(() => root!.render(<layer.ShowMeBox state={state({ drawing: true, box: { place: { file: null, lines: null }, words: '', turn: 'ask_1' } })} {...props} />));
+    expect(el.querySelector('[data-show-me-box]')!.hasAttribute('data-over-board')).toBe(false);
+    expect(el.querySelector('[role="status"]')!.textContent).toContain('It opens over the review when it’s ready.');
+  });
+
+  test('before the thread\'s read names the agent, the box waits for the name: no stand-in word for it', () => {
+    const props = { onWords: () => {}, onSend: () => {}, onStop: () => {}, onClose: () => {} };
+    const drawing = state({ drawing: true, box: { place: { file: null, lines: null, part: { board: 'shp_a', name: 'The next attempt' } }, words: '', turn: 'ask_1' } });
+    const el = mount(<layer.ShowMeBox state={drawing} agent={null} {...props} />);
+    expect(el.querySelector('[data-show-me-box]')).toBeNull();
+    act(() => root!.render(<layer.ShowMeBox state={drawing} agent="Codex" {...props} />));
+    expect(el.querySelector('[role="status"]')!.textContent).toBe('Codex is drawing it. It opens here when it’s ready.');
+  });
+
   test('the box names the lines and sends; while drawn it offers Stop and no second Show me', () => {
     let sent = 0;
     let stopped = 0;
@@ -107,62 +116,31 @@ describe.skipIf(!hasDom)('Show me over the code review', () => {
     expect(el.querySelector('[data-show-me-send]')).not.toBeNull();
   });
 
-  test("this round's picture has Show me again in its footer; an earlier round's has it in its banner only", () => {
-    let again = 0;
-    const sheet = (asked: boolean) => (
-      <layer.ShowMeSheet
-        drawing={DRAWING}
-        answer="The retry waits, then puts the job back."
-        agent="Claude Code"
-        host="claude-code"
-        asked={asked ? { stale: new Set<string>(), onAgain: () => void again++ } : null}
-        onAgain={() => void (again += 10)}
-        onCode={() => {}}
-        onShrink={() => {}}
-        onClose={() => {}}
-      />
-    );
-    const el = mount(sheet(false));
-    expect(el.querySelectorAll('[data-show-me-again]').length).toBe(1);
-    expect(el.querySelector('[data-show-me-asked]')).toBeNull();
-    act(() => el.querySelector<HTMLButtonElement>('.ib-sm-sheet-f [data-show-me-again]')!.click());
-    expect(again).toBe(10);
-    act(() => root!.render(sheet(true)));
-    expect(el.querySelectorAll('[data-show-me-again]').length).toBe(1);
-    act(() => el.querySelector<HTMLButtonElement>('[data-show-me-asked] [data-show-me-again]')!.click());
-    expect(again).toBe(11);
-  });
-
-  test("a part of the picture opens its code, and the corner card names the part it opened", () => {
-    const opened: { target: ShapeCodeTarget; mark: string | null }[] = [];
+  test('the corner card names the part a click landed on, and grows the board back', () => {
+    let grown = 0;
+    let closed = 0;
     const el = mount(
-      <layer.ShowMeSheet
-        drawing={DRAWING}
-        answer="The retry waits, then puts the job back."
-        agent="Claude Code"
-        host="claude-code"
-        onCode={(target, part) => opened.push({ target, mark: part.closest('[data-mark]')?.getAttribute('data-mark') ?? null })}
-        onShrink={() => {}}
-        onClose={() => {}}
+      <layer.ShowMeCorner resolveSrc={(src: string) => src}
+        shape="shp_1"
+        title="How a failed job comes back"
+        picture={PICTURE}
+        part={{ name: 'Pick the next job', mark: 'pick', file: 'src/retry-worker.ts', lines: [16, 18] }}
+        onGrow={() => void grown++}
+        onClose={() => void closed++}
       />,
     );
-    expect(el.textContent).toContain('Claude Code · Show me on retry-worker.ts lines 16–18 · round 1');
-    act(() => board(el).querySelector<HTMLElement>('[data-code]')!.click());
-    expect(opened).toEqual([{ target: { path: 'src/retry-worker.ts', line: 16, lineEnd: 18 }, mark: 'pick' }]);
-
-    act(() =>
-      root!.render(
-        <layer.ShowMeCorner drawing={DRAWING} part={{ name: 'Pick the next job', mark: 'pick', file: 'src/retry-worker.ts', lines: [16, 18] }} onGrow={() => {}} onClose={() => {}} />,
-      ),
-    );
     expect(el.querySelector('.ib-sm-pip-f')!.textContent).toBe('Pick the next job · retry-worker.ts lines 16–18');
-    // The opened part stays ringed in the small picture.
-    expect(board(el).querySelector('[data-mark="pick"]')!.classList.contains('noted')).toBe(true);
+    act(() => el.querySelector<HTMLElement>('[data-show-me-grow]')!.click());
+    act(() => el.querySelector<HTMLButtonElement>('[aria-label="Grow the board"]')!.click());
+    expect(grown).toBe(2);
+    act(() => el.querySelector<HTMLButtonElement>('[aria-label="Close the board"]')!.click());
+    expect(closed).toBe(1);
+    expect(el.querySelector('[data-show-me-corner]')!.matches('[data-popover-layer][data-chat-window]')).toBe(true);
   });
 
-  test("the Overview's picture hides, and in round 2 its changed parts carry the tag", () => {
+  test("the Overview's picture hides, and in a later review its changed parts carry the tag", () => {
     const el = mount(
-      <figure.OverviewFigure drawn={DRAWING.view} meta="redrawn by Claude Code for round 2 · 1 part changed" changed={new Set(['wait'])} onCode={() => {}} />,
+      <figure.OverviewFigure drawn={PICTURE} meta="redrawn by Claude Code · 1 part changed" changed={new Set(['wait'])} onCode={() => {}} />,
     );
     expect(board(el).querySelector('[data-mark="wait"]')!.getAttribute('data-shp-tag')).toBe('changed');
     expect(board(el).querySelector('[data-mark="pick"]')!.hasAttribute('data-shp-tag')).toBe(false);

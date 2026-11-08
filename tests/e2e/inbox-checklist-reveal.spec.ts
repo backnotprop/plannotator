@@ -7,17 +7,22 @@
  *
  * Reveals are opt-in (the owner, 2026-11-04): showing the dialog turns nothing on.
  *
- *  - Desktop: never on load. Past a minute on the page the person reads a thread and closes it: ChecklistIntro opens
- *    as an offer, and the claim stamped it (its stamp the spacing clock's) with `inboxSteps` still unset. "Turn it on"
- *    writes it true, and Settings → Capabilities shows the Checklist switch on. A reload reaching the moment again
- *    shows nothing, and the Checklist stays on.
+ *  - Desktop: never on load, and not at a calm moment while the page is younger than a minute (a thread read and
+ *    closed shows nothing and stamps nothing). Past a minute on the page the person reads a thread and closes it:
+ *    ChecklistIntro opens as an offer, and the claim stamped it (its stamp the spacing clock's) with `inboxSteps`
+ *    still unset. "Turn it on" writes it true, and Settings → Capabilities shows the Checklist switch on. A reload
+ *    reaching the moment again shows nothing, and the Checklist stays on.
  *  - A 390 px phone: the dialog as a sheet, Turn it on on top; "Not now" closes it and the Checklist stays unset.
  *  - A person who set the Checklist, on or off: the moment shows nothing, their setting stays, and no reveal is stamped.
  *  - In every case the "Tell your agents" dialog never appears.
  *
- * The page's thresholds are real (60 s, 5 s, 2.5 s). Build the apps first (bun run --cwd apps/review build && bun run
- * build:hook), then `bunx playwright test -c tests/e2e/playwright.config.ts inbox-checklist-reveal.spec.ts`. PNGs land
- * in PLANNOTATOR_E2E_PROOF_DIR/checklist-reveal, or .local/proof/checklist-reveal/.
+ * The read and settling times are real (5 s, 2.5 s). The page's minute is on the page's own clock: the gate reads
+ * `Date.now()` in the page, so each context installs Playwright's clock before its pages load (it then runs in real
+ * time) and a case fast-forwards it a minute instead of waiting one out. Every time the spec reads from the Inbox
+ * (config.json stamps, the seeded days) is the Inbox's own, never the page's. Build the apps first (bun run --cwd
+ * apps/review build && bun run build:hook), then `bunx playwright test -c tests/e2e/playwright.config.ts
+ * inbox-checklist-reveal.spec.ts`. PNGs land in PLANNOTATOR_E2E_PROOF_DIR/checklist-reveal, or
+ * .local/proof/checklist-reveal/.
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
@@ -31,8 +36,8 @@ const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo
 const VERSION = '0.30.0';
 const DIALOG = '[data-dialog="checklist-intro"]';
 const DAY = 24 * 3600_000;
-/** Past the page's minute, with room for the list's first read. */
-const PAGE_AGE_MS = 57_000;
+/** The page's minute, on the page's clock (fast-forwarded, never waited out). */
+const PAGE_AGE_MS = 60_000;
 /** Past the 5 s read. */
 const READ_MS = 5_600;
 
@@ -125,6 +130,8 @@ async function context(browser: Browser, phone = false): Promise<BrowserContext>
     colorScheme: 'light',
     ...(phone ? { isMobile: true, hasTouch: true } : {}),
   });
+  // Before any page loads: the reveal's page age is the page's `Date.now()`, so the minute can be fast-forwarded.
+  await ctx.clock.install();
   contexts.push(ctx);
   return ctx;
 }
@@ -168,10 +175,23 @@ async function readAndLeave(page: Page, id: string, phone = false) {
   await expect(page.locator('section.ib-pane')).toHaveCount(0);
 }
 
+/**
+ * The calm moment on a page younger than its minute: the thread read and closed, the moment settles, and the page may
+ * not claim it yet. Nothing shows and nothing is stamped (the claim is not spent: the next leave is the next chance).
+ */
+async function tooYoung(page: Page, w: World) {
+  await expect(rowOf(page, w.ids['invoice-pdf']!)).toBeVisible();
+  const before = JSON.stringify(config(w).inboxReveals);
+  await readAndLeave(page, w.ids['invoice-pdf']!);
+  await page.waitForTimeout(5_000);
+  await expect(page.locator(DIALOG)).toHaveCount(0);
+  expect(JSON.stringify(config(w).inboxReveals)).toBe(before);
+}
+
 /** A minute on the page with nothing shown and the Checklist still unset, then the moment: the dialog, the claim already spent. */
 async function reveal(page: Page, w: World, phone = false) {
   await expect(rowOf(page, w.ids['invoice-pdf']!)).toBeVisible();
-  await page.waitForTimeout(PAGE_AGE_MS);
+  await page.clock.fastForward(PAGE_AGE_MS);
   await expect(page.locator(DIALOG)).toHaveCount(0);
   expect(config(w).inboxSteps).toBeUndefined();
   await readAndLeave(page, w.ids['invoice-pdf']!, phone);
@@ -190,7 +210,7 @@ async function reveal(page: Page, w: World, phone = false) {
 async function neverAgain(page: Page, w: World, steps: boolean | undefined, phone = false) {
   await page.goto(w.url.replace(/#.*$/, ''));
   await expect(rowOf(page, w.ids['release-notes']!)).toBeVisible();
-  await page.waitForTimeout(PAGE_AGE_MS);
+  await page.clock.fastForward(PAGE_AGE_MS);
   await readAndLeave(page, w.ids['release-notes']!, phone);
   await page.waitForTimeout(5_000);
   await expect(page.locator(DIALOG)).toHaveCount(0);
@@ -221,6 +241,7 @@ test('desktop: never on load; at the calm moment the dialog offers the Checklist
   const page = await (await context(browser)).newPage();
   await guardAgentNote(page);
   await page.goto(w.url);
+  await tooYoung(page, w);
   await reveal(page, w);
   await shots(page, 'desktop-{s}-reveal');
   await noAgentNote(page);
@@ -271,7 +292,8 @@ test('a person who set the Checklist, on or off, never gets it: the moment shows
   for (const page of pages) await guardAgentNote(page);
   await Promise.all(pages.map((page, i) => page.goto(worlds[i]!.url)));
   for (const [i, page] of pages.entries()) await expect(rowOf(page, worlds[i]!.ids['invoice-pdf']!)).toBeVisible();
-  await pages[0]!.waitForTimeout(PAGE_AGE_MS);
+  // One context, one clock: the minute passes on both pages.
+  await ctx.clock.fastForward(PAGE_AGE_MS);
   await Promise.all(pages.map((page, i) => readAndLeave(page, worlds[i]!.ids['invoice-pdf']!)));
   await pages[0]!.waitForTimeout(5_000);
   for (const [i, page] of pages.entries()) {

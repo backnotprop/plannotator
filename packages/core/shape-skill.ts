@@ -17,8 +17,14 @@
  * approved words (.product/approved/shape-skill/approval.md): never edit them
  * here alone.
  *
+ * The stance ends with `SHAPE_PICTURE_LOOK` and the guide with `SHAPE_ANIMATIONS_SECTION`,
+ * both from ./shape-animate.ts (approval "shape-animated-scenes"), which also builds
+ * `plannotator shape --help animate` from the same words.
+ *
  * Browser-safe, no dependencies: the server lists it and the window pastes it.
  */
+
+import { SHAPE_ANIMATIONS_SECTION, SHAPE_PICTURE_LOOK } from './shape-animate';
 
 export interface ShapeSkillText {
   name: string;
@@ -40,15 +46,18 @@ export const SHAPE_GUIDE = `## The stance
 - A few colours, each with one meaning: a soft zone per group, a small chip for a status (new, open, unproven), a red box for what must never happen. About 200 words at most; no paragraphs.
 - The Picture says what it is; How it works says how it goes. Steps in order go in How it works, not on the Picture. A flow of pictures and logos is fine when the flow is the idea.
 - Paste real images, not boxes that name them. If a screenshot in the folder shows the thing, open it, cut the file down to the part that matters (\`sips -c <h> <w> --cropOffset <y> <x> in.png --out crop.png\`, or any tool), and put it on the Picture beside what it shows, never over it: \`<image href="crop.png" x="…" y="…" width="…" height="…"/>\` (a path relative to the board file, an absolute path, a \`file://\` or an \`https://\` address; \`shape update\` copies it into the board). Icons, real logos and drawn things come by name (below); a logo that is not there is a picture like this one. Never make up a logo.
-- What you would say aloud goes behind a number: a reference's \`sub\` (one line), and \`images\` only if the picture shows what the line says. \`crop\` picks the part to show: a whole screen is unreadable in a bubble.
+- What you would say aloud goes behind a number: a reference's \`sub\` (one line), and \`images\` only if the picture shows what the line says. \`crop\` picks the part to show: a whole screen is unreadable in a bubble. A caveat or a "why" that does not draw goes there too, on the part it is about. What does not fit behind a number goes in your message to the person, not on the board.
 - Use the source's own words, names and numbers (the thread, the conversation, the code). Never invent data. If the source contradicts itself and nothing settles it, draw the latest statement and say it is open.
 - Commit to a clear reading. A clear picture can be corrected; a vague one cannot.
 - Handing the board to a helper or subagent? Give it the strongest model you can choose: the board is only as good as the model that draws it.
+
+${SHAPE_PICTURE_LOOK}
 
 ## Keeping it current
 
 - Before you draw a new version, run \`plannotator shape drawing <id>\`, so the board shows that you are drawing.
 - Store the new version with \`plannotator shape update --file <file> --id <id> --base <the version you started from>\`. If someone changed it since, it is refused and prints the latest version: start from that one.
+- Run \`plannotator shape update\` from the project's folder, or pass \`--project <folder>\`, so the board is filed under that project.
 - Keep the same ids (\`data-mark\`, ref numbers) for the same parts in every version. The board redraws only what changed.
 - The person points at parts of the board to change or ask about them. Run \`plannotator shape read <id> --notes\` at the start of each turn. It prints the notes that wait for you and marks them as received:
   - a \`change\` note: draw the change as a new version;
@@ -64,11 +73,10 @@ export const SHAPE_GUIDE = `## The stance
   "note": "v2: the dialog now says 2 days.",
   "views": {
     "picture": { "html": "<figure data-step=\\"1\\" data-mark=\\"dialog\\">…</figure>", "css": ".x { … }", "width": 1200, "height": 620, "tall": { "html": "…" } },
-    "how": { "html": "<svg viewBox=\\"0 0 1200 420\\">…</svg>", "width": 1200, "height": 420 },
-    "know": "It shows **once, after 2 days** of use, and never again [^1]. Nobody who already snoozed sees it."
+    "how": { "html": "<svg viewBox=\\"0 0 1200 420\\">…</svg>", "width": 1200, "height": 420 }
   },
   "refs": [
-    { "n": 1, "kind": "message", "title": "You set it to 2 days", "target": "msg_…" },
+    { "n": 1, "kind": "message", "title": "You set it to 2 days", "sub": "It shows once, after 2 days of use. Nobody who already snoozed sees it.", "target": "msg_…" },
     { "n": 2, "kind": "file", "title": "The dialog", "target": "src/SnoozeDialog.tsx", "line": 10 },
     { "n": 3, "kind": "image", "title": "Today's dialog", "target": "shot.png" },
     { "n": 4, "kind": "pr", "title": "#2547", "sub": "Adds the dialog", "target": "https://github.com/owner/repo/pull/2547", "images": [{ "src": "pr.png", "alt": "The PR's page" }] }
@@ -85,9 +93,15 @@ export const SHAPE_GUIDE = `## The stance
   - \`signature\`: name, parameters and return type, no keywords: \`sound(r: Reading): Sound\`. \`code\`: its \`{ path, line }\`.
   - \`checks\`, in code order: \`[{ code, constant, saw, result }]\`. A check is a condition the code needs to go on (\`a || b\` is one check). \`result\` is \`pass\`, \`fail\` (the code stops there; later checks are \`not-reached\`) or \`not-reached\`. Mark the check that decided the step \`"decides": true\`; give a failing one its \`short\` ("20_000 short (20 s)").
   - \`output\`: \`{ name, value, type }\`.
-- **views.know** (What to know, optional): what the person needs to know that the drawings can't say, in at most two short paragraphs of prose (1,200 characters). Inline Markdown: \`**bold**\`, \`code\`, links, and \`[^n]\` for reference n.
-- **views.code** (Code, optional): a Guided Review of the change. Leave it out unless the person asks.
+- **views.code** (Code, optional): a Guided Review of the change. Leave it out unless the person asks. The Plannotator Inbox does not show it.
 - **refs:** numbered sources; on the Picture, a handful. Any kind can have \`sub\` and \`images\` (\`{ src, alt, crop: [x, y, width, height] }\`, 0 to 1); the bubble shows the first. \`message\` targets a thread message id; \`file\` a path in the project (with \`line\`); \`image\` a picture, named as on the Picture (the store keeps a copy); \`pr\` and \`link\` an https URL.
+
+**A stack of PRs.** When the work lands as more than one pull request, add \`stack\` to the board so the person can see which PR changed which part.
+- \`stack.pulls\`: one entry per PR, in landing order: \`{ "n": 301, "title": "Which failures retry", "url": "https://github.com/…/pull/301", "step": 1 }\`. \`step\` is the PR's chapter in the guided review (1-based), when the review has one chapter per PR.
+- \`stack.changes\`: one entry per PR per part it changed: \`{ "part": "<a mark on How it works or the Picture>", "pr": 301, "said": "…", "files": [{ "path": "src/billing/errors.ts", "additions": 15, "deletions": 0, "lines": [[1, 15]] }] }\`.
+- \`said\` is one or two plain sentences about what that PR did in that part: what it adds or changes, not how the code is written.
+- \`files\` holds the files that PR changed for that part (1–30), with project paths. \`additions\`/\`deletions\` are optional; \`lines\` are optional ranges in the new file, and the code popup shows the hunks that meet them.
+- Leave \`stack\` out for a single PR; the board shows no badges then.
 
 ## Drawing rules
 
@@ -108,7 +122,8 @@ Draw it however you like, by hand or from a one-off script. The board makes it b
 - A phone shows the board narrow. For a wide How it works, add \`"tall": { "html": … }\` with the same parts stacked about 400 px wide.
 - \`shape update\` prints \`notes\` when a board will not behave. It stores the board anyway: fix them and update again.
 - Optional helpers: \`plannotator shape kit > kit.mjs\` (JavaScript, no dependencies). Its first lines show how.
-`;
+
+${SHAPE_ANIMATIONS_SECTION}`;
 
 /**
  * The start of `plannotator shape --help`: the welcome, how to open the page
@@ -122,11 +137,12 @@ export const SHAPE_HELP_INTRO = [
   "",
   "Start:",
   "1. Write the board as JSON (the format is below) in a scratch file, such as /tmp/shape-<topic>.json.",
-  "2. Store it: `plannotator shape update --file /tmp/shape-<topic>.json`. It prints { id, v }. Keep the id.",
+  "2. Check that the Picture and How it works agree before you update.",
+  "3. Store it: `plannotator shape update --file /tmp/shape-<topic>.json`. It prints { id, v }. Keep the id.",
   "   If it is refused, fix what it lists and run it again. Each problem names its field.",
-  "3. Open it: `plannotator shape open <id>`. The Shape page opens in the person's browser, and the",
+  "4. Open it: `plannotator shape open <id>`. The Shape page opens in the person's browser, and the",
   "   command prints its address. Tell the person in one line that the board is up (v1), with the address.",
-  "4. A page that is already open shows each new version by itself: do not open it again. Run",
+  "5. A page that is already open shows each new version by itself: do not open it again. Run",
   "   `plannotator shape open` again only when the person closed it or asks for it.",
   "",
   "In a Plannotator Inbox thread, add --thread <the thread's id> to the first update and",
@@ -141,10 +157,12 @@ export const SHAPE_HELP_INTRO = [
   "  plannotator shape done [<shp_id>]",
   "  plannotator shape list [--all] [--json]",
   "  plannotator shape open [<shp_id>]",
+  "  plannotator shape frame [<shp_id>] [--view picture|how] [--scene <id>] [--at <time|end|beat N>] [--phone] [--out <file.png>]",
   "  plannotator shape on | off",
   "",
-  "A shape is a board you draw for the person: a Picture, How it works, What to know",
-  "and Code, with numbered references. Each update stores a new version of the whole board.",
+  "A shape is a board you draw for the person: a Picture, How it works and Code,",
+  "with numbered references. Each update stores a new version of",
+  "the whole board.",
   "",
   "(none)   Opens Shape's page in the person's browser, or the one already open, and prints its address.",
   "update   Stores the board in <board.json>. Without --id it makes a new shape and",
@@ -161,10 +179,14 @@ export const SHAPE_HELP_INTRO = [
   "list     Lists the active shapes, newest change first (--all: finished ones too).",
   "open     Opens the Shape page in the person's browser: every board, or one board.",
   "         It prints the page's address.",
+  "frame    Saves a picture (PNG) of the board as the person sees it and prints its path:",
+  "         the Picture, or --view how. On a board that moves, --at picks the moment of the scene",
+  "         (default: its end); --phone draws it on a phone's screen. It uses the Chrome on this",
+  "         computer; with none, it says so.",
   "on, off  Turns Shape on or off: the same switch as the Plannotator Inbox's Settings →",
   "         Capabilities → Shape. Run them only when the person asks.",
   "",
-  "Without <shp_id>, read, drawing, answer and done use your session's newest active shape,",
+  "Without <shp_id>, read, drawing, answer, done and frame use your session's newest active shape,",
   "else this project's.",
 ].join("\n");
 
@@ -187,11 +209,12 @@ DRAFT. The person wants to see the work in this thread the way you see it, so th
 
 ## Steps
 
-1. Read the whole thread (\`read_thread\`, every message). Note: what the work makes, what is settled, what is open and whose call it is, and what happens next. Then pick the one idea to draw; the rest goes behind numbers or in What to know.
+1. Read the whole thread (\`read_thread\`, every message). Note: what the work makes, what is settled, what is open and whose call it is, and what happens next. Then pick the one idea to draw; the rest goes behind numbers or in your message to the person.
 2. Write the board as JSON (the format is below) in a scratch file, such as \`/tmp/shape-<topic>.json\`.
-3. Store it: \`plannotator shape update --file /tmp/shape-<topic>.json --thread <the thread's id: thread_id from read_thread> --through <the latest message id you read>\`. It prints \`{ id, v }\`. Keep the id.
-4. If it is refused, fix what it lists and run it again. Each problem names its field.
-5. Tell the person in one line that the board is up (v1), in this thread.
+3. Check that the Picture and How it works agree before you update.
+4. Store it: \`plannotator shape update --file /tmp/shape-<topic>.json --thread <the thread's id: thread_id from read_thread> --through <the latest message id you read>\`. It prints \`{ id, v }\`. Keep the id.
+5. If it is refused, fix what it lists and run it again. Each problem names its field.
+6. Tell the person in one line that the board is up (v1), in this thread.
 
 Every later update in this thread also takes \`--through <the latest message id you read>\`.
 `;

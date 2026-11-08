@@ -63,12 +63,13 @@ export interface AskLiveText {
 
 /**
  * A turn's question as the person reads it. A Show me (code review) sent the
- * agent its request to draw; the person sees what they asked: "Show me on
+ * agent its request for a Shape; the person sees what they asked: "Show me on
  * retry-worker.ts lines 16–18", and their words.
  */
 export function askShownQuestion(turn: Pick<InboxAskTurnWire, 'question' | 'kind' | 'show_me'>): string {
   if (turn.kind !== 'show_me' || !turn.show_me) return turn.question;
-  const { file, lines, words } = turn.show_me;
+  const { file, lines, words, part } = turn.show_me;
+  if (part) return `Show me on ${part.name}${words?.trim() ? `: ${words.trim()}` : ''}`;
   const where = file ? `${file.slice(file.lastIndexOf('/') + 1)}${lines ? ` ${lines[0] === lines[1] ? 'line' : 'lines'} ${inboxReviewLines(lines)}` : ''}` : 'the whole review';
   return `Show me on ${where}${words?.trim() ? `: ${words.trim()}` : ''}`;
 }

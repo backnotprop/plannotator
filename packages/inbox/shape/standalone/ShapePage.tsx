@@ -24,7 +24,7 @@ import { createStandaloneShapeHost } from './host';
 
 const ShapeBoard = lazy(() => import('#shape-board'));
 
-const VIEWS: readonly ShapeViewId[] = ['picture', 'how', 'know', 'code'];
+const VIEWS: readonly ShapeViewId[] = ['picture', 'how', 'changed', 'know', 'code'];
 const PANELS: readonly ShapePanelTab[] = ['ask', 'refs'];
 
 export interface ShapeRoute {
@@ -37,7 +37,7 @@ export interface ShapeRoute {
 export function parseShapeHash(hash: string): ShapeRoute {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
   const shape = params.get('shape');
-  // A saved link to the old Requirements view opens What to know.
+  // A saved link to an old `view=know` or `view=reqs`: `know`, which the board opens as its Shape view.
   const view = shapeViewNow(params.get('view')) as ShapeViewId | null;
   const panel = params.get('panel') as ShapePanelTab | null;
   return {

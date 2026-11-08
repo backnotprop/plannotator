@@ -23,7 +23,7 @@
 
 import type { InboxListRow } from "@plannotator/core/inbox-types";
 import type { InboxLinkRecord } from "./inbox-links";
-import type { InboxOutbox, OutboxAnswer, OutboxEntry } from "./inbox-outbox";
+import { MACHINE_WINDOW_HEADER, type InboxOutbox, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
 import type { InboxPeerTransport } from "./inbox-transport";
 
 /** The oldest link protocol this Inbox links to: health's `machine_links`. */
@@ -118,6 +118,8 @@ export class PeerLink {
   since = Date.now();
   reason: string | null = null;
   version: string | null = null;
+  /** Its health's `launch_from_machines` (remote launch): agents can start there (true), launch is off (false), or its Inbox is too old to say (null). */
+  launch: boolean | null = null;
   list: PeerList | null = null;
   private cursor: number | null = null;
   private running = false;
@@ -229,6 +231,7 @@ export class PeerLink {
     if (health.status === 401 && (body.code === "device_revoked" || body.code === "device_token_invalid")) return "revoked";
     if (!health.ok) return `health answered ${health.status}`;
     this.version = typeof body.version === "string" ? body.version : null;
+    this.launch = typeof body.launch_from_machines === "number" ? body.launch_from_machines >= 1 : null;
     if (body.inbox_id !== this.id) return "a different Inbox answers at this address";
     if (typeof body.machine_links !== "number" || body.machine_links < MACHINE_LINKS_PROTOCOL) {
       this.setState("needs_update", `Update Plannotator on ${this.options.link.name} (it runs ${this.version ?? "an older version"}).`);
@@ -396,7 +399,8 @@ export class PeerLink {
     try {
       const response = await this.options.transport.request(entry.route, "", {
         method: "POST",
-        headers: this.auth({ "Content-Type": "application/json" }),
+        // A press in the person's window here: the other machine's door hands that on (inbox-devices.ts).
+        headers: this.auth({ "Content-Type": "application/json", ...(entry.window ? { [MACHINE_WINDOW_HEADER]: "1" } : {}) }),
         body: JSON.stringify(entry.body),
         signal: AbortSignal.timeout(this.t.sendMs),
       });

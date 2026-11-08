@@ -328,16 +328,20 @@ test('an image the agent overwrites says it changed since it was sent, and opens
   await expect(pane()).toHaveAttribute('data-version', 'sent');
 });
 
-test('a typed comment on an image asks before a step', async () => {
+test('a typed comment on an image never stops a step, and waits in its box for that image', async () => {
   const page = world.page;
   await pane().getByRole('textbox', { name: 'Comment on checkout-c-drawer.png' }).fill('The drawer hides the total.');
   await pane().locator('.ib-imgstage').click();
   await page.keyboard.press(']');
-  const guard = page.locator('[data-step-guard]');
-  await expect(guard).toBeVisible();
-  await expect(guard.getByRole('button', { name: 'Discard and go to empty-orders.png' })).toBeVisible();
-  await shot(page, '06-guard');
-  await guard.getByRole('button', { name: 'Discard and go to empty-orders.png' }).click();
+  await expectAt(page, 4, 'empty-orders.png');
+  await expect(page.locator('[data-step-guard]')).toHaveCount(0);
+  await page.keyboard.press('[');
+  await expect(pane().getByRole('textbox', { name: 'Comment on checkout-c-drawer.png' })).toHaveValue('The drawer hides the total.');
+  await shot(page, '06-kept');
+  // Cleared on the comment itself, then on: nothing waits for it.
+  await pane().getByRole('textbox', { name: 'Comment on checkout-c-drawer.png' }).fill('');
+  await pane().locator('.ib-imgstage').click();
+  await page.keyboard.press(']');
   await expectAt(page, 4, 'empty-orders.png');
 });
 
@@ -937,9 +941,14 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
   expect(Math.abs((ink.minY + ink.maxY) / 2 - target.v * 760)).toBeLessThan(3);
   expect(Math.abs((ink.maxX - ink.minX) / 2 - reach * 1200)).toBeLessThan(8);
 
-  /** Where the drawing's colour is on the screen, inside the stage, in page pixels. */
+  /**
+   * Where the drawing's colour is on the screen, inside the stage, in page pixels. The open comments panel floats
+   * over the stage's right side, and its card shows the drawing too: only the stage left of the panel is read.
+   */
   const inkOnScreen = async () => {
-    const box = (await pane().locator('[data-image-zoom-stage]').boundingBox())!;
+    const stageBox = (await pane().locator('[data-image-zoom-stage]').boundingBox())!;
+    const panelBox = await pane().locator('[data-comments-drawer="open"]').boundingBox();
+    const box = panelBox && panelBox.x < stageBox.x + stageBox.width ? { ...stageBox, width: panelBox.x - stageBox.x } : stageBox;
     const shotPng = await page.screenshot({ clip: box });
     const found = await page.evaluate(async ({ data, color }) => {
       // The window's CSP lets images load data: URLs (connect-src does not).

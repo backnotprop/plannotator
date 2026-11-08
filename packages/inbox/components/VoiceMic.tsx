@@ -192,6 +192,8 @@ function troubleNote(trouble: VoiceTrouble, api: boolean, where: string): Note {
       return { tone: 'quiet', text: notReadyText(api, where), settings: true };
     case 'voiceoff':
       return { tone: 'quiet', text: `Voice is off on ${where}.`, settings: true };
+    case 'failed':
+      return { tone: 'error', text: 'Couldn’t transcribe this clip. Your clip is kept until you close this box.' };
   }
 }
 

@@ -49,9 +49,9 @@ const row = (page: Page, threadId: string) => page.locator(`.ib-lbody [data-thre
 const sectionOf = (page: Page, threadId: string) => row(page, threadId).getAttribute('data-section');
 const pane = (page: Page) => page.locator('section.ib-pane');
 const box = (page: Page) => pane(page).locator('textarea');
-/** The thread's reply draft as the Inbox holds it: its words, or null. */
+/** The thread's reply draft as the Inbox holds it: its words, or null. (`world.url` ends in `/`: a `//api/…` path is the page's 404.) */
 const draftWords = async (threadId: string) =>
-  ((await (await fetch(`${world.url}/api/inbox/threads/${threadId}/draft`)).json()) as { draft: { body: string } | null }).draft?.body ?? null;
+  ((await (await fetch(new URL(`/api/inbox/threads/${threadId}/draft`, world.url))).json()) as { draft: { body: string } | null }).draft?.body ?? null;
 
 function startInbox(): string {
   const started = spawnSync(binary, ['inbox', '--background'], { env: world?.env ?? {}, encoding: 'utf8', timeout: 60_000 });

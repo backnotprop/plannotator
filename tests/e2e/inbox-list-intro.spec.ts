@@ -31,10 +31,10 @@
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_LAUNCH_OFF, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
@@ -46,8 +46,12 @@ const LONG_NAME = 'Ledger reconciliation dry run for the quarter-end close acros
 
 let binary = '';
 let scratch = '';
+// What the running test started, stopped in afterEach: each world is a whole Inbox, three `inbox mcp` agents and a
+// browser context at 2x. Kept to the end, a spec's twenty-odd worlds ran the 8 GB e2e machine out of memory (exit 137)
+// in its last test, the video one.
 const agents: SimAgent[] = [];
 const contexts: BrowserContext[] = [];
+const worldRoots: string[] = [];
 
 interface World {
   url: string;
@@ -73,7 +77,8 @@ function compileReleaseBinary(): string {
  * with the sound dialog and the agent notes already behind them unless `soundDue`.
  */
 async function world(options: { earlier: boolean; soundDue?: boolean; attachment?: boolean }): Promise<World> {
-  const root = realpathSync(mkdtempSync(join(scratch, 'world-')));
+  const root = inboxScratch('plannotator-inbox-list-intro-world-');
+  worldRoots.push(root);
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   mkdirSync(dataDir, { recursive: true });
@@ -83,6 +88,8 @@ async function world(options: { earlier: boolean; soundDue?: boolean; attachment
     writeFileSync(
       join(dataDir, 'config.json'),
       JSON.stringify({
+        // Written whole: launch stays off (inboxScratch's launchOff), so New message runs no `claude --version` on the runner's PATH.
+        ...E2E_LAUNCH_OFF,
         inboxTour: { version: 2, seen_at: '2026-10-01T10:00:00.000Z', skipped_at: '2026-10-01T10:00:00.000Z' },
         inboxNotifications: { dismissed: true },
         inboxAgentNotes: { offered: true },
@@ -245,10 +252,21 @@ test.beforeAll(() => {
   binary = compileReleaseBinary();
 });
 
+/** Close the test's contexts and agents, and stop its Inboxes (their folders go with them). */
+async function closeWorlds() {
+  try {
+    for (const ctx of contexts.splice(0)) await ctx.close().catch(() => {});
+    await Promise.all(agents.splice(0).map((a) => a.close().catch(() => {})));
+  } finally {
+    for (const root of worldRoots.splice(0)) await removeInboxScratch(root);
+  }
+}
+
+test.afterEach(closeWorlds);
+
 test.afterAll(async () => {
   try {
-    for (const ctx of contexts) await ctx.close().catch(() => {});
-    await Promise.all(agents.map((a) => a.close().catch(() => {})));
+    await closeWorlds();
   } finally {
     await removeInboxScratch();
   }

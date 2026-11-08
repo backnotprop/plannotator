@@ -172,6 +172,17 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
   diffStyle?: 'split' | 'unified';
   /** The renderer can read a changed file's whole text: it draws an arrow row after the last hunk. For the same estimate. */
   opensWholeFiles?: boolean;
+  /**
+   * Files sit flush, edge to edge (the Inbox's PR page): a content-fit box has no border, padding or corner of its own,
+   * and holds exactly its renderer's height, so one file's header meets the last code row of the file above. Absent:
+   * the bordered box, as before.
+   */
+  flushFiles?: boolean;
+  /**
+   * Fold or open every file's diff at once (a host bar's Collapse all). Each new `token` applies `collapsed` to every
+   * card again; a file folded or opened by hand after that keeps its own state. Absent: each card keeps its own.
+   */
+  collapseAll?: { collapsed: boolean; token: number };
 }
 
 // The context erases the renderer's extra-prop generic; hosts recover typing at the provider site.

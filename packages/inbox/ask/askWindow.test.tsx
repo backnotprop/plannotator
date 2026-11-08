@@ -1,8 +1,8 @@
 /**
  * Ask AI's window in the whole Inbox window (InboxApp) over a REAL Inbox in a
  * temp data dir, with a scripted agent on a live connection (its own process,
- * tests/helpers/inbox-ask-dom-server.ts). What is proved: with the setting off
- * nothing shows and nothing is read; the icon shows only for a thread that can
+ * tests/helpers/inbox-ask-dom-server.ts), with no switch and Code review off
+ * (Ask is on in every Inbox). What is proved: the icon shows only for a thread that can
  * ask; a question gets its answer under the real agent's name and icon, and the
  * surface the agent gets comes from the thread; the dropdown's pick moves
  * `#thread=`; the box's words stay across a thread switch; Mod+Enter in the
@@ -59,7 +59,6 @@ interface World {
 
 const dirs: string[] = [];
 let on: World;
-let off: World;
 let world: World;
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -73,10 +72,10 @@ let postsLand: Promise<void> | null = null;
 /** While set, POST /ask is refused as the Inbox refuses a question it can't take, and nothing reaches the server. */
 let refuseAsks = false;
 
-async function startWorld(setting: 'on' | 'off'): Promise<World> {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), `plannotator-inbox-ask-dom-${setting}-`)));
+async function startWorld(): Promise<World> {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-ask-dom-')));
   dirs.push(dir);
-  const child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), setting], {
+  const child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects')], {
     env: {
       ...process.env,
       DOM_TESTS: '0',
@@ -127,14 +126,12 @@ function loopback(port: number, path: string, method: string, body?: string, sig
 
 beforeAll(async () => {
   if (!hasDom) return;
-  on = await startWorld('on');
-  off = await startWorld('off');
+  on = await startWorld();
 });
 
 afterAll(async () => {
   if (!hasDom) return;
   await on?.stop();
-  await off?.stop();
   for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -659,15 +656,4 @@ test('Stop works from a page that did not start the answer', async () => {
   expect(requests.some((r) => r.path === '/api/ai/abort')).toBe(false);
   await until(() => askWindow()!.textContent!.includes('Stopped.'), 'the turn to say so');
   expect(askWindow()!.querySelector('[aria-label="Stop"]')).toBeNull();
-});
-
-// Last: the page keeps the first server session it saw, so another Inbox only works once this file is done posting.
-test('with the setting off the window reads nothing about Ask AI and shows nothing', async () => {
-  if (!hasDom) return;
-  await openInbox(off, off.first);
-  await wait(250);
-  expect(askButton()).toBeNull();
-  expect(askWindow()).toBeNull();
-  expect(document.querySelector('[data-ask-layer]')).toBeNull();
-  expect(requests.filter((r) => r.path.includes('/ask')).length).toBe(0);
 });

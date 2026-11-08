@@ -37,7 +37,7 @@ interface DoorScript {
 }
 
 function door(script: DoorScript) {
-  const stats = { events: 0, threads: 0, posts: [] as string[], lastEventId: [] as (string | null)[] };
+  const stats = { events: 0, threads: 0, posts: [] as string[], windowMarks: [] as (string | null)[], lastEventId: [] as (string | null)[] };
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -75,6 +75,7 @@ function door(script: DoorScript) {
       }
       if (req.method === "POST") {
         stats.posts.push(route);
+        stats.windowMarks.push(req.headers.get("x-plannotator-window"));
         return script.post ? script.post(route, await req.json()) : Response.json({ ok: true });
       }
       return Response.json({ code: "device_route_not_found" }, { status: 404 });
@@ -273,6 +274,17 @@ describe("the outbox goes when the machine is there (rule 15)", () => {
     peer.start();
     await until("delivered", () => outbox.get("k1")!.state === "delivered");
     expect(d.stats.posts).toEqual(["messages/msg_x/reply"]);
+  });
+
+  test("a write the person pressed in a window says so to the other machine; any other write does not (remote launch)", async () => {
+    const d = door({});
+    const { peer, outbox } = link(d.url);
+    outbox.submit(B, "messages", { idempotency_key: "k-window", body: "Start it", to: { launch: { agent: "claude-code", project_id: "prj_a" } } }, null, true);
+    outbox.submit(B, "messages/msg_x/reply", { idempotency_key: "k-script", words: "yes", seen_through_seq: 1 });
+    peer.start();
+    await until("both delivered", () => outbox.get("k-script")!.state === "delivered");
+    expect(d.stats.posts).toEqual(["messages", "messages/msg_x/reply"]);
+    expect(d.stats.windowMarks).toEqual(["1", null]);
   });
 
   test("a 401 device_revoked while sending drops the queue with notices", async () => {

@@ -30,9 +30,10 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSnoozeRefusal, inboxSnoozeRunning } from "@plannotator/core/inbox-snooze";
 import { refuseInboxSnoozeUntil } from "@plannotator/shared/inbox/snoozes";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { INBOX_MACHINE_WINDOW_ONLY_BODY, isWindowRequest } from "./inbox-cross-site";
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
-import { doorWriteKind, InboxOutbox, type OutboxEntry } from "./inbox-outbox";
+import { doorWriteKind, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
 import { MACHINE_LINKS_PROTOCOL, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerLinkTimings, type PeerRecord } from "./inbox-peer-link";
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
@@ -145,6 +146,12 @@ export interface MachineView {
   list_cursor: number | null;
   /** Its Inbox keeps snoozes (approval "inbox-snooze"): a write there would land. False until its list is read, and for an older Inbox. */
   snoozes: boolean;
+  /**
+   * Remote launch, from its health when the line connected: agents can start there (true), launch is off there
+   * (false: "Starting agents is off on Mini"), or its Inbox is too old to say (null: "Update Plannotator on Mini to
+   * start agents there"). Null for this Inbox, whose own launch block says.
+   */
+  launch: boolean | null;
 }
 
 /** An agent's snooze of a linked machine's thread: its answer there, or `held`, the words for a write that waits. */
@@ -210,6 +217,33 @@ export const outboxView = (entry: OutboxEntry): OutboxView => ({
 const FORWARD = /^\/api\/inbox\/m\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/(.+)$/;
 const SNOOZE_ROUTE = /^threads\/[^/]+\/snooze$/;
 const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
+/** Another machine's folder names, for "Another folder on <machine>…" (remote launch), and where it would clone a URL. */
+const FOLDERS_ROUTES = new Set(["launch/folders", "launch/clone", "launch/clone-check"]);
+/** A tailnet guest of this Inbox, acting on another machine or on what waits for one. */
+const OWNER_ONLY_BODY = { error: "Only this computer's owner can act on another machine from this Inbox.", code: "owner_only" } as const;
+/** Of a forwarded read's query, what a guest never passes on: `sessions`' folder-trust facts. */
+const GUEST_STRIPPED = ["trust_agent", "trust_project"] as const;
+
+/** A forwarded read's query: a guest reads as before, but never another machine's folder-trust facts (Trust and start is the owner's). */
+export function forwardedReadSearch(search: string, guest: boolean): string {
+  if (!guest) return search;
+  const query = new URLSearchParams(search);
+  if (!GUEST_STRIPPED.some((name) => query.has(name))) return search;
+  for (const name of GUEST_STRIPPED) query.delete(name);
+  return query.size > 0 ? `?${query}` : "";
+}
+/** A launched agent's buttons on another machine (remote launch): Stop, Try again, Trust folder, Delete. */
+const LAUNCH_ROUTE = /^launch\/[^/]+\/(stop|retry|trust|delete)$/;
+
+/**
+ * Remote launch: a write that starts, stops or trusts an agent on another machine, which is code run there. Only a
+ * press in a window of this Inbox sends one; an agent's or a script's bare call through the forward never does.
+ */
+export function startsAgentThere(route: string, body: Record<string, unknown>): boolean {
+  if (LAUNCH_ROUTE.test(route)) return true;
+  const to = body.to;
+  return route === "messages" && !!to && typeof to === "object" && "launch" in to;
+}
 /** A thread id the window names in `X-Plannotator-Thread`: kept on the outbox entry only, never sent on. */
 const THREAD_HINT = /^[A-Za-z0-9_-]{8,80}$/;
 /** Of the window's headers, the forward passes on only these (as the door does). */
@@ -288,6 +322,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       waiting: 0,
       list_cursor: null,
       snoozes: true,
+      launch: null,
     },
     ...links.list().map((link) => {
       const peer = peers.get(link.id);
@@ -304,6 +339,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         waiting: outbox.list(link.id, "pending").length,
         list_cursor: peer?.list?.cursor ?? null,
         snoozes: peer?.list?.snoozes ?? false,
+        launch: peer?.launch ?? null,
       } satisfies MachineView;
     }),
   ];
@@ -615,15 +651,23 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const offline = () =>
       json({ error: `${links.get(machine)?.name ?? "That machine"} cannot be reached now.`, code: "machine_offline", machine: machinesView().find((m) => m.id === machine) }, 503);
     if (req.method === "GET") {
+      const search = forwardedReadSearch(url.search, context.isGuest(req, via));
+      const headers = pick(req.headers, PASS_REQUEST);
+      // Another machine's folder names ("Another folder on <machine>…"): the owner's window only, and said so to it.
+      if (FOLDERS_ROUTES.has(route)) {
+        if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
+        if (req.headers.get("sec-fetch-site") !== "same-origin") return json({ error: "Folders are listed in the Inbox window only.", code: "window_only" }, 403);
+        headers[MACHINE_WINDOW_HEADER] = "1";
+      }
       try {
-        return passAnswer(await peer.request(route, url.search, { method: "GET", headers: pick(req.headers, PASS_REQUEST), signal: req.signal }));
+        return passAnswer(await peer.request(route, search, { method: "GET", headers, signal: req.signal }));
       } catch {
         return offline();
       }
     }
     if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
     // A guest let onto this Inbox's tailnet was never let onto that machine: it writes nothing there. Reads stay as they are.
-    if (context.isGuest(req, via)) return json({ error: "Only this computer's owner can act on another machine from this Inbox.", code: "owner_only" }, 403);
+    if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
     // Rule 8's table decides, by route: a write it has not classified, or calls `local`, never reaches another machine.
     const kind = doorWriteKind(route);
     if (!kind) return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
@@ -650,6 +694,11 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // Every other write is a JSON body, whatever its Content-Type says, and goes through the outbox.
     const body = await context.readBody(req);
     if (checkServerSession(body, context.serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+    // A press in this Inbox's window (its own Origin and this run's page session), said to the other machine with the
+    // write: it answers a permission prompt, or starts, stops or trusts an agent there, only for one (remote launch).
+    // An agent's or a script's bare call is still the owner's for every other write, as before.
+    const window = isWindowRequest(req, body, context.serverSession);
+    if (!window && startsAgentThere(route, body)) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
     // A write that names this Inbox's thread, message, file or project in its body (a comment, a new message) is refused the same way.
     for (const [key, held] of BODY_IDS) {
       const id = body[key];
@@ -666,7 +715,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (SNOOZE_ROUTE.test(route) && !outbox.get(String(body.idempotency_key)) && inboxSnoozeRefusal(body.until) === "past") throw new InboxError("snooze_past", "That time has passed.", { field: "until" });
     // The window names the thread a write is about, so a held answer shows even where that thread cannot open.
     const named = req.headers.get("X-Plannotator-Thread")?.trim() ?? "";
-    const { entry, fresh } = outbox.submit(machine, route, body, THREAD_HINT.test(named) ? named : null);
+    const { entry, fresh } = outbox.submit(machine, route, body, THREAD_HINT.test(named) ? named : null, window);
     if (peer.state === "online") peer.flush();
     else peer.poke();
     const settled = (await outbox.waitSettled(entry.key, peer.state === "online" ? MACHINE_WRITE_WAIT_MS : 0)) ?? entry;
@@ -796,9 +845,30 @@ export function createInboxMachines(context: InboxMachinesContext) {
       const waiting = links.list().flatMap((l) => (machine && l.id !== machine ? [] : outbox.list(l.id, "pending")));
       return json({ waiting: waiting.map(outboxView), notices: outbox.notices().map(outboxView) });
     }
+    // Cancel a write still waiting that never left (a launch held for a machine that is asleep): it is never sent.
+    // The owner's, from any of their devices; a held launch only from a window, as the forward took it.
+    const cancel = /^\/api\/inbox\/outbox\/([^/]+)\/cancel$/.exec(path);
+    if (cancel) {
+      if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+      if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
+      const body = await context.readBody(req);
+      const stale = staleTab(body);
+      if (stale) return stale;
+      const key = decodeURIComponent(cancel[1]!);
+      const held = outbox.get(key);
+      if (held && startsAgentThere(held.route, held.body) && !isWindowRequest(req, body, context.serverSession)) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
+      const entry = outbox.cancel(key);
+      if (!entry) return json({ error: "No such write.", code: "not_found" }, 404);
+      if (entry.state !== "cancelled") {
+        const name = links.get(entry.machine)?.name ?? entry.machine_name ?? "the other machine";
+        return json({ error: `It already went to ${name}, so it can't be cancelled here.`, code: "outbox_already_sent", entry: outboxView(entry) }, 409);
+      }
+      return json({ entry: outboxView(entry) });
+    }
     const dismiss = /^\/api\/inbox\/outbox\/([^/]+)\/dismiss$/.exec(path);
     if (dismiss) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+      if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
       const stale = staleTab(await context.readBody(req));
       if (stale) return stale;
       const entry = outbox.dismiss(decodeURIComponent(dismiss[1]!));
@@ -872,6 +942,11 @@ export function createInboxMachines(context: InboxMachinesContext) {
     projects,
     projectOwner,
     snoozeThread,
+    /** The linked machine a device on this Inbox's door belongs to (a launch it starts here records it), or null. */
+    machineOfDevice: (deviceId: string): { machine: string; name: string } | null => {
+      const record = links.list().find((l) => l.device_id === deviceId);
+      return record ? { machine: record.id, name: record.name } : null;
+    },
     subscribe: (listener: (frame: MachineFrame) => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);

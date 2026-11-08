@@ -5,9 +5,8 @@
  * A machine keeps what config.json keeps for the line (`inboxReveals`) and changes it only through the module's own
  * helpers, as packages/server/inbox.ts does: a page load is seen (`revealSeeLoad`), the page arms `revealNext`, the
  * agent note asks `revealLineFree("setup")`, a claim stamps (`revealStamp`), a Not now stamps (`revealStampNotNow`).
- * Each user brings their own loads, reads and moments (what the page would see). Bro mode and List view are not built
- * here: they are registered in a test table the way their branches register (`heavyUse`, `minThreads`), so the line's
- * seam is what is tested.
+ * Each user brings their own loads, reads and moments (what the page would see). Bro mode and List view are in the
+ * real queue, so the real table is what is tested.
  *
  * What regresses: a heavy user's dialogs leaving their approved days (setup on day 0, then one a day from day 2: the
  * owner, 2026-11-06, "one day apart, three after a Not now: a heavy user sees all five by about day 5"); List
@@ -15,7 +14,8 @@
  * day after the list grows taller than the screen); a light user getting a heavy-use dialog; two dialogs on one day,
  * or on two page loads in a row (an old tab reading again included); the gap after an offer's Not now; an offer whose
  * moment never comes not retiring after 14 days (an update-day dialog never retires); update-day dialogs coming back to
- * back; an unanswered agent note taking another day.
+ * back; an unanswered agent note taking another day; the "Star the repo" ask (approval "star-ask") not going from the
+ * second day of use (the owner, 2026-11-06), or moving any other dialog's day (it stays outside the line's order).
  */
 import { describe, expect, test } from "bun:test";
 import {
@@ -27,6 +27,7 @@ import {
   revealAgentNoteAgents,
   revealAgentNoteNew,
   revealAhead,
+  revealAsideNow,
   revealDay,
   revealHeavyUse,
   revealLineFree,
@@ -48,16 +49,18 @@ const DAY = 24 * HOUR;
 /** Day 0, local time: the person's first use (or the update) is that morning. */
 const at = (day: number, hour: number) => new Date(2026, 10, 2 + day, hour, 0, 0, 0);
 
-const BRO = "bro" as RevealId;
-const LIST_VIEW = "list_view" as RevealId;
-/** The queue with Bro mode and List view registered at their places, as #2693 and #2716 add them. */
-const AFTER_SNOOZE = INBOX_REVEALS.findIndex((entry) => entry.id === "snooze") + 1;
-const TABLE: readonly RevealEntry[] = [
-  ...INBOX_REVEALS.slice(0, AFTER_SNOOZE),
-  { id: BRO, kind: "offer", tenureMs: 2 * DAY, minThreads: 0, heavyUse: true, enabled: true },
-  ...INBOX_REVEALS.slice(AFTER_SNOOZE),
-  { id: LIST_VIEW, kind: "offer", tenureMs: 2 * DAY, minThreads: 15, ahead: true, enabled: true },
-];
+const BRO: RevealId = "bro";
+const LIST_VIEW: RevealId = "list_view";
+const TABLE: readonly RevealEntry[] = INBOX_REVEALS;
+
+test("Bro mode is registered in the real queue as the approval places it: right after Snooze, an offer for heavy use, never on day 0 or 1", () => {
+  const after = INBOX_REVEALS.findIndex((entry) => entry.id === "snooze") + 1;
+  expect(INBOX_REVEALS[after]).toEqual({ id: BRO, kind: "offer", tenureMs: 2 * DAY, minThreads: 0, heavyUse: true, enabled: true });
+});
+
+test("List view is registered in the real queue as the approval places it: last, an offer, ahead at its moment", () => {
+  expect(INBOX_REVEALS.at(-1)).toEqual({ id: LIST_VIEW, kind: "offer", tenureMs: 2 * DAY, minThreads: 15, ahead: true, enabled: true });
+});
 
 type Dialog = RevealId | "agent_note";
 
@@ -149,7 +152,16 @@ function simulate(user: User, days = 30): Shown[] {
         show(early, true);
         continue;
       }
-      if (next && user.moment(next, day) && revealMayClaim(next, state(), now, TABLE)) show(next, true);
+      if (next && user.moment(next, day) && revealMayClaim(next, state(), now, TABLE)) {
+        show(next, true);
+        continue;
+      }
+      // An `aside` entry (the star ask) at a calm moment the line left free: it stamps nothing of the line.
+      const aside = revealAsideNow(state(), now, TABLE).find((id) => user.moment(id, day));
+      if (aside) {
+        done.add(aside);
+        shown.push({ id: aside, day, at: now });
+      }
     }
   }
   return shown;
@@ -195,10 +207,11 @@ function expectOnePerDay(shown: Shown[]) {
 }
 
 describe("30 days of a heavy user", () => {
-  test("setup on day 0, then one a day: Snooze 2, Bro mode 3, the Board 4; the list outgrows the screen on day 5, so List view goes on 5, ahead of the Checklist (6)", () => {
+  test("setup on day 0, the star ask on day 1 (aside: it moves no one), then one a day: Snooze 2, Bro mode 3, the Board 4; the list outgrows the screen on day 5, so List view goes on 5, ahead of the Checklist (6)", () => {
     const shown = simulate(HEAVY);
     expect(shown.map((s) => [s.id, s.day])).toEqual([
       ["agent_note", 0],
+      ["star", 1],
       ["snooze", 2],
       [BRO, 3],
       ["board", 4],
@@ -212,6 +225,7 @@ describe("30 days of a heavy user", () => {
     const shown = simulate({ ...HEAVY, moment: (id, day) => id !== "snooze" || day >= 1 });
     expect(shown.map((s) => [s.id, s.day])).toEqual([
       ["agent_note", 0],
+      ["star", 1],
       [LIST_VIEW, 2],
       ["snooze", 3],
       [BRO, 4],
@@ -222,7 +236,7 @@ describe("30 days of a heavy user", () => {
 
   test("a Not now on Bro mode: the next offer waits three days, not one", () => {
     const shown = simulate({ ...HEAVY, notNow: [BRO] });
-    expect(days(shown)).toEqual({ agent_note: 0, snooze: 2, [BRO]: 3, [LIST_VIEW]: 6, board: 7, steps: 8 });
+    expect(days(shown)).toEqual({ agent_note: 0, snooze: 2, [BRO]: 3, [LIST_VIEW]: 6, board: 7, steps: 8, star: 1 });
   });
 });
 
@@ -237,6 +251,8 @@ describe("Code review's offer (approval \"code-review-offer-card\": show up abou
       ["board", 4],
       [LIST_VIEW, 5],
       ["steps", 6],
+      // The star ask (aside) waits for the first day the line leaves free, and moves no one.
+      ["star", 7],
     ]);
     // The first load of day 0 shows it: about immediately.
     expect(shown[0]!.at).toEqual(at(0, HEAVY.loads(0)[0]!));
@@ -270,6 +286,9 @@ describe("30 days of a light user", () => {
     const got = days(shown);
     expect(got.agent_note).toBe(0);
     expect(got.snooze).toBe(7);
+    // The star ask on day 4: their first load with the line free (day 2's load comes right after the agent note's),
+    // beside Snooze waiting for its moment, and Snooze's day unmoved.
+    expect(got.star).toBe(4);
     expect(got.steps).toBeGreaterThanOrEqual(20);
     for (const never of [BRO, "board", LIST_VIEW]) expect(got[never]).toBeUndefined();
     expectOnePerDay(shown);
@@ -291,6 +310,7 @@ describe("an update day", () => {
       ["voice", 3],
       [BRO, 4],
       [LIST_VIEW, 5],
+      ["star", 6],
     ]);
     expectOnePerDay(shown);
   });

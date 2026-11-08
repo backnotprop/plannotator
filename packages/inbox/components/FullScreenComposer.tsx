@@ -367,8 +367,8 @@ export function FullScreenComposer({
 
   /**
    * The file's comment row stays drawn (hidden) on the Reply tab and while minimized: words typed in it are
-   * never dropped, and the pane's unsaved-comment question (`unsavedComposer`) still finds them before a
-   * step or a close (its Keep writing brings the Comment tab back: `revealComposerComment`).
+   * never dropped, and the pane still reads them (`unsavedComposers`, `useRowDraft`) as the file closes or
+   * steps, to keep them as the file's draft.
    */
   const keptComment = (shown: boolean, bin: ReactNode = null) =>
     takesComments ? (

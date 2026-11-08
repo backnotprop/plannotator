@@ -22,6 +22,7 @@ import { transformPlainText } from '../utils/inlineTransforms';
 import { richCopySourceFromRange, type RichCopySource } from '../utils/richClipboard';
 import { TOUCH_PRIMARY_QUERY, TOUCH_SELECTION_SETTLE_MS } from '../utils/touchSelection';
 import type { ShelvedCommentDraft } from '../utils/commentDraftShelf';
+import { unionToolbarRect, type ToolbarRect } from '../utils/touchToolbarPlacement';
 
 // --- Exported state types ---
 
@@ -32,6 +33,10 @@ export interface ToolbarState {
   /** Builds the selection's rich-text copy when the toolbar button is pressed
    *  (synchronous in the markdown Viewer, a bridge round trip on HTML surfaces). */
   getRichCopy?: () => RichCopySource | Promise<RichCopySource>;
+  /** The whole selection's rect when `element` is only its start (several
+   *  marks; a 1px anchor over an HTML frame). The touch toolbar goes below it
+   *  (`AnnotationToolbar` `touchAnchorRect`). Absent: `element`'s rect. */
+  getAnchorRect?: () => ToolbarRect | null;
 }
 
 export interface CommentPopoverState {
@@ -876,6 +881,18 @@ export interface UseAnnotationHighlighterReturn {
   commentDrafts: CommentPopoverState[];
   /** Open the composer of a draft mark again (by its highlight id); an open composer closes first, as a close. */
   reopenCommentDraft: (id: string) => void;
+  /**
+   * Open the comment composer again on a text selection comment's quote,
+   * holding its words (see `ViewerHandle.reopenComment`). Waits for the
+   * highlighter when it does not exist yet. False while disabled.
+   */
+  reopenComment: (annotation: Annotation, onMissing?: () => void) => boolean;
+  /**
+   * The text selection comment being written, as the comment its submit
+   * would add (its words empty), without adding it or closing anything (see
+   * `ViewerHandle.peekComment`). Null when no such composer is open.
+   */
+  peekComment: () => Annotation | null;
 }
 
 /** The class a draft mark's highlight carries (`commentDraftShelf`). */
@@ -919,9 +936,9 @@ export function useAnnotationHighlighter({
 
   const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
   const [commentPopover, setCommentPopover] = useState<CommentPopoverState | null>(null);
-  // Visible drafts (`commentDraftShelf`). The open composer is read through its own ref name, apart from any other.
-  const openDraftComposerRef = useRef(commentPopover);
-  openDraftComposerRef.current = commentPopover;
+  // The open composer, read from callbacks and listeners (visible drafts, `peekComment`).
+  const commentPopoverRef = useRef(commentPopover);
+  commentPopoverRef.current = commentPopover;
   const commentDraftShelfRef = useRef(commentDraftShelf);
   commentDraftShelfRef.current = commentDraftShelf;
   const [commentDrafts, setCommentDrafts] = useState<CommentPopoverState[]>([]);
@@ -967,6 +984,15 @@ export function useAnnotationHighlighter({
   hostComposesRef.current = onHostDraft !== undefined;
   const takeTouchSelectionRef = useRef<() => boolean>(() => false);
   const takeSelection = useCallback(() => takeTouchSelectionRef.current(), []);
+
+  // `reopenComment`: the words a reopened comment's composer opens with (read
+  // by the CREATE handler's comment branch while the range is painted), and
+  // whether that branch opened it. Requests made before the highlighter
+  // exists wait in the queue and run once it does.
+  const reopenTextRef = useRef<string | null>(null);
+  const reopenOpenedRef = useRef(false);
+  const reopenQueueRef = useRef<Array<{ annotation: Annotation; onMissing?: () => void }>>([]);
+  const reopenNowRef = useRef<(annotation: Annotation, onMissing?: () => void) => void>(() => {});
 
   // Track mouse position for quick label picker
   useEffect(() => {
@@ -1687,10 +1713,14 @@ export function useAnnotationHighlighter({
             window.getSelection()?.removeAllRanges();
           } else if (effectiveMode === 'comment') {
             pendingSourceRef.current = source;
+            // A comment reopened by its host (`reopenComment`) comes back with its words.
+            const reopened = reopenTextRef.current;
+            if (reopened !== null) reopenOpenedRef.current = true;
             setCommentPopover({
               anchorEl: doms[0] as HTMLElement,
               contextText: source.text.slice(0, 80),
               selectedText: source.text,
+              ...(reopened !== null ? { initialText: reopened } : {}),
               source,
               draftKey: commentDraftTargetKey(source, source.text),
               blockIds: selectionBlockIds(highlighter, source),
@@ -1724,6 +1754,11 @@ export function useAnnotationHighlighter({
                 range.setEndAfter(last);
                 return richCopySourceFromRange(range, selectionText);
               },
+              // The marks split at every text node: the touch toolbar goes
+              // below all of them, not under the first.
+              getAnchorRect: () => unionToolbarRect(
+                marks.filter((m) => m.isConnected).flatMap((m) => Array.from(m.getClientRects())),
+              ),
             });
           }
         }
@@ -1946,6 +1981,10 @@ export function useAnnotationHighlighter({
 
     // Visible drafts waiting from another mount of this document come back as draft marks.
     paintShelvedDraftsRef.current();
+    // Comments a host asked to reopen before this highlighter existed.
+    const queued = reopenQueueRef.current;
+    reopenQueueRef.current = [];
+    for (const request of queued) reopenNowRef.current(request.annotation, request.onMissing);
 
     return () => {
       if (handleSelectionChange) {
@@ -2239,7 +2278,7 @@ export function useAnnotationHighlighter({
       return;
     }
     // Visible drafts: words left in the composer keep their highlight, as a draft mark, so they can be found again.
-    const prev = openDraftComposerRef.current;
+    const prev = commentPopoverRef.current;
     const highlighter = highlighterRef.current;
     if (prev?.source && highlighter && !isMathAnnotationSource(prev.source)) {
       const id: string = prev.source.id;
@@ -2255,7 +2294,7 @@ export function useAnnotationHighlighter({
 
   keepAsDraftMarkRef.current = (id: string) => {
     const shelf = commentDraftShelfRef.current;
-    const open = openDraftComposerRef.current;
+    const open = commentPopoverRef.current;
     const highlighter = highlighterRef.current;
     if (!shelf || !highlighter || !open?.source || open.source.id !== id || isMathAnnotationSource(open.source)) return false;
     if (!shelf.keeps(open)) return false;
@@ -2287,7 +2326,7 @@ export function useAnnotationHighlighter({
     const highlighter = highlighterRef.current;
     const root = containerRef.current;
     if (!shelf || !highlighter || !root) return;
-    const openKey = openDraftComposerRef.current?.draftKey;
+    const openKey = commentPopoverRef.current?.draftKey;
     const painted: CommentPopoverState[] = [];
     for (const draft of shelf.list()) {
       if (draft.draftKey === openKey) continue;
@@ -2323,7 +2362,7 @@ export function useAnnotationHighlighter({
     const draft = commentDraftsRef.current.find((d) => d.source?.id === id);
     const highlighter = highlighterRef.current;
     if (!draft || !highlighter) return;
-    if (openDraftComposerRef.current) handleCommentClose();
+    if (commentPopoverRef.current) handleCommentClose();
     setToolbarState((open) => {
       if (open?.source && !isMathAnnotationSource(open.source) && open.source.id !== id) highlighter.remove(open.source.id);
       return null;
@@ -2376,6 +2415,101 @@ export function useAnnotationHighlighter({
     setQuickLabelPicker(null);
     window.getSelection()?.removeAllRanges();
   }, [clearPendingSelection, quickLabelPicker]);
+
+  // --- A comment reopened by its host (ViewerHandle.reopenComment) ---
+  // Its pending highlight is painted from the stored positions when they
+  // still lead to its quote, else from a search for the quote (the creation
+  // pipeline then opens the composer), and the composer opens holding the
+  // words. Nothing is saved: the composer's own submit and close act on it.
+  reopenNowRef.current = (annotation, onMissing) => {
+    const highlighter = highlighterRef.current;
+    const root = containerRef.current;
+    if (!highlighter || !root) {
+      onMissing?.();
+      return;
+    }
+    const words = annotation.text ?? '';
+    const previous = pendingSourceRef.current;
+    if (previous && !isMathAnnotationSource(previous)) {
+      try { highlighter.remove(previous.id); } catch {}
+    }
+    clearPendingSelection();
+    setToolbarState(null);
+    setQuickLabelPicker(null);
+    setCommentPopover(null);
+    if (isBlankQuote(annotation.originalText)) {
+      onMissing?.();
+      return;
+    }
+    if (annotation.startMeta && annotation.endMeta) {
+      const id = annotationId();
+      let doms: HTMLElement[] = [];
+      try {
+        highlighter.fromStore(
+          metaWithBelowTitle(root, annotation.startMeta),
+          metaWithBelowTitle(root, annotation.endMeta),
+          annotation.originalText,
+          id,
+        );
+        doms = (highlighter.getDoms(id) ?? []) as HTMLElement[];
+      } catch {}
+      if (doms.length > 0 && compactText(paintedTextOf(doms)) === compactText(annotation.originalText)) {
+        const source = { id, startMeta: annotation.startMeta, endMeta: annotation.endMeta, text: annotation.originalText };
+        pendingSourceRef.current = source;
+        setCommentPopover({
+          anchorEl: doms[0],
+          contextText: source.text.slice(0, 80),
+          selectedText: source.text,
+          initialText: words,
+          source,
+          draftKey: commentDraftTargetKey(source, source.text),
+          blockIds: selectionBlockIds(highlighter, source),
+          ...withStartOffset(selectionSourceOffset(highlighter, source)),
+        });
+        return;
+      }
+      if (doms.length > 0) {
+        try { highlighter.remove(id); } catch {}
+      }
+    }
+    const range = findTextInDOM(annotation.originalText);
+    if (!range) {
+      onMissing?.();
+      return;
+    }
+    reopenTextRef.current = words;
+    reopenOpenedRef.current = false;
+    try {
+      highlightRange(range, 'comment');
+    } finally {
+      reopenTextRef.current = null;
+    }
+    if (!reopenOpenedRef.current) onMissing?.();
+    reopenOpenedRef.current = false;
+  };
+  const reopenComment = useCallback((annotation: Annotation, onMissing?: () => void): boolean => {
+    if (!enabled) return false;
+    if (!highlighterRef.current || !containerRef.current) {
+      reopenQueueRef.current.push({ annotation, onMissing });
+      return true;
+    }
+    reopenNowRef.current(annotation, onMissing);
+    return true;
+  }, [containerRef, enabled]);
+
+  // --- The comment being written, read without touching it (ViewerHandle.peekComment) ---
+  const buildAnnotationRef = useRef(buildAnnotationFromSource);
+  buildAnnotationRef.current = buildAnnotationFromSource;
+  const peekComment = useCallback((): Annotation | null => {
+    const open = commentPopoverRef.current;
+    const highlighter = highlighterRef.current;
+    if (!open?.source || !highlighter || isMathAnnotationSource(open.source)) return null;
+    try {
+      return buildAnnotationRef.current(highlighter, open.source, AnnotationType.COMMENT, '');
+    } catch {
+      return null;
+    }
+  }, []);
 
   // --- The composer handed to the host (onHostDraft) ---
   // The toolbar and composer states still drive everything here; the host is
@@ -2458,5 +2592,7 @@ export function useAnnotationHighlighter({
     takeSelection,
     commentDrafts,
     reopenCommentDraft,
+    reopenComment,
+    peekComment,
   };
 }

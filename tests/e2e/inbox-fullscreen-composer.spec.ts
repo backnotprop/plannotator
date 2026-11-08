@@ -665,43 +665,6 @@ test('an HTML page: the reply box never runs over the drawer’s foot, at any wi
   }
 });
 
-test('the unsaved comment question stays beside the drawer: its foot and Write the reply can still be pressed', async ({ browser }: { browser: Browser }) => {
-  for (const name of ['checkout.html', 'checkout.png']) {
-    for (const width of [900, 1100, 768]) {
-      const context = await browser.newContext({ viewport: { width, height: 800 }, reducedMotion: 'reduce' });
-      try {
-        const page = await context.newPage();
-        await page.goto(fileUrl(name));
-        await expect(pane(page)).toHaveAttribute('data-full-view', '');
-        await page.locator('[data-full-view-comments]').first().click();
-        const foot = page.locator('[data-full-view-foot]');
-        await expect(foot).toBeVisible();
-        const field =
-          name === 'checkout.html'
-            ? page.locator('[data-comment-popover] textarea[data-pn-mobile-editable="true"]').last()
-            : pane(page).getByRole('textbox', { name: 'Comment on checkout.png' });
-        if (name === 'checkout.html') await page.frameLocator('[data-attachment-pane] iframe').first().locator('h1').click();
-        else await card(page).getByRole('radio', { name: /Comment/ }).click();
-        await expect(field).toBeVisible();
-        await page.waitForTimeout(200);
-        await field.fill('Not saved yet');
-        // HTML asks on Escape; an image asks when the file would close.
-        if (name === 'checkout.html') await field.press('Escape');
-        else await foot.getByRole('button', { name: 'Write the reply' }).click();
-        const guard = page.locator('[data-step-guard]');
-        await expect(guard).toBeVisible();
-        if (width === 900) await page.screenshot({ path: join(process.env.PLANNOTATOR_E2E_GUARD_SHOTS ?? shotsDir, `question-${name}-${width}.png`) });
-        const box = (await guard.boundingBox())!;
-        const footBox = (await foot.boundingBox())!;
-        expect(box.x + box.width, `${name} ${width}: the question ends before the foot starts`).toBeLessThanOrEqual(footBox.x);
-        await foot.getByRole('button', { name: 'Write the reply' }).click({ trial: true, timeout: 3_000 });
-      } finally {
-        await context.close();
-      }
-    }
-  }
-});
-
 type Read = { id: string; author: { kind: string }; body: string; viewing?: string };
 
 /** A thread of its own for what a floating box's Send tells the agent, and the steps those tests repeat. */

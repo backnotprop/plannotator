@@ -10,9 +10,10 @@
  *   only while the switch is on;
  * - the words of the person's verdict reply (`inboxReviewVerdictWords`).
  *
- * - Show me (approval "shape-in-code-review", ac2): the request the window
- *   sends, `plannotator review draw`'s help, result and refusals, and the
- *   guide brief's and the skills' lines for the overview's drawing.
+ * - Show me (approval "code-review-launch-build", item 1: Show me makes a
+ *   Shape): the request the window sends, the refusal an old `plannotator
+ *   review draw` gets, and the guide brief's and the skills' lines for the
+ *   overview's drawing.
  *
  * With the switch off, or never set, none of these reach an agent.
  * Browser-safe, no dependencies outside core: the server and the window both read it.
@@ -44,7 +45,7 @@ const OLD_SESSION = 'If submit_guide takes no `review` field in this session, se
 export const INBOX_REVIEW_CURATE_DRAWING_LINE = 'If the change is a flow across 3 or more steps that is easier to see than to read, give the overview one drawing (`overview.diagram`). The guide brief has the format.';
 
 /** /review-recheck's line for the overview's drawing (AGENT-TEXT §5, approved), after "Give one chapter to each comment you acted on…". */
-export const INBOX_REVIEW_RECHECK_DRAWING_LINE = "If the earlier review's overview had a drawing and you changed lines it opens, send it again, redrawn, as this review's `overview.diagram`, with the same data-mark ids. `plannotator review drawings <the earlier review's message id>` prints it.";
+export const INBOX_REVIEW_RECHECK_DRAWING_LINE = "If the earlier review's overview had a drawing and you changed lines it opens, send it again, redrawn, as this review's `overview.diagram`, with the same data-mark ids.";
 
 /**
  * Every review skill Plannotator knows, by name. Which of them the "/" list
@@ -190,22 +191,40 @@ export function inboxReviewVerdictWords(verdict: InboxReviewVerdict, title: stri
     : `I reviewed ${name} and I am asking for changes.`;
 }
 
-// ───────────────────────────── Show me (approval "shape-in-code-review", ac2) ─────────────────────────────
+// ───────────────────────────── Show me (approval "code-review-launch-build", item 1) ─────────────────────────────
 //
-// Every word as the owner approved it (q-b81e04bd), from
-// `.product/approved/shape-in-code-review/mock/ac2/AGENT-TEXT.md`.
-// None of it reaches an agent while Code review is off: the window offers no
-// Show me, the drawings routes are the unknown route, and `plannotator review
-// draw|drawings` is the review parse's, as before Show me.
+// Show me asks the session that wrote the review for a Shape: the same board,
+// store and commands as Shape on its own. The details are `plannotator shape
+// --help`'s. None of it reaches an agent while Code review is off: the window
+// offers no Show me, and `plannotator shape` is off unless a switch is on.
 
 /** What a Show me points at: a review, its file and lines (null: the Overview, the whole review), the round asked in, the person's words. */
 export interface InboxShowMeTarget {
-  /** The review's message id. */
-  review: string;
+  /** The review's message id; null: a Show me from a board with no review behind it (a Shape on its own). */
+  review: string | null;
   file: string | null;
   lines: [number, number] | null;
   round: number;
   words?: string;
+  /** Show me on a part of a board: `file` and `lines` are null, and the part says where. */
+  part?: InboxShowMePart;
+}
+
+/** What a Show me from a board is on: a part, words picked, a file's lines, or the whole board. */
+export interface InboxShowMePart {
+  /** The board it was pressed on. */
+  board: string;
+  /** What the person calls it: a part's heading, the words picked, or a file and its lines. */
+  name: string;
+  /** Its `data-code` value, when it has one. */
+  code?: string;
+  /** A box over several parts: their names, and `name` is "A part of the board". */
+  parts?: string[];
+  /**
+   * A box's picture, the box drawn on it: a PNG `data:` URL as the window sends it; once the Inbox keeps it in the
+   * board's folder, that file's full path, which the request names.
+   */
+  picture?: string;
 }
 
 /** "16–18" (an en dash), or "16" for one line. */
@@ -229,39 +248,41 @@ function quoted(text: string): string {
 }
 
 /**
- * The Show me request (AGENT-TEXT §1), the words the window sends as an Ask
- * turn. The bridge puts its own session header first. `againOfRound`: "Show me
- * again" for a drawing asked in an earlier round. A Show me on the Overview
- * (no file) has its own first line, in the same voice (not in AGENT-TEXT yet).
+ * The Show me request, the words the window sends as an Ask turn. The bridge
+ * puts its own session header first. `threadId` and the review tie the board to
+ * this thread, so it opens over the review. `again`: Show me again, a new
+ * version of that board.
  */
-export function inboxShowMeRequest(input: { target: InboxShowMeTarget; title: string; turnId: string; againOfRound?: number }): string {
-  const { target, turnId } = input;
+export function inboxShowMeRequest(input: { target: InboxShowMeTarget; title: string; threadId: string; again?: string }): string {
+  const { target, threadId } = input;
   const title = quoted(inboxReviewTitleLine(input.title));
   const words = target.words?.trim() ? `: "${quoted(target.words)}"` : '';
-  const where =
-    target.file !== null && target.lines
+  const tie = `--thread ${threadId}${target.review ? ` --through ${target.review}` : ''}`;
+  const part = target.part;
+  // A box over several parts names them; a part on its own, its code.
+  const after = part?.parts?.length ? ` (parts: ${part.parts.map(quoted).join(', ')})` : part?.code ? ` (${quoted(part.code)})` : '';
+  // The picture's line only once the Inbox kept it: the window's request, before, has none.
+  const picture = part?.picture && !part.picture.startsWith('data:') ? [`A picture of what they boxed, the box drawn on it: ${part.picture}.`] : [];
+  const where = part
+    ? `on "${quoted(part.name)}"${after} in your Shape ${part.board}, from`
+    : target.file !== null && target.lines
       ? `on ${target.lines[0] === target.lines[1] ? 'line' : 'lines'} ${inboxReviewLines(target.lines)} of ${target.file} in`
       : 'on the Overview of';
   return [
-    ...(input.againOfRound !== undefined
-      ? [`You drew this for round ${input.againOfRound}. The code changed since: draw it for the code as it is now, with the same data-mark ids for the parts that stay.`]
-      : []),
-    `The reviewer pressed Show me ${where} your review "${title}" (${target.review})${words}.`,
-    'They want a picture, not only words. Draw how this code works: where it starts, what it does, what it ends in. Write the drawing as JSON in a scratch file outside the project, such as /tmp/show-me.json, and send it first:',
-    `plannotator review draw --file /tmp/show-me.json --review ${target.review} --turn ${turnId}`,
-    'Then answer here in one or two sentences: what the picture shows, and anything in it the reviewer should act on. `plannotator review draw --help` has the format and the rules.',
+    target.review
+      ? `The reviewer pressed Show me ${where} your review "${title}" (${target.review})${words}.`
+      : `The person pressed Show me on "${quoted(part?.name ?? '')}"${after} in your Shape ${part?.board ?? ''}${words}.`,
+    ...picture,
+    input.again
+      ? `Bring your Shape ${input.again} up to date with the code as it is now, as a new version. \`plannotator shape --help\` has how.`
+      : part
+        ? `Make a new Shape of that part, so they can see it the way you see it, and leave ${part.board} as it is. It can show code the board doesn't. \`plannotator shape --help\` has how.`
+        : 'Make a Shape of it, so they can see it the way you see it. `plannotator shape --help` has how.',
+    `Store it with \`${tie}\`: it opens ${target.review ? 'over the review ' : ''}by itself, so don't open a page.`,
+    // A board with no review behind it has no diff for a click to land in: the agent draws it as any board.
+    ...(target.review ? ['On each part that is code, put `data-code="path#L42"` (or `#L42-L48`) with the review\'s paths and the new file\'s line numbers: a click lands on those lines of the diff.'] : []),
+    'Then answer here in one or two sentences.',
   ].join('\n');
-}
-
-/** A drawing as the agent writes it (`plannotator review draw --file`), the same object as the guide's overview `diagram`. */
-export interface InboxDrawnInput {
-  kind: 'html';
-  title?: string;
-  source: string;
-  css?: string;
-  width?: number;
-  height?: number;
-  tall?: { source: string; css?: string };
 }
 
 /** The view Shape's renderer draws: `source` becomes `html`. */
@@ -272,21 +293,6 @@ export function inboxDrawnViewOf(d: { source: string; css?: string; width?: numb
     ...(d.width !== undefined && d.height !== undefined ? { width: d.width, height: d.height } : {}),
     ...(d.tall ? { tall: { html: d.tall.source, ...(d.tall.css !== undefined ? { css: d.tall.css } : {}) } } : {}),
   };
-}
-
-/** One Show me drawing, kept by the Inbox beside the review (`inbox/review-drawings/<msg id>.json`). */
-export interface InboxReviewDrawing {
-  /** `drw_…` */
-  id: string;
-  /** The Ask turn it answers. */
-  turn: string;
-  file: string | null;
-  lines: [number, number] | null;
-  round: number;
-  words?: string;
-  title?: string;
-  view: ShapeDrawnView;
-  at: string;
 }
 
 /**
@@ -370,76 +376,13 @@ export function checkInboxDrawing(
   return { ok: true, ...(title ? { title } : {}), view };
 }
 
-/** `plannotator review draw --help` (AGENT-TEXT §2), while Code review is on. */
-export const INBOX_REVIEW_DRAW_HELP = [
-  'Usage:',
-  '  plannotator review draw --file <drawing.json> --review <msg_id> --turn <turn_id>',
-  '  plannotator review drawings <msg_id>',
-  '',
-  'A drawing shows the reviewer how a change works, inside the review you sent.',
-  'A part that names code opens that code when the reviewer clicks it.',
-  '',
-  "draw      Sends the drawing in <drawing.json> as your answer to the reviewer's",
-  '          Show me (--turn).',
-  "drawings  Prints the review's drawings (the Overview's and each Show me): round,",
-  '          and the lines each part opens.',
-  '',
-  'The drawing:',
-  '  { "kind": "html",',
-  '    "title": "After the third failure",',
-  '    "source": "<div data-step=\\"1\\" data-mark=\\"fails\\" data-code=\\"src/jobs/retry-worker.ts#L11\\">…</div>",',
-  '    "css": ".box { … }",',
-  '    "width": 800, "height": 360,',
-  '    "tall": { "source": "…" } }',
-  '',
-  'Rules:',
-  '- One flow: where it starts, what it does, what it ends in. 4 to 8 parts.',
-  "  Give every arrow a verb. Use the code's own names and numbers.",
-  '- data-code="path#L42" or "path#L42-L48" on each part that has code: a path from',
-  "  the repository root, lines in the new file of the review's diff.",
-  '- data-mark="id" on each part. Keep the id when you draw it again: only changed',
-  '  parts redraw.',
-  '- data-step="N": parts arrive in number order, the order you would explain them.',
-  '- One accent, on the point. Colours only through var(--ink), var(--ink2),',
-  '  var(--grey), var(--rule), var(--paper), var(--surface), var(--sunk) and',
-  '  var(--mark) (var(--mark-soft) for a fill). In SVG: class="line", "grey", "acc",',
-  '  "acc-fill", "dash", "t-acc", "t-grey".',
-  '- Nothing from outside: no scripts, event handlers, <style> (use css), external',
-  '  images, fonts or url(), iframes, forms or popovers.',
-  '- width and height make a fixed canvas the review scales to fit. Add "tall":',
-  '  every part again, stacked about 400 px wide, for a phone.',
-].join('\n');
-
-/** `plannotator review draw`'s result (AGENT-TEXT §3). */
-export const INBOX_REVIEW_DRAW_SENT = 'Sent. It opens over the review, beside your answer.';
-
-/** The only output of `plannotator review draw` / `drawings` (help included) while Code review is off (AGENT-TEXT §3). */
-export const INBOX_REVIEW_CODE_REVIEW_OFF = 'code_review_off: Code review is off. The person turns it on in the Plannotator Inbox: Settings → Capabilities → Code review.';
-
-/** The refusals' words (AGENT-TEXT §3), without the `<code>: ` the CLI puts first. */
-export const inboxReviewDrawRefusal = {
-  not_found: (review: string) => `No review ${review} here.`,
-  not_a_review: (review: string) => `${review} is not a review you sent.`,
-  turn_unknown: (turn: string) => `${turn} is not a Show me in this review's thread.`,
-  turn_stopped: (turn: string) => `The reviewer stopped ${turn}; it takes no drawing.`,
-  drawing_exists: (turn: string) => `${turn} already has its drawing; a Show me takes one.`,
-  invalid: (problems: readonly string[]) => ['the drawing has problems:', ...problems.map((p) => `  - ${p}`)].join('\n'),
-} as const;
-
-/** One line of `plannotator review drawings` (AGENT-TEXT §3). */
-export function inboxReviewDrawingsLine(
-  entry: { kind: 'overview'; round: number; codes: readonly string[] } | { kind: 'show_me'; round: number; file: string | null; lines: [number, number] | null; codes: readonly string[] },
-): string {
-  const codes = entry.codes.join(', ');
-  if (entry.kind === 'overview') return `overview · round ${entry.round} · with the guide · ${codes}`;
-  const where = entry.file !== null && entry.lines ? `${entry.file.split('/').pop()} lines ${inboxReviewLines(entry.lines)}` : 'the Overview';
-  return `show me · round ${entry.round} · ${where} · ${codes}`;
-}
+/** What an old `plannotator review draw` or `review drawings` gets while Code review is on: Show me makes a Shape now. */
+export const INBOX_REVIEW_DRAW_GONE = 'review_draw_gone: `plannotator review draw` is gone: Show me makes a Shape now. Run `plannotator shape --help`.';
 
 /** get_guide_brief's field doc for the overview's drawing (AGENT-TEXT §4), served only while Code review is on. */
 export const INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC = [
   '- **overview.diagram** (optional): one drawing of how the whole change works, when',
   '  it is a flow across 3 or more steps that is easier to see than to read.',
-  '  { "kind": "html", "source", "css"?, "width"?, "height"?, "tall"? }; the rules',
-  '  are in `plannotator review draw --help`. Or { "kind": "mermaid", "source" }.',
+  '  { "kind": "html", "source", "css"?, "width"?, "height"?, "tall"? }: `source` is a',
+  '  drawing by the rules in `plannotator shape --help`. Or { "kind": "mermaid", "source" }.',
 ].join('\n');

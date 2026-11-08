@@ -124,7 +124,8 @@ const readRow = (page: Page) =>
       const after = getComputedStyle(el, '::after');
       const width = after.content !== 'none' && after.position === 'absolute' ? Math.max(own.width, parseFloat(after.width) || 0) : own.width;
       const height = after.content !== 'none' && after.position === 'absolute' ? Math.max(own.height, parseFloat(after.height) || 0) : own.height;
-      return { name: el.getAttribute('aria-label') || el.textContent!.trim(), left: own.left, right: own.right, top: own.top, bottom: own.bottom, width, height };
+      // `chip`: inside a computer's chips, which keep their 26 px look (inbox-attachments.spec.ts checks it).
+      return { name: el.getAttribute('aria-label') || el.textContent!.trim(), chip: el.closest('.ib-rchips') !== null, left: own.left, right: own.right, top: own.top, bottom: own.bottom, width, height };
     };
     const b = box.getBoundingClientRect();
     return { scroll: row.scrollWidth, client: row.clientWidth, boxLeft: b.left, boxRight: b.right, rowRight: row.getBoundingClientRect().right, controls: controls.map(press) };
@@ -136,7 +137,8 @@ function oneRow(row: Awaited<ReturnType<typeof readRow>>, press = 44): void {
   const middles = row.controls.map((c) => (c.top + c.bottom) / 2);
   for (const middle of middles) expect(Math.abs(middle - middles[0]!), 'every control on one line').toBeLessThanOrEqual(2);
   for (const c of row.controls) expect(c.right, `"${c.name}" inside the box`).toBeLessThanOrEqual(row.boxRight + 0.5);
-  for (const c of row.controls) expect(Math.min(c.width, c.height), `"${c.name}" is ${press} px to press`).toBeGreaterThanOrEqual(press);
+  // The row's own controls (Send, the paperclip, Skills, the mic, the bin, the summary line); a chip's button is the chip's size.
+  for (const c of row.controls.filter((c) => !c.chip)) expect(Math.min(c.width, c.height), `"${c.name}" is ${press} px to press`).toBeGreaterThanOrEqual(press);
 }
 
 /** Where the things a person aims at are: the mic, Send, the bin (a computer), and the box itself. */

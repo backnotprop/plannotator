@@ -422,6 +422,17 @@ export interface AllFilesCodeViewProps {
   /** No scroller of its own: as tall as its content, windowed and sticky against the page's scroller. Read once, at mount. */
   scrollsWithPage?: boolean;
   /**
+   * Files that sit flush, a header's own hairline the only seam (the Inbox's PR page, one file per viewer that scrolls
+   * with the page). Every list counts no spacing around a hunk separator (#2713). Here a file whose whole text is not
+   * read yet draws no row after its last hunk (neither "More unchanged context may be available" nor "N unmodified
+   * lines"), and gives back the room it is laid out in, so the next file's header sits right under the last code row,
+   * as in the code review app; once the text is read (an arrow above it), what is left below shows as "N unmodified
+   * lines". The header draws its hairline whether stuck or not.
+   */
+  flushFiles?: boolean;
+  /** A narrow header keeps the folder before the name (FileHeader `keepsFolder`). */
+  headerKeepsFolder?: boolean;
+  /**
    * Portable / read-only host (the exported Guided Review viewer): no line or
    * gutter selection, no annotation toolbar or comment popovers, no global
    * keyboard shortcuts, no /api/file-content augmentation, no open-in
@@ -687,9 +698,16 @@ const SCROLLS_WITH_PAGE_CSS = `
   :host([data-reading-whole-file]) [data-expand-button] { cursor: progress; animation: reading-whole-file 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
   @keyframes reading-whole-file { 50% { opacity: 0.5; } }
   @media (prefers-reduced-motion: reduce) { :host([data-reading-whole-file]) [data-expand-button] { animation: none; } }
+`;
+const STUCK_HEADER_LINE_CSS = `
   @container sticky-header scroll-state(stuck: top) {
     [data-diffs-header]::after { content: ''; position: absolute; left: 0; bottom: -1px; width: 100%; height: 1px; background: var(--border); }
   }
+`;
+// Flush files (`flushFiles`): the header's own hairline is the seam, and an unread file's trailing row is not drawn
+// (the viewer gives its room back, HUNK_SEPARATOR_HEIGHT).
+const FLUSH_FILES_CSS = `
+  :host([data-trailing-unread]) [data-separator][data-separator-last] { display: none; }
 `;
 
 // How long the scroller must be quiet before queued augmentation applies
@@ -783,6 +801,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   getAIHistoryForFile,
   allowScrollChaining = false,
   onContentHeightChange,
+  flushFiles = false,
+  headerKeepsFolder = false,
   scrollsWithPage = false,
   enableEditSuggestions = false,
   onAddSuggestionsForFile,
@@ -860,6 +880,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const contentHeightRef = useRef(onContentHeightChange);
   contentHeightRef.current = onContentHeightChange;
   const reportsContentHeight = !!onContentHeightChange;
+  // A flush file's hidden trailing row (flushFiles, below): its room is given back, from the report as from the page.
+  const [trailingUnread, setTrailingUnread] = useState(false);
   useEffect(() => {
     if (!scrollEl || !reportsContentHeight || typeof ResizeObserver === 'undefined') return;
     let last = -1;
@@ -867,7 +889,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const report = () => {
       if (!list) return;
       const style = getComputedStyle(list);
-      const height = Math.ceil((list as HTMLElement).offsetHeight + parseFloat(style.marginTop || '0') + parseFloat(style.marginBottom || '0'));
+      const height = Math.ceil((list as HTMLElement).offsetHeight + parseFloat(style.marginTop || '0') + parseFloat(style.marginBottom || '0')) - (trailingUnread ? HUNK_SEPARATOR_HEIGHT : 0);
       if (height <= 0 || height === last) return;
       last = height;
       contentHeightRef.current?.(height);
@@ -890,7 +912,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       children.disconnect();
       sizes.disconnect();
     };
-  }, [scrollEl, reportsContentHeight]);
+  }, [scrollEl, reportsContentHeight, trailingUnread]);
 
   const toolbarHostRef = useRef<ToolbarHostHandle>(null);
 
@@ -1930,6 +1952,22 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   });
   // Only a file with both sides has anything to open.
   const opensWholeFiles = !!fetchFileContent && !wholeFileGone && files.some((file) => file.status === 'modified' || file.status === 'renamed');
+  // Flush, one file per viewer (the PR page): while its whole text is unread, Pierre would close the file with a
+  // "More unchanged context may be available" row (a loader, a partial diff). It is hidden and its room given back.
+  const flushesFiles = flushFiles && scrollsWithPage && files.length === 1;
+  const hidesTrailingRow = (item: CodeViewItem<DiffAnnotationMetadata>) =>
+    item.type === 'diff' &&
+    opensWholeFiles &&
+    item.collapsed !== true &&
+    item.fileDiff.isPartial &&
+    (item.fileDiff.type === 'change' || item.fileDiff.type === 'rename-changed') &&
+    item.fileDiff.hunks.length > 0;
+  // Nothing is read for it: the row stays hidden until an arrow above it opens the file's whole text.
+  const syncTrailingRow = (node: HTMLElement, item: CodeViewItem<DiffAnnotationMetadata>) => {
+    const unread = hidesTrailingRow(item);
+    node.toggleAttribute('data-trailing-unread', unread);
+    setTrailingUnread(unread);
+  };
 
   // A comment on a line an arrow opened, after a reload: the gap is closed again. Open what holds it (a first read if
   // need be), then scroll, once the rows are there. Answers whether it took the jump on.
@@ -2017,6 +2055,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // selection's shadow-root host. Registered on every mount/update because
       // CodeView recycles elements across items.
       nodeToItemIdRef.current.set(node, context.id);
+      if (flushesFiles) syncTrailingRow(node, context);
       augmentItem(context.id);
       const itemId = context.id;
       requestAnimationFrame(() => applyItemHighlights(node, itemId));
@@ -3173,6 +3212,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       >
         <FileHeader
         compactTouchLayout={compactTouchLayout}
+        keepsFolder={headerKeepsFolder}
         readOnly={readOnly || commentOnly}
         openIn={fileOpenIn?.(filePath)}
         filePath={filePath}
@@ -3321,22 +3361,24 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     () => ({
       diffHeaderHeight: compactTouchLayout ? COMPACT_PANEL_HEADER_HEIGHT : PANEL_HEADER_HEIGHT,
       hunkSeparatorHeight: HUNK_SEPARATOR_HEIGHT,
-      // HUNK_SEPARATOR_HEIGHT already holds the drawn margins. In a box that is as tall as this layout, Pierre's gaps
-      // around each separator would be empty space the rows float in.
-      ...(scrollsWithPage && { spacing: 0 }),
+      // HUNK_SEPARATOR_HEIGHT already holds the drawn margins, so Pierre's gaps around each separator are never drawn.
+      // Counted, every open file was laid out 8px taller per gap than it is. In a box as tall as the layout the rows
+      // float in that room; in the scroller, a list that just outgrows the view is pushed down by it, under the
+      // pointer, when a file opens (#2713: Pierre's sticky window sits at the bottom of the room it is given).
+      spacing: 0,
       // Spacing 0 would count no room under the last row, but the code keeps Pierre's 8px there (its padding plus its
       // sideways scrollbar's gutter): counted, the bar is not cut off by the box or drawn over the next file.
-      ...(scrollsWithPage && { paddingBottom: 8 }),
+      paddingBottom: 8,
       ...(customLineHeight != null && { lineHeight: customLineHeight }),
     }),
-    [compactTouchLayout, customLineHeight, scrollsWithPage],
+    [compactTouchLayout, customLineHeight],
   );
   itemMetricsRef.current = itemMetrics;
 
   const options = useMemo<CodeViewOptions<DiffAnnotationMetadata>>(
     () => ({
       themeType: pierreTheme.type,
-      unsafeCSS: scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}` : pierreTheme.css,
+      unsafeCSS: scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}${flushFiles ? FLUSH_FILES_CSS : STUCK_HEADER_LINE_CSS}` : pierreTheme.css,
       ...(pierreTheme.syntaxTheme && { theme: pierreTheme.syntaxTheme }),
       diffStyle,
       overflow: diffOverflow,
@@ -3421,6 +3463,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       itemMetrics,
       leadingHeight,
       scrollsWithPage,
+      flushFiles,
       handleLineSelectionEnd,
       handleGutterUtilityClick,
       onCodeNavRequest,
@@ -3492,6 +3535,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   return (
     <div
       className="relative h-full"
+      // The hidden trailing row's room, given back (flushFiles): the next file's header meets the last code row.
+      style={flushesFiles && trailingUnread ? { marginBottom: -HUNK_SEPARATOR_HEIGHT } : undefined}
       data-history-owner={editSession.editingItemId ? 'edit-session' : undefined}
       onPointerMove={markdownPreview ? (event) => { pointerRef.current = { x: event.clientX, y: event.clientY }; } : undefined}
       onPointerLeave={markdownPreview ? () => { pointerRef.current = null; } : undefined}

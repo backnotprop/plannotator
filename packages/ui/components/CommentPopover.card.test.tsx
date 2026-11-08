@@ -8,7 +8,9 @@
  * - the card's button says anything but "Comment" (for a selection and for a global comment alike);
  * - the card's chevron, or Escape, loses the words typed (they must come back on the next open of that draft);
  * - Escape on a card opened to full closes it, instead of taking it back to small first (one layer per Escape);
- * - a phone gets the old full-screen veil (blurred page behind) instead of the card docked at the foot.
+ * - a phone gets the old full-screen veil (blurred page behind) instead of the card docked at the foot;
+ * - a box's single extra action (Shape's Show me on code lines) vanishes in the card;
+ * - a surface that keeps its own footer (Shape's board, `allowCard={false}`) is turned into the card anyway.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -187,5 +189,21 @@ describe.if(hasDom)('CommentPopover as the comment card (the Inbox opts in)', ()
     expect(box()!.hasAttribute('data-phone')).toBe(true);
     expect(document.querySelector('button[aria-label="Dismiss comment"]')).toBeNull();
     expect(document.querySelector('.backdrop-blur-sm')).toBeNull();
+  });
+
+  test('the card keeps a box\'s extra action, and it gets the words', async () => {
+    const got: string[] = [];
+    await mount(<CommentPopover anchorRect={ANCHOR} contextText="the words" isGlobal={false} onSubmit={() => {}} onClose={() => {}} extraAction={{ label: 'Show me', onAction: (t) => got.push(t) }} />);
+    expect(box()!.hasAttribute('data-comment-card')).toBe(true);
+    await type('how it flows');
+    await act(async () => box()!.querySelector<HTMLButtonElement>('[data-comment-extra-action]')!.click());
+    expect(got).toEqual(['how it flows']);
+  });
+
+  test('allowCard={false} draws the popover as before, its own labels and all', async () => {
+    await mount(<CommentPopover anchorRect={ANCHOR} contextText="the words" isGlobal={false} allowCard={false} submitLabel="Change it" onSubmit={() => {}} onClose={() => {}} />);
+    expect(box()!.hasAttribute('data-comment-card')).toBe(false);
+    expect(box()!.querySelector('[data-comment-card-close]')).toBeNull();
+    expect(buttonByText('Change it')).not.toBeNull();
   });
 });

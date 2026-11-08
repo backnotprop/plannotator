@@ -8,8 +8,10 @@
  * The card reads: what the comment is on, Parent and Child to move a pin to the
  * element around it or back in (`stepPin`), the field and Comment. The field is
  * the reply's (`InboxComposerField`: `@` tags and `/` skills), inside
- * `data-image-composer`, so the pane's unsaved-comment question and its Escape
- * rungs treat it as they treat an image's comment row.
+ * `data-image-composer`, so the pane's Escape rungs treat it as they treat an
+ * image's comment row. Words typed when the file closes wait as its draft
+ * (`kept`), and come back on the same pin or words when it opens again
+ * (`expectWords`, then the page's own draft).
  *
  * Focus lands in the field for a pin. A selection leaves it in the page, where
  * the person may still be dragging its handles; moving it would end them.
@@ -35,7 +37,7 @@ import { TagNotes } from './TagPicker';
 export interface HtmlPageCommentOptions {
   /** The card can open: a phone's full screen on a page that takes comments. Off, any open draft goes. */
   enabled: boolean;
-  /** What the draft belongs to: another file drops it (the pane asked first about typed words). */
+  /** What the draft belongs to: another file drops it (the pane kept typed words as that file's draft first). */
   fileKey: string;
   threadId: string | null;
   /** The file's name, for the field's label. */
@@ -59,6 +61,10 @@ export interface HtmlPageComment {
   card: ReactNode | null;
   /** For the composer's minimize: a comment with no words yet is dropped. */
   onMinimized: () => void;
+  /** The comment being written, as the file closes (its words as `text`, what it is on), or null: none has words. */
+  kept: () => Annotation | null;
+  /** The next draft the page hands over (a kept comment put back on its pin or words) opens holding these words. */
+  expectWords: (text: string) => void;
 }
 
 export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, tags, onSave, covered, onDone }: HtmlPageCommentOptions): HtmlPageComment {
@@ -74,6 +80,8 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
   const restore = useRef<(() => void) | null>(null);
   /** Parent or Child was pressed: the next draft is the same comment, focus stays where it is. */
   const stepping = useRef(false);
+  /** Words a kept comment had, for the draft the page hands over next (`expectWords`). */
+  const expected = useRef<string | null>(null);
 
   const drop = useCallback(() => {
     setDraft(null);
@@ -95,9 +103,22 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
         else restore.current = openComposerComment(threadId);
       }
       setDraft(next);
+      if (expected.current !== null) {
+        setWords(expected.current);
+        expected.current = null;
+      }
     },
     [threadId, drop],
   );
+  const kept = useCallback((): Annotation | null => {
+    const held = draftRef.current;
+    const text = wordsRef.current;
+    if (!held || text.trim() === '') return null;
+    return { ...held.annotation, text, ...(mentions.current.length > 0 ? { mentions: mentions.current } : {}) };
+  }, []);
+  const expectWords = useCallback((text: string) => {
+    expected.current = text;
+  }, []);
 
   const onMinimized = useCallback(() => {
     if (!draftRef.current || wordsRef.current.trim() !== '') return;
@@ -171,7 +192,7 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
     />
   ) : null;
 
-  return { open: draft !== null, onHostDraft, card, onMinimized };
+  return { open: draft !== null, onHostDraft, card, onMinimized, kept, expectWords };
 }
 
 function HtmlCommentCard({

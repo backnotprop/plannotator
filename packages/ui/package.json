@@ -15,6 +15,7 @@
     "./components/html-viewer": "./components/html-viewer/index.ts",
     "./components/chat": "./components/chat/index.ts",
     "./components/shape": "./components/shape/index.ts",
+    "./components/shape/scene/frame": "./components/shape/scene/frame.ts",
     "./shape.css": "./components/shape/shape.css",
     "./components/diagram": "./components/diagram/index.ts",
     "./components/diagramLanguages": "./components/diagramLanguages.ts",

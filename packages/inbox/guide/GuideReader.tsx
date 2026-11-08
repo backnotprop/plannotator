@@ -8,14 +8,16 @@
  * comments (`commentOnly`: nothing else of the review app, which needs its
  * server); without, they are read-only, as on guides.show and the phone.
  *
- * Mounted only through GuidePane's dynamic import (`#guide-reader`,
+ * Mounted only through lazyParts.tsx's dynamic import (`#guide-reader`,
  * tests/entry-assets.test.ts). It is its own chunk, packed in inbox.html and
  * served by the Inbox (build/pack-inbox.ts, #2593): its modules (the guide
  * chain, the diff renderer) load and run on the first Open, never at page load.
  * The first section card carries the Split | Unified tab (DiffStyleSwitch,
- * through the chain's `renderSectionTab`; under `threadHeading`, every open
- * chapter with diffs does); a phone draws every diff Unified
- * and has no tab. No new Tailwind classes here or in the chain. The comment cards, toolbar
+ * through the chain's `renderSectionTab`) unless the host draws the diff
+ * controls in its own bar (`hostDiffControls`: the guided review and the
+ * full-window review, approval "diff-controls-headers"); a phone draws every
+ * diff Unified and has no tab. The diffs follow every display setting the
+ * "Diff display" popover writes, the tab size included. No new Tailwind classes here or in the chain. The comment cards, toolbar
  * and suggestion blocks are styled by packages/review-editor/comments.css,
  * which apps/inbox/index.css imports (guides.show gets it through
  * review-editor's index.css; its pinned manifest follows the viewer build).
@@ -46,6 +48,7 @@ import { AllFilesCodeView, type AllFilesCodeViewProps } from '@plannotator/revie
 import type { DiffSelectionActions } from '@plannotator/review-editor/components/SelectionChooser';
 import { extractLinesFromPatch, isLineRangeInPatch } from '@plannotator/review-editor/utils/patchParser';
 import { useConfigValue } from '@plannotator/ui/config';
+import { getIdentity } from '@plannotator/ui/utils/identity';
 import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
 import { reviewSourceLine } from './sourceLine';
 import { usePhone } from '../phone';
@@ -193,8 +196,12 @@ function Reader({
   renderHeadActions,
   highlight = null,
   bare = false,
+  controlsHost = null,
   fileContents,
   threadHeading = false,
+  signComments = false,
+  hostDiffControls = false,
+  collapseAll,
 }: GuideReaderProps) {
   const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
@@ -228,18 +235,41 @@ function Reader({
     [mode, ticks, onReviewedChange],
   );
 
-  // Line comments: the selection the toolbar opens on, as the review app keeps it (one, on the focused card).
+  // Line comments: the selection the toolbar opens on, as the review app keeps it (one), on the file it was made in:
+  // the next file taking focus has the same line numbers, but not these lines.
   const [pendingSelection, setPendingSelection] = useState<SelectedLineRange | null>(null);
+  const [selectionFile, setSelectionFile] = useState<string | null>(null);
+  const selectionSetters = useRef(new Map<string, (range: SelectedLineRange | null) => void>());
+  const selectionSetter = useCallback((path: string) => {
+    let set = selectionSetters.current.get(path);
+    if (!set) {
+      set = (range) => {
+        setSelectionFile(path);
+        setPendingSelection(range);
+      };
+      selectionSetters.current.set(path, set);
+    }
+    return set;
+  }, []);
   // A host's highlight (a picture's part opened its code): those lines are painted on that file's card, which takes focus.
   useEffect(() => {
-    if (!highlight) return;
+    if (!highlight) {
+      // The host took it back (a part landed where nothing may be painted).
+      setPendingSelection(null);
+      return;
+    }
     setFocusedFile(highlight.path);
+    setSelectionFile(highlight.path);
     setPendingSelection({ start: highlight.start, end: highlight.end, side: 'additions' });
   }, [highlight?.token]); // eslint-disable-line react-hooks/exhaustive-deps
   const commentsRef = useRef(comments);
   commentsRef.current = comments;
   const pendingRef = useRef(pendingSelection);
   pendingRef.current = pendingSelection;
+  // The PR page and a review with Code review on sign a new comment with the person's name, as the review app does; a
+  // guide, or any review with Code review off, leaves it unsigned as on main.
+  const signs = bare || signComments;
+  const signed = useCallback((): { author?: string } => (signs ? { author: getIdentity() } : {}), [signs]);
   // Line comments go to the diffs; global comments (on the whole review) to the guide's header.
   const annotations = useMemo(() => (comments ? comments.annotations.filter((a) => a.scope !== 'general') : NO_ANNOTATIONS), [comments?.annotations]);
   const globalAnnotations = useMemo(() => (comments ? comments.annotations.filter((a) => a.scope === 'general') : NO_ANNOTATIONS), [comments?.annotations]);
@@ -254,12 +284,12 @@ function Reader({
     const draftKey = `guide-global:${wiring.draftScope}`;
     // The review app's general comment: no file and no lines (its '' / 0 / 0 sentinels).
     void wiring
-      .onSave({ id: newCommentId(), type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text: trimmed, createdAt: Date.now() })
+      .onSave({ id: newCommentId(), type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text: trimmed, ...signed(), createdAt: Date.now() })
       // Refused (too long, the thread resolved elsewhere, offline): the words wait in the composer for the next open.
       .then((saved) => {
         if (!saved) restoreCommentDraft(draftKey, text);
       });
-  }, []);
+  }, [signed]);
   const addComment = useCallback<GuideDiffComments['onAddAnnotationForFile']>(
     (filePath, type, text, suggestedCode, originalCode, conventionalLabel, decorations, tokenMeta) => {
       const range = pendingRef.current;
@@ -290,12 +320,13 @@ function Reader({
         ...(selectedText && { selectedText }),
         ...(outsideDiff && { outsideDiff: true, ...(openedCode && { anchorText: openedCode }) }),
         createdAt: Date.now(),
+        ...signed(),
         conventionalLabel,
         decorations,
       });
       setPendingSelection(null);
     },
-    [files],
+    [files, signed],
   );
   const editComment = useCallback<GuideDiffComments['onEditAnnotation']>((id, text, suggestedCode, originalCode, conventionalLabel, decorations) => {
     const wiring = commentsRef.current;
@@ -340,30 +371,32 @@ function Reader({
   }, [commentFile, reveal]);
 
   // A phone draws one column, always, and offers no switch (two ~130 px columns read as nothing);
-  // the saved layout is left as it is. Elsewhere the first card carries the Split | Unified tab (the review: every open chapter).
+  // the saved layout is left as it is. Elsewhere the first card carries the Split | Unified tab, unless the host's bar has it.
   const phone = usePhone();
+  // The tab size the popover sets, as code review applies it (Pierre reads it off the page).
+  const tabSize = useConfigValue('diffTabSize');
+  useEffect(() => {
+    document.documentElement.style.setProperty('--diffs-tab-size', String(tabSize));
+  }, [tabSize]);
   // AllFilesCodeView compares Viewed sets by identity: a new Set only when the ticks change.
   const viewedFilesKey = viewed ? [...viewed.files].sort().join('\n') : null;
   const viewedSet = useMemo(() => (viewed ? new Set(viewed.files) : undefined), [viewedFilesKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  // The review: every open chapter with diffs carries it too, so a jump to a chapter lands with the control attached.
-  const renderSectionTab = useCallback(
-    (index: number, card: { folded: boolean; diffs: number; title: string }) => {
-      if (index === 0) return <DiffStyleSwitch icons={threadHeading} name={threadHeading ? 'ib-diff-style-0' : undefined} />;
-      if (!threadHeading || card.folded || card.diffs === 0) return null;
-      return <DiffStyleSwitch icons name={`ib-diff-style-${index}`} label={`Diff layout, ${card.title}`} />;
-    },
-    [threadHeading],
-  );
+  // The pull request page's flat review, whose bar holds its actions, draws the tab as two marks.
+  const renderSectionTab = useCallback((index: number) => (index === 0 ? <DiffStyleSwitch icons={!!controlsHost} /> : null), [controlsHost]);
 
   const getDiffRendererProps = useCallback(
-    ({ file, focused }: GuideDiffRendererContext): {
+    ({ file }: GuideDiffRendererContext): {
       comments?: GuideDiffComments;
       diffStyleOverride?: 'unified';
       viewedFiles?: Set<string>;
       onToggleViewed?: (filePath: string) => void;
       fetchFileContent?: AllFilesCodeViewProps['fetchFileContent'];
       fileOpenIn?: (filePath: string) => ReactNode;
+      flushFiles?: boolean;
+      headerKeepsFolder?: boolean;
     } => ({
+      // The PR page: files flush, and a narrow header (a phone's) keeps the folder, so two files of one name read apart.
+      ...(bare && { flushFiles: true, headerKeepsFolder: true }),
       ...(phone && { diffStyleOverride: 'unified' as const }),
       ...(fetchFileContent && { fetchFileContent }),
       ...(fileOpenIn ? { fileOpenIn } : {}),
@@ -374,9 +407,8 @@ function Reader({
               annotations,
               selectedAnnotationId: comments.selectedId,
               scrollTargetAnnotation: scrollTarget && annotations.some((a) => a.id === scrollTarget.id && a.filePath === file.path) ? scrollTarget : null,
-              // Only the focused card is the selection target, as in the review app.
-              pendingSelection: focused ? pendingSelection : null,
-              onLineSelection: setPendingSelection,
+              pendingSelection: selectionFile === file.path ? pendingSelection : null,
+              onLineSelection: selectionSetter(file.path),
               onAddAnnotationForFile: addComment,
               onEditAnnotation: editComment,
               onSelectAnnotation: selectComment,
@@ -386,7 +418,7 @@ function Reader({
           }
         : {}),
     }),
-    [phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, fileOpenIn],
+    [bare, phone, comments, annotations, scrollTarget, pendingSelection, selectionFile, selectionSetter, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, fileOpenIn],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).
@@ -421,16 +453,20 @@ function Reader({
       DiffRenderer: GuideDiff,
       getDiffRendererProps,
       ...(revealFile ? { revealFile } : {}),
-      ...(phone ? {} : { renderSectionTab }),
+      ...(phone || hostDiffControls ? {} : { renderSectionTab }),
       ...(renderOverviewDiagram ? { renderOverviewDiagram } : {}),
       ...(renderOverviewFigure ? { renderOverviewFigure } : {}),
       ...(renderHeadActions ? { renderHeadActions } : {}),
       ...(globalComments ? { globalComments } : {}),
       // What GuideDiff draws (a phone: always Unified), for a file box's first estimate.
       diffStyle: phone ? ('unified' as const) : savedDiffStyle,
-      opensWholeFiles: !!fetchFileContent,
+      // The PR page's flush files draw no row after the last hunk until a file's text is read (flushFiles).
+      opensWholeFiles: !!fetchFileContent && !bare,
+      // The PR page: files edge to edge, each box exactly its header and code.
+      ...(bare ? { flushFiles: true } : {}),
+      ...(collapseAll ? { collapseAll } : {}),
     }),
-    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent],
+    [files, getDiffRendererProps, revealFile, phone, hostDiffControls, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent, collapseAll, bare],
   );
 
   // The window's wrap for a code span, for the viewer's own inline parser.
@@ -449,6 +485,7 @@ function Reader({
         onFocusFile={setFocusedFile}
         sourceLine={reviewSourceLine(snapshot)}
         bare={bare}
+        actionsHost={controlsHost}
         threadHeading={threadHeading}
         // Every file's box as tall as its diff, in the readers built on this one (a thread's guided review, the review, the PR page).
         fitFileHeights
@@ -473,3 +510,6 @@ function Reader({
 
 // Held to the shape the window's strict typecheck reads (reader-module.d.ts).
 GuideReader satisfies typeof ReaderShape;
+
+// The PR page's All files rides this chunk: the review app's tree and file view (PullRepoParts.tsx).
+export { PullAllFiles, PullRepoFile } from './PullRepoParts';

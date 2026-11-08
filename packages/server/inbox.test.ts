@@ -933,6 +933,64 @@ describe("the window's routes: settings, restart, favicon", () => {
     }
   });
 
+  // Approval "inbox-reaction-tray": two windows (a laptop and a phone) saving emoji never write over each other's.
+  test("the tray's saved emoji change one at a time on the list as it is, count their saves, and every open window hears them", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTextSize: 13 }));
+      const server = await start(dataDir);
+      const settings = async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()) as { reactions: unknown; reactions_rev: unknown };
+      const change = (reaction_change: unknown) => post(server, "/api/inbox/settings", { serverSession: server.serverSession, reaction_change });
+      const onDisk = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as Record<string, unknown>;
+      expect(await settings()).toMatchObject({ reactions: [], reactions_rev: 0 });
+
+      const controller = new AbortController();
+      const stream = await fetch(`http://127.0.0.1:${server.port}/api/inbox/events?cursor=${server.store.cursor()}&window=window-reactions-1&permission=granted`, { signal: controller.signal });
+      const reader = stream.body!.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      while (!text.includes("event: hello")) text += decoder.decode((await reader.read()).value);
+
+      // Window A saves 🚀; window B, which never heard of it, saves 🔥: both are kept, in the order saved.
+      expect(await (await change({ op: "add", emoji: "🚀" })).json()).toMatchObject({ reactions: [{ emoji: "🚀" }], reactions_rev: 1 });
+      expect(await (await change({ op: "add", emoji: "🔥" })).json()).toMatchObject({ reactions: [{ emoji: "🚀" }, { emoji: "🔥" }], reactions_rev: 2 });
+      // A name with a bidi override and a zero-width space keeps only what shows.
+      expect(await (await change({ op: "name", emoji: "🚀", label: "Ship‮ it​" })).json()).toMatchObject({ reactions: [{ emoji: "🚀", label: "Ship it" }, { emoji: "🔥" }], reactions_rev: 3 });
+      expect(await (await change({ op: "change", emoji: "🔥", to: "🎉" })).json()).toMatchObject({ reactions: [{ emoji: "🚀", label: "Ship it" }, { emoji: "🎉" }], reactions_rev: 4 });
+      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxReactions: [{ emoji: "🚀", label: "Ship it" }, { emoji: "🎉" }], inboxReactionsRev: 4 });
+      // A name for an emoji another window took out changes nothing and writes nothing.
+      expect(await (await change({ op: "name", emoji: "🦄", label: "Gone" })).json()).toMatchObject({ reactions_rev: 4 });
+
+      const deadline = Date.now() + 1500;
+      while (!text.includes('"rev":4') && Date.now() < deadline) {
+        const chunk = await Promise.race([reader.read(), new Promise<null>((resolve) => setTimeout(() => resolve(null), 200))]);
+        if (chunk && chunk.value) text += decoder.decode(chunk.value);
+      }
+      controller.abort();
+      expect(text).toContain(`event: reactions\ndata: ${JSON.stringify({ reactions: [{ emoji: "🚀" }], rev: 1 })}`);
+      expect(text).toContain(`event: reactions\ndata: ${JSON.stringify({ reactions: [{ emoji: "🚀", label: "Ship it" }, { emoji: "🎉" }], rev: 4 })}`);
+
+      // Refused: not an emoji, 👍 (the tray's first), and a sixth emoji. Nothing changes.
+      for (const bad of [{ op: "add", emoji: "ok" }, { op: "add", emoji: "👍" }, { op: "rename", emoji: "🚀" }, { op: "change", emoji: "🚀" }]) {
+        const refused = await change(bad);
+        expect(refused.status).toBe(422);
+        expect((await refused.json()).code).toBe("validation_error");
+      }
+      for (const emoji of ["🧪", "👀", "❤️"]) expect((await change({ op: "add", emoji })).status).toBe(200);
+      const full = await change({ op: "add", emoji: "🌮" });
+      expect(full.status).toBe(422);
+      expect(await settings()).toMatchObject({ reactions_rev: 7 });
+      expect((await (await change({ op: "remove", emoji: "🚀" })).json()).reactions).toEqual([{ emoji: "🎉" }, { emoji: "🧪" }, { emoji: "👀" }, { emoji: "❤️" }]);
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
   test("the guided review's diff layout saves into config.json `diffOptions.diffStyle`, shared with code review", async () => {
     const root = tempRoot();
     const dataDir = join(root, "data");
@@ -976,6 +1034,86 @@ describe("the window's routes: settings, restart, favicon", () => {
       const other = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, text_size: 13 });
       expect((await other.json()).diff_style).toBe("unified");
       expect(onDisk().diffOptions?.diffStyle).toBe("unified");
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
+  test("diff display settings (`diff_options`) round trip through config.json `diffOptions`, field by field, with `diff_style` as an alias", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      // What code review saved: these read back under the wire's names; Whole file and the font are code review's own.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ diffOptions: { lineDiffType: "char", tabSize: 4, expandUnchanged: true, fontSize: "13", diffIndicators: "sideways" } }));
+      const server = await start(dataDir);
+      const read = async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()) as { diff_options: Record<string, unknown>; diff_style: unknown };
+      const onDisk = () => (JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { diffOptions?: Record<string, unknown> }).diffOptions;
+      const save = (body: Record<string, unknown>) => post(server, "/api/inbox/settings", { serverSession: server.serverSession, ...body });
+      // A value no build writes reads as never chosen.
+      expect((await read()).diff_options).toEqual({ diff_style: null, overflow: null, indicators: null, line_diff_type: "char", line_numbers: null, background: null, background_intensity: null, tab_size: 4 });
+
+      // Every field is checked, and the refusal names it; nothing is written.
+      const refusals: [unknown, string][] = [
+        [[], "diff_options"],
+        ["wrap", "diff_options"],
+        [{}, "diff_options"],
+        [{ font_size: "14" }, "diff_options.font_size"],
+        [{ expand_unchanged: true }, "diff_options.expand_unchanged"],
+        // Names Object.prototype has are not diff options either (a computed key, so `__proto__` is an own key on the wire).
+        [{ toString: "x" }, "diff_options.toString"],
+        [{ ["__proto__"]: "x" }, "diff_options.__proto__"],
+        [{ diff_style: "both" }, "diff_options.diff_style"],
+        [{ overflow: "clip" }, "diff_options.overflow"],
+        [{ indicators: "dots" }, "diff_options.indicators"],
+        [{ line_diff_type: "line" }, "diff_options.line_diff_type"],
+        [{ line_numbers: "yes" }, "diff_options.line_numbers"],
+        [{ background: 1 }, "diff_options.background"],
+        [{ background_intensity: "loud" }, "diff_options.background_intensity"],
+        [{ tab_size: 0 }, "diff_options.tab_size"],
+        [{ tab_size: 9 }, "diff_options.tab_size"],
+        [{ tab_size: 2.5 }, "diff_options.tab_size"],
+        [{ overflow: "wrap", tab_size: "4" }, "diff_options.tab_size"],
+      ];
+      for (const [bad, field] of refusals) {
+        const refused = await save({ diff_options: bad });
+        expect(refused.status).toBe(422);
+        expect((await refused.json()).field).toBe(field);
+      }
+      // The alias may not disagree with the object.
+      const clash = await save({ diff_style: "split", diff_options: { diff_style: "unified" } });
+      expect(clash.status).toBe(422);
+      expect((await clash.json()).field).toBe("diff_style");
+      expect(onDisk()).toEqual({ lineDiffType: "char", tabSize: 4, expandUnchanged: true, fontSize: "13", diffIndicators: "sideways" });
+
+      // A change saves only its fields; the others, code review's included, stay.
+      const saved = await save({ diff_options: { overflow: "wrap", indicators: "classic", line_numbers: false, background_intensity: "strong", tab_size: 8 } });
+      expect(saved.status).toBe(200);
+      const answer = (await saved.json()) as { diff_options: Record<string, unknown> };
+      expect(answer.diff_options).toEqual({ diff_style: null, overflow: "wrap", indicators: "classic", line_diff_type: "char", line_numbers: false, background: null, background_intensity: "strong", tab_size: 8 });
+      expect(onDisk()).toEqual({ lineDiffType: "char", tabSize: 8, expandUnchanged: true, fontSize: "13", diffIndicators: "classic", overflow: "wrap", showLineNumbers: false, lineBgIntensity: "strong" });
+      expect((await read()).diff_options).toEqual(answer.diff_options);
+
+      // `diff_style` alone (pages from before) sets the same field and is answered both ways.
+      const alias = await save({ diff_style: "unified" });
+      expect(alias.status).toBe(200);
+      const aliasAnswer = (await alias.json()) as { diff_style: unknown; diff_options: Record<string, unknown> };
+      expect(aliasAnswer.diff_style).toBe("unified");
+      expect(aliasAnswer.diff_options.diff_style).toBe("unified");
+      expect(onDisk()?.diffStyle).toBe("unified");
+      const both = await save({ diff_style: "split", diff_options: { diff_style: "split", background: true } });
+      expect(both.status).toBe(200);
+      expect(onDisk()?.diffStyle).toBe("split");
+      expect(onDisk()?.showDiffBackground).toBe(true);
+      expect((await read()).diff_style).toBe("split");
+
+      // Another site's page writes nothing.
+      const cross = await post(server, "/api/inbox/settings", { diff_options: { overflow: "scroll" } }, { Origin: "https://evil.example" });
+      expect(cross.status).toBe(403);
+      expect(onDisk()?.overflow).toBe("wrap");
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;

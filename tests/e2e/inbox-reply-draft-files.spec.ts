@@ -115,6 +115,8 @@ test('a draft started on the computer with a picture and a file opens on the pho
   // Each tile's × is a finger's target on a phone: its drawn 26 px grows to a
   // 44 px hit area, so a tap 8 px outside the drawn box still lands on it.
   for (const tile of await tiles.all()) {
+    // The words and files scroll in the box's capped region (approval "inbox-reply-box", D1): the tile in view first.
+    await tile.evaluate((el) => el.scrollIntoView({ block: 'center' }));
     const hits = await tile.locator('.ib-cp-fx').evaluate((button) => {
       const r = button.getBoundingClientRect();
       const cx = r.left + r.width / 2;

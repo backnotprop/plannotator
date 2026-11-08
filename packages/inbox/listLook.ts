@@ -48,6 +48,34 @@ export interface ListLook {
   relativeTime: boolean;
   /** Settings → Rows only: First line "Thread name": the name and the time on line 1, the agents and project under it (three-line and phone rows). */
   titleFirst: boolean;
+  /** Settings → Rows only: Show → Letter marks "Threads" or "Both", a thread's mark from its name (letterMarks.tsx). */
+  marksThreads: boolean;
+  /** Settings → Rows only: Show → Letter marks "Projects" or "Both", a project's mark (its picture, else its letters). */
+  marksProjects: boolean;
+  /** Settings → Rows only: Look → Mark style "Inline" (neither this nor `markDot`: "Avatar"). Only while marks show. */
+  markInline: boolean;
+  /** Settings → Rows only: Look → Mark style "Dot". Only while marks show. */
+  markDot: boolean;
+  /** Settings → Rows only: Show → Logo from the repo, a favicon or logo found in the project's folder. Only with project marks. */
+  repoLogo: boolean;
+  /** Settings → Rows only: Show → GitHub pictures, the owner's picture for a project on GitHub. Only with project marks. */
+  githubPictures: boolean;
+  /**
+   * Settings → Rows only: Look → Time position "Under the preview": on three-line and phone rows the time leaves line 1
+   * for a line of its own under the preview, at the left, with the row's end (pin, badge, words, counts) at its right.
+   * A wide row keeps its columns.
+   */
+  timeBelow: boolean;
+  /** Settings → Rows only: Show → Dividers, a hairline (the theme's border) between rows. Never an outline on a row. */
+  dividers: boolean;
+  /**
+   * Settings → Rows only: Show → Status mark, one mark at the row's end (`StatusMark`, RowStatus.tsx): waiting on you
+   * (an open question or action item) or done (Quiet), in place of the action pill and `?N`, whose words are its name
+   * and tooltip. Stopped and Holds up keep their triangles.
+   */
+  statusMark: boolean;
+  /** Settings → Rows only: Show → Bold thread names, every row's name in bold, read or not (Sent and Quiet included). */
+  boldNames: boolean;
 }
 
 export type ListLookKey = keyof ListLook;
@@ -67,6 +95,16 @@ export const LIST_LOOK_OFF: ListLook = {
   previewTwo: false,
   relativeTime: false,
   titleFirst: false,
+  marksThreads: false,
+  marksProjects: false,
+  markInline: false,
+  markDot: false,
+  repoLogo: false,
+  githubPictures: false,
+  timeBelow: false,
+  dividers: false,
+  statusMark: false,
+  boldNames: false,
 };
 
 /** The look for someone who chose none (core `INBOX_ROWS_DEFAULT`): smaller thread names on, every other option off. */
@@ -123,7 +161,50 @@ export function lookWithChange(look: ListLook, change: Partial<ListLook>): ListL
   if (change.previewTwo) next.hidePreview = false;
   if (change.unreadDot) next.smallNames = true;
   if (change.smallNames === false) next.unreadDot = false;
+  if (change.markInline) next.markDot = false;
+  if (change.markDot) next.markInline = false;
+  // A picture switch turned on while no project marks show turns them on (Off becomes Projects, Threads becomes
+  // Both), so the switch never does nothing.
+  if (change.repoLogo || change.githubPictures) next.marksProjects = true;
   return lookFromRows(rowsFromLook(next));
+}
+
+/** Show → Letter marks: which marks draw. */
+export type MarksWhat = 'off' | 'threads' | 'projects' | 'both';
+/** Look → Mark style: where the mark lives. */
+export type MarkStyle = 'inline' | 'avatar' | 'dot';
+export interface MarksChoice {
+  what: MarksWhat;
+  style: MarkStyle;
+  /** Logo from the repo (only with project marks). */
+  logo: boolean;
+  /** GitHub pictures (only with project marks). */
+  github: boolean;
+}
+
+/** The letter marks a look draws (all off by default; with marks off the style reads Avatar, the first one shown). */
+export function lookMarks(look: Pick<ListLook, 'marksThreads' | 'marksProjects' | 'markInline' | 'markDot' | 'repoLogo' | 'githubPictures'>): MarksChoice {
+  const what: MarksWhat = look.marksThreads ? (look.marksProjects ? 'both' : 'threads') : look.marksProjects ? 'projects' : 'off';
+  const on = what !== 'off';
+  const projects = what === 'projects' || what === 'both';
+  return {
+    what,
+    style: on && look.markInline ? 'inline' : on && look.markDot ? 'dot' : 'avatar',
+    logo: projects && look.repoLogo,
+    github: projects && look.githubPictures,
+  };
+}
+
+/** Show → Letter marks as the look's options. */
+export function marksWhatLook(what: MarksWhat): Pick<ListLook, 'marksThreads' | 'marksProjects'> {
+  return { marksThreads: what === 'threads' || what === 'both', marksProjects: what === 'projects' || what === 'both' };
+}
+
+/** Look → Mark style as the look's options. Picked while marks are off, it turns thread marks on, so a click never does nothing. */
+export function markStyleLook(style: MarkStyle, look: ListLook): Partial<ListLook> {
+  const change: Partial<ListLook> = { markInline: style === 'inline', markDot: style === 'dot' };
+  if (lookMarks(look).what === 'off') change.marksThreads = true;
+  return change;
 }
 
 export function rowsFromLook(look: ListLook): InboxRowsOption[] {
@@ -306,7 +387,7 @@ function adopt(rows: unknown, rev: unknown): void {
 
 /** The list column's classes for the look: none when every option is off. */
 export function listLookClasses(look: ListLook): string {
-  return `${look.highlight ? ' ib-lk-pill' : ''}${look.compact ? ' ib-lk-compact' : ''}${look.hideAgents ? ' ib-lk-noagents' : ''}${look.smallNames ? ' ib-lk-small' : ''}${look.roomy ? ' ib-lk-roomy' : ''}${look.unreadDot ? ' ib-lk-dot' : ''}${look.previewTwo ? ' ib-lk-pv2' : ''}${look.titleFirst ? ' ib-lk-tfirst' : ''}`;
+  return `${look.highlight ? ' ib-lk-pill' : ''}${look.compact ? ' ib-lk-compact' : ''}${look.hideAgents ? ' ib-lk-noagents' : ''}${look.smallNames ? ' ib-lk-small' : ''}${look.roomy ? ' ib-lk-roomy' : ''}${look.unreadDot ? ' ib-lk-dot' : ''}${look.previewTwo ? ' ib-lk-pv2' : ''}${look.titleFirst ? ' ib-lk-tfirst' : ''}${look.timeBelow ? ' ib-lk-tbelow' : ''}${look.dividers ? ' ib-lk-div' : ''}${look.statusMark ? ' ib-lk-stm' : ''}${look.boldNames ? ' ib-lk-bold' : ''}`;
 }
 
 function subscribe(listener: () => void): () => void {

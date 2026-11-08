@@ -20,6 +20,7 @@ import type { ExternalAnnotationEvent, VaultNode } from './types';
 import { setComponentTooltips } from './components/HostTitle';
 import { setRichCopyEnabled } from './utils/richCopyPolicy';
 import { setCommentCardEnabled, setVisibleCommentDrafts, type CommentCardLayout } from './utils/commentCardPolicy';
+import { setTouchSelectionToolbar } from './utils/touchToolbarPlacement';
 import { setDigitHexIssueRefs } from './components/InlineMarkdown';
 import { setRefCardTransport, type RefCardTransport } from './utils/refCard';
 
@@ -167,6 +168,17 @@ export interface PlannotatorUIConfig {
    */
   visibleCommentDrafts?: boolean;
   /**
+   * On a touch screen (main pointer a finger), put the selection toolbar
+   * (`AnnotationToolbar`) below the selection, where iOS Safari's own edit
+   * menu does not go, keep it inside the visible screen with an 8px margin
+   * and the safe-area insets, and give its buttons 44px targets
+   * (`utils/touchToolbarPlacement`).
+   * Default: false, the toolbar placed and sized exactly as before. With it
+   * on, nothing changes with a mouse or trackpad. Plannotator's plan review,
+   * annotate, code review and Inbox pass true.
+   */
+  touchSelectionToolbar?: boolean;
+  /**
    * Fetch an issue / PR / MR hover card's data (`components/RefHoverCard`).
    * Default: none, so no card is drawn and nothing is requested. The
    * Plannotator Inbox passes one over its `/api/inbox/ref` route.
@@ -201,6 +213,7 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.richCopy !== undefined) setRichCopyEnabled(config.richCopy);
   if (config.commentCard !== undefined) setCommentCardEnabled(config.commentCard);
   if (config.visibleCommentDrafts !== undefined) setVisibleCommentDrafts(config.visibleCommentDrafts);
+  if (config.touchSelectionToolbar !== undefined) setTouchSelectionToolbar(config.touchSelectionToolbar);
   if (config.refCardTransport) setRefCardTransport(config.refCardTransport);
   // Re-hydrate AFTER storageBackend is installed (load-bearing order — gated last).
   if (config.loadSettingsFromBackend) configStore.loadFromBackend();

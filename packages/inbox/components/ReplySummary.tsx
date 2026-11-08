@@ -203,6 +203,9 @@ export function ReplySummary({ skip, dropped, comments }: { skip: FootSkip; drop
               {...comments.props}
               at={comments.list!.at}
               press={comments.list!.press}
+              // On a computer the line sits in the row's middle cell (approval "inbox-reply-box", D4), often right of
+              // the middle: kept in the window as the chip's list is. A phone's sheet is fixed, so nothing moves there.
+              fit
               onClose={(back) => {
                 comments.onList(null);
                 if (!back) return;

@@ -46,6 +46,7 @@ export function DiagramComposer({
   onSubmit,
   onCancel,
   onAskAI,
+  initialText,
 }: {
   draft: DiagramComposerDraft;
   anchorRect: ScreenRect;
@@ -65,13 +66,21 @@ export function DiagramComposer({
    * the host took it (the composer then closes), false to keep the draft.
    * Absent: no Ask AI button. */
   onAskAI?: (question: string) => Promise<boolean>;
+  /** Opt-in: the words it opens with (a comment the host kept and put back). Absent: empty, as always. */
+  initialText?: string;
 }) {
   // The comment card (opt-in, `configurePlannotatorUI({ commentCard })`): read once, so a box never changes look open.
   const [card] = useState(getCommentCardEnabled);
   const scope = useContext(CommentDraftScopeContext);
   const part = draft.primary.target;
   const cardKey = [scope, draft.sourceLine?.[0] ?? '', part.id ?? '', part.from ?? '', part.to ?? '', part.kind ?? '', diagramTargetText(part)].join('\u0000');
-  const [text, setTextState] = useState(() => (card ? cardDrafts.get(cardKey) ?? '' : ''));
+  // Words the host put back (a comment kept as the file's draft) win over the card's own draft, and become it: the
+  // card then has one store, so a chevron after a reopen keeps them as any other draft.
+  const [text, setTextState] = useState(() => initialText ?? (card ? cardDrafts.get(cardKey) ?? '' : ''));
+  useEffect(() => {
+    if (card && initialText !== undefined && initialText.trim() !== '') cardDrafts.set(cardKey, initialText);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const setText = (value: string) => {
     setTextState(value);
     if (!card) return;

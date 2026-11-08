@@ -1,7 +1,7 @@
 /**
  * The "N unmodified lines" arrows in the Inbox: a host passes a reader of whole
  * files (`GuideReader` `fileContents`; a thread's guided review through
- * GuidePane, against `GET /api/inbox/messages/:id/guide/file`), and the real
+ * ReviewPane, against `GET /api/inbox/messages/:id/guide/file`), and the real
  * reader, AllFilesCodeView and Pierre's diff do the rest.
  *
  * The failures this catches: a read before anyone opens an arrow (a whole file
@@ -21,6 +21,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { resolve } from 'node:path';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
+import type { ShapeHost } from '@plannotator/ui/components/shape';
+import type { InboxShapes } from './shape/useInboxShapes';
+
+const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
 // The window's tsconfig points `#guide-reader` at the reader's type shape (reader-module.d.ts), which Bun
 // would load as the module; the real reader is package.json's `imports` entry (as guideDiffStyle.test.tsx).
@@ -41,7 +45,6 @@ mock.module(resolve(import.meta.dir, '../review-editor/workerPool.tsx'), () => (
 }));
 
 const hasDom = typeof document !== 'undefined';
-const { GuidePane } = (hasDom ? await import('./components/GuidePane') : {}) as typeof import('./components/GuidePane');
 const { ReviewPane } = (hasDom ? await import('./components/ReviewPane') : {}) as typeof import('./components/ReviewPane');
 const GuideReader = (hasDom ? (await import('#guide-reader')).default : null)!;
 
@@ -172,7 +175,7 @@ test.skipIf(!hasDom)("a thread's guided review: the arrows come from the message
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
     return Response.json({});
   }) as typeof fetch;
-  await draw(<GuidePane thread={thread} message={message} onBack={() => {}} onClose={() => {}} />);
+  await draw(<ReviewPane thread={thread} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />);
   // Nobody opened anything: the arrows are there, and the file is not read.
   expect(asked).toEqual([]);
   expect(arrows().length).toBeGreaterThan(0);
@@ -200,22 +203,9 @@ test.skipIf(!hasDom)("a tailnet guest's page asks nothing (each file would be a 
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
     return Response.json({});
   }) as typeof fetch;
-  await draw(<GuidePane thread={thread} message={message} onBack={() => {}} onClose={() => {}} guest />);
+  await draw(<ReviewPane thread={thread} message={message} codeReview guest onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />);
   expect(rows()).toBeGreaterThan(0);
   expect(asked).toEqual([]);
-  expect(arrows().length).toBe(0);
-});
-
-test.skipIf(!hasDom)("a tailnet guest's review (the full window): no arrows either", async () => {
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const path = String(input);
-    if (path.includes('/guide/file')) return Response.json({ error: 'local only', code: 'local_only' }, { status: 403 });
-    if (path.includes('/guide')) return Response.json({ message_id: MESSAGE, guide: message.guide, snapshot: snapshotOf(MODIFIED, ['a.ts']) });
-    if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
-    return Response.json({});
-  }) as typeof fetch;
-  await draw(<ReviewPane thread={thread} message={message} guest onBack={() => {}} onClose={() => {}} onSent={() => {}} />);
-  expect(rows()).toBeGreaterThan(0);
   expect(arrows().length).toBe(0);
 });
 
