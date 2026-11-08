@@ -122,6 +122,8 @@ const GH_ANSWER = {
  */
 function ghJq(args: string[], pull: { sha: string; body: string | null }): { stdout: string; stderr: string; exitCode: number } {
   const program = args[args.indexOf("--jq") + 1] ?? "";
+  // The head alone (readHeadNow: the whole diff a risk judgment reads): a string answer, printed raw.
+  if (program === ".head.sha") return { stdout: `${pull.sha}\n`, stderr: "", exitCode: 0 };
   const picked = { ...(/\bsha: \.head\.sha\b/.test(program) ? { sha: pull.sha } : {}), ...(/\bbody: \.body\b/.test(program) ? { body: pull.body } : {}) };
   const json = JSON.stringify(picked);
   return { stdout: `${/\| *tojson *$/.test(program) ? json : `\u001b[1;38m${json}\u001b[m`}\n`, stderr: "", exitCode: 0 };
@@ -2022,7 +2024,8 @@ describe("GET /api/inbox/pulls/avatar", () => {
     // The person's own picture too; the second ask of a picture is the cache's.
     expect((await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=dana`)).status).toBe(200);
     expect((await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=tomas`)).status).toBe(200);
-    expect(s.fetched).toEqual(["https://avatars.githubusercontent.com/u/2?v=4", "https://avatars.githubusercontent.com/u/1?v=4"]);
+    // Asked at s=96 (inbox-pull-avatars.ts sizeForAFace).
+    expect(s.fetched).toEqual(["https://avatars.githubusercontent.com/u/2?v=4&s=96", "https://avatars.githubusercontent.com/u/1?v=4&s=96"]);
   });
 
   test("a login the list did not show is 404 and nothing is fetched; another site's page is refused", async () => {
