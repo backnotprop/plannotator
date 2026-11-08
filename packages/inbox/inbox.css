@@ -3592,6 +3592,8 @@ dialog.ib-dlg.ib-anote[open] { display: flex; flex-direction: column; }
 .ib-cline-lines p { margin: 0; display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 9px; align-items: start; overflow-wrap: anywhere; text-wrap: pretty; }
 /* The ask line's icon takes the `icon` grid area of its row; here each line is its own small grid. */
 .pn-inbox .ib-askline.ib-cline svg.ib-ic { grid-area: auto; width: 16px; height: 16px; margin-top: 2px; }
+/* The quiet ask line pulls its actions toward its grid's text column; this line is a flex row with its own gap, so none. */
+.pn-inbox .ib-askline.ib-cline .ib-ask-acts { margin-inline-start: 0; }
 .pn-inbox .ib-askline.ib-cline .ib-cline-ok svg.ib-ic { color: var(--success); }
 .ib-cline .ib-cline-quiet { color: var(--muted-foreground); }
 .pn-inbox .ib-askline.ib-cline .ib-cline-warn svg.ib-ic { color: var(--warning); }

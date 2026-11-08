@@ -59,7 +59,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
-import { describeFsError, readAgentFile, stripJsonComments, withBom, writeAgentFileAtomic } from "./agent-files";
+import { type AgentFileRead, describeFsError, readAgentFile, stripJsonComments, withBom, writeAgentFileAtomic } from "./agent-files";
 import {
   agentHomeAllowed,
   agentSpec,
@@ -606,7 +606,35 @@ export function noteStatus(agent: InboxNoteAgentId, dataDir: string, e: AgentEnv
 
 export type NoteChange =
   | { ok: true; agent: InboxNoteAgentId; action: "added" | "created" | "updated" | "unchanged" | "shared" | "removed" | "deleted" | "kept-edited" | "kept-shared"; path: string }
-  | { ok: false; agent: InboxNoteAgentId; reason: string; path: string | null };
+  /** `skipped` (only with `auto`): left alone on purpose, never to be tried again by itself (read-only, hard-linked, the note pasted without markers). */
+  | { ok: false; agent: InboxNoteAgentId; reason: string; path: string | null; skipped?: true };
+
+/** How an add may write. */
+export interface AddNoteOptions {
+  /**
+   * Written by itself (autoAddInboxNotes), with nobody's yes: the file is left alone, as the start's
+   * refresh leaves it, when it is read-only (no owner write bit) or has other hard links (the atomic
+   * rename would split them), and when it already holds the note pasted by hand without markers.
+   */
+  auto?: boolean;
+  /** Tests: runs between the read and the write, to change the file under the add. */
+  beforeWrite?: (target: string) => void;
+}
+
+/** The note pasted by hand without markers (as Cursor's copy, or an older prompt showed it): its heading on a line of its own. */
+const UNMARKED_NOTE = /^[ \t]{0,3}#{1,6}[ \t]+Plannotator Inbox[ \t]*#*[ \t]*\r?$/m;
+
+/** The file is still as `read` found it (the bytes and the mode, or still missing): compare before the write. */
+function unchangedSince(read: AgentFileRead): boolean {
+  try {
+    if (read.kind === "missing") return !existsSync(read.target);
+    if (read.kind !== "file") return false;
+    if ((statSync(read.target).mode & 0o777) !== read.mode) return false;
+    return readFileSync(read.target).equals(Buffer.from(withBom(read.text, read.bom), "utf8"));
+  } catch {
+    return false;
+  }
+}
 
 function recordNote(dataDir: string, agent: InboxNoteAgentId, record: InboxAgentNoteRecord | null): void {
   const file = readInboxAgentNotes(dataDir);
@@ -616,7 +644,7 @@ function recordNote(dataDir: string, agent: InboxNoteAgentId, record: InboxAgent
 }
 
 /** Add (or bring up to date) the note for one agent. Never overwrites a block the person edited. */
-export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentEnvironment, now = new Date()): NoteChange {
+export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentEnvironment, now = new Date(), options: AddNoteOptions = {}): NoteChange {
   const target = noteTarget(agent, e);
   const shown = displayPath(target.path, e);
   if (!agentHomeAllowed(e)) return { ok: false, agent, reason: "not in a test's scratch home", path: shown };
@@ -654,10 +682,24 @@ export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentE
       return { ok: true, agent, action: "kept-edited", path: shown! };
     }
   } else {
+    if (options.auto && UNMARKED_NOTE.test(original)) {
+      return { ok: false, agent, reason: `${shown} already has the note, pasted without markers`, path: shown, skipped: true };
+    }
     next = insertBlock(original, nl);
     action = read.kind === "missing" ? "created" : "added";
   }
   if (read.kind !== "file" || next !== original) {
+    if (options.auto && read.kind === "file") {
+      if ((read.mode & 0o200) === 0) return { ok: false, agent, reason: `${shown} is read-only`, path: shown, skipped: true };
+      try {
+        if (statSync(read.target).nlink > 1) return { ok: false, agent, reason: `${shown} has other hard links`, path: shown, skipped: true };
+      } catch (error) {
+        return { ok: false, agent, reason: `${shown} can't be read (${describeFsError(error)})`, path: shown };
+      }
+    }
+    // Compare and write, as the refresh does: a memory Gemini saved or an edit made since the read is never lost.
+    options.beforeWrite?.(read.target);
+    if (!unchangedSince(read)) return { ok: false, agent, reason: `${shown} changed while the note was being added; try again`, path: shown };
     try {
       writeAgentFileAtomic(read.target, withBom(next, read.kind === "file" && read.bom), read.kind === "file" ? read.mode : 0o644);
     } catch (error) {
@@ -1130,7 +1172,9 @@ export async function autoAddInboxNotes(options: ConnectOptions): Promise<InboxN
   const written: InboxNoteAgentId[] = [];
   const added: InboxNoteAutoAdd[] = [];
   for (const agent of candidates) {
-    const change = addInboxNote(agent, options.dataDir, e, options.now?.());
+    const change = addInboxNote(agent, options.dataDir, e, options.now?.(), { auto: true });
+    // Left alone on purpose (read-only, hard-linked, pasted without markers): answered, never tried again by itself.
+    if (!change.ok && change.skipped) written.push(agent);
     if (!change.ok || change.action === "kept-edited") continue;
     written.push(agent);
     if (change.action !== "unchanged") added.push({ agent, path: change.path });
@@ -1155,10 +1199,14 @@ export function unsaidAutoNotes(): InboxNoteAutoAdd[] {
   );
 }
 
-/** The window said them (POST /api/inbox/agents/seen). */
-export function markAutoNotesSaid(): void {
+/**
+ * The window said them (POST /api/inbox/agents/seen): the notes its line showed, so one written by a pass
+ * that ended after the window read the agents is still said next time. `shown` absent (an older window): all.
+ */
+export function markAutoNotesSaid(shown?: readonly InboxNoteAutoAdd[]): void {
   const saved = loadConfig().inboxAgentNotes;
   if (!saved?.auto) return;
-  const { auto: _said, ...rest } = saved;
-  saveConfig({ inboxAgentNotes: rest });
+  const { auto, ...rest } = saved;
+  const left = shown ? auto.filter((entry) => !shown.some((said) => said.agent === entry.agent && said.path === entry.path)) : [];
+  saveConfig({ inboxAgentNotes: left.length > 0 ? { ...rest, auto: left } : rest });
 }

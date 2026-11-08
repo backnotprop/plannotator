@@ -5278,7 +5278,7 @@ function Inbox() {
     const news = connectLineNews(agents);
     if (!news) return;
     setConnectLine(news);
-    void inboxApi.agentsSeen().then(setAgents, () => {});
+    void inboxApi.agentsSeen(news.report?.at ?? null, news.notes).then(setAgents, () => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agents, agentsSettled, settings?.via, connectLine]);
   const connectLineEl =
