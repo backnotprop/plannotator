@@ -2513,7 +2513,8 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
     }
     await note.evaluate((node, text) => (node.textContent = text), words);
 
-    // From 1500 wide the comments are a column beside the diff, with neither the card's fill nor the diff's; folded, a card.
+    // From 1500 wide the comments are a column beside the diff, closed at first and opened by the bar's Comments button;
+    // open, it is framed as the Guided Review's panel: the card's fill and a hairline down its left. Folded, a card.
     const fill = () =>
       review.evaluate((root) => {
         const token = (name: string) => {
@@ -2525,13 +2526,15 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
         };
         const panel = getComputedStyle(root.querySelector('.ib-gpanel')!);
         const inner = getComputedStyle(root.querySelector('.ib-gpanel > [data-annotation-panel]')!);
-        return { display: panel.display, panel: panel.backgroundColor, inner: inner.backgroundColor, card: token('--card'), ground: token('--background') };
+        return { display: panel.display, panel: panel.backgroundColor, inner: inner.backgroundColor, edge: panel.borderLeftWidth, card: token('--card') };
       });
     await page.setViewportSize({ width: 1800, height: 900 });
+    await expect.poll(async () => (await fill()).display).toBe('none');
+    await review.locator('.ib-vhead .ib-vcomments').click();
     await expect.poll(async () => (await fill()).display).toBe('flex');
     const column = await fill();
-    expect(column.inner).toBe(column.panel);
-    expect([column.card, column.ground]).not.toContain(column.panel);
+    expect([column.panel, column.inner, column.edge]).toEqual([column.card, column.card, '1px']);
+    // Crossing the fold closes it.
     await page.setViewportSize({ width: 1440, height: 900 });
     await expect.poll(async () => (await fill()).display).toBe('none');
     await review.locator('.ib-vhead .ib-vcomments').click();

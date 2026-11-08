@@ -8940,8 +8940,9 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
    next one rides up over them, so the hairline is the only thing between one file's code and the next one's header. */
 .ib-prreview [data-guide-file-shell] + [data-guide-file-shell] { position: relative; margin-top: -17px; }
 .ib-prreview [data-guide-file-shell] + [data-guide-file-shell]::before { content: ''; position: absolute; inset: 7px 0 auto; height: 1px; background: color-mix(in oklch, var(--border) 50%, transparent); }
-/* From REVIEW_FOLD_PANEL_BELOW up the comments are a column beside the diff: the review app's sidebar fill (bg-card/30). Folded, the sheet stays a card over the diff. */
-.ib-prreview:not(.ib-fold) :is(.ib-gpanel, .ib-gpanel > [data-annotation-panel]) { background: color-mix(in oklab, var(--card) 30%, var(--background)); }
+/* From REVIEW_FOLD_PANEL_BELOW up an open comments panel is a column beside the diff, framed as the Guided Review's
+   (.ib-apanel and the panel's own header: the card fill, a hairline down its left and under its title, no corner),
+   so the file headers end on a line, not on a fill (the owner on #2871). Folded, the sheet stays a card over the diff. */
 /* What else sits in the pane keeps a row's margin. */
 .ib-prreview .ib-gbody > .w-full > div:has(> [data-guide-global-comment-add]) { margin-inline: 16px; }
 .ib-prreview [data-guide-global-comments] { margin-inline: 16px; }
@@ -9501,17 +9502,19 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-prreview .ib-vhead, .ib-prr-wide :is(.ib-vhead, .ib-rrail) { background: var(--ib-prp-chrome); border-color: transparent; border-bottom: 0; }
 .ib-prreview .ib-rsplit { background: var(--ib-prp-chrome); position: relative; }
 .ib-prreview .ib-rrail { background: transparent; border: 0; gap: 0; }
-.ib-prreview:not(.ib-fold) :is(.ib-gpanel, .ib-gpanel > [data-annotation-panel]) { background: var(--ib-prp-chrome); border: 0; }
 .ib-prreview .ib-gbody { background: var(--background); }
 /* One surface, as the code review app (approval pr-view-one-surface, follow-up): every width but a phone's, the rail
    and the code share the page's colour with a hairline between them, no sheet and no corner; the bar is the one strip
-   that stands out, a hairline under it. The comments column keeps its fill. */
+   that stands out, a hairline under it. An open comments column is the Guided Review's (above). */
 .ib-prr-wide .ib-rsplit { background: var(--background); }
 .ib-prr-wide .ib-vhead { border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
 .ib-prr-wide:not(.ib-railfold) .ib-rrail { border-right: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
 .ib-prr-wide .ib-gbody { border-radius: 0; }
 .ib-review.ib-prreview.ib-prr-wide:not(.ib-railfold) .ib-rsplit { grid-template-columns: var(--ib-rail-w, 280px) minmax(0, 1fr) 300px; }
 .ib-review.ib-prreview.ib-prr-wide.ib-fold:not(.ib-railfold) .ib-rsplit { grid-template-columns: var(--ib-rail-w, 280px) minmax(0, 1fr); }
+/* Closed beside the code (PullReview's Comments button, approval pr-view-one-surface 11-07 18:33Z): its width goes back to the code. */
+.ib-review.ib-prreview.ib-prr-wide.ib-prr-panel-shut:not(.ib-railfold) .ib-rsplit { grid-template-columns: var(--ib-rail-w, 280px) minmax(0, 1fr); }
+.ib-prreview.ib-prr-panel-shut .ib-gpanel { display: none; }
 .ib-prp-handle { position: absolute; top: 0; bottom: 0; left: calc(var(--ib-rail-w, 280px) - 4px); width: 8px; z-index: 4; cursor: col-resize; touch-action: none; }
 .ib-prp-handle::after { content: ""; position: absolute; top: 12px; bottom: 12px; left: 3px; width: 2px; border-radius: 1px; background: transparent; transition: background-color 120ms ease; }
 .ib-prp-handle:hover::after, .ib-prp-handle:active::after, .ib-prp-handle:focus-visible::after { background: var(--ring); }
@@ -9610,8 +9613,6 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .ib-prreview .ib-gbody { border-top-left-radius: 12px; border-top-right-radius: 12px; }
   .ib-prreview .ib-rsplit { grid-template-rows: auto minmax(0, 1fr); }
 }
-/* The panel scrolls: a long description opens in it, with no second scroller. */
-.ib-prreview:not(.ib-fold) .ib-gpanel [data-annotation-panel] > :first-child { border-bottom: 0; }
 
 /* The bar: one weight of icon, one muted colour, no pills but the switch's seat and Approve. */
 .pn-inbox .ib-prreview .ib-vhead { gap: 6px; }

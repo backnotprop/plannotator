@@ -12,6 +12,10 @@
  * - The rail stays at every width but a phone's, where the row under the bar
  *   opens it as a sheet over the diff, the comments' sheet's mirror; an open
  *   sidebar never takes it away: its toggle gives the room back.
+ * - The comments panel starts closed at every width, as in the review app: the
+ *   bar's Comments button opens it, beside the code from REVIEW_FOLD_PANEL_BELOW
+ *   up and as a sheet below. It opens by itself on a new comment and on a
+ *   comment chosen elsewhere (approval "pr-view-one-surface", 11-07 18:33Z).
  * - A layer is the PR's own diff; "All N layers" is the compare from the
  *   stack's base branch to this layer's head (inbox-pulls.ts `diff`).
  * - The end of a layer's diff offers the next layer.
@@ -490,11 +494,14 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       // Storage full or off: this visit only.
     }
   };
+  // The comments panel, open or not, at every width: closed at first, as in the review app; from REVIEW_FOLD_PANEL_BELOW
+  // up an open one is the column beside the code, below it the sheet. Crossing the fold closes it. Nothing is kept: a
+  // fresh PR opens closed.
   const [sheet, setSheet] = useState(false);
   const sheetId = useId();
   const sheetCloseRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    if (!folded) setSheet(false);
+    setSheet(false);
   }, [folded]);
   // The folded rail's sheet, the comments' mirror on the other side: one of the two is open at a time.
   const [filesSheet, setFilesSheet] = useState(false);
@@ -569,7 +576,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       const left = tabbing.current && event.relatedTarget instanceof Element && !event.currentTarget.contains(event.relatedTarget) && !inOverlay(event.relatedTarget);
       tabbing.current = false;
       if (!left) return;
-      setSheet(false);
+      // The column beside the code is no sheet: it stays.
+      if (folded) setSheet(false);
       setFilesSheet(false);
       setDetailsOpen(false);
     },
@@ -590,14 +598,21 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     showComment(id);
     if (phone) setSheet(false);
   };
-  // A global comment chosen in the guide: selected in the panel, and the folded panel opens on it (as ReviewPane).
+  // A global comment chosen in the guide: selected in the panel, and the panel opens on it (as ReviewPane folded).
   const showGlobalComment = (id: string) => {
     setSelectedId(id);
-    if (folded) setSheet(true);
+    setSheet(true);
+  };
+  // A new comment opens the column beside the code, so it never lands out of sight; a sheet would cover the code.
+  const saveFromReader = async (annotation: CodeAnnotation) => {
+    const added = !comments.some((c) => c.id === annotation.id);
+    save(annotation);
+    if (added && !folded) setSheet(true);
+    return true;
   };
   // The unsaved global comment's words are named per layer and scope, not per push: they outlive a push, as the
   // global comments do.
-  const readerComments = canDecide || canPost ? { annotations: here, selectedId, onSelect: setSelectedId, onSave: async (annotation: CodeAnnotation) => (save(annotation), true), onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
+  const readerComments = canDecide || canPost ? { annotations: here, selectedId, onSelect: setSelectedId, onSave: saveFromReader, onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
 
   // Open in: what is on disk in a clone of this repository, which may not be the PR's version; nothing when no clone holds the file.
   const repoKey = stack ? inboxPullRepoKey(stack.host, stack.repo) : null;
@@ -818,7 +833,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer ib-wlayer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${phone ? '' : ' ib-prr-wide'}${phone ? ' ib-railfold' : ''}${filesSheet ? ' ib-files-open' : ''}`}
+      className={`ib-viewer ib-wlayer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${!folded && !sheet ? ' ib-prr-panel-shut' : ''}${phone ? '' : ' ib-prr-wide'}${phone ? ' ib-railfold' : ''}${filesSheet ? ' ib-files-open' : ''}`}
       style={{ '--ib-rail-w': `${railWidth}px` } as React.CSSProperties}
       aria-label={`Review ${label}`}
       data-pull-review={layer.key}
@@ -853,7 +868,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         )}
         <span className="ib-sp" />
         {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
-        {folded && (readerComments || comments.length > 0) && (
+        {(readerComments || comments.length > 0) && (
           <button
             type="button"
             ref={sheetButton}
