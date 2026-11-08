@@ -194,7 +194,7 @@ export function createInboxLaunch(options: {
     } catch {
       // No config.json: the defaults.
     }
-    if (configCache?.key !== key) configCache = { key, value: resolveInboxLaunch(loadConfig()) };
+    if (configCache?.key !== key) configCache = { key, value: resolveInboxLaunch(loadConfig(), options.platform) };
     return configCache.value;
   };
   const enabled = () => config().enabled;
@@ -208,7 +208,8 @@ export function createInboxLaunch(options: {
   let loginPath: string[] = [];
 
   /**
-   * The person's login shell: read once when the Inbox starts (`warm`), for Settings → Agents and the
+   * The person's login shell: read the first time it is needed (`warmLogin`: New message's sessions read, never at
+   * Inbox start; nothing runs on Windows), for Settings → Agents and the
    * composer's "Start Claude Code" while the switch was never set (what it follows), and by each start for
    * its own env, after the Send answered. One read at a time: callers meanwhile share it. Of a read only its
    * PATH (for the plain env) and the names the hosts keep (`shellNames`: Claude Code's skip-permissions
@@ -222,7 +223,8 @@ export function createInboxLaunch(options: {
   const readLogin = (): Promise<LaunchEnv> => {
     reading ??= (async () => {
       try {
-        const login = await options.loginEnv();
+        // Windows has no login shell to read (`$SHELL -ilc`): the Inbox's own env stands in, and nothing runs.
+        const login = options.platform === "win32" ? {} : await options.loginEnv();
         if (login.PATH) loginPath = login.PATH.split(delimiter).filter(Boolean);
         const kept: LaunchEnv = {};
         for (const name of hostList.flatMap((host) => host.shellNames)) if (login[name] !== undefined) kept[name] = login[name]!;
@@ -235,6 +237,14 @@ export function createInboxLaunch(options: {
       }
     })();
     return reading;
+  };
+
+  /**
+   * The login shell read ahead, so a Send rarely waits on it: the first time it is needed (New message's sessions read),
+   * never at Inbox start, which hooks do often (its rc files are the person's, and may prompt or start agents).
+   */
+  const warmLogin = () => {
+    if (enabled() && shell === null && !reading) void readLogin().catch(() => {});
   };
 
   // ── Scratch folders (PR 3): `<root>/<thread-name slug>`, then `-2`, `-3` when taken ──
@@ -502,9 +512,9 @@ export function createInboxLaunch(options: {
     return last?.author.kind === "person" && (!last.to || last.to.session === root.to?.session);
   };
 
-  /** The root of a launched thread whose launch started this session, with launch on and the launch not deleted. */
+  /** The root of a launched thread whose launch started this session, the launch not deleted (the switch off too: it governs new starts only). */
   const launchedRootOf = (threadId: string, session: string | null | undefined): InboxMessage | null => {
-    if (!enabled() || !session) return null;
+    if (!session) return null;
     const root = store.message(threadId);
     if (!root?.launch || root.launch.deleted_at || inboxLaunchedSession(root) !== session) return null;
     return root;
@@ -585,14 +595,7 @@ export function createInboxLaunch(options: {
    * view fresh where a line could change. An agent with no host is skipped.
    */
   const sweep = (watched: boolean) => {
-    if (!enabled()) {
-      // Launch turned off: a question no one can answer any more is withdrawn (nothing to do once none is open).
-      for (const root of roots()) {
-        const host = hostOf(root.launch!);
-        if (host && !root.launch!.deleted_at) stateOf(host).permissions.withdrawAll(root);
-      }
-      return;
-    }
+    // The switch off governs new starts only: an agent already started keeps its line, its questions and its respawn.
     const all = roots().filter((root) => !root.launch!.deleted_at && hostOf(root.launch!));
     if (all.length === 0) return;
     for (const root of all) maybeRespawn(root);
@@ -716,7 +719,7 @@ export function createInboxLaunch(options: {
     respawn(root, host, newest.id);
   };
   const unsubscribe = store.subscribe((line) => {
-    if (line.kind !== "message" || !enabled()) return;
+    if (line.kind !== "message") return;
     const message = line.record;
     if (message.author.kind !== "person" || message.id === message.thread_id || message.delivery) return;
     const root = store.message(message.thread_id);
@@ -730,8 +733,10 @@ export function createInboxLaunch(options: {
    * switch (Claude Code's words, `settingsState`) and the scratch root. Off, those rows are hidden, so nothing else is
    * read (no Claude settings, no login shell).
    */
-  const settingsState = (): { enabled: boolean; full_permissions: boolean } & Record<string, unknown> =>
-    enabled()
+  const settingsState = (): { enabled: boolean; full_permissions: boolean } & Record<string, unknown> => ({
+    // Windows: launch has no support there (off unless config.json says true), so Settings shows no switch.
+    ...(options.platform === "win32" ? { unsupported: true } : {}),
+    ...(enabled()
       ? {
           enabled: true,
           ...claude.settingsState(),
@@ -739,7 +744,8 @@ export function createInboxLaunch(options: {
           scratch_dir: scratchRoot(),
           scratch_dir_shown: options.displayFolder(scratchRoot()),
         }
-      : { enabled: false, full_permissions: false };
+      : { enabled: false, full_permissions: false }),
+  });
   /**
    * "Another folder on <machine>…": the folder names in one folder under home (`listHomeFolders`). The owner's window
    * only: a guest gets `owner_only`; an agent's call, MCP and the CLI (no same-origin fetch) and a linked machine
@@ -775,8 +781,8 @@ export function createInboxLaunch(options: {
     }
     const match = /^\/api\/inbox\/launch\/(settings|lch_[0-9A-HJKMNP-TV-Z]{26})(?:\/(stop|open|delete|retry|trust))?$/.exec(path);
     if (!match) return null;
-    // Off, only Settings → Agents' switch answers: its read, and the POST that turns it back on.
-    if (!enabled() && !(match[1] === "settings" && !match[2])) return json({ error: "Launch is off.", code: "launch_off" }, 404);
+    // The switch governs new starts only (the folder list above, compose's `to.launch` and block): an agent already
+    // started keeps Stop, Open, Delete, Try again and Trust folder while it is off, and Settings → Agents' read and switch answer.
     // Settings → Agents, shown: the switch as it stands; never set, the login shell read again when stale.
     if (req.method === "GET" && match[1] === "settings" && !match[2]) {
       // The owner's, from this computer or over the tailnet (their phone); never a guest's.
@@ -801,11 +807,9 @@ export function createInboxLaunch(options: {
         // Settings → Agents' "Start agents from New message": written either way (an explicit true outlives a change
         // of default), and read live, so New message offers or drops its New session rows without a restart.
         if (typeof body.enabled !== "boolean") throw new InboxError("validation_error", "enabled: a boolean.", { field: "enabled" });
-        const current = loadConfig().inboxLaunch ?? {};
-        saveConfig({ inboxLaunch: { ...current, enabled: body.enabled } });
+        // Only this key: saveConfig merges `inboxLaunch` key by key under its lock, so a change made at once elsewhere stays.
+        saveConfig({ inboxLaunch: { enabled: body.enabled } });
         if (config().enabled !== body.enabled) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
-        // Turned on: the login shell read the Inbox skipped at start while off, ahead of the first Send.
-        if (body.enabled && !shellFresh()) void readLogin().catch(() => {});
         return json({ launch: settingsState() });
       }
       if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
@@ -820,14 +824,13 @@ export function createInboxLaunch(options: {
         if (repository) {
           throw new InboxError("validation_error", `That folder is inside the git repository ${options.displayFolder(repository)}. Pick one outside any repository.`, { field: "scratch_dir" });
         }
-        const { scratchDir: _was, ...rest } = loadConfig().inboxLaunch ?? {};
-        saveConfig({ inboxLaunch: { ...rest, ...(path ? { scratchDir: resolve(path) } : {}) } });
+        // Undefined drops the key (the default) when config.json is written.
+        saveConfig({ inboxLaunch: { scratchDir: path ? resolve(path) : undefined } as { scratchDir?: string } });
         if (config().scratchDir !== (path ? resolve(path) : null)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
         return json({ launch: settingsState() });
       }
       if (typeof body.full_permissions !== "boolean") throw new InboxError("validation_error", "full_permissions: a boolean.", { field: "full_permissions" });
-      const current = loadConfig().inboxLaunch ?? {};
-      saveConfig({ inboxLaunch: { ...current, fullPermissions: body.full_permissions } });
+      saveConfig({ inboxLaunch: { fullPermissions: body.full_permissions } });
       if (config().fullPermissions !== body.full_permissions) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
       return json({ launch: settingsState() });
     }
@@ -1021,9 +1024,9 @@ export function createInboxLaunch(options: {
   return {
     enabled,
     settingsState,
-    /** Once at Inbox start, with launch on: the login shell read ahead, so a Send rarely waits on it. */
+    /** The login shell read ahead (`warmLogin`), at most once: a no-op once read or while launch is off. */
     warm(): void {
-      if (enabled()) void readLogin().catch(() => {});
+      warmLogin();
     },
     route,
     sweep,
@@ -1034,13 +1037,12 @@ export function createInboxLaunch(options: {
 
     /**
      * A launched session's permission hook (`POST /api/inbox/launch/:id/permission`), after the
-     * caller's connection guard: null for any other path. Off, 404 `launch_off` (the hook then says nothing).
+     * caller's connection guard: null for any other path. Answered with the switch off too: it governs new starts only.
      * The launch's host answers; an id no thread has goes to the host that takes such calls, which refuses its key.
      */
     async permissionRoute(req: Request, path: string): Promise<Response | null> {
       const match = /^\/api\/inbox\/launch\/(lch_[0-9A-HJKMNP-TV-Z]{26})\/permission$/.exec(path);
       if (!match) return null;
-      if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
       const root = roots().find((m) => m.launch!.id === match[1]);
       const host = root ? hostOf(root.launch!) : hostList.find((h) => stateOf(h).permissions.handle);
       const permissions = host ? stateOf(host).permissions : null;
@@ -1048,10 +1050,14 @@ export function createInboxLaunch(options: {
       return permissions.handle(req, match[1]!);
     },
 
-    /** Compose's `to.launch`, when launch is on: `{ agent, project_id }` or `{ agent, scratch: true }`; null for any other `to`. */
+    /**
+     * Compose's `to.launch`, when launch is on: `{ agent, project_id }` or `{ agent, scratch: true }`; null for any other
+     * `to`, and for any `to.launch` while the switch is off (compose refuses it with `launch_off` in its own words, which
+     * know whether a linked machine asked).
+     */
     target(to: unknown): InboxLaunchTarget | null {
       if (!to || typeof to !== "object" || !("launch" in to)) return null;
-      if (!enabled()) throw new InboxError("launch_off", "Starting agents from the Inbox is off.");
+      if (!enabled()) return null;
       const value = (to as { launch: unknown }).launch as Record<string, unknown> | null;
       const host = value && typeof value === "object" && typeof value.agent === "string" && Object.hasOwn(hosts, value.agent) ? hosts[value.agent]! : null;
       if (host && value!.scratch === true && value!.project_id === undefined) return { agent: host.agent, scratch: true, ...trustOfTarget(value!) };
@@ -1170,6 +1176,8 @@ export function createInboxLaunch(options: {
      */
     async composeBlock(owner: { pick: { agent: string; project: string } | null } | null = null): Promise<InboxComposeLaunch | undefined> {
       if (!enabled()) return undefined;
+      // New message is open: the first time, the login shell read ahead of a Send.
+      warmLogin();
       const root = scratchRoot();
       const recency = new Map<string, string>();
       for (const row of store.listRows()) if ((recency.get(row.project.id) ?? "") < row.last_at) recency.set(row.project.id, row.last_at);
@@ -1222,7 +1230,6 @@ export function createInboxLaunch(options: {
      * `owner`: the machine's owner reads it, so a line refused for trust carries the host's offer.
      */
     async runOf(threadId: string, owner: boolean = false): Promise<InboxRun | null | undefined> {
-      if (!enabled()) return undefined;
       const root = store.message(threadId);
       if (!root?.launch || root.thread_id !== root.id) return undefined;
       const host = hostOf(root.launch);
@@ -1249,7 +1256,7 @@ export function createInboxLaunch(options: {
     /** The launch ended before its agent wrote: it failed, its CLI is gone, or it was stopped or went away (the thread's own line says which). */
     didNotStart(threadId: string): boolean {
       const root = store.message(threadId);
-      if (!enabled() || !root?.launch || root.thread_id !== root.id) return false;
+      if (!root?.launch || root.thread_id !== root.id) return false;
       const state = runOfRoot(root)?.state;
       return state === "failed" || state === "missing" || state === "stopped";
     },
@@ -1261,9 +1268,9 @@ export function createInboxLaunch(options: {
       return host && launch!.session_ref && !launch!.deleted_at && !launch!.error ? host.attach(launch!) : null;
     },
 
-    /** The list's row decorator, resolved once per list (one config read): the identity while launch is off. */
+    /** The list's row decorator (a launched row gets its run word, the switch off too: it governs new starts only). */
     rowDecorator(): <T extends InboxListRow>(row: T) => T {
-      return enabled() ? (row) => this.decorateLaunched(row) : (row) => row;
+      return (row) => this.decorateLaunched(row);
     },
 
     /**
@@ -1307,7 +1314,6 @@ export function createInboxLaunch(options: {
 
     /** Changes when any launched thread's line would: part of the windows' delivery signature. */
     signature(): string {
-      if (!enabled()) return "";
       return roots()
         .map((root) => {
           const line = runOfRoot(root);

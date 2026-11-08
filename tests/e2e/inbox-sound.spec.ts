@@ -28,7 +28,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
-import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { E2E_LAUNCH_OFF, inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const shots = resolve(process.env.PLANNOTATOR_SOUND_SHOTS ?? join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'sound'));
@@ -122,7 +122,7 @@ async function newWorld(browser: Browser, options: { updatedFrom?: string } = {}
   if (options.updatedFrom) {
     writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ inboxVersion: options.updatedFrom }));
     // Due on a used Inbox, and its check would run the `codex` on this PATH.
-    writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxVoiceIntro: { shownAt: '2026-10-01T10:00:00.000Z' } }));
+    writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, inboxVoiceIntro: { shownAt: '2026-10-01T10:00:00.000Z' } }));
   }
   const env = {
     PATH: `${trapDir}:${process.env.PATH ?? ''}`,

@@ -547,8 +547,10 @@ export interface InboxStorageModel {
 
 /** Settings → Agents: starting agents from New message (config.json `inboxLaunch`). Off, only `enabled` and a false `full_permissions`. */
 export interface InboxLaunchSettings {
-  /** "Start agents from New message": on unless config.json `inboxLaunch.enabled` is false. */
+  /** "Start agents from New message": on unless config.json `inboxLaunch.enabled` is false (off by default on Windows). */
   enabled: boolean;
+  /** Windows: launch has no support there, so Settings → Agents shows no switch (config.json only). */
+  unsupported?: boolean;
   /** "Start new sessions with full permissions": Claude Code starts in bypass mode (otherwise auto mode). */
   full_permissions: boolean;
   /** Never set by the person, and on because their Claude settings (`claude`) or their shell (`shell`) run Claude in bypass mode. */

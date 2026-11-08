@@ -578,7 +578,8 @@ export function AgentsSettings({
       setLaunchBusy(false);
     }
   };
-  const enabledRow = launchState ? (
+  // Windows (`unsupported`): no switch; launch there is config.json only.
+  const enabledRow = launchState && !launchState.unsupported ? (
     <div className="ib-agent ib-aglaunch" data-launch-enabled-group="">
       <Row
         k="Start agents from New message"

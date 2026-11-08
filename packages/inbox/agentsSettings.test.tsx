@@ -205,6 +205,12 @@ test.skipIf(!hasDom)('"Start agents from New message": always shown, saves confi
   expect(launchRows()).toEqual([true, true]);
 });
 
+test.skipIf(!hasDom)('Windows (launch unsupported there): no switch, and no launch rows while off', () => {
+  const el = mount(model(), { enabled: false, full_permissions: false, unsupported: true });
+  expect(el.querySelector('[data-launch-enabled-row]')).toBeNull();
+  expect(el.querySelector('[data-launch-full-row]')).toBeNull();
+});
+
 test.skipIf(!hasDom)('connected under another QWEN_HOME: shown off, where it is, and turning it on asks to move it here', async () => {
   const qwen = mcp('qwen', 'Qwen Code', '~/.qwen/settings.json', {
     reach: { kind: 'mcp', on: false, state: 'elsewhere', path: '~/.qwen/settings.json', locked: false, reason: null },
