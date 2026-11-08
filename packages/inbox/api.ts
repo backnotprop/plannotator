@@ -199,6 +199,11 @@ export interface MachineView {
   list_cursor?: number | null;
   /** Its Inbox keeps snoozes (approval "inbox-snooze"). Absent from an older Inbox, and false for a linked one too old: no Snooze on its rows. */
   snoozes?: boolean;
+  /**
+   * Remote launch: agents can start there (true), launch is off there (false), or its Inbox is too old to say (null;
+   * null for this machine, whose own launch block says). Absent from an older Inbox.
+   */
+  launch?: boolean | null;
 }
 
 /** A write held for another machine (`GET /api/inbox/outbox`, the `outbox` frame). */
@@ -1544,12 +1549,14 @@ export const inboxApi = {
   deleteThread: (threadId: string) => post<{ store: InboxStorageModel }>(threadUrl(threadId, `/delete`), {}),
   // Step 8: New message to a live session of the thread's project.
   // Compose: every live session, a new thread, Send to another session, and drafts.
-  composeSessions: (session?: string | null, trust?: ComposeTrustPick | null) => {
+  /** `machine`: a linked machine's sessions and launch block, read through the forward (remote launch); absent: this Inbox's. */
+  composeSessions: (session?: string | null, trust?: ComposeTrustPick | null, machine?: string | null) => {
     const query = new URLSearchParams({ ...(session ? { session } : {}), ...(trust ? { trust_agent: trust.agent, trust_project: trust.project } : {}) }).toString();
-    return get<ComposeSessionsModel>(inboxUrl('/sessions', query || undefined));
+    return get<ComposeSessionsModel>(inboxUrl('/sessions', query || undefined, machine));
   },
-  startThread: (input: StartThreadInput) =>
-    post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean; launch?: { id: string; state: 'starting' | 'failed' } }>(inboxUrl('/messages'), { ...input }),
+  /** `machine`: start the agent on that linked machine (remote launch), through the forward; a `202` is `InboxHeldError`. */
+  startThread: (input: StartThreadInput, machine?: string | null) =>
+    post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean; launch?: { id: string; state: 'starting' | 'failed' } }>(inboxUrl('/messages', undefined, machine), { ...input }),
   // Launch (behind `inboxLaunch.enabled`): the run line's buttons and Settings → Agents' switch.
   launchStop: (launchId: string, machine?: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/stop`, undefined, machine), {}),
   launchOpen: (launchId: string) => post<{ ok: true; command: string }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/open`), {}),

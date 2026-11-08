@@ -7,6 +7,7 @@
 import { derivePersonThreadSubject, suggestPersonThreadName } from '@plannotator/core/inbox-questions';
 import { checkInboxThreadName, INBOX_DRAFT_BODY_MAX, INBOX_HOST_NAMES, type InboxComposeLaunch, type InboxComposeProject, type InboxComposeSession, type InboxLaunchAgent, type InboxDraft, type InboxDraftTo } from '@plannotator/core/inbox-types';
 import { INBOX_SCRATCH_PICK, inboxScratchSlug } from '@plannotator/core/inbox-scratch';
+import { inboxLaunchNotReadyWords, inboxMachineLaunchWords } from '@plannotator/core/inbox-launch-ready';
 import { whenTime } from '../format';
 
 /** One live session with the project it works in: what To names. */
@@ -390,7 +391,8 @@ const queryWords = (query: string) => query.toLowerCase().split(/\s+/).filter(Bo
 /** The project a new session starts in by default: the one the person is looking at, else the most recently active. */
 export function defaultStartProject(launch: InboxComposeLaunch | undefined, current: { id: string | null; root: string | null } | null): LaunchProject | null {
   if (!launch || launch.projects.length === 0) return null;
-  return launch.projects.find((p) => isCurrent(p, current)) ?? launch.projects[0]!;
+  // The current project by its id first: with linked machines, another machine may have a folder at the same path.
+  return (current?.id ? launch.projects.find((p) => p.id === current.id) : undefined) ?? launch.projects.find((p) => isCurrent(p, current)) ?? launch.projects[0]!;
 }
 
 /**
@@ -426,4 +428,119 @@ export function filterLaunchProjects(projects: readonly LaunchProject[], query: 
 /** The status line beside Send for a start: none, as for a message to a live session, unless the folder is gone (screen 13). */
 export function startStatusLine(start: ComposeStart): string {
   return start.project.exists ? '' : 'Pick a folder to start in.';
+}
+
+// ── Remote launch: the folder menu grouped by machine (approval "remote-launch", the picker's A) ──
+
+/** A machine as compose sees it (`GET /api/inbox/machines`). */
+export interface LaunchMachine {
+  id: string;
+  name: string;
+  self: boolean;
+  state: 'online' | 'connecting' | 'offline' | 'needs_update' | 'revoked';
+  since: string;
+  /** Agents can start there (true), launch is off there (false), its Inbox is too old to say (null). */
+  launch?: boolean | null;
+}
+
+/** A linked machine's last good sessions read (its launch block and home), kept while it sleeps. */
+export interface MachineLaunchRead {
+  launch?: InboxComposeLaunch;
+  home: string | null;
+}
+
+/** A folder-menu project with the machine it is on: absent for this computer's. */
+export type MachineLaunchProject = LaunchProject & { machine?: string; machine_name?: string };
+
+/** One machine's group in the folder menu. */
+export interface LaunchGroup {
+  /** The machine's id, or null for this computer. */
+  machine: string | null;
+  name: string;
+  self: boolean;
+  /** That machine is asleep (offline): what it shows is its last read, and a Send waits for it. */
+  asleep: boolean;
+  /** The caption's quiet words after the name: "this computer", "asleep", or null. */
+  quiet: string | null;
+  /** Its home folder, for `~/…` paths (each machine's own). */
+  home: string | null;
+  projects: MachineLaunchProject[];
+  /** The project the person last started an agent in on this machine, when it is listed (drawn first). */
+  last: string | null;
+  /** "New scratch folder" there. */
+  scratch: { root: string } | null;
+  /** The agent can't start there: one disabled row in place of its projects. */
+  notice: { line: string; command: string | null } | null;
+}
+
+/** Where the person last started an agent, per machine id: when, and in which project (from the merged list). */
+export type LaunchHistory = ReadonlyMap<string, { at: string; project: string }>;
+
+/**
+ * Where the person last started an agent on each machine, from the list's rows: a launched thread's row carries
+ * `run` (its key, even when null), and the merged list names its `machine`. Each machine keeps its newest.
+ */
+export function launchHistory(rows: readonly { machine?: string; project: { id: string }; created_at: string; run?: unknown }[]): Map<string, { at: string; project: string }> {
+  const out = new Map<string, { at: string; project: string }>();
+  for (const row of rows) {
+    if (!row.machine || !('run' in row)) continue;
+    const had = out.get(row.machine);
+    if (!had || row.created_at > had.at) out.set(row.machine, { at: row.created_at, project: row.project.id });
+  }
+  return out;
+}
+
+/**
+ * The folder menu's groups for `agent`. No linked machine (or none with anything to offer): one group, this
+ * computer's, and `grouped` false, so the menu is exactly what it was. Otherwise one group per machine with a caption,
+ * the machine the person started an agent on last first (this computer first when none says), a project on several
+ * machines under each. A machine where the agent can't start shows one disabled line in its words
+ * (`inboxLaunchNotReadyWords`, `inboxMachineLaunchWords`). A linked machine never read yet shows nothing.
+ */
+export function launchGroups(input: {
+  agent: InboxLaunchAgent | null;
+  /** This computer's launch block and home, and its id and name in the machines list (null before it). */
+  self: { launch: InboxComposeLaunch | undefined; home: string | null; id: string | null; name: string | null };
+  machines: readonly LaunchMachine[];
+  reads: ReadonlyMap<string, MachineLaunchRead>;
+  history?: LaunchHistory;
+}): { grouped: boolean; groups: LaunchGroup[] } {
+  const { agent, self, reads } = input;
+  const history = input.history ?? new Map();
+  const groupOf = (machine: string | null, name: string, isSelf: boolean, asleep: boolean, block: InboxComposeLaunch | undefined, home: string | null, words: string | null): LaunchGroup | null => {
+    const quiet = isSelf ? 'this computer' : asleep ? 'asleep' : null;
+    const base = { machine, name, self: isSelf, asleep, quiet, home, projects: [] as MachineLaunchProject[], last: null, scratch: null, notice: null };
+    if (words) return { ...base, notice: { line: words, command: null } };
+    if (!block || !agent) return null;
+    if (block.agents.some((a) => a.agent === agent)) {
+      const seen = history.get((isSelf ? self.id : machine) ?? '');
+      const listed = block.projects.map((p) => (machine ? { ...p, machine, machine_name: name } : { ...p }));
+      const last = seen && listed.some((p) => p.id === seen.project) ? seen.project : null;
+      return { ...base, projects: listed, last, scratch: block.scratch ?? null };
+    }
+    const not = block.not_ready?.find((n) => n.agent === agent);
+    if (!not) return null;
+    const said = inboxLaunchNotReadyWords({ agent: not.name, code: not.code, machine: isSelf ? null : name, overSsh: not.over_ssh === true });
+    return { ...base, notice: { line: said.line, command: said.command } };
+  };
+  const mine = groupOf(null, self.name ?? 'This computer', true, false, self.launch, self.home, null);
+  const linked = input.machines.filter((m) => !m.self && m.state !== 'revoked');
+  const theirs = linked.map((m, i) => {
+    const asleep = m.state === 'offline';
+    const words = m.launch === false ? inboxMachineLaunchWords(m.name, 'off') : m.launch === null || m.launch === undefined || m.state === 'needs_update' ? inboxMachineLaunchWords(m.name, 'update') : null;
+    const read = reads.get(m.id);
+    return { group: groupOf(m.id, m.name, false, asleep, read?.launch, read?.home ?? null, words), order: i + 1, id: m.id };
+  });
+  const all = [{ group: mine, order: 0, id: self.id ?? '' }, ...theirs].filter((g): g is { group: LaunchGroup; order: number; id: string } => {
+    const group = g.group;
+    return !!group && (group.projects.length > 0 || !!group.scratch || !!group.notice);
+  });
+  const grouped = all.length > 1 || (all.length === 1 && !all[0]!.group.self);
+  if (!grouped) return { grouped: false, groups: all.map((g) => ({ ...g.group, last: null })) };
+  // The machine the person started an agent on last, first; the rest as they were (this computer, then the linked ones).
+  const at = (id: string) => history.get(id)?.at ?? '';
+  // In each group, the project the person last started an agent in there leads ("· you started it here last").
+  const lead = (g: LaunchGroup): LaunchGroup => (g.last ? { ...g, projects: [...g.projects.filter((p) => p.id === g.last), ...g.projects.filter((p) => p.id !== g.last)] } : g);
+  const groups = [...all].sort((a, b) => (at(a.id) === at(b.id) ? a.order - b.order : at(a.id) > at(b.id) ? -1 : 1)).map((g) => lead(g.group));
+  return { grouped: true, groups };
 }
