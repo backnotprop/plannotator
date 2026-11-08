@@ -246,6 +246,17 @@ export function HomeFolderBrowser({
       setHl((at + step + rows.length) % rows.length);
       return;
     }
+    // Tab in the path field on a highlighted folder fills it in, as a shell does (G3, q-5e334740): the field reads
+    // `<folder>/`, ready for the next name. Anything else highlighted, or none, and Shift+Tab: focus moves as usual.
+    if (event.key === 'Tab' && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey && event.target === inputRef.current) {
+      const row = at >= 0 ? rows[at] : undefined;
+      if (row?.kind === 'folder') {
+        event.preventDefault();
+        event.stopPropagation();
+        goTo(`${row.path}/`);
+      }
+      return;
+    }
     // ⌘↵ stays the dialog's Send.
     if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) {
       if ((event.target as Element).closest?.('button')) return;
