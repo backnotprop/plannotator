@@ -601,6 +601,8 @@ export interface PlannotatorConfig {
     /** The "Star the repo" ask's claim in the line (config.json `starAsk` is its record across surfaces). */
     star?: { shownAt?: string; key?: string };
     list_view?: { shownAt?: string; key?: string };
+    /** The Launch tip (approval "launch-tip"; packages/shared/inbox/launch-tip.ts): stamped once when shown, outside the line. */
+    launch_tip?: { shownAt?: string; key?: string; launchedAt?: string };
   };
   inboxSound?: {
     enabled?: boolean;

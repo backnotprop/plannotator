@@ -97,8 +97,8 @@ import { newUuid } from './uuid';
 export type InboxRevealId = 'code_review' | 'sound' | 'list_intro' | 'voice' | 'snooze' | 'bro' | 'board' | 'steps' | 'star' | 'list_view';
 /** An offer of the line (not an update-day dialog): only an offer's Not now stamps the four-day gap. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
-/** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, or the agent note. */
-export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note';
+/** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, or the Launch tip (outside the line). */
+export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip';
 
 /**
  * This page load's id, sent with every read and write (`X-Plannotator-Load`): the line of one-time dialogs never shows
@@ -494,9 +494,10 @@ export interface SettingsModel {
    * as soon as its own moment comes (List view); `setup`: the agent note may show on this load (absent from an older
    * Inbox: it may); `line`: this Inbox keeps the line (a release build), so the update-day dialogs (sound, list
    * options, voice) show only when `next` names them; `aside`: the star ask, which this page may arm beside `next` (it
-   * stands outside the line's order). The whole field is absent from an older Inbox.
+   * stands outside the line's order); `launch_tip`: the Launch tip may show at the first plain New message (outside the
+   * line; absent from an older Inbox: it never shows). The whole field is absent from an older Inbox.
    */
-  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[] };
+  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */

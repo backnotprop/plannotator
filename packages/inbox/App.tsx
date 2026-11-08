@@ -131,7 +131,8 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro, VOICE_INTRO_MIN_WORDS, VOICE_INTRO_MOMENT_MS } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
-import { listTallerThanScreen, listViewRevealLeaveCounts, listViewRevealMayClaim, noteRevealThread, openThreadAsks, revealArmed, broRevealLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
+import { claimRevealOnce, listTallerThanScreen, listViewRevealLeaveCounts, listViewRevealMayClaim, noteRevealThread, openThreadAsks, revealArmed, broRevealLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
+import { launchTipDue } from './compose/launchTip';
 import type { InboxRevealId } from './api';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
 import { namesCapability, withCapabilities } from './capabilities';
@@ -2702,6 +2703,20 @@ function Inbox() {
     focusAfterOpen();
   };
   // ── Compose: a new message to a connected agent (compose/ComposeDialog.tsx) ──
+  // The Launch tip (compose/launchTip.ts): this page spends its claim once, with its own key (a retry after a lost
+  // answer is shown it again); the Inbox keeps it seen for every window and the phone. A plain New message that never
+  // reached the tip (To opened first) leaves it for the next one.
+  const launchTipSpent = useRef(false);
+  const launchTipKey = useRef(`lt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
+  const launchTip = useMemo(
+    () => ({
+      claim: async () => {
+        launchTipSpent.current = true;
+        return (await claimRevealOnce('launch_tip', launchTipKey.current)).show;
+      },
+    }),
+    [],
+  );
   const openCompose = (request: ComposeRequest, opener?: HTMLElement | null) => {
     composeOpener.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     setCompose(request);
@@ -7103,6 +7118,7 @@ function Inbox() {
           reviewPulls={compose.review ? reviewPulls : undefined}
           reviewPullsRead={!pulls.reviews ? (pulls.error ? 'failed' : 'reading') : pulls.reviews.hosts.length > 0 && pulls.reviews.hosts.some((host) => host.error) ? 'failed' : 'read'}
           onOpenReviewThread={(id) => writeRoute({ page: 'inbox', reviews: reviewsScope(), project: null, thread: id })}
+          launchTip={!tourOn && !launchTipSpent.current && launchTipDue(settings) ? launchTip : null}
           onSent={(sent) => {
             rememberSent(sent.session);
             composeSent(sent);
