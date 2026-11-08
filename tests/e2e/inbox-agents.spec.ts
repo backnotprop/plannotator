@@ -373,12 +373,24 @@ test('stress: every proven agent at once, long and non-Latin paths: written by i
     });
     // Never a dialog for them.
     await expect(dialogOf(page)).toHaveCount(0);
-    // The paths live in tooltips: the line stays one quiet line, its button in view, at both widths.
+    // The paths live in tooltips: the line stays one quiet line, its button in view, at both widths. With no thread
+    // yet this is the first-run screen, where the line is in the ask slot under Try it (inbox-foundation.md), below
+    // five agents' Done list and the Left to do list: the screen scrolls to the line's top first, so what is proved
+    // is that nothing pushes Got it out of the line or the window sideways.
     const gotIt = line.getByRole('button', { name: 'Got it' });
-    await expect(gotIt).toBeInViewport();
+    const lineFits = async (width: number) => {
+      await line.evaluate((el) => el.scrollIntoView({ block: 'start', inline: 'nearest' }));
+      await expect(gotIt).toBeInViewport();
+      const box = (await line.boundingBox())!;
+      const button = (await gotIt.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+      expect(button.x).toBeGreaterThanOrEqual(box.x);
+      expect(button.x + button.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
+    };
+    await lineFits(DESKTOP.width);
     await page.setViewportSize(NARROW);
-    await expect(gotIt).toBeInViewport();
-    expect((await line.boundingBox())!.width).toBeLessThanOrEqual(NARROW.width);
+    await lineFits(NARROW.width);
     await page.setViewportSize(DESKTOP);
     await shot(page, 'connect-line-05-stress', ['desktop', 'narrow']);
   } finally {

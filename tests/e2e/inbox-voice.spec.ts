@@ -37,7 +37,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { NO_BROWSER } from '../helpers/no-browser';
-import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { E2E_LAUNCH_OFF, inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const shotsDir = resolve(process.env.PLANNOTATOR_E2E_SHOTS_DIR ?? join(repo, '.local/proof/inbox-voice'));
@@ -98,6 +98,9 @@ async function startWorld(options: { version?: string; config?: Record<string, u
   writeFileSync(
     join(dataDir, 'config.json'),
     JSON.stringify({
+      // A world's data dir is not inboxScratch's own `<root>/data`, and this writes config.json whole: launch off here,
+      // or New message runs `claude --version` on the runner's PATH (tests/e2e/agent-cli-stubs.ts).
+      ...E2E_LAUNCH_OFF,
       inboxTour: { version: 2, seen_at: '2026-10-01T10:00:00.000Z', skipped_at: '2026-10-01T10:00:00.000Z' },
       // A notification setting means someone used an Inbox here (inboxUsedBefore).
       ...(options.fresh ? {} : { inboxNotifications: { dismissed: true } }),

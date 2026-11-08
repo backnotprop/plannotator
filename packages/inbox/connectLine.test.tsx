@@ -25,7 +25,7 @@ afterEach(() => {
   host?.remove();
   root = null;
   host = null;
-  document.body.innerHTML = '';
+  if (typeof document !== 'undefined') document.body.innerHTML = '';
 });
 
 const REPORT: InboxConnectReport = {
