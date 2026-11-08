@@ -252,6 +252,27 @@ export function makeHomeFolder(parent: string, name: string): { real: string; ma
   // checks that leads out of home or into a hidden folder.
   const real = realpathSync(path);
   if (lstatSync(path).isSymbolicLink() || real !== join(realpathSync(parent), name)) throw new Error(`${path} is not a folder in ${parent}`);
-  const stat = statSync(real);
-  return { real, made, inode: `${stat.dev}:${stat.ino}` };
+  return { real, made, inode: folderIdentity(real)! };
+}
+
+/**
+ * A folder's identity, for removing only a folder the Inbox made: `<dev>:<ino>`, then `:<birth time ns>` where the file
+ * system keeps one. An inode number alone can come back (ext4 hands a freed one to the next folder made), and a folder
+ * the person made then would read as the Inbox's; its birth time tells them apart. Null when it is not there.
+ */
+export function folderIdentity(path: string): string | null {
+  try {
+    const stat = lstatSync(path, { bigint: true });
+    return stat.birthtimeNs > 0n ? `${stat.dev}:${stat.ino}:${stat.birthtimeNs}` : `${stat.dev}:${stat.ino}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Two identities are the same folder: device and inode, and the birth time when both have one (older records have none). */
+export function sameFolderIdentity(now: string | null, recorded: string | null | undefined): boolean {
+  if (!now || !recorded) return false;
+  const [dev, ino, birth] = now.split(":");
+  const [recDev, recIno, recBirth] = recorded.split(":");
+  return dev === recDev && ino === recIno && (!birth || !recBirth || birth === recBirth);
 }

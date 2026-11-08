@@ -1034,6 +1034,8 @@ export interface InboxLaunchClone {
   renamed_from?: string;
   /** After the clone, what the repo brings that needs the person's trust first (E10): "hooks", "MCP servers", "settings". */
   brings?: string[];
+  /** `failed` or `cancelled`: when it ended. Only a reply written after it clones again (E7), never one the clone already had. */
+  ended_at?: string;
 }
 
 /** The linked machine a launch was started from: its Inbox id (`ibx_…`) and its name as this Inbox knows it. */
