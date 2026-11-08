@@ -10,7 +10,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { htmlAnnotateShortcuts, listRegistryShortcuts, matchesShortcutBinding, validateShortcutRegistry } from '@plannotator/ui/shortcuts';
-import { buildInboxShortcutRegistry, INBOX_SHORTCUT_EXTRAS, inboxFileViewerShortcuts, inboxSearchShortcuts, inboxShortcutRegistry, inboxSurface, inboxThreadShortcuts, isBareBinding, type InboxShortcutExtras } from './shortcuts';
+import { buildInboxShortcutRegistry, INBOX_SHORTCUT_EXTRAS, inboxAppShortcuts, inboxFileViewerShortcuts, inboxSearchShortcuts, inboxShortcutRegistry, inboxSurface, inboxThreadShortcuts, isBareBinding, type InboxShortcutExtras } from './shortcuts';
 
 const COMBOS: InboxShortcutExtras[] = [false, true].flatMap((slashSearch) =>
   [false, true].flatMap((goTo) => [false, true].map((readFromList) => ({ slashSearch, goTo, readFromList }))),
@@ -18,10 +18,11 @@ const COMBOS: InboxShortcutExtras[] = [false, true].flatMap((slashSearch) =>
 
 /**
  * The single keys the owner approved; each extra adds its own. Shift+E, H, Shift+O, C, G P and G D: approval
- * "inbox-keyboard-keys-2026-11-07" (H for Snooze, as that approval's fallback: B is G B's second key).
+ * "inbox-keyboard-keys-2026-11-07" (H for Snooze, as that approval's fallback: B is G B's second key). Shift+R
+ * (Refresh): approval "inbox-refresh-key".
  */
 function approvedBare(extras: InboxShortcutExtras): string[] {
-  const core = ['E', 'Shift+E', 'Z', 'R', 'J', 'K', 'Shift+J', 'Shift+K', 'N', 'O', 'Shift+O', 'Q', 'F', 'H', 'C', '?', '[', ']'];
+  const core = ['E', 'Shift+E', 'Z', 'R', 'Shift+R', 'J', 'K', 'Shift+J', 'Shift+K', 'N', 'O', 'Shift+O', 'Q', 'F', 'H', 'C', '?', '[', ']'];
   return [...core, ...(extras.slashSearch ? ['/'] : []), ...(extras.goTo ? ['G I', 'G B', 'G P', 'G D', 'G S'] : [])].sort();
 }
 
@@ -90,6 +91,14 @@ describe('the Inbox surface', () => {
     expect(archive.bindings.some((b) => matchesShortcutBinding(keydown({ key: 'E', code: 'KeyE', shiftKey: true }), b))).toBe(true);
     expect(openNewest.bindings.some((b) => matchesShortcutBinding(keydown({ key: 'O', code: 'KeyO', shiftKey: true }), b))).toBe(false);
     expect(artifacts.bindings.some((b) => matchesShortcutBinding(keydown({ key: 'O', code: 'KeyO', shiftKey: true }), b))).toBe(true);
+    // R is Reply, Shift+R Refresh; ⌘⇧R and Ctrl+Shift+R stay the browser's hard reload.
+    const { reply } = inboxThreadShortcuts.shortcuts;
+    const { refresh } = inboxAppShortcuts.shortcuts;
+    expect(reply.bindings.some((b) => matchesShortcutBinding(keydown({ key: 'r', code: 'KeyR' }), b))).toBe(true);
+    expect(reply.bindings.some((b) => matchesShortcutBinding(keydown({ key: 'R', code: 'KeyR', shiftKey: true }), b))).toBe(false);
+    expect(refresh.bindings.some((b) => matchesShortcutBinding(keydown({ key: 'R', code: 'KeyR', shiftKey: true }), b))).toBe(true);
+    expect(refresh.bindings.some((b) => matchesShortcutBinding(keydown({ key: 'r', code: 'KeyR' }), b))).toBe(false);
+    for (const mod of [{ metaKey: true }, { ctrlKey: true }]) expect(refresh.bindings.some((b) => matchesShortcutBinding(keydown({ key: 'R', code: 'KeyR', shiftKey: true, ...mod }), b))).toBe(false);
   });
 
   test('letters work on a non-Latin layout (the physical key), a Latin layout keeps its characters, and ? / stay characters', () => {

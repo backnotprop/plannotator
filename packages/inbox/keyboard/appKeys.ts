@@ -1,6 +1,6 @@
 /**
- * The gates of the Inbox-wide keys added by approval "inbox-keyboard-keys-2026-11-07" (App.tsx runs them in its app
- * scope), and what Shift+E archives. Kept apart from App so a test can drive them through the shortcut runtime.
+ * The gates of the Inbox-wide keys added by approval "inbox-keyboard-keys-2026-11-07" and Shift+R's (approval
+ * "inbox-refresh-key"; App.tsx runs them in its app scope), and what Shift+E archives. Kept apart from App so a test can drive them through the shortcut runtime.
  */
 import { bareKeyAllowed } from '../shortcuts/guards';
 
@@ -29,6 +29,24 @@ export function newPageKeys(pages: () => AppKeyPages, act: { goPulls: () => void
     goPulls: { when: (event) => appKeyAllowed(event, pages().page) && pages().pulls, handle: act.goPulls },
     goDrafts: { when: (event) => appKeyAllowed(event, pages().page) && pages().drafts, handle: act.goDrafts },
     compose: { when: (event) => appKeyAllowed(event, pages().page) && !pages().composing, handle: act.compose },
+  };
+}
+
+/**
+ * Shift+R (approval "inbox-refresh-key"): the refresh of the page on screen, the same as its own control. The Inbox
+ * or a project (the list header's ↻, also with a thread open), the Board (its ⋮ Refresh) or Reviews (its ↻). `run` is
+ * null where the page has no refresh (Drafts, Settings, a pull request's review, a list still loading): the key does
+ * nothing there and is left to the browser, which gives Shift+R no meaning of its own.
+ */
+export function refreshKey(on: () => { page: string; run: (() => void) | null }): Record<'refresh', Handler> {
+  return {
+    refresh: {
+      when: (event) => {
+        const now = on();
+        return appKeyAllowed(event, now.page) && now.run !== null;
+      },
+      handle: () => on().run?.(),
+    },
   };
 }
 

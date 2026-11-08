@@ -93,7 +93,7 @@ import { onOpenSearchKey } from './search/searchShortcut';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from './shortcuts/thread.shortcuts';
 import { bareKeyAllowed, inOverlay, isComposingKey, isEditableTarget, isRepeatKey, keyboardFocused, keyTarget, modalOpen, singleKeysLive } from './shortcuts/guards';
-import { appKeyAllowed as appKeyAllowedOn, archiveTarget, newPageKeys } from './keyboard/appKeys';
+import { appKeyAllowed as appKeyAllowedOn, archiveTarget, newPageKeys, refreshKey } from './keyboard/appKeys';
 import { inboxAppShortcuts } from './shortcuts/app.shortcuts';
 import { ShortcutMap } from './components/ShortcutMap';
 import { EmptyState } from './components/EmptyState';
@@ -4072,6 +4072,8 @@ function Inbox() {
   const [mapOpen, setMapOpen] = useState(false);
   /** What G P, G D and C need from later in the render: whether Reviews and Drafts show, and whether compose is up. */
   const pagesRef = useRef({ pulls: false, drafts: false, composing: false });
+  /** What Shift+R runs: the refresh of the page on screen, set as the page is drawn; null where it has none. */
+  const refreshRef = useRef<(() => void) | null>(null);
   const appKeyAllowed = (event: KeyboardEvent, onTouchPhone = false) => appKeyAllowedOn(event, routeRef.current.page, onTouchPhone);
   /** Focus the first of `selectors` on screen once the page it is on has drawn (two frames: the route, then its layout). */
   const focusSoon = (selectors: readonly string[]) => requestAnimationFrame(() => requestAnimationFrame(() => focusFirst(selectors)));
@@ -4124,6 +4126,8 @@ function Inbox() {
         },
         compose: () => openCompose({}),
       }),
+      // Shift+R (approval "inbox-refresh-key"): what the page's own refresh does (keyboard/appKeys.ts has its gate).
+      ...refreshKey(() => ({ page: routeRef.current.page, run: refreshRef.current })),
     },
   });
 
@@ -5942,6 +5946,13 @@ function Inbox() {
     />
     );
   };
+  /** The Board's ⋮ Refresh (BoardPage's `onChanged` with no card), and Shift+R on the Board. */
+  const refreshBoard = () => {
+    void refreshCards();
+    void refreshList(false);
+  };
+  // Shift+R: set below by the page drawn, which has a refresh (the Inbox's list or thread, the Board, Reviews' list).
+  let refreshOnScreen: (() => void) | null = null;
   let main: ReactNode;
   if (tourOn && !tourFixture) {
     main = <TourLoading />;
@@ -6093,6 +6104,7 @@ function Inbox() {
     for (const row of latest?.pins ?? []) if (!rowById.has(row.thread_id)) rowById.set(row.thread_id, row);
     // The cards' own answer names threads the list leaves out (archived): the opened card still names them.
     for (const [id, row] of Object.entries(cards?.threads ?? {})) if (row && !rowById.has(id)) rowById.set(id, row);
+    refreshOnScreen = refreshBoard;
     main = (
       <BoardPage
         view={route.board ?? 'lanes'}
@@ -6146,8 +6158,7 @@ function Inbox() {
             handleCard(card.id);
             setCards((model) => (model ? { ...model, cards: [card, ...model.cards.filter((c) => c.id !== card.id)] } : model));
           }
-          void refreshCards();
-          void refreshList(false);
+          refreshBoard();
         }}
         onSeeDrops={seeDrops}
         tidy={boardTidy}
@@ -6177,6 +6188,8 @@ function Inbox() {
       />
     );
   } else if (route.page === 'reviews' && pullsShown) {
+    // Reviews' ↻ (its foot: "Read again").
+    refreshOnScreen = pulls.refresh;
     main = reviewsList(route.project, route.view ?? 'all', null);
   } else if ((route.page === 'reviews' || route.reviews) && settings !== null && !guestPage && !codeReviewOn) {
     main = <ReviewsOff phone={phone} onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'capabilities' })} />;
@@ -6239,6 +6252,18 @@ function Inbox() {
     if (settings === null) firstRunDrawnBare.current = true;
     main = firstRunScreen({ tour: false });
   } else {
+    if (route.page === 'inbox') {
+      // The list header's ↻: the Inbox or the project, the open thread read again too. Beside the Reviews list (a
+      // thread opened from it), that list's ↻ and the thread.
+      const open = route.thread;
+      refreshOnScreen =
+        !fileOpen && !fromCard && route.reviews && pullsShown
+          ? () => {
+              pulls.refresh();
+              if (open) void refreshThread(open);
+            }
+          : () => void refreshInbox(route.project, false);
+    }
     main = (
       <>
         {/* In full screen the list stays drawn, hidden (inbox.css `data-thread-full`): J/K and G I read its order, and
@@ -6549,6 +6574,7 @@ function Inbox() {
       </>
     );
   }
+  refreshRef.current = refreshOnScreen;
 
   return (
     <InitiativeTagsContext.Provider value={initiativeTags}>

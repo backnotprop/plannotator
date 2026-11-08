@@ -4,15 +4,17 @@
  * outside one); H opening the header clock's menu without focus in it, snoozing on its own, or opening again by
  * itself when the clock mounts again; H on a row opening another row's menu, or a menu on a row that cannot snooze;
  * Shift+E archiving the wrong thread; C and G P / G D firing while typing, on the tour, or where their page is
- * hidden; Shift+F10 on a message head not opening its ⋯ menu, or opening it from a text field.
+ * hidden; Shift+F10 on a message head not opening its ⋯ menu, or opening it from a text field. Shift+R (approval
+ * "inbox-refresh-key") not running the page's refresh from the list or an open thread, running it while typing, under a
+ * dialog, with single keys off or where the page has none, or taking plain R from Reply.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { GuideArtifact } from './artifacts';
 import { gridStep, laneStep, type Box } from './gridMove';
-import { archiveTarget, newPageKeys, type AppKeyPages } from './keyboard/appKeys';
-import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import { archiveTarget, newPageKeys, refreshKey, type AppKeyPages } from './keyboard/appKeys';
+import type { InboxListRow, InboxListSection, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
 const { ArtifactsView } = (hasDom ? await import('./components/ArtifactsView') : {}) as typeof import('./components/ArtifactsView');
@@ -20,6 +22,9 @@ const { ThreadSnooze, MessageMenu } = (hasDom ? await import('./components/CopyM
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { useShortcutScope } = (hasDom ? await import('@plannotator/ui/shortcuts') : {}) as typeof import('@plannotator/ui/shortcuts');
+// Viewer pulls in web-highlighter, which reads `window` at module-eval time.
+const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
+const prefs = await import('./shortcuts/prefs');
 const { inboxAppShortcuts } = await import('./shortcuts/app.shortcuts');
 
 let root: Root | null = null;
@@ -348,4 +353,116 @@ test.skipIf(!hasDom)('Shift+F10 in a text field inside a message’s head is the
   await frames();
   expect(document.querySelector('[data-message-menu="msg_1"]')).toBeNull();
   expect(document.activeElement).toBe(field);
+});
+
+function RefreshKeys({ on }: { on: () => { page: string; run: (() => void) | null } }) {
+  useShortcutScope({ scope: inboxAppShortcuts, handlers: refreshKey(on) });
+  return null;
+}
+
+const REFRESH_PROJECT: InboxProject = { id: 'prj_1', key: 'ledger-abcdef', name: 'ledger', root: '/work/ledger', created_at: '2026-10-11T10:00:00.000Z' };
+
+function refreshThread(): InboxThread {
+  const id = 'msg_01M4H6G73M9H3Z32T859E72DPY';
+  const message: InboxMessageWire = {
+    id,
+    project_id: REFRESH_PROJECT.id,
+    thread_id: id,
+    reply_to: null,
+    author: { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null },
+    subject: 'Nightly sync',
+    body: 'The nightly sync is green again.',
+    created_at: '2026-10-11T10:41:00.000Z',
+    resolved_at: null,
+    idempotency_key: null,
+  };
+  return { thread_id: id, project: REFRESH_PROJECT, subject: 'Nightly sync', thread_name: null, resolved_at: null, messages: [message] };
+}
+
+test.skipIf(!hasDom)('Shift+R runs the page’s refresh from the list and from an open thread; plain R still opens Reply', async () => {
+  const savedFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = String(input);
+    if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
+    if (path.includes('/sessions')) return Response.json({ serverSession: 's', home: '/home/me', project: REFRESH_PROJECT, sessions: [] });
+    return Response.json({});
+  }) as typeof fetch;
+  restores.push(() => {
+    globalThis.fetch = savedFetch;
+  });
+  const settle = async () => {
+    for (let i = 0; i < 4; i += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+  };
+  let refreshes = 0;
+  const view: { page: string; run: (() => void) | null } = { page: 'inbox', run: () => (refreshes += 1) };
+  const el = mount(
+    <>
+      <RefreshKeys on={() => view} />
+      <button type="button" data-thread-id="thr_row">
+        A row
+      </button>
+      <ThreadPane thread={refreshThread()} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />
+    </>,
+  );
+  await settle();
+  const box = () => el.querySelector<HTMLTextAreaElement>('textarea');
+  const replyButton = () => el.querySelector<HTMLButtonElement>('[data-reply-button]');
+  expect(replyButton()).not.toBeNull();
+  const shiftR = (target: Element, init: KeyboardEventInit = {}) => press(target, 'R', { code: 'KeyR', shiftKey: true, ...init });
+
+  // From the list (a row with focus), Shift+R refreshes, and opens nothing.
+  const row = el.querySelector<HTMLElement>('[data-thread-id="thr_row"]')!;
+  act(() => row.focus());
+  shiftR(row);
+  expect(refreshes).toBe(1);
+  // From inside the open thread (its Reply button with focus), the same; the reply box stays shut.
+  act(() => replyButton()!.focus());
+  shiftR(replyButton()!);
+  await settle();
+  expect(refreshes).toBe(2);
+  expect(box()).toBeNull();
+  // Plain R is still Reply: the box opens, nothing refreshes.
+  act(() => (document.activeElement as HTMLElement | null)?.blur());
+  press(document.body, 'r', { code: 'KeyR' });
+  await settle();
+  expect(box()).not.toBeNull();
+  expect(refreshes).toBe(2);
+  // Typing in the reply box: Shift+R is a capital R.
+  act(() => box()!.focus());
+  shiftR(box()!);
+  expect(refreshes).toBe(2);
+  act(() => box()!.blur());
+  // ⌘⇧R and Ctrl+Shift+R stay the browser's hard reload.
+  shiftR(document.body, { metaKey: true });
+  shiftR(document.body, { ctrlKey: true });
+  expect(refreshes).toBe(2);
+  // Under a dialog, nothing.
+  const dialog = document.createElement('dialog');
+  dialog.setAttribute('open', '');
+  document.body.append(dialog);
+  shiftR(document.body);
+  dialog.remove();
+  expect(refreshes).toBe(2);
+  // Single-key shortcuts off (Settings → General): nothing; back on, it refreshes again.
+  act(() => prefs.setSingleKeys(false));
+  try {
+    shiftR(document.body);
+    expect(refreshes).toBe(2);
+  } finally {
+    act(() => prefs.setSingleKeys(true));
+  }
+  shiftR(document.body);
+  expect(refreshes).toBe(3);
+  // A page with no refresh (Drafts, Settings): nothing, and the key is left alone.
+  view.run = null;
+  const left = new KeyboardEvent('keydown', { key: 'R', code: 'KeyR', shiftKey: true, bubbles: true, cancelable: true });
+  act(() => {
+    document.body.dispatchEvent(left);
+  });
+  expect(left.defaultPrevented).toBe(false);
+  // On the tour, nothing either.
+  view.run = () => (refreshes += 1);
+  view.page = 'tour';
+  shiftR(document.body);
+  expect(refreshes).toBe(3);
 });

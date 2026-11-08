@@ -7,7 +7,7 @@ import { INBOX_SHORTCUT_EXTRAS, type InboxShortcutExtras } from './extras';
  * `?` is matched by its character (`event.key`), so it is Shift+/ on a US
  * keyboard and Shift+, on a French one.
  */
-export type InboxAppAction = 'openMap' | 'goInbox' | 'goBoard' | 'goPulls' | 'goDrafts' | 'goSettings' | 'compose' | 'toggleSidebar' | 'leavePage';
+export type InboxAppAction = 'openMap' | 'goInbox' | 'goBoard' | 'goPulls' | 'goDrafts' | 'goSettings' | 'compose' | 'refresh' | 'toggleSidebar' | 'leavePage';
 
 export function buildInboxAppShortcuts(extras: InboxShortcutExtras = INBOX_SHORTCUT_EXTRAS) {
   const goTo: Partial<Record<InboxAppAction, ShortcutDefinition>> = extras.goTo
@@ -42,6 +42,15 @@ export function buildInboxAppShortcuts(extras: InboxShortcutExtras = INBOX_SHORT
         hint: 'Opens a new message to an agent.',
         preventDefault: true,
         displayOrder: 4.5,
+      },
+      refresh: {
+        // App.tsx: the list header's ↻ (approval "inbox-refresh-key"; "R for refresh", beside ⌘R; plain R stays Reply).
+        description: 'Refresh',
+        bindings: ['Shift+R'],
+        section: 'Everywhere',
+        hint: 'The Inbox or the project on screen, as the list’s ↻ does. On the Board and Reviews, their own refresh.',
+        preventDefault: true,
+        displayOrder: 4.6,
       },
       toggleSidebar: {
         // Wired in shell/sidebar.tsx (the sidebar primitive's own listener, unchanged); listed here for the map.

@@ -1463,12 +1463,18 @@ export function InboxList(props: InboxListProps) {
         {props.onRefresh ? (
           <h1 dir="auto" className="ib-lhead-h">
             {/* The full name in the tooltip too, for a project name the header cuts; a project's folder is there as well, never beside the name. */}
-            <Tip content={props.path ? <ProjectTipText name={`Refresh ${props.title}`} root={props.path} /> : props.title === 'Inbox' ? 'Refresh' : `Refresh ${props.title}`}>
+            <Tip
+              content={withShortcut(props.path ? <ProjectTipText name={`Refresh ${props.title}`} root={props.path} /> : props.title === 'Inbox' ? 'Refresh' : `Refresh ${props.title}`, {
+                scope: inboxAppShortcuts,
+                action: 'refresh',
+              })}
+            >
               <button
                 type="button"
                 className="ib-lhead-title"
                 onClick={props.onRefresh}
                 aria-describedby={refreshHintId}
+                aria-keyshortcuts={shortcutAria({ scope: inboxAppShortcuts, action: 'refresh' })}
                 data-list-refresh=""
                 data-refreshing={props.refreshSpin != null ? '' : undefined}
               >

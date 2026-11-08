@@ -43,6 +43,7 @@ export const MAP_COLUMNS: MapGroup[][] = [
         { keys: [{ scope: inboxSearchShortcuts, action: 'openSearch' }] },
         { keys: [app('openMap')] },
         { keys: [app('compose')] },
+        { keys: [app('refresh')] },
         { keys: [app('goInbox')] },
         { keys: [app('goBoard')] },
         { keys: [app('goPulls')] },
