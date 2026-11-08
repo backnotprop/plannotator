@@ -134,6 +134,7 @@ test.skipIf(!hasDom)("Grow from the corner card shows the board on the view and 
       <ReviewPane
         thread={thread}
         message={message}
+        codeReview
         onBack={() => {}}
         onClose={() => {}}
         onSent={() => {}}

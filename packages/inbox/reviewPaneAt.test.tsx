@@ -1,5 +1,5 @@
 /**
- * The review opened from a Shape board at a place (ReviewPane with Code review on, GuidePane without it) (approval "shape-whats-changed": `#thread=…&guide=…&code=…`,
+ * The review opened from a Shape board at a place (ReviewPane, with Code review on or off: approval "inbox-one-review-screen") (approval "shape-whats-changed": `#thread=…&guide=…&code=…`,
  * `&step=N`, `&files`). The Inbox's doors are stubbed at `fetch` and the diff reader is stubbed to record what it is
  * told. What regresses:
  *  - a board's `file:line` opens the review at its top, not at that file with the lines painted;
@@ -46,7 +46,6 @@ if (hasDom) {
   }));
 }
 const { ReviewPane } = (hasDom ? await import('./components/ReviewPane') : {}) as typeof import('./components/ReviewPane');
-const { GuidePane } = (hasDom ? await import('./components/GuidePane') : {}) as typeof import('./components/GuidePane');
 const { lineScrollBy } = (hasDom ? await import('./components/reviewLineInView') : {}) as typeof import('./components/reviewLineInView');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'kettle-abcdef', name: 'kettle', root: '/work/kettle', created_at: '2026-11-05T10:00:00.000Z' };
@@ -122,7 +121,7 @@ afterEach(() => {
   served = snapshot;
 });
 
-async function open(at: ShapeReviewAt | null, pane: 'review' | 'guide' = 'review'): Promise<{ landed: () => number }> {
+async function open(at: ShapeReviewAt | null, codeReview = true): Promise<{ landed: () => number }> {
   let landed = 0;
   el = document.createElement('div');
   document.body.appendChild(el);
@@ -130,11 +129,7 @@ async function open(at: ShapeReviewAt | null, pane: 'review' | 'guide' = 'review
     root = createRoot(el!);
     root.render(
       <div className="pn-inbox">
-        {pane === 'review' ? (
-          <ReviewPane thread={thread} message={message} onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} at={at} onLanded={() => (landed += 1)} />
-        ) : (
-          <GuidePane thread={thread} message={message} onBack={() => {}} onClose={() => {}} at={at} onLanded={() => (landed += 1)} />
-        )}
+        <ReviewPane thread={thread} message={message} codeReview={codeReview} onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} at={at} onLanded={() => (landed += 1)} />
       </div>,
     );
   });
@@ -179,14 +174,14 @@ test.skipIf(!hasDom)('Full review opens All files; Guided review opens the walkt
   expect(guided.landed()).toBe(0);
 });
 
-test.skipIf(!hasDom)('with Code review off, the guide opens at the file with the line painted, or at a step\'s first file', async () => {
-  const line = await open({ path: 'src/settings.ts', line: 2 }, 'guide');
+test.skipIf(!hasDom)('with Code review off, the review opens at the file with the line painted, or at a step\'s first file', async () => {
+  const line = await open({ path: 'src/settings.ts', line: 2 }, false);
   expect(reader?.reveal?.path).toBe('src/settings.ts');
   expect(reader?.highlight).toMatchObject({ path: 'src/settings.ts', start: 2, end: 2 });
   expect(line.landed()).toBe(1);
   act(() => root?.unmount());
   el?.remove();
-  await open({ step: 2 }, 'guide');
+  await open({ step: 2 }, false);
   expect(reader?.reveal?.path).toBe('src/settings.ts');
   expect(reader?.highlight ?? null).toBeNull();
 });
