@@ -6995,7 +6995,8 @@ export class InboxStore {
       const record = this.pullsById.get(id);
       if (record && record.removed_at === undefined) out.push(record);
     }
-    return out.sort((a, b) => a.added_at.localeCompare(b.added_at) || a.id.localeCompare(b.id));
+    // Stable: PRs added in one call (one time) keep the order they were named in (the set's first-add order).
+    return out.sort((a, b) => a.added_at.localeCompare(b.added_at));
   }
 
   /** The thread's PRs removed at or after `since` and not back on it, the latest removal first. */

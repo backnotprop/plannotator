@@ -76,6 +76,12 @@ describe("a thread's PRs", () => {
     expect(store.threadPulls(thread).map((p) => p.pull)).toEqual(["github.com/o/r#2"]);
   });
 
+  test("PRs added in one call keep the order they were named in", () => {
+    const { store, thread } = world();
+    store.changeThreadPulls({ thread_id: thread, add: refs("o/r#30", "o/r#4", "o/a#9"), by: BY_AGENT });
+    expect(store.threadPulls(thread).map((p) => p.pull)).toEqual(["github.com/o/r#30", "github.com/o/r#4", "github.com/o/a#9"]);
+  });
+
   test("a message id finds its thread, and an id that is no message is thread_not_found", () => {
     const { store, thread, project } = world();
     const reply = store.sendMessage({ project_id: project.id, author: AGENT, body: "And the follow-up.", reply_to: thread }).message.id;

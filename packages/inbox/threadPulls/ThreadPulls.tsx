@@ -211,7 +211,10 @@ function PullsPopover({ anchor, sheet, label, onClose, cardHover, children }: { 
   );
 }
 
-/** One PR's full hover card when the forge answers; else the card from what the Inbox knows. */
+/**
+ * One PR: the full hover card when the forge answers (its loading state meanwhile); else (no gh or glab, signed
+ * out, a phone) the list's row from what the Inbox knows, never a card that makes up a description or comments.
+ */
 function OnePull({ pull, sheet, onClose }: { pull: InboxThreadPullWire; sheet: boolean; onClose: () => void }) {
   const target = parseForgeRefUrl(pull.url);
   const [result, setResult] = useState<ForgeRefCardResult | null | undefined>(undefined);
@@ -227,37 +230,11 @@ function OnePull({ pull, sheet, onClose }: { pull: InboxThreadPullWire; sheet: b
     // The card is per PR; its url says which.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pull.url]);
-  if (!target) return null;
-  // No forge answer (no gh or glab, signed out, a phone): the card from the Inbox's own state, never a failure line.
-  const known: ForgeRefCardResult = {
-    ok: true,
-    fetchedAt: Date.now(),
-    data: {
-      platform: pull.platform,
-      kind: 'pull',
-      repo: pull.repo,
-      number: pull.number,
-      url: pull.url,
-      title: pull.title ?? `${pull.repo}${pull.label}`,
-      state: pull.state === 'unknown' ? 'open' : pull.state,
-      author: null,
-      createdAt: pull.added_at,
-      updatedAt: pull.read_at ?? pull.added_at,
-      closedAt: null,
-      labels: [],
-      assignees: [],
-      comments: 0,
-      body: '',
-      bodyCut: false,
-      lastComment: null,
-      linked: [],
-    },
-  };
-  const shown = result?.ok ? result : result === undefined ? undefined : pull.state === 'unknown' ? result : known;
-  return <RefCardView target={target} href={pull.url} result={shown} sheet={sheet} onClose={onClose} />;
+  if (target && (result === undefined || result?.ok)) return <RefCardView target={target} href={pull.url} result={result} sheet={sheet} onClose={onClose} />;
+  return <PullsList answer={{ pulls: [pull], groups: [{ kind: 'related', pulls: [pull.pull] }], removed: [] }} />;
 }
 
-function PullRow({ pull, oneRepo, onRemove }: { pull: InboxThreadPullWire; oneRepo: boolean; onRemove: (pull: InboxThreadPullWire) => void }) {
+function PullRow({ pull, oneRepo, onRemove }: { pull: InboxThreadPullWire; oneRepo: boolean; onRemove?: (pull: InboxThreadPullWire) => void }) {
   const extras = pullExtras(pull);
   return (
     <li className="ib-prpop-row" data-pr-row={pull.ref} data-state={pull.state}>
@@ -281,17 +258,19 @@ function PullRow({ pull, oneRepo, onRemove }: { pull: InboxThreadPullWire; oneRe
           </span>
         </span>
       </a>
-      <button type="button" className="ib-prpop-rm" aria-label={`Remove ${pull.ref} from this thread`} data-pr-remove={pull.ref} onClick={() => onRemove(pull)}>
-        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-          <path d="M4 4l8 8M12 4l-8 8" />
-        </svg>
-      </button>
+      {onRemove && (
+        <button type="button" className="ib-prpop-rm" aria-label={`Remove ${pull.ref} from this thread`} data-pr-remove={pull.ref} onClick={() => onRemove(pull)}>
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+            <path d="M4 4l8 8M12 4l-8 8" />
+          </svg>
+        </button>
+      )}
     </li>
   );
 }
 
 /** Several PRs: each stack base first and joined, then the related ones in the order they were added. */
-function PullsList({ answer, onRemove }: { answer: InboxThreadPullsAnswer; onRemove: (pull: InboxThreadPullWire) => void }) {
+function PullsList({ answer, onRemove }: { answer: InboxThreadPullsAnswer; onRemove?: (pull: InboxThreadPullWire) => void }) {
   const head = pullsHead(answer);
   const byKey = new Map(answer.pulls.map((pull) => [pull.pull, pull]));
   const only = answer.groups.length === 1;

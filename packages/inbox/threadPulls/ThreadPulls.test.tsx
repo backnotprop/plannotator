@@ -250,6 +250,30 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     expect(host!.querySelector('[data-pr-button] .ib-prc-n')!.textContent).toBe('2');
   });
 
+  test("one PR with no forge answer shows what the Inbox knows, never a made-up card; the forge's answer shows the hover card", async () => {
+    answer = answerOf([pull('o/r#7', 'open', 'main', 'a', { checks: 'running' })]);
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} />);
+    await settle();
+    await click(host!.querySelector('[data-pr-button]'));
+    const card = popover()!;
+    expect(card.querySelector('[data-pr-one] [data-pr-row="o/r#7"] .ib-prpop-sub')!.textContent).toBe('Open · checks running');
+    expect(card.textContent).not.toContain('comments');
+    expect(card.querySelector('[data-pr-remove="o/r#7"]')!.textContent).toBe('Remove o/r#7 from this thread');
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    const { setRefCardTransport } = await import('@plannotator/ui/utils/refCard');
+    setRefCardTransport(async (href) => ({
+      ok: true,
+      fetchedAt: Date.now(),
+      data: { platform: 'github', kind: 'pull', repo: 'o/r', number: 7, url: href, title: 'Seven from the forge', state: 'open', author: null, createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-02T00:00:00.000Z', closedAt: null, labels: [], assignees: [], comments: 4, body: '', bodyCut: false, lastComment: null, linked: [] },
+    }));
+    try {
+      await click(host!.querySelector('[data-pr-button]'));
+      expect(popover()!.textContent).toContain('Seven from the forge');
+    } finally {
+      setRefCardTransport(null);
+    }
+  });
+
   test('Escape closes the card and puts focus back on the button', async () => {
     answer = answerOf([pull('o/r#1', 'open', 'main', 'a'), pull('o/r#2', 'open', 'main', 'b')]);
     render(<ThreadPullsButton threadId={THREAD} summary={undefined} />);
